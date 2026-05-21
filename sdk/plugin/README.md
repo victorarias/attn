@@ -2,12 +2,11 @@
 
 Small TypeScript SDK for attn plugins.
 
-This first cut focuses on the provider path already exercised by attn's
-worktree extension points:
+This first cut focuses on the worktree extension path already exercised by attn:
 
 - connect to the attn daemon over its plugin socket
 - send the `hello` handshake
-- declare provider surfaces during the connection handshake
+- declare concrete handled surfaces during the connection handshake
 - handle daemon-initiated JSON-RPC requests
 - return structured `handled`, `decline`, or `error` results
 
@@ -16,8 +15,6 @@ import {
   AttnPluginClient,
   decline,
   handled,
-  type WorktreeCreateParams,
-  type WorktreeCreateResult,
 } from "@attn/plugin";
 
 const client = new AttnPluginClient({
@@ -26,7 +23,7 @@ const client = new AttnPluginClient({
   version: "0.1.0",
 });
 
-client.on<WorktreeCreateParams, WorktreeCreateResult>(
+client.handle<"worktree.create">(
   "worktree.create",
   async (params) => {
     if (!params.main_repo.includes("example")) {
@@ -40,13 +37,27 @@ client.on<WorktreeCreateParams, WorktreeCreateResult>(
   },
 );
 
-await client.connect({
-  providerSurfaces: ["worktree.create"],
-});
+await client.connect();
 ```
 
-The runtime remains intentionally small. Driver, observer, and actor helpers
-should be extracted once those flows have concrete plugin implementations.
+`client.handle(...)` is the declaration point. `connect()` includes every
+registered surface in the daemon handshake, so plugin code does not maintain a
+second registration list.
+
+Create lifecycle hooks use the same registration path:
+
+```ts
+import {
+  type WorktreeAfterCreateParams,
+} from "@attn/plugin";
+
+client.handle<"worktree.after_create">(
+  "worktree.after_create",
+  async (params: WorktreeAfterCreateParams) => {
+    await bootstrapRepo(params.path);
+  },
+);
+```
 
 For a full plugin directory built on this SDK, see
-`examples/plugins/worktree-deps-provider`.
+`examples/plugins/worktree-deps-hook`.

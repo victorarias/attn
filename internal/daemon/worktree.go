@@ -107,12 +107,18 @@ func (d *Daemon) doCreateWorktree(msg *protocol.CreateWorktreeMessage) (string, 
 	path = git.CanonicalizePath(path)
 
 	startingFrom := protocol.Deref(msg.StartingFrom)
+	if err := d.dispatchWorktreeBeforeCreateHooks(mainRepo, msg.Branch, startingFrom, requestedPath); err != nil {
+		return "", err
+	}
 	providerPath, providerBranch, handled, err := d.dispatchWorktreeCreateProvider(mainRepo, msg.Branch, startingFrom, requestedPath)
 	if err != nil {
 		return "", err
 	}
 	if handled {
 		d.registerCreatedWorktree(mainRepo, providerPath, providerBranch)
+		if err := d.dispatchWorktreeAfterCreateHooks(mainRepo, providerPath, providerBranch); err != nil {
+			return providerPath, err
+		}
 		return providerPath, nil
 	}
 
@@ -138,6 +144,9 @@ func (d *Daemon) doCreateWorktree(msg *protocol.CreateWorktreeMessage) (string, 
 	}
 
 	d.registerCreatedWorktree(mainRepo, path, msg.Branch)
+	if err := d.dispatchWorktreeAfterCreateHooks(mainRepo, path, msg.Branch); err != nil {
+		return path, err
+	}
 	return path, nil
 }
 

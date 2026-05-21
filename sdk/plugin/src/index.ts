@@ -1,7 +1,5 @@
 import { createConnection, type Socket } from "node:net";
 
-export type PluginRole = "driver" | "observer" | "actor";
-
 export type ProviderDecline = {
   status: "decline";
 };
@@ -42,16 +40,39 @@ export type WorktreeDeleteParams = {
 
 export type WorktreeDeleteResult = ProviderResult;
 
+export type WorktreeBeforeCreateParams = WorktreeCreateParams;
+
+export type WorktreeAfterCreateParams = {
+  main_repo: string;
+  path: string;
+  branch: string;
+};
+
+export type PluginSurface =
+  | "worktree.before_create"
+  | "worktree.create"
+  | "worktree.after_create"
+  | "worktree.delete";
+
+type PluginSurfaceParams = {
+  "worktree.before_create": WorktreeBeforeCreateParams;
+  "worktree.create": WorktreeCreateParams;
+  "worktree.after_create": WorktreeAfterCreateParams;
+  "worktree.delete": WorktreeDeleteParams;
+};
+
+type PluginSurfaceResult = {
+  "worktree.before_create": void;
+  "worktree.create": WorktreeCreateResult;
+  "worktree.after_create": void;
+  "worktree.delete": WorktreeDeleteResult;
+};
+
 export type AttnPluginClientOptions = {
   socketPath: string;
   name: string;
   version: string;
-  roles?: PluginRole[];
   attnAPIVersion?: number;
-};
-
-export type ConnectOptions = {
-  providerSurfaces?: string[];
 };
 
 export type PluginHandler<TParams = unknown, TResult = unknown> = (
@@ -94,12 +115,12 @@ export class AttnPluginClient {
   private socket?: Socket;
   private nextID = 1;
   private readBuffer = "";
-  private readonly handlers = new Map<string, PluginHandler>();
+  private readonly handlers = new Map<PluginSurface, PluginHandler>();
   private readonly pending = new Map<string, PendingRequest>();
 
   constructor(private readonly options: AttnPluginClientOptions) {}
 
-  async connect(options: ConnectOptions = {}): Promise<void> {
+  async connect(): Promise<void> {
     if (this.socket) {
       return;
     }
@@ -127,8 +148,7 @@ export class AttnPluginClient {
         name: this.options.name,
         version: this.options.version,
         attn_api_version: this.options.attnAPIVersion ?? pluginAPIVersion,
-        roles: this.options.roles ?? [],
-        provider_surfaces: options.providerSurfaces ?? [],
+        surfaces: [...this.handlers.keys()].sort(),
       });
       if (!result.ok) {
         throw new Error("attn rejected plugin hello");
@@ -145,14 +165,17 @@ export class AttnPluginClient {
     this.failPending(new Error("attn plugin client closed"));
   }
 
-  on<TParams = unknown, TResult = unknown>(
-    method: string,
-    handler: PluginHandler<TParams, TResult>,
+  handle<TSurface extends PluginSurface>(
+    surface: TSurface,
+    handler: PluginHandler<PluginSurfaceParams[TSurface], PluginSurfaceResult[TSurface]>,
   ): void {
-    this.handlers.set(method, handler as PluginHandler);
+    if (this.socket) {
+      throw new Error("attn plugin surfaces must be registered before connect");
+    }
+    this.handlers.set(surface, handler as PluginHandler);
   }
 
-  async request<TResult = unknown>(method: string, params?: unknown): Promise<TResult> {
+  private async request<TResult = unknown>(method: string, params?: unknown): Promise<TResult> {
     const id = this.nextID++;
     const response = new Promise<TResult>((resolve, reject) => {
       this.pending.set(String(id), {
@@ -211,7 +234,7 @@ export class AttnPluginClient {
   }
 
   private async handleRequest(request: JsonRpcRequest): Promise<void> {
-    const handler = this.handlers.get(request.method);
+    const handler = this.handlers.get(request.method as PluginSurface);
     if (!handler) {
       this.sendError(request.id, -32601, `unknown method ${request.method}`);
       return;

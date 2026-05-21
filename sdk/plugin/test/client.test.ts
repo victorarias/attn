@@ -9,6 +9,7 @@ import {
   decline,
   handled,
   providerError,
+  type WorktreeAfterCreateParams,
   type WorktreeCreateParams,
   type WorktreeCreateResult,
 } from "../src";
@@ -37,7 +38,7 @@ afterEach(async () => {
 });
 
 describe("AttnPluginClient", () => {
-  test("connects, handshakes, and registers provider surfaces", async () => {
+  test("connects and declares registered surfaces in hello", async () => {
     const server = await startServer(async (socket, request) => {
       if (request.method === "hello") {
         socket.write(`${JSON.stringify(response(request.id, { ok: true }))}\n`);
@@ -49,12 +50,16 @@ describe("AttnPluginClient", () => {
       name: "sdk-provider",
       version: "0.1.0",
     });
+    client.handle<"worktree.create">("worktree.create", async () => {
+      return decline();
+    });
+    client.handle<"worktree.after_create">("worktree.after_create", async () => {});
 
-    await client.connect({ providerSurfaces: ["worktree.create"] });
+    await client.connect();
 
     expect(server.requests.map((request) => request.method)).toEqual(["hello"]);
     expect(server.requests[0]?.params).toMatchObject({
-      provider_surfaces: ["worktree.create"],
+      surfaces: ["worktree.after_create", "worktree.create"],
     });
 
     client.close();
@@ -85,7 +90,7 @@ describe("AttnPluginClient", () => {
       name: "sdk-provider",
       version: "0.1.0",
     });
-    client.on<WorktreeCreateParams, WorktreeCreateResult>("worktree.create", async (params) => {
+    client.handle<"worktree.create">("worktree.create", async (params) => {
       return handled({
         path: `${params.main_repo}/.worktrees/feature-sdk`,
         branch: params.branch,
@@ -114,7 +119,10 @@ describe("AttnPluginClient", () => {
       version: "0.1.0",
     });
 
-    await expect(client.request("transport.probe", {})).rejects.toThrow(
+    const unsafeClient = client as unknown as {
+      request<TResult = unknown>(method: string, params?: unknown): Promise<TResult>;
+    };
+    await expect(unsafeClient.request("transport.probe", {})).rejects.toThrow(
       "attn plugin socket is not connected",
     );
     expect(pendingRequestCount(client)).toBe(0);
@@ -142,6 +150,54 @@ describe("AttnPluginClient", () => {
     await client.connect();
 
     expect(helloCount).toBe(2);
+    client.close();
+    await server.close();
+  });
+
+  test("routes hook surfaces without requiring a result payload", async () => {
+    const seen: WorktreeAfterCreateParams[] = [];
+    const server = await startServer(async (socket, request) => {
+      if (request.method === "hello") {
+        socket.write(`${JSON.stringify(response(request.id, { ok: true }))}\n`);
+        socket.write(
+          `${JSON.stringify({
+            jsonrpc: "2.0",
+            id: 100,
+            method: "worktree.after_create",
+            params: {
+              main_repo: "/repo",
+              path: "/repo/.worktrees/feature-sdk",
+              branch: "feature/sdk",
+            },
+          })}\n`,
+        );
+      }
+    });
+
+    const client = new AttnPluginClient({
+      socketPath: server.socketPath,
+      name: "sdk-hooks",
+      version: "0.1.0",
+    });
+    client.handle<"worktree.after_create">("worktree.after_create", async (params) => {
+      seen.push(params);
+    });
+
+    await client.connect();
+    await waitFor(() => server.responses.length === 1);
+
+    expect(seen).toEqual([
+      {
+        main_repo: "/repo",
+        path: "/repo/.worktrees/feature-sdk",
+        branch: "feature/sdk",
+      },
+    ]);
+    expect(server.responses[0]).toEqual({
+      jsonrpc: "2.0",
+      id: 100,
+    });
+
     client.close();
     await server.close();
   });

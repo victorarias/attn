@@ -28,12 +28,18 @@ func (d *Daemon) doCreateWorktreeFromBranch(msg *protocol.CreateWorktreeFromBran
 	}
 	path = git.ExpandPath(path)
 
+	if err := d.dispatchWorktreeBeforeCreateHooks(mainRepo, localBranch, branch, requestedPath); err != nil {
+		return "", err
+	}
 	providerPath, providerBranch, handled, err := d.dispatchWorktreeCreateProvider(mainRepo, localBranch, branch, requestedPath)
 	if err != nil {
 		return "", err
 	}
 	if handled {
 		d.registerCreatedWorktree(mainRepo, providerPath, providerBranch)
+		if err := d.dispatchWorktreeAfterCreateHooks(mainRepo, providerPath, providerBranch); err != nil {
+			return providerPath, err
+		}
 		return providerPath, nil
 	}
 
@@ -51,6 +57,9 @@ func (d *Daemon) doCreateWorktreeFromBranch(msg *protocol.CreateWorktreeFromBran
 	}
 
 	d.registerCreatedWorktree(mainRepo, path, localBranch)
+	if err := d.dispatchWorktreeAfterCreateHooks(mainRepo, path, localBranch); err != nil {
+		return path, err
+	}
 	return path, nil
 }
 

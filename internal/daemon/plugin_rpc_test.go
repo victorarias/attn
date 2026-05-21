@@ -132,7 +132,7 @@ func TestDaemon_HandleConnection_PluginHelloCanArriveAcrossWrites(t *testing.T) 
 	}
 }
 
-func TestDaemon_HandleConnection_PluginHelloRegistersProviderSurfaces(t *testing.T) {
+func TestDaemon_HandleConnection_PluginHelloRegistersSurfaces(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	serverConn, clientConn := net.Pipe()
 	defer clientConn.Close()
@@ -143,14 +143,14 @@ func TestDaemon_HandleConnection_PluginHelloRegistersProviderSurfaces(t *testing
 		d.handleConnection(serverConn)
 	}()
 
-	sendPluginHelloWithOptions(t, clientConn, "hello-provider", nil, []string{"worktree.create"})
+	sendPluginHelloWithSurfaces(t, clientConn, "hello-provider", []string{"worktree.create"})
 	if resp := decodeJSONRPCMessage(t, clientConn); resp.Error != nil {
 		t.Fatalf("provider hello error=%#v, want nil", resp.Error)
 	}
 
-	providers := d.plugins.providersForSurface("worktree.create")
-	if len(providers) != 1 || providers[0].PluginName != "hello-provider" {
-		t.Fatalf("worktree.create providers=%v, want hello-provider only", providers)
+	handlers := d.plugins.handlersForSurface("worktree.create")
+	if len(handlers) != 1 || handlers[0].PluginName != "hello-provider" {
+		t.Fatalf("worktree.create handlers=%v, want hello-provider only", handlers)
 	}
 
 	_ = clientConn.Close()
@@ -158,6 +158,33 @@ func TestDaemon_HandleConnection_PluginHelloRegistersProviderSurfaces(t *testing
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("provider plugin connection did not close after client disconnect")
+	}
+}
+
+func TestDaemon_HandleConnection_PluginHelloRejectsUnknownSurface(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.handleConnection(serverConn)
+	}()
+
+	sendPluginHelloWithSurfaces(t, clientConn, "typo-provider", []string{"worktree.cretae"})
+	resp := decodeJSONRPCMessage(t, clientConn)
+	if resp.Error == nil {
+		t.Fatal("unknown surface hello error=nil, want rejection")
+	}
+	if got := d.plugins.get("typo-provider"); got != nil {
+		t.Fatalf("typo provider registered unexpectedly: %#v", got)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("unknown surface connection did not close")
 	}
 }
 
@@ -233,7 +260,7 @@ func TestDaemon_CallPlugin_RoundTripsRequestAndResponse(t *testing.T) {
 	}
 }
 
-func TestDaemon_ProviderSurfaces_OrderProvidersAndCleanUpOnDisconnect(t *testing.T) {
+func TestDaemon_Surfaces_OrderHandlersAndCleanUpOnDisconnect(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 
 	lowClient, lowDone := startPluginPipe(t, d, "alpha-provider", []string{"worktree.create", "worktree.delete"})
@@ -241,16 +268,16 @@ func TestDaemon_ProviderSurfaces_OrderProvidersAndCleanUpOnDisconnect(t *testing
 	highClient, highDone := startPluginPipe(t, d, "zeta-provider", []string{"worktree.create"})
 	defer highClient.Close()
 
-	providers := d.plugins.providersForSurface("worktree.create")
-	if len(providers) != 2 {
-		t.Fatalf("worktree.create provider count=%d, want 2", len(providers))
+	handlers := d.plugins.handlersForSurface("worktree.create")
+	if len(handlers) != 2 {
+		t.Fatalf("worktree.create handler count=%d, want 2", len(handlers))
 	}
-	if providers[0].PluginName != "alpha-provider" || providers[1].PluginName != "zeta-provider" {
-		t.Fatalf("worktree.create provider order=%v, want alpha-provider then zeta-provider", providers)
+	if handlers[0].PluginName != "alpha-provider" || handlers[1].PluginName != "zeta-provider" {
+		t.Fatalf("worktree.create handler order=%v, want alpha-provider then zeta-provider", handlers)
 	}
-	deleteProviders := d.plugins.providersForSurface("worktree.delete")
-	if len(deleteProviders) != 1 || deleteProviders[0].PluginName != "alpha-provider" {
-		t.Fatalf("worktree.delete providers=%v, want alpha-provider only", deleteProviders)
+	deleteHandlers := d.plugins.handlersForSurface("worktree.delete")
+	if len(deleteHandlers) != 1 || deleteHandlers[0].PluginName != "alpha-provider" {
+		t.Fatalf("worktree.delete handlers=%v, want alpha-provider only", deleteHandlers)
 	}
 
 	_ = highClient.Close()
@@ -259,9 +286,9 @@ func TestDaemon_ProviderSurfaces_OrderProvidersAndCleanUpOnDisconnect(t *testing
 	case <-time.After(2 * time.Second):
 		t.Fatal("zeta provider connection did not close")
 	}
-	providers = d.plugins.providersForSurface("worktree.create")
-	if len(providers) != 1 || providers[0].PluginName != "alpha-provider" {
-		t.Fatalf("worktree.create providers after disconnect=%v, want alpha-provider only", providers)
+	handlers = d.plugins.handlersForSurface("worktree.create")
+	if len(handlers) != 1 || handlers[0].PluginName != "alpha-provider" {
+		t.Fatalf("worktree.create handlers after disconnect=%v, want alpha-provider only", handlers)
 	}
 
 	_ = lowClient.Close()
@@ -272,7 +299,7 @@ func TestDaemon_ProviderSurfaces_OrderProvidersAndCleanUpOnDisconnect(t *testing
 	}
 }
 
-func startPluginPipe(t *testing.T, d *Daemon, name string, providerSurfaces []string) (net.Conn, <-chan struct{}) {
+func startPluginPipe(t *testing.T, d *Daemon, name string, surfaces []string) (net.Conn, <-chan struct{}) {
 	t.Helper()
 	serverConn, clientConn := net.Pipe()
 	done := make(chan struct{})
@@ -281,7 +308,7 @@ func startPluginPipe(t *testing.T, d *Daemon, name string, providerSurfaces []st
 		d.handleConnection(serverConn)
 	}()
 
-	sendPluginHelloWithOptions(t, clientConn, name, nil, providerSurfaces)
+	sendPluginHelloWithSurfaces(t, clientConn, name, surfaces)
 	helloResp := decodeJSONRPCMessage(t, clientConn)
 	if helloResp.Error != nil {
 		t.Fatalf("hello error = %#v, want nil", helloResp.Error)
@@ -290,17 +317,16 @@ func startPluginPipe(t *testing.T, d *Daemon, name string, providerSurfaces []st
 }
 
 func sendPluginHello(t *testing.T, conn net.Conn, name string) {
-	sendPluginHelloWithOptions(t, conn, name, nil, nil)
+	sendPluginHelloWithSurfaces(t, conn, name, nil)
 }
 
-func sendPluginHelloWithOptions(t *testing.T, conn net.Conn, name string, roles, providerSurfaces []string) {
+func sendPluginHelloWithSurfaces(t *testing.T, conn net.Conn, name string, surfaces []string) {
 	t.Helper()
 	params, err := json.Marshal(pluginHelloParams{
-		Name:             name,
-		Version:          "0.1.0",
-		AttnAPIVersion:   pluginAPIVersion,
-		Roles:            roles,
-		ProviderSurfaces: providerSurfaces,
+		Name:           name,
+		Version:        "0.1.0",
+		AttnAPIVersion: pluginAPIVersion,
+		Surfaces:       surfaces,
 	})
 	if err != nil {
 		t.Fatalf("marshal hello params: %v", err)

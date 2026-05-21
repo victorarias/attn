@@ -1,5 +1,5 @@
 {
-  "name": "attn-example-worktree-deps-provider",
+  "name": "attn-example-worktree-deps-hook",
   "private": true,
   "type": "module",
   "version": "0.1.0",

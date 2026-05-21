@@ -25,11 +25,10 @@ const (
 )
 
 type pluginHelloParams struct {
-	Name             string   `json:"name"`
-	Version          string   `json:"version"`
-	AttnAPIVersion   int      `json:"attn_api_version"`
-	Roles            []string `json:"roles"`
-	ProviderSurfaces []string `json:"provider_surfaces,omitempty"`
+	Name           string   `json:"name"`
+	Version        string   `json:"version"`
+	AttnAPIVersion int      `json:"attn_api_version"`
+	Surfaces       []string `json:"surfaces,omitempty"`
 }
 
 type pluginHelloResult struct {
@@ -51,15 +50,15 @@ type jsonRPCError struct {
 }
 
 type pluginRegistry struct {
-	mu        sync.RWMutex
-	plugins   map[string]*pluginConnection
-	providers map[string][]pluginProvider
+	mu       sync.RWMutex
+	plugins  map[string]*pluginConnection
+	surfaces map[string][]pluginSurfaceHandler
 }
 
 func newPluginRegistry() *pluginRegistry {
 	return &pluginRegistry{
-		plugins:   make(map[string]*pluginConnection),
-		providers: make(map[string][]pluginProvider),
+		plugins:  make(map[string]*pluginConnection),
+		surfaces: make(map[string][]pluginSurfaceHandler),
 	}
 }
 
@@ -86,7 +85,7 @@ func (r *pluginRegistry) unregister(plugin *pluginConnection) {
 	defer r.mu.Unlock()
 	if r.plugins[plugin.name] == plugin {
 		delete(r.plugins, plugin.name)
-		r.unregisterProvidersLocked(plugin.name)
+		r.unregisterSurfacesLocked(plugin.name)
 	}
 }
 
@@ -96,17 +95,20 @@ func (r *pluginRegistry) get(name string) *pluginConnection {
 	return r.plugins[name]
 }
 
-type pluginProvider struct {
+type pluginSurfaceHandler struct {
 	PluginName string
 	Surface    string
 }
 
-func (r *pluginRegistry) registerProviderSurfaces(plugin *pluginConnection, values []string) error {
+func (r *pluginRegistry) registerSurfaces(plugin *pluginConnection, values []string) error {
 	if plugin == nil || plugin.name == "" {
 		return errors.New("plugin name is required")
 	}
 
-	surfaces := normalizeProviderSurfaces(values)
+	surfaces, err := validatePluginSurfaces(values)
+	if err != nil {
+		return err
+	}
 	if len(surfaces) == 0 {
 		return nil
 	}
@@ -117,51 +119,51 @@ func (r *pluginRegistry) registerProviderSurfaces(plugin *pluginConnection, valu
 		return fmt.Errorf("plugin %q is not connected", plugin.name)
 	}
 
-	r.unregisterProvidersLocked(plugin.name)
+	r.unregisterSurfacesLocked(plugin.name)
 	for _, surface := range surfaces {
-		r.providers[surface] = append(r.providers[surface], pluginProvider{
+		r.surfaces[surface] = append(r.surfaces[surface], pluginSurfaceHandler{
 			PluginName: plugin.name,
 			Surface:    surface,
 		})
-		sort.Slice(r.providers[surface], func(i, j int) bool {
-			left := r.providers[surface][i]
-			right := r.providers[surface][j]
+		sort.Slice(r.surfaces[surface], func(i, j int) bool {
+			left := r.surfaces[surface][i]
+			right := r.surfaces[surface][j]
 			return left.PluginName < right.PluginName
 		})
 	}
 	return nil
 }
 
-func (r *pluginRegistry) providersForSurface(surface string) []pluginProvider {
+func (r *pluginRegistry) handlersForSurface(surface string) []pluginSurfaceHandler {
 	surface = strings.TrimSpace(surface)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	providers := r.providers[surface]
-	if len(providers) == 0 {
+	handlers := r.surfaces[surface]
+	if len(handlers) == 0 {
 		return nil
 	}
-	out := make([]pluginProvider, len(providers))
-	copy(out, providers)
+	out := make([]pluginSurfaceHandler, len(handlers))
+	copy(out, handlers)
 	return out
 }
 
-func (r *pluginRegistry) unregisterProvidersLocked(pluginName string) {
-	for surface, providers := range r.providers {
-		filtered := providers[:0]
-		for _, provider := range providers {
-			if provider.PluginName != pluginName {
-				filtered = append(filtered, provider)
+func (r *pluginRegistry) unregisterSurfacesLocked(pluginName string) {
+	for surface, handlers := range r.surfaces {
+		filtered := handlers[:0]
+		for _, handler := range handlers {
+			if handler.PluginName != pluginName {
+				filtered = append(filtered, handler)
 			}
 		}
 		if len(filtered) == 0 {
-			delete(r.providers, surface)
+			delete(r.surfaces, surface)
 			continue
 		}
-		r.providers[surface] = filtered
+		r.surfaces[surface] = filtered
 	}
 }
 
-func normalizeProviderSurfaces(values []string) []string {
+func normalizePluginSurfaces(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	surfaces := make([]string, 0, len(values))
 	for _, value := range values {
@@ -179,10 +181,24 @@ func normalizeProviderSurfaces(values []string) []string {
 	return surfaces
 }
 
+func validatePluginSurfaces(values []string) ([]string, error) {
+	surfaces := normalizePluginSurfaces(values)
+	for _, surface := range surfaces {
+		switch surface {
+		case worktreeBeforeCreateSurface,
+			worktreeCreateProviderSurface,
+			worktreeAfterCreateSurface,
+			worktreeDeleteProviderSurface:
+		default:
+			return nil, fmt.Errorf("unsupported plugin surface %q", surface)
+		}
+	}
+	return surfaces, nil
+}
+
 type pluginConnection struct {
 	name    string
 	version string
-	roles   []string
 
 	conn   net.Conn
 	reader *bufio.Reader
@@ -199,21 +215,10 @@ func newPluginConnection(conn net.Conn, reader *bufio.Reader, params pluginHello
 	return &pluginConnection{
 		name:    strings.TrimSpace(params.Name),
 		version: strings.TrimSpace(params.Version),
-		roles:   append([]string(nil), params.Roles...),
 		conn:    conn,
 		reader:  reader,
 		pending: make(map[string]chan jsonRPCMessage),
 	}
-}
-
-func (p *pluginConnection) hasRole(role string) bool {
-	role = strings.TrimSpace(role)
-	for _, candidate := range p.roles {
-		if strings.TrimSpace(candidate) == role {
-			return true
-		}
-	}
-	return false
 }
 
 func (p *pluginConnection) send(msg jsonRPCMessage) error {
@@ -460,7 +465,7 @@ func (d *Daemon) handlePluginConnection(conn net.Conn, reader *bufio.Reader, hel
 		_ = plugin.send(jsonRPCFailure(helloID, jsonRPCInvalidRequest, err.Error()))
 		return
 	}
-	if err := registry.registerProviderSurfaces(plugin, params.ProviderSurfaces); err != nil {
+	if err := registry.registerSurfaces(plugin, params.Surfaces); err != nil {
 		registry.unregister(plugin)
 		_ = plugin.send(jsonRPCFailure(helloID, jsonRPCInvalidRequest, err.Error()))
 		return
