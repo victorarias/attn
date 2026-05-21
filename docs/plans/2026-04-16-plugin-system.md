@@ -92,7 +92,7 @@ These were proposed in conversation but not explicitly confirmed:
 ### Plugin lifecycle — driver role
 
 1. attn spawns the plugin binary at daemon startup (or user runs it in dev mode).
-2. Plugin connects to `~/.attn/attn.sock`, sends `hello { name, version, attn_api_version, roles }`.
+2. Plugin connects to `~/.attn/attn.sock`, sends `hello { name, version, attn_api_version, roles, provider_surfaces? }`.
 3. attn replies with accepted capabilities. If `driver` is in roles, plugin sends `driver.register { agent, capabilities }`.
 4. When user runs `attn -s foo` with agent = the registered name, attn calls `driver.spawn { session_id, cwd, agent_args, resume, fork, yolo }` on the plugin.
 5. Plugin responds `{ argv, env, cwd }`. attn spawns that command in a PTY under the session. **Attn owns the PTY. Plugin owns agent-specific semantics.**
@@ -202,15 +202,19 @@ Extend the daemon's existing unix socket handler to recognize a JSON-RPC 2.0 han
 | `session.report_metadata`     | plugin → attn   | `{ session_id, metadata }` (generic, replaces `pi_session_linked`)       |
 | `pty.request_spawn`           | plugin → attn   | (Optional) ask attn to spawn additional processes under the session    |
 
-**Provider methods (initial):**
+**Provider declaration + methods (initial):**
 
 | Method            | Direction     | Purpose                                                                 |
 |-------------------|---------------|-------------------------------------------------------------------------|
-| `provider.register` | plugin → attn | Declare supported provider surfaces                                      |
 | `worktree.create` | attn → plugin | Offer a worktree creation operation to a provider                       |
 | `worktree.delete` | attn → plugin | Offer a worktree deletion operation to a provider                       |
 
-Provider methods return structured `handled`, `decline`, or `error` results. For `worktree.create`, `handled` must include the actual created `path` and resulting `branch`. Attn validates that the returned path is a real worktree of the expected main repo before storing it or launching a session.
+Provider surfaces are declared once in the `hello` handshake via
+`provider_surfaces`. Provider methods return structured `handled`, `decline`,
+or `error` results. For `worktree.create`, `handled` must include the actual
+created `path` and resulting `branch`. Attn validates that the returned path is
+a real worktree of the expected main repo before storing it or launching a
+session.
 
 **Observer-role:** subscriptions via `subscribe { events }`, attn pushes notifications matching the frontend's existing event set.
 

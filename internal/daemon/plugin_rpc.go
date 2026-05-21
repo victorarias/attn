@@ -25,23 +25,15 @@ const (
 )
 
 type pluginHelloParams struct {
-	Name           string   `json:"name"`
-	Version        string   `json:"version"`
-	AttnAPIVersion int      `json:"attn_api_version"`
-	Roles          []string `json:"roles"`
+	Name             string   `json:"name"`
+	Version          string   `json:"version"`
+	AttnAPIVersion   int      `json:"attn_api_version"`
+	Roles            []string `json:"roles"`
+	ProviderSurfaces []string `json:"provider_surfaces,omitempty"`
 }
 
 type pluginHelloResult struct {
 	OK bool `json:"ok"`
-}
-
-type providerRegisterParams struct {
-	Surfaces []string `json:"surfaces"`
-}
-
-type providerRegisterResult struct {
-	OK       bool     `json:"ok"`
-	Surfaces []string `json:"surfaces"`
 }
 
 type jsonRPCMessage struct {
@@ -109,20 +101,20 @@ type pluginProvider struct {
 	Surface    string
 }
 
-func (r *pluginRegistry) registerProvider(plugin *pluginConnection, params providerRegisterParams) ([]string, error) {
+func (r *pluginRegistry) registerProviderSurfaces(plugin *pluginConnection, values []string) error {
 	if plugin == nil || plugin.name == "" {
-		return nil, errors.New("plugin name is required")
+		return errors.New("plugin name is required")
 	}
 
-	surfaces := normalizeProviderSurfaces(params.Surfaces)
+	surfaces := normalizeProviderSurfaces(values)
 	if len(surfaces) == 0 {
-		return nil, errors.New("provider.register requires at least one surface")
+		return nil
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.plugins[plugin.name] != plugin {
-		return nil, fmt.Errorf("plugin %q is not connected", plugin.name)
+		return fmt.Errorf("plugin %q is not connected", plugin.name)
 	}
 
 	r.unregisterProvidersLocked(plugin.name)
@@ -137,7 +129,7 @@ func (r *pluginRegistry) registerProvider(plugin *pluginConnection, params provi
 			return left.PluginName < right.PluginName
 		})
 	}
-	return surfaces, nil
+	return nil
 }
 
 func (r *pluginRegistry) providersForSurface(surface string) []pluginProvider {
@@ -468,6 +460,11 @@ func (d *Daemon) handlePluginConnection(conn net.Conn, reader *bufio.Reader, hel
 		_ = plugin.send(jsonRPCFailure(helloID, jsonRPCInvalidRequest, err.Error()))
 		return
 	}
+	if err := registry.registerProviderSurfaces(plugin, params.ProviderSurfaces); err != nil {
+		registry.unregister(plugin)
+		_ = plugin.send(jsonRPCFailure(helloID, jsonRPCInvalidRequest, err.Error()))
+		return
+	}
 	defer func() {
 		registry.unregister(plugin)
 		plugin.closePending(io.EOF)
@@ -508,22 +505,7 @@ func (d *Daemon) handlePluginMethod(plugin *pluginConnection, msg jsonRPCMessage
 		return
 	}
 
-	switch msg.Method {
-	case "provider.register":
-		var params providerRegisterParams
-		if err := json.Unmarshal(msg.Params, &params); err != nil {
-			_ = plugin.send(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, fmt.Sprintf("decode provider.register params: %v", err)))
-			return
-		}
-		surfaces, err := d.ensurePluginRegistry().registerProvider(plugin, params)
-		if err != nil {
-			_ = plugin.send(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, err.Error()))
-			return
-		}
-		_ = plugin.send(jsonRPCResult(msg.ID, providerRegisterResult{OK: true, Surfaces: surfaces}))
-	default:
-		_ = plugin.send(jsonRPCFailure(msg.ID, jsonRPCMethodNotFound, fmt.Sprintf("unknown method %q", msg.Method)))
-	}
+	_ = plugin.send(jsonRPCFailure(msg.ID, jsonRPCMethodNotFound, fmt.Sprintf("unknown method %q", msg.Method)))
 }
 
 func (d *Daemon) callPlugin(ctx context.Context, name, method string, params interface{}, result interface{}) error {

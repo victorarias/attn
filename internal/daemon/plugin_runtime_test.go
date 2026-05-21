@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -132,27 +131,9 @@ func TestDaemonPluginProcessHelper(t *testing.T) {
 	defer conn.Close()
 
 	name := os.Getenv("ATTN_PLUGIN_NAME")
-	sendPluginHello(t, conn, name)
+	sendPluginHelloWithOptions(t, conn, name, nil, []string{"worktree.create", "worktree.delete"})
 	if resp := decodeJSONRPCMessage(t, conn); resp.Error != nil {
 		t.Fatalf("helper hello error=%#v", resp.Error)
-	}
-
-	params, err := json.Marshal(providerRegisterParams{
-		Surfaces: []string{"worktree.create", "worktree.delete"},
-	})
-	if err != nil {
-		t.Fatalf("marshal helper provider params: %v", err)
-	}
-	if err := json.NewEncoder(conn).Encode(jsonRPCMessage{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage("2"),
-		Method:  "provider.register",
-		Params:  params,
-	}); err != nil {
-		t.Fatalf("encode helper provider.register: %v", err)
-	}
-	if resp := decodeJSONRPCMessage(t, conn); resp.Error != nil {
-		t.Fatalf("helper provider.register error=%#v", resp.Error)
 	}
 
 	time.Sleep(30 * time.Second)

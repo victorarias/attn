@@ -88,11 +88,6 @@ type HelloResult = {
   ok: boolean;
 };
 
-type ProviderRegisterResult = {
-  ok: boolean;
-  surfaces: string[];
-};
-
 const pluginAPIVersion = 1;
 
 export class AttnPluginClient {
@@ -133,12 +128,10 @@ export class AttnPluginClient {
         version: this.options.version,
         attn_api_version: this.options.attnAPIVersion ?? pluginAPIVersion,
         roles: this.options.roles ?? [],
+        provider_surfaces: options.providerSurfaces ?? [],
       });
       if (!result.ok) {
         throw new Error("attn rejected plugin hello");
-      }
-      if (options.providerSurfaces && options.providerSurfaces.length > 0) {
-        await this.registerProvider(options.providerSurfaces);
       }
     } catch (error) {
       this.resetSocket(error instanceof Error ? error : new Error(String(error)));
@@ -157,16 +150,6 @@ export class AttnPluginClient {
     handler: PluginHandler<TParams, TResult>,
   ): void {
     this.handlers.set(method, handler as PluginHandler);
-  }
-
-  async registerProvider(surfaces: string[]): Promise<string[]> {
-    const result = await this.request<ProviderRegisterResult>("provider.register", {
-      surfaces,
-    });
-    if (!result.ok) {
-      throw new Error("attn rejected provider registration");
-    }
-    return result.surfaces;
   }
 
   async request<TResult = unknown>(method: string, params?: unknown): Promise<TResult> {

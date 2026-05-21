@@ -41,12 +41,6 @@ describe("AttnPluginClient", () => {
     const server = await startServer(async (socket, request) => {
       if (request.method === "hello") {
         socket.write(`${JSON.stringify(response(request.id, { ok: true }))}\n`);
-        return;
-      }
-      if (request.method === "provider.register") {
-        socket.write(
-          `${JSON.stringify(response(request.id, { ok: true, surfaces: ["worktree.create"] }))}\n`,
-        );
       }
     });
 
@@ -58,10 +52,10 @@ describe("AttnPluginClient", () => {
 
     await client.connect({ providerSurfaces: ["worktree.create"] });
 
-    expect(server.requests.map((request) => request.method)).toEqual([
-      "hello",
-      "provider.register",
-    ]);
+    expect(server.requests.map((request) => request.method)).toEqual(["hello"]);
+    expect(server.requests[0]?.params).toMatchObject({
+      provider_surfaces: ["worktree.create"],
+    });
 
     client.close();
     await server.close();
@@ -120,7 +114,7 @@ describe("AttnPluginClient", () => {
       version: "0.1.0",
     });
 
-    await expect(client.request("provider.register", {})).rejects.toThrow(
+    await expect(client.request("transport.probe", {})).rejects.toThrow(
       "attn plugin socket is not connected",
     );
     expect(pendingRequestCount(client)).toBe(0);
@@ -152,32 +146,6 @@ describe("AttnPluginClient", () => {
     await server.close();
   });
 
-  test("still allows provider registration after connect", async () => {
-    const server = await startServer(async (socket, request) => {
-      if (request.method === "hello") {
-        socket.write(`${JSON.stringify(response(request.id, { ok: true }))}\n`);
-        return;
-      }
-      if (request.method === "provider.register") {
-        socket.write(
-          `${JSON.stringify(response(request.id, { ok: true, surfaces: ["worktree.delete"] }))}\n`,
-        );
-      }
-    });
-
-    const client = new AttnPluginClient({
-      socketPath: server.socketPath,
-      name: "sdk-provider",
-      version: "0.1.0",
-    });
-
-    await client.connect();
-    const surfaces = await client.registerProvider(["worktree.delete"]);
-
-    expect(surfaces).toEqual(["worktree.delete"]);
-    client.close();
-    await server.close();
-  });
 });
 
 describe("provider result helpers", () => {

@@ -102,7 +102,6 @@ func TestDaemon_HandleConnection_PluginHelloCanArriveAcrossWrites(t *testing.T) 
 			Name:           "split-provider",
 			Version:        "0.1.0",
 			AttnAPIVersion: pluginAPIVersion,
-			Roles:          []string{"provider"},
 		}),
 	})
 	if err != nil {
@@ -133,7 +132,7 @@ func TestDaemon_HandleConnection_PluginHelloCanArriveAcrossWrites(t *testing.T) 
 	}
 }
 
-func TestDaemon_HandleConnection_PluginHelloPreservesPipelinedFrames(t *testing.T) {
+func TestDaemon_HandleConnection_PluginHelloRegistersProviderSurfaces(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	serverConn, clientConn := net.Pipe()
 	defer clientConn.Close()
@@ -144,64 +143,21 @@ func TestDaemon_HandleConnection_PluginHelloPreservesPipelinedFrames(t *testing.
 		d.handleConnection(serverConn)
 	}()
 
-	hello, err := json.Marshal(jsonRPCMessage{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage("1"),
-		Method:  "hello",
-		Params: mustMarshalPluginHelloParams(t, pluginHelloParams{
-			Name:           "pipelined-provider",
-			Version:        "0.1.0",
-			AttnAPIVersion: pluginAPIVersion,
-			Roles:          []string{"provider"},
-		}),
-	})
-	if err != nil {
-		t.Fatalf("marshal pipelined hello: %v", err)
-	}
-	registerParams, err := json.Marshal(providerRegisterParams{
-		Surfaces: []string{"worktree.create"},
-	})
-	if err != nil {
-		t.Fatalf("marshal pipelined provider params: %v", err)
-	}
-	register, err := json.Marshal(jsonRPCMessage{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage("2"),
-		Method:  "provider.register",
-		Params:  registerParams,
-	})
-	if err != nil {
-		t.Fatalf("marshal pipelined provider.register: %v", err)
-	}
-
-	payload := append(append(append([]byte(nil), hello...), '\n'), register...)
-	payload = append(payload, '\n')
-	writeErr := make(chan error, 1)
-	go func() {
-		_, err := clientConn.Write(payload)
-		writeErr <- err
-	}()
-
+	sendPluginHelloWithOptions(t, clientConn, "hello-provider", nil, []string{"worktree.create"})
 	if resp := decodeJSONRPCMessage(t, clientConn); resp.Error != nil {
-		t.Fatalf("pipelined hello error=%#v, want nil", resp.Error)
-	}
-	if resp := decodeJSONRPCMessage(t, clientConn); resp.Error != nil {
-		t.Fatalf("pipelined provider.register error=%#v, want nil", resp.Error)
-	}
-	if err := <-writeErr; err != nil {
-		t.Fatalf("write pipelined frames: %v", err)
+		t.Fatalf("provider hello error=%#v, want nil", resp.Error)
 	}
 
 	providers := d.plugins.providersForSurface("worktree.create")
-	if len(providers) != 1 || providers[0].PluginName != "pipelined-provider" {
-		t.Fatalf("worktree.create providers=%v, want pipelined-provider only", providers)
+	if len(providers) != 1 || providers[0].PluginName != "hello-provider" {
+		t.Fatalf("worktree.create providers=%v, want hello-provider only", providers)
 	}
 
 	_ = clientConn.Close()
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("pipelined plugin connection did not close after client disconnect")
+		t.Fatal("provider plugin connection did not close after client disconnect")
 	}
 }
 
@@ -277,16 +233,13 @@ func TestDaemon_CallPlugin_RoundTripsRequestAndResponse(t *testing.T) {
 	}
 }
 
-func TestDaemon_ProviderRegister_OrdersProvidersAndCleansUpOnDisconnect(t *testing.T) {
+func TestDaemon_ProviderSurfaces_OrderProvidersAndCleanUpOnDisconnect(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 
-	lowClient, lowDone := startPluginPipe(t, d, "alpha-provider", nil)
+	lowClient, lowDone := startPluginPipe(t, d, "alpha-provider", []string{"worktree.create", "worktree.delete"})
 	defer lowClient.Close()
-	highClient, highDone := startPluginPipe(t, d, "zeta-provider", nil)
+	highClient, highDone := startPluginPipe(t, d, "zeta-provider", []string{"worktree.create"})
 	defer highClient.Close()
-
-	registerProvider(t, lowClient, []string{"worktree.create", "worktree.delete"})
-	registerProvider(t, highClient, []string{"worktree.create"})
 
 	providers := d.plugins.providersForSurface("worktree.create")
 	if len(providers) != 2 {
@@ -319,38 +272,7 @@ func TestDaemon_ProviderRegister_OrdersProvidersAndCleansUpOnDisconnect(t *testi
 	}
 }
 
-func TestDaemon_ProviderRegister_DoesNotRequireHandshakeRole(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	client, done := startPluginPipe(t, d, "observer-only", []string{"observer"})
-	defer client.Close()
-
-	params, err := json.Marshal(providerRegisterParams{Surfaces: []string{"worktree.create"}})
-	if err != nil {
-		t.Fatalf("marshal provider.register params: %v", err)
-	}
-	if err := json.NewEncoder(client).Encode(jsonRPCMessage{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage("2"),
-		Method:  "provider.register",
-		Params:  params,
-	}); err != nil {
-		t.Fatalf("encode provider.register: %v", err)
-	}
-
-	resp := decodeJSONRPCMessage(t, client)
-	if resp.Error != nil {
-		t.Fatalf("provider.register error=%#v, want nil", resp.Error)
-	}
-
-	_ = client.Close()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("observer-only plugin connection did not close")
-	}
-}
-
-func startPluginPipe(t *testing.T, d *Daemon, name string, roles []string) (net.Conn, <-chan struct{}) {
+func startPluginPipe(t *testing.T, d *Daemon, name string, providerSurfaces []string) (net.Conn, <-chan struct{}) {
 	t.Helper()
 	serverConn, clientConn := net.Pipe()
 	done := make(chan struct{})
@@ -359,7 +281,7 @@ func startPluginPipe(t *testing.T, d *Daemon, name string, roles []string) (net.
 		d.handleConnection(serverConn)
 	}()
 
-	sendPluginHelloWithRoles(t, clientConn, name, roles)
+	sendPluginHelloWithOptions(t, clientConn, name, nil, providerSurfaces)
 	helloResp := decodeJSONRPCMessage(t, clientConn)
 	if helloResp.Error != nil {
 		t.Fatalf("hello error = %#v, want nil", helloResp.Error)
@@ -367,44 +289,18 @@ func startPluginPipe(t *testing.T, d *Daemon, name string, roles []string) (net.
 	return clientConn, done
 }
 
-func registerProvider(t *testing.T, conn net.Conn, surfaces []string) {
-	t.Helper()
-	params, err := json.Marshal(providerRegisterParams{Surfaces: surfaces})
-	if err != nil {
-		t.Fatalf("marshal provider.register params: %v", err)
-	}
-	if err := json.NewEncoder(conn).Encode(jsonRPCMessage{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage("2"),
-		Method:  "provider.register",
-		Params:  params,
-	}); err != nil {
-		t.Fatalf("encode provider.register: %v", err)
-	}
-	resp := decodeJSONRPCMessage(t, conn)
-	if resp.Error != nil {
-		t.Fatalf("provider.register error = %#v, want nil", resp.Error)
-	}
-	var result providerRegisterResult
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		t.Fatalf("decode provider.register result: %v", err)
-	}
-	if !result.OK {
-		t.Fatal("provider.register result ok=false, want true")
-	}
-}
-
 func sendPluginHello(t *testing.T, conn net.Conn, name string) {
-	sendPluginHelloWithRoles(t, conn, name, nil)
+	sendPluginHelloWithOptions(t, conn, name, nil, nil)
 }
 
-func sendPluginHelloWithRoles(t *testing.T, conn net.Conn, name string, roles []string) {
+func sendPluginHelloWithOptions(t *testing.T, conn net.Conn, name string, roles, providerSurfaces []string) {
 	t.Helper()
 	params, err := json.Marshal(pluginHelloParams{
-		Name:           name,
-		Version:        "0.1.0",
-		AttnAPIVersion: pluginAPIVersion,
-		Roles:          roles,
+		Name:             name,
+		Version:          "0.1.0",
+		AttnAPIVersion:   pluginAPIVersion,
+		Roles:            roles,
+		ProviderSurfaces: providerSurfaces,
 	})
 	if err != nil {
 		t.Fatalf("marshal hello params: %v", err)

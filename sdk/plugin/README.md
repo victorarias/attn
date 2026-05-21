@@ -7,7 +7,7 @@ worktree extension points:
 
 - connect to the attn daemon over its plugin socket
 - send the `hello` handshake
-- register provider surfaces
+- declare provider surfaces during the connection handshake
 - handle daemon-initiated JSON-RPC requests
 - return structured `handled`, `decline`, or `error` results
 
