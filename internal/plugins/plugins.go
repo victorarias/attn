@@ -135,19 +135,30 @@ func InstallPath(sourceDir, pluginDir string) (Manifest, error) {
 	} else if !os.IsNotExist(err) {
 		return Manifest{}, fmt.Errorf("inspect install path: %w", err)
 	}
-	if err := copyTree(sourceDir, targetDir); err != nil {
-		_ = os.RemoveAll(targetDir)
+
+	stagingDir, err := os.MkdirTemp(pluginDir, "."+sourceManifest.Name+".install-*")
+	if err != nil {
+		return Manifest{}, fmt.Errorf("create staging install directory: %w", err)
+	}
+	defer os.RemoveAll(stagingDir)
+
+	if err := copyTree(sourceDir, stagingDir); err != nil {
 		return Manifest{}, err
 	}
-	installed, err := LoadManifest(filepath.Join(targetDir, ManifestName))
+	installed, err := LoadManifest(filepath.Join(stagingDir, ManifestName))
 	if err != nil {
-		_ = os.RemoveAll(targetDir)
 		return Manifest{}, fmt.Errorf("validate installed manifest: %w", err)
 	}
-	if err := installDependencies(targetDir); err != nil {
-		_ = os.RemoveAll(targetDir)
+	if err := installDependencies(stagingDir); err != nil {
 		return Manifest{}, err
 	}
+	if err := os.Rename(stagingDir, targetDir); err != nil {
+		if _, statErr := os.Stat(targetDir); statErr == nil {
+			return Manifest{}, fmt.Errorf("plugin %q is already installed", sourceManifest.Name)
+		}
+		return Manifest{}, fmt.Errorf("publish plugin %q: %w", sourceManifest.Name, err)
+	}
+	installed.Dir = targetDir
 	return installed, nil
 }
 

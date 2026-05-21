@@ -3,6 +3,7 @@ package plugins
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -52,6 +53,43 @@ func TestInstallPathRejectsDuplicatePlugin(t *testing.T) {
 	}
 	if _, err := InstallPath(sourceDir, pluginDir); err == nil {
 		t.Fatal("second InstallPath error=nil, want duplicate install error")
+	}
+}
+
+func TestInstallPathConcurrentDuplicateInstallsPublishExactlyOnePlugin(t *testing.T) {
+	installFakeBun(t)
+	sourceDir := filepath.Join(t.TempDir(), "source")
+	writeTestPlugin(t, sourceDir, "worktree-provider")
+	pluginDir := filepath.Join(t.TempDir(), "plugins")
+
+	const installs = 8
+	results := make([]error, installs)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range installs {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			<-start
+			_, results[index] = InstallPath(sourceDir, pluginDir)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	successes := 0
+	for _, err := range results {
+		if err == nil {
+			successes++
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("successful installs=%d, want exactly 1; errors=%v", successes, results)
+	}
+
+	installedManifest := filepath.Join(pluginDir, "worktree-provider", ManifestName)
+	if _, err := LoadManifest(installedManifest); err != nil {
+		t.Fatalf("installed manifest missing or invalid after concurrent install: %v", err)
 	}
 }
 
