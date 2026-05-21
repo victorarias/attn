@@ -72,14 +72,12 @@ export type AttnPluginClientOptions = {
   socketPath?: string;
   name?: string;
   version: string;
-  attnAPIVersion?: number;
 };
 
 type ResolvedAttnPluginClientOptions = {
   socketPath: string;
   name: string;
   version: string;
-  attnAPIVersion?: number;
 };
 
 export type PluginHandler<TParams = unknown, TResult = unknown> = (
@@ -132,7 +130,6 @@ export class AttnPluginClient {
       socketPath: resolvePluginOption(options.socketPath, "ATTN_SOCKET_PATH", "socketPath"),
       name: resolvePluginOption(options.name, "ATTN_PLUGIN_NAME", "name"),
       version: options.version,
-      attnAPIVersion: options.attnAPIVersion,
     };
   }
 
@@ -163,7 +160,7 @@ export class AttnPluginClient {
       const result = await this.request<HelloResult>("hello", {
         name: this.options.name,
         version: this.options.version,
-        attn_api_version: this.options.attnAPIVersion ?? pluginAPIVersion,
+        attn_api_version: pluginAPIVersion,
         surfaces: [...this.handlers.keys()].sort(),
       });
       if (!result.ok) {

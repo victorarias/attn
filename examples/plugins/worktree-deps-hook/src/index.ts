@@ -1,7 +1,4 @@
-import {
-  AttnPluginClient,
-  type WorktreeAfterCreateParams,
-} from "@attn/plugin";
+import { AttnPluginClient } from "@attn/plugin";
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -11,7 +8,7 @@ const client = new AttnPluginClient({
 });
 
 client.handle<"worktree.after_create">("worktree.after_create", async (params) => {
-  await bootstrapDependencies(params);
+  await installDependenciesIfPresent(params.path);
 });
 
 await client.connect();
@@ -20,8 +17,11 @@ async function pathExists(path: string): Promise<boolean> {
   try {
     await stat(path);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return false;
+    }
+    throw error;
   }
 }
 
@@ -78,6 +78,6 @@ async function installDependenciesIfPresent(worktreePath: string): Promise<void>
   }
 }
 
-async function bootstrapDependencies(params: WorktreeAfterCreateParams): Promise<void> {
-  await installDependenciesIfPresent(params.path);
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }

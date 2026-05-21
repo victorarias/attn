@@ -97,7 +97,6 @@ func (r *pluginRegistry) get(name string) *pluginConnection {
 
 type pluginSurfaceHandler struct {
 	PluginName string
-	Surface    string
 }
 
 func (r *pluginRegistry) registerSurfaces(plugin *pluginConnection, values []string) error {
@@ -119,11 +118,9 @@ func (r *pluginRegistry) registerSurfaces(plugin *pluginConnection, values []str
 		return fmt.Errorf("plugin %q is not connected", plugin.name)
 	}
 
-	r.unregisterSurfacesLocked(plugin.name)
 	for _, surface := range surfaces {
 		r.surfaces[surface] = append(r.surfaces[surface], pluginSurfaceHandler{
 			PluginName: plugin.name,
-			Surface:    surface,
 		})
 		sort.Slice(r.surfaces[surface], func(i, j int) bool {
 			left := r.surfaces[surface][i]
@@ -197,8 +194,7 @@ func validatePluginSurfaces(values []string) ([]string, error) {
 }
 
 type pluginConnection struct {
-	name    string
-	version string
+	name string
 
 	conn   net.Conn
 	reader *bufio.Reader
@@ -214,7 +210,6 @@ type pluginConnection struct {
 func newPluginConnection(conn net.Conn, reader *bufio.Reader, params pluginHelloParams) *pluginConnection {
 	return &pluginConnection{
 		name:    strings.TrimSpace(params.Name),
-		version: strings.TrimSpace(params.Version),
 		conn:    conn,
 		reader:  reader,
 		pending: make(map[string]chan jsonRPCMessage),
