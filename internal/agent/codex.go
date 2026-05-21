@@ -42,7 +42,7 @@ func (c *Codex) Capabilities() Capabilities {
 		HasTranscript:        true,
 		HasTranscriptWatcher: true,
 		HasClassifier:        true,
-		HasStateDetector:     true,
+		HasStateDetector:     false,
 		HasResume:            true,
 		HasYolo:              true,
 	}
@@ -120,23 +120,11 @@ func (c *Codex) NewTranscriptWatcherBehavior() TranscriptWatcherBehavior {
 }
 
 func (c *Codex) RecoveredRunningState(ptyState string) protocol.SessionState {
-	switch ptyState {
-	case protocol.StatePendingApproval:
-		return protocol.SessionStatePendingApproval
-	default:
-		return protocol.SessionStateLaunching
-	}
+	return protocol.SessionStateLaunching
 }
 
 func (c *Codex) ShouldApplyPTYState(current protocol.SessionState, incoming string) bool {
-	switch incoming {
-	case protocol.StatePendingApproval:
-		return true
-	case protocol.StateWorking:
-		return current == protocol.SessionStateWorking
-	default:
-		return false
-	}
+	return false
 }
 
 func (c *Codex) ResolveSpawnResumeSessionID(existingSessionID, requestedResumeID, storedResumeID string) string {

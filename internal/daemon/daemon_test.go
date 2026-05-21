@@ -1072,8 +1072,13 @@ func TestSessionStateFromRecoveredInfo(t *testing.T) {
 			want: protocol.SessionStateLaunching,
 		},
 		{
-			name: "pending approval",
+			name: "codex pending approval normalizes to launching",
 			info: ptybackend.SessionInfo{Running: true, State: protocol.StatePendingApproval},
+			want: protocol.SessionStateLaunching,
+		},
+		{
+			name: "claude pending approval",
+			info: ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentClaude), State: protocol.StatePendingApproval},
 			want: protocol.SessionStatePendingApproval,
 		},
 		{

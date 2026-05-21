@@ -259,8 +259,11 @@ func TestClient_SocketPath(t *testing.T) {
 	config.SetBinaryName("attn")
 
 	// Test default socket path
-	os.Setenv("HOME", "/home/testuser")
-	defer os.Unsetenv("HOME")
+	t.Setenv("HOME", "/home/testuser")
+	t.Setenv("ATTN_PROFILE", "")
+	t.Setenv("ATTN_SOCKET_PATH", "")
+	t.Setenv("ATTN_CONFIG_PATH", filepath.Join(t.TempDir(), "missing-config.json"))
+	config.ReloadForTesting()
 
 	path := DefaultSocketPath()
 	expected := "/home/testuser/.attn/attn.sock"
