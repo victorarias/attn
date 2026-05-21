@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -54,8 +55,6 @@ func LoadManifest(path string) (Manifest, error) {
 	switch {
 	case manifest.Name == "":
 		return Manifest{}, errors.New("name is required")
-	case !validInstallName(manifest.Name):
-		return Manifest{}, fmt.Errorf("name %q cannot be used as an install directory", manifest.Name)
 	case manifest.Version == "":
 		return Manifest{}, errors.New("version is required")
 	case manifest.AttnAPIVersion != APIVersion:
@@ -66,7 +65,10 @@ func LoadManifest(path string) (Manifest, error) {
 		return Manifest{}, errors.New("plugin.entrypoint must be relative to the plugin directory")
 	}
 
-	entrypointPath := filepath.Join(manifest.Dir, manifest.Plugin.Entrypoint)
+	entrypointPath := filepath.Clean(filepath.Join(manifest.Dir, manifest.Plugin.Entrypoint))
+	if !pathWithinDir(manifest.Dir, entrypointPath) {
+		return Manifest{}, errors.New("plugin.entrypoint must stay within the plugin directory")
+	}
 	if _, err := os.Stat(entrypointPath); err != nil {
 		return Manifest{}, fmt.Errorf("plugin.entrypoint %q: %w", manifest.Plugin.Entrypoint, err)
 	}
@@ -120,6 +122,9 @@ func InstallPath(sourceDir, pluginDir string) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, fmt.Errorf("load source manifest: %w", err)
 	}
+	if !validInstallName(sourceManifest.Name) {
+		return Manifest{}, fmt.Errorf("name %q cannot be used as an install directory", sourceManifest.Name)
+	}
 	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
 		return Manifest{}, fmt.Errorf("create plugin directory: %w", err)
 	}
@@ -138,6 +143,10 @@ func InstallPath(sourceDir, pluginDir string) (Manifest, error) {
 	if err != nil {
 		_ = os.RemoveAll(targetDir)
 		return Manifest{}, fmt.Errorf("validate installed manifest: %w", err)
+	}
+	if err := installDependencies(targetDir); err != nil {
+		_ = os.RemoveAll(targetDir)
+		return Manifest{}, err
 	}
 	return installed, nil
 }
@@ -165,6 +174,30 @@ func validInstallName(name string) bool {
 		name != ".." &&
 		name == filepath.Base(name) &&
 		!strings.ContainsAny(name, `/\`)
+}
+
+func pathWithinDir(root, target string) bool {
+	root = filepath.Clean(root)
+	target = filepath.Clean(target)
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)))
+}
+
+func installDependencies(pluginDir string) error {
+	cmd := exec.Command("bun", "install")
+	cmd.Dir = pluginDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		details := strings.TrimSpace(string(output))
+		if details == "" {
+			return fmt.Errorf("run bun install: %w", err)
+		}
+		return fmt.Errorf("run bun install: %w: %s", err, details)
+	}
+	return nil
 }
 
 func copyTree(sourceDir, targetDir string) error {

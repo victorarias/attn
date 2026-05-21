@@ -51,6 +51,40 @@ attn_api_version = 1
 	}
 }
 
+func TestDiscoverPluginManifests_AllowsRuntimeOnlyManifestNames(t *testing.T) {
+	pluginDir := filepath.Join(t.TempDir(), "plugins")
+	root := filepath.Join(pluginDir, "manual-provider")
+	entrypointDir := filepath.Join(root, "src")
+	if err := os.MkdirAll(entrypointDir, 0o755); err != nil {
+		t.Fatalf("mkdir plugin dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(entrypointDir, "index.ts"), []byte("// fake entrypoint\n"), 0o644); err != nil {
+		t.Fatalf("write fake entrypoint: %v", err)
+	}
+	manifest := []byte(`
+name = "manual/provider"
+version = "0.1.0"
+attn_api_version = 1
+
+[plugin]
+entrypoint = "src/index.ts"
+`)
+	if err := os.WriteFile(filepath.Join(root, pluginManifestName), manifest, 0o644); err != nil {
+		t.Fatalf("write plugin manifest: %v", err)
+	}
+
+	manifests, issues := discoverPluginManifests(pluginDir)
+	if len(issues) != 0 {
+		t.Fatalf("manifest issues=%v, want none", issues)
+	}
+	if len(manifests) != 1 {
+		t.Fatalf("manifest count=%d, want 1", len(manifests))
+	}
+	if manifests[0].Name != "manual/provider" {
+		t.Fatalf("manifest name=%q, want manual/provider", manifests[0].Name)
+	}
+}
+
 func TestDaemon_StartInstalledPlugins_SpawnsProviderPlugin(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19971")
 	t.Setenv("ATTN_PLUGIN_HELPER", "1")
