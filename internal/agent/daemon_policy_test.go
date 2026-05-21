@@ -53,23 +53,27 @@ func TestRecoveredRunningSessionState_DefaultAndAgentOverrides(t *testing.T) {
 	if got := RecoveredRunningSessionState(Get("codex"), protocol.StateWaitingInput); got != protocol.SessionStateLaunching {
 		t.Fatalf("codex recovered waiting_input = %s, want launching", got)
 	}
+	if got := RecoveredRunningSessionState(Get("codex"), protocol.StatePendingApproval); got != protocol.SessionStateLaunching {
+		t.Fatalf("codex recovered pending_approval = %s, want launching", got)
+	}
 	if got := RecoveredRunningSessionState(Get("copilot"), protocol.StatePendingApproval); got != protocol.SessionStatePendingApproval {
 		t.Fatalf("copilot recovered pending_approval = %s, want pending_approval", got)
 	}
 }
 
 func TestShouldApplyPTYState_AgentOverrides(t *testing.T) {
-	if ShouldApplyPTYState(Get("codex"), protocol.SessionStateWorking, protocol.StateWaitingInput) {
-		t.Fatal("codex should ignore waiting_input PTY state updates")
-	}
-	if !ShouldApplyPTYState(Get("codex"), protocol.SessionStateWorking, protocol.StatePendingApproval) {
-		t.Fatal("codex should accept pending_approval PTY state updates")
+	for _, incoming := range []string{
+		protocol.StateWorking,
+		protocol.StateWaitingInput,
+		protocol.StatePendingApproval,
+		protocol.StateIdle,
+	} {
+		if ShouldApplyPTYState(Get("codex"), protocol.SessionStateWorking, incoming) {
+			t.Fatalf("codex should ignore %s PTY state updates", incoming)
+		}
 	}
 	if ShouldApplyPTYState(Get("codex"), protocol.SessionStateLaunching, protocol.StateWorking) {
 		t.Fatal("codex should ignore launch-time working PTY noise")
-	}
-	if !ShouldApplyPTYState(Get("codex"), protocol.SessionStateWorking, protocol.StateWorking) {
-		t.Fatal("codex should accept working PTY state updates while already working")
 	}
 	if ShouldApplyPTYState(Get("codex"), protocol.SessionStateIdle, protocol.StateWorking) {
 		t.Fatal("codex should ignore working PTY noise while idle")

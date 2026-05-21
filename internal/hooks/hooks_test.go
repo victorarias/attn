@@ -121,6 +121,12 @@ func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {
 	if !strings.Contains(joined, "features.hooks=true") {
 		t.Fatal("codex overrides should enable hooks for attn-managed sessions")
 	}
+	if !strings.Contains(joined, "hooks.PreToolUse=") {
+		t.Fatal("codex overrides should include PreToolUse hook")
+	}
+	if !strings.Contains(joined, `"/<session-flags>/config.toml:pre_tool_use:0:0" = { trusted_hash =`) {
+		t.Fatal("codex overrides should trust attn-managed PreToolUse hook")
+	}
 	if !strings.Contains(joined, `hooks.state={`) ||
 		!strings.Contains(joined, `"/<session-flags>/config.toml:session_start:0:0" = { trusted_hash =`) {
 		t.Fatal("codex overrides should trust attn-managed session flag hooks")

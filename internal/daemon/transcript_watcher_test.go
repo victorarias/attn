@@ -8,34 +8,32 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-func TestHandlePTYState_CodexIgnoresWaitingAndIdle(t *testing.T) {
+func TestHandlePTYState_CodexIgnoresPTYState(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "sock"))
 
-	nowStr := string(protocol.TimestampNow())
-	d.store.Add(&protocol.Session{
-		ID:             "codex-sess",
-		Label:          "codex",
-		Agent:          protocol.SessionAgentCodex,
-		Directory:      "/tmp",
-		State:          protocol.SessionStateWorking,
-		StateSince:     nowStr,
-		StateUpdatedAt: nowStr,
-		LastSeen:       nowStr,
-	})
+	for _, state := range []string{
+		protocol.StateWaitingInput,
+		protocol.StateIdle,
+		protocol.StatePendingApproval,
+		protocol.StateWorking,
+	} {
+		id := "codex-sess-" + state
+		nowStr := string(protocol.TimestampNow())
+		d.store.Add(&protocol.Session{
+			ID:             id,
+			Label:          "codex",
+			Agent:          protocol.SessionAgentCodex,
+			Directory:      "/tmp",
+			State:          protocol.SessionStateIdle,
+			StateSince:     nowStr,
+			StateUpdatedAt: nowStr,
+			LastSeen:       nowStr,
+		})
 
-	d.handlePTYState("codex-sess", protocol.StateWaitingInput)
-	if got := d.store.Get("codex-sess"); got.State != protocol.SessionStateWorking {
-		t.Fatalf("codex waiting_input should be ignored, got=%s", got.State)
-	}
-
-	d.handlePTYState("codex-sess", protocol.StateIdle)
-	if got := d.store.Get("codex-sess"); got.State != protocol.SessionStateWorking {
-		t.Fatalf("codex idle should be ignored, got=%s", got.State)
-	}
-
-	d.handlePTYState("codex-sess", protocol.StatePendingApproval)
-	if got := d.store.Get("codex-sess"); got.State != protocol.SessionStatePendingApproval {
-		t.Fatalf("codex pending_approval should be applied, got=%s", got.State)
+		d.handlePTYState(id, state)
+		if got := d.store.Get(id); got.State != protocol.SessionStateIdle {
+			t.Fatalf("codex %s PTY state should be ignored, got=%s", state, got.State)
+		}
 	}
 }
 

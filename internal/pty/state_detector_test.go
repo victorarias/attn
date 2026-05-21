@@ -71,8 +71,8 @@ up/down to navigate - Enter to select - Esc to cancel`
 	}
 }
 
-func TestCodexStateDetector_EmitsWorkingPulseForAnimationFrames(t *testing.T) {
-	d := newCodexStateDetector()
+func TestCopilotStateDetector_EmitsWorkingPulseForAnimationFrames(t *testing.T) {
+	d := newCopilotStateDetector()
 	frame := []byte("\x1b[2m• working\x1b[0m\r")
 
 	state, changed := d.Observe(frame)

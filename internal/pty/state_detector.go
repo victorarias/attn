@@ -39,7 +39,7 @@ var defaultStateHeuristics = stateHeuristics{
 	listRequestTriggers: []string{"pick one", "choose", "select", "tell me"},
 }
 
-type codexStateDetector struct {
+type copilotStateDetector struct {
 	tail             string
 	lastState        string
 	lastWorkingPulse time.Time
@@ -51,8 +51,8 @@ type claudeWorkingDetector struct {
 	lastWorkingPulse time.Time
 }
 
-func newCodexStateDetector() *codexStateDetector {
-	return &codexStateDetector{}
+func newCopilotStateDetector() *copilotStateDetector {
+	return &copilotStateDetector{}
 }
 
 func newClaudeWorkingDetector() *claudeWorkingDetector {
@@ -64,7 +64,7 @@ const workingPulseInterval = 1200 * time.Millisecond
 var claudeStatusTimerPattern = regexp.MustCompile(`\((?:\d+h\s+)?(?:\d+m\s+)?\d+s(?:\s+·[^)]*)?\)`)
 var claudeFinalSummaryPattern = regexp.MustCompile(`(?i)\bfor\s+(?:\d+h\s+)?(?:\d+m\s+)?\d+s\b`)
 
-func (d *codexStateDetector) Observe(chunk []byte) (string, bool) {
+func (d *copilotStateDetector) Observe(chunk []byte) (string, bool) {
 	if len(chunk) == 0 {
 		return "", false
 	}

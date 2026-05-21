@@ -40,6 +40,7 @@ func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath string) []s
 	sessionStart := command("_hook-session-start")
 	userPromptSubmit := command("_hook-state", "working")
 	permissionRequest := command("_hook-state", "pending_approval")
+	preToolUse := command("_hook-state", "working")
 	postToolUse := command("_hook-state", "working")
 	stop := command("_hook-stop")
 
@@ -49,12 +50,14 @@ func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath string) []s
 			{eventKey: "session_start", matcher: "startup|resume", command: sessionStart},
 			{eventKey: "user_prompt_submit", command: userPromptSubmit},
 			{eventKey: "permission_request", matcher: "*", command: permissionRequest},
+			{eventKey: "pre_tool_use", matcher: "*", command: preToolUse},
 			{eventKey: "post_tool_use", matcher: "*", command: postToolUse},
 			{eventKey: "stop", command: stop},
 		}),
 		"hooks.SessionStart=" + group("startup|resume", sessionStart),
 		"hooks.UserPromptSubmit=" + group("", userPromptSubmit),
 		"hooks.PermissionRequest=" + group("*", permissionRequest),
+		"hooks.PreToolUse=" + group("*", preToolUse),
 		"hooks.PostToolUse=" + group("*", postToolUse),
 		"hooks.Stop=" + group("", stop),
 	}

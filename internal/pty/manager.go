@@ -226,8 +226,8 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	}
 	if detectorEnabled {
 		switch agent {
-		case "codex", "copilot":
-			session.detector = newCodexStateDetector()
+		case "copilot":
+			session.detector = newCopilotStateDetector()
 		case "claude":
 			session.detector = newClaudeWorkingDetector()
 		}
