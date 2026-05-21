@@ -298,7 +298,7 @@ Provider dispatch and future driver work are the tightest V1 requirements. Assis
 
 In priority order of what might come next:
 
-- **SDK expansion.** Extend `@attn/plugin` beyond the initial provider foundation once broader surfaces have real plugin implementations. Reconnect logic and richer typed helpers belong here, not in the first extraction.
+- **SDK expansion.** Extend `@victorarias/attn-plugin` beyond the initial provider foundation once broader surfaces have real plugin implementations. Reconnect logic and richer typed helpers belong here, not in the first extraction.
 - **Cross-daemon control API.** Expose the same JSON-RPC surface over the hub's existing WebSocket at `:9849` so future control plugins can span daemons. Useful for attn-as-agent and dashboards.
 - **Custom UI extensions.** Separate design.
 - **Plugin install over SSH / hub** — `attn --endpoint <server> plugin install <url>`. Nice-to-have, requires proxying through the hub.

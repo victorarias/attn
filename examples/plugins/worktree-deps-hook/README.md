@@ -1,6 +1,6 @@
 # Worktree dependency bootstrap hook
 
-Example attn plugin built with `@attn/plugin`.
+Example attn plugin built with `@victorarias/attn-plugin`.
 
 It demonstrates:
 
@@ -17,7 +17,7 @@ The example keeps the behavior genuinely useful:
 - otherwise run `npm install` when `package-lock.json` is present
 - surface package-manager failures back to attn through the hook RPC call
 
-This example consumes `@attn/plugin` through a local `file:` dependency back
+This example consumes `@victorarias/attn-plugin` through a local `file:` dependency back
 into this repository. Until the SDK has a publishable external consumption path,
 treat this as a source-tree example rather than a plugin to install with
 `attn plugin install --path`.
