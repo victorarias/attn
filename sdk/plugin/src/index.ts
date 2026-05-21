@@ -69,6 +69,13 @@ type PluginSurfaceResult = {
 };
 
 export type AttnPluginClientOptions = {
+  socketPath?: string;
+  name?: string;
+  version: string;
+  attnAPIVersion?: number;
+};
+
+type ResolvedAttnPluginClientOptions = {
   socketPath: string;
   name: string;
   version: string;
@@ -118,7 +125,16 @@ export class AttnPluginClient {
   private readonly handlers = new Map<PluginSurface, PluginHandler>();
   private readonly pending = new Map<string, PendingRequest>();
 
-  constructor(private readonly options: AttnPluginClientOptions) {}
+  private readonly options: ResolvedAttnPluginClientOptions;
+
+  constructor(options: AttnPluginClientOptions) {
+    this.options = {
+      socketPath: resolvePluginOption(options.socketPath, "ATTN_SOCKET_PATH", "socketPath"),
+      name: resolvePluginOption(options.name, "ATTN_PLUGIN_NAME", "name"),
+      version: options.version,
+      attnAPIVersion: options.attnAPIVersion,
+    };
+  }
 
   async connect(): Promise<void> {
     if (this.socket) {
@@ -298,4 +314,16 @@ export function providerError(error: string): ProviderError {
     status: "error",
     error,
   };
+}
+
+function resolvePluginOption(
+  explicitValue: string | undefined,
+  envName: "ATTN_SOCKET_PATH" | "ATTN_PLUGIN_NAME",
+  optionName: "socketPath" | "name",
+): string {
+  const value = explicitValue?.trim() || process.env[envName]?.trim();
+  if (!value) {
+    throw new Error(`attn plugin ${optionName} is required; pass ${optionName} or set ${envName}`);
+  }
+  return value;
 }

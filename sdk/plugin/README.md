@@ -18,8 +18,6 @@ import {
 } from "@attn/plugin";
 
 const client = new AttnPluginClient({
-  socketPath: process.env.ATTN_SOCKET_PATH ?? "",
-  name: "example-worktree-provider",
   version: "0.1.0",
 });
 
@@ -42,7 +40,9 @@ await client.connect();
 
 `client.handle(...)` is the declaration point. `connect()` includes every
 registered surface in the daemon handshake, so plugin code does not maintain a
-second registration list.
+second registration list. Managed plugins get `ATTN_SOCKET_PATH` and
+`ATTN_PLUGIN_NAME` from attn; manually-launched plugins can still pass
+`socketPath` or `name` explicitly.
 
 Create lifecycle hooks use the same registration path:
 

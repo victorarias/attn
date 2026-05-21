@@ -6,16 +6,7 @@ import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 
-const socketPath = process.env.ATTN_SOCKET_PATH?.trim();
-const pluginName = process.env.ATTN_PLUGIN_NAME?.trim() || "worktree-deps-hook";
-
-if (!socketPath) {
-  throw new Error("ATTN_SOCKET_PATH is required");
-}
-
 const client = new AttnPluginClient({
-  socketPath,
-  name: pluginName,
   version: "0.1.0",
 });
 

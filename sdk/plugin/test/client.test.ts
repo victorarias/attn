@@ -66,6 +66,36 @@ describe("AttnPluginClient", () => {
     await server.close();
   });
 
+  test("resolves daemon-provided socket path and plugin name from env", async () => {
+    const server = await startServer(async (socket, request) => {
+      if (request.method === "hello") {
+        socket.write(`${JSON.stringify(response(request.id, { ok: true }))}\n`);
+      }
+    });
+    const previousSocketPath = process.env.ATTN_SOCKET_PATH;
+    const previousPluginName = process.env.ATTN_PLUGIN_NAME;
+    process.env.ATTN_SOCKET_PATH = server.socketPath;
+    process.env.ATTN_PLUGIN_NAME = "sdk-env-provider";
+
+    let client: AttnPluginClient | undefined;
+    try {
+      client = new AttnPluginClient({
+        version: "0.1.0",
+      });
+
+      await client.connect();
+
+      expect(server.requests[0]?.params).toMatchObject({
+        name: "sdk-env-provider",
+      });
+    } finally {
+      client?.close();
+      restoreEnv("ATTN_SOCKET_PATH", previousSocketPath);
+      restoreEnv("ATTN_PLUGIN_NAME", previousPluginName);
+      await server.close();
+    }
+  });
+
   test("routes daemon worktree requests to typed handlers", async () => {
     const server = await startServer(async (socket, request) => {
       if (request.method === "hello") {
@@ -300,4 +330,12 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 
 function pendingRequestCount(client: AttnPluginClient): number {
   return (client as unknown as { pending: Map<string, unknown> }).pending.size;
+}
+
+function restoreEnv(name: "ATTN_SOCKET_PATH" | "ATTN_PLUGIN_NAME", value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = value;
 }
