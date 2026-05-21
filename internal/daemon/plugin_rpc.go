@@ -497,11 +497,13 @@ func (d *Daemon) handlePluginConnection(conn net.Conn, reader *bufio.Reader, hel
 	defer func() {
 		registry.unregister(plugin)
 		plugin.closePending(io.EOF)
+		d.broadcastPluginsUpdated()
 	}()
 
 	if err := plugin.send(jsonRPCResult(helloID, pluginHelloResult{OK: true})); err != nil {
 		return
 	}
+	d.broadcastPluginsUpdated()
 
 	for {
 		data, err := readSocketFrame(reader)

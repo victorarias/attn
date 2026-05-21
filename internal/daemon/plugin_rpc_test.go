@@ -50,6 +50,8 @@ func TestDaemon_HandleConnection_LegacySocketMessageStillWorks(t *testing.T) {
 
 func TestDaemon_HandleConnection_PluginHelloRegistersLongLivedConnection(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.pluginDir = filepath.Join(t.TempDir(), "plugins")
+	writeTestPluginManifest(t, d.pluginDir, "worktree-provider")
 	serverConn, clientConn := net.Pipe()
 	defer clientConn.Close()
 
@@ -74,6 +76,7 @@ func TestDaemon_HandleConnection_PluginHelloRegistersLongLivedConnection(t *test
 	if got := d.plugins.get("worktree-provider"); got == nil {
 		t.Fatal("plugin registry missing worktree-provider after hello")
 	}
+	assertPluginConnectionBroadcast(t, readPluginUpdatedBroadcast(t, d), true)
 
 	_ = clientConn.Close()
 	select {
@@ -81,6 +84,7 @@ func TestDaemon_HandleConnection_PluginHelloRegistersLongLivedConnection(t *test
 	case <-time.After(2 * time.Second):
 		t.Fatal("plugin connection did not close after client disconnect")
 	}
+	assertPluginConnectionBroadcast(t, readPluginUpdatedBroadcast(t, d), false)
 }
 
 func TestDaemon_HandleConnection_PluginHelloCanArriveAcrossWrites(t *testing.T) {
@@ -387,4 +391,37 @@ func mustMarshalPluginHelloParams(t *testing.T, params pluginHelloParams) json.R
 		t.Fatalf("marshal hello params: %v", err)
 	}
 	return payload
+}
+
+func readPluginUpdatedBroadcast(t *testing.T, d *Daemon) map[string]interface{} {
+	t.Helper()
+	select {
+	case outbound := <-d.wsHub.broadcast:
+		var event map[string]interface{}
+		if err := json.Unmarshal(outbound.payload, &event); err != nil {
+			t.Fatalf("decode plugin broadcast: %v", err)
+		}
+		if event["event"] != protocol.EventPluginsUpdated {
+			t.Fatalf("plugin broadcast event=%v, want %q", event["event"], protocol.EventPluginsUpdated)
+		}
+		return event
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for plugins_updated broadcast")
+		return nil
+	}
+}
+
+func assertPluginConnectionBroadcast(t *testing.T, event map[string]interface{}, connected bool) {
+	t.Helper()
+	plugins, ok := event["plugins"].([]interface{})
+	if !ok || len(plugins) != 1 {
+		t.Fatalf("plugins=%v, want one plugin", event["plugins"])
+	}
+	info, ok := plugins[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("plugin info=%T, want object", plugins[0])
+	}
+	if got := info["connected"]; got != connected {
+		t.Fatalf("connected=%v, want %v", got, connected)
+	}
 }
