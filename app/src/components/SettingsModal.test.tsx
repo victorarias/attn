@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '../test/utils';
 import { SettingsModal } from './SettingsModal';
 
 describe('SettingsModal review loop prompts', () => {
-  it('closes on escape', () => {
+  it('closes on escape', async () => {
     const onClose = vi.fn();
 
     render(
@@ -17,22 +17,29 @@ describe('SettingsModal review loop prompts', () => {
         onUnmuteAuthor={vi.fn()}
         settings={{}}
         endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
         onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
         onSetSetting={vi.fn()}
         themePreference="system"
         onSetTheme={vi.fn()}
       />
     );
 
+    await screen.findByText('No plugins installed.');
     fireEvent.keyDown(window, { key: 'Escape' });
 
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('saves a custom review loop preset to settings', () => {
+  it('saves a custom review loop preset to settings', async () => {
     const onSetSetting = vi.fn();
 
     render(
@@ -46,16 +53,23 @@ describe('SettingsModal review loop prompts', () => {
         onUnmuteAuthor={vi.fn()}
         settings={{}}
         endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
         onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
         onSetSetting={onSetSetting}
         themePreference="system"
         onSetTheme={vi.fn()}
       />
     );
 
+    await screen.findByText('No plugins installed.');
     fireEvent.change(screen.getByLabelText('Prompt name'), { target: { value: 'Architect Pass' } });
     fireEvent.change(screen.getByLabelText('Default iterations'), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Review like an architect' } });
@@ -88,10 +102,16 @@ describe('SettingsModal review loop prompts', () => {
         onUnmuteAuthor={vi.fn()}
         settings={{}}
         endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
         onAddEndpoint={onAddEndpoint}
         onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
         onSetSetting={vi.fn()}
         themePreference="system"
         onSetTheme={vi.fn()}
@@ -107,7 +127,155 @@ describe('SettingsModal review loop prompts', () => {
     });
   });
 
-  it('toggles tailscale serve on the existing device', () => {
+  it('installs a plugin from a local directory', async () => {
+    const onInstallPlugin = vi.fn().mockResolvedValue({ success: true });
+    const onListPlugins = vi.fn().mockResolvedValue({ plugins: [], issues: [] });
+
+    render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        connectedHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{}}
+        endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={onListPlugins}
+        onInstallPlugin={onInstallPlugin}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={vi.fn()}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText('Plugin directory'), { target: { value: '/tmp/my-plugin' } });
+    fireEvent.click(screen.getByText('Install Plugin'));
+
+    await waitFor(() => {
+      expect(onInstallPlugin).toHaveBeenCalledWith('/tmp/my-plugin');
+    });
+    expect(onListPlugins).toHaveBeenCalled();
+  });
+
+  it('updates provider priority for an installed plugin', async () => {
+    const onSetPluginPriority = vi.fn().mockResolvedValue({ success: true });
+
+    render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        connectedHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{}}
+        endpoints={[]}
+        plugins={[{
+          name: 'services-pilot-worktrees',
+          version: '0.1.0',
+          dir: '/tmp/services-pilot-worktrees',
+          priority: 10,
+          connected: true,
+          running: true,
+        }]}
+        pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({
+          plugins: [{
+            name: 'services-pilot-worktrees',
+            version: '0.1.0',
+            dir: '/tmp/services-pilot-worktrees',
+            priority: 10,
+            connected: true,
+            running: true,
+          }],
+          issues: [],
+        })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={onSetPluginPriority}
+        onSetSetting={vi.fn()}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />
+    );
+
+    const priority = await screen.findByLabelText('services-pilot-worktrees priority');
+    fireEvent.change(priority, { target: { value: '25' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() => {
+      expect(onSetPluginPriority).toHaveBeenCalledWith('services-pilot-worktrees', 25);
+    });
+  });
+
+  it('refreshes a plugin status when the live daemon snapshot changes', async () => {
+    const baseProps = {
+      isOpen: true,
+      onClose: vi.fn(),
+      mutedRepos: [] as string[],
+      connectedHosts: [] as string[],
+      onUnmuteRepo: vi.fn(),
+      mutedAuthors: [] as string[],
+      onUnmuteAuthor: vi.fn(),
+      settings: {},
+      endpoints: [],
+      pluginIssues: [],
+      onAddEndpoint: vi.fn().mockResolvedValue({ success: true }),
+      onUpdateEndpoint: vi.fn().mockResolvedValue({ success: true }),
+      onRemoveEndpoint: vi.fn().mockResolvedValue({ success: true }),
+      onSetEndpointRemoteWeb: vi.fn().mockResolvedValue({ success: true }),
+      onListPlugins: vi.fn().mockResolvedValue({ plugins: [], issues: [] }),
+      onInstallPlugin: vi.fn().mockResolvedValue({ success: true }),
+      onRemovePlugin: vi.fn().mockResolvedValue({ success: true }),
+      onSetPluginPriority: vi.fn().mockResolvedValue({ success: true }),
+      onSetSetting: vi.fn(),
+      themePreference: 'system' as const,
+      onSetTheme: vi.fn(),
+    };
+    const startingPlugin = {
+      name: 'services-pilot-worktrees',
+      version: '0.1.0',
+      dir: '/tmp/services-pilot-worktrees',
+      priority: 0,
+      connected: false,
+      running: true,
+    };
+
+    const { rerender } = render(
+      <SettingsModal
+        {...baseProps}
+        plugins={[startingPlugin]}
+      />,
+    );
+
+    expect(await screen.findByText('starting')).toBeInTheDocument();
+
+    rerender(
+      <SettingsModal
+        {...baseProps}
+        plugins={[{ ...startingPlugin, connected: true }]}
+      />,
+    );
+
+    expect(await screen.findByText('connected')).toBeInTheDocument();
+  });
+
+  it('toggles tailscale serve on the existing device', async () => {
     const onSetSetting = vi.fn();
 
     render(
@@ -125,16 +293,23 @@ describe('SettingsModal review loop prompts', () => {
           tailscale_domain: 'macbook-epidemic.tail1bfe77.ts.net',
         }}
         endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
         onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
         onSetSetting={onSetSetting}
         themePreference="system"
         onSetTheme={vi.fn()}
       />
     );
 
+    await screen.findByText('No plugins installed.');
     fireEvent.click(screen.getByText('Enable'));
     expect(onSetSetting).toHaveBeenCalledWith('tailscale_enabled', 'true');
     expect(screen.getByText(/does not register a second tailnet device/i)).toBeInTheDocument();
@@ -168,10 +343,16 @@ describe('SettingsModal review loop prompts', () => {
             tailscale_auth_url: 'https://login.tailscale.example/auth',
           },
         }]}
+        plugins={[]}
+        pluginIssues={[]}
         onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onSetEndpointRemoteWeb={onSetEndpointRemoteWeb}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
         onSetSetting={vi.fn()}
         themePreference="system"
         onSetTheme={vi.fn()}
@@ -206,10 +387,16 @@ describe('SettingsModal review loop prompts', () => {
           status: 'error',
           enabled: true,
         }]}
+        plugins={[]}
+        pluginIssues={[]}
         onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onUpdateEndpoint={onUpdateEndpoint}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
         onSetSetting={vi.fn()}
         themePreference="system"
         onSetTheme={vi.fn()}

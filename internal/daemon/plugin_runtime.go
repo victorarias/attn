@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 
 	"github.com/victorarias/attn/internal/plugins"
@@ -58,6 +59,18 @@ func (r *pluginProcessRegistry) remove(name string, process *pluginProcess) {
 	}
 }
 
+func (r *pluginProcessRegistry) get(name string) *pluginProcess {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.processes[name]
+}
+
+func (r *pluginProcessRegistry) isRunning(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.processes[name] != nil
+}
+
 func (r *pluginProcessRegistry) list() []*pluginProcess {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -88,10 +101,9 @@ func (d *Daemon) startInstalledPlugins() {
 }
 
 func (d *Daemon) startInstalledPlugin(manifest pluginManifest) error {
-	cmd := exec.Command("bun", "run", manifest.Plugin.Entrypoint)
+	cmd := exec.Command("/usr/bin/env", "bun", "run", manifest.Plugin.Entrypoint)
 	cmd.Dir = manifest.Dir
-	cmd.Env = append(
-		os.Environ(),
+	cmd.Env = d.pluginCommandEnv(
 		"ATTN_SOCKET_PATH="+d.socketPath,
 		"ATTN_PLUGIN_NAME="+manifest.Name,
 	)
@@ -123,6 +135,41 @@ func (d *Daemon) startInstalledPlugin(manifest pluginManifest) error {
 	return nil
 }
 
+func (d *Daemon) pluginCommandEnv(extra ...string) []string {
+	env := append([]string(nil), os.Environ()...)
+	env = mergePluginEnvironment(env, d.cachedLoginShellEnv())
+	env = mergePluginEnvironment(env, extra)
+	return env
+}
+
+func mergePluginEnvironment(base, overlay []string) []string {
+	if len(overlay) == 0 {
+		return append([]string(nil), base...)
+	}
+
+	merged := make([]string, 0, len(base)+len(overlay))
+	index := make(map[string]int, len(base)+len(overlay))
+	add := func(entry string) {
+		key := entry
+		if split := strings.Index(entry, "="); split >= 0 {
+			key = entry[:split]
+		}
+		if pos, ok := index[key]; ok {
+			merged[pos] = entry
+			return
+		}
+		index[key] = len(merged)
+		merged = append(merged, entry)
+	}
+	for _, entry := range base {
+		add(entry)
+	}
+	for _, entry := range overlay {
+		add(entry)
+	}
+	return merged
+}
+
 func (d *Daemon) stopInstalledPlugins() {
 	for _, process := range d.ensurePluginProcessRegistry().list() {
 		if process.cmd == nil || process.cmd.Process == nil {
@@ -130,4 +177,12 @@ func (d *Daemon) stopInstalledPlugins() {
 		}
 		_ = process.cmd.Process.Kill()
 	}
+}
+
+func (d *Daemon) stopInstalledPlugin(name string) {
+	process := d.ensurePluginProcessRegistry().get(name)
+	if process == nil || process.cmd == nil || process.cmd.Process == nil {
+		return
+	}
+	_ = process.cmd.Process.Kill()
 }

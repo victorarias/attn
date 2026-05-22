@@ -362,6 +362,74 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('resolves plugin list and priority actions from daemon events', async () => {
+    const onPluginsUpdate = vi.fn();
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onPluginsUpdate,
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    const listPlugins = result.current.sendListPlugins();
+
+    act(() => {
+      ws.emit({
+        event: 'plugins_updated',
+        plugins: [{
+          name: 'services-pilot-worktrees',
+          version: '0.1.0',
+          dir: '/tmp/services-pilot-worktrees',
+          priority: 25,
+          connected: true,
+          running: true,
+        }],
+      });
+    });
+
+    await expect(listPlugins).resolves.toEqual({
+      plugins: [{
+        name: 'services-pilot-worktrees',
+        version: '0.1.0',
+        dir: '/tmp/services-pilot-worktrees',
+        priority: 25,
+        connected: true,
+        running: true,
+      }],
+      issues: [],
+    });
+    expect(onPluginsUpdate).toHaveBeenCalledWith([{
+      name: 'services-pilot-worktrees',
+      version: '0.1.0',
+      dir: '/tmp/services-pilot-worktrees',
+      priority: 25,
+      connected: true,
+      running: true,
+    }], []);
+
+    const setPriority = result.current.sendSetPluginPriority('services-pilot-worktrees', 50);
+    act(() => {
+      ws.emit({
+        event: 'plugin_action_result',
+        action: 'set_priority',
+        name: 'services-pilot-worktrees',
+        success: true,
+      });
+    });
+
+    await expect(setPriority).resolves.toMatchObject({
+      success: true,
+      name: 'services-pilot-worktrees',
+    });
+    unmount();
+  });
+
   it('retries transient worker attach failures after respawn', async () => {
     const waits: number[] = [];
     const attach = vi.fn()
@@ -404,7 +472,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '61',
+        protocol_version: '62',
         sessions: [],
         session_layouts: [{
           session_id: 'sess-remote',
@@ -480,7 +548,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '61',
+        protocol_version: '62',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -559,7 +627,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '61',
+        protocol_version: '62',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -652,7 +720,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '61',
+        protocol_version: '62',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -749,7 +817,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '61',
+        protocol_version: '62',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -832,7 +900,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '61',
+        protocol_version: '62',
         sessions: [],
         session_layouts: [{
           session_id: 'sess-remote',
@@ -941,7 +1009,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '61',
+        protocol_version: '62',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -999,7 +1067,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '61',
+        protocol_version: '62',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',

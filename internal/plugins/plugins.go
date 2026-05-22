@@ -36,6 +36,10 @@ type ManifestIssue struct {
 	Err  error  `json:"-"`
 }
 
+type InstallOptions struct {
+	Env []string
+}
+
 func (i ManifestIssue) Error() string {
 	return fmt.Sprintf("%s: %v", i.Path, i.Err)
 }
@@ -114,6 +118,10 @@ func Discover(pluginDir string) ([]Manifest, []ManifestIssue) {
 }
 
 func InstallPath(sourceDir, pluginDir string) (Manifest, error) {
+	return InstallPathWithOptions(sourceDir, pluginDir, InstallOptions{})
+}
+
+func InstallPathWithOptions(sourceDir, pluginDir string, opts InstallOptions) (Manifest, error) {
 	sourceDir, err := filepath.Abs(strings.TrimSpace(sourceDir))
 	if err != nil {
 		return Manifest{}, fmt.Errorf("resolve source directory: %w", err)
@@ -149,7 +157,7 @@ func InstallPath(sourceDir, pluginDir string) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, fmt.Errorf("validate installed manifest: %w", err)
 	}
-	if err := installDependencies(stagingDir); err != nil {
+	if err := installDependencies(stagingDir, opts.Env); err != nil {
 		return Manifest{}, err
 	}
 	if err := os.Rename(stagingDir, targetDir); err != nil {
@@ -197,9 +205,10 @@ func pathWithinDir(root, target string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)))
 }
 
-func installDependencies(pluginDir string) error {
-	cmd := exec.Command("bun", "install")
+func installDependencies(pluginDir string, env []string) error {
+	cmd := exec.Command("/usr/bin/env", "bun", "install")
 	cmd.Dir = pluginDir
+	cmd.Env = env
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		details := strings.TrimSpace(string(output))

@@ -42,6 +42,26 @@ func TestParseCommand(t *testing.T) {
 			wantCmd: CmdClearWarnings,
 		},
 		{
+			name:    "list plugins message",
+			input:   `{"cmd":"list_plugins"}`,
+			wantCmd: CmdListPlugins,
+		},
+		{
+			name:    "install plugin message",
+			input:   `{"cmd":"install_plugin","path":"/tmp/plugin"}`,
+			wantCmd: CmdInstallPlugin,
+		},
+		{
+			name:    "remove plugin message",
+			input:   `{"cmd":"remove_plugin","name":"demo"}`,
+			wantCmd: CmdRemovePlugin,
+		},
+		{
+			name:    "set plugin priority message",
+			input:   `{"cmd":"set_plugin_priority","name":"demo","priority":10}`,
+			wantCmd: CmdSetPluginPriority,
+		},
+		{
 			name:    "invalid json",
 			input:   `not json`,
 			wantErr: true,

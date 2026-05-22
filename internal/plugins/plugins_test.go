@@ -3,6 +3,7 @@ package plugins
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -40,6 +41,21 @@ func TestInstallPathDiscoverAndRemove(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(pluginDir, "worktree-provider")); !os.IsNotExist(err) {
 		t.Fatalf("installed directory still exists, stat err=%v", err)
+	}
+}
+
+func TestInstallPathWithOptionsUsesProvidedEnvironment(t *testing.T) {
+	installMarker, env := fakeBunEnvironment(t)
+	sourceDir := filepath.Join(t.TempDir(), "source")
+	writeTestPlugin(t, sourceDir, "worktree-provider")
+
+	pluginDir := filepath.Join(t.TempDir(), "plugins")
+	manifest, err := InstallPathWithOptions(sourceDir, pluginDir, InstallOptions{Env: env})
+	if err != nil {
+		t.Fatalf("InstallPathWithOptions failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(manifest.Dir, installMarker)); err != nil {
+		t.Fatalf("provided-env bun install marker stat failed: %v", err)
 	}
 }
 
@@ -176,6 +192,13 @@ entrypoint = "src/index.ts"
 
 func installFakeBun(t *testing.T) string {
 	t.Helper()
+	installMarker, env := fakeBunEnvironment(t)
+	t.Setenv("PATH", envPath(env))
+	return installMarker
+}
+
+func fakeBunEnvironment(t *testing.T) (string, []string) {
+	t.Helper()
 	binDir := filepath.Join(t.TempDir(), "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatalf("mkdir fake bun dir: %v", err)
@@ -185,8 +208,17 @@ func installFakeBun(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(binDir, "bun"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake bun: %v", err)
 	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return installMarker
+	path := binDir + string(os.PathListSeparator) + os.Getenv("PATH")
+	return installMarker, []string{"PATH=" + path}
+}
+
+func envPath(env []string) string {
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "PATH=") {
+			return strings.TrimPrefix(entry, "PATH=")
+		}
+	}
+	return ""
 }
 
 func installFailingBun(t *testing.T) {
