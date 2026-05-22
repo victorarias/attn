@@ -935,6 +935,7 @@ export function SettingsModal({
                 {plugins.map((plugin) => {
                   const busy = pluginActionName === plugin.name;
                   const draftPriority = pluginPriorityDrafts[plugin.name] ?? String(plugin.priority);
+                  const healthStatus = plugin.health_status || 'unknown';
                   return (
                     <div key={plugin.name} className="plugin-card">
                       <div className="plugin-card-header">
@@ -944,12 +945,20 @@ export function SettingsModal({
                           <span className={`plugin-status-badge ${plugin.connected ? 'connected' : plugin.running ? 'starting' : 'stopped'}`}>
                             {plugin.connected ? 'connected' : plugin.running ? 'starting' : 'stopped'}
                           </span>
+                          <span className={`plugin-health-badge ${healthStatus}`}>
+                            {healthStatus}
+                          </span>
                         </div>
                         <button className="browse-btn danger" onClick={() => void handleRemovePlugin(plugin.name)} disabled={pluginActionName !== null}>
                           Remove
                         </button>
                       </div>
                       {plugin.description && <p className="settings-description plugin-description">{plugin.description}</p>}
+                      {plugin.health_message && (
+                        <div className="settings-agent-warning">
+                          Healthcheck: {plugin.health_message}
+                        </div>
+                      )}
                       <div className="plugin-meta-grid">
                         <div className="endpoint-meta">
                           <span className="endpoint-meta-label">Path</span>

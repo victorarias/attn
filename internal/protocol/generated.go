@@ -1336,6 +1336,15 @@ type PluginInfo struct {
 	// Dir corresponds to the JSON schema field "dir".
 	Dir string `json:"dir"`
 
+	// HealthMessage corresponds to the JSON schema field "health_message".
+	HealthMessage *string `json:"health_message,omitempty,omitzero"`
+
+	// HealthStatus corresponds to the JSON schema field "health_status".
+	HealthStatus *string `json:"health_status,omitempty,omitzero"`
+
+	// LastHealthAt corresponds to the JSON schema field "last_health_at".
+	LastHealthAt *string `json:"last_health_at,omitempty,omitzero"`
+
 	// Name corresponds to the JSON schema field "name".
 	Name string `json:"name"`
 

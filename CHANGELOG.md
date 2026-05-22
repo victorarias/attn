@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-05-22]
+
+### Added
+- **Plugin Healthchecks**: The daemon now pings connected plugins, records healthy/unhealthy/unknown state separately from process and socket state, and shows that health in Settings.
+
+---
+
 ## [2026-05-21]
 
 ### Added

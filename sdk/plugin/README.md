@@ -7,6 +7,7 @@ This first cut focuses on the worktree extension path already exercised by attn:
 - connect to the attn daemon over its plugin socket
 - send the `hello` handshake
 - declare concrete handled surfaces during the connection handshake
+- respond to daemon healthchecks automatically
 - handle daemon-initiated JSON-RPC requests
 - return structured `handled`, `decline`, or `error` results
 
@@ -43,6 +44,10 @@ registered surface in the daemon handshake, so plugin code does not maintain a
 second registration list. Managed plugins get `ATTN_SOCKET_PATH` and
 `ATTN_PLUGIN_NAME` from attn; manually-launched plugins can still pass
 `socketPath` or `name` explicitly.
+
+The SDK handles `attn.health` internally and returns `{ ok: true }`. Plugin
+authors do not need to register a health handler for the daemon to distinguish a
+live plugin from a process that merely started.
 
 Create lifecycle hooks use the same registration path:
 

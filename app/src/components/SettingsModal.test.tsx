@@ -254,6 +254,7 @@ describe('SettingsModal review loop prompts', () => {
       priority: 0,
       connected: false,
       running: true,
+      health_status: 'unknown',
     };
 
     const { rerender } = render(
@@ -268,11 +269,12 @@ describe('SettingsModal review loop prompts', () => {
     rerender(
       <SettingsModal
         {...baseProps}
-        plugins={[{ ...startingPlugin, connected: true }]}
+        plugins={[{ ...startingPlugin, connected: true, health_status: 'healthy' }]}
       />,
     );
 
     expect(await screen.findByText('connected')).toBeInTheDocument();
+    expect(await screen.findByText('healthy')).toBeInTheDocument();
   });
 
   it('toggles tailscale serve on the existing device', async () => {

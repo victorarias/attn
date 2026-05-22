@@ -333,6 +333,67 @@ func TestDaemon_Surfaces_OrderHandlersAndCleanUpOnDisconnect(t *testing.T) {
 	}
 }
 
+func TestDaemon_PluginHealthCheckRecordsStatus(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.pluginDir = filepath.Join(t.TempDir(), "plugins")
+	writeTestPluginManifest(t, d.pluginDir, "health-provider")
+
+	client, done := startPluginPipe(t, d, "health-provider", []string{"worktree.create"})
+	defer client.Close()
+
+	plugin := d.plugins.get("health-provider")
+	if plugin == nil {
+		t.Fatal("plugin registry missing health-provider")
+	}
+
+	healthDone := make(chan struct{})
+	go func() {
+		defer close(healthDone)
+		request := decodeJSONRPCMessage(t, client)
+		if request.Method != pluginHealthMethod {
+			t.Errorf("health method=%q, want %s", request.Method, pluginHealthMethod)
+			return
+		}
+		result, err := json.Marshal(pluginHealthResult{OK: true})
+		if err != nil {
+			t.Errorf("marshal health result: %v", err)
+			return
+		}
+		if err := json.NewEncoder(client).Encode(jsonRPCMessage{
+			JSONRPC: "2.0",
+			ID:      request.ID,
+			Result:  result,
+		}); err != nil {
+			t.Errorf("encode health result: %v", err)
+		}
+	}()
+
+	d.checkPluginHealth(plugin)
+	select {
+	case <-healthDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("health request did not complete")
+	}
+
+	plugins := d.pluginsUpdatedMessage().Plugins
+	if len(plugins) != 1 {
+		t.Fatalf("plugin count=%d, want 1", len(plugins))
+	}
+	if got := protocol.Deref(plugins[0].HealthStatus); got != "healthy" {
+		t.Fatalf("health status=%q, want healthy", got)
+	}
+	if protocol.Deref(plugins[0].LastHealthAt) == "" {
+		t.Fatal("last health timestamp empty")
+	}
+
+	_ = client.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("health provider connection did not close")
+	}
+}
+
 func startPluginPipe(t *testing.T, d *Daemon, name string, surfaces []string) (net.Conn, <-chan struct{}) {
 	t.Helper()
 	serverConn, clientConn := net.Pipe()

@@ -1,6 +1,6 @@
 {
   "name": "@victorarias/attn-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript SDK for attn plugins",
   "license": "GPL-3.0-only",
   "type": "module",
