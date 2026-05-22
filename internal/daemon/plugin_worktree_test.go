@@ -6,10 +6,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/victorarias/attn/internal/git"
+	"github.com/victorarias/attn/internal/logging"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -144,6 +146,7 @@ func TestDoCreateWorktree_AfterCreateHookErrorReturnsCreatedPath(t *testing.T) {
 func TestDoCreateWorktree_ProviderDeclineFallsBackToBuiltInGit(t *testing.T) {
 	tmpDir, mainDir := initProviderTestRepo(t)
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
+	logPath := attachPluginTestLogger(t, d)
 
 	client, done := startPluginPipe(t, d, "declining-create-provider", []string{worktreeCreateProviderSurface})
 	defer client.Close()
@@ -168,6 +171,10 @@ func TestDoCreateWorktree_ProviderDeclineFallsBackToBuiltInGit(t *testing.T) {
 	if wt := d.store.GetWorktree(path); wt == nil {
 		t.Fatalf("expected fallback-created worktree %q in store", path)
 	}
+	assertLogContains(t, logPath,
+		"worktree provider plugin=declining-create-provider surface=worktree.create status=decline",
+		"worktree provider surface=worktree.create status=fallback",
+	)
 
 	_ = client.Close()
 	select {
@@ -401,6 +408,7 @@ func TestDoDeleteWorktree_ProviderHandledFinalizesDaemonState(t *testing.T) {
 	worktreePath = git.CanonicalizePath(worktreePath)
 
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
+	logPath := attachPluginTestLogger(t, d)
 	d.registerCreatedWorktree(mainDir, worktreePath, "feat/provider-delete")
 
 	client, done := startPluginPipe(t, d, "custom-delete-provider", []string{worktreeDeleteProviderSurface})
@@ -436,12 +444,85 @@ func TestDoDeleteWorktree_ProviderHandledFinalizesDaemonState(t *testing.T) {
 			t.Fatalf("provider-deleted worktree still listed: %#v", worktree)
 		}
 	}
+	assertLogContains(t, logPath,
+		"worktree provider plugin=custom-delete-provider surface=worktree.delete status=handled",
+		"path="+worktreePath,
+	)
 
 	_ = client.Close()
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("delete provider connection did not close")
+	}
+}
+
+func TestDoDeleteWorktree_ProviderDeclineFallsBackToBuiltInGit(t *testing.T) {
+	tmpDir, mainDir := initProviderTestRepo(t)
+	worktreePath := filepath.Join(tmpDir, "declined-delete")
+	runGitDaemon(t, mainDir, "worktree", "add", "-b", "feat/declined-delete", worktreePath)
+	worktreePath = git.CanonicalizePath(worktreePath)
+
+	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
+	logPath := attachPluginTestLogger(t, d)
+	d.registerCreatedWorktree(mainDir, worktreePath, "feat/declined-delete")
+
+	client, done := startPluginPipe(t, d, "declining-delete-provider", []string{worktreeDeleteProviderSurface})
+	defer client.Close()
+
+	responseDone := respondToDeleteProviderCall(t, client, func(params worktreeDeleteProviderParams) worktreeDeleteProviderResult {
+		if params.Path != worktreePath {
+			t.Fatalf("provider delete path=%q, want %q", params.Path, worktreePath)
+		}
+		return worktreeDeleteProviderResult{Status: providerStatusDecline}
+	})
+
+	if err := d.doDeleteWorktree(worktreePath, nil); err != nil {
+		t.Fatalf("doDeleteWorktree fallback failed: %v", err)
+	}
+	waitForProviderResponse(t, responseDone)
+
+	if wt := d.store.GetWorktree(worktreePath); wt != nil {
+		t.Fatalf("expected fallback-deleted worktree removed from store, got %#v", wt)
+	}
+	assertLogContains(t, logPath,
+		"worktree provider plugin=declining-delete-provider surface=worktree.delete status=decline",
+		"worktree provider surface=worktree.delete status=fallback",
+	)
+
+	_ = client.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("declining delete provider connection did not close")
+	}
+}
+
+func attachPluginTestLogger(t *testing.T, d *Daemon) string {
+	t.Helper()
+	logPath := filepath.Join(t.TempDir(), "daemon.log")
+	logger, err := logging.New(logPath)
+	if err != nil {
+		t.Fatalf("new test logger: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = logger.Close()
+	})
+	d.logger = logger
+	return logPath
+}
+
+func assertLogContains(t *testing.T, logPath string, wants ...string) {
+	t.Helper()
+	body, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read daemon log: %v", err)
+	}
+	text := string(body)
+	for _, want := range wants {
+		if !strings.Contains(text, want) {
+			t.Fatalf("daemon log missing %q\nlog:\n%s", want, text)
+		}
 	}
 }
 
