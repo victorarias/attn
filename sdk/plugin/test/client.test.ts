@@ -142,6 +142,36 @@ describe("AttnPluginClient", () => {
     await server.close();
   });
 
+  test("responds to daemon healthchecks without plugin code", async () => {
+    const server = await startServer(async (socket, request) => {
+      if (request.method === "hello") {
+        socket.write(`${JSON.stringify(response(request.id, { ok: true }))}\n`);
+        socket.write(
+          `${JSON.stringify({
+            jsonrpc: "2.0",
+            id: 100,
+            method: "attn.health",
+            params: { now: "2026-05-22T00:00:00Z" },
+          })}\n`,
+        );
+      }
+    });
+
+    const client = new AttnPluginClient({
+      socketPath: server.socketPath,
+      name: "sdk-health",
+      version: "0.1.0",
+    });
+
+    await client.connect();
+    await waitFor(() => server.responses.length === 1);
+
+    expect(server.responses[0]).toEqual(response(100, { ok: true }));
+
+    client.close();
+    await server.close();
+  });
+
   test("drops pending requests when send fails before writing", async () => {
     const client = new AttnPluginClient({
       socketPath: "/tmp/unused.sock",

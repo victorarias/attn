@@ -1540,13 +1540,16 @@ export enum PluginActionResultMessageEvent {
 }
 
 export interface PluginInfo {
-    connected:    boolean;
-    description?: string;
-    dir:          string;
-    name:         string;
-    priority:     number;
-    running:      boolean;
-    version:      string;
+    connected:       boolean;
+    description?:    string;
+    dir:             string;
+    health_message?: string;
+    health_status?:  string;
+    last_health_at?: string;
+    name:            string;
+    priority:        number;
+    running:         boolean;
+    version:         string;
     [property: string]: any;
 }
 
@@ -1574,13 +1577,16 @@ export interface IssueElement {
 }
 
 export interface PluginElement {
-    connected:    boolean;
-    description?: string;
-    dir:          string;
-    name:         string;
-    priority:     number;
-    running:      boolean;
-    version:      string;
+    connected:       boolean;
+    description?:    string;
+    dir:             string;
+    health_message?: string;
+    health_status?:  string;
+    last_health_at?: string;
+    name:            string;
+    priority:        number;
+    running:         boolean;
+    version:         string;
     [property: string]: any;
 }
 
@@ -5154,6 +5160,9 @@ const typeMap: any = {
         { json: "connected", js: "connected", typ: true },
         { json: "description", js: "description", typ: u(undefined, "") },
         { json: "dir", js: "dir", typ: "" },
+        { json: "health_message", js: "health_message", typ: u(undefined, "") },
+        { json: "health_status", js: "health_status", typ: u(undefined, "") },
+        { json: "last_health_at", js: "last_health_at", typ: u(undefined, "") },
         { json: "name", js: "name", typ: "" },
         { json: "priority", js: "priority", typ: 0 },
         { json: "running", js: "running", typ: true },
@@ -5176,6 +5185,9 @@ const typeMap: any = {
         { json: "connected", js: "connected", typ: true },
         { json: "description", js: "description", typ: u(undefined, "") },
         { json: "dir", js: "dir", typ: "" },
+        { json: "health_message", js: "health_message", typ: u(undefined, "") },
+        { json: "health_status", js: "health_status", typ: u(undefined, "") },
+        { json: "last_health_at", js: "last_health_at", typ: u(undefined, "") },
         { json: "name", js: "name", typ: "" },
         { json: "priority", js: "priority", typ: 0 },
         { json: "running", js: "running", typ: true },

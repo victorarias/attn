@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/victorarias/attn/internal/plugins"
 	"github.com/victorarias/attn/internal/protocol"
@@ -78,16 +79,35 @@ func (d *Daemon) pluginsUpdatedMessage() *protocol.PluginsUpdatedMessage {
 	priorities := d.pluginPriorities()
 	pluginInfos := make([]protocol.PluginInfo, 0, len(manifests))
 	for _, manifest := range manifests {
+		connection := d.ensurePluginRegistry().get(manifest.Name)
+		healthStatus := "unknown"
+		var healthMessage string
+		var lastHealthAt string
+		if connection != nil {
+			status, message, checkedAt := connection.healthSnapshot()
+			healthStatus = status
+			healthMessage = message
+			if !checkedAt.IsZero() {
+				lastHealthAt = checkedAt.Format(time.RFC3339Nano)
+			}
+		}
 		info := protocol.PluginInfo{
-			Name:      manifest.Name,
-			Version:   manifest.Version,
-			Dir:       manifest.Dir,
-			Priority:  priorities[manifest.Name],
-			Connected: d.ensurePluginRegistry().get(manifest.Name) != nil,
-			Running:   d.ensurePluginProcessRegistry().isRunning(manifest.Name),
+			Name:         manifest.Name,
+			Version:      manifest.Version,
+			Dir:          manifest.Dir,
+			Priority:     priorities[manifest.Name],
+			Connected:    connection != nil,
+			Running:      d.ensurePluginProcessRegistry().isRunning(manifest.Name),
+			HealthStatus: protocol.Ptr(healthStatus),
 		}
 		if manifest.Description != "" {
 			info.Description = protocol.Ptr(manifest.Description)
+		}
+		if healthMessage != "" {
+			info.HealthMessage = protocol.Ptr(healthMessage)
+		}
+		if lastHealthAt != "" {
+			info.LastHealthAt = protocol.Ptr(lastHealthAt)
 		}
 		pluginInfos = append(pluginInfos, info)
 	}

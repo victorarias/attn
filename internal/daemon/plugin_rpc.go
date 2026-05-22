@@ -13,9 +13,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 const pluginAPIVersion = 1
+const pluginHealthMethod = "attn.health"
+const pluginHealthInterval = 15 * time.Second
+const pluginHealthTimeout = 2 * time.Second
 
 const (
 	jsonRPCParseError     = -32700
@@ -33,6 +37,15 @@ type pluginHelloParams struct {
 
 type pluginHelloResult struct {
 	OK bool `json:"ok"`
+}
+
+type pluginHealthParams struct {
+	Now string `json:"now"`
+}
+
+type pluginHealthResult struct {
+	OK      bool   `json:"ok"`
+	Message string `json:"message,omitempty"`
 }
 
 type jsonRPCMessage struct {
@@ -233,14 +246,20 @@ type pluginConnection struct {
 	pending   map[string]chan jsonRPCMessage
 	nextID    uint64
 	closed    bool
+
+	healthMu      sync.RWMutex
+	healthStatus  string
+	healthMessage string
+	lastHealthAt  time.Time
 }
 
 func newPluginConnection(conn net.Conn, reader *bufio.Reader, params pluginHelloParams) *pluginConnection {
 	return &pluginConnection{
-		name:    strings.TrimSpace(params.Name),
-		conn:    conn,
-		reader:  reader,
-		pending: make(map[string]chan jsonRPCMessage),
+		name:         strings.TrimSpace(params.Name),
+		conn:         conn,
+		reader:       reader,
+		pending:      make(map[string]chan jsonRPCMessage),
+		healthStatus: "unknown",
 	}
 }
 
@@ -335,6 +354,23 @@ func (p *pluginConnection) request(ctx context.Context, method string, params in
 		}
 		return nil
 	}
+}
+
+func (p *pluginConnection) setHealth(status, message string, at time.Time) {
+	p.healthMu.Lock()
+	defer p.healthMu.Unlock()
+	p.healthStatus = strings.TrimSpace(status)
+	if p.healthStatus == "" {
+		p.healthStatus = "unknown"
+	}
+	p.healthMessage = strings.TrimSpace(message)
+	p.lastHealthAt = at
+}
+
+func (p *pluginConnection) healthSnapshot() (string, string, time.Time) {
+	p.healthMu.RLock()
+	defer p.healthMu.RUnlock()
+	return p.healthStatus, p.healthMessage, p.lastHealthAt
 }
 
 func readSocketFrame(reader *bufio.Reader) ([]byte, error) {
@@ -504,6 +540,7 @@ func (d *Daemon) handlePluginConnection(conn net.Conn, reader *bufio.Reader, hel
 		return
 	}
 	d.broadcastPluginsUpdated()
+	go d.monitorPluginHealth(plugin)
 
 	for {
 		data, err := readSocketFrame(reader)
@@ -545,4 +582,53 @@ func (d *Daemon) callPlugin(ctx context.Context, name, method string, params int
 		return fmt.Errorf("plugin %q is not connected", name)
 	}
 	return plugin.request(ctx, method, params, result)
+}
+
+func (d *Daemon) monitorPluginHealth(plugin *pluginConnection) {
+	timer := time.NewTimer(500 * time.Millisecond)
+	defer timer.Stop()
+	for {
+		select {
+		case <-d.done:
+			return
+		case <-timer.C:
+		}
+
+		if d.ensurePluginRegistry().get(plugin.name) != plugin {
+			return
+		}
+		d.checkPluginHealth(plugin)
+		timer.Reset(pluginHealthInterval)
+	}
+}
+
+func (d *Daemon) checkPluginHealth(plugin *pluginConnection) {
+	now := time.Now().UTC()
+	ctx, cancel := context.WithTimeout(context.Background(), pluginHealthTimeout)
+	defer cancel()
+
+	var result pluginHealthResult
+	err := plugin.request(ctx, pluginHealthMethod, pluginHealthParams{
+		Now: now.Format(time.RFC3339Nano),
+	}, &result)
+	if err != nil {
+		plugin.setHealth("unhealthy", err.Error(), now)
+		d.logf("plugin health plugin=%s status=unhealthy error=%s", plugin.name, providerLogValue(err.Error()))
+		d.broadcastPluginsUpdated()
+		return
+	}
+	if !result.OK {
+		message := strings.TrimSpace(result.Message)
+		if message == "" {
+			message = "plugin reported unhealthy"
+		}
+		plugin.setHealth("unhealthy", message, now)
+		d.logf("plugin health plugin=%s status=unhealthy error=%s", plugin.name, providerLogValue(message))
+		d.broadcastPluginsUpdated()
+		return
+	}
+
+	plugin.setHealth("healthy", result.Message, now)
+	d.logf("plugin health plugin=%s status=healthy", plugin.name)
+	d.broadcastPluginsUpdated()
 }

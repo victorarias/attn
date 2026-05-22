@@ -263,6 +263,31 @@
   background: var(--color-bg-secondary);
 }
 
+.plugin-health-badge {
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.plugin-health-badge.healthy {
+  color: #1f8f4c;
+  background: rgba(31, 143, 76, 0.12);
+}
+
+.plugin-health-badge.unhealthy {
+  color: #b42318;
+  background: rgba(180, 35, 24, 0.12);
+}
+
+.plugin-health-badge.unknown {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+}
+
 .endpoint-card {
   border: 1px solid var(--color-border);
   border-radius: 8px;

@@ -219,6 +219,9 @@ model PluginInfo {
   priority: int32;
   connected: boolean;
   running: boolean;
+  health_status?: string;
+  health_message?: string;
+  last_health_at?: string;
 }
 
 model PluginIssue {

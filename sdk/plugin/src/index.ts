@@ -114,6 +114,10 @@ type HelloResult = {
   ok: boolean;
 };
 
+type HealthResult = {
+  ok: boolean;
+};
+
 const pluginAPIVersion = 1;
 
 export class AttnPluginClient {
@@ -247,6 +251,15 @@ export class AttnPluginClient {
   }
 
   private async handleRequest(request: JsonRpcRequest): Promise<void> {
+    if (request.method === "attn.health") {
+      this.send({
+        jsonrpc: "2.0",
+        id: request.id,
+        result: { ok: true } satisfies HealthResult,
+      });
+      return;
+    }
+
     const handler = this.handlers.get(request.method as PluginSurface);
     if (!handler) {
       this.sendError(request.id, -32601, `unknown method ${request.method}`);
