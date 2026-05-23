@@ -168,6 +168,111 @@ func TestMigrations_MigratedColumnsExist(t *testing.T) {
 	}
 }
 
+func TestMigration37_ConvertsSessionLayoutToWorkspaceLayout(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration-37.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() setup error = %v", err)
+	}
+
+	if _, err := db.Exec(`
+		DROP TABLE workspace_layout_panes;
+		DROP TABLE workspace_layouts;
+		CREATE TABLE session_workspaces (
+			session_id TEXT PRIMARY KEY,
+			active_pane_id TEXT NOT NULL,
+			layout_json TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+		CREATE TABLE workspace_panes (
+			session_id TEXT NOT NULL,
+			pane_id TEXT NOT NULL,
+			runtime_id TEXT NOT NULL DEFAULT '',
+			kind TEXT NOT NULL,
+			title TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (session_id, pane_id)
+		);
+		INSERT INTO sessions (
+			id, label, directory, state, state_since, state_updated_at, last_seen, workspace_id
+		) VALUES (
+			'sess-legacy', 'Legacy', '/tmp/legacy', 'idle', '2026-05-01T00:00:00Z',
+			'2026-05-01T00:00:00Z', '2026-05-01T00:00:00Z', NULL
+		);
+		INSERT INTO session_workspaces (session_id, active_pane_id, layout_json, updated_at)
+		VALUES ('sess-legacy', 'pane-shell', '{"type":"split"}', '2026-05-01T00:00:00Z');
+		INSERT INTO workspace_panes (session_id, pane_id, runtime_id, kind, title, created_at, updated_at)
+		VALUES
+			('sess-legacy', 'main', 'sess-legacy', 'main', 'Session', '2026-05-01T00:00:00Z', '2026-05-01T00:00:00Z'),
+			('sess-legacy', 'pane-shell', 'runtime-shell', 'shell', 'Shell 1', '2026-05-01T00:00:00Z', '2026-05-01T00:00:00Z');
+		DELETE FROM schema_migrations WHERE version = 37;
+	`); err != nil {
+		db.Close()
+		t.Fatalf("seed legacy layout error = %v", err)
+	}
+	db.Close()
+
+	migrated, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() migrate error = %v", err)
+	}
+	defer migrated.Close()
+
+	var workspaceID string
+	if err := migrated.QueryRow("SELECT workspace_id FROM sessions WHERE id = 'sess-legacy'").Scan(&workspaceID); err != nil {
+		t.Fatalf("select migrated session workspace id error = %v", err)
+	}
+	if workspaceID != "workspace-sess-legacy" {
+		t.Fatalf("workspace_id = %q, want workspace-sess-legacy", workspaceID)
+	}
+
+	var activePaneID, layoutJSON string
+	if err := migrated.QueryRow(
+		"SELECT active_pane_id, layout_json FROM workspace_layouts WHERE workspace_id = ?",
+		workspaceID,
+	).Scan(&activePaneID, &layoutJSON); err != nil {
+		t.Fatalf("select migrated layout error = %v", err)
+	}
+	if activePaneID != "pane-shell" || layoutJSON != `{"type":"split"}` {
+		t.Fatalf("migrated layout = (%q, %q), want pane-shell and original JSON", activePaneID, layoutJSON)
+	}
+
+	rows, err := migrated.Query("SELECT pane_id, kind, session_id FROM workspace_layout_panes WHERE workspace_id = ? ORDER BY pane_id", workspaceID)
+	if err != nil {
+		t.Fatalf("select migrated panes error = %v", err)
+	}
+	defer rows.Close()
+	type migratedPane struct {
+		paneID    string
+		kind      string
+		sessionID *string
+	}
+	var panes []migratedPane
+	for rows.Next() {
+		var pane migratedPane
+		var sessionID *string
+		if err := rows.Scan(&pane.paneID, &pane.kind, &sessionID); err != nil {
+			t.Fatalf("scan migrated pane error = %v", err)
+		}
+		pane.sessionID = sessionID
+		panes = append(panes, pane)
+	}
+	if len(panes) != 2 || panes[0].kind != "agent" || panes[0].sessionID == nil || *panes[0].sessionID != "sess-legacy" || panes[1].kind != "shell" || panes[1].sessionID != nil {
+		t.Fatalf("migrated panes = %+v, want agent-owned main and utility shell", panes)
+	}
+
+	for _, legacyTable := range []string{"session_workspaces", "workspace_panes"} {
+		var count int
+		if err := migrated.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", legacyTable).Scan(&count); err != nil {
+			t.Fatalf("check removed table %s error = %v", legacyTable, err)
+		}
+		if count != 0 {
+			t.Fatalf("legacy table %s still exists", legacyTable)
+		}
+	}
+}
+
 func TestMigration20_IdempotentWhenHostColumnAlreadyExists(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")

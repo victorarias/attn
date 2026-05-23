@@ -578,7 +578,6 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		DaemonInstanceID:  protocol.Ptr(d.daemonInstanceID),
 		Sessions:          d.mergedSessionsForBroadcast(),
 		Endpoints:         d.listEndpointInfos(),
-		SessionLayouts:    d.mergedSessionLayoutsForBroadcast(),
 		Workspaces:        d.listWorkspaces(),
 		Prs:               protocol.PRsToValues(d.store.ListPRs("")),
 		Repos:             protocol.RepoStatesToValues(d.store.ListRepoStates()),
@@ -854,22 +853,20 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handlePtyResize(client, msg.(*protocol.PtyResizeMessage))
 	case protocol.CmdKillSession:
 		d.handleKillSession(client, msg.(*protocol.KillSessionMessage))
-	case protocol.CmdSessionLayoutGet:
-		d.handleSessionLayoutGet(client, msg.(*protocol.SessionLayoutGetMessage))
-	case protocol.CmdSessionLayoutSplitPane:
-		d.handleSessionLayoutSplitPane(client, msg.(*protocol.SessionLayoutSplitPaneMessage))
-	case protocol.CmdSessionLayoutClosePane:
-		d.handleSessionLayoutClosePane(client, msg.(*protocol.SessionLayoutClosePaneMessage))
-	case protocol.CmdSessionLayoutFocusPane:
-		d.handleSessionLayoutFocusPane(client, msg.(*protocol.SessionLayoutFocusPaneMessage))
-	case protocol.CmdSessionLayoutRenamePane:
-		d.handleSessionLayoutRenamePane(client, msg.(*protocol.SessionLayoutRenamePaneMessage))
+	case protocol.CmdWorkspaceLayoutGet:
+		d.handleWorkspaceLayoutGet(client, msg.(*protocol.WorkspaceLayoutGetMessage))
+	case protocol.CmdWorkspaceLayoutSplitPane:
+		d.handleWorkspaceLayoutSplitPane(client, msg.(*protocol.WorkspaceLayoutSplitPaneMessage))
+	case protocol.CmdWorkspaceLayoutClosePane:
+		d.handleWorkspaceLayoutClosePane(client, msg.(*protocol.WorkspaceLayoutClosePaneMessage))
+	case protocol.CmdWorkspaceLayoutFocusPane:
+		d.handleWorkspaceLayoutFocusPane(client, msg.(*protocol.WorkspaceLayoutFocusPaneMessage))
+	case protocol.CmdWorkspaceLayoutRenamePane:
+		d.handleWorkspaceLayoutRenamePane(client, msg.(*protocol.WorkspaceLayoutRenamePaneMessage))
 	case protocol.CmdRegisterWorkspace:
 		d.handleRegisterWorkspace(client, msg.(*protocol.RegisterWorkspaceMessage))
 	case protocol.CmdUnregisterWorkspace:
 		d.handleUnregisterWorkspace(client, msg.(*protocol.UnregisterWorkspaceMessage))
-	case protocol.CmdUpdateWorkspacePanelGeometry:
-		d.handleUpdateWorkspacePanelGeometry(client, msg.(*protocol.UpdateWorkspacePanelGeometryMessage))
 	default:
 		d.sendCommandError(client, cmd, "unsupported command")
 	}
@@ -913,6 +910,18 @@ func (d *Daemon) tryHandleRemoteWSCommand(client *wsClient, cmd string, msg inte
 			if cmd == protocol.CmdAttachSession {
 				client.clearRemoteAttach(ptyTargetID)
 			}
+			d.sendCommandError(client, cmd, err.Error())
+			return true
+		}
+		return true
+	}
+
+	if workspaceID := remoteCommandWorkspaceID(cmd, msg); workspaceID != "" {
+		endpointID, ok := d.hubManager.EndpointIDForWorkspace(workspaceID)
+		if !ok {
+			return false
+		}
+		if err := d.hubManager.ForwardEndpointCommand(context.Background(), endpointID, raw); err != nil {
 			d.sendCommandError(client, cmd, err.Error())
 			return true
 		}
@@ -983,25 +992,31 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.SetReviewLoopIterationLimitMessage); ok {
 			return typed.SessionID
 		}
-	case protocol.CmdSessionLayoutGet:
-		if typed, ok := msg.(*protocol.SessionLayoutGetMessage); ok {
-			return typed.SessionID
+	}
+	return ""
+}
+
+func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
+	switch cmd {
+	case protocol.CmdWorkspaceLayoutGet:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutGetMessage); ok {
+			return typed.WorkspaceID
 		}
-	case protocol.CmdSessionLayoutSplitPane:
-		if typed, ok := msg.(*protocol.SessionLayoutSplitPaneMessage); ok {
-			return typed.SessionID
+	case protocol.CmdWorkspaceLayoutSplitPane:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutSplitPaneMessage); ok {
+			return typed.WorkspaceID
 		}
-	case protocol.CmdSessionLayoutClosePane:
-		if typed, ok := msg.(*protocol.SessionLayoutClosePaneMessage); ok {
-			return typed.SessionID
+	case protocol.CmdWorkspaceLayoutClosePane:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutClosePaneMessage); ok {
+			return typed.WorkspaceID
 		}
-	case protocol.CmdSessionLayoutFocusPane:
-		if typed, ok := msg.(*protocol.SessionLayoutFocusPaneMessage); ok {
-			return typed.SessionID
+	case protocol.CmdWorkspaceLayoutFocusPane:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutFocusPaneMessage); ok {
+			return typed.WorkspaceID
 		}
-	case protocol.CmdSessionLayoutRenamePane:
-		if typed, ok := msg.(*protocol.SessionLayoutRenamePaneMessage); ok {
-			return typed.SessionID
+	case protocol.CmdWorkspaceLayoutRenamePane:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutRenamePaneMessage); ok {
+			return typed.WorkspaceID
 		}
 	}
 	return ""
@@ -1023,6 +1038,10 @@ func remoteCommandEndpointID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdSpawnSession:
 		if typed, ok := msg.(*protocol.SpawnSessionMessage); ok {
+			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
+		}
+	case protocol.CmdRegisterWorkspace:
+		if typed, ok := msg.(*protocol.RegisterWorkspaceMessage); ok {
 			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
 		}
 	case protocol.CmdCreateWorktree:

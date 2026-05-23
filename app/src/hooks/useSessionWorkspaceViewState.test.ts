@@ -10,6 +10,7 @@ function buildSession(overrides?: Partial<Session>): Session {
     label: 'Session 1',
     state: 'idle',
     cwd: '/tmp/repo',
+    workspaceId: 'workspace-session-1',
     agent: 'claude',
     transcriptMatched: true,
     workspace: {

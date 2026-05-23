@@ -13,7 +13,7 @@ func TestParseCommand(t *testing.T) {
 	}{
 		{
 			name:    "register message",
-			input:   `{"cmd":"register","id":"abc","label":"test","dir":"/tmp"}`,
+			input:   `{"cmd":"register","id":"abc","label":"test","dir":"/tmp","workspace_id":"workspace-abc"}`,
 			wantCmd: CmdRegister,
 		},
 		{
@@ -32,9 +32,9 @@ func TestParseCommand(t *testing.T) {
 			wantCmd: CmdUnregister,
 		},
 		{
-			name:    "update workspace panel geometry message",
-			input:   `{"cmd":"update_workspace_panel_geometry","workspace_id":"ws1","panel_id":"p1","world_x":10,"height":240}`,
-			wantCmd: CmdUpdateWorkspacePanelGeometry,
+			name:    "workspace layout get message",
+			input:   `{"cmd":"workspace_layout_get","workspace_id":"ws1"}`,
+			wantCmd: CmdWorkspaceLayoutGet,
 		},
 		{
 			name:    "clear warnings message",

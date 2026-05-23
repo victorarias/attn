@@ -14,6 +14,10 @@ APP_BINARY=$(APP_BUNDLE)/Contents/MacOS/attn
 # docs/plans or Phase 2 of the profiles feature for the full design.
 APP_BUNDLE_DEV=$(HOME)/Applications/attn-dev.app
 APP_BINARY_DEV=$(APP_BUNDLE_DEV)/Contents/MacOS/attn
+# Dev targets may be invoked from a terminal hosted by the prod app, whose
+# session env points back at the prod socket/wrapper. Do not let that routing
+# state cross into the isolated dev daemon.
+DEV_DAEMON_ENV=env -u ATTN_SOCKET_PATH -u ATTN_DB_PATH -u ATTN_CONFIG_PATH -u ATTN_WS_PORT -u ATTN_WRAPPER_PATH -u ATTN_INSIDE_APP -u ATTN_DAEMON_MANAGED -u ATTN_PTY_WORKER -u ATTN_SESSION_ID -u ATTN_AGENT ATTN_PROFILE=dev
 BUILD_DIR=./cmd/attn
 VERSION ?= $(shell bash ./scripts/version.sh)
 BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -139,7 +143,7 @@ install-dev: build-app-dev
 	@osascript -e 'tell application id "com.attn.manager.dev" to quit' 2>/dev/null || true
 	@rm -rf $(APP_BUNDLE_DEV)
 	cp -r app/src-tauri/target/release/bundle/macos/attn-dev.app ~/Applications/
-	@ATTN_PROFILE=dev $(APP_BINARY_DEV) daemon ensure >/dev/null
+	@$(DEV_DAEMON_ENV) $(APP_BINARY_DEV) daemon ensure >/dev/null
 	@echo "Installed $(APP_BUNDLE_DEV) — profile=dev, data=~/.attn-dev, port=29849"
 
 install-daemon-dev: build
@@ -150,7 +154,7 @@ install-daemon-dev: build
 	@echo ">>> Updating DEV daemon at $(APP_BINARY_DEV)"
 	cp $(OUTPUT) $(APP_BINARY_DEV)
 	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign -s - -f $(APP_BINARY_DEV); fi
-	@ATTN_PROFILE=dev $(APP_BINARY_DEV) daemon ensure >/dev/null
+	@$(DEV_DAEMON_ENV) $(APP_BINARY_DEV) daemon ensure >/dev/null
 	@echo "Updated bundled dev daemon at $(APP_BINARY_DEV)"
 
 clean:
@@ -224,7 +228,7 @@ app-screenshot:
 dev-native: build
 	@echo ">>> Ensuring dev daemon (profile=dev, port=29849, data=~/.attn-dev)"
 	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign -s - -f $(OUTPUT) >/dev/null 2>&1 || true; fi
-	@ATTN_PROFILE=dev ./$(OUTPUT) daemon ensure >/dev/null
+	@$(DEV_DAEMON_ENV) ./$(OUTPUT) daemon ensure >/dev/null
 	@echo ">>> Launching attn-native (profile=dev, daemon=ws://localhost:29849/ws)"
 	cd native-ui && ATTN_PROFILE=dev ATTN_WS_URL=ws://localhost:29849/ws cargo run --bin attn-native
 

@@ -350,6 +350,17 @@ func resolveSpawnCWD(cwd string) string {
 func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSessionMessage) {
 	agent := normalizeSpawnAgent(msg.Agent)
 	isShell := agent == protocol.AgentShellValue
+	workspaceID := strings.TrimSpace(msg.WorkspaceID)
+	if !isShell {
+		if workspaceID == "" {
+			d.sendCommandError(client, protocol.CmdSpawnSession, "missing workspace_id")
+			return
+		}
+		if d.store.GetWorkspace(workspaceID) == nil {
+			d.sendCommandError(client, protocol.CmdSpawnSession, "unknown workspace")
+			return
+		}
+	}
 	spawnStartedAt := time.Now()
 	existingSession := d.store.Get(msg.ID)
 	cwd := resolveSpawnCWD(msg.Cwd)
@@ -409,12 +420,8 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		return
 	}
 
-	// Shell PTYs are utility terminals by default (Cmd+T in the Tauri
-	// app — fire-and-forget, not tracked as sessions). The native canvas
-	// app needs them as first-class sessions so the workspace can render
-	// each PTY as a panel; it opts in via the `shell_as_session`
-	// capability declared in client_hello.
-	registerAsSession := !isShell || client.HasCapability(protocol.CapabilityShellAsSession)
+	// Shell PTYs remain utility runtimes owned by a workspace layout.
+	registerAsSession := !isShell
 	if registerAsSession {
 		d.clearLongRunTracking(msg.ID)
 		branchInfo, _ := git.GetBranchInfo(cwd)
@@ -442,6 +449,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			StateSince:     initialStateSince,
 			StateUpdatedAt: initialStateUpdatedAt,
 			LastSeen:       nowStr,
+			WorkspaceID:    protocol.Ptr(workspaceID),
 		}
 		if branchInfo != nil {
 			if branchInfo.Branch != "" {
@@ -455,9 +463,6 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			}
 		}
 		d.store.Add(session)
-		if _, err := d.ensureSessionLayout(session.ID); err != nil {
-			d.logf("workspace bootstrap failed for session %s: %v", session.ID, err)
-		}
 		if persistResumeID := agentdriver.SpawnResumeSessionID(
 			driver,
 			session.ID,
@@ -471,8 +476,9 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		}
 		d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, spawnStartedAt)
 		d.store.UpsertRecentLocation(cwd, label)
-		if workspaceID := strings.TrimSpace(protocol.Deref(msg.WorkspaceID)); workspaceID != "" {
-			d.associateSessionWithWorkspace(session.ID, workspaceID)
+		d.associateSessionWithWorkspace(session.ID, workspaceID)
+		if _, err := d.ensureWorkspaceLayout(workspaceID); err != nil {
+			d.logf("workspace bootstrap failed for workspace %s: %v", workspaceID, err)
 		}
 		eventType := protocol.EventSessionRegistered
 		if existingSession != nil {
@@ -482,7 +488,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			Event:   eventType,
 			Session: d.sessionForBroadcast(session),
 		})
-		d.broadcastSessionLayout(session.ID)
+		d.broadcastWorkspaceLayout(workspaceID)
 		d.recomputeAndBroadcastWorkspaceForSession(session.ID)
 	}
 

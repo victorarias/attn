@@ -66,7 +66,7 @@ type endpointRuntime struct {
 	pendingBootstrap bool
 
 	sessions   map[string]protocol.Session
-	workspaces map[string]protocol.SessionLayout
+	workspaces map[string]protocol.Workspace
 }
 
 type pendingRemoteWebAction struct {
@@ -126,7 +126,7 @@ func NewManager(
 			record:     record,
 			info:       infoFromRecord(record),
 			sessions:   make(map[string]protocol.Session),
-			workspaces: make(map[string]protocol.SessionLayout),
+			workspaces: make(map[string]protocol.Workspace),
 		}
 	}
 	return m
@@ -239,7 +239,7 @@ func (m *Manager) AddEndpoint(name, sshTarget, profile string) (*store.EndpointR
 		record:     *record,
 		info:       infoFromRecord(*record),
 		sessions:   make(map[string]protocol.Session),
-		workspaces: make(map[string]protocol.SessionLayout),
+		workspaces: make(map[string]protocol.Workspace),
 	}
 	if m.started && record.Enabled {
 		m.startRuntimeLocked(record.ID)
@@ -293,7 +293,7 @@ func (m *Manager) UpdateEndpoint(id string, update store.EndpointUpdate) (*store
 	if !ok {
 		runtime = &endpointRuntime{
 			sessions:   make(map[string]protocol.Session),
-			workspaces: make(map[string]protocol.SessionLayout),
+			workspaces: make(map[string]protocol.Workspace),
 		}
 		m.runtimes[id] = runtime
 	}
@@ -416,7 +416,7 @@ func (m *Manager) stopRuntimeLocked(runtime *endpointRuntime) {
 		runtime.cmd = nil
 	}
 	runtime.sessions = make(map[string]protocol.Session)
-	runtime.workspaces = make(map[string]protocol.SessionLayout)
+	runtime.workspaces = make(map[string]protocol.Workspace)
 	m.clearPendingRoutesLocked(runtime.record.ID)
 	m.clearRouteCachesLocked(runtime.record.ID)
 	zero := 0
@@ -482,7 +482,7 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 		if m.clearRemoteSessions(id) {
 			m.publishSessionsChanged()
 		}
-		m.clearRemoteSessionLayouts(id)
+		m.clearRemoteWorkspaceLayouts(id)
 
 		if ctx.Err() != nil {
 			return
@@ -584,7 +584,7 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 				return false, &VersionMismatchError{RemoteVersion: remoteProtocol, LocalVersion: protocol.ProtocolVersion}
 			}
 			changed := m.replaceRemoteSessions(id, msg.Sessions)
-			m.replaceRemoteSessionLayouts(id, msg.SessionLayouts)
+			m.replaceRemoteWorkspaces(id, msg.Workspaces)
 			caps := capabilitiesFromInitialState(&msg)
 			sessionCount := int32(len(msg.Sessions))
 			if fingerMismatch, fingerMsg := fingerprintMismatch(msg.SourceFingerprint); fingerMismatch {
@@ -595,7 +595,6 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 			if changed {
 				m.publishSessionsChanged()
 			}
-			m.publishSessionLayouts(msg.SessionLayouts)
 			connected = true
 		case protocol.EventSettingsUpdated:
 			var msg protocol.SettingsUpdatedMessage
@@ -635,20 +634,37 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 				continue
 			}
 			changed, sessionCount := m.removeRemoteSession(id, msg.Session.ID)
-			m.removeRemoteSessionLayout(id, msg.Session.ID)
 			countValue := int32(sessionCount)
 			m.updateStatus(id, activeStatus, activeMsg, nil, &countValue)
 			if changed {
 				m.publishSessionsChanged()
 			}
-		case protocol.EventSessionLayout, protocol.EventSessionLayoutUpdated:
+		case protocol.EventWorkspaceLayout, protocol.EventWorkspaceLayoutUpdated:
 			var msg struct {
-				SessionLayout *protocol.SessionLayout `json:"session_layout"`
+				WorkspaceLayout *protocol.WorkspaceLayout `json:"workspace_layout"`
 			}
-			if err := json.Unmarshal(data, &msg); err != nil || msg.SessionLayout == nil {
+			if err := json.Unmarshal(data, &msg); err != nil || msg.WorkspaceLayout == nil {
 				continue
 			}
-			m.upsertRemoteSessionLayout(id, *msg.SessionLayout)
+			m.upsertRemoteWorkspaceLayout(id, *msg.WorkspaceLayout)
+			m.publishRawEvent(data)
+		case protocol.EventWorkspaceRegistered, protocol.EventWorkspaceStateChanged:
+			var msg struct {
+				Workspace *protocol.Workspace `json:"workspace"`
+			}
+			if err := json.Unmarshal(data, &msg); err != nil || msg.Workspace == nil {
+				continue
+			}
+			m.upsertRemoteWorkspace(id, *msg.Workspace)
+			m.publishRawEvent(data)
+		case protocol.EventWorkspaceUnregistered:
+			var msg struct {
+				Workspace *protocol.Workspace `json:"workspace"`
+			}
+			if err := json.Unmarshal(data, &msg); err != nil || msg.Workspace == nil {
+				continue
+			}
+			m.removeRemoteWorkspace(id, msg.Workspace.ID)
 			m.publishRawEvent(data)
 		default:
 			if forwardsRawEvent(peek.Event) {
@@ -734,13 +750,13 @@ func forwardsRawEvent(event string) bool {
 		protocol.EventResolveCommentResult,
 		protocol.EventDeleteCommentResult,
 		protocol.EventGetCommentsResult,
-		protocol.EventSessionLayoutRuntimeExited,
+		protocol.EventWorkspaceLayoutRuntimeExited,
 		protocol.EventSpawnResult,
 		protocol.EventAttachResult,
 		protocol.EventPtyOutput,
 		protocol.EventPtyDesync,
 		protocol.EventSessionExited,
-		protocol.EventSessionLayoutActionResult,
+		protocol.EventWorkspaceLayoutActionResult,
 		protocol.EventCommandError:
 		return true
 	default:
@@ -778,7 +794,7 @@ func (m *Manager) RemoteSessions() []protocol.Session {
 	return out
 }
 
-func (m *Manager) RemoteWorkspaces() []protocol.SessionLayout {
+func (m *Manager) RemoteWorkspaces() []protocol.Workspace {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -790,14 +806,14 @@ func (m *Manager) RemoteWorkspaces() []protocol.SessionLayout {
 		return nil
 	}
 
-	out := make([]protocol.SessionLayout, 0, total)
+	out := make([]protocol.Workspace, 0, total)
 	for _, runtime := range m.runtimes {
 		for _, workspace := range runtime.workspaces {
 			out = append(out, workspace)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
-		return out[i].SessionID < out[j].SessionID
+		return out[i].ID < out[j].ID
 	})
 	return out
 }
@@ -812,6 +828,17 @@ func (m *Manager) EndpointIDForSession(sessionID string) (string, bool) {
 	}
 	if pending, ok := m.pendingSessionRouteLocked(sessionID, time.Now()); ok {
 		return pending.endpointID, true
+	}
+	return "", false
+}
+
+func (m *Manager) EndpointIDForWorkspace(workspaceID string) (string, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for endpointID, runtime := range m.runtimes {
+		if _, ok := runtime.workspaces[workspaceID]; ok {
+			return endpointID, true
+		}
 	}
 	return "", false
 }
@@ -850,13 +877,6 @@ func (m *Manager) ForgetSession(sessionID string) bool {
 				changed = true
 			}
 		}
-		if runtime.workspaces != nil {
-			if _, ok := runtime.workspaces[sessionID]; ok {
-				delete(runtime.workspaces, sessionID)
-				runtimeChanged = true
-				changed = true
-			}
-		}
 		if runtimeChanged {
 			count := len(runtime.sessions)
 			runtime.info.SessionCount = protocol.Ptr(count)
@@ -874,7 +894,10 @@ func (m *Manager) EndpointIDForPTYTarget(targetID string) (string, bool) {
 			return endpointID, true
 		}
 		for _, layout := range runtime.workspaces {
-			for _, pane := range layout.Panes {
+			if layout.Layout == nil {
+				continue
+			}
+			for _, pane := range layout.Layout.Panes {
 				if protocol.Deref(pane.RuntimeID) == targetID {
 					return endpointID, true
 				}
@@ -1186,73 +1209,82 @@ func (m *Manager) recordLoopRoute(endpointID, loopID string) {
 	m.loops[loopID] = endpointID
 }
 
-func (m *Manager) replaceRemoteSessionLayouts(id string, workspaces []protocol.SessionLayout) bool {
+func (m *Manager) replaceRemoteWorkspaces(id string, workspaces []protocol.Workspace) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	runtime, ok := m.runtimes[id]
 	if !ok {
 		return false
 	}
-	next := make(map[string]protocol.SessionLayout, len(workspaces))
+	next := make(map[string]protocol.Workspace, len(workspaces))
 	for _, workspace := range workspaces {
-		if runtime.sessions != nil {
-			if _, ok := runtime.sessions[workspace.SessionID]; !ok {
-				continue
-			}
-		}
-		next[workspace.SessionID] = workspace
+		next[workspace.ID] = workspace
 	}
-	if sessionLayoutsEqual(runtime.workspaces, next) {
+	if workspaceLayoutsEqual(runtime.workspaces, next) {
 		return false
 	}
 	runtime.workspaces = next
 	return true
 }
 
-func (m *Manager) upsertRemoteSessionLayout(id string, workspace protocol.SessionLayout) bool {
+func (m *Manager) upsertRemoteWorkspaceLayout(id string, workspace protocol.WorkspaceLayout) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	runtime, ok := m.runtimes[id]
 	if !ok {
 		return false
 	}
-	if runtime.sessions != nil {
-		if _, ok := runtime.sessions[workspace.SessionID]; !ok {
-			return false
-		}
-	}
 	if runtime.workspaces == nil {
-		runtime.workspaces = make(map[string]protocol.SessionLayout)
+		runtime.workspaces = make(map[string]protocol.Workspace)
 	}
-	if existing, ok := runtime.workspaces[workspace.SessionID]; ok && sessionLayoutsMatch(existing, workspace) {
+	current, ok := runtime.workspaces[workspace.WorkspaceID]
+	if !ok {
 		return false
 	}
-	runtime.workspaces[workspace.SessionID] = workspace
+	if current.Layout != nil && workspaceLayoutsMatch(*current.Layout, workspace) {
+		return false
+	}
+	current.Layout = &workspace
+	runtime.workspaces[workspace.WorkspaceID] = current
 	return true
 }
 
-func (m *Manager) removeRemoteSessionLayout(id, sessionID string) bool {
+func (m *Manager) upsertRemoteWorkspace(id string, workspace protocol.Workspace) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	runtime, ok := m.runtimes[id]
+	if !ok {
+		return false
+	}
+	if runtime.workspaces == nil {
+		runtime.workspaces = make(map[string]protocol.Workspace)
+	}
+	runtime.workspaces[workspace.ID] = workspace
+	return true
+}
+
+func (m *Manager) removeRemoteWorkspace(id, workspaceID string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	runtime, ok := m.runtimes[id]
 	if !ok || runtime.workspaces == nil {
 		return false
 	}
-	if _, ok := runtime.workspaces[sessionID]; !ok {
+	if _, ok := runtime.workspaces[workspaceID]; !ok {
 		return false
 	}
-	delete(runtime.workspaces, sessionID)
+	delete(runtime.workspaces, workspaceID)
 	return true
 }
 
-func (m *Manager) clearRemoteSessionLayouts(id string) bool {
+func (m *Manager) clearRemoteWorkspaceLayouts(id string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	runtime, ok := m.runtimes[id]
 	if !ok || len(runtime.workspaces) == 0 {
 		return false
 	}
-	runtime.workspaces = make(map[string]protocol.SessionLayout)
+	runtime.workspaces = make(map[string]protocol.Workspace)
 	return true
 }
 
@@ -1268,19 +1300,6 @@ func (m *Manager) publishRawEvent(data []byte) {
 	}
 	cloned := append([]byte(nil), data...)
 	m.onRawEvent(cloned)
-}
-
-func (m *Manager) publishSessionLayouts(layouts []protocol.SessionLayout) {
-	for _, layout := range layouts {
-		payload, err := json.Marshal(protocol.SessionLayoutMessage{
-			Event:         protocol.EventSessionLayout,
-			SessionLayout: layout,
-		})
-		if err != nil {
-			continue
-		}
-		m.publishRawEvent(payload)
-	}
 }
 
 func tagRemoteSession(endpointID string, session protocol.Session) protocol.Session {
@@ -1324,21 +1343,28 @@ func sessionsMatch(left, right protocol.Session) bool {
 		left.Muted == right.Muted
 }
 
-func sessionLayoutsEqual(left, right map[string]protocol.SessionLayout) bool {
+func workspaceLayoutsEqual(left, right map[string]protocol.Workspace) bool {
 	if len(left) != len(right) {
 		return false
 	}
 	for id, leftWorkspace := range left {
 		rightWorkspace, ok := right[id]
-		if !ok || !sessionLayoutsMatch(leftWorkspace, rightWorkspace) {
+		if !ok || leftWorkspace.ID != rightWorkspace.ID || leftWorkspace.Title != rightWorkspace.Title ||
+			leftWorkspace.Directory != rightWorkspace.Directory || leftWorkspace.Status != rightWorkspace.Status {
+			return false
+		}
+		if (leftWorkspace.Layout == nil) != (rightWorkspace.Layout == nil) {
+			return false
+		}
+		if leftWorkspace.Layout != nil && !workspaceLayoutsMatch(*leftWorkspace.Layout, *rightWorkspace.Layout) {
 			return false
 		}
 	}
 	return true
 }
 
-func sessionLayoutsMatch(left, right protocol.SessionLayout) bool {
-	if left.SessionID != right.SessionID ||
+func workspaceLayoutsMatch(left, right protocol.WorkspaceLayout) bool {
+	if left.WorkspaceID != right.WorkspaceID ||
 		left.ActivePaneID != right.ActivePaneID ||
 		left.LayoutJson != right.LayoutJson ||
 		protocol.Deref(left.UpdatedAt) != protocol.Deref(right.UpdatedAt) ||

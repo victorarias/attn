@@ -222,11 +222,11 @@ func BranchesToValues(branches []*Branch) []Branch {
 	return result
 }
 
-func SessionLayoutsToValues(layouts []*SessionLayout) []SessionLayout {
+func WorkspaceLayoutsToValues(layouts []*WorkspaceLayout) []WorkspaceLayout {
 	if layouts == nil {
 		return nil
 	}
-	result := make([]SessionLayout, len(layouts))
+	result := make([]WorkspaceLayout, len(layouts))
 	for i, l := range layouts {
 		if l != nil {
 			result[i] = *l

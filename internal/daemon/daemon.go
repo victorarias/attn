@@ -137,7 +137,7 @@ type Daemon struct {
 	loginShellEnvMu sync.RWMutex
 	loginShellEnv   []string
 
-	// Native canvas-UI workspace registry. Backed by the store for
+	// Workspace registry for Tauri and remote clients. Backed by the store for
 	// workspace identity, session membership, and daemon-owned panel
 	// geometry.
 	workspaces *workspaceRegistry
@@ -695,7 +695,7 @@ func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
 
 	if _, ok := d.ptyBackend.(ptybackend.RecoverableRuntime); ok {
 		d.reconcileStartupWorkerSessions(recoveryReport, recoverErr, recoveryStartedAt)
-		d.reconcileSessionLayoutsWithPTYBackend(context.Background())
+		d.reconcileWorkspaceLayoutsWithPTYBackend(context.Background())
 		return
 	}
 
@@ -707,7 +707,7 @@ func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
 			fmt.Sprintf("Removed %d stale sessions from a previous daemon run because no live PTY was found.", removedSessions),
 		)
 	}
-	d.reconcileSessionLayoutsWithPTYBackend(context.Background())
+	d.reconcileWorkspaceLayoutsWithPTYBackend(context.Background())
 }
 
 func (d *Daemon) recoverPTYBackend(timeout time.Duration) (ptybackend.RecoveryReport, error) {
@@ -1128,7 +1128,7 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 			d.recomputeAndBroadcastWorkspaceForSession(info.ID)
 		}
 	} else {
-		d.handleSessionLayoutRuntimeExit(info.ID, info.ExitCode, info.Signal)
+		d.handleWorkspaceLayoutRuntimeExit(info.ID, info.ExitCode, info.Signal)
 	}
 
 	event := &protocol.WebSocketEvent{
@@ -1189,7 +1189,6 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 	if session == nil && d.hubManager != nil {
 		session = d.hubManager.RemoteSession(sessionID)
 	}
-	d.killSessionLayoutRuntimesForSession(sessionID)
 	d.terminateSession(sessionID, sig)
 	d.handleReviewLoopSourceSessionExit(sessionID)
 	d.setPendingInputSource(sessionID, "")
@@ -1615,12 +1614,21 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 			session.MainRepo = protocol.Ptr(branchInfo.MainRepo)
 		}
 	}
+	workspaceID := strings.TrimSpace(msg.WorkspaceID)
+	if workspaceID == "" {
+		d.sendError(conn, "missing workspace_id")
+		return
+	}
+	session.WorkspaceID = protocol.Ptr(workspaceID)
+	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: session.Label, Directory: session.Directory, Status: protocol.WorkspaceStatusLaunching})
+	d.workspaces.register(workspaceID, session.Label, session.Directory)
 	d.store.Add(session)
 	if resumeSessionID := d.consumePendingResumeSessionID(session.ID); resumeSessionID != "" {
 		d.store.SetResumeSessionID(session.ID, resumeSessionID)
 	}
-	if _, err := d.ensureSessionLayout(session.ID); err != nil {
-		d.logf("session layout bootstrap failed for session %s: %v", session.ID, err)
+	d.associateSessionWithWorkspace(session.ID, workspaceID)
+	if _, err := d.ensureWorkspaceLayout(workspaceID); err != nil {
+		d.logf("workspace layout bootstrap failed for workspace %s: %v", workspaceID, err)
 	}
 
 	// Track this location in recent locations
@@ -1638,7 +1646,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		Event:   eventType,
 		Session: d.sessionForBroadcast(session),
 	})
-	d.broadcastSessionLayout(session.ID)
+	d.broadcastWorkspaceLayout(workspaceID)
 	d.recomputeAndBroadcastWorkspaceForSession(session.ID)
 }
 
@@ -2211,33 +2219,11 @@ func (d *Daemon) mergedSessionsForBroadcast() []protocol.Session {
 	return merged
 }
 
-func (d *Daemon) mergedSessionLayoutsForBroadcast() []protocol.SessionLayout {
-	localLayouts := d.listSessionLayouts(d.store.List(""))
-	remoteLayouts := d.remoteSessionLayoutsForBroadcast()
-	if len(localLayouts) == 0 {
-		return remoteLayouts
-	}
-	if len(remoteLayouts) == 0 {
-		return localLayouts
-	}
-	merged := make([]protocol.SessionLayout, 0, len(localLayouts)+len(remoteLayouts))
-	merged = append(merged, localLayouts...)
-	merged = append(merged, remoteLayouts...)
-	return merged
-}
-
 func (d *Daemon) remoteSessionsForBroadcast() []protocol.Session {
 	if d.hubManager == nil {
 		return nil
 	}
 	return d.hubManager.RemoteSessions()
-}
-
-func (d *Daemon) remoteSessionLayoutsForBroadcast() []protocol.SessionLayout {
-	if d.hubManager == nil {
-		return nil
-	}
-	return d.hubManager.RemoteWorkspaces()
 }
 
 func (d *Daemon) broadcastSessionStateChanged(sessionID string) {
@@ -2784,9 +2770,19 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 
 	d.clearLongRunTracking(msg.Session.ID)
 	msg.Session.Agent = normalizeStoredSessionAgent(string(msg.Session.Agent), protocol.SessionAgentCodex)
+	workspaceID := "workspace-" + msg.Session.ID
+	msg.Session.WorkspaceID = protocol.Ptr(workspaceID)
+	d.store.AddWorkspace(&protocol.Workspace{
+		ID:        workspaceID,
+		Title:     msg.Session.Label,
+		Directory: msg.Session.Directory,
+		Status:    protocol.WorkspaceStatusLaunching,
+	})
+	d.workspaces.register(workspaceID, msg.Session.Label, msg.Session.Directory)
 
 	// Add session directly to store
 	d.store.Add(&msg.Session)
+	d.associateSessionWithWorkspace(msg.Session.ID, workspaceID)
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients
@@ -2794,6 +2790,7 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 		Event:   protocol.EventSessionRegistered,
 		Session: d.sessionForBroadcast(&msg.Session),
 	})
+	d.broadcastWorkspaceLayout(workspaceID)
 }
 
 // RefreshPRs triggers an immediate PR refresh

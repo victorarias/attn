@@ -968,9 +968,6 @@ type InitialStateMessage struct {
 	// Repos corresponds to the JSON schema field "repos".
 	Repos []RepoState `json:"repos,omitempty,omitzero"`
 
-	// SessionLayouts corresponds to the JSON schema field "session_layouts".
-	SessionLayouts []SessionLayout `json:"session_layouts,omitempty,omitzero"`
-
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`
 
@@ -1565,6 +1562,9 @@ type RegisterMessage struct {
 
 	// Label corresponds to the JSON schema field "label".
 	Label *string `json:"label,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
 }
 
 type RegisterWorkspaceMessage struct {
@@ -1573,6 +1573,9 @@ type RegisterWorkspaceMessage struct {
 
 	// Directory corresponds to the JSON schema field "directory".
 	Directory string `json:"directory"`
+
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty,omitzero"`
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
@@ -1693,9 +1696,6 @@ type Response struct {
 
 	// ReviewLoopRun corresponds to the JSON schema field "review_loop_run".
 	ReviewLoopRun *ReviewLoopRun `json:"review_loop_run,omitempty,omitzero"`
-
-	// SessionLayouts corresponds to the JSON schema field "session_layouts".
-	SessionLayouts []SessionLayout `json:"session_layouts,omitempty,omitzero"`
 
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`
@@ -2097,161 +2097,6 @@ type SessionExitedMessage struct {
 	Signal *string `json:"signal,omitempty,omitzero"`
 }
 
-type SessionLayout struct {
-	// ActivePaneID corresponds to the JSON schema field "active_pane_id".
-	ActivePaneID string `json:"active_pane_id"`
-
-	// LayoutJson corresponds to the JSON schema field "layout_json".
-	LayoutJson string `json:"layout_json"`
-
-	// Panes corresponds to the JSON schema field "panes".
-	Panes []SessionLayoutPane `json:"panes"`
-
-	// SessionID corresponds to the JSON schema field "session_id".
-	SessionID string `json:"session_id"`
-
-	// UpdatedAt corresponds to the JSON schema field "updated_at".
-	UpdatedAt *string `json:"updated_at,omitempty,omitzero"`
-}
-
-type SessionLayoutActionResultMessage struct {
-	// Action corresponds to the JSON schema field "action".
-	Action string `json:"action"`
-
-	// Error corresponds to the JSON schema field "error".
-	Error *string `json:"error,omitempty,omitzero"`
-
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// PaneID corresponds to the JSON schema field "pane_id".
-	PaneID *string `json:"pane_id,omitempty,omitzero"`
-
-	// SessionID corresponds to the JSON schema field "session_id".
-	SessionID string `json:"session_id"`
-
-	// Success corresponds to the JSON schema field "success".
-	Success bool `json:"success"`
-}
-
-type SessionLayoutClosePaneMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// PaneID corresponds to the JSON schema field "pane_id".
-	PaneID string `json:"pane_id"`
-
-	// SessionID corresponds to the JSON schema field "session_id".
-	SessionID string `json:"session_id"`
-}
-
-type SessionLayoutFocusPaneMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// PaneID corresponds to the JSON schema field "pane_id".
-	PaneID string `json:"pane_id"`
-
-	// SessionID corresponds to the JSON schema field "session_id".
-	SessionID string `json:"session_id"`
-}
-
-type SessionLayoutGetMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// SessionID corresponds to the JSON schema field "session_id".
-	SessionID string `json:"session_id"`
-}
-
-type SessionLayoutMessage struct {
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// SessionLayout corresponds to the JSON schema field "session_layout".
-	SessionLayout SessionLayout `json:"session_layout"`
-}
-
-type SessionLayoutPane struct {
-	// Kind corresponds to the JSON schema field "kind".
-	Kind SessionLayoutPaneKind `json:"kind"`
-
-	// PaneID corresponds to the JSON schema field "pane_id".
-	PaneID string `json:"pane_id"`
-
-	// RuntimeID corresponds to the JSON schema field "runtime_id".
-	RuntimeID *string `json:"runtime_id,omitempty,omitzero"`
-
-	// Title corresponds to the JSON schema field "title".
-	Title string `json:"title"`
-}
-
-type SessionLayoutPaneKind string
-
-const SessionLayoutPaneKindMain SessionLayoutPaneKind = "main"
-const SessionLayoutPaneKindShell SessionLayoutPaneKind = "shell"
-
-type SessionLayoutRenamePaneMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// PaneID corresponds to the JSON schema field "pane_id".
-	PaneID string `json:"pane_id"`
-
-	// SessionID corresponds to the JSON schema field "session_id".
-	SessionID string `json:"session_id"`
-
-	// Title corresponds to the JSON schema field "title".
-	Title string `json:"title"`
-}
-
-type SessionLayoutRuntimeExitedMessage struct {
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// ExitCode corresponds to the JSON schema field "exit_code".
-	ExitCode int `json:"exit_code"`
-
-	// PaneID corresponds to the JSON schema field "pane_id".
-	PaneID string `json:"pane_id"`
-
-	// RuntimeID corresponds to the JSON schema field "runtime_id".
-	RuntimeID string `json:"runtime_id"`
-
-	// SessionID corresponds to the JSON schema field "session_id".
-	SessionID string `json:"session_id"`
-
-	// Signal corresponds to the JSON schema field "signal".
-	Signal *string `json:"signal,omitempty,omitzero"`
-}
-
-type SessionLayoutSplitDirection string
-
-const SessionLayoutSplitDirectionHorizontal SessionLayoutSplitDirection = "horizontal"
-const SessionLayoutSplitDirectionVertical SessionLayoutSplitDirection = "vertical"
-
-type SessionLayoutSplitPaneMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Direction corresponds to the JSON schema field "direction".
-	Direction SessionLayoutSplitDirection `json:"direction"`
-
-	// SessionID corresponds to the JSON schema field "session_id".
-	SessionID string `json:"session_id"`
-
-	// TargetPaneID corresponds to the JSON schema field "target_pane_id".
-	TargetPaneID string `json:"target_pane_id"`
-}
-
-type SessionLayoutUpdatedMessage struct {
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// SessionLayout corresponds to the JSON schema field "session_layout".
-	SessionLayout SessionLayout `json:"session_layout"`
-}
-
 type SessionRegisteredMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
@@ -2442,7 +2287,7 @@ type SpawnSessionMessage struct {
 	Rows int `json:"rows"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+	WorkspaceID string `json:"workspace_id"`
 
 	// YoloMode corresponds to the JSON schema field "yolo_mode".
 	YoloMode *bool `json:"yolo_mode,omitempty,omitzero"`
@@ -2578,29 +2423,6 @@ type UpdateEndpointMessage struct {
 
 	// SshTarget corresponds to the JSON schema field "ssh_target".
 	SshTarget *string `json:"ssh_target,omitempty,omitzero"`
-}
-
-type UpdateWorkspacePanelGeometryMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Height corresponds to the JSON schema field "height".
-	Height *float64 `json:"height,omitempty,omitzero"`
-
-	// PanelID corresponds to the JSON schema field "panel_id".
-	PanelID string `json:"panel_id"`
-
-	// Width corresponds to the JSON schema field "width".
-	Width *float64 `json:"width,omitempty,omitzero"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
-
-	// WorldX corresponds to the JSON schema field "world_x".
-	WorldX *float64 `json:"world_x,omitempty,omitzero"`
-
-	// WorldY corresponds to the JSON schema field "world_y".
-	WorldY *float64 `json:"world_y,omitempty,omitzero"`
 }
 
 type WebSocketEvent struct {
@@ -2763,12 +2585,6 @@ type WebSocketEvent struct {
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID *string `json:"session_id,omitempty,omitzero"`
 
-	// SessionLayout corresponds to the JSON schema field "session_layout".
-	SessionLayout *SessionLayout `json:"session_layout,omitempty,omitzero"`
-
-	// SessionLayouts corresponds to the JSON schema field "session_layouts".
-	SessionLayouts []SessionLayout `json:"session_layouts,omitempty,omitzero"`
-
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`
 
@@ -2802,6 +2618,12 @@ type WebSocketEvent struct {
 	// Workspace corresponds to the JSON schema field "workspace".
 	Workspace *Workspace `json:"workspace,omitempty,omitzero"`
 
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+
+	// WorkspaceLayout corresponds to the JSON schema field "workspace_layout".
+	WorkspaceLayout *WorkspaceLayout `json:"workspace_layout,omitempty,omitzero"`
+
 	// Workspaces corresponds to the JSON schema field "workspaces".
 	Workspaces []Workspace `json:"workspaces,omitempty,omitzero"`
 
@@ -2816,8 +2638,8 @@ type Workspace struct {
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
 
-	// Panels corresponds to the JSON schema field "panels".
-	Panels []WorkspacePanel `json:"panels,omitempty,omitzero"`
+	// Layout corresponds to the JSON schema field "layout".
+	Layout *WorkspaceLayout `json:"layout,omitempty,omitzero"`
 
 	// Status corresponds to the JSON schema field "status".
 	Status WorkspaceStatus `json:"status"`
@@ -2826,30 +2648,165 @@ type Workspace struct {
 	Title string `json:"title"`
 }
 
-type WorkspacePanel struct {
-	// Height corresponds to the JSON schema field "height".
-	Height float64 `json:"height"`
+type WorkspaceLayout struct {
+	// ActivePaneID corresponds to the JSON schema field "active_pane_id".
+	ActivePaneID string `json:"active_pane_id"`
 
-	// ID corresponds to the JSON schema field "id".
-	ID string `json:"id"`
+	// LayoutJson corresponds to the JSON schema field "layout_json".
+	LayoutJson string `json:"layout_json"`
 
+	// Panes corresponds to the JSON schema field "panes".
+	Panes []WorkspaceLayoutPane `json:"panes"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt *string `json:"updated_at,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspaceLayoutActionResultMessage struct {
+	// Action corresponds to the JSON schema field "action".
+	Action string `json:"action"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// PaneID corresponds to the JSON schema field "pane_id".
+	PaneID *string `json:"pane_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspaceLayoutClosePaneMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// PaneID corresponds to the JSON schema field "pane_id".
+	PaneID string `json:"pane_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspaceLayoutFocusPaneMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// PaneID corresponds to the JSON schema field "pane_id".
+	PaneID string `json:"pane_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspaceLayoutGetMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspaceLayoutMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// WorkspaceLayout corresponds to the JSON schema field "workspace_layout".
+	WorkspaceLayout WorkspaceLayout `json:"workspace_layout"`
+}
+
+type WorkspaceLayoutPane struct {
 	// Kind corresponds to the JSON schema field "kind".
-	Kind string `json:"kind"`
+	Kind WorkspaceLayoutPaneKind `json:"kind"`
+
+	// PaneID corresponds to the JSON schema field "pane_id".
+	PaneID string `json:"pane_id"`
+
+	// RuntimeID corresponds to the JSON schema field "runtime_id".
+	RuntimeID *string `json:"runtime_id,omitempty,omitzero"`
 
 	// SessionID corresponds to the JSON schema field "session_id".
-	SessionID string `json:"session_id"`
+	SessionID *string `json:"session_id,omitempty,omitzero"`
 
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title"`
 
-	// Width corresponds to the JSON schema field "width".
-	Width float64 `json:"width"`
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+}
 
-	// WorldX corresponds to the JSON schema field "world_x".
-	WorldX float64 `json:"world_x"`
+type WorkspaceLayoutPaneKind string
 
-	// WorldY corresponds to the JSON schema field "world_y".
-	WorldY float64 `json:"world_y"`
+const WorkspaceLayoutPaneKindAgent WorkspaceLayoutPaneKind = "agent"
+const WorkspaceLayoutPaneKindShell WorkspaceLayoutPaneKind = "shell"
+
+type WorkspaceLayoutRenamePaneMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// PaneID corresponds to the JSON schema field "pane_id".
+	PaneID string `json:"pane_id"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspaceLayoutRuntimeExitedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// ExitCode corresponds to the JSON schema field "exit_code".
+	ExitCode int `json:"exit_code"`
+
+	// PaneID corresponds to the JSON schema field "pane_id".
+	PaneID string `json:"pane_id"`
+
+	// RuntimeID corresponds to the JSON schema field "runtime_id".
+	RuntimeID string `json:"runtime_id"`
+
+	// Signal corresponds to the JSON schema field "signal".
+	Signal *string `json:"signal,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspaceLayoutSplitDirection string
+
+const WorkspaceLayoutSplitDirectionHorizontal WorkspaceLayoutSplitDirection = "horizontal"
+const WorkspaceLayoutSplitDirectionVertical WorkspaceLayoutSplitDirection = "vertical"
+
+type WorkspaceLayoutSplitPaneMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Direction corresponds to the JSON schema field "direction".
+	Direction WorkspaceLayoutSplitDirection `json:"direction"`
+
+	// TargetPaneID corresponds to the JSON schema field "target_pane_id".
+	TargetPaneID string `json:"target_pane_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspaceLayoutUpdatedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// WorkspaceLayout corresponds to the JSON schema field "workspace_layout".
+	WorkspaceLayout WorkspaceLayout `json:"workspace_layout"`
 }
 
 type WorkspaceRegisteredMessage struct {

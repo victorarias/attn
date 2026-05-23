@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"math"
 	"strings"
 	"sync"
 	"syscall"
@@ -19,7 +18,6 @@ type workspaceEntry struct {
 	title     string
 	directory string
 	status    protocol.WorkspaceStatus
-	panels    []protocol.WorkspacePanel
 	// sessionIDs in this workspace, used for status rollup.
 	sessionIDs map[string]struct{}
 }
@@ -90,12 +88,10 @@ func (r *workspaceRegistry) associateSession(sessionID, workspaceID, title strin
 	if existing, had := r.sessionToWorkspace[sessionID]; had && existing != workspaceID {
 		if prev, ok := r.workspaces[existing]; ok {
 			delete(prev.sessionIDs, sessionID)
-			prev.removePanelForSession(sessionID)
 		}
 	}
 	entry.sessionIDs[sessionID] = struct{}{}
 	r.sessionToWorkspace[sessionID] = workspaceID
-	entry.ensurePanelForSession(sessionID, title)
 	return true
 }
 
@@ -110,7 +106,6 @@ func (r *workspaceRegistry) dissociateSession(sessionID string) string {
 	delete(r.sessionToWorkspace, sessionID)
 	if entry, ok := r.workspaces[workspaceID]; ok {
 		delete(entry.sessionIDs, sessionID)
-		entry.removePanelForSession(sessionID)
 	}
 	return workspaceID
 }
@@ -156,61 +151,6 @@ func (r *workspaceRegistry) list() []protocol.Workspace {
 	return out
 }
 
-func (r *workspaceRegistry) setPanels(workspaceID string, panels []protocol.WorkspacePanel) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	entry, ok := r.workspaces[workspaceID]
-	if !ok {
-		return false
-	}
-	entry.panels = append([]protocol.WorkspacePanel(nil), panels...)
-	return true
-}
-
-func (r *workspaceRegistry) panelForSession(workspaceID, sessionID string) (protocol.WorkspacePanel, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	entry, ok := r.workspaces[workspaceID]
-	if !ok {
-		return protocol.WorkspacePanel{}, false
-	}
-	for _, panel := range entry.panels {
-		if panel.SessionID == sessionID {
-			return panel, true
-		}
-	}
-	return protocol.WorkspacePanel{}, false
-}
-
-func (r *workspaceRegistry) updatePanelGeometry(workspaceID, panelID string, worldX, worldY, width, height *float64) (protocol.Workspace, protocol.WorkspacePanel, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	entry, ok := r.workspaces[workspaceID]
-	if !ok {
-		return protocol.Workspace{}, protocol.WorkspacePanel{}, false
-	}
-	for i := range entry.panels {
-		panel := &entry.panels[i]
-		if panel.ID != panelID {
-			continue
-		}
-		if worldX != nil {
-			panel.WorldX = *worldX
-		}
-		if worldY != nil {
-			panel.WorldY = *worldY
-		}
-		if width != nil {
-			panel.Width = *width
-		}
-		if height != nil {
-			panel.Height = *height
-		}
-		return snapshotEntry(entry), *panel, true
-	}
-	return protocol.Workspace{}, protocol.WorkspacePanel{}, false
-}
-
 // applyStatus updates the cached status for a workspace and returns whether
 // it changed (i.e., whether a state-changed broadcast is needed).
 func (r *workspaceRegistry) applyStatus(id string, status protocol.WorkspaceStatus) (protocol.Workspace, bool) {
@@ -233,49 +173,7 @@ func snapshotEntry(e *workspaceEntry) protocol.Workspace {
 		Title:     e.title,
 		Directory: e.directory,
 		Status:    e.status,
-		Panels:    append([]protocol.WorkspacePanel(nil), e.panels...),
 	}
-}
-
-const (
-	defaultWorkspacePanelWidth  = 720.0
-	defaultWorkspacePanelHeight = 560.0
-	defaultWorkspacePanelX      = 30.0
-	defaultWorkspacePanelY      = 50.0
-	defaultWorkspacePanelGap    = 30.0
-)
-
-func (e *workspaceEntry) ensurePanelForSession(sessionID, title string) protocol.WorkspacePanel {
-	for _, panel := range e.panels {
-		if panel.SessionID == sessionID {
-			return panel
-		}
-	}
-	if title == "" {
-		title = sessionID
-	}
-	panel := protocol.WorkspacePanel{
-		ID:        sessionID,
-		SessionID: sessionID,
-		Kind:      "terminal",
-		Title:     title,
-		WorldX:    defaultWorkspacePanelX + float64(len(e.panels))*(defaultWorkspacePanelWidth+defaultWorkspacePanelGap),
-		WorldY:    defaultWorkspacePanelY,
-		Width:     defaultWorkspacePanelWidth,
-		Height:    defaultWorkspacePanelHeight,
-	}
-	e.panels = append(e.panels, panel)
-	return panel
-}
-
-func (e *workspaceEntry) removePanelForSession(sessionID string) bool {
-	for i, panel := range e.panels {
-		if panel.SessionID == sessionID {
-			e.panels = append(e.panels[:i], e.panels[i+1:]...)
-			return true
-		}
-	}
-	return false
 }
 
 // rollupWorkspaceStatus returns the workspace status that summarizes the
@@ -375,9 +273,7 @@ func (d *Daemon) handleRegisterWorkspace(client *wsClient, msg *protocol.Registe
 	}
 	snapshot, isNew := d.workspaces.register(id, title, directory)
 	d.store.AddWorkspace(&snapshot)
-	// Treat the workspace's directory like a session-spawn location, so canvas
-	// directories show up in the recent-locations picker alongside CLI-spawned
-	// session dirs.
+	// Make workspace directories available in the recent-locations picker.
 	label := title
 	if label == "" {
 		label = directory
@@ -421,6 +317,7 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 	// mutate the in-memory association map, which would race the snapshot
 	// the registry hands out otherwise.
 	memberIDs := d.workspaces.sessionIDs(id)
+	d.killWorkspaceLayoutRuntimes(id)
 	for _, sid := range memberIDs {
 		closed := d.unregisterSession(sid, syscall.SIGTERM)
 		if closed != nil {
@@ -442,50 +339,6 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 	})
 }
 
-func (d *Daemon) handleUpdateWorkspacePanelGeometry(client *wsClient, msg *protocol.UpdateWorkspacePanelGeometryMessage) {
-	workspaceID := strings.TrimSpace(msg.WorkspaceID)
-	panelID := strings.TrimSpace(msg.PanelID)
-	if workspaceID == "" {
-		d.sendCommandError(client, protocol.CmdUpdateWorkspacePanelGeometry, "missing workspace_id")
-		return
-	}
-	if panelID == "" {
-		d.sendCommandError(client, protocol.CmdUpdateWorkspacePanelGeometry, "missing panel_id")
-		return
-	}
-	if !validOptionalFinite(msg.WorldX) || !validOptionalFinite(msg.WorldY) {
-		d.sendCommandError(client, protocol.CmdUpdateWorkspacePanelGeometry, "panel position must be finite")
-		return
-	}
-	if !validOptionalPositive(msg.Width) || !validOptionalPositive(msg.Height) {
-		d.sendCommandError(client, protocol.CmdUpdateWorkspacePanelGeometry, "panel size must be positive and finite")
-		return
-	}
-	if d.workspaces == nil {
-		d.sendCommandError(client, protocol.CmdUpdateWorkspacePanelGeometry, "unknown workspace")
-		return
-	}
-
-	snapshot, panel, ok := d.workspaces.updatePanelGeometry(workspaceID, panelID, msg.WorldX, msg.WorldY, msg.Width, msg.Height)
-	if !ok {
-		d.sendCommandError(client, protocol.CmdUpdateWorkspacePanelGeometry, "unknown workspace panel")
-		return
-	}
-	d.store.SaveWorkspacePanel(workspaceID, panel)
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorkspaceStateChanged,
-		Workspace: &snapshot,
-	})
-}
-
-func validOptionalFinite(v *float64) bool {
-	return v == nil || !math.IsNaN(*v) && !math.IsInf(*v, 0)
-}
-
-func validOptionalPositive(v *float64) bool {
-	return validOptionalFinite(v) && (v == nil || *v > 0)
-}
-
 // loadWorkspacesFromStore rebuilds the in-memory registry from SQLite at
 // daemon start. Order matters: we register every workspace first (so
 // associateSession has somewhere to land), then walk persisted sessions and
@@ -500,18 +353,13 @@ func (d *Daemon) loadWorkspacesFromStore() {
 			continue
 		}
 		d.workspaces.register(ws.ID, ws.Title, ws.Directory)
-		d.workspaces.setPanels(ws.ID, d.store.ListWorkspacePanels(ws.ID))
 	}
 	for _, session := range d.store.List("") {
 		if session == nil {
 			continue
 		}
 		if wsID := protocol.Deref(session.WorkspaceID); wsID != "" {
-			if d.workspaces.associateSession(session.ID, wsID, session.Label) {
-				if panel, ok := d.workspaces.panelForSession(wsID, session.ID); ok {
-					d.store.SaveWorkspacePanel(wsID, panel)
-				}
-			}
+			d.workspaces.associateSession(session.ID, wsID, session.Label)
 		}
 	}
 	// Seed each workspace's status from its members. No broadcast — clients
@@ -526,7 +374,17 @@ func (d *Daemon) listWorkspaces() []protocol.Workspace {
 	if d.workspaces == nil {
 		return nil
 	}
-	return d.workspaces.list()
+	workspaces := d.workspaces.list()
+	for i := range workspaces {
+		layout, err := d.protocolWorkspaceLayout(workspaces[i].ID)
+		if err == nil {
+			workspaces[i].Layout = layout
+		}
+	}
+	if d.hubManager != nil {
+		workspaces = append(workspaces, d.hubManager.RemoteWorkspaces()...)
+	}
+	return workspaces
 }
 
 // associateSessionWithWorkspace binds a freshly spawned session to a workspace
@@ -546,8 +404,8 @@ func (d *Daemon) associateSessionWithWorkspace(sessionID, workspaceID string) {
 		return
 	}
 	d.store.SetSessionWorkspaceID(sessionID, workspaceID)
-	if panel, ok := d.workspaces.panelForSession(workspaceID, sessionID); ok {
-		d.store.SaveWorkspacePanel(workspaceID, panel)
+	if err := d.ensureAgentPaneInWorkspace(workspaceID, sessionID, title); err != nil {
+		d.logf("workspace layout agent pane ensure failed for session %s: %v", sessionID, err)
 	}
 	updated, changed := d.recomputeWorkspaceStatus(workspaceID)
 	if !changed {
@@ -570,7 +428,6 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 		return
 	}
 	d.store.SetSessionWorkspaceID(sessionID, "")
-	d.store.RemoveWorkspacePanelForSession(sessionID)
 	updated, changed := d.recomputeWorkspaceStatus(workspaceID)
 	if !changed {
 		updated, _ = d.workspaces.snapshot(workspaceID)

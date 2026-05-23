@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '@tauri-apps/api/core';
 import type {
   Session as GeneratedSession,
-  SessionLayout as GeneratedWorkspaceSnapshot,
+  Workspace as GeneratedWorkspaceSnapshot,
   PR as GeneratedPR,
   Worktree as GeneratedWorktree,
   PluginInfo as GeneratedPluginInfo,
@@ -91,6 +91,7 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   endpoint?: GeneratedEndpoint;
   endpoints?: GeneratedEndpoint[];
   workspace?: GeneratedWorkspaceSnapshot;
+  workspace_id?: string;
   data?: string;
   seq?: number;
   scrollback?: string;
@@ -152,7 +153,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '64';
+const PROTOCOL_VERSION = '65';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
 // injects this global before any page script runs — see
@@ -417,13 +418,6 @@ interface UseDaemonSocketOptions {
   wsUrl?: string;
 }
 
-/**
- * Sessions the Tauri sidebar should ignore. Shell-agent sessions exist
- * on the wire because the native canvas app declares the
- * `shell_as_session` capability, but in the Tauri app shells are utility
- * terminals (Cmd+T), never sidebar entries. Filtering here keeps the
- * Tauri app's behavior identical regardless of who else is connected.
- */
 function isHiddenSidebarSession(session: DaemonSession): boolean {
   return session.agent === 'shell';
 }
@@ -458,7 +452,7 @@ function upsertSessionByID(sessions: DaemonSession[], session: DaemonSession): D
 function workspaceRuntimeIDs(workspaces: DaemonWorkspace[]): Set<string> {
   const ids = new Set<string>();
   for (const workspace of workspaces) {
-    for (const pane of workspace.panes || []) {
+    for (const pane of workspace.layout?.panes || []) {
       if (typeof pane.runtime_id === 'string' && pane.runtime_id.length > 0) {
         ids.add(pane.runtime_id);
       }
@@ -468,19 +462,15 @@ function workspaceRuntimeIDs(workspaces: DaemonWorkspace[]): Set<string> {
 }
 
 function pruneWorkspacesBySessions(
-  sessions: DaemonSession[],
+  _sessions: DaemonSession[],
   workspaces: DaemonWorkspace[],
 ): DaemonWorkspace[] {
-  if (workspaces.length === 0) {
-    return workspaces;
-  }
-  const sessionIDs = new Set(sessions.map((session) => session.id));
-  return workspaces.filter((workspace) => sessionIDs.has(workspace.session_id));
+  return workspaces;
 }
 
 function workspacesIncludeRuntimeID(workspaces: DaemonWorkspace[], runtimeID: string): boolean {
   for (const workspace of workspaces) {
-    for (const pane of workspace.panes || []) {
+    for (const pane of workspace.layout?.panes || []) {
       if (pane.runtime_id === runtimeID) {
         return true;
       }
@@ -503,14 +493,14 @@ function resolveRuntimeLogContext(
     };
   }
   for (const workspace of workspaces) {
-    for (const pane of workspace.panes || []) {
+    for (const pane of workspace.layout?.panes || []) {
       if (pane.runtime_id !== runtimeID) {
         continue;
       }
       return {
-        sessionId: workspace.session_id,
+        sessionId: pane.session_id,
         paneId: pane.pane_id,
-        paneKind: pane.pane_id === 'main' ? 'main' : 'shell',
+        paneKind: pane.kind === 'agent' ? 'main' : 'shell',
       };
     }
   }
@@ -527,8 +517,18 @@ function upsertEndpointByID(endpoints: DaemonEndpoint[], endpoint: DaemonEndpoin
   return updated;
 }
 
-function workspaceActionKey(action: string, sessionId: string, paneId?: string): string {
-  return `workspace:${action}:${sessionId}:${paneId || ''}`;
+function upsertWorkspaceByID(workspaces: DaemonWorkspace[], workspace: DaemonWorkspace): DaemonWorkspace[] {
+  const index = workspaces.findIndex((entry) => entry.id === workspace.id);
+  if (index === -1) {
+    return [...workspaces, workspace];
+  }
+  const updated = [...workspaces];
+  updated[index] = workspace;
+  return updated;
+}
+
+function workspaceActionKey(action: string, workspaceId: string, paneId?: string): string {
+  return `workspace:${action}:${workspaceId}:${paneId || ''}`;
 }
 
 const ATTACH_RETRY_TIMEOUT_MS = 3_000;
@@ -781,10 +781,13 @@ export function useDaemonSocket({
       case 'unregister':
         rejectPendingByPredicate((key) => key.startsWith('unregister:'), error);
         return;
-      case 'session_layout_split_pane':
-      case 'session_layout_close_pane':
-      case 'session_layout_focus_pane':
-      case 'session_layout_rename_pane':
+      case 'unregister_workspace':
+        rejectPendingByPredicate((key) => key.startsWith('unregister_workspace:'), error);
+        return;
+      case 'workspace_layout_split_pane':
+      case 'workspace_layout_close_pane':
+      case 'workspace_layout_focus_pane':
+      case 'workspace_layout_rename_pane':
         rejectPendingByPredicate((key) => key.startsWith(`workspace:${cmd}:`), error);
         return;
       case 'approve_pr':
@@ -1019,7 +1022,7 @@ export function useDaemonSocket({
             const nextSessions = dedupeSessionsByID(data.sessions || []);
             sessionsRef.current = nextSessions;
             onSessionsUpdate(nextSessions);
-            const nextWorkspaces = data.session_layouts || [];
+            const nextWorkspaces = data.workspaces || [];
             workspacesRef.current = nextWorkspaces;
             onWorkspacesUpdate(nextWorkspaces);
             pruneAttachedPtySessions(nextSessions, nextWorkspaces);
@@ -1061,39 +1064,37 @@ export function useDaemonSocket({
             }
             break;
 
-          case 'session_layout':
-          case 'session_layout_updated':
-            if (data.session_layout) {
+          case 'workspace_layout':
+          case 'workspace_layout_updated':
+            if (data.workspace_layout) {
+              const workspaceID = data.workspace_layout.workspace_id;
               recordPaneRuntimeDebugEvent({
                 scope: 'daemon',
-                sessionId: data.session_layout.session_id,
-                paneId: data.session_layout.active_pane_id,
-                message: data.event === 'session_layout' ? 'session layout received' : 'session layout updated received',
+                sessionId: workspaceID,
+                paneId: data.workspace_layout.active_pane_id,
+                message: data.event === 'workspace_layout' ? 'workspace layout received' : 'workspace layout updated received',
                 details: {
-                  paneIds: (data.session_layout.panes || []).map((pane) => pane.pane_id),
+                  paneIds: (data.workspace_layout.panes || []).map((pane) => pane.pane_id),
                 },
               });
-              const workspaceSessionID = data.session_layout.session_id;
-              const sessionExists = sessionsRef.current.some((session) => session.id === workspaceSessionID);
-              const nextWorkspaces = sessionExists
-                ? [
-                    ...workspacesRef.current.filter((entry) => entry.session_id !== workspaceSessionID),
-                    data.session_layout,
-                  ]
-                : workspacesRef.current.filter((entry) => entry.session_id !== workspaceSessionID);
+              const nextWorkspaces = workspacesRef.current.map((workspace) => (
+                workspace.id === workspaceID
+                  ? { ...workspace, layout: data.workspace_layout }
+                  : workspace
+              ));
               workspacesRef.current = nextWorkspaces;
               onWorkspacesUpdate(nextWorkspaces);
               pruneAttachedPtySessions(sessionsRef.current, nextWorkspaces);
             }
             break;
 
-          case 'session_layout_action_result': {
+          case 'workspace_layout_action_result': {
             const action = data.action || '';
-            const sessionId = data.session_id || '';
+            const workspaceId = data.workspace_id || '';
             const paneId = data.pane_id;
             recordPaneRuntimeDebugEvent({
               scope: 'daemon',
-              sessionId,
+              sessionId: workspaceId,
               paneId: paneId || undefined,
               message: 'workspace action result',
               details: {
@@ -1102,7 +1103,7 @@ export function useDaemonSocket({
                 error: data.error,
               },
             });
-            const key = workspaceActionKey(action, sessionId, paneId);
+            const key = workspaceActionKey(action, workspaceId, paneId);
             const pending = pendingActionsRef.current.get(key);
             if (pending) {
               pendingActionsRef.current.delete(key);
@@ -1115,8 +1116,28 @@ export function useDaemonSocket({
             break;
           }
 
-          case 'session_layout_runtime_exited':
-            // The canonical pane removal arrives via session_layout_updated.
+          case 'workspace_layout_runtime_exited':
+            // The canonical pane removal arrives via workspace_layout_updated.
+            break;
+
+          case 'workspace_registered':
+          case 'workspace_state_changed':
+            if (data.workspace) {
+              const nextWorkspaces = upsertWorkspaceByID(workspacesRef.current, data.workspace);
+              workspacesRef.current = nextWorkspaces;
+              onWorkspacesUpdate(nextWorkspaces);
+            }
+            break;
+
+          case 'workspace_unregistered':
+            if (data.workspace) {
+              const key = `unregister_workspace:${data.workspace.id}`;
+              pendingActionsRef.current.get(key)?.resolve(undefined);
+              pendingActionsRef.current.delete(key);
+              const nextWorkspaces = workspacesRef.current.filter((workspace) => workspace.id !== data.workspace!.id);
+              workspacesRef.current = nextWorkspaces;
+              onWorkspacesUpdate(nextWorkspaces);
+            }
             break;
 
           case 'endpoint_status_changed':
@@ -2081,6 +2102,7 @@ export function useDaemonSocket({
         cmd: 'spawn_session',
         id: args.id,
         cwd: args.cwd,
+        ...(args.workspace_id && { workspace_id: args.workspace_id }),
         ...(args.endpoint_id && { endpoint_id: args.endpoint_id }),
         agent: args.shell ? 'shell' : (args.agent || 'codex'),
         cols: args.cols,
@@ -2284,22 +2306,22 @@ export function useDaemonSocket({
     });
   }, []);
 
-  const sendWorkspaceGet = useCallback((sessionId: string) => {
-    sendOrQueueCommand({ cmd: 'session_layout_get', session_id: sessionId }, { waitForInitialState: true });
+  const sendWorkspaceGet = useCallback((workspaceId: string) => {
+    sendOrQueueCommand({ cmd: 'workspace_layout_get', workspace_id: workspaceId }, { waitForInitialState: true });
   }, [sendOrQueueCommand]);
 
   const sendWorkspaceCommand = useCallback((
     action: string,
-    sessionId: string,
+    workspaceId: string,
     payload: Record<string, unknown>,
     paneId?: string,
   ): Promise<WorkspaceActionResult> => {
     return new Promise((resolve, reject) => {
-      const key = workspaceActionKey(action, sessionId, paneId);
+      const key = workspaceActionKey(action, workspaceId, paneId);
       pendingActionsRef.current.set(key, { resolve, reject });
       recordPaneRuntimeDebugEvent({
         scope: 'daemon',
-        sessionId,
+        sessionId: workspaceId,
         paneId,
         message: 'send workspace command',
         details: { action, payload },
@@ -2315,13 +2337,13 @@ export function useDaemonSocket({
     });
   }, [sendOrQueueCommand]);
 
-  const sendWorkspaceSplitPane = useCallback((sessionId: string, targetPaneId: string, direction: 'vertical' | 'horizontal') => {
+  const sendWorkspaceSplitPane = useCallback((workspaceId: string, targetPaneId: string, direction: 'vertical' | 'horizontal') => {
     return sendWorkspaceCommand(
-      'session_layout_split_pane',
-      sessionId,
+      'workspace_layout_split_pane',
+      workspaceId,
       {
-        cmd: 'session_layout_split_pane',
-        session_id: sessionId,
+        cmd: 'workspace_layout_split_pane',
+        workspace_id: workspaceId,
         target_pane_id: targetPaneId,
         direction,
       },
@@ -2329,39 +2351,39 @@ export function useDaemonSocket({
     );
   }, [sendWorkspaceCommand]);
 
-  const sendWorkspaceClosePane = useCallback((sessionId: string, paneId: string) => {
+  const sendWorkspaceClosePane = useCallback((workspaceId: string, paneId: string) => {
     return sendWorkspaceCommand(
-      'session_layout_close_pane',
-      sessionId,
+      'workspace_layout_close_pane',
+      workspaceId,
       {
-        cmd: 'session_layout_close_pane',
-        session_id: sessionId,
+        cmd: 'workspace_layout_close_pane',
+        workspace_id: workspaceId,
         pane_id: paneId,
       },
       paneId,
     );
   }, [sendWorkspaceCommand]);
 
-  const sendWorkspaceFocusPane = useCallback((sessionId: string, paneId: string) => {
+  const sendWorkspaceFocusPane = useCallback((workspaceId: string, paneId: string) => {
     return sendWorkspaceCommand(
-      'session_layout_focus_pane',
-      sessionId,
+      'workspace_layout_focus_pane',
+      workspaceId,
       {
-        cmd: 'session_layout_focus_pane',
-        session_id: sessionId,
+        cmd: 'workspace_layout_focus_pane',
+        workspace_id: workspaceId,
         pane_id: paneId,
       },
       paneId,
     );
   }, [sendWorkspaceCommand]);
 
-  const sendWorkspaceRenamePane = useCallback((sessionId: string, paneId: string, title: string) => {
+  const sendWorkspaceRenamePane = useCallback((workspaceId: string, paneId: string, title: string) => {
     return sendWorkspaceCommand(
-      'session_layout_rename_pane',
-      sessionId,
+      'workspace_layout_rename_pane',
+      workspaceId,
       {
-        cmd: 'session_layout_rename_pane',
-        session_id: sessionId,
+        cmd: 'workspace_layout_rename_pane',
+        workspace_id: workspaceId,
         pane_id: paneId,
         title,
       },
@@ -2583,6 +2605,37 @@ export function useDaemonSocket({
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
     ws.send(JSON.stringify({ cmd: 'clear_sessions' }));
+  }, []);
+
+  const sendRegisterWorkspace = useCallback((workspaceId: string, title: string, directory: string, endpointId?: string) => {
+    sendOrQueueCommand(
+      { cmd: 'register_workspace', id: workspaceId, title, directory, ...(endpointId ? { endpoint_id: endpointId } : {}) },
+      { waitForInitialState: true },
+    );
+  }, [sendOrQueueCommand]);
+
+  const sendUnregisterWorkspace = useCallback((workspaceId: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if (!workspaceId) {
+        resolve();
+        return;
+      }
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = `unregister_workspace:${workspaceId}`;
+      pendingActionsRef.current.set(key, { resolve: () => resolve(), reject });
+      ws.send(JSON.stringify({ cmd: 'unregister_workspace', id: workspaceId }));
+      window.setTimeout(() => {
+        if (!pendingActionsRef.current.has(key)) {
+          return;
+        }
+        pendingActionsRef.current.delete(key);
+        reject(new Error(`Workspace close timed out for ${workspaceId}`));
+      }, 10_000);
+    });
   }, []);
 
   // Unregister a single session from daemon
@@ -3578,6 +3631,8 @@ export function useDaemonSocket({
     sendFetchPRDetails,
     sendClearSessions,
     sendUnregisterSession,
+    sendRegisterWorkspace,
+    sendUnregisterWorkspace,
     sendPRVisited,
     sendListWorktrees,
     sendCreateWorktree,

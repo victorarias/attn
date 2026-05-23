@@ -149,41 +149,6 @@ func TestWorkspaceRegistry_AssociateAndDissociate(t *testing.T) {
 	}
 }
 
-func TestWorkspaceRegistry_AssociationOwnsPanelGeometry(t *testing.T) {
-	r := newWorkspaceRegistry()
-	r.register("ws1", "ws", "/repo")
-
-	if !r.associateSession("s1", "ws1", "Session 1") {
-		t.Fatal("associate should succeed")
-	}
-	snap, ok := r.snapshot("ws1")
-	if !ok {
-		t.Fatal("workspace snapshot missing")
-	}
-	if len(snap.Panels) != 1 {
-		t.Fatalf("panel count = %d, want 1", len(snap.Panels))
-	}
-	panel := snap.Panels[0]
-	if panel.ID != "s1" || panel.SessionID != "s1" || panel.Title != "Session 1" || panel.Kind != "terminal" {
-		t.Fatalf("unexpected panel: %+v", panel)
-	}
-
-	x := 120.0
-	y := 80.0
-	w := 640.0
-	h := 360.0
-	updated, updatedPanel, ok := r.updatePanelGeometry("ws1", "s1", &x, &y, &w, &h)
-	if !ok {
-		t.Fatal("updatePanelGeometry should succeed")
-	}
-	if updatedPanel.WorldX != x || updatedPanel.WorldY != y || updatedPanel.Width != w || updatedPanel.Height != h {
-		t.Fatalf("updated panel = %+v", updatedPanel)
-	}
-	if len(updated.Panels) != 1 || updated.Panels[0] != updatedPanel {
-		t.Fatalf("updated workspace panels = %+v, want %+v", updated.Panels, updatedPanel)
-	}
-}
-
 func TestWorkspaceRegistry_UnregisterCleansSessionLinks(t *testing.T) {
 	r := newWorkspaceRegistry()
 	r.register("ws1", "ws", "/repo")

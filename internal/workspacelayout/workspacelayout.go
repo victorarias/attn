@@ -1,4 +1,4 @@
-package sessionlayout
+package workspacelayout
 
 import (
 	"encoding/json"
@@ -9,7 +9,7 @@ import (
 
 const (
 	MainPaneID        = "main"
-	DefaultPaneTitle  = "Session"
+	DefaultPaneTitle  = "Agent"
 	DefaultSplitRatio = 0.5
 )
 
@@ -23,13 +23,14 @@ const (
 type PaneKind string
 
 const (
-	PaneKindMain  PaneKind = "main"
+	PaneKindAgent PaneKind = "agent"
 	PaneKindShell PaneKind = "shell"
 )
 
 type Pane struct {
 	PaneID    string
 	RuntimeID string
+	SessionID string
 	Kind      PaneKind
 	Title     string
 }
@@ -43,8 +44,8 @@ type Node struct {
 	Children  []Node    `json:"children,omitempty"`
 }
 
-type SessionLayout struct {
-	SessionID    string
+type WorkspaceLayout struct {
+	WorkspaceID  string
 	ActivePaneID string
 	Layout       Node
 	Panes        []Pane
@@ -58,16 +59,17 @@ func DefaultLayout() Node {
 	}
 }
 
-func DefaultSessionLayout(sessionID string) SessionLayout {
-	return SessionLayout{
-		SessionID:    sessionID,
+func DefaultWorkspaceLayout(workspaceID, sessionID string) WorkspaceLayout {
+	return WorkspaceLayout{
+		WorkspaceID:  workspaceID,
 		ActivePaneID: MainPaneID,
 		Layout:       DefaultLayout(),
 		Panes: []Pane{
 			{
 				PaneID:    MainPaneID,
 				RuntimeID: sessionID,
-				Kind:      PaneKindMain,
+				SessionID: sessionID,
+				Kind:      PaneKindAgent,
 				Title:     DefaultPaneTitle,
 			},
 		},
@@ -93,17 +95,15 @@ func DecodeLayout(layoutJSON string) (Node, error) {
 	return node, nil
 }
 
-func NormalizeSessionLayout(snapshot SessionLayout, mainRuntimeID string) SessionLayout {
+func NormalizeWorkspaceLayout(snapshot WorkspaceLayout, mainSessionID string) WorkspaceLayout {
 	normalized := snapshot
-	if normalized.SessionID == "" {
-		normalized.SessionID = strings.TrimSpace(mainRuntimeID)
-	}
 
 	panesByID := make(map[string]Pane, len(normalized.Panes)+1)
 	panesByID[MainPaneID] = Pane{
 		PaneID:    MainPaneID,
-		RuntimeID: strings.TrimSpace(mainRuntimeID),
-		Kind:      PaneKindMain,
+		RuntimeID: strings.TrimSpace(mainSessionID),
+		SessionID: strings.TrimSpace(mainSessionID),
+		Kind:      PaneKindAgent,
 		Title:     DefaultPaneTitle,
 	}
 
@@ -120,10 +120,17 @@ func NormalizeSessionLayout(snapshot SessionLayout, mainRuntimeID string) Sessio
 		if title == "" {
 			title = paneID
 		}
+		kind := pane.Kind
+		sessionID := strings.TrimSpace(pane.SessionID)
+		if kind != PaneKindAgent || sessionID == "" {
+			kind = PaneKindShell
+			sessionID = ""
+		}
 		panesByID[paneID] = Pane{
 			PaneID:    paneID,
 			RuntimeID: runtimeID,
-			Kind:      PaneKindShell,
+			SessionID: sessionID,
+			Kind:      kind,
 			Title:     title,
 		}
 	}
@@ -337,7 +344,7 @@ func collectPaneIDs(node Node, ids *[]string) {
 	}
 }
 
-func SortedShellRuntimeIDs(snapshot SessionLayout) []string {
+func SortedShellRuntimeIDs(snapshot WorkspaceLayout) []string {
 	runtimeIDs := make([]string, 0, len(snapshot.Panes))
 	for _, pane := range snapshot.Panes {
 		if pane.Kind != PaneKindShell {

@@ -7,6 +7,8 @@ const mockUseSessionStore = vi.fn();
 const mockUseDaemonStore = vi.fn();
 const mockUseDaemonSocket = vi.fn();
 const mockSendUnregisterSession = vi.fn();
+const mockSendRegisterWorkspace = vi.fn();
+const mockSendUnregisterWorkspace = vi.fn(async () => {});
 const mockUseKeyboardShortcuts = vi.fn();
 const mockSendWorkspaceClosePane = vi.fn(async () => ({ success: true }));
 const mockCloseSession = vi.fn();
@@ -218,6 +220,8 @@ describe('worktree cleanup prompt', () => {
       sendPRVisited: fn,
       sendRefreshPRs: vi.fn(async () => ({ success: true })),
       sendUnregisterSession: mockSendUnregisterSession,
+      sendRegisterWorkspace: mockSendRegisterWorkspace,
+      sendUnregisterWorkspace: mockSendUnregisterWorkspace,
       sendSetSetting: fn,
       sendCreateWorktree: vi.fn(async () => ({ success: true, path: '/tmp/new' })),
       sendDeleteWorktree: vi.fn(async () => ({ success: true })),
@@ -483,6 +487,8 @@ describe('worktree cleanup prompt', () => {
       sendPRVisited: fn,
       sendRefreshPRs: vi.fn(async () => ({ success: true })),
       sendUnregisterSession: mockSendUnregisterSession,
+      sendRegisterWorkspace: mockSendRegisterWorkspace,
+      sendUnregisterWorkspace: mockSendUnregisterWorkspace,
       sendSetSetting: fn,
       sendCreateWorktree: vi.fn(async () => ({ success: true, path: '/tmp/new' })),
       sendDeleteWorktree: vi.fn(async () => ({ success: true })),

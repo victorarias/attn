@@ -1,10 +1,11 @@
 //! Build-profile awareness for the Tauri shell.
 //!
 //! The `ATTN_BUILD_PROFILE` env var is read at *compile* time and baked
-//! into the binary. At startup we propagate it into the process env as
-//! `ATTN_PROFILE` so the spawned daemon inherits it, and we pre-set
-//! `ATTN_WS_PORT` to the profile's default port so the Rust-side
-//! health probes look at the right TCP port from the very first call.
+//! into the binary. At startup a profile-baked app makes that profile
+//! authoritative for daemon routing: it sets `ATTN_PROFILE` and
+//! `ATTN_WS_PORT`, and removes socket/database/config paths inherited from
+//! a parent attn terminal. That prevents the dev bundle from reaching the
+//! production daemon while being launched from a production session.
 //!
 //! Keep the dev port in sync with `internal/config/config.go::WSPort`.
 
@@ -42,22 +43,18 @@ pub fn default_port_for_build_profile() -> &'static str {
 
 /// Applies the build-time profile to the process env, so spawned daemon
 /// subprocesses inherit it and any subsequent env lookups in the shell
-/// itself (e.g. `daemon_http_port`) see the expected port.
-///
-/// Respects caller overrides: if `ATTN_PROFILE` or `ATTN_WS_PORT` are
-/// already set in the parent env (e.g. for tests), we leave them alone.
+/// itself (e.g. `daemon_http_port`) see the expected isolated endpoint.
 ///
 /// Must be called before any function that reads `ATTN_PROFILE` or
 /// `ATTN_WS_PORT` (directly or via a spawned subprocess).
 pub fn apply_build_profile_env() {
     let profile = build_profile();
     if !profile.is_empty() {
-        if env::var_os("ATTN_PROFILE").is_none() {
-            env::set_var("ATTN_PROFILE", profile);
+        for key in ["ATTN_SOCKET_PATH", "ATTN_DB_PATH", "ATTN_CONFIG_PATH"] {
+            env::remove_var(key);
         }
-        if env::var_os("ATTN_WS_PORT").is_none() {
-            env::set_var("ATTN_WS_PORT", default_port_for_build_profile());
-        }
+        env::set_var("ATTN_PROFILE", profile);
+        env::set_var("ATTN_WS_PORT", default_port_for_build_profile());
     }
 }
 
@@ -81,8 +78,7 @@ pub fn bundle_identifier() -> &'static str {
 ///   - `ATTN_PROFILE=dev`   → on   (default for dev)
 ///   - otherwise            → off  (default for prod / unset)
 ///
-/// `apply_build_profile_env` must run first so a dev build that didn't
-/// inherit `ATTN_PROFILE=dev` from its parent process still sees the
+/// `apply_build_profile_env` must run first so a dev build always sees the
 /// right profile name when this is consulted.
 pub fn automation_enabled() -> bool {
     let automation = env::var("ATTN_AUTOMATION").ok();
