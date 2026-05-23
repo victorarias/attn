@@ -1,7 +1,7 @@
 use attn_protocol::{
     BrowseDirectoryResultMessage, ClientHelloMessage, CreateWorktreeResultMessage, EndpointInfo,
-    GetRepoInfoResultMessage, InspectPathResultMessage, PullRequestSummary, RepoState, ServerEvent,
-    Session, SettingsMap, Workspace, CAPABILITY_SHELL_AS_SESSION, PROTOCOL_VERSION,
+    GetRepoInfoResultMessage, InspectPathResultMessage, RepoState, ServerEvent, Session, SettingsMap,
+    Workspace, CAPABILITY_SHELL_AS_SESSION, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use gpui::{AsyncApp, Context, EventEmitter, WeakEntity};
@@ -37,7 +37,6 @@ pub enum DaemonEvent {
         sessions: Vec<Session>,
         workspaces: Vec<Workspace>,
         endpoints: Vec<EndpointInfo>,
-        prs: Vec<PullRequestSummary>,
         repos: Vec<RepoState>,
         authors: Vec<attn_protocol::AuthorState>,
         github_hosts: Vec<String>,
@@ -63,9 +62,6 @@ pub enum DaemonEvent {
     },
     AuthorsUpdated {
         authors: Vec<attn_protocol::AuthorState>,
-    },
-    PRsUpdated {
-        prs: Vec<PullRequestSummary>,
     },
     /// A session appeared (newly spawned or registered).
     SessionRegistered {
@@ -286,7 +282,6 @@ impl DaemonClient {
                     sessions: msg.sessions,
                     workspaces: msg.workspaces,
                     endpoints: msg.endpoints,
-                    prs: msg.prs,
                     repos: msg.repos,
                     authors: msg.authors,
                     github_hosts: msg.github_hosts,
@@ -324,9 +319,7 @@ impl DaemonClient {
                     authors: msg.authors,
                 });
             }
-            ServerEvent::PRsUpdated(msg) => {
-                cx.emit(DaemonEvent::PRsUpdated { prs: msg.prs });
-            }
+            ServerEvent::PRsUpdated(_msg) => {}
             ServerEvent::SessionRegistered(msg) => {
                 cx.emit(DaemonEvent::SessionRegistered {
                     session: msg.session,

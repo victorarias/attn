@@ -220,7 +220,6 @@ impl NativeApp {
                     sessions,
                     workspaces,
                     endpoints,
-                    prs: _,
                     repos,
                     authors,
                     github_hosts,
