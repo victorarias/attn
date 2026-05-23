@@ -46,6 +46,10 @@ func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath string) []s
 
 	return []string{
 		"features.hooks=true",
+		// Codex's transcript resize reflow emits a full inline-history redraw on
+		// SIGWINCH. xterm.js consumes that redraw as a visible jump into older
+		// conversation content for long sessions, unlike native terminals.
+		"features.terminal_resize_reflow=false",
 		trustedHashOverrides([]codexHookTrustEntry{
 			{eventKey: "session_start", matcher: "startup|resume", command: sessionStart},
 			{eventKey: "user_prompt_submit", command: userPromptSubmit},
