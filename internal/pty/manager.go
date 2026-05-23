@@ -449,6 +449,11 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 	// because the login shell inherits the current process environment.
 	env = filterEnvKeys(env, "CLAUDECODE")
 
+	// Interactive terminals should not inherit NO_COLOR from whichever
+	// process launched attn. Agent runners commonly set it for their own
+	// output, which would otherwise disable colors inside every PTY.
+	env = filterEnvKeys(env, "NO_COLOR")
+
 	env = mergeEnvironment(env, []string{"TERM=xterm-256color"})
 	if agent != "shell" {
 		env = mergeEnvironment(env, []string{

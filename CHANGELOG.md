@@ -11,6 +11,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Changed
 - **Input Assistance Disabled**: attn no longer allows browser or operating-system autocorrection, auto-capitalization, or spellchecking to rewrite typed paths, branches, commands, prompts, comments, or searches.
 - **GitHub Host Visibility**: Settings now lists daemon-discovered authenticated GitHub hosts even when a host has no currently visible pull requests.
+- **Terminal Colors**: Interactive terminals no longer inherit `NO_COLOR` from the process that launched attn, so shells and coding agents can emit their normal colored output.
 
 ---
 

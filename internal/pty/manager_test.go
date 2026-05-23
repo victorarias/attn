@@ -166,3 +166,24 @@ func TestBuildSpawnEnv_SetsAgentExecutableForExplicitOverride(t *testing.T) {
 		t.Fatalf("expected ATTN_CODEX_EXECUTABLE override in env, got %v", env)
 	}
 }
+
+func TestBuildSpawnEnv_StripsInheritedNoColorFromInteractiveSessions(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+
+	for _, agent := range []string{"shell", "codex"} {
+		t.Run(agent, func(t *testing.T) {
+			env := buildSpawnEnv(
+				"",
+				SpawnOptions{ID: "session-1", LoginShellEnv: []string{"NO_COLOR=1"}},
+				agent,
+				"/tmp/attn-wrapper",
+				nil,
+			)
+			for _, entry := range env {
+				if strings.HasPrefix(entry, "NO_COLOR=") {
+					t.Fatalf("did not expect NO_COLOR in %s PTY environment, got %v", agent, env)
+				}
+			}
+		})
+	}
+}
