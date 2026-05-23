@@ -3301,6 +3301,31 @@ func waitForDaemonWebSocketEvent(
 	return nil
 }
 
+func waitForProtocolWebSocketEvent(t *testing.T, conn *websocket.Conn, want string) protocol.WebSocketEvent {
+	t.Helper()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Until(deadline))
+		_, payload, err := conn.Read(ctx)
+		cancel()
+		if err != nil {
+			t.Fatalf("websocket read failed while waiting for %s: %v", want, err)
+		}
+
+		var event protocol.WebSocketEvent
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatalf("decode websocket event: %v", err)
+		}
+		if event.Event == want {
+			return event
+		}
+	}
+
+	t.Fatalf("timed out waiting for websocket event %s", want)
+	return protocol.WebSocketEvent{}
+}
+
 func initialStateIncludesSession(event map[string]interface{}, sessionID string) bool {
 	rawSessions, ok := event["sessions"].([]interface{})
 	if !ok {
@@ -3914,17 +3939,8 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 		t.Fatalf("Write mute command error: %v", err)
 	}
 
-	// Read prs_updated broadcast
-	_, updateData, err := wsConn.Read(ctx)
-	if err != nil {
-		t.Fatalf("Read update error: %v", err)
-	}
-
-	var updateEvent protocol.WebSocketEvent
-	json.Unmarshal(updateData, &updateEvent)
-	if updateEvent.Event != protocol.EventPRsUpdated {
-		t.Errorf("Expected event=%s, got event=%s", protocol.EventPRsUpdated, updateEvent.Event)
-	}
+	// Other background broadcasts may arrive before the PR update.
+	updateEvent := waitForProtocolWebSocketEvent(t, wsConn, protocol.EventPRsUpdated)
 	if len(updateEvent.Prs) != 1 {
 		t.Fatalf("Expected 1 PR in update, got %d", len(updateEvent.Prs))
 	}
@@ -3938,14 +3954,7 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 		t.Fatalf("Write second mute command error: %v", err)
 	}
 
-	// Read second prs_updated broadcast
-	_, updateData2, err := wsConn.Read(ctx)
-	if err != nil {
-		t.Fatalf("Read second update error: %v", err)
-	}
-
-	var updateEvent2 protocol.WebSocketEvent
-	json.Unmarshal(updateData2, &updateEvent2)
+	updateEvent2 := waitForProtocolWebSocketEvent(t, wsConn, protocol.EventPRsUpdated)
 	if updateEvent2.Prs[0].Muted {
 		t.Error("Expected PR to be unmuted after second mute command (toggle)")
 	}
