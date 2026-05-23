@@ -10,160 +10,159 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "64"
+const ProtocolVersion = "65"
 
 // Commands
 const (
-	CmdClientHello                  = "client_hello"
-	CmdRegister                     = "register"
-	CmdUnregister                   = "unregister"
-	CmdState                        = "state"
-	CmdSetSessionResumeID           = "set_session_resume_id"
-	CmdStop                         = "stop"
-	CmdTodos                        = "todos"
-	CmdQuery                        = "query"
-	CmdHeartbeat                    = "heartbeat"
-	CmdSessionVisualized            = "session_visualized"
-	CmdMute                         = "mute"
-	CmdQueryPRs                     = "query_prs"
-	CmdMutePR                       = "mute_pr"
-	CmdMuteRepo                     = "mute_repo"
-	CmdMuteAuthor                   = "mute_author"
-	CmdCollapseRepo                 = "collapse_repo"
-	CmdQueryRepos                   = "query_repos"
-	CmdQueryAuthors                 = "query_authors"
-	CmdFetchPRDetails               = "fetch_pr_details"
-	CmdRefreshPRs                   = "refresh_prs"
-	CmdClearSessions                = "clear_sessions"
-	CmdClearWarnings                = "clear_warnings"
-	CmdPRVisited                    = "pr_visited"
-	CmdListWorktrees                = "list_worktrees"
-	CmdCreateWorktree               = "create_worktree"
-	CmdDeleteWorktree               = "delete_worktree"
-	CmdGetSettings                  = "get_settings"
-	CmdSetSetting                   = "set_setting"
-	CmdListPlugins                  = "list_plugins"
-	CmdInstallPlugin                = "install_plugin"
-	CmdRemovePlugin                 = "remove_plugin"
-	CmdSetPluginPriority            = "set_plugin_priority"
-	CmdAddEndpoint                  = "add_endpoint"
-	CmdRemoveEndpoint               = "remove_endpoint"
-	CmdUpdateEndpoint               = "update_endpoint"
-	CmdListEndpoints                = "list_endpoints"
-	CmdSetEndpointRemoteWeb         = "set_endpoint_remote_web"
-	CmdBootstrapEndpoint            = "bootstrap_endpoint"
-	CmdApprovePR                    = "approve_pr"
-	CmdMergePR                      = "merge_pr"
-	CmdInjectTestPR                 = "inject_test_pr"
-	CmdInjectTestSession            = "inject_test_session"
-	CmdGetRecentLocations           = "get_recent_locations"
-	CmdBrowseDirectory              = "browse_directory"
-	CmdInspectPath                  = "inspect_path"
-	CmdListBranches                 = "list_branches"
-	CmdCreateWorktreeFromBranch     = "create_worktree_from_branch"
-	CmdGetDefaultBranch             = "get_default_branch"
-	CmdFetchRemotes                 = "fetch_remotes"
-	CmdListRemoteBranches           = "list_remote_branches"
-	CmdEnsureRepo                   = "ensure_repo"
-	CmdSubscribeGitStatus           = "subscribe_git_status"
-	CmdUnsubscribeGitStatus         = "unsubscribe_git_status"
-	CmdGetFileDiff                  = "get_file_diff"
-	CmdGetBranchDiffFiles           = "get_branch_diff_files"
-	CmdGetRepoInfo                  = "get_repo_info"
-	CmdGetReviewState               = "get_review_state"
-	CmdStartReviewLoop              = "start_review_loop"
-	CmdStopReviewLoop               = "stop_review_loop"
-	CmdGetReviewLoopState           = "get_review_loop_state"
-	CmdGetReviewLoopRun             = "get_review_loop_run"
-	CmdSetReviewLoopIterations      = "set_review_loop_iteration_limit"
-	CmdAnswerReviewLoop             = "answer_review_loop"
-	CmdMarkFileViewed               = "mark_file_viewed"
-	CmdAddComment                   = "add_comment"
-	CmdUpdateComment                = "update_comment"
-	CmdResolveComment               = "resolve_comment"
-	CmdDeleteComment                = "delete_comment"
-	CmdGetComments                  = "get_comments"
-	CmdSpawnSession                 = "spawn_session"
-	CmdAttachSession                = "attach_session"
-	CmdDetachSession                = "detach_session"
-	CmdPtyInput                     = "pty_input"
-	CmdPtyResize                    = "pty_resize"
-	CmdKillSession                  = "kill_session"
-	CmdSessionLayoutGet             = "session_layout_get"
-	CmdSessionLayoutSplitPane       = "session_layout_split_pane"
-	CmdSessionLayoutClosePane       = "session_layout_close_pane"
-	CmdSessionLayoutFocusPane       = "session_layout_focus_pane"
-	CmdSessionLayoutRenamePane      = "session_layout_rename_pane"
-	CmdRegisterWorkspace            = "register_workspace"
-	CmdUnregisterWorkspace          = "unregister_workspace"
-	CmdUpdateWorkspacePanelGeometry = "update_workspace_panel_geometry"
+	CmdClientHello               = "client_hello"
+	CmdRegister                  = "register"
+	CmdUnregister                = "unregister"
+	CmdState                     = "state"
+	CmdSetSessionResumeID        = "set_session_resume_id"
+	CmdStop                      = "stop"
+	CmdTodos                     = "todos"
+	CmdQuery                     = "query"
+	CmdHeartbeat                 = "heartbeat"
+	CmdSessionVisualized         = "session_visualized"
+	CmdMute                      = "mute"
+	CmdQueryPRs                  = "query_prs"
+	CmdMutePR                    = "mute_pr"
+	CmdMuteRepo                  = "mute_repo"
+	CmdMuteAuthor                = "mute_author"
+	CmdCollapseRepo              = "collapse_repo"
+	CmdQueryRepos                = "query_repos"
+	CmdQueryAuthors              = "query_authors"
+	CmdFetchPRDetails            = "fetch_pr_details"
+	CmdRefreshPRs                = "refresh_prs"
+	CmdClearSessions             = "clear_sessions"
+	CmdClearWarnings             = "clear_warnings"
+	CmdPRVisited                 = "pr_visited"
+	CmdListWorktrees             = "list_worktrees"
+	CmdCreateWorktree            = "create_worktree"
+	CmdDeleteWorktree            = "delete_worktree"
+	CmdGetSettings               = "get_settings"
+	CmdSetSetting                = "set_setting"
+	CmdListPlugins               = "list_plugins"
+	CmdInstallPlugin             = "install_plugin"
+	CmdRemovePlugin              = "remove_plugin"
+	CmdSetPluginPriority         = "set_plugin_priority"
+	CmdAddEndpoint               = "add_endpoint"
+	CmdRemoveEndpoint            = "remove_endpoint"
+	CmdUpdateEndpoint            = "update_endpoint"
+	CmdListEndpoints             = "list_endpoints"
+	CmdSetEndpointRemoteWeb      = "set_endpoint_remote_web"
+	CmdBootstrapEndpoint         = "bootstrap_endpoint"
+	CmdApprovePR                 = "approve_pr"
+	CmdMergePR                   = "merge_pr"
+	CmdInjectTestPR              = "inject_test_pr"
+	CmdInjectTestSession         = "inject_test_session"
+	CmdGetRecentLocations        = "get_recent_locations"
+	CmdBrowseDirectory           = "browse_directory"
+	CmdInspectPath               = "inspect_path"
+	CmdListBranches              = "list_branches"
+	CmdCreateWorktreeFromBranch  = "create_worktree_from_branch"
+	CmdGetDefaultBranch          = "get_default_branch"
+	CmdFetchRemotes              = "fetch_remotes"
+	CmdListRemoteBranches        = "list_remote_branches"
+	CmdEnsureRepo                = "ensure_repo"
+	CmdSubscribeGitStatus        = "subscribe_git_status"
+	CmdUnsubscribeGitStatus      = "unsubscribe_git_status"
+	CmdGetFileDiff               = "get_file_diff"
+	CmdGetBranchDiffFiles        = "get_branch_diff_files"
+	CmdGetRepoInfo               = "get_repo_info"
+	CmdGetReviewState            = "get_review_state"
+	CmdStartReviewLoop           = "start_review_loop"
+	CmdStopReviewLoop            = "stop_review_loop"
+	CmdGetReviewLoopState        = "get_review_loop_state"
+	CmdGetReviewLoopRun          = "get_review_loop_run"
+	CmdSetReviewLoopIterations   = "set_review_loop_iteration_limit"
+	CmdAnswerReviewLoop          = "answer_review_loop"
+	CmdMarkFileViewed            = "mark_file_viewed"
+	CmdAddComment                = "add_comment"
+	CmdUpdateComment             = "update_comment"
+	CmdResolveComment            = "resolve_comment"
+	CmdDeleteComment             = "delete_comment"
+	CmdGetComments               = "get_comments"
+	CmdSpawnSession              = "spawn_session"
+	CmdAttachSession             = "attach_session"
+	CmdDetachSession             = "detach_session"
+	CmdPtyInput                  = "pty_input"
+	CmdPtyResize                 = "pty_resize"
+	CmdKillSession               = "kill_session"
+	CmdWorkspaceLayoutGet        = "workspace_layout_get"
+	CmdWorkspaceLayoutSplitPane  = "workspace_layout_split_pane"
+	CmdWorkspaceLayoutClosePane  = "workspace_layout_close_pane"
+	CmdWorkspaceLayoutFocusPane  = "workspace_layout_focus_pane"
+	CmdWorkspaceLayoutRenamePane = "workspace_layout_rename_pane"
+	CmdRegisterWorkspace         = "register_workspace"
+	CmdUnregisterWorkspace       = "unregister_workspace"
 )
 
 // WebSocket Events (daemon -> client)
 const (
-	EventSessionRegistered          = "session_registered"
-	EventSessionUnregistered        = "session_unregistered"
-	EventSessionStateChanged        = "session_state_changed"
-	EventWorkspaceRegistered        = "workspace_registered"
-	EventWorkspaceUnregistered      = "workspace_unregistered"
-	EventWorkspaceStateChanged      = "workspace_state_changed"
-	EventSessionTodosUpdated        = "session_todos_updated"
-	EventSessionsUpdated            = "sessions_updated"
-	EventPRsUpdated                 = "prs_updated"
-	EventReposUpdated               = "repos_updated"
-	EventAuthorsUpdated             = "authors_updated"
-	EventInitialState               = "initial_state"
-	EventEndpointStatusChanged      = "endpoint_status_changed"
-	EventEndpointsUpdated           = "endpoints_updated"
-	EventEndpointActionResult       = "endpoint_action_result"
-	EventPRActionResult             = "pr_action_result"
-	EventRefreshPRsResult           = "refresh_prs_result"
-	EventFetchPRDetailsResult       = "fetch_pr_details_result"
-	EventBranchChanged              = "branch_changed"
-	EventWorktreeCreated            = "worktree_created"
-	EventWorktreeDeleted            = "worktree_deleted"
-	EventWorktreesUpdated           = "worktrees_updated"
-	EventCreateWorktreeResult       = "create_worktree_result"
-	EventDeleteWorktreeResult       = "delete_worktree_result"
-	EventGitOperationStarted        = "git_operation_started"
-	EventGitOperationFinished       = "git_operation_finished"
-	EventSettingsUpdated            = "settings_updated"
-	EventGitHubHostsUpdated         = "github_hosts_updated"
-	EventPluginsUpdated             = "plugins_updated"
-	EventPluginActionResult         = "plugin_action_result"
-	EventRateLimited                = "rate_limited"
-	EventRecentLocationsResult      = "recent_locations_result"
-	EventBrowseDirectoryResult      = "browse_directory_result"
-	EventInspectPathResult          = "inspect_path_result"
-	EventBranchesResult             = "branches_result"
-	EventGetDefaultBranchResult     = "get_default_branch_result"
-	EventFetchRemotesResult         = "fetch_remotes_result"
-	EventListRemoteBranchesResult   = "list_remote_branches_result"
-	EventEnsureRepoResult           = "ensure_repo_result"
-	EventGitStatusUpdate            = "git_status_update"
-	EventFileDiffResult             = "file_diff_result"
-	EventBranchDiffFilesResult      = "branch_diff_files_result"
-	EventGetRepoInfoResult          = "get_repo_info_result"
-	EventGetReviewStateResult       = "get_review_state_result"
-	EventReviewLoopResult           = "review_loop_result"
-	EventReviewLoopUpdated          = "review_loop_updated"
-	EventMarkFileViewedResult       = "mark_file_viewed_result"
-	EventAddCommentResult           = "add_comment_result"
-	EventUpdateCommentResult        = "update_comment_result"
-	EventResolveCommentResult       = "resolve_comment_result"
-	EventDeleteCommentResult        = "delete_comment_result"
-	EventGetCommentsResult          = "get_comments_result"
-	EventPtyOutput                  = "pty_output"
-	EventSpawnResult                = "spawn_result"
-	EventAttachResult               = "attach_result"
-	EventSessionExited              = "session_exited"
-	EventPtyDesync                  = "pty_desync"
-	EventPtyResized                 = "pty_resized"
-	EventSessionLayout              = "session_layout"
-	EventSessionLayoutUpdated       = "session_layout_updated"
-	EventSessionLayoutActionResult  = "session_layout_action_result"
-	EventSessionLayoutRuntimeExited = "session_layout_runtime_exited"
-	EventCommandError               = "command_error"
+	EventSessionRegistered            = "session_registered"
+	EventSessionUnregistered          = "session_unregistered"
+	EventSessionStateChanged          = "session_state_changed"
+	EventWorkspaceRegistered          = "workspace_registered"
+	EventWorkspaceUnregistered        = "workspace_unregistered"
+	EventWorkspaceStateChanged        = "workspace_state_changed"
+	EventSessionTodosUpdated          = "session_todos_updated"
+	EventSessionsUpdated              = "sessions_updated"
+	EventPRsUpdated                   = "prs_updated"
+	EventReposUpdated                 = "repos_updated"
+	EventAuthorsUpdated               = "authors_updated"
+	EventInitialState                 = "initial_state"
+	EventEndpointStatusChanged        = "endpoint_status_changed"
+	EventEndpointsUpdated             = "endpoints_updated"
+	EventEndpointActionResult         = "endpoint_action_result"
+	EventPRActionResult               = "pr_action_result"
+	EventRefreshPRsResult             = "refresh_prs_result"
+	EventFetchPRDetailsResult         = "fetch_pr_details_result"
+	EventBranchChanged                = "branch_changed"
+	EventWorktreeCreated              = "worktree_created"
+	EventWorktreeDeleted              = "worktree_deleted"
+	EventWorktreesUpdated             = "worktrees_updated"
+	EventCreateWorktreeResult         = "create_worktree_result"
+	EventDeleteWorktreeResult         = "delete_worktree_result"
+	EventGitOperationStarted          = "git_operation_started"
+	EventGitOperationFinished         = "git_operation_finished"
+	EventSettingsUpdated              = "settings_updated"
+	EventGitHubHostsUpdated           = "github_hosts_updated"
+	EventPluginsUpdated               = "plugins_updated"
+	EventPluginActionResult           = "plugin_action_result"
+	EventRateLimited                  = "rate_limited"
+	EventRecentLocationsResult        = "recent_locations_result"
+	EventBrowseDirectoryResult        = "browse_directory_result"
+	EventInspectPathResult            = "inspect_path_result"
+	EventBranchesResult               = "branches_result"
+	EventGetDefaultBranchResult       = "get_default_branch_result"
+	EventFetchRemotesResult           = "fetch_remotes_result"
+	EventListRemoteBranchesResult     = "list_remote_branches_result"
+	EventEnsureRepoResult             = "ensure_repo_result"
+	EventGitStatusUpdate              = "git_status_update"
+	EventFileDiffResult               = "file_diff_result"
+	EventBranchDiffFilesResult        = "branch_diff_files_result"
+	EventGetRepoInfoResult            = "get_repo_info_result"
+	EventGetReviewStateResult         = "get_review_state_result"
+	EventReviewLoopResult             = "review_loop_result"
+	EventReviewLoopUpdated            = "review_loop_updated"
+	EventMarkFileViewedResult         = "mark_file_viewed_result"
+	EventAddCommentResult             = "add_comment_result"
+	EventUpdateCommentResult          = "update_comment_result"
+	EventResolveCommentResult         = "resolve_comment_result"
+	EventDeleteCommentResult          = "delete_comment_result"
+	EventGetCommentsResult            = "get_comments_result"
+	EventPtyOutput                    = "pty_output"
+	EventSpawnResult                  = "spawn_result"
+	EventAttachResult                 = "attach_result"
+	EventSessionExited                = "session_exited"
+	EventPtyDesync                    = "pty_desync"
+	EventPtyResized                   = "pty_resized"
+	EventWorkspaceLayout              = "workspace_layout"
+	EventWorkspaceLayoutUpdated       = "workspace_layout_updated"
+	EventWorkspaceLayoutActionResult  = "workspace_layout_action_result"
+	EventWorkspaceLayoutRuntimeExited = "workspace_layout_runtime_exited"
+	EventCommandError                 = "command_error"
 )
 
 // Session states (values for SessionState enum)
@@ -179,18 +178,6 @@ const (
 // Agent values
 const (
 	AgentShellValue = "shell"
-)
-
-// Client capabilities advertised in ClientHelloMessage.capabilities.
-// Daemon code checks these via wsClient.HasCapability so behavior can
-// diverge per client without name-keying on client_kind. Unknown
-// capability strings are silently ignored.
-const (
-	// CapabilityShellAsSession: when set, the daemon treats shell PTY
-	// spawns from this client as first-class sessions (store + broadcast)
-	// rather than fire-and-forget utility terminals. Declared by the
-	// native-canvas app; absent from the legacy Tauri app.
-	CapabilityShellAsSession = "shell_as_session"
 )
 
 // PR states (values for PR.State field, distinct from session states)
@@ -775,38 +762,38 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdSessionLayoutGet:
-		var msg SessionLayoutGetMessage
+	case CmdWorkspaceLayoutGet:
+		var msg WorkspaceLayoutGetMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal session_layout_get: %w", err)
+			return "", nil, fmt.Errorf("unmarshal workspace_layout_get: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdSessionLayoutSplitPane:
-		var msg SessionLayoutSplitPaneMessage
+	case CmdWorkspaceLayoutSplitPane:
+		var msg WorkspaceLayoutSplitPaneMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal session_layout_split_pane: %w", err)
+			return "", nil, fmt.Errorf("unmarshal workspace_layout_split_pane: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdSessionLayoutClosePane:
-		var msg SessionLayoutClosePaneMessage
+	case CmdWorkspaceLayoutClosePane:
+		var msg WorkspaceLayoutClosePaneMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal session_layout_close_pane: %w", err)
+			return "", nil, fmt.Errorf("unmarshal workspace_layout_close_pane: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdSessionLayoutFocusPane:
-		var msg SessionLayoutFocusPaneMessage
+	case CmdWorkspaceLayoutFocusPane:
+		var msg WorkspaceLayoutFocusPaneMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal session_layout_focus_pane: %w", err)
+			return "", nil, fmt.Errorf("unmarshal workspace_layout_focus_pane: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdSessionLayoutRenamePane:
-		var msg SessionLayoutRenamePaneMessage
+	case CmdWorkspaceLayoutRenamePane:
+		var msg WorkspaceLayoutRenamePaneMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal session_layout_rename_pane: %w", err)
+			return "", nil, fmt.Errorf("unmarshal workspace_layout_rename_pane: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 
@@ -821,13 +808,6 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg UnregisterWorkspaceMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal unregister_workspace: %w", err)
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdUpdateWorkspacePanelGeometry:
-		var msg UpdateWorkspacePanelGeometryMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal update_workspace_panel_geometry: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

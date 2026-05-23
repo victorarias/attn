@@ -28,9 +28,6 @@ enum SessionAgent {
   codex,
   copilot,
   pi,
-  // Shell agents are first-class sessions for clients that advertise the
-  // shell_as_session capability (the native canvas app); the Tauri app
-  // continues to filter them out of its sidebar.
   shell,
 }
 
@@ -49,12 +46,12 @@ enum WorkspaceStatus {
   idle,
 }
 
-enum SessionLayoutPaneKind {
-  main,
+enum WorkspaceLayoutPaneKind {
+  agent,
   shell,
 }
 
-enum SessionLayoutSplitDirection {
+enum WorkspaceLayoutSplitDirection {
   vertical,
   horizontal,
 }
@@ -129,7 +126,7 @@ model Session {
   agent: SessionAgent;
   directory: string;
   endpoint_id?: string;         // Optional: owning endpoint for remote/session-aware routing
-  workspace_id?: string;        // Optional: owning workspace if session was spawned within a workspace context
+  workspace_id?: string;        // Owning workspace; required for newly-created sessions
   branch?: string;              // Optional: might not be in git repo
   is_worktree?: boolean;        // Optional: false if not worktree
   main_repo?: string;           // Optional: only set if worktree
@@ -143,28 +140,13 @@ model Session {
   muted: boolean;               // Always has value (defaults false)
 }
 
-// Workspace is a directory + multiple agents (sessions) + panels of any type.
-// Status is rolled up from member sessions. Used by the native canvas UI sidebar.
+// Workspace is a directory plus one or more agent sessions and its split layout.
 model Workspace {
   id: string;
   title: string;
   directory: string;
   status: WorkspaceStatus;
-  panels?: WorkspacePanel[];
-}
-
-// A daemon-owned canvas panel inside a Workspace. The native app may keep
-// transient drag state while a gesture is active, but these fields are the
-// durable geometry restored after daemon/client restart.
-model WorkspacePanel {
-  id: string;
-  session_id: string;
-  kind: string; // currently "terminal"
-  title: string;
-  world_x: float64;
-  world_y: float64;
-  width: float64;
-  height: float64;
+  layout?: WorkspaceLayout;
 }
 
 model PR {
@@ -288,18 +270,20 @@ model GitFileChange {
   old_path?: string;     // For renames
 }
 
-model SessionLayoutPane {
+model WorkspaceLayoutPane {
   pane_id: string;
   runtime_id?: string;
-  kind: SessionLayoutPaneKind;
+  workspace_id?: string;
+  session_id?: string;
+  kind: WorkspaceLayoutPaneKind;
   title: string;
 }
 
-model SessionLayout {
-  session_id: string;
+model WorkspaceLayout {
+  workspace_id: string;
   active_pane_id: string;
   layout_json: string;
-  panes: SessionLayoutPane[];
+  panes: WorkspaceLayoutPane[];
   updated_at?: string;
 }
 
@@ -344,15 +328,9 @@ model EndpointInfo {
 // hello are treated as the legacy default (no capabilities) for
 // backwards compatibility.
 //
-// Capabilities are open-ended strings — the daemon checks the ones it
-// recognizes; unknown capabilities are ignored. Currently defined:
-//   - "shell_as_session" — when the client spawns a shell PTY via
-//     spawn_session, the daemon treats it as a first-class session
-//     (added to the store, broadcast as session_registered) instead of
-//     a fire-and-forget utility terminal.
 model ClientHelloMessage {
   cmd: "client_hello";
-  client_kind: string;          // e.g. "native-canvas", "tauri-app"
+  client_kind: string;          // e.g. "tauri-app", "remote-web"
   version: string;              // free-form, used for diagnostics
   capabilities: string[];       // see capability docstrings above
 }
@@ -363,6 +341,7 @@ model RegisterMessage {
   label?: string;
   agent?: SessionAgent;         // Optional for legacy wrappers
   dir: string;
+  workspace_id: string;
 }
 
 model UnregisterMessage {
@@ -758,7 +737,7 @@ model SpawnSessionMessage {
   id: string;
   cwd: string;
   endpoint_id?: string;
-  workspace_id?: string;    // Optional: owning workspace if spawned from a canvas-UI workspace
+  workspace_id: string;     // Required owner for agent sessions
   agent: string;            // "claude", "codex", "copilot", "shell"
   cols: int32;
   rows: int32;
@@ -804,33 +783,33 @@ model KillSessionMessage {
   signal?: string; // "SIGTERM", "SIGINT", ...
 }
 
-model SessionLayoutGetMessage {
-  cmd: "session_layout_get";
-  session_id: string;
+model WorkspaceLayoutGetMessage {
+  cmd: "workspace_layout_get";
+  workspace_id: string;
 }
 
-model SessionLayoutSplitPaneMessage {
-  cmd: "session_layout_split_pane";
-  session_id: string;
+model WorkspaceLayoutSplitPaneMessage {
+  cmd: "workspace_layout_split_pane";
+  workspace_id: string;
   target_pane_id: string;
-  direction: SessionLayoutSplitDirection;
+  direction: WorkspaceLayoutSplitDirection;
 }
 
-model SessionLayoutClosePaneMessage {
-  cmd: "session_layout_close_pane";
-  session_id: string;
+model WorkspaceLayoutClosePaneMessage {
+  cmd: "workspace_layout_close_pane";
+  workspace_id: string;
   pane_id: string;
 }
 
-model SessionLayoutFocusPaneMessage {
-  cmd: "session_layout_focus_pane";
-  session_id: string;
+model WorkspaceLayoutFocusPaneMessage {
+  cmd: "workspace_layout_focus_pane";
+  workspace_id: string;
   pane_id: string;
 }
 
-model SessionLayoutRenamePaneMessage {
-  cmd: "session_layout_rename_pane";
-  session_id: string;
+model WorkspaceLayoutRenamePaneMessage {
+  cmd: "workspace_layout_rename_pane";
+  workspace_id: string;
   pane_id: string;
   title: string;
 }
@@ -840,21 +819,12 @@ model RegisterWorkspaceMessage {
   id: string;
   title: string;
   directory: string;
+  endpoint_id?: string;
 }
 
 model UnregisterWorkspaceMessage {
   cmd: "unregister_workspace";
   id: string;
-}
-
-model UpdateWorkspacePanelGeometryMessage {
-  cmd: "update_workspace_panel_geometry";
-  workspace_id: string;
-  panel_id: string;
-  world_x?: float64;
-  world_y?: float64;
-  width?: float64;
-  height?: float64;
 }
 
 // ============================================================================
@@ -868,7 +838,6 @@ model InitialStateMessage {
   daemon_instance_id?: string;
   sessions?: Session[];
   endpoints?: EndpointInfo[];
-  session_layouts?: SessionLayout[];
   workspaces?: Workspace[];
   prs?: PR[];
   repos?: RepoState[];
@@ -936,28 +905,28 @@ model SessionsUpdatedMessage {
   sessions?: Session[];
 }
 
-model SessionLayoutMessage {
-  event: "session_layout";
-  session_layout: SessionLayout;
+model WorkspaceLayoutMessage {
+  event: "workspace_layout";
+  workspace_layout: WorkspaceLayout;
 }
 
-model SessionLayoutUpdatedMessage {
-  event: "session_layout_updated";
-  session_layout: SessionLayout;
+model WorkspaceLayoutUpdatedMessage {
+  event: "workspace_layout_updated";
+  workspace_layout: WorkspaceLayout;
 }
 
-model SessionLayoutActionResultMessage {
-  event: "session_layout_action_result";
+model WorkspaceLayoutActionResultMessage {
+  event: "workspace_layout_action_result";
   action: string;
-  session_id: string;
+  workspace_id: string;
   pane_id?: string;
   success: boolean;
   error?: string;
 }
 
-model SessionLayoutRuntimeExitedMessage {
-  event: "session_layout_runtime_exited";
-  session_id: string;
+model WorkspaceLayoutRuntimeExitedMessage {
+  event: "workspace_layout_runtime_exited";
+  workspace_id: string;
   pane_id: string;
   runtime_id: string;
   exit_code: int32;
@@ -1428,7 +1397,6 @@ model Response {
   ok: boolean;
   error?: string;
   sessions?: Session[];
-  session_layouts?: SessionLayout[];
   prs?: PR[];
   repos?: RepoState[];
   authors?: AuthorState[];
@@ -1452,10 +1420,10 @@ model WebSocketEvent {
   pane_id?: string;
   runtime_id?: string;
   session_id?: string;
+  workspace_id?: string;
   session?: Session;
   sessions?: Session[];
-  session_layout?: SessionLayout;
-  session_layouts?: SessionLayout[];
+  workspace_layout?: WorkspaceLayout;
   workspace?: Workspace;
   workspaces?: Workspace[];
   prs?: PR[];
@@ -1539,10 +1507,10 @@ alias DaemonEvent =
   | WorkspaceStateChangedMessage
   | SessionTodosUpdatedMessage
   | SessionsUpdatedMessage
-  | SessionLayoutMessage
-  | SessionLayoutUpdatedMessage
-  | SessionLayoutActionResultMessage
-  | SessionLayoutRuntimeExitedMessage
+  | WorkspaceLayoutMessage
+  | WorkspaceLayoutUpdatedMessage
+  | WorkspaceLayoutActionResultMessage
+  | WorkspaceLayoutRuntimeExitedMessage
   | PRsUpdatedMessage
   | ReposUpdatedMessage
   | AuthorsUpdatedMessage

@@ -28,8 +28,8 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
-	"github.com/victorarias/attn/internal/sessionlayout"
 	"github.com/victorarias/attn/internal/store"
+	"github.com/victorarias/attn/internal/workspacelayout"
 	"nhooyr.io/websocket"
 )
 
@@ -1284,6 +1284,11 @@ func (b *fakeReviewLoopBackend) SetScrollback(sessionID, text string) {
 	b.scrollback[sessionID] = []byte(text)
 }
 
+func addTestWorkspace(d *Daemon, id, directory string) {
+	d.store.AddWorkspace(&protocol.Workspace{ID: id, Title: id, Directory: directory, Status: protocol.WorkspaceStatusLaunching})
+	d.workspaces.register(id, id, directory)
+}
+
 func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDForRecoverableClaudeSession(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
@@ -1302,6 +1307,7 @@ func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDForRecoverableClaude
 		Recoverable:    protocol.Ptr(true),
 	})
 	d.store.SetResumeSessionID("attn-session", "claude-session")
+	addTestWorkspace(d, "workspace-attn-session", t.TempDir())
 
 	client := &wsClient{
 		send:            make(chan outboundMessage, 2),
@@ -1314,6 +1320,7 @@ func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDForRecoverableClaude
 		Cols:            80,
 		Rows:            24,
 		Agent:           "claude",
+		WorkspaceID:     "workspace-attn-session",
 		ResumeSessionID: protocol.Ptr("attn-session"),
 	}
 
@@ -1359,6 +1366,7 @@ func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDEvenWhenNotRecoverab
 		Recoverable:    protocol.Ptr(false),
 	})
 	d.store.SetResumeSessionID("attn-session", "claude-session")
+	addTestWorkspace(d, "workspace-attn-session", t.TempDir())
 
 	client := &wsClient{
 		send:            make(chan outboundMessage, 2),
@@ -1371,6 +1379,7 @@ func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDEvenWhenNotRecoverab
 		Cols:            80,
 		Rows:            24,
 		Agent:           "claude",
+		WorkspaceID:     "workspace-attn-session",
 		ResumeSessionID: protocol.Ptr("attn-session"),
 	}
 
@@ -1402,6 +1411,7 @@ func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDForCodexSession(t *t
 		LastSeen:       now,
 	})
 	d.store.SetResumeSessionID("attn-session", "codex-session")
+	addTestWorkspace(d, "workspace-attn-session", t.TempDir())
 
 	client := &wsClient{
 		send:            make(chan outboundMessage, 2),
@@ -1414,6 +1424,7 @@ func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDForCodexSession(t *t
 		Cols:            80,
 		Rows:            24,
 		Agent:           "codex",
+		WorkspaceID:     "workspace-attn-session",
 		ResumeSessionID: protocol.Ptr("attn-session"),
 	}
 
@@ -1463,10 +1474,11 @@ func TestDaemon_HandleSetSessionResumeID_QueuesUntilSessionExists(t *testing.T) 
 	go func() {
 		defer close(done)
 		d.handleRegister(serverConn, &protocol.RegisterMessage{
-			ID:    "attn-session",
-			Label: protocol.Ptr("attn-session"),
-			Dir:   t.TempDir(),
-			Agent: protocol.Ptr(protocol.SessionAgentCodex),
+			ID:          "attn-session",
+			Label:       protocol.Ptr("attn-session"),
+			Dir:         t.TempDir(),
+			Agent:       protocol.Ptr(protocol.SessionAgentCodex),
+			WorkspaceID: "workspace-attn-session",
 		})
 		_ = serverConn.Close()
 	}()
@@ -2369,16 +2381,16 @@ func TestDaemon_HandleUnregisterWS_RemovesWorkspaceAndBroadcastsSessionUnregiste
 		LastSeen:       time.Now().UTC().Format(time.RFC3339),
 	}
 	d.store.Add(session)
-	if err := d.store.SaveSessionLayout(sessionlayout.SessionLayout{
-		SessionID:    session.ID,
-		ActivePaneID: sessionlayout.MainPaneID,
-		Layout:       sessionlayout.DefaultLayout(),
-		Panes: []sessionlayout.Pane{
-			{PaneID: sessionlayout.MainPaneID, RuntimeID: session.ID, Kind: sessionlayout.PaneKindMain, Title: sessionlayout.DefaultPaneTitle},
-			{PaneID: "pane-shell-1", RuntimeID: "runtime-shell-1", Kind: sessionlayout.PaneKindShell, Title: "Shell 1"},
+	if err := d.store.SaveWorkspaceLayout(workspacelayout.WorkspaceLayout{
+		WorkspaceID:  "workspace-" + session.ID,
+		ActivePaneID: workspacelayout.MainPaneID,
+		Layout:       workspacelayout.DefaultLayout(),
+		Panes: []workspacelayout.Pane{
+			{PaneID: workspacelayout.MainPaneID, RuntimeID: session.ID, Kind: workspacelayout.PaneKindAgent, Title: workspacelayout.DefaultPaneTitle},
+			{PaneID: "pane-shell-1", RuntimeID: "runtime-shell-1", Kind: workspacelayout.PaneKindShell, Title: "Shell 1"},
 		},
 	}); err != nil {
-		t.Fatalf("SaveSessionLayout() error = %v", err)
+		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
 	}
 
 	client := &wsClient{
@@ -2393,8 +2405,8 @@ func TestDaemon_HandleUnregisterWS_RemovesWorkspaceAndBroadcastsSessionUnregiste
 	if got := d.store.Get(session.ID); got != nil {
 		t.Fatalf("store.Get(%q) = %+v, want nil", session.ID, got)
 	}
-	if got := d.store.GetSessionLayout(session.ID); got != nil {
-		t.Fatalf("store.GetSessionLayout(%q) = %+v, want nil", session.ID, got)
+	if got := d.store.GetWorkspaceLayout(session.ID); got != nil {
+		t.Fatalf("store.GetWorkspaceLayout(%q) = %+v, want nil", session.ID, got)
 	}
 
 	event := readOutboundEvent(t, client)
@@ -3289,6 +3301,31 @@ func waitForDaemonWebSocketEvent(
 	return nil
 }
 
+func waitForProtocolWebSocketEvent(t *testing.T, conn *websocket.Conn, want string) protocol.WebSocketEvent {
+	t.Helper()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Until(deadline))
+		_, payload, err := conn.Read(ctx)
+		cancel()
+		if err != nil {
+			t.Fatalf("websocket read failed while waiting for %s: %v", want, err)
+		}
+
+		var event protocol.WebSocketEvent
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatalf("decode websocket event: %v", err)
+		}
+		if event.Event == want {
+			return event
+		}
+	}
+
+	t.Fatalf("timed out waiting for websocket event %s", want)
+	return protocol.WebSocketEvent{}
+}
+
 func initialStateIncludesSession(event map[string]interface{}, sessionID string) bool {
 	rawSessions, ok := event["sessions"].([]interface{})
 	if !ok {
@@ -3902,17 +3939,8 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 		t.Fatalf("Write mute command error: %v", err)
 	}
 
-	// Read prs_updated broadcast
-	_, updateData, err := wsConn.Read(ctx)
-	if err != nil {
-		t.Fatalf("Read update error: %v", err)
-	}
-
-	var updateEvent protocol.WebSocketEvent
-	json.Unmarshal(updateData, &updateEvent)
-	if updateEvent.Event != protocol.EventPRsUpdated {
-		t.Errorf("Expected event=%s, got event=%s", protocol.EventPRsUpdated, updateEvent.Event)
-	}
+	// Other background broadcasts may arrive before the PR update.
+	updateEvent := waitForProtocolWebSocketEvent(t, wsConn, protocol.EventPRsUpdated)
 	if len(updateEvent.Prs) != 1 {
 		t.Fatalf("Expected 1 PR in update, got %d", len(updateEvent.Prs))
 	}
@@ -3926,14 +3954,7 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 		t.Fatalf("Write second mute command error: %v", err)
 	}
 
-	// Read second prs_updated broadcast
-	_, updateData2, err := wsConn.Read(ctx)
-	if err != nil {
-		t.Fatalf("Read second update error: %v", err)
-	}
-
-	var updateEvent2 protocol.WebSocketEvent
-	json.Unmarshal(updateData2, &updateEvent2)
+	updateEvent2 := waitForProtocolWebSocketEvent(t, wsConn, protocol.EventPRsUpdated)
 	if updateEvent2.Prs[0].Muted {
 		t.Error("Expected PR to be unmuted after second mute command (toggle)")
 	}
@@ -4271,21 +4292,26 @@ func TestDaemon_StateTransitions_AllStates(t *testing.T) {
 			t.Fatalf("UpdateState to %s error: %v", expectedState, err)
 		}
 
-		// Read and verify event
-		_, eventData, err := wsConn.Read(ctx)
-		if err != nil {
-			t.Fatalf("Read event error for state %s: %v", expectedState, err)
-		}
-
 		var event protocol.WebSocketEvent
-		json.Unmarshal(eventData, &event)
-
-		if event.Event != protocol.EventSessionStateChanged {
-			t.Errorf("Expected event=%s for state %s, got event=%s", protocol.EventSessionStateChanged, expectedState, event.Event)
+		for {
+			_, eventData, err := wsConn.Read(ctx)
+			if err != nil {
+				t.Fatalf("Read event error for state %s: %v", expectedState, err)
+			}
+			if err := json.Unmarshal(eventData, &event); err != nil {
+				t.Fatalf("Decode event for state %s: %v", expectedState, err)
+			}
+			if event.Event == protocol.EventSessionStateChanged {
+				break
+			}
 		}
 		// Compare state - need to handle string/SessionState conversion
-		if string(event.Session.State) != expectedState {
-			t.Errorf("Expected state=%s, got state=%s", expectedState, event.Session.State)
+		gotState := ""
+		if event.Session != nil {
+			gotState = string(event.Session.State)
+		}
+		if gotState != expectedState {
+			t.Errorf("Expected state=%s, got state=%s", expectedState, gotState)
 		}
 	}
 }
@@ -4358,17 +4384,18 @@ func TestDaemon_InjectTestSession_BroadcastsToWebSocket(t *testing.T) {
 	conn.Write(msgJSON)
 	conn.Close()
 
-	// Read WebSocket event - should be session_registered
-	_, eventData, err := wsConn.Read(ctx)
-	if err != nil {
-		t.Fatalf("Read event error: %v", err)
-	}
-
 	var event protocol.WebSocketEvent
-	json.Unmarshal(eventData, &event)
-
-	if event.Event != protocol.EventSessionRegistered {
-		t.Errorf("Expected event=%s, got event=%s", protocol.EventSessionRegistered, event.Event)
+	for {
+		_, eventData, err := wsConn.Read(ctx)
+		if err != nil {
+			t.Fatalf("Read event error: %v", err)
+		}
+		if err := json.Unmarshal(eventData, &event); err != nil {
+			t.Fatalf("Decode event error: %v", err)
+		}
+		if event.Event == protocol.EventSessionRegistered {
+			break
+		}
 	}
 	if event.Session == nil {
 		t.Fatal("Expected Session in event")

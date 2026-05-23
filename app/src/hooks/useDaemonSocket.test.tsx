@@ -312,7 +312,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         event: 'initial_state',
         protocol_version: '41',
         sessions: [],
-        session_layouts: [],
+        workspaces: [],
         prs: [],
         repos: [],
         authors: [],
@@ -449,7 +449,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       ws.emit({
         event: 'initial_state',
         sessions: [],
-        session_layouts: [],
+        workspaces: [],
         prs: [],
         repos: [],
         authors: [],
@@ -509,18 +509,24 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '64',
+        protocol_version: '65',
         sessions: [],
-        session_layouts: [{
-          session_id: 'sess-remote',
-          active_pane_id: 'main',
-          layout_json: '',
-          panes: [{
-            pane_id: 'pane-shell-1',
-            kind: 'shell',
-            runtime_id: 'runtime-shell-1',
-            title: 'Shell 1',
-          }],
+        workspaces: [{
+          id: 'workspace-sess-remote',
+          title: 'Remote',
+          directory: '/tmp/repo',
+          status: 'idle',
+          layout: {
+            workspace_id: 'workspace-sess-remote',
+            active_pane_id: 'main',
+            layout_json: '',
+            panes: [{
+              pane_id: 'pane-shell-1',
+              kind: 'shell',
+              runtime_id: 'runtime-shell-1',
+              title: 'Shell 1',
+            }],
+          },
         }],
         prs: [],
         repos: [],
@@ -585,7 +591,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '64',
+        protocol_version: '65',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -596,7 +602,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           state_updated_at: '2026-04-08T00:00:00Z',
           last_seen: '2026-04-08T00:00:00Z',
         }],
-        session_layouts: [],
+        workspaces: [],
         prs: [],
         repos: [],
         authors: [],
@@ -642,6 +648,57 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('includes the owning workspace when spawning a new agent session', async () => {
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    const spawnPromise = ptySpawn({
+      args: {
+        id: 'sess-new',
+        cwd: '/tmp/repo',
+        workspace_id: 'workspace-sess-new',
+        agent: 'claude',
+        cols: 80,
+        rows: 24,
+      },
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({
+        cmd: 'spawn_session',
+        id: 'sess-new',
+        cwd: '/tmp/repo',
+        workspace_id: 'workspace-sess-new',
+        agent: 'claude',
+        cols: 80,
+        rows: 24,
+      });
+    });
+
+    act(() => {
+      ws.emit({ event: 'spawn_result', id: 'sess-new', success: true });
+    });
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-new', attach_policy: 'fresh_spawn' });
+    });
+    act(() => {
+      ws.emit({ event: 'attach_result', id: 'sess-new', success: true, cols: 80, rows: 24, running: true });
+    });
+    await expect(spawnPromise).resolves.toBeUndefined();
+    unmount();
+  });
+
   it('hydrates a remounted runtime by resizing before re-attaching', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
@@ -664,7 +721,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '64',
+        protocol_version: '65',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -675,7 +732,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           state_updated_at: '2026-04-08T00:00:00Z',
           last_seen: '2026-04-08T00:00:00Z',
         }],
-        session_layouts: [],
+        workspaces: [],
         prs: [],
         repos: [],
         authors: [],
@@ -757,7 +814,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '64',
+        protocol_version: '65',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -768,7 +825,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           state_updated_at: '2026-04-08T00:00:00Z',
           last_seen: '2026-04-08T00:00:00Z',
         }],
-        session_layouts: [],
+        workspaces: [],
         prs: [],
         repos: [],
         authors: [],
@@ -854,7 +911,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '64',
+        protocol_version: '65',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -865,7 +922,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           state_updated_at: '2026-04-08T00:00:00Z',
           last_seen: '2026-04-08T00:00:00Z',
         }],
-        session_layouts: [],
+        workspaces: [],
         prs: [],
         repos: [],
         authors: [],
@@ -937,18 +994,24 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '64',
+        protocol_version: '65',
         sessions: [],
-        session_layouts: [{
-          session_id: 'sess-remote',
-          active_pane_id: 'main',
-          layout_json: '',
-          panes: [{
-            pane_id: 'pane-shell-1',
-            kind: 'shell',
-            runtime_id: 'runtime-shell-1',
-            title: 'Shell 1',
-          }],
+        workspaces: [{
+          id: 'workspace-sess-remote',
+          title: 'Remote',
+          directory: '/tmp/repo',
+          status: 'idle',
+          layout: {
+            workspace_id: 'workspace-sess-remote',
+            active_pane_id: 'main',
+            layout_json: '',
+            panes: [{
+              pane_id: 'pane-shell-1',
+              kind: 'shell',
+              runtime_id: 'runtime-shell-1',
+              title: 'Shell 1',
+            }],
+          },
         }],
         prs: [],
         repos: [],
@@ -1027,7 +1090,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('prunes stale workspaces when sessions_updated removes a session', async () => {
+  it('retains workspaces when one agent session disappears', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
     const { unmount } = renderHook(() =>
@@ -1046,7 +1109,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '64',
+        protocol_version: '65',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -1054,15 +1117,22 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           state: 'working',
           last_seen: '2026-04-09T00:00:00Z',
         }],
-        session_layouts: [{
-          session_id: 'sess-stale',
-          active_pane_id: 'main',
-          layout_json: '',
-          panes: [{
-            pane_id: 'main',
-            kind: 'main',
-            title: 'Session',
-          }],
+        workspaces: [{
+          id: 'workspace-sess-stale',
+          title: 'stale',
+          directory: '/tmp/repo',
+          status: 'working',
+          layout: {
+            workspace_id: 'workspace-sess-stale',
+            active_pane_id: 'main',
+            layout_json: '',
+            panes: [{
+              pane_id: 'main',
+              kind: 'agent',
+              title: 'Agent',
+              session_id: 'sess-stale',
+            }],
+          },
         }],
         prs: [],
         repos: [],
@@ -1079,13 +1149,15 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     });
 
     await waitFor(() => {
-      expect(onWorkspacesUpdate).toHaveBeenLastCalledWith([]);
+      expect(onWorkspacesUpdate).toHaveBeenLastCalledWith([
+        expect.objectContaining({ id: 'workspace-sess-stale' }),
+      ]);
     });
 
     unmount();
   });
 
-  it('ignores late workspace updates for sessions that were already removed', async () => {
+  it('removes a workspace only after workspace_unregistered', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
     const { unmount } = renderHook(() =>
@@ -1104,7 +1176,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '64',
+        protocol_version: '65',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',
@@ -1112,15 +1184,22 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           state: 'working',
           last_seen: '2026-04-09T00:00:00Z',
         }],
-        session_layouts: [{
-          session_id: 'sess-removed',
-          active_pane_id: 'main',
-          layout_json: '',
-          panes: [{
-            pane_id: 'main',
-            kind: 'main',
-            title: 'Session',
-          }],
+        workspaces: [{
+          id: 'workspace-sess-removed',
+          title: 'removed',
+          directory: '/tmp/repo',
+          status: 'working',
+          layout: {
+            workspace_id: 'workspace-sess-removed',
+            active_pane_id: 'main',
+            layout_json: '',
+            panes: [{
+              pane_id: 'main',
+              kind: 'agent',
+              title: 'Agent',
+              session_id: 'sess-removed',
+            }],
+          },
         }],
         prs: [],
         repos: [],
@@ -1142,21 +1221,19 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     });
 
     await waitFor(() => {
-      expect(onWorkspacesUpdate).toHaveBeenLastCalledWith([]);
+      expect(onWorkspacesUpdate).toHaveBeenLastCalledWith([
+        expect.objectContaining({ id: 'workspace-sess-removed' }),
+      ]);
     });
 
     act(() => {
       ws.emit({
-        event: 'session_layout_updated',
-        session_layout: {
-          session_id: 'sess-removed',
-          active_pane_id: 'main',
-          layout_json: '',
-          panes: [{
-            pane_id: 'main',
-            kind: 'main',
-            title: 'Ghost',
-          }],
+        event: 'workspace_unregistered',
+        workspace: {
+          id: 'workspace-sess-removed',
+          title: 'removed',
+          directory: '/tmp/repo',
+          status: 'idle',
         },
       });
     });

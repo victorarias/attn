@@ -72,11 +72,11 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdPtyInput,
 		protocol.CmdPtyResize,
 		protocol.CmdKillSession,
-		protocol.CmdSessionLayoutGet,
-		protocol.CmdSessionLayoutSplitPane,
-		protocol.CmdSessionLayoutClosePane,
-		protocol.CmdSessionLayoutFocusPane,
-		protocol.CmdSessionLayoutRenamePane,
+		protocol.CmdWorkspaceLayoutGet,
+		protocol.CmdWorkspaceLayoutSplitPane,
+		protocol.CmdWorkspaceLayoutClosePane,
+		protocol.CmdWorkspaceLayoutFocusPane,
+		protocol.CmdWorkspaceLayoutRenamePane,
 	}
 
 	for _, cmd := range commands {

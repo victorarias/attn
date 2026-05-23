@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useSessionStore } from './sessions';
-import { SessionLayoutPaneKind } from '../types/generated';
+import { WorkspaceLayoutPaneKind, WorkspaceStatus } from '../types/generated';
 
 const { mockPtySpawn, mockPtyKill } = vi.hoisted(() => ({
   mockPtySpawn: vi.fn(),
@@ -55,6 +55,7 @@ describe('sessions store', () => {
           label: 'Old Label',
           state: 'working',
           cwd: '/tmp/old',
+          workspaceId: 'workspace-sess-1',
           agent: 'codex',
           transcriptMatched: false,
           daemonActivePaneId: 'pane-a',
@@ -133,22 +134,28 @@ describe('sessions store', () => {
 
     useSessionStore.getState().syncFromDaemonWorkspaces([
       {
-        session_id: sessionId,
-        active_pane_id: 'pane-shell',
-        layout_json: JSON.stringify({
-          type: 'split',
-          split_id: 'root',
-          direction: 'vertical',
-          ratio: 0.5,
-          children: [
-            { type: 'pane', pane_id: 'main' },
-            { type: 'pane', pane_id: 'pane-shell' },
+        id: `workspace-${sessionId}`,
+        title: 'Workspace',
+        directory: '/tmp/workspace',
+        status: WorkspaceStatus.Idle,
+        layout: {
+          workspace_id: `workspace-${sessionId}`,
+          active_pane_id: 'pane-shell',
+          layout_json: JSON.stringify({
+            type: 'split',
+            split_id: 'root',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              { type: 'pane', pane_id: 'main' },
+              { type: 'pane', pane_id: 'pane-shell' },
+            ],
+          }),
+          panes: [
+            { pane_id: 'main', kind: WorkspaceLayoutPaneKind.Agent, title: 'Agent', runtime_id: sessionId, session_id: sessionId },
+            { pane_id: 'pane-shell', kind: WorkspaceLayoutPaneKind.Shell, title: 'Shell 1', runtime_id: 'runtime-shell' },
           ],
-        }),
-        panes: [
-          { pane_id: 'main', kind: SessionLayoutPaneKind.Main, title: 'Session', runtime_id: sessionId },
-          { pane_id: 'pane-shell', kind: SessionLayoutPaneKind.Shell, title: 'Shell 1', runtime_id: 'runtime-shell' },
-        ],
+        },
       },
     ]);
 
@@ -176,20 +183,32 @@ describe('sessions store', () => {
 
     useSessionStore.getState().syncFromDaemonWorkspaces([
       {
-        session_id: sessionId,
-        active_pane_id: 'missing-pane',
-        layout_json: '{not-json',
-        panes: [
-          { pane_id: 'main', kind: SessionLayoutPaneKind.Main, title: 'Session', runtime_id: sessionId },
-        ],
+        id: `workspace-${sessionId}`,
+        title: 'Workspace',
+        directory: '/tmp/workspace',
+        status: WorkspaceStatus.Idle,
+        layout: {
+          workspace_id: `workspace-${sessionId}`,
+          active_pane_id: 'missing-pane',
+          layout_json: '{not-json',
+          panes: [
+            { pane_id: 'main', kind: WorkspaceLayoutPaneKind.Agent, title: 'Agent', runtime_id: sessionId, session_id: sessionId },
+          ],
+        },
       },
       {
-        session_id: 'unknown-session',
-        active_pane_id: 'pane-x',
-        layout_json: '',
-        panes: [
-          { pane_id: 'pane-x', kind: SessionLayoutPaneKind.Shell, title: 'Shell X', runtime_id: 'runtime-x' },
-        ],
+        id: 'workspace-unknown-session',
+        title: 'Unknown',
+        directory: '/tmp/unknown',
+        status: WorkspaceStatus.Idle,
+        layout: {
+          workspace_id: 'workspace-unknown-session',
+          active_pane_id: 'pane-x',
+          layout_json: '',
+          panes: [
+            { pane_id: 'pane-x', kind: WorkspaceLayoutPaneKind.Shell, title: 'Shell X', runtime_id: 'runtime-x' },
+          ],
+        },
       },
     ]);
 

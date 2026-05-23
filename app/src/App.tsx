@@ -262,7 +262,8 @@ function App() {
     sendMuteSession,
     sendPRVisited,
     sendRefreshPRs,
-    sendUnregisterSession,
+    sendRegisterWorkspace,
+    sendUnregisterWorkspace,
     sendSetSetting,
     sendCreateWorktree,
     sendDeleteWorktree,
@@ -375,7 +376,8 @@ function App() {
         sendMuteSession={sendMuteSession}
         sendPRVisited={sendPRVisited}
         sendRefreshPRs={sendRefreshPRs}
-        sendUnregisterSession={sendUnregisterSession}
+        sendRegisterWorkspace={sendRegisterWorkspace}
+        sendUnregisterWorkspace={sendUnregisterWorkspace}
         sendSetSetting={sendSetSetting}
         sendCreateWorktree={sendCreateWorktree}
         sendDeleteWorktree={sendDeleteWorktree}
@@ -455,7 +457,8 @@ interface AppContentProps {
   sendMuteSession: ReturnType<typeof useDaemonSocket>['sendMuteSession'];
   sendPRVisited: ReturnType<typeof useDaemonSocket>['sendPRVisited'];
   sendRefreshPRs: ReturnType<typeof useDaemonSocket>['sendRefreshPRs'];
-  sendUnregisterSession: ReturnType<typeof useDaemonSocket>['sendUnregisterSession'];
+  sendRegisterWorkspace: ReturnType<typeof useDaemonSocket>['sendRegisterWorkspace'];
+  sendUnregisterWorkspace: ReturnType<typeof useDaemonSocket>['sendUnregisterWorkspace'];
   sendSetSetting: ReturnType<typeof useDaemonSocket>['sendSetSetting'];
   sendCreateWorktree: ReturnType<typeof useDaemonSocket>['sendCreateWorktree'];
   sendDeleteWorktree: ReturnType<typeof useDaemonSocket>['sendDeleteWorktree'];
@@ -530,7 +533,8 @@ function AppContent({
   sendMuteSession,
   sendPRVisited,
   sendRefreshPRs,
-  sendUnregisterSession,
+  sendRegisterWorkspace,
+  sendUnregisterWorkspace,
   sendSetSetting,
   sendCreateWorktree,
   sendDeleteWorktree,
@@ -591,6 +595,20 @@ sendFetchPRDetails,
     syncFromDaemonSessions,
     syncFromDaemonWorkspaces,
   } = useSessionStore();
+
+  const createWorkspaceSession = useCallback(async (
+    label: string,
+    cwd: string,
+    providedSessionId?: string,
+    agent?: SessionAgent,
+    endpointId?: string,
+    yoloMode = false,
+  ) => {
+    const sessionId = providedSessionId || crypto.randomUUID();
+    const workspaceId = `workspace-${sessionId}`;
+    sendRegisterWorkspace(workspaceId, label, cwd, endpointId);
+    return createSession(label, cwd, sessionId, agent, endpointId, yoloMode, workspaceId);
+  }, [createSession, sendRegisterWorkspace]);
 
   // UI scale for font sizing (Cmd+/Cmd-) - now uses SettingsContext
   const { scale, increaseScale, decreaseScale, resetScale } = useUIScale();
@@ -706,14 +724,14 @@ sendFetchPRDetails,
             // Just activate the existing session
             setActiveSession(existingSession.id);
           } else {
-            createSession(label, cwd);
+            void createWorkspaceSession(label, cwd);
           }
         }
       }
     } catch (e) {
       console.error('Failed to parse deep-link URL:', e);
     }
-  }, [createSession, setActiveSession]);
+  }, [createWorkspaceSession, setActiveSession]);
 
   // Handle cold-start deep links (app opened via URL when not running)
   useEffect(() => {
@@ -1200,9 +1218,9 @@ sendFetchPRDetails,
       // Note: Location is automatically tracked by daemon when session registers
       const folderName = path.split('/').pop() || 'session';
       const selectedAgent = resolvePreferredAgent(agent, agentAvailability, 'codex');
-      await createSession(folderName, path, undefined, selectedAgent, endpointId, yoloMode);
+      await createWorkspaceSession(folderName, path, undefined, selectedAgent, endpointId, yoloMode);
     },
-    [agentAvailability, createSession, daemonEndpoints, hasAvailableAgents, showError]
+    [agentAvailability, createWorkspaceSession, daemonEndpoints, hasAvailableAgents, showError]
   );
 
   const closeLocationPicker = useCallback(() => {
@@ -1247,17 +1265,17 @@ sendFetchPRDetails,
         }
       }
 
-      // Unregister from daemon by matching session ID
+      // Closing the workspace owns all agent and utility PTY teardown.
       const localDaemonSession = daemonSessions.find(ds => ds.id === session?.id);
-      if (localDaemonSession) {
-        await sendUnregisterSession(localDaemonSession.id);
+      if (localDaemonSession && session) {
+        await sendUnregisterWorkspace(session.workspaceId || `workspace-${session.id}`);
       } else {
         closeSession(id);
       }
 
       removeWorkspaceRef(id);
     },
-    [alwaysKeepWorktrees, closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterSession, showError]
+    [alwaysKeepWorktrees, closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterWorkspace]
   );
 
   const handleRequestCloseSession = useCallback((id: string) => {
@@ -1300,11 +1318,12 @@ sendFetchPRDetails,
 
   const handleClosePane = useCallback((sessionId: string, paneId: string) => {
     prepareClosePaneFocus(sessionId, paneId);
-    return sendWorkspaceClosePane(sessionId, paneId).catch((error) => {
+    const workspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId ?? sessionId;
+    return sendWorkspaceClosePane(workspaceId, paneId).catch((error) => {
       clearPreparedClosePaneFocus(sessionId);
       throw error;
     });
-  }, [clearPreparedClosePaneFocus, prepareClosePaneFocus, sendWorkspaceClosePane]);
+  }, [clearPreparedClosePaneFocus, prepareClosePaneFocus, sendWorkspaceClosePane, sessions]);
 
   useUiAutomationBridge({
     sessions,
@@ -1312,12 +1331,15 @@ sendFetchPRDetails,
     daemonReady: hasReceivedInitialState && !connectionError,
     connectionError,
     getActivePaneIdForSession,
-    createSession,
+    createSession: createWorkspaceSession,
     selectSession: handleSelectSession,
     closeSession: handleCloseSession,
     reloadSession,
     setSetting: sendSetSetting,
-    splitPane: sendWorkspaceSplitPane,
+    splitPane: (sessionId, paneId, direction) => {
+      const workspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId ?? sessionId;
+      return sendWorkspaceSplitPane(workspaceId, paneId, direction);
+    },
     closePane: handleClosePane,
     focusPane: (sessionId: string, paneId: string) => {
       setActiveSession(sessionId);
@@ -1366,7 +1388,7 @@ sendFetchPRDetails,
     sendFetchPRDetails,
     sendEnsureRepo,
     sendCreateWorktreeFromBranch,
-    createSession,
+    createSession: createWorkspaceSession,
   });
 
   // Handle opening a PR in a worktree
@@ -2109,7 +2131,7 @@ sendFetchPRDetails,
                   eventRouter={paneRuntimeEventRouter}
                   getMainPaneSpawnArgs={(cols, rows) => takeSessionSpawnArgs(session.id, cols, rows)}
                   onSplitPane={(targetPaneId, direction) => {
-                    void sendWorkspaceSplitPane(session.id, targetPaneId, direction).catch(console.error);
+                    void sendWorkspaceSplitPane(session.workspaceId, targetPaneId, direction).catch(console.error);
                   }}
                   onClosePane={(paneId) => {
                     void handleClosePane(session.id, paneId).catch(console.error);

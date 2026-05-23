@@ -109,7 +109,7 @@ async function readUtilityScrollback(wsUrl: string, ptyID: string): Promise<stri
   });
 }
 
-async function sendSessionLayoutSplitPane(
+async function sendWorkspaceLayoutSplitPane(
   wsUrl: string,
   sessionID: string,
   targetPaneID: string,
@@ -119,13 +119,13 @@ async function sendSessionLayoutSplitPane(
     const ws = new WebSocket(wsUrl);
     const timeout = setTimeout(() => {
       ws.close();
-      reject(new Error('session_layout_split_pane timeout'));
+      reject(new Error('workspace_layout_split_pane timeout'));
     }, 5000);
 
     ws.onopen = () => {
       ws.send(JSON.stringify({
-        cmd: 'session_layout_split_pane',
-        session_id: sessionID,
+        cmd: 'workspace_layout_split_pane',
+        workspace_id: `workspace-${sessionID}`,
         target_pane_id: targetPaneID,
         direction,
       }));
@@ -135,15 +135,15 @@ async function sendSessionLayoutSplitPane(
       const msg = JSON.parse(event.data.toString()) as {
         event?: string;
         action?: string;
-        session_id?: string;
+        workspace_id?: string;
         pane_id?: string;
         success?: boolean;
         error?: string;
       };
       if (
-        msg.event !== 'session_layout_action_result' ||
-        msg.action !== 'session_layout_split_pane' ||
-        msg.session_id !== sessionID ||
+        msg.event !== 'workspace_layout_action_result' ||
+        msg.action !== 'workspace_layout_split_pane' ||
+        msg.workspace_id !== `workspace-${sessionID}` ||
         msg.pane_id !== targetPaneID
       ) {
         return;
@@ -155,7 +155,7 @@ async function sendSessionLayoutSplitPane(
         resolve();
         return;
       }
-      reject(new Error(msg.error || 'session_layout_split_pane failed'));
+      reject(new Error(msg.error || 'workspace_layout_split_pane failed'));
     };
 
     ws.onerror = (err) => {
@@ -405,7 +405,7 @@ test.describe('Utility Terminal Real PTY', () => {
       )
       .toBe(true);
 
-    await sendSessionLayoutSplitPane(wsUrl, 's-real-pty-main', 'main', 'vertical');
+    await sendWorkspaceLayoutSplitPane(wsUrl, 's-real-pty-main', 'main', 'vertical');
     await expect(page.locator('.dashboard')).toBeVisible({ timeout: 5000 });
 
     await page.locator('[data-testid="session-s-real-pty-d"]').click();
@@ -589,7 +589,7 @@ test.describe('Utility Terminal Real PTY', () => {
       .toBeGreaterThan(initialInputEvents.length);
     console.log('[main-before-text]', JSON.stringify(await getMainTerminalText(page, 's-real-pty-main')));
 
-    await sendSessionLayoutSplitPane(wsUrl, 's-real-pty-main', 'main', 'vertical');
+    await sendWorkspaceLayoutSplitPane(wsUrl, 's-real-pty-main', 'main', 'vertical');
     await expect
       .poll(
         async () =>

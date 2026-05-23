@@ -14,6 +14,7 @@ import {
   printCommonHelp,
 } from './common.mjs';
 import {
+  compactTerminalText,
   waitForNewShellPane,
   waitForPaneInputFocus,
   waitForPaneState,
@@ -116,7 +117,7 @@ async function main() {
             paneId: utilityPane.paneId,
           });
           lastText = payload?.text || '';
-          if (lastText.includes(utilityToken)) {
+          if (compactTerminalText(lastText).includes(compactTerminalText(utilityToken))) {
             return lastText;
           }
           await new Promise((resolve) => setTimeout(resolve, 300));

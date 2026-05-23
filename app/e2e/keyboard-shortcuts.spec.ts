@@ -260,8 +260,16 @@ test.describe('Keyboard Shortcuts', () => {
 
       await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
 
-      // ⌘J should jump to the waiting session
-      await page.keyboard.press('Meta+j');
+      // Dispatch directly so the browser does not consume Cmd+J as its own
+      // shortcut before the application shortcut listener receives it.
+      await page.evaluate(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'j',
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }));
+      });
 
       // Should be viewing a terminal (the waiting session)
       await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });

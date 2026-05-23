@@ -131,42 +131,54 @@ func TestManagerRemoteWorkspacesTrackAndClear(t *testing.T) {
 		t.Fatalf("upsertRemoteSession(second) = (%v, %d), want (true, 1)", changed, count)
 	}
 
-	if changed := manager.replaceRemoteSessionLayouts(first.ID, []protocol.SessionLayout{{
-		SessionID:    "sess-a",
-		ActivePaneID: "main",
-		LayoutJson:   `{"type":"pane","paneId":"main"}`,
-		Panes: []protocol.SessionLayoutPane{{
-			PaneID: "main",
-			Kind:   protocol.SessionLayoutPaneKindMain,
-			Title:  "Main",
-		}, {
-			PaneID:    "shell-1",
-			Kind:      protocol.SessionLayoutPaneKindShell,
-			Title:     "Shell 1",
-			RuntimeID: protocol.Ptr("runtime-a"),
-		}},
+	if changed := manager.replaceRemoteWorkspaces(first.ID, []protocol.Workspace{{
+		ID:        "ws-a",
+		Title:     "GPU review",
+		Directory: "/srv/repo",
+		Status:    protocol.WorkspaceStatusWorking,
+		Layout: &protocol.WorkspaceLayout{
+			WorkspaceID:  "ws-a",
+			ActivePaneID: "main",
+			LayoutJson:   `{"type":"pane","paneId":"main"}`,
+			Panes: []protocol.WorkspaceLayoutPane{{
+				PaneID: "main",
+				Kind:   protocol.WorkspaceLayoutPaneKindAgent,
+				Title:  "Agent",
+			}, {
+				PaneID:    "shell-1",
+				Kind:      protocol.WorkspaceLayoutPaneKindShell,
+				Title:     "Shell 1",
+				RuntimeID: protocol.Ptr("runtime-a"),
+			}},
+		},
 	}}); !changed {
-		t.Fatal("replaceRemoteSessionLayouts(first) reported no change")
+		t.Fatal("replaceRemoteWorkspaces(first) reported no change")
 	}
-	if changed := manager.replaceRemoteSessionLayouts(second.ID, []protocol.SessionLayout{{
-		SessionID:    "sess-b",
-		ActivePaneID: "main",
-		LayoutJson:   `{"type":"pane","paneId":"main"}`,
-		Panes: []protocol.SessionLayoutPane{{
-			PaneID: "main",
-			Kind:   protocol.SessionLayoutPaneKindMain,
-			Title:  "Main",
+	if changed := manager.replaceRemoteWorkspaces(second.ID, []protocol.Workspace{{
+		ID:        "ws-b",
+		Title:     "DEV fix",
+		Directory: "/srv/repo",
+		Status:    protocol.WorkspaceStatusIdle,
+		Layout: &protocol.WorkspaceLayout{
+			WorkspaceID:  "ws-b",
+			ActivePaneID: "main",
+			LayoutJson:   `{"type":"pane","paneId":"main"}`,
+			Panes: []protocol.WorkspaceLayoutPane{{
+				PaneID: "main",
+				Kind:   protocol.WorkspaceLayoutPaneKindAgent,
+				Title:  "Agent",
+			}},
 		}},
-	}}); !changed {
-		t.Fatal("replaceRemoteSessionLayouts(second) reported no change")
+	}); !changed {
+		t.Fatal("replaceRemoteWorkspaces(second) reported no change")
 	}
 
 	got := manager.RemoteWorkspaces()
 	if len(got) != 2 {
 		t.Fatalf("RemoteWorkspaces() len = %d, want 2", len(got))
 	}
-	if got[0].SessionID != "sess-a" || got[1].SessionID != "sess-b" {
-		t.Fatalf("RemoteWorkspaces() session ids = %q, %q, want sess-a, sess-b", got[0].SessionID, got[1].SessionID)
+	if got[0].ID != "ws-a" || got[1].ID != "ws-b" {
+		t.Fatalf("RemoteWorkspaces() ids = %q, %q, want ws-a, ws-b", got[0].ID, got[1].ID)
 	}
 
 	if endpointID, ok := manager.EndpointIDForSession("missing"); ok || endpointID != "" {
@@ -177,20 +189,23 @@ func TestManagerRemoteWorkspacesTrackAndClear(t *testing.T) {
 	if endpointID, ok := manager.EndpointIDForSession("sess-a"); !ok || endpointID != first.ID {
 		t.Fatalf("EndpointIDForSession(sess-a) = (%q, %v), want (%q, true)", endpointID, ok, first.ID)
 	}
+	if endpointID, ok := manager.EndpointIDForWorkspace("ws-a"); !ok || endpointID != first.ID {
+		t.Fatalf("EndpointIDForWorkspace(ws-a) = (%q, %v), want (%q, true)", endpointID, ok, first.ID)
+	}
 	if endpointID, ok := manager.EndpointIDForPTYTarget("runtime-a"); !ok || endpointID != first.ID {
 		t.Fatalf("EndpointIDForPTYTarget(runtime-a) = (%q, %v), want (%q, true)", endpointID, ok, first.ID)
 	}
 
-	if changed := manager.clearRemoteSessionLayouts(first.ID); !changed {
-		t.Fatal("clearRemoteSessionLayouts(first) reported no change")
+	if changed := manager.clearRemoteWorkspaceLayouts(first.ID); !changed {
+		t.Fatal("clearRemoteWorkspaceLayouts(first) reported no change")
 	}
 	got = manager.RemoteWorkspaces()
-	if len(got) != 1 || got[0].SessionID != "sess-b" {
-		t.Fatalf("RemoteWorkspaces() after clear = %+v, want only sess-b", got)
+	if len(got) != 1 || got[0].ID != "ws-b" {
+		t.Fatalf("RemoteWorkspaces() after clear = %+v, want only ws-b", got)
 	}
 }
 
-func TestManagerIgnoresWorkspaceUpdatesForRemovedRemoteSessions(t *testing.T) {
+func TestManagerIgnoresLayoutUpdatesForRemovedRemoteWorkspaces(t *testing.T) {
 	endpointStore := store.New()
 	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
 	if err != nil {
@@ -198,36 +213,33 @@ func TestManagerIgnoresWorkspaceUpdatesForRemovedRemoteSessions(t *testing.T) {
 	}
 
 	manager := NewManager(endpointStore, nil, nil, nil, nil)
-	if changed, count := manager.upsertRemoteSession(record.ID, protocol.Session{ID: "sess-1", Directory: "/srv/repo"}); !changed || count != 1 {
-		t.Fatalf("upsertRemoteSession() = (%v, %d), want (true, 1)", changed, count)
+	if changed := manager.upsertRemoteWorkspace(record.ID, protocol.Workspace{ID: "ws-1", Directory: "/srv/repo"}); !changed {
+		t.Fatal("upsertRemoteWorkspace() reported no change")
 	}
-	if changed := manager.upsertRemoteSessionLayout(record.ID, protocol.SessionLayout{
-		SessionID:    "sess-1",
+	if changed := manager.upsertRemoteWorkspaceLayout(record.ID, protocol.WorkspaceLayout{
+		WorkspaceID:  "ws-1",
 		ActivePaneID: "main",
 		LayoutJson:   `{"type":"pane","paneId":"main"}`,
 	}); !changed {
-		t.Fatal("upsertRemoteSessionLayout() reported no change")
+		t.Fatal("upsertRemoteWorkspaceLayout() reported no change")
 	}
 
-	if changed, count := manager.removeRemoteSession(record.ID, "sess-1"); !changed || count != 0 {
-		t.Fatalf("removeRemoteSession() = (%v, %d), want (true, 0)", changed, count)
+	if changed := manager.removeRemoteWorkspace(record.ID, "ws-1"); !changed {
+		t.Fatal("removeRemoteWorkspace() reported no change")
 	}
-	if changed := manager.removeRemoteSessionLayout(record.ID, "sess-1"); !changed {
-		t.Fatal("removeRemoteSessionLayout() reported no change")
-	}
-	if changed := manager.upsertRemoteSessionLayout(record.ID, protocol.SessionLayout{
-		SessionID:    "sess-1",
+	if changed := manager.upsertRemoteWorkspaceLayout(record.ID, protocol.WorkspaceLayout{
+		WorkspaceID:  "ws-1",
 		ActivePaneID: "main",
 		LayoutJson:   `{"type":"pane","paneId":"main"}`,
 	}); changed {
-		t.Fatal("upsertRemoteSessionLayout() should ignore workspace for removed session")
+		t.Fatal("upsertRemoteWorkspaceLayout() should ignore removed workspace")
 	}
 	if got := manager.RemoteWorkspaces(); len(got) != 0 {
 		t.Fatalf("RemoteWorkspaces() = %+v, want empty after stale workspace update", got)
 	}
 }
 
-func TestManagerForgetSessionRemovesRemoteSessionAndWorkspace(t *testing.T) {
+func TestManagerForgetSessionLeavesRemoteWorkspaceUntilWorkspaceEvent(t *testing.T) {
 	endpointStore := store.New()
 	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
 	if err != nil {
@@ -238,12 +250,15 @@ func TestManagerForgetSessionRemovesRemoteSessionAndWorkspace(t *testing.T) {
 	if changed, count := manager.upsertRemoteSession(record.ID, protocol.Session{ID: "sess-1", Directory: "/srv/repo"}); !changed || count != 1 {
 		t.Fatalf("upsertRemoteSession() = (%v, %d), want (true, 1)", changed, count)
 	}
-	if changed := manager.upsertRemoteSessionLayout(record.ID, protocol.SessionLayout{
-		SessionID:    "sess-1",
+	if changed := manager.upsertRemoteWorkspace(record.ID, protocol.Workspace{ID: "ws-1", Directory: "/srv/repo"}); !changed {
+		t.Fatal("upsertRemoteWorkspace() reported no change")
+	}
+	if changed := manager.upsertRemoteWorkspaceLayout(record.ID, protocol.WorkspaceLayout{
+		WorkspaceID:  "ws-1",
 		ActivePaneID: "main",
 		LayoutJson:   `{"type":"pane","paneId":"main"}`,
 	}); !changed {
-		t.Fatal("upsertRemoteSessionLayout() reported no change")
+		t.Fatal("upsertRemoteWorkspaceLayout() reported no change")
 	}
 
 	session := manager.RemoteSession("sess-1")
@@ -257,8 +272,8 @@ func TestManagerForgetSessionRemovesRemoteSessionAndWorkspace(t *testing.T) {
 	if got := manager.RemoteSession("sess-1"); got != nil {
 		t.Fatalf("RemoteSession(sess-1) after forget = %+v, want nil", got)
 	}
-	if got := manager.RemoteWorkspaces(); len(got) != 0 {
-		t.Fatalf("RemoteWorkspaces() after forget = %+v, want empty", got)
+	if got := manager.RemoteWorkspaces(); len(got) != 1 || got[0].ID != "ws-1" {
+		t.Fatalf("RemoteWorkspaces() after forget = %+v, want retained workspace", got)
 	}
 	if endpointID, ok := manager.EndpointIDForSession("sess-1"); ok || endpointID != "" {
 		t.Fatalf("EndpointIDForSession(sess-1) after forget = (%q, %v), want ('', false)", endpointID, ok)

@@ -70,10 +70,11 @@ func (c *Client) Register(id, label, dir string) error {
 // agent should be "claude", "codex", or "copilot"; empty preserves daemon default behavior.
 func (c *Client) RegisterWithAgent(id, label, dir, agent string) error {
 	msg := protocol.RegisterMessage{
-		Cmd:   protocol.CmdRegister,
-		ID:    id,
-		Label: protocol.Ptr(label),
-		Dir:   dir,
+		Cmd:         protocol.CmdRegister,
+		ID:          id,
+		Label:       protocol.Ptr(label),
+		Dir:         dir,
+		WorkspaceID: "workspace-" + id,
 	}
 	if agent != "" {
 		normalized := protocol.NormalizeSessionAgentString(agent, string(protocol.SessionAgentCodex))

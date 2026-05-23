@@ -20,6 +20,7 @@ export interface Session {
   label: string;
   state: UISessionState;
   cwd: string;
+  workspaceId: string;
   agent: SessionAgent;
   endpointId?: string;
   yoloMode?: boolean;
@@ -35,6 +36,7 @@ export interface DaemonSessionSnapshot {
   label: string;
   agent?: string;
   directory: string;
+  workspace_id?: string;
   endpoint_id?: string;
   state: string;
   branch?: string;
@@ -56,7 +58,7 @@ interface SessionStore {
 
   // Actions
   connect: () => Promise<void>;
-  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string, yoloMode?: boolean) => Promise<string>;
+  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string, yoloMode?: boolean, workspaceId?: string) => Promise<string>;
   closeSession: (id: string) => void;
   removeSessionLocalState: (id: string) => void;
   setActiveSession: (id: string | null) => void;
@@ -145,15 +147,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  createSession: async (label: string, cwd: string, providedId?: string, agent?: SessionAgent, endpointId?: string, yoloMode = false) => {
+  createSession: async (label: string, cwd: string, providedId?: string, agent?: SessionAgent, endpointId?: string, yoloMode = false, providedWorkspaceId?: string) => {
     // Use provided ID or generate new one
     const id = providedId || crypto.randomUUID();
+    const workspaceId = providedWorkspaceId || `workspace-${id}`;
     const resolvedAgent: SessionAgent = agent ?? 'claude';
     const session: Session = {
       id,
       label,
       state: 'launching',
       cwd,
+      workspaceId,
       agent: resolvedAgent,
       endpointId,
       yoloMode,
@@ -232,6 +236,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     return {
       id,
       cwd: session.cwd,
+      workspace_id: session.workspaceId,
       ...(session.endpointId ? { endpoint_id: session.endpointId } : {}),
       label: session.label,
       cols: resolvedCols,
@@ -279,6 +284,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         args: {
           id,
           cwd: session.cwd,
+          workspace_id: session.workspaceId,
           ...(session.endpointId ? { endpoint_id: session.endpointId } : {}),
           reload: true,
           label: session.label,
@@ -321,6 +327,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         const normalizedState = normalizeSessionState(daemonSession.state);
         const nextAgent: SessionAgent = normalizeSessionAgent(daemonSession.agent, existing?.agent ?? 'codex');
         const nextEndpointId = daemonSession.endpoint_id ?? existing?.endpointId;
+        const nextWorkspaceId = daemonSession.workspace_id ?? existing?.workspaceId ?? `workspace-${daemonSession.id}`;
         const nextBranch = daemonSession.branch ?? existing?.branch;
         const nextIsWorktree = daemonSession.is_worktree ?? existing?.isWorktree;
 
@@ -329,6 +336,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           existing.label === daemonSession.label &&
           existing.agent === nextAgent &&
           existing.cwd === daemonSession.directory &&
+          existing.workspaceId === nextWorkspaceId &&
           existing.endpointId === nextEndpointId &&
           existing.state === normalizedState &&
           existing.branch === nextBranch &&
@@ -342,6 +350,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           label: daemonSession.label,
           state: normalizedState,
           cwd: daemonSession.directory,
+          workspaceId: nextWorkspaceId,
           agent: nextAgent,
           endpointId: nextEndpointId,
           yoloMode: existing?.yoloMode,
@@ -375,16 +384,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   syncFromDaemonWorkspaces: (daemonWorkspaces: DaemonWorkspace[]) => {
-    const workspaceBySessionID = new Map(daemonWorkspaces.map((workspace) => [
-      workspace.session_id,
-      workspaceSnapshotFromDaemonWorkspace(workspace),
-    ]));
+    const workspaceByID = new Map(daemonWorkspaces
+      .filter((workspace) => workspace.layout)
+      .map((workspace) => [
+        workspace.id,
+        workspaceSnapshotFromDaemonWorkspace(workspace.layout!),
+      ]));
 
     set((state) => ({
       sessions: state.sessions.map((session) => ({
         ...session,
-        workspace: workspaceBySessionID.get(session.id)?.workspace ?? session.workspace,
-        daemonActivePaneId: workspaceBySessionID.get(session.id)?.daemonActivePaneId ?? session.daemonActivePaneId,
+        workspace: workspaceByID.get(session.workspaceId)?.workspace ?? session.workspace,
+        daemonActivePaneId: workspaceByID.get(session.workspaceId)?.daemonActivePaneId ?? session.daemonActivePaneId,
       })),
     }));
   },
@@ -405,6 +416,7 @@ if (import.meta.env.DEV) {
         {
           ...session,
           agent: session.agent ?? 'codex',
+          workspaceId: `workspace-${session.id}`,
           transcriptMatched: (session.agent ?? 'codex') !== 'codex',
           workspace: createDefaultWorkspaceState(),
           daemonActivePaneId: MAIN_TERMINAL_PANE_ID,

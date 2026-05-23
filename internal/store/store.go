@@ -13,7 +13,7 @@ import (
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/sessionlayout"
+	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
 // Store manages session state in SQLite
@@ -22,8 +22,7 @@ type Store struct {
 	db *sql.DB
 
 	sessions        map[string]*protocol.Session
-	workspaces      map[string]sessionlayout.SessionLayout
-	canvasPanels    map[string][]protocol.WorkspacePanel
+	workspaces      map[string]workspacelayout.WorkspaceLayout
 	recentLocations map[string]*protocol.RecentLocation
 }
 
@@ -33,8 +32,7 @@ func New() *Store {
 	if err != nil {
 		return &Store{
 			sessions:        make(map[string]*protocol.Session),
-			workspaces:      make(map[string]sessionlayout.SessionLayout),
-			canvasPanels:    make(map[string][]protocol.WorkspacePanel),
+			workspaces:      make(map[string]workspacelayout.WorkspaceLayout),
 			recentLocations: make(map[string]*protocol.RecentLocation),
 		}
 	}
@@ -246,32 +244,9 @@ func (s *Store) Remove(id string) {
 
 	if s.db == nil {
 		delete(s.sessions, id)
-		delete(s.workspaces, id)
-		for workspaceID, panels := range s.canvasPanels {
-			filtered := panels[:0]
-			for _, panel := range panels {
-				if panel.SessionID != id {
-					filtered = append(filtered, panel)
-				}
-			}
-			if len(filtered) == 0 {
-				delete(s.canvasPanels, workspaceID)
-			} else {
-				s.canvasPanels[workspaceID] = filtered
-			}
-		}
 		return
 	}
 
-	if _, err := s.db.Exec("DELETE FROM canvas_workspace_panels WHERE session_id = ?", id); err != nil {
-		log.Printf("[store] Remove: failed to delete canvas workspace panel for session %s: %v", id, err)
-	}
-	if _, err := s.db.Exec("DELETE FROM workspace_panes WHERE session_id = ?", id); err != nil {
-		log.Printf("[store] Remove: failed to delete workspace panes for session %s: %v", id, err)
-	}
-	if _, err := s.db.Exec("DELETE FROM session_workspaces WHERE session_id = ?", id); err != nil {
-		log.Printf("[store] Remove: failed to delete workspace for session %s: %v", id, err)
-	}
 	_, err := s.db.Exec("DELETE FROM sessions WHERE id = ?", id)
 	if err != nil {
 		log.Printf("[store] Remove: failed for session %s: %v", id, err)
@@ -285,19 +260,15 @@ func (s *Store) ClearSessions() {
 
 	if s.db == nil {
 		s.sessions = make(map[string]*protocol.Session)
-		s.workspaces = make(map[string]sessionlayout.SessionLayout)
-		s.canvasPanels = make(map[string][]protocol.WorkspacePanel)
+		s.workspaces = make(map[string]workspacelayout.WorkspaceLayout)
 		return
 	}
 
-	if _, err := s.db.Exec("DELETE FROM canvas_workspace_panels"); err != nil {
-		log.Printf("[store] ClearSessions: failed to clear canvas workspace panels: %v", err)
+	if _, err := s.db.Exec("DELETE FROM workspace_layout_panes"); err != nil {
+		log.Printf("[store] ClearSessions: failed to clear workspace layout panes: %v", err)
 	}
-	if _, err := s.db.Exec("DELETE FROM workspace_panes"); err != nil {
-		log.Printf("[store] ClearSessions: failed to clear workspace panes: %v", err)
-	}
-	if _, err := s.db.Exec("DELETE FROM session_workspaces"); err != nil {
-		log.Printf("[store] ClearSessions: failed to clear workspaces: %v", err)
+	if _, err := s.db.Exec("DELETE FROM workspace_layouts"); err != nil {
+		log.Printf("[store] ClearSessions: failed to clear workspace layouts: %v", err)
 	}
 	_, err := s.db.Exec("DELETE FROM sessions")
 	if err != nil {
@@ -440,34 +411,11 @@ func (s *Store) RemoveSessionsInDirectory(directory string) {
 		for id, session := range s.sessions {
 			if session.Directory == directory {
 				delete(s.sessions, id)
-				delete(s.workspaces, id)
-				for workspaceID, panels := range s.canvasPanels {
-					filtered := panels[:0]
-					for _, panel := range panels {
-						if panel.SessionID != id {
-							filtered = append(filtered, panel)
-						}
-					}
-					if len(filtered) == 0 {
-						delete(s.canvasPanels, workspaceID)
-					} else {
-						s.canvasPanels[workspaceID] = filtered
-					}
-				}
 			}
 		}
 		return
 	}
 
-	if _, err := s.db.Exec(`DELETE FROM canvas_workspace_panels WHERE session_id IN (SELECT id FROM sessions WHERE directory = ?)`, directory); err != nil {
-		log.Printf("[store] RemoveSessionsInDirectory: failed to delete canvas workspace panels for directory %s: %v", directory, err)
-	}
-	if _, err := s.db.Exec(`DELETE FROM workspace_panes WHERE session_id IN (SELECT id FROM sessions WHERE directory = ?)`, directory); err != nil {
-		log.Printf("[store] RemoveSessionsInDirectory: failed to delete workspace panes for directory %s: %v", directory, err)
-	}
-	if _, err := s.db.Exec(`DELETE FROM session_workspaces WHERE session_id IN (SELECT id FROM sessions WHERE directory = ?)`, directory); err != nil {
-		log.Printf("[store] RemoveSessionsInDirectory: failed to delete workspaces for directory %s: %v", directory, err)
-	}
 	_, err := s.db.Exec(`DELETE FROM sessions WHERE directory = ?`, directory)
 	if err != nil {
 		log.Printf("[store] RemoveSessionsInDirectory: failed for directory %s: %v", directory, err)

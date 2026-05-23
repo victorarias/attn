@@ -5,6 +5,7 @@ import { recordPtyListenerError } from '../utils/ptyPerf';
 export interface PtySpawnArgs {
   id: string;
   cwd: string;
+  workspace_id?: string;
   endpoint_id?: string;
   reload?: boolean;
   cols: number;

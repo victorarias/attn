@@ -39,12 +39,11 @@ func (s *Store) RemoveWorkspace(id string) {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
-		delete(s.canvasPanels, id)
+		delete(s.workspaces, id)
 		return
 	}
-	if _, err := s.db.Exec(`DELETE FROM canvas_workspace_panels WHERE workspace_id = ?`, id); err != nil {
-		log.Printf("[store] RemoveWorkspace: failed to delete workspace panels %s: %v", id, err)
-	}
+	_, _ = s.db.Exec(`DELETE FROM workspace_layout_panes WHERE workspace_id = ?`, id)
+	_, _ = s.db.Exec(`DELETE FROM workspace_layouts WHERE workspace_id = ?`, id)
 	if _, err := s.db.Exec(`DELETE FROM workspaces WHERE id = ?`, id); err != nil {
 		log.Printf("[store] RemoveWorkspace: failed to delete workspace %s: %v", id, err)
 	}
@@ -120,7 +119,7 @@ func (s *Store) SessionsInWorkspace(workspaceID string) []string {
 	if s.db == nil {
 		return nil
 	}
-	rows, err := s.db.Query(`SELECT id FROM sessions WHERE workspace_id = ?`, workspaceID)
+	rows, err := s.db.Query(`SELECT id FROM sessions WHERE workspace_id = ? ORDER BY id`, workspaceID)
 	if err != nil {
 		return nil
 	}
@@ -135,150 +134,4 @@ func (s *Store) SessionsInWorkspace(workspaceID string) []string {
 		ids = append(ids, id)
 	}
 	return ids
-}
-
-// SaveWorkspacePanel inserts or updates one daemon-owned canvas panel.
-func (s *Store) SaveWorkspacePanel(workspaceID string, panel protocol.WorkspacePanel) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.db == nil {
-		if s.canvasPanels == nil {
-			s.canvasPanels = make(map[string][]protocol.WorkspacePanel)
-		}
-		for existingWorkspaceID, existingPanels := range s.canvasPanels {
-			filtered := existingPanels[:0]
-			for _, existing := range existingPanels {
-				if existing.SessionID == panel.SessionID && (existingWorkspaceID != workspaceID || existing.ID != panel.ID) {
-					continue
-				}
-				filtered = append(filtered, existing)
-			}
-			if len(filtered) == 0 {
-				delete(s.canvasPanels, existingWorkspaceID)
-			} else {
-				s.canvasPanels[existingWorkspaceID] = filtered
-			}
-		}
-		panels := s.canvasPanels[workspaceID]
-		for i := range panels {
-			if panels[i].ID == panel.ID {
-				panels[i] = panel
-				s.canvasPanels[workspaceID] = panels
-				return
-			}
-		}
-		s.canvasPanels[workspaceID] = append(panels, panel)
-		return
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	tx, err := s.db.Begin()
-	if err != nil {
-		log.Printf("[store] SaveWorkspacePanel: failed to begin transaction for panel %s/%s: %v", workspaceID, panel.ID, err)
-		return
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec(`
-		DELETE FROM canvas_workspace_panels
-		WHERE session_id = ?
-		  AND NOT (workspace_id = ? AND panel_id = ?)`,
-		panel.SessionID, workspaceID, panel.ID,
-	); err != nil {
-		log.Printf("[store] SaveWorkspacePanel: failed to clear previous panel for session %s: %v", panel.SessionID, err)
-		return
-	}
-
-	if _, err := tx.Exec(`
-		INSERT INTO canvas_workspace_panels (
-			workspace_id, panel_id, session_id, kind, title,
-			world_x, world_y, width, height, created_at, updated_at
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(workspace_id, panel_id) DO UPDATE SET
-			session_id = excluded.session_id,
-			kind = excluded.kind,
-			title = excluded.title,
-			world_x = excluded.world_x,
-			world_y = excluded.world_y,
-			width = excluded.width,
-			height = excluded.height,
-			updated_at = excluded.updated_at`,
-		workspaceID, panel.ID, panel.SessionID, panel.Kind, panel.Title,
-		panel.WorldX, panel.WorldY, panel.Width, panel.Height, now, now,
-	); err != nil {
-		log.Printf("[store] SaveWorkspacePanel: failed to upsert panel %s/%s: %v", workspaceID, panel.ID, err)
-		return
-	}
-	if err := tx.Commit(); err != nil {
-		log.Printf("[store] SaveWorkspacePanel: failed to commit panel %s/%s: %v", workspaceID, panel.ID, err)
-	}
-}
-
-// ListWorkspacePanels returns the daemon-owned panels for a canvas workspace.
-func (s *Store) ListWorkspacePanels(workspaceID string) []protocol.WorkspacePanel {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.db == nil {
-		panels := s.canvasPanels[workspaceID]
-		out := make([]protocol.WorkspacePanel, len(panels))
-		copy(out, panels)
-		return out
-	}
-
-	rows, err := s.db.Query(`
-		SELECT panel_id, session_id, kind, title, world_x, world_y, width, height
-		FROM canvas_workspace_panels
-		WHERE workspace_id = ?
-		ORDER BY created_at ASC, panel_id ASC`, workspaceID)
-	if err != nil {
-		log.Printf("[store] ListWorkspacePanels: failed for workspace %s: %v", workspaceID, err)
-		return nil
-	}
-	defer rows.Close()
-
-	var panels []protocol.WorkspacePanel
-	for rows.Next() {
-		var panel protocol.WorkspacePanel
-		if err := rows.Scan(
-			&panel.ID,
-			&panel.SessionID,
-			&panel.Kind,
-			&panel.Title,
-			&panel.WorldX,
-			&panel.WorldY,
-			&panel.Width,
-			&panel.Height,
-		); err != nil {
-			log.Printf("[store] ListWorkspacePanels: failed to scan panel for workspace %s: %v", workspaceID, err)
-			continue
-		}
-		panels = append(panels, panel)
-	}
-	return panels
-}
-
-// RemoveWorkspacePanelForSession removes any canvas panel that hosts sessionID.
-func (s *Store) RemoveWorkspacePanelForSession(sessionID string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.db == nil {
-		for workspaceID, panels := range s.canvasPanels {
-			filtered := panels[:0]
-			for _, panel := range panels {
-				if panel.SessionID != sessionID {
-					filtered = append(filtered, panel)
-				}
-			}
-			if len(filtered) == 0 {
-				delete(s.canvasPanels, workspaceID)
-			} else {
-				s.canvasPanels[workspaceID] = filtered
-			}
-		}
-		return
-	}
-	if _, err := s.db.Exec(`DELETE FROM canvas_workspace_panels WHERE session_id = ?`, sessionID); err != nil {
-		log.Printf("[store] RemoveWorkspacePanelForSession: failed for session %s: %v", sessionID, err)
-	}
 }

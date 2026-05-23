@@ -317,6 +317,7 @@ var migrations = []migration{
 		CREATE INDEX IF NOT EXISTS idx_canvas_workspace_panels_workspace_id
 			ON canvas_workspace_panels(workspace_id);
 	`},
+	{37, "migrate session layouts to workspace layouts", ""},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -427,6 +428,11 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 35 {
 			if err := applyMigration35(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 37 {
+			if err := applyMigration37(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -610,6 +616,89 @@ func applyMigration35(tx *sql.Tx) error {
 		}
 	}
 	if _, err := tx.Exec("CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id ON sessions(workspace_id)"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyMigration37(tx *sql.Tx) error {
+	if _, err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS workspace_layouts (
+			workspace_id TEXT PRIMARY KEY,
+			active_pane_id TEXT NOT NULL,
+			layout_json TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS workspace_layout_panes (
+			workspace_id TEXT NOT NULL,
+			pane_id TEXT NOT NULL,
+			runtime_id TEXT NOT NULL DEFAULT '',
+			session_id TEXT,
+			kind TEXT NOT NULL,
+			title TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (workspace_id, pane_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_workspace_layout_panes_runtime_id
+			ON workspace_layout_panes(runtime_id);
+		CREATE TABLE IF NOT EXISTS session_workspaces (
+			session_id TEXT PRIMARY KEY,
+			active_pane_id TEXT NOT NULL,
+			layout_json TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS workspace_panes (
+			session_id TEXT NOT NULL,
+			pane_id TEXT NOT NULL,
+			runtime_id TEXT NOT NULL DEFAULT '',
+			kind TEXT NOT NULL,
+			title TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (session_id, pane_id)
+		);
+
+		INSERT OR IGNORE INTO workspaces (id, title, directory, created_at)
+		SELECT 'workspace-' || id, label, directory, datetime('now')
+		FROM sessions
+		WHERE workspace_id IS NULL OR workspace_id = '';
+		UPDATE sessions
+		SET workspace_id = 'workspace-' || id
+		WHERE workspace_id IS NULL OR workspace_id = '';
+		INSERT OR IGNORE INTO workspaces (id, title, directory, created_at)
+		SELECT workspace_id, label, directory, datetime('now')
+		FROM sessions
+		WHERE workspace_id IS NOT NULL AND workspace_id != '';
+
+		INSERT OR IGNORE INTO workspace_layouts (workspace_id, active_pane_id, layout_json, updated_at)
+		SELECT s.workspace_id, sw.active_pane_id, sw.layout_json, sw.updated_at
+		FROM session_workspaces sw
+		JOIN sessions s ON s.id = sw.session_id;
+		INSERT OR IGNORE INTO workspace_layout_panes (
+			workspace_id, pane_id, runtime_id, session_id, kind, title, created_at, updated_at
+		)
+		SELECT s.workspace_id, p.pane_id, p.runtime_id,
+			CASE WHEN p.kind = 'main' THEN p.session_id ELSE NULL END,
+			CASE WHEN p.kind = 'main' THEN 'agent' ELSE 'shell' END,
+			CASE WHEN p.kind = 'main' AND p.title = 'Session' THEN 'Agent' ELSE p.title END,
+			p.created_at, p.updated_at
+		FROM workspace_panes p
+		JOIN sessions s ON s.id = p.session_id;
+
+		INSERT OR IGNORE INTO workspace_layouts (workspace_id, active_pane_id, layout_json, updated_at)
+		SELECT workspace_id, 'main', '{"type":"pane","pane_id":"main"}', datetime('now')
+		FROM sessions WHERE workspace_id IS NOT NULL AND workspace_id != '';
+		INSERT OR IGNORE INTO workspace_layout_panes (
+			workspace_id, pane_id, runtime_id, session_id, kind, title, created_at, updated_at
+		)
+		SELECT workspace_id, 'main', id, id, 'agent', 'Agent', datetime('now'), datetime('now')
+		FROM sessions WHERE workspace_id IS NOT NULL AND workspace_id != '';
+
+		DROP TABLE IF EXISTS canvas_workspace_panels;
+		DROP TABLE IF EXISTS workspace_panes;
+		DROP TABLE IF EXISTS session_workspaces;
+	`); err != nil {
 		return err
 	}
 	return nil

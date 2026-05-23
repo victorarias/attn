@@ -265,8 +265,8 @@ export class DaemonObserver {
       state: session.state,
       agent: session.agent,
     }));
-    const workspaces = [...this.workspacesBySessionId.values()].map((workspace) => ({
-      sessionId: workspace.session_id,
+    const workspaces = [...this.workspacesBySessionId.entries()].map(([sessionId, workspace]) => ({
+      sessionId,
       activePaneId: workspace.active_pane_id,
       paneIds: workspacePaneIds(workspace),
     }));
@@ -349,8 +349,13 @@ export class DaemonObserver {
           this.sessionsById.set(session.id, session);
         }
         this.workspacesBySessionId.clear();
-        for (const layout of data.session_layouts || []) {
-          this.workspacesBySessionId.set(layout.session_id, layout);
+        for (const workspace of data.workspaces || []) {
+          const layout = workspace.layout;
+          for (const pane of layout?.panes || []) {
+            if (pane.kind === 'agent' && pane.session_id) {
+              this.workspacesBySessionId.set(pane.session_id, layout);
+            }
+          }
         }
         this.endpointsById.clear();
         for (const endpoint of data.endpoints || []) {
@@ -388,13 +393,22 @@ export class DaemonObserver {
           this.workspacesBySessionId.delete(data.session.id);
         }
         break;
-      case 'session_layout':
-      case 'session_layout_updated':
-        if (data.session_layout?.session_id) {
-          if (this.sessionsById.has(data.session_layout.session_id)) {
-            this.workspacesBySessionId.set(data.session_layout.session_id, data.session_layout);
-          } else {
-            this.workspacesBySessionId.delete(data.session_layout.session_id);
+      case 'workspace_layout':
+      case 'workspace_layout_updated':
+        if (data.workspace_layout?.workspace_id) {
+          for (const pane of data.workspace_layout.panes || []) {
+            if (pane.kind === 'agent' && pane.session_id && this.sessionsById.has(pane.session_id)) {
+              this.workspacesBySessionId.set(pane.session_id, data.workspace_layout);
+            }
+          }
+        }
+        break;
+      case 'workspace_unregistered':
+        if (data.workspace?.id) {
+          for (const [sessionId, layout] of this.workspacesBySessionId.entries()) {
+            if (layout.workspace_id === data.workspace.id) {
+              this.workspacesBySessionId.delete(sessionId);
+            }
           }
         }
         break;

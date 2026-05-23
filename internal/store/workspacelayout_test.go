@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/sessionlayout"
+	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
 func TestWorkspaceSaveLoadRoundTrip(t *testing.T) {
@@ -21,33 +21,34 @@ func TestWorkspaceSaveLoadRoundTrip(t *testing.T) {
 		StateUpdatedAt: string(protocol.TimestampNow()),
 		LastSeen:       string(protocol.TimestampNow()),
 	})
+	s.AddWorkspace(&protocol.Workspace{ID: "workspace-1", Title: "Session 1", Directory: "/tmp/sess-1"})
 
-	snapshot := sessionlayout.SessionLayout{
-		SessionID:    "sess-1",
+	snapshot := workspacelayout.WorkspaceLayout{
+		WorkspaceID:  "workspace-1",
 		ActivePaneID: "pane-b",
-		Layout: sessionlayout.Node{
+		Layout: workspacelayout.Node{
 			Type:      "split",
 			SplitID:   "root",
-			Direction: sessionlayout.DirectionVertical,
-			Ratio:     sessionlayout.DefaultSplitRatio,
-			Children: []sessionlayout.Node{
-				{Type: "pane", PaneID: sessionlayout.MainPaneID},
+			Direction: workspacelayout.DirectionVertical,
+			Ratio:     workspacelayout.DefaultSplitRatio,
+			Children: []workspacelayout.Node{
+				{Type: "pane", PaneID: workspacelayout.MainPaneID},
 				{Type: "pane", PaneID: "pane-b"},
 			},
 		},
-		Panes: []sessionlayout.Pane{
-			{PaneID: sessionlayout.MainPaneID, RuntimeID: "sess-1", Kind: sessionlayout.PaneKindMain, Title: sessionlayout.DefaultPaneTitle},
-			{PaneID: "pane-b", RuntimeID: "runtime-b", Kind: sessionlayout.PaneKindShell, Title: "Shell 1"},
+		Panes: []workspacelayout.Pane{
+			{PaneID: workspacelayout.MainPaneID, RuntimeID: "sess-1", SessionID: "sess-1", Kind: workspacelayout.PaneKindAgent, Title: workspacelayout.DefaultPaneTitle},
+			{PaneID: "pane-b", RuntimeID: "runtime-b", Kind: workspacelayout.PaneKindShell, Title: "Shell 1"},
 		},
 	}
 
-	if err := s.SaveSessionLayout(snapshot); err != nil {
-		t.Fatalf("SaveSessionLayout() error = %v", err)
+	if err := s.SaveWorkspaceLayout(snapshot); err != nil {
+		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
 	}
 
-	loaded := s.GetSessionLayout("sess-1")
+	loaded := s.GetWorkspaceLayout("workspace-1")
 	if loaded == nil {
-		t.Fatal("GetSessionLayout() = nil, want snapshot")
+		t.Fatal("GetWorkspaceLayout() = nil, want snapshot")
 	}
 	if loaded.ActivePaneID != "pane-b" {
 		t.Fatalf("ActivePaneID = %q, want pane-b", loaded.ActivePaneID)
@@ -60,7 +61,7 @@ func TestWorkspaceSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
-func TestRemoveSessionDeletesWorkspaceRows(t *testing.T) {
+func TestRemoveWorkspaceDeletesLayoutRows(t *testing.T) {
 	s := New()
 	t.Cleanup(func() { _ = s.Close() })
 
@@ -74,22 +75,22 @@ func TestRemoveSessionDeletesWorkspaceRows(t *testing.T) {
 		StateUpdatedAt: string(protocol.TimestampNow()),
 		LastSeen:       string(protocol.TimestampNow()),
 	})
+	s.AddWorkspace(&protocol.Workspace{ID: "workspace-1", Title: "Session 1", Directory: "/tmp/sess-1"})
 
-	if err := s.SaveSessionLayout(sessionlayout.DefaultSessionLayout("sess-1")); err != nil {
-		t.Fatalf("SaveSessionLayout() error = %v", err)
+	if err := s.SaveWorkspaceLayout(workspacelayout.DefaultWorkspaceLayout("workspace-1", "sess-1")); err != nil {
+		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
 	}
 
-	s.Remove("sess-1")
-	if s.GetSessionLayout("sess-1") != nil {
-		t.Fatal("GetSessionLayout() != nil after session removal")
+	s.RemoveWorkspace("workspace-1")
+	if s.GetWorkspaceLayout("workspace-1") != nil {
+		t.Fatal("GetWorkspaceLayout() != nil after session removal")
 	}
 }
 
 func TestInMemoryFallbackSupportsSessionWorkspaceAndState(t *testing.T) {
 	s := &Store{
 		sessions:        make(map[string]*protocol.Session),
-		workspaces:      make(map[string]sessionlayout.SessionLayout),
-		canvasPanels:    make(map[string][]protocol.WorkspacePanel),
+		workspaces:      make(map[string]workspacelayout.WorkspaceLayout),
 		recentLocations: make(map[string]*protocol.RecentLocation),
 	}
 
@@ -104,9 +105,9 @@ func TestInMemoryFallbackSupportsSessionWorkspaceAndState(t *testing.T) {
 		LastSeen:       string(protocol.TimestampNow()),
 	})
 
-	snapshot := sessionlayout.DefaultSessionLayout("sess-1")
-	if err := s.SaveSessionLayout(snapshot); err != nil {
-		t.Fatalf("SaveSessionLayout() error = %v", err)
+	snapshot := workspacelayout.DefaultWorkspaceLayout("workspace-1", "sess-1")
+	if err := s.SaveWorkspaceLayout(snapshot); err != nil {
+		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
 	}
 
 	got := s.Get("sess-1")
@@ -117,12 +118,12 @@ func TestInMemoryFallbackSupportsSessionWorkspaceAndState(t *testing.T) {
 		t.Fatalf("state = %s, want launching", got.State)
 	}
 
-	loadedWorkspace := s.GetSessionLayout("sess-1")
+	loadedWorkspace := s.GetWorkspaceLayout("workspace-1")
 	if loadedWorkspace == nil {
-		t.Fatal("GetSessionLayout() = nil, want snapshot")
+		t.Fatal("GetWorkspaceLayout() = nil, want snapshot")
 	}
-	if loadedWorkspace.ActivePaneID != sessionlayout.MainPaneID {
-		t.Fatalf("ActivePaneID = %q, want %q", loadedWorkspace.ActivePaneID, sessionlayout.MainPaneID)
+	if loadedWorkspace.ActivePaneID != workspacelayout.MainPaneID {
+		t.Fatalf("ActivePaneID = %q, want %q", loadedWorkspace.ActivePaneID, workspacelayout.MainPaneID)
 	}
 
 	s.UpdateState("sess-1", protocol.StateWaitingInput)
