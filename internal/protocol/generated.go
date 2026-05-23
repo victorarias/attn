@@ -834,6 +834,14 @@ type GitFileChange struct {
 	Status string `json:"status"`
 }
 
+type GitHubHostsUpdatedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// GithubHosts corresponds to the JSON schema field "github_hosts".
+	GithubHosts []string `json:"github_hosts"`
+}
+
 type GitOperation struct {
 	// DurationMs corresponds to the JSON schema field "duration_ms".
 	DurationMs *int `json:"duration_ms,omitempty,omitzero"`
@@ -947,6 +955,9 @@ type InitialStateMessage struct {
 
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
+
+	// GithubHosts corresponds to the JSON schema field "github_hosts".
+	GithubHosts []string `json:"github_hosts,omitempty,omitzero"`
 
 	// ProtocolVersion corresponds to the JSON schema field "protocol_version".
 	ProtocolVersion *string `json:"protocol_version,omitempty,omitzero"`

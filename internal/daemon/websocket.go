@@ -583,6 +583,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Prs:               protocol.PRsToValues(d.store.ListPRs("")),
 		Repos:             protocol.RepoStatesToValues(d.store.ListRepoStates()),
 		Authors:           protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
+		GithubHosts:       d.gitHubHosts(),
 		Settings:          d.settingsWithAgentAvailability(),
 		Warnings:          d.getWarnings(),
 	}

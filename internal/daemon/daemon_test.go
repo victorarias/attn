@@ -2539,6 +2539,36 @@ func TestDaemon_InitialState_IncludesDaemonInstanceID(t *testing.T) {
 	}
 }
 
+func TestDaemon_GitHubHostsMessages_UseRegisteredHosts(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ghRegistry.Register("ghe.example.test", nil)
+	d.ghRegistry.Register("github.com", nil)
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	d.sendInitialState(client)
+	msg := <-client.send
+
+	var initial protocol.InitialStateMessage
+	if err := json.Unmarshal(msg.payload, &initial); err != nil {
+		t.Fatalf("decode initial_state: %v", err)
+	}
+	if got := strings.Join(initial.GithubHosts, ","); got != "ghe.example.test,github.com" {
+		t.Fatalf("initial github_hosts = %q, want registered hosts", got)
+	}
+
+	updated := d.gitHubHostsUpdatedMessage()
+	if updated.Event != protocol.EventGitHubHostsUpdated {
+		t.Fatalf("updated event = %q, want %q", updated.Event, protocol.EventGitHubHostsUpdated)
+	}
+	if got := strings.Join(updated.GithubHosts, ","); got != "ghe.example.test,github.com" {
+		t.Fatalf("updated github_hosts = %q, want registered hosts", got)
+	}
+}
+
 func TestDaemon_RecoveryBarrier_BlocksPTYCommands(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.setRecovering(true)

@@ -430,6 +430,43 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('reports daemon-discovered GitHub hosts from snapshots and refresh events', async () => {
+    const onGitHubHostsUpdate = vi.fn();
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        onGitHubHostsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        sessions: [],
+        session_layouts: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        github_hosts: ['github.com'],
+        settings: {},
+      });
+      ws.emit({
+        event: 'github_hosts_updated',
+        github_hosts: ['ghe.example.test', 'github.com'],
+      });
+    });
+
+    expect(onGitHubHostsUpdate).toHaveBeenNthCalledWith(1, ['github.com']);
+    expect(onGitHubHostsUpdate).toHaveBeenNthCalledWith(2, ['ghe.example.test', 'github.com']);
+    unmount();
+  });
+
   it('retries transient worker attach failures after respawn', async () => {
     const waits: number[] = [];
     const attach = vi.fn()
@@ -472,7 +509,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '63',
+        protocol_version: '64',
         sessions: [],
         session_layouts: [{
           session_id: 'sess-remote',
@@ -548,7 +585,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '63',
+        protocol_version: '64',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -627,7 +664,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '63',
+        protocol_version: '64',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -720,7 +757,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '63',
+        protocol_version: '64',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -817,7 +854,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '63',
+        protocol_version: '64',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -900,7 +937,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '63',
+        protocol_version: '64',
         sessions: [],
         session_layouts: [{
           session_id: 'sess-remote',
@@ -1009,7 +1046,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '63',
+        protocol_version: '64',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -1067,7 +1104,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '63',
+        protocol_version: '64',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',

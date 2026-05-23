@@ -1,13 +1,10 @@
 //! Native Settings surface. It mirrors the daemon-backed settings exposed
 //! by the Tauri client while keeping native-only canvas controls nearby.
 
-use std::collections::HashSet;
-
 use attn_protocol::{
     AddEndpointMessage, AuthorState, BootstrapEndpointMessage, EndpointInfo, ListEndpointsMessage,
-    PullRequestSummary, RemoveEndpointMessage, RepoState, SetEndpointRemoteWebMessage,
-    SetSettingMessage, SettingsMap, ToggleAuthorMuteMessage, ToggleRepoMuteMessage,
-    UpdateEndpointMessage,
+    RemoveEndpointMessage, RepoState, SetEndpointRemoteWebMessage, SetSettingMessage, SettingsMap,
+    ToggleAuthorMuteMessage, ToggleRepoMuteMessage, UpdateEndpointMessage,
 };
 use gpui::{
     div, hsla, point, prelude::*, px, BoxShadow, Context, Entity, FocusHandle, Focusable,
@@ -36,7 +33,7 @@ type ToggleSidebarHandler = dyn Fn(&mut Window, &mut gpui::App) -> bool + 'stati
 pub struct SettingsPageState {
     pub settings: SettingsMap,
     pub endpoints: Vec<EndpointInfo>,
-    pub connected_hosts: Vec<String>,
+    pub github_hosts: Vec<String>,
     pub repos: Vec<RepoState>,
     pub authors: Vec<AuthorState>,
 }
@@ -45,21 +42,17 @@ impl SettingsPageState {
     pub fn from_wire(
         settings: SettingsMap,
         endpoints: Vec<EndpointInfo>,
-        prs: Vec<PullRequestSummary>,
+        github_hosts: Vec<String>,
         repos: Vec<RepoState>,
         authors: Vec<AuthorState>,
     ) -> Self {
         Self {
             settings,
             endpoints,
-            connected_hosts: connected_hosts_from_prs(&prs),
+            github_hosts,
             repos,
             authors,
         }
-    }
-
-    pub fn set_prs(&mut self, prs: &[PullRequestSummary]) {
-        self.connected_hosts = connected_hosts_from_prs(prs);
     }
 }
 
@@ -166,8 +159,8 @@ impl SettingsPage {
         cx.notify();
     }
 
-    pub fn apply_prs(&mut self, prs: Vec<PullRequestSummary>, cx: &mut Context<Self>) {
-        self.state.connected_hosts = connected_hosts_from_prs(&prs);
+    pub fn apply_github_hosts(&mut self, hosts: Vec<String>, cx: &mut Context<Self>) {
+        self.state.github_hosts = hosts;
         cx.notify();
     }
 
@@ -860,11 +853,14 @@ impl SettingsPage {
             }
         }
 
-        let mut hosts = card("GitHub hosts", "Detected from authenticated pull requests");
-        if self.state.connected_hosts.is_empty() {
+        let mut hosts = card(
+            "GitHub hosts",
+            "Authenticated hosts registered by the daemon",
+        );
+        if self.state.github_hosts.is_empty() {
             hosts = hosts.child(empty_row("No authenticated hosts detected"));
         } else {
-            for host in &self.state.connected_hosts {
+            for host in &self.state.github_hosts {
                 hosts = hosts.child(token_row(host, "host"));
             }
         }
@@ -958,8 +954,8 @@ impl SettingsPage {
                 self.state.endpoints.len().to_string(),
             ))
             .child(metric_row(
-                "Connected hosts",
-                self.state.connected_hosts.len().to_string(),
+                "Authenticated hosts",
+                self.state.github_hosts.len().to_string(),
             ))
             .child(metric_row(
                 "Settings loaded",
@@ -1298,18 +1294,6 @@ impl SettingsPage {
     }
 }
 
-fn connected_hosts_from_prs(prs: &[PullRequestSummary]) -> Vec<String> {
-    let mut set = HashSet::new();
-    for pr in prs {
-        if let Some(host) = pr.host.as_ref().filter(|host| !host.trim().is_empty()) {
-            set.insert(host.clone());
-        }
-    }
-    let mut hosts: Vec<_> = set.into_iter().collect();
-    hosts.sort();
-    hosts
-}
-
 fn setting<'a>(settings: &'a SettingsMap, key: &str) -> &'a str {
     settings.get(key).map(String::as_str).unwrap_or("")
 }
@@ -1450,7 +1434,7 @@ fn summary_strip(state: &SettingsPageState) -> gpui::Div {
         .gap_2()
         .child(summary_line("settings", state.settings.len()))
         .child(summary_line("endpoints", state.endpoints.len()))
-        .child(summary_line("hosts", state.connected_hosts.len()))
+        .child(summary_line("hosts", state.github_hosts.len()))
 }
 
 fn summary_line(label: &'static str, count: usize) -> gpui::Div {

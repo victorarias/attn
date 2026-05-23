@@ -25,6 +25,8 @@ pub struct InitialStateMessage {
     #[serde(default)]
     pub authors: Vec<AuthorState>,
     #[serde(default)]
+    pub github_hosts: Vec<String>,
+    #[serde(default)]
     pub settings: SettingsMap,
 }
 
@@ -39,6 +41,12 @@ pub struct SettingsUpdatedMessage {
     pub success: Option<bool>,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GitHubHostsUpdatedMessage {
+    pub event: String,
+    pub github_hosts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -239,6 +247,7 @@ struct EventPeek {
 pub enum ServerEvent {
     InitialState(InitialStateMessage),
     SettingsUpdated(SettingsUpdatedMessage),
+    GitHubHostsUpdated(GitHubHostsUpdatedMessage),
     EndpointsUpdated(EndpointsUpdatedMessage),
     EndpointStatusChanged(EndpointStatusChangedMessage),
     ReposUpdated(ReposUpdatedMessage),
@@ -275,6 +284,10 @@ impl ServerEvent {
             "settings_updated" => {
                 let msg: SettingsUpdatedMessage = serde_json::from_str(data)?;
                 Ok(Self::SettingsUpdated(msg))
+            }
+            "github_hosts_updated" => {
+                let msg: GitHubHostsUpdatedMessage = serde_json::from_str(data)?;
+                Ok(Self::GitHubHostsUpdated(msg))
             }
             "endpoints_updated" => {
                 let msg: EndpointsUpdatedMessage = serde_json::from_str(data)?;
@@ -365,6 +378,40 @@ impl ServerEvent {
                 Ok(Self::CreateWorktreeResult(msg))
             }
             other => Ok(Self::Unknown(other.to_string())),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ServerEvent;
+
+    #[test]
+    fn parses_github_hosts_from_initial_state() {
+        let event =
+            ServerEvent::parse(r#"{"event":"initial_state","github_hosts":["github.example"]}"#)
+                .expect("parse initial_state");
+
+        match event {
+            ServerEvent::InitialState(message) => {
+                assert_eq!(message.github_hosts, vec!["github.example"]);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_github_hosts_update() {
+        let event = ServerEvent::parse(
+            r#"{"event":"github_hosts_updated","github_hosts":["github.example"]}"#,
+        )
+        .expect("parse github_hosts_updated");
+
+        match event {
+            ServerEvent::GitHubHostsUpdated(message) => {
+                assert_eq!(message.github_hosts, vec!["github.example"]);
+            }
+            other => panic!("unexpected event: {other:?}"),
         }
     }
 }
