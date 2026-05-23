@@ -121,6 +121,7 @@ function App() {
   const [daemonEndpoints, setDaemonEndpoints] = useState<DaemonEndpoint[]>([]);
   const [daemonPlugins, setDaemonPlugins] = useState<DaemonPlugin[]>([]);
   const [daemonPluginIssues, setDaemonPluginIssues] = useState<DaemonPluginIssue[]>([]);
+  const [daemonGitHubHosts, setDaemonGitHubHosts] = useState<string[]>([]);
   const handlePluginsUpdate = useCallback((plugins: DaemonPlugin[], issues: DaemonPluginIssue[]) => {
     setDaemonPlugins(plugins);
     setDaemonPluginIssues(issues);
@@ -315,6 +316,7 @@ function App() {
     onPRsUpdate: setPRs,
     onEndpointsUpdate: setDaemonEndpoints,
     onPluginsUpdate: handlePluginsUpdate,
+    onGitHubHostsUpdate: setDaemonGitHubHosts,
     onReposUpdate: setRepoStates,
     onAuthorsUpdate: setAuthorStates,
     onSettingsUpdate: setSettings,
@@ -351,6 +353,7 @@ function App() {
         daemonEndpoints={daemonEndpoints}
         daemonPlugins={daemonPlugins}
         daemonPluginIssues={daemonPluginIssues}
+        daemonGitHubHosts={daemonGitHubHosts}
         settings={settings}
         gitStatus={gitStatus}
         reviewLoopsBySessionId={reviewLoopsBySessionId}
@@ -430,6 +433,7 @@ interface AppContentProps {
   daemonEndpoints: DaemonEndpoint[];
   daemonPlugins: DaemonPlugin[];
   daemonPluginIssues: DaemonPluginIssue[];
+  daemonGitHubHosts: string[];
   settings: Record<string, string>;
   gitStatus: GitStatusUpdate | null;
   reviewLoopsBySessionId: Record<string, ReviewLoopState>;
@@ -505,6 +509,7 @@ function AppContent({
   daemonEndpoints,
   daemonPlugins,
   daemonPluginIssues,
+  daemonGitHubHosts,
   settings,
   gitStatus,
   reviewLoopsBySessionId,
@@ -605,14 +610,6 @@ sendFetchPRDetails,
     authorStates.filter(a => a.muted).map(a => a.author),
     [authorStates],
   );
-  const connectedHosts = useMemo(() => {
-    const set = new Set<string>();
-    for (const pr of prs) {
-      if (pr.host) set.add(pr.host);
-    }
-    return Array.from(set).sort();
-  }, [prs]);
-
   // Track PR refresh state for progress indicator
   const [isRefreshingPRs, setIsRefreshingPRs] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -2279,7 +2276,7 @@ sendFetchPRDetails,
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         mutedRepos={mutedRepos}
-        connectedHosts={connectedHosts}
+        githubHosts={daemonGitHubHosts}
         onUnmuteRepo={sendMuteRepo}
         mutedAuthors={mutedAuthors}
         onUnmuteAuthor={sendMuteAuthor}

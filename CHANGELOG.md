@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Input Assistance Disabled**: attn no longer allows browser or operating-system autocorrection, auto-capitalization, or spellchecking to rewrite typed paths, branches, commands, prompts, comments, or searches.
+- **GitHub Host Visibility**: Settings now lists daemon-discovered authenticated GitHub hosts even when a host has no currently visible pull requests.
 
 ---
 

@@ -130,6 +130,7 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   inspection?: PathInspection;
   plugins?: DaemonPlugin[];
   issues?: DaemonPluginIssue[];
+  github_hosts?: string[];
   // Legacy review event fields
   review_id?: string;
   session_id?: string;
@@ -151,7 +152,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '63';
+const PROTOCOL_VERSION = '64';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
 // injects this global before any page script runs — see
@@ -404,6 +405,7 @@ interface UseDaemonSocketOptions {
   onPRsUpdate: (prs: DaemonPR[]) => void;
   onEndpointsUpdate?: (endpoints: DaemonEndpoint[]) => void;
   onPluginsUpdate?: (plugins: DaemonPlugin[], issues: DaemonPluginIssue[]) => void;
+  onGitHubHostsUpdate?: (hosts: string[]) => void;
   onReposUpdate: (repos: RepoState[]) => void;
   onAuthorsUpdate: (authors: AuthorState[]) => void;
   onWorktreesUpdate?: (worktrees: DaemonWorktree[]) => void;
@@ -631,6 +633,7 @@ export function useDaemonSocket({
   onPRsUpdate,
   onEndpointsUpdate,
   onPluginsUpdate,
+  onGitHubHostsUpdate,
   onReposUpdate,
   onAuthorsUpdate,
   onWorktreesUpdate,
@@ -1035,6 +1038,8 @@ export function useDaemonSocket({
             const nextAuthors = data.authors || [];
             authorsRef.current = nextAuthors;
             onAuthorsUpdate(nextAuthors);
+
+            onGitHubHostsUpdate?.(data.github_hosts || []);
 
             const nextSettings = data.settings || {};
             settingsRef.current = nextSettings;
@@ -1563,6 +1568,10 @@ export function useDaemonSocket({
             }
             break;
 
+          case 'github_hosts_updated':
+            onGitHubHostsUpdate?.(data.github_hosts || []);
+            break;
+
           case 'plugins_updated': {
             const plugins = data.plugins || [];
             const issues = data.issues || [];
@@ -2023,7 +2032,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [resolvedWsUrl, onSessionsUpdate, onWorkspacesUpdate, onPRsUpdate, onEndpointsUpdate, onPluginsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand, flushQueuedCommands, pruneAttachedPtySessions]);
+  }, [resolvedWsUrl, onSessionsUpdate, onWorkspacesUpdate, onPRsUpdate, onEndpointsUpdate, onPluginsUpdate, onGitHubHostsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand, flushQueuedCommands, pruneAttachedPtySessions]);
 
   useEffect(() => {
     void connect();

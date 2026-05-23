@@ -873,6 +873,7 @@ model InitialStateMessage {
   prs?: PR[];
   repos?: RepoState[];
   authors?: AuthorState[];
+  github_hosts?: string[];
   settings?: Record<string>;
   warnings?: DaemonWarning[];
 }
@@ -1057,6 +1058,11 @@ model SettingsUpdatedMessage {
   changed_key?: string;
   success?: boolean;
   error?: string;
+}
+
+model GitHubHostsUpdatedMessage {
+  event: "github_hosts_updated";
+  github_hosts: string[];
 }
 
 model PluginsUpdatedMessage {
@@ -1553,6 +1559,7 @@ alias DaemonEvent =
   | GitOperationStartedMessage
   | GitOperationFinishedMessage
   | SettingsUpdatedMessage
+  | GitHubHostsUpdatedMessage
   | PluginsUpdatedMessage
   | PluginActionResultMessage
   | RecentLocationsResultMessage

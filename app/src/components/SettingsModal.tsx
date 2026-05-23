@@ -37,7 +37,7 @@ interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   mutedRepos: string[];
-  connectedHosts: string[];
+  githubHosts: string[];
   onUnmuteRepo: (repo: string) => void;
   mutedAuthors: string[];
   onUnmuteAuthor: (author: string) => void;
@@ -78,7 +78,7 @@ export function SettingsModal({
   isOpen,
   onClose,
   mutedRepos,
-  connectedHosts,
+  githubHosts,
   onUnmuteRepo,
   mutedAuthors,
   onUnmuteAuthor,
@@ -595,7 +595,7 @@ export function SettingsModal({
           label: 'Mobile, hosts, remotes',
           title: 'Mobile web, hosts, and remote endpoints',
           description: 'Controls for mobile browser access, GitHub host detection, and remote attn peers.',
-          count: Math.max(3, endpoints.length + connectedHosts.length + 1),
+          count: Math.max(3, endpoints.length + githubHosts.length + 1),
           keywords: 'tailscale mobile web github hosts ssh remote endpoint daemon',
         },
       ],
@@ -653,7 +653,7 @@ export function SettingsModal({
       ],
     },
   ], [
-    connectedHosts.length,
+    githubHosts.length,
     endpoints.length,
     mutedItemCount,
     orderedAgentList.length,
@@ -881,11 +881,11 @@ export function SettingsModal({
           </p>
         </div>
         <div className="settings-block-body">
-          {connectedHosts.length === 0 ? (
+          {githubHosts.length === 0 ? (
             <p className="settings-empty">No authenticated hosts detected.</p>
           ) : (
             <div className="settings-token-list">
-              {connectedHosts.map((host) => (
+              {githubHosts.map((host) => (
                 <span key={host} className="settings-token">{host}</span>
               ))}
             </div>

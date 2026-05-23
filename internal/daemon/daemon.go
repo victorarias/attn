@@ -1310,6 +1310,7 @@ func (d *Daemon) refreshGitHubHosts() error {
 		if err := d.registerMockClient(mockURL); err != nil {
 			d.logf("Mock GitHub client not available: %v", err)
 		}
+		d.broadcastGitHubHosts()
 		return nil
 	}
 
@@ -1359,7 +1360,26 @@ func (d *Daemon) refreshGitHubHosts() error {
 		}
 	}
 
+	d.broadcastGitHubHosts()
 	return nil
+}
+
+func (d *Daemon) gitHubHosts() []string {
+	if d.ghRegistry == nil {
+		return nil
+	}
+	return d.ghRegistry.Hosts()
+}
+
+func (d *Daemon) broadcastGitHubHosts() {
+	d.wsHub.BroadcastValue(d.gitHubHostsUpdatedMessage())
+}
+
+func (d *Daemon) gitHubHostsUpdatedMessage() *protocol.GitHubHostsUpdatedMessage {
+	return &protocol.GitHubHostsUpdatedMessage{
+		Event:       protocol.EventGitHubHostsUpdated,
+		GithubHosts: d.gitHubHosts(),
+	}
 }
 
 func (d *Daemon) registerMockClient(mockURL string) error {

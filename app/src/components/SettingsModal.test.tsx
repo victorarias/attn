@@ -11,7 +11,7 @@ describe('SettingsModal review loop prompts', () => {
         isOpen
         onClose={onClose}
         mutedRepos={[]}
-        connectedHosts={[]}
+        githubHosts={[]}
         onUnmuteRepo={vi.fn()}
         mutedAuthors={[]}
         onUnmuteAuthor={vi.fn()}
@@ -39,6 +39,38 @@ describe('SettingsModal review loop prompts', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('renders authenticated GitHub hosts provided by the daemon', async () => {
+    render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        githubHosts={['ghe.example.test', 'github.com']}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{}}
+        endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={vi.fn()}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText('ghe.example.test')).toBeInTheDocument();
+    expect(screen.getByText('github.com')).toBeInTheDocument();
+  });
+
   it('saves a custom review loop preset to settings', async () => {
     const onSetSetting = vi.fn();
 
@@ -47,7 +79,7 @@ describe('SettingsModal review loop prompts', () => {
         isOpen
         onClose={vi.fn()}
         mutedRepos={[]}
-        connectedHosts={[]}
+        githubHosts={[]}
         onUnmuteRepo={vi.fn()}
         mutedAuthors={[]}
         onUnmuteAuthor={vi.fn()}
@@ -97,7 +129,7 @@ describe('SettingsModal review loop prompts', () => {
         isOpen
         onClose={vi.fn()}
         mutedRepos={[]}
-        connectedHosts={[]}
+        githubHosts={[]}
         onUnmuteRepo={vi.fn()}
         mutedAuthors={[]}
         onUnmuteAuthor={vi.fn()}
@@ -137,7 +169,7 @@ describe('SettingsModal review loop prompts', () => {
         isOpen
         onClose={vi.fn()}
         mutedRepos={[]}
-        connectedHosts={[]}
+        githubHosts={[]}
         onUnmuteRepo={vi.fn()}
         mutedAuthors={[]}
         onUnmuteAuthor={vi.fn()}
@@ -177,7 +209,7 @@ describe('SettingsModal review loop prompts', () => {
         isOpen
         onClose={vi.fn()}
         mutedRepos={[]}
-        connectedHosts={[]}
+        githubHosts={[]}
         onUnmuteRepo={vi.fn()}
         mutedAuthors={[]}
         onUnmuteAuthor={vi.fn()}
@@ -231,7 +263,7 @@ describe('SettingsModal review loop prompts', () => {
       isOpen: true,
       onClose: vi.fn(),
       mutedRepos: [] as string[],
-      connectedHosts: [] as string[],
+      githubHosts: [] as string[],
       onUnmuteRepo: vi.fn(),
       mutedAuthors: [] as string[],
       onUnmuteAuthor: vi.fn(),
@@ -291,7 +323,7 @@ describe('SettingsModal review loop prompts', () => {
         isOpen
         onClose={vi.fn()}
         mutedRepos={[]}
-        connectedHosts={[]}
+        githubHosts={[]}
         onUnmuteRepo={vi.fn()}
         mutedAuthors={[]}
         onUnmuteAuthor={vi.fn()}
@@ -331,7 +363,7 @@ describe('SettingsModal review loop prompts', () => {
         isOpen
         onClose={vi.fn()}
         mutedRepos={[]}
-        connectedHosts={[]}
+        githubHosts={[]}
         onUnmuteRepo={vi.fn()}
         mutedAuthors={[]}
         onUnmuteAuthor={vi.fn()}
@@ -383,7 +415,7 @@ describe('SettingsModal review loop prompts', () => {
         isOpen
         onClose={vi.fn()}
         mutedRepos={[]}
-        connectedHosts={[]}
+        githubHosts={[]}
         onUnmuteRepo={vi.fn()}
         mutedAuthors={[]}
         onUnmuteAuthor={vi.fn()}
