@@ -1,7 +1,7 @@
 use attn_protocol::{
     BrowseDirectoryResultMessage, ClientHelloMessage, CreateWorktreeResultMessage, EndpointInfo,
-    GetRepoInfoResultMessage, InspectPathResultMessage, RepoState, ServerEvent, Session, SettingsMap,
-    Workspace, CAPABILITY_SHELL_AS_SESSION, PROTOCOL_VERSION,
+    GetRepoInfoResultMessage, InspectPathResultMessage, RepoState, ServerEvent, Session,
+    SettingsMap, Workspace, CAPABILITY_SHELL_AS_SESSION, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use gpui::{AsyncApp, Context, EventEmitter, WeakEntity};
