@@ -249,6 +249,7 @@ export function Dashboard({
         </div>
         <button
           className="settings-btn"
+          data-testid="settings-button"
           onClick={onOpenSettings}
           title="Settings"
         >

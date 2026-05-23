@@ -6,6 +6,7 @@
  */
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { installVerbatimTextEntryGuard } from '../src/utils/verbatimTextEntry';
 import { harnesses } from './harnesses';
 import type { HarnessAPI } from './types';
 // Note: Base styles are included via component CSS imports
@@ -87,6 +88,8 @@ function HarnessApp() {
     <HarnessComponent onReady={handleReady} setTriggerRerender={setTriggerRerender} />
   );
 }
+
+installVerbatimTextEntryGuard(document);
 
 const root = createRoot(document.getElementById('harness-root')!);
 root.render(
