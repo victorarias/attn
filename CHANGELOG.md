@@ -13,6 +13,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **GitHub Host Visibility**: Settings now lists daemon-discovered authenticated GitHub hosts even when a host has no currently visible pull requests.
 - **Terminal Colors**: Interactive terminals no longer inherit `NO_COLOR` from the process that launched attn, so shells and coding agents can emit their normal colored output.
 
+### Fixed
+- **Codex Resize Stability**: Long Codex sessions no longer jump back through earlier conversation content when resizing a pane or opening a split in attn's embedded terminal.
+
 ---
 
 ## [2026-05-22]
