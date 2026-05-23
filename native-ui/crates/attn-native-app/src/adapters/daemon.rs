@@ -40,6 +40,7 @@ pub enum DaemonEvent {
         prs: Vec<PullRequestSummary>,
         repos: Vec<RepoState>,
         authors: Vec<attn_protocol::AuthorState>,
+        github_hosts: Vec<String>,
         settings: SettingsMap,
     },
     SettingsUpdated {
@@ -47,6 +48,9 @@ pub enum DaemonEvent {
         changed_key: Option<String>,
         success: Option<bool>,
         error: Option<String>,
+    },
+    GitHubHostsUpdated {
+        hosts: Vec<String>,
     },
     EndpointsUpdated {
         endpoints: Vec<EndpointInfo>,
@@ -285,6 +289,7 @@ impl DaemonClient {
                     prs: msg.prs,
                     repos: msg.repos,
                     authors: msg.authors,
+                    github_hosts: msg.github_hosts,
                     settings: msg.settings,
                 });
             }
@@ -294,6 +299,11 @@ impl DaemonClient {
                     changed_key: msg.changed_key,
                     success: msg.success,
                     error: msg.error,
+                });
+            }
+            ServerEvent::GitHubHostsUpdated(msg) => {
+                cx.emit(DaemonEvent::GitHubHostsUpdated {
+                    hosts: msg.github_hosts,
                 });
             }
             ServerEvent::EndpointsUpdated(msg) => {
@@ -429,6 +439,7 @@ fn record_inbound_event(event: &ServerEvent) {
             "session_count": m.sessions.len(),
             "workspace_count": m.workspaces.len(),
             "endpoint_count": m.endpoints.len(),
+            "github_host_count": m.github_hosts.len(),
             "settings_count": m.settings.len(),
         }),
         ServerEvent::SettingsUpdated(m) => json!({
@@ -437,6 +448,10 @@ fn record_inbound_event(event: &ServerEvent) {
             "changed_key": m.changed_key.as_deref(),
             "success": m.success,
             "error": m.error.as_deref(),
+        }),
+        ServerEvent::GitHubHostsUpdated(m) => json!({
+            "kind": "github_hosts_updated",
+            "github_host_count": m.github_hosts.len(),
         }),
         ServerEvent::EndpointsUpdated(m) => json!({
             "kind": "endpoints_updated",

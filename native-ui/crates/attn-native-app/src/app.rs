@@ -220,9 +220,10 @@ impl NativeApp {
                     sessions,
                     workspaces,
                     endpoints,
-                    prs,
+                    prs: _,
                     repos,
                     authors,
+                    github_hosts,
                     settings,
                 } => {
                     events::record(
@@ -235,7 +236,7 @@ impl NativeApp {
                     this.settings_state = SettingsPageState::from_wire(
                         settings.clone(),
                         endpoints.clone(),
-                        prs.clone(),
+                        github_hosts.clone(),
                         repos.clone(),
                         authors.clone(),
                     );
@@ -263,6 +264,12 @@ impl NativeApp {
                         });
                     }
                 }
+                DaemonEvent::GitHubHostsUpdated { hosts } => {
+                    this.settings_state.github_hosts = hosts.clone();
+                    if let Some(page) = this.settings_page.clone() {
+                        page.update(cx, |page, cx| page.apply_github_hosts(hosts.clone(), cx));
+                    }
+                }
                 DaemonEvent::EndpointsUpdated { endpoints } => {
                     this.settings_state.endpoints = endpoints.clone();
                     if let Some(page) = this.settings_page.clone() {
@@ -286,12 +293,6 @@ impl NativeApp {
                     this.settings_state.authors = authors.clone();
                     if let Some(page) = this.settings_page.clone() {
                         page.update(cx, |page, cx| page.apply_authors(authors.clone(), cx));
-                    }
-                }
-                DaemonEvent::PRsUpdated { prs } => {
-                    this.settings_state.set_prs(prs);
-                    if let Some(page) = this.settings_page.clone() {
-                        page.update(cx, |page, cx| page.apply_prs(prs.clone(), cx));
                     }
                 }
                 DaemonEvent::WorkspaceRegistered { workspace } => {
