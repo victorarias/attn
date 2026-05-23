@@ -1,7 +1,7 @@
 # Long Git Operation Surface Map
 
 Date: 2026-05-15
-Last updated: 2026-05-17
+Last updated: 2026-05-22
 
 Purpose: map every product surface that waits on git today before choosing UI patterns. The problem is not one spinner. Different surfaces need different treatment depending on whether the user is blocked, whether existing data can stay visible, and whether the surface is even mounted.
 
@@ -14,6 +14,7 @@ Recent PRs already cover part of the giant-repo latency problem:
 - Active-session git status refreshes are coalesced and slow full status scans fall back to a limited tracked-only result.
 - Git status, branch-diff, and file-diff reads are routed through a daemon repo coordinator, with branch-diff snapshots owned per repo/base ref and in-flight work shared across connected clients.
 - Diff detail no longer keeps its own branch file-list cache; branch file-list snapshots come from the daemon coordinator.
+- Repository picker/worktree modal operations are covered by PR #195: path inspection and repo-option loading show inline picker state; refresh keeps stale destinations visible; create uses form-local progress; delete uses row-local progress.
 
 The remaining latency gap is not that session navigation blocks on Git. It is that slow repositories can still leave panel-owned Git data in a first-load state when the daemon has no prior snapshot. Clients should keep rendering daemon-owned state and avoid adding independent Git data caches.
 
@@ -138,7 +139,7 @@ These paths update useful labels/badges but should not block the main product ex
 1. **Measure daemon git coordinator latency:** record durations/failures per repo/key so adaptive decisions are based on real slow-repo behavior.
 2. **Expose daemon-owned stale/fresh metadata:** let panel callers distinguish cached branch-diff snapshots from fresh reads without client-side data caches.
 3. **Review-loop slow snapshot UX:** label "capturing diff snapshot" inside the review-loop surface if coordinator reads are slow.
-4. **Picker/worktree modal UX:** add operation state to repo options create/delete/refresh where long user-initiated git operations still need better local feedback.
+4. **Picker/worktree modal UX (done in PR #195):** repo options create/delete/refresh now use localized operation state; keep future picker work scoped to regressions or cancellation/lifecycle polish.
 5. **Daemon lifecycle events:** add protocol-level `git_operation_started/updated/finished` for true long-running git subprocesses, cancellation, and elapsed-time accuracy.
 6. **Adaptive background behavior:** reduce refresh pressure when status/diff commands are repeatedly slow, using coordinator measurements instead of frontend-only heuristics.
 
