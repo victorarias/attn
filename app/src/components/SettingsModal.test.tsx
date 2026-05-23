@@ -33,7 +33,7 @@ describe('SettingsModal review loop prompts', () => {
       />
     );
 
-    await screen.findByText('No plugins installed.');
+    await screen.findByText('Mobile Web Client');
     fireEvent.keyDown(window, { key: 'Escape' });
 
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -69,7 +69,8 @@ describe('SettingsModal review loop prompts', () => {
       />
     );
 
-    await screen.findByText('No plugins installed.');
+    fireEvent.click(screen.getByTestId('settings-nav-review'));
+    await screen.findByText('Review Loop Prompts');
     fireEvent.change(screen.getByLabelText('Prompt name'), { target: { value: 'Architect Pass' } });
     fireEvent.change(screen.getByLabelText('Default iterations'), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Review like an architect' } });
@@ -158,6 +159,7 @@ describe('SettingsModal review loop prompts', () => {
       />
     );
 
+    fireEvent.click(screen.getByTestId('settings-nav-plugins'));
     fireEvent.change(screen.getByLabelText('Plugin directory'), { target: { value: '/tmp/my-plugin' } });
     fireEvent.click(screen.getByText('Install Plugin'));
 
@@ -214,6 +216,7 @@ describe('SettingsModal review loop prompts', () => {
       />
     );
 
+    fireEvent.click(screen.getByTestId('settings-nav-plugins'));
     const priority = await screen.findByLabelText('services-pilot-worktrees priority');
     fireEvent.change(priority, { target: { value: '25' } });
     fireEvent.click(screen.getByText('Save'));
@@ -264,6 +267,7 @@ describe('SettingsModal review loop prompts', () => {
       />,
     );
 
+    fireEvent.click(screen.getByTestId('settings-nav-plugins'));
     expect(await screen.findByText('starting')).toBeInTheDocument();
 
     rerender(
@@ -274,7 +278,9 @@ describe('SettingsModal review loop prompts', () => {
     );
 
     expect(await screen.findByText('connected')).toBeInTheDocument();
-    expect(await screen.findByText('healthy')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText('healthy').length).toBeGreaterThan(0);
+    });
   });
 
   it('toggles tailscale serve on the existing device', async () => {
@@ -311,7 +317,7 @@ describe('SettingsModal review loop prompts', () => {
       />
     );
 
-    await screen.findByText('No plugins installed.');
+    await screen.findByText('Mobile Web Client');
     fireEvent.click(screen.getByText('Enable'));
     expect(onSetSetting).toHaveBeenCalledWith('tailscale_enabled', 'true');
     expect(screen.getByText(/does not register a second tailnet device/i)).toBeInTheDocument();

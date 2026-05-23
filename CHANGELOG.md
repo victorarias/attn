@@ -6,10 +6,20 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-05-23]
+
+### Changed
+- **Input Assistance Disabled**: attn no longer allows browser or operating-system autocorrection, auto-capitalization, or spellchecking to rewrite typed paths, branches, commands, prompts, comments, or searches.
+
+---
+
 ## [2026-05-22]
 
 ### Added
 - **Plugin Healthchecks**: The daemon now pings connected plugins, records healthy/unhealthy/unknown state separately from process and socket state, and shows that health in Settings.
+
+### Changed
+- **Settings Workbench**: Settings now opens as a larger workbench with separate navigation for general preferences, connectivity, plugins, agents, review settings, and muted items instead of one long mixed page.
 
 ---
 

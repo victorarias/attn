@@ -1,7 +1,10 @@
+import { installVerbatimTextEntryGuard } from './utils/verbatimTextEntry';
+
 declare global { interface Window { __dbg?: (msg: string) => void } }
 const dbg = (msg: string) => window.__dbg?.(msg);
 
 dbg('main.tsx: imports resolved');
+installVerbatimTextEntryGuard(document);
 
 async function boot() {
   dbg('boot: loading ReactDOM');

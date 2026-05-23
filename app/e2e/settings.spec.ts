@@ -10,19 +10,26 @@ test.describe('Settings', () => {
     await expect(page.locator('.dashboard')).toBeVisible({ timeout: 5000 });
 
     // Click settings button
-    const settingsBtn = page.locator('.settings-btn');
+    const settingsBtn = page.getByTestId('settings-button');
     await settingsBtn.click();
 
     // Settings modal should open
-    const modal = page.locator('.settings-modal');
+    const modal = page.getByTestId('settings-modal');
     await expect(modal).toBeVisible({ timeout: 2000 });
+    const searchInput = modal.getByRole('searchbox', { name: 'Search settings' });
+    await expect(searchInput).toHaveAttribute('autocorrect', 'off');
+    await expect(searchInput).toHaveAttribute('autocapitalize', 'none');
+    await expect(searchInput).toHaveAttribute('spellcheck', 'false');
 
-    // Verify modal has expected sections
+    // Verify workbench navigation exposes separated settings areas
+    await expect(modal.locator('h3', { hasText: 'Mobile Web Client' })).toBeVisible();
+    await modal.getByTestId('settings-nav-general').click();
     await expect(modal.locator('h3', { hasText: 'Projects Directory' })).toBeVisible();
+    await modal.getByTestId('settings-nav-hygiene').click();
     await expect(modal.locator('h3', { hasText: 'Muted Repositories' })).toBeVisible();
 
     // Close modal via X button
-    const closeBtn = modal.locator('.settings-close');
+    const closeBtn = modal.getByTestId('settings-close');
     await closeBtn.click();
 
     // Modal should be hidden
@@ -36,12 +43,12 @@ test.describe('Settings', () => {
     await expect(page.locator('.dashboard')).toBeVisible({ timeout: 5000 });
 
     // Open settings
-    await page.locator('.settings-btn').click();
-    const modal = page.locator('.settings-modal');
+    await page.getByTestId('settings-button').click();
+    const modal = page.getByTestId('settings-modal');
     await expect(modal).toBeVisible({ timeout: 2000 });
 
     // Click overlay (outside modal)
-    await page.locator('.settings-overlay').click({ position: { x: 10, y: 10 } });
+    await page.getByTestId('settings-overlay').click({ position: { x: 10, y: 10 } });
 
     // Modal should be hidden
     await expect(modal).not.toBeVisible();
@@ -54,23 +61,25 @@ test.describe('Settings', () => {
     await expect(page.locator('.dashboard')).toBeVisible({ timeout: 5000 });
 
     // Open settings
-    await page.locator('.settings-btn').click();
-    const modal = page.locator('.settings-modal');
+    await page.getByTestId('settings-button').click();
+    const modal = page.getByTestId('settings-modal');
     await expect(modal).toBeVisible({ timeout: 2000 });
+    await modal.getByTestId('settings-nav-general').click();
 
     // Type a projects directory
     const projectsDir = '/tmp/attn-e2e-projects-manual';
-    const input = modal.locator('.projects-dir-input .settings-input');
+    const input = modal.getByTestId('settings-projects-directory-input');
     await input.fill(projectsDir);
     await input.blur();
 
     // Close and reopen to verify persistence
-    await modal.locator('.settings-close').click();
+    await modal.getByTestId('settings-close').click();
     await expect(modal).not.toBeVisible();
 
     // Reopen settings
-    await page.locator('.settings-btn').click();
+    await page.getByTestId('settings-button').click();
     await expect(modal).toBeVisible({ timeout: 2000 });
+    await modal.getByTestId('settings-nav-general').click();
 
     // Value should be preserved
     await expect(input).toHaveValue(projectsDir);
@@ -100,12 +109,13 @@ test.describe('Settings', () => {
     await expect(prCard).not.toBeVisible({ timeout: 5000 });
 
     // Open settings
-    await page.locator('.settings-btn').click();
-    const modal = page.locator('.settings-modal');
+    await page.getByTestId('settings-button').click();
+    const modal = page.getByTestId('settings-modal');
     await expect(modal).toBeVisible({ timeout: 2000 });
+    await modal.getByTestId('settings-nav-hygiene').click();
 
     // Muted repo should appear in list
-    const mutedRepoItem = modal.locator('.muted-item').filter({ hasText: 'test/settings-repo' });
+    const mutedRepoItem = modal.getByTestId('settings-muted-repository-item').filter({ hasText: 'test/settings-repo' });
     await expect(mutedRepoItem).toBeVisible();
   });
 
@@ -131,16 +141,17 @@ test.describe('Settings', () => {
     await expect(prCard).not.toBeVisible({ timeout: 5000 });
 
     // Open settings
-    await page.locator('.settings-btn').click();
-    const modal = page.locator('.settings-modal');
+    await page.getByTestId('settings-button').click();
+    const modal = page.getByTestId('settings-modal');
     await expect(modal).toBeVisible({ timeout: 2000 });
+    await modal.getByTestId('settings-nav-hygiene').click();
 
     // Click unmute button
-    const mutedRepoItem = modal.locator('.muted-item').filter({ hasText: 'test/unmute-repo' });
-    await mutedRepoItem.locator('.unmute-btn').click();
+    const mutedRepoItem = modal.getByTestId('settings-muted-repository-item').filter({ hasText: 'test/unmute-repo' });
+    await mutedRepoItem.getByTestId('settings-unmute-repository-button').click();
 
     // Close modal
-    await modal.locator('.settings-close').click();
+    await modal.getByTestId('settings-close').click();
     await expect(modal).not.toBeVisible();
 
     // PR should reappear
@@ -177,15 +188,16 @@ test.describe('Settings', () => {
     await expect(prCard).not.toBeVisible({ timeout: 5000 });
 
     // Open settings
-    await page.locator('.settings-btn').click();
-    const modal = page.locator('.settings-modal');
+    await page.getByTestId('settings-button').click();
+    const modal = page.getByTestId('settings-modal');
     await expect(modal).toBeVisible({ timeout: 2000 });
+    await modal.getByTestId('settings-nav-hygiene').click();
 
     // Verify Muted Authors section exists
     await expect(modal.locator('h3', { hasText: 'Muted Authors' })).toBeVisible();
 
     // Muted author should appear in list
-    const mutedAuthorItem = modal.locator('.muted-item').filter({ hasText: 'dependabot' });
+    const mutedAuthorItem = modal.getByTestId('settings-muted-author-item').filter({ hasText: 'dependabot' });
     await expect(mutedAuthorItem).toBeVisible();
   });
 
@@ -213,16 +225,17 @@ test.describe('Settings', () => {
     await expect(prCard).not.toBeVisible({ timeout: 5000 });
 
     // Open settings
-    await page.locator('.settings-btn').click();
-    const modal = page.locator('.settings-modal');
+    await page.getByTestId('settings-button').click();
+    const modal = page.getByTestId('settings-modal');
     await expect(modal).toBeVisible({ timeout: 2000 });
+    await modal.getByTestId('settings-nav-hygiene').click();
 
     // Click unmute button for the author
-    const mutedAuthorItem = modal.locator('.muted-item').filter({ hasText: 'renovate' });
-    await mutedAuthorItem.locator('.unmute-btn').click();
+    const mutedAuthorItem = modal.getByTestId('settings-muted-author-item').filter({ hasText: 'renovate' });
+    await mutedAuthorItem.getByTestId('settings-unmute-author-button').click();
 
     // Close modal
-    await modal.locator('.settings-close').click();
+    await modal.getByTestId('settings-close').click();
     await expect(modal).not.toBeVisible();
 
     // PR should reappear

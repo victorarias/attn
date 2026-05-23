@@ -38,6 +38,7 @@
     "real-app:scenario-tr502": "node scripts/real-app-harness/scenario-tr502-remote-relaunch-splits.mjs",
     "real-app:serial-matrix": "node scripts/real-app-harness/run-serial-matrix.mjs",
     "e2e": "playwright test",
+    "e2e:settings-visual": "playwright test e2e/settings-visual.spec.ts",
     "e2e:headed": "playwright test --headed"
   },
   "dependencies": {
