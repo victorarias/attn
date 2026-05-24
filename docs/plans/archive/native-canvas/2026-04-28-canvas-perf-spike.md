@@ -7,6 +7,9 @@ status: Done — Go
 
 # Canvas rendering perf + zoom-out scaling spike
 
+> **Archived direction (2026-05-23).** This successful feasibility spike is
+> historical input only; the new native client is not a canvas UI.
+
 **Status**: Done — Go
 **Owner**: Victor
 **Date**: 2026-04-28

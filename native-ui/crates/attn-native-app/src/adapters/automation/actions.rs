@@ -1,78 +1,61 @@
-/// GPUI-bound action handlers. The wire-protocol server runs on the GPUI
-/// background executor and can't access entities directly (`AsyncApp` is
-/// !Send across some boundaries, and entity access has to happen on the
-/// foreground thread). We bridge with an async channel: the dispatcher
-/// sends an `ActionRequest`, a foreground-spawned `pump_actions` task
-/// reads each request, runs the handler with `&mut AsyncApp`, and sends
-/// the result back.
-use std::sync::Arc;
+use std::{fs, path::Path, process::Command, sync::Arc};
 
 use async_channel::{unbounded, Receiver, Sender};
-use attn_protocol::{PtyInputMessage, UnregisterSessionMessage, UnregisterWorkspaceMessage};
-use gpui::{
-    prelude::*, AnyView, App, AsyncApp, Entity, Keystroke, Modifiers, SharedString, WeakEntity,
-    Window,
+use attn_protocol::{
+    KillSessionMessage, MuteMessage, PtyInputMessage, RegisterWorkspaceMessage,
+    SpawnSessionMessage, UnregisterWorkspaceMessage, WorkspaceLayoutClosePaneMessage,
+    WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutSplitDirection,
+    WorkspaceLayoutSplitPaneMessage,
 };
+use gpui::{AnyView, App, AppContext as _, AsyncApp, Keystroke, Modifiers, WeakEntity};
 use serde_json::{json, Value};
 
 use crate::app::NativeApp;
-use crate::domain::panel_placement::{
-    place_panel_adjacent_avoiding, AdjacentPanelDirection, PanelPlacementItem, Rect,
-};
-use crate::domain::viewport::pf;
-use crate::state::terminal_model::TerminalModel;
-use crate::views::terminal_view::TerminalView;
 
-use super::events;
-use super::server::Dispatcher;
+use super::{events, server::Dispatcher};
 
 pub struct ActionRequest {
-    pub action: String,
-    pub payload: Value,
-    pub reply: Sender<Result<Value, String>>,
+    action: String,
+    payload: Value,
+    reply: Sender<Result<Value, String>>,
 }
 
-/// Build a `(Dispatcher, Receiver)` pair. The `Dispatcher` is what the
-/// TCP server uses to fulfill requests; the `Receiver` is consumed by
-/// `pump_actions` on the foreground.
 pub fn make_dispatcher() -> (Dispatcher, Receiver<ActionRequest>) {
-    let (tx, rx) = unbounded::<ActionRequest>();
-    let tx = Arc::new(tx);
+    let (sender, receiver) = unbounded::<ActionRequest>();
+    let sender = Arc::new(sender);
     let dispatcher: Dispatcher = Arc::new(move |action, payload| {
-        let tx = tx.clone();
+        let sender = sender.clone();
         Box::pin(async move {
-            let (reply_tx, reply_rx) = async_channel::bounded(1);
-            tx.send(ActionRequest {
-                action,
-                payload,
-                reply: reply_tx,
-            })
-            .await
-            .map_err(|e| format!("dispatcher: action queue closed: {e}"))?;
-            reply_rx
+            let (reply, result) = async_channel::bounded(1);
+            sender
+                .send(ActionRequest {
+                    action,
+                    payload,
+                    reply,
+                })
+                .await
+                .map_err(|error| format!("automation queue closed: {error}"))?;
+            result
                 .recv()
                 .await
-                .map_err(|e| format!("dispatcher: reply channel closed: {e}"))?
+                .map_err(|error| format!("automation reply dropped: {error}"))?
         })
     });
-    (dispatcher, rx)
+    (dispatcher, receiver)
 }
 
-/// Foreground-side pump. Spawn via `cx.spawn` so it has access to
-/// `&mut AsyncApp` across awaits. Returns when the channel is closed
-/// (i.e. when the dispatcher is dropped on app shutdown).
 pub async fn pump_actions(
-    rx: Receiver<ActionRequest>,
+    receiver: Receiver<ActionRequest>,
     app: WeakEntity<NativeApp>,
     mut cx: AsyncApp,
 ) {
-    while let Ok(req) = rx.recv().await {
-        let result = handle_action(&req.action, req.payload, &app, &mut cx).await;
-        let _ = req.reply.send(result).await;
+    while let Ok(request) = receiver.recv().await {
+        let result = handle_action(&request.action, request.payload, &app, &mut cx);
+        let _ = request.reply.send(result).await;
     }
 }
 
-async fn handle_action(
+fn handle_action(
     action: &str,
     payload: Value,
     app: &WeakEntity<NativeApp>,
@@ -81,278 +64,164 @@ async fn handle_action(
     match action {
         "ping" => Ok(json!({
             "pong": true,
+            "frontendReady": true,
             "pid": std::process::id(),
         })),
-        "get_state" => get_state(app, cx),
-        "list_sessions" => list_sessions(app, cx),
-        "get_window_geometry" => get_window_geometry(cx),
-        "select_workspace" => select_workspace(app, cx, payload),
-        "focus_panel" => focus_panel(app, cx, payload),
-        "move_panel" => move_panel(app, cx, payload),
-        "send_pty_input" => send_pty_input(app, cx, payload),
-        "type_into_panel" => type_into_panel(app, cx, payload),
-        "read_pane_text" => read_pane_text(app, cx, payload),
-        "tail_events" => tail_events(payload),
-        "set_zoom" => set_zoom(app, cx, payload),
-        "set_sidebar_collapsed" => set_sidebar_collapsed(app, cx, payload),
-        "click_sidebar_settings" => click_sidebar_settings(app, cx),
-        "click_settings_sidebar_mode" => click_settings_sidebar_mode(app, cx),
-        "click_settings_section" => click_settings_section(app, cx, payload),
-        "click_settings_close" => click_settings_close(app, cx),
-        "press_canvas_cmd_comma" => press_canvas_cmd_comma(app, cx),
-        "press_window_cmd_comma_without_view_focus" => {
-            press_window_cmd_comma_without_view_focus(cx)
+        "get_state" => read_app(app, cx, |app, cx| app.automation_snapshot(cx)),
+        "capture_structured_snapshot" => {
+            let include_text = payload
+                .get("includePaneText")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            read_app(app, cx, |app, cx| {
+                app.automation_structured_snapshot(cx, include_text)
+            })
         }
+        "capture_render_health" => read_app(app, cx, |app, cx| app.automation_render_health(cx)),
+        "list_sessions" => read_app(app, cx, |app, _| app.automation_sessions()),
+        "tail_events" => Ok(events::tail(
+            payload.get("since_id").and_then(Value::as_u64).unwrap_or(0),
+        )),
+        "get_window_bounds" => window_bounds(cx),
+        "screenshot" => capture_screenshot(cx, payload),
         "create_workspace" => create_workspace(app, cx, payload),
-        "destroy_workspace" => destroy_workspace(app, cx, payload),
         "spawn_session" => spawn_session(app, cx, payload),
-        "split_shell" => split_shell(app, cx, payload),
-        "unregister_session" => unregister_session(app, cx, payload),
+        "destroy_workspace" => destroy_workspace(app, cx, payload),
+        "kill_runtime" => kill_runtime(app, cx, payload),
+        "select_workspace" => select_workspace(app, cx, payload),
+        "focus_pane" => focus_pane(app, cx, payload),
+        "split_pane" => split_pane(app, cx, payload),
+        "mute_session" => mute_session(app, cx, payload),
+        "close_pane" => close_pane(app, cx, payload),
+        "write_pane" => write_pane(app, cx, payload),
+        "type_pane_via_ui" => type_pane_via_ui(app, cx, payload),
+        "read_pane_text" => read_pane_text(app, cx, payload),
         _ => Err(format!("unknown action: {action}")),
     }
 }
 
-fn press_canvas_cmd_comma(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {
-    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    let canvas = cx
-        .read_entity(&entity, |app: &NativeApp, _cx: &App| app.canvas_entity())
-        .map_err(|e| format!("read entity: {e}"))?;
-    let window = cx
-        .update(|app: &mut App| app.windows().into_iter().next())
-        .map_err(|e| format!("list windows: {e}"))?
-        .ok_or("no open windows")?;
-
-    cx.update_window(
-        window,
-        move |_root: AnyView, window: &mut Window, app: &mut App| {
-            canvas.update(app, |canvas, cx| {
-                canvas.inject_keystroke(
-                    Keystroke {
-                        key: ",".into(),
-                        modifiers: Modifiers {
-                            platform: true,
-                            ..Modifiers::default()
-                        },
-                        key_char: None,
-                    },
-                    window,
-                    cx,
-                );
-            });
-        },
-    )
-    .map_err(|e| format!("update window: {e}"))?;
-
-    Ok(json!({ "shortcut": "cmd+," }))
-}
-
-fn press_window_cmd_comma_without_view_focus(cx: &mut AsyncApp) -> Result<Value, String> {
-    let window = cx
-        .update(|app: &mut App| app.windows().into_iter().next())
-        .map_err(|e| format!("list windows: {e}"))?
-        .ok_or("no open windows")?;
-
-    cx.update_window(
-        window,
-        move |_root: AnyView, window: &mut Window, app: &mut App| {
-            window.blur();
-            window.dispatch_keystroke(
-                Keystroke {
-                    key: ",".into(),
-                    modifiers: Modifiers {
-                        platform: true,
-                        ..Modifiers::default()
-                    },
-                    key_char: None,
-                },
-                app,
-            );
-        },
-    )
-    .map_err(|e| format!("update window: {e}"))?;
-
-    Ok(json!({ "shortcut": "cmd+,", "view_focus": false }))
-}
-
-fn click_sidebar_settings(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {
-    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    let sidebar = cx
-        .read_entity(&entity, |app: &NativeApp, _cx: &App| app.sidebar_entity())
-        .map_err(|e| format!("read entity: {e}"))?;
-    let window = cx
-        .update(|app: &mut App| app.windows().into_iter().next())
-        .map_err(|e| format!("list windows: {e}"))?
-        .ok_or("no open windows")?;
-
-    cx.update_window(
-        window,
-        move |_root: AnyView, window: &mut Window, app: &mut App| {
-            sidebar.update(app, |sidebar, cx| {
-                sidebar.click_settings_for_automation(window, cx);
-            });
-        },
-    )
-    .map_err(|e| format!("update window: {e}"))?;
-
-    Ok(json!({ "settings_open": true }))
-}
-
-fn click_settings_sidebar_mode(
-    app: &WeakEntity<NativeApp>,
-    cx: &mut AsyncApp,
-) -> Result<Value, String> {
-    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    let settings_page = cx
-        .read_entity(&entity, |app: &NativeApp, _cx: &App| {
-            app.settings_page_entity()
-        })
-        .map_err(|e| format!("read entity: {e}"))?
-        .ok_or("settings page is not open")?;
-    let window = cx
-        .update(|app: &mut App| app.windows().into_iter().next())
-        .map_err(|e| format!("list windows: {e}"))?
-        .ok_or("no open windows")?;
-
-    cx.update_window(
-        window,
-        move |_root: AnyView, window: &mut Window, app: &mut App| {
-            settings_page.update(app, |settings, cx| {
-                settings.click_sidebar_mode_for_automation(window, cx);
-            });
-        },
-    )
-    .map_err(|e| format!("update window: {e}"))?;
-
-    Ok(json!({ "clicked": "settings_sidebar_mode" }))
-}
-
-fn click_settings_section(
+fn create_workspace(
     app: &WeakEntity<NativeApp>,
     cx: &mut AsyncApp,
     payload: Value,
 ) -> Result<Value, String> {
-    let section = payload
-        .get("section")
+    let workspace_id =
+        required_string(&payload, "workspace_id").or_else(|_| required_string(&payload, "id"))?;
+    let directory = required_string(&payload, "directory")?;
+    let title = payload
+        .get("title")
         .and_then(Value::as_str)
-        .ok_or("section is required")?
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Automation Workspace")
         .to_string();
-    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    let settings_page = cx
-        .read_entity(&entity, |app: &NativeApp, _cx: &App| {
-            app.settings_page_entity()
-        })
-        .map_err(|e| format!("read entity: {e}"))?
-        .ok_or("settings page is not open")?;
-
-    cx.update_entity(&settings_page, |settings, cx| {
-        settings.select_section_for_automation(section.as_str(), cx)
-    })
-    .map_err(|e| format!("update settings page: {e}"))??;
-
-    Ok(json!({ "section": section }))
-}
-
-fn click_settings_close(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {
-    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    let settings_page = cx
-        .read_entity(&entity, |app: &NativeApp, _cx: &App| {
-            app.settings_page_entity()
-        })
-        .map_err(|e| format!("read entity: {e}"))?
-        .ok_or("settings page is not open")?;
-    let window = cx
-        .update(|app: &mut App| app.windows().into_iter().next())
-        .map_err(|e| format!("list windows: {e}"))?
-        .ok_or("no open windows")?;
-
-    cx.update_window(
-        window,
-        move |_root: AnyView, window: &mut Window, app: &mut App| {
-            settings_page.update(app, |settings, cx| {
-                settings.click_close_for_automation(window, cx);
-            });
-        },
-    )
-    .map_err(|e| format!("update window: {e}"))?;
-
-    Ok(json!({ "settings_open": false }))
-}
-
-fn set_sidebar_collapsed(
-    app: &WeakEntity<NativeApp>,
-    cx: &mut AsyncApp,
-    payload: Value,
-) -> Result<Value, String> {
-    let collapsed = payload
-        .get("collapsed")
-        .and_then(Value::as_bool)
-        .ok_or("payload.collapsed (bool) is required")?;
-    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    cx.update_entity(&entity, |app, cx| {
-        app.set_sidebar_collapsed(collapsed, cx);
-    })
-    .map_err(|e| format!("update entity: {e}"))?;
-
-    Ok(json!({ "collapsed": collapsed }))
-}
-
-fn focus_panel(
-    app: &WeakEntity<NativeApp>,
-    cx: &mut AsyncApp,
-    payload: Value,
-) -> Result<Value, String> {
-    let session_id = payload
-        .get("session_id")
-        .and_then(Value::as_str)
-        .ok_or("payload.session_id (string) is required")?
-        .to_string();
-    let input_focus = payload
-        .get("input_focus")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
-
-    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    let window = cx
-        .update(|app: &mut App| app.windows().into_iter().next())
-        .map_err(|e| format!("list windows: {e}"))?
-        .ok_or("no open windows")?;
-    let session_id_for_focus = session_id.clone();
-
-    cx.update_window(
-        window,
-        move |_root: AnyView, window: &mut Window, app: &mut App| {
-            app_entity.update(app, |native: &mut NativeApp, cx| {
-                native.set_canvas_panel_focus_by_session(
-                    &session_id_for_focus,
-                    input_focus,
-                    window,
-                    cx,
-                )
-            })
-        },
-    )
-    .map_err(|e| format!("update window: {e}"))??;
-
+    send_daemon(
+        app,
+        cx,
+        &RegisterWorkspaceMessage::new(workspace_id.clone(), title.clone(), directory.clone()),
+    )?;
+    events::record(
+        "workspace_create_requested",
+        json!({"workspace_id": workspace_id, "title": title, "directory": directory}),
+    );
     Ok(json!({
-        "session_id": session_id,
-        "input_focus": input_focus,
+        "workspace_id": workspace_id,
+        "title": title,
+        "directory": directory,
     }))
 }
 
-fn get_state(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {
-    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    cx.read_entity(&entity, |app: &NativeApp, cx: &App| {
-        app.automation_snapshot(cx)
-    })
-    .map_err(|e| format!("read entity: {e}"))
+fn spawn_session(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    payload: Value,
+) -> Result<Value, String> {
+    let session_id =
+        required_string(&payload, "session_id").or_else(|_| required_string(&payload, "id"))?;
+    let workspace_id = required_string(&payload, "workspace_id")?;
+    let cwd = required_string(&payload, "cwd")?;
+    let agent = payload
+        .get("agent")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("shell")
+        .to_string();
+    let cols = payload.get("cols").and_then(Value::as_u64).unwrap_or(100) as u16;
+    let rows = payload.get("rows").and_then(Value::as_u64).unwrap_or(36) as u16;
+    let mut message = SpawnSessionMessage::new(
+        session_id.clone(),
+        cwd.clone(),
+        workspace_id.clone(),
+        agent.clone(),
+        cols,
+        rows,
+    );
+    message.executable = payload
+        .get("executable")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    send_daemon(app, cx, &message)?;
+    events::record(
+        "session_spawn_requested",
+        json!({
+            "session_id": session_id,
+            "workspace_id": workspace_id,
+            "cwd": cwd,
+            "agent": agent,
+            "executable": message.executable,
+        }),
+    );
+    Ok(json!({
+        "session_id": session_id,
+        "workspace_id": workspace_id,
+        "agent": agent,
+        "executable": message.executable,
+    }))
 }
 
-fn list_sessions(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {
-    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    cx.read_entity(&entity, |app: &NativeApp, _cx: &App| {
-        serde_json::to_value(app.sessions_snapshot()).unwrap_or(Value::Null)
-    })
-    .map_err(|e| format!("read entity: {e}"))
+fn destroy_workspace(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    payload: Value,
+) -> Result<Value, String> {
+    let workspace_id =
+        required_string(&payload, "workspace_id").or_else(|_| required_string(&payload, "id"))?;
+    send_daemon(
+        app,
+        cx,
+        &UnregisterWorkspaceMessage::new(workspace_id.clone()),
+    )?;
+    events::record(
+        "workspace_destroy_requested",
+        json!({"workspace_id": workspace_id}),
+    );
+    Ok(json!({"workspace_id": workspace_id}))
+}
+
+fn kill_runtime(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    payload: Value,
+) -> Result<Value, String> {
+    let runtime_id = required_string(&payload, "runtime_id")
+        .or_else(|_| required_string(&payload, "session_id"))
+        .or_else(|_| required_string(&payload, "id"))?;
+    send_daemon(app, cx, &KillSessionMessage::new(runtime_id.clone()))?;
+    events::record("runtime_kill_requested", json!({"runtime_id": runtime_id}));
+    Ok(json!({"runtime_id": runtime_id}))
+}
+
+fn read_app(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    read: impl FnOnce(&NativeApp, &App) -> Value,
+) -> Result<Value, String> {
+    let entity = app.upgrade().ok_or("native app dropped")?;
+    cx.read_entity(&entity, read)
+        .map_err(|error| format!("read native app: {error}"))
 }
 
 fn select_workspace(
@@ -360,551 +229,368 @@ fn select_workspace(
     cx: &mut AsyncApp,
     payload: Value,
 ) -> Result<Value, String> {
-    let id = payload
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or("payload.id (string) is required")?
-        .to_string();
-    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
+    let workspace_id =
+        required_string(&payload, "workspace_id").or_else(|_| required_string(&payload, "id"))?;
+    let entity = app.upgrade().ok_or("native app dropped")?;
     cx.update_entity(&entity, |app, cx| {
-        if app.workspace(&id).is_none() {
-            return Err(format!("unknown workspace id: {id}"));
-        }
-        app.select_workspace(SharedString::from(id.clone()), cx);
-        Ok(json!({ "selected_workspace_id": id }))
+        app.automation_select_workspace(&workspace_id, cx)
     })
-    .map_err(|e| format!("update entity: {e}"))?
+    .map_err(|error| format!("update native app: {error}"))??;
+    events::record("workspace_selected", json!({"workspace_id": workspace_id}));
+    Ok(json!({"selected_workspace_id": workspace_id}))
 }
 
-fn move_panel(
+fn focus_pane(
     app: &WeakEntity<NativeApp>,
     cx: &mut AsyncApp,
     payload: Value,
 ) -> Result<Value, String> {
-    let workspace_id = payload
-        .get("workspace_id")
-        .and_then(Value::as_str)
-        .ok_or("payload.workspace_id (string) is required")?
-        .to_string();
-    let panel_id = payload
-        .get("panel_id")
-        .and_then(Value::as_u64)
-        .ok_or("payload.panel_id (number) is required")? as usize;
-    let world_x = payload
-        .get("world_x")
-        .and_then(Value::as_f64)
-        .map(|n| n as f32);
-    let world_y = payload
-        .get("world_y")
-        .and_then(Value::as_f64)
-        .map(|n| n as f32);
-    let width = payload
-        .get("width")
-        .and_then(Value::as_f64)
-        .map(|n| n as f32);
-    let height = payload
-        .get("height")
-        .and_then(Value::as_f64)
-        .map(|n| n as f32);
-
-    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    let workspace = cx
-        .read_entity(&app_entity, |app: &NativeApp, _cx: &App| {
-            app.workspace(&workspace_id)
-        })
-        .map_err(|e| format!("read entity: {e}"))?
-        .ok_or_else(|| format!("unknown workspace id: {workspace_id}"))?;
-
-    let (
-        daemon_panel_id,
-        session_id,
-        title,
-        target_world_x,
-        target_world_y,
-        target_width,
-        target_height,
-    ) = cx
-        .read_entity(&workspace, |ws, _cx| {
-            let existing = ws
-                .panels
-                .iter()
-                .find(|panel| panel.id == panel_id)
-                .ok_or_else(|| format!("unknown panel id: {panel_id}"))?;
-            let target_world_x = world_x.unwrap_or(existing.world_x);
-            let target_world_y = world_y.unwrap_or(existing.world_y);
-            let target_width = width.unwrap_or(existing.width);
-            let target_height = height.unwrap_or(existing.height);
-            Ok::<_, String>((
-                existing.daemon_panel_id.to_string(),
-                existing.session_id.to_string(),
-                existing.title.to_string(),
-                target_world_x,
-                target_world_y,
-                target_width,
-                target_height,
-            ))
-        })
-        .map_err(|e| format!("read workspace: {e}"))??;
-
-    let daemon_panel_id_for_send = daemon_panel_id.clone();
-    cx.read_entity(&app_entity, |app: &NativeApp, cx: &App| {
-        app.daemon()
-            .read(cx)
-            .send_cmd(&attn_protocol::UpdateWorkspacePanelGeometryMessage::new(
-                workspace_id.clone(),
-                daemon_panel_id_for_send,
-                Some(target_world_x),
-                Some(target_world_y),
-                Some(target_width),
-                Some(target_height),
-            ))
-    })
-    .map_err(|e| format!("read entity: {e}"))??;
-
-    Ok(json!({
-        "panel": {
-            "id": panel_id,
-            "daemon_panel_id": daemon_panel_id,
-            "kind": "terminal",
-            "title": title,
-            "session_id": session_id,
-            "world_x": target_world_x,
-            "world_y": target_world_y,
-            "width": target_width,
-            "height": target_height,
-        }
-    }))
-}
-
-fn send_pty_input(
-    app: &WeakEntity<NativeApp>,
-    cx: &mut AsyncApp,
-    payload: Value,
-) -> Result<Value, String> {
-    let session_id = payload
-        .get("session_id")
-        .and_then(Value::as_str)
-        .ok_or("payload.session_id (string) is required")?
-        .to_string();
-    let text = payload
-        .get("text")
-        .and_then(Value::as_str)
-        .ok_or("payload.text (string) is required")?
-        .to_string();
-
-    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    cx.read_entity(&app_entity, |app: &NativeApp, cx: &App| {
-        if find_terminal_model(app, &session_id, cx).is_none() {
-            return Err(format!("no terminal panel for session: {session_id}"));
-        }
-        // The daemon routes by session id; we just need to send the
-        // message. Passing through TerminalModel would also work but
-        // it's strictly equivalent and adds an indirection.
-        app.daemon()
-            .read(cx)
-            .send_cmd(&PtyInputMessage::new(session_id.clone(), text.clone()))?;
-        Ok(json!({
-            "session_id": session_id,
-            "bytes_sent": text.len(),
-        }))
-    })
-    .map_err(|e| format!("read entity: {e}"))?
-}
-
-/// Register a new workspace with the daemon. Caller may supply an `id`
-/// for deterministic test setups; otherwise we generate a UUIDv4-style
-/// hex id locally. Daemon enforces `directory` non-empty but does not
-/// validate filesystem existence — tests can use `/tmp/whatever` freely.
-/// Fails if the daemon command cannot be queued for delivery. Observers
-/// (canvas, sidebar) still react to the daemon's `workspace_registered`
-/// broadcast on their own schedule, so callers should poll `get_state` or
-/// `tail_events` for the post-condition rather than treating action
-/// success as "workspace is now in the UI".
-fn create_workspace(
-    app: &WeakEntity<NativeApp>,
-    cx: &mut AsyncApp,
-    payload: Value,
-) -> Result<Value, String> {
-    let directory = payload
-        .get("directory")
-        .and_then(Value::as_str)
-        .ok_or("payload.directory (string) is required")?
-        .trim()
-        .to_string();
-    if directory.is_empty() {
-        return Err("payload.directory must be non-empty".to_string());
+    let workspace_id = required_string(&payload, "workspace_id")?;
+    let pane_id = required_string(&payload, "pane_id")?;
+    let runtime_id = resolve_runtime_id(app, cx, &payload).ok();
+    send_daemon(
+        app,
+        cx,
+        &WorkspaceLayoutFocusPaneMessage::new(workspace_id.clone(), pane_id.clone()),
+    )?;
+    events::record(
+        "pane_focus_requested",
+        json!({"workspace_id": workspace_id, "pane_id": pane_id}),
+    );
+    if let Some(runtime_id) = runtime_id {
+        focus_terminal_view(app, cx, &runtime_id)?;
     }
-    let title = payload
-        .get("title")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    let id = match payload.get("id").and_then(Value::as_str) {
-        Some(s) if !s.trim().is_empty() => s.trim().to_string(),
-        _ => generate_workspace_id(),
+    Ok(json!({"workspace_id": workspace_id, "pane_id": pane_id}))
+}
+
+fn split_pane(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    payload: Value,
+) -> Result<Value, String> {
+    let workspace_id = optional_string(&payload, &["workspaceId", "workspace_id"])
+        .ok_or("payload.workspaceId is required")?;
+    let target_pane_id = optional_string(
+        &payload,
+        &["targetPaneId", "target_pane_id", "paneId", "pane_id"],
+    )
+    .ok_or("payload.targetPaneId is required")?;
+    let direction = match optional_string(&payload, &["direction"]).as_deref() {
+        Some("horizontal") => WorkspaceLayoutSplitDirection::Horizontal,
+        Some("vertical") | None => WorkspaceLayoutSplitDirection::Vertical,
+        Some(value) => return Err(format!("unknown split direction: {value}")),
     };
-
-    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    cx.update_entity(&app_entity, |app: &mut NativeApp, cx| {
-        app.register_workspace_and_select(id.clone(), title.clone(), directory.clone(), cx)
-    })
-    .map_err(|e| format!("update entity: {e}"))??;
-
+    send_daemon(
+        app,
+        cx,
+        &WorkspaceLayoutSplitPaneMessage {
+            cmd: "workspace_layout_split_pane",
+            workspace_id: workspace_id.clone(),
+            target_pane_id: target_pane_id.clone(),
+            direction,
+        },
+    )?;
+    events::record(
+        "pane_split_requested",
+        json!({"workspace_id": workspace_id, "target_pane_id": target_pane_id}),
+    );
     Ok(json!({
-        "id": id,
-        "title": title,
-        "directory": directory,
+        "workspaceId": workspace_id,
+        "targetPaneId": target_pane_id,
     }))
 }
 
-/// Send `unregister_workspace` to the daemon. Daemon cascades: SIGTERMs
-/// every member session and broadcasts `session_unregistered` for each
-/// before broadcasting `workspace_unregistered`. Idempotent on unknown id
-/// (daemon silently no-ops), so tests don't have to guard against double-
-/// destroy in cleanup paths.
-fn destroy_workspace(
+fn mute_session(
     app: &WeakEntity<NativeApp>,
     cx: &mut AsyncApp,
     payload: Value,
 ) -> Result<Value, String> {
-    let id = payload
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or("payload.id (string) is required")?
-        .trim()
-        .to_string();
-    if id.is_empty() {
-        return Err("payload.id must be non-empty".to_string());
-    }
-
-    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    cx.read_entity(&app_entity, |app: &NativeApp, cx: &App| {
-        app.daemon()
-            .read(cx)
-            .send_cmd(&UnregisterWorkspaceMessage::new(id.clone()))
-    })
-    .map_err(|e| format!("read entity: {e}"))??;
-
-    Ok(json!({ "id": id }))
+    let session_id = required_string(&payload, "session_id")?;
+    send_daemon(app, cx, &MuteMessage::new(session_id.clone()))?;
+    events::record("session_mute_requested", json!({"session_id": session_id}));
+    Ok(json!({"session_id": session_id}))
 }
 
-/// Spawn a new session inside an existing workspace through the same
-/// `NativeApp::spawn_session_in_workspace` path the canvas toolbar uses,
-/// so a regression in id generation, pending-spawn tracking, or wire
-/// shape trips this action just like it would in the UI. Caller may
-/// override `cwd` for tests that want to spawn outside the workspace's
-/// recorded directory; otherwise we fall back to the workspace's cwd
-/// (matching the toolbar's behaviour).
-fn spawn_session(
+fn close_pane(
     app: &WeakEntity<NativeApp>,
     cx: &mut AsyncApp,
     payload: Value,
 ) -> Result<Value, String> {
-    let workspace_id = payload
-        .get("workspace_id")
-        .and_then(Value::as_str)
-        .ok_or("payload.workspace_id (string) is required")?
-        .trim()
-        .to_string();
-    if workspace_id.is_empty() {
-        return Err("payload.workspace_id must be non-empty".to_string());
+    let workspace_id = required_string(&payload, "workspace_id")?;
+    let pane_id = required_string(&payload, "pane_id")?;
+    send_daemon(
+        app,
+        cx,
+        &WorkspaceLayoutClosePaneMessage::new(workspace_id.clone(), pane_id.clone()),
+    )?;
+    events::record(
+        "pane_close_requested",
+        json!({"workspace_id": workspace_id, "pane_id": pane_id}),
+    );
+    Ok(json!({"workspace_id": workspace_id, "pane_id": pane_id}))
+}
+
+fn write_pane(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    payload: Value,
+) -> Result<Value, String> {
+    let runtime_id = resolve_runtime_id(app, cx, &payload)?;
+    let mut text = required_raw_string(&payload, "text")?;
+    if payload
+        .get("submit")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+    {
+        text.push('\r');
     }
-    let agent = payload
-        .get("agent")
-        .and_then(Value::as_str)
-        .ok_or("payload.agent (string) is required")?
-        .trim()
-        .to_string();
-    if agent.is_empty() {
-        return Err("payload.agent must be non-empty".to_string());
+    let entity = app.upgrade().ok_or("native app dropped")?;
+    let visible = cx
+        .read_entity(&entity, |app, _| app.has_visible_runtime(&runtime_id))
+        .map_err(|error| format!("read native app: {error}"))?;
+    if !visible {
+        return Err(format!("no visible terminal runtime: {runtime_id}"));
     }
-    let cwd = payload
-        .get("cwd")
+    send_daemon(
+        app,
+        cx,
+        &PtyInputMessage::new(runtime_id.clone(), text.clone()),
+    )?;
+    Ok(target_result(&payload, runtime_id, text.len()))
+}
+
+fn type_pane_via_ui(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    payload: Value,
+) -> Result<Value, String> {
+    let runtime_id = resolve_runtime_id(app, cx, &payload)?;
+    let text = required_raw_string(&payload, "text")?;
+    let entity = app.upgrade().ok_or("native app dropped")?;
+    let view = cx
+        .read_entity(&entity, |app, _| app.terminal_view(&runtime_id))
+        .map_err(|error| format!("read native app: {error}"))?
+        .ok_or_else(|| format!("no visible terminal runtime: {runtime_id}"))?;
+    let window = cx
+        .update(|app| app.windows().into_iter().next())
+        .map_err(|error| format!("list windows: {error}"))?
+        .ok_or("no native window")?;
+    let keystrokes = keystrokes_for_text(&text);
+    let count = keystrokes.len();
+    let accepted = cx
+        .update_window(window, move |_root: AnyView, window, app| {
+            view.update(app, |view, cx| {
+                keystrokes
+                    .into_iter()
+                    .filter(|keystroke| view.inject_keystroke(keystroke.clone(), window, cx))
+                    .count()
+            })
+        })
+        .map_err(|error| format!("update native window: {error}"))?;
+    if accepted != count {
+        return Err(format!(
+            "terminal pane is not focused for UI input: accepted {accepted} of {count} keystrokes"
+        ));
+    }
+    let mut result = target_result(&payload, runtime_id, 0);
+    result["keystrokes"] = json!(count);
+    result["focusedFirst"] = json!(false);
+    Ok(result)
+}
+
+fn focus_terminal_view(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    runtime_id: &str,
+) -> Result<(), String> {
+    let entity = app.upgrade().ok_or("native app dropped")?;
+    let view = cx
+        .read_entity(&entity, |app, _| app.terminal_view(runtime_id))
+        .map_err(|error| format!("read native app: {error}"))?
+        .ok_or_else(|| format!("no visible terminal runtime: {runtime_id}"))?;
+    let window = cx
+        .update(|app| app.windows().into_iter().next())
+        .map_err(|error| format!("list windows: {error}"))?
+        .ok_or("no native window")?;
+    cx.update_window(window, move |_root: AnyView, window, app| {
+        view.update(app, |view, _| view.focus_for_input(window));
+    })
+    .map_err(|error| format!("focus native terminal: {error}"))
+}
+
+fn read_pane_text(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    payload: Value,
+) -> Result<Value, String> {
+    let runtime_id = resolve_runtime_id(app, cx, &payload)?;
+    let entity = app.upgrade().ok_or("native app dropped")?;
+    let view = cx
+        .read_entity(&entity, |app, _| app.terminal_view(&runtime_id))
+        .map_err(|error| format!("read native app: {error}"))?
+        .ok_or_else(|| format!("no visible terminal runtime: {runtime_id}"))?;
+    cx.read_entity(&view, |view, cx| {
+        let (cols, rows) = view.terminal_size(cx);
+        let mut result = json!({
+            "runtimeId": runtime_id,
+            "cols": cols,
+            "rows": rows,
+            "text": view.screen_text().unwrap_or_default(),
+        });
+        if let Some(workspace_id) = optional_string(&payload, &["workspaceId", "workspace_id"]) {
+            result["workspaceId"] = json!(workspace_id);
+        }
+        if let Some(pane_id) = optional_string(&payload, &["paneId", "pane_id"]) {
+            result["paneId"] = json!(pane_id);
+        }
+        result
+    })
+    .map_err(|error| format!("read terminal: {error}"))
+}
+
+fn send_daemon<T: serde::Serialize>(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    message: &T,
+) -> Result<(), String> {
+    let entity = app.upgrade().ok_or("native app dropped")?;
+    cx.read_entity(&entity, |app, cx| app.daemon().read(cx).send(message))
+        .map_err(|error| format!("read native app: {error}"))?
+}
+
+fn window_bounds(cx: &mut AsyncApp) -> Result<Value, String> {
+    let window = cx
+        .update(|app| app.windows().into_iter().next())
+        .map_err(|error| format!("list windows: {error}"))?
+        .ok_or("no native window")?;
+    cx.update_window(window, |_root: AnyView, window, _| {
+        let bounds = window.bounds();
+        json!({
+            "scaleFactor": window.scale_factor(),
+            "logicalBounds": {
+                "x": f32::from(bounds.origin.x),
+                "y": f32::from(bounds.origin.y),
+                "width": f32::from(bounds.size.width),
+                "height": f32::from(bounds.size.height),
+            },
+            "globalBounds": {
+                "x": f32::from(bounds.origin.x),
+                "y": f32::from(bounds.origin.y),
+                "width": f32::from(bounds.size.width),
+                "height": f32::from(bounds.size.height),
+            }
+        })
+    })
+    .map_err(|error| format!("read native window: {error}"))
+}
+
+fn capture_screenshot(cx: &mut AsyncApp, payload: Value) -> Result<Value, String> {
+    let path =
+        optional_string(&payload, &["path"]).unwrap_or_else(|| "/tmp/attn-native.png".to_string());
+    let window_id = payload
+        .get("windowId")
+        .and_then(Value::as_u64)
+        .filter(|id| *id > 0)
+        .ok_or("payload.windowId (positive number) is required for exact-window capture")?;
+    let bounds = window_bounds(cx)?;
+    if let Some(parent) = Path::new(&path).parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("create screenshot directory: {error}"))?;
+    }
+    let window_id = window_id.to_string();
+    let output = Command::new("/usr/sbin/screencapture")
+        .args(["-x", "-l", &window_id, "-o", &path])
+        .output()
+        .map_err(|error| format!("run screencapture: {error}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(format!(
+            "native screencapture failed{}",
+            if stderr.is_empty() {
+                String::new()
+            } else {
+                format!(": {stderr}")
+            }
+        ));
+    }
+    Ok(json!({
+        "source": "native_process",
+        "path": path,
+        "windowId": window_id,
+        "logicalBounds": bounds.get("logicalBounds"),
+    }))
+}
+
+fn required_string(payload: &Value, key: &str) -> Result<String, String> {
+    payload
+        .get(key)
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned);
-
-    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    let session_id = cx
-        .update_entity(&app_entity, |app: &mut NativeApp, cx| match cwd.clone() {
-            Some(directory) => app.spawn_session_in_workspace_at(
-                SharedString::from(workspace_id.clone()),
-                directory,
-                SharedString::from(agent.clone()),
-                cx,
-            ),
-            None => app.spawn_session_in_workspace(
-                SharedString::from(workspace_id.clone()),
-                SharedString::from(agent.clone()),
-                cx,
-            ),
-        })
-        .map_err(|e| format!("update entity: {e}"))??;
-
-    Ok(json!({
-        "session_id": session_id.as_ref(),
-        "workspace_id": workspace_id,
-        "agent": agent,
-        "cwd": cwd,
-    }))
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| format!("payload.{key} (string) is required"))
 }
 
-fn split_shell(
-    app: &WeakEntity<NativeApp>,
-    cx: &mut AsyncApp,
-    payload: Value,
-) -> Result<Value, String> {
-    let session_id = payload
-        .get("session_id")
+fn required_raw_string(payload: &Value, key: &str) -> Result<String, String> {
+    payload
+        .get(key)
         .and_then(Value::as_str)
-        .ok_or("payload.session_id (string) is required")?
-        .trim()
-        .to_string();
-    if session_id.is_empty() {
-        return Err("payload.session_id must be non-empty".to_string());
-    }
-    let direction = parse_adjacent_direction(
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| format!("payload.{key} (non-empty string) is required"))
+}
+
+fn optional_string(payload: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
         payload
-            .get("direction")
+            .get(*key)
             .and_then(Value::as_str)
-            .unwrap_or("right"),
-    )?;
-
-    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    let (workspace_id, placement) = cx
-        .read_entity(&app_entity, |app: &NativeApp, cx: &App| {
-            for ws in app.workspaces() {
-                let ws = ws.read(cx);
-                if let Some(panel) = ws
-                    .panels
-                    .iter()
-                    .find(|panel| panel.session_id.as_ref() == session_id.as_str())
-                {
-                    let anchor = Rect {
-                        x: panel.world_x,
-                        y: panel.world_y,
-                        width: panel.width,
-                        height: panel.height,
-                    };
-                    let existing = ws
-                        .panels
-                        .iter()
-                        .map(|panel| PanelPlacementItem {
-                            id: panel.id,
-                            rect: Rect {
-                                x: panel.world_x,
-                                y: panel.world_y,
-                                width: panel.width,
-                                height: panel.height,
-                            },
-                        })
-                        .collect::<Vec<_>>();
-                    return Ok::<_, String>((
-                        ws.id.clone(),
-                        place_panel_adjacent_avoiding(anchor, direction, &existing),
-                    ));
-                }
-            }
-            Err(format!("no terminal panel for session: {session_id}"))
-        })
-        .map_err(|e| format!("read entity: {e}"))??;
-
-    let spawned = cx
-        .update_entity(&app_entity, |app: &mut NativeApp, cx| {
-            app.spawn_shell_split_in_workspace(
-                workspace_id.clone(),
-                SharedString::from(session_id.clone()),
-                direction,
-                placement,
-                cx,
-            )
-        })
-        .map_err(|e| format!("update entity: {e}"))??;
-
-    Ok(json!({
-        "session_id": spawned.as_ref(),
-        "workspace_id": workspace_id.as_ref(),
-        "anchor_session_id": session_id.as_str(),
-        "agent": "shell",
-        "direction": adjacent_direction_name(direction),
-        "placement": {
-            "world_x": placement.x,
-            "world_y": placement.y,
-            "width": placement.width,
-            "height": placement.height,
-        },
-    }))
-}
-
-/// Tear down a session through the same daemon command the canvas's
-/// panel close button issues. Idempotent on the daemon — retrying after
-/// a missed response can't double-fault.
-fn unregister_session(
-    app: &WeakEntity<NativeApp>,
-    cx: &mut AsyncApp,
-    payload: Value,
-) -> Result<Value, String> {
-    let session_id = payload
-        .get("session_id")
-        .and_then(Value::as_str)
-        .ok_or("payload.session_id (string) is required")?
-        .trim()
-        .to_string();
-    if session_id.is_empty() {
-        return Err("payload.session_id must be non-empty".to_string());
-    }
-
-    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    cx.read_entity(&app_entity, |app: &NativeApp, cx: &App| {
-        app.daemon()
-            .read(cx)
-            .send_cmd(&UnregisterSessionMessage::new(session_id.clone()))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
     })
-    .map_err(|e| format!("read entity: {e}"))??;
-
-    Ok(json!({ "session_id": session_id }))
 }
 
-/// UUIDv4-shaped hex id (`xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`) so
-/// generated workspace ids look like the daemon's CLI-generated ones in
-/// logs and the recent-locations table. Pulling in the `uuid` crate just
-/// for this would add a dep without buying anything; `getrandom` is
-/// already a workspace dependency. `pub(crate)` so the sidebar's "+ New
-/// Workspace" flow can mint ids the same way.
-pub(crate) fn generate_workspace_id() -> String {
-    let mut bytes = [0u8; 16];
-    if getrandom::getrandom(&mut bytes).is_err() {
-        // OS RNG failure shouldn't happen, but if it does, fall back to a
-        // process-pid + timestamp scheme so the action still produces a
-        // distinguishable id rather than panicking the action pump.
-        let pid = std::process::id();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or_default();
-        let mut idx = 0;
-        for b in pid.to_le_bytes() {
-            bytes[idx] = b;
-            idx += 1;
-        }
-        for b in now.to_le_bytes() {
-            if idx >= bytes.len() {
-                break;
-            }
-            bytes[idx] = b;
-            idx += 1;
-        }
-    }
-    // Set version (4) and variant (10) bits per RFC 4122.
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-
-    let mut s = String::with_capacity(36);
-    for (i, b) in bytes.iter().enumerate() {
-        if matches!(i, 4 | 6 | 8 | 10) {
-            s.push('-');
-        }
-        s.push(hex_nibble(b >> 4));
-        s.push(hex_nibble(b & 0x0f));
-    }
-    s
-}
-
-fn hex_nibble(n: u8) -> char {
-    match n {
-        0..=9 => (b'0' + n) as char,
-        10..=15 => (b'a' + n - 10) as char,
-        _ => unreachable!(),
-    }
-}
-
-/// Pump a string of text through the focused panel's keyboard handler so
-/// tests exercise the same encode/send path as real keypresses
-/// (`TerminalView::on_key_down → encode_key → send_input`). Differs from
-/// `send_pty_input`, which constructs the wire message directly and
-/// therefore can't catch regressions in focus routing or key encoding.
-fn type_into_panel(
+fn resolve_runtime_id(
     app: &WeakEntity<NativeApp>,
     cx: &mut AsyncApp,
-    payload: Value,
-) -> Result<Value, String> {
-    let session_id = payload
-        .get("session_id")
-        .and_then(Value::as_str)
-        .ok_or("payload.session_id (string) is required")?
-        .to_string();
-    let text = payload
-        .get("text")
-        .and_then(Value::as_str)
-        .ok_or("payload.text (string) is required")?
-        .to_string();
-    let focus = payload
-        .get("focus")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
-
-    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    let view = cx
-        .read_entity(&app_entity, |app: &NativeApp, cx: &App| {
-            find_terminal_view(app, &session_id, cx)
-        })
-        .map_err(|e| format!("read entity: {e}"))?
-        .ok_or_else(|| format!("no terminal panel for session: {session_id}"))?;
-
-    let window = cx
-        .update(|app: &mut App| app.windows().into_iter().next())
-        .map_err(|e| format!("list windows: {e}"))?
-        .ok_or("no open windows")?;
-
-    let keystrokes = keystrokes_for_text(&text);
-    let count = keystrokes.len();
-    let session_id_for_focus = session_id.clone();
-    let app_entity_for_focus = app_entity.clone();
-
-    cx.update_window(
-        window,
-        move |_root: AnyView, window: &mut Window, app: &mut App| {
-            if focus {
-                app_entity_for_focus.update(app, |native: &mut NativeApp, cx| {
-                    native.set_canvas_panel_focus_by_session(
-                        &session_id_for_focus,
-                        true,
-                        window,
-                        cx,
-                    )
-                })?;
-            }
-            view.update(app, |view: &mut TerminalView, cx| {
-                if focus && view.set_input_enabled(true) {
-                    cx.notify();
-                }
-                for keystroke in keystrokes {
-                    view.inject_keystroke(keystroke, window, cx);
-                }
-            });
-            Ok::<_, String>(())
-        },
-    )
-    .map_err(|e| format!("update window: {e}"))??;
-
-    Ok(json!({
-        "session_id": session_id,
-        "keystrokes": count,
-        "focused_first": focus,
-    }))
+    payload: &Value,
+) -> Result<String, String> {
+    if let Some(runtime_id) = optional_string(
+        payload,
+        &["runtimeId", "runtime_id", "sessionId", "session_id"],
+    ) {
+        return Ok(runtime_id);
+    }
+    let workspace_id = optional_string(payload, &["workspaceId", "workspace_id"])
+        .ok_or("payload.runtimeId or payload.workspaceId is required")?;
+    let pane_id = optional_string(payload, &["paneId", "pane_id"])
+        .ok_or("payload.paneId is required with payload.workspaceId")?;
+    let entity = app.upgrade().ok_or("native app dropped")?;
+    cx.read_entity(&entity, |app, _| {
+        app.runtime_for_pane(&workspace_id, &pane_id)
+            .ok_or_else(|| format!("no runtime for pane: {workspace_id}/{pane_id}"))
+    })
+    .map_err(|error| format!("read native app: {error}"))?
 }
 
-/// Translate a UTF-8 string into one `Keystroke` per logical key press,
-/// matching what GPUI would deliver if a real user typed the text. `\n`
-/// becomes `Enter`, `\t` becomes `Tab`; printable chars round-trip through
-/// `key_char` (which `encode_key` prefers over `key` for non-modified
-/// printable input). Doesn't try to model international layouts or IME
-/// composition — single-line ASCII commands are the test surface here.
+fn target_result(payload: &Value, runtime_id: String, bytes_sent: usize) -> Value {
+    let mut result = json!({
+        "runtimeId": runtime_id,
+        "bytesSent": bytes_sent,
+    });
+    if let Some(workspace_id) = optional_string(payload, &["workspaceId", "workspace_id"]) {
+        result["workspaceId"] = json!(workspace_id);
+    }
+    if let Some(pane_id) = optional_string(payload, &["paneId", "pane_id"]) {
+        result["paneId"] = json!(pane_id);
+    }
+    result
+}
+
 fn keystrokes_for_text(text: &str) -> Vec<Keystroke> {
-    let mut out = Vec::with_capacity(text.len());
-    for ch in text.chars() {
-        let keystroke = match ch {
+    text.chars()
+        .map(|character| match character {
             '\n' => Keystroke {
                 modifiers: Modifiers::default(),
                 key: "enter".to_string(),
@@ -916,234 +602,36 @@ fn keystrokes_for_text(text: &str) -> Vec<Keystroke> {
                 key_char: None,
             },
             other => {
-                let s = other.to_string();
+                let text = other.to_string();
                 Keystroke {
                     modifiers: Modifiers::default(),
-                    key: s.clone(),
-                    key_char: Some(s),
+                    key: text.clone(),
+                    key_char: Some(text),
                 }
             }
-        };
-        out.push(keystroke);
-    }
-    out
-}
-
-fn read_pane_text(
-    app: &WeakEntity<NativeApp>,
-    cx: &mut AsyncApp,
-    payload: Value,
-) -> Result<Value, String> {
-    let session_id = payload
-        .get("session_id")
-        .and_then(Value::as_str)
-        .ok_or("payload.session_id (string) is required")?
-        .to_string();
-
-    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    let model = cx
-        .read_entity(&app_entity, |app: &NativeApp, cx: &App| {
-            find_terminal_model(app, &session_id, cx)
         })
-        .map_err(|e| format!("read entity: {e}"))?
-        .ok_or_else(|| format!("no terminal panel for session: {session_id}"))?;
-
-    cx.read_entity(&model, |term: &TerminalModel, _cx: &App| {
-        let rows = term.screen_text();
-        let joined = rows.join("\n");
-        json!({
-            "session_id": term.session_id,
-            "cols": term.cols,
-            "rows": rows,
-            "text": joined,
-        })
-    })
-    .map_err(|e| format!("read terminal model: {e}"))
-}
-
-/// Walks every workspace's panels for a Terminal panel matching
-/// `session_id` and returns its model handle. None when no such panel
-/// exists in any workspace.
-fn find_terminal_model(
-    app: &NativeApp,
-    session_id: &str,
-    cx: &App,
-) -> Option<Entity<TerminalModel>> {
-    for ws in app.workspaces() {
-        for panel in ws.read(cx).panels.iter() {
-            if panel.session_id.as_ref() == session_id {
-                return Some(panel.view.read(cx).model().clone());
-            }
-        }
-    }
-    None
-}
-
-/// Like `find_terminal_model` but returns the GPUI view entity. Needed by
-/// `type_into_panel` because keystroke dispatch happens on the view, not
-/// the model.
-fn find_terminal_view(app: &NativeApp, session_id: &str, cx: &App) -> Option<Entity<TerminalView>> {
-    for ws in app.workspaces() {
-        for panel in ws.read(cx).panels.iter() {
-            if panel.session_id.as_ref() == session_id {
-                return Some(panel.view.clone());
-            }
-        }
-    }
-    None
-}
-
-/// Drain the in-process event ring buffer past `since_id` (defaults to 0,
-/// meaning "give me everything you still have"). Doesn't need entity
-/// access — the buffer is global — but routes through the action pump
-/// for protocol uniformity.
-fn tail_events(payload: Value) -> Result<Value, String> {
-    let cursor = payload.get("since_id").and_then(Value::as_u64).unwrap_or(0);
-    Ok(events::tail_events_response(cursor))
-}
-
-fn set_zoom(
-    app: &WeakEntity<NativeApp>,
-    cx: &mut AsyncApp,
-    payload: Value,
-) -> Result<Value, String> {
-    let zoom = payload
-        .get("zoom")
-        .and_then(Value::as_f64)
-        .ok_or("payload.zoom (number) is required")? as f32;
-    if !zoom.is_finite() || zoom <= 0.0 {
-        return Err(format!("zoom must be a positive finite number, got {zoom}"));
-    }
-    // Default true: a single set_zoom is a discrete perf measurement
-    // and should start from a clean window. Sweeps that mimic
-    // scroll-wheel cadence pass `reset: false` so samples accumulate
-    // across many small steps.
-    let reset_fps = payload
-        .get("reset")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
-    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    cx.update_entity(&entity, |app, cx| {
-        app.set_canvas_zoom(zoom, reset_fps, cx);
-        json!({ "zoom": zoom })
-    })
-    .map_err(|e| format!("update entity: {e}"))
-}
-
-fn get_window_geometry(cx: &mut AsyncApp) -> Result<Value, String> {
-    let window = cx
-        .update(|app: &mut App| app.windows().into_iter().next())
-        .map_err(|e| format!("list windows: {e}"))?
-        .ok_or("no open windows")?;
-    cx.update_window(
-        window,
-        |_view: AnyView, window: &mut Window, _app: &mut App| {
-            let bounds = window.bounds();
-            json!({
-                "scaleFactor": window.scale_factor(),
-                "globalBounds": {
-                    "x": pf(bounds.origin.x),
-                    "y": pf(bounds.origin.y),
-                    "width": pf(bounds.size.width),
-                    "height": pf(bounds.size.height),
-                },
-            })
-        },
-    )
-    .map_err(|e| format!("update window: {e}"))
-}
-
-fn parse_adjacent_direction(value: &str) -> Result<AdjacentPanelDirection, String> {
-    match value.trim() {
-        "right" => Ok(AdjacentPanelDirection::Right),
-        "bottom" | "down" => Ok(AdjacentPanelDirection::Bottom),
-        other => Err(format!("unsupported direction: {other}")),
-    }
-}
-
-fn adjacent_direction_name(direction: AdjacentPanelDirection) -> &'static str {
-    match direction {
-        AdjacentPanelDirection::Right => "right",
-        AdjacentPanelDirection::Bottom => "bottom",
-    }
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{keystrokes_for_text, required_raw_string};
+    use serde_json::json;
 
-    /// Newline must map to `Enter` with `key_char: None` (not `\n`) so
-    /// `terminal_view::encode_key` takes the dedicated-escape branch and
-    /// emits `\r`. If `\n` ever leaks into `key_char`, encode_key returns
-    /// `\n` and shells stop running the typed command — broken e2e but
-    /// silent in production. Locking the shape here.
     #[test]
-    fn keystrokes_for_text_uses_named_keys_for_newline_and_tab() {
-        let ks = keystrokes_for_text("a\n\tb");
-        assert_eq!(ks.len(), 4);
-        assert_eq!(ks[0].key, "a");
-        assert_eq!(ks[0].key_char.as_deref(), Some("a"));
-        assert_eq!(ks[1].key, "enter");
-        assert!(ks[1].key_char.is_none());
-        assert_eq!(ks[2].key, "tab");
-        assert!(ks[2].key_char.is_none());
-        assert_eq!(ks[3].key, "b");
-        assert_eq!(ks[3].key_char.as_deref(), Some("b"));
+    fn pty_input_preserves_control_characters() {
+        let text = required_raw_string(&json!({"text": "echo ready\r"}), "text").unwrap();
+
+        assert_eq!(text, "echo ready\r");
     }
 
     #[test]
-    fn keystrokes_for_text_default_modifiers_are_clear() {
-        // Bare ASCII shouldn't pick up shift/ctrl/alt — the encoder
-        // branches on those modifiers and would emit control sequences
-        // instead of the literal char.
-        let ks = keystrokes_for_text("X");
-        assert_eq!(ks.len(), 1);
-        let m = &ks[0].modifiers;
-        assert!(!m.shift && !m.control && !m.alt);
-    }
+    fn ui_typing_encodes_newline_as_enter_key() {
+        let keys = keystrokes_for_text("a\n\tb");
 
-    #[test]
-    fn generated_workspace_id_is_uuidv4_shaped() {
-        let id = generate_workspace_id();
-        assert_eq!(id.len(), 36, "uuid: {id}");
-        let bytes = id.as_bytes();
-        for (i, b) in bytes.iter().enumerate() {
-            if matches!(i, 8 | 13 | 18 | 23) {
-                assert_eq!(*b, b'-', "expected '-' at {i} of {id}");
-            } else {
-                assert!(b.is_ascii_hexdigit(), "non-hex at {i} of {id}");
-                assert!(!b.is_ascii_uppercase(), "uppercase at {i} of {id}");
-            }
-        }
-        // Version + variant nibbles per RFC 4122.
-        assert_eq!(bytes[14], b'4', "version nibble: {id}");
-        assert!(
-            matches!(bytes[19], b'8' | b'9' | b'a' | b'b'),
-            "variant nibble: {id}"
-        );
-    }
-
-    #[test]
-    fn generated_workspace_ids_differ() {
-        // Two consecutive calls should never collide; if they do the test
-        // fails fast rather than leaking duplicate ids into the daemon.
-        assert_ne!(generate_workspace_id(), generate_workspace_id());
-    }
-
-    #[test]
-    fn parse_adjacent_direction_accepts_right_and_bottom() {
-        assert_eq!(
-            parse_adjacent_direction("right").unwrap(),
-            AdjacentPanelDirection::Right
-        );
-        assert_eq!(
-            parse_adjacent_direction("bottom").unwrap(),
-            AdjacentPanelDirection::Bottom
-        );
-        assert_eq!(
-            parse_adjacent_direction("down").unwrap(),
-            AdjacentPanelDirection::Bottom
-        );
-        assert!(parse_adjacent_direction("left").is_err());
+        assert_eq!(keys.len(), 4);
+        assert_eq!(keys[1].key, "enter");
+        assert_eq!(keys[1].key_char, None);
+        assert_eq!(keys[2].key, "tab");
     }
 }

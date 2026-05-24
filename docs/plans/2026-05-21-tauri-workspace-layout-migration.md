@@ -15,8 +15,8 @@ session layout.
 
 This supersedes the canvas-layout assumptions in:
 
-- `docs/plans/2026-04-28-native-canvas-mvp.md`
-- `docs/plans/native-canvas-architecture.md`
+- `docs/plans/archive/native-canvas/2026-04-28-native-canvas-mvp.md`
+- `docs/plans/archive/native-canvas/native-canvas-architecture.md`
 
 Those docs remain useful historical context, but the active target for Tauri
 is daemon-owned workspace splits, not a canvas with panels.
@@ -167,9 +167,11 @@ Remove or replace:
 
 Re-evaluate:
 
-- `shell_as_session`: this existed so the native canvas could represent shell
-  panels as first-class sessions. Tauri split shells are utility PTYs today.
-  Do not keep this capability unless another supported client still needs it.
+- `shell_as_session`: the canvas-specific representation is obsolete, but the
+  planned native client needs a first-class shell-session capability soon.
+  Preserve or reintroduce a protocol-v65 equivalent with workspace-layout
+  semantics: user-created shell sessions belong to a workspace pane, while
+  split-created Tauri shells remain utility PTYs.
 - Remote hub layout naming: `RemoteWorkspaces()` currently returns
   `[]SessionLayout`, and hub internals call layout snapshots `workspaces`.
   Rename to workspace layout and key by workspace id.
@@ -313,15 +315,16 @@ Acceptable incremental behavior inside the single PR:
 - Remove `session_layouts` from initial state and response models.
 - Remove `canvas_workspace_panels` runtime access.
 - Remove `WorkspacePanel` model and geometry commands.
-- Remove `CapabilityShellAsSession` unless a supported current client still
-  needs it.
+- Preserve or reintroduce a protocol-v65 equivalent of
+  `CapabilityShellAsSession` for the planned native client's first-class shell
+  sessions; do not bring back canvas panel semantics with it.
 - Rename `DaemonWorkspace` in Tauri if it currently aliases
   `SessionLayout`; reserve that name for real daemon `Workspace`.
 - Remove Tauri canonical session store behavior after workspace snapshots are
   authoritative.
 - Update comments that mention native canvas as the reason for workspace
   behavior.
-- Revisit old native canvas plan docs if they are confusing after this lands.
+- Keep old native canvas plan docs archived outside the active plan set.
 
 ## Risks
 

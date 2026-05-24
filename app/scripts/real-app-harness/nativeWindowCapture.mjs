@@ -1,9 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const NATIVE_WINDOW_ID_SOURCE = path.join(SCRIPT_DIR, 'NativeWindowID.swift');
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -234,6 +237,44 @@ export async function captureFrontWindowScreenshot(outputPath, options = {}) {
     source: 'native_window',
     bundleId,
     bounds,
+    path: outputPath,
+  };
+}
+
+export async function getProcessWindowId(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new Error(`Invalid native app pid: ${pid}`);
+  }
+  const { stdout } = await execFileAsync('/usr/bin/xcrun', [
+    'swift',
+    NATIVE_WINDOW_ID_SOURCE,
+    String(pid),
+  ], {
+    timeout: 20_000,
+  });
+  const windowId = Number.parseInt(stdout.trim(), 10);
+  if (!Number.isInteger(windowId) || windowId <= 0) {
+    throw new Error(`Failed to resolve native app window id for pid ${pid}: ${stdout}`);
+  }
+  return windowId;
+}
+
+export async function captureProcessWindowScreenshot(outputPath, pid) {
+  const windowId = await getProcessWindowId(pid);
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  await execFileAsync('/usr/sbin/screencapture', [
+    '-x',
+    '-l',
+    String(windowId),
+    '-o',
+    outputPath,
+  ], {
+    timeout: 10_000,
+  });
+  return {
+    source: 'native_window_id',
+    pid,
+    windowId,
     path: outputPath,
   };
 }

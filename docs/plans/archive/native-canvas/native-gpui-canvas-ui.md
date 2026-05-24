@@ -1,5 +1,9 @@
 # Native GPUI Canvas UI
 
+> **Archived direction (2026-05-23).** This records the discarded canvas
+> experiments. New native UI work follows
+> `native-gpui-workspace-client-prototype.md`.
+
 ## Status
 
 Spike plan. Prototypes to prove feasibility before building the real client.

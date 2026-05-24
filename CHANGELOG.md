@@ -6,6 +6,16 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-05-24]
+
+### Added
+- **Native Workspace Prototype**: Added the new GPUI native-client foundation with daemon-owned proportioned layout rendering, nested pane rows, visible-workspace-only Ghostty Metal terminal surfaces, an animated sidebar mute/close action tray, `gpui-component` root integration, and runtime-gated automation for state inspection, controls, terminal readback, and window screenshots through the harness. Terminal surfaces use an attn-owned Ghostty external-I/O patch so the daemon remains PTY owner and replay cannot answer historical terminal queries into a live session; Retina windows now size Ghostty from backing pixels so terminal output fills each pane rather than rendering at half scale.
+- **Background Native Automation**: Native-client automation now restores the previously foreground application after the first native terminal surface is mounted, then exercises Ghostty-owned keyboard input and terminal readback without taking foreground focus again. Foreground lifecycle coverage remains available for cold surface re-creation after workspace switching.
+- **Stable Local macOS Signing**: Source and native development builds now use an installed Apple Development signing identity when available, `make dev-native` packages the GPUI renderer as a stable `com.attn.native.dev` app bundle for native-owned screenshots, and physical-input automation uses a signed `com.attn.harness.input-driver` app bundle so Screen Recording and Accessibility grants attach to stable identities; environments without a local identity continue to fall back to ad-hoc signing.
+
+### Fixed
+- **Native Terminal Input**: Clicking or navigating to an embedded Ghostty terminal now transfers keyboard focus correctly, and terminal keys are processed through Ghostty's native key path rather than as pasted text.
+
 ## [2026-05-23]
 
 ### Changed
@@ -13,6 +23,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **GitHub Host Visibility**: Settings now lists daemon-discovered authenticated GitHub hosts even when a host has no currently visible pull requests.
 - **Terminal Colors**: Interactive terminals no longer inherit `NO_COLOR` from the process that launched attn, so shells and coding agents can emit their normal colored output.
 - **Tauri Workspaces**: Terminal layouts are now owned by workspaces rather than individual sessions, so workspace close cleans up member agent and shell terminals together and persisted split layouts migrate automatically.
+- **Native Client Direction**: The GPUI infinite-canvas client is archived as `attn-native-canvas-archive`; the replacement native-client plan now targets the same daemon-owned workspace layout model as Tauri.
 
 ### Fixed
 - **Codex Resize Stability**: Long Codex sessions no longer jump back through earlier conversation content when resizing a pane or opening a split in attn's embedded terminal.
@@ -118,7 +129,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Changed
 - **Native New Session And Workspace Picker**: The native canvas now opens a shared Observatory-styled location dialog for both "+ Session" and "+ New Workspace". The dialog supports agent selection for sessions, path entry with directory suggestions, repository destination selection, existing worktrees, and creating a new worktree from either the current branch or the default branch before opening it.
 - **Native Sidebar Polish**: The workspace rail now shows a count beside the section header, and the active workspace gets a thin sodium-orange accent stripe along its left edge so the selection reads at a glance even when the row's background is otherwise unchanged. The "+ New Workspace" affordance is set apart by a faint divider so it no longer competes with live workspaces. Panel title bars across the canvas now carry the same hairline + primary-text treatment for visual consistency. The opt-in FPS overlay (`ATTN_NATIVE_FPS=1`) is reorganized into a labeled card where only the live frame-rate number takes the working-state hue, so the eye lands on the one number that matters.
-- **Observatory Design System**: Extended the native theme module with hairline (`theme::line`), translucent sodium tints (`theme::sodium::soft` / `glow` / `hush`), and motion-duration tokens (`theme::motion`). New invariants are guarded by tests so the design rules can't drift: the hairline scale is monotone, the sodium tints share the canonical hue, and halted breath cycles faster than live breath. Updated visual plates at `docs/prototypes/native-design-system-observatory.html` with editorial polish — folio marks at the bottom of each plate, a continuous "spine" hairline running through the bound set, a sodium scroll-progress hairline, and a refined three-star brand mark.
+- **Observatory Design System**: Extended the native theme module with hairline (`theme::line`), translucent sodium tints (`theme::sodium::soft` / `glow` / `hush`), and motion-duration tokens (`theme::motion`). New invariants are guarded by tests so the design rules can't drift: the hairline scale is monotone, the sodium tints share the canonical hue, and halted breath cycles faster than live breath. Updated visual plates, now archived at `docs/prototypes/archive/native-canvas/native-design-system-observatory.html`, with editorial polish — folio marks at the bottom of each plate, a continuous "spine" hairline running through the bound set, a sodium scroll-progress hairline, and a refined three-star brand mark.
 - **Native Canvas Panel Snapping**: Moving or resizing native-canvas panels now magnetically aligns nearby edges and centers to other panels, keeping a small gap between neighboring panels and showing short contextual guide lines while a lock is active.
 - **Native Canvas Focus Modes**: `Cmd+Enter` now focuses the selected panel and fits the canvas viewport around it without changing panel geometry. `Cmd+Shift+Enter` toggles a temporary window-wide panel fullscreen mode that covers the sidebar without resizing or persisting the panel.
 - **Native Canvas Clipping And Keyboard Panning**: Zoomed native-canvas panels are now clipped to the canvas area instead of painting over the sidebar. `Shift+h/j/k/l` now pan the canvas alongside `Shift+Arrow`, and new native terminal panels are taller by default.

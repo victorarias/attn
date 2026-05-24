@@ -29,6 +29,7 @@ struct Options {
     var bundleId = "com.attn.manager"
     var promptAccessibility = false
     var command: String?
+    var pid: pid_t?
     var text: String?
     var key: String?
     var keyCode: Int?
@@ -47,8 +48,14 @@ func parseOptions() throws -> Options {
     while index < args.count {
         let arg = args[index]
         switch arg {
-        case "activate", "activate_background", "frontmost", "windowid", "text", "key", "keycode", "click", "menu", "window_park":
+        case "activate", "activate_pid", "activate_background", "frontmost", "frontmost_pid", "windowid", "text", "key", "keycode", "click", "menu", "window_park":
             options.command = arg
+        case "--pid":
+            index += 1
+            guard index < args.count, let value = Int32(args[index]), value > 0 else {
+                throw DriverError.invalidArgument("Missing or invalid value for --pid")
+            }
+            options.pid = value
         case "--visible-px":
             index += 1
             guard index < args.count, let value = Int(args[index]), value > 0 else {
@@ -115,8 +122,10 @@ func parseOptions() throws -> Options {
             throw DriverError.usage("""
             Usage:
               InputDriver.swift activate [--bundle-id com.attn.manager]
+              InputDriver.swift activate_pid --pid 12345
               InputDriver.swift activate_background [--bundle-id ...]
               InputDriver.swift frontmost
+              InputDriver.swift frontmost_pid
               InputDriver.swift windowid [--bundle-id ...]
               InputDriver.swift text --text "hello" [--bundle-id ...] [--prompt-accessibility]
               InputDriver.swift key --key d [--modifiers command,option]
@@ -132,7 +141,7 @@ func parseOptions() throws -> Options {
     }
 
     guard options.command != nil else {
-        throw DriverError.usage("Missing command. Use activate, activate_background, frontmost, windowid, text, key, keycode, click, or menu.")
+        throw DriverError.usage("Missing command. Use activate, activate_pid, activate_background, frontmost, frontmost_pid, windowid, text, key, keycode, click, or menu.")
     }
 
     return options
@@ -149,12 +158,38 @@ func runningPID(bundleId: String) throws -> pid_t {
     return app.processIdentifier
 }
 
+func targetPID(bundleId: String, pid: pid_t?) throws -> pid_t {
+    if let pid {
+        guard NSRunningApplication(processIdentifier: pid) != nil else {
+            throw DriverError.invalidArgument("Process \(pid) is not running")
+        }
+        return pid
+    }
+    return try runningPID(bundleId: bundleId)
+}
+
 func activateApp(bundleId: String) throws {
     guard let app = findRunningApp(bundleId: bundleId) else {
         throw DriverError.appNotRunning(bundleId)
     }
     app.activate(options: [.activateIgnoringOtherApps])
     Thread.sleep(forTimeInterval: 0.2)
+}
+
+func activateProcess(pid: pid_t) throws {
+    guard let app = NSRunningApplication(processIdentifier: pid) else {
+        throw DriverError.invalidArgument("Process \(pid) is not running")
+    }
+    app.activate(options: [.activateIgnoringOtherApps])
+    Thread.sleep(forTimeInterval: 0.2)
+}
+
+func activateTarget(bundleId: String, pid: pid_t?) throws {
+    if let pid {
+        try activateProcess(pid: pid)
+    } else {
+        try activateApp(bundleId: bundleId)
+    }
 }
 
 // Non-activating resolution: verify the app is running but do not change
@@ -232,6 +267,10 @@ func frontmostBundleIdentifier() -> String {
     NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
 }
 
+func frontmostProcessIdentifier() -> pid_t {
+    NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1
+}
+
 func ensureAccessibility(prompt: Bool) throws {
     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary
     guard AXIsProcessTrustedWithOptions(options) else {
@@ -239,8 +278,8 @@ func ensureAccessibility(prompt: Bool) throws {
     }
 }
 
-func mainWindowBounds(bundleId: String) throws -> CGRect {
-    let pid = try runningPID(bundleId: bundleId)
+func mainWindowBounds(bundleId: String, pid target: pid_t? = nil) throws -> CGRect {
+    let pid = try targetPID(bundleId: bundleId, pid: target)
     let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
     guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
         throw DriverError.eventCreationFailed("Failed to read window list.")
@@ -524,8 +563,8 @@ func windowPark(bundleId: String, visiblePx: Int) throws {
     print("screen=\(Int(screenFrame.width))x\(Int(screenFrame.height)) win=\(Int(size.width))x\(Int(size.height)) from=\(Int(curPos.x)),\(Int(curPos.y)) to=\(Int(newX)),\(Int(newY))")
 }
 
-func clickWindow(bundleId: String, relativeX: Double, relativeY: Double) throws {
-    let bounds = try mainWindowBounds(bundleId: bundleId)
+func clickWindow(bundleId: String, pid: pid_t?, relativeX: Double, relativeY: Double) throws {
+    let bounds = try mainWindowBounds(bundleId: bundleId, pid: pid)
     let clampedX = min(max(relativeX, 0), 1)
     let clampedY = min(max(relativeY, 0), 1)
     let point = CGPoint(
@@ -553,7 +592,7 @@ do {
     // observation-only commands must NOT activate (that is the whole point).
     switch options.command {
     case "activate", "text", "key", "keycode", "click":
-        try activateApp(bundleId: options.bundleId)
+        try activateTarget(bundleId: options.bundleId, pid: options.pid)
     default:
         break
     }
@@ -561,12 +600,19 @@ do {
     switch options.command {
     case "activate":
         break
+    case "activate_pid":
+        guard let pid = options.pid else {
+            throw DriverError.invalidArgument("Missing --pid for activate_pid")
+        }
+        try activateProcess(pid: pid)
     case "activate_background":
         // Resolve the app without changing frontmost. If the app is not
         // running, surface a clear error; otherwise this is a no-op.
         _ = try axApplication(bundleId: options.bundleId)
     case "frontmost":
         print(frontmostBundleIdentifier())
+    case "frontmost_pid":
+        print(frontmostProcessIdentifier())
     case "windowid":
         let wid = try mainWindowID(bundleId: options.bundleId)
         print(wid)
@@ -596,7 +642,7 @@ do {
         guard let relativeX = options.relativeX, let relativeY = options.relativeY else {
             throw DriverError.invalidArgument("Missing --relative-x/--relative-y for click")
         }
-        try clickWindow(bundleId: options.bundleId, relativeX: relativeX, relativeY: relativeY)
+        try clickWindow(bundleId: options.bundleId, pid: options.pid, relativeX: relativeX, relativeY: relativeY)
     case "window_park":
         try ensureAccessibility(prompt: options.promptAccessibility)
         guard let visiblePx = options.visiblePx else {

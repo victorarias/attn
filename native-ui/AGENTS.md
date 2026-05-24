@@ -1,264 +1,198 @@
 # native-ui
 
-Architecture conventions and learnings for the GPUI native canvas client.
+Instructions for the active GPUI native client. Read
+`../docs/plans/native-gpui-workspace-client-prototype.md` when changing
+product behavior or adding a new pane type; keep detailed UX rationale there,
+not in this file.
 
-## Architecture
+## Scope
 
-The native app follows **MVVM with a hexagonal edge**. Four directories under
-`crates/attn-native-app/src/`, each with one responsibility:
+- Active crates: `crates/attn-native-app/` and `crates/attn-protocol/`.
+- Archived reference only: `crates/attn-native-canvas-archive/` and
+  `crates/attn-native-canvas-protocol-archive/`. They are excluded from the
+  active Cargo workspace; do not update, build, or use them as evidence for
+  current behavior unless the task explicitly targets the archive.
+- The active app is a GPUI renderer of the daemon's workspace-layout model,
+  not a continuation of the infinite-canvas experiment. Terminal panes must
+  embed full Ghostty surfaces; do not reintroduce the removed `libghostty-vt`
+  plus GPUI-painted terminal path.
 
-| Directory   | Holds                                                                                  |
-|-------------|----------------------------------------------------------------------------------------|
-| `adapters/` | Everything that talks to the outside world (websocket, TCP sidecar).                   |
-| `state/`    | Long-lived observable application state. GPUI entities. The "ViewModels".              |
-| `views/`    | `Render` impls. Sidebar, canvas, terminal view, overlays.                              |
-| `domain/`   | Pure logic. No `Window`, `Context`, or entity types. Unit-testable without a window.   |
+## Build And Verify
 
-Plus two top-level files:
+The active app must compile with the real Ghostty surface renderer. Do not add
+a parser-disabled, terminal-stub, or custom GPUI terminal-painting fallback.
 
-- `app.rs` — the coordinator. Owns registries, wires adapters → state, hands state
-  handles to views. Should stay slim (~150 lines once extractions land).
-- `main.rs` — entrypoint. Window setup only.
+The attn Ghostty fork is cloned at `../ghostty` relative to this worktree and
+its `attn/external-io` branch exposes daemon-owned PTY integration. Ghostty
+requires Zig `0.15.x`; on macOS SDK 26.4, use Homebrew's patched `zig@0.15`
+on `PATH`. Full Metal surface builds also require Xcode's Metal Toolchain
+component (`xcodebuild -downloadComponent MetalToolchain`).
 
-### Decision rules
+```bash
+cd native-ui
+export PATH="$(brew --prefix zig@0.15)/bin:$PATH"
 
-When adding code, ask one question:
-
-1. **Does it talk to the network, filesystem, or another process?** → `adapters/`
-2. **Is it stateful, observable, and survives re-renders?** → `state/`
-3. **Does it produce pixels?** → `views/`
-4. **Is it pure logic with no `Window`/`Context`/entity dependency?** → `domain/`
-5. **Does it stitch the layers together?** → `app.rs`
-
-### Dependency direction
-
-Dependencies point inward, with two pragmatic exceptions for GPUI's grain:
-
-- **Adapters** know nothing about views or state, with one exception:
-  *action handlers* inside an adapter (e.g. `adapters/automation/actions.rs`)
-  may dispatch into state entities, because they're the bridge between the
-  outside-world request and the app's internal command surface. The wire
-  layer of the adapter (server, protocol, manifest) stays pure. They emit
-  events outward (`cx.emit(DaemonEvent::...)`) and expose command methods
-  callers invoke.
-- **State** entities may subscribe to adapter events (`cx.subscribe(&adapter, ...)`)
-  and call adapter command methods. They never call into views. Domain
-  state (sessions, workspaces) lives in state registries on `NativeApp`,
-  not inside adapters — `DaemonClient` parses the wire and emits events,
-  but the canonical "what sessions exist?" lives in `SessionRegistry`.
-  Connection-meta state (`connected`, `error`) is the one thing adapters
-  legitimately own about themselves.
-- **Views** observe state and may hold adapter handles **only** for outbound
-  commands (e.g. `TerminalView` sending `PtyInput`). Views never read cached
-  state from an adapter — they read it from a state entity.
-- **Domain** imports neither GPUI runtime types (`Window`, `Context`,
-  `Entity`, `App`) nor any sibling module. It can use GPUI value types
-  (`Pixels`, `Point`, `Bounds`).
-- **`app.rs` does no logic.** It wires. If it's branching on data, the
-  branch belongs in a state entity.
-
-#### Pragmatic exception: state holding view entity handles
-
-State entities may hold `Entity<View>` handles for views that encapsulate
-per-instance view state. Example: `Panel` (state) holds
-`Entity<TerminalView>` (view). This is the canonical GPUI pattern for
-component-like views that bundle state + rendering (mirrors Zed's
-`Editor`, `Pane`). Strict MVVM separation here would mean a parallel
-`HashMap<session_id, Entity<TerminalView>>` in the view layer with
-lookup-at-render-time plumbing — not worth it. The exception is narrow:
-state holds the handle; state still does not call `.render(...)` or read
-view-only fields. Views are observed normally.
-
-### Why these conventions
-
-- A reactive desktop UI in GPUI maps cleanly onto MVVM: entities are
-  ViewModels, `Render` impls are Views, observation is data binding.
-- The hexagonal `adapters/` boundary captures most of the value of
-  ports-and-adapters without the ceremony — at this scale (~6k LOC), full
-  hexagonal would be overkill.
-- The daemon-broadcast-as-source-of-truth rule (no optimistic UI) is
-  enforced by the dependency direction: adapters push, state holds, views
-  observe.
-
-## Design system — Observatory
-
-Every color, radius, and spacing the GPUI views render comes from
-`crates/attn-native-app/src/theme.rs`. The visual language is
-documented in plates at
-[`docs/prototypes/native-design-system-observatory.html`](../docs/prototypes/native-design-system-observatory.html)
-— open it to see how every primitive composes.
-
-The system is named *Observatory*. Agents are stars (Claude `α`, Codex
-`β`, Shell `γ`); states are observation classifications (`transitus`,
-`occultatum`, `retentum`, `inscriptum`, …); the canvas is the chart on
-which they're plotted. The metaphor stays out of identifier names —
-`theme::ink`, `theme::moon`, `theme::sodium` are about color roles, not
-astronomy — but the visual language earns its character from it.
-
-### Token vocabulary
-
-| Module            | Holds                                                          |
-|-------------------|----------------------------------------------------------------|
-| `theme::ink`      | Six surface inks, deepest (`void`) to lightest (`firm`).       |
-| `theme::moon`     | Five text values, primary (`moonstone`) to disabled (`cinder`).|
-| `theme::sodium`   | The single accent — `vapor`, `deep`, plus `soft` / `glow` / `hush` translucent tints. |
-| `theme::star`     | Three agent identities — `claude`, `codex`, `shell`.            |
-| `theme::state`    | Seven observation classifications — working, halted, etc.       |
-| `theme::surface`  | Composite tokens for row states (selected, danger, pending).   |
-| `theme::line`     | Four hairline opacities — `weak` (.05) → `bold` (.28), moonstone-tinted alpha. |
-| `theme::radius`   | Three radii — `R0` (4px), `R1` (7px), `R2` (12px).              |
-| `theme::space`    | Seven-step spacing ramp — `S0` (4px) through `S6` (56px).       |
-| `theme::motion`   | Duration tokens in seconds — `TIGHT`/`NORMAL`/`RELAXED` for UI; `BREATH_LIVE`/`BREATH_HALTED`/`AURORA` for ambient. |
-
-### Rules
-
-1. **Color is meaning.** Hue carries either *identity* (which agent) or
-   *status* (what state) — never decoration.
-2. **One accent.** Sodium-vapor orange (`theme::sodium::vapor`). If
-   sodium appears, it is the most important pixel on screen.
-3. **Three radii, no more.** `R0` / `R1` / `R2`. Anything else is a bug.
-4. **Six surface inks.** Cool blue-black. Never pure black, never
-   tinted toward purple.
-5. **Identity and status are independent.** A working Codex panel
-   shows the Codex blue (identity) plus the working green (status).
-   They never share a hue.
-
-Raw `rgb(0xNNNNNN)` and `rgba(0xNNNNNNNN)` literals are forbidden in
-`views/`, `app.rs`, and elsewhere outside `theme.rs`. The module's
-tests guard the load-bearing invariants:
-
-- idle visual weight ≡ dim metadata (`state::idle` ≡ `moon::ash`);
-- the sodium tints share the vapor hue (`soft` / `glow` / `hush` only
-  vary in alpha — there is no "second orange");
-- the hairline scale is monotone (`line::weak` < `mild` < `firm` < `bold`);
-- halted breath is faster than live breath (the urgent voice pulses
-  faster than the working one);
-- agent star hues are pairwise distinct;
-- state hues are pairwise distinct.
-
-### Working in views
-
-```rust
-use crate::theme;
-
-div()
-    .bg(theme::ink::nocturne())
-    .border_color(theme::line::firm())  // hairline (translucent)
-    .text_color(theme::moon::moonstone())
-    .rounded(px(theme::radius::R1))
+cargo fmt --check
+cargo test -p attn-protocol
+cargo test -p attn-native-app --no-run
 ```
 
-`theme::ink::firm()` and `theme::line::firm()` are *both* legitimate
-border colors — they read differently. `ink::firm` is opaque cool
-blue-black (a structural region edge); `line::firm` is moonstone alpha
-that blends onto whatever ink it sits on (a hairline that feels of the
-warm palette). Use `line::*` for in-card dividers, faint chrome edges,
-and anything that should read as "barely there"; use `ink::firm` when
-you need the harder, region-defining contrast.
+Build the native Ghostty framework used by terminal surface integration:
 
-For status indicators driven by a protocol enum, call the resolver
-helper rather than re-`match`ing in the view:
-
-```rust
-fn status_badge(status: WorkspaceStatus) -> impl IntoElement {
-    div().w(px(8.)).h(px(8.)).rounded_full()
-        .bg(theme::workspace_status_color(status))
-}
+```bash
+make build-native-ghostty-kit
 ```
 
-For agent identity from a wire-level identifier:
+When exercising the client against a running Attn installation, use the
+isolated dev daemon from the repository root:
 
-```rust
-let star_color = theme::star::for_agent_id(&agent_id);  // "claude" → peach, etc
+```bash
+make dev-native
 ```
 
-### Adding a token
+`make dev-native` enables the local automation sidecar through
+the bundled `dev` profile and daemon URL, so a macOS privacy-permission
+relaunch remains isolated from the production daemon. Runtime environment
+variables still override those defaults for test-owned profiles. Once it is
+running, inspect or drive it from another shell:
 
-1. Add a `pub const FOO_HEX: u32 = 0x...;` to the right submodule of
-   `theme.rs`.
-2. Add a `pub fn foo() -> Rgba { rgb(FOO_HEX) }` next to it.
-3. Document what it means and where it gets used.
-
-That's it. No coordinator file, no enum to extend, no match arms to keep
-in sync. When a submodule grows past ~30 tokens, split `theme.rs` into a
-`theme/` directory with one file per submodule — the public API stays
-the same.
-
-### When tokens don't fit
-
-If a view needs a color that doesn't map cleanly to an existing token,
-pause and ask: *is this a missing primitive, or am I about to invent
-decoration?*
-
-- **Missing primitive** — add a token (e.g. a new `surface::*` for a
-  composite row state, a new `state::*` if the protocol grows a
-  classification). Update the visual plate so the prototype stays
-  authoritative.
-- **Decoration** — find an existing token. If you need a color to
-  "pop", you almost always want `sodium::vapor`, and the rule is that
-  it's already the most important pixel — putting it on something
-  ordinary devalues every other appearance of it.
-
-### Migration notes
-
-The migration from ad-hoc `rgb(0xNNNNNN)` literals is complete in
-`views/canvas.rs`, `views/sidebar.rs`, `views/terminal_view.rs`,
-`views/fps_overlay.rs`, and `app.rs`. New views should never reintroduce
-raw hex.
-
-The terminal's 16-entry ANSI palette in `views/terminal_view.rs` is
-intentionally **not** themed — external tools paint with ANSI escapes
-expecting standard colors, and overriding them would break user
-expectations. Only the chrome (panel bg, default fg, cursor) follows
-the design system.
-
-## Learnings
-
-After completing a meaningful spike or feature, add to this file any decisions
-that **seemed to work but caused rework** — not compiler errors, but choices
-that passed an early test, looked reasonable at the time, and then had to be
-undone or rewritten later. Compiler errors are self-correcting; these aren't.
-
----
-
-### Div-based rendering cannot fill cell backgrounds to full row height
-
-When implementing terminal cell backgrounds with GPUI's div/flex system, `.bg()` on a span is constrained to text layout height — not the full cell height. This looked correct at a glance (colors appeared) but caused visible artifacts with ANSI art and box-drawing characters. Attempts to fix it with `h_full()`, row height adjustments, and flex tweaks all failed and had to be reverted.
-
-**Rule:** As soon as pixel-exact cell backgrounds are required, go straight to `Element` trait + `window.paint_quad(fill(...))`. Don't try to approximate it with div layout.
-
----
-
-### Panel frame and terminal content both scale with zoom; cols/rows do not
-
-Panel width/height are world-space values. Screen size = `world_size * zoom`. Both position and size scale with zoom so the canvas feels like tldraw.
-
-Terminal rendering (font size, row height) also scales with zoom: `text_size = BASE_SIZE * zoom`, `line_height = ROW_HEIGHT * zoom`. This makes the whole panel — frame and content — shrink and grow together, which is the correct tldraw feel.
-
-**What does NOT change with zoom:** terminal cols/rows. Those are computed from world-space panel dimensions (`world_w / CHAR_WIDTH`, `(world_h - TITLE_HEIGHT) / ROW_HEIGHT`) and only change when the user drag-resizes the panel, triggering a `PtyResize` to the daemon.
-
-The two concerns are separate:
-- **Rendering zoom** → `TerminalView.zoom` field, updated every canvas frame, scales font and row height
-- **Logical size (cols/rows)** → derived from world-space panel dimensions, zoom-invariant, drives `PtyResize`
-
-Storing panel sizes as fixed screen pixels (only position scaling) makes panels overlap when zoomed out and stay the same size when zoomed in — it does not feel like a canvas.
-
----
-
-### Focus routing: read `focus_handle` from the entity, don't store it separately in the canvas
-
-When the canvas needs to focus a specific `TerminalView` on a mouse click, the correct pattern is:
-
-```rust
-panel.view.read(cx).focus_handle.clone().focus(window);
+```bash
+pnpm --dir app run native:bridge-cli -- get_state
+pnpm --dir app run native:bridge-cli -- screenshot '{"path":"/tmp/attn-native.png"}'
 ```
 
-Do not try to cache focus handles separately in the canvas — they can drift. Reading directly from the entity at click time is always current.
+The screenshot command calls the native automation action, which invokes
+macOS exact-window capture from the signed `attn-native-dev.app` process; the
+harness supplies its native window id so overlapping windows do not replace
+the evidence. Grant Screen Recording permission to the generated bundle at
+`native-ui/target/debug/attn-native-dev.app`, not the external harness
+process or its raw binary.
 
-Also: focusing in a `needs_focus_panel` flag + `render()` application (same pattern as spike 2's `needs_focus`) avoids calling `focus(window)` from inside `spawn_panel` where `window` is not available.
+On macOS, the Makefile selects a locally installed `Apple Development`
+code-signing identity when one is available and otherwise falls back to
+ad-hoc signing. Keep a stable identity configured while using Screen
+Recording automation: ad-hoc signing changes the privacy identity after
+source rebuilds. Override selection explicitly with
+`MACOS_CODESIGN_IDENTITY="<SHA-1 fingerprint>"` when pinning a specific
+identity, particularly if multiple development certificates are installed.
 
----
+For agent-driven product smoke testing, run:
 
-### `Pixels.0` is private in GPUI 0.2 — use `f32::from(pixels)` or `pixels / pixels`
+```bash
+make test-native-agent
+```
 
-`pub struct Pixels(pub(crate) f32)` — the inner field is crate-private. To extract a float: `f32::from(p)` (via `impl From<Pixels> for f32`) or `p / px(1.0)` (via `impl Div<Pixels> for Pixels → f32`). The `pf()` helper wraps `f32::from(p)`.
+That target launches a uniquely profiled daemon and native window owned by the
+scenario and removes its temporary profile data on exit. Set
+`ATTN_NATIVE_KEEP_ARTIFACTS=1` only when debugging a failed run. Do not use
+the persistent `dev` daemon as automated-test isolation.
+It sets `ATTN_AUTOMATION_BACKGROUND=1`: the runner lets the first AppKit
+Ghostty surface mount, immediately restores the previously foreground
+application, then asserts that bridge-driven output/input on that mounted
+surface does not take foreground focus again. Cold Ghostty surface creation
+(for example, release-on-workspace-switch reattachment) is covered by the
+foreground run because AppKit surface bootstrap currently needs an active
+application.
+Use `ATTN_NATIVE_FOREGROUND=1 make test-native-agent` for release/reattach and
+split-pane lifecycle verification; it intentionally allows the test window to
+activate. Add `ATTN_NATIVE_PHYSICAL_INPUT=1` to that command to have the
+macOS input driver click and type through real OS events; this additionally
+requires Accessibility permission for the compiled input-driver helper. The
+harness packages it as `app/scripts/real-app-harness/.build/attn Input
+Driver.app` with bundle identifier `com.attn.harness.input-driver` and signs
+it with the same available Apple Development identity strategy as the app
+bundle. Grant Accessibility to that app bundle, not to a prior raw helper
+binary.
+When launching a second window manually, additionally pass
+`ATTN_AUTOMATION_START_EMPTY=1` so it does not initially attach and resize an
+existing workspace pane.
+
+Before changing terminal lifecycle or automation input, read the archived
+implementations only for attach/reconnect/replay sequencing, raw PTY bytes,
+and automation behavior. Do not carry over its terminal painting. The
+surface-backed implementation must feed daemon output into Ghostty's external
+I/O surface, send Ghostty input callbacks to the daemon, suppress callback
+responses during historical replay, and forward Ghostty-derived resize
+geometry to the daemon.
+
+Never run `make install` or `make install-daemon` while developing this client
+against an active Attn session; those commands overwrite or restart the live
+installation.
+
+## Ownership Rules
+
+- The Go daemon is canonical for workspaces, `WorkspaceLayout`, pane
+  membership and focus, session lifecycle, PTY ownership and replay, persisted
+  splits, and session `muted` state.
+- The native client owns only ephemeral UI state: selected/focused views,
+  pending-result feedback, GPUI entities, and visible terminal renderer
+  lifetimes.
+- Submit layout or focus changes through daemon commands and reconcile from
+  confirmed events. Do not persist or optimistically mutate a competing local
+  layout.
+- Keep terminal bytes off root application state. Allocate Ghostty surfaces
+  only for visible attached panes in the selected workspace; measure before
+  retaining inactive-workspace surfaces.
+- Use existing daemon surfaces before inventing protocol: `mute` for session
+  muting, existing settings events/commands for settings, existing diff and
+  review events for review panes, and session todo messages for the initial
+  Todo pane.
+
+## Product Constraints
+
+- The sidebar is workspace-first and contains nested pane rows; do not add a
+  second workspace-tab navigation system.
+- Pane identity, focus indication, session activity, and mute/close actions
+  belong in sidebar rows, not duplicated title bars on rendered panes.
+- Muting a runtime-backed pane suppresses attention only. It must not pause
+  the session, detach the PTY, hide underlying state, or remove the pane.
+- Selecting a workspace renders its daemon-owned layout. Agent sessions,
+  first-class shell sessions, utility shells, Todo, diff, and future content
+  are panes inside that layout, not top-level workspace items.
+- Todo begins as a non-terminal pane driven by existing daemon session todo
+  messages. Do not create native-local checklist persistence or broader Todo
+  protocol without an explicit product decision.
+- Keep creation affordances unobtrusive; do not add a permanent workspace
+  header/shortcut bar or a large combined sidebar creation button.
+- `Cmd+Arrow` pane navigation operates on daemon pane identities and reports
+  focus through `workspace_layout_focus_pane`.
+
+## Code Placement
+
+- `crates/attn-protocol/`: protocol-v65 Rust subset corresponding to
+  `../internal/protocol/schema/main.tsp`. Model `Workspace`,
+  `WorkspaceLayout`, relevant workspace commands/events, and PTY messages
+  here.
+- `crates/attn-native-app/src/adapters/`: websocket, reconnect,
+  command/result, and external-process boundaries.
+- `crates/attn-native-app/src/state/`: observable client snapshots and
+  Ghostty surface lifetimes. Daemon state stored here is a received snapshot,
+  not a new authority.
+- `crates/attn-native-app/src/views/`: GPUI rendering and input forwarding.
+- `crates/attn-native-app/src/domain/`: add only pure logic that does not
+  depend on GPUI runtime entities or external I/O.
+- `crates/attn-native-app/src/app.rs`: wiring and top-level composition;
+  move domain or protocol branching out of it as features grow.
+
+Use `gpui-component` for conventional app surfaces such as modal/form
+controls, settings, Todo content, Markdown, and review UI. Initialize and
+retain its required `Root`/theme boundary. Do not use it to own daemon layout
+state, render terminals instead of Ghostty, or replace the custom sidebar
+activity/mute/close interaction.
+
+## Reuse From The Archive
+
+The archive may be consulted for mechanics that remain valid:
+
+- adapter/state/view/domain organization;
+- reconnecting websocket behavior;
+- attach/replay/desync and PTY input/resize protocol behavior;
+- location/worktree browsing interaction;
+- runtime-gated automation patterns;
+- theme tokens where they fit the non-canvas client.
+
+Do not copy canvas viewport/pan/zoom/panel geometry, its GPUI terminal
+renderer, protocol-v64 `WorkspacePanel` wire models, canvas-era
+`shell_as_session` assumptions, or local layout mutation. Preserve the need
+for first-class shell sessions by designing their protocol-v65
+workspace-layout behavior explicitly.

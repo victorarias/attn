@@ -36,7 +36,7 @@ import {
   bundleIdentifierForNativeProfile,
   currentNativeProfile,
   manifestPathForNativeProfile,
-} from './nativeHarnessProfile.mjs';
+} from '../../nativeHarnessProfile.mjs';
 
 const PROFILE = currentNativeProfile() || 'default';
 const MANIFEST_PATH = manifestPathForNativeProfile();

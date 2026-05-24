@@ -1,0 +1,557 @@
+use gpui::{
+    div, fill, point, prelude::*, px, rgb, size, App, Bounds, Context, ElementId, Entity,
+    FocusHandle, Focusable, Font, GlobalElementId, Hsla, InspectorElementId, KeyDownEvent,
+    Keystroke, LayoutId, Pixels, Size, Style, TextRun, Window,
+};
+
+use attn_protocol::{PtyInputMessage, PtyResizeMessage};
+
+use crate::adapters::daemon::DaemonClient;
+use crate::state::terminal_model::{RenderedCell, TerminalEvent, TerminalModel};
+use crate::theme;
+
+/// Approximate character cell dimensions for Source Code Pro at 13px.
+pub const CHAR_WIDTH: f32 = 7.8;
+pub const ROW_HEIGHT: f32 = 17.0;
+
+/// Default terminal colors. The chrome side of the terminal pulls from
+/// the design-system tokens (panel body = `ink::midnight`, default text
+/// = `moon::parchment`, cursor = the sodium accent — the same caret
+/// language used everywhere else). ANSI color resolution now comes from
+/// libghostty's render state.
+const COLOR_BG: u32 = theme::ink::MIDNIGHT_HEX;
+const COLOR_FG: u32 = theme::moon::PARCHMENT_HEX;
+/// Cursor block uses the sodium accent — same caret language as every
+/// other input affordance in the app.
+const COLOR_CURSOR_BG: u32 = theme::sodium::VAPOR_HEX;
+/// Inverse: text under the cursor block reads as the deepest ink so the
+/// glyph stays legible on the bright sodium fill.
+const COLOR_CURSOR_FG: u32 = theme::ink::VOID_HEX;
+
+/// Canvas-based terminal element. Paints background quads and shaped text
+/// directly onto the GPUI scene rather than relying on div layout.
+pub struct TerminalElement {
+    cells: Vec<Vec<RenderedCell>>,
+    cols: usize,
+    /// Canvas zoom factor. Scales font size and row height so the terminal
+    /// content visually shrinks/grows with the panel. Cols/rows are unaffected.
+    zoom: f32,
+}
+
+pub struct TerminalPrepaint {
+    cell_width: Pixels,
+    line_height: Pixels,
+    font: Font,
+    font_size: Pixels,
+}
+
+impl Element for TerminalElement {
+    type RequestLayoutState = ();
+    type PrepaintState = TerminalPrepaint;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        let style = Style {
+            size: Size::full(),
+            ..Default::default()
+        };
+        let layout_id = window.request_layout(style, [], cx);
+        (layout_id, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        _request_layout: &mut (),
+        window: &mut Window,
+        _cx: &mut App,
+    ) -> TerminalPrepaint {
+        let text_style = window.text_style();
+        let font = text_style.font();
+        let font_size = text_style.font_size.to_pixels(window.rem_size());
+
+        // Shape a single 'm' to measure the monospace cell width.
+        let run = TextRun {
+            len: 1,
+            font: font.clone(),
+            color: Hsla::from(rgb(COLOR_FG)),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let shaped = window
+            .text_system()
+            .shape_line("m".into(), font_size, &[run], None);
+        let cell_width = shaped.width;
+        // Scale line height by the same zoom factor applied to the font size so
+        // background quads and text baselines stay aligned.
+        let line_height = px(ROW_HEIGHT * self.zoom);
+
+        TerminalPrepaint {
+            cell_width,
+            line_height,
+            font,
+            font_size,
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _request_layout: &mut (),
+        prepaint: &mut TerminalPrepaint,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let TerminalPrepaint {
+            cell_width,
+            line_height,
+            font,
+            font_size,
+        } = prepaint;
+        let (cell_width, line_height, font_size) = (*cell_width, *line_height, *font_size);
+        let origin = bounds.origin;
+
+        // Pass 1: paint non-default background quads.
+        for (row_idx, row) in self.cells.iter().enumerate() {
+            let y = origin.y + line_height * row_idx as f32;
+            for (col_idx, cell) in row.iter().enumerate() {
+                // Spacer cells are covered by the paired wide cell.
+                if cell.is_spacer {
+                    continue;
+                }
+
+                let bg = if cell.is_cursor {
+                    COLOR_CURSOR_BG
+                } else {
+                    cell.bg
+                };
+
+                if bg == COLOR_BG {
+                    continue; // default background, no quad needed
+                }
+
+                // Wide characters occupy two cell columns.
+                let bg_width = if cell.is_wide {
+                    cell_width * 2.0
+                } else {
+                    cell_width
+                };
+
+                let x = origin.x + cell_width * col_idx as f32;
+                window.paint_quad(fill(
+                    Bounds::new(point(x, y), size(bg_width, line_height)),
+                    rgb(bg),
+                ));
+            }
+        }
+
+        // Pass 2: shape and paint text for each row.
+        for (row_idx, row) in self.cells.iter().enumerate() {
+            let y = origin.y + line_height * row_idx as f32;
+
+            let mut text = String::with_capacity(self.cols);
+            let mut runs: Vec<TextRun> = Vec::new();
+            let mut run_fg: u32 = COLOR_FG;
+            let mut run_len: usize = 0;
+            let mut first_cell = true;
+
+            for cell in row.iter() {
+                // Spacer cells have no character to render.
+                if cell.is_spacer {
+                    continue;
+                }
+
+                let cell_text = if cell.text.is_empty() {
+                    " "
+                } else {
+                    cell.text.as_str()
+                };
+                let fg = if cell.is_cursor {
+                    COLOR_CURSOR_FG
+                } else {
+                    cell.fg
+                };
+
+                if first_cell {
+                    run_fg = fg;
+                    first_cell = false;
+                } else if fg != run_fg {
+                    if run_len > 0 {
+                        runs.push(TextRun {
+                            len: run_len,
+                            font: font.clone(),
+                            color: Hsla::from(rgb(run_fg)),
+                            background_color: None,
+                            underline: None,
+                            strikethrough: None,
+                        });
+                    }
+                    run_fg = fg;
+                    run_len = 0;
+                }
+
+                text.push_str(cell_text);
+                run_len += cell_text.len();
+            }
+
+            if run_len > 0 {
+                runs.push(TextRun {
+                    len: run_len,
+                    font: font.clone(),
+                    color: Hsla::from(rgb(run_fg)),
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                });
+            }
+
+            if !text.is_empty() && !runs.is_empty() {
+                let row_origin = point(origin.x, y);
+                let shaped = window
+                    .text_system()
+                    .shape_line(text.into(), font_size, &runs, None);
+                let _ = shaped.paint(row_origin, line_height, window, cx);
+            }
+        }
+    }
+}
+
+impl IntoElement for TerminalElement {
+    type Element = Self;
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+/// GPUI view that renders a terminal and forwards keyboard input.
+pub struct TerminalView {
+    terminal: Entity<TerminalModel>,
+    daemon: Entity<DaemonClient>,
+    pub focus_handle: FocusHandle,
+    /// Explicit content area size (world-space pixels) for use inside canvas panels.
+    /// When set, terminal sizing uses these instead of the window viewport.
+    content_size: Option<(f32, f32)>,
+    /// Canvas zoom factor for rendering. Scales font size and row height so the
+    /// terminal scales visually with the panel. Cols/rows are not affected.
+    /// Defaults to 1.0 (fullscreen / no canvas).
+    zoom: f32,
+    /// Whether this terminal is allowed to turn keydown events into PTY
+    /// input. The canvas owns this gate so selected panels can be navigated
+    /// without a stale terminal focus handle still eating keystrokes.
+    input_enabled: bool,
+}
+
+impl Focusable for TerminalView {
+    fn focus_handle(&self, _cx: &gpui::App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl TerminalView {
+    /// Read-only handle to the underlying terminal model. Used by the
+    /// automation `read_pane_text` action to dump the visible grid for
+    /// scenario assertions.
+    pub fn model(&self) -> &Entity<TerminalModel> {
+        &self.terminal
+    }
+
+    pub fn new(
+        terminal: Entity<TerminalModel>,
+        daemon: Entity<DaemonClient>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let focus_handle = cx.focus_handle();
+
+        // Re-render whenever terminal content changes.
+        cx.subscribe(
+            &terminal,
+            |_this, _term, event: &TerminalEvent, cx| match event {
+                TerminalEvent::DataReceived | TerminalEvent::Exited => cx.notify(),
+                TerminalEvent::Desync => cx.notify(),
+            },
+        )
+        .detach();
+
+        Self {
+            terminal,
+            daemon,
+            focus_handle,
+            content_size: None,
+            zoom: 1.0,
+            input_enabled: true,
+        }
+    }
+
+    /// Set the canvas zoom factor used for rendering. Returns true if changed.
+    /// `#[allow(dead_code)]` is a per-binary artifact of the spike's
+    /// multi-bin layout — the method is used by `attn-spike4` and
+    /// `attn-spike5` but not by `attn-native`, and Rust dead-code
+    /// analysis runs per binary. A future lib.rs refactor would let us
+    /// drop this.
+    #[allow(dead_code)]
+    pub fn set_zoom(&mut self, zoom: f32) -> bool {
+        let changed = (self.zoom - zoom).abs() >= 0.001;
+        if changed {
+            self.zoom = zoom;
+        }
+        changed
+    }
+
+    /// Set the content area size (world-space units) used for terminal dimension
+    /// computation. Returns true if the value changed by more than half a pixel.
+    /// See note on `set_zoom` re: `#[allow(dead_code)]`.
+    #[allow(dead_code)]
+    pub fn set_content_size(&mut self, w: f32, h: f32) -> bool {
+        let changed = match self.content_size {
+            Some((cw, ch)) => (cw - w).abs() >= 0.5 || (ch - h).abs() >= 0.5,
+            None => true,
+        };
+        if changed {
+            self.content_size = Some((w, h));
+        }
+        changed
+    }
+
+    /// Set whether keyboard input should be forwarded to the PTY. Returns
+    /// true when the value changed so callers can request a repaint.
+    pub fn set_input_enabled(&mut self, enabled: bool) -> bool {
+        let changed = self.input_enabled != enabled;
+        if changed {
+            self.input_enabled = enabled;
+        }
+        changed
+    }
+
+    fn send_input(&self, data: &str, cx: &mut Context<Self>) {
+        let session_id = self.terminal.read(cx).session_id.clone();
+        let msg = PtyInputMessage::new(session_id, data);
+        let _ = self.daemon.read(cx).send_cmd(&msg);
+    }
+
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.focus_handle.is_focused(window) {
+            return;
+        }
+        if !self.input_enabled {
+            return;
+        }
+        if event.keystroke.modifiers.platform {
+            return;
+        }
+        let seq = encode_key(event);
+        if !seq.is_empty() {
+            self.send_input(&seq, cx);
+        }
+    }
+
+    /// Synthesize a keystroke from outside the GPUI event loop and run it
+    /// through the same path real keystrokes take. Used by the automation
+    /// `type_into_panel` action so test scripts exercise the full
+    /// focus → encode → send_input chain rather than bypassing it via
+    /// `send_pty_input`. Caller is responsible for focusing this view
+    /// first; an unfocused view drops the keystroke (matching production
+    /// behavior).
+    pub fn inject_keystroke(
+        &mut self,
+        keystroke: Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let event = KeyDownEvent {
+            keystroke,
+            is_held: false,
+        };
+        self.on_key_down(&event, window, cx);
+    }
+}
+
+impl Render for TerminalView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Sync terminal size to the available content area.
+        // When hosted inside a canvas panel, content_size overrides viewport size.
+        let (new_cols, new_rows) = if let Some((w, h)) = self.content_size {
+            (
+                ((w / CHAR_WIDTH) as u16).max(1),
+                ((h / ROW_HEIGHT) as u16).max(1),
+            )
+        } else {
+            let viewport = window.viewport_size();
+            (
+                ((viewport.width / px(CHAR_WIDTH)) as u16).max(1),
+                ((viewport.height / px(ROW_HEIGHT)) as u16).max(1),
+            )
+        };
+        let (cur_cols, cur_rows, session_id) = {
+            let t = self.terminal.read(cx);
+            (t.cols, t.rows, t.session_id.clone())
+        };
+        let cell_width_px = (CHAR_WIDTH * self.zoom).round().max(1.0) as u32;
+        let cell_height_px = (ROW_HEIGHT * self.zoom).round().max(1.0) as u32;
+        if new_cols != cur_cols || new_rows != cur_rows {
+            self.terminal.update(cx, |t, _| {
+                t.resize(new_cols, new_rows, cell_width_px, cell_height_px)
+            });
+            let _ = self
+                .daemon
+                .read(cx)
+                .send_cmd(&PtyResizeMessage::new(session_id, new_cols, new_rows));
+        } else {
+            self.terminal.update(cx, |t, _| {
+                t.resize(new_cols, new_rows, cell_width_px, cell_height_px)
+            });
+        }
+
+        let terminal = self.terminal.read(cx);
+        let rows = terminal.rows as usize;
+        let cols = terminal.cols as usize;
+
+        // Collect all cell data for the canvas element.
+        let mut all_cells: Vec<Vec<RenderedCell>> = Vec::with_capacity(rows);
+        for row_idx in 0..rows {
+            let cells = terminal.render_row(row_idx).unwrap_or_default();
+            all_cells.push(cells);
+        }
+
+        let focus_handle = self.focus_handle.clone();
+        let zoom = self.zoom;
+
+        div()
+            .size_full()
+            .bg(rgb(COLOR_BG))
+            .font_family("Source Code Pro for Powerline")
+            // Scale font size with zoom so text visually shrinks/grows with the panel.
+            .text_size(px(13. * zoom))
+            .track_focus(&focus_handle)
+            .on_key_down(cx.listener(Self::on_key_down))
+            .child(TerminalElement {
+                cells: all_cells,
+                cols,
+                zoom,
+            })
+    }
+}
+
+/// Encode a GPUI keystroke into a terminal byte sequence.
+fn encode_key(event: &KeyDownEvent) -> String {
+    let k = &event.keystroke;
+    let ctrl = k.modifiers.control;
+    let alt = k.modifiers.alt;
+    let shift = k.modifiers.shift;
+
+    // Printable character input via IME key_char takes priority.
+    // But don't send key_char for Ctrl/Alt combos or named special keys —
+    // those need dedicated escape encoding below.
+    if let Some(key_char) = &k.key_char {
+        if !ctrl && !alt && !key_char.is_empty() {
+            match k.key.as_str() {
+                // These keys always use dedicated escape sequences regardless
+                // of what key_char says (e.g. macOS may return "\n" for Enter).
+                "enter" | "escape" | "tab" | "backspace" | "delete" | "up" | "down" | "left"
+                | "right" | "home" | "end" | "pageup" | "pagedown" | "f1" | "f2" | "f3" | "f4"
+                | "f5" | "f6" | "f7" | "f8" | "f9" | "f10" | "f11" | "f12" => {}
+                _ => return key_char.clone(),
+            }
+        }
+    }
+
+    // Special keys.
+    let seq: Option<&str> = match k.key.as_str() {
+        "enter" => {
+            // Shift+Enter inserts a newline in apps using kitty keyboard
+            // protocol (e.g. Claude Code). Plain Enter always submits (\r).
+            if shift {
+                Some("\x1b[13;2u")
+            } else {
+                Some("\r")
+            }
+        }
+        "escape" => Some("\x1b"),
+        "tab" => {
+            if shift {
+                Some("\x1b[Z")
+            } else {
+                Some("\t")
+            }
+        }
+        "backspace" => Some("\x7f"),
+        "delete" => Some("\x1b[3~"),
+        "up" => Some("\x1b[A"),
+        "down" => Some("\x1b[B"),
+        "right" => Some("\x1b[C"),
+        "left" => Some("\x1b[D"),
+        "home" => Some("\x1b[H"),
+        "end" => Some("\x1b[F"),
+        "pageup" => Some("\x1b[5~"),
+        "pagedown" => Some("\x1b[6~"),
+        "f1" => Some("\x1bOP"),
+        "f2" => Some("\x1bOQ"),
+        "f3" => Some("\x1bOR"),
+        "f4" => Some("\x1bOS"),
+        "f5" => Some("\x1b[15~"),
+        "f6" => Some("\x1b[17~"),
+        "f7" => Some("\x1b[18~"),
+        "f8" => Some("\x1b[19~"),
+        "f9" => Some("\x1b[20~"),
+        "f10" => Some("\x1b[21~"),
+        "f11" => Some("\x1b[23~"),
+        "f12" => Some("\x1b[24~"),
+        _ => None,
+    };
+
+    if let Some(s) = seq {
+        return s.to_string();
+    }
+
+    // Ctrl+letter: encode as control character.
+    if ctrl && !alt {
+        let key = k.key.as_str();
+        if key.len() == 1 {
+            let c = key.chars().next().unwrap();
+            if c.is_ascii_lowercase() {
+                // Ctrl+a = \x01, Ctrl+b = \x02, ..., Ctrl+z = \x1a
+                return String::from(char::from(c as u8 - b'a' + 1));
+            }
+            match c {
+                '@' => return "\x00".to_string(),
+                '[' => return "\x1b".to_string(),
+                '\\' => return "\x1c".to_string(),
+                ']' => return "\x1d".to_string(),
+                '^' => return "\x1e".to_string(),
+                '_' => return "\x1f".to_string(),
+                _ => {}
+            }
+        }
+    }
+
+    // Alt+key: prefix with ESC.
+    if alt {
+        if let Some(key_char) = &k.key_char {
+            if !key_char.is_empty() {
+                return format!("\x1b{key_char}");
+            }
+        }
+        if k.key.len() == 1 {
+            return format!("\x1b{}", k.key);
+        }
+    }
+
+    String::new()
+}

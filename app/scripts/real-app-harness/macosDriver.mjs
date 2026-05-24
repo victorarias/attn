@@ -9,7 +9,11 @@ const execFileAsync = promisify(execFile);
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const INPUT_DRIVER_SOURCE = path.join(SCRIPT_DIR, 'InputDriver.swift');
 const INPUT_DRIVER_BUILD_DIR = path.join(SCRIPT_DIR, '.build');
-const INPUT_DRIVER_BINARY = path.join(INPUT_DRIVER_BUILD_DIR, 'attn-real-input-driver');
+const INPUT_DRIVER_APP = path.join(INPUT_DRIVER_BUILD_DIR, 'attn Input Driver.app');
+const INPUT_DRIVER_BINARY = path.join(INPUT_DRIVER_APP, 'Contents', 'MacOS', 'attn-real-input-driver');
+const INPUT_DRIVER_PLIST = path.join(INPUT_DRIVER_APP, 'Contents', 'Info.plist');
+const INPUT_DRIVER_BUNDLE_ID = 'com.attn.harness.input-driver';
+let inputDriverReady;
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -20,10 +24,12 @@ export class MacOSDriver {
     bundleId = 'com.attn.manager',
     appPath = path.join(os.homedir(), 'Applications', 'attn.app'),
     actionDelayMs = 250,
+    pid = null,
   } = {}) {
     this.bundleId = bundleId;
     this.appPath = appPath;
     this.actionDelayMs = actionDelayMs;
+    this.pid = pid;
   }
 
   async launchApp() {
@@ -64,6 +70,17 @@ export class MacOSDriver {
 
   async frontmostBundleId() {
     return this.runInputDriverCapture(['frontmost']);
+  }
+
+  async frontmostProcessId() {
+    const value = await this.runInputDriverCapture(['frontmost_pid']);
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  async activateProcessId(pid) {
+    await this.runInputDriver(['activate_pid', '--pid', String(pid)]);
+    await delay(this.actionDelayMs);
   }
 
   // Returns the CGWindowID of the driver's bundle's largest layer-0 onscreen
@@ -161,24 +178,112 @@ export class MacOSDriver {
   }
 
   async ensureInputDriver() {
-    fs.mkdirSync(INPUT_DRIVER_BUILD_DIR, { recursive: true });
-    const binaryExists = fs.existsSync(INPUT_DRIVER_BINARY);
-    const sourceMtime = fs.statSync(INPUT_DRIVER_SOURCE).mtimeMs;
-    const binaryMtime = binaryExists ? fs.statSync(INPUT_DRIVER_BINARY).mtimeMs : 0;
-    if (binaryExists && binaryMtime >= sourceMtime) {
-      return INPUT_DRIVER_BINARY;
+    if (!inputDriverReady) {
+      inputDriverReady = (async () => {
+        fs.mkdirSync(path.dirname(INPUT_DRIVER_BINARY), { recursive: true });
+        fs.writeFileSync(INPUT_DRIVER_PLIST, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key>
+  <string>attn Input Driver</string>
+  <key>CFBundleExecutable</key>
+  <string>attn-real-input-driver</string>
+  <key>CFBundleIdentifier</key>
+  <string>${INPUT_DRIVER_BUNDLE_ID}</string>
+  <key>CFBundleName</key>
+  <string>attn Input Driver</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+</dict>
+</plist>
+`);
+        const binaryExists = fs.existsSync(INPUT_DRIVER_BINARY);
+        const sourceMtime = fs.statSync(INPUT_DRIVER_SOURCE).mtimeMs;
+        const binaryMtime = binaryExists ? fs.statSync(INPUT_DRIVER_BINARY).mtimeMs : 0;
+        const rebuilt = !binaryExists || binaryMtime < sourceMtime;
+        if (rebuilt) {
+          await execFileAsync('/usr/bin/swiftc', [INPUT_DRIVER_SOURCE, '-o', INPUT_DRIVER_BINARY], {
+            timeout: 30_000,
+          });
+        }
+        if (process.platform === 'darwin') {
+          const identity = await this.inputDriverCodesignIdentity();
+          if (rebuilt || await this.inputDriverNeedsSigning(identity)) {
+            await execFileAsync('/usr/bin/codesign', [
+              '--force',
+              '--sign',
+              identity,
+              INPUT_DRIVER_BINARY,
+            ], { timeout: 30_000 });
+          }
+          if (rebuilt || await this.inputDriverAppNeedsSigning(identity)) {
+            await execFileAsync('/usr/bin/codesign', [
+              '--force',
+              '--sign',
+              identity,
+              INPUT_DRIVER_APP,
+            ], { timeout: 30_000 });
+          }
+        }
+        return INPUT_DRIVER_BINARY;
+      })();
     }
-    await execFileAsync('/usr/bin/swiftc', [INPUT_DRIVER_SOURCE, '-o', INPUT_DRIVER_BINARY], {
-      timeout: 30_000,
-    });
-    return INPUT_DRIVER_BINARY;
+    return inputDriverReady;
+  }
+
+  async inputDriverCodesignIdentity() {
+    if (process.env.MACOS_CODESIGN_IDENTITY) {
+      return process.env.MACOS_CODESIGN_IDENTITY;
+    }
+    try {
+      const { stdout } = await execFileAsync('/usr/bin/security', [
+        'find-identity',
+        '-v',
+        '-p',
+        'codesigning',
+      ]);
+      const identities = [...stdout.matchAll(/\)\s+([0-9A-F]{40})\s+"Apple Development:/g)]
+        .map((match) => match[1])
+        .sort();
+      return identities[0] || '-';
+    } catch {
+      return '-';
+    }
+  }
+
+  async inputDriverNeedsSigning(identity) {
+    if (identity === '-') return false;
+    try {
+      const { stderr } = await execFileAsync('/usr/bin/codesign', [
+        '-dvvv',
+        INPUT_DRIVER_BINARY,
+      ]);
+      return !stderr.includes('Authority=Apple Development:') ||
+        !stderr.includes('TeamIdentifier=');
+    } catch {
+      return true;
+    }
   }
 
   async runInputDriver(args) {
-    const binaryPath = await this.ensureInputDriver();
-    const fullArgs = ['--bundle-id', this.bundleId, ...args];
+    await this.ensureInputDriver();
+    const targetArgs = this.pid
+      ? ['--pid', String(this.pid)]
+      : ['--bundle-id', this.bundleId];
+    const fullArgs = [...targetArgs, ...args];
     try {
-      await execFileAsync(binaryPath, fullArgs, {
+      // Launch through the bundle so macOS applies Accessibility permission
+      // to the stable `com.attn.harness.input-driver` identity, rather than
+      // treating the embedded CLI binary as an unrelated process.
+      await execFileAsync('/usr/bin/open', [
+        '-g',
+        '-W',
+        '-n',
+        INPUT_DRIVER_APP,
+        '--args',
+        ...fullArgs,
+      ], {
         timeout: 5_000,
       });
     } catch (error) {
@@ -192,7 +297,10 @@ export class MacOSDriver {
 
   async runInputDriverCapture(args) {
     const binaryPath = await this.ensureInputDriver();
-    const fullArgs = ['--bundle-id', this.bundleId, ...args];
+    const targetArgs = this.pid
+      ? ['--pid', String(this.pid)]
+      : ['--bundle-id', this.bundleId];
+    const fullArgs = [...targetArgs, ...args];
     try {
       const { stdout } = await execFileAsync(binaryPath, fullArgs, {
         timeout: 5_000,
@@ -203,6 +311,27 @@ export class MacOSDriver {
       throw new Error(`macOS input driver capture failed: ${stderr || error.message}`);
     }
   }
+
+  async inputDriverAppNeedsSigning(identity) {
+    if (identity === '-') return false;
+    try {
+      await execFileAsync('/usr/bin/codesign', [
+        '--verify',
+        '--deep',
+        '--strict',
+        INPUT_DRIVER_APP,
+      ]);
+      const { stderr } = await execFileAsync('/usr/bin/codesign', [
+        '-dvvv',
+        INPUT_DRIVER_APP,
+      ]);
+      return !stderr.includes(`Identifier=${INPUT_DRIVER_BUNDLE_ID}`) ||
+        !stderr.includes('Authority=Apple Development:') ||
+        !stderr.includes('TeamIdentifier=');
+    } catch {
+      return true;
+    }
+  }
 }
 
-export { delay };
+export { delay, INPUT_DRIVER_APP };

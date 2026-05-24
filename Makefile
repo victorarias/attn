@@ -1,4 +1,4 @@
-.PHONY: run build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev dev-native test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-dev app-screenshot scenario-native-canvas dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev build-native-ghostty-kit build-native-app-dev dev-native test-native-agent test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-dev app-screenshot dist release release-skip-tests
 
 # Bare `make` does the full prod inner loop: install + open the app.
 # `make install` is install-only (for scripts/CI that drive the launch
@@ -26,6 +26,26 @@ GIT_COMMIT ?= $(shell bash ./scripts/source-fingerprint.sh --field commit)
 OUTPUT ?= $(BINARY_NAME)
 GO_LDFLAGS = -X github.com/victorarias/attn/internal/buildinfo.Version=$(VERSION) -X github.com/victorarias/attn/internal/buildinfo.BuildTime=$(BUILD_TIME) -X github.com/victorarias/attn/internal/buildinfo.SourceFingerprint=$(SOURCE_FINGERPRINT) -X github.com/victorarias/attn/internal/buildinfo.GitCommit=$(GIT_COMMIT)
 ZIG ?= zig
+NATIVE_ZIG_PREFIX ?= $(shell HOMEBREW_NO_AUTO_UPDATE=1 brew --prefix zig@0.15 2>/dev/null)
+NATIVE_GHOSTTY_DIR ?= $(abspath ../ghostty)
+NATIVE_GHOSTTY_EXTERNAL_IO_REV ?= ba8e595f7
+NATIVE_DEV_WS_URL ?= ws://localhost:29849/ws
+NATIVE_APP_BUNDLE_DEV := $(abspath native-ui/target/debug/attn-native-dev.app)
+NATIVE_APP_BINARY_DEV := $(NATIVE_APP_BUNDLE_DEV)/Contents/MacOS/attn-native
+# Prefer a stable local development identity so macOS privacy grants survive
+# source rebuilds. Sort by fingerprint because Keychain output ordering is
+# not stable when more than one development identity is installed. CI and
+# contributors without a certificate retain the ad-hoc fallback; callers may
+# override this with a pinned fingerprint or Developer ID identity.
+MACOS_CODESIGN_IDENTITY ?= $(shell security find-identity -v -p codesigning 2>/dev/null | awk '/"Apple Development:/ { print $$2 }' | LC_ALL=C sort | head -1)
+ifeq ($(strip $(MACOS_CODESIGN_IDENTITY)),)
+MACOS_CODESIGN_IDENTITY := -
+endif
+# Go tool binaries may be redirected by asdf or a local GOBIN setting.
+GO_TOOLS_BIN ?= $(shell go env GOBIN)
+ifeq ($(strip $(GO_TOOLS_BIN)),)
+GO_TOOLS_BIN := $(shell go env GOPATH)/bin
+endif
 
 build:
 	go build -ldflags "$(GO_LDFLAGS)" -o $(OUTPUT) $(BUILD_DIR)
@@ -36,7 +56,7 @@ build-linux-amd64:
 build-linux-arm64:
 	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC='$(ZIG) cc -target aarch64-linux-gnu' CXX='$(ZIG) c++ -target aarch64-linux-gnu' go build -ldflags "$(GO_LDFLAGS)" -o $(OUTPUT) $(BUILD_DIR)
 
-GOTESTSUM=$(HOME)/go/bin/gotestsum
+GOTESTSUM=$(GO_TOOLS_BIN)/gotestsum
 
 $(GOTESTSUM):
 	go install gotest.tools/gotestsum@latest
@@ -119,7 +139,10 @@ install-daemon: build
 	fi
 	@echo ">>> Updating PROD daemon at $(APP_BINARY)"
 	cp $(OUTPUT) $(APP_BINARY)
-	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign -s - -f $(APP_BINARY); fi
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" $(APP_BINARY); \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" $(APP_BUNDLE); \
+	fi
 	@$(APP_BINARY) daemon ensure >/dev/null
 	@echo "Updated bundled daemon at $(APP_BINARY)"
 
@@ -153,9 +176,71 @@ install-daemon-dev: build
 	fi
 	@echo ">>> Updating DEV daemon at $(APP_BINARY_DEV)"
 	cp $(OUTPUT) $(APP_BINARY_DEV)
-	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign -s - -f $(APP_BINARY_DEV); fi
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" $(APP_BINARY_DEV); \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" $(APP_BUNDLE_DEV); \
+	fi
 	@$(DEV_DAEMON_ENV) $(APP_BINARY_DEV) daemon ensure >/dev/null
 	@echo "Updated bundled dev daemon at $(APP_BINARY_DEV)"
+
+# Build the full Ghostty Metal renderer from attn's upstream-based fork.
+build-native-ghostty-kit:
+	@if [ ! -d "$(NATIVE_GHOSTTY_DIR)/.git" ]; then \
+		echo "Missing attn Ghostty fork clone at $(NATIVE_GHOSTTY_DIR)"; \
+		echo "Clone https://github.com/victorarias/ghostty and checkout attn/external-io."; \
+		exit 1; \
+	fi
+	@if ! git -C "$(NATIVE_GHOSTTY_DIR)" merge-base --is-ancestor "$(NATIVE_GHOSTTY_EXTERNAL_IO_REV)" HEAD; then \
+		echo "Ghostty checkout does not contain attn external-I/O commit $(NATIVE_GHOSTTY_EXTERNAL_IO_REV)."; \
+		echo "Checkout the attn/external-io branch in $(NATIVE_GHOSTTY_DIR)."; \
+		exit 1; \
+	fi
+	@if [ ! -x "$(NATIVE_ZIG_PREFIX)/bin/zig" ]; then \
+		echo "Missing patched Zig toolchain; install it with: brew install zig@0.15"; \
+		exit 1; \
+	fi
+	@if ! xcrun -find metal >/dev/null 2>&1; then \
+		echo "Missing Metal Toolchain; install it with: xcodebuild -downloadComponent MetalToolchain"; \
+		exit 1; \
+	fi
+	cd "$(NATIVE_GHOSTTY_DIR)" && PATH="$(NATIVE_ZIG_PREFIX)/bin:$$PATH" zig build -Dapp-runtime=none -Demit-xcframework=true -Dxcframework-target=native -Demit-macos-app=false -Dsentry=false -Di18n=false
+	@test -f "$(NATIVE_GHOSTTY_DIR)/macos/GhosttyKit.xcframework/macos-arm64/libghostty-internal-fat.a"
+	@echo "Built GhosttyKit from $(NATIVE_GHOSTTY_DIR)"
+
+# Build a signed macOS bundle for the native renderer. A stable bundle
+# identifier is required for Screen Recording permission to survive rebuilds.
+build-native-app-dev: build-native-ghostty-kit
+	@if [ ! -x "$(NATIVE_ZIG_PREFIX)/bin/zig" ]; then \
+		echo "Missing patched Zig toolchain; install it with: brew install zig@0.15"; \
+		exit 1; \
+	fi
+	cd native-ui && ATTN_NATIVE_BUILD_PROFILE=dev ATTN_NATIVE_BUILD_WS_URL="$(NATIVE_DEV_WS_URL)" PATH="$(NATIVE_ZIG_PREFIX)/bin:$$PATH" cargo build --bin attn-native
+	@mkdir -p "$(NATIVE_APP_BUNDLE_DEV)/Contents/MacOS"
+	cp native-ui/macos/attn-native-dev/Info.plist "$(NATIVE_APP_BUNDLE_DEV)/Contents/Info.plist"
+	cp native-ui/target/debug/attn-native "$(NATIVE_APP_BINARY_DEV)"
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" "$(NATIVE_APP_BINARY_DEV)" >/dev/null; \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" "$(NATIVE_APP_BUNDLE_DEV)" >/dev/null; \
+	fi
+
+# Run the workspace-first native client against the isolated dev daemon.
+# The native Ghostty build currently requires Homebrew's Zig 0.15 patch for
+# macOS SDK 26.4, so callers should not need to alter their asdf selection.
+dev-native: build build-native-app-dev
+	@echo ">>> Ensuring native dev daemon (profile=dev, port=29849, data=~/.attn-dev)"
+	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" $(OUTPUT) >/dev/null; fi
+	@$(DEV_DAEMON_ENV) ./$(OUTPUT) daemon ensure >/dev/null
+	@echo ">>> Launching $(NATIVE_APP_BUNDLE_DEV) (built-in profile=dev, daemon=$(NATIVE_DEV_WS_URL))"
+	open -n -W "$(NATIVE_APP_BUNDLE_DEV)"
+
+# Agent-driven native smoke test. It owns a unique daemon profile and native
+# window, so it never attaches to or resizes the user's dev/prod terminals.
+test-native-agent: build
+	@if [ ! -x "$(NATIVE_ZIG_PREFIX)/bin/zig" ]; then \
+		echo "Missing patched Zig toolchain; install it with: brew install zig@0.15"; \
+		exit 1; \
+	fi
+	cd app && PATH="$(NATIVE_ZIG_PREFIX)/bin:$$PATH" ATTN_NATIVE_DAEMON_BINARY="$(abspath $(OUTPUT))" pnpm run native:smoke
 
 clean:
 	rm -f $(BINARY_NAME)
@@ -163,7 +248,7 @@ clean:
 # Type generation pipeline: TypeSpec -> JSON Schema -> go-jsonschema/quicktype
 generate-types:
 	cd internal/protocol/schema && pnpm exec tsp compile .
-	$(HOME)/go/bin/go-jsonschema -p protocol --only-models --tags json --resolve-extension json \
+	$(GO_TOOLS_BIN)/go-jsonschema -p protocol --only-models --tags json --resolve-extension json \
 		--capitalization ID --capitalization URL --capitalization SHA --capitalization PR --capitalization CI \
 		-o internal/protocol/generated.go \
 		internal/protocol/schema/tsp-output/json-schema/*.json
@@ -184,7 +269,8 @@ check-types: generate-types
 #          in tauri.conf.json / tauri.dev.conf.json.
 #   $(3) — extra args for `pnpm tauri build` (e.g. --config for overlays)
 # The Go daemon is bundled as a sidecar under Contents/MacOS/attn regardless
-# of productName, so the codesign step is the same for both builds.
+# of productName. Sign the sidecar first, then the enclosing app bundle, so
+# the installed app and the CLI/PTY host share the configured stable identity.
 define build_tauri_app
 	@mkdir -p app/src-tauri/binaries
 	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
@@ -194,7 +280,8 @@ define build_tauri_app
 		printf '{\n  "version": "%s",\n  "sourceFingerprint": "%s",\n  "gitCommit": "%s",\n  "buildTime": "%s"\n}\n' '$(VERSION)' '$(SOURCE_FINGERPRINT)' '$(GIT_COMMIT)' '$(BUILD_TIME)' > app/src-tauri/target/release/bundle/macos/$(2).app/Contents/Resources/build-identity.json; \
 	fi
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		codesign -s - -f app/src-tauri/target/release/bundle/macos/$(2).app/Contents/MacOS/attn; \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" app/src-tauri/target/release/bundle/macos/$(2).app/Contents/MacOS/attn; \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" app/src-tauri/target/release/bundle/macos/$(2).app; \
 	fi
 endef
 
@@ -215,37 +302,13 @@ build-app-dev: build
 app-screenshot:
 	cd app && node scripts/real-app-harness/capture-app-screenshot.mjs $(if $(SCREENSHOT_PATH),--path "$(SCREENSHOT_PATH)",) $(APP_SCREENSHOT_FLAGS)
 
-# Run the native canvas app from source against the dev daemon, with
-# automation enabled (ATTN_PROFILE=dev). Self-sufficient: builds the Go
-# binary, ad-hoc codesigns it (so macOS doesn't SIGKILL the spawned
-# daemon), ensures a dev daemon is running on port 29849, then launches
-# the native app via cargo run. `daemon ensure` is idempotent — if a dev
-# daemon is already running (e.g. from `make dev`), it's a no-op and the
-# native app reuses it. Prod daemon is never touched.
-#
-# The bin name is `attn-native`; swap to `attn-spike3/4/5` to run an
-# older spike side-by-side without rebuilding the main binary.
-dev-native: build
-	@echo ">>> Ensuring dev daemon (profile=dev, port=29849, data=~/.attn-dev)"
-	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign -s - -f $(OUTPUT) >/dev/null 2>&1 || true; fi
-	@$(DEV_DAEMON_ENV) ./$(OUTPUT) daemon ensure >/dev/null
-	@echo ">>> Launching attn-native (profile=dev, daemon=ws://localhost:29849/ws)"
-	cd native-ui && ATTN_PROFILE=dev ATTN_WS_URL=ws://localhost:29849/ws cargo run --bin attn-native
-
-# End-to-end scenario for the native canvas app driven through its UI
-# automation sidecar. Assumes the native binary is already running with
-# automation enabled — `make dev-native` in another terminal sets up the
-# right env. The script reads ATTN_PROFILE itself to find the matching
-# manifest at ~/Library/Application Support/com.attn.native.dev/.
-scenario-native-canvas:
-	cd app && node scripts/real-app-harness/scenario-native-canvas.mjs
-
-# Ad-hoc sign the installed app binary so macOS doesn't SIGKILL it
-# when invoked as a CLI subprocess (e.g. Claude Code hooks)
+# Sign the installed app and bundled CLI/daemon sidecar using the configured
+# stable identity when available; falls back to ad-hoc without a certificate.
 sign-app:
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		codesign -s - ~/Applications/attn.app/Contents/MacOS/attn; \
-		echo "Ad-hoc signed ~/Applications/attn.app/Contents/MacOS/attn"; \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" ~/Applications/attn.app/Contents/MacOS/attn; \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" ~/Applications/attn.app; \
+		echo "Signed ~/Applications/attn.app with identity $(MACOS_CODESIGN_IDENTITY)"; \
 	else \
 		echo "sign-app is only needed on macOS"; \
 	fi

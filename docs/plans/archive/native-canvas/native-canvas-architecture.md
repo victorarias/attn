@@ -1,5 +1,10 @@
 # Native Canvas — Architecture
 
+> **Archived direction (2026-05-23).** The implementation was renamed to
+> `native-ui/crates/attn-native-canvas-archive`. The active native-client
+> direction is workspace-first split layout parity with Tauri; see
+> `native-gpui-workspace-client-prototype.md`.
+
 Living design overview for `attn-native`, the GPUI canvas client. Companions:
 `2026-04-28-native-canvas-mvp.md` (sequencing) and
 `native-gpui-canvas-ui.md` (historical spike plan).

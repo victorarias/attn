@@ -1,0 +1,29 @@
+[package]
+name = "attn-native-canvas-archive"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "attn-native-canvas-archive"
+path = "src/main.rs"
+
+[dependencies]
+attn-protocol = { package = "attn-native-canvas-protocol-archive", path = "../attn-native-canvas-protocol-archive" }
+gpui = "0.2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+futures-util = { workspace = true }
+async-tungstenite = { version = "0.28", features = ["async-std-runtime"] }
+smol = "2"
+libghostty-vt = { git = "https://github.com/Uzaaft/libghostty-rs.git", rev = "5ac47e9eb166add2c00c432bc65c279133629712", default-features = false, features = ["link-static"] }
+base64 = "0.22"
+async-channel = "2"
+getrandom = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block = "0.1"
+cocoa = "0.26"
+objc = "0.2"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }

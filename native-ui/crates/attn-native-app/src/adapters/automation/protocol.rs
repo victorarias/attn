@@ -1,13 +1,8 @@
-/// Wire types for the UI automation TCP protocol. Newline-delimited JSON;
-/// one request per line, one response per line. Format must stay compatible
-/// with `app/scripts/real-app-harness/uiAutomationClient.mjs`.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Deserialize)]
 pub struct Request {
-    /// Optional client-supplied id. If absent the server assigns one and
-    /// echoes it back in the response so callers can correlate.
     #[serde(default)]
     pub id: Option<String>,
     pub token: String,
@@ -36,40 +31,12 @@ impl Response {
         }
     }
 
-    pub fn err(id: String, message: impl Into<String>) -> Self {
+    pub fn err(id: String, error: impl Into<String>) -> Self {
         Self {
             id,
             ok: false,
             result: None,
-            error: Some(message.into()),
+            error: Some(error.into()),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn request_payload_optional() {
-        let parsed: Request =
-            serde_json::from_str(r#"{"id":"a","token":"t","action":"ping"}"#).unwrap();
-        assert_eq!(parsed.action, "ping");
-        assert!(parsed.payload.is_none());
-    }
-
-    #[test]
-    fn response_omits_unused_fields() {
-        let body =
-            serde_json::to_string(&Response::ok("1".into(), serde_json::json!({"pong": true})))
-                .unwrap();
-        assert!(body.contains("\"ok\":true"));
-        assert!(body.contains("\"result\""));
-        assert!(!body.contains("\"error\""));
-
-        let body = serde_json::to_string(&Response::err("2".into(), "nope")).unwrap();
-        assert!(body.contains("\"ok\":false"));
-        assert!(body.contains("\"error\":\"nope\""));
-        assert!(!body.contains("\"result\""));
     }
 }
