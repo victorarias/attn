@@ -478,7 +478,7 @@ model ListPluginsMessage {
 
 model InstallPluginMessage {
   cmd: "install_plugin";
-  path: string;
+  source: string;
 }
 
 model RemovePluginMessage {

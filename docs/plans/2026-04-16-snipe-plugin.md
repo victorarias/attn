@@ -237,7 +237,7 @@ This prevents attn core from learning how to invoke Snipe. If classification fai
 - Attn accurately shows Snipe working, stopped/waiting, approval-waiting, shutdown, and observability-failure states.
 - Attn yolo behavior launches Snipe with bypassed permissions and disabled sandbox while preserving reload/session semantics.
 - Classification is implemented in the plugin and does not introduce Snipe subprocess knowledge into attn core.
-- Installation from the private `attn-snipe` repository checkout works through `attn plugin install --path`, and incompatible Snipe CLI installations are reported as unhealthy.
+- Installation from the private `attn-snipe` repository works by pasting its Git URL in Settings or through local development checkout installation with `attn plugin install --path`, and incompatible Snipe CLI installations are reported as unhealthy.
 - Both `attn-snipe` and a later independent `attn-pi` can register through the same generic driver protocol.
 
 ## Incremental Delivery Slices
@@ -300,10 +300,10 @@ Each slice must be working within its stated scope; later slices expand supporte
 
 **Status:** Implemented.
 
-- Document repository-based installation by cloning `https://ghe.spotify.net/victora/attn-snipe` and using local `attn plugin install --path ~/src/attn-snipe`; package/tagged publication is intentionally deferred.
+- Document repository-based installation through a pasted Git URL in attn Settings, while retaining local `attn plugin install --path ~/src/attn-snipe` for development; package/tagged publication is intentionally deferred.
 - Report plugin health failures when the configured Snipe executable cannot launch or lacks the CLI flags required for managed identity, reload, yolo mapping, or MCP-free classification; show a temporary healthy-state advisory because approval-event compatibility cannot yet be CLI-probed.
 - Document configuration for executable/model overrides, the currently non-probeable approval-event prerequisite, changelogs, and coexistence with the eventual pure Pi plugin.
-- Verify local installation from the repository checkout; later add remote/tagged distribution only when desired.
+- Verify installation from the private Git repository through Settings and local installation from a checkout; later add update/tagged distribution only when desired.
 
 **Useful result:** integration is maintainable and installable outside the development checkout.
 

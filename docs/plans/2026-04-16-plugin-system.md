@@ -8,7 +8,7 @@
 
 Replace the current pattern of integrating coding agents via in-tree Go drivers (`internal/agent/claude.go`, `codex.go`, `copilot.go`, and previously proposed agent additions) with an out-of-process plugin system that can also provide daemon extension points for repository and workflow-specific behavior.
 
-A third party can write a plugin in TypeScript (Bun runtime), install its local checkout via `attn plugin install --path <dir>`, and extend attn without touching its Go code. Agent plugins can work end-to-end — state reporting, classification, resume, session metadata — while provider plugins can claim daemon operations such as custom worktree creation and deletion. Git URL installation remains deferred.
+A third party can write a plugin in TypeScript (Bun runtime), install its local checkout via `attn plugin install --path <dir>` or paste a Git repository URL into Settings, and extend attn without touching its Go code. Agent plugins can work end-to-end — state reporting, classification, resume, session metadata — while provider plugins can claim daemon operations such as custom worktree creation and deletion.
 
 ### Goals
 
@@ -65,7 +65,7 @@ These were proposed in conversation but not explicitly confirmed:
 4. **Remote daemons.** Proposed: plugins are daemon-local. Each daemon has its own plugin set. Install per host (SSH to remote, run `attn plugin install` there). Cross-daemon control plugins are deferred — likely exposing the same JSON-RPC over the hub's existing WebSocket later. User raised this as an open question worth capturing; design sketched but not confirmed.
 5. **SDK shape and timing.** User pushed back on designing SDK top-down. **Revised approach: the first real plugins are written against raw JSON-RPC first. After the provider path proved out, extract a small SDK from those patterns; let richer plugin surfaces wait until their concrete implementations exist.** The protocol must still stay ergonomic enough to consume without a wrapper.
 6. **Manifest format.** Probably TOML — minimal, human-readable, Bun ecosystem-neutral. Alternatives: JSON, YAML. Not confirmed.
-7. **Install sources.** `attn plugin install <git-url>` as the headline, `--path <dir>` for local development. Not confirmed.
+7. **Install sources.** Settings accepts a pasted Git repository URL or local directory. The CLI currently keeps `--path <dir>` for local development; a Git-source CLI form is deferred until it has a concrete use case.
 8. **API versioning discipline.** Proposed: strict `attn_api_version: 1` refuses to load on mismatch. Additive protocol changes don't bump version. Not confirmed.
 9. **Socket coexistence.** Existing one-message-per-connection hook protocol (claude hooks, whatever remains of the old pi plan's pattern) must keep working. Proposed: detect JSON-RPC handshake by first-message shape and switch the connection's mode. Not confirmed.
 10. **JSON-RPC framing.** Proposed: newline-delimited JSON. Alternative: LSP-style Content-Length headers. Unix socket + JSON makes newline-delimited the simpler choice.
@@ -225,7 +225,7 @@ a session.
 
 Commands:
 
-- `attn plugin install <git-url>` — clone to `~/.attn/plugins/<name>/`, validate manifest, run `bun install`, register, spawn.
+- Settings plugin install from `<git-url>` — clone temporarily, validate manifest, copy to `~/.attn/plugins/<name>/`, run `bun install`, register, spawn.
 - `attn plugin install --path <dir>` — same, from local directory (development).
 - `attn plugin list` — installed plugins and status.
 - `attn plugin remove <name>` — uninstall + stop.
@@ -272,14 +272,14 @@ This phase proves that plugins can participate in daemon-owned operations, not o
 
 ### Phase 3 — CLI + installer + dev mode (partially implemented)
 
-Implemented: manifest parsing, installed-plugin spawn/reconcile in the daemon, and
-the local development path needed for the first real plugins:
-`attn plugin install --path <dir>`, `attn plugin list`, and
-`attn plugin remove <name>`.
+Implemented: manifest parsing, installed-plugin spawn/reconcile in the daemon,
+installation from a Git repository URL in Settings, and the local development
+path needed for the first real plugins: `attn plugin install --path <dir>`,
+`attn plugin list`, and `attn plugin remove <name>`.
 
-Still to ship: git URL install, update, foreground dev/auto-restart mode, and
-live traffic inspection. None blocks building or exercising `attn-snipe`
-locally through `--path`.
+Still to ship: CLI Git URL install, update, foreground dev/auto-restart mode,
+and live traffic inspection. None blocks building or exercising `attn-snipe`
+locally through `--path` or installing it directly from Settings.
 
 ### Phase 4 — Provider SDK foundation (implemented)
 

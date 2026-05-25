@@ -153,7 +153,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '66';
+const PROTOCOL_VERSION = '67';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
 // injects this global before any page script runs — see
@@ -2790,7 +2790,7 @@ export function useDaemonSocket({
     });
   }, []);
 
-  const sendInstallPlugin = useCallback((path: string): Promise<PluginActionResult> => {
+  const sendInstallPlugin = useCallback((source: string): Promise<PluginActionResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -2799,7 +2799,7 @@ export function useDaemonSocket({
       }
       const key = 'plugin_action:install:pending';
       pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'install_plugin', path }));
+      ws.send(JSON.stringify({ cmd: 'install_plugin', source }));
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);

@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "66"
+const ProtocolVersion = "67"
 
 // SessionAgent labels in-tree and externally registered agent identifiers.
 type SessionAgent = string

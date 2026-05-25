@@ -1038,8 +1038,8 @@ type InstallPluginMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
-	// Path corresponds to the JSON schema field "path".
-	Path string `json:"path"`
+	// Source corresponds to the JSON schema field "source".
+	Source string `json:"source"`
 }
 
 type KillSessionMessage struct {

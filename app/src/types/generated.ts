@@ -1286,8 +1286,8 @@ export interface Inspection {
 }
 
 export interface InstallPluginMessage {
-    cmd:  InstallPluginMessageCmd;
-    path: string;
+    cmd:    InstallPluginMessageCmd;
+    source: string;
     [property: string]: any;
 }
 
@@ -4977,7 +4977,7 @@ const typeMap: any = {
     ], "any"),
     "InstallPluginMessage": o([
         { json: "cmd", js: "cmd", typ: r("InstallPluginMessageCmd") },
-        { json: "path", js: "path", typ: "" },
+        { json: "source", js: "source", typ: "" },
     ], "any"),
     "KillSessionMessage": o([
         { json: "cmd", js: "cmd", typ: r("KillSessionMessageCmd") },

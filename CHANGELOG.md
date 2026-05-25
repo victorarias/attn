@@ -30,6 +30,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Added
 - **Agent Driver Plugins**: Installed plugins can now register coding agents, launch or resume them inside attn-owned terminals, report session state and stop verdicts, and persist opaque agent session metadata for future resumes.
+- **Plugin Installation Sources**: Plugins can now be installed from a pasted Git repository URL in Settings as well as from a local source directory.
 
 ### Changed
 - **External Agent Selection**: Plugin-provided agents are advertised dynamically in local and remote session pickers. Pi is no longer shipped as an in-tree placeholder; a future Pi integration can be installed as its own plugin.

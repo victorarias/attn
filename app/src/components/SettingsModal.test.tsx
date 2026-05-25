@@ -160,7 +160,7 @@ describe('SettingsModal review loop prompts', () => {
     });
   });
 
-  it('installs a plugin from a local directory', async () => {
+  it('installs a plugin from a source entered in settings', async () => {
     const onInstallPlugin = vi.fn().mockResolvedValue({ success: true });
     const onListPlugins = vi.fn().mockResolvedValue({ plugins: [], issues: [] });
 
@@ -192,11 +192,11 @@ describe('SettingsModal review loop prompts', () => {
     );
 
     fireEvent.click(screen.getByTestId('settings-nav-plugins'));
-    fireEvent.change(screen.getByLabelText('Plugin directory'), { target: { value: '/tmp/my-plugin' } });
+    fireEvent.change(screen.getByLabelText('Plugin source'), { target: { value: 'git@ghe.spotify.net:victora/attn-snipe.git' } });
     fireEvent.click(screen.getByText('Install Plugin'));
 
     await waitFor(() => {
-      expect(onInstallPlugin).toHaveBeenCalledWith('/tmp/my-plugin');
+      expect(onInstallPlugin).toHaveBeenCalledWith('git@ghe.spotify.net:victora/attn-snipe.git');
     });
     expect(onListPlugins).toHaveBeenCalled();
   });

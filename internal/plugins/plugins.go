@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -121,6 +122,28 @@ func InstallPath(sourceDir, pluginDir string) (Manifest, error) {
 	return InstallPathWithOptions(sourceDir, pluginDir, InstallOptions{})
 }
 
+func InstallSourceWithOptions(source, pluginDir string, opts InstallOptions) (Manifest, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return Manifest{}, errors.New("plugin source is required")
+	}
+	if !isGitSource(source) {
+		return InstallPathWithOptions(source, pluginDir, opts)
+	}
+
+	cloneRoot, err := os.MkdirTemp("", "attn-plugin-source-*")
+	if err != nil {
+		return Manifest{}, fmt.Errorf("create plugin clone directory: %w", err)
+	}
+	defer os.RemoveAll(cloneRoot)
+
+	checkoutDir := filepath.Join(cloneRoot, "checkout")
+	if err := cloneGitSource(source, checkoutDir, opts.Env); err != nil {
+		return Manifest{}, err
+	}
+	return InstallPathWithOptions(checkoutDir, pluginDir, opts)
+}
+
 func InstallPathWithOptions(sourceDir, pluginDir string, opts InstallOptions) (Manifest, error) {
 	sourceDir, err := filepath.Abs(strings.TrimSpace(sourceDir))
 	if err != nil {
@@ -168,6 +191,53 @@ func InstallPathWithOptions(sourceDir, pluginDir string, opts InstallOptions) (M
 	}
 	installed.Dir = targetDir
 	return installed, nil
+}
+
+func isGitSource(source string) bool {
+	if strings.HasPrefix(source, "git@") {
+		return strings.Contains(source, ":")
+	}
+	parsed, err := url.Parse(source)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	switch parsed.Scheme {
+	case "git", "http", "https", "ssh":
+		return true
+	default:
+		return false
+	}
+}
+
+func cloneGitSource(source, targetDir string, env []string) error {
+	cmd := exec.Command("/usr/bin/env", "git", "clone", "--depth", "1", source, targetDir)
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	details := strings.TrimSpace(strings.ReplaceAll(string(output), source, redactGitSource(source)))
+	if details == "" {
+		return fmt.Errorf("clone plugin repository: %w", err)
+	}
+	return fmt.Errorf("clone plugin repository: %w: %s", err, details)
+}
+
+func redactGitSource(source string) string {
+	parsed, err := url.Parse(source)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return source
+	}
+	if parsed.User != nil {
+		parsed.User = url.User("REDACTED")
+	}
+	if parsed.RawQuery != "" {
+		parsed.RawQuery = "REDACTED"
+	}
+	if parsed.Fragment != "" {
+		parsed.Fragment = "REDACTED"
+	}
+	return parsed.String()
 }
 
 func Remove(pluginDir, name string) error {

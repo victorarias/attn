@@ -413,6 +413,21 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       running: true,
     }], []);
 
+    const install = result.current.sendInstallPlugin('git@ghe.spotify.net:victora/attn-snipe.git');
+    expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual({
+      cmd: 'install_plugin',
+      source: 'git@ghe.spotify.net:victora/attn-snipe.git',
+    });
+    act(() => {
+      ws.emit({
+        event: 'plugin_action_result',
+        action: 'install',
+        name: 'attn-snipe',
+        success: true,
+      });
+    });
+    await expect(install).resolves.toMatchObject({ success: true, name: 'attn-snipe' });
+
     const setPriority = result.current.sendSetPluginPriority('services-pilot-worktrees', 50);
     act(() => {
       ws.emit({
@@ -510,7 +525,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '66',
+        protocol_version: '67',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -592,7 +607,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '66',
+        protocol_version: '67',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -727,7 +742,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '66',
+        protocol_version: '67',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -820,7 +835,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '66',
+        protocol_version: '67',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -917,7 +932,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '66',
+        protocol_version: '67',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1000,7 +1015,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '66',
+        protocol_version: '67',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -1115,7 +1130,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '66',
+        protocol_version: '67',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -1182,7 +1197,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '66',
+        protocol_version: '67',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',
