@@ -510,7 +510,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '65',
+        protocol_version: '66',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -592,7 +592,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '65',
+        protocol_version: '66',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -727,7 +727,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '65',
+        protocol_version: '66',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -820,7 +820,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '65',
+        protocol_version: '66',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -917,7 +917,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '65',
+        protocol_version: '66',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1000,7 +1000,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '65',
+        protocol_version: '66',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -1115,7 +1115,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '65',
+        protocol_version: '66',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -1182,7 +1182,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '65',
+        protocol_version: '66',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',

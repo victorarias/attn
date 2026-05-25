@@ -50,7 +50,9 @@ type SpawnOptions struct {
 	ClaudeExecutable  string
 	CodexExecutable   string
 	CopilotExecutable string
-	PiExecutable      string
+	ExternalCommand   []string
+	ExternalEnv       []string
+	ExternalCWD       string
 
 	// LoginShellEnv, when non-nil, is a pre-computed login shell environment
 	// that replaces the ReadLoginShellEnv call.
@@ -150,7 +152,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		opts.Rows = 24
 	}
 
-	agent := normalizeAgent(opts.Agent)
+	agent := normalizeAgent(opts.Agent, len(opts.ExternalCommand) > 0)
 	attnPath := ""
 	if agent != "shell" {
 		attnPath = resolveAttnPath()
@@ -176,6 +178,9 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	for i, shellPath := range shellCandidates {
 		cmd = buildSpawnCommand(opts, agent, shellPath, attnPath)
 		cmd.Dir = opts.CWD
+		if strings.TrimSpace(opts.ExternalCWD) != "" {
+			cmd.Dir = opts.ExternalCWD
+		}
 		cmd.Env = cmdEnv
 
 		ptmx, lastErr = creackpty.StartWithSize(cmd, &creackpty.Winsize{
@@ -374,7 +379,7 @@ func (m *Manager) getSession(id string) (*Session, error) {
 	return session, nil
 }
 
-func normalizeAgent(agent string) string {
+func normalizeAgent(agent string, external bool) string {
 	a := strings.TrimSpace(strings.ToLower(agent))
 	if a == "" {
 		return "codex"
@@ -385,12 +390,18 @@ func normalizeAgent(agent string) string {
 	if agentdriver.Get(a) != nil {
 		return a
 	}
+	if external {
+		return a
+	}
 	return "codex"
 }
 
 func buildSpawnCommand(opts SpawnOptions, agent, shellPath, attnPath string) *exec.Cmd {
 	if agent == "shell" {
 		return exec.Command(shellPath, "-l")
+	}
+	if len(opts.ExternalCommand) > 0 {
+		return exec.Command(opts.ExternalCommand[0], opts.ExternalCommand[1:]...)
 	}
 
 	args := []string{attnPath}
@@ -488,10 +499,10 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 			if opts.CopilotExecutable != "" && opts.CopilotExecutable != "copilot" {
 				env = mergeEnvironment(env, []string{"ATTN_COPILOT_EXECUTABLE=" + opts.CopilotExecutable})
 			}
-			if opts.PiExecutable != "" && opts.PiExecutable != "pi" {
-				env = mergeEnvironment(env, []string{"ATTN_PI_EXECUTABLE=" + opts.PiExecutable})
-			}
 		}
+	}
+	if len(opts.ExternalEnv) > 0 {
+		env = mergeEnvironment(env, opts.ExternalEnv)
 	}
 	return env
 }
@@ -507,8 +518,6 @@ func configuredExecutableForAgent(opts SpawnOptions, agent string) string {
 		return strings.TrimSpace(opts.CodexExecutable)
 	case "copilot":
 		return strings.TrimSpace(opts.CopilotExecutable)
-	case "pi":
-		return strings.TrimSpace(opts.PiExecutable)
 	default:
 		return ""
 	}

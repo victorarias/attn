@@ -435,8 +435,22 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 	if opts.CopilotExecutable != "" {
 		args = append(args, "--copilot-executable", opts.CopilotExecutable)
 	}
-	if opts.PiExecutable != "" {
-		args = append(args, "--pi-executable", opts.PiExecutable)
+	if len(opts.ExternalCommand) > 0 {
+		encoded, err := json.Marshal(opts.ExternalCommand)
+		if err != nil {
+			return fmt.Errorf("encode external command: %w", err)
+		}
+		args = append(args, "--external-command-json", string(encoded))
+	}
+	if len(opts.ExternalEnv) > 0 {
+		encoded, err := json.Marshal(opts.ExternalEnv)
+		if err != nil {
+			return fmt.Errorf("encode external environment: %w", err)
+		}
+		args = append(args, "--external-env-json", string(encoded))
+	}
+	if opts.ExternalCWD != "" {
+		args = append(args, "--external-cwd", opts.ExternalCWD)
 	}
 
 	binaryPath := b.resolveBinaryPath()

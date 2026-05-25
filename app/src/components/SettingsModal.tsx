@@ -160,6 +160,10 @@ export function SettingsModal({
     () => orderedAgents(agentAvailability, resolvedDefaultAgent, 'codex'),
     [agentAvailability, resolvedDefaultAgent],
   );
+  const executableAgentList = useMemo(
+    () => orderedAgentList.filter((agent) => ['codex', 'claude', 'copilot'].includes(agent)),
+    [orderedAgentList],
+  );
   const agentCapabilityOrder = useMemo(
     () => AGENT_CAPABILITY_ORDER.map((cap) => cap as string),
     [],
@@ -1247,7 +1251,7 @@ export function SettingsModal({
         </div>
         <div className="settings-block-body">
           <div className="settings-field-grid">
-            {orderedAgentList.map((agent) => {
+            {executableAgentList.map((agent) => {
               const available = isAgentAvailable(agentAvailability, agent);
               const inputId = `settings-${agent}-exec`;
               const value = agentExecutables[agent] || '';

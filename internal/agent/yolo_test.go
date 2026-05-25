@@ -52,10 +52,3 @@ func TestCodexBuildCommand_IncludesConfigOverridesBeforeResume(t *testing.T) {
 		t.Fatalf("args = %#v, want %#v", cmd.Args, wantArgs)
 	}
 }
-
-func TestPiDoesNotAdvertiseYoloCapability(t *testing.T) {
-	driver := &Pi{}
-	if driver.Capabilities().HasYolo {
-		t.Fatal("pi should not advertise yolo support")
-	}
-}

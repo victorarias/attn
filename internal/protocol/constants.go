@@ -10,7 +10,19 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "65"
+const ProtocolVersion = "66"
+
+// SessionAgent labels in-tree and externally registered agent identifiers.
+type SessionAgent = string
+
+// Built-in session-agent identifiers. SessionAgent is intentionally open so
+// external plugin drivers can publish their own identifiers at runtime.
+const (
+	SessionAgentClaude  SessionAgent = "claude"
+	SessionAgentCodex   SessionAgent = "codex"
+	SessionAgentCopilot SessionAgent = "copilot"
+	SessionAgentShell   SessionAgent = "shell"
+)
 
 // Commands
 const (

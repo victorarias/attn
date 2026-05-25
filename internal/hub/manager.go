@@ -1385,12 +1385,16 @@ func capabilitiesFromInitialState(msg *protocol.InitialStateMessage) *protocol.E
 	}
 	settings := msg.Settings
 	agents := make([]string, 0, 4)
-	for _, agent := range []string{"claude", "codex", "copilot", "pi"} {
-		key := agent + "_available"
-		if truthySetting(settings[key]) {
+	for key, value := range settings {
+		if !strings.HasSuffix(key, "_available") || !truthySetting(value) {
+			continue
+		}
+		agent := strings.TrimSuffix(key, "_available")
+		if strings.TrimSpace(agent) != "" {
 			agents = append(agents, agent)
 		}
 	}
+	sort.Strings(agents)
 
 	caps := &protocol.EndpointCapabilities{
 		ProtocolVersion: protocol.Deref(msg.ProtocolVersion),

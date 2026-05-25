@@ -167,6 +167,29 @@ func TestBuildSpawnEnv_SetsAgentExecutableForExplicitOverride(t *testing.T) {
 	}
 }
 
+func TestBuildSpawnCommand_UsesExternalPluginDriverArgvDirectly(t *testing.T) {
+	cmd := buildSpawnCommand(SpawnOptions{
+		ExternalCommand: []string{"snipe", "--session-id", "session-1"},
+	}, "snipe", "/bin/zsh", "/tmp/attn-wrapper")
+	if got := cmd.Args; len(got) != 3 || got[0] != "snipe" || got[2] != "session-1" {
+		t.Fatalf("cmd args=%v, want external driver argv", got)
+	}
+}
+
+func TestBuildSpawnEnv_AppliesExternalPluginEnvironment(t *testing.T) {
+	t.Setenv("SNIPE_BRIDGE", "stale")
+	env := buildSpawnEnv("", SpawnOptions{
+		ID:          "session-1",
+		ExternalEnv: []string{"SNIPE_BRIDGE=ready"},
+	}, "snipe", "/tmp/attn-wrapper", nil)
+	for _, entry := range env {
+		if entry == "SNIPE_BRIDGE=ready" {
+			return
+		}
+	}
+	t.Fatalf("expected external plugin environment override, got %v", env)
+}
+
 func TestBuildSpawnEnv_StripsInheritedNoColorFromInteractiveSessions(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 

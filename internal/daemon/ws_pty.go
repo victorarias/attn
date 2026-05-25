@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
@@ -331,8 +332,6 @@ func legacyExecutableFromSpawnMessage(msg *protocol.SpawnSessionMessage, agent s
 		return strings.TrimSpace(protocol.Deref(msg.CodexExecutable))
 	case string(protocol.SessionAgentCopilot):
 		return strings.TrimSpace(protocol.Deref(msg.CopilotExecutable))
-	case string(protocol.SessionAgentPi):
-		return strings.TrimSpace(protocol.Deref(msg.PiExecutable))
 	default:
 		return ""
 	}
@@ -356,7 +355,20 @@ func resolveSpawnCWD(cwd string) string {
 }
 
 func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSessionMessage) {
+	requestedAgent := strings.TrimSpace(strings.ToLower(msg.Agent))
+	pluginDriver, hasPluginDriver := d.ensurePluginRegistry().driver(requestedAgent)
 	agent := normalizeSpawnAgent(msg.Agent)
+	if hasPluginDriver {
+		agent = pluginDriver.Agent
+	} else if requestedAgent != "" && requestedAgent != protocol.AgentShellValue && agentdriver.Get(requestedAgent) == nil {
+		d.sendToClient(client, protocol.SpawnResultMessage{
+			Event:   protocol.EventSpawnResult,
+			ID:      msg.ID,
+			Success: false,
+			Error:   protocol.Ptr(fmt.Sprintf("agent %q is not available", requestedAgent)),
+		})
+		return
+	}
 	isShell := agent == protocol.AgentShellValue
 	workspaceID := strings.TrimSpace(msg.WorkspaceID)
 	if !isShell {
@@ -387,7 +399,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 	}
 	resumeSessionID := protocol.Deref(msg.ResumeSessionID)
 	driver := agentdriver.Get(agent)
-	if existingSession != nil {
+	if existingSession != nil && !hasPluginDriver {
 		resumeSessionID = agentdriver.ResolveSpawnResumeSessionID(
 			driver,
 			existingSession.ID,
@@ -414,11 +426,53 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		ClaudeExecutable:  protocol.Deref(msg.ClaudeExecutable),
 		CodexExecutable:   protocol.Deref(msg.CodexExecutable),
 		CopilotExecutable: protocol.Deref(msg.CopilotExecutable),
-		PiExecutable:      protocol.Deref(msg.PiExecutable),
 		LoginShellEnv:     d.cachedLoginShellEnv(),
+	}
+	pluginRunID := ""
+	if hasPluginDriver {
+		pluginRunID = uuid.NewString()
+		d.beginPluginSessionLaunch(msg.ID, pluginDriver.PluginName, pluginRunID)
+		params := pluginDriverSpawnParams{
+			SessionID: msg.ID,
+			RunID:     pluginRunID,
+			CWD:       cwd,
+			Label:     label,
+			Yolo:      protocol.Deref(msg.YoloMode),
+		}
+		if metadata := strings.TrimSpace(d.store.GetAgentMetadata(msg.ID)); metadata != "" && json.Valid([]byte(metadata)) {
+			params.Metadata = json.RawMessage(metadata)
+		}
+		result, err := d.resolvePluginDriverLaunch(pluginDriver, params, existingSession != nil)
+		if err != nil {
+			d.finishPluginSessionLaunch(msg.ID, false)
+			d.sendToClient(client, protocol.SpawnResultMessage{
+				Event:   protocol.EventSpawnResult,
+				ID:      msg.ID,
+				Success: false,
+				Error:   protocol.Ptr(err.Error()),
+			})
+			return
+		}
+		commandEnv, err := pluginCommandEnv(result.Env)
+		if err != nil {
+			d.finishPluginSessionLaunch(msg.ID, false)
+			d.sendToClient(client, protocol.SpawnResultMessage{
+				Event:   protocol.EventSpawnResult,
+				ID:      msg.ID,
+				Success: false,
+				Error:   protocol.Ptr(err.Error()),
+			})
+			return
+		}
+		spawnOpts.ExternalCommand = append([]string(nil), result.Argv...)
+		spawnOpts.ExternalEnv = commandEnv
+		spawnOpts.ExternalCWD = strings.TrimSpace(result.CWD)
 	}
 
 	if err := d.ptyBackend.Spawn(context.Background(), spawnOpts); err != nil {
+		if hasPluginDriver {
+			d.finishPluginSessionLaunch(msg.ID, false)
+		}
 		d.sendToClient(client, protocol.SpawnResultMessage{
 			Event:   protocol.EventSpawnResult,
 			ID:      msg.ID,
@@ -471,6 +525,10 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			}
 		}
 		d.store.Add(session)
+		if hasPluginDriver && !d.store.BeginAgentDriverRun(session.ID, pluginRunID) {
+			d.finishPluginSessionLaunch(msg.ID, false)
+			d.logf("failed to initialize plugin driver run cursor: session=%s", session.ID)
+		}
 		if persistResumeID := agentdriver.SpawnResumeSessionID(
 			driver,
 			session.ID,
@@ -498,6 +556,9 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		})
 		d.broadcastWorkspaceLayout(workspaceID)
 		d.recomputeAndBroadcastWorkspaceForSession(session.ID)
+	}
+	if hasPluginDriver {
+		d.finishPluginSessionLaunch(msg.ID, true)
 	}
 
 	d.sendToClient(client, protocol.SpawnResultMessage{
@@ -715,7 +776,9 @@ func parseSignal(name string) syscall.Signal {
 func (d *Daemon) handleKillSession(client *wsClient, msg *protocol.KillSessionMessage) {
 	d.detachSession(client, msg.ID)
 	sig := parseSignal(protocol.Deref(msg.Signal))
-	if err := d.ptyBackend.Kill(context.Background(), msg.ID, sig); err != nil {
+	d.closePluginDriverSession(msg.ID, "killed", nil, signalName(sig))
+	err := d.ptyBackend.Kill(context.Background(), msg.ID, sig)
+	if err != nil {
 		if shouldLogPtyCommandError(err) {
 			d.logf("kill_session failed for %s: %v", msg.ID, err)
 		}
@@ -724,4 +787,17 @@ func (d *Daemon) handleKillSession(client *wsClient, msg *protocol.KillSessionMe
 
 func shouldLogPtyCommandError(err error) bool {
 	return !errors.Is(err, pty.ErrSessionNotFound)
+}
+
+func signalName(sig syscall.Signal) string {
+	switch sig {
+	case syscall.SIGINT:
+		return "SIGINT"
+	case syscall.SIGHUP:
+		return "SIGHUP"
+	case syscall.SIGKILL:
+		return "SIGKILL"
+	default:
+		return "SIGTERM"
+	}
 }

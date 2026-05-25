@@ -66,6 +66,7 @@ type pluginRegistry struct {
 	mu         sync.RWMutex
 	plugins    map[string]*pluginConnection
 	surfaces   map[string][]pluginSurfaceHandler
+	drivers    map[string]pluginDriverRegistration
 	priorities map[string]int
 }
 
@@ -73,6 +74,7 @@ func newPluginRegistry() *pluginRegistry {
 	return &pluginRegistry{
 		plugins:    make(map[string]*pluginConnection),
 		surfaces:   make(map[string][]pluginSurfaceHandler),
+		drivers:    make(map[string]pluginDriverRegistration),
 		priorities: make(map[string]int),
 	}
 }
@@ -101,6 +103,7 @@ func (r *pluginRegistry) unregister(plugin *pluginConnection) {
 	if r.plugins[plugin.name] == plugin {
 		delete(r.plugins, plugin.name)
 		r.unregisterSurfacesLocked(plugin.name)
+		r.unregisterDriversLocked(plugin.name)
 	}
 }
 
@@ -198,6 +201,14 @@ func (r *pluginRegistry) unregisterSurfacesLocked(pluginName string) {
 			continue
 		}
 		r.surfaces[surface] = filtered
+	}
+}
+
+func (r *pluginRegistry) unregisterDriversLocked(pluginName string) {
+	for agent, driver := range r.drivers {
+		if driver.PluginName == pluginName {
+			delete(r.drivers, agent)
+		}
 	}
 }
 
@@ -534,6 +545,7 @@ func (d *Daemon) handlePluginConnection(conn net.Conn, reader *bufio.Reader, hel
 		registry.unregister(plugin)
 		plugin.closePending(io.EOF)
 		d.broadcastPluginsUpdated()
+		d.broadcastSettings("")
 	}()
 
 	if err := plugin.send(jsonRPCResult(helloID, pluginHelloResult{OK: true})); err != nil {
@@ -570,6 +582,16 @@ func (d *Daemon) handlePluginConnection(conn net.Conn, reader *bufio.Reader, hel
 func (d *Daemon) handlePluginMethod(plugin *pluginConnection, msg jsonRPCMessage) {
 	if jsonRPCIDKey(msg.ID) == "" {
 		_ = plugin.send(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, "plugin method calls require an id"))
+		return
+	}
+
+	result, handled, err := d.handlePluginDriverMethod(plugin, msg)
+	if handled {
+		if err != nil {
+			_ = plugin.send(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, err.Error()))
+			return
+		}
+		_ = plugin.send(jsonRPCResult(msg.ID, result))
 		return
 	}
 

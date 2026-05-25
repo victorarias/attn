@@ -23,14 +23,6 @@ enum PRRole {
   reviewer,
 }
 
-enum SessionAgent {
-  claude,
-  codex,
-  copilot,
-  pi,
-  shell,
-}
-
 // WorkspaceStatus is the rolled-up status of all sessions in a workspace.
 // Priority (highest first): working > waiting_input > pending_approval > idle > launching.
 // `launching` sits below `idle` because it carries less information — any
@@ -123,7 +115,7 @@ enum GitOperationStatus {
 model Session {
   id: string;
   label: string;
-  agent: SessionAgent;
+  agent: string;                // Built-in ID or registered plugin driver ID
   directory: string;
   endpoint_id?: string;         // Optional: owning endpoint for remote/session-aware routing
   workspace_id?: string;        // Owning workspace; required for newly-created sessions
@@ -339,7 +331,7 @@ model RegisterMessage {
   cmd: "register";
   id: string;
   label?: string;
-  agent?: SessionAgent;         // Optional for legacy wrappers
+  agent?: string;               // Optional for legacy wrappers or registered plugin IDs
   dir: string;
   workspace_id: string;
 }
@@ -738,7 +730,7 @@ model SpawnSessionMessage {
   cwd: string;
   endpoint_id?: string;
   workspace_id: string;     // Required owner for agent sessions
-  agent: string;            // "claude", "codex", "copilot", "shell"
+  agent: string;            // Built-in ID, "shell", or registered plugin driver ID
   cols: int32;
   rows: int32;
   label?: string;
@@ -749,7 +741,6 @@ model SpawnSessionMessage {
   claude_executable?: string;  // Backward compatibility
   codex_executable?: string;   // Backward compatibility
   copilot_executable?: string; // Backward compatibility
-  pi_executable?: string;      // Backward compatibility
 }
 
 model AttachSessionMessage {

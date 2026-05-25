@@ -1200,12 +1200,16 @@ func (b *fakeAttachBackend) SetAttachInfo(info ptybackend.AttachInfo) {
 type fakeSpawnBackend struct {
 	mu        sync.Mutex
 	spawnOpts []ptybackend.SpawnOptions
+	onSpawn   func()
 }
 
 func (b *fakeSpawnBackend) Spawn(_ context.Context, opts ptybackend.SpawnOptions) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.spawnOpts = append(b.spawnOpts, opts)
+	if b.onSpawn != nil {
+		b.onSpawn()
+	}
 	return nil
 }
 func (b *fakeSpawnBackend) Attach(context.Context, string, string) (ptybackend.AttachInfo, ptybackend.Stream, error) {
@@ -3482,19 +3486,17 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"valid new_session_agent codex", "new_session_agent", "codex", false},
 		{"valid new_session_agent claude", "new_session_agent", "claude", false},
 		{"valid new_session_agent copilot", "new_session_agent", "copilot", false},
-		{"valid new_session_agent pi", "new_session_agent", "pi", false},
+		{"unregistered future plugin agent pi", "new_session_agent", "pi", true},
 		{"empty new_session_agent", "new_session_agent", "", false},
 		{"empty claude_executable", "claude_executable", "", false},
 		{"empty codex_executable", "codex_executable", "", false},
 		{"empty copilot_executable", "copilot_executable", "", false},
-		{"empty pi_executable", "pi_executable", "", false},
 		{"empty review_loop_model", "review_loop_model", "", false},
 		{"custom review_loop_model", "review_loop_model", "claude-opus-4-6", false},
 		{"empty reviewer_model", "reviewer_model", "", false},
 		{"custom reviewer_model", "reviewer_model", "claude-sonnet-4-6", false},
 		{"valid tailscale_enabled true", "tailscale_enabled", "true", false},
 		{"valid tailscale_enabled false", "tailscale_enabled", "false", false},
-		{"dynamic executable key for known agent", "pi_executable", "not-a-real-binary-123", true},
 		{"invalid claude_executable", "claude_executable", "not-a-real-binary-123", true},
 		{"invalid new_session_agent", "new_session_agent", "gpt", true},
 		{"invalid tailscale_enabled", "tailscale_enabled", "maybe", true},
@@ -3531,11 +3533,11 @@ func TestDaemon_SettingsWithAgentAvailability(t *testing.T) {
 	if got := settings[SettingCopilotAvailable]; got != "false" {
 		t.Fatalf("settings[%s] = %v, want false", SettingCopilotAvailable, got)
 	}
-	if got := settings[SettingPiAvailable]; got != "false" {
-		t.Fatalf("settings[%s] = %v, want false", SettingPiAvailable, got)
+	if _, ok := settings["pi_available"]; ok {
+		t.Fatalf("settings unexpectedly advertises pi without an installed plugin")
 	}
-	if got := settings["pi_cap_transcript"]; got != "false" {
-		t.Fatalf("settings[pi_cap_transcript] = %v, want false", got)
+	if _, ok := settings["pi_cap_transcript"]; ok {
+		t.Fatalf("settings unexpectedly advertises in-tree pi capabilities")
 	}
 	if got := settings["codex_cap_transcript"]; got != "true" {
 		t.Fatalf("settings[codex_cap_transcript] = %v, want true", got)
@@ -3568,8 +3570,8 @@ func TestDaemon_SettingsWithAgentAvailability(t *testing.T) {
 	if got := settings[SettingCopilotAvailable]; got != "false" {
 		t.Fatalf("settings[%s] = %v, want false", SettingCopilotAvailable, got)
 	}
-	if got := settings[SettingPiAvailable]; got != "false" {
-		t.Fatalf("settings[%s] = %v, want false", SettingPiAvailable, got)
+	if _, ok := settings["pi_available"]; ok {
+		t.Fatalf("settings unexpectedly advertises pi without an installed plugin")
 	}
 
 	d.store.SetSetting(SettingTailscaleEnabled, "true")

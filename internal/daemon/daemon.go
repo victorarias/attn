@@ -132,6 +132,9 @@ type Daemon struct {
 	tailscale        *tailscaleRuntime
 	plugins          *pluginRegistry
 	pluginProcesses  *pluginProcessRegistry
+	pluginDriverMu   sync.Mutex
+	pluginLaunching  map[string]pluginSessionLaunch
+	pluginReports    map[string][]pendingPluginReport
 	pluginDir        string
 
 	loginShellEnvMu sync.RWMutex
@@ -1055,7 +1058,10 @@ func normalizeStoredSessionAgent(agent string, fallback protocol.SessionAgent) p
 	if agentdriver.Get(normalized) != nil {
 		return protocol.SessionAgent(normalized)
 	}
-	return protocol.NormalizeSessionAgent(protocol.SessionAgent(normalized), fallback)
+	if normalizePluginAgent(normalized) != "" {
+		return protocol.SessionAgent(normalized)
+	}
+	return protocol.NormalizeSessionAgent(fallback, protocol.SessionAgentCodex)
 }
 
 func sessionStateFromRecoveredInfo(info ptybackend.SessionInfo) protocol.SessionState {
@@ -1109,6 +1115,7 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 	d.stopTranscriptWatcher(info.ID)
 	d.clearLongRunTracking(info.ID)
 	d.handleReviewLoopSourceSessionExit(info.ID)
+	d.closePluginDriverSession(info.ID, "exited", &info.ExitCode, info.Signal)
 
 	if d.ptyBackend != nil {
 		if err := d.removePTYSession(info.ID); err != nil {
@@ -1174,6 +1181,7 @@ func (d *Daemon) removePTYSession(sessionID string) error {
 func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
 	d.stopTranscriptWatcher(sessionID)
 	d.markForcedStopClassification(sessionID)
+	d.closePluginDriverSession(sessionID, "killed", nil, signalName(sig))
 
 	if d.ptyBackend == nil {
 		return
@@ -2262,7 +2270,7 @@ func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
 // updateAndBroadcastStateWithTimestamp updates state only if the timestamp is newer
 // than the current state. Used by classifier to prevent stale results from overwriting
 // newer state updates that arrived during classification.
-func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, updatedAt time.Time) {
+func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, updatedAt time.Time) bool {
 	if d.store.UpdateStateWithTimestamp(sessionID, state, updatedAt) {
 		switch state {
 		case protocol.StateWorking:
@@ -2280,9 +2288,11 @@ func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, u
 			})
 			d.recomputeAndBroadcastWorkspaceForSession(sessionID)
 		}
+		return true
 	} else {
 		d.logf("state update discarded: session=%s state=%s (newer state exists)", sessionID, state)
 	}
+	return false
 }
 
 // broadcastRateLimited broadcasts a rate limit event to WebSocket clients

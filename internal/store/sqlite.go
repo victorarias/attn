@@ -318,6 +318,11 @@ var migrations = []migration{
 			ON canvas_workspace_panels(workspace_id);
 	`},
 	{37, "migrate session layouts to workspace layouts", ""},
+	{38, "add opaque agent metadata to sessions", "ALTER TABLE sessions ADD COLUMN agent_metadata TEXT NOT NULL DEFAULT ''"},
+	{39, "add agent driver report cursor to sessions", `
+		ALTER TABLE sessions ADD COLUMN agent_driver_run_id TEXT NOT NULL DEFAULT '';
+		ALTER TABLE sessions ADD COLUMN agent_driver_report_seq INTEGER NOT NULL DEFAULT 0;
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -433,6 +438,16 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 37 {
 			if err := applyMigration37(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 38 {
+			if err := applyMigration38(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 39 {
+			if err := applyMigration39(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -700,6 +715,40 @@ func applyMigration37(tx *sql.Tx) error {
 		DROP TABLE IF EXISTS session_workspaces;
 	`); err != nil {
 		return err
+	}
+	return nil
+}
+
+func applyMigration38(tx *sql.Tx) error {
+	hasAgentMetadata, err := columnExists(tx, "sessions", "agent_metadata")
+	if err != nil {
+		return err
+	}
+	if hasAgentMetadata {
+		return nil
+	}
+	_, err = tx.Exec("ALTER TABLE sessions ADD COLUMN agent_metadata TEXT NOT NULL DEFAULT ''")
+	return err
+}
+
+func applyMigration39(tx *sql.Tx) error {
+	hasRunID, err := columnExists(tx, "sessions", "agent_driver_run_id")
+	if err != nil {
+		return err
+	}
+	if !hasRunID {
+		if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN agent_driver_run_id TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	hasReportSeq, err := columnExists(tx, "sessions", "agent_driver_report_seq")
+	if err != nil {
+		return err
+	}
+	if !hasReportSeq {
+		if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN agent_driver_report_seq INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
 	}
 	return nil
 }

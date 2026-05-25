@@ -83,7 +83,9 @@ type Config struct {
 	ClaudeExecutable  string
 	CodexExecutable   string
 	CopilotExecutable string
-	PiExecutable      string
+	ExternalCommand   []string
+	ExternalEnv       []string
+	ExternalCWD       string
 
 	RegistryPath   string
 	SocketPath     string
@@ -246,7 +248,9 @@ func (r *Runtime) run(ctx context.Context) error {
 		ClaudeExecutable:  r.cfg.ClaudeExecutable,
 		CodexExecutable:   r.cfg.CodexExecutable,
 		CopilotExecutable: r.cfg.CopilotExecutable,
-		PiExecutable:      r.cfg.PiExecutable,
+		ExternalCommand:   r.cfg.ExternalCommand,
+		ExternalEnv:       r.cfg.ExternalEnv,
+		ExternalCWD:       r.cfg.ExternalCWD,
 	}); err != nil {
 		return fmt.Errorf("spawn PTY session: %w", err)
 	}

@@ -19,13 +19,11 @@ const (
 	SettingClaudeExecutable         = "claude_executable"
 	SettingCodexExecutable          = "codex_executable"
 	SettingCopilotExecutable        = "copilot_executable"
-	SettingPiExecutable             = "pi_executable"
 	SettingEditorExecutable         = "editor_executable"
 	SettingNewSessionAgent          = "new_session_agent"
 	SettingClaudeAvailable          = "claude_available"
 	SettingCodexAvailable           = "codex_available"
 	SettingCopilotAvailable         = "copilot_available"
-	SettingPiAvailable              = "pi_available"
 	SettingPTYBackendMode           = "pty_backend_mode"
 	SettingTheme                    = "theme"
 	SettingReviewLoopPresets        = "review_loop_prompt_presets"
@@ -149,6 +147,12 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 		settings[capabilitySettingKey(name, "resume")] = strconv.FormatBool(caps.HasResume)
 		settings[capabilitySettingKey(name, "yolo")] = strconv.FormatBool(caps.HasYolo)
 	}
+	for _, driver := range d.ensurePluginRegistry().registeredDrivers() {
+		settings[availabilitySettingKey(driver.Agent)] = "true"
+		for capability, enabled := range driver.Capabilities {
+			settings[capabilitySettingKey(driver.Agent, capability)] = strconv.FormatBool(enabled)
+		}
+	}
 
 	if _, ok := settings[SettingClaudeAvailable]; !ok {
 		settings[SettingClaudeAvailable] = settings[availabilitySettingKey(string(protocol.SessionAgentClaude))]
@@ -159,10 +163,6 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	if _, ok := settings[SettingCopilotAvailable]; !ok {
 		settings[SettingCopilotAvailable] = settings[availabilitySettingKey(string(protocol.SessionAgentCopilot))]
 	}
-	if _, ok := settings[SettingPiAvailable]; !ok {
-		settings[SettingPiAvailable] = settings[availabilitySettingKey("pi")]
-	}
-
 	settings[SettingPTYBackendMode] = d.ptyBackendMode()
 	settings[SettingTailscaleEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingTailscaleEnabled]))
 
@@ -209,12 +209,12 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateProjectsDirectory(value)
 	case SettingUIScale:
 		return validateUIScale(value)
-	case SettingClaudeExecutable, SettingCodexExecutable, SettingCopilotExecutable, SettingPiExecutable:
+	case SettingClaudeExecutable, SettingCodexExecutable, SettingCopilotExecutable:
 		return validateExecutableSetting(value)
 	case SettingEditorExecutable:
 		return validateEditorSetting(value)
 	case SettingNewSessionAgent:
-		return validateNewSessionAgent(value)
+		return d.validateNewSessionAgent(value)
 	case SettingTheme:
 		return validateTheme(value)
 	case SettingTailscaleEnabled:
@@ -341,12 +341,17 @@ func validateEditorSetting(value string) error {
 	return nil
 }
 
-func validateNewSessionAgent(value string) error {
+func (d *Daemon) validateNewSessionAgent(value string) error {
 	agent := strings.TrimSpace(strings.ToLower(value))
 	if agent == "" {
 		return nil
 	}
 	if agentdriver.Get(agent) == nil {
+		if d.plugins != nil {
+			if _, ok := d.plugins.driver(agent); ok {
+				return nil
+			}
+		}
 		return fmt.Errorf("unknown agent: %s", value)
 	}
 	return nil

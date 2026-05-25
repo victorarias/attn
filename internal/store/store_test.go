@@ -81,6 +81,93 @@ func TestStore_AddAndGet_PreservesShellAgent(t *testing.T) {
 	}
 }
 
+func TestStore_AddAndGet_PreservesExternalPluginAgentAndMetadata(t *testing.T) {
+	s := New()
+	session := &protocol.Session{
+		ID:         "plugin123",
+		Label:      "snipe session",
+		Agent:      "snipe",
+		Directory:  "/home/user/project",
+		State:      protocol.SessionStateWorking,
+		StateSince: protocol.TimestampNow().String(),
+		LastSeen:   protocol.TimestampNow().String(),
+	}
+
+	s.Add(session)
+	if !s.BeginAgentDriverRun(session.ID, "run-metadata") {
+		t.Fatal("BeginAgentDriverRun() = false, want true")
+	}
+	if !s.ApplyAgentDriverMetadata(session.ID, "run-metadata", 1, `{"snipe_session_id":"abc"}`) {
+		t.Fatal("ApplyAgentDriverMetadata() rejected current run sequence")
+	}
+	session.State = protocol.SessionStateIdle
+	s.Add(session)
+
+	got := s.Get(session.ID)
+	if got == nil || got.Agent != "snipe" {
+		t.Fatalf("Agent = %q, want %q", got.Agent, "snipe")
+	}
+	if metadata := s.GetAgentMetadata(session.ID); metadata != `{"snipe_session_id":"abc"}` {
+		t.Fatalf("metadata = %q, want stored plugin JSON", metadata)
+	}
+}
+
+func TestStore_AgentDriverMetadataFallbackRetainsOrderedReport(t *testing.T) {
+	s := &Store{
+		sessions:        make(map[string]*protocol.Session),
+		agentDriverRuns: make(map[string]AgentDriverReportCursor),
+		agentMetadata:   make(map[string]string),
+	}
+	s.Add(&protocol.Session{ID: "plugin-fallback", Agent: "snipe"})
+	if !s.BeginAgentDriverRun("plugin-fallback", "run-fallback") {
+		t.Fatal("BeginAgentDriverRun() = false, want true")
+	}
+	if !s.ApplyAgentDriverMetadata("plugin-fallback", "run-fallback", 1, `{"native_id":"fallback"}`) {
+		t.Fatal("ApplyAgentDriverMetadata() rejected fallback store report")
+	}
+	if got := s.GetAgentMetadata("plugin-fallback"); got != `{"native_id":"fallback"}` {
+		t.Fatalf("GetAgentMetadata()=%q, want retained fallback metadata", got)
+	}
+}
+
+func TestStore_AgentDriverRunRejectsWrongRunAndStaleSequence(t *testing.T) {
+	s := New()
+	now := protocol.TimestampNow().String()
+	s.Add(&protocol.Session{
+		ID:             "plugin-run",
+		Label:          "snipe session",
+		Agent:          "snipe",
+		Directory:      "/home/user/project",
+		State:          protocol.SessionStateLaunching,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+
+	if !s.BeginAgentDriverRun("plugin-run", "run-a") {
+		t.Fatal("BeginAgentDriverRun() = false, want true")
+	}
+	if !s.ApplyAgentDriverState("plugin-run", "run-a", 2, protocol.StateWorking) {
+		t.Fatal("ApplyAgentDriverState() rejected current run sequence")
+	}
+	if s.ApplyAgentDriverState("plugin-run", "run-a", 1, protocol.StateIdle) {
+		t.Fatal("ApplyAgentDriverState() accepted stale sequence")
+	}
+	if s.ApplyAgentDriverState("plugin-run", "run-b", 3, protocol.StateIdle) {
+		t.Fatal("ApplyAgentDriverState() accepted wrong run")
+	}
+	if got := s.Get("plugin-run").State; got != protocol.SessionStateWorking {
+		t.Fatalf("state=%q, want working", got)
+	}
+
+	if ended := s.EndAgentDriverRun("plugin-run"); ended != "run-a" {
+		t.Fatalf("EndAgentDriverRun()=%q, want run-a", ended)
+	}
+	if s.ApplyAgentDriverState("plugin-run", "run-a", 3, protocol.StateIdle) {
+		t.Fatal("ApplyAgentDriverState() accepted report after run ended")
+	}
+}
+
 func TestStore_AddAndGet_PreservesEndpointID(t *testing.T) {
 	s := New()
 

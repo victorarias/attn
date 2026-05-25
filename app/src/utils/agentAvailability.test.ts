@@ -12,9 +12,9 @@ import {
 } from './agentAvailability';
 
 describe('agentAvailability', () => {
-  it('defaults built-ins and keeps pi false when daemon keys are missing', () => {
+  it('defaults in-tree built-ins without pre-advertising plugin agents', () => {
     const availability = getAgentAvailability({});
-    expect(availability).toEqual({ codex: true, claude: true, copilot: true, pi: false });
+    expect(availability).toEqual({ codex: true, claude: true, copilot: true });
   });
 
   it('parses dynamic daemon availability flags', () => {
@@ -61,17 +61,14 @@ describe('agentAvailability', () => {
     expect(hasAnyAvailableAgents(availability)).toBe(false);
   });
 
-  it('extracts dynamic executable settings', () => {
+  it('extracts only attn-owned executable settings', () => {
     const executables = getAgentExecutableSettings({
       codex_executable: '/usr/local/bin/codex',
-      pi_executable: '/opt/pi',
-      'gemini-cli_executable': '/opt/gemini',
+      snipe_executable: '/opt/snipe',
       editor_executable: 'code',
     });
     expect(executables).toEqual({
       codex: '/usr/local/bin/codex',
-      pi: '/opt/pi',
-      'gemini-cli': '/opt/gemini',
     });
   });
 

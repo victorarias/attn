@@ -3,7 +3,7 @@ import { formatSessionAgentLabel, normalizeSessionAgent, type SessionAgent } fro
 export type AgentAvailability = Record<SessionAgent, boolean>;
 export type AgentCapabilities = Record<SessionAgent, Record<string, boolean>>;
 
-const BUILTIN_AGENT_ORDER: SessionAgent[] = ['codex', 'claude', 'copilot', 'pi'];
+const BUILTIN_AGENT_ORDER: SessionAgent[] = ['codex', 'claude', 'copilot'];
 
 export const AGENT_CAPABILITY_ORDER = [
   'yolo',
@@ -49,7 +49,7 @@ function parseAgentFromExecutableKey(key: string): SessionAgent | null {
     return null;
   }
   const agent = normalized.slice(0, -'_executable'.length).trim();
-  if (!agent || agent === 'editor') return null;
+  if (!BUILTIN_AGENT_ORDER.includes(agent)) return null;
   return agent;
 }
 
@@ -74,9 +74,6 @@ export function getAgentAvailability(settings: Record<string, string>): AgentAva
     codex: true,
     claude: true,
     copilot: true,
-    // Pi is new: avoid showing it as available when connected to older daemons
-    // that don't publish a pi_available key.
-    pi: false,
   };
 
   for (const [key, value] of Object.entries(settings)) {

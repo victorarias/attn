@@ -26,6 +26,19 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-05-25]
+
+### Added
+- **Agent Driver Plugins**: Installed plugins can now register coding agents, launch or resume them inside attn-owned terminals, report session state and stop verdicts, and persist opaque agent session metadata for future resumes.
+
+### Changed
+- **External Agent Selection**: Plugin-provided agents are advertised dynamically in local and remote session pickers. Pi is no longer shipped as an in-tree placeholder; a future Pi integration can be installed as its own plugin.
+
+### Fixed
+- **Plugin Session Reporting**: Reports emitted immediately while a plugin launches or resumes a session are retained during terminal startup; per-launch run IDs and sequenced reports prevent stale updates after newer activity or relaunch, and plugins are notified when their attn-owned PTY closes.
+
+---
+
 ## [2026-05-23]
 
 ### Changed
@@ -566,7 +579,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Generic Launch Preparation Hook**: Add optional driver pre-launch setup (`LaunchPreparer`) so agent-specific prep (like Claude resume transcript copy) is encapsulated in the agent driver.
 - **Generic Settings Writer**: Add `wrapper.WriteSettingsConfig()` for writing driver-provided settings/hook files (not Claude-specific anymore).
 - **Minimal Pi Driver**: Add an initial `pi` driver with transcript/hook/classifier/state-detector capabilities disabled by default, so Pi can be integrated incrementally.
-- **Dynamic Agent Settings Surface**: Settings now carry per-agent availability and executable keys for all registered drivers (for example `pi_available`, `pi_executable`, or future `<agent>_available/<agent>_executable`).
+- **Dynamic Agent Settings Surface**: Settings now carry per-agent availability and executable keys for attn-owned drivers.
 - **Copilot Resume Transcript Discovery API**: Add `transcript.FindCopilotTranscriptForResume()` to expose resume-ID transcript lookup as shared transcript package functionality.
 
 ### Changed

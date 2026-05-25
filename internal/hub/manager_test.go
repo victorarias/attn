@@ -2,6 +2,7 @@ package hub
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -364,6 +365,7 @@ func TestCapabilitiesFromInitialStateIncludesRemoteWebFields(t *testing.T) {
 		DaemonInstanceID: protocol.Ptr("d-123"),
 		Settings: map[string]interface{}{
 			"codex_available":    "true",
+			"snipe_available":    "true",
 			"tailscale_enabled":  "true",
 			"tailscale_status":   "running",
 			"tailscale_url":      "https://gpu-box.tail.ts.net/",
@@ -376,6 +378,9 @@ func TestCapabilitiesFromInitialStateIncludesRemoteWebFields(t *testing.T) {
 	})
 	if caps == nil {
 		t.Fatal("capabilitiesFromInitialState() = nil")
+	}
+	if got := strings.Join(caps.AgentsAvailable, ","); got != "codex,snipe" {
+		t.Fatalf("caps.AgentsAvailable = %q, want dynamic plugin agent", got)
 	}
 	if protocol.Deref(caps.TailscaleEnabled) != true {
 		t.Fatalf("caps.TailscaleEnabled = %v, want true", protocol.Deref(caps.TailscaleEnabled))

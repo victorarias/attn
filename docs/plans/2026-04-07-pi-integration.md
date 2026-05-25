@@ -1,10 +1,10 @@
 # Pi Coding Agent Integration
 
-**Status**: SUPERSEDED on 2026-04-16 by `docs/plans/2026-04-16-plugin-system.md` and `docs/plans/2026-04-16-pi-plugin.md`.
+**Status**: DEFERRED on 2026-05-25. Retained as reference material for a future standalone pure Pi plugin; it is not the Snipe integration plan.
 
-Pi is no longer an in-tree Go driver. It becomes the first consumer of attn's new plugin system — a TypeScript/Bun plugin living in its own repo, connecting over JSON-RPC on the unix socket.
+Pi is no longer proposed as an in-tree Go driver. If pursued, it should become its own external `attn-pi` plugin over attn's generic agent-driver protocol. Snipe, a fork of Pi with different session and permission surfaces, is planned separately in `docs/plans/2026-04-16-snipe-plugin.md` and must not be implemented from this document by renaming Pi concepts.
 
-**The behavioral design in this document is still authoritative** and referenced by the new pi plugin plan:
+**The behavioral design in this document is reference material for a future pure Pi plugin only:**
 
 - State event → attn state mapping (§State flow table)
 - Classifier hint pattern (who runs the classifier, with which model)

@@ -48,7 +48,9 @@ func (b *EmbeddedBackend) Spawn(_ context.Context, opts SpawnOptions) error {
 		ClaudeExecutable:  opts.ClaudeExecutable,
 		CodexExecutable:   opts.CodexExecutable,
 		CopilotExecutable: opts.CopilotExecutable,
-		PiExecutable:      opts.PiExecutable,
+		ExternalCommand:   opts.ExternalCommand,
+		ExternalEnv:       opts.ExternalEnv,
+		ExternalCWD:       opts.ExternalCWD,
 		LoginShellEnv:     opts.LoginShellEnv,
 	})
 }

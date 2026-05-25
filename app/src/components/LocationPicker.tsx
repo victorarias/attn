@@ -86,9 +86,8 @@ const DEFAULT_AGENT_AVAILABILITY: AgentAvailability = {
   codex: true,
   claude: true,
   copilot: true,
-  pi: false,
 };
-const FIXED_AGENT_ORDER: SessionAgent[] = ['claude', 'codex', 'copilot', 'pi'];
+const FIXED_AGENT_ORDER: SessionAgent[] = ['claude', 'codex', 'copilot'];
 
 const normalizeAgent = (value?: string): SessionAgent | null => {
   if (!value) return null;
