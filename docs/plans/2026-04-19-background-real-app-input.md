@@ -11,6 +11,15 @@ status: Done
 **Owner**: Victor
 **Date**: 2026-04-19
 
+## Implementation evidence
+
+Implemented in [PR #153](https://github.com/victorarias/attn/pull/153), which landed the focus-free harness path from this plan:
+
+- `smoke.mjs` now launches through `launchFreshAppAndConnect(client, observer)` and drives pane creation/focus/typing through `UiAutomationClient` bridge requests (`split_pane`, `focus_pane`, `type_pane_via_ui`, `write_pane`) instead of `driver.activateApp()`, `driver.typeText()`, or `driver.pressEnter()`.
+- `launchFreshAppAndConnect()` delegates launch to `UiAutomationClient.launchFreshApp()` and then waits for manifest/readiness/responsiveness before connecting the daemon observer.
+- `scenario-focus-probe.mjs` exists as the regression probe: mode A demonstrates the old `activateApp()` + CGEvent path steals Terminal focus, while mode B uses bridge-only `split_pane` and asserts Terminal stays frontmost.
+- `MacOSDriver` has the background-safe helper surface (`activateBackground()`, `menu()`, `frontmostBundleId()`); the remaining `launchApp()` method is only the activation-free `open -a` fallback for older/deep-link harness paths.
+
 ## Why
 
 The packaged-app harness uses two input paths today:
