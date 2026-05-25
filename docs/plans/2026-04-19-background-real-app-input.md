@@ -155,6 +155,15 @@ Success criterion for conversion: `scenario-focus-probe` run immediately after `
 - **M3 (half day)** — Convert `smoke.mjs`. Run `scenario-focus-probe` + `smoke` back-to-back and confirm focus stays on the caller's terminal for the whole run.
 - **M4 (optional)** — Migrate `scenario-tr502` and `repro-older-pane-writability`. Only after M3 holds up across several runs.
 
+## Resolution note — smoke keyboard gap
+
+`smoke.mjs` no longer needs a genuine window-level keyboard shortcut for its flow. The implemented smoke path uses the UI automation bridge for pane input (`type_pane_via_ui` plus `write_pane`) and contains no `driver.pressKey(...)` calls, so there is no remaining smoke shortcut to migrate to `driver.menu(...)`.
+
+Evidence:
+- `app/scripts/real-app-harness/smoke.mjs` types into the utility pane through `UiAutomationClient`.
+- `app/scripts/real-app-harness/macosDriver.mjs` already exposes the AX-backed `menu(...)` path for harness flows that still need menu-level shortcuts.
+- `git log -- app/scripts/real-app-harness/smoke.mjs app/scripts/real-app-harness/macosDriver.mjs` shows the focus-free harness work landed in `64c61fe` / PR #153.
+
 ## Done when
 
 - `scenario-focus-probe` asserts `frontmost_after === frontmost_before` on the new path and fails fast on the old path.
