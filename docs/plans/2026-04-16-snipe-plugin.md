@@ -55,7 +55,7 @@ From attn, Snipe behaves as a first-class external agent:
 
 - Defines generic driver requests/results and session reporting methods. Each launch gets a daemon-owned `run_id`; reports carry a monotonically increasing `seq` within that run.
 - Spawns the returned command in the managed PTY.
-- Persists opaque `agent_metadata`, stores the accepted report cursor for the active run, rejects stale or ended-run reports, tells the plugin when the PTY closes, and displays driver-reported state.
+- Persists opaque `agent_metadata`, stores the accepted report cursor and spawning plugin identity for the active run, rejects stale, ended-run, or wrong-owner reports, tells the owning plugin after the PTY closes, and displays driver-reported state.
 - Contains no Snipe session paths, CLI flag mapping, extension source, or classifier subprocess logic.
 
 ### `~/src/attn-snipe`

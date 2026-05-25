@@ -1181,12 +1181,16 @@ func (d *Daemon) removePTYSession(sessionID string) error {
 func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
 	d.stopTranscriptWatcher(sessionID)
 	d.markForcedStopClassification(sessionID)
-	d.closePluginDriverSession(sessionID, "killed", nil, signalName(sig))
 
 	if d.ptyBackend == nil {
+		d.closePluginDriverSession(sessionID, "killed", nil, signalName(sig))
 		return
 	}
-	if err := d.ptyBackend.Kill(context.Background(), sessionID, sig); err != nil && !errors.Is(err, pty.ErrSessionNotFound) {
+	err := d.ptyBackend.Kill(context.Background(), sessionID, sig)
+	if err == nil || errors.Is(err, pty.ErrSessionNotFound) {
+		d.closePluginDriverSession(sessionID, "killed", nil, signalName(sig))
+	}
+	if err != nil && !errors.Is(err, pty.ErrSessionNotFound) {
 		d.logf("terminate session failed for %s: %v", sessionID, err)
 	}
 	_ = d.ptyBackend.Remove(context.Background(), sessionID)

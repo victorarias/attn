@@ -103,12 +103,9 @@ func (d *Daemon) clearAllSessions() {
 	}
 
 	for sessionID := range sessionIDs {
-		d.closePluginDriverSession(sessionID, "killed", nil, "SIGTERM")
-	}
-	d.store.ClearSessions()
-	for sessionID := range sessionIDs {
 		d.terminateSession(sessionID, syscall.SIGTERM)
 		d.clearLongRunTracking(sessionID)
 	}
+	d.store.ClearSessions()
 	d.broadcastSessionsUpdated()
 }

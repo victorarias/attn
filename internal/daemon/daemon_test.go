@@ -1201,6 +1201,7 @@ type fakeSpawnBackend struct {
 	mu        sync.Mutex
 	spawnOpts []ptybackend.SpawnOptions
 	onSpawn   func()
+	killErr   error
 }
 
 func (b *fakeSpawnBackend) Spawn(_ context.Context, opts ptybackend.SpawnOptions) error {
@@ -1217,7 +1218,7 @@ func (b *fakeSpawnBackend) Attach(context.Context, string, string) (ptybackend.A
 }
 func (b *fakeSpawnBackend) Input(context.Context, string, []byte) error          { return nil }
 func (b *fakeSpawnBackend) Resize(context.Context, string, uint16, uint16) error { return nil }
-func (b *fakeSpawnBackend) Kill(context.Context, string, syscall.Signal) error   { return nil }
+func (b *fakeSpawnBackend) Kill(context.Context, string, syscall.Signal) error   { return b.killErr }
 func (b *fakeSpawnBackend) Remove(context.Context, string) error                 { return nil }
 func (b *fakeSpawnBackend) SessionIDs(context.Context) []string                  { return nil }
 func (b *fakeSpawnBackend) Recover(context.Context) (ptybackend.RecoveryReport, error) {

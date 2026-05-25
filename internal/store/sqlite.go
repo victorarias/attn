@@ -320,6 +320,7 @@ var migrations = []migration{
 	{37, "migrate session layouts to workspace layouts", ""},
 	{38, "add opaque agent metadata to sessions", "ALTER TABLE sessions ADD COLUMN agent_metadata TEXT NOT NULL DEFAULT ''"},
 	{39, "add agent driver report cursor to sessions", `
+		ALTER TABLE sessions ADD COLUMN agent_driver_plugin_name TEXT NOT NULL DEFAULT '';
 		ALTER TABLE sessions ADD COLUMN agent_driver_run_id TEXT NOT NULL DEFAULT '';
 		ALTER TABLE sessions ADD COLUMN agent_driver_report_seq INTEGER NOT NULL DEFAULT 0;
 	`},
@@ -732,6 +733,15 @@ func applyMigration38(tx *sql.Tx) error {
 }
 
 func applyMigration39(tx *sql.Tx) error {
+	hasPluginName, err := columnExists(tx, "sessions", "agent_driver_plugin_name")
+	if err != nil {
+		return err
+	}
+	if !hasPluginName {
+		if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN agent_driver_plugin_name TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
 	hasRunID, err := columnExists(tx, "sessions", "agent_driver_run_id")
 	if err != nil {
 		return err

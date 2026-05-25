@@ -28,8 +28,9 @@ type Store struct {
 }
 
 type AgentDriverReportCursor struct {
-	RunID string
-	Seq   uint64
+	PluginName string
+	RunID      string
+	Seq        uint64
 }
 
 // New creates a new in-memory store (backed by SQLite :memory:)
@@ -656,13 +657,14 @@ func (s *Store) GetAgentMetadata(id string) string {
 	return strings.TrimSpace(metadata)
 }
 
-// BeginAgentDriverRun resets the report cursor for a newly launched external agent run.
-func (s *Store) BeginAgentDriverRun(id, runID string) bool {
+// BeginAgentDriverRun records ownership and resets the cursor for a newly launched external agent run.
+func (s *Store) BeginAgentDriverRun(id, pluginName, runID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	pluginName = strings.TrimSpace(pluginName)
 	runID = strings.TrimSpace(runID)
-	if runID == "" {
+	if pluginName == "" || runID == "" {
 		return false
 	}
 	if s.db == nil {
@@ -672,11 +674,12 @@ func (s *Store) BeginAgentDriverRun(id, runID string) bool {
 		if s.agentDriverRuns == nil {
 			s.agentDriverRuns = make(map[string]AgentDriverReportCursor)
 		}
-		s.agentDriverRuns[id] = AgentDriverReportCursor{RunID: runID}
+		s.agentDriverRuns[id] = AgentDriverReportCursor{PluginName: pluginName, RunID: runID}
 		return true
 	}
 	result, err := s.db.Exec(
-		"UPDATE sessions SET agent_driver_run_id = ?, agent_driver_report_seq = 0 WHERE id = ?",
+		"UPDATE sessions SET agent_driver_plugin_name = ?, agent_driver_run_id = ?, agent_driver_report_seq = 0 WHERE id = ?",
+		pluginName,
 		runID,
 		id,
 	)
@@ -688,36 +691,66 @@ func (s *Store) BeginAgentDriverRun(id, runID string) bool {
 	return updated == 1
 }
 
-// EndAgentDriverRun invalidates the active external-driver run and returns its ID.
-func (s *Store) EndAgentDriverRun(id string) string {
+// GetAgentDriverRun returns the active owner and report cursor for an external driver run.
+func (s *Store) GetAgentDriverRun(id string) AgentDriverReportCursor {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return s.agentDriverRuns[id]
+	}
+	var cursor AgentDriverReportCursor
+	if err := s.db.QueryRow(
+		"SELECT agent_driver_plugin_name, agent_driver_run_id, agent_driver_report_seq FROM sessions WHERE id = ?",
+		id,
+	).Scan(&cursor.PluginName, &cursor.RunID, &cursor.Seq); err != nil {
+		return AgentDriverReportCursor{}
+	}
+	cursor.PluginName = strings.TrimSpace(cursor.PluginName)
+	cursor.RunID = strings.TrimSpace(cursor.RunID)
+	return cursor
+}
+
+// EndAgentDriverRun invalidates and returns the active external-driver run cursor.
+func (s *Store) EndAgentDriverRun(id string) AgentDriverReportCursor {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.db == nil {
 		cursor := s.agentDriverRuns[id]
 		if cursor.RunID == "" {
-			return ""
+			return AgentDriverReportCursor{}
 		}
 		delete(s.agentDriverRuns, id)
-		return cursor.RunID
+		return cursor
 	}
-	var runID string
-	if err := s.db.QueryRow("SELECT agent_driver_run_id FROM sessions WHERE id = ?", id).Scan(&runID); err != nil {
-		return ""
-	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return ""
-	}
-	if _, err := s.db.Exec(
-		"UPDATE sessions SET agent_driver_run_id = '', agent_driver_report_seq = 0 WHERE id = ? AND agent_driver_run_id = ?",
+	var cursor AgentDriverReportCursor
+	if err := s.db.QueryRow(
+		"SELECT agent_driver_plugin_name, agent_driver_run_id, agent_driver_report_seq FROM sessions WHERE id = ?",
 		id,
-		runID,
-	); err != nil {
-		log.Printf("[store] EndAgentDriverRun: failed for session %s: %v", id, err)
-		return ""
+	).Scan(&cursor.PluginName, &cursor.RunID, &cursor.Seq); err != nil {
+		return AgentDriverReportCursor{}
 	}
-	return runID
+	cursor.PluginName = strings.TrimSpace(cursor.PluginName)
+	cursor.RunID = strings.TrimSpace(cursor.RunID)
+	if cursor.RunID == "" {
+		return AgentDriverReportCursor{}
+	}
+	result, err := s.db.Exec(
+		"UPDATE sessions SET agent_driver_plugin_name = '', agent_driver_run_id = '', agent_driver_report_seq = 0 WHERE id = ? AND agent_driver_plugin_name = ? AND agent_driver_run_id = ?",
+		id,
+		cursor.PluginName,
+		cursor.RunID,
+	)
+	if err != nil {
+		log.Printf("[store] EndAgentDriverRun: failed for session %s: %v", id, err)
+		return AgentDriverReportCursor{}
+	}
+	updated, _ := result.RowsAffected()
+	if updated != 1 {
+		return AgentDriverReportCursor{}
+	}
+	return cursor
 }
 
 // ApplyAgentDriverState applies an ordered status report for the active external-driver run.

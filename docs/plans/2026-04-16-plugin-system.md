@@ -97,8 +97,8 @@ These were proposed in conversation but not explicitly confirmed:
 4. When a session starts with agent = the registered name, attn calls `driver.spawn { session_id, run_id, cwd, label, yolo }` on the plugin. On reload of that same session, it calls `driver.resume` with the stored opaque metadata. Capability inputs such as `yolo` express attn-level behavior, not required command-line flag names; each driver returns the agent-specific equivalent argv.
 5. Plugin responds `{ argv, env, cwd }`. attn spawns that command in a PTY under the session. **Attn owns the PTY. Plugin owns agent-specific semantics.**
 6. Plugin stages companion files (extensions, hooks) however it likes. Plugin monitors the agent however it likes.
-7. Plugin reports state via `session.report_state`, `session.report_stop`, `session.report_metadata`. The daemon supplies a fresh `run_id` per launched PTY, and the plugin sequences reports within that run so asynchronous work cannot overwrite newer status or a replacement run.
-8. When an attn-owned plugin agent PTY exits or is killed, attn calls `driver.session_closed` so the plugin can dispose bridge tokens, watchers, classifiers, and staged launch resources for that run.
+7. Plugin reports state via `session.report_state`, `session.report_stop`, `session.report_metadata`. The daemon supplies a fresh `run_id` per launched PTY and persists the spawning plugin as that run's owner; only that owner can report or receive close notification for the run. The plugin sequences reports within that run so asynchronous work cannot overwrite newer status or a replacement run.
+8. When an attn-owned plugin agent PTY exits or has been killed successfully, attn calls `driver.session_closed` on the recorded run owner so the plugin can dispose bridge tokens, watchers, classifiers, and staged launch resources for that run.
 9. Plugin exits when attn shuts down or its own lifecycle ends.
 
 ### Provider and lifecycle surfaces
@@ -202,7 +202,7 @@ Extend the daemon's existing unix socket handler to recognize a JSON-RPC 2.0 han
 | `session.report_metadata`     | plugin → attn   | `{ session_id, run_id, seq, metadata }`; persists opaque native-session data |
 | `pty.request_spawn`           | plugin → attn   | Deferred: optionally spawn additional processes under the session       |
 
-`seq` is monotonic across reports within one `run_id`. When classification begins after an observed stop, it reserves its report sequence at that observation; any later lifecycle report receives a higher sequence and therefore wins even if classification finishes afterward.
+`seq` is monotonic across reports within one `run_id`. The daemon stores the run's spawning plugin identity alongside its cursor, preventing a later plugin that registers the same agent identifier from taking over the active run. When classification begins after an observed stop, it reserves its report sequence at that observation; any later lifecycle report receives a higher sequence and therefore wins even if classification finishes afterward.
 
 **Worktree surfaces (initial):**
 

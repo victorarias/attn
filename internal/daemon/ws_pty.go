@@ -442,7 +442,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		if metadata := strings.TrimSpace(d.store.GetAgentMetadata(msg.ID)); metadata != "" && json.Valid([]byte(metadata)) {
 			params.Metadata = json.RawMessage(metadata)
 		}
-		result, err := d.resolvePluginDriverLaunch(pluginDriver, params, existingSession != nil)
+		result, err := d.resolvePluginDriverLaunch(pluginDriver, params, existingSession != nil && pluginDriver.Capabilities["resume"])
 		if err != nil {
 			d.finishPluginSessionLaunch(msg.ID, false)
 			d.sendToClient(client, protocol.SpawnResultMessage{
@@ -525,7 +525,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			}
 		}
 		d.store.Add(session)
-		if hasPluginDriver && !d.store.BeginAgentDriverRun(session.ID, pluginRunID) {
+		if hasPluginDriver && !d.store.BeginAgentDriverRun(session.ID, pluginDriver.PluginName, pluginRunID) {
 			d.finishPluginSessionLaunch(msg.ID, false)
 			d.logf("failed to initialize plugin driver run cursor: session=%s", session.ID)
 		}
@@ -776,8 +776,10 @@ func parseSignal(name string) syscall.Signal {
 func (d *Daemon) handleKillSession(client *wsClient, msg *protocol.KillSessionMessage) {
 	d.detachSession(client, msg.ID)
 	sig := parseSignal(protocol.Deref(msg.Signal))
-	d.closePluginDriverSession(msg.ID, "killed", nil, signalName(sig))
 	err := d.ptyBackend.Kill(context.Background(), msg.ID, sig)
+	if err == nil || errors.Is(err, pty.ErrSessionNotFound) {
+		d.closePluginDriverSession(msg.ID, "killed", nil, signalName(sig))
+	}
 	if err != nil {
 		if shouldLogPtyCommandError(err) {
 			d.logf("kill_session failed for %s: %v", msg.ID, err)

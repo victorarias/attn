@@ -190,7 +190,7 @@ func (d *Daemon) handlePluginDriverMethod(plugin *pluginConnection, msg jsonRPCM
 			return nil, true, err
 		}
 		if !d.queueReportDuringPluginLaunch(plugin, params.SessionID, pendingPluginReport{State: &params}) {
-			if err := d.authorizePluginSessionReport(plugin, params.SessionID); err != nil {
+			if err := d.authorizePluginSessionReport(plugin, params.SessionID, params.RunID); err != nil {
 				return nil, true, err
 			}
 			d.applyPluginReportedState(params)
@@ -205,7 +205,7 @@ func (d *Daemon) handlePluginDriverMethod(plugin *pluginConnection, msg jsonRPCM
 			return nil, true, err
 		}
 		if !d.queueReportDuringPluginLaunch(plugin, params.SessionID, pendingPluginReport{Stop: &params}) {
-			if err := d.authorizePluginSessionReport(plugin, params.SessionID); err != nil {
+			if err := d.authorizePluginSessionReport(plugin, params.SessionID, params.RunID); err != nil {
 				return nil, true, err
 			}
 			d.applyPluginReportedStop(params)
@@ -223,7 +223,7 @@ func (d *Daemon) handlePluginDriverMethod(plugin *pluginConnection, msg jsonRPCM
 			return nil, true, err
 		}
 		if !d.queueReportDuringPluginLaunch(plugin, params.SessionID, pendingPluginReport{Metadata: &params}) {
-			if err := d.authorizePluginSessionReport(plugin, params.SessionID); err != nil {
+			if err := d.authorizePluginSessionReport(plugin, params.SessionID, params.RunID); err != nil {
 				return nil, true, err
 			}
 			d.applyPluginReportedMetadata(params)
@@ -234,15 +234,15 @@ func (d *Daemon) handlePluginDriverMethod(plugin *pluginConnection, msg jsonRPCM
 	}
 }
 
-func (d *Daemon) authorizePluginSessionReport(plugin *pluginConnection, sessionID string) error {
+func (d *Daemon) authorizePluginSessionReport(plugin *pluginConnection, sessionID, runID string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	session := d.store.Get(sessionID)
 	if session == nil {
 		return fmt.Errorf("unknown session %q", sessionID)
 	}
-	driver, ok := d.ensurePluginRegistry().driver(string(session.Agent))
-	if !ok || driver.PluginName != plugin.name {
-		return fmt.Errorf("plugin %q does not own session %q", plugin.name, sessionID)
+	cursor := d.store.GetAgentDriverRun(sessionID)
+	if cursor.PluginName != plugin.name || cursor.RunID != strings.TrimSpace(runID) {
+		return fmt.Errorf("plugin %q does not own active run %q for session %q", plugin.name, strings.TrimSpace(runID), sessionID)
 	}
 	return nil
 }
@@ -382,21 +382,18 @@ func (d *Daemon) closePluginDriverSession(sessionID, reason string, exitCode *in
 	if session == nil {
 		return
 	}
-	runID := d.store.EndAgentDriverRun(sessionID)
-	if runID == "" {
+	run := d.store.EndAgentDriverRun(sessionID)
+	if run.RunID == "" {
 		return
 	}
-	driver, ok := d.ensurePluginRegistry().driver(string(session.Agent))
-	if !ok {
-		return
-	}
-	plugin := d.ensurePluginRegistry().get(driver.PluginName)
+	plugin := d.ensurePluginRegistry().get(run.PluginName)
 	if plugin == nil {
+		d.logf("plugin session close notification dropped: plugin=%s session=%s run=%s owner disconnected", run.PluginName, sessionID, run.RunID)
 		return
 	}
 	params := pluginDriverSessionClosedParams{
 		SessionID: sessionID,
-		RunID:     runID,
+		RunID:     run.RunID,
 		Reason:    strings.TrimSpace(reason),
 		ExitCode:  exitCode,
 		Signal:    strings.TrimSpace(signal),
@@ -406,7 +403,7 @@ func (d *Daemon) closePluginDriverSession(sessionID, reason string, exitCode *in
 		defer cancel()
 		var result pluginDriverSessionClosedResult
 		if err := plugin.request(ctx, "driver.session_closed", params, &result); err != nil {
-			d.logf("plugin session close notification failed: plugin=%s session=%s run=%s err=%v", driver.PluginName, sessionID, runID, err)
+			d.logf("plugin session close notification failed: plugin=%s session=%s run=%s err=%v", run.PluginName, sessionID, run.RunID, err)
 		}
 	}()
 }

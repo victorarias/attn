@@ -94,7 +94,7 @@ func TestStore_AddAndGet_PreservesExternalPluginAgentAndMetadata(t *testing.T) {
 	}
 
 	s.Add(session)
-	if !s.BeginAgentDriverRun(session.ID, "run-metadata") {
+	if !s.BeginAgentDriverRun(session.ID, "snipe-plugin", "run-metadata") {
 		t.Fatal("BeginAgentDriverRun() = false, want true")
 	}
 	if !s.ApplyAgentDriverMetadata(session.ID, "run-metadata", 1, `{"snipe_session_id":"abc"}`) {
@@ -119,7 +119,7 @@ func TestStore_AgentDriverMetadataFallbackRetainsOrderedReport(t *testing.T) {
 		agentMetadata:   make(map[string]string),
 	}
 	s.Add(&protocol.Session{ID: "plugin-fallback", Agent: "snipe"})
-	if !s.BeginAgentDriverRun("plugin-fallback", "run-fallback") {
+	if !s.BeginAgentDriverRun("plugin-fallback", "snipe-plugin", "run-fallback") {
 		t.Fatal("BeginAgentDriverRun() = false, want true")
 	}
 	if !s.ApplyAgentDriverMetadata("plugin-fallback", "run-fallback", 1, `{"native_id":"fallback"}`) {
@@ -144,8 +144,11 @@ func TestStore_AgentDriverRunRejectsWrongRunAndStaleSequence(t *testing.T) {
 		LastSeen:       now,
 	})
 
-	if !s.BeginAgentDriverRun("plugin-run", "run-a") {
+	if !s.BeginAgentDriverRun("plugin-run", "snipe-plugin", "run-a") {
 		t.Fatal("BeginAgentDriverRun() = false, want true")
+	}
+	if cursor := s.GetAgentDriverRun("plugin-run"); cursor.PluginName != "snipe-plugin" || cursor.RunID != "run-a" {
+		t.Fatalf("GetAgentDriverRun()=%+v, want snipe-plugin/run-a", cursor)
 	}
 	if !s.ApplyAgentDriverState("plugin-run", "run-a", 2, protocol.StateWorking) {
 		t.Fatal("ApplyAgentDriverState() rejected current run sequence")
@@ -160,8 +163,8 @@ func TestStore_AgentDriverRunRejectsWrongRunAndStaleSequence(t *testing.T) {
 		t.Fatalf("state=%q, want working", got)
 	}
 
-	if ended := s.EndAgentDriverRun("plugin-run"); ended != "run-a" {
-		t.Fatalf("EndAgentDriverRun()=%q, want run-a", ended)
+	if ended := s.EndAgentDriverRun("plugin-run"); ended.PluginName != "snipe-plugin" || ended.RunID != "run-a" {
+		t.Fatalf("EndAgentDriverRun()=%+v, want snipe-plugin/run-a", ended)
 	}
 	if s.ApplyAgentDriverState("plugin-run", "run-a", 3, protocol.StateIdle) {
 		t.Fatal("ApplyAgentDriverState() accepted report after run ended")
