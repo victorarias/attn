@@ -33,7 +33,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Plugin Installation Sources**: Plugins can now be installed from a pasted Git repository URL in Settings as well as from a local source directory.
 
 ### Changed
-- **External Agent Selection**: Plugin-provided agents are advertised dynamically in local and remote session pickers. Pi is no longer shipped as an in-tree placeholder; a future Pi integration can be installed as its own plugin.
+- **External Agent Selection**: Plugin-provided agents are advertised dynamically in local and remote session pickers. Unshipped in-tree external-agent placeholders are removed in favor of standalone plugins.
 
 ### Fixed
 - **Plugin Session Reporting**: Reports emitted immediately while a plugin launches or resumes a session are retained during terminal startup; per-launch run IDs, persisted plugin ownership, and sequenced reports prevent stale or replacement-plugin updates after newer activity or relaunch. Plugins are notified only after their attn-owned PTY has actually closed or been killed.

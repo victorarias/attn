@@ -1,6 +1,6 @@
 # Attn Plugin System
 
-**Status**: IN PROGRESS — provider/plugin runtime and the generic agent-driver host surface are implemented; Snipe Slices 1 through 6 are implemented externally with repository-based installation plus operational diagnostics and no package publication. Remaining proposals are tracked in §Open Questions and §Deferred.
+**Status**: IN PROGRESS — provider/plugin runtime and the generic agent-driver host surface are implemented. Remaining proposals are tracked in §Open Questions and §Deferred.
 **Date**: 2026-04-16
 **Owner**: victor
 
@@ -49,7 +49,7 @@ These have been explicitly confirmed in conversation:
 - **One mechanism covers agent drivers AND future non-driver plugins.** Plugins declare concrete surfaces they handle during the daemon handshake. No generic role taxonomy in the base protocol, and no second system for worktree customization, attn-as-agent, assistants, dashboards, etc.
 - **Provider plugins are first-class.** Plugins may claim daemon-owned extension points that must run inside an attn operation, returning structured `handled`, `decline`, or `error` outcomes so attn can continue, fall back, or fail coherently.
 - **TypeScript with Bun as the canonical runtime.**
-- **Snipe is the first agent-driver plugin, not an in-tree driver.** See companion plan `2026-04-16-snipe-plugin.md`. Snipe is a Pi fork with its own session and permission capabilities; a future pure Pi integration remains a separate plugin. The first provider use case is user-owned worktree customization, proving that plugins are not limited to agent integration.
+- **Agent-driver plugins are consumer-neutral.** Attn provides the host contract and leaves each external agent's command mapping, lifecycle observation, metadata, and classification policy in its own plugin. The first provider use case is user-owned worktree customization, proving that plugins are not limited to agent integration.
 - **Trust model: user-installed = user-trusted.** Installing a plugin is equivalent to `curl | bash` from that repo. No sandboxing, no signing, no confirmation prompts, no catalog curation. Document clearly in the plugin-authoring README and move on.
 - **No auth.** Unix socket filesystem permissions gate access. Consistent with existing frontend↔daemon and daemon↔daemon trust model in attn today.
 - **Claude, codex, copilot stay in-tree.** No forcing function to migrate. Long-term they could become plugins but that's zero-pressure.
@@ -81,7 +81,7 @@ These were proposed in conversation but not explicitly confirmed:
 │                 │ socket   │                            │
 │                 │          │  ┌──────────────────────┐  │
 │                 │          │  │ user-facing agent    │  │
-│                 │          │  │ (snipe, pi, ...)     │  │
+│                 │          │  │ (external driver)    │  │
 │                 │          │  └──────────────────────┘  │
 │                 │          │   spawned by plugin via    │
 │                 │          │   driver.spawn response    │
@@ -170,7 +170,7 @@ Decline response:
 
 ### 1. Schema normalization (prerequisite)
 
-Remove agent-specific fields from core schema and protocol. Replaces the agent-specific additions proposed during the earlier Pi exploration and keeps Snipe and future Pi plugins independent.
+Remove agent-specific fields from core schema and protocol. Replaces the agent-specific additions proposed during earlier integration exploration and keeps concrete agent plugins independent.
 
 - Generic `agent_metadata TEXT` column on `sessions` (JSON blob, opaque to core) replacing any proposed `pi_session_file` / `pi_session_id` columns.
 - Use generic `session.report_metadata` rather than any agent-specific linkage command.
@@ -184,7 +184,7 @@ Extend the daemon's existing unix socket handler to recognize a JSON-RPC 2.0 han
 **Handshake:**
 ```json
 → {"jsonrpc":"2.0","id":1,"method":"hello","params":{
-    "name":"snipe-driver","version":"0.1.0",
+    "name":"example-driver","version":"0.1.0",
     "attn_api_version":1}}
 ← {"jsonrpc":"2.0","id":1,"result":{"ok":true}}
 ```
@@ -236,10 +236,10 @@ Commands:
 
 Manifest (`attn-plugin.toml` at repo root):
 ```toml
-name = "snipe-driver"
+name = "example-driver"
 version = "0.1.0"
 attn_api_version = 1
-description = "Snipe coding agent driver for attn"
+description = "Example external coding agent driver for attn"
 
 [plugin]
 entrypoint = "src/index.ts"
@@ -278,8 +278,8 @@ path needed for the first real plugins: `attn plugin install --path <dir>`,
 `attn plugin list`, and `attn plugin remove <name>`.
 
 Still to ship: CLI Git URL install, update, foreground dev/auto-restart mode,
-and live traffic inspection. None blocks building or exercising `attn-snipe`
-locally through `--path` or installing it directly from Settings.
+and live traffic inspection. None blocks building or exercising an external
+driver locally through `--path` or installing it directly from Settings.
 
 ### Phase 4 — Provider SDK foundation (implemented)
 
@@ -294,28 +294,25 @@ Extract the proven raw JSON-RPC provider client into a small TypeScript SDK:
 
 Keep broader surfaces out until their first concrete plugins exercise those paths.
 
-### Phase 5 — Snipe as the first agent-driver plugin (Slices 1-6 implemented)
+### Phase 5 — Generic agent-driver host (implemented)
 
-See companion plan `2026-04-16-snipe-plugin.md`. Snipe forces driver-protocol gaps to surface after the provider model has already been validated against a non-agent extension point. Its eventual full integration includes state, classification, reload of the existing attn-owned session through the generic `driver.resume` method, mapping attn's `yolo` behavioral intent onto Snipe-compatible permission/sandbox flags, and native approval visibility. Snipe-native session replacement such as `/fork` is observed through generic metadata updates; it does not require an attn driver capability.
+Add an external-driver surface after the provider model has already validated
+long-running plugin connectivity and daemon-owned dispatch:
 
-`~/src/attn-snipe` now provides all six planned vertical slices: raw driver
-registration, persisted `--session-id` launch, a private token-scoped
-extension bridge, sequenced metadata/basic lifecycle reports, visible
-`unknown` state if bridge startup or an active bridge connection fails, and
-Haiku-backed sequence-safe stop classification. Generic `driver.resume` now
-reloads a written Snipe conversation strictly from stored opaque metadata,
-while an explicitly unmaterialized empty launch may safely reopen through its
-pinned ID because there is no conversation to discard. Attn yolo behavior is
-mapped onto Snipe's explicit bypass-permissions and sandbox-off flags so
-persisted identity and strict reload remain intact. Read-only native Snipe
-approval-wait events are translated to generic `pending_approval` state.
-Repository-checkout installation is documented without publishing an
-artifact, and plugin health now rejects missing or CLI-incompatible Snipe
-executables through the existing attn Settings health surface while warning
-about approval-event compatibility until Snipe publishes a probeable contract.
-Attn does not expose
-a new-session native Snipe picker workflow, so it is not part of the plugin
-scope.
+- Plugins register open agent identifiers and capabilities dynamically.
+- Attn requests a new launch through `driver.spawn`; reload uses
+  `driver.resume` only when the driver advertises that capability and otherwise
+  requests a new spawn.
+- Plugins return `argv`, `env`, and `cwd`; attn remains the PTY owner.
+- Each launched PTY receives a fresh run identity and a persisted spawning
+  plugin owner. Sequenced metadata/state/stop reports are accepted only from
+  that owner and cannot supersede fresher activity.
+- Attn issues `driver.session_closed` only after the owned PTY has exited or a
+  kill has completed, so plugin cleanup never invalidates a still-running
+  process after failed termination.
+- Opaque metadata, generic `yolo` intent, health reporting, and dynamic picker
+  availability allow concrete plugins to implement their agent-specific
+  behavior without core schema or command-line knowledge.
 
 #### Driver host verification harness (implemented)
 
@@ -332,7 +329,9 @@ The harness verifies:
 - `driver.resume` receives persisted metadata from the prior run and its immediate reports survive resumed PTY startup
 - PTY exit produces `driver.session_closed` with the specific ended `run_id`
 
-This is the minimum regression gate before wiring Snipe itself: a plugin that works in the harness has crossed the same daemon, socket, WebSocket, session-store, and PTY boundaries it will cross in production.
+This is the minimum regression gate for any external agent driver: a plugin
+that works in the harness has crossed the same daemon, socket, WebSocket,
+session-store, and PTY boundaries it will cross in production.
 
 ### Phase 6 — Broader plugin surfaces
 
@@ -361,13 +360,12 @@ In priority order of what might come next:
 - **Cross-daemon control API.** Expose the same JSON-RPC surface over the hub's existing WebSocket at `:9849` so future control plugins can span daemons. Useful for attn-as-agent and dashboards.
 - **Custom UI extensions.** Separate design.
 - **Plugin install over SSH / hub** — `attn --endpoint <server> plugin install <url>`. Nice-to-have, requires proxying through the hub.
-- **Pure Pi agent-driver plugin.** Build `attn-pi` independently after the generic driver surface is proven by Snipe; do not couple its session or permission behavior to the fork.
+- **Concrete agent-driver integrations.** Each external agent integration should be designed and distributed as its own plugin on top of this generic host contract.
 - **Claude / codex / copilot migration** to plugins. Zero pressure; only if there's a reason.
 
 ## References
 
-- **Deferred pure Pi exploration:** `docs/plans/2026-04-07-pi-integration.md` — reference material for a later independent Pi plugin, not the Snipe design.
-- **Snipe plugin plan:** `docs/plans/2026-04-16-snipe-plugin.md`.
+- **Deferred Pi exploration:** `docs/plans/2026-04-07-pi-integration.md`.
 - **Existing agent driver interface:** `internal/agent/driver.go`.
 - **Existing socket handler:** `internal/daemon/daemon.go` (`handleConnection`).
 - **Hub module (cross-daemon context):** `internal/hub/`.
