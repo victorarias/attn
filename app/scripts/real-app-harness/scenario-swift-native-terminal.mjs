@@ -519,7 +519,13 @@ async function exerciseWorkspaceLauncher(client, daemon, temporaryDirectory, suf
   const paneDirectory = path.join(temporaryDirectory, 'dialog-pane-current-directory');
   fs.mkdirSync(paneDirectory);
   const resolvedPaneDirectory = fs.realpathSync(paneDirectory);
-  await submitTerminalCommand(client, firstPane.runtimeId, `cd "${resolvedPaneDirectory}"`);
+  // CWD discovery is driven by OSC 7 from shell integration. Emit it
+  // explicitly so this fixture does not depend on the runner's dotfiles.
+  await submitTerminalCommand(
+    client,
+    firstPane.runtimeId,
+    `cd "${resolvedPaneDirectory}" && printf '\\033]7;file://localhost%s\\007' "$PWD"`,
+  );
   await waitFor(async () => {
     const panes = await client.request('list_panes');
     return panes.panes.find((pane) => pane.runtimeId === firstPane.runtimeId)?.reportedCurrentDirectory === resolvedPaneDirectory;
