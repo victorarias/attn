@@ -508,6 +508,10 @@ async function exerciseWorkspaceLauncher(client, daemon, temporaryDirectory, suf
     const panes = await client.request('list_panes');
     return panes.panes.length === 1 && panes.panes[0].attached ? panes.panes[0] : null;
   }, 'New Workspace dialog-created Ghostty pane');
+  await waitFor(async () => {
+    const geometry = await client.request('get_surface_geometry', { runtime_id: firstPane.runtimeId });
+    return geometry.cols > 0 && geometry.rows > 0 ? geometry : null;
+  }, 'New Workspace dialog-created Ghostty live grid');
 
   const firstMarker = `__DIALOG_WORKSPACE_${suffix}__`;
   await submitTerminalCommand(client, firstPane.runtimeId, `printf '${firstMarker}\\n'`);
@@ -551,6 +555,10 @@ async function exerciseWorkspaceLauncher(client, daemon, temporaryDirectory, suf
     return secondPane && firstStillMounted ? { panes: panes.panes, secondPane } : null;
   }, 'Add Pane dialog-created Ghostty pane');
   const secondPane = splitPanes.secondPane;
+  await waitFor(async () => {
+    const geometry = await client.request('get_surface_geometry', { runtime_id: secondPane.runtimeId });
+    return geometry.cols > 0 && geometry.rows > 0 ? geometry : null;
+  }, 'Add Pane dialog-created Ghostty live grid');
   const secondMarker = `__DIALOG_PANE_${suffix}__`;
   await submitTerminalCommand(client, secondPane.runtimeId, `printf '${secondMarker}\\n'`);
   await waitFor(async () => {
