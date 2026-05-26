@@ -73,97 +73,110 @@ struct WorkspaceLauncherView: View {
 
     private var header: some View {
         HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(model.title.uppercased())
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .tracking(1.7)
-                    .foregroundStyle(.white.opacity(0.86))
-                Text(headerContext)
-                    .font(.system(size: 8, weight: .medium, design: .monospaced))
-                    .tracking(1.25)
-                    .foregroundStyle(accent.opacity(0.75))
-            }
-            .frame(width: 116, alignment: .leading)
-
+            headerTitle
             Spacer(minLength: 8)
-
-            HStack(spacing: 7) {
-                sectionLabel("TYPE")
-                HStack(spacing: 3) {
-                    ForEach(WorkspaceLauncherModel.PaneChoice.allCases) { choice in
-                        Button {
-                            model.perform(.selectPane(choice))
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text(choice.label)
-                                Text(choiceShortcutLabel(choice))
-                                    .font(.system(size: 7, weight: .bold, design: .monospaced))
-                                    .padding(.horizontal, 3)
-                                    .frame(height: 13)
-                                    .background {
-                                        RoundedRectangle(cornerRadius: 4)
-                                            .fill(model.paneChoice == choice ? Color.black.opacity(0.12) : Color.white.opacity(0.045))
-                                    }
-                                    .overlay {
-                                        RoundedRectangle(cornerRadius: 4)
-                                            .stroke(model.paneChoice == choice ? Color.black.opacity(0.18) : Color.white.opacity(0.09), lineWidth: 1)
-                                    }
-                            }
-                                .foregroundStyle(model.paneChoice == choice ? Color.black : Color.white.opacity(0.54))
-                                .font(.system(size: 10, weight: model.paneChoice == choice ? .semibold : .regular, design: .monospaced))
-                                .padding(.vertical, 5)
-                                .padding(.horizontal, 6)
-                                .background {
-                                    Capsule().fill(model.paneChoice == choice ? accent : .clear)
-                                }
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!model.isAvailable(choice))
-                        .opacity(model.isAvailable(choice) ? 1 : 0.38)
-                        .keyboardShortcut(choiceShortcut(choice), modifiers: [.option])
-                    }
-                }
-                .padding(3)
-                .background(Capsule().fill(Color.black.opacity(0.3)))
-                .overlay { Capsule().stroke(Color.white.opacity(0.1), lineWidth: 1) }
-            }
-
-            Button {
-                model.perform(.toggleLocalYolo)
-            } label: {
-                HStack(spacing: 7) {
-                    Circle()
-                        .fill(accent.opacity(model.yoloMode ? 1 : 0.7))
-                        .frame(width: 6, height: 6)
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text("Local")
-                            if model.yoloMode && model.yoloSupported {
-                                Text("YOLO")
-                                    .font(.system(size: 7, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(accent)
-                            }
-                        }
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.88))
-                        Text(model.yoloSupported ? "⌥Q toggle" : "this machine")
-                            .font(.system(size: 8, design: .monospaced))
-                            .foregroundStyle(Color.white.opacity(0.4))
-                    }
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 34)
-                .background(RoundedRectangle(cornerRadius: 9).fill(accent.opacity(model.yoloMode ? 0.16 : 0.07)))
-                .overlay { RoundedRectangle(cornerRadius: 9).stroke(accent.opacity(model.yoloMode ? 0.72 : 0.3), lineWidth: 1) }
-            }
-            .buttonStyle(.plain)
-            .disabled(!model.yoloSupported)
-            .keyboardShortcut("q", modifiers: [.option])
+            paneChoiceSelector
+            localTargetToggle
         }
         .padding(.horizontal, 16)
         .frame(height: 54)
         .background(Color.black.opacity(0.14))
         .overlay(alignment: .bottom) { Divider().overlay(divider) }
+    }
+
+    private var headerTitle: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(model.title.uppercased())
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .tracking(1.7)
+                .foregroundStyle(.white.opacity(0.86))
+            Text(headerContext)
+                .font(.system(size: 8, weight: .medium, design: .monospaced))
+                .tracking(1.25)
+                .foregroundStyle(accent.opacity(0.75))
+        }
+        .frame(width: 116, alignment: .leading)
+    }
+
+    private var paneChoiceSelector: some View {
+        HStack(spacing: 7) {
+            sectionLabel("TYPE")
+            HStack(spacing: 3) {
+                ForEach(WorkspaceLauncherModel.PaneChoice.allCases) { choice in
+                    paneChoiceButton(choice)
+                }
+            }
+            .padding(3)
+            .background(Capsule().fill(Color.black.opacity(0.3)))
+            .overlay { Capsule().stroke(Color.white.opacity(0.1), lineWidth: 1) }
+        }
+    }
+
+    private func paneChoiceButton(_ choice: WorkspaceLauncherModel.PaneChoice) -> some View {
+        Button {
+            model.perform(.selectPane(choice))
+        } label: {
+            HStack(spacing: 4) {
+                Text(choice.label)
+                Text(choiceShortcutLabel(choice))
+                    .font(.system(size: 7, weight: .bold, design: .monospaced))
+                    .padding(.horizontal, 3)
+                    .frame(height: 13)
+                    .background {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(model.paneChoice == choice ? Color.black.opacity(0.12) : Color.white.opacity(0.045))
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(model.paneChoice == choice ? Color.black.opacity(0.18) : Color.white.opacity(0.09), lineWidth: 1)
+                    }
+            }
+            .foregroundStyle(model.paneChoice == choice ? Color.black : Color.white.opacity(0.54))
+            .font(.system(size: 10, weight: model.paneChoice == choice ? .semibold : .regular, design: .monospaced))
+            .padding(.vertical, 5)
+            .padding(.horizontal, 6)
+            .background {
+                Capsule().fill(model.paneChoice == choice ? accent : .clear)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.isAvailable(choice))
+        .opacity(model.isAvailable(choice) ? 1 : 0.38)
+        .keyboardShortcut(choiceShortcut(choice), modifiers: [.option])
+    }
+
+    private var localTargetToggle: some View {
+        Button {
+            model.perform(.toggleLocalYolo)
+        } label: {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(accent.opacity(model.yoloMode ? 1 : 0.7))
+                    .frame(width: 6, height: 6)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("Local")
+                        if model.yoloMode && model.yoloSupported {
+                            Text("YOLO")
+                                .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                .foregroundStyle(accent)
+                        }
+                    }
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.88))
+                    Text(model.yoloSupported ? "⌥Q toggle" : "this machine")
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.4))
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(RoundedRectangle(cornerRadius: 9).fill(accent.opacity(model.yoloMode ? 0.16 : 0.07)))
+            .overlay { RoundedRectangle(cornerRadius: 9).stroke(accent.opacity(model.yoloMode ? 0.72 : 0.3), lineWidth: 1) }
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.yoloSupported)
+        .keyboardShortcut("q", modifiers: [.option])
     }
 
     private var locationStage: some View {
