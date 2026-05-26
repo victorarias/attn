@@ -22,6 +22,7 @@ const (
 	SettingPiExecutable             = "pi_executable"
 	SettingEditorExecutable         = "editor_executable"
 	SettingNewSessionAgent          = "new_session_agent"
+	SettingNewPaneChoice            = "new_pane_choice"
 	SettingClaudeAvailable          = "claude_available"
 	SettingCodexAvailable           = "codex_available"
 	SettingCopilotAvailable         = "copilot_available"
@@ -215,6 +216,8 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateEditorSetting(value)
 	case SettingNewSessionAgent:
 		return validateNewSessionAgent(value)
+	case SettingNewPaneChoice:
+		return validateNewPaneChoice(value)
 	case SettingTheme:
 		return validateTheme(value)
 	case SettingTailscaleEnabled:
@@ -350,6 +353,14 @@ func validateNewSessionAgent(value string) error {
 		return fmt.Errorf("unknown agent: %s", value)
 	}
 	return nil
+}
+
+func validateNewPaneChoice(value string) error {
+	choice := strings.TrimSpace(strings.ToLower(value))
+	if choice == "" || choice == "terminal" {
+		return nil
+	}
+	return validateNewSessionAgent(choice)
 }
 
 func validateTheme(value string) error {

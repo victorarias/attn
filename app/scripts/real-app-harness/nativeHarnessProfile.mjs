@@ -2,13 +2,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 /**
- * Native-app sibling of harnessProfile.mjs. The native GPUI app and the
+ * Native-app sibling of harnessProfile.mjs. The Swift native app and the
  * Tauri app are evolving on different timelines and will diverge — this
  * file owns the native side so the Tauri helper isn't paramaterized by
  * an `app` argument that hides their growing differences.
  *
- * Profile + automation gating must stay in sync with the Rust copy at
- *   - native-ui/crates/attn-native-app/src/automation/profile.rs
+ * Profile + automation gating must stay in sync with the Swift copy at
+ *   - native-ui/Sources/AttnNative/Automation/AutomationProfile.swift
  * and the Tauri runtime gate at
  *   - app/src-tauri/src/profile.rs
  * and the Go regex at

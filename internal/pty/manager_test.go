@@ -133,14 +133,20 @@ func TestBuildSpawnEnv_SetsWrapperPath(t *testing.T) {
 	env := buildSpawnEnv("", SpawnOptions{ID: "session-1"}, "codex", "/tmp/attn-wrapper", nil)
 
 	found := false
+	suppressesProfileBanner := false
 	for _, entry := range env {
 		if entry == "ATTN_WRAPPER_PATH=/tmp/attn-wrapper" {
 			found = true
-			break
+		}
+		if entry == "ATTN_SUPPRESS_PROFILE_BANNER=1" {
+			suppressesProfileBanner = true
 		}
 	}
 	if !found {
 		t.Fatalf("expected ATTN_WRAPPER_PATH in env, got %v", env)
+	}
+	if !suppressesProfileBanner {
+		t.Fatalf("expected managed agent wrapper to suppress its profile banner, got %v", env)
 	}
 }
 
@@ -149,6 +155,15 @@ func TestBuildSpawnEnv_DoesNotSetAgentExecutableForDefaultBinary(t *testing.T) {
 	for _, entry := range env {
 		if strings.HasPrefix(entry, "ATTN_CODEX_EXECUTABLE=") {
 			t.Fatalf("did not expect ATTN_CODEX_EXECUTABLE for default binary, got %v", env)
+		}
+	}
+}
+
+func TestBuildSpawnEnv_DoesNotSuppressExplicitCommandsInsideShellPane(t *testing.T) {
+	env := buildSpawnEnv("", SpawnOptions{ID: "shell-1"}, "shell", "/tmp/attn-wrapper", nil)
+	for _, entry := range env {
+		if entry == "ATTN_SUPPRESS_PROFILE_BANNER=1" {
+			t.Fatalf("did not expect profile banner suppression in interactive shell env, got %v", env)
 		}
 	}
 }

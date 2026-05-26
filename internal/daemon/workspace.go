@@ -1,11 +1,18 @@
 package daemon
 
 import (
+	"context"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 
+	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
 // The in-memory registry is the runtime cache; the SQLite store is the source
@@ -297,6 +304,151 @@ func (d *Daemon) handleRegisterWorkspace(client *wsClient, msg *protocol.Registe
 	})
 }
 
+func (d *Daemon) sendBootstrapWorkspaceResult(client *wsClient, workspaceID, sessionID string, err error) {
+	result := protocol.BootstrapWorkspaceResultMessage{
+		Event:       protocol.EventBootstrapWorkspaceResult,
+		WorkspaceID: workspaceID,
+		Success:     err == nil,
+	}
+	if strings.TrimSpace(sessionID) != "" {
+		result.SessionID = protocol.Ptr(sessionID)
+	}
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, result)
+}
+
+func (d *Daemon) handleBootstrapWorkspace(client *wsClient, msg *protocol.BootstrapWorkspaceMessage) {
+	workspaceID := strings.TrimSpace(msg.ID)
+	directory := resolveSpawnCWD(strings.TrimSpace(msg.Directory))
+	sessionID := strings.TrimSpace(msg.InitialSession.ID)
+	if workspaceID == "" || directory == "" || sessionID == "" {
+		d.sendBootstrapWorkspaceResult(client, workspaceID, sessionID, fmt.Errorf("workspace id, directory and initial session id are required"))
+		return
+	}
+	if d.store.GetWorkspace(workspaceID) != nil && len(d.store.SessionsInWorkspace(workspaceID)) > 0 {
+		d.sendBootstrapWorkspaceResult(client, workspaceID, sessionID, fmt.Errorf("workspace already exists: %s", workspaceID))
+		return
+	}
+	if d.ptyBackend == nil {
+		d.sendBootstrapWorkspaceResult(client, workspaceID, sessionID, fmt.Errorf("pty backend unavailable"))
+		return
+	}
+	if msg.InitialSession.Cols <= 0 || msg.InitialSession.Rows <= 0 ||
+		msg.InitialSession.Cols > maxPTYDimValue || msg.InitialSession.Rows > maxPTYDimValue {
+		d.sendBootstrapWorkspaceResult(client, workspaceID, sessionID, fmt.Errorf("invalid terminal size"))
+		return
+	}
+
+	cwd := resolveSpawnCWD(strings.TrimSpace(msg.InitialSession.Cwd))
+	if cwd == "" {
+		cwd = directory
+	}
+	rootKind := workspacelayout.PaneKindAgent
+	agent := normalizeSpawnAgent(protocol.Deref(msg.InitialSession.Agent))
+	if msg.InitialSession.Kind == protocol.WorkspaceLayoutPaneKindShell {
+		rootKind = workspacelayout.PaneKindShell
+		agent = protocol.AgentShellValue
+	} else if agent == protocol.AgentShellValue {
+		d.sendBootstrapWorkspaceResult(client, workspaceID, sessionID, fmt.Errorf("agent root requires a coding agent"))
+		return
+	}
+	label := strings.TrimSpace(protocol.Deref(msg.InitialSession.Label))
+	if label == "" {
+		label = filepath.Base(cwd)
+	}
+	title := strings.TrimSpace(msg.Title)
+	if title == "" {
+		title = filepath.Base(directory)
+	}
+	driver := agentdriver.Get(agent)
+	spawnOpts := ptybackend.SpawnOptions{
+		ID:            sessionID,
+		CWD:           cwd,
+		Agent:         agent,
+		Label:         label,
+		Cols:          uint16(msg.InitialSession.Cols),
+		Rows:          uint16(msg.InitialSession.Rows),
+		YoloMode:      protocol.Deref(msg.InitialSession.YoloMode),
+		Executable:    strings.TrimSpace(protocol.Deref(msg.InitialSession.Executable)),
+		LoginShellEnv: d.cachedLoginShellEnv(),
+	}
+	spawnStartedAt := protocol.TimestampNow()
+	if err := d.ptyBackend.Spawn(context.Background(), spawnOpts); err != nil {
+		d.sendBootstrapWorkspaceResult(client, workspaceID, sessionID, err)
+		return
+	}
+
+	now := string(protocol.TimestampNow())
+	state := protocol.SessionStateLaunching
+	if rootKind == workspacelayout.PaneKindShell {
+		state = protocol.SessionStateIdle
+	}
+	session := &protocol.Session{
+		ID:             sessionID,
+		Label:          label,
+		Agent:          protocol.SessionAgent(agent),
+		Directory:      cwd,
+		EndpointID:     msg.EndpointID,
+		WorkspaceID:    protocol.Ptr(workspaceID),
+		State:          state,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	}
+	if branchInfo, _ := git.GetBranchInfo(cwd); branchInfo != nil {
+		if branchInfo.Branch != "" {
+			session.Branch = protocol.Ptr(branchInfo.Branch)
+		}
+		if branchInfo.IsWorktree {
+			session.IsWorktree = protocol.Ptr(true)
+		}
+		if branchInfo.MainRepo != "" {
+			session.MainRepo = protocol.Ptr(branchInfo.MainRepo)
+		}
+	}
+	workspace := &protocol.Workspace{
+		ID:        workspaceID,
+		Title:     title,
+		Directory: directory,
+		Status:    protocol.WorkspaceStatus(state),
+	}
+	layout := workspacelayout.DefaultWorkspaceLayoutForRoot(workspaceID, workspacelayout.Pane{
+		RuntimeID: sessionID,
+		SessionID: sessionID,
+		Kind:      rootKind,
+		Title:     label,
+	})
+	if err := d.store.BootstrapWorkspace(workspace, session, layout); err != nil {
+		d.terminateSession(sessionID, syscall.SIGTERM)
+		d.sendBootstrapWorkspaceResult(client, workspaceID, sessionID, err)
+		return
+	}
+	if d.workspaces == nil {
+		d.workspaces = newWorkspaceRegistry()
+	}
+	snapshot, registered := d.workspaces.register(workspaceID, title, directory)
+	d.workspaces.associateSession(sessionID, workspaceID, label)
+	if rootKind == workspacelayout.PaneKindAgent {
+		d.clearLongRunTracking(sessionID)
+		d.startTranscriptWatcher(sessionID, session.Agent, session.Directory, spawnStartedAt.Time())
+		if persistResumeID := agentdriver.SpawnResumeSessionID(driver, sessionID, "", false); persistResumeID != "" {
+			d.store.SetResumeSessionID(sessionID, persistResumeID)
+		}
+	}
+	snapshot.Status = workspace.Status
+	d.workspaces.applyStatus(workspaceID, workspace.Status)
+	event := protocol.EventWorkspaceStateChanged
+	if registered {
+		event = protocol.EventWorkspaceRegistered
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{Event: event, Workspace: &snapshot})
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{Event: protocol.EventSessionRegistered, Session: d.sessionForBroadcast(session)})
+	d.broadcastWorkspaceLayout(workspaceID)
+	d.sendBootstrapWorkspaceResult(client, workspaceID, sessionID, nil)
+}
+
 // handleUnregisterWorkspace closes the workspace AND every session that
 // belongs to it. Sessions get a graceful SIGTERM through unregisterSession
 // (same path as the unix-socket "unregister" command), so transcripts flush
@@ -332,6 +484,7 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 	if !removed {
 		return
 	}
+	d.clearWorkspacePaneFocusHistory(id)
 	d.store.RemoveWorkspace(id)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:     protocol.EventWorkspaceUnregistered,
@@ -391,6 +544,10 @@ func (d *Daemon) listWorkspaces() []protocol.Workspace {
 // and seeds the rollup status. Called from handleSpawnSession when the spawn
 // message carries workspace_id.
 func (d *Daemon) associateSessionWithWorkspace(sessionID, workspaceID string) {
+	d.associateSessionWithWorkspaceAt(sessionID, workspaceID, "", nil)
+}
+
+func (d *Daemon) associateSessionWithWorkspaceAt(sessionID, workspaceID, targetPaneID string, direction *protocol.WorkspaceLayoutSplitDirection) {
 	if workspaceID == "" || d.workspaces == nil {
 		return
 	}
@@ -404,7 +561,7 @@ func (d *Daemon) associateSessionWithWorkspace(sessionID, workspaceID string) {
 		return
 	}
 	d.store.SetSessionWorkspaceID(sessionID, workspaceID)
-	if err := d.ensureAgentPaneInWorkspace(workspaceID, sessionID, title); err != nil {
+	if err := d.ensureAgentPaneInWorkspace(workspaceID, sessionID, title, targetPaneID, direction); err != nil {
 		d.logf("workspace layout agent pane ensure failed for session %s: %v", sessionID, err)
 	}
 	updated, changed := d.recomputeWorkspaceStatus(workspaceID)
@@ -436,6 +593,9 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 		Event:     protocol.EventWorkspaceStateChanged,
 		Workspace: &updated,
 	})
+	if len(d.workspaces.sessionIDs(workspaceID)) == 0 {
+		d.broadcastWorkspaceLayout(workspaceID)
+	}
 }
 
 // decorateSessionWithWorkspace fills in WorkspaceID on a session about to be

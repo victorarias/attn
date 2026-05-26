@@ -2,7 +2,6 @@
 
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { manifestPathForNativeProfile } from './nativeHarnessProfile.mjs';
-import { getProcessWindowId } from './nativeWindowCapture.mjs';
 
 function printHelp() {
   console.log(`Usage: node scripts/real-app-harness/native-ui-automation-cli.mjs <action> [json-payload]
@@ -12,23 +11,38 @@ The native client must already be running through \`make dev-native\`.
 Actions:
   ping
   get_state
+  list_panes
+  select_workspace              JSON payload: {"workspace_id":"workspace-id"}
+  navigate                      JSON payload: {"direction":"left"}
+  open_new_workspace_dialog
+  open_add_pane_dialog          JSON payload: {"direction":"vertical"}
+  quick_split                   JSON payload: {"direction":"vertical"}
+  get_launcher_state
+  set_launcher_path             JSON payload: {"path":"/tmp/workspace"}
+  set_launcher_choice           JSON payload: {"choice":"terminal","yolo":false}
+  perform_launcher_action       JSON payload: {"action":"move_location_down"}
+  submit_launcher_location
+  choose_launcher_destination   JSON payload: {"path":"/path/to/worktree"}
+  cancel_launcher
+  close_selected_content
+  close_window
   tail_events                  JSON payload: {"since_id":0}
   get_window_bounds
-  create_workspace             JSON payload: {"id":"...","title":"...","directory":"/tmp"}
-  spawn_session                JSON payload: {"id":"...","workspace_id":"...","cwd":"/tmp","agent":"pi","executable":"/bin/sh"}
-  destroy_workspace            JSON payload: {"id":"..."}
-  kill_runtime                 JSON payload: {"runtime_id":"..."}
-  select_workspace             JSON payload: {"workspace_id":"..."}
-  focus_pane                   JSON payload: {"workspace_id":"...","pane_id":"..."}
-  split_pane                   JSON payload: {"workspaceId":"...","targetPaneId":"...","direction":"vertical"}
-  mute_session                 JSON payload: {"session_id":"..."}
-  close_pane                   JSON payload: {"workspace_id":"...","pane_id":"..."}
-  write_pane                   JSON payload: {"workspaceId":"...","paneId":"...","text":"\\r","submit":false}
-  type_pane_via_ui             JSON payload: {"workspaceId":"...","paneId":"...","text":"echo ready"} (requires prior focus_pane)
-  read_pane_text               JSON payload: {"workspaceId":"...","paneId":"..."}
-  capture_structured_snapshot  JSON payload: {"includePaneText":true}
-  capture_render_health
+  set_window_background_mode   JSON payload: {"enabled":true}
+  park_window                  JSON payload: {"visible_px":20}
   screenshot                   JSON payload: {"path":"/tmp/attn-native.png"}
+  screenshot_window            JSON payload: {"path":"/tmp/attn-native.png"}
+  focus_pane                   JSON payload: {"runtime_id":"runtime-id","key_window":false}
+  type_terminal                JSON payload: {"runtime_id":"runtime-id","text":"printf ok\\\\r"}
+  press_terminal_enter         JSON payload: {"runtime_id":"runtime-id"}
+  copy_terminal_selection      JSON payload: {"runtime_id":"runtime-id"}
+  paste_terminal_clipboard     JSON payload: {"runtime_id":"runtime-id"}
+  read_pane_text               JSON payload: {"runtime_id":"runtime-id"}
+  read_terminal_selection      JSON payload: {"runtime_id":"runtime-id"}
+  move_terminal_pointer        JSON payload: {"runtime_id":"runtime-id","column":0,"row":0}
+  click_terminal_cell          JSON payload: {"runtime_id":"runtime-id","column":0,"row":0}
+  drag_terminal_selection      JSON payload: {"runtime_id":"runtime-id","start_column":0,"start_row":0,"end_column":4,"end_row":0}
+  get_surface_geometry         JSON payload: {"runtime_id":"runtime-id"}
 `);
 }
 
@@ -49,13 +63,7 @@ async function main() {
   await client.waitForManifest(20_000);
   await client.waitForReady(20_000);
 
-  const requestPayload = action === 'screenshot'
-    ? {
-        ...payload,
-        windowId: await getProcessWindowId(client.readManifest().pid),
-      }
-    : payload;
-  const result = await client.request(action, requestPayload);
+  const result = await client.request(action, payload);
   console.log(JSON.stringify(result, null, 2));
 }
 

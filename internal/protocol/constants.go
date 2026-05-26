@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "65"
+const ProtocolVersion = "66"
 
 // Commands
 const (
@@ -95,6 +95,7 @@ const (
 	CmdWorkspaceLayoutFocusPane  = "workspace_layout_focus_pane"
 	CmdWorkspaceLayoutRenamePane = "workspace_layout_rename_pane"
 	CmdRegisterWorkspace         = "register_workspace"
+	CmdBootstrapWorkspace        = "bootstrap_workspace"
 	CmdUnregisterWorkspace       = "unregister_workspace"
 )
 
@@ -106,6 +107,7 @@ const (
 	EventWorkspaceRegistered          = "workspace_registered"
 	EventWorkspaceUnregistered        = "workspace_unregistered"
 	EventWorkspaceStateChanged        = "workspace_state_changed"
+	EventBootstrapWorkspaceResult     = "bootstrap_workspace_result"
 	EventSessionTodosUpdated          = "session_todos_updated"
 	EventSessionsUpdated              = "sessions_updated"
 	EventPRsUpdated                   = "prs_updated"
@@ -801,6 +803,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg RegisterWorkspaceMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal register_workspace: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdBootstrapWorkspace:
+		var msg BootstrapWorkspaceMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal bootstrap_workspace: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

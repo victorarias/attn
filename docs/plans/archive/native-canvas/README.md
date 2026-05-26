@@ -21,5 +21,7 @@ Its canvas-only automation scenario is retained at
 Do not treat canvas panels, panel geometry, or the protocol-v64 encoding of
 `shell_as_session` as active architecture. The first-class shell-session need
 is retained and must be represented through the current workspace-layout
-protocol. Active native-client work is described in
-`../../native-gpui-workspace-client-prototype.md`.
+protocol. Active native-client launcher work is described in
+`../../2026-05-24-native-workspace-pane-launcher.md`. The broader native
+workspace prototype proposal has been retained as historical context in
+`../native-workspace-prototype/`.

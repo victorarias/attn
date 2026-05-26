@@ -17,6 +17,7 @@ import (
 
 	creackpty "github.com/creack/pty"
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/config"
 )
 
 const (
@@ -459,6 +460,7 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 		env = mergeEnvironment(env, []string{
 			"ATTN_INSIDE_APP=1",
 			"ATTN_DAEMON_MANAGED=1",
+			config.SuppressProfileBannerEnv + "=1",
 			"ATTN_SESSION_ID=" + opts.ID,
 			"ATTN_AGENT=" + agent,
 		})

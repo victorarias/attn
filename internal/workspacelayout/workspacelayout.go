@@ -10,6 +10,7 @@ import (
 const (
 	MainPaneID        = "main"
 	DefaultPaneTitle  = "Agent"
+	DefaultShellTitle = "Terminal"
 	DefaultSplitRatio = 0.5
 )
 
@@ -60,19 +61,22 @@ func DefaultLayout() Node {
 }
 
 func DefaultWorkspaceLayout(workspaceID, sessionID string) WorkspaceLayout {
+	return DefaultWorkspaceLayoutForRoot(workspaceID, Pane{
+		PaneID:    MainPaneID,
+		RuntimeID: sessionID,
+		SessionID: sessionID,
+		Kind:      PaneKindAgent,
+		Title:     DefaultPaneTitle,
+	})
+}
+
+func DefaultWorkspaceLayoutForRoot(workspaceID string, root Pane) WorkspaceLayout {
+	root = NormalizeRootPane(root)
 	return WorkspaceLayout{
 		WorkspaceID:  workspaceID,
 		ActivePaneID: MainPaneID,
 		Layout:       DefaultLayout(),
-		Panes: []Pane{
-			{
-				PaneID:    MainPaneID,
-				RuntimeID: sessionID,
-				SessionID: sessionID,
-				Kind:      PaneKindAgent,
-				Title:     DefaultPaneTitle,
-			},
-		},
+		Panes:        []Pane{root},
 	}
 }
 
@@ -95,17 +99,35 @@ func DecodeLayout(layoutJSON string) (Node, error) {
 	return node, nil
 }
 
-func NormalizeWorkspaceLayout(snapshot WorkspaceLayout, mainSessionID string) WorkspaceLayout {
+func NormalizeRootPane(root Pane) Pane {
+	root.PaneID = MainPaneID
+	root.RuntimeID = strings.TrimSpace(root.RuntimeID)
+	root.SessionID = strings.TrimSpace(root.SessionID)
+	if root.SessionID == "" {
+		root.SessionID = root.RuntimeID
+	}
+	if root.RuntimeID == "" {
+		root.RuntimeID = root.SessionID
+	}
+	if root.Kind != PaneKindShell {
+		root.Kind = PaneKindAgent
+	}
+	root.Title = strings.TrimSpace(root.Title)
+	if root.Title == "" {
+		if root.Kind == PaneKindShell {
+			root.Title = DefaultShellTitle
+		} else {
+			root.Title = DefaultPaneTitle
+		}
+	}
+	return root
+}
+
+func NormalizeWorkspaceLayout(snapshot WorkspaceLayout, root Pane) WorkspaceLayout {
 	normalized := snapshot
 
 	panesByID := make(map[string]Pane, len(normalized.Panes)+1)
-	panesByID[MainPaneID] = Pane{
-		PaneID:    MainPaneID,
-		RuntimeID: strings.TrimSpace(mainSessionID),
-		SessionID: strings.TrimSpace(mainSessionID),
-		Kind:      PaneKindAgent,
-		Title:     DefaultPaneTitle,
-	}
+	panesByID[MainPaneID] = NormalizeRootPane(root)
 
 	for _, pane := range normalized.Panes {
 		paneID := strings.TrimSpace(pane.PaneID)

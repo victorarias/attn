@@ -865,6 +865,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkspaceLayoutRenamePane(client, msg.(*protocol.WorkspaceLayoutRenamePaneMessage))
 	case protocol.CmdRegisterWorkspace:
 		d.handleRegisterWorkspace(client, msg.(*protocol.RegisterWorkspaceMessage))
+	case protocol.CmdBootstrapWorkspace:
+		d.handleBootstrapWorkspace(client, msg.(*protocol.BootstrapWorkspaceMessage))
 	case protocol.CmdUnregisterWorkspace:
 		d.handleUnregisterWorkspace(client, msg.(*protocol.UnregisterWorkspaceMessage))
 	default:
@@ -1042,6 +1044,10 @@ func remoteCommandEndpointID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdRegisterWorkspace:
 		if typed, ok := msg.(*protocol.RegisterWorkspaceMessage); ok {
+			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
+		}
+	case protocol.CmdBootstrapWorkspace:
+		if typed, ok := msg.(*protocol.BootstrapWorkspaceMessage); ok {
 			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
 		}
 	case protocol.CmdCreateWorktree:

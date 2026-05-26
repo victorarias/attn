@@ -285,6 +285,9 @@ func TestAttnDir_SplitsByProfile(t *testing.T) {
 	if got := LogPath(); got != filepath.Join(wantDir, "daemon.log") {
 		t.Errorf("LogPath() = %q", got)
 	}
+	if got := DaemonStderrPath(); got != filepath.Join(wantDir, "daemon.stderr.log") {
+		t.Errorf("DaemonStderrPath() = %q", got)
+	}
 }
 
 func TestWSPort_ProfileDefaults(t *testing.T) {

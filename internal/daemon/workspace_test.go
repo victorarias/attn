@@ -1,11 +1,15 @@
 package daemon
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
 func TestRollupWorkspaceStatus_PriorityOrdering(t *testing.T) {
@@ -252,6 +256,7 @@ func TestHandleUnregisterWorkspace_BroadcastsOnlyForKnown(t *testing.T) {
 		Title:     "ws",
 		Directory: "/repo",
 	})
+	d.recordWorkspacePaneFocus("ws1", workspacelayout.MainPaneID)
 	d.handleUnregisterWorkspace(nil, &protocol.UnregisterWorkspaceMessage{
 		Cmd: protocol.CmdUnregisterWorkspace,
 		ID:  "ws1",
@@ -262,6 +267,12 @@ func TestHandleUnregisterWorkspace_BroadcastsOnlyForKnown(t *testing.T) {
 	}
 	if events[1].Event != protocol.EventWorkspaceUnregistered {
 		t.Fatalf("second broadcast = %q, want workspace_unregistered", events[1].Event)
+	}
+	d.workspacePaneHistoryMu.Lock()
+	_, retainedHistory := d.workspacePaneHistory["ws1"]
+	d.workspacePaneHistoryMu.Unlock()
+	if retainedHistory {
+		t.Fatal("unregistered workspace retained pane focus history")
 	}
 }
 
@@ -460,6 +471,48 @@ func TestUnregisterWorkspace_CascadeClosesMemberSessions(t *testing.T) {
 	}
 }
 
+type fakeTerminateRemoveBackend struct {
+	fakeSpawnBackend
+	killCalls               int
+	terminateAndRemoveCalls int
+}
+
+func (b *fakeTerminateRemoveBackend) Kill(context.Context, string, syscall.Signal) error {
+	b.killCalls++
+	return nil
+}
+
+func (b *fakeTerminateRemoveBackend) TerminateAndRemove(context.Context, string, syscall.Signal) error {
+	b.terminateAndRemoveCalls++
+	return nil
+}
+
+func TestUnregisterWorkspace_UsesBackendCombinedTerminationWhenAvailable(t *testing.T) {
+	d := newDaemonForTest(t)
+	backend := &fakeTerminateRemoveBackend{}
+	d.ptyBackend = backend
+	now := string(protocol.TimestampNow())
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: "ws-combined-close", Title: "ws", Directory: "/repo",
+	})
+	d.store.Add(&protocol.Session{
+		ID: "session-combined-close", Label: "session", Agent: protocol.SessionAgentCodex, Directory: "/repo",
+		State: protocol.SessionStateIdle, StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	})
+	d.associateSessionWithWorkspace("session-combined-close", "ws-combined-close")
+
+	d.handleUnregisterWorkspace(nil, &protocol.UnregisterWorkspaceMessage{
+		Cmd: protocol.CmdUnregisterWorkspace, ID: "ws-combined-close",
+	})
+
+	if backend.terminateAndRemoveCalls != 1 || backend.killCalls != 0 {
+		t.Fatalf("teardown calls = combined:%d kill:%d, want combined remove only", backend.terminateAndRemoveCalls, backend.killCalls)
+	}
+	if d.store.GetWorkspace("ws-combined-close") != nil || d.store.Get("session-combined-close") != nil {
+		t.Fatal("combined teardown did not remove workspace state")
+	}
+}
+
 func TestLoadWorkspacesFromStore_RebuildsRegistryAndReassociates(t *testing.T) {
 	d := newDaemonForTest(t)
 	now := string(protocol.TimestampNow())
@@ -514,5 +567,331 @@ func TestAssociateSessionWithWorkspace_PersistsToStore(t *testing.T) {
 	got = d.store.Get("s1")
 	if got == nil || got.WorkspaceID != nil {
 		t.Fatalf("workspace_id was not cleared on dissociate: %+v", got)
+	}
+}
+
+func TestBootstrapWorkspace_ShellRootIsFirstClassSession(t *testing.T) {
+	d := newDaemonForTest(t)
+	d.ptyBackend = &fakeSpawnBackend{}
+	dir := t.TempDir()
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+
+	d.handleBootstrapWorkspace(client, &protocol.BootstrapWorkspaceMessage{
+		Cmd:       protocol.CmdBootstrapWorkspace,
+		ID:        "ws-shell",
+		Title:     "Shell workspace",
+		Directory: dir,
+		InitialSession: protocol.BootstrapWorkspaceInitialSession{
+			ID:   "shell-root",
+			Cwd:  dir,
+			Kind: protocol.WorkspaceLayoutPaneKindShell,
+			Cols: 100,
+			Rows: 36,
+		},
+	})
+
+	session := d.store.Get("shell-root")
+	if session == nil || session.Agent != protocol.SessionAgentShell || protocol.Deref(session.WorkspaceID) != "ws-shell" {
+		t.Fatalf("shell root session = %+v, want stored workspace-owned shell", session)
+	}
+	layout := d.store.GetWorkspaceLayout("ws-shell")
+	if layout == nil || len(layout.Panes) != 1 {
+		t.Fatalf("root layout = %+v, want one pane", layout)
+	}
+	root := layout.Panes[0]
+	if root.PaneID != workspacelayout.MainPaneID || root.Kind != workspacelayout.PaneKindShell || root.SessionID != "shell-root" {
+		t.Fatalf("root pane = %+v, want first-class shell root", root)
+	}
+}
+
+func TestBootstrapWorkspace_SpawnFailureLeavesNoPersistedWorkspace(t *testing.T) {
+	d := newDaemonForTest(t)
+	d.ptyBackend = &fakeSpawnBackend{spawnErr: errors.New("cannot start terminal")}
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+
+	d.handleBootstrapWorkspace(client, &protocol.BootstrapWorkspaceMessage{
+		Cmd:       protocol.CmdBootstrapWorkspace,
+		ID:        "ws-failed",
+		Title:     "Failed",
+		Directory: t.TempDir(),
+		InitialSession: protocol.BootstrapWorkspaceInitialSession{
+			ID:    "failed-root",
+			Cwd:   t.TempDir(),
+			Kind:  protocol.WorkspaceLayoutPaneKindAgent,
+			Agent: protocol.Ptr("codex"),
+			Cols:  100,
+			Rows:  36,
+		},
+	})
+
+	if d.store.GetWorkspace("ws-failed") != nil || d.store.Get("failed-root") != nil || d.store.GetWorkspaceLayout("ws-failed") != nil {
+		t.Fatal("failed bootstrap persisted partial workspace state")
+	}
+}
+
+func TestBootstrapWorkspace_RepopulatesWorkspaceAfterLastSessionIsRemoved(t *testing.T) {
+	d := newDaemonForTest(t)
+	d.ptyBackend = &fakeSpawnBackend{}
+	dir := t.TempDir()
+	client := &wsClient{send: make(chan outboundMessage, 8)}
+
+	d.handleBootstrapWorkspace(client, &protocol.BootstrapWorkspaceMessage{
+		Cmd:       protocol.CmdBootstrapWorkspace,
+		ID:        "ws-retained",
+		Title:     "Retained",
+		Directory: dir,
+		InitialSession: protocol.BootstrapWorkspaceInitialSession{
+			ID:   "old-root",
+			Cwd:  dir,
+			Kind: protocol.WorkspaceLayoutPaneKindShell,
+			Cols: 100,
+			Rows: 36,
+		},
+	})
+	cap := captureBroadcasts(d)
+	d.handleUnregisterWS(client, &protocol.UnregisterMessage{Cmd: protocol.CmdUnregister, ID: "old-root"})
+	if remaining := d.workspaces.sessionIDs("ws-retained"); len(remaining) != 0 {
+		t.Fatalf("websocket unregister left retained workspace membership behind: %v", remaining)
+	}
+	foundEmptyLayout := false
+	for _, event := range cap.snapshot() {
+		if event.Event == protocol.EventWorkspaceLayout && event.WorkspaceLayout != nil &&
+			event.WorkspaceLayout.WorkspaceID == "ws-retained" && len(event.WorkspaceLayout.Panes) == 0 {
+			foundEmptyLayout = true
+		}
+	}
+	if !foundEmptyLayout {
+		t.Fatal("websocket unregister did not broadcast an empty retained-workspace layout")
+	}
+
+	d.handleBootstrapWorkspace(client, &protocol.BootstrapWorkspaceMessage{
+		Cmd:       protocol.CmdBootstrapWorkspace,
+		ID:        "ws-retained",
+		Title:     "Retained",
+		Directory: dir,
+		InitialSession: protocol.BootstrapWorkspaceInitialSession{
+			ID:   "replacement-root",
+			Cwd:  dir,
+			Kind: protocol.WorkspaceLayoutPaneKindShell,
+			Cols: 100,
+			Rows: 36,
+		},
+	})
+
+	layout := d.store.GetWorkspaceLayout("ws-retained")
+	if d.store.Get("replacement-root") == nil || layout == nil || len(layout.Panes) != 1 || layout.Panes[0].RuntimeID != "replacement-root" {
+		t.Fatalf("replacement bootstrap did not reset retained workspace layout: %+v", layout)
+	}
+}
+
+func TestSpawnSession_UsesRequestedAgentPaneDirection(t *testing.T) {
+	d := newDaemonForTest(t)
+	d.ptyBackend = &fakeSpawnBackend{}
+	dir := t.TempDir()
+	client := &wsClient{send: make(chan outboundMessage, 8)}
+	d.handleBootstrapWorkspace(client, &protocol.BootstrapWorkspaceMessage{
+		Cmd:       protocol.CmdBootstrapWorkspace,
+		ID:        "ws-agents",
+		Title:     "Agents",
+		Directory: dir,
+		InitialSession: protocol.BootstrapWorkspaceInitialSession{
+			ID:    "root-agent",
+			Cwd:   dir,
+			Kind:  protocol.WorkspaceLayoutPaneKindAgent,
+			Agent: protocol.Ptr("codex"),
+			Cols:  100,
+			Rows:  36,
+		},
+	})
+
+	direction := protocol.WorkspaceLayoutSplitDirectionHorizontal
+	d.handleSpawnSession(client, &protocol.SpawnSessionMessage{
+		Cmd:          protocol.CmdSpawnSession,
+		ID:           "claude-pane",
+		Cwd:          dir,
+		WorkspaceID:  "ws-agents",
+		Agent:        "claude",
+		Cols:         100,
+		Rows:         36,
+		TargetPaneID: protocol.Ptr(workspacelayout.MainPaneID),
+		Direction:    &direction,
+	})
+
+	layout := d.store.GetWorkspaceLayout("ws-agents")
+	if layout == nil || layout.Layout.Direction != workspacelayout.DirectionHorizontal {
+		t.Fatalf("agent split layout = %+v, want horizontal root split", layout)
+	}
+	if layout.ActivePaneID == workspacelayout.MainPaneID {
+		t.Fatal("new agent pane did not become active")
+	}
+}
+
+func TestWorkspaceLayoutSplitPane_UsesEditedShellDirectory(t *testing.T) {
+	d := newDaemonForTest(t)
+	backend := &fakeSpawnBackend{}
+	d.ptyBackend = backend
+	rootDir := t.TempDir()
+	shellDir := t.TempDir()
+	client := &wsClient{send: make(chan outboundMessage, 8)}
+	d.handleBootstrapWorkspace(client, &protocol.BootstrapWorkspaceMessage{
+		Cmd:       protocol.CmdBootstrapWorkspace,
+		ID:        "ws-shell-split",
+		Title:     "Shell split",
+		Directory: rootDir,
+		InitialSession: protocol.BootstrapWorkspaceInitialSession{
+			ID:    "root-agent",
+			Cwd:   rootDir,
+			Kind:  protocol.WorkspaceLayoutPaneKindAgent,
+			Agent: protocol.Ptr("codex"),
+			Cols:  100,
+			Rows:  36,
+		},
+	})
+
+	d.handleWorkspaceLayoutSplitPane(client, &protocol.WorkspaceLayoutSplitPaneMessage{
+		Cmd:          protocol.CmdWorkspaceLayoutSplitPane,
+		WorkspaceID:  "ws-shell-split",
+		TargetPaneID: workspacelayout.MainPaneID,
+		Direction:    protocol.WorkspaceLayoutSplitDirectionVertical,
+		Cwd:          protocol.Ptr(shellDir),
+	})
+
+	spawn, ok := backend.LastSpawn()
+	if !ok || spawn.CWD != shellDir || spawn.Agent != protocol.AgentShellValue {
+		t.Fatalf("shell split spawn = %+v, want shell in %s", spawn, shellDir)
+	}
+}
+
+func TestWorkspacePaneRemoval_ReturnsToPreviouslyFocusedPaneInWorkspace(t *testing.T) {
+	d := newDaemonForTest(t)
+	d.ptyBackend = &fakeSpawnBackend{}
+	dir := t.TempDir()
+	client := &wsClient{send: make(chan outboundMessage, 16)}
+	d.handleBootstrapWorkspace(client, &protocol.BootstrapWorkspaceMessage{
+		Cmd:       protocol.CmdBootstrapWorkspace,
+		ID:        "ws-focus-history",
+		Title:     "Focus history",
+		Directory: dir,
+		InitialSession: protocol.BootstrapWorkspaceInitialSession{
+			ID:    "root-agent",
+			Cwd:   dir,
+			Kind:  protocol.WorkspaceLayoutPaneKindAgent,
+			Agent: protocol.Ptr("codex"),
+			Cols:  100,
+			Rows:  36,
+		},
+	})
+
+	d.handleWorkspaceLayoutSplitPane(client, &protocol.WorkspaceLayoutSplitPaneMessage{
+		Cmd:          protocol.CmdWorkspaceLayoutSplitPane,
+		WorkspaceID:  "ws-focus-history",
+		TargetPaneID: workspacelayout.MainPaneID,
+		Direction:    protocol.WorkspaceLayoutSplitDirectionVertical,
+	})
+	firstSplit := d.store.GetWorkspaceLayout("ws-focus-history")
+	if firstSplit == nil {
+		t.Fatal("first split did not create a layout")
+	}
+	paneA := firstSplit.ActivePaneID
+
+	d.handleWorkspaceLayoutSplitPane(client, &protocol.WorkspaceLayoutSplitPaneMessage{
+		Cmd:          protocol.CmdWorkspaceLayoutSplitPane,
+		WorkspaceID:  "ws-focus-history",
+		TargetPaneID: paneA,
+		Direction:    protocol.WorkspaceLayoutSplitDirectionHorizontal,
+	})
+	secondSplit := d.store.GetWorkspaceLayout("ws-focus-history")
+	if secondSplit == nil {
+		t.Fatal("second split did not create a layout")
+	}
+	paneB := secondSplit.ActivePaneID
+
+	for _, paneID := range []string{workspacelayout.MainPaneID, paneA, paneB} {
+		d.handleWorkspaceLayoutFocusPane(client, &protocol.WorkspaceLayoutFocusPaneMessage{
+			Cmd:         protocol.CmdWorkspaceLayoutFocusPane,
+			WorkspaceID: "ws-focus-history",
+			PaneID:      paneID,
+		})
+	}
+
+	d.handleBootstrapWorkspace(client, &protocol.BootstrapWorkspaceMessage{
+		Cmd:       protocol.CmdBootstrapWorkspace,
+		ID:        "ws-other",
+		Title:     "Other",
+		Directory: dir,
+		InitialSession: protocol.BootstrapWorkspaceInitialSession{
+			ID:    "other-root",
+			Cwd:   dir,
+			Kind:  protocol.WorkspaceLayoutPaneKindAgent,
+			Agent: protocol.Ptr("codex"),
+			Cols:  100,
+			Rows:  36,
+		},
+	})
+	d.handleWorkspaceLayoutFocusPane(client, &protocol.WorkspaceLayoutFocusPaneMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutFocusPane,
+		WorkspaceID: "ws-other",
+		PaneID:      workspacelayout.MainPaneID,
+	})
+
+	d.handleWorkspaceLayoutClosePane(client, &protocol.WorkspaceLayoutClosePaneMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutClosePane,
+		WorkspaceID: "ws-focus-history",
+		PaneID:      paneB,
+	})
+	afterFirstClose := d.store.GetWorkspaceLayout("ws-focus-history")
+	if afterFirstClose == nil || afterFirstClose.ActivePaneID != paneA {
+		t.Fatalf("active pane after closing last-focused pane = %+v, want %q", afterFirstClose, paneA)
+	}
+
+	d.handleWorkspaceLayoutSplitPane(client, &protocol.WorkspaceLayoutSplitPaneMessage{
+		Cmd:          protocol.CmdWorkspaceLayoutSplitPane,
+		WorkspaceID:  "ws-focus-history",
+		TargetPaneID: paneA,
+		Direction:    protocol.WorkspaceLayoutSplitDirectionHorizontal,
+	})
+	beforeRuntimeExit := d.store.GetWorkspaceLayout("ws-focus-history")
+	if beforeRuntimeExit == nil {
+		t.Fatal("runtime-exit split did not create a layout")
+	}
+	transientPaneID := beforeRuntimeExit.ActivePaneID
+	transientRuntimeID := ""
+	for _, pane := range beforeRuntimeExit.Panes {
+		if pane.PaneID == transientPaneID {
+			transientRuntimeID = pane.RuntimeID
+			break
+		}
+	}
+	if transientRuntimeID == "" || !d.handleWorkspaceLayoutRuntimeExit(transientRuntimeID, 0, "") {
+		t.Fatal("runtime exit did not remove its pane")
+	}
+	afterRuntimeExit := d.store.GetWorkspaceLayout("ws-focus-history")
+	if afterRuntimeExit == nil || afterRuntimeExit.ActivePaneID != paneA {
+		t.Fatalf("active pane after focused terminal exits = %+v, want %q", afterRuntimeExit, paneA)
+	}
+
+	d.handleWorkspaceLayoutClosePane(client, &protocol.WorkspaceLayoutClosePaneMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutClosePane,
+		WorkspaceID: "ws-focus-history",
+		PaneID:      paneA,
+	})
+	afterSecondClose := d.store.GetWorkspaceLayout("ws-focus-history")
+	if afterSecondClose == nil || afterSecondClose.ActivePaneID != workspacelayout.MainPaneID {
+		t.Fatalf("active pane after exhausting history = %+v, want %q", afterSecondClose, workspacelayout.MainPaneID)
+	}
+}
+
+func TestWorkspacePaneRemovalHandlesRecoveredLayoutWithoutFocusHistory(t *testing.T) {
+	d := newDaemonForTest(t)
+	layout := workspacelayout.Node{
+		Type: "split",
+		Children: []workspacelayout.Node{
+			{Type: "pane", PaneID: workspacelayout.MainPaneID},
+			{Type: "pane", PaneID: "pane-b"},
+		},
+	}
+
+	if got := d.previouslyFocusedSurvivingPane("ws-recovered", "pane-b", layout); got != "" {
+		t.Fatalf("previously focused pane = %q, want no preferred pane without history", got)
 	}
 }

@@ -750,6 +750,8 @@ model SpawnSessionMessage {
   codex_executable?: string;   // Backward compatibility
   copilot_executable?: string; // Backward compatibility
   pi_executable?: string;      // Backward compatibility
+  target_pane_id?: string;     // Explicit split target for adding an agent pane
+  direction?: WorkspaceLayoutSplitDirection; // Explicit split direction for adding an agent pane
 }
 
 model AttachSessionMessage {
@@ -793,6 +795,7 @@ model WorkspaceLayoutSplitPaneMessage {
   workspace_id: string;
   target_pane_id: string;
   direction: WorkspaceLayoutSplitDirection;
+  cwd?: string; // Optional shell working directory; defaults to workspace directory
 }
 
 model WorkspaceLayoutClosePaneMessage {
@@ -820,6 +823,27 @@ model RegisterWorkspaceMessage {
   title: string;
   directory: string;
   endpoint_id?: string;
+}
+
+model BootstrapWorkspaceInitialSession {
+  id: string;
+  cwd: string;
+  kind: WorkspaceLayoutPaneKind;
+  agent?: string;
+  cols: int32;
+  rows: int32;
+  label?: string;
+  yolo_mode?: boolean;
+  executable?: string;
+}
+
+model BootstrapWorkspaceMessage {
+  cmd: "bootstrap_workspace";
+  id: string;
+  title: string;
+  directory: string;
+  endpoint_id?: string;
+  initial_session: BootstrapWorkspaceInitialSession;
 }
 
 model UnregisterWorkspaceMessage {
@@ -893,6 +917,14 @@ model WorkspaceUnregisteredMessage {
 model WorkspaceStateChangedMessage {
   event: "workspace_state_changed";
   workspace: Workspace;
+}
+
+model BootstrapWorkspaceResultMessage {
+  event: "bootstrap_workspace_result";
+  workspace_id: string;
+  session_id?: string;
+  success: boolean;
+  error?: string;
 }
 
 model SessionTodosUpdatedMessage {
@@ -1505,6 +1537,7 @@ alias DaemonEvent =
   | WorkspaceRegisteredMessage
   | WorkspaceUnregisteredMessage
   | WorkspaceStateChangedMessage
+  | BootstrapWorkspaceResultMessage
   | SessionTodosUpdatedMessage
   | SessionsUpdatedMessage
   | WorkspaceLayoutMessage

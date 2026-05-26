@@ -1200,13 +1200,14 @@ func (b *fakeAttachBackend) SetAttachInfo(info ptybackend.AttachInfo) {
 type fakeSpawnBackend struct {
 	mu        sync.Mutex
 	spawnOpts []ptybackend.SpawnOptions
+	spawnErr  error
 }
 
 func (b *fakeSpawnBackend) Spawn(_ context.Context, opts ptybackend.SpawnOptions) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.spawnOpts = append(b.spawnOpts, opts)
-	return nil
+	return b.spawnErr
 }
 func (b *fakeSpawnBackend) Attach(context.Context, string, string) (ptybackend.AttachInfo, ptybackend.Stream, error) {
 	return ptybackend.AttachInfo{Running: true}, newFakeOutputStream(), nil
@@ -2083,17 +2084,26 @@ func TestDaemon_HandleAttachSession_FallsBackToFreshSnapshotWhenStoredCodexRawRe
 	}
 }
 
-func TestDaemon_HandleAttachSession_PrefersFreshScreenSnapshotForStoredClaudeSession(t *testing.T) {
+func TestDaemon_HandleAttachSession_PreservesClaudeTerminalModesWithRawReplay(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeAttachBackend{}
-	raw := bytes.Repeat([]byte("claude-replay-chunk-"), 64)
+	raw := []byte("\x1b[?1004h\x1b[H\x1b[2JClaude Code\r\n\r\n❯ ")
+	snapshot, ok := pty.ScreenSnapshotFromReplay(raw, 58, 46)
+	if !ok {
+		t.Fatal("expected Claude raw replay to derive a snapshot")
+	}
 	backend.SetAttachInfo(ptybackend.AttachInfo{
 		Running:             true,
 		Scrollback:          raw,
-		ScreenSnapshot:      []byte("\x1b[2Jclaude snapshot"),
+		Cols:                58,
+		Rows:                46,
+		ScreenSnapshot:      snapshot.Payload,
 		ScreenSnapshotFresh: true,
-		ScreenCols:          58,
-		ScreenRows:          46,
+		ScreenCols:          snapshot.Cols,
+		ScreenRows:          snapshot.Rows,
+		ScreenCursorX:       snapshot.CursorX,
+		ScreenCursorY:       snapshot.CursorY,
+		ScreenCursorVisible: snapshot.CursorVisible,
 	})
 	d.ptyBackend = backend
 	d.store.Add(&protocol.Session{
@@ -2123,14 +2133,18 @@ func TestDaemon_HandleAttachSession_PrefersFreshScreenSnapshotForStoredClaudeSes
 		if !result.Success {
 			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
 		}
-		if result.Scrollback != nil {
-			t.Fatal("expected Claude relaunch attach to omit raw replay when a fresh screen snapshot is available")
+		if result.ScreenSnapshot != nil {
+			t.Fatal("expected Claude attach to avoid a cell-only snapshot that loses focus-reporting mode")
 		}
-		if protocol.Deref(result.ScreenSnapshot) == "" {
-			t.Fatal("expected Claude relaunch attach to keep the fresh screen snapshot")
+		if protocol.Deref(result.Scrollback) == "" {
+			t.Fatal("expected Claude attach to preserve raw terminal mode changes")
 		}
-		if !protocol.Deref(result.ScreenSnapshotFresh) {
-			t.Fatal("expected Claude relaunch attach screen snapshot to be marked fresh")
+		decoded, err := base64.StdEncoding.DecodeString(protocol.Deref(result.Scrollback))
+		if err != nil {
+			t.Fatalf("decode Claude replay: %v", err)
+		}
+		if !bytes.Equal(decoded, raw) {
+			t.Fatal("expected Claude raw replay to retain focus-reporting startup bytes")
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for attach_result")
@@ -3428,6 +3442,8 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"valid new_session_agent copilot", "new_session_agent", "copilot", false},
 		{"valid new_session_agent pi", "new_session_agent", "pi", false},
 		{"empty new_session_agent", "new_session_agent", "", false},
+		{"valid new_pane_choice terminal", "new_pane_choice", "terminal", false},
+		{"valid new_pane_choice codex", "new_pane_choice", "codex", false},
 		{"empty claude_executable", "claude_executable", "", false},
 		{"empty codex_executable", "codex_executable", "", false},
 		{"empty copilot_executable", "copilot_executable", "", false},
@@ -3441,6 +3457,7 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"dynamic executable key for known agent", "pi_executable", "not-a-real-binary-123", true},
 		{"invalid claude_executable", "claude_executable", "not-a-real-binary-123", true},
 		{"invalid new_session_agent", "new_session_agent", "gpt", true},
+		{"invalid new_pane_choice", "new_pane_choice", "gpt", true},
 		{"invalid tailscale_enabled", "tailscale_enabled", "maybe", true},
 		{"invalid key", "unknown_setting", "value", true},
 		{"empty projects_directory", "projects_directory", "", true},

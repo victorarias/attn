@@ -139,8 +139,11 @@ func (d *Daemon) handleBrowseDirectoryWS(client *wsClient, msg *protocol.BrowseD
 			d.sendToClient(client, &protocol.BrowseDirectoryResultMessage{
 				Event:      protocol.EventBrowseDirectoryResult,
 				InputPath:  msg.InputPath,
+				Directory:  dirToQuery,
+				Entries:    []protocol.DirectoryEntry{},
 				EndpointID: msg.EndpointID,
 				RequestID:  msg.RequestID,
+				HomePath:   protocol.Ptr(homePath),
 				Success:    false,
 				Error:      protocol.Ptr(err.Error()),
 			})
@@ -167,6 +170,7 @@ func (d *Daemon) handleBrowseDirectoryWS(client *wsClient, msg *protocol.BrowseD
 				Event:      protocol.EventBrowseDirectoryResult,
 				InputPath:  msg.InputPath,
 				Directory:  dirToQuery,
+				Entries:    []protocol.DirectoryEntry{},
 				EndpointID: msg.EndpointID,
 				RequestID:  msg.RequestID,
 				HomePath:   protocol.Ptr(homePath),

@@ -1,0 +1,919 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>attn native | Workspace-first prototype</title>
+  <style>
+    :root {
+      --ink-0: #070910;
+      --ink-1: #0b1018;
+      --ink-2: #111925;
+      --ink-3: #192435;
+      --ink-4: #273448;
+      --moon: #ede8d7;
+      --ash: #a09a89;
+      --dim: #625d51;
+      --line: rgba(237, 232, 215, .12);
+      --line-strong: rgba(237, 232, 215, .23);
+      --sodium: #ff8b40;
+      --sodium-soft: rgba(255, 139, 64, .16);
+      --green: #62dc91;
+      --yellow: #ffd665;
+      --blue: #73baff;
+      --shell: #d9e9ff;
+      --red: #ff7962;
+      --display: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+      --body: "Avenir Next", "Helvetica Neue", sans-serif;
+      --mono: "SFMono-Regular", "Menlo", "Monaco", monospace;
+      --r: 14px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--moon);
+      background:
+        radial-gradient(circle at 72% 3%, rgba(255, 139, 64, .12), transparent 28rem),
+        linear-gradient(115deg, #060810, var(--ink-1) 34%, #090d14);
+      font: 15px/1.55 var(--body);
+      min-width: 320px;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .3;
+      background-image:
+        linear-gradient(var(--line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line) 1px, transparent 1px);
+      background-size: 64px 64px;
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,.55), transparent 68%);
+    }
+    a { color: inherit; text-decoration: none; }
+    code, .mono { font-family: var(--mono); }
+
+    .rail {
+      position: fixed;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 72px;
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 25px 0;
+      background: rgba(7, 9, 16, .84);
+      backdrop-filter: blur(12px);
+      z-index: 2;
+    }
+    .mark {
+      width: 32px;
+      height: 32px;
+      border: 1px solid var(--sodium);
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: var(--sodium);
+      font: italic 24px var(--display);
+    }
+    .rail-links {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      display: flex;
+      gap: 28px;
+      margin-top: 58px;
+      color: var(--ash);
+      text-transform: uppercase;
+      letter-spacing: .16em;
+      font: 10px var(--mono);
+    }
+    .rail-links a:hover { color: var(--sodium); }
+    .folio {
+      margin-top: auto;
+      font: 11px var(--mono);
+      color: var(--dim);
+    }
+
+    main {
+      margin-left: 72px;
+      max-width: 1280px;
+      padding: 52px clamp(25px, 6vw, 84px) 76px;
+    }
+    .eyebrow {
+      color: var(--sodium);
+      letter-spacing: .18em;
+      font: 11px var(--mono);
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 16px 0 18px;
+      max-width: 900px;
+      font: 400 clamp(54px, 7.3vw, 100px)/.93 var(--display);
+      letter-spacing: -.055em;
+    }
+    h1 span { color: var(--sodium); font-style: italic; }
+    .lede {
+      max-width: 700px;
+      margin: 0 0 47px;
+      font-size: clamp(17px, 2vw, 21px);
+      line-height: 1.6;
+      color: var(--ash);
+    }
+
+    .manifest {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      border: 1px solid var(--line);
+      background: var(--line);
+      border-radius: var(--r);
+      overflow: hidden;
+      margin-bottom: 70px;
+    }
+    .manifest article {
+      min-height: 120px;
+      background: var(--ink-1);
+      padding: 20px 22px;
+    }
+    .number {
+      display: block;
+      margin-bottom: 22px;
+      color: var(--sodium);
+      font: 12px var(--mono);
+    }
+    .manifest strong {
+      display: block;
+      font-size: 17px;
+      font-weight: 500;
+      margin-bottom: 7px;
+    }
+    .manifest p { margin: 0; color: var(--ash); font-size: 13px; }
+
+    section { margin: 0 0 88px; }
+    .section-head {
+      display: grid;
+      grid-template-columns: 190px 1fr;
+      gap: 24px;
+      align-items: end;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 18px;
+      margin-bottom: 28px;
+    }
+    .section-head small {
+      color: var(--sodium);
+      font: 11px var(--mono);
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    h2 {
+      margin: 0;
+      font: 400 clamp(30px, 4vw, 45px)/1.05 var(--display);
+      letter-spacing: -.035em;
+    }
+    .caption {
+      color: var(--ash);
+      max-width: 760px;
+      margin: 0 0 24px;
+    }
+
+    .window {
+      border: 1px solid var(--line-strong);
+      border-radius: 18px;
+      overflow: hidden;
+      background: var(--ink-0);
+      box-shadow: 0 26px 80px rgba(0,0,0,.38);
+    }
+    .window-bar {
+      height: 45px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      color: var(--ash);
+      gap: 8px;
+      font: 12px var(--mono);
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink-4); }
+    .window-title { margin-left: 14px; }
+    .app {
+      min-height: 570px;
+      display: grid;
+      grid-template-columns: 264px 1fr;
+    }
+    .sidebar {
+      border-right: 1px solid var(--line);
+      padding: 23px 16px;
+      background: var(--ink-1);
+    }
+    .sidebar-title {
+      color: var(--dim);
+      text-transform: uppercase;
+      font: 10px var(--mono);
+      letter-spacing: .16em;
+      margin: 0 8px 18px;
+    }
+    .workspace-group {
+      padding: 7px 6px 9px;
+      margin-bottom: 10px;
+      border: 1px solid transparent;
+      border-radius: 11px;
+    }
+    .workspace-group.active {
+      background: rgba(255, 139, 64, .045);
+      border-color: rgba(255,139,64,.18);
+    }
+    .ws {
+      display: grid;
+      grid-template-columns: 10px 1fr;
+      gap: 12px;
+      padding: 8px 8px 10px;
+      border-radius: 9px;
+      color: var(--ash);
+    }
+    .ws.active {
+      background: var(--sodium-soft);
+      outline: 1px solid rgba(255,139,64,.26);
+      color: var(--moon);
+    }
+    .state {
+      width: 7px; height: 7px; margin-top: 7px;
+      border-radius: 50%; background: var(--green);
+      box-shadow: 0 0 10px rgba(98,220,145,.6);
+    }
+    .state.wait { background: var(--yellow); box-shadow: none; }
+    .state.idle { background: var(--dim); box-shadow: none; }
+    .ws strong { font-size: 14px; display: block; font-weight: 500; }
+    .ws em {
+      font-style: normal; font: 11px var(--mono); color: var(--dim);
+      display: block; white-space: nowrap; overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pane-row {
+      height: 38px;
+      margin: 2px 4px 2px 18px;
+      padding: 0 10px;
+      border-radius: 7px;
+      display: grid;
+      grid-template-columns: 17px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      font: 12px var(--mono);
+      color: var(--ash);
+    }
+    .pane-row.selected {
+      background: var(--sodium-soft);
+      color: var(--moon);
+    }
+    .pane-row.muted {
+      opacity: .52;
+    }
+    .pane-row.muted:hover {
+      opacity: .76;
+    }
+    .pane-kind {
+      display: inline-grid;
+      place-items: center;
+      width: 17px;
+      height: 17px;
+      border-radius: 50%;
+      font-size: 10px;
+      color: var(--ink-0);
+      background: var(--shell);
+    }
+    .pane-kind.claude { background: var(--sodium); }
+    .pane-kind.codex { background: var(--blue); }
+    .row-control {
+      position: relative;
+      height: 24px;
+      width: 24px;
+      display: inline-grid;
+      place-items: center;
+      justify-self: end;
+      overflow: hidden;
+      transition: width 190ms cubic-bezier(.2,.8,.2,1);
+    }
+    .activity {
+      position: absolute;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--dim);
+      opacity: 1;
+      transform: scale(1) translateX(0);
+      transition: opacity 150ms ease, transform 180ms cubic-bezier(.2,.8,.2,1);
+    }
+    .activity.working {
+      background: var(--green);
+      box-shadow: 0 0 10px rgba(98,220,145,.62);
+    }
+    .activity.waiting { background: var(--yellow); }
+    .activity.ready { background: var(--blue); }
+    .activity.todo { background: transparent; }
+    .row-actions {
+      position: absolute;
+      right: 0;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      opacity: 0;
+      transform: translateX(9px) scale(.9);
+      transition: opacity 150ms ease, transform 190ms cubic-bezier(.2,.8,.2,1);
+    }
+    .row-action {
+      height: 20px;
+      width: 20px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      border-radius: 5px;
+      display: inline-grid;
+      place-items: center;
+      color: var(--dim);
+      font: 12px var(--mono);
+      cursor: pointer;
+      transition: color 120ms ease, background 120ms ease;
+    }
+    .row-action:hover {
+      color: var(--moon);
+      background: rgba(237,232,215,.06);
+    }
+    .mute.on {
+      color: var(--sodium);
+      background: rgba(255,139,64,.12);
+    }
+    .pane-row.muted .activity {
+      box-shadow: none;
+    }
+    .pane-row:hover .row-control.runtime,
+    .pane-row:focus-within .row-control.runtime {
+      width: 48px;
+    }
+    .pane-row:hover .row-control.pane-only,
+    .pane-row:focus-within .row-control.pane-only {
+      width: 24px;
+    }
+    .pane-row:hover .row-control.runtime .activity,
+    .pane-row:focus-within .row-control.runtime .activity,
+    .pane-row:hover .row-control.pane-only .activity,
+    .pane-row:focus-within .row-control.pane-only .activity {
+      opacity: 0;
+      transform: translateX(-6px) scale(.65);
+    }
+    .pane-row:hover .row-control .row-actions,
+    .pane-row:focus-within .row-control .row-actions {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+    }
+    .surface {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .workspace-layout {
+      display: grid;
+      grid-template-columns: 1fr .82fr;
+      gap: 1px;
+      flex: 1;
+      background: var(--line);
+    }
+    .pane-stack {
+      display: grid;
+      grid-template-rows: 1fr 1fr .9fr;
+      gap: 1px;
+      background: var(--line);
+    }
+    .terminal-pane {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--ink-0);
+    }
+    .terminal-pane.focused {
+      box-shadow: inset 0 0 0 1px rgba(255,139,64,.52);
+    }
+    .terminal {
+      padding: 19px;
+      color: #bbc4c2;
+      font: 12px/1.62 var(--mono);
+      flex: 1;
+      background:
+        linear-gradient(180deg, rgba(255,139,64,.035), transparent 150px),
+        var(--ink-0);
+    }
+    .prompt { color: var(--sodium); }
+    .agent { color: var(--green); }
+    .path { color: var(--blue); }
+    .cursor {
+      width: 8px; height: 16px; background: var(--sodium);
+      display: inline-block; vertical-align: -3px;
+      animation: blink 1.15s steps(2) infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+    .concept-tag {
+      display: inline-flex;
+      margin: 0 0 14px;
+      padding: 5px 10px;
+      border: 1px solid rgba(255, 139, 64, .3);
+      border-radius: 999px;
+      color: var(--sodium);
+      font: 10px var(--mono);
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    .todo-pane {
+      background: var(--ink-0);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .todo-pane-body {
+      padding: 13px 14px;
+      background:
+        radial-gradient(circle at 100% 8%, rgba(255,139,64,.08), transparent 180px),
+        var(--ink-0);
+    }
+    .todo-list {
+      display: grid;
+      gap: 7px;
+    }
+    .todo-item {
+      display: grid;
+      grid-template-columns: 16px 1fr;
+      gap: 9px;
+      align-items: center;
+      min-height: 30px;
+      padding: 5px 8px;
+      background: rgba(11,16,24,.7);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+    .check {
+      width: 12px;
+      height: 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 3px;
+    }
+    .todo-item strong { display: block; font: 10px var(--mono); font-weight: 500; }
+    .todo-meta { margin-top: 9px; color: var(--ash); font: 10px var(--mono); }
+
+    .diagram-grid {
+      display: grid;
+      grid-template-columns: 1.15fr .85fr;
+      gap: 18px;
+    }
+    .plate {
+      background: rgba(11, 16, 24, .74);
+      border: 1px solid var(--line);
+      border-radius: var(--r);
+      padding: 26px;
+      min-height: 280px;
+    }
+    .plate h3 {
+      font-size: 13px; font-weight: 500; text-transform: uppercase;
+      letter-spacing: .13em; color: var(--ash); margin: 0 0 24px;
+    }
+    svg { width: 100%; height: auto; display: block; overflow: visible; }
+    .box { fill: var(--ink-2); stroke: rgba(237,232,215,.19); stroke-width: 1; }
+    .box.accent { stroke: var(--sodium); fill: rgba(255,139,64,.07); }
+    .box.daemon { fill: #151d29; stroke: rgba(98,220,145,.45); }
+    .svg-title { fill: var(--moon); font: 500 14px var(--body); }
+    .svg-detail { fill: var(--ash); font: 11px var(--mono); }
+    .svg-accent { fill: var(--sodium); font: 11px var(--mono); }
+    .line { stroke: var(--line-strong); stroke-width: 1.5; fill: none; }
+    .pulse { stroke: var(--sodium); stroke-width: 1.5; fill: none; }
+    .green-line { stroke: var(--green); stroke-width: 1.5; fill: none; }
+
+    .sequence {
+      padding: 12px 0 0;
+      display: grid;
+      gap: 12px;
+    }
+    .step {
+      display: grid;
+      grid-template-columns: 42px 178px 1fr;
+      gap: 14px;
+      align-items: center;
+      min-height: 58px;
+    }
+    .step b {
+      color: var(--sodium); font: 12px var(--mono);
+      height: 30px; width: 30px; border-radius: 50%;
+      border: 1px solid var(--line-strong); display: grid; place-items: center;
+    }
+    .step strong { font-weight: 500; font-size: 14px; }
+    .step p { margin: 0; color: var(--ash); font-size: 13px; }
+    .step code { color: var(--sodium); font-size: 12px; }
+
+    .memory {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+    .memory-card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 19px;
+      min-height: 174px;
+      background: var(--ink-1);
+    }
+    .memory-card h3 {
+      margin: 0 0 18px;
+      color: var(--ash); font: 11px var(--mono);
+      letter-spacing: .11em; text-transform: uppercase;
+    }
+    .meter {
+      height: 8px; border-radius: 8px; background: var(--ink-3);
+      overflow: hidden; margin: 12px 0 15px;
+    }
+    .meter i { height: 100%; display: block; background: var(--sodium); }
+    .memory-card p { color: var(--ash); font-size: 13px; margin: 0; }
+    .retained { color: var(--green); font: 12px var(--mono); }
+    .released { color: var(--dim); font: 12px var(--mono); }
+    .experiment {
+      margin-top: 18px;
+      padding: 22px 24px;
+      border: 1px solid rgba(255, 139, 64, .28);
+      border-radius: var(--r);
+      background: rgba(255, 139, 64, .055);
+      display: grid;
+      grid-template-columns: 196px 1fr 1fr;
+      gap: 18px;
+    }
+    .experiment h3 {
+      margin: 0;
+      font: 11px var(--mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--sodium);
+    }
+    .experiment strong { display: block; font-weight: 500; margin-bottom: 7px; }
+    .experiment p { margin: 0; font-size: 13px; color: var(--ash); }
+
+    .decisions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+    .decision {
+      border-radius: var(--r);
+      padding: 24px;
+      border: 1px solid var(--line);
+      background: var(--ink-1);
+    }
+    .decision.forbidden { border-color: rgba(255,121,98,.26); }
+    .decision.slice { border-color: rgba(98,220,145,.26); }
+    .decision h3 {
+      margin: 0 0 15px; font: 500 17px var(--body);
+    }
+    .decision ul {
+      margin: 0; padding-left: 17px; color: var(--ash);
+    }
+    .decision li { margin: 10px 0; padding-left: 6px; }
+    .placement {
+      border-top: 2px solid var(--line-strong);
+      padding-top: 20px;
+    }
+    .placement.panel { border-color: var(--blue); }
+    .placement.cost { border-color: var(--sodium); }
+    .placement .best {
+      display: block;
+      margin: 16px 0 8px;
+      color: var(--ash);
+      font: 10px var(--mono);
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+    footer {
+      border-top: 1px solid var(--line);
+      margin-top: 90px;
+      padding-top: 26px;
+      display: flex; justify-content: space-between; gap: 18px;
+      color: var(--dim); font: 11px var(--mono);
+    }
+    @media (max-width: 850px) {
+      .rail { display: none; }
+      main { margin-left: 0; }
+      .manifest, .diagram-grid, .memory, .decisions, .app, .experiment { grid-template-columns: 1fr; }
+      .app { min-height: auto; }
+      .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+      .workspace-layout { grid-template-columns: 1fr; }
+      .step { grid-template-columns: 36px 1fr; }
+      .step p { grid-column: 2; }
+      .section-head { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="rail" aria-label="Sections">
+    <div class="mark">a</div>
+    <div class="rail-links">
+      <a href="#surface">Layout</a>
+      <a href="#todo">Todo</a>
+      <a href="#system">System</a>
+      <a href="#toolkit">Toolkit</a>
+      <a href="#flow">Flow</a>
+      <a href="#build">Build</a>
+      <a href="#memory">Memory</a>
+    </div>
+    <div class="folio">N / 01</div>
+  </nav>
+
+  <main>
+    <header>
+      <div class="eyebrow">Native UI proposal / protocol 65 / 24 May 2026</div>
+      <h1>A native <span>workspace</span> instrument.</h1>
+      <p class="lede">A fast GPUI shell for Attn that renders the same daemon-owned workspaces as Tauri. No canvas. No duplicate truth. Live terminal pixels retained only where the user is looking.</p>
+    </header>
+
+    <div class="manifest" aria-label="Core principles">
+      <article><span class="number">01 / MODEL</span><strong>Workspace-first</strong><p>The rail groups workspaces; each tool appears as a pane in the selected workspace layout.</p></article>
+      <article><span class="number">02 / OWNER</span><strong>Daemon canonical</strong><p>Lifecycle, PTY, persistence and split layout remain behind one protocol.</p></article>
+      <article><span class="number">03 / COST</span><strong>Visible buffers only</strong><p>Ghostty is allocated for the selected workspace's displayed panes.</p></article>
+    </div>
+
+    <section id="surface">
+      <div class="section-head"><small>01 / Chosen Layout</small><h2>Everything is a pane</h2></div>
+      <span class="concept-tag">Pane-based direction</span>
+      <p class="caption">Workspace groups expand into nested pane rows, matching your sketch. Shell, Claude, Codex and Todo are focusable peers in one layout. At rest a session row shows its status dot; on hover, that slot expands into mute and close actions.</p>
+      <div class="window" role="img" aria-label="Mockup of native Attn app with grouped workspace sidebar and fish Claude Codex and Todo panes">
+        <div class="window-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="window-title">attn-native / dev daemon / connected</span></div>
+        <div class="app">
+          <aside class="sidebar">
+            <p class="sidebar-title">Workspaces / panes</p>
+            <div class="workspace-group active">
+              <div class="ws active"><i class="state"></i><div><strong>workspace 1</strong><em>~/projects/attn--feat-native2</em></div></div>
+              <div class="pane-row selected"><i class="pane-kind">&gt;_</i><span>fish</span><span class="row-control runtime"><i class="activity ready"></i><span class="row-actions"><button class="row-action mute" aria-label="Mute fish session">&#8856;</button><button class="row-action close" aria-label="Close fish pane">&times;</button></span></span></div>
+              <div class="pane-row"><i class="pane-kind claude">a</i><span>Claude Code</span><span class="row-control runtime"><i class="activity working"></i><span class="row-actions"><button class="row-action mute" aria-label="Mute Claude session">&#8856;</button><button class="row-action close" aria-label="Close Claude pane">&times;</button></span></span></div>
+              <div class="pane-row muted"><i class="pane-kind codex">b</i><span>Codex</span><span class="row-control runtime"><i class="activity waiting"></i><span class="row-actions"><button class="row-action mute on" aria-label="Unmute Codex session">&#8857;</button><button class="row-action close" aria-label="Close Codex pane">&times;</button></span></span></div>
+              <div class="pane-row"><i class="pane-kind">+</i><span>Todo</span><span class="row-control pane-only"><i class="activity todo"></i><span class="row-actions"><button class="row-action close" aria-label="Close Todo pane">&times;</button></span></span></div>
+            </div>
+            <div class="workspace-group">
+              <div class="ws"><i class="state wait"></i><div><strong>workspace 2</strong><em>~/projects/docs</em></div></div>
+              <div class="pane-row"><i class="pane-kind">&gt;_</i><span>fish</span><span class="row-control runtime"><i class="activity working"></i><span class="row-actions"><button class="row-action mute" aria-label="Mute fish session">&#8856;</button><button class="row-action close" aria-label="Close fish pane">&times;</button></span></span></div>
+            </div>
+          </aside>
+          <div class="surface">
+            <div class="workspace-layout">
+              <div class="terminal-pane focused">
+                <div class="terminal">
+                  <div><span class="prompt">~/attn</span> <span class="path">feat/native2</span> $ cargo test</div>
+                  <br>
+                  <div>running 4 tests</div>
+                  <div><span class="agent">ok</span> protocol workspace layout</div>
+                  <br>
+                  <div><span class="prompt">&gt;</span> echo hello</div>
+                  <div>hello <span class="cursor"></span></div>
+                </div>
+              </div>
+              <div class="pane-stack">
+                <div class="terminal-pane">
+                  <div class="terminal">
+                    <div><span class="agent">working</span> Reading migration plan...</div>
+                    <br>
+                    <div>WorkspaceLayout has 4 visible panes</div>
+                    <div>Awaiting direction.</div>
+                  </div>
+                </div>
+                <div class="terminal-pane">
+                  <div class="terminal">
+                    <div><span class="prompt">&gt;</span> Summarize recent commits</div>
+                    <br>
+                    <div>Native prototype plan updated.</div>
+                    <div><span class="path">Ready</span> for implementation.</div>
+                  </div>
+                </div>
+                <div class="todo-pane">
+                  <div class="todo-pane-body">
+                    <div class="todo-list">
+                      <div class="todo-item"><i class="check"></i><strong>Wire protocol v65 snapshot</strong></div>
+                      <div class="todo-item"><i class="check"></i><strong>Measure release-on-switch</strong></div>
+                      <div class="todo-item"><i class="check"></i><strong>Restore shell session flow</strong></div>
+                    </div>
+                    <div class="todo-meta">daemon-backed / non-terminal pane</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="todo">
+      <div class="section-head"><small>02 / Decision</small><h2>Todo is a pane</h2></div>
+      <p class="caption">One navigation model is enough for the rewrite: choose a workspace and arrange its panes. Todo stays visible beside the agent or shell executing its work.</p>
+      <div class="decisions">
+        <article class="decision placement panel">
+          <h3>UI rule</h3>
+          <p>Todo is a focusable peer in <code>WorkspaceLayout</code>. Runtime rows show activity at rest, then expand into mute and close; Todo reveals close only.</p>
+          <span class="best">Benefit</span>
+          <p>No new tabs or hidden task context while working in terminals.</p>
+        </article>
+        <article class="decision placement cost">
+          <h3>Architecture cost</h3>
+          <p>Todo needs a non-terminal pane kind. Start from existing daemon session todo events; do not create native-local checklist state.</p>
+          <span class="best">Build order</span>
+          <p>Land terminal pane foundations first, then add Todo as the first non-terminal pane.</p>
+        </article>
+      </div>
+      <div class="experiment">
+        <h3>Deliberately avoided</h3>
+        <div>
+          <strong>No workspace tabs now</strong>
+          <p>A tabbed mode is deferred until the pane-based native client exists and usage provides a reason.</p>
+        </div>
+        <div>
+          <strong>Mute is not lifecycle</strong>
+          <p>Hover the Codex row to reveal unmute and close where its subdued state indicator rests. The pane remains in place and retains true session state.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="system">
+      <div class="section-head"><small>03 / System</small><h2>One truth, two renderers</h2></div>
+      <div class="diagram-grid">
+        <article class="plate">
+          <h3>Ownership map</h3>
+          <svg viewBox="0 0 580 338" aria-label="Architecture ownership diagram">
+            <path class="pulse" d="M218 88H274 M306 88H362" />
+            <path class="line" d="M461 145V188 M461 236V270" />
+            <path class="green-line" d="M149 145V220 M149 268V297" />
+            <rect class="box accent" x="18" y="35" rx="10" width="200" height="110"/>
+            <text class="svg-title" x="38" y="63">GPUI native client</text>
+            <text class="svg-detail" x="38" y="87">selection + focus</text>
+            <text class="svg-detail" x="38" y="105">visible pane render state</text>
+            <text class="svg-detail" x="38" y="123">pixels + input</text>
+            <text class="svg-accent" x="235" y="83">WS / v65</text>
+            <rect class="box daemon" x="362" y="35" rx="10" width="200" height="110"/>
+            <text class="svg-title" x="382" y="63">Go daemon</text>
+            <text class="svg-detail" x="382" y="87">canonical workspace</text>
+            <text class="svg-detail" x="382" y="105">layout + lifecycle</text>
+            <text class="svg-detail" x="382" y="123">PTY + replay</text>
+            <rect class="box" x="54" y="220" rx="9" width="190" height="48"/>
+            <text class="svg-title" x="72" y="248">Ghostty terminal buffers</text>
+            <text class="svg-detail" x="76" y="318">terminal panes only</text>
+            <rect class="box" x="366" y="188" rx="9" width="190" height="48"/>
+            <text class="svg-title" x="385" y="216">WorkspaceLayout</text>
+            <rect class="box" x="366" y="270" rx="9" width="190" height="48"/>
+            <text class="svg-title" x="385" y="298">PTYs + Todo data</text>
+          </svg>
+        </article>
+        <article class="plate">
+          <h3>Crate boundary</h3>
+          <svg viewBox="0 0 395 338" aria-label="Native Rust crate layers">
+            <rect class="box accent" x="20" y="18" rx="9" width="355" height="48"/>
+            <text class="svg-title" x="40" y="47">app.rs</text>
+            <text class="svg-detail" x="132" y="47">wiring only</text>
+            <rect class="box" x="20" y="87" rx="9" width="168" height="64"/>
+            <text class="svg-title" x="39" y="114">views/</text>
+            <text class="svg-detail" x="39" y="135">rail + pane views</text>
+            <rect class="box" x="207" y="87" rx="9" width="168" height="64"/>
+            <text class="svg-title" x="225" y="114">state/</text>
+            <text class="svg-detail" x="225" y="135">snapshots + VT</text>
+            <rect class="box" x="20" y="172" rx="9" width="168" height="64"/>
+            <text class="svg-title" x="39" y="199">domain/</text>
+            <text class="svg-detail" x="39" y="220">pure layout read</text>
+            <rect class="box daemon" x="207" y="172" rx="9" width="168" height="64"/>
+            <text class="svg-title" x="225" y="199">adapters/</text>
+            <text class="svg-detail" x="225" y="220">websocket edge</text>
+            <path class="line" d="M197 260V280" />
+            <rect class="box" x="20" y="280" rx="9" width="355" height="42"/>
+            <text class="svg-title" x="39" y="307">protocol v65 / WorkspaceLayout</text>
+          </svg>
+        </article>
+      </div>
+    </section>
+
+    <section id="toolkit">
+      <div class="section-head"><small>04 / Toolkit</small><h2>Use components at the edges</h2></div>
+      <p class="caption"><code>gpui-component</code> earns its place on conventional and rich-content surfaces. It accelerates native parity, but it does not become Attn's layout model or terminal engine.</p>
+      <div class="decisions">
+        <article class="decision slice">
+          <h3 style="color:var(--green)">Use gpui-component</h3>
+          <ul>
+            <li>New-session dialog and settings forms.</li>
+            <li>Todo controls and long-list rendering.</li>
+            <li>Markdown content and rich textual surfaces.</li>
+            <li>Diff/review controls, file lists and highlighted code text.</li>
+          </ul>
+        </article>
+        <article class="decision forbidden">
+          <h3 style="color:var(--red)">Keep Attn-owned</h3>
+          <ul>
+            <li><code>WorkspaceLayout</code> and daemon-confirmed mutations.</li>
+            <li>Ghostty terminal rendering and PTY lifecycle.</li>
+            <li>Custom sidebar row actions and activity semantics.</li>
+            <li>Diff protocol/data model; no assumed turnkey viewer.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="flow">
+      <div class="section-head"><small>05 / Flow</small><h2>Create, confirm, attach</h2></div>
+      <p class="caption">Workspace membership and pane layout change only after daemon broadcasts. A pane is a daemon layout entry, never a locally manufactured terminal card or checklist.</p>
+      <div class="plate sequence" aria-label="New workspace sequence">
+        <div class="step"><b>01</b><strong>Choose destination</strong><p>Reuse archived dialog behavior with component form controls; select directory and <code>claude</code> or <code>codex</code>.</p></div>
+        <div class="step"><b>02</b><strong>Register</strong><p>Send <code>register_workspace(id, title, directory)</code> to the daemon.</p></div>
+        <div class="step"><b>03</b><strong>Observe</strong><p>Accept <code>workspace_registered</code>; now the rail may render the workspace.</p></div>
+        <div class="step"><b>04</b><strong>Spawn agent</strong><p>Send <code>spawn_session(..., workspace_id)</code>; it creates the first agent pane.</p></div>
+        <div class="step"><b>05</b><strong>Display</strong><p>Read <code>WorkspaceLayout</code>, attach its agent session PTY, create Ghostty state, render output.</p></div>
+        <div class="step"><b>06</b><strong>Add peer pane</strong><p>Spawn into the existing workspace; render the updated layout and focus it with <code>Cmd+Arrow</code>.</p></div>
+      </div>
+    </section>
+
+    <section id="build">
+      <div class="section-head"><small>06 / Build Order</small><h2>One working slice at a time</h2></div>
+      <p class="caption">Do not build all of the replacement app at once. Each step extends a daemon-backed client that already runs within its stated scope.</p>
+      <div class="plate sequence" aria-label="Native client implementation sequence">
+        <div class="step"><b>01</b><strong>Archive + skeleton</strong><p>Keep canvas reference; initialize active crates and component root.</p></div>
+        <div class="step"><b>02</b><strong>Protocol v65</strong><p>Connect, handshake, reconnect and read workspace layouts.</p></div>
+        <div class="step"><b>03</b><strong>Pane rail</strong><p>Render workspace groups and focus rows from daemon state.</p></div>
+        <div class="step"><b>04</b><strong>Terminal panes</strong><p>Port Ghostty attach, replay, resize and keyboard input.</p></div>
+        <div class="step"><b>05</b><strong>Create flow</strong><p>Build component-backed dialog without optimistic state.</p></div>
+        <div class="step"><b>06</b><strong>Memory + keys</strong><p>Measure workspace release policy and land navigation.</p></div>
+        <div class="step"><b>07</b><strong>Todo pane</strong><p>Render existing daemon todo events; settle workspace aggregation.</p></div>
+        <div class="step"><b>08</b><strong>Shell session</strong><p>Restore first-class shell creation using v65 semantics.</p></div>
+        <div class="step"><b>09</b><strong>Settings + Markdown</strong><p>Build component-backed native rich content.</p></div>
+        <div class="step"><b>10</b><strong>Diff + review</strong><p>Render existing daemon diff data as a native pane.</p></div>
+        <div class="step"><b>11</b><strong>Parity</strong><p>Split controls, remaining workflows and polish.</p></div>
+      </div>
+    </section>
+
+    <section id="memory">
+      <div class="section-head"><small>07 / Memory</small><h2>Pay only for what is visible</h2></div>
+      <div class="memory">
+        <article class="memory-card">
+          <h3>All workspaces</h3>
+          <span class="retained">retained / metadata</span>
+          <div class="meter"><i style="width:18%"></i></div>
+          <p>IDs, titles, status and daemon layout snapshots feed the rail. Small and stable.</p>
+        </article>
+        <article class="memory-card">
+          <h3>Selected workspace</h3>
+          <span class="retained">retained / visible pane set</span>
+          <div class="meter"><i style="width:56%"></i></div>
+          <p>Ghostty buffers exist only for displayed terminal panes; Todo uses lightweight daemon data.</p>
+        </article>
+        <article class="memory-card">
+          <h3>On switch</h3>
+          <span class="released">released / old VT</span>
+          <div class="meter"><i style="width:7%; background:var(--dim)"></i></div>
+          <p>Drop the prior workspace's model set. Reattach later and reconstruct its panes from daemon replay.</p>
+        </article>
+      </div>
+      <div class="experiment">
+        <h3>Prototype decision / measure it</h3>
+        <div>
+          <strong>Default: release on switch</strong>
+          <p>Lowest-memory baseline. Drop all inactive workspace Ghostty models and rebuild through daemon replay when revisited.</p>
+        </div>
+        <div>
+          <strong>Compare: one warm workspace</strong>
+          <p>Measure whether caching one prior pane set buys meaningful switch speed without allowing memory to scale with workspace count.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head"><small>08 / Boundary</small><h2>What this prototype refuses</h2></div>
+      <div class="decisions">
+        <article class="decision forbidden">
+          <h3 style="color:var(--red)">Discarded mechanics</h3>
+          <ul>
+            <li>Canvas viewport, dragging, snapping or panel geometry.</li>
+            <li>Canvas-era <code>shell_as_session</code> wiring and v64 panel types.</li>
+            <li>Workspace surface tabs before the pane-based rewrite works.</li>
+            <li>Permanent workspace header bars or oversized create buttons.</li>
+            <li>Per-pane title bars that duplicate identity or activity state.</li>
+            <li>Component dock/layout ownership replacing daemon truth.</li>
+            <li>Optimistic local layout ownership.</li>
+            <li>Terminal buffers retained for inactive workspaces.</li>
+          </ul>
+        </article>
+        <article class="decision slice">
+          <h3 style="color:var(--green)">Intentional first slice</h3>
+          <ul>
+            <li>Sidebar is workspace-first from the initial run.</li>
+            <li>Creation follows register, spawn, broadcast, attach.</li>
+            <li>Terminal panes prove the base; Todo is the next pane kind.</li>
+            <li>Layout mutation controls extend <code>WorkspaceLayout</code> next.</li>
+            <li>First-class shell sessions return through v65 workspace semantics.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <footer>
+      <span>ATTN / NATIVE WORKSPACE CLIENT / ARCHITECTURE EXPLAINER</span>
+      <span class="mono">docs/plans/archive/native-workspace-prototype/native-gpui-workspace-client-prototype.md</span>
+    </footer>
+  </main>
+</body>
+</html>

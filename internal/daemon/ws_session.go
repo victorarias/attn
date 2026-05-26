@@ -54,6 +54,7 @@ func (d *Daemon) handleUnregisterWS(client *wsClient, msg *protocol.UnregisterMe
 			Event:   protocol.EventSessionUnregistered,
 			Session: d.sessionForBroadcast(session),
 		})
+		d.dissociateSessionFromWorkspace(session.ID)
 	}
 	d.broadcastSessionsUpdated()
 }

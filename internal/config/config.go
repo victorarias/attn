@@ -332,6 +332,13 @@ func LogPath() string {
 	return filepath.Join(attnDir(), "daemon.log")
 }
 
+// DaemonStderrPath returns the process-level daemon output path. The normal
+// logger writes structured activity to LogPath; this file retains failures
+// emitted before or outside that logger, including Go panic traces.
+func DaemonStderrPath() string {
+	return filepath.Join(attnDir(), "daemon.stderr.log")
+}
+
 // WSPort returns the WebSocket/HTTP port.
 // Priority: ATTN_WS_PORT env var > per-profile default.
 // Default profile → 9849. Named profile "dev" → 29849. Any other named profile

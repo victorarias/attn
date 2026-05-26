@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 func sameDirectory(left string, right string) bool {
@@ -68,6 +70,29 @@ func TestParseBrowseInputUsesParentDirectoryForPartialChildMatch(t *testing.T) {
 	}
 	if homePath != home {
 		t.Fatalf("homePath = %q, want %q", homePath, home)
+	}
+}
+
+func TestBrowseDirectoryFailurePreservesRequiredEntriesShape(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	client := &wsClient{send: make(chan outboundMessage, 1)}
+	missing := filepath.Join(t.TempDir(), "missing") + string(os.PathSeparator)
+
+	d.handleBrowseDirectoryWS(client, &protocol.BrowseDirectoryMessage{
+		Cmd:       protocol.CmdBrowseDirectory,
+		InputPath: missing,
+	})
+
+	event := readOutboundEvent(t, client)
+	if event["success"] != false {
+		t.Fatalf("success = %#v, want false", event["success"])
+	}
+	entries, ok := event["entries"].([]interface{})
+	if !ok {
+		t.Fatalf("entries = %#v, want an empty list present on failure", event["entries"])
+	}
+	if len(entries) != 0 {
+		t.Fatalf("entries = %#v, want empty list on failure", entries)
 	}
 }
 

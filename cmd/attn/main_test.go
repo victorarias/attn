@@ -8,8 +8,19 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/buildinfo"
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/transcript"
 )
+
+func TestClearManagedLaunchProfileBannerSuppressionBeforeChildLaunch(t *testing.T) {
+	t.Setenv(config.SuppressProfileBannerEnv, "1")
+
+	clearManagedLaunchProfileBannerSuppression()
+
+	if got := os.Getenv(config.SuppressProfileBannerEnv); got != "" {
+		t.Fatalf("%s = %q, want unset for the interactive child", config.SuppressProfileBannerEnv, got)
+	}
+}
 
 func writeCopilotSessionState(t *testing.T, homeDir, sessionID, cwd string, startTime time.Time, withStart, withAssistant bool, modTime time.Time) string {
 	t.Helper()

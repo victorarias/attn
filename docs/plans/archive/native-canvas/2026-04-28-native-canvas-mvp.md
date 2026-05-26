@@ -1,8 +1,8 @@
 # Native Canvas MVP — Scope
 
 > **Archived direction (2026-05-23).** This MVP is no longer the product
-> target. The retained code lives under `attn-native-canvas-archive`; the
-> replacement proposal is `native-gpui-workspace-client-prototype.md`.
+> target. The retained code lives under `attn-native-canvas-archive`; active
+> launcher work is in `../../2026-05-24-native-workspace-pane-launcher.md`.
 
 Companion to `2026-04-28-canvas-perf-spike.md`. The spike proved we can build
 a Rust + GPUI canvas client. This doc scopes the path from spike to

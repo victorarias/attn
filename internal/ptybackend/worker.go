@@ -690,6 +690,21 @@ func (b *WorkerBackend) Remove(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+func (b *WorkerBackend) TerminateAndRemove(ctx context.Context, sessionID string, sig syscall.Signal) error {
+	if sig == syscall.SIGTERM {
+		// MethodRemove acknowledges first, then SIGTERMs the PTY child inside
+		// the worker. Avoid a preceding MethodSignal RPC, which waits for a
+		// possibly unresponsive TUI and blocks daemon-owned state removal.
+		return b.Remove(ctx, sessionID)
+	}
+	killErr := b.Kill(ctx, sessionID, sig)
+	removeErr := b.Remove(ctx, sessionID)
+	if killErr != nil {
+		return killErr
+	}
+	return removeErr
+}
+
 func (b *WorkerBackend) SessionIDs(_ context.Context) []string {
 	b.mu.RLock()
 	defer b.mu.RUnlock()

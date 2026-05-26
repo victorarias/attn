@@ -547,9 +547,9 @@ func respondToCreateProviderCall(
 	done := make(chan error, 1)
 	go func() {
 		defer close(done)
-		request := decodeJSONRPCMessage(t, conn)
-		if request.Method != worktreeCreateProviderSurface {
-			done <- fmt.Errorf("provider method=%q, want %s", request.Method, worktreeCreateProviderSurface)
+		request, err := readWorktreePluginRequest(t, conn, worktreeCreateProviderSurface)
+		if err != nil {
+			done <- err
 			return
 		}
 		var params worktreeCreateProviderParams
@@ -571,9 +571,9 @@ func respondToDeleteProviderCall(
 	done := make(chan error, 1)
 	go func() {
 		defer close(done)
-		request := decodeJSONRPCMessage(t, conn)
-		if request.Method != worktreeDeleteProviderSurface {
-			done <- fmt.Errorf("provider method=%q, want %s", request.Method, worktreeDeleteProviderSurface)
+		request, err := readWorktreePluginRequest(t, conn, worktreeDeleteProviderSurface)
+		if err != nil {
+			done <- err
 			return
 		}
 		var params worktreeDeleteProviderParams
@@ -595,9 +595,9 @@ func respondToBeforeCreateHookCall(
 	done := make(chan error, 1)
 	go func() {
 		defer close(done)
-		request := decodeJSONRPCMessage(t, conn)
-		if request.Method != worktreeBeforeCreateSurface {
-			done <- fmt.Errorf("hook method=%q, want %s", request.Method, worktreeBeforeCreateSurface)
+		request, err := readWorktreePluginRequest(t, conn, worktreeBeforeCreateSurface)
+		if err != nil {
+			done <- err
 			return
 		}
 		var params worktreeCreateProviderParams
@@ -619,9 +619,9 @@ func respondToAfterCreateHookCall(
 	done := make(chan error, 1)
 	go func() {
 		defer close(done)
-		request := decodeJSONRPCMessage(t, conn)
-		if request.Method != worktreeAfterCreateSurface {
-			done <- fmt.Errorf("hook method=%q, want %s", request.Method, worktreeAfterCreateSurface)
+		request, err := readWorktreePluginRequest(t, conn, worktreeAfterCreateSurface)
+		if err != nil {
+			done <- err
 			return
 		}
 		var params worktreeAfterCreateHookParams
@@ -632,6 +632,21 @@ func respondToAfterCreateHookCall(
 		writeHookResult(t, conn, request.ID, handle(params))
 	}()
 	return done
+}
+
+func readWorktreePluginRequest(t *testing.T, conn net.Conn, expectedMethod string) (jsonRPCMessage, error) {
+	t.Helper()
+	for {
+		request := decodeJSONRPCMessage(t, conn)
+		if request.Method == pluginHealthMethod {
+			writeProviderResult(t, conn, request.ID, pluginHealthResult{OK: true})
+			continue
+		}
+		if request.Method != expectedMethod {
+			return jsonRPCMessage{}, fmt.Errorf("plugin method=%q, want %s", request.Method, expectedMethod)
+		}
+		return request, nil
+	}
 }
 
 func waitForProviderResponse(t *testing.T, done <-chan error) {

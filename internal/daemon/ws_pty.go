@@ -56,19 +56,19 @@ func shouldPreferAgentRawReplay(session *protocol.Session) bool {
 		return false
 	}
 	agent := strings.TrimSpace(strings.ToLower(string(session.Agent)))
-	return agent == string(protocol.SessionAgentCodex)
+	return agent == string(protocol.SessionAgentCodex) ||
+		agent == string(protocol.SessionAgentClaude)
 }
 
 func shouldIncludeAttachReplay(policy protocol.AttachPolicy, session *protocol.Session) bool {
 	switch policy {
 	case protocol.AttachPolicySameAppRemount, protocol.AttachPolicyFreshSpawn:
-		// Codex's TUI emits terminal capability queries (CPR, DA, kitty
-		// keyboard, OSC 10) on startup and waits for the responses before it
-		// will draw anything. Bytes emitted between PTY spawn and xterm.js
-		// attach are lost when replay is omitted, so Codex hangs forever
-		// waiting for query responses that xterm never had a chance to
-		// produce. For Codex sessions we replay scrollback so xterm processes
-		// the queries and emits the responses Codex is waiting for.
+		// Codex emits startup terminal capability queries whose output changes
+		// its rendered state; the PTY startup fallback supplies their replies
+		// while no interactive frontend is attached. Claude enables terminal
+		// modes such as focus reporting during startup. For both TUIs, a
+		// visible-frame snapshot loses protocol state, so replay verified raw
+		// startup output through the frontend's write-suppressed replay path.
 		return shouldPreferAgentRawReplay(session)
 	default:
 		return true
@@ -476,7 +476,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		}
 		d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, spawnStartedAt)
 		d.store.UpsertRecentLocation(cwd, label)
-		d.associateSessionWithWorkspace(session.ID, workspaceID)
+		d.associateSessionWithWorkspaceAt(session.ID, workspaceID, protocol.Deref(msg.TargetPaneID), msg.Direction)
 		if _, err := d.ensureWorkspaceLayout(workspaceID); err != nil {
 			d.logf("workspace bootstrap failed for workspace %s: %v", workspaceID, err)
 		}

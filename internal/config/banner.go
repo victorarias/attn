@@ -8,12 +8,20 @@ import (
 	"strings"
 )
 
+// SuppressProfileBannerEnv is set only for an internally launched attn
+// wrapper process whose stderr is rendered inside an application terminal.
+// The wrapper must clear it before launching the interactive child process.
+const SuppressProfileBannerEnv = "ATTN_SUPPRESS_PROFILE_BANNER"
+
 // PrintProfileBanner writes a single-line banner to w when a non-default
 // ATTN_PROFILE is active. No-op on the default profile so regular users
 // never see it. Call from CLI entry points that interact with daemon
 // state — NOT from hook commands (they run on every Claude action and
 // would flood output).
 func PrintProfileBanner(w io.Writer) {
+	if os.Getenv(SuppressProfileBannerEnv) == "1" {
+		return
+	}
 	profile := Profile()
 	if profile == "" {
 		return

@@ -1,8 +1,8 @@
 # Native GPUI Canvas UI
 
 > **Archived direction (2026-05-23).** This records the discarded canvas
-> experiments. New native UI work follows
-> `native-gpui-workspace-client-prototype.md`.
+> experiments. Current native launcher work follows
+> `../../2026-05-24-native-workspace-pane-launcher.md`.
 
 ## Status
 

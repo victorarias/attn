@@ -2,11 +2,125 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/workspacelayout"
 )
+
+// BootstrapWorkspace persists a new workspace, its first session and root
+// layout in one transaction. It deliberately rejects existing identities:
+// callers must not turn an initial-create action into an accidental update.
+func (s *Store) BootstrapWorkspace(ws *protocol.Workspace, session *protocol.Session, layout workspacelayout.WorkspaceLayout) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		if s.sessions == nil {
+			s.sessions = make(map[string]*protocol.Session)
+		}
+		if _, exists := s.sessions[session.ID]; exists {
+			return fmt.Errorf("session already exists: %s", session.ID)
+		}
+		if s.workspaces == nil {
+			s.workspaces = make(map[string]workspacelayout.WorkspaceLayout)
+		}
+		if _, exists := s.workspaces[ws.ID]; exists {
+			for _, existing := range s.sessions {
+				if protocol.Deref(existing.WorkspaceID) == ws.ID {
+					return fmt.Errorf("workspace already exists: %s", ws.ID)
+				}
+			}
+		}
+		s.sessions[session.ID] = cloneSession(session)
+		s.workspaces[ws.ID] = layout
+		return nil
+	}
+
+	todosJSON, err := json.Marshal(session.Todos)
+	if err != nil {
+		return err
+	}
+	layoutJSON, err := workspacelayout.EncodeLayout(layout.Layout)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var existingWorkspaceCount int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM workspaces WHERE id = ?`, ws.ID).Scan(&existingWorkspaceCount); err != nil {
+		return err
+	}
+	if existingWorkspaceCount > 0 {
+		var memberCount int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM sessions WHERE workspace_id = ?`, ws.ID).Scan(&memberCount); err != nil {
+			return err
+		}
+		if memberCount > 0 {
+			return fmt.Errorf("workspace already exists: %s", ws.ID)
+		}
+		if _, err := tx.Exec(`UPDATE workspaces SET title = ?, directory = ? WHERE id = ?`, ws.Title, ws.Directory, ws.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM workspace_layout_panes WHERE workspace_id = ?`, ws.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM workspace_layouts WHERE workspace_id = ?`, ws.ID); err != nil {
+			return err
+		}
+	} else {
+		if _, err := tx.Exec(`
+			INSERT INTO workspaces (id, title, directory, created_at)
+			VALUES (?, ?, ?, ?)`, ws.ID, ws.Title, ws.Directory, now); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO sessions
+		(id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		session.ID, session.Label, session.Agent, session.Directory,
+		protocol.Deref(session.EndpointID), ws.ID, protocol.Deref(session.Branch),
+		boolToInt(protocol.Deref(session.IsWorktree)), protocol.Deref(session.MainRepo),
+		string(session.State), session.StateSince, session.StateUpdatedAt,
+		string(todosJSON), session.LastSeen, boolToInt(session.Muted),
+		boolToInt(protocol.Deref(session.Recoverable))); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO workspace_layouts (workspace_id, active_pane_id, layout_json, updated_at)
+		VALUES (?, ?, ?, ?)`, ws.ID, layout.ActivePaneID, layoutJSON, now); err != nil {
+		return err
+	}
+	for _, pane := range layout.Panes {
+		if _, err := tx.Exec(`
+			INSERT INTO workspace_layout_panes (workspace_id, pane_id, runtime_id, session_id, kind, title, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			ws.ID, pane.PaneID, pane.RuntimeID, nilIfEmpty(pane.SessionID),
+			pane.Kind, pane.Title, now, now); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO recent_locations (path, label, last_seen, use_count)
+		VALUES (?, ?, ?, 1)
+		ON CONFLICT(path) DO UPDATE SET
+			label = excluded.label,
+			last_seen = excluded.last_seen,
+			use_count = use_count + 1`,
+		ws.Directory, ws.Title, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // AddWorkspace inserts or updates a workspace row. The Status field is NOT
 // persisted — it's a runtime rollup recomputed from member sessions every time

@@ -141,6 +141,9 @@ type Daemon struct {
 	// workspace identity, session membership, and daemon-owned panel
 	// geometry.
 	workspaces *workspaceRegistry
+
+	workspacePaneHistoryMu sync.Mutex
+	workspacePaneHistory   map[string][]string
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -1176,6 +1179,12 @@ func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
 	d.markForcedStopClassification(sessionID)
 
 	if d.ptyBackend == nil {
+		return
+	}
+	if remover, ok := d.ptyBackend.(ptybackend.TerminatingRemover); ok {
+		if err := remover.TerminateAndRemove(context.Background(), sessionID, sig); err != nil && !errors.Is(err, pty.ErrSessionNotFound) {
+			d.logf("terminate and remove session failed for %s: %v", sessionID, err)
+		}
 		return
 	}
 	if err := d.ptyBackend.Kill(context.Background(), sessionID, sig); err != nil && !errors.Is(err, pty.ErrSessionNotFound) {

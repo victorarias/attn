@@ -67,6 +67,7 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdDeleteComment,
 		protocol.CmdGetComments,
 		protocol.CmdSpawnSession,
+		protocol.CmdBootstrapWorkspace,
 		protocol.CmdAttachSession,
 		protocol.CmdDetachSession,
 		protocol.CmdPtyInput,
@@ -77,6 +78,8 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdWorkspaceLayoutClosePane,
 		protocol.CmdWorkspaceLayoutFocusPane,
 		protocol.CmdWorkspaceLayoutRenamePane,
+		protocol.CmdRegisterWorkspace,
+		protocol.CmdUnregisterWorkspace,
 	}
 
 	for _, cmd := range commands {

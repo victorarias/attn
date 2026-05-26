@@ -94,7 +94,7 @@ func TestNormalizeWorkspaceLayoutPrunesMissingPanes(t *testing.T) {
 		},
 	}
 
-	normalized := NormalizeWorkspaceLayout(snapshot, "sess-1")
+	normalized := NormalizeWorkspaceLayout(snapshot, snapshot.Panes[0])
 	if normalized.Layout.Type != "pane" || normalized.Layout.PaneID != MainPaneID {
 		t.Fatalf("normalized layout = %+v, want single agent pane", normalized.Layout)
 	}
@@ -136,7 +136,7 @@ func TestNormalizeWorkspaceLayoutRebalancesSameDirectionChains(t *testing.T) {
 		},
 	}
 
-	normalized := NormalizeWorkspaceLayout(snapshot, "sess-1")
+	normalized := NormalizeWorkspaceLayout(snapshot, snapshot.Panes[0])
 	if normalized.Layout.Type != "split" {
 		t.Fatalf("normalized layout = %+v, want split root", normalized.Layout)
 	}
@@ -178,11 +178,26 @@ func TestNormalizeWorkspaceLayoutRebalancesAfterRemovingPaneFromChain(t *testing
 		},
 	}
 
-	normalized := NormalizeWorkspaceLayout(snapshot, "sess-1")
+	normalized := NormalizeWorkspaceLayout(snapshot, snapshot.Panes[0])
 	if normalized.Layout.Type != "split" {
 		t.Fatalf("normalized layout = %+v, want split root", normalized.Layout)
 	}
 	if math.Abs(normalized.Layout.Ratio-0.5) > 1e-9 {
 		t.Fatalf("root ratio = %v, want 0.5", normalized.Layout.Ratio)
+	}
+}
+
+func TestNormalizeWorkspaceLayoutPreservesShellRootSession(t *testing.T) {
+	snapshot := DefaultWorkspaceLayoutForRoot("workspace-1", Pane{
+		RuntimeID: "shell-1",
+		SessionID: "shell-1",
+		Kind:      PaneKindShell,
+		Title:     "fish",
+	})
+
+	normalized := NormalizeWorkspaceLayout(snapshot, snapshot.Panes[0])
+	root := normalized.Panes[0]
+	if root.Kind != PaneKindShell || root.SessionID != "shell-1" || root.Title != "fish" {
+		t.Fatalf("shell root = %+v, want first-class shell session", root)
 	}
 }

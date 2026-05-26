@@ -95,6 +95,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdDeleteComment:             commandMetadata(ScopeEndpoint, false, true),
 	protocol.CmdGetComments:               commandMetadata(ScopeEndpoint, false, true),
 	protocol.CmdSpawnSession:              commandMetadata(ScopeEndpoint, true, true),
+	protocol.CmdBootstrapWorkspace:        commandMetadata(ScopeEndpoint, true, true),
 	protocol.CmdAttachSession:             commandMetadata(ScopeSession, true, true),
 	protocol.CmdDetachSession:             commandMetadata(ScopeSession, true, true),
 	protocol.CmdPtyInput:                  commandMetadata(ScopeSession, true, false),
@@ -105,6 +106,8 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdWorkspaceLayoutClosePane:  commandMetadata(ScopeSession, true, true),
 	protocol.CmdWorkspaceLayoutFocusPane:  commandMetadata(ScopeSession, true, true),
 	protocol.CmdWorkspaceLayoutRenamePane: commandMetadata(ScopeSession, true, true),
+	protocol.CmdRegisterWorkspace:         commandMetadata(ScopeEndpoint, true, true),
+	protocol.CmdUnregisterWorkspace:       commandMetadata(ScopeSession, true, true),
 }
 
 func shouldLogWSCommand(cmd string) bool {

@@ -175,6 +175,72 @@ type BootstrapEndpointMessage struct {
 	EndpointID string `json:"endpoint_id"`
 }
 
+type BootstrapWorkspaceInitialSession struct {
+	// Agent corresponds to the JSON schema field "agent".
+	Agent *string `json:"agent,omitempty,omitzero"`
+
+	// Cols corresponds to the JSON schema field "cols".
+	Cols int `json:"cols"`
+
+	// Cwd corresponds to the JSON schema field "cwd".
+	Cwd string `json:"cwd"`
+
+	// Executable corresponds to the JSON schema field "executable".
+	Executable *string `json:"executable,omitempty,omitzero"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind WorkspaceLayoutPaneKind `json:"kind"`
+
+	// Label corresponds to the JSON schema field "label".
+	Label *string `json:"label,omitempty,omitzero"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows int `json:"rows"`
+
+	// YoloMode corresponds to the JSON schema field "yolo_mode".
+	YoloMode *bool `json:"yolo_mode,omitempty,omitzero"`
+}
+
+type BootstrapWorkspaceMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Directory corresponds to the JSON schema field "directory".
+	Directory string `json:"directory"`
+
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty,omitzero"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// InitialSession corresponds to the JSON schema field "initial_session".
+	InitialSession BootstrapWorkspaceInitialSession `json:"initial_session"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+}
+
+type BootstrapWorkspaceResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
 type Branch struct {
 	// CommitHash corresponds to the JSON schema field "commit_hash".
 	CommitHash *string `json:"commit_hash,omitempty,omitzero"`
@@ -2262,6 +2328,9 @@ type SpawnSessionMessage struct {
 	// Cwd corresponds to the JSON schema field "cwd".
 	Cwd string `json:"cwd"`
 
+	// Direction corresponds to the JSON schema field "direction".
+	Direction *WorkspaceLayoutSplitDirection `json:"direction,omitempty,omitzero"`
+
 	// EndpointID corresponds to the JSON schema field "endpoint_id".
 	EndpointID *string `json:"endpoint_id,omitempty,omitzero"`
 
@@ -2285,6 +2354,9 @@ type SpawnSessionMessage struct {
 
 	// Rows corresponds to the JSON schema field "rows".
 	Rows int `json:"rows"`
+
+	// TargetPaneID corresponds to the JSON schema field "target_pane_id".
+	TargetPaneID *string `json:"target_pane_id,omitempty,omitzero"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`
@@ -2790,6 +2862,9 @@ const WorkspaceLayoutSplitDirectionVertical WorkspaceLayoutSplitDirection = "ver
 type WorkspaceLayoutSplitPaneMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
+
+	// Cwd corresponds to the JSON schema field "cwd".
+	Cwd *string `json:"cwd,omitempty,omitzero"`
 
 	// Direction corresponds to the JSON schema field "direction".
 	Direction WorkspaceLayoutSplitDirection `json:"direction"`

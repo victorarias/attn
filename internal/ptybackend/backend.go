@@ -123,6 +123,14 @@ type LifecycleHooks interface {
 	SetStateHandler(func(sessionID, state string))
 }
 
+// TerminatingRemover is implemented by backends that can remove a runtime
+// while delivering its terminating signal as one operation. Worker-backed
+// terminals acknowledge removal before waiting for a TUI to exit, so daemon
+// state teardown is not blocked by an unresponsive child.
+type TerminatingRemover interface {
+	TerminateAndRemove(ctx context.Context, sessionID string, sig syscall.Signal) error
+}
+
 type SessionInfoProvider interface {
 	SessionInfo(ctx context.Context, sessionID string) (SessionInfo, error)
 }

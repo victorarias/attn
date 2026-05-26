@@ -51,8 +51,11 @@ jobs:
               - '.github/workflows/ci.yml'
             native_ui:
               - 'native-ui/**'
-              - 'internal/protocol/schema/**'
-              - 'app/scripts/real-app-harness/scenario-native-canvas.mjs'
+              - 'cmd/**'
+              - 'internal/**'
+              - 'Makefile'
+              - 'scripts/run-native-dev.sh'
+              - 'app/scripts/real-app-harness/**'
               - '.github/workflows/ci.yml'
 
   backend:
@@ -183,33 +186,42 @@ jobs:
     name: Native UI
     needs: changes
     if: needs.changes.outputs.native_ui == 'true'
-    runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: native-ui
+    runs-on: macos-15
+    env:
+      NATIVE_GHOSTTY_DIR: ${{ github.workspace }}/ghostty
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Check out attn Ghostty fork
+        uses: actions/checkout@v4
         with:
-          components: rustfmt, clippy
+          repository: victorarias/ghostty
+          ref: 853aa8cb89d1bb2bda17c867c0a0c88b5b286994
+          path: ghostty
 
       - name: Set up Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: '26.3'
 
-      - name: Set up Zig
-        uses: mlugg/setup-zig@v2
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          version: 0.15.2
+          go-version: '1.22'
 
-      - name: Cargo fmt
-        run: cargo fmt --check
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-      - name: Cargo test
-        run: cargo test --workspace
+      - name: Install Zig used by Ghostty
+        run: brew install zig@0.15
 
-      - name: Cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Ensure Metal toolchain is available
+        run: |
+          if ! xcrun -find metal >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+
+      - name: Test Swift native client and non-interactive harnesses
+        run: make test-native-ci

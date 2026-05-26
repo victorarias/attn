@@ -36,6 +36,17 @@ func TestPrintProfileBanner_MentionsProfileSocketAndPort(t *testing.T) {
 	}
 }
 
+func TestPrintProfileBanner_NoopForManagedPTYBootstrap(t *testing.T) {
+	t.Setenv("ATTN_PROFILE", "dev")
+	t.Setenv("ATTN_SUPPRESS_PROFILE_BANNER", "1")
+
+	var buf bytes.Buffer
+	PrintProfileBanner(&buf)
+	if buf.Len() != 0 {
+		t.Errorf("expected no banner for managed PTY bootstrap, got %q", buf.String())
+	}
+}
+
 func TestCollapseHome(t *testing.T) {
 	t.Setenv("HOME", "/Users/victor")
 	cases := map[string]string{

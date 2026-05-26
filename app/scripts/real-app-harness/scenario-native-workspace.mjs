@@ -145,6 +145,9 @@ async function main() {
     });
     await client.waitForManifest(40_000);
     nativePid = client.readManifest().pid;
+    const physicalDriver = physicalInputMode
+      ? new MacOSDriver({ pid: nativePid, actionDelayMs: 10 })
+      : null;
     const assertRunsInBackground = async (label) => {
       const frontmostPid = await focusDriver.frontmostProcessId();
       const sample = { label, frontmostPid, nativePid };
@@ -161,23 +164,100 @@ async function main() {
 
     workspaceId = `native-smoke-${suffix}`;
     const runtimeId = `native-pane-${suffix}`;
-    await client.request('create_workspace', {
+    await client.request('bootstrap_workspace', {
       id: workspaceId,
       title: 'Native smoke',
       directory: '/tmp',
+      session_id: runtimeId,
+      agent: 'pi',
+      executable: '/bin/sh',
     });
     await waitFor(async () => {
       const state = await client.request('get_state');
       return state.workspaces.some((workspace) => workspace.id === workspaceId) ? state : null;
     }, 'workspace registration');
     await client.request('select_workspace', { workspace_id: workspaceId });
-    await client.request('spawn_session', {
-      id: runtimeId,
-      workspace_id: workspaceId,
-      cwd: '/tmp',
-      agent: 'pi',
-      executable: '/bin/sh',
-    });
+    if (backgroundMode && priorForegroundPid && priorForegroundPid !== nativePid) {
+      await focusDriver.activateProcessId(priorForegroundPid);
+    }
+    if (physicalDriver) {
+      await physicalDriver.activateApp();
+      await physicalDriver.clickWindow(0.6, 0.4);
+      await physicalDriver.pressKey('n', { command: true });
+      const verticalPaneLauncher = await client.request('get_launcher_state');
+      if (!verticalPaneLauncher.open ||
+        verticalPaneLauncher.mode !== 'add_pane' ||
+        verticalPaneLauncher.direction !== 'vertical') {
+        throw new Error(`Cmd+N did not open vertical Add Pane launcher: ${JSON.stringify(verticalPaneLauncher)}`);
+      }
+      await physicalDriver.pressKeyCode(53);
+      await physicalDriver.pressKey('n', { command: true, shift: true });
+      const horizontalPaneLauncher = await client.request('get_launcher_state');
+      if (!horizontalPaneLauncher.open ||
+        horizontalPaneLauncher.mode !== 'add_pane' ||
+        horizontalPaneLauncher.direction !== 'horizontal') {
+        throw new Error(`Cmd+Shift+N did not open horizontal Add Pane launcher: ${JSON.stringify(horizontalPaneLauncher)}`);
+      }
+      await physicalDriver.pressKeyCode(53);
+      await physicalDriver.clickWindow(0.16, 0.06);
+      const visibleNewWorkspaceLauncher = await client.request('get_launcher_state');
+      if (!visibleNewWorkspaceLauncher.open ||
+        visibleNewWorkspaceLauncher.mode !== 'new_workspace') {
+        const windowId = await physicalDriver.waitForMainWindow();
+        if (windowId) {
+          try {
+            await client.request('screenshot', {
+              path: path.join(paths.appDataDir, 'sidebar-plus-failure.png'),
+              windowId,
+            });
+          } catch {}
+        }
+        throw new Error(
+          `Sidebar + did not open New Workspace launcher: ${JSON.stringify(visibleNewWorkspaceLauncher)}`,
+        );
+      }
+      await physicalDriver.pressKeyCode(53);
+      const closedVisibleLauncher = await client.request('get_launcher_state');
+      if (closedVisibleLauncher.open) {
+        throw new Error('Escape did not close New Workspace launcher opened from sidebar +');
+      }
+    }
+    const beforeLauncherState = await client.request('get_state');
+    const beforeLauncherLayout = beforeLauncherState.layouts.find(
+      (layout) => layout.workspace_id === workspaceId,
+    );
+    await client.request('open_add_pane_launcher', { direction: 'horizontal' });
+    const launcherState = await client.request('get_launcher_state');
+    if (!launcherState.open ||
+      launcherState.mode !== 'add_pane' ||
+      launcherState.direction !== 'horizontal' ||
+      launcherState.path !== '/tmp') {
+      throw new Error(`Add Pane launcher draft mismatch: ${JSON.stringify(launcherState)}`);
+    }
+    await client.request('cancel_launcher');
+    const cancelledLauncherState = await client.request('get_launcher_state');
+    const afterLauncherState = await client.request('get_state');
+    const afterLauncherLayout = afterLauncherState.layouts.find(
+      (layout) => layout.workspace_id === workspaceId,
+    );
+    if (cancelledLauncherState.open ||
+      beforeLauncherLayout?.panes?.length !== afterLauncherLayout?.panes?.length) {
+      throw new Error('Cancelling Add Pane mutated daemon-confirmed pane state');
+    }
+    if (backgroundMode) await assertRunsInBackground('launcher-open-cancel');
+    await client.request('open_new_workspace_launcher');
+    await client.request('set_launcher_path', { path: REPO_ROOT });
+    await client.request('inspect_launcher_path');
+    const repoLauncherState = await waitFor(async () => {
+      const state = await client.request('get_launcher_state');
+      return state.stage === 'repository' ? state : null;
+    }, 'repository destination launcher stage');
+    if (repoLauncherState.destinationCount < 1) {
+      throw new Error('Repository launcher did not expose a checkout destination');
+    }
+    await client.request('cancel_launcher');
+    await client.request('cancel_launcher');
+    if (backgroundMode) await assertRunsInBackground('launcher-repository-stage');
 
     const target = await waitFor(async () => {
       const state = await client.request('get_state');
@@ -214,7 +294,6 @@ async function main() {
     }, 'direct PTY output in current window mode');
     let physicalText = null;
     if (physicalInputMode) {
-      const physicalDriver = new MacOSDriver({ pid: nativePid, actionDelayMs: 10 });
       const physicalMarker = `phys${suffix}`;
       await physicalDriver.clickWindow(0.6, 0.4);
       for (const key of `echo ${physicalMarker}`) {
@@ -264,10 +343,12 @@ async function main() {
       const eventTail = await client.request('tail_events', { since_id: 0 });
       const eventCursor = eventTail.next_cursor;
       parkingWorkspaceId = `native-parking-${suffix}`;
-      await client.request('create_workspace', {
+      await client.request('bootstrap_workspace', {
         id: parkingWorkspaceId,
         title: 'Native parking',
         directory: '/tmp',
+        session_id: `native-parking-shell-${suffix}`,
+        agent: 'shell',
       });
       await waitFor(async () => {
         const state = await client.request('get_state');
@@ -350,6 +431,8 @@ async function main() {
       renderedMarker: text.text.includes(marker),
       backgroundOutputReadback: directText.text.includes(directMarker),
       ghosttyInputCallback: Boolean(inputCallback),
+      launcherOpenCancel: !cancelledLauncherState.open,
+      launcherRepositoryStage: repoLauncherState.stage === 'repository',
       physicalInputCovered: physicalInputMode ? Boolean(physicalText) : false,
       reattachedAfterSwitch: backgroundMode ? null : Boolean(reattachEvent),
       splitPanesAttached: splitSnapshot?.panes.length ?? null,

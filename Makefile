@@ -1,4 +1,4 @@
-.PHONY: run build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev build-native-ghostty-kit build-native-app-dev dev-native test-native-agent test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-dev app-screenshot dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev build-native-ghostty-kit stage-native-ghostty-kit build-native-app-dev dev-native test-native-swift test-native-automation test-native-terminal test-native-ci test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-dev app-screenshot dist release release-skip-tests
 
 # Bare `make` does the full prod inner loop: install + open the app.
 # `make install` is install-only (for scripts/CI that drive the launch
@@ -28,10 +28,11 @@ GO_LDFLAGS = -X github.com/victorarias/attn/internal/buildinfo.Version=$(VERSION
 ZIG ?= zig
 NATIVE_ZIG_PREFIX ?= $(shell HOMEBREW_NO_AUTO_UPDATE=1 brew --prefix zig@0.15 2>/dev/null)
 NATIVE_GHOSTTY_DIR ?= $(abspath ../ghostty)
-NATIVE_GHOSTTY_EXTERNAL_IO_REV ?= ba8e595f7
+NATIVE_GHOSTTY_EXTERNAL_IO_REV ?= 853aa8cb89d1bb2bda17c867c0a0c88b5b286994
 NATIVE_DEV_WS_URL ?= ws://localhost:29849/ws
-NATIVE_APP_BUNDLE_DEV := $(abspath native-ui/target/debug/attn-native-dev.app)
+NATIVE_APP_BUNDLE_DEV := $(abspath native-ui/.build/debug/attn-native-dev.app)
 NATIVE_APP_BINARY_DEV := $(NATIVE_APP_BUNDLE_DEV)/Contents/MacOS/attn-native
+NATIVE_SWIFT_BINARY_DEV := $(abspath native-ui/.build/debug/attn-native)
 # Prefer a stable local development identity so macOS privacy grants survive
 # source rebuilds. Sort by fingerprint because Keychain output ordering is
 # not stable when more than one development identity is installed. CI and
@@ -207,17 +208,19 @@ build-native-ghostty-kit:
 	@test -f "$(NATIVE_GHOSTTY_DIR)/macos/GhosttyKit.xcframework/macos-arm64/libghostty-internal-fat.a"
 	@echo "Built GhosttyKit from $(NATIVE_GHOSTTY_DIR)"
 
-# Build a signed macOS bundle for the native renderer. A stable bundle
+# Stage the locally-built renderer as a SwiftPM binary target input.
+stage-native-ghostty-kit: build-native-ghostty-kit
+	@mkdir -p native-ui/Vendor
+	@rm -rf native-ui/Vendor/GhosttyKit.xcframework
+	cp -R "$(NATIVE_GHOSTTY_DIR)/macos/GhosttyKit.xcframework" native-ui/Vendor/
+
+# Build a signed macOS bundle for the Swift native client. A stable bundle
 # identifier is required for Screen Recording permission to survive rebuilds.
-build-native-app-dev: build-native-ghostty-kit
-	@if [ ! -x "$(NATIVE_ZIG_PREFIX)/bin/zig" ]; then \
-		echo "Missing patched Zig toolchain; install it with: brew install zig@0.15"; \
-		exit 1; \
-	fi
-	cd native-ui && ATTN_NATIVE_BUILD_PROFILE=dev ATTN_NATIVE_BUILD_WS_URL="$(NATIVE_DEV_WS_URL)" PATH="$(NATIVE_ZIG_PREFIX)/bin:$$PATH" cargo build --bin attn-native
+build-native-app-dev: stage-native-ghostty-kit
+	cd native-ui && swift build --product attn-native -c debug
 	@mkdir -p "$(NATIVE_APP_BUNDLE_DEV)/Contents/MacOS"
-	cp native-ui/macos/attn-native-dev/Info.plist "$(NATIVE_APP_BUNDLE_DEV)/Contents/Info.plist"
-	cp native-ui/target/debug/attn-native "$(NATIVE_APP_BINARY_DEV)"
+	cp native-ui/Resources/Info.plist "$(NATIVE_APP_BUNDLE_DEV)/Contents/Info.plist"
+	cp "$(NATIVE_SWIFT_BINARY_DEV)" "$(NATIVE_APP_BINARY_DEV)"
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
 		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" "$(NATIVE_APP_BINARY_DEV)" >/dev/null; \
 		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" "$(NATIVE_APP_BUNDLE_DEV)" >/dev/null; \
@@ -230,17 +233,30 @@ dev-native: build build-native-app-dev
 	@echo ">>> Ensuring native dev daemon (profile=dev, port=29849, data=~/.attn-dev)"
 	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" $(OUTPUT) >/dev/null; fi
 	@$(DEV_DAEMON_ENV) ./$(OUTPUT) daemon ensure >/dev/null
-	@echo ">>> Launching $(NATIVE_APP_BUNDLE_DEV) (built-in profile=dev, daemon=$(NATIVE_DEV_WS_URL))"
-	open -n -W "$(NATIVE_APP_BUNDLE_DEV)"
+	@echo ">>> Launching $(NATIVE_APP_BUNDLE_DEV) (profile=dev, daemon=$(NATIVE_DEV_WS_URL)); Ctrl-C stops a client launched here"
+	$(DEV_DAEMON_ENV) ATTN_NATIVE_WS_URL="$(NATIVE_DEV_WS_URL)" \
+		ATTN_NATIVE_APP_BUNDLE="$(NATIVE_APP_BUNDLE_DEV)" \
+		sh scripts/run-native-dev.sh
 
-# Agent-driven native smoke test. It owns a unique daemon profile and native
-# window, so it never attaches to or resizes the user's dev/prod terminals.
-test-native-agent: build
-	@if [ ! -x "$(NATIVE_ZIG_PREFIX)/bin/zig" ]; then \
-		echo "Missing patched Zig toolchain; install it with: brew install zig@0.15"; \
-		exit 1; \
-	fi
-	cd app && PATH="$(NATIVE_ZIG_PREFIX)/bin:$$PATH" ATTN_NATIVE_DAEMON_BINARY="$(abspath $(OUTPUT))" pnpm run native:smoke
+# Swift native unit tests. Agent-driven terminal smoke tests return once the
+# forked native surface host is connected to the automation bridge.
+test-native-swift: stage-native-ghostty-kit
+	cd native-ui && swift test
+
+# Signed app smoke test for the focus-safe automation foundation. It launches
+# an isolated no-daemon instance and never attaches to live terminal state.
+test-native-automation: build-native-app-dev
+	node app/scripts/real-app-harness/scenario-swift-native-automation-foundation.mjs
+
+# Isolated-daemon terminal test. The scenario creates workspaces via the
+# daemon protocol, then verifies the native client through Ghostty surfaces.
+# Set ATTN_NATIVE_REAL_AGENTS=1 to additionally render local Claude/Codex UIs.
+test-native-terminal: build build-native-app-dev
+	ATTN_NATIVE_DAEMON_BINARY="$(abspath $(OUTPUT))" node app/scripts/real-app-harness/scenario-swift-native-terminal.mjs
+
+# CI-safe native coverage. The harness scenarios operate against isolated
+# profiles and avoid hardware keyboard input or real locally installed agents.
+test-native-ci: test-native-swift test-native-automation test-native-terminal
 
 clean:
 	rm -f $(BINARY_NAME)

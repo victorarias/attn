@@ -183,6 +183,47 @@ Before changing PTY attach/replay, terminal resize, mobile keyboard viewport han
 - do not let replayed historical terminal queries produce fresh live PTY input
 - for mobile or viewport bugs, keep structured instrumentation and prefer transition evidence over screenshots alone
 
+### 8. Terminal Replay Preserves Protocol State
+
+Terminal output is not only pixels. Startup bytes can enable modes that change
+later behavior, such as Claude Code enabling DEC focus reporting (`CSI ?1004 h`).
+A visible-screen snapshot recreates cells and cursor visibility, but cannot
+recreate those terminal modes.
+
+Rules:
+
+- When an attached interactive app may have emitted terminal-mode changes before
+  a frontend surface mounted, restore verified raw startup bytes, not only a
+  synthesized visible-screen snapshot.
+- Raw attach replay is still historical output. Frontends must parse it through
+  an input-suppressed replay path (`ghostty_surface_process_replay` in native,
+  `attach_replay` suppression in Tauri), so old terminal queries cannot generate
+  new PTY input.
+- Test both sides of this invariant: raw replay retains stateful mode sequences,
+  and an end-to-end native test proves an attn-launched Claude pane receives a
+  focus-loss notification after another pane takes focus.
+
+Failure mode this prevents: Claude launched directly by attn appears focused in
+an inactive pane, while Claude launched manually inside an already-attached
+shell behaves correctly.
+
+### 9. Native Ghostty Pointer Delivery
+
+Ghostty owns terminal selection and terminal mouse reporting, but its native
+surface API consumes button presses using the most recently delivered pointer
+position. A host that sends a button without updating position can anchor
+selection at an earlier hover location and report the wrong cell to mouse-aware
+TUIs.
+
+Rules:
+
+- Native surface hosts must maintain mouse tracking across the visible terminal
+  region and report pointer entry, motion and exit to Ghostty.
+- Send the current pointer position immediately before each mouse-button press;
+  do not assume a preceding `mouseMoved` event was delivered.
+- Test both Ghostty modes: plain rendered-text selection and a DEC
+  mouse-reporting fixture that consumes click/drag input through its PTY.
+
 ## Communication
 
 - unix socket IPC: `~/.attn/attn.sock`

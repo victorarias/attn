@@ -25,6 +25,8 @@
     "real-app:bridge-pty-bench": "node scripts/real-app-harness/bridge-pty-bench.mjs",
     "real-app:bridge-cli": "node scripts/real-app-harness/ui-automation-cli.mjs",
     "native:bridge-cli": "node scripts/real-app-harness/native-ui-automation-cli.mjs",
+    "native:automation-smoke": "node scripts/real-app-harness/scenario-swift-native-automation-foundation.mjs",
+    "native:terminal-smoke": "node scripts/real-app-harness/scenario-swift-native-terminal.mjs",
     "native:smoke": "node scripts/real-app-harness/scenario-native-workspace.mjs",
     "real-app:scenario-tr201": "node scripts/real-app-harness/scenario-tr201-local-relaunch-existing-split.mjs",
     "real-app:scenario-tr204": "node scripts/real-app-harness/scenario-tr204-local-relaunch-formatting.mjs",

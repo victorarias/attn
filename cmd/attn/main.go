@@ -575,6 +575,11 @@ func mergeEnv(base []string, extra []string) []string {
 }
 
 func runAgentDirectly(requestedAgent string) {
+	// The PTY invokes this wrapper in-band, but the interactive child must not
+	// inherit suppression: an explicit `attn` command run later should still
+	// show which non-default profile it targets.
+	clearManagedLaunchProfileBannerSuppression()
+
 	pathutil.EnsureGUIPath()
 
 	driver := agentdriver.Get(requestedAgent)
@@ -708,6 +713,10 @@ func runAgentDirectly(requestedAgent string) {
 		}
 		os.Exit(1)
 	}
+}
+
+func clearManagedLaunchProfileBannerSuppression() {
+	os.Unsetenv(config.SuppressProfileBannerEnv)
 }
 
 func resolveWrapperPath() string {

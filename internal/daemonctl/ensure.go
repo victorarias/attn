@@ -137,8 +137,19 @@ func normalizedFingerprint(value string) string {
 }
 
 func spawnDaemon(binaryPath string) error {
+	if err := os.MkdirAll(config.DataDir(), 0o700); err != nil {
+		return fmt.Errorf("create daemon data directory: %w", err)
+	}
+	processOutput, err := os.OpenFile(config.DaemonStderrPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("open daemon stderr log: %w", err)
+	}
+	defer processOutput.Close()
+
 	cmd := exec.Command(binaryPath, "daemon")
 	cmd.Env = append(os.Environ(), "ATTN_WRAPPER_PATH="+binaryPath)
+	cmd.Stdout = processOutput
+	cmd.Stderr = processOutput
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start daemon: %w", err)
 	}
