@@ -54,8 +54,10 @@ async function main() {
   const guardedAppDataDir = path.dirname(path.dirname(guardedManifestPath));
   const screenshotPath = path.join(os.tmpdir(), `attn-swift-native-automation-${profile}.png`);
   const appPath = process.env.ATTN_NATIVE_APP_PATH || DEFAULT_APP_PATH;
+  const allowScreenshotDenied = process.env.ATTN_NATIVE_ALLOW_SCREENSHOT_DENIED === '1';
   const foregroundBefore = await frontmostApplication();
   const previousForegroundPID = foregroundBefore.pid;
+  let screenshotVerified = false;
   let client;
   let nativePID;
   let guardedClient;
@@ -95,9 +97,17 @@ async function main() {
     assert.ok(bounds.logicalBounds.width > 0 && bounds.logicalBounds.height > 0);
     assert.equal(bounds.logicalBounds.x, parked.logicalBounds.x, 'parked bounds must be observable through automation');
 
-    const screenshot = await client.request('screenshot_window', { path: screenshotPath });
-    assert.equal(screenshot.path, screenshotPath);
-    assert.ok(fs.statSync(screenshotPath).size > 0, 'native screenshot must be non-empty');
+    try {
+      const screenshot = await client.request('screenshot_window', { path: screenshotPath });
+      assert.equal(screenshot.path, screenshotPath);
+      assert.ok(fs.statSync(screenshotPath).size > 0, 'native screenshot must be non-empty');
+      screenshotVerified = true;
+    } catch (error) {
+      if (!allowScreenshotDenied || !/native screencapture failed: could not create image from window/.test(error.message)) {
+        throw error;
+      }
+      console.warn('Native screenshot request reached macOS capture, which is denied on this hosted runner.');
+    }
 
     await assert.rejects(
       client.request('type_terminal', { text: 'echo ready\n' }),
@@ -162,7 +172,8 @@ async function main() {
       previousForegroundBundleIdentifier: foregroundBefore.bundleIdentifier,
       parkedWindow: parked,
       windowId: bounds.windowId,
-      screenshotPath,
+      screenshotVerified,
+      screenshotPath: screenshotVerified ? screenshotPath : null,
       terminalSurfaceAbsentWithoutDaemon: true,
       singleClientPerProfile: true,
       interruptedLauncherStopsOwnedClientWithOpenDialog: true,

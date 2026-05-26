@@ -1058,6 +1058,7 @@ async function main() {
   const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'attn-native-terminal-'));
   const daemonProcessLogPath = path.join(temporaryDirectory, 'daemon-process.stderr.log');
   const keepArtifacts = process.env.ATTN_NATIVE_KEEP_ARTIFACTS === '1';
+  const allowScreenshotDenied = process.env.ATTN_NATIVE_ALLOW_SCREENSHOT_DENIED === '1';
   const appPath = process.env.ATTN_NATIVE_APP_PATH || DEFAULT_APP_PATH;
   const daemonBinary = process.env.ATTN_NATIVE_DAEMON_BINARY || path.join(REPO_ROOT, 'attn');
   const previousForegroundPID = await frontmostPID();
@@ -1134,8 +1135,17 @@ async function main() {
     const launcher = await exerciseWorkspaceLauncher(client, controller, temporaryDirectory, suffix, physicalDriver);
     const retainedEmptyWorkspace = await exerciseRetainedEmptyWorkspace(client, controller, temporaryDirectory, suffix);
     const screenshotPath = path.join(temporaryDirectory, 'ghostty-terminal-window.png');
-    await client.request('screenshot_window', { path: screenshotPath });
-    assert.ok(fs.statSync(screenshotPath).size > 0, 'rendered terminal window screenshot must be non-empty');
+    let terminalScreenshot = false;
+    try {
+      await client.request('screenshot_window', { path: screenshotPath });
+      assert.ok(fs.statSync(screenshotPath).size > 0, 'rendered terminal window screenshot must be non-empty');
+      terminalScreenshot = true;
+    } catch (error) {
+      if (!allowScreenshotDenied || !/native screencapture failed: could not create image from window/.test(error.message)) {
+        throw error;
+      }
+      console.warn('Native screenshot request reached macOS capture, which is denied on this hosted runner.');
+    }
 
     if (process.env.ATTN_NATIVE_REAL_AGENTS === '1') {
       const realClaude = await exerciseRenderedTerminal(
@@ -1173,7 +1183,7 @@ async function main() {
       mouseInput,
       launcher,
       retainedEmptyWorkspace,
-      terminalScreenshot: true,
+      terminalScreenshot,
       results,
       closeCascade,
     }, null, 2));

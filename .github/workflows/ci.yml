@@ -189,6 +189,9 @@ jobs:
     runs-on: macos-15
     env:
       NATIVE_GHOSTTY_DIR: ${{ github.workspace }}/ghostty
+      # Hosted runners cannot grant this app a persistent Screen Recording
+      # permission. Invoke the action, but accept only macOS's capture denial.
+      ATTN_NATIVE_ALLOW_SCREENSHOT_DENIED: '1'
     steps:
       - uses: actions/checkout@v4
 
