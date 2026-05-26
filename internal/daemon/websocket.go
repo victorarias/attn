@@ -881,9 +881,14 @@ func (d *Daemon) tryHandleRemoteWSCommand(client *wsClient, cmd string, msg inte
 
 	if endpointID := remoteCommandEndpointID(cmd, msg); endpointID != "" {
 		if d.hubManager.HasEndpoint(endpointID) {
-			if cmd == protocol.CmdSpawnSession {
+			switch cmd {
+			case protocol.CmdSpawnSession:
 				if typed, ok := msg.(*protocol.SpawnSessionMessage); ok {
 					d.hubManager.ReservePendingSessionRoute(endpointID, typed.ID)
+				}
+			case protocol.CmdBootstrapWorkspace:
+				if typed, ok := msg.(*protocol.BootstrapWorkspaceMessage); ok {
+					d.hubManager.ReservePendingSessionRoute(endpointID, typed.InitialSession.ID)
 				}
 			}
 			if err := d.hubManager.ForwardEndpointCommand(context.Background(), endpointID, raw); err != nil {
