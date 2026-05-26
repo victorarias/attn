@@ -217,6 +217,14 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install harness dependencies
+        run: pnpm --dir app install --frozen-lockfile
+
       - name: Install Zig used by Ghostty
         run: brew install zig@0.15
 
