@@ -81,6 +81,8 @@ interface SelectionRange {
   endCol: number;
 }
 
+// ghostty-web's low-level model exposes hyperlink IDs but currently returns
+// null for hyperlink URIs, so OSC 8 labels cannot be opened without API work.
 const URL_RE = /\b(?:https?:\/\/|file:\/\/|mailto:|ftp:\/\/|ssh:\/\/|git:\/\/|tel:|magnet:|gemini:\/\/|gopher:\/\/|news:)[^\s<>()]+/g;
 
 function colorNumber(value: string): number {
@@ -114,16 +116,26 @@ function normalizeSelection(range: SelectionRange): SelectionRange {
   };
 }
 
-function cellText(terminal: GhosttyModel, cells: GhosttyCell[], row: number): string {
+function cellText(
+  terminal: GhosttyModel,
+  cells: GhosttyCell[],
+  row: number,
+  startCol = 0,
+  scrollback = false,
+  trimEnd = true,
+): string {
   let text = '';
-  for (let col = 0; col < terminal.cols; col += 1) {
-    const cell = cells[col];
+  for (let offset = 0; offset < cells.length; offset += 1) {
+    const col = startCol + offset;
+    const cell = cells[offset];
     if (!cell || cell.width === 0) continue;
     text += cell.grapheme_len > 0
-      ? terminal.getGraphemeString(row, col)
+      ? scrollback
+        ? terminal.getScrollbackGraphemeString(row, col)
+        : terminal.getGraphemeString(row, col)
       : cell.codepoint > 0 ? String.fromCodePoint(cell.codepoint) : ' ';
   }
-  return text.trimEnd();
+  return trimEnd ? text.trimEnd() : text;
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
@@ -198,25 +210,37 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const lineAtVisibleRow = useCallback((row: number): string => {
       const terminal = terminalRef.current;
       if (!terminal) return '';
+      const history = terminal.getScrollbackLength();
+      const bufferRow = bufferRowFromViewportRow(row, history, viewportOffsetRef.current);
+      const scrollback = bufferRow < history;
       const cells = getViewportCells() ?? terminal.getViewport();
-      return cellText(terminal, cells.slice(row * terminal.cols, (row + 1) * terminal.cols), row);
+      return cellText(
+        terminal,
+        cells.slice(row * terminal.cols, (row + 1) * terminal.cols),
+        scrollback ? bufferRow : bufferRow - history,
+        0,
+        scrollback,
+      );
     }, [getViewportCells]);
 
-    const lineAtBufferRow = useCallback((row: number): string => {
+    const selectionLineAtBufferRow = useCallback((row: number, startCol: number, endCol: number): string => {
       const terminal = terminalRef.current;
       if (!terminal) return '';
       const history = terminal.getScrollbackLength();
       if (row < history) {
         const line = terminal.getScrollbackLine(row);
-        return line ? cellText(terminal, line, row) : '';
+        return line ? cellText(terminal, line.slice(startCol, endCol), row, startCol, true, false) : '';
       }
       const viewportRow = row - history;
       if (viewportRow < 0 || viewportRow >= terminal.rows) return '';
       const active = terminal.getViewport();
       return cellText(
         terminal,
-        active.slice(viewportRow * terminal.cols, (viewportRow + 1) * terminal.cols),
+        active.slice(viewportRow * terminal.cols + startCol, viewportRow * terminal.cols + endCol),
         viewportRow,
+        startCol,
+        false,
+        false,
       );
     }, []);
 
@@ -226,13 +250,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       if (!terminal || !range) return '';
       const lines: string[] = [];
       for (let row = range.startRow; row <= range.endRow; row += 1) {
-        const text = lineAtBufferRow(row);
         const start = row === range.startRow ? range.startCol : 0;
         const end = row === range.endRow ? range.endCol : terminal.cols;
-        lines.push(text.slice(start, end));
+        lines.push(selectionLineAtBufferRow(row, start, end));
       }
       return cleanTerminalLines(lines).join('\n');
-    }, [lineAtBufferRow]);
+    }, [selectionLineAtBufferRow]);
 
     const selectedText = useCallback(() => {
       return selectedTextRef.current ?? textForSelectionRange(selectionRef.current);
@@ -244,7 +267,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const lines: string[] = [];
       for (let row = 0; row < terminal.getScrollbackLength(); row += 1) {
         const line = terminal.getScrollbackLine(row);
-        if (line) lines.push(cellText(terminal, line, row));
+        if (line) lines.push(cellText(terminal, line, row, 0, true));
       }
       const active = terminal.getViewport();
       for (let row = 0; row < terminal.rows; row += 1) {
@@ -610,7 +633,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
               const text = textForSelectionRange(range);
               if (text) {
                 selectedTextRef.current = text;
-                applicationSelectionAnchorRef.current = createApplicationSelectionAnchor(range, lineAtBufferRow);
+                applicationSelectionAnchorRef.current = createApplicationSelectionAnchor(
+                  range,
+                  (row) => selectionLineAtBufferRow(row, 0, terminal.cols).trimEnd(),
+                );
               }
             }
             const cell = cellFromPointer(event);
