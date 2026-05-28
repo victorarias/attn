@@ -151,6 +151,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       {
         paneId: MAIN_TERMINAL_PANE_ID,
         runtimeId: sessionId,
+        paneKind: 'main' as const,
+        agent: sessionAgent,
         sessionId,
         testSessionId: sessionId,
         getSpawnArgs: ({ cols, rows }: { cols: number; rows: number }) => getMainPaneSpawnArgs(cols, rows),
@@ -158,6 +160,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       ...workspace.terminals.map((terminal) => ({
         paneId: terminal.id,
         runtimeId: terminal.ptyId,
+        paneKind: 'shell' as const,
         sessionId,
         getSpawnArgs: ({ cols, rows }: { cols: number; rows: number }) => ({
           id: terminal.ptyId,
@@ -168,7 +171,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           shell: true,
         }),
       })),
-    ]), [cwd, getMainPaneSpawnArgs, sessionEndpointId, sessionId, workspace.terminals]);
+    ]), [cwd, getMainPaneSpawnArgs, sessionAgent, sessionEndpointId, sessionId, workspace.terminals]);
 
     const runtime = useGhosttyPaneRuntime(runtimePanes, activePaneId, eventRouter, isActiveSessionRef);
     const fitPane = runtime.fitPane;

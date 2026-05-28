@@ -22,6 +22,7 @@ import { analyzeTerminalVisibleLines } from '../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot, TerminalVisibleStyleLineSnapshot } from '../utils/terminalStyleSummary';
 import { registerTerminalPerfGetter, type TerminalPerfStartupSnapshot } from '../utils/terminalPerf';
 import {
+  applicationMouseInput,
   applicationWheelInput,
   bufferRowFromViewportRow,
   consumeWheelRows,
@@ -62,7 +63,7 @@ export interface GhosttyTerminalHandle {
   focus: () => boolean;
   typeTextViaInput: (text: string) => boolean;
   isInputFocused: () => boolean;
-  write: (data: string | Uint8Array) => Promise<void>;
+  write: (data: string | Uint8Array, options?: { suppressResponses?: boolean }) => Promise<void>;
   resizeLocal: (cols: number, rows: number) => void;
   reset: () => void;
   scrollToTop: () => boolean;
@@ -138,6 +139,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const selectedTextRef = useRef<string | null>(null);
     const applicationSelectionAnchorRef = useRef<ApplicationSelectionAnchor | null>(null);
     const selectingRef = useRef(false);
+    const trackedMouseButtonRef = useRef<number | null>(null);
     const writeChainRef = useRef(Promise.resolve());
     const renderCountRef = useRef(0);
     const writeCountRef = useRef(0);
@@ -149,12 +151,18 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const onReadyRef = useRef(onReady);
     const onResizeRef = useRef(onResize);
     const runtimeMetaRef = useRef(runtimeLogMeta);
+    const fontSizeRef = useRef(fontSize);
+    const resolvedThemeRef = useRef(resolvedTheme);
+    const debugNameRef = useRef(debugName);
     const [error, setError] = useState<string | null>(null);
 
     onInputRef.current = onInput;
     onReadyRef.current = onReady;
     onResizeRef.current = onResize;
     runtimeMetaRef.current = runtimeLogMeta;
+    fontSizeRef.current = fontSize;
+    resolvedThemeRef.current = resolvedTheme;
+    debugNameRef.current = debugName;
 
     const getViewportCells = useCallback((): GhosttyCell[] | undefined => {
       const terminal = terminalRef.current;
@@ -181,14 +189,14 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         startCol: range.startCol,
         endRow: viewportRowFromBufferRow(range.endRow, scrollbackLength, viewportOffsetRef.current),
         endCol: range.endCol,
-        color: getTerminalTheme(resolvedTheme).selectionBackground,
+        color: getTerminalTheme(resolvedThemeRef.current).selectionBackground,
       } : null;
       const sample = renderer.render(terminal, force, getViewportCells(), overlay, viewportOffsetRef.current);
       if (sample) {
         renderCountRef.current += 1;
         lastRenderAtRef.current = Date.now();
       }
-    }, [getViewportCells, resolvedTheme]);
+    }, [getViewportCells]);
 
     const lineAtVisibleRow = useCallback((row: number): string => {
       const terminal = terminalRef.current;
@@ -304,7 +312,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return { cols: terminal.cols, rows: terminal.rows, viewportY: viewportOffsetRef.current, lineCount: lines.length, lines, summary };
     }, [getViewportCells, lineAtVisibleRow]);
 
-    const write = useCallback((data: string | Uint8Array) => {
+    const write = useCallback((data: string | Uint8Array, options?: { suppressResponses?: boolean }) => {
       writeChainRef.current = writeChainRef.current.then(async () => {
         const terminal = terminalRef.current;
         if (!terminal) return;
@@ -325,7 +333,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         terminal.write(data);
         while (terminal.hasResponse()) {
           const response = terminal.readResponse();
-          if (response) onInputRef.current(response);
+          if (response && !options?.suppressResponses) onInputRef.current(response);
         }
         viewportOffsetRef.current = offsetAfterWrite(
           viewportOffsetBefore,
@@ -410,17 +418,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const container = containerRef.current;
       const canvas = canvasRef.current;
       if (!container || !canvas) return;
-      const perfId = `ghostty-${debugName}`;
+      const perfId = `ghostty-${debugNameRef.current}`;
       void Ghostty.load(ghosttyWasmUrl).then((ghostty) => {
         if (!active) return;
-        const theme = getTerminalTheme(resolvedTheme);
+        const theme = getTerminalTheme(resolvedThemeRef.current);
         const terminal = ghostty.createTerminal(80, 24, {
           scrollbackLimit: TERMINAL_SCROLLBACK_LINES,
           fgColor: colorNumber(theme.foreground),
           bgColor: colorNumber(theme.background),
           cursorColor: colorNumber(theme.cursor),
         });
-        const renderer = new WebGlTerminalRenderer(canvas, fontSize, FONT_FAMILY, {
+        const renderer = new WebGlTerminalRenderer(canvas, fontSizeRef.current, FONT_FAMILY, {
           background: theme.background,
           foreground: theme.foreground,
           cursor: theme.cursor,
@@ -471,7 +479,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         const meta = runtimeMetaRef.current;
         if (!terminal) return null;
         return {
-          terminalName: debugName,
+          terminalName: debugNameRef.current,
           sessionId: meta?.sessionId ?? null,
           paneId: meta?.paneId ?? null,
           runtimeId: meta?.runtimeId ?? null,
@@ -513,7 +521,24 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         rendererRef.current = null;
         terminalRef.current = null;
       };
-    }, [debugName, fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, resolvedTheme, write]);
+    }, [fit, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, write]);
+
+    useEffect(() => {
+      const terminal = terminalRef.current;
+      const canvas = canvasRef.current;
+      if (!terminal || !canvas || !readyRef.current) return;
+      const theme = getTerminalTheme(resolvedTheme);
+      rendererRef.current?.dispose();
+      const renderer = new WebGlTerminalRenderer(canvas, fontSize, FONT_FAMILY, {
+        background: theme.background,
+        foreground: theme.foreground,
+        cursor: theme.cursor,
+      });
+      rendererRef.current = renderer;
+      renderer.resize(terminal.cols, terminal.rows);
+      fit();
+      renderSurface(true);
+    }, [fit, fontSize, renderSurface, resolvedTheme]);
 
     const cellFromPointer = (event: React.MouseEvent) => {
       const renderer = rendererRef.current;
@@ -523,6 +548,45 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         row: Math.max(0, Math.min((terminalRef.current?.rows ?? 1) - 1, Math.floor((event.clientY - rect.top) / renderer.cellHeight))),
         col: Math.max(0, Math.min((terminalRef.current?.cols ?? 1), Math.floor((event.clientX - rect.left) / renderer.cellWidth))),
       };
+    };
+
+    const mouseModifiers = (event: React.MouseEvent) =>
+      (event.shiftKey ? 4 : 0) + (event.altKey ? 8 : 0) + (event.ctrlKey ? 16 : 0);
+
+    const mouseButton = (button: number) => {
+      if (button === 1) return 1;
+      if (button === 2) return 2;
+      return 0;
+    };
+
+    const sendTrackedMouse = (
+      action: 'press' | 'move' | 'release',
+      event: React.MouseEvent,
+    ): boolean => {
+      const terminal = terminalRef.current;
+      const cell = cellFromPointer(event);
+      if (!terminal || !cell || !terminal.hasMouseTracking()) return false;
+      const activeButton = trackedMouseButtonRef.current;
+      if (action === 'move') {
+        if (!terminal.getMode(1003) && !(activeButton !== null && terminal.getMode(1002))) {
+          return true;
+        }
+      } else if (action === 'release' && activeButton === null) {
+        return true;
+      }
+      const button = action === 'press' ? mouseButton(event.button) : activeButton ?? 0;
+      onInputRef.current(applicationMouseInput(
+        action,
+        button,
+        cell.col + 1,
+        cell.row + 1,
+        terminal.getMode(1006),
+        mouseModifiers(event),
+      ));
+      if (action === 'press') trackedMouseButtonRef.current = button;
+      if (action === 'release') trackedMouseButtonRef.current = null;
+      event.preventDefault();
+      return true;
     };
 
     return (
@@ -562,6 +626,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
               (cell?.col ?? 0) + 1,
               (cell?.row ?? 0) + 1,
               mouseTracking,
+              terminal.getMode(1006),
             ));
             return;
           }
@@ -581,6 +646,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           const terminal = terminalRef.current;
           const cell = cellFromPointer(event);
           if (!terminal || !cell) return;
+          if (!event.shiftKey && sendTrackedMouse('press', event)) return;
           const row = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
           selectedTextRef.current = null;
           applicationSelectionAnchorRef.current = null;
@@ -589,7 +655,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           renderSurface(true);
         }}
         onMouseMove={(event) => {
-          if (!selectingRef.current || !selectionRef.current) return;
+          if (!selectingRef.current || !selectionRef.current) {
+            sendTrackedMouse('move', event);
+            return;
+          }
           const terminal = terminalRef.current;
           const cell = cellFromPointer(event);
           if (!terminal || !cell) return;
@@ -598,6 +667,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           renderSurface(true);
         }}
         onMouseUp={async (event) => {
+          if (!selectingRef.current) {
+            sendTrackedMouse('release', event);
+            return;
+          }
           selectingRef.current = false;
           const text = textForSelectionRange(selectionRef.current);
           selectedTextRef.current = text || null;

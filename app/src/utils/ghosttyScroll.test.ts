@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applicationMouseInput,
   applicationWheelInput,
   bufferRowFromViewportRow,
   consumeWheelRows,
@@ -14,11 +15,25 @@ describe('applicationWheelInput', () => {
   it('uses SGR mouse wheel reports for a mouse-tracking program', () => {
     expect(applicationWheelInput(-2, 7, 9, true)).toBe('\x1b[<64;7;9M\x1b[<64;7;9M');
     expect(applicationWheelInput(1, 7, 9, true)).toBe('\x1b[<65;7;9M');
+    expect(applicationWheelInput(1, 1, 1, true, false)).toBe('\x1b[Ma!!');
   });
 
   it('uses arrow input for alternate screens without mouse tracking and limits burst size', () => {
     expect(applicationWheelInput(-8, 1, 1, false)).toBe('\x1b[A'.repeat(5));
     expect(applicationWheelInput(2, 1, 1, false)).toBe('\x1b[B\x1b[B');
+  });
+});
+
+describe('applicationMouseInput', () => {
+  it('encodes SGR mouse presses, drags and releases', () => {
+    expect(applicationMouseInput('press', 0, 7, 9, true)).toBe('\x1b[<0;7;9M');
+    expect(applicationMouseInput('move', 0, 8, 9, true)).toBe('\x1b[<32;8;9M');
+    expect(applicationMouseInput('release', 0, 8, 9, true)).toBe('\x1b[<3;8;9m');
+  });
+
+  it('encodes legacy mouse reports when SGR mode is disabled', () => {
+    expect(applicationMouseInput('press', 0, 1, 1, false)).toBe('\x1b[M !!');
+    expect(applicationMouseInput('release', 0, 1, 1, false)).toBe('\x1b[M#!!');
   });
 });
 

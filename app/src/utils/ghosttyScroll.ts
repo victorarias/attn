@@ -30,6 +30,7 @@ export function applicationWheelInput(
   col: number,
   row: number,
   mouseTracking: boolean,
+  sgrEncoding = true,
 ): string {
   if (lines === 0) return '';
   const count = Math.min(Math.abs(lines), 5);
@@ -37,8 +38,32 @@ export function applicationWheelInput(
     return (lines < 0 ? '\x1b[A' : '\x1b[B').repeat(count);
   }
   const button = lines < 0 ? 64 : 65;
-  const report = `\x1b[<${button};${Math.max(1, col)};${Math.max(1, row)}M`;
+  const report = applicationMouseInput('press', button, col, row, sgrEncoding);
   return report.repeat(count);
+}
+
+export type ApplicationMouseAction = 'press' | 'move' | 'release';
+
+export function applicationMouseInput(
+  action: ApplicationMouseAction,
+  button: number,
+  col: number,
+  row: number,
+  sgrEncoding: boolean,
+  modifiers = 0,
+): string {
+  const boundedCol = Math.max(1, col);
+  const boundedRow = Math.max(1, row);
+  const buttonCode = action === 'release' ? 3 : button;
+  const code = buttonCode + modifiers + (action === 'move' ? 32 : 0);
+  if (sgrEncoding) {
+    return `\x1b[<${code};${boundedCol};${boundedRow}${action === 'release' ? 'm' : 'M'}`;
+  }
+  return `\x1b[M${String.fromCharCode(
+    Math.min(255, 32 + code),
+    Math.min(255, 32 + boundedCol),
+    Math.min(255, 32 + boundedRow),
+  )}`;
 }
 
 export function createApplicationSelectionAnchor(

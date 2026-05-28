@@ -1316,6 +1316,7 @@ export function useDaemonSocket({
                     id: data.id,
                     data: attachEffects.replayAction.data,
                     source: 'attach_replay',
+                    suppressResponses: !replayPlan.respondToTerminalQueries,
                   });
                 } else if (attachEffects.replayAction.kind === 'scrollback') {
                   recordRuntimeTransportLog(data.id, 'pty.attach.replay_applied', 'attach replay applied', {
@@ -1335,6 +1336,7 @@ export function useDaemonSocket({
                     id: data.id,
                     data: attachEffects.replayAction.data,
                     source: 'attach_replay',
+                    suppressResponses: !replayPlan.respondToTerminalQueries,
                   });
                 } else if (attachEffects.replayAction.kind === 'scrollback_segments') {
                   const bytes = attachEffects.replayAction.segments.reduce(
@@ -1375,6 +1377,7 @@ export function useDaemonSocket({
                       id: data.id,
                       data: segment.data,
                       source: 'attach_replay',
+                      suppressResponses: !replayPlan.respondToTerminalQueries,
                     });
                   }
                 }
