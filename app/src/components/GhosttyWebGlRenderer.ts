@@ -1,5 +1,5 @@
 import { CellFlags, type GhosttyCell, type GhosttyTerminal } from 'ghostty-web';
-import { cursorRowInViewport } from '../utils/ghosttyScroll';
+import { cursorRowInViewport, viewportBufferStart } from '../utils/ghosttyScroll';
 
 interface RendererTheme {
   background: string;
@@ -42,6 +42,19 @@ export interface WebGlRenderSample {
   cells: number;
   quads: number;
   glyphUploads: number;
+}
+
+export function graphemeAtViewportCell(
+  terminal: GhosttyTerminal,
+  row: number,
+  col: number,
+  viewportOffset: number,
+): string {
+  const history = terminal.getScrollbackLength();
+  const bufferRow = viewportBufferStart(history, viewportOffset) + row;
+  return bufferRow < history
+    ? terminal.getScrollbackGraphemeString(bufferRow, col)
+    : terminal.getGraphemeString(bufferRow - history, col);
 }
 
 const ATLAS_SIZE = 2048;
@@ -321,7 +334,7 @@ export class WebGlTerminalRenderer {
           const alpha = (cell.flags & CellFlags.FAINT) !== 0 ? 0.5 : 1;
           if (!this.pushBlockElement(vertices, cell.codepoint, x, y, width, this.cellHeight * scale, fg, alpha)) {
             const text = cell.grapheme_len > 0
-              ? terminal.getGraphemeString(row, col)
+              ? graphemeAtViewportCell(terminal, row, col, viewportOffset)
               : String.fromCodePoint(cell.codepoint);
             const glyph = this.getGlyph(text, cell.flags);
             this.pushTexturedQuad(vertices, x, y, glyph.width, glyph.height, glyph, fg, alpha);

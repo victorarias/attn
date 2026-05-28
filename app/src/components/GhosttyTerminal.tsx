@@ -14,9 +14,11 @@ import { writeClipboardText } from '../utils/clipboardBridge';
 import {
   FONT_FAMILY,
   TERMINAL_SCROLLBACK_LINES,
+  getTerminalAnsiPalette,
   getTerminalTheme,
   type ResolvedTheme,
 } from '../utils/terminalSizing';
+import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
 import { analyzeTerminalVisibleLines } from '../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot, TerminalVisibleStyleLineSnapshot } from '../utils/terminalStyleSummary';
@@ -392,6 +394,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       // frame before the session becomes visible again.
       if (runtimeMetaRef.current && !runtimeMetaRef.current.isActiveSession) return;
       const dims = renderer.fitDimensions(container.clientWidth, container.clientHeight);
+      if (runtimeMetaRef.current?.paneKind === 'main' && isSuspiciousTerminalSize(dims.cols, dims.rows)) {
+        return;
+      }
       if (dims.cols === terminal.cols && dims.rows === terminal.rows) return;
       terminal.resize(dims.cols, dims.rows);
       modelSizeRef.current = dims;
@@ -452,6 +457,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           fgColor: colorNumber(theme.foreground),
           bgColor: colorNumber(theme.background),
           cursorColor: colorNumber(theme.cursor),
+          palette: getTerminalAnsiPalette(resolvedTheme),
         });
         const renderer = new WebGlTerminalRenderer(canvas, fontSize, FONT_FAMILY, {
           background: theme.background,
@@ -611,6 +617,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         className="terminal-container ghostty-terminal"
         data-terminal-renderer="ghostty-webgl"
         tabIndex={0}
+        contentEditable
+        suppressContentEditableWarning
+        role="textbox"
+        aria-label="Terminal input"
+        aria-multiline="true"
+        spellCheck={false}
+        onBeforeInput={(event) => event.preventDefault()}
         onWheel={(event) => {
           if (event.defaultPrevented) return;
           const terminal = terminalRef.current;
