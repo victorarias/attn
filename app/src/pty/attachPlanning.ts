@@ -101,7 +101,7 @@ export function classifyAttachReplay(
   // on startup and waits for the responses before drawing anything. When the
   // queries land in scrollback before the websocket attach completes (common
   // on remote endpoints due to the SSH-relay round trip), the daemon ships
-  // them in the attach replay. xterm has to actually parse that replay so
+  // them in the attach replay. The terminal parser has to process that replay so
   // its onData callback fires and emits the responses Codex is waiting for —
   // skipping the replay leaves Codex hung on a blank screen forever. Allow
   // replay for fresh_spawn / same_app_remount when the agent is Codex.

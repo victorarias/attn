@@ -143,7 +143,7 @@ export function comparePaneNativePaintRegression(
   };
 }
 
-// Text-grid equivalent of `analyzePanePixelCoverage`. Uses xterm's in-process
+// Text-grid equivalent of `analyzePanePixelCoverage`. Uses the terminal's in-process
 // buffer (cols × rows of cells, with glyph/whitespace) so coverage signal is
 // independent of WKWebView compositor state — no screencap, no focus steal.
 // Returns the same field shape consumed by evaluate/compare helpers above.

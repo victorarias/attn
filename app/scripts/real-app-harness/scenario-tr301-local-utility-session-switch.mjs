@@ -117,6 +117,14 @@ async function main() {
         'primary utility pane to remain the active pane after session switch',
         20_000,
       );
+      await assertPaneVisibleContent(client, primarySessionId, 'main', {
+        minNonEmptyLines: 2,
+        minDenseLines: 0,
+        minCharCount: 20,
+        minMaxLineLength: 8,
+        timeoutMs: 20_000,
+        description: 'primary Claude main pane content preserved after session switch',
+      });
       await waitForPaneInputFocus(client, primarySessionId, utilityPaneId, 20_000, { stableMs: 700 });
       await client.request('type_pane_via_ui', {
         sessionId: primarySessionId,

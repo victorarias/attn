@@ -10,6 +10,7 @@ import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 import { cleanupSessionViaAppClose } from './scenarioCleanup.mjs';
+import { getFrontWindowBounds, setFrontWindowBounds } from './nativeWindowCapture.mjs';
 import {
   assertPaneCoverage,
   assertPaneNativePaintCoverage,
@@ -214,6 +215,11 @@ async function main() {
       await launchFreshAppAndConnect(client, observer);
     });
 
+    await runner.step('normalize_window_origin_for_capture', async () => {
+      const bounds = await getFrontWindowBounds('com.attn.manager', { client });
+      await setFrontWindowBounds({ ...bounds, x: 80, y: 80 }, { client, bundleId: 'com.attn.manager' });
+    });
+
     if (options.agent === 'claude') {
       const trustedFolder = preTrustClaudeFolder(runner.sessionDir);
       runner.log('claude:pre_trust_folder', { folder: trustedFolder });
@@ -229,12 +235,6 @@ async function main() {
         waitForMainVisible: false,
       });
     });
-    await observer.waitForWorkspace(
-      sessionId,
-      (workspace) => (workspace.panes || []).length >= 1,
-      `initial workspace for ${sessionId}`,
-      30_000,
-    );
 
     await runner.step('capture_baseline_main', async () => {
       await client.request('select_session', { sessionId });

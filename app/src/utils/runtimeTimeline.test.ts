@@ -68,7 +68,7 @@ function makeTerminalSnapshot(): TerminalPerfSnapshot {
     baseY: 0,
     viewportY: 0,
     scrollbackLimit: 5000,
-    renderer: 'webgl',
+    renderer: 'ghostty-webgl',
     visible: true,
     writeQueueChunks: 0,
     writeQueueBytes: 0,
@@ -93,8 +93,7 @@ function makeTerminalSnapshot(): TerminalPerfSnapshot {
     lastResize: null,
     dom: {
       container: { width: 400, height: 300 },
-      xterm: { width: 400, height: 300 },
-      xtermScreen: { width: 400, height: 300 },
+      surface: { width: 400, height: 300 },
       canvas: { width: 400, height: 300 },
     },
   };
@@ -139,7 +138,7 @@ describe('runtimeTimeline', () => {
         sessionId: 'session-1',
         paneId: 'pane-1',
         runtimeId: 'runtime-1',
-        message: 'xterm mounted',
+        message: 'terminal mounted',
       },
       {
         at: '2026-04-08T07:00:00.040Z',

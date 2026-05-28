@@ -26,6 +26,13 @@ GIT_COMMIT ?= $(shell bash ./scripts/source-fingerprint.sh --field commit)
 OUTPUT ?= $(BINARY_NAME)
 GO_LDFLAGS = -X github.com/victorarias/attn/internal/buildinfo.Version=$(VERSION) -X github.com/victorarias/attn/internal/buildinfo.BuildTime=$(BUILD_TIME) -X github.com/victorarias/attn/internal/buildinfo.SourceFingerprint=$(SOURCE_FINGERPRINT) -X github.com/victorarias/attn/internal/buildinfo.GitCommit=$(GIT_COMMIT)
 ZIG ?= zig
+# Prefer a stable local development identity so macOS privacy grants survive
+# source rebuilds. Contributors without a certificate retain the ad-hoc
+# fallback; callers may override this with a pinned identity or fingerprint.
+MACOS_CODESIGN_IDENTITY ?= $(shell security find-identity -v -p codesigning 2>/dev/null | awk '/"Apple Development:/ { print $$2 }' | LC_ALL=C sort | head -1)
+ifeq ($(strip $(MACOS_CODESIGN_IDENTITY)),)
+MACOS_CODESIGN_IDENTITY := -
+endif
 
 build:
 	go build -ldflags "$(GO_LDFLAGS)" -o $(OUTPUT) $(BUILD_DIR)
@@ -119,7 +126,10 @@ install-daemon: build
 	fi
 	@echo ">>> Updating PROD daemon at $(APP_BINARY)"
 	cp $(OUTPUT) $(APP_BINARY)
-	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign -s - -f $(APP_BINARY); fi
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" $(APP_BINARY); \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" $(APP_BUNDLE); \
+	fi
 	@$(APP_BINARY) daemon ensure >/dev/null
 	@echo "Updated bundled daemon at $(APP_BINARY)"
 
@@ -153,7 +163,10 @@ install-daemon-dev: build
 	fi
 	@echo ">>> Updating DEV daemon at $(APP_BINARY_DEV)"
 	cp $(OUTPUT) $(APP_BINARY_DEV)
-	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign -s - -f $(APP_BINARY_DEV); fi
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" $(APP_BINARY_DEV); \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" $(APP_BUNDLE_DEV); \
+	fi
 	@$(DEV_DAEMON_ENV) $(APP_BINARY_DEV) daemon ensure >/dev/null
 	@echo "Updated bundled dev daemon at $(APP_BINARY_DEV)"
 
@@ -184,7 +197,8 @@ check-types: generate-types
 #          in tauri.conf.json / tauri.dev.conf.json.
 #   $(3) — extra args for `pnpm tauri build` (e.g. --config for overlays)
 # The Go daemon is bundled as a sidecar under Contents/MacOS/attn regardless
-# of productName, so the codesign step is the same for both builds.
+# of productName. Sign the sidecar first, then the enclosing app bundle, so
+# macOS grants attach to a stable signed app identity across source rebuilds.
 define build_tauri_app
 	@mkdir -p app/src-tauri/binaries
 	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
@@ -194,7 +208,8 @@ define build_tauri_app
 		printf '{\n  "version": "%s",\n  "sourceFingerprint": "%s",\n  "gitCommit": "%s",\n  "buildTime": "%s"\n}\n' '$(VERSION)' '$(SOURCE_FINGERPRINT)' '$(GIT_COMMIT)' '$(BUILD_TIME)' > app/src-tauri/target/release/bundle/macos/$(2).app/Contents/Resources/build-identity.json; \
 	fi
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		codesign -s - -f app/src-tauri/target/release/bundle/macos/$(2).app/Contents/MacOS/attn; \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" app/src-tauri/target/release/bundle/macos/$(2).app/Contents/MacOS/attn; \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" app/src-tauri/target/release/bundle/macos/$(2).app; \
 	fi
 endef
 
@@ -240,12 +255,13 @@ dev-native: build
 scenario-native-canvas:
 	cd app && node scripts/real-app-harness/scenario-native-canvas.mjs
 
-# Ad-hoc sign the installed app binary so macOS doesn't SIGKILL it
-# when invoked as a CLI subprocess (e.g. Claude Code hooks)
+# Sign the installed app and bundled CLI/daemon sidecar using the configured
+# stable identity when available; falls back to ad-hoc without a certificate.
 sign-app:
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		codesign -s - ~/Applications/attn.app/Contents/MacOS/attn; \
-		echo "Ad-hoc signed ~/Applications/attn.app/Contents/MacOS/attn"; \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" ~/Applications/attn.app/Contents/MacOS/attn; \
+		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" ~/Applications/attn.app; \
+		echo "Signed ~/Applications/attn.app with identity $(MACOS_CODESIGN_IDENTITY)"; \
 	else \
 		echo "sign-app is only needed on macOS"; \
 	fi

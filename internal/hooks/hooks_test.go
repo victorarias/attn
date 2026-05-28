@@ -121,8 +121,8 @@ func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {
 	if !strings.Contains(joined, "features.hooks=true") {
 		t.Fatal("codex overrides should enable hooks for attn-managed sessions")
 	}
-	if !strings.Contains(joined, "features.terminal_resize_reflow=false") {
-		t.Fatal("codex overrides should disable xterm-incompatible transcript resize reflow")
+	if !strings.Contains(joined, "features.terminal_resize_reflow=true") {
+		t.Fatal("codex overrides should enable terminal resize reflow for embedded sessions")
 	}
 	if !strings.Contains(joined, "hooks.PreToolUse=") {
 		t.Fatal("codex overrides should include PreToolUse hook")

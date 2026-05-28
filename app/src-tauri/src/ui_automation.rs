@@ -6,6 +6,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -351,6 +352,42 @@ fn handle_request<R: Runtime>(
         };
     }
 
+    if request.action == "capture_native_window_screenshot" {
+        let payload = request.payload.unwrap_or(Value::Null);
+        return match capture_native_window_screenshot(app, payload) {
+            Ok(result) => {
+                append_log(
+                    app,
+                    &format!(
+                        "request ok id={} action=capture_native_window_screenshot",
+                        request_id
+                    ),
+                );
+                AutomationSocketResponse {
+                    id: request_id,
+                    ok: true,
+                    result: Some(result),
+                    error: None,
+                }
+            }
+            Err(error) => {
+                append_log(
+                    app,
+                    &format!(
+                        "request err id={} action=capture_native_window_screenshot error={}",
+                        request_id, error
+                    ),
+                );
+                AutomationSocketResponse {
+                    id: request_id,
+                    ok: false,
+                    result: None,
+                    error: Some(error),
+                }
+            }
+        };
+    }
+
     let payload = request.payload.unwrap_or(Value::Null);
     let bridge_request = BridgeRequest {
         request_id: request_id.clone(),
@@ -497,6 +534,124 @@ fn capture_webview_screenshot<R: Runtime>(
         "source": "web",
         "bounds": result.get("bounds").cloned().unwrap_or(Value::Null),
     }))
+}
+
+#[cfg(target_os = "macos")]
+fn capture_native_window_screenshot<R: Runtime>(
+    app: &AppHandle<R>,
+    payload: Value,
+) -> Result<Value, String> {
+    let bounds = window_bounds(app)?;
+    let (window_id_sender, window_id_receiver) = mpsc::channel();
+    let app_for_window_id = app.clone();
+    app.run_on_main_thread(move || {
+        let result = app_for_window_id
+            .get_webview_window("main")
+            .ok_or_else(|| "main window not found".to_string())
+            .and_then(|window| {
+                window
+                    .ns_window()
+                    .map_err(|error| format!("failed to get native window handle: {error}"))
+            })
+            .map(|window_ptr| {
+                let window: &objc2_app_kit::NSWindow = unsafe { &*window_ptr.cast() };
+                window.windowNumber()
+            });
+        let _ = window_id_sender.send(result);
+    })
+    .map_err(|error| format!("failed to request native window number: {error}"))?;
+    let window_id = window_id_receiver
+        .recv_timeout(Duration::from_secs(5))
+        .map_err(|_| "timed out resolving native window number".to_string())??;
+
+    let output_path = match payload
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(path) => PathBuf::from(path),
+        None => default_screenshot_path(app)?,
+    };
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create screenshot parent dir: {error}"))?;
+    }
+
+    let output = Command::new("/usr/sbin/screencapture")
+        .args(["-x", "-l", &window_id.to_string(), "-o"])
+        .arg(&output_path)
+        .output()
+        .map_err(|error| format!("failed to run native screencapture: {error}"))?;
+    let mut source = "native_window";
+    let mut window_capture_error = None;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let primary_error = format!(
+            "native screencapture failed for window_id={} bounds={}{}",
+            window_id,
+            bounds
+                .get("logicalBounds")
+                .cloned()
+                .unwrap_or(Value::Null),
+            if detail.is_empty() {
+                String::new()
+            } else {
+                format!(": {detail}")
+            }
+        );
+        let logical_bounds = bounds
+            .get("logicalBounds")
+            .ok_or_else(|| format!("{primary_error}; missing logical bounds for region fallback"))?;
+        let component = |name: &str| -> Result<i64, String> {
+            logical_bounds
+                .get(name)
+                .and_then(Value::as_f64)
+                .map(|value| value.round() as i64)
+                .ok_or_else(|| format!("{primary_error}; invalid logical bounds field {name}"))
+        };
+        let region = format!(
+            "{},{},{},{}",
+            component("x")?,
+            component("y")?,
+            component("width")?,
+            component("height")?,
+        );
+        let fallback = Command::new("/usr/sbin/screencapture")
+            .args(["-x", "-R", &region])
+            .arg(&output_path)
+            .output()
+            .map_err(|error| format!("{primary_error}; failed to run region fallback: {error}"))?;
+        if !fallback.status.success() {
+            let fallback_detail = String::from_utf8_lossy(&fallback.stderr).trim().to_string();
+            return Err(format!(
+                "{primary_error}; native screen-region fallback failed for region={region}{}",
+                if fallback_detail.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {fallback_detail}")
+                }
+            ));
+        }
+        source = "native_screen_region";
+        window_capture_error = Some(primary_error);
+    }
+
+    Ok(serde_json::json!({
+        "path": output_path.to_string_lossy().to_string(),
+        "source": source,
+        "windowId": window_id,
+        "bounds": bounds.get("logicalBounds").cloned().unwrap_or(Value::Null),
+        "windowCaptureError": window_capture_error,
+    }))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn capture_native_window_screenshot<R: Runtime>(
+    _app: &AppHandle<R>,
+    _payload: Value,
+) -> Result<Value, String> {
+    Err("native window screenshots are only supported on macOS".into())
 }
 
 fn serve_connection<R: Runtime>(

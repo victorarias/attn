@@ -24,7 +24,7 @@ describe('installVerbatimTextEntryGuard', () => {
   it('disables browser rewriting on controls created by runtime widgets', async () => {
     const dispose = installVerbatimTextEntryGuard(document.body);
     const terminalTextarea = document.createElement('textarea');
-    terminalTextarea.className = 'xterm-helper-textarea';
+    terminalTextarea.className = 'terminal-input';
     terminalTextarea.setAttribute('autocorrect', 'on');
     document.body.appendChild(terminalTextarea);
 

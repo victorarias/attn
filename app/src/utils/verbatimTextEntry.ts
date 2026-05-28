@@ -29,7 +29,7 @@ function enforceInSubtree(root: ParentNode | Node): void {
 
 /**
  * Text entry in attn is preserved as typed, including controls created later
- * by xterm and editor widgets.
+ * by terminal and editor widgets.
  */
 export function installVerbatimTextEntryGuard(root: Document | HTMLElement): () => void {
   enforceInSubtree(root);

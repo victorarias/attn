@@ -38,18 +38,18 @@ function installGlobalListener() {
             return;
           }
           e.preventDefault();
-          e.stopPropagation(); // Prevent event from reaching xterm
+          e.stopPropagation(); // Prevent event from reaching the terminal.
           triggerShortcut(id as ShortcutId);
           return;
         }
       }
     }
-  }, true); // capture phase to get events before xterm
+  }, true); // Capture phase to get events before terminal input.
 }
 
 function isTerminalTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
-  return target.closest('.xterm, .terminal-container, .session-terminal-workspace') !== null;
+  return target.closest('.terminal-container, .session-terminal-workspace') !== null;
 }
 
 /**

@@ -64,10 +64,10 @@ func shouldIncludeAttachReplay(policy protocol.AttachPolicy, session *protocol.S
 	case protocol.AttachPolicySameAppRemount, protocol.AttachPolicyFreshSpawn:
 		// Codex's TUI emits terminal capability queries (CPR, DA, kitty
 		// keyboard, OSC 10) on startup and waits for the responses before it
-		// will draw anything. Bytes emitted between PTY spawn and xterm.js
+		// will draw anything. Bytes emitted between PTY spawn and terminal
 		// attach are lost when replay is omitted, so Codex hangs forever
-		// waiting for query responses that xterm never had a chance to
-		// produce. For Codex sessions we replay scrollback so xterm processes
+		// waiting for query responses that the frontend never had a chance to
+		// produce. For Codex sessions we replay scrollback so the terminal processes
 		// the queries and emits the responses Codex is waiting for.
 		return shouldPreferAgentRawReplay(session)
 	default:

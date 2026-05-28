@@ -117,7 +117,7 @@ describe('attachPlanning', () => {
     expect(plan.replayAllowedByPolicy).toBe(false);
   });
 
-  it('applies raw scrollback for Codex fresh_spawn so xterm can answer capability queries', () => {
+  it('applies raw scrollback for Codex fresh_spawn so the terminal can answer capability queries', () => {
     const plan = classifyAttachReplay({
       cols: 68,
       rows: 35,

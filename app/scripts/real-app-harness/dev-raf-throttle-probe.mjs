@@ -66,13 +66,13 @@ async function activateBundle(bundleId) {
 //
 // Simpler approach: use an existing bridge action that internally calls
 // `window.requestAnimationFrame`, and count how many completions happen in a
-// fixed window by sampling xterm's `renderCount` (which only advances inside
+// fixed window by sampling the terminal's `renderCount` (which only advances inside
 // onRender → driven by rAF). If attn is at 60fps, a pane that has steady PTY
 // output (e.g. `yes` running in the background) should see dozens of renders
 // per second; if throttled to 3fps, the counter creeps.
 //
 // To avoid flooding the user's machine, we start a small `head -c 100000 /dev/urandom`
-// loop in a pane (bounded output, triggers continuous xterm writes), then sample
+// loop in a pane (bounded output, triggers continuous terminal writes), then sample
 // renderCount at t=0 and t=2000ms to compute fps.
 async function sampleRenderRate(client, sessionId, paneId, windowMs = 2000) {
   const startSample = await client.request('get_pane_state', { sessionId, paneId });

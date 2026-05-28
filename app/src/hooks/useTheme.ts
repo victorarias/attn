@@ -20,7 +20,7 @@ export function useTheme() {
   const initializedFromSettings = useRef(false);
 
   const [preference, setPreference] = useState<ThemePreference>(DEFAULT_PREFERENCE);
-  // resolved is state so OS theme changes trigger re-renders (needed for xterm)
+  // resolved is state so OS theme changes trigger terminal re-renders.
   const [resolved, setResolved] = useState<ResolvedTheme>('dark');
 
   // Sync from daemon settings when they arrive
@@ -44,7 +44,7 @@ export function useTheme() {
   }, [preference, setSetting]);
 
   // Apply data-theme attribute and update resolved theme
-  // - "system": remove data-theme, let CSS @media handle it; resolve for xterm via matchMedia
+  // - "system": remove data-theme, let CSS @media handle it; resolve the terminal theme via matchMedia.
   // - "dark"/"light": set data-theme explicitly
   useEffect(() => {
     if (preference === 'system') {
@@ -56,7 +56,7 @@ export function useTheme() {
     }
   }, [preference]);
 
-  // Listen for OS theme changes (only matters for xterm when preference is "system";
+  // Listen for OS theme changes (only matters for terminal rendering when preference is "system";
   // CSS variables update automatically via @media query)
   useEffect(() => {
     if (preference !== 'system') return;
