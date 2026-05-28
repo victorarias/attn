@@ -81,7 +81,7 @@ interface SelectionRange {
   endCol: number;
 }
 
-const URL_RE = /\b(?:https?:\/\/|mailto:|ftp:\/\/|ssh:\/\/|git:\/\/|tel:|magnet:|gemini:\/\/|gopher:\/\/|news:)[^\s<>()]+/g;
+const URL_RE = /\b(?:https?:\/\/|file:\/\/|mailto:|ftp:\/\/|ssh:\/\/|git:\/\/|tel:|magnet:|gemini:\/\/|gopher:\/\/|news:)[^\s<>()]+/g;
 
 function colorNumber(value: string): number {
   return Number.parseInt(value.slice(1), 16);
@@ -315,6 +315,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         if (!terminal) return;
         const searchableOutput = typeof data === 'string' ? data : new TextDecoder().decode(data);
         if (searchableOutput) {
+          // Preserve the existing terminal contract: OSC 52 writes copy text
+          // to the host clipboard; clipboard read queries are not answered.
           const osc52 = /\x1b\]52;[^;]*;([A-Za-z0-9+/=]+)(?:\x07|\x1b\\)/g;
           for (const match of searchableOutput.matchAll(osc52)) {
             try {

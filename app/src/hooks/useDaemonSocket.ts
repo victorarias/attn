@@ -1428,6 +1428,8 @@ export function useDaemonSocket({
               });
               const attachKey = `pty_attach_${data.id}`;
               if (pendingActionsRef.current.has(attachKey)) {
+                // Attach replay is emitted before this queue is drained.
+                // Ghostty then serializes those emitted writes in order.
                 recordRuntimeTransportLog(data.id, 'pty.output.queued_during_attach', 'queue pty output while attach pending', {
                   seq: typeof data.seq === 'number' ? data.seq : null,
                   bytes: data.data.length,
