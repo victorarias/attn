@@ -9,8 +9,14 @@ import {
 import { Ghostty, InputHandler, CellFlags, type GhosttyCell, type GhosttyTerminal as GhosttyModel } from 'ghostty-web';
 import ghosttyWasmUrl from 'ghostty-web/ghostty-vt.wasm?url';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { cleanTerminalLines } from '../utils/terminalMarkdown';
+import {
+  cleanTerminalLines,
+  terminalStyledSelectionToMarkdown,
+  type TerminalMarkdownLine,
+  type TerminalMarkdownRun,
+} from '../utils/terminalMarkdown';
 import { writeClipboardText } from '../utils/clipboardBridge';
+import { parseOsc52Writes, type Osc52State } from '../utils/terminalOsc';
 import {
   FONT_FAMILY,
   TERMINAL_SCROLLBACK_LINES,
@@ -66,7 +72,7 @@ export interface GhosttyTerminalHandle {
   typeTextViaInput: (text: string) => boolean;
   isInputFocused: () => boolean;
   write: (data: string | Uint8Array, options?: { suppressResponses?: boolean }) => Promise<void>;
-  resizeLocal: (cols: number, rows: number) => void;
+  resizeLocal: (cols: number, rows: number) => Promise<void>;
   reset: () => void;
   scrollToTop: () => boolean;
   getText: () => string;
@@ -156,6 +162,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const selectingRef = useRef(false);
     const trackedMouseButtonRef = useRef<number | null>(null);
     const writeChainRef = useRef(Promise.resolve());
+    const osc52StateRef = useRef<Osc52State>({ pending: '' });
     const renderCountRef = useRef(0);
     const writeCountRef = useRef(0);
     const lastRenderAtRef = useRef(0);
@@ -259,9 +266,54 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return cleanTerminalLines(lines).join('\n');
     }, [selectionLineAtBufferRow]);
 
-    const selectedText = useCallback(() => {
-      return selectedTextRef.current ?? textForSelectionRange(selectionRef.current);
-    }, [textForSelectionRange]);
+    const selectedMarkdown = useCallback(() => {
+      const terminal = terminalRef.current;
+      const range = selectionRef.current ? normalizeSelection(selectionRef.current) : null;
+      if (!terminal || !range) return '';
+      const history = terminal.getScrollbackLength();
+      const defaultForeground = colorNumber(getTerminalTheme(resolvedTheme).foreground);
+      const lines: TerminalMarkdownLine[] = [];
+      for (let row = range.startRow; row <= range.endRow; row += 1) {
+        const start = row === range.startRow ? range.startCol : 0;
+        const end = row === range.endRow ? range.endCol : terminal.cols;
+        const scrollback = row < history;
+        const activeRow = row - history;
+        const cells = scrollback
+          ? terminal.getScrollbackLine(row)?.slice(start, end) ?? []
+          : terminal.getViewport().slice(activeRow * terminal.cols + start, activeRow * terminal.cols + end);
+        const runs: TerminalMarkdownRun[] = [];
+        for (let offset = 0; offset < cells.length; offset += 1) {
+          const cell = cells[offset];
+          if (!cell || cell.width === 0) continue;
+          const text = cell.grapheme_len > 0
+            ? scrollback
+              ? terminal.getScrollbackGraphemeString(row, start + offset)
+              : terminal.getGraphemeString(activeRow, start + offset)
+            : cell.codepoint > 0 ? String.fromCodePoint(cell.codepoint) : ' ';
+          const run = {
+            text,
+            bold: Boolean(cell.flags & CellFlags.BOLD),
+            italic: Boolean(cell.flags & CellFlags.ITALIC),
+            strikethrough: Boolean(cell.flags & CellFlags.STRIKETHROUGH),
+            underline: Boolean(cell.flags & CellFlags.UNDERLINE),
+            colored: (cell.fg_r << 16 | cell.fg_g << 8 | cell.fg_b) !== defaultForeground,
+          };
+          const current = runs[runs.length - 1];
+          if (current
+            && current.bold === run.bold
+            && current.italic === run.italic
+            && current.strikethrough === run.strikethrough
+            && current.underline === run.underline
+            && current.colored === run.colored) {
+            current.text += run.text;
+          } else {
+            runs.push(run);
+          }
+        }
+        lines.push({ runs, wrapped: !scrollback && terminal.isRowWrapped(activeRow) });
+      }
+      return terminalStyledSelectionToMarkdown(lines);
+    }, [resolvedTheme]);
 
     const getText = useCallback(() => {
       const terminal = terminalRef.current;
@@ -334,18 +386,32 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return { cols: terminal.cols, rows: terminal.rows, viewportY: viewportOffsetRef.current, lineCount: lines.length, lines, summary };
     }, [getViewportCells, lineAtVisibleRow]);
 
+    const enqueueOperation = useCallback((operation: () => void | Promise<void>) => {
+      writeChainRef.current = writeChainRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          try {
+            await operation();
+          } catch (reason) {
+            setError(`Ghostty terminal update failed: ${String(reason)}`);
+          }
+        });
+      return writeChainRef.current;
+    }, []);
+
     const write = useCallback((data: string | Uint8Array, options?: { suppressResponses?: boolean }) => {
-      writeChainRef.current = writeChainRef.current.then(async () => {
+      return enqueueOperation(async () => {
         const terminal = terminalRef.current;
         if (!terminal) return;
         const searchableOutput = typeof data === 'string' ? data : new TextDecoder().decode(data);
         if (searchableOutput) {
           // Preserve the existing terminal contract: OSC 52 writes copy text
           // to the host clipboard; clipboard read queries are not answered.
-          const osc52 = /\x1b\]52;[^;]*;([A-Za-z0-9+/=]+)(?:\x07|\x1b\\)/g;
-          for (const match of searchableOutput.matchAll(osc52)) {
+          const parsed = parseOsc52Writes(osc52StateRef.current, searchableOutput);
+          osc52StateRef.current = parsed.state;
+          for (const payload of parsed.payloads) {
             try {
-              const bytes = Uint8Array.from(atob(match[1]), (char) => char.charCodeAt(0));
+              const bytes = Uint8Array.from(atob(payload), (char) => char.charCodeAt(0));
               void writeClipboardText(new TextDecoder().decode(bytes));
             } catch {
               // Ignore malformed clipboard output.
@@ -381,8 +447,19 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         lastWriteAtRef.current = Date.now();
         renderSurface(true);
       });
-      return writeChainRef.current;
-    }, [lineAtVisibleRow, renderSurface]);
+    }, [enqueueOperation, lineAtVisibleRow, renderSurface]);
+
+    // Replay segments alternate resize and bytes; both must be applied on one
+    // chain or all historical bytes are parsed at the final geometry.
+    const resizeLocal = useCallback((cols: number, rows: number) => enqueueOperation(() => {
+      const terminal = terminalRef.current;
+      const renderer = rendererRef.current;
+      if (!terminal || !renderer) return;
+      terminal.resize(cols, rows);
+      modelSizeRef.current = { cols, rows };
+      renderer.resize(cols, rows);
+      renderSurface(true);
+    }), [enqueueOperation, renderSurface]);
 
     const fit = useCallback(() => {
       const container = containerRef.current;
@@ -416,15 +493,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       typeTextViaInput: (text: string) => { onInputRef.current(text.replace(/\n/g, '\r')); return true; },
       isInputFocused: () => document.activeElement === containerRef.current,
       write,
-      resizeLocal: (cols, rows) => {
-        const terminal = terminalRef.current;
-        const renderer = rendererRef.current;
-        if (!terminal || !renderer) return;
-        terminal.resize(cols, rows);
-        modelSizeRef.current = { cols, rows };
-        renderer.resize(cols, rows);
-        renderSurface(true);
-      },
+      resizeLocal,
       reset: () => { void write('\x1bc'); },
       scrollToTop: () => {
         const terminal = terminalRef.current;
@@ -439,7 +508,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       getVisibleContent,
       getVisibleStyleSummary,
       drain: () => writeChainRef.current,
-    }), [fit, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, write]);
+    }), [fit, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, resizeLocal, write]);
 
     useEffect(() => {
       let active = true;
@@ -488,12 +557,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           typeTextViaInput: (text) => { onInputRef.current(text.replace(/\n/g, '\r')); return true; },
           isInputFocused: () => document.activeElement === container,
           write,
-          resizeLocal: (cols, rows) => {
-            terminal.resize(cols, rows);
-            modelSizeRef.current = { cols, rows };
-            renderer.resize(cols, rows);
-            renderSurface(true);
-          },
+          resizeLocal,
           reset: () => { void write('\x1bc'); },
           scrollToTop: () => { viewportOffsetRef.current = terminal.getScrollbackLength(); wheelRemainderRowsRef.current = 0; renderSurface(true); return true; },
           getText,
@@ -560,7 +624,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // Ghostty cells contain their resolved default RGB values, so theme
     // changes require a fresh model. The pane runtime rehydrates this model
     // from verified replay without sending historical replies to the live PTY.
-    }, [fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, resolvedTheme, write]);
+    }, [fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, resizeLocal, resolvedTheme, write]);
 
     const cellFromPointer = (event: React.MouseEvent) => {
       const renderer = rendererRef.current;
@@ -722,7 +786,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }}
         onKeyDown={(event) => {
           if (event.metaKey && event.shiftKey && event.key.toLowerCase() === 'c') {
-            const text = selectedText();
+            const text = selectedMarkdown();
             if (text) {
               void writeClipboardText(text);
               event.preventDefault();

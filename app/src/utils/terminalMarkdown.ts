@@ -23,3 +23,68 @@ export function cleanTerminalLines(lines: string[]): string[] {
 
   return result;
 }
+
+export interface TerminalMarkdownRun {
+  text: string;
+  bold: boolean;
+  italic: boolean;
+  strikethrough: boolean;
+  underline: boolean;
+  colored: boolean;
+}
+
+export interface TerminalMarkdownLine {
+  runs: TerminalMarkdownRun[];
+  wrapped?: boolean;
+}
+
+function shouldAllowInlineCode(runs: TerminalMarkdownRun[]): boolean {
+  let defaultNonSpace = 0;
+  let totalNonSpace = 0;
+  for (const run of runs) {
+    const count = run.text.replace(/\s/g, '').length;
+    totalNonSpace += count;
+    if (!run.colored) defaultNonSpace += count;
+  }
+  return totalNonSpace > 0 && (defaultNonSpace / totalNonSpace) >= 0.3;
+}
+
+function runToMarkdown(run: TerminalMarkdownRun, allowInlineCode: boolean): string {
+  const { text, bold, italic, strikethrough, underline, colored } = run;
+  if (!text) return '';
+
+  const hasSemanticAttribute = bold || italic || strikethrough;
+  const useCode = allowInlineCode && colored && !hasSemanticAttribute;
+  if (!hasSemanticAttribute && !underline && !useCode) return text;
+
+  const match = text.match(/^(\s*)(.*?)(\s*)$/s);
+  if (!match) return text;
+  const [, leading, inner, trailing] = match;
+  if (!inner) return text;
+
+  let result = inner;
+  if (useCode) {
+    result = inner.includes('`') ? `\`\` ${inner} \`\`` : `\`${inner}\``;
+  } else {
+    if (underline && !colored) result = `<u>${result}</u>`;
+    if (strikethrough) result = `~~${result}~~`;
+    if (bold && italic) result = `***${result}***`;
+    else if (bold) result = `**${result}**`;
+    else if (italic) result = `*${result}*`;
+  }
+  return leading + result + trailing;
+}
+
+export function terminalStyledSelectionToMarkdown(lines: TerminalMarkdownLine[]): string {
+  const rawLines: string[] = [];
+  for (const line of lines) {
+    const allowInlineCode = shouldAllowInlineCode(line.runs);
+    const text = line.runs.map((run) => runToMarkdown(run, allowInlineCode)).join('');
+    if (line.wrapped && rawLines.length > 0) {
+      rawLines[rawLines.length - 1] += text;
+    } else {
+      rawLines.push(text);
+    }
+  }
+  return cleanTerminalLines(rawLines).join('\n');
+}

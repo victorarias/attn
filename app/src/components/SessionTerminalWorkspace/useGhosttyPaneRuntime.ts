@@ -70,7 +70,7 @@ export function useGhosttyPaneRuntime(
         });
         break;
       case 'local_resize':
-        terminal.resizeLocal(event.cols, event.rows);
+        void terminal.resizeLocal(event.cols, event.rows);
         break;
       case 'reset':
         terminal.reset();

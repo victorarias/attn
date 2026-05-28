@@ -199,6 +199,8 @@ export class WebGlTerminalRenderer {
   private atlasX = 2;
   private atlasY = 1;
   private atlasRowHeight = 0;
+  private atlasGeneration = 0;
+  private retryingAtlasFrame = false;
   private cols = 0;
   private rows = 0;
 
@@ -298,6 +300,7 @@ export class WebGlTerminalRenderer {
     const cells = viewportCells ?? terminal.getViewport();
     const vertices: number[] = [];
     const glyphCountBefore = this.glyphs.size;
+    const atlasGenerationBefore = this.atlasGeneration;
 
     gl.clearColor(defaultBg.r / 255, defaultBg.g / 255, defaultBg.b / 255, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -346,6 +349,15 @@ export class WebGlTerminalRenderer {
         if ((cell.flags & CellFlags.STRIKETHROUGH) !== 0) {
           this.pushSolidQuad(vertices, x, y + Math.floor(this.cellHeight / 2) * scale, width, scale, fg, 1);
         }
+      }
+    }
+
+    if (this.atlasGeneration !== atlasGenerationBefore && !this.retryingAtlasFrame) {
+      this.retryingAtlasFrame = true;
+      try {
+        return this.render(terminal, true, viewportCells, selection, viewportOffset);
+      } finally {
+        this.retryingAtlasFrame = false;
       }
     }
 
@@ -414,7 +426,7 @@ export class WebGlTerminalRenderer {
       this.atlasRowHeight = 0;
     }
     if (this.atlasY + height >= ATLAS_SIZE) {
-      throw new Error('Ghostty terminal glyph atlas is full');
+      this.resetAtlas();
     }
 
     const x = this.atlasX;
@@ -438,6 +450,29 @@ export class WebGlTerminalRenderer {
     this.atlasRowHeight = Math.max(this.atlasRowHeight, height);
     this.glyphs.set(key, glyph);
     return glyph;
+  }
+
+  private resetAtlas(): void {
+    this.glyphs.clear();
+    this.atlasX = 2;
+    this.atlasY = 1;
+    this.atlasRowHeight = 0;
+    this.atlasGeneration += 1;
+    this.atlasContext.clearRect(0, 0, ATLAS_SIZE, ATLAS_SIZE);
+    this.atlasContext.fillStyle = '#ffffff';
+    this.atlasContext.fillRect(0, 0, 1, 1);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture);
+    this.gl.texImage2D(
+      this.gl.TEXTURE_2D,
+      0,
+      this.gl.RGBA,
+      ATLAS_SIZE,
+      ATLAS_SIZE,
+      0,
+      this.gl.RGBA,
+      this.gl.UNSIGNED_BYTE,
+      this.atlas,
+    );
   }
 
   private pushSolidQuad(vertices: number[], x: number, y: number, width: number, height: number, color: Rgb, alpha: number): void {
