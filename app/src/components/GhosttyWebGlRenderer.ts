@@ -275,10 +275,7 @@ export class WebGlTerminalRenderer {
 
     const gl = this.gl;
     const scale = this.dpr;
-    // The renderer owns app theme changes while the Ghostty model remains
-    // alive to preserve scrollback and alternate-screen state.
     const defaultBg = parseColor(this.theme.background);
-    const defaultFg = parseColor(this.theme.foreground);
     const cursorBg = parseColor(this.theme.cursor);
     const cursorFg = parseColor(this.theme.background);
     const cursor = terminal.getCursor();
@@ -302,8 +299,8 @@ export class WebGlTerminalRenderer {
         const x = col * this.cellWidth * scale;
         const y = row * this.cellHeight * scale;
         const isCursor = cursorRow !== null && cursor.x === col && cursorRow === row;
-        const fg = isCursor ? cursorFg : this.cellForeground(cell, defaultFg, defaultBg);
-        const bg = this.cellBackground(cell, defaultBg, defaultFg);
+        const fg = isCursor ? cursorFg : this.cellForeground(cell);
+        const bg = this.cellBackground(cell);
         const isSelected = selection
           ? row > selection.startRow && row < selection.endRow
             || row === selection.startRow && row === selection.endRow && col >= selection.startCol && col < selection.endCol
@@ -367,22 +364,22 @@ export class WebGlTerminalRenderer {
     this.gl.vertexAttribPointer(location, size, this.gl.FLOAT, false, stride, offset);
   }
 
-  private cellForeground(cell: GhosttyCell, fallback: Rgb, inverseFallback: Rgb): Rgb {
+  private cellForeground(cell: GhosttyCell): Rgb {
     if ((cell.flags & CellFlags.INVERSE) !== 0) {
-      return this.readColor(cell.bg_r, cell.bg_g, cell.bg_b, inverseFallback);
+      return this.readColor(cell.bg_r, cell.bg_g, cell.bg_b);
     }
-    return this.readColor(cell.fg_r, cell.fg_g, cell.fg_b, fallback);
+    return this.readColor(cell.fg_r, cell.fg_g, cell.fg_b);
   }
 
-  private cellBackground(cell: GhosttyCell, fallback: Rgb, inverseFallback: Rgb): Rgb {
+  private cellBackground(cell: GhosttyCell): Rgb {
     if ((cell.flags & CellFlags.INVERSE) !== 0) {
-      return this.readColor(cell.fg_r, cell.fg_g, cell.fg_b, inverseFallback);
+      return this.readColor(cell.fg_r, cell.fg_g, cell.fg_b);
     }
-    return this.readColor(cell.bg_r, cell.bg_g, cell.bg_b, fallback);
+    return this.readColor(cell.bg_r, cell.bg_g, cell.bg_b);
   }
 
-  private readColor(r: number, g: number, b: number, fallback: Rgb): Rgb {
-    return r === 0 && g === 0 && b === 0 ? fallback : { r, g, b };
+  private readColor(r: number, g: number, b: number): Rgb {
+    return { r, g, b };
   }
 
   private getGlyph(text: string, flags: number): AtlasGlyph {

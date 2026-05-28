@@ -83,7 +83,7 @@ describe('useGhosttyPaneRuntime', () => {
     ]);
   });
 
-  it('writes attach replay normally and forwards any response generated while parsing it', async () => {
+  it('allows explicit bootstrap replay to return terminal responses to the live PTY', async () => {
     const terminal = createTerminal();
     vi.mocked(terminal.write).mockImplementation(async () => {
       result.current.handleTerminalInput('main')('\u001b[1;1R');
@@ -98,6 +98,7 @@ describe('useGhosttyPaneRuntime', () => {
         event: 'data',
         id: 'runtime-1',
         source: 'attach_replay',
+        suppressResponses: false,
         data: btoa('\u001b[6n'),
       });
     });
@@ -123,7 +124,6 @@ describe('useGhosttyPaneRuntime', () => {
         event: 'data',
         id: 'runtime-1',
         source: 'attach_replay',
-        suppressResponses: true,
         data: btoa('\u001b[6n'),
       });
     });

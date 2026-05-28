@@ -493,6 +493,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     const onPRsUpdate = vi.fn();
     const onReposUpdate = vi.fn();
     const onAuthorsUpdate = vi.fn();
+    (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; cols?: number; rows?: number; source?: string }> }).__TEST_PTY_EVENTS = [];
     const { unmount } = renderHook(() =>
       useDaemonSocket({
         onSessionsUpdate,
@@ -569,7 +570,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('claims visible geometry after attaching a daemon-known session with stale replay dimensions', async () => {
+  it('preserves daemon geometry while relaunch restores before workspace layout settles', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
     const onPRsUpdate = vi.fn();
@@ -640,9 +641,14 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await expect(spawnPromise).resolves.toBeUndefined();
 
-    await waitFor(() => {
-      const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 46 });
+    const sent = ws.sent.map((entry) => JSON.parse(entry));
+    expect(sent).not.toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 46 });
+    expect((window as Window & { __TEST_PTY_EVENTS?: unknown[] }).__TEST_PTY_EVENTS).toContainEqual({
+      event: 'local_resize',
+      id: 'sess-existing',
+      cols: 80,
+      rows: 24,
+      source: 'attach_replay',
     });
 
     unmount();

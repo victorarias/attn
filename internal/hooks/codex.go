@@ -11,6 +11,8 @@ import (
 
 // GenerateCodexConfigOverrides returns Codex CLI -c overrides required for
 // attn-managed terminals without mutating user or project Codex config.
+// attn has always owned the resize-reflow value for its embedded renderer:
+// xterm needed it disabled, while Ghostty correctly renders the enabled redraw.
 func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath string) []string {
 	_ = sessionID  // Commands read ATTN_SESSION_ID from the Codex process env.
 	_ = socketPath // Hook commands inherit ATTN_SOCKET_PATH from the Codex process env.

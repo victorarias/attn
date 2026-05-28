@@ -1264,6 +1264,19 @@ export function useDaemonSocket({
                   queuedOutputs: ptyTransportRef.current.getQueuedAttachOutputs(data.id),
                   sessionAgent: session?.agent,
                 });
+                if (
+                  attachContext?.policy === 'relaunch_restore'
+                  && typeof data.cols === 'number'
+                  && typeof data.rows === 'number'
+                ) {
+                  emitPtyEvent({
+                    event: 'local_resize',
+                    id: data.id,
+                    cols: data.cols,
+                    rows: data.rows,
+                    source: 'attach_replay',
+                  });
+                }
                 if (attachEffects.shouldReset && attachEffects.resetReason) {
                   emitPtyEvent({
                     event: 'reset',

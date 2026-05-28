@@ -133,6 +133,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const terminalRef = useRef<GhosttyModel | null>(null);
     const rendererRef = useRef<WebGlTerminalRenderer | null>(null);
     const inputRef = useRef<InputHandler | null>(null);
+    const modelSizeRef = useRef({ cols: 80, rows: 24 });
     const viewportOffsetRef = useRef(0);
     const wheelRemainderRowsRef = useRef(0);
     const selectionRef = useRef<SelectionRange | null>(null);
@@ -151,8 +152,6 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const onReadyRef = useRef(onReady);
     const onResizeRef = useRef(onResize);
     const runtimeMetaRef = useRef(runtimeLogMeta);
-    const fontSizeRef = useRef(fontSize);
-    const resolvedThemeRef = useRef(resolvedTheme);
     const debugNameRef = useRef(debugName);
     const [error, setError] = useState<string | null>(null);
 
@@ -160,8 +159,6 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     onReadyRef.current = onReady;
     onResizeRef.current = onResize;
     runtimeMetaRef.current = runtimeLogMeta;
-    fontSizeRef.current = fontSize;
-    resolvedThemeRef.current = resolvedTheme;
     debugNameRef.current = debugName;
 
     const getViewportCells = useCallback((): GhosttyCell[] | undefined => {
@@ -189,14 +186,14 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         startCol: range.startCol,
         endRow: viewportRowFromBufferRow(range.endRow, scrollbackLength, viewportOffsetRef.current),
         endCol: range.endCol,
-        color: getTerminalTheme(resolvedThemeRef.current).selectionBackground,
+        color: getTerminalTheme(resolvedTheme).selectionBackground,
       } : null;
       const sample = renderer.render(terminal, force, getViewportCells(), overlay, viewportOffsetRef.current);
       if (sample) {
         renderCountRef.current += 1;
         lastRenderAtRef.current = Date.now();
       }
-    }, [getViewportCells]);
+    }, [getViewportCells, resolvedTheme]);
 
     const lineAtVisibleRow = useCallback((row: number): string => {
       const terminal = terminalRef.current;
@@ -372,6 +369,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const dims = renderer.fitDimensions(container.clientWidth, container.clientHeight);
       if (dims.cols === terminal.cols && dims.rows === terminal.rows) return;
       terminal.resize(dims.cols, dims.rows);
+      modelSizeRef.current = dims;
       renderer.resize(dims.cols, dims.rows);
       renderSurface(true);
       onResizeRef.current(dims.cols, dims.rows, { reason: 'ghostty_fit' });
@@ -393,6 +391,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         const renderer = rendererRef.current;
         if (!terminal || !renderer) return;
         terminal.resize(cols, rows);
+        modelSizeRef.current = { cols, rows };
         renderer.resize(cols, rows);
         renderSurface(true);
       },
@@ -421,14 +420,15 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const perfId = `ghostty-${debugNameRef.current}`;
       void Ghostty.load(ghosttyWasmUrl).then((ghostty) => {
         if (!active) return;
-        const theme = getTerminalTheme(resolvedThemeRef.current);
-        const terminal = ghostty.createTerminal(80, 24, {
+        const theme = getTerminalTheme(resolvedTheme);
+        const initialSize = modelSizeRef.current;
+        const terminal = ghostty.createTerminal(initialSize.cols, initialSize.rows, {
           scrollbackLimit: TERMINAL_SCROLLBACK_LINES,
           fgColor: colorNumber(theme.foreground),
           bgColor: colorNumber(theme.background),
           cursorColor: colorNumber(theme.cursor),
         });
-        const renderer = new WebGlTerminalRenderer(canvas, fontSizeRef.current, FONT_FAMILY, {
+        const renderer = new WebGlTerminalRenderer(canvas, fontSize, FONT_FAMILY, {
           background: theme.background,
           foreground: theme.foreground,
           cursor: theme.cursor,
@@ -457,7 +457,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           typeTextViaInput: (text) => { onInputRef.current(text.replace(/\n/g, '\r')); return true; },
           isInputFocused: () => document.activeElement === container,
           write,
-          resizeLocal: (cols, rows) => { terminal.resize(cols, rows); renderer.resize(cols, rows); renderSurface(true); },
+          resizeLocal: (cols, rows) => {
+            terminal.resize(cols, rows);
+            modelSizeRef.current = { cols, rows };
+            renderer.resize(cols, rows);
+            renderSurface(true);
+          },
           reset: () => { void write('\x1bc'); },
           scrollToTop: () => { viewportOffsetRef.current = terminal.getScrollbackLength(); wheelRemainderRowsRef.current = 0; renderSurface(true); return true; },
           getText,
@@ -521,24 +526,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         rendererRef.current = null;
         terminalRef.current = null;
       };
-    }, [fit, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, write]);
-
-    useEffect(() => {
-      const terminal = terminalRef.current;
-      const canvas = canvasRef.current;
-      if (!terminal || !canvas || !readyRef.current) return;
-      const theme = getTerminalTheme(resolvedTheme);
-      rendererRef.current?.dispose();
-      const renderer = new WebGlTerminalRenderer(canvas, fontSize, FONT_FAMILY, {
-        background: theme.background,
-        foreground: theme.foreground,
-        cursor: theme.cursor,
-      });
-      rendererRef.current = renderer;
-      renderer.resize(terminal.cols, terminal.rows);
-      fit();
-      renderSurface(true);
-    }, [fit, fontSize, renderSurface, resolvedTheme]);
+    // Ghostty cells contain their resolved default RGB values, so theme
+    // changes require a fresh model. The pane runtime rehydrates this model
+    // from verified replay without sending historical replies to the live PTY.
+    }, [fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, resolvedTheme, write]);
 
     const cellFromPointer = (event: React.MouseEvent) => {
       const renderer = rendererRef.current;

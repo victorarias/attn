@@ -65,7 +65,9 @@ export function useGhosttyPaneRuntime(
     }
     switch (event.event) {
       case 'data':
-        void terminal.write(decodePtyBytes(event.data), { suppressResponses: event.suppressResponses });
+        void terminal.write(decodePtyBytes(event.data), {
+          suppressResponses: event.suppressResponses ?? event.source === 'attach_replay',
+        });
         break;
       case 'local_resize':
         terminal.resizeLocal(event.cols, event.rows);

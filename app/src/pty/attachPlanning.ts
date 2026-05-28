@@ -135,13 +135,16 @@ export function classifyAttachReplay(
   const replayGeometryMismatch = requestedCols !== null && requestedRows !== null && hasReplayPayload && (
     replayCols !== requestedCols || replayRows !== requestedRows
   );
+  // A relaunch is reconstructing a frontend model for an already-running PTY.
+  // The daemon's current dimensions are authoritative until restored layout
+  // measurement produces a subsequent interactive resize.
+  const preserveAttachedGeometry = context?.policy === 'relaunch_restore';
   const replayAllowedByPolicy = context?.policy === 'relaunch_restore'
     || context?.policy === 'same_app_remount'
     || codexRawReplayBootstrap;
   const replaySkipped = hasReplayPayload && (
     !replayAllowedByPolicy ||
-    attachedGeometryMismatch ||
-    replayGeometryMismatch
+    (!preserveAttachedGeometry && (attachedGeometryMismatch || replayGeometryMismatch))
   );
   const replayApplied = hasReplayPayload && !replaySkipped;
 
@@ -194,7 +197,8 @@ export function planAttachedRuntimeGeometry(
     : hasRawScrollbackReplay
       ? ptyGeometryMatches
       : false;
-  const resizeRequired = !ptyGeometryMatches;
+  const preserveAttachedGeometry = options.attachPolicy === 'relaunch_restore';
+  const resizeRequired = !preserveAttachedGeometry && !ptyGeometryMatches;
 
   return {
     requestedCols,
@@ -215,7 +219,7 @@ export function planAttachedRuntimeGeometry(
     replayPreference: replayPlan.replayPreference,
     agent: replayPlan.agent,
     resizeRequired,
-    strategy: resizeRequired ? 'resize' : 'none',
+    strategy: resizeRequired ? 'resize' : preserveAttachedGeometry && !ptyGeometryMatches ? 'preserve_attached' : 'none',
     attachPolicy: options.attachPolicy,
   };
 }
