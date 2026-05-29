@@ -590,19 +590,16 @@ fn capture_native_window_screenshot<R: Runtime>(
         let primary_error = format!(
             "native screencapture failed for window_id={} bounds={}{}",
             window_id,
-            bounds
-                .get("logicalBounds")
-                .cloned()
-                .unwrap_or(Value::Null),
+            bounds.get("logicalBounds").cloned().unwrap_or(Value::Null),
             if detail.is_empty() {
                 String::new()
             } else {
                 format!(": {detail}")
             }
         );
-        let logical_bounds = bounds
-            .get("logicalBounds")
-            .ok_or_else(|| format!("{primary_error}; missing logical bounds for region fallback"))?;
+        let logical_bounds = bounds.get("logicalBounds").ok_or_else(|| {
+            format!("{primary_error}; missing logical bounds for region fallback")
+        })?;
         let component = |name: &str| -> Result<i64, String> {
             logical_bounds
                 .get(name)
