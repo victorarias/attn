@@ -13,21 +13,14 @@ describe('renderHealth', () => {
       projectedBounds: { width: 800, height: 600 },
       paneBodyBounds: { width: 800, height: 560 },
       terminalContainerBounds: { width: 800, height: 560 },
-      xtermScreenBounds: { width: 800, height: 560 },
+      terminalSurfaceBounds: { width: 800, height: 560 },
       canvasBounds: { width: 800, height: 560 },
-      helperTextarea: {
-        focused: true,
-        disabled: false,
-        readOnly: false,
-        width: 0,
-        height: 0,
-      },
       terminal: {
         terminalName: 'main:test',
         sessionId: 'session-1',
         paneId: 'main',
         runtimeId: 'session-1',
-        renderer: 'webgl',
+        renderer: 'ghostty-webgl',
         visible: true,
         ready: true,
         writeQueueChunks: 0,
@@ -41,8 +34,8 @@ describe('renderHealth', () => {
     });
 
     expect(pane.warnings).toEqual([]);
-    expect(pane.fill.xtermScreenVsPaneBody.width).toBe(1);
-    expect(pane.fill.xtermScreenVsPaneBody.height).toBe(1);
+    expect(pane.fill.terminalSurfaceVsPaneBody.width).toBe(1);
+    expect(pane.fill.terminalSurfaceVsPaneBody.height).toBe(1);
   });
 
   it('flags underfilled panes and unfocused active input', () => {
@@ -56,21 +49,14 @@ describe('renderHealth', () => {
       projectedBounds: { width: 420, height: 500 },
       paneBodyBounds: { width: 400, height: 460 },
       terminalContainerBounds: { width: 200, height: 460 },
-      xtermScreenBounds: { width: 180, height: 420 },
+      terminalSurfaceBounds: { width: 180, height: 420 },
       canvasBounds: { width: 180, height: 420 },
-      helperTextarea: {
-        focused: false,
-        disabled: false,
-        readOnly: false,
-        width: 0,
-        height: 0,
-      },
       terminal: {
         terminalName: 'shell:test',
         sessionId: 'session-1',
         paneId: 'pane-1',
         runtimeId: 'runtime-1',
-        renderer: 'webgl',
+        renderer: 'ghostty-webgl',
         visible: true,
         ready: true,
         writeQueueChunks: 0,
@@ -85,7 +71,7 @@ describe('renderHealth', () => {
 
     expect(pane.warnings.map((warning) => warning.code)).toEqual(expect.arrayContaining([
       'terminal_container_underfills_width',
-      'xterm_screen_underfills_width',
+      'terminal_surface_underfills_width',
       'canvas_underfills_width',
       'active_pane_input_unfocused',
     ]));
@@ -109,9 +95,8 @@ describe('renderHealth', () => {
           projectedBounds: { width: 800, height: 600 },
           paneBodyBounds: { width: 800, height: 560 },
           terminalContainerBounds: { width: 800, height: 560 },
-          xtermScreenBounds: { width: 800, height: 560 },
+          terminalSurfaceBounds: { width: 800, height: 560 },
           canvasBounds: { width: 800, height: 560 },
-          helperTextarea: null,
           terminal: null,
         },
         {
@@ -124,21 +109,14 @@ describe('renderHealth', () => {
           projectedBounds: { width: 500, height: 500 },
           paneBodyBounds: { width: 400, height: 460 },
           terminalContainerBounds: { width: 200, height: 460 },
-          xtermScreenBounds: { width: 180, height: 420 },
+          terminalSurfaceBounds: { width: 180, height: 420 },
           canvasBounds: { width: 180, height: 420 },
-          helperTextarea: {
-            focused: false,
-            disabled: false,
-            readOnly: false,
-            width: 0,
-            height: 0,
-          },
           terminal: {
             terminalName: 'shell:test',
             sessionId: 'session-1',
             paneId: 'pane-1',
             runtimeId: 'runtime-1',
-            renderer: 'webgl',
+            renderer: 'ghostty-webgl',
             visible: true,
             ready: true,
             writeQueueChunks: 0,

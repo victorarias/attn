@@ -134,9 +134,7 @@ async function main() {
             (summary.italicCellCount || 0) >= 8 &&
             (summary.underlineCellCount || 0) >= 8 &&
             (summary.inverseCellCount || 0) >= 8 &&
-            (summary.fgPaletteCellCount || 0) >= 8 &&
             (summary.fgRgbCellCount || 0) >= 8 &&
-            (summary.bgPaletteCellCount || 0) >= 8 &&
             (summary.bgRgbCellCount || 0) >= 8 &&
             (summary.uniqueStyleCount || 0) >= 4
           );
@@ -189,9 +187,7 @@ async function main() {
           minBoldCellRatio: 0.75,
           minUnderlineCellRatio: 0.75,
           minInverseCellRatio: 0.75,
-          minFgPaletteCellRatio: 0.75,
           minFgRgbCellRatio: 0.75,
-          minBgPaletteCellRatio: 0.75,
           minBgRgbCellRatio: 0.75,
           minUniqueStyleRatio: 0.75,
           timeoutMs: 20_000,

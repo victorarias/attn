@@ -97,11 +97,11 @@ export async function scrollPaneToTop(client, sessionId, paneId, timeoutMs = 12_
   );
 }
 
-// A freshly-split pane's xterm only starts receiving pty_output after the
-// frontend's `attach_session` RPC succeeds. `write_pane` bypasses xterm and
+// A freshly-split pane's terminal only starts receiving pty_output after the
+// frontend's `attach_session` RPC succeeds. `write_pane` bypasses the terminal and
 // writes straight to the worker PTY, so input that arrives before attach
 // runs in the shell but drops output into the worker's scrollback without
-// reaching the xterm buffer (fresh_spawn attach omits replay). Gate writes
+// reaching the terminal buffer (fresh_spawn attach omits replay). Gate writes
 // on `runtimeAttached=true` so visible content reflects what the shell did.
 // Returns { state, elapsedMs } — elapsedMs lets callers distinguish "gate
 // was cosmetic" (trivially true) from "gate caught a real attach stall".
@@ -162,7 +162,7 @@ export async function waitForPaneInputFocus(
 // on screen is necessary but not sufficient; the shell must also be idle.
 //
 // The gate: require the prompt glyph at the tail of the buffer *and* wait
-// for xterm's write-parse count to sit still for `idleMs`. That marks the
+// for the terminal write-parse count to sit still for `idleMs`. That marks the
 // end of the startup burst, after which keystrokes go straight into zle.
 export async function waitForPaneShellReady(
   client,
@@ -430,7 +430,7 @@ function visibleContentAnchorLines(
     .slice(0, maxAnchors);
 }
 
-// After a resize (e.g. split_pane), xterm keeps the pre-resize buffer around
+// After a resize (e.g. split_pane), the terminal keeps the pre-resize buffer around
 // until the agent responds to SIGWINCH with a fresh redraw. Sampling the pane
 // during that window captures stale wide content and misrepresents the post-
 // resize baseline. Wait until no visible line exceeds the pane's current
@@ -655,8 +655,8 @@ export async function assertPaneCoverage(
     sessionId,
     paneId,
     (state) => {
-      const widthRatio = state?.renderHealth?.fill?.xtermScreenVsPaneBody?.width ?? 0;
-      const heightRatio = state?.renderHealth?.fill?.xtermScreenVsPaneBody?.height ?? 0;
+      const widthRatio = state?.renderHealth?.fill?.terminalSurfaceVsPaneBody?.width ?? 0;
+      const heightRatio = state?.renderHealth?.fill?.terminalSurfaceVsPaneBody?.height ?? 0;
       return widthRatio >= minWidthRatio && heightRatio >= minHeightRatio;
     },
     description,
@@ -859,6 +859,9 @@ export async function captureSessionArtifacts(client, runDir, prefix, sessionId)
     }
   };
 
+  await writeJson(`${prefix}-native-window.json`, 'capture_native_window_screenshot', {
+    path: `${runDir}/${prefix}-native-window.png`,
+  });
   await writeJson(`${prefix}-workspace.json`, 'get_workspace', { sessionId });
   await writeJson(`${prefix}-session-ui-state.json`, 'get_session_ui_state', { sessionId });
   await writeJson(`${prefix}-structured-snapshot.json`, 'capture_structured_snapshot', {

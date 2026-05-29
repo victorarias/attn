@@ -413,7 +413,7 @@ test.describe('Utility Terminal Real PTY', () => {
     await expect(page.locator('.session-terminal-workspace')).toBeVisible({ timeout: 5000 });
 
     // Output shown before dashboard switch should be restored in the
-    // remounted utility xterm buffer without typing anything new.
+    // remounted utility terminal buffer without typing anything new.
     await expect
       .poll(
         async () =>

@@ -61,18 +61,26 @@ func shouldPreferAgentRawReplay(session *protocol.Session) bool {
 
 func shouldIncludeAttachReplay(policy protocol.AttachPolicy, session *protocol.Session) bool {
 	switch policy {
-	case protocol.AttachPolicySameAppRemount, protocol.AttachPolicyFreshSpawn:
+	case protocol.AttachPolicySameAppRemount:
+		// Ghostty terminal models are local to a mounted renderer. Remounting a
+		// pane creates an empty model that must be rehydrated from the daemon.
+		return true
+	case protocol.AttachPolicyFreshSpawn:
 		// Codex's TUI emits terminal capability queries (CPR, DA, kitty
 		// keyboard, OSC 10) on startup and waits for the responses before it
-		// will draw anything. Bytes emitted between PTY spawn and xterm.js
+		// will draw anything. Bytes emitted between PTY spawn and terminal
 		// attach are lost when replay is omitted, so Codex hangs forever
-		// waiting for query responses that xterm never had a chance to
-		// produce. For Codex sessions we replay scrollback so xterm processes
+		// waiting for query responses that the frontend never had a chance to
+		// produce. For Codex sessions we replay scrollback so the terminal processes
 		// the queries and emits the responses Codex is waiting for.
 		return shouldPreferAgentRawReplay(session)
 	default:
 		return true
 	}
+}
+
+func shouldRestoreTerminalModelHistory(policy protocol.AttachPolicy) bool {
+	return policy == protocol.AttachPolicyRelaunchRestore || policy == protocol.AttachPolicySameAppRemount
 }
 
 func limitReplayTail(data []byte, limit int) ([]byte, bool) {
@@ -179,7 +187,8 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Sess
 		return payload
 	}
 
-	if shouldPreferAgentRawReplay(session) && (len(info.Scrollback) > 0 || len(info.ReplaySegments) > 0) {
+	if (shouldPreferAgentRawReplay(session) || shouldRestoreTerminalModelHistory(policy)) &&
+		(len(info.Scrollback) > 0 || len(info.ReplaySegments) > 0) {
 		if len(info.ReplaySegments) > 0 {
 			segments, clipped := pty.LimitReplaySegmentsTail(replaySegmentsToPTY(info.ReplaySegments), maxAgentRawReplayBytes)
 			backendSegments := make([]ptybackend.ReplaySegment, 0, len(segments))
@@ -257,10 +266,9 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Sess
 		}
 	}
 
-	// Fresh visible-frame snapshots are enough for current websocket clients to
-	// restore the screen while live output catches up. Sending full scrollback in
-	// addition to that snapshot turns split/remount attaches into multi-megabyte
-	// JSON payloads with no UI benefit.
+	// A fresh snapshot is sufficient when verified raw history was unavailable.
+	// Rehydrating a fresh Ghostty model uses raw history above only when it is
+	// complete, bounded, and reconstructs the daemon's current visible frame.
 	if len(info.Scrollback) > 0 && !(len(payload.screenSnapshot) > 0 && payload.screenSnapshotFresh) {
 		payload.scrollback = info.Scrollback
 		if payload.rawReplayDecision == "default" {

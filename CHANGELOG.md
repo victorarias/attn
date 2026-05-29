@@ -6,6 +6,21 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-05-27]
+
+### Changed
+- **Ghostty Terminal Rendering**: Terminal panes now use the Ghostty WASM parser with GPU-backed rendering directly in the app, replacing the previous terminal implementation.
+- **Stable Local macOS Signing**: Development app builds now use an installed Apple Development identity when available, sign the enclosing app bundle, and expose an app-owned native screenshot path so Screen Recording grants survive source rebuilds during visual terminal validation.
+
+### Fixed
+- **Terminal Block Graphics**: Colored cell fills and Unicode block graphics, including the Claude startup mark, now render continuously instead of showing faint seams between cells.
+- **Codex Resize Redraws**: Attn-managed Codex terminals now enable Codex's resize-reflow mode so resizing a Ghostty-rendered pane redraws the inline UI instead of leaving wrapped or duplicated header fragments.
+- **Terminal Scrolling**: Ghostty terminal panes now scroll in proportion to wheel or trackpad movement, keep a manually scrolled view steady while new output is arriving, keep selections attached to their text while browsing local or application-owned history, and forward wheel input to interactive agents such as Claude when they request terminal mouse tracking.
+- **Terminal Links**: Visible URLs in Ghostty terminal panes now open when clicked, including modifier-clicks while an interactive application has terminal mouse tracking enabled.
+- **Dev App Profile Isolation**: Relaunching `attn-dev.app` from a terminal that inherited production routing variables now keeps the dev app on its isolated daemon and port instead of starting or replacing a production daemon.
+
+---
+
 ## [2026-05-23]
 
 ### Changed
@@ -149,7 +164,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Smarter Commit Checks**: The pre-commit hook now chooses validation by staged file path and auto-formats staged Go, native Rust, and Tauri Rust files when safe. Native canvas changes run daemon checks plus native Rust format, clippy, and tests; Tauri changes run daemon checks plus Tauri Rust format, clippy, and tests; frontend, shell, and daemon-only changes stay scoped to their relevant suites.
 
 ### Fixed
-- **Codex Sessions No Longer Hang On Startup**: When a Codex session was opened, Codex's TUI emitted terminal capability queries (cursor position, device attributes, kitty keyboard, OSC 10) and waited for the responses before drawing anything. If those queries arrived at the daemon's PTY stream before the frontend's xterm.js had attached — which it usually did, given how fast Codex starts, and even more reliably on remote endpoints due to the SSH-relay round-trip — the responses never came back and Codex stayed stuck on a blank screen forever. Two coordinated changes fix this end-to-end: the daemon now replays early scrollback for Codex sessions on fresh-spawn and same-app-remount attaches, and the frontend now applies that replay (instead of always discarding it on non-relaunch policies), so xterm.js processes the buffered queries and emits the responses Codex is waiting for.
+- **Codex Sessions No Longer Hang On Startup**: When a Codex session was opened, Codex's TUI emitted terminal capability queries (cursor position, device attributes, kitty keyboard, OSC 10) and waited for the responses before drawing anything. If those queries arrived at the daemon's PTY stream before the frontend terminal had attached, the responses never came back and Codex stayed stuck on a blank screen forever. Two coordinated changes fix this end-to-end: the daemon now replays early scrollback for Codex sessions on fresh-spawn and same-app-remount attaches, and the frontend now applies that replay (instead of always discarding it on non-relaunch policies), so the terminal processes the buffered queries and emits the responses Codex is waiting for.
 - **Codex Sessions No Longer Strand The Input Prompt After Resize**: Switching sessions, opening side panels, or changing the UI scale could push tiny intermediate measurements (e.g. 10×6) into a Codex pane's PTY. Codex's inline TUI redraws at the small size and then can't recover when the pane returns to full size — the input prompt ends up far above the cursor with dozens of blank rows below it, and any keystroke auto-scrolls the prompt out of view. Two changes fix the root cause: (1) `getScaledDimensions` now rejects sub-usable grid measurements (≤20 cols or ≤10 rows) so transient layout states never reach the PTY at all, and (2) inactive sessions no longer forward terminal resizes — their PTY keeps its previous geometry until the user actually selects the session.
 - **Shell Panes In Tight Splits No Longer Stay Dead, And The Codex Floor Is No Longer A Layout Filter**: The codex small-grid protection above was doing two unrelated jobs at once — filtering transient layout-state measurements (panel animations, grid tracks resolving mid-mount, sidebar collapse layout shifts) AND enforcing codex's "don't poke me with a sub-20×10 SIGWINCH" requirement — at the same `getScaledDimensions` choke point. That conflation meant a legitimate 14-col shell pane in a 3-way split was rejected as "transient garbage", `terminal.ready` never fired, and the new pane silently received no PTY data. The two concerns are now separated: `getScaledDimensions` rejects measurements that are implausibly small relative to the pane's "fair share" of the window (window size ÷ pane count × 30%), which catches transient layout states for any pane regardless of kind; codex's 20×10 SIGWINCH protection moves to the resize-send point and applies only to main panes. A 3-way split shell pane at 17 cols is now well above its layout-aware floor and initializes normally; a 1-pane window reporting 10 cols mid-animation is still rejected as a transient regardless of which kind of pane it is.
 - **Native Workspace Deletion Polish**: The native workspace sidebar now asks for an inline confirmation before deleting a workspace, keeps the row in a pending state while the daemon unregisters it, surfaces command-send failures in the sidebar, and automatically selects another workspace after the selected one is deleted.
@@ -210,27 +225,27 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Terminal Goes Blank After Closing A Split In A Relaunched Remote Session**: The websocket subscriber id was derived from `<client_ptr>:<sessionID>`, which stays stable when the same client reattaches to the same session during remount/relaunch. The PTY session's subscriber map is keyed by that id, so a second attach silently overwrote the first subscriber's callback in place; then when the first stream closed it emitted a `Detach` RPC that removed the subscriber id — now pointing at the *new* stream — leaving the session with no one to forward output to. Claude's post-SIGWINCH redraw bytes continued to be generated but had no subscriber, so the pane kept showing the stale narrow frame from before the close. Each attach now gets a monotonically unique subscriber id, so a dying stream's detach removes only its own subscription. Verified with the tr205-claude scenario (previously 0/2 passes, now 3/3) and a dedicated byte-level PTY probe that confirmed claude does emit full redraws on every resize.
 
 ### Changed
-- **`scenario-tr201-local-relaunch-existing-split` Waits For Post-Split Reflow Before Baseline Capture**: After `split_pane`, xterm keeps the pre-split wide buffer until the agent (claude) responds to SIGWINCH with a fresh narrow redraw. Sampling the main pane's visible content during that window captured the stale wide frame as the baseline, then after relaunch the restored pane showed the correct narrow frame — the scenario flagged the mismatch as "main pane content not preserved." Baseline capture now waits for `visibleContent.summary.maxLineLength <= visibleContent.cols` (the observable reflow signal) before recording the baseline, eliminating the race.
+- **`scenario-tr201-local-relaunch-existing-split` Waits For Post-Split Reflow Before Baseline Capture**: After `split_pane`, the terminal keeps the pre-split wide buffer until the agent (claude) responds to SIGWINCH with a fresh narrow redraw. Sampling the main pane's visible content during that window captured the stale wide frame as the baseline, then after relaunch the restored pane showed the correct narrow frame. Baseline capture now waits for `visibleContent.summary.maxLineLength <= visibleContent.cols` before recording the baseline, eliminating the race.
 
 ---
 
 ## [2026-04-20]
 
 ### Changed
-- **Harness Typing Is Focus-Agnostic**: `typeTextViaInput` (the xterm path behind `type_pane_via_ui`) no longer short-circuits when the target pane's hidden textarea isn't `document.activeElement`, and no longer focuses the textarea at all. Synthetic `InputEvent` dispatch fires xterm's listener regardless of which element currently holds DOM focus, so the helper just dispatches. Pre-typing `waitForPaneInputFocus` waits that were only there to satisfy the old focus guard were removed from tr201, tr204, tr301 setup, tr401, and tr502. The two calls that actually *assert* focus as a product behavior stay: tr301's "utility regains focus after session switch" (line 120) and tr303's "click_pane focuses main" (line 152). Scenarios that only needed DOM focus as a precondition no longer block on stable focus — removing a common flake source without losing coverage.
+- **Harness Typing Is Focus-Agnostic**: `typeTextViaInput` no longer short-circuits when the target pane's input surface is not active, and no longer changes focus just to dispatch text. Pre-typing `waitForPaneInputFocus` waits that were only there to satisfy the old focus guard were removed from tr201, tr204, tr301 setup, tr401, and tr502. The two calls that actually assert focus as product behavior stay: tr301's "utility regains focus after session switch" and tr303's "click_pane focuses main."
 - **Harness Restores The Caller's Frontmost App On Exit**: `UiAutomationClient` captures the caller's frontmost bundle at `launchApp()` time and re-activates it when `quitApp()` returns. Scenarios still run attn in the foreground because `open -g` puts the Tauri WKWebView into `NSWindowOcclusionState.occluded`, where rAF and ResizeObserver throttle and freshly-split panes stall at `runtimeAttached: false`. A small visible-but-not-key "corner panel" variant was prototyped (`#parkWindowAsPanel` in `uiAutomationClient.mjs`) but 3/3 tr204 runs under parking timed out on `waitForPaneAttached` vs 2/3 under floor on the same day, so we didn't ship it. The `#parkWindowAsPanel` helper is retained unused for follow-up experiments (e.g. always-on-top panel via a Tauri-side window config). With the restore in place, the visible effect of the current ship: attn comes forward when the scenario starts, runs, then the caller's original app (Slack, Ghostty, iTerm, etc.) automatically comes back when the scenario quits attn.
 
 ### Fixed
-- **Harness No Longer Writes To Unattached Panes**: `scenario-tr401-local-window-resize` and `scenario-tr204-local-relaunch-formatting` — the two scenarios that call `write_pane` on a freshly-split pane without any intermediate xterm-routed typing — now wait for `runtimeAttached=true` before the write. Previously, `waitForPaneInputFocus` could return while the pane's xterm was still finishing `attach_session` with the daemon; `write_pane` then wrote directly to the worker PTY, the shell ran the command, and the output landed in the worker's scrollback while xterm remained empty (fresh-spawn attach omits scrollback replay). The harness would time out on `waitForPaneText` with an empty tail, with no surviving clue to the cause. The new `waitForPaneAttached` helper closes the window — instrumentation shows it blocks ~200 ms on roughly half of cold-start tr401 runs, and the 22-s `prepare_split_baseline` stall we first hit is structurally impossible where the gate runs. Scenarios that seed panes via `type_pane_via_ui` (tr502, tr201, smoke) are naturally gated because xterm's `onData` requires the component to be mounted and receiving, so no further migration is needed there. A companion `runtimeAttached` field is exposed through `get_pane_state` for scenarios that want to assert on it directly.
+- **Harness No Longer Writes To Unattached Panes**: `scenario-tr401-local-window-resize` and `scenario-tr204-local-relaunch-formatting` now wait for `runtimeAttached=true` before writing into a freshly split pane. Previously, the focus gate could return while the pane was still finishing `attach_session`, leaving output only in worker scrollback. A companion `runtimeAttached` field is exposed through `get_pane_state` for scenarios that assert on it directly.
 
 ---
 
 ## [2026-04-19]
 
 ### Changed
-- **Pane Paint-Coverage Assertions Are Focus-Free**: Harness scenarios (tr401, tr402, tr205, tr502) no longer screencap the attn window to assert post-close/post-resize paint coverage. Coverage is now computed from xterm's in-process buffer — `analyzePaneTextCoverage` derives the same `busyColumnRatio` / `busyRowRatio` / `bboxWidthRatio` / `bboxHeightRatio` fields from cell occupancy. The pixel path required attn frontmost because WKWebView serves a stale backing store while occluded, and the focus steal was visually disruptive. The text path works regardless of compositor state, so per-scenario activations for paint assertions are eliminated. One trade: we no longer automatically detect the narrow case of "xterm buffer has text but the WebGL canvas rendered blank."
+- **Pane Paint-Coverage Assertions Are Focus-Free**: Harness scenarios (tr401, tr402, tr205, tr502) no longer screencap the attn window to assert post-close/post-resize paint coverage. Coverage is now computed from the terminal buffer through `analyzePaneTextCoverage`. The pixel path required attn frontmost because WKWebView serves a stale backing store while occluded; the text path works regardless of compositor state.
 - **Real-App Harness Preserves Focus**: The `pnpm --dir app run real-app:smoke` flow now drives the packaged app entirely through the in-webview automation bridge — splitting, focusing, and typing into panes no longer synthesize `CGEvent` keystrokes or call `NSRunningApplication.activate(...)`. The packaged app is also launched with `open -g` (background) so it never steals frontmost on boot. Contributors can keep using another app while the harness runs.
-- **`repro-older-pane-writability` Runs Focus-Free**: The older-pane repro is now bridge-only — splits, focus moves, and typed input all route through the automation bridge. The underlying writability invariant is still exercised because `type_pane_via_ui` fails fast unless the target pane's xterm textarea is the document's active element, so a refocus-routing regression still surfaces.
+- **`repro-older-pane-writability` Runs Focus-Free**: The older-pane repro is now bridge-only: splits, focus moves, and typed input all route through the automation bridge while still checking input ownership.
 - **`scenario-tr502-remote-relaunch-splits` Typing Is Focus-Free**: The three remote-shell typing phases now go through `type_pane_via_ui` instead of `CGEvent` keystrokes, dropping three activations per run. The scenario still activates attn briefly on launch (the remote harness needs env-var delivery via spawn); the per-assertion activation is gone as of the text-coverage change above.
 - **Spawn-With-Env Launch Bounces Focus Back To The Caller**: When a real-app scenario launches the packaged app via spawn (currently tr502, because LaunchServices and `open -g` don't propagate env vars into Tauri's window-creation path), the harness now records the caller's frontmost bundle before spawning, waits for attn's main window to appear via `CGWindowListCopyWindowInfo` (an AppleScript `count of windows` gate is unreliable for Tauri/wry — it returns 0 even with a visible window), then reactivates the caller. Attn is frontmost for roughly 300 ms per launch instead of the whole scenario.
 
@@ -275,7 +290,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Fixed
 - **Comment Form Focus Theft**: Typing in a diff-panel comment or search form no longer loses focus as the terminal emits output in the background. Overlapping focus-retry chains and an unstable workspace binder were letting terminal focus preempt active form input.
 - **Ghost Click Targets In Closed Dock Panels**: Closed side panels no longer intercept clicks on the diff editor. Descendants with `pointer-events: auto` could override the panel's `pointer-events: none`; closed panels are now fully `inert`.
-- **Duplicate Terminal Link Opens**: Cmd-clicking a link in the terminal no longer opens the URL twice. The in-xterm link handlers were redundant with the Tauri opener plugin.
+- **Duplicate Terminal Link Opens**: Cmd-clicking a link in the terminal no longer opens the URL twice. The inline link handlers were redundant with the Tauri opener plugin.
 - **Orphan Comment Cross-Branch Cleanup**: Switching branches while the diff panel was open could misclassify valid comments on the new branch as orphaned and auto-delete them. Cached diff data is now cleared on branch change so cleanup waits for fresh data before running.
 
 ### Removed
@@ -367,7 +382,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Embedded Phone Terminal Touch Scroll**: Touch drags now distinguish real scrollback, alternate-screen mouse tracking, and alternate-scroll mode instead of always faking `Up` / `Down`, so supported apps can still scroll while prompt-driven sessions stop accidentally walking history.
 - **Embedded Phone Terminal Diagnostics**: Add daemon-backed viewport instrumentation plus PTY rendering guidance so focus and viewport bugs can be diagnosed from real-device traces instead of browser emulation alone.
 - **Build Metadata Injection**: Share version and build-time metadata across `attn --version`, daemon health output, source/bootstrap builds, Homebrew packaging, and build/install flows so it is easier to identify the running daemon build and `install-all` leaves the newest daemon running.
-- **Pane Runtime Binder Ordering**: Preserve early split-pane terminal input during initial mount and keep pane drain sequencing tied to xterm flush callbacks so shell startup probes and terminal automation no longer race the pane lifecycle.
+- **Pane Runtime Binder Ordering**: Preserve early split-pane terminal input during initial mount and keep pane drain sequencing tied to render flush callbacks so shell startup probes and terminal automation no longer race the pane lifecycle.
 
 ## [2026-04-04]
 
@@ -381,7 +396,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Remote Sidebar Session Actions**: Remote-host sessions now show the same hover-only reload and close buttons as local sessions in the left sidebar.
-- **Hidden Session Terminal Repaint**: Switching back to a previously hidden session now forces xterm through a real size bounce when the measured cols/rows are unchanged, so main panes no longer stay rendered as a narrow stale column until some later resize shakes them loose.
+- **Hidden Session Terminal Repaint**: Switching back to a previously hidden session now forces a real size bounce when the measured cols/rows are unchanged, so main panes no longer stay rendered as a narrow stale column until a later resize.
 
 ## [2026-04-03]
 
@@ -393,7 +408,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **UI Perf Harness**: Packaged-app benchmark that samples CPU, RSS, and frontend terminal/diff/review perf at repeatable checkpoints, including PTY transport mode comparisons.
 
 ### Changed
-- **PTY Output Backpressure**: Pace live terminal output with xterm write callbacks and websocket acknowledgements so the daemon stops flooding terminals faster than they can render.
+- **PTY Output Backpressure**: Pace live terminal output with write completion and websocket acknowledgements so the daemon stops flooding terminals faster than they can render.
 - **Linux Release Artifacts**: Tagged releases now ship standalone `attn-linux-amd64` and `attn-linux-arm64` daemon binaries, with a release-preflight workflow for branch-safe verification.
 - **Compiled Versioning**: The daemon reports an explicit compiled version via `attn --version`, and the app preflights binary protocol compatibility before restarting a mismatched daemon.
 - **Cross-Compile Path**: Use `zig cc` for macOS-to-Linux cgo builds with fingerprint-based dev caching, so remote-daemon iteration produces SQLite-capable Linux binaries without a Linux box.
@@ -457,7 +472,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Daemon-Owned Workspace Control Plane**: Move split-pane creation, close, focus, and rename authority into the daemon with dedicated workspace protocol messages and snapshot/update events, while the frontend now renders daemon snapshots instead of mutating the canonical split tree locally.
 - **Attached Shell Runtime Recovery**: Reconcile recovered shell-pane PTY runtimes against persisted workspace metadata at startup, prune missing panes from saved layouts, and clean up orphaned shell runtimes that no longer belong to any workspace.
 - **Spatial Pane Navigation**: `Cmd+Alt+Arrow` now moves focus by panel geometry instead of creation order, with `Up/Down` respecting stacked panes and `Left/Right` respecting side-by-side panes; when there is no pane in that direction, focus falls through to the previous or next session.
-- **Unified Pane Runtime Binding**: Main session panes and split shell panes now bind xterm instances through the same workspace-level runtime binder, so remount, restore, resize, and keyboard wiring follow one terminal lifecycle path instead of separate store and UI implementations.
+- **Unified Pane Runtime Binding**: Main session panes and split shell panes now share the same workspace-level runtime binding, so remount, restore, resize, and keyboard wiring follow one terminal lifecycle path instead of separate store and UI implementations.
 - **Centralized PTY Event Routing**: The session workspace UI now routes PTY output through one app-level runtime registry instead of letting every mounted workspace subscribe to the PTY event bus independently, which makes pane/runtime delivery a single explicit ownership graph.
 - **Explicit Workspace vs View-State Model**: Frontend sessions now store daemon-owned workspace topology separately from the daemon’s last-active-pane hint, while live pane selection stays client-local in `App`, which makes the UI ownership boundary clearer for future remote or multi-client work.
 - **Dedicated Workspace View Controller**: The client-side pane-selection and topology-reconciliation logic now lives in a dedicated frontend hook instead of being embedded inline in `App`, which gives the workspace UI a cleaner controller boundary and direct unit coverage.
@@ -610,7 +625,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-02-17]
 
 ### Fixed
-- **Terminal Emoji Width**: Add Unicode 11 addon to xterm.js so emojis and CJK characters are correctly treated as double-width, fixing misaligned columns in status bars and context displays.
+- **Terminal Emoji Width**: Emoji and CJK characters are correctly treated as double-width, fixing misaligned columns in status bars and context displays.
 - **Login Shell Environment Capture**: PTY sessions now source `.zshrc` when capturing the login shell environment, fixing missing PATH entries (e.g. Google Cloud SDK) that are configured in `.zshrc` rather than `.zprofile`.
 - **Session List Ordering Stability**: Daemon session listing now sorts by `label` with `id` as a deterministic tie-breaker, preventing same-label sessions from swapping order between refreshes.
 
@@ -671,7 +686,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-02-10]
 
 ### Fixed
-- **Terminal Cmd+Click Link Open**: Terminal hyperlinks now open directly via Tauri opener for both plain URLs and OSC 8 links, removing the xterm warning prompt and fixing links that previously failed to open after confirmation.
+- **Terminal Cmd+Click Link Open**: Terminal hyperlinks now open directly via Tauri opener for both plain URLs and OSC 8 links, removing an extra warning prompt and fixing links that previously failed to open after confirmation.
 
 ### Added
 - **Worker PTY Sidecar Runtime (Feature Rollout)**: Add restart-survivable PTY execution by moving session runtime into per-session worker sidecars, with daemon recovery/reconnect flow and embedded-backend fallback for compatibility.
@@ -720,7 +735,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Recovery Deferred Reconcile Triggering**: Missing worker metadata now triggers deferred reconciliation retries, improving eventual convergence for transient info-read failures.
 - **Recovery Clear Sessions Semantics**: `clear_sessions` is now blocked during startup recovery barrier to prevent worker-recovered sessions from immediately reappearing after a clear.
 - **Startup Recovery Flow Decomposition**: Daemon startup now delegates PTY recovery/reconciliation into focused helpers, reducing coupling in `Start()` while preserving behavior.
-- **Terminal Cmd+Click Link Open**: Terminal hyperlinks now open directly via Tauri opener for both plain URLs and OSC 8 links, removing the xterm warning prompt and fixing links that previously failed to open after confirmation.
+- **Terminal Cmd+Click Link Open**: Terminal hyperlinks now open directly via Tauri opener for both plain URLs and OSC 8 links, removing an extra warning prompt and fixing links that previously failed to open after confirmation.
 - **Classifier WAITING/DONE Parsing**: Stop-time state classification now handles multiline/model-explanatory outputs correctly (including responses that start with `WAITING` and then add rationale), preventing false `idle` states when user input is still required.
 - **Classifier Structured Output Handling**: Claude classifier requests a JSON-schema verdict (`WAITING`/`DONE`) and consumes structured/result payloads when available, with robust fallback parsing for plain-text outputs.
 
@@ -811,7 +826,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Daemon Spawn Wrapper Path Resolution**: PTY-launched sessions now validate candidate `attn` executable paths before invoking them, preventing `fish: Unknown command` failures when a stale or missing binary path is discovered.
-- **Utility Terminal Shell Bootstrap**: `Cmd+T` utility terminals now wire xterm input before replaying buffered PTY output, so early terminal capability queries receive responses and interactive login shells (like fish) initialize their prompt correctly.
+- **Utility Terminal Shell Bootstrap**: `Cmd+T` utility terminals now wire input before replaying buffered PTY output, so early terminal capability queries receive responses and interactive login shells (like fish) initialize their prompt correctly.
 - **Daemon Socket Detection (Tauri)**: Frontend daemon health/start checks now use `~/.attn/attn.sock` (and `ATTN_SOCKET_PATH` override), matching daemon defaults.
 - **Stale Daemon Socket Recovery**: App startup now verifies the daemon socket is connectable (not just present), removes stale socket files, and waits for a live socket before reporting daemon startup success.
 - **Persistence Degraded Visibility**: When SQLite open/migrations fail and daemon falls back to in-memory state, the app now receives a persistent warning banner that includes the DB path and points to daemon logs for recovery details.

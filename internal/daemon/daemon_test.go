@@ -2137,17 +2137,23 @@ func TestDaemon_HandleAttachSession_PrefersFreshScreenSnapshotForStoredClaudeSes
 	}
 }
 
-func TestDaemon_HandleAttachSession_SkipsReplayForSameAppRemountPolicy(t *testing.T) {
+func TestDaemon_HandleAttachSession_ReplaysVerifiedHistoryForSameAppRemountPolicy(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeAttachBackend{}
+	raw := []byte("\x1b[H\x1b[2Jhello from replay\r\nsecond line")
+	snapshot, ok := pty.ScreenSnapshotFromReplay(raw, 58, 46)
+	if !ok {
+		t.Fatal("expected raw replay to derive a snapshot")
+	}
 	backend.SetAttachInfo(ptybackend.AttachInfo{
 		Running:             true,
-		Scrollback:          []byte("hello from replay"),
-		ScrollbackTruncated: true,
-		ScreenSnapshot:      []byte("\x1b[2Jsnapshot"),
+		Scrollback:          raw,
+		Cols:                58,
+		Rows:                46,
+		ScreenSnapshot:      snapshot.Payload,
 		ScreenSnapshotFresh: true,
-		ScreenCols:          58,
-		ScreenRows:          46,
+		ScreenCols:          snapshot.Cols,
+		ScreenRows:          snapshot.Rows,
 	})
 	d.ptyBackend = backend
 
@@ -2170,14 +2176,64 @@ func TestDaemon_HandleAttachSession_SkipsReplayForSameAppRemountPolicy(t *testin
 		if !result.Success {
 			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
 		}
-		if result.Scrollback != nil {
-			t.Fatal("expected same-app remount attach to omit replay scrollback")
+		if protocol.Deref(result.Scrollback) == "" {
+			t.Fatal("expected same-app remount attach to replay verified history")
 		}
 		if result.ScreenSnapshot != nil {
-			t.Fatal("expected same-app remount attach to omit replay screen snapshot")
+			t.Fatal("expected verified history to replace the screen snapshot replay")
 		}
 		if protocol.Deref(result.ScrollbackTruncated) {
-			t.Fatal("expected same-app remount attach to clear replay truncation flag")
+			t.Fatal("expected complete verified history not to be truncated")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for attach_result")
+	}
+}
+
+func TestDaemon_HandleAttachSession_ReplaysVerifiedHistoryForRelaunchRestoreWithoutStoredSession(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeAttachBackend{}
+	raw := []byte("\x1b[H\x1b[2Jformatted utility output\r\nprompt")
+	snapshot, ok := pty.ScreenSnapshotFromReplay(raw, 58, 46)
+	if !ok {
+		t.Fatal("expected raw replay to derive a snapshot")
+	}
+	backend.SetAttachInfo(ptybackend.AttachInfo{
+		Running:             true,
+		Scrollback:          raw,
+		Cols:                58,
+		Rows:                46,
+		ScreenSnapshot:      snapshot.Payload,
+		ScreenSnapshotFresh: true,
+		ScreenCols:          snapshot.Cols,
+		ScreenRows:          snapshot.Rows,
+	})
+	d.ptyBackend = backend
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	d.handleAttachSession(client, &protocol.AttachSessionMessage{
+		ID:           "runtime-shell-1",
+		AttachPolicy: protocol.Ptr(protocol.AttachPolicyRelaunchRestore),
+	})
+
+	select {
+	case outbound := <-client.send:
+		var result protocol.AttachResultMessage
+		if err := json.Unmarshal(outbound.payload, &result); err != nil {
+			t.Fatalf("decode attach_result: %v", err)
+		}
+		if !result.Success {
+			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
+		}
+		if protocol.Deref(result.Scrollback) == "" {
+			t.Fatal("expected relaunch restore to replay verified history for an untracked shell runtime")
+		}
+		if result.ScreenSnapshot != nil {
+			t.Fatal("expected verified relaunch history to replace the screen snapshot replay")
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for attach_result")

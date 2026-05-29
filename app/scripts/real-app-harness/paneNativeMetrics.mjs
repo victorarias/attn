@@ -7,7 +7,7 @@ function resolveTargetBounds(state, target) {
   const dom = pane?.dom || null;
   const selected = (
     target === 'paneBody' ? dom?.paneBody?.bounds
-      : target === 'xtermScreen' ? dom?.xtermScreen?.bounds
+      : target === 'terminalSurface' ? dom?.terminalSurface?.bounds
       : target === 'terminalContainer' ? dom?.terminalContainer?.bounds
       : pane?.bounds
   ) || pane?.bounds || null;
@@ -32,7 +32,7 @@ function resolveTargetBounds(state, target) {
 
 // Pane coverage assertions used to sample WKWebView-composited pixels. That
 // path required attn frontmost because occluded WebViews serve stale backing
-// store, and the focus steal was visually disruptive. xterm's in-process
+// store, and the focus steal was visually disruptive. The terminal's in-process
 // buffer is the rendering ground truth for terminal content, so we analyse
 // cell occupancy instead of pixel activity — no screencap, no focus steal.
 export async function capturePaneNativeMetrics(
@@ -74,7 +74,7 @@ export async function capturePaneNativeMetrics(
     paneState: {
       bounds: state?.pane?.bounds || null,
       paneBodyBounds: state?.pane?.dom?.paneBody?.bounds || null,
-      xtermScreenBounds: state?.pane?.dom?.xtermScreen?.bounds || null,
+      terminalSurfaceBounds: state?.pane?.dom?.terminalSurface?.bounds || null,
       visibleContent,
       renderHealth: state?.renderHealth || null,
     },

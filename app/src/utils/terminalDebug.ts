@@ -8,7 +8,7 @@ const TERMINAL_DEBUG_STORAGE_KEY = 'attn:terminal-debug';
 // a 3-way split) renders fine, so this floor is main-pane-only.
 //
 // Transient layout-state filtering (panel animations, grid track resolving)
-// is handled separately by getScaledDimensions's layout-aware floor.
+// is handled separately by the terminal surface's layout measurement.
 export const MIN_USABLE_TERMINAL_COLS = 20;
 export const MIN_USABLE_TERMINAL_ROWS = 10;
 

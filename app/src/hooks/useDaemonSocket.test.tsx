@@ -493,6 +493,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     const onPRsUpdate = vi.fn();
     const onReposUpdate = vi.fn();
     const onAuthorsUpdate = vi.fn();
+    (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; cols?: number; rows?: number; source?: string }> }).__TEST_PTY_EVENTS = [];
     const { unmount } = renderHook(() =>
       useDaemonSocket({
         onSessionsUpdate,
@@ -569,7 +570,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('claims visible geometry after attaching a daemon-known session with stale replay dimensions', async () => {
+  it('preserves daemon geometry while relaunch restores before workspace layout settles', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
     const onPRsUpdate = vi.fn();
@@ -640,9 +641,14 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await expect(spawnPromise).resolves.toBeUndefined();
 
-    await waitFor(() => {
-      const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 46 });
+    const sent = ws.sent.map((entry) => JSON.parse(entry));
+    expect(sent).not.toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 46 });
+    expect((window as Window & { __TEST_PTY_EVENTS?: unknown[] }).__TEST_PTY_EVENTS).toContainEqual({
+      event: 'local_resize',
+      id: 'sess-existing',
+      cols: 80,
+      rows: 24,
+      source: 'attach_replay',
     });
 
     unmount();
@@ -880,9 +886,9 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     }).__TEST_PTY_EVENTS || [];
     expect(ptyEvents).toContainEqual({ event: 'reset', id: 'sess-existing', reason: 'reattach' });
     expect(ptyEvents).toContainEqual({ event: 'local_resize', id: 'sess-existing', cols: 118, rows: 48, source: 'attach_replay' });
-    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'd2lkZS1oaXN0b3J5', source: 'attach_replay' });
+    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'd2lkZS1oaXN0b3J5', source: 'attach_replay', suppressResponses: true });
     expect(ptyEvents).toContainEqual({ event: 'local_resize', id: 'sess-existing', cols: 58, rows: 46, source: 'attach_replay' });
-    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'bmFycm93LXRhaWw=', source: 'attach_replay' });
+    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'bmFycm93LXRhaWw=', source: 'attach_replay', suppressResponses: true });
     expect(ptyEvents.some((event) => event.event === 'data' && event.id === 'sess-existing' && event.data === 'c25hcHNob3Qtd2lucw==')).toBe(false);
 
     unmount();
@@ -962,7 +968,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     const ptyEvents = (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string; source?: string }> }).__TEST_PTY_EVENTS || [];
     expect(ptyEvents).toContainEqual({ event: 'reset', id: 'sess-existing', reason: 'reattach' });
-    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'cmF3LXJlcGxheQ==', source: 'attach_replay' });
+    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'cmF3LXJlcGxheQ==', source: 'attach_replay', suppressResponses: true });
 
     const resizes = ws.sent
       .map((entry) => JSON.parse(entry))

@@ -42,7 +42,9 @@ export interface TerminalPerfSnapshot {
   baseY: number;
   viewportY: number;
   scrollbackLimit: number;
-  renderer: 'webgl' | 'dom';
+  alternateScreen?: boolean;
+  mouseTracking?: boolean;
+  renderer: 'ghostty-webgl';
   visible: boolean;
   writeQueueChunks: number;
   writeQueueBytes: number;
@@ -56,8 +58,7 @@ export interface TerminalPerfSnapshot {
   lastResize: TerminalPerfResizeSnapshot | null;
   dom: {
     container: TerminalPerfElementMetrics | null;
-    xterm: TerminalPerfElementMetrics | null;
-    xtermScreen: TerminalPerfElementMetrics | null;
+    surface: TerminalPerfElementMetrics | null;
     canvas: TerminalPerfElementMetrics | null;
   };
 }

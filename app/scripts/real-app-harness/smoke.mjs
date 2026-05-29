@@ -105,7 +105,7 @@ async function main() {
     });
 
     // Prefer bridge-side read_pane_text for verification — it walks the same
-    // xterm buffer the user sees, without requiring a daemon attach.
+    // terminal buffer the user sees, without requiring a daemon attach.
     let utilityScrollback = '';
     try {
       const textResult = await (async () => {

@@ -9,12 +9,12 @@ import {
 } from './attachPlanning';
 
 describe('attachPlanning', () => {
-  it('applies relaunch replay only when policy and geometry are compatible', () => {
+  it('applies relaunch replay at the daemon-owned attached geometry', () => {
     const plan = classifyAttachReplay({
-      cols: 58,
-      rows: 46,
-      screen_cols: 58,
-      screen_rows: 46,
+      cols: 31,
+      rows: 25,
+      screen_cols: 31,
+      screen_rows: 25,
       screen_snapshot: 'match',
       screen_snapshot_fresh: true,
     }, createAttachRequestContext({ cols: 58, rows: 46 }, 'relaunch_restore'));
@@ -22,7 +22,9 @@ describe('attachPlanning', () => {
     expect(plan.replayKind).toBe('screen_snapshot');
     expect(plan.replayApplied).toBe(true);
     expect(plan.replaySkipped).toBe(false);
+    expect(plan.attachedGeometryMismatch).toBe(true);
     expect(plan.replayAllowedByPolicy).toBe(true);
+    expect(plan.respondToTerminalQueries).toBe(false);
   });
 
   it('prefers raw scrollback over screen snapshot for Codex relaunch restores', () => {
@@ -101,7 +103,7 @@ describe('attachPlanning', () => {
     expect(plan.replayPreference).toBe('default');
   });
 
-  it('skips replay for same-app remount even when payload geometry matches', () => {
+  it('applies replay for same-app remount because the terminal model is new', () => {
     const plan = classifyAttachReplay({
       cols: 58,
       rows: 46,
@@ -112,12 +114,13 @@ describe('attachPlanning', () => {
     }, createAttachRequestContext({ cols: 58, rows: 46 }, 'same_app_remount'));
 
     expect(plan.replayKind).toBe('screen_snapshot');
-    expect(plan.replayApplied).toBe(false);
-    expect(plan.replaySkipped).toBe(true);
-    expect(plan.replayAllowedByPolicy).toBe(false);
+    expect(plan.replayApplied).toBe(true);
+    expect(plan.replaySkipped).toBe(false);
+    expect(plan.replayAllowedByPolicy).toBe(true);
+    expect(plan.respondToTerminalQueries).toBe(false);
   });
 
-  it('applies raw scrollback for Codex fresh_spawn so xterm can answer capability queries', () => {
+  it('applies raw scrollback for Codex fresh_spawn so the terminal can answer capability queries', () => {
     const plan = classifyAttachReplay({
       cols: 68,
       rows: 35,
@@ -128,6 +131,7 @@ describe('attachPlanning', () => {
     expect(plan.replayApplied).toBe(true);
     expect(plan.replaySkipped).toBe(false);
     expect(plan.replayAllowedByPolicy).toBe(true);
+    expect(plan.respondToTerminalQueries).toBe(true);
   });
 
   it('applies segmented raw replay for Codex same_app_remount', () => {
@@ -174,7 +178,7 @@ describe('attachPlanning', () => {
     expect(plan.strategy).toBe('none');
   });
 
-  it('requests resize without treating skipped stale snapshot replay as an active redraw source', () => {
+  it('preserves daemon geometry during relaunch restore rather than resizing from bootstrap layout', () => {
     const attachContext = createAttachRequestContext({
       cols: 58,
       rows: 46,
@@ -195,8 +199,8 @@ describe('attachPlanning', () => {
       attachContext,
     });
 
-    expect(plan.resizeRequired).toBe(true);
-    expect(plan.strategy).toBe('resize');
+    expect(plan.resizeRequired).toBe(false);
+    expect(plan.strategy).toBe('preserve_attached');
     expect(plan.ptyGeometryMatches).toBe(false);
     expect(plan.replayGeometryMatches).toBe(false);
   });

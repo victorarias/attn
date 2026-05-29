@@ -15,7 +15,8 @@ pnpm run dev    # Starts tauri dev with hot reload
 - **App.tsx**: Main layout, state orchestration (see "App.tsx two-component pattern" in Gotchas)
 - **Sidebar.tsx**: Session/PR list with state indicators
 - **Dashboard.tsx**: Terminal tabs and main content area
-- **Terminal.tsx**: xterm.js integration with PTY bridge
+- **GhosttyTerminal.tsx**: Ghostty WASM terminal model and GPU renderer integration
+- **SessionTerminalWorkspace/**: Pane lifecycle and PTY bridge wiring
 - **LocationPicker.tsx**: Path selection with filesystem suggestions
 - **NewSessionDialog/**: Session creation (PathInput, RepoOptions subcomponents)
 - **ChangesPanel.tsx**: Git changes display
@@ -29,14 +30,13 @@ pnpm run dev    # Starts tauri dev with hot reload
 - **store/sessions.ts**: Local terminal session management
 - **hooks/useDaemonSocket.ts**: WebSocket connection with reconnect + circuit breaker (manual daemon recovery, no auto-restart)
 
-### Terminal Component (xterm.js)
+### Terminal Component (Ghostty)
 
-When modifying `src/components/Terminal.tsx`:
+When modifying `src/components/GhosttyTerminal.tsx` or `src/components/SessionTerminalWorkspace/`:
 
 1. **Wait for container dimensions** - Use ResizeObserver to wait for valid size before calling `onReady`
-2. **Pre-calculate initial dimensions** - Measure font before creating XTerm to avoid 80x24 default
-3. **Resize xterm first, then PTY** - Call `term.resize()` then notify PTY (sends SIGWINCH)
-4. **Use VS Code's resize debouncing** - Y-axis immediate, X-axis 100ms debounced (text reflow is expensive)
+2. **Keep the GPU surface aligned with the model** - Resize the Ghostty model and canvas before notifying the PTY (sends SIGWINCH)
+3. **Preserve user-facing behaviors** - Keep copy-on-select, URL opening, keyboard input, and automation bridge coverage working through the Ghostty component
 
 ### PTY Architecture
 

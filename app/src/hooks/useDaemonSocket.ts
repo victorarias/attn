@@ -1264,6 +1264,19 @@ export function useDaemonSocket({
                   queuedOutputs: ptyTransportRef.current.getQueuedAttachOutputs(data.id),
                   sessionAgent: session?.agent,
                 });
+                if (
+                  attachContext?.policy === 'relaunch_restore'
+                  && typeof data.cols === 'number'
+                  && typeof data.rows === 'number'
+                ) {
+                  emitPtyEvent({
+                    event: 'local_resize',
+                    id: data.id,
+                    cols: data.cols,
+                    rows: data.rows,
+                    source: 'attach_replay',
+                  });
+                }
                 if (attachEffects.shouldReset && attachEffects.resetReason) {
                   emitPtyEvent({
                     event: 'reset',
@@ -1316,6 +1329,7 @@ export function useDaemonSocket({
                     id: data.id,
                     data: attachEffects.replayAction.data,
                     source: 'attach_replay',
+                    suppressResponses: !replayPlan.respondToTerminalQueries,
                   });
                 } else if (attachEffects.replayAction.kind === 'scrollback') {
                   recordRuntimeTransportLog(data.id, 'pty.attach.replay_applied', 'attach replay applied', {
@@ -1335,6 +1349,7 @@ export function useDaemonSocket({
                     id: data.id,
                     data: attachEffects.replayAction.data,
                     source: 'attach_replay',
+                    suppressResponses: !replayPlan.respondToTerminalQueries,
                   });
                 } else if (attachEffects.replayAction.kind === 'scrollback_segments') {
                   const bytes = attachEffects.replayAction.segments.reduce(
@@ -1375,6 +1390,7 @@ export function useDaemonSocket({
                       id: data.id,
                       data: segment.data,
                       source: 'attach_replay',
+                      suppressResponses: !replayPlan.respondToTerminalQueries,
                     });
                   }
                 }
@@ -1412,6 +1428,8 @@ export function useDaemonSocket({
               });
               const attachKey = `pty_attach_${data.id}`;
               if (pendingActionsRef.current.has(attachKey)) {
+                // Attach replay is emitted before this queue is drained.
+                // Ghostty then serializes those emitted writes in order.
                 recordRuntimeTransportLog(data.id, 'pty.output.queued_during_attach', 'queue pty output while attach pending', {
                   seq: typeof data.seq === 'number' ? data.seq : null,
                   bytes: data.data.length,

@@ -9,7 +9,7 @@ import {
   type TerminalVisibleContentSnapshot,
 } from '../utils/terminalVisibleContent';
 import {
-  snapshotVisibleTerminalStyleSummary,
+  emptyTerminalVisibleStyleSnapshot,
   type TerminalVisibleStyleSnapshot,
 } from '../utils/terminalStyleSummary';
 
@@ -111,7 +111,7 @@ export function useSessionWorkspaceController(
 
   const getPaneVisibleStyleSummary = useCallback((sessionId: string, paneId: string) => {
     return workspaceRefs.current.get(sessionId)?.getPaneVisibleStyleSummary(paneId)
-      || snapshotVisibleTerminalStyleSummary(null);
+      || emptyTerminalVisibleStyleSnapshot();
   }, []);
 
   const resetSessionPaneTerminal = useCallback((sessionId: string, paneId: string) => {

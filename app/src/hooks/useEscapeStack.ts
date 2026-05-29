@@ -10,10 +10,10 @@ import { useEffect, useRef } from 'react';
  * Escape calls only the top handler (LIFO), so nested overlays dismiss
  * in the right order automatically.
  *
- * Capture phase is intentional: fires before xterm.js and any element-level
+ * Capture phase is intentional: fires before terminal and element-level
  * handlers, so overlays always close regardless of what has DOM focus.
  * When the stack is non-empty, stopPropagation() prevents the event from
- * reaching background elements (xterm textarea, CodeMirror, etc.).
+ * reaching background inputs (terminal, CodeMirror, etc.).
  * All Escape dismiss handlers — including nested sub-states — must go
  * through this hook so the LIFO ordering stays correct.
  */
@@ -29,11 +29,11 @@ function ensureInstalled() {
     const top = stack[stack.length - 1];
     if (top) {
       e.preventDefault();
-      e.stopPropagation(); // prevent xterm.js and other element handlers from also seeing it
+      e.stopPropagation(); // Prevent terminal and other element handlers from also seeing it.
       top();
     }
   };
-  window.addEventListener('keydown', installedListener, true); // capture phase — fires before xterm.js
+  window.addEventListener('keydown', installedListener, true); // Capture phase fires before terminal input.
 }
 
 export function useEscapeStack(handler: () => void, enabled: boolean): void {

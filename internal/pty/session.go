@@ -16,7 +16,7 @@ import (
 )
 
 // Worker-side debug capture and info probes attach transient/non-interactive
-// subscribers before the real frontend xterm is ready. They should not suppress
+// subscribers before the real interactive terminal is ready. They should not suppress
 // terminal-query fallbacks such as DA1.
 const debugCaptureSubscriberID = "__attn_debug_capture__"
 
@@ -178,7 +178,7 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 
 				// Respond to DA1 (Primary Device Attributes) queries when no
 				// frontend subscriber is attached. The daemon can spawn shell
-				// PTYs before the interactive xterm is ready, while non-interactive
+				// PTYs before the interactive terminal is ready, while non-interactive
 				// worker subscribers like debug capture are already attached.
 				// Fish waits about 2 s for these terminal queries before the prompt
 				// becomes truly interactive. Shell prompts can also re-issue the
@@ -546,7 +546,7 @@ func (s *Session) writeTerminalQueryResponses(queries terminalQueries, source st
 		_, _ = s.ptmx.Write([]byte(fallbackOSC11Response))
 	}
 	if responses.da1 {
-		// xterm DA1 response: VT100 with Advanced Video Option
+		// DA1 response: VT100 with Advanced Video Option.
 		_, _ = s.ptmx.Write([]byte("\x1b[?1;2c"))
 	}
 	if responses.cpr {

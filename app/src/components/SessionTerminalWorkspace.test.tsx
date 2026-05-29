@@ -42,8 +42,8 @@ const { terminalLifecycleCounts } = vi.hoisted(() => ({
   terminalLifecycleCounts: new Map<string, { mounts: number; unmounts: number }>(),
 }));
 
-vi.mock('./Terminal', () => ({
-  Terminal: forwardRef((props: any, ref) => {
+vi.mock('./GhosttyTerminal', () => ({
+  GhosttyTerminal: forwardRef((props: any, ref) => {
     renderedTerminalProps.set(props.debugName, props);
     useEffect(() => {
       const current = terminalLifecycleCounts.get(props.debugName) || { mounts: 0, unmounts: 0 };
@@ -60,12 +60,19 @@ vi.mock('./Terminal', () => ({
       };
     }, [props.debugName]);
     useImperativeHandle(ref, () => ({
-      terminal: {} as any,
       fit: mockTerminalFit,
       focus: mockTerminalFocus,
       typeTextViaInput: vi.fn(() => true),
       isInputFocused: vi.fn(() => false),
-      resetScrollPin: vi.fn(),
+      write: vi.fn(() => Promise.resolve()),
+      resizeLocal: vi.fn(),
+      reset: vi.fn(),
+      scrollToTop: vi.fn(() => true),
+      getText: vi.fn(() => ''),
+      getSize: vi.fn(() => ({ cols: 80, rows: 24 })),
+      getVisibleContent: vi.fn(),
+      getVisibleStyleSummary: vi.fn(),
+      drain: vi.fn(() => Promise.resolve()),
     }));
     const label = typeof props.debugName === 'string' && props.debugName.startsWith('utility:')
       ? props.debugName.split(':')[2]
@@ -88,24 +95,21 @@ vi.mock('../shortcuts/useShortcut', () => ({
   triggerShortcut: vi.fn(() => false),
 }));
 
-function createMockXterm() {
+function createMockTerminal() {
   return {
-    cols: 80,
-    rows: 24,
-    write: vi.fn((_data: string | Uint8Array, callback?: () => void) => {
-      callback?.();
-    }),
+    fit: vi.fn(),
+    focus: vi.fn(() => true),
+    typeTextViaInput: vi.fn(() => true),
+    isInputFocused: vi.fn(() => false),
+    write: vi.fn(() => Promise.resolve()),
+    resizeLocal: vi.fn(),
     reset: vi.fn(),
-    focus: vi.fn(),
-    onData: vi.fn(() => ({ dispose: vi.fn() })),
-    onWriteParsed: vi.fn(() => ({ dispose: vi.fn() })),
-    attachCustomKeyEventHandler: vi.fn(),
-    buffer: {
-      active: {
-        length: 0,
-        getLine: vi.fn(() => null),
-      },
-    },
+    scrollToTop: vi.fn(() => true),
+    getText: vi.fn(() => ''),
+    getSize: vi.fn(() => ({ cols: 80, rows: 24 })),
+    getVisibleContent: vi.fn(),
+    getVisibleStyleSummary: vi.fn(),
+    drain: vi.fn(() => Promise.resolve()),
   };
 }
 
@@ -869,7 +873,7 @@ describe('SessionTerminalWorkspace', () => {
     expect(utilityTerminalProps).toBeDefined();
 
     await act(async () => {
-      utilityTerminalProps.onReady(createMockXterm() as any);
+      utilityTerminalProps.onReady(createMockTerminal() as any);
       await vi.advanceTimersByTimeAsync(100);
       await Promise.resolve();
     });

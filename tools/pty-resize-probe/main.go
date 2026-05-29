@@ -2,7 +2,7 @@
 // and drive a configurable resize sequence. Answers the question "is the
 // agent actually emitting redraw bytes in response to SIGWINCH?" without
 // any terminal emulator between the PTY and the observer — so whatever the
-// probe sees is upstream of xterm.js, ghostty, or attn's forwarding. When
+// probe sees is upstream of terminal rendering or attn's forwarding. When
 // a pane's content looks stale after a resize, run this to find out
 // whether the agent is silent or whether something downstream is losing
 // the bytes.

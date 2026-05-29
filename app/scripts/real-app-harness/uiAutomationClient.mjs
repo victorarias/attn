@@ -49,11 +49,13 @@ function isRetryableAutomationAbsence(error) {
 const TRANSIENT_SESSION_ACTIONS = new Set([
   'click_pane',
   'close_pane',
+  'drag_pane_selection',
   'focus_pane',
   'get_pane_state',
   'get_workspace',
   'read_pane_text',
   'scroll_pane_to_top',
+  'wheel_pane',
   'select_session',
   'split_pane',
   'type_pane_via_ui',

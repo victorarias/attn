@@ -36,10 +36,10 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
   openUrl: vi.fn(async () => {}),
 }));
 
-vi.mock('./components/Terminal', async () => {
+vi.mock('./components/GhosttyTerminal', async () => {
   const React = await import('react');
   return {
-    Terminal: React.forwardRef(function MockTerminal() {
+    GhosttyTerminal: React.forwardRef(function MockTerminal() {
       return null;
     }),
   };

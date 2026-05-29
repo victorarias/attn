@@ -11,7 +11,7 @@
 //   4. Activate ghostty to occlude attn (no focus change on the pane PTY).
 //   5. Capture-B immediately (nothing drew; expected to match A).
 //   6. write_pane AFTER_TOKEN (PTY-direct — independent of DOM focus). Wait
-//      for echo via read_pane_text (confirms xterm saw the bytes).
+//      for echo via read_pane_text (confirms the terminal saw the bytes).
 //   7. Capture-C while attn is still occluded.
 //   8. Compare SHA-256 hashes.
 //      - If C ≠ B: the compositor kept delivering frames under occlusion.

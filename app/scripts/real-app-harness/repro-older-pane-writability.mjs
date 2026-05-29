@@ -137,7 +137,7 @@ async function main() {
     // The actual regression probe: return focus to the older pane and confirm
     // it still accepts typed input (the bug: older pane input was sometimes
     // dropped after a newer split became active). type_pane_via_ui requires
-    // the target pane's xterm textarea to be the document's activeElement, so
+    // the target pane's terminal input to be focused, so
     // a refocus-routing regression surfaces as a 'Failed to type' error here.
     await focusPaneAndAwaitInput(client, sessionId, firstUtilityPane.paneId);
     const revisitScrollback = await typeAndWaitForEcho(

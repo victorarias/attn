@@ -48,7 +48,7 @@ export interface PtyReplaySegment {
 }
 
 export type PtyEventPayload =
-  | { event: 'data'; id: string; data: string; seq?: number; source?: PtyDataEventSource }
+  | { event: 'data'; id: string; data: string; seq?: number; source?: PtyDataEventSource; suppressResponses?: boolean }
   | { event: 'local_resize'; id: string; cols: number; rows: number; source?: PtyDataEventSource }
   | { event: 'exit'; id: string; code: number; signal?: string }
   | { event: 'error'; id: string; error: string }
@@ -113,6 +113,18 @@ export function emitPtyEvent(payload: PtyEventPayload) {
       });
     }
   }
+}
+
+declare global {
+  interface Window {
+    __TEST_EMIT_PTY_DATA?: (id: string, data: string) => void;
+  }
+}
+
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  window.__TEST_EMIT_PTY_DATA = (id: string, data: string) => {
+    emitPtyEvent({ event: 'data', id, data: encodeBase64(data) });
+  };
 }
 
 const encodeBase64 = (value: string) => {

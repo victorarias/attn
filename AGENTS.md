@@ -61,6 +61,7 @@ pnpm run e2e
 - If you need one scenario, run exactly one packaged-app scenario at a time and wait for it to finish.
 - Rebuild first when packaged-app evidence matters, or you may be testing an older installed app.
 - The serial matrix targets the **dev** install (`~/Applications/attn-dev.app`, port 29849) by default so it never takes over the live prod app. Run `make dev` first if there's no dev install yet. To target prod explicitly, run with `ATTN_HARNESS_PROFILE=` (empty).
+- When a packaged-app scenario fails, always inspect the captured pane text and any native screenshot artifacts before diagnosing the cause. Startup prompts, permission dialogs, and agent-owned redraws are part of the evidence.
 
 ## Debugging And Logging
 
@@ -164,7 +165,7 @@ Why:
 Implementation rule:
 
 - in `app/src/App.tsx`, selection should `fit()` main terminal but only `focus()` it when utility is not open or active
-- in `app/src/components/UtilityTerminalPanel/index.tsx`, prefer `xterm.focus()` before fallback focus with retry
+- in `app/src/components/SessionTerminalWorkspace/index.tsx`, prefer the active `GhosttyTerminal` handle's `focus()` before any fallback retry
 
 Verification:
 

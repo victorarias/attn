@@ -22,15 +22,8 @@ export interface PaneRenderHealthInput {
   projectedBounds: RenderHealthBox | null;
   paneBodyBounds: RenderHealthBox | null;
   terminalContainerBounds: RenderHealthBox | null;
-  xtermScreenBounds: RenderHealthBox | null;
+  terminalSurfaceBounds: RenderHealthBox | null;
   canvasBounds: RenderHealthBox | null;
-  helperTextarea: {
-    focused: boolean;
-    disabled: boolean;
-    readOnly: boolean;
-    width: number | null;
-    height: number | null;
-  } | null;
   terminal: Pick<
     TerminalPerfSnapshot,
     | 'terminalName'
@@ -59,7 +52,7 @@ export interface PaneRenderHealth {
   warnings: PaneRenderHealthWarning[];
   fill: {
     terminalContainerVsPaneBody: { width: number | null; height: number | null };
-    xtermScreenVsPaneBody: { width: number | null; height: number | null };
+    terminalSurfaceVsPaneBody: { width: number | null; height: number | null };
     canvasVsPaneBody: { width: number | null; height: number | null };
   };
   deltas: {
@@ -68,7 +61,6 @@ export interface PaneRenderHealth {
   flags: {
     suspiciousTerminalSize: boolean;
     activePaneInputUnfocused: boolean;
-    activePaneHelperDisabled: boolean;
     terminalVisible: boolean | null;
     terminalReady: boolean | null;
   };
@@ -168,8 +160,8 @@ export function buildPaneRenderHealth(input: PaneRenderHealthInput): PaneRenderH
   const paneBodyHeight = input.paneBodyBounds?.height ?? null;
   const terminalContainerWidth = input.terminalContainerBounds?.width ?? null;
   const terminalContainerHeight = input.terminalContainerBounds?.height ?? null;
-  const xtermScreenWidth = input.xtermScreenBounds?.width ?? null;
-  const xtermScreenHeight = input.xtermScreenBounds?.height ?? null;
+  const terminalSurfaceWidth = input.terminalSurfaceBounds?.width ?? null;
+  const terminalSurfaceHeight = input.terminalSurfaceBounds?.height ?? null;
   const canvasWidth = input.canvasBounds?.width ?? null;
   const canvasHeight = input.canvasBounds?.height ?? null;
 
@@ -178,9 +170,9 @@ export function buildPaneRenderHealth(input: PaneRenderHealthInput): PaneRenderH
       width: safeRatio(terminalContainerWidth, paneBodyWidth),
       height: safeRatio(terminalContainerHeight, paneBodyHeight),
     },
-    xtermScreenVsPaneBody: {
-      width: safeRatio(xtermScreenWidth, paneBodyWidth),
-      height: safeRatio(xtermScreenHeight, paneBodyHeight),
+    terminalSurfaceVsPaneBody: {
+      width: safeRatio(terminalSurfaceWidth, paneBodyWidth),
+      height: safeRatio(terminalSurfaceHeight, paneBodyHeight),
     },
     canvasVsPaneBody: {
       width: safeRatio(canvasWidth, paneBodyWidth),
@@ -222,15 +214,15 @@ export function buildPaneRenderHealth(input: PaneRenderHealthInput): PaneRenderH
   );
   addWarning(
     warnings,
-    'xterm_screen_underfills_width',
-    ratioSeverity(fill.xtermScreenVsPaneBody.width),
-    `xterm screen uses only ${Math.round((fill.xtermScreenVsPaneBody.width || 0) * 100)}% of pane-body width.`,
+    'terminal_surface_underfills_width',
+    ratioSeverity(fill.terminalSurfaceVsPaneBody.width),
+    `Terminal surface uses only ${Math.round((fill.terminalSurfaceVsPaneBody.width || 0) * 100)}% of pane-body width.`,
   );
   addWarning(
     warnings,
-    'xterm_screen_underfills_height',
-    ratioSeverity(fill.xtermScreenVsPaneBody.height),
-    `xterm screen uses only ${Math.round((fill.xtermScreenVsPaneBody.height || 0) * 100)}% of pane-body height.`,
+    'terminal_surface_underfills_height',
+    ratioSeverity(fill.terminalSurfaceVsPaneBody.height),
+    `Terminal surface uses only ${Math.round((fill.terminalSurfaceVsPaneBody.height || 0) * 100)}% of pane-body height.`,
   );
   addWarning(
     warnings,
@@ -259,20 +251,7 @@ export function buildPaneRenderHealth(input: PaneRenderHealthInput): PaneRenderH
     warnings.push({
       code: 'active_pane_input_unfocused',
       severity: 'warning',
-      message: 'Active pane does not own the xterm helper textarea focus.',
-    });
-  }
-
-  const activePaneHelperDisabled = Boolean(
-    input.active &&
-    input.helperTextarea &&
-    (input.helperTextarea.disabled || input.helperTextarea.readOnly),
-  );
-  if (activePaneHelperDisabled) {
-    warnings.push({
-      code: 'active_pane_helper_disabled',
-      severity: 'warning',
-      message: 'Active pane helper textarea is disabled or read-only.',
+      message: 'Active pane does not own terminal input focus.',
     });
   }
 
@@ -303,7 +282,6 @@ export function buildPaneRenderHealth(input: PaneRenderHealthInput): PaneRenderH
     flags: {
       suspiciousTerminalSize,
       activePaneInputUnfocused,
-      activePaneHelperDisabled,
       terminalVisible: input.terminal?.visible ?? null,
       terminalReady: input.terminal?.ready ?? null,
     },

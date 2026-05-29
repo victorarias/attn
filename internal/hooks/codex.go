@@ -9,8 +9,10 @@ import (
 	"strings"
 )
 
-// GenerateCodexConfigOverrides returns Codex CLI -c overrides that install
-// attn's per-launch hooks without mutating user or project Codex config.
+// GenerateCodexConfigOverrides returns Codex CLI -c overrides required for
+// attn-managed terminals without mutating user or project Codex config.
+// attn has always owned the resize-reflow value for its embedded renderer:
+// xterm needed it disabled, while Ghostty correctly renders the enabled redraw.
 func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath string) []string {
 	_ = sessionID  // Commands read ATTN_SESSION_ID from the Codex process env.
 	_ = socketPath // Hook commands inherit ATTN_SOCKET_PATH from the Codex process env.
@@ -46,10 +48,9 @@ func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath string) []s
 
 	return []string{
 		"features.hooks=true",
-		// Codex's transcript resize reflow emits a full inline-history redraw on
-		// SIGWINCH. xterm.js consumes that redraw as a visible jump into older
-		// conversation content for long sessions, unlike native terminals.
-		"features.terminal_resize_reflow=false",
+		// Ghostty renders Codex's SIGWINCH redraw correctly, and enabling
+		// reflow prevents resized inline UIs from leaving stale headers.
+		"features.terminal_resize_reflow=true",
 		trustedHashOverrides([]codexHookTrustEntry{
 			{eventKey: "session_start", matcher: "startup|resume", command: sessionStart},
 			{eventKey: "user_prompt_submit", command: userPromptSubmit},

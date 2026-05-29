@@ -66,6 +66,16 @@ const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-tr401'],
   },
   {
+    id: 'tr401-local-codex',
+    label: 'TR-401 local codex resize',
+    command: ['pnpm', 'run', 'real-app:scenario-tr401-local-codex'],
+  },
+  {
+    id: 'tr401-codex-main',
+    label: 'TR-401 Codex fresh main-pane resize',
+    command: ['pnpm', 'run', 'real-app:scenario-tr401-codex-main'],
+  },
+  {
     id: 'tr303-local-codex',
     label: 'TR-303 local codex',
     command: ['pnpm', 'run', 'real-app:scenario-tr303-local-codex'],
@@ -74,6 +84,11 @@ const scenarioCatalog = [
     id: 'codex-resume',
     label: 'Codex native resume id mapping',
     command: ['pnpm', 'run', 'real-app:scenario-codex-resume'],
+  },
+  {
+    id: 'ghostty-scroll',
+    label: 'Ghostty scrollback anchoring while output streams',
+    command: ['pnpm', 'run', 'real-app:scenario-ghostty-scroll'],
   },
 ];
 

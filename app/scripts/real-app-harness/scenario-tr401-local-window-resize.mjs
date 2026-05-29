@@ -26,6 +26,7 @@ import {
   waitForPaneVisible,
 } from './scenarioAssertions.mjs';
 import {
+  ensureCodexMainPromptReady,
   ensureClaudeMainPromptReady,
   promptClaudeForStructuredBlock,
 } from './scenarioAgents.mjs';
@@ -35,17 +36,34 @@ function parseArgs(argv) {
   if (args[0] === '--') {
     args.shift();
   }
-  const options = parseCommonArgs(args);
+  const options = {
+    ...parseCommonArgs([]),
+    agent: process.env.ATTN_LOCAL_WINDOW_RESIZE_AGENT || 'claude',
+  };
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--ws-url') options.wsUrl = args[++index];
+    else if (arg === '--app-path') options.appPath = args[++index];
+    else if (arg === '--artifacts-dir') options.artifactsDir = args[++index];
+    else if (arg === '--session-root-dir') options.sessionRootDir = args[++index];
+    else if (arg === '--agent') options.agent = args[++index] || options.agent;
+    else if (arg === '--help' || arg === '-h') options.help = true;
+    else throw new Error(`Unknown argument: ${arg}`);
+  }
+  options.agent = String(options.agent || 'claude').toLowerCase();
+  if (options.agent !== 'codex' && options.agent !== 'claude') {
+    throw new Error(`Unsupported agent for local window-resize scenario: ${options.agent}`);
+  }
   return {
     options,
-    help: args.includes('--help') || args.includes('-h'),
+    help: Boolean(options.help),
   };
 }
 
 function normalizeBaselineWindowBounds(bounds) {
   return {
-    x: bounds.x,
-    y: bounds.y,
+    x: 80,
+    y: 80,
     width: Math.max(bounds.width, 1_280),
     height: Math.max(bounds.height, 800),
   };
@@ -163,22 +181,25 @@ async function main() {
   const { options, help } = parseArgs(process.argv.slice(2));
   if (help) {
     printCommonHelp('scripts/real-app-harness/scenario-tr401-local-window-resize.mjs');
+    console.log(`Additional options:
+  --agent <codex|claude>        Local agent to exercise (default: claude)
+`);
     return;
   }
 
   const runner = createScenarioRunner(options, {
     scenarioId: 'TR-401',
     tier: 'tier2-local-real-agent',
-    prefix: 'scenario-tr401-local-window-resize',
+    prefix: `scenario-tr401-local-${options.agent}-window-resize`,
     metadata: {
-      agent: 'claude',
+      agent: options.agent,
       focus: 'split-session window resize render health',
     },
   });
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
 
-  const agentToken = `TR401CLAUDE${Date.now()}`;
+  const agentToken = options.agent === 'claude' ? `TR401CLAUDE${Date.now()}` : 'OpenAI Codex';
   const shellToken = `__TR401_SHELL_${Date.now()}__`;
 
   let sessionId = null;
@@ -206,33 +227,38 @@ async function main() {
       return setFrontWindowBounds(targetBounds, { client, bundleId: 'com.attn.manager' });
     });
 
-    sessionId = await runner.step('create_claude_session', async () => {
+    sessionId = await runner.step('create_local_session', async () => {
       return createSessionAndWaitForMain({
         client,
         observer,
         cwd: runner.sessionDir,
-        label: `tr401-local-claude-${runner.runId}`,
-        agent: 'claude',
+        label: `tr401-local-${options.agent}-${runner.runId}`,
+        agent: options.agent,
         waitForMainVisible: false,
       });
     });
 
     await runner.step('prepare_split_baseline', async () => {
       await client.request('select_session', { sessionId });
-      await ensureClaudeMainPromptReady(client, sessionId, 45_000);
+      if (options.agent === 'claude') {
+        await ensureClaudeMainPromptReady(client, sessionId, 45_000);
+      } else {
+        await ensureCodexMainPromptReady(client, sessionId, 45_000);
+      }
       await waitForPaneVisible(client, sessionId, 'main', 20_000);
 
-      const fixture = await promptClaudeForStructuredBlock(client, sessionId, agentToken, 6);
-      runner.writeJson('agent-fixture.json', fixture);
-
-      await waitForPaneText(
-        client,
-        sessionId,
-        'main',
-        (text) => text.includes(agentToken),
-        'main pane text to include structured agent token before resize',
-        45_000,
-      );
+      if (options.agent === 'claude') {
+        const fixture = await promptClaudeForStructuredBlock(client, sessionId, agentToken, 6);
+        runner.writeJson('agent-fixture.json', fixture);
+        await waitForPaneText(
+          client,
+          sessionId,
+          'main',
+          (text) => text.includes(agentToken),
+          'main pane text to include structured agent token before resize',
+          45_000,
+        );
+      }
 
       const workspaceBefore = await client.request('get_workspace', { sessionId });
       const existingPaneIds = new Set((workspaceBefore.panes || []).map((pane) => pane.paneId));

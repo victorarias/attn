@@ -32,5 +32,8 @@ libc = "0.2"
 base64 = "0.22"
 getrandom = "0.2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow"] }
+
 [dev-dependencies]
 anyhow = "1"

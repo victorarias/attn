@@ -97,20 +97,16 @@ export function classifyAttachReplay(
   const availableScreenSnapshot = Boolean(data.screen_snapshot && data.screen_snapshot_fresh !== false);
   const availableRawScrollback = Boolean(data.scrollback || (data.replay_segments && data.replay_segments.length > 0));
   const replayPreference = context?.replayPreference ?? 'default';
-  // Codex's TUI emits terminal capability queries (CPR, DA, kitty kbd, OSC 10)
-  // on startup and waits for the responses before drawing anything. When the
-  // queries land in scrollback before the websocket attach completes (common
-  // on remote endpoints due to the SSH-relay round trip), the daemon ships
-  // them in the attach replay. xterm has to actually parse that replay so
-  // its onData callback fires and emits the responses Codex is waiting for —
-  // skipping the replay leaves Codex hung on a blank screen forever. Allow
-  // replay for fresh_spawn / same_app_remount when the agent is Codex.
-  const policyEligibleForCodexRawReplay = context?.policy === 'fresh_spawn'
-    || context?.policy === 'same_app_remount';
+  // A same-app remount creates a fresh Ghostty model and therefore must
+  // rehydrate the visible state and available history. Codex fresh-spawn is
+  // separate: its startup query bytes must pass through the parser so the
+  // frontend can answer them before the TUI draws.
+  const policyEligibleForCodexRawReplay = context?.policy === 'fresh_spawn';
   const codexRawReplayBootstrap = replayPreference === 'prefer_raw_scrollback'
     && policyEligibleForCodexRawReplay;
+  const respondToTerminalQueries = codexRawReplayBootstrap;
   const prefersRawScrollback = replayPreference === 'prefer_raw_scrollback'
-    && (context?.policy === 'relaunch_restore' || policyEligibleForCodexRawReplay);
+    && (context?.policy === 'relaunch_restore' || context?.policy === 'same_app_remount' || policyEligibleForCodexRawReplay);
   const screenSnapshotSuppressed = availableScreenSnapshot && availableRawScrollback && prefersRawScrollback;
   const hasScreenSnapshot = availableScreenSnapshot && !screenSnapshotSuppressed;
   const hasReplayPayload = Boolean(
@@ -139,11 +135,16 @@ export function classifyAttachReplay(
   const replayGeometryMismatch = requestedCols !== null && requestedRows !== null && hasReplayPayload && (
     replayCols !== requestedCols || replayRows !== requestedRows
   );
-  const replayAllowedByPolicy = context?.policy === 'relaunch_restore' || codexRawReplayBootstrap;
+  // A relaunch is reconstructing a frontend model for an already-running PTY.
+  // The daemon's current dimensions are authoritative until restored layout
+  // measurement produces a subsequent interactive resize.
+  const preserveAttachedGeometry = context?.policy === 'relaunch_restore';
+  const replayAllowedByPolicy = context?.policy === 'relaunch_restore'
+    || context?.policy === 'same_app_remount'
+    || codexRawReplayBootstrap;
   const replaySkipped = hasReplayPayload && (
     !replayAllowedByPolicy ||
-    attachedGeometryMismatch ||
-    replayGeometryMismatch
+    (!preserveAttachedGeometry && (attachedGeometryMismatch || replayGeometryMismatch))
   );
   const replayApplied = hasReplayPayload && !replaySkipped;
 
@@ -167,6 +168,7 @@ export function classifyAttachReplay(
     attachedGeometryMismatch,
     replayGeometryMismatch,
     replayAllowedByPolicy,
+    respondToTerminalQueries,
     replayApplied,
     replaySkipped,
   };
@@ -195,7 +197,8 @@ export function planAttachedRuntimeGeometry(
     : hasRawScrollbackReplay
       ? ptyGeometryMatches
       : false;
-  const resizeRequired = !ptyGeometryMatches;
+  const preserveAttachedGeometry = options.attachPolicy === 'relaunch_restore';
+  const resizeRequired = !preserveAttachedGeometry && !ptyGeometryMatches;
 
   return {
     requestedCols,
@@ -216,7 +219,7 @@ export function planAttachedRuntimeGeometry(
     replayPreference: replayPlan.replayPreference,
     agent: replayPlan.agent,
     resizeRequired,
-    strategy: resizeRequired ? 'resize' : 'none',
+    strategy: resizeRequired ? 'resize' : preserveAttachedGeometry && !ptyGeometryMatches ? 'preserve_attached' : 'none',
     attachPolicy: options.attachPolicy,
   };
 }

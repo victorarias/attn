@@ -317,30 +317,14 @@ function collectPaneDomMetrics(paneElement: Element | null) {
   }
   const paneBody = paneElement.querySelector('.workspace-pane-body');
   const terminalContainer = paneElement.querySelector('.terminal-container');
-  const xterm = paneElement.querySelector('.xterm');
-  const xtermScreen = paneElement.querySelector('.xterm-screen');
-  const xtermViewport = paneElement.querySelector('.xterm-viewport');
-  const scrollArea = paneElement.querySelector('.xterm-scroll-area');
-  const canvas = paneElement.querySelector('.xterm-screen canvas');
-  const helperTextarea = paneElement.querySelector('textarea.xterm-helper-textarea');
+  const terminalSurface = paneElement.querySelector('.ghostty-terminal');
+  const canvas = paneElement.querySelector('.ghostty-terminal canvas');
 
   return {
     paneBody: elementMetrics(paneBody),
     terminalContainer: elementMetrics(terminalContainer),
-    xterm: elementMetrics(xterm),
-    xtermScreen: elementMetrics(xtermScreen),
-    xtermViewport: elementMetrics(xtermViewport),
-    scrollArea: elementMetrics(scrollArea),
+    terminalSurface: elementMetrics(terminalSurface),
     canvas: elementMetrics(canvas),
-    helperTextarea: helperTextarea instanceof HTMLTextAreaElement
-      ? {
-          ...elementMetrics(helperTextarea),
-          focused: document.activeElement === helperTextarea,
-          disabled: helperTextarea.disabled,
-          readOnly: helperTextarea.readOnly,
-          valueLength: helperTextarea.value.length,
-        }
-      : null,
   };
 }
 
@@ -574,17 +558,8 @@ function collectRenderHealthSnapshot(
           projectedBounds: boxFromRect(pane.layout?.projectedBounds),
           paneBodyBounds: boxFromRect(pane.dom?.paneBody?.bounds),
           terminalContainerBounds: boxFromRect(pane.dom?.terminalContainer?.bounds),
-          xtermScreenBounds: boxFromRect(pane.dom?.xtermScreen?.bounds),
+          terminalSurfaceBounds: boxFromRect(pane.dom?.terminalSurface?.bounds),
           canvasBounds: boxFromRect(pane.dom?.canvas?.bounds),
-          helperTextarea: pane.dom?.helperTextarea
-            ? {
-                focused: pane.dom.helperTextarea.focused,
-                disabled: pane.dom.helperTextarea.disabled,
-                readOnly: pane.dom.helperTextarea.readOnly,
-                width: pane.dom.helperTextarea.bounds?.width ?? null,
-                height: pane.dom.helperTextarea.bounds?.height ?? null,
-              }
-            : null,
           terminal,
         };
       }),
@@ -772,6 +747,71 @@ function clickPaneElement(sessionId: string, paneId: string) {
     bubbles: true,
     cancelable: true,
     view: window,
+  }));
+}
+
+function wheelPaneElement(sessionId: string, paneId: string, deltaY: number, deltaMode: number) {
+  const paneElement = document.querySelector(
+    `[data-pane-session-id="${sessionId}"][data-pane-id="${paneId}"]`
+  );
+  const terminal = paneElement?.querySelector('.terminal-container');
+  if (!(terminal instanceof HTMLElement)) {
+    throw new Error(`Terminal element not found for ${sessionId}:${paneId}`);
+  }
+  const rect = terminal.getBoundingClientRect();
+  terminal.dispatchEvent(new WheelEvent('wheel', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: rect.left + rect.width / 2,
+    clientY: rect.top + rect.height / 2,
+    deltaY,
+    deltaMode,
+  }));
+}
+
+function dragPaneSelection(
+  sessionId: string,
+  paneId: string,
+  size: { cols: number; rows: number },
+  start: { col: number; row: number },
+  end: { col: number; row: number },
+) {
+  const paneElement = document.querySelector(
+    `[data-pane-session-id="${sessionId}"][data-pane-id="${paneId}"]`
+  );
+  const terminal = paneElement?.querySelector('.terminal-container');
+  if (!(terminal instanceof HTMLElement)) {
+    throw new Error(`Terminal element not found for ${sessionId}:${paneId}`);
+  }
+  const rect = terminal.getBoundingClientRect();
+  const point = ({ col, row }: { col: number; row: number }) => ({
+    clientX: rect.left + ((col + 0.5) / Math.max(1, size.cols)) * rect.width,
+    clientY: rect.top + ((row + 0.5) / Math.max(1, size.rows)) * rect.height,
+  });
+  const startPoint = point(start);
+  const endPoint = point(end);
+  terminal.dispatchEvent(new MouseEvent('mousedown', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    button: 0,
+    buttons: 1,
+    ...startPoint,
+  }));
+  terminal.dispatchEvent(new MouseEvent('mousemove', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    buttons: 1,
+    ...endPoint,
+  }));
+  terminal.dispatchEvent(new MouseEvent('mouseup', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    button: 0,
+    ...endPoint,
   }));
 }
 
@@ -1001,7 +1041,7 @@ async function capturePerfSnapshot(
     },
     document: {
       totalElements: document.querySelectorAll('*').length,
-      xtermCount: document.querySelectorAll('.xterm').length,
+      terminalSurfaceCount: document.querySelectorAll('.ghostty-terminal').length,
       terminalContainerCount: document.querySelectorAll('.terminal-container').length,
       codeMirrorCount: document.querySelectorAll('.cm-editor').length,
       unifiedDiffEditorCount: document.querySelectorAll('.unified-diff-editor').length,
@@ -1496,6 +1536,48 @@ export function useUiAutomationBridge({
         }
         await settleUi(1);
         return { sessionId, paneId };
+      }
+      case 'wheel_pane': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const session = sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+        const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const deltaY = typeof payload.deltaY === 'number' ? payload.deltaY : 0;
+        const deltaMode = typeof payload.deltaMode === 'number' ? payload.deltaMode : WheelEvent.DOM_DELTA_PIXEL;
+        selectSession(sessionId);
+        await settleUi(1);
+        wheelPaneElement(sessionId, paneId, deltaY, deltaMode);
+        await settleUi(2);
+        return { sessionId, paneId, deltaY, deltaMode };
+      }
+      case 'drag_pane_selection': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const session = sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+        const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const size = getPaneSize(sessionId, paneId);
+        const start = payload.start as { col?: unknown; row?: unknown } | undefined;
+        const end = payload.end as { col?: unknown; row?: unknown } | undefined;
+        if (!size
+          || typeof start?.col !== 'number' || typeof start?.row !== 'number'
+          || typeof end?.col !== 'number' || typeof end?.row !== 'number') {
+          throw new Error('drag_pane_selection requires pane size and numeric start/end cells');
+        }
+        selectSession(sessionId);
+        await settleUi(1);
+        dragPaneSelection(
+          sessionId,
+          paneId,
+          size,
+          { col: start.col, row: start.row },
+          { col: end.col, row: end.row },
+        );
+        await settleUi(2);
+        return { sessionId, paneId, start, end };
       }
       case 'dispatch_shortcut': {
         const shortcutId = typeof payload.shortcutId === 'string' ? payload.shortcutId as ShortcutId : null;
