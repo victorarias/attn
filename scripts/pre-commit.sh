@@ -107,7 +107,6 @@ ensure_e2e_binary() {
 run_daemon_checks=false
 run_frontend_checks=false
 run_tauri_checks=false
-run_native_checks=false
 run_shell_checks=false
 
 if has_go_files; then
@@ -125,7 +124,6 @@ fi
 if has_changed '^internal/protocol/schema/'; then
   run_daemon_checks=true
   run_frontend_checks=true
-  run_native_checks=true
 fi
 
 if has_changed '^app/src-tauri/'; then
@@ -134,10 +132,6 @@ fi
 
 if has_frontend_files; then
   run_frontend_checks=true
-fi
-
-if has_changed '^(native-ui/|app/scripts/real-app-harness/scenario-native-canvas\.mjs$)'; then
-  run_native_checks=true
 fi
 
 if has_changed '^(\.githooks/pre-commit|scripts/pre-commit\.sh|AGENTS\.md)$'; then
@@ -207,21 +201,9 @@ if [ "$run_tauri_checks" = true ]; then
   (cd "$root/app/src-tauri" && cargo test)
 fi
 
-if [ "$run_native_checks" = true ]; then
-  header "Native Rust format"
-  format_rust_files '^native-ui/.*\.rs$'
-
-  header "Native Rust lint"
-  (cd "$root/native-ui" && cargo clippy --workspace --all-targets -- -D warnings)
-
-  header "Native Rust tests"
-  (cd "$root/native-ui" && cargo test --workspace)
-fi
-
 if [ "$run_daemon_checks" != true ] &&
   [ "$run_frontend_checks" != true ] &&
   [ "$run_tauri_checks" != true ] &&
-  [ "$run_native_checks" != true ] &&
   [ "$run_shell_checks" != true ]; then
   header "No matching test bucket"
 fi

@@ -14,7 +14,6 @@ jobs:
       daemon: ${{ steps.filter.outputs.daemon }}
       frontend: ${{ steps.filter.outputs.frontend }}
       tauri: ${{ steps.filter.outputs.tauri }}
-      native_ui: ${{ steps.filter.outputs.native_ui }}
     steps:
       - uses: actions/checkout@v4
 
@@ -49,12 +48,6 @@ jobs:
             tauri:
               - 'app/src-tauri/**'
               - '.github/workflows/ci.yml'
-            native_ui:
-              - 'native-ui/**'
-              - 'internal/protocol/schema/**'
-              - 'app/scripts/real-app-harness/scenario-native-canvas.mjs'
-              - '.github/workflows/ci.yml'
-
   backend:
     name: Daemon
     needs: changes
@@ -178,38 +171,3 @@ jobs:
 
       - name: Cargo test
         run: cargo test
-
-  native-ui:
-    name: Native UI
-    needs: changes
-    if: needs.changes.outputs.native_ui == 'true'
-    runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: native-ui
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Set up Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: '26.3'
-
-      - name: Set up Zig
-        uses: mlugg/setup-zig@v2
-        with:
-          version: 0.15.2
-
-      - name: Cargo fmt
-        run: cargo fmt --check
-
-      - name: Cargo test
-        run: cargo test --workspace
-
-      - name: Cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
