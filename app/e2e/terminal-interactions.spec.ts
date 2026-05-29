@@ -230,6 +230,23 @@ test.describe('Ghostty terminal interactions', () => {
       .toBe('selectable-word');
   });
 
+  test('does not create a selection from click-sized pointer jitter', async ({ page, context, daemon }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const terminal = await openTerminalSession(page, daemon, 's-click-jitter');
+    await writeTerminalOutput(page, 's-click-jitter', '\u001b[2J\u001b[Hclick-jitter-target');
+    await page.evaluate(() => navigator.clipboard.writeText('clipboard-sentinel'));
+
+    const bounds = await terminal.boundingBox();
+    expect(bounds).not.toBeNull();
+    await page.mouse.move(bounds!.x + 55, bounds!.y + 8);
+    await page.mouse.down();
+    await page.mouse.move(bounds!.x + 56, bounds!.y + 8);
+    await page.mouse.up();
+
+    await expect.poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .toBe('clipboard-sentinel');
+  });
+
   test('option-drag selects text while terminal mouse tracking is active', async ({ page, context, daemon }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const terminal = await openTerminalSession(page, daemon, 's-option-selection');
