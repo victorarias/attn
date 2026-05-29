@@ -105,6 +105,173 @@ func TestHandleSpawnSession_PluginDriverLaunchesReturnedCommand(t *testing.T) {
 	if session := d.store.Get("snipe-session"); session == nil || session.Agent != "snipe" {
 		t.Fatalf("stored session=%+v, want snipe agent", session)
 	}
+	if session := d.store.Get("snipe-session"); session.State != protocol.SessionStateWorking {
+		t.Fatalf("stored session state=%q, want working for driver without state_reporting", session.State)
+	}
+}
+
+func TestHandleSpawnSession_PluginDriverClosesRunThatExitsDuringSpawn(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	backend.onSpawn = func(opts ptybackend.SpawnOptions) {
+		d.handlePTYExit(ptybackend.ExitInfo{ID: "snipe-early-exit", ExitCode: 7, LifecycleID: opts.LifecycleID})
+	}
+	d.ptyBackend = backend
+	client, done := startPluginPipe(t, d, "snipe-plugin", nil)
+	defer func() {
+		_ = client.Close()
+		<-done
+	}()
+	registerTestPluginDriver(t, client, "snipe", map[string]bool{})
+
+	closeDone := make(chan pluginDriverSessionClosedParams, 1)
+	go func() {
+		request := decodeJSONRPCMessage(t, client)
+		respondPluginRequest(t, client, request, pluginDriverSpawnResult{Argv: []string{"snipe"}})
+		request = decodeJSONRPCMessage(t, client)
+		if request.Method != "driver.session_closed" {
+			t.Errorf("method=%q, want driver.session_closed", request.Method)
+			return
+		}
+		var params pluginDriverSessionClosedParams
+		if err := json.Unmarshal(request.Params, &params); err != nil {
+			t.Errorf("decode session_closed params: %v", err)
+			return
+		}
+		respondPluginRequest(t, client, request, pluginDriverSessionClosedResult{OK: true})
+		closeDone <- params
+	}()
+
+	addTestWorkspace(d, "workspace-snipe-early-exit", t.TempDir())
+	ws := &wsClient{send: make(chan outboundMessage, 4), attachedStreams: make(map[string]ptybackend.Stream)}
+	d.handleSpawnSession(ws, &protocol.SpawnSessionMessage{
+		ID:          "snipe-early-exit",
+		Cwd:         t.TempDir(),
+		WorkspaceID: "workspace-snipe-early-exit",
+		Agent:       "snipe",
+		Cols:        80,
+		Rows:        24,
+	})
+
+	params := <-closeDone
+	if params.SessionID != "snipe-early-exit" || params.RunID == "" || params.Reason != "exited" || params.ExitCode == nil || *params.ExitCode != 7 {
+		t.Fatalf("session_closed params=%+v, want exited early run with exit code 7", params)
+	}
+	if run := d.store.GetAgentDriverRun("snipe-early-exit"); run.RunID != "" {
+		t.Fatalf("active run=%+v after early exit, want closed run", run)
+	}
+	if session := d.store.Get("snipe-early-exit"); session == nil || session.State != protocol.SessionStateIdle {
+		t.Fatalf("stored session=%+v after early exit, want idle session", session)
+	}
+}
+
+func TestHandleSpawnSession_PluginDriverDoesNotQueuePriorRunExitDuringRelaunch(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	backend.onSpawn = func(_ ptybackend.SpawnOptions) {
+		d.handlePTYExit(ptybackend.ExitInfo{ID: "snipe-relaunch", ExitCode: 0, LifecycleID: "run-old"})
+	}
+	d.ptyBackend = backend
+	client, done := startPluginPipe(t, d, "snipe-plugin", nil)
+	defer func() {
+		_ = client.Close()
+		<-done
+	}()
+	registerTestPluginDriver(t, client, "snipe", map[string]bool{"resume": true})
+
+	now := protocol.TimestampNow().String()
+	d.store.Add(&protocol.Session{
+		ID:             "snipe-relaunch",
+		Label:          "snipe",
+		Agent:          "snipe",
+		Directory:      t.TempDir(),
+		State:          protocol.SessionStateIdle,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	if !d.store.BeginAgentDriverRun("snipe-relaunch", "snipe-plugin", "run-old") {
+		t.Fatal("failed to begin prior plugin run")
+	}
+
+	newRunID := make(chan string, 1)
+	closeDone := make(chan pluginDriverSessionClosedParams, 1)
+	go func() {
+		request := decodeJSONRPCMessage(t, client)
+		var params pluginDriverSpawnParams
+		if err := json.Unmarshal(request.Params, &params); err != nil {
+			t.Errorf("decode relaunch params: %v", err)
+			return
+		}
+		newRunID <- params.RunID
+		respondPluginRequest(t, client, request, pluginDriverSpawnResult{Argv: []string{"snipe"}})
+		request = decodeJSONRPCMessage(t, client)
+		var closed pluginDriverSessionClosedParams
+		if err := json.Unmarshal(request.Params, &closed); err != nil {
+			t.Errorf("decode prior session_closed params: %v", err)
+			return
+		}
+		respondPluginRequest(t, client, request, pluginDriverSessionClosedResult{OK: true})
+		closeDone <- closed
+	}()
+
+	addTestWorkspace(d, "workspace-snipe-relaunch", t.TempDir())
+	ws := &wsClient{send: make(chan outboundMessage, 4), attachedStreams: make(map[string]ptybackend.Stream)}
+	d.handleSpawnSession(ws, &protocol.SpawnSessionMessage{
+		ID:          "snipe-relaunch",
+		Cwd:         t.TempDir(),
+		WorkspaceID: "workspace-snipe-relaunch",
+		Agent:       "snipe",
+		Cols:        80,
+		Rows:        24,
+	})
+
+	wantRunID := <-newRunID
+	closed := <-closeDone
+	if closed.RunID != "run-old" || closed.Reason != "exited" {
+		t.Fatalf("session_closed params=%+v, want exit notification for prior run", closed)
+	}
+	if run := d.store.GetAgentDriverRun("snipe-relaunch"); run.RunID != wantRunID {
+		t.Fatalf("active run=%+v, want replacement run %q retained", run, wantRunID)
+	}
+	if removed := backend.RemovedIDs(); len(removed) != 0 {
+		t.Fatalf("removed PTYs=%v, want prior-run exit to leave replacement PTY intact", removed)
+	}
+}
+
+func TestHandlePTYExit_PluginDriverIgnoresSupersededExitAfterRelaunch(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &fakeSpawnBackend{}
+	now := protocol.TimestampNow().String()
+	d.store.Add(&protocol.Session{
+		ID:             "snipe-delayed-exit",
+		Label:          "snipe",
+		Agent:          "snipe",
+		Directory:      t.TempDir(),
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	if !d.store.BeginAgentDriverRun("snipe-delayed-exit", "snipe-plugin", "run-new") {
+		t.Fatal("failed to begin replacement plugin run")
+	}
+
+	d.handlePTYExit(ptybackend.ExitInfo{
+		ID:          "snipe-delayed-exit",
+		ExitCode:    0,
+		LifecycleID: "run-old",
+	})
+
+	if run := d.store.GetAgentDriverRun("snipe-delayed-exit"); run.RunID != "run-new" {
+		t.Fatalf("active run=%+v, want replacement run retained after stale exit", run)
+	}
+	if session := d.store.Get("snipe-delayed-exit"); session == nil || session.State != protocol.SessionStateWorking {
+		t.Fatalf("stored session=%+v, want replacement session still working", session)
+	}
+	if !d.store.ApplyAgentDriverState("snipe-delayed-exit", "run-new", 1, protocol.StatePendingApproval) {
+		t.Fatal("replacement run rejected report after stale exit")
+	}
 }
 
 func TestHandleSpawnSession_PluginDriverWithoutResumeRelaunchesWithSpawn(t *testing.T) {
@@ -262,7 +429,7 @@ func TestHandleSpawnSession_PluginDriverQueuesReportsDuringPTYStartup(t *testing
 
 	backend := &fakeSpawnBackend{}
 	launchRunID := make(chan string, 1)
-	backend.onSpawn = func() {
+	backend.onSpawn = func(_ ptybackend.SpawnOptions) {
 		runID := <-launchRunID
 		sendPluginMethod(t, client, 7, "session.report_metadata", pluginReportMetadataParams{
 			SessionID: "early-report",
@@ -417,7 +584,37 @@ func TestPluginDriverReports_RequireRunCursor(t *testing.T) {
 	}
 }
 
-func TestPluginDriverSessionClosed_InvalidatesRunAndNotifiesOwner(t *testing.T) {
+func TestPluginDriverRun_IgnoresGenericPTYState(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	client, done := startPluginPipe(t, d, "snipe-plugin", nil)
+	defer func() {
+		_ = client.Close()
+		<-done
+	}()
+	registerTestPluginDriver(t, client, "snipe", map[string]bool{"state_reporting": true})
+
+	now := protocol.TimestampNow().String()
+	d.store.Add(&protocol.Session{
+		ID:             "plugin-state-owner",
+		Label:          "snipe",
+		Agent:          "snipe",
+		Directory:      t.TempDir(),
+		State:          protocol.SessionStateWaitingInput,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	if !d.store.BeginAgentDriverRun("plugin-state-owner", "snipe-plugin", "run-state-owner") {
+		t.Fatal("failed to begin plugin-owned state run")
+	}
+
+	d.handlePTYState("plugin-state-owner", protocol.StateWorking)
+	if got := d.store.Get("plugin-state-owner").State; got != protocol.SessionStateWaitingInput {
+		t.Fatalf("state=%q after generic PTY event, want plugin-owned waiting_input", got)
+	}
+}
+
+func TestPluginDriverSessionClosed_KillNotifiesOwnerAfterExit(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	client, done := startPluginPipe(t, d, "snipe-plugin", nil)
 	defer func() {
@@ -440,7 +637,9 @@ func TestPluginDriverSessionClosed_InvalidatesRunAndNotifiesOwner(t *testing.T) 
 	if !d.store.BeginAgentDriverRun("session-close", "snipe-plugin", "run-close") {
 		t.Fatal("failed to begin test plugin run")
 	}
-	d.ptyBackend = &fakeSpawnBackend{}
+	d.ptyBackend = &fakeSpawnBackend{onKill: func() {
+		d.handlePTYExit(ptybackend.ExitInfo{ID: "session-close", ExitCode: 0, Signal: "SIGTERM"})
+	}}
 
 	requestDone := make(chan struct{})
 	go func() {
@@ -455,8 +654,8 @@ func TestPluginDriverSessionClosed_InvalidatesRunAndNotifiesOwner(t *testing.T) 
 			t.Errorf("decode session_closed params: %v", err)
 			return
 		}
-		if params.SessionID != "session-close" || params.RunID != "run-close" || params.Reason != "killed" {
-			t.Errorf("session_closed params=%+v, want killed run-close", params)
+		if params.SessionID != "session-close" || params.RunID != "run-close" || params.Reason != "exited" || params.Signal != "SIGTERM" {
+			t.Errorf("session_closed params=%+v, want exited run-close after SIGTERM", params)
 		}
 		respondPluginRequest(t, client, request, pluginDriverSessionClosedResult{OK: true})
 	}()

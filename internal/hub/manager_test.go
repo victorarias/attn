@@ -399,6 +399,40 @@ func TestCapabilitiesFromInitialStateIncludesRemoteWebFields(t *testing.T) {
 	}
 }
 
+func TestManagerHandleRemoteSettingsUpdatedRefreshesDynamicAgentAvailability(t *testing.T) {
+	endpointStore := store.New()
+	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
+	if err != nil {
+		t.Fatalf("AddEndpoint() error = %v", err)
+	}
+
+	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager.mu.Lock()
+	manager.runtimes[record.ID].info.Capabilities = &protocol.EndpointCapabilities{
+		AgentsAvailable: []string{"codex"},
+	}
+	manager.mu.Unlock()
+
+	manager.handleRemoteSettingsUpdated(record.ID, &protocol.SettingsUpdatedMessage{
+		Settings: map[string]interface{}{
+			"codex_available": "true",
+			"snipe_available": "true",
+		},
+	})
+	if got := strings.Join(manager.List()[0].Capabilities.AgentsAvailable, ","); got != "codex,snipe" {
+		t.Fatalf("agents after plugin registration = %q, want codex,snipe", got)
+	}
+
+	manager.handleRemoteSettingsUpdated(record.ID, &protocol.SettingsUpdatedMessage{
+		Settings: map[string]interface{}{
+			"codex_available": "true",
+		},
+	})
+	if got := strings.Join(manager.List()[0].Capabilities.AgentsAvailable, ","); got != "codex" {
+		t.Fatalf("agents after plugin disconnect = %q, want codex", got)
+	}
+}
+
 func TestManagerHandleRemoteSettingsUpdatedResolvesRemoteWebAction(t *testing.T) {
 	endpointStore := store.New()
 	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")

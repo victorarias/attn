@@ -431,6 +431,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 	pluginRunID := ""
 	if hasPluginDriver {
 		pluginRunID = uuid.NewString()
+		spawnOpts.LifecycleID = pluginRunID
 		d.beginPluginSessionLaunch(msg.ID, pluginDriver.PluginName, pluginRunID)
 		params := pluginDriverSpawnParams{
 			SessionID: msg.ID,
@@ -502,6 +503,11 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 				initialStateUpdatedAt = nowStr
 			}
 		}
+		if hasPluginDriver && !pluginDriver.Capabilities["state_reporting"] {
+			initialState = protocol.SessionStateWorking
+			initialStateSince = nowStr
+			initialStateUpdatedAt = nowStr
+		}
 		session := &protocol.Session{
 			ID:             msg.ID,
 			Label:          label,
@@ -558,7 +564,9 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		d.recomputeAndBroadcastWorkspaceForSession(session.ID)
 	}
 	if hasPluginDriver {
-		d.finishPluginSessionLaunch(msg.ID, true)
+		if exit := d.finishPluginSessionLaunch(msg.ID, true); exit != nil {
+			d.handlePTYExit(*exit)
+		}
 	}
 
 	d.sendToClient(client, protocol.SpawnResultMessage{
@@ -778,6 +786,8 @@ func (d *Daemon) handleKillSession(client *wsClient, msg *protocol.KillSessionMe
 	sig := parseSignal(protocol.Deref(msg.Signal))
 	err := d.ptyBackend.Kill(context.Background(), msg.ID, sig)
 	if err == nil || errors.Is(err, pty.ErrSessionNotFound) {
+		// Production backends return from Kill only once the child has exited.
+		// Close here because worker lifecycle delivery can trail that return.
 		d.closePluginDriverSession(msg.ID, "killed", nil, signalName(sig))
 	}
 	if err != nil {

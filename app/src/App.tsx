@@ -36,6 +36,7 @@ import { useTheme } from './hooks/useTheme';
 import { useOpenPR, type OpenPRProgress } from './hooks/useOpenPR';
 import { useUiAutomationBridge } from './hooks/useUiAutomationBridge';
 import {
+  agentLabel,
   getAgentAvailability,
   getAgentExecutableSettings,
   hasAnyAvailableAgents,
@@ -1200,10 +1201,7 @@ sendFetchPRDetails,
 
   const handleLocationSelect = useCallback(
     async (path: string, agent: SessionAgent, endpointId?: string, yoloMode = false) => {
-      if (!hasAvailableAgents) {
-        showError('No supported agent CLI found in PATH.');
-        return;
-      }
+      let selectedAgent: SessionAgent;
       if (endpointId) {
         const endpoint = daemonEndpoints.find((entry) => entry.id === endpointId);
         if (!endpoint) {
@@ -1214,10 +1212,20 @@ sendFetchPRDetails,
           showError(`Endpoint ${endpoint.name} is ${endpoint.status}.`);
           return;
         }
+        if (!endpoint.capabilities?.agents_available.includes(agent)) {
+          showError(`${agentLabel(agent)} is not available on ${endpoint.name}.`);
+          return;
+        }
+        selectedAgent = agent;
+      } else {
+        if (!hasAvailableAgents) {
+          showError('No supported agent CLI found in PATH.');
+          return;
+        }
+        selectedAgent = resolvePreferredAgent(agent, agentAvailability, 'codex');
       }
       // Note: Location is automatically tracked by daemon when session registers
       const folderName = path.split('/').pop() || 'session';
-      const selectedAgent = resolvePreferredAgent(agent, agentAvailability, 'codex');
       await createWorkspaceSession(folderName, path, undefined, selectedAgent, endpointId, yoloMode);
     },
     [agentAvailability, createWorkspaceSession, daemonEndpoints, hasAvailableAgents, showError]

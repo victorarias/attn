@@ -11,6 +11,7 @@ import (
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/ptybackend"
 )
 
 const pluginDriverCallTimeout = 30 * time.Second
@@ -328,8 +329,12 @@ func (d *Daemon) beginPluginSessionLaunch(sessionID, pluginName, runID string) {
 	if d.pluginReports == nil {
 		d.pluginReports = make(map[string][]pendingPluginReport)
 	}
+	if d.pluginExits == nil {
+		d.pluginExits = make(map[string]ptybackend.ExitInfo)
+	}
 	d.pluginLaunching[sessionID] = pluginSessionLaunch{PluginName: pluginName, RunID: runID}
 	delete(d.pluginReports, sessionID)
+	delete(d.pluginExits, sessionID)
 }
 
 func (d *Daemon) queueReportDuringPluginLaunch(plugin *pluginConnection, sessionID string, report pendingPluginReport) bool {
@@ -343,14 +348,34 @@ func (d *Daemon) queueReportDuringPluginLaunch(plugin *pluginConnection, session
 	return true
 }
 
-func (d *Daemon) finishPluginSessionLaunch(sessionID string, success bool) {
+func (d *Daemon) queueExitDuringPluginLaunch(info ptybackend.ExitInfo) bool {
+	d.pluginDriverMu.Lock()
+	defer d.pluginDriverMu.Unlock()
+	launch, ok := d.pluginLaunching[info.ID]
+	if !ok || info.LifecycleID == "" || launch.RunID != info.LifecycleID {
+		return false
+	}
+	d.pluginExits[info.ID] = info
+	return true
+}
+
+func (d *Daemon) supersededExitDuringPluginLaunch(info ptybackend.ExitInfo) bool {
+	d.pluginDriverMu.Lock()
+	defer d.pluginDriverMu.Unlock()
+	launch, ok := d.pluginLaunching[info.ID]
+	return ok && info.LifecycleID != "" && launch.RunID != info.LifecycleID
+}
+
+func (d *Daemon) finishPluginSessionLaunch(sessionID string, success bool) *ptybackend.ExitInfo {
 	d.pluginDriverMu.Lock()
 	reports := append([]pendingPluginReport(nil), d.pluginReports[sessionID]...)
+	exit, exited := d.pluginExits[sessionID]
 	delete(d.pluginReports, sessionID)
+	delete(d.pluginExits, sessionID)
 	delete(d.pluginLaunching, sessionID)
 	d.pluginDriverMu.Unlock()
 	if !success {
-		return
+		return nil
 	}
 	for _, report := range reports {
 		switch {
@@ -362,6 +387,10 @@ func (d *Daemon) finishPluginSessionLaunch(sessionID string, success bool) {
 			d.applyPluginReportedMetadata(*report.Metadata)
 		}
 	}
+	if exited {
+		return &exit
+	}
+	return nil
 }
 
 func (r pendingPluginReport) runID() string {

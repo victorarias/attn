@@ -227,9 +227,7 @@ func runPTYWorker() {
 	fs.StringVar(&cfg.CodexExecutable, "codex-executable", "", "codex executable override")
 	fs.StringVar(&cfg.CopilotExecutable, "copilot-executable", "", "copilot executable override")
 	var externalCommandJSON string
-	var externalEnvJSON string
 	fs.StringVar(&externalCommandJSON, "external-command-json", "", "external plugin driver argv as JSON")
-	fs.StringVar(&externalEnvJSON, "external-env-json", "", "external plugin driver environment as JSON")
 	fs.StringVar(&cfg.ExternalCWD, "external-cwd", "", "external plugin driver working directory")
 	fs.StringVar(&cfg.RegistryPath, "registry-path", "", "registry path")
 	fs.StringVar(&cfg.SocketPath, "socket-path", "", "socket path")
@@ -245,9 +243,9 @@ func runPTYWorker() {
 			os.Exit(1)
 		}
 	}
-	if externalEnvJSON != "" {
+	if externalEnvJSON := os.Getenv("ATTN_PTY_EXTERNAL_ENV"); externalEnvJSON != "" {
 		if err := json.Unmarshal([]byte(externalEnvJSON), &cfg.ExternalEnv); err != nil {
-			fmt.Fprintf(os.Stderr, "pty-worker error: invalid --external-env-json: %v\n", err)
+			fmt.Fprintf(os.Stderr, "pty-worker error: invalid ATTN_PTY_EXTERNAL_ENV: %v\n", err)
 			os.Exit(1)
 		}
 	}

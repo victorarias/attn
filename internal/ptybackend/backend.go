@@ -33,6 +33,7 @@ type SpawnOptions struct {
 	ExternalCommand   []string
 	ExternalEnv       []string
 	ExternalCWD       string
+	LifecycleID       string
 
 	// LoginShellEnv, when non-nil, is a pre-computed login shell environment
 	// from the daemon's cache. Skips the ~130ms readLoginShellEnv in workers.
@@ -103,9 +104,10 @@ type RecoveryReport struct {
 }
 
 type ExitInfo struct {
-	ID       string
-	ExitCode int
-	Signal   string
+	ID          string
+	ExitCode    int
+	Signal      string
+	LifecycleID string
 }
 
 type Backend interface {
@@ -113,6 +115,7 @@ type Backend interface {
 	Attach(ctx context.Context, sessionID, subscriberID string) (AttachInfo, Stream, error)
 	Input(ctx context.Context, sessionID string, data []byte) error
 	Resize(ctx context.Context, sessionID string, cols, rows uint16) error
+	// Kill returns nil only after the child process has exited.
 	Kill(ctx context.Context, sessionID string, sig syscall.Signal) error
 	Remove(ctx context.Context, sessionID string) error
 	SessionIDs(ctx context.Context) []string

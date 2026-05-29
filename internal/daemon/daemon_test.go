@@ -784,6 +784,59 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend_ClaudeSessionsRecoverable(t *
 		LastSeen:       now,
 	})
 
+	d.store.Add(&protocol.Session{
+		ID:             "plugin-metadata-stale",
+		Label:          "plugin-metadata-stale",
+		Agent:          "snipe",
+		Directory:      "/tmp/plugin-metadata-stale",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	if !d.store.BeginAgentDriverRun("plugin-metadata-stale", "snipe-plugin", "run-metadata") {
+		t.Fatal("BeginAgentDriverRun(plugin-metadata-stale) failed")
+	}
+	if !d.store.ApplyAgentDriverMetadata("plugin-metadata-stale", "run-metadata", 1, `{"native_id":"resume-me"}`) {
+		t.Fatal("ApplyAgentDriverMetadata(plugin-metadata-stale) failed")
+	}
+	d.store.EndAgentDriverRun("plugin-metadata-stale")
+
+	d.store.Add(&protocol.Session{
+		ID:             "plugin-capability-stale",
+		Label:          "plugin-capability-stale",
+		Agent:          "snipe-live",
+		Directory:      "/tmp/plugin-capability-stale",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	plugin := &pluginConnection{name: "snipe-live-plugin"}
+	if err := d.plugins.register(plugin); err != nil {
+		t.Fatalf("register plugin: %v", err)
+	}
+	if err := d.plugins.registerDriver(plugin, pluginDriverRegisterParams{
+		Agent:        "snipe-live",
+		Capabilities: map[string]bool{"resume": true},
+	}); err != nil {
+		t.Fatalf("register resumable driver: %v", err)
+	}
+
+	d.store.Add(&protocol.Session{
+		ID:             "plugin-owned-stale",
+		Label:          "plugin-owned-stale",
+		Agent:          "resume-before-register",
+		Directory:      "/tmp/plugin-owned-stale",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	if !d.store.BeginAgentDriverRun("plugin-owned-stale", "offline-plugin", "run-offline") {
+		t.Fatal("BeginAgentDriverRun(plugin-owned-stale) failed")
+	}
+
 	d.ptyBackend = &fakeWorkerReconcileBackend{
 		liveIDs: nil,
 		info:    map[string]ptybackend.SessionInfo{},
@@ -791,8 +844,8 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend_ClaudeSessionsRecoverable(t *
 
 	report := d.reconcileSessionsWithWorkerBackend(context.Background(), true, time.Time{})
 
-	if report.MarkedRecoverable != 1 {
-		t.Fatalf("marked_recoverable = %d, want 1", report.MarkedRecoverable)
+	if report.MarkedRecoverable != 4 {
+		t.Fatalf("marked_recoverable = %d, want 4", report.MarkedRecoverable)
 	}
 	if report.Reaped != 2 {
 		t.Fatalf("reaped = %d, want 2", report.Reaped)
@@ -809,6 +862,12 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend_ClaudeSessionsRecoverable(t *
 	if !protocol.Deref(claudeSession.Recoverable) {
 		t.Fatal("claude-stale should be marked recoverable")
 	}
+	for _, id := range []string{"plugin-metadata-stale", "plugin-capability-stale", "plugin-owned-stale"} {
+		session := d.store.Get(id)
+		if session == nil || session.State != protocol.SessionStateIdle || !protocol.Deref(session.Recoverable) {
+			t.Fatalf("%s session = %+v, want idle recoverable plugin session", id, session)
+		}
+	}
 
 	// Non-claude sessions should be removed
 	if d.store.Get("codex-stale") != nil {
@@ -816,6 +875,84 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend_ClaudeSessionsRecoverable(t *
 	}
 	if d.store.Get("copilot-stale") != nil {
 		t.Fatal("copilot-stale session should be reaped")
+	}
+}
+
+func TestDaemon_ReconcileSessionsWithWorkerBackend_PreservesLivePluginReportedState(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "plugin-live",
+		Label:          "plugin-live",
+		Agent:          "snipe",
+		Directory:      "/tmp/plugin-live",
+		State:          protocol.SessionStateLaunching,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+		Recoverable:    protocol.Ptr(true),
+	})
+	if !d.store.BeginAgentDriverRun("plugin-live", "snipe-plugin", "run-live") {
+		t.Fatal("BeginAgentDriverRun(plugin-live) failed")
+	}
+	if !d.store.ApplyAgentDriverState("plugin-live", "run-live", 1, protocol.StateWaitingInput) {
+		t.Fatal("ApplyAgentDriverState(plugin-live) failed")
+	}
+	d.ptyBackend = &fakeWorkerReconcileBackend{
+		liveIDs: []string{"plugin-live"},
+		info: map[string]ptybackend.SessionInfo{
+			"plugin-live": {
+				SessionID: "plugin-live",
+				Agent:     "snipe",
+				CWD:       "/tmp/plugin-live",
+				Running:   true,
+				State:     protocol.StateWorking,
+			},
+		},
+	}
+
+	report := d.reconcileSessionsWithWorkerBackend(context.Background(), true, time.Time{})
+	if report.StateUpdated != 0 {
+		t.Fatalf("state_updated = %d, want 0 for plugin-owned state", report.StateUpdated)
+	}
+	session := d.store.Get("plugin-live")
+	if session == nil || session.State != protocol.SessionStateWaitingInput {
+		t.Fatalf("plugin-live session = %+v, want waiting_input retained from plugin report", session)
+	}
+	if protocol.Deref(session.Recoverable) {
+		t.Fatal("plugin-live recoverable flag should clear after PTY recovery")
+	}
+}
+
+func TestDaemon_PruneSessionsWithoutPTY_PreservesPluginMetadataForResume(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "plugin-resume",
+		Label:          "plugin-resume",
+		Agent:          "snipe",
+		Directory:      "/tmp/plugin-resume",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	if !d.store.BeginAgentDriverRun("plugin-resume", "snipe-plugin", "run-resume") {
+		t.Fatal("BeginAgentDriverRun(plugin-resume) failed")
+	}
+	if !d.store.ApplyAgentDriverMetadata("plugin-resume", "run-resume", 1, `{"native_id":"resume-me"}`) {
+		t.Fatal("ApplyAgentDriverMetadata(plugin-resume) failed")
+	}
+
+	if removed := d.pruneSessionsWithoutPTY(); removed != 0 {
+		t.Fatalf("pruneSessionsWithoutPTY removed = %d, want 0", removed)
+	}
+	session := d.store.Get("plugin-resume")
+	if session == nil || session.State != protocol.SessionStateIdle || !protocol.Deref(session.Recoverable) {
+		t.Fatalf("plugin-resume session = %+v, want idle recoverable plugin session", session)
+	}
+	if got := d.store.GetAgentMetadata("plugin-resume"); got != `{"native_id":"resume-me"}` {
+		t.Fatalf("metadata = %q, want persisted resume metadata", got)
 	}
 }
 
@@ -1200,16 +1337,19 @@ func (b *fakeAttachBackend) SetAttachInfo(info ptybackend.AttachInfo) {
 type fakeSpawnBackend struct {
 	mu        sync.Mutex
 	spawnOpts []ptybackend.SpawnOptions
-	onSpawn   func()
+	removed   []string
+	onSpawn   func(ptybackend.SpawnOptions)
+	onKill    func()
 	killErr   error
 }
 
 func (b *fakeSpawnBackend) Spawn(_ context.Context, opts ptybackend.SpawnOptions) error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	b.spawnOpts = append(b.spawnOpts, opts)
-	if b.onSpawn != nil {
-		b.onSpawn()
+	onSpawn := b.onSpawn
+	b.mu.Unlock()
+	if onSpawn != nil {
+		onSpawn(opts)
 	}
 	return nil
 }
@@ -1218,9 +1358,19 @@ func (b *fakeSpawnBackend) Attach(context.Context, string, string) (ptybackend.A
 }
 func (b *fakeSpawnBackend) Input(context.Context, string, []byte) error          { return nil }
 func (b *fakeSpawnBackend) Resize(context.Context, string, uint16, uint16) error { return nil }
-func (b *fakeSpawnBackend) Kill(context.Context, string, syscall.Signal) error   { return b.killErr }
-func (b *fakeSpawnBackend) Remove(context.Context, string) error                 { return nil }
-func (b *fakeSpawnBackend) SessionIDs(context.Context) []string                  { return nil }
+func (b *fakeSpawnBackend) Kill(context.Context, string, syscall.Signal) error {
+	if b.killErr == nil && b.onKill != nil {
+		b.onKill()
+	}
+	return b.killErr
+}
+func (b *fakeSpawnBackend) Remove(_ context.Context, id string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.removed = append(b.removed, id)
+	return nil
+}
+func (b *fakeSpawnBackend) SessionIDs(context.Context) []string { return nil }
 func (b *fakeSpawnBackend) Recover(context.Context) (ptybackend.RecoveryReport, error) {
 	return ptybackend.RecoveryReport{}, nil
 }
@@ -1233,6 +1383,12 @@ func (b *fakeSpawnBackend) LastSpawn() (ptybackend.SpawnOptions, bool) {
 		return ptybackend.SpawnOptions{}, false
 	}
 	return b.spawnOpts[len(b.spawnOpts)-1], true
+}
+
+func (b *fakeSpawnBackend) RemovedIDs() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.removed...)
 }
 
 type fakeReviewLoopBackend struct {

@@ -22,7 +22,7 @@ function createOperations(): SpawnPtyRuntimeOperations & {
   attachFreshRuntime: ReturnType<typeof vi.fn<SpawnPtyRuntimeOperations['attachFreshRuntime']>>;
   spawnRuntime: ReturnType<typeof vi.fn<SpawnPtyRuntimeOperations['spawnRuntime']>>;
   resizeRuntime: ReturnType<typeof vi.fn<SpawnPtyRuntimeOperations['resizeRuntime']>>;
-  logClaudeResumeRecovery: ReturnType<typeof vi.fn<NonNullable<SpawnPtyRuntimeOperations['logClaudeResumeRecovery']>>>;
+  logResumeRecovery: ReturnType<typeof vi.fn<NonNullable<SpawnPtyRuntimeOperations['logResumeRecovery']>>>;
   logKnownWorkspaceRespawn: ReturnType<typeof vi.fn<NonNullable<SpawnPtyRuntimeOperations['logKnownWorkspaceRespawn']>>>;
 } {
   return {
@@ -30,7 +30,7 @@ function createOperations(): SpawnPtyRuntimeOperations & {
     attachFreshRuntime: vi.fn<SpawnPtyRuntimeOperations['attachFreshRuntime']>(),
     spawnRuntime: vi.fn<SpawnPtyRuntimeOperations['spawnRuntime']>(),
     resizeRuntime: vi.fn<SpawnPtyRuntimeOperations['resizeRuntime']>(),
-    logClaudeResumeRecovery: vi.fn<NonNullable<SpawnPtyRuntimeOperations['logClaudeResumeRecovery']>>(),
+    logResumeRecovery: vi.fn<NonNullable<SpawnPtyRuntimeOperations['logResumeRecovery']>>(),
     logKnownWorkspaceRespawn: vi.fn<NonNullable<SpawnPtyRuntimeOperations['logKnownWorkspaceRespawn']>>(),
   };
 }
@@ -106,8 +106,9 @@ describe('runtimeLifecycle', () => {
       operations,
     );
 
-    expect(operations.logClaudeResumeRecovery).toHaveBeenCalledWith({
+    expect(operations.logResumeRecovery).toHaveBeenCalledWith({
       id: 'runtime-1',
+      agent: 'claude',
       recoverable: true,
     });
     expect(operations.spawnRuntime).toHaveBeenCalledWith(
@@ -119,6 +120,41 @@ describe('runtimeLifecycle', () => {
     );
     expect(operations.attachExistingRuntime).toHaveBeenCalledTimes(2);
     expect(operations.attachFreshRuntime).not.toHaveBeenCalled();
+  });
+
+  it('resumes recoverable plugin sessions after attach failure', async () => {
+    const operations = createOperations();
+    operations.attachExistingRuntime
+      .mockRejectedValueOnce(new Error('session not found'))
+      .mockResolvedValueOnce(undefined);
+
+    await spawnPtyRuntime(
+      createSpawnArgs({ agent: 'snipe' }),
+      {
+        alreadyAttached: false,
+        runtimeKnownToDaemon: true,
+        existingSession: {
+          agent: 'snipe',
+          recoverable: true,
+        },
+      },
+      operations,
+    );
+
+    expect(operations.logResumeRecovery).toHaveBeenCalledWith({
+      id: 'runtime-1',
+      agent: 'snipe',
+      recoverable: true,
+    });
+    expect(operations.spawnRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'runtime-1',
+        agent: 'snipe',
+        resume_session_id: 'runtime-1',
+        resume_picker: null,
+      }),
+    );
+    expect(operations.attachExistingRuntime).toHaveBeenCalledTimes(2);
   });
 
   it('recreates daemon-known workspace runtimes in place after attach failure', async () => {

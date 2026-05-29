@@ -2429,10 +2429,11 @@ export function useDaemonSocket({
             },
             spawnRuntime: sendSpawnSession,
             resizeRuntime: sendPtyResize,
-            logClaudeResumeRecovery: ({ id, recoverable }) => {
+            logResumeRecovery: ({ id, agent, recoverable }) => {
               console.log(
-                '[DaemonSocket] Recovering session %s via resume (recoverable=%s)',
+                '[DaemonSocket] Recovering session %s (%s) via resume (recoverable=%s)',
                 id,
+                agent ?? 'unknown',
                 String(recoverable),
               );
             },

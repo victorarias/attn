@@ -170,24 +170,46 @@ func TestBuildSpawnEnv_SetsAgentExecutableForExplicitOverride(t *testing.T) {
 func TestBuildSpawnCommand_UsesExternalPluginDriverArgvDirectly(t *testing.T) {
 	cmd := buildSpawnCommand(SpawnOptions{
 		ExternalCommand: []string{"snipe", "--session-id", "session-1"},
-	}, "snipe", "/bin/zsh", "/tmp/attn-wrapper")
+	}, "snipe", "/bin/zsh", "/tmp/attn-wrapper", nil)
 	if got := cmd.Args; len(got) != 3 || got[0] != "snipe" || got[2] != "session-1" {
 		t.Fatalf("cmd args=%v, want external driver argv", got)
 	}
 }
 
+func TestBuildSpawnCommand_ResolvesExternalPluginCommandFromLaunchPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandPath := filepath.Join(tmpDir, "snipe")
+	if err := os.WriteFile(commandPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write plugin command: %v", err)
+	}
+
+	cmd := buildSpawnCommand(SpawnOptions{
+		ExternalCommand: []string{"snipe", "--session-id", "session-1"},
+	}, "snipe", "/bin/zsh", "/tmp/attn-wrapper", []string{"PATH=" + tmpDir})
+	if cmd.Path != commandPath {
+		t.Fatalf("cmd.Path=%q, want command resolved from effective PATH %q", cmd.Path, commandPath)
+	}
+}
+
 func TestBuildSpawnEnv_AppliesExternalPluginEnvironment(t *testing.T) {
 	t.Setenv("SNIPE_BRIDGE", "stale")
+	t.Setenv("ATTN_PTY_EXTERNAL_ENV", `["SNIPE_BRIDGE=secret"]`)
 	env := buildSpawnEnv("", SpawnOptions{
 		ID:          "session-1",
 		ExternalEnv: []string{"SNIPE_BRIDGE=ready"},
 	}, "snipe", "/tmp/attn-wrapper", nil)
+	found := false
 	for _, entry := range env {
 		if entry == "SNIPE_BRIDGE=ready" {
-			return
+			found = true
+		}
+		if strings.HasPrefix(entry, "ATTN_PTY_EXTERNAL_ENV=") {
+			t.Fatalf("did not expect worker environment transport in plugin env, got %v", env)
 		}
 	}
-	t.Fatalf("expected external plugin environment override, got %v", env)
+	if !found {
+		t.Fatalf("expected external plugin environment override, got %v", env)
+	}
 }
 
 func TestBuildSpawnEnv_StripsInheritedNoColorFromInteractiveSessions(t *testing.T) {

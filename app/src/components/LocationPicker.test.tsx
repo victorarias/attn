@@ -119,7 +119,7 @@ describe('LocationPicker', () => {
     }));
   });
 
-  it('spawns a remote session with the selected endpoint id', async () => {
+  it('spawns a remote session with an agent advertised only by that endpoint', async () => {
     const onGetRecentLocations = vi.fn(async () => ({ locations: [], home_path: '/home/remote' }));
     const onInspectPath = vi.fn(async () => ({
       success: true,
@@ -144,20 +144,23 @@ describe('LocationPicker', () => {
         enabled: true,
         capabilities: {
           protocol_version: '46',
-          agents_available: ['codex'],
+          agents_available: ['snipe'],
           projects_directory: '/srv/projects',
         },
       }],
     });
 
     fireEvent.click(screen.getByRole('radio', { name: /gpu-box/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('radio', { name: /snipe/i })).toHaveAttribute('aria-checked', 'true');
+    });
     const input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: '~/projects/remote-repo' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
     await waitFor(() => {
-      expect(onInspectPath).toHaveBeenCalledWith('~/projects/remote-repo', 'ep-1');
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'claude', 'ep-1', false);
+      expect(onInspectPath).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'ep-1');
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'snipe', 'ep-1', false);
     });
     expect(onGetRepoInfo).not.toHaveBeenCalled();
   });
@@ -668,7 +671,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('/', 'ep-1');
-      expect(onSelect).toHaveBeenCalledWith('/', 'claude', 'ep-1', false);
+      expect(onSelect).toHaveBeenCalledWith('/', 'codex', 'ep-1', false);
     });
   });
 
