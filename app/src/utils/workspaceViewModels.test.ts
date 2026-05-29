@@ -40,6 +40,44 @@ describe('workspaceViewModels', () => {
     ]);
   });
 
+  it('nests remote sessions under endpoint-less daemon workspace snapshots', () => {
+    const viewModels = buildWorkspaceViewModels(
+      [{ id: 'workspace-remote', title: 'Remote', directory: '/srv/repo' }],
+      [
+        {
+          id: 'remote-session',
+          label: 'Remote Session',
+          workspace_id: 'workspace-remote',
+          endpoint_id: 'ep-remote',
+          directory: '/srv/repo',
+        },
+      ],
+    );
+
+    expect(viewModels).toHaveLength(1);
+    expect(viewModels[0].endpointId).toBe('ep-remote');
+    expect(viewModels[0].sessions.map((session) => session.id)).toEqual(['remote-session']);
+  });
+
+  it('pairs duplicate endpoint-less workspace snapshots with distinct endpoint session groups', () => {
+    const viewModels = buildWorkspaceViewModels(
+      [
+        { id: 'workspace-shared', title: 'Remote A', directory: '/srv/a' },
+        { id: 'workspace-shared', title: 'Remote B', directory: '/srv/b' },
+      ],
+      [
+        { id: 'a1', label: 'A1', workspace_id: 'workspace-shared', endpoint_id: 'ep-a', directory: '/srv/a' },
+        { id: 'b1', label: 'B1', workspace_id: 'workspace-shared', endpoint_id: 'ep-b', directory: '/srv/b' },
+      ],
+    );
+
+    expect(viewModels.map((workspace) => workspace.sessions.map((session) => session.id))).toEqual([
+      ['a1'],
+      ['b1'],
+    ]);
+    expect(viewModels.map((workspace) => workspace.endpointId)).toEqual(['ep-a', 'ep-b']);
+  });
+
   it('uses remembered focused session when it still belongs to the workspace', () => {
     const [workspace] = buildWorkspaceViewModels(
       [{ id: 'workspace-a', title: 'A', directory: '/repo/a' }],

@@ -15,6 +15,7 @@ export interface WorkspaceViewWorkspace {
   title: string;
   directory: string;
   status?: string;
+  endpointId?: string;
   endpoint_id?: string;
 }
 
@@ -45,6 +46,10 @@ function sessionEndpointId(session: WorkspaceViewSession): string | undefined {
   return session.endpointId || session.endpoint_id;
 }
 
+function workspaceEndpointId(workspace: WorkspaceViewWorkspace): string | undefined {
+  return workspace.endpointId || workspace.endpoint_id;
+}
+
 function fallbackTitle(directory: string): string {
   return directory.split('/').filter(Boolean).pop() || directory;
 }
@@ -59,19 +64,28 @@ export function buildWorkspaceViewModels<TSession extends WorkspaceViewSession>(
   options: WorkspaceViewModelOptions = {},
 ): WorkspaceWithSessions<TSession>[] {
   const sessionsByWorkspace = new Map<string, TSession[]>();
+  const sessionKeysByWorkspaceId = new Map<string, string[]>();
 
   for (const session of sessions) {
-    const key = workspaceKey(sessionWorkspaceId(session), sessionEndpointId(session));
+    const workspaceId = sessionWorkspaceId(session);
+    const key = workspaceKey(workspaceId, sessionEndpointId(session));
     const current = sessionsByWorkspace.get(key) || [];
     current.push(session);
     sessionsByWorkspace.set(key, current);
+    if (!sessionKeysByWorkspaceId.has(workspaceId)) {
+      sessionKeysByWorkspaceId.set(workspaceId, []);
+    }
+    const keys = sessionKeysByWorkspaceId.get(workspaceId)!;
+    if (!keys.includes(key)) {
+      keys.push(key);
+    }
   }
 
   const result: WorkspaceWithSessions<TSession>[] = [];
   const consumed = new Set<string>();
 
   for (const workspace of workspaces) {
-    const key = workspaceKey(workspace.id, workspace.endpoint_id);
+    const key = resolveWorkspaceSessionKey(workspace, sessionKeysByWorkspaceId, consumed);
     const workspaceSessions = sessionsByWorkspace.get(key) || [];
     consumed.add(key);
     result.push(toWorkspaceViewModel(workspace, workspaceSessions, options));
@@ -98,6 +112,20 @@ export function buildWorkspaceViewModels<TSession extends WorkspaceViewSession>(
   return result;
 }
 
+function resolveWorkspaceSessionKey(
+  workspace: WorkspaceViewWorkspace,
+  sessionKeysByWorkspaceId: Map<string, string[]>,
+  consumed: Set<string>,
+): string {
+  const endpointId = workspaceEndpointId(workspace);
+  if (endpointId) {
+    return workspaceKey(workspace.id, endpointId);
+  }
+  const unconsumedSessionKey = (sessionKeysByWorkspaceId.get(workspace.id) || [])
+    .find((key) => !consumed.has(key));
+  return unconsumedSessionKey || workspaceKey(workspace.id);
+}
+
 function toWorkspaceViewModel<TSession extends WorkspaceViewSession>(
   workspace: WorkspaceViewWorkspace,
   sessions: TSession[],
@@ -114,7 +142,7 @@ function toWorkspaceViewModel<TSession extends WorkspaceViewSession>(
     title: workspace.title,
     directory: workspace.directory,
     status: workspace.status,
-    endpointId: workspace.endpoint_id,
+    endpointId: workspaceEndpointId(workspace) || sessionEndpointId(sessions[0]),
     sessions,
     firstSessionId,
     focusedSessionId,
