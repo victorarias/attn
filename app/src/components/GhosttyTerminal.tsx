@@ -93,6 +93,15 @@ interface SelectionRange {
 // null for hyperlink URIs, so OSC 8 labels cannot be opened without API work.
 const URL_RE = /\b(?:https?:\/\/|file:\/\/|mailto:|ftp:\/\/|ssh:\/\/|git:\/\/|tel:|magnet:|gemini:\/\/|gopher:\/\/|news:)[^\s<>()]+/g;
 
+function literalUrlAtColumn(line: string, col: number): string | null {
+  for (const match of line.matchAll(URL_RE)) {
+    const start = match.index ?? -1;
+    const uri = match[0].replace(/[.,;:!?]+$/, '');
+    if (col >= start && col < start + uri.length) return uri;
+  }
+  return null;
+}
+
 function colorNumber(value: string): number {
   return Number.parseInt(value.slice(1), 16);
 }
@@ -742,7 +751,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           const terminal = terminalRef.current;
           const cell = cellFromPointer(event);
           if (!terminal || !cell) return;
-          if (!event.shiftKey && sendTrackedMouse('press', event)) return;
+          const uri = literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col);
+          const opensUri = Boolean(uri && ((event.metaKey || event.ctrlKey) || !terminal.hasMouseTracking()));
+          if (!opensUri && !event.shiftKey && sendTrackedMouse('press', event)) return;
           const row = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
           selectedTextRef.current = null;
           applicationSelectionAnchorRef.current = null;
@@ -771,17 +782,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           const text = textForSelectionRange(selectionRef.current);
           selectedTextRef.current = text || null;
           if (text) await writeClipboardText(text);
-          if ((event.metaKey || event.ctrlKey) && !text) {
-            const cell = cellFromPointer(event);
-            const line = cell ? lineAtVisibleRow(cell.row) : '';
-            for (const match of line.matchAll(URL_RE)) {
-              const start = match.index ?? -1;
-              const uri = match[0].replace(/[.,;:!?]+$/, '');
-              if (cell && cell.col >= start && cell.col < start + uri.length) {
-                void openUrl(uri);
-                break;
-              }
-            }
+          const cell = cellFromPointer(event);
+          const uri = cell ? literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col) : null;
+          if (uri && !text && ((event.metaKey || event.ctrlKey) || !terminalRef.current?.hasMouseTracking())) {
+            void openUrl(uri);
           }
         }}
         onKeyDown={(event) => {

@@ -16,6 +16,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Terminal Block Graphics**: Colored cell fills and Unicode block graphics, including the Claude startup mark, now render continuously instead of showing faint seams between cells.
 - **Codex Resize Redraws**: Attn-managed Codex terminals now enable Codex's resize-reflow mode so resizing a Ghostty-rendered pane redraws the inline UI instead of leaving wrapped or duplicated header fragments.
 - **Terminal Scrolling**: Ghostty terminal panes now scroll in proportion to wheel or trackpad movement, keep a manually scrolled view steady while new output is arriving, keep selections attached to their text while browsing local or application-owned history, and forward wheel input to interactive agents such as Claude when they request terminal mouse tracking.
+- **Terminal Links**: Visible URLs in Ghostty terminal panes now open when clicked, including modifier-clicks while an interactive application has terminal mouse tracking enabled.
 - **Dev App Profile Isolation**: Relaunching `attn-dev.app` from a terminal that inherited production routing variables now keeps the dev app on its isolated daemon and port instead of starting or replacing a production daemon.
 
 ---

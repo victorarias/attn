@@ -115,6 +115,18 @@ export function emitPtyEvent(payload: PtyEventPayload) {
   }
 }
 
+declare global {
+  interface Window {
+    __TEST_EMIT_PTY_DATA?: (id: string, data: string) => void;
+  }
+}
+
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  window.__TEST_EMIT_PTY_DATA = (id: string, data: string) => {
+    emitPtyEvent({ event: 'data', id, data: encodeBase64(data) });
+  };
+}
+
 const encodeBase64 = (value: string) => {
   if (typeof btoa !== 'undefined') {
     return btoa(value);
