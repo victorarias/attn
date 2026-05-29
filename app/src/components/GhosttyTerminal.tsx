@@ -179,6 +179,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const selectedTextRef = useRef<string | null>(null);
     const applicationSelectionAnchorRef = useRef<ApplicationSelectionAnchor | null>(null);
     const selectingRef = useRef(false);
+    const selectionPointerStartRef = useRef<{ clientX: number; clientY: number } | null>(null);
+    const selectionDragThresholdMetRef = useRef(false);
     const trackedMouseButtonRef = useRef<number | null>(null);
     const hoveredCellRef = useRef<{ row: number; col: number } | null>(null);
     const acceleratorHeldRef = useRef(false);
@@ -801,6 +803,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           selectedTextRef.current = null;
           applicationSelectionAnchorRef.current = null;
           selectingRef.current = true;
+          selectionPointerStartRef.current = { clientX: event.clientX, clientY: event.clientY };
+          selectionDragThresholdMetRef.current = false;
           selectionRef.current = { startRow: row, startCol: cell.col, endRow: row, endCol: cell.col };
           renderSurface(true);
         }}
@@ -814,8 +818,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             return;
           }
           const terminal = terminalRef.current;
+          const renderer = rendererRef.current;
           const cell = cellFromPointer(event);
-          if (!terminal || !cell) return;
+          const pointerStart = selectionPointerStartRef.current;
+          if (!terminal || !renderer || !cell || !pointerStart) return;
+          if (!selectionDragThresholdMetRef.current) {
+            const deltaX = event.clientX - pointerStart.clientX;
+            const deltaY = event.clientY - pointerStart.clientY;
+            const threshold = renderer.cellWidth * 0.5;
+            if (deltaX * deltaX + deltaY * deltaY < threshold * threshold) return;
+            selectionDragThresholdMetRef.current = true;
+          }
           const row = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
           selectionRef.current = { ...selectionRef.current, endRow: row, endCol: cell.col + 1 };
           renderSurface(true);
@@ -830,6 +843,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             return;
           }
           selectingRef.current = false;
+          selectionPointerStartRef.current = null;
+          if (!selectionDragThresholdMetRef.current) {
+            selectionRef.current = null;
+            renderSurface(true);
+          }
           const text = textForSelectionRange(selectionRef.current);
           selectedTextRef.current = text || null;
           if (text) await writeClipboardText(text);
