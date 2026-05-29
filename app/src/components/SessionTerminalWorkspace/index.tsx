@@ -23,15 +23,9 @@ import './SessionTerminalWorkspace.css';
 import type { TerminalVisibleContentSnapshot } from '../../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot } from '../../utils/terminalStyleSummary';
 import type { ResolvedTheme } from '../../utils/terminalSizing';
+import { WorkspaceLayoutRenderer } from './WorkspaceLayoutRenderer';
 
 const ZOOM_PATH_RATIO = 0.76;
-
-function clampSplitRatio(ratio: number): number {
-  if (ratio > 0 && ratio < 1) {
-    return ratio;
-  }
-  return 0.5;
-}
 
 function zoomLayoutTowardPane(node: TerminalLayoutNode, paneId: string): TerminalLayoutNode {
   if (node.type === 'pane') {
@@ -485,46 +479,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     useShortcut('terminal.focusUp', () => handleMovePane('up'), sessionVisible);
     useShortcut('terminal.focusDown', () => handleMovePane('down'), sessionVisible);
 
-    const renderLayoutMetadata = useCallback((node: TerminalLayoutNode, path = 'root'): React.ReactNode => {
-      if (node.type === 'split') {
-        const firstRatio = clampSplitRatio(node.ratio);
-        const secondRatio = clampSplitRatio(1 - firstRatio);
-        const firstPath = `${path}/0`;
-        const secondPath = `${path}/1`;
-        const splitStyle = node.direction === 'vertical'
-          ? { gridTemplateColumns: `minmax(0, ${firstRatio}fr) minmax(0, ${secondRatio}fr)` }
-          : { gridTemplateRows: `minmax(0, ${firstRatio}fr) minmax(0, ${secondRatio}fr)` };
-        return (
-          <div
-            key={node.splitId}
-            className={`workspace-split split-${node.direction}`}
-            data-split-id={node.splitId}
-            data-split-path={path}
-            data-split-direction={node.direction}
-            data-split-ratio={firstRatio.toFixed(3)}
-            style={splitStyle}
-          >
-            <div
-              className="workspace-split-child"
-              data-split-child-index="0"
-              data-split-child-path={firstPath}
-            >
-              {renderLayoutMetadata(node.children[0], firstPath)}
-            </div>
-            <div
-              className="workspace-split-child"
-              data-split-child-index="1"
-              data-split-child-path={secondPath}
-            >
-              {renderLayoutMetadata(node.children[1], secondPath)}
-            </div>
-          </div>
-        );
-      }
-
-      return null;
-    }, []);
-
     const paneFrameStyle = useCallback((bounds: NormalizedPaneBounds) => ({
       left: `${bounds.left * 100}%`,
       top: `${bounds.top * 100}%`,
@@ -671,12 +625,11 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
             </button>
           </div>
         )}
-        <div className="session-terminal-panes">
-          <div className="workspace-layout-metadata" aria-hidden="true">
-            {renderLayoutMetadata(renderedLayoutTree)}
-          </div>
-          {renderedPaneIds.map((paneId) => renderPaneSurface(paneId))}
-        </div>
+        <WorkspaceLayoutRenderer
+          layoutTree={renderedLayoutTree}
+          paneIds={renderedPaneIds}
+          renderPane={renderPaneSurface}
+        />
       </div>
     );
   }

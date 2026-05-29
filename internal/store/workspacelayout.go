@@ -157,6 +157,17 @@ func (s *Store) HasWorkspaceLayout(workspaceID string) bool {
 	return exists == 1
 }
 
+// ListWorkspaceLayoutPanes returns the persisted pane records for a workspace
+// without exposing the layout tree. This is a prep seam for moving layout
+// leaves from runtime-owned panes to session-owned panes.
+func (s *Store) ListWorkspaceLayoutPanes(workspaceID string) []workspacelayout.Pane {
+	snapshot := s.GetWorkspaceLayout(workspaceID)
+	if snapshot == nil || len(snapshot.Panes) == 0 {
+		return nil
+	}
+	return append([]workspacelayout.Pane(nil), snapshot.Panes...)
+}
+
 func (s *Store) FindWorkspaceLayoutPaneByRuntimeID(runtimeID string) (workspaceID string, paneID string, ok bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -181,6 +192,36 @@ func (s *Store) FindWorkspaceLayoutPaneByRuntimeID(runtimeID string) (workspaceI
 	if err != nil {
 		if err != sql.ErrNoRows {
 			log.Printf("[store] FindWorkspaceLayoutPaneByRuntimeID: query failed for runtime %s: %v", runtimeID, err)
+		}
+		return "", "", false
+	}
+	return rowWorkspaceID, rowPaneID, true
+}
+
+func (s *Store) FindWorkspaceLayoutPaneBySessionID(sessionID string) (workspaceID string, paneID string, ok bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		for workspaceID, snapshot := range s.workspaces {
+			for _, pane := range snapshot.Panes {
+				if pane.SessionID == sessionID {
+					return workspaceID, pane.PaneID, true
+				}
+			}
+		}
+		return "", "", false
+	}
+
+	var rowWorkspaceID, rowPaneID string
+	err := s.db.QueryRow(`
+		SELECT workspace_id, pane_id
+		FROM workspace_layout_panes
+		WHERE session_id = ?
+	`, sessionID).Scan(&rowWorkspaceID, &rowPaneID)
+	if err != nil {
+		if err != sql.ErrNoRows {
+			log.Printf("[store] FindWorkspaceLayoutPaneBySessionID: query failed for session %s: %v", sessionID, err)
 		}
 		return "", "", false
 	}

@@ -43,3 +43,12 @@ func TestFormatPRID(t *testing.T) {
 		t.Fatalf("FormatPRID default host = %s", id)
 	}
 }
+
+func TestNormalizeSpawnAgentAcceptsShell(t *testing.T) {
+	if got := NormalizeSpawnAgent(" shell ", string(SessionAgentCodex)); got != AgentShellValue {
+		t.Fatalf("NormalizeSpawnAgent(shell) = %q, want %q", got, AgentShellValue)
+	}
+	if got := NormalizeSpawnAgent("", AgentShellValue); got != AgentShellValue {
+		t.Fatalf("NormalizeSpawnAgent fallback shell = %q, want %q", got, AgentShellValue)
+	}
+}

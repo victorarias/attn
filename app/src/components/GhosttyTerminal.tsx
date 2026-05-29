@@ -30,6 +30,7 @@ import {
 } from '../utils/terminalSizing';
 import { buildTerminalQueryResponses } from '../utils/terminalQueryResponses';
 import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
+import { recordTerminalLinkHitTestEvent } from '../utils/terminalLinkHitTestLog';
 import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
 import { analyzeTerminalVisibleLines } from '../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot, TerminalVisibleStyleLineSnapshot } from '../utils/terminalStyleSummary';
@@ -118,6 +119,35 @@ function wordRangeAtColumn(line: string, col: number): { startCol: number; endCo
   let endCol = col + 1;
   while (endCol < line.length && isWordCharacter(line[endCol])) endCol += 1;
   return { startCol, endCol };
+}
+
+function rectSnapshot(rect: DOMRect | null) {
+  if (!rect) return null;
+  return {
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+    top: rect.top,
+    left: rect.left,
+    right: rect.right,
+    bottom: rect.bottom,
+  };
+}
+
+function cellFromRect(
+  event: React.MouseEvent,
+  rect: DOMRect | null,
+  cellWidth: number,
+  cellHeight: number,
+  rows: number,
+  cols: number,
+) {
+  if (!rect) return null;
+  return {
+    row: Math.max(0, Math.min(rows - 1, Math.floor((event.clientY - rect.top) / cellHeight))),
+    col: Math.max(0, Math.min(cols, Math.floor((event.clientX - rect.left) / cellWidth))),
+  };
 }
 
 function colorNumber(value: string): number {
@@ -711,6 +741,100 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       };
     };
 
+    const recordPointerHitTest = useCallback((
+      eventName: string,
+      event: React.MouseEvent,
+      extra: Record<string, unknown> = {},
+    ) => {
+      const terminal = terminalRef.current;
+      const renderer = rendererRef.current;
+      const container = containerRef.current;
+      const canvas = canvasRef.current;
+      if (!terminal || !renderer || !container || !canvas) return;
+      const containerRect = container.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
+      const containerCell = cellFromRect(event, containerRect, renderer.cellWidth, renderer.cellHeight, terminal.rows, terminal.cols);
+      const canvasCell = cellFromRect(event, canvasRect, renderer.cellWidth, renderer.cellHeight, terminal.rows, terminal.cols);
+      const selectedText = selectedTextRef.current;
+      const selection = selectionRef.current;
+      const containerLine = containerCell ? lineAtVisibleRow(containerCell.row) : '';
+      const canvasLine = canvasCell ? lineAtVisibleRow(canvasCell.row) : '';
+      const containerUri = containerCell ? literalUrlAtColumn(containerLine, containerCell.col) : null;
+      const canvasUri = canvasCell ? literalUrlAtColumn(canvasLine, canvasCell.col) : null;
+      recordTerminalLinkHitTestEvent({
+        event: eventName,
+        debugName: debugNameRef.current,
+        sessionId: runtimeMetaRef.current?.sessionId,
+        paneId: runtimeMetaRef.current?.paneId,
+        runtimeId: runtimeMetaRef.current?.runtimeId,
+        details: {
+          pointer: {
+            clientX: event.clientX,
+            clientY: event.clientY,
+            offsetFromContainer: {
+              x: event.clientX - containerRect.left,
+              y: event.clientY - containerRect.top,
+            },
+            offsetFromCanvas: {
+              x: event.clientX - canvasRect.left,
+              y: event.clientY - canvasRect.top,
+            },
+            metaKey: event.metaKey,
+            ctrlKey: event.ctrlKey,
+            altKey: event.altKey,
+            shiftKey: event.shiftKey,
+            button: event.button,
+            buttons: event.buttons,
+          },
+          cells: {
+            container: containerCell,
+            canvas: canvasCell,
+          },
+          detected: {
+            containerUri,
+            canvasUri,
+            containerLinePreview: containerLine,
+            canvasLinePreview: canvasLine,
+          },
+          selection: {
+            selecting: selectingRef.current,
+            dragThresholdMet: selectionDragThresholdMetRef.current,
+            range: selection,
+            selectedTextPreview: selectedText,
+            selectedTextLength: selectedText?.length ?? 0,
+          },
+          terminal: {
+            cols: terminal.cols,
+            rows: terminal.rows,
+            scrollbackLength: terminal.getScrollbackLength(),
+            viewportOffset: viewportOffsetRef.current,
+            alternateScreen: terminal.isAlternateScreen(),
+            mouseTracking: terminal.hasMouseTracking(),
+          },
+          geometry: {
+            containerRect: rectSnapshot(containerRect),
+            canvasRect: rectSnapshot(canvasRect),
+            containerClient: {
+              width: container.clientWidth,
+              height: container.clientHeight,
+            },
+            canvasClient: {
+              width: canvas.clientWidth,
+              height: canvas.clientHeight,
+            },
+            canvasBacking: {
+              width: canvas.width,
+              height: canvas.height,
+            },
+            devicePixelRatio: window.devicePixelRatio,
+            cellWidth: renderer.cellWidth,
+            cellHeight: renderer.cellHeight,
+          },
+          ...extra,
+        },
+      });
+    }, [lineAtVisibleRow]);
+
     const mouseModifiers = (event: React.MouseEvent) =>
       (event.shiftKey ? 4 : 0) + (event.altKey ? 8 : 0) + (event.ctrlKey ? 16 : 0);
 
@@ -849,6 +973,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           if (!terminal || !cell) return;
           const uri = literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col);
           const opensUri = Boolean(uri && (event.metaKey || event.ctrlKey));
+          recordPointerHitTest('mousedown', event, {
+            activeCell: cell,
+            activeUri: uri,
+            opensUri,
+            phase: 'before-selection',
+          });
           if (!opensUri && !event.altKey && sendTrackedMouse('press', event)) return;
           const row = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
           selectedTextRef.current = null;
@@ -864,6 +994,15 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           hoveredCellRef.current = hoveredCell;
           acceleratorHeldRef.current = event.metaKey || event.ctrlKey;
           updateLinkCursor(hoveredCell, acceleratorHeldRef.current);
+          const hoveredLine = hoveredCell ? lineAtVisibleRow(hoveredCell.row) : '';
+          const hoveredUri = hoveredCell ? literalUrlAtColumn(hoveredLine, hoveredCell.col) : null;
+          if (acceleratorHeldRef.current || hoveredUri || selectingRef.current) {
+            recordPointerHitTest('mousemove', event, {
+              activeCell: hoveredCell,
+              activeUri: hoveredUri,
+              phase: selectingRef.current ? 'selection-drag' : 'hover',
+            });
+          }
           if (!selectingRef.current || !selectionRef.current) {
             sendTrackedMouse('move', event);
             return;
@@ -890,6 +1029,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }}
         onMouseUp={async (event) => {
           if (!selectingRef.current) {
+            recordPointerHitTest('mouseup', event, {
+              phase: 'tracked-mouse-release',
+            });
             sendTrackedMouse('release', event);
             return;
           }
@@ -904,6 +1046,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           if (text) await writeClipboardText(text);
           const cell = cellFromPointer(event);
           const uri = cell ? literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col) : null;
+          recordPointerHitTest('mouseup', event, {
+            activeCell: cell,
+            activeUri: uri,
+            opensUri: Boolean(uri && !text && (event.metaKey || event.ctrlKey)),
+            copiedTextLength: text.length,
+            phase: 'after-selection',
+          });
           if (uri && !text && (event.metaKey || event.ctrlKey)) {
             void openUrl(uri);
           }
@@ -911,6 +1060,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         onDoubleClick={async (event) => {
           const terminal = terminalRef.current;
           const cell = cellFromPointer(event);
+          recordPointerHitTest('doubleclick', event, {
+            activeCell: cell,
+            phase: 'before-word-selection',
+          });
           if (!terminal || !cell || (terminal.hasMouseTracking() && !event.altKey)) return;
           const range = wordRangeAtColumn(lineAtVisibleRow(cell.row), cell.col);
           if (!range) return;
