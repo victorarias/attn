@@ -24,6 +24,7 @@ import {
   getTerminalTheme,
   type ResolvedTheme,
 } from '../utils/terminalSizing';
+import { buildTerminalQueryResponses } from '../utils/terminalQueryResponses';
 import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
 import { analyzeTerminalVisibleLines } from '../utils/terminalVisibleContent';
@@ -445,9 +446,18 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         const scrollbackBefore = terminal.getScrollbackLength();
         const viewportOffsetBefore = viewportOffsetRef.current;
         terminal.write(data);
+        const responses: string[] = [];
         while (terminal.hasResponse()) {
           const response = terminal.readResponse();
-          if (response && !options?.suppressResponses) onInputRef.current(response);
+          if (response) responses.push(response);
+        }
+        if (!options?.suppressResponses) {
+          for (const response of responses) {
+            onInputRef.current(response);
+          }
+          for (const response of buildTerminalQueryResponses(data, resolvedTheme, responses)) {
+            onInputRef.current(response);
+          }
         }
         viewportOffsetRef.current = offsetAfterWrite(
           viewportOffsetBefore,
