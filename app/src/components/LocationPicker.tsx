@@ -270,14 +270,17 @@ export function LocationPicker({
     return shortcuts;
   }, [selectableTargets]);
 
+  const handleHomePathChange = useCallback((nextHomePath: string) => {
+    setHomePath((prev) => (prev === nextHomePath ? prev : nextHomePath));
+  }, []);
+
   const { suggestions: fsSuggestions, currentDir } = useFilesystemSuggestions(
     inputValue,
     selectedEndpointId,
     onBrowseDirectory,
     homePath,
-    (nextHomePath) => {
-      setHomePath((prev) => (prev === nextHomePath ? prev : nextHomePath));
-    },
+    handleHomePathChange,
+    isOpen,
   );
 
   const orderedAgentList = useMemo(() => {

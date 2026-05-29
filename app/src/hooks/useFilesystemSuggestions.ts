@@ -20,6 +20,7 @@ export function useFilesystemSuggestions(
   browseDirectory?: (inputPath: string, endpointId?: string) => Promise<BrowseDirectoryResult>,
   homePath?: string,
   onHomePathChange?: (nextHomePath: string) => void,
+  enabled = true,
 ): UseFilesystemSuggestionsResult {
   const [suggestions, setSuggestions] = useState<FilesystemSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
@@ -30,9 +31,11 @@ export function useFilesystemSuggestions(
   const previousEndpointIdRef = useRef<string | undefined>(endpointId);
 
   const fetchSuggestions = useCallback(async (path: string, targetEndpointId?: string) => {
-    if (!browseDirectory || !path || path.length < 1) {
+    if (!enabled || !browseDirectory || !path || path.length < 1) {
       setSuggestions([]);
       setCurrentDir('');
+      setError(null);
+      setLoading(false);
       return;
     }
 
@@ -68,11 +71,20 @@ export function useFilesystemSuggestions(
         setLoading(false);
       }
     }
-  }, [browseDirectory, homePath, onHomePathChange]);
+  }, [browseDirectory, enabled, homePath, onHomePathChange]);
 
   useEffect(() => {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
+    }
+
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setSuggestions([]);
+      setCurrentDir('');
+      setError(null);
+      setLoading(false);
+      return;
     }
 
     const endpointChanged = previousEndpointIdRef.current !== endpointId;
@@ -97,7 +109,7 @@ export function useFilesystemSuggestions(
         clearTimeout(debounceRef.current);
       }
     };
-  }, [endpointId, fetchSuggestions, inputPath]);
+  }, [enabled, endpointId, fetchSuggestions, inputPath]);
 
   return { suggestions, loading, error, currentDir };
 }

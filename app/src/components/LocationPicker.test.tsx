@@ -119,6 +119,15 @@ describe('LocationPicker', () => {
     }));
   });
 
+  it('disables filesystem suggestions while closed', () => {
+    renderPicker({ isOpen: false });
+
+    expect(useFilesystemSuggestionsMock).toHaveBeenCalled();
+    const calls = useFilesystemSuggestionsMock.mock.calls;
+    const lastCall = calls[calls.length - 1];
+    expect(lastCall?.[5]).toBe(false);
+  });
+
   it('spawns a remote session with an agent advertised only by that endpoint', async () => {
     const onGetRecentLocations = vi.fn(async () => ({ locations: [], home_path: '/home/remote' }));
     const onInspectPath = vi.fn(async () => ({

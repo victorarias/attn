@@ -12,6 +12,50 @@ describe('useFilesystemSuggestions', () => {
     vi.useRealTimers();
   });
 
+  it('does not browse while disabled and clears visible suggestion state', async () => {
+    const browseDirectory = vi.fn(async () => ({
+      success: true,
+      input_path: '~/projects/',
+      directory: '/Users/victor/projects',
+      entries: [{ name: 'attn', path: '/Users/victor/projects/attn' }],
+      home_path: '/Users/victor',
+    }));
+
+    const { result, rerender } = renderHook(
+      ({ inputPath, enabled }) => useFilesystemSuggestions(
+        inputPath,
+        undefined,
+        browseDirectory,
+        undefined,
+        undefined,
+        enabled,
+      ),
+      { initialProps: { inputPath: '~/projects/', enabled: true } },
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+      await Promise.resolve();
+    });
+
+    expect(result.current.suggestions.map((entry) => entry.name)).toEqual(['attn']);
+
+    act(() => {
+      rerender({ inputPath: '~/projects/attn', enabled: false });
+    });
+
+    expect(result.current.suggestions).toEqual([]);
+    expect(result.current.currentDir).toBe('');
+    expect(result.current.loading).toBe(false);
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(browseDirectory).toHaveBeenCalledTimes(1);
+  });
+
   it('refreshes immediately and clears stale results when the target endpoint changes', async () => {
     let resolveRemote: ((value: BrowseDirectoryResult) => void) | null = null;
     const browseDirectory = vi.fn(async (_inputPath: string, endpointId?: string) => {

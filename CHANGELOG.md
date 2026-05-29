@@ -14,6 +14,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Terminal Screenshot Paste**: Ghostty terminal sessions now forward macOS Control-V image-paste triggers and translate image paste events so Claude and Codex can read pasted clipboard images again without breaking text paste on other platforms.
 - **Session Switching Shortcuts**: Command-number session switching no longer writes the selected session number into the focused Ghostty terminal.
 - **Terminal Click Selection**: Small pointer movement during an ordinary terminal click no longer creates and copies a single-cell text selection.
+- **Shell Terminal Input**: Shell panes now answer common terminal capability and color queries, preventing prompts from delaying typed input while they wait for a terminal response.
+- **Location Picker Background Work**: Hidden location pickers no longer keep sending directory-browse requests, reducing avoidable daemon and terminal UI load while working in sessions.
 
 ## [2026-05-27]
 
