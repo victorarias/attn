@@ -18,6 +18,10 @@ import {
 import { writeClipboardText } from '../utils/clipboardBridge';
 import { parseOsc52Writes, type Osc52State } from '../utils/terminalOsc';
 import {
+  parseSynchronizedOutput,
+  type SynchronizedOutputState,
+} from '../utils/terminalSynchronizedOutput';
+import {
   FONT_FAMILY,
   TERMINAL_SCROLLBACK_LINES,
   getTerminalAnsiPalette,
@@ -93,6 +97,9 @@ interface SelectionRange {
 // ghostty-web's low-level model exposes hyperlink IDs but currently returns
 // null for hyperlink URIs, so OSC 8 labels cannot be opened without API work.
 const URL_RE = /\b(?:https?:\/\/|file:\/\/|mailto:|ftp:\/\/|ssh:\/\/|git:\/\/|tel:|magnet:|gemini:\/\/|gopher:\/\/|news:)[^\s<>()]+/g;
+// Ghostty's native renderer resets synchronized-output mode after 1000ms so
+// one bad producer cannot freeze rendering indefinitely.
+const SYNCHRONIZED_OUTPUT_RENDER_TIMEOUT_MS = 1000;
 
 function literalUrlAtColumn(line: string, col: number): string | null {
   for (const match of line.matchAll(URL_RE)) {
@@ -187,6 +194,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const acceleratorHeldRef = useRef(false);
     const writeChainRef = useRef(Promise.resolve());
     const osc52StateRef = useRef<Osc52State>({ pending: '' });
+    const synchronizedOutputStateRef = useRef<SynchronizedOutputState>({ active: false, pending: '' });
+    const synchronizedOutputRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const renderCountRef = useRef(0);
     const writeCountRef = useRef(0);
     const lastRenderAtRef = useRef(0);
@@ -240,6 +249,26 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         lastRenderAtRef.current = Date.now();
       }
     }, [getViewportCells, resolvedTheme]);
+
+    const clearSynchronizedOutputRenderTimer = useCallback(() => {
+      if (!synchronizedOutputRenderTimerRef.current) return;
+      clearTimeout(synchronizedOutputRenderTimerRef.current);
+      synchronizedOutputRenderTimerRef.current = null;
+    }, []);
+
+    const flushSynchronizedOutputRender = useCallback(() => {
+      clearSynchronizedOutputRenderTimer();
+      renderSurface(true);
+    }, [clearSynchronizedOutputRenderTimer, renderSurface]);
+
+    const scheduleSynchronizedOutputRenderFallback = useCallback(() => {
+      if (synchronizedOutputRenderTimerRef.current) return;
+      synchronizedOutputRenderTimerRef.current = setTimeout(() => {
+        synchronizedOutputRenderTimerRef.current = null;
+        synchronizedOutputStateRef.current = { active: false, pending: '' };
+        renderSurface(true);
+      }, SYNCHRONIZED_OUTPUT_RENDER_TIMEOUT_MS);
+    }, [renderSurface]);
 
     const lineAtVisibleRow = useCallback((row: number): string => {
       const terminal = terminalRef.current;
@@ -479,9 +508,18 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }
         writeCountRef.current += 1;
         lastWriteAtRef.current = Date.now();
-        renderSurface(true);
+        const synchronizedOutput = parseSynchronizedOutput(
+          synchronizedOutputStateRef.current,
+          searchableOutput,
+        );
+        synchronizedOutputStateRef.current = synchronizedOutput.state;
+        if (synchronizedOutput.shouldRender) {
+          flushSynchronizedOutputRender();
+        } else {
+          scheduleSynchronizedOutputRenderFallback();
+        }
       });
-    }, [enqueueOperation, lineAtVisibleRow, renderSurface]);
+    }, [enqueueOperation, flushSynchronizedOutputRender, lineAtVisibleRow, scheduleSynchronizedOutputRenderFallback]);
 
     // Replay segments alternate resize and bytes; both must be applied on one
     // chain or all historical bytes are parsed at the final geometry.
@@ -562,6 +600,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           cursorColor: colorNumber(theme.cursor),
           palette: getTerminalAnsiPalette(resolvedTheme),
         });
+        synchronizedOutputStateRef.current = { active: false, pending: '' };
+        clearSynchronizedOutputRenderTimer();
         const renderer = new WebGlTerminalRenderer(canvas, fontSize, FONT_FAMILY, {
           background: theme.background,
           foreground: theme.foreground,
@@ -648,6 +688,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         observer?.disconnect();
         canvas.removeEventListener('webglcontextlost', handleContextLost);
         unregister();
+        clearSynchronizedOutputRenderTimer();
         inputRef.current?.dispose();
         rendererRef.current?.dispose();
         terminalRef.current?.free();
@@ -658,7 +699,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // Ghostty cells contain their resolved default RGB values, so theme
     // changes require a fresh model. The pane runtime rehydrates this model
     // from verified replay without sending historical replies to the live PTY.
-    }, [fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, resizeLocal, resolvedTheme, write]);
+    }, [clearSynchronizedOutputRenderTimer, fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, resizeLocal, resolvedTheme, write]);
 
     const cellFromPointer = (event: React.MouseEvent) => {
       const renderer = rendererRef.current;
