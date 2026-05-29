@@ -12,6 +12,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Codex Activity State**: Codex sessions now use hooks exclusively for live activity state, preventing completed sessions from remaining green due to stale transcript activity.
 - **Terminal Selection and Link Activation**: Ghostty terminals now select words on double-click, preserve Option-drag selection inside mouse-tracking applications, and open URLs only with Command-click while showing a pointer cursor when Command is held.
 - **Terminal Screenshot Paste**: Ghostty terminal sessions now forward macOS Control-V image-paste triggers and translate image paste events so Claude and Codex can read pasted clipboard images again without breaking text paste on other platforms.
+- **Session Switching Shortcuts**: Command-number session switching no longer writes the selected session number into the focused Ghostty terminal.
 
 ## [2026-05-27]
 
