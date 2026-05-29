@@ -148,6 +148,10 @@ test.describe('Ghostty terminal interactions', () => {
   });
 
   test('forwards screenshot paste triggers from ctrl+v and command paste', async ({ page, daemon }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });
+      Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (Macintosh; Intel Mac OS X)', configurable: true });
+    });
     const terminal = await openTerminalSession(page, daemon, 's-image-paste');
     await writeTerminalOutput(page, 's-image-paste', '\u001b[2J\u001b[Hready');
     await expect
