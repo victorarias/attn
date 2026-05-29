@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -127,7 +128,7 @@ func TestPluginDriverEndToEnd_InstalledProcessLaunchReportAndResumeThroughWorker
 		t.Fatalf("first plugin request=%+v, want yolo driver.spawn", records[0])
 	}
 
-	removePTYSession(t, d, sessionID)
+	terminatePluginFixturePTY(t, d, sessionID)
 	firstClose := waitForPluginFixtureCloseRecords(t, fixtureCloseLog, 1)[0]
 	if firstClose.Params.RunID != records[0].Params.RunID || firstClose.Params.Reason != "exited" {
 		t.Fatalf("first close=%+v, want exited notification for spawned run %q", firstClose.Params, records[0].Params.RunID)
@@ -149,7 +150,7 @@ func TestPluginDriverEndToEnd_InstalledProcessLaunchReportAndResumeThroughWorker
 		t.Fatalf("resume metadata=%s, want previous plugin metadata", resume.Params.Metadata)
 	}
 
-	removePTYSession(t, d, sessionID)
+	terminatePluginFixturePTY(t, d, sessionID)
 	secondClose := waitForPluginFixtureCloseRecords(t, fixtureCloseLog, 2)[1]
 	if secondClose.Params.RunID != resume.Params.RunID || secondClose.Params.Reason != "exited" {
 		t.Fatalf("second close=%+v, want exited notification for resumed run %q", secondClose.Params, resume.Params.RunID)
@@ -161,6 +162,15 @@ func TestPluginDriverEndToEnd_InstalledProcessLaunchReportAndResumeThroughWorker
 	}, "plugin disconnect to remove registered driver")
 	if _, ok := d.settingsWithAgentAvailability()["fixture_available"]; ok {
 		t.Fatal("fixture_available remains advertised after plugin disconnect")
+	}
+}
+
+func terminatePluginFixturePTY(t *testing.T, d *Daemon, sessionID string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := d.ptyBackend.Kill(ctx, sessionID, syscall.SIGTERM); err != nil {
+		t.Fatalf("terminate plugin fixture PTY: %v", err)
 	}
 }
 
