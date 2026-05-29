@@ -3,6 +3,18 @@ import { isMacLikePlatform } from '../../shortcuts/platform';
 
 export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
   return (event: KeyboardEvent) => {
+    if (
+      event.type === 'keydown'
+      && event.ctrlKey
+      && !event.metaKey
+      && !event.altKey
+      && !event.shiftKey
+      && event.key.toLowerCase() === 'v'
+    ) {
+      // Claude and Codex read image clipboard content after receiving Ctrl+V.
+      sendToPty('\x16');
+      return false;
+    }
     const accel = isMacLikePlatform() ? event.metaKey : (event.metaKey || event.ctrlKey);
     if (event.type === 'keydown' && accel && !event.altKey) {
       if (!event.shiftKey && event.key.toLowerCase() === 't') {

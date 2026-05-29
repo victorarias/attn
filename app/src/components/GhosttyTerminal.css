@@ -13,6 +13,10 @@
   display: block;
 }
 
+.ghostty-terminal-link-hover {
+  cursor: pointer;
+}
+
 .ghostty-terminal-error {
   padding: 12px;
   color: var(--color-fg-error, #f48771);

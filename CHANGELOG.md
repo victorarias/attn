@@ -10,6 +10,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Codex Activity State**: Codex sessions now use hooks exclusively for live activity state, preventing completed sessions from remaining green due to stale transcript activity.
+- **Terminal Link Activation**: Ghostty terminal URLs now open only with Command-click and show a pointer cursor while Command is held, consistently across interactive applications.
+- **Terminal Screenshot Paste**: Ghostty terminal sessions now forward Control-V image-paste triggers and translate Command-V screenshot paste events so Claude and Codex can read pasted clipboard images again.
 
 ## [2026-05-27]
 
