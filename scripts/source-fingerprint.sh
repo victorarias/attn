@@ -63,15 +63,13 @@ hash_file() {
 should_exclude_path() {
   local relative_path="$1"
   # Only app + daemon source is tracked. Everything else — docs, tests,
-  # harness scripts, CI config, the separate native-ui project — can change
-  # without invalidating the packaged app bundle, so skipping those paths
-  # keeps iteration fast.
+  # harness scripts, and CI config — can change without invalidating the
+  # packaged app bundle, so skipping those paths keeps iteration fast.
   case "${relative_path}" in
     app/scripts/real-app-harness/*) return 0 ;;
     app/scripts/*)                  return 0 ;;
     app/e2e/*)                      return 0 ;;
     app/test-harness/*)             return 0 ;;
-    native-ui/*)                    return 0 ;;
     docs/*)                         return 0 ;;
     scripts/*)                      return 0 ;;
     .github/*)                      return 0 ;;

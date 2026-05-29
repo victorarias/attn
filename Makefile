@@ -1,4 +1,4 @@
-.PHONY: run build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev dev-native test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-dev app-screenshot scenario-native-canvas dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-dev app-screenshot dist release release-skip-tests
 
 # Bare `make` does the full prod inner loop: install + open the app.
 # `make install` is install-only (for scripts/CI that drive the launch
@@ -229,31 +229,6 @@ build-app-dev: build
 
 app-screenshot:
 	cd app && node scripts/real-app-harness/capture-app-screenshot.mjs $(if $(SCREENSHOT_PATH),--path "$(SCREENSHOT_PATH)",) $(APP_SCREENSHOT_FLAGS)
-
-# Run the native canvas app from source against the dev daemon, with
-# automation enabled (ATTN_PROFILE=dev). Self-sufficient: builds the Go
-# binary, ad-hoc codesigns it (so macOS doesn't SIGKILL the spawned
-# daemon), ensures a dev daemon is running on port 29849, then launches
-# the native app via cargo run. `daemon ensure` is idempotent — if a dev
-# daemon is already running (e.g. from `make dev`), it's a no-op and the
-# native app reuses it. Prod daemon is never touched.
-#
-# The bin name is `attn-native`; swap to `attn-spike3/4/5` to run an
-# older spike side-by-side without rebuilding the main binary.
-dev-native: build
-	@echo ">>> Ensuring dev daemon (profile=dev, port=29849, data=~/.attn-dev)"
-	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign -s - -f $(OUTPUT) >/dev/null 2>&1 || true; fi
-	@$(DEV_DAEMON_ENV) ./$(OUTPUT) daemon ensure >/dev/null
-	@echo ">>> Launching attn-native (profile=dev, daemon=ws://localhost:29849/ws)"
-	cd native-ui && ATTN_PROFILE=dev ATTN_WS_URL=ws://localhost:29849/ws cargo run --bin attn-native
-
-# End-to-end scenario for the native canvas app driven through its UI
-# automation sidecar. Assumes the native binary is already running with
-# automation enabled — `make dev-native` in another terminal sets up the
-# right env. The script reads ATTN_PROFILE itself to find the matching
-# manifest at ~/Library/Application Support/com.attn.native.dev/.
-scenario-native-canvas:
-	cd app && node scripts/real-app-harness/scenario-native-canvas.mjs
 
 # Sign the installed app and bundled CLI/daemon sidecar using the configured
 # stable identity when available; falls back to ad-hoc without a certificate.

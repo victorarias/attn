@@ -68,10 +68,7 @@ pub fn bundle_identifier() -> &'static str {
     }
 }
 
-/// Decide whether the UI automation bridge should run this launch. Single
-/// rule shared with the native canvas app — keep it in sync with
-/// `native-ui/crates/attn-native-app/src/automation/profile.rs` and
-/// `app/scripts/real-app-harness/nativeHarnessProfile.mjs`.
+/// Decide whether the UI automation bridge should run this launch.
 ///
 ///   - `ATTN_AUTOMATION=1`  → on
 ///   - `ATTN_AUTOMATION=0`  → off
