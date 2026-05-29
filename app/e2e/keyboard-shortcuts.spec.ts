@@ -214,9 +214,17 @@ test.describe('Keyboard Shortcuts', () => {
 
       await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
 
-      // ⌘2 should select second session
+      // Switching from a focused Ghostty terminal must not forward the shortcut's digit.
+      await page.locator('[data-testid="session-s1"]').click();
+      const firstTerminal = page.locator('[data-pane-session-id="s1"][data-pane-id="main"] .terminal-container');
+      await expect(firstTerminal).toBeVisible({ timeout: 5000 });
+      await firstTerminal.focus();
+
       await page.keyboard.press('Meta+2');
-      await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('[data-session-terminal-workspace="s2"]')).toBeVisible({ timeout: 2000 });
+      expect(await page.evaluate(() => (
+        window.__TEST_GET_SESSION_INPUT_EVENTS?.('s1') ?? []
+      ).filter((event) => event.event === 'send_to_pty').length)).toBe(0);
 
       // Go back to dashboard
       await page.keyboard.press('Escape');

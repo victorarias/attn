@@ -107,6 +107,7 @@ export function useKeyboardShortcuts({
       // ⌘1-9 - Select session by index
       if (isMeta && e.key >= '1' && e.key <= '9') {
         e.preventDefault();
+        e.stopPropagation();
         const index = parseInt(e.key, 10) - 1;
         onSelectSession(index);
       }
