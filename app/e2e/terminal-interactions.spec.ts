@@ -184,6 +184,66 @@ test.describe('Ghostty terminal interactions', () => {
     await expectTerminalInputCount(page, 's-image-paste', 'pasted text', 1);
   });
 
+  test('leaves ctrl+v text paste available on non-mac platforms', async ({ page, daemon }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'platform', { value: 'Linux x86_64', configurable: true });
+      Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (X11; Linux x86_64)', configurable: true });
+    });
+    const terminal = await openTerminalSession(page, daemon, 's-text-paste-linux');
+    await terminal.focus();
+
+    await page.keyboard.press('Control+v');
+    await expectTerminalInputCount(page, 's-text-paste-linux', '\u0016', 0);
+
+    await terminal.evaluate((element) => {
+      const data = new DataTransfer();
+      data.setData('text/plain', 'linux pasted text');
+      element.dispatchEvent(new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: data,
+      }));
+    });
+    await expectTerminalInputCount(page, 's-text-paste-linux', 'linux pasted text', 1);
+  });
+
+  test('double-click selects and copies a terminal word', async ({ page, context, daemon }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const terminal = await openTerminalSession(page, daemon, 's-double-click');
+    await writeTerminalOutput(page, 's-double-click', '\u001b[2J\u001b[Hselectable-word suffix');
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-double-click') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('selectable-word');
+
+    await terminal.dblclick({ position: { x: 55, y: 8 } });
+
+    await expect
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .toBe('selectable-word');
+  });
+
+  test('option-drag selects text while terminal mouse tracking is active', async ({ page, context, daemon }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const terminal = await openTerminalSession(page, daemon, 's-option-selection');
+    const text = 'select while tracked';
+    await writeTerminalOutput(page, 's-option-selection', `\u001b[2J\u001b[H\u001b[?1000h${text}`);
+
+    await terminal.hover({ position: { x: 2, y: 8 } });
+    await page.keyboard.down('Alt');
+    await page.mouse.down();
+    await terminal.hover({ position: { x: 200, y: 8 } });
+    await page.mouse.up();
+    await page.keyboard.up('Alt');
+
+    await expect
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .toContain(text);
+  });
+
   test('copies selected terminal text without opening a dragged URL', async ({ page, context, daemon }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await installOpenerProbe(page);

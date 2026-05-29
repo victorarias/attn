@@ -102,6 +102,16 @@ function literalUrlAtColumn(line: string, col: number): string | null {
   return null;
 }
 
+function wordRangeAtColumn(line: string, col: number): { startCol: number; endCol: number } | null {
+  const isWordCharacter = (character: string | undefined) => Boolean(character && /[\w-]/.test(character));
+  if (!isWordCharacter(line[col])) return null;
+  let startCol = col;
+  while (startCol > 0 && isWordCharacter(line[startCol - 1])) startCol -= 1;
+  let endCol = col + 1;
+  while (endCol < line.length && isWordCharacter(line[endCol])) endCol += 1;
+  return { startCol, endCol };
+}
+
 function colorNumber(value: string): number {
   return Number.parseInt(value.slice(1), 16);
 }
@@ -786,7 +796,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           if (!terminal || !cell) return;
           const uri = literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col);
           const opensUri = Boolean(uri && (event.metaKey || event.ctrlKey));
-          if (!opensUri && !event.shiftKey && sendTrackedMouse('press', event)) return;
+          if (!opensUri && !event.altKey && sendTrackedMouse('press', event)) return;
           const row = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
           selectedTextRef.current = null;
           applicationSelectionAnchorRef.current = null;
@@ -828,6 +838,25 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           if (uri && !text && (event.metaKey || event.ctrlKey)) {
             void openUrl(uri);
           }
+        }}
+        onDoubleClick={async (event) => {
+          const terminal = terminalRef.current;
+          const cell = cellFromPointer(event);
+          if (!terminal || !cell || (terminal.hasMouseTracking() && !event.altKey)) return;
+          const range = wordRangeAtColumn(lineAtVisibleRow(cell.row), cell.col);
+          if (!range) return;
+          const row = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
+          selectionRef.current = {
+            startRow: row,
+            startCol: range.startCol,
+            endRow: row,
+            endCol: range.endCol,
+          };
+          applicationSelectionAnchorRef.current = null;
+          const text = textForSelectionRange(selectionRef.current);
+          selectedTextRef.current = text || null;
+          renderSurface(true);
+          if (text) await writeClipboardText(text);
         }}
         onKeyDown={(event) => {
           if (event.metaKey && event.shiftKey && event.key.toLowerCase() === 'c') {

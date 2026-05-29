@@ -10,8 +10,10 @@ export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
       && !event.altKey
       && !event.shiftKey
       && event.key.toLowerCase() === 'v'
+      && isMacLikePlatform()
     ) {
-      // Claude and Codex read image clipboard content after receiving Ctrl+V.
+      // On macOS Ctrl+V is available for the agent image-paste trigger;
+      // elsewhere it is the normal browser text-paste accelerator.
       sendToPty('\x16');
       return false;
     }
