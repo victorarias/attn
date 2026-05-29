@@ -11,7 +11,6 @@ import (
 )
 
 const (
-	codexActiveWindow         = 3 * time.Second
 	copilotToolStartGraceTime = 1200 * time.Millisecond
 	claudeHookStaleThreshold  = 2 * time.Minute
 )
@@ -124,139 +123,6 @@ func (b *claudeTranscriptWatcherBehavior) SkipClassification(sessionState protoc
 	if now.Sub(parsed) < claudeHookStaleThreshold {
 		return true, "transcript watcher: skipping classification, hooks active"
 	}
-	return false, ""
-}
-
-// --- Codex behavior ---
-
-type codexPendingTool struct {
-	name      string
-	startedAt time.Time
-}
-
-type codexTranscriptWatcherBehavior struct {
-	turnOpen        bool
-	pendingTools    map[string]codexPendingTool
-	lastActivityAt  time.Time
-	assistantInTurn int
-	sawTurnStart    bool
-}
-
-func (b *codexTranscriptWatcherBehavior) Reset() {
-	b.turnOpen = false
-	b.pendingTools = make(map[string]codexPendingTool)
-	b.lastActivityAt = time.Time{}
-	b.assistantInTurn = 0
-	b.sawTurnStart = false
-}
-
-func (b *codexTranscriptWatcherBehavior) HandleLine(line []byte, now time.Time, sessionState protocol.SessionState) WatcherLineResult {
-	evt, ok := transcript.ExtractCodexLifecycle(line)
-	if !ok {
-		return WatcherLineResult{}
-	}
-	switch evt.Kind {
-	case "turn_start":
-		b.turnOpen = true
-		b.lastActivityAt = now
-		b.assistantInTurn = 0
-		b.sawTurnStart = true
-		return WatcherLineResult{
-			Log: "transcript watcher: codex turn start",
-		}
-	case "turn_end":
-		b.turnOpen = false
-		b.lastActivityAt = now
-		b.pendingTools = make(map[string]codexPendingTool)
-		sawTurnStart := b.sawTurnStart
-		assistantCount := b.assistantInTurn
-		b.assistantInTurn = 0
-		b.sawTurnStart = false
-		if shouldPromoteCodexNoOutputTurn(sawTurnStart, assistantCount, sessionState) {
-			return WatcherLineResult{
-				State: protocol.StateWaitingInput,
-				Log:   "transcript watcher: codex turn ended with no assistant output, setting waiting_input",
-			}
-		}
-		return WatcherLineResult{
-			Log: fmt.Sprintf("transcript watcher: codex turn end assistant_messages=%d", assistantCount),
-		}
-	case "turn_aborted":
-		b.turnOpen = false
-		b.lastActivityAt = now
-		b.pendingTools = make(map[string]codexPendingTool)
-		b.assistantInTurn = 0
-		b.sawTurnStart = false
-		if sessionState != protocol.SessionStatePendingApproval && sessionState != protocol.SessionStateWaitingInput {
-			return WatcherLineResult{
-				State: protocol.StateWaitingInput,
-				Log:   "transcript watcher: codex turn aborted, setting waiting_input",
-			}
-		}
-	case "tool_start":
-		b.turnOpen = true
-		b.lastActivityAt = now
-		if evt.ToolCallID != "" {
-			b.pendingTools[evt.ToolCallID] = codexPendingTool{
-				name:      evt.ToolName,
-				startedAt: now,
-			}
-			return WatcherLineResult{
-				Log: fmt.Sprintf("transcript watcher: codex tool start tool=%s call=%s", evt.ToolName, evt.ToolCallID),
-			}
-		}
-	case "tool_complete":
-		b.lastActivityAt = now
-		if evt.ToolCallID != "" {
-			delete(b.pendingTools, evt.ToolCallID)
-			return WatcherLineResult{
-				Log: fmt.Sprintf("transcript watcher: codex tool complete call=%s", evt.ToolCallID),
-			}
-		}
-	case "activity":
-		b.lastActivityAt = now
-	}
-	return WatcherLineResult{}
-}
-
-func (b *codexTranscriptWatcherBehavior) HandleAssistantMessage(now time.Time) {
-	b.lastActivityAt = now
-	b.assistantInTurn++
-}
-
-func (b *codexTranscriptWatcherBehavior) DeduplicateAssistantEvents() bool { return true }
-
-func (b *codexTranscriptWatcherBehavior) QuietSince(lastAssistantAt time.Time) time.Time {
-	if b.lastActivityAt.After(lastAssistantAt) {
-		return b.lastActivityAt
-	}
-	return lastAssistantAt
-}
-
-func (b *codexTranscriptWatcherBehavior) Tick(now time.Time, sessionState protocol.SessionState) WatcherTickResult {
-	if !shouldKeepCodexWorking(b.turnOpen, b.pendingTools, b.lastActivityAt, now) {
-		return WatcherTickResult{}
-	}
-	if sessionState == protocol.SessionStateWorking || sessionState == protocol.SessionStatePendingApproval {
-		return WatcherTickResult{BlockClassification: true}
-	}
-	activityAge := int64(-1)
-	if !b.lastActivityAt.IsZero() {
-		activityAge = now.Sub(b.lastActivityAt).Milliseconds()
-	}
-	return WatcherTickResult{
-		State:               protocol.StateWorking,
-		BlockClassification: true,
-		Log: fmt.Sprintf(
-			"transcript watcher: keeping codex working turn_open=%v pending_tools=%d activity_age_ms=%d",
-			b.turnOpen,
-			len(b.pendingTools),
-			activityAge,
-		),
-	}
-}
-
-func (b *codexTranscriptWatcherBehavior) SkipClassification(sessionState protocol.SessionState, lastSeen string, now time.Time) (bool, string) {
 	return false, ""
 }
 
@@ -396,32 +262,6 @@ func shouldPromoteTranscriptPending(sessionState protocol.SessionState) bool {
 	default:
 		return false
 	}
-}
-
-func shouldKeepCodexWorking(turnOpen bool, pendingTools map[string]codexPendingTool, lastActivityAt time.Time, now time.Time) bool {
-	if turnOpen {
-		return true
-	}
-	if len(pendingTools) > 0 {
-		return true
-	}
-	if !lastActivityAt.IsZero() && now.Sub(lastActivityAt) <= codexActiveWindow {
-		return true
-	}
-	return false
-}
-
-func shouldPromoteCodexNoOutputTurn(sawTurnStart bool, assistantMessages int, sessionState protocol.SessionState) bool {
-	if !sawTurnStart {
-		return false
-	}
-	if assistantMessages > 0 {
-		return false
-	}
-	if sessionState == protocol.SessionStatePendingApproval || sessionState == protocol.SessionStateWaitingInput {
-		return false
-	}
-	return true
 }
 
 func extractTranscriptEventType(line []byte) string {
