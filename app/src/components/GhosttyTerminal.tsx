@@ -102,6 +102,16 @@ function literalUrlAtColumn(line: string, col: number): string | null {
   return null;
 }
 
+function wordRangeAtColumn(line: string, col: number): { startCol: number; endCol: number } | null {
+  const isWordCharacter = (character: string | undefined) => Boolean(character && /[\w-]/.test(character));
+  if (!isWordCharacter(line[col])) return null;
+  let startCol = col;
+  while (startCol > 0 && isWordCharacter(line[startCol - 1])) startCol -= 1;
+  let endCol = col + 1;
+  while (endCol < line.length && isWordCharacter(line[endCol])) endCol += 1;
+  return { startCol, endCol };
+}
+
 function colorNumber(value: string): number {
   return Number.parseInt(value.slice(1), 16);
 }
@@ -170,6 +180,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const applicationSelectionAnchorRef = useRef<ApplicationSelectionAnchor | null>(null);
     const selectingRef = useRef(false);
     const trackedMouseButtonRef = useRef<number | null>(null);
+    const hoveredCellRef = useRef<{ row: number; col: number } | null>(null);
+    const acceleratorHeldRef = useRef(false);
     const writeChainRef = useRef(Promise.resolve());
     const osc52StateRef = useRef<Osc52State>({ pending: '' });
     const renderCountRef = useRef(0);
@@ -184,6 +196,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const runtimeMetaRef = useRef(runtimeLogMeta);
     const debugNameRef = useRef(debugName);
     const [error, setError] = useState<string | null>(null);
+    const [linkCursorActive, setLinkCursorActive] = useState(false);
 
     onInputRef.current = onInput;
     onReadyRef.current = onReady;
@@ -654,6 +667,25 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return 0;
     };
 
+    const updateLinkCursor = useCallback((cell: { row: number; col: number } | null, acceleratorHeld: boolean) => {
+      const uri = cell ? literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col) : null;
+      setLinkCursorActive(Boolean(uri && acceleratorHeld));
+    }, [lineAtVisibleRow]);
+
+    useEffect(() => {
+      const handleModifierChange = (event: KeyboardEvent) => {
+        if (event.key !== 'Meta' && event.key !== 'Control') return;
+        acceleratorHeldRef.current = event.metaKey || event.ctrlKey;
+        updateLinkCursor(hoveredCellRef.current, acceleratorHeldRef.current);
+      };
+      window.addEventListener('keydown', handleModifierChange);
+      window.addEventListener('keyup', handleModifierChange);
+      return () => {
+        window.removeEventListener('keydown', handleModifierChange);
+        window.removeEventListener('keyup', handleModifierChange);
+      };
+    }, [updateLinkCursor]);
+
     const sendTrackedMouse = (
       action: 'press' | 'move' | 'release',
       event: React.MouseEvent,
@@ -687,7 +719,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     return (
       <div
         ref={containerRef}
-        className="terminal-container ghostty-terminal"
+        className={`terminal-container ghostty-terminal${linkCursorActive ? ' ghostty-terminal-link-hover' : ''}`}
         data-terminal-renderer="ghostty-webgl"
         tabIndex={0}
         contentEditable
@@ -697,6 +729,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         aria-multiline="true"
         spellCheck={false}
         onBeforeInput={(event) => event.preventDefault()}
+        onPasteCapture={(event) => {
+          const hasImage = Array.from(event.clipboardData.items).some((item) => (
+            item.kind === 'file' && item.type.startsWith('image/')
+          ));
+          if (!hasImage) return;
+          // Browser paste events cannot send image bytes through a PTY. Both
+          // supported agent TUIs handle Ctrl+V by reading the native clipboard.
+          event.preventDefault();
+          event.stopPropagation();
+          onInputRef.current('\x16');
+        }}
         onWheel={(event) => {
           if (event.defaultPrevented) return;
           const terminal = terminalRef.current;
@@ -752,8 +795,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           const cell = cellFromPointer(event);
           if (!terminal || !cell) return;
           const uri = literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col);
-          const opensUri = Boolean(uri && ((event.metaKey || event.ctrlKey) || !terminal.hasMouseTracking()));
-          if (!opensUri && !event.shiftKey && sendTrackedMouse('press', event)) return;
+          const opensUri = Boolean(uri && (event.metaKey || event.ctrlKey));
+          if (!opensUri && !event.altKey && sendTrackedMouse('press', event)) return;
           const row = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
           selectedTextRef.current = null;
           applicationSelectionAnchorRef.current = null;
@@ -762,6 +805,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           renderSurface(true);
         }}
         onMouseMove={(event) => {
+          const hoveredCell = cellFromPointer(event);
+          hoveredCellRef.current = hoveredCell;
+          acceleratorHeldRef.current = event.metaKey || event.ctrlKey;
+          updateLinkCursor(hoveredCell, acceleratorHeldRef.current);
           if (!selectingRef.current || !selectionRef.current) {
             sendTrackedMouse('move', event);
             return;
@@ -772,6 +819,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           const row = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
           selectionRef.current = { ...selectionRef.current, endRow: row, endCol: cell.col + 1 };
           renderSurface(true);
+        }}
+        onMouseLeave={() => {
+          hoveredCellRef.current = null;
+          setLinkCursorActive(false);
         }}
         onMouseUp={async (event) => {
           if (!selectingRef.current) {
@@ -784,9 +835,28 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           if (text) await writeClipboardText(text);
           const cell = cellFromPointer(event);
           const uri = cell ? literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col) : null;
-          if (uri && !text && ((event.metaKey || event.ctrlKey) || !terminalRef.current?.hasMouseTracking())) {
+          if (uri && !text && (event.metaKey || event.ctrlKey)) {
             void openUrl(uri);
           }
+        }}
+        onDoubleClick={async (event) => {
+          const terminal = terminalRef.current;
+          const cell = cellFromPointer(event);
+          if (!terminal || !cell || (terminal.hasMouseTracking() && !event.altKey)) return;
+          const range = wordRangeAtColumn(lineAtVisibleRow(cell.row), cell.col);
+          if (!range) return;
+          const row = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
+          selectionRef.current = {
+            startRow: row,
+            startCol: range.startCol,
+            endRow: row,
+            endCol: range.endCol,
+          };
+          applicationSelectionAnchorRef.current = null;
+          const text = textForSelectionRange(selectionRef.current);
+          selectedTextRef.current = text || null;
+          renderSurface(true);
+          if (text) await writeClipboardText(text);
         }}
         onKeyDown={(event) => {
           if (event.metaKey && event.shiftKey && event.key.toLowerCase() === 'c') {

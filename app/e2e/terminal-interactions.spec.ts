@@ -57,6 +57,25 @@ async function expectOpenedUrl(page: import('@playwright/test').Page, url: strin
     .toContain(url);
 }
 
+async function expectTerminalInputCount(
+  page: import('@playwright/test').Page,
+  sessionId: string,
+  data: string,
+  count: number,
+) {
+  await expect
+    .poll(
+      async () => page.evaluate(
+        ({ id, expectedData }) => (
+          window.__TEST_GET_SESSION_INPUT_EVENTS?.(id) ?? []
+        ).filter((event) => event.event === 'send_to_pty' && event.data === expectedData).length,
+        { id: sessionId, expectedData: data },
+      ),
+      { timeout: 3000 },
+    )
+    .toBe(count);
+}
+
 async function openTerminalSession(
   page: import('@playwright/test').Page,
   daemon: { injectSession: (session: { id: string; label: string; state: string; directory?: string }) => Promise<void> },
@@ -73,7 +92,7 @@ async function openTerminalSession(
 }
 
 test.describe('Ghostty terminal interactions', () => {
-  test('opens a visible URL when clicked', async ({ page, daemon }) => {
+  test('opens a visible URL only when cmd+clicked', async ({ page, daemon }) => {
     await installOpenerProbe(page);
     const terminal = await openTerminalSession(page, daemon, 's-link');
     const url = 'https://example.test/terminal-link';
@@ -86,7 +105,21 @@ test.describe('Ghostty terminal interactions', () => {
       )
       .toContain(url);
 
+    await terminal.hover({ position: { x: 100, y: 8 } });
+    await expect(terminal).toHaveCSS('cursor', 'text');
     await terminal.click({ position: { x: 100, y: 8 } });
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_URLS?: string[] }).__OPENED_TERMINAL_URLS ?? [],
+        ),
+        { timeout: 500 },
+      )
+      .toEqual([]);
+    await page.keyboard.down('Meta');
+    await expect(terminal).toHaveCSS('cursor', 'pointer');
+    await terminal.click({ position: { x: 100, y: 8 } });
+    await page.keyboard.up('Meta');
 
     await expectOpenedUrl(page, url);
   });
@@ -104,9 +137,115 @@ test.describe('Ghostty terminal interactions', () => {
       )
       .toContain(url);
 
-    await terminal.click({ modifiers: ['Meta'], position: { x: 100, y: 8 } });
+    await terminal.hover({ position: { x: 100, y: 8 } });
+    await expect(terminal).toHaveCSS('cursor', 'text');
+    await page.keyboard.down('Meta');
+    await expect(terminal).toHaveCSS('cursor', 'pointer');
+    await terminal.click({ position: { x: 100, y: 8 } });
+    await page.keyboard.up('Meta');
 
     await expectOpenedUrl(page, url);
+  });
+
+  test('forwards screenshot paste triggers from ctrl+v and command paste', async ({ page, daemon }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });
+      Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (Macintosh; Intel Mac OS X)', configurable: true });
+    });
+    const terminal = await openTerminalSession(page, daemon, 's-image-paste');
+    await writeTerminalOutput(page, 's-image-paste', '\u001b[2J\u001b[Hready');
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-image-paste') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('ready');
+
+    await terminal.focus();
+    await page.keyboard.press('Control+v');
+    await expectTerminalInputCount(page, 's-image-paste', '\u0016', 1);
+
+    await terminal.evaluate((element) => {
+      const data = new DataTransfer();
+      data.items.add(new File(['image'], 'screenshot.png', { type: 'image/png' }));
+      element.dispatchEvent(new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: data,
+      }));
+    });
+    await expectTerminalInputCount(page, 's-image-paste', '\u0016', 2);
+
+    await terminal.evaluate((element) => {
+      const data = new DataTransfer();
+      data.setData('text/plain', 'pasted text');
+      element.dispatchEvent(new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: data,
+      }));
+    });
+    await expectTerminalInputCount(page, 's-image-paste', 'pasted text', 1);
+  });
+
+  test('leaves ctrl+v text paste available on non-mac platforms', async ({ page, daemon }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'platform', { value: 'Linux x86_64', configurable: true });
+      Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (X11; Linux x86_64)', configurable: true });
+    });
+    const terminal = await openTerminalSession(page, daemon, 's-text-paste-linux');
+    await terminal.focus();
+
+    await page.keyboard.press('Control+v');
+    await expectTerminalInputCount(page, 's-text-paste-linux', '\u0016', 0);
+
+    await terminal.evaluate((element) => {
+      const data = new DataTransfer();
+      data.setData('text/plain', 'linux pasted text');
+      element.dispatchEvent(new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: data,
+      }));
+    });
+    await expectTerminalInputCount(page, 's-text-paste-linux', 'linux pasted text', 1);
+  });
+
+  test('double-click selects and copies a terminal word', async ({ page, context, daemon }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const terminal = await openTerminalSession(page, daemon, 's-double-click');
+    await writeTerminalOutput(page, 's-double-click', '\u001b[2J\u001b[Hselectable-word suffix');
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-double-click') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('selectable-word');
+
+    await terminal.dblclick({ position: { x: 55, y: 8 } });
+
+    await expect
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .toBe('selectable-word');
+  });
+
+  test('option-drag selects text while terminal mouse tracking is active', async ({ page, context, daemon }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const terminal = await openTerminalSession(page, daemon, 's-option-selection');
+    const text = 'select while tracked';
+    await writeTerminalOutput(page, 's-option-selection', `\u001b[2J\u001b[H\u001b[?1000h${text}`);
+
+    await terminal.hover({ position: { x: 2, y: 8 } });
+    await page.keyboard.down('Alt');
+    await page.mouse.down();
+    await terminal.hover({ position: { x: 200, y: 8 } });
+    await page.mouse.up();
+    await page.keyboard.up('Alt');
+
+    await expect
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .toContain(text);
   });
 
   test('copies selected terminal text without opening a dragged URL', async ({ page, context, daemon }) => {
