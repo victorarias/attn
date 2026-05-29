@@ -255,9 +255,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       ...(session.agent === 'copilot' && selectedExecutable
         ? { copilot_executable: selectedExecutable }
         : {}),
-      ...(session.agent === 'pi' && selectedExecutable
-        ? { pi_executable: selectedExecutable }
-        : {}),
     };
   },
 
@@ -302,9 +299,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             : {}),
           ...(session.agent === 'copilot' && selectedExecutable
             ? { copilot_executable: selectedExecutable }
-            : {}),
-          ...(session.agent === 'pi' && selectedExecutable
-            ? { pi_executable: selectedExecutable }
             : {}),
         },
       });

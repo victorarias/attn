@@ -48,7 +48,7 @@ func TestParseCommand(t *testing.T) {
 		},
 		{
 			name:    "install plugin message",
-			input:   `{"cmd":"install_plugin","path":"/tmp/plugin"}`,
+			input:   `{"cmd":"install_plugin","source":"git@example.com:team/plugin.git"}`,
 			wantCmd: CmdInstallPlugin,
 		},
 		{

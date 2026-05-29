@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/workspacelayout"
@@ -22,8 +21,16 @@ type Store struct {
 	db *sql.DB
 
 	sessions        map[string]*protocol.Session
+	agentDriverRuns map[string]AgentDriverReportCursor
+	agentMetadata   map[string]string
 	workspaces      map[string]workspacelayout.WorkspaceLayout
 	recentLocations map[string]*protocol.RecentLocation
+}
+
+type AgentDriverReportCursor struct {
+	PluginName string
+	RunID      string
+	Seq        uint64
 }
 
 // New creates a new in-memory store (backed by SQLite :memory:)
@@ -32,6 +39,8 @@ func New() *Store {
 	if err != nil {
 		return &Store{
 			sessions:        make(map[string]*protocol.Session),
+			agentDriverRuns: make(map[string]AgentDriverReportCursor),
+			agentMetadata:   make(map[string]string),
 			workspaces:      make(map[string]workspacelayout.WorkspaceLayout),
 			recentLocations: make(map[string]*protocol.RecentLocation),
 		}
@@ -132,19 +141,27 @@ func (s *Store) Add(session *protocol.Session) {
 	if normalizedAgent == "" {
 		normalizedAgent = string(protocol.SessionAgentCodex)
 	}
-	if normalizedAgent != string(protocol.SessionAgentClaude) &&
-		normalizedAgent != string(protocol.SessionAgentCodex) &&
-		normalizedAgent != string(protocol.SessionAgentCopilot) &&
-		normalizedAgent != protocol.AgentShellValue {
-		if agentdriver.Get(normalizedAgent) == nil {
-			normalizedAgent = string(protocol.SessionAgentCodex)
-		}
-	}
 	session.Agent = protocol.SessionAgent(normalizedAgent)
 	_, err = s.db.Exec(`
-		INSERT OR REPLACE INTO sessions
+		INSERT INTO sessions
 		(id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			label = excluded.label,
+			agent = excluded.agent,
+			directory = excluded.directory,
+			endpoint_id = excluded.endpoint_id,
+			workspace_id = excluded.workspace_id,
+			branch = excluded.branch,
+			is_worktree = excluded.is_worktree,
+			main_repo = excluded.main_repo,
+			state = excluded.state,
+			state_since = excluded.state_since,
+			state_updated_at = excluded.state_updated_at,
+			todos = excluded.todos,
+			last_seen = excluded.last_seen,
+			muted = excluded.muted,
+			recoverable = excluded.recoverable`,
 		session.ID,
 		session.Label,
 		session.Agent,
@@ -244,6 +261,8 @@ func (s *Store) Remove(id string) {
 
 	if s.db == nil {
 		delete(s.sessions, id)
+		delete(s.agentDriverRuns, id)
+		delete(s.agentMetadata, id)
 		return
 	}
 
@@ -260,6 +279,8 @@ func (s *Store) ClearSessions() {
 
 	if s.db == nil {
 		s.sessions = make(map[string]*protocol.Session)
+		s.agentDriverRuns = make(map[string]AgentDriverReportCursor)
+		s.agentMetadata = make(map[string]string)
 		s.workspaces = make(map[string]workspacelayout.WorkspaceLayout)
 		return
 	}
@@ -618,6 +639,201 @@ func (s *Store) GetResumeSessionID(id string) string {
 		return ""
 	}
 	return strings.TrimSpace(resumeSessionID)
+}
+
+// GetAgentMetadata returns opaque plugin-owned JSON for a session.
+func (s *Store) GetAgentMetadata(id string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return strings.TrimSpace(s.agentMetadata[id])
+	}
+
+	var metadata string
+	if err := s.db.QueryRow("SELECT agent_metadata FROM sessions WHERE id = ?", id).Scan(&metadata); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(metadata)
+}
+
+// BeginAgentDriverRun records ownership and resets the cursor for a newly launched external agent run.
+func (s *Store) BeginAgentDriverRun(id, pluginName, runID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	pluginName = strings.TrimSpace(pluginName)
+	runID = strings.TrimSpace(runID)
+	if pluginName == "" || runID == "" {
+		return false
+	}
+	if s.db == nil {
+		if s.sessions[id] == nil {
+			return false
+		}
+		if s.agentDriverRuns == nil {
+			s.agentDriverRuns = make(map[string]AgentDriverReportCursor)
+		}
+		s.agentDriverRuns[id] = AgentDriverReportCursor{PluginName: pluginName, RunID: runID}
+		return true
+	}
+	result, err := s.db.Exec(
+		"UPDATE sessions SET agent_driver_plugin_name = ?, agent_driver_run_id = ?, agent_driver_report_seq = 0 WHERE id = ?",
+		pluginName,
+		runID,
+		id,
+	)
+	if err != nil {
+		log.Printf("[store] BeginAgentDriverRun: failed for session %s: %v", id, err)
+		return false
+	}
+	updated, _ := result.RowsAffected()
+	return updated == 1
+}
+
+// GetAgentDriverRun returns the active owner and report cursor for an external driver run.
+func (s *Store) GetAgentDriverRun(id string) AgentDriverReportCursor {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return s.agentDriverRuns[id]
+	}
+	var cursor AgentDriverReportCursor
+	if err := s.db.QueryRow(
+		"SELECT agent_driver_plugin_name, agent_driver_run_id, agent_driver_report_seq FROM sessions WHERE id = ?",
+		id,
+	).Scan(&cursor.PluginName, &cursor.RunID, &cursor.Seq); err != nil {
+		return AgentDriverReportCursor{}
+	}
+	cursor.PluginName = strings.TrimSpace(cursor.PluginName)
+	cursor.RunID = strings.TrimSpace(cursor.RunID)
+	return cursor
+}
+
+// EndAgentDriverRun invalidates and returns the active external-driver run cursor.
+func (s *Store) EndAgentDriverRun(id string) AgentDriverReportCursor {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		cursor := s.agentDriverRuns[id]
+		if cursor.RunID == "" {
+			return AgentDriverReportCursor{}
+		}
+		delete(s.agentDriverRuns, id)
+		return cursor
+	}
+	var cursor AgentDriverReportCursor
+	if err := s.db.QueryRow(
+		"SELECT agent_driver_plugin_name, agent_driver_run_id, agent_driver_report_seq FROM sessions WHERE id = ?",
+		id,
+	).Scan(&cursor.PluginName, &cursor.RunID, &cursor.Seq); err != nil {
+		return AgentDriverReportCursor{}
+	}
+	cursor.PluginName = strings.TrimSpace(cursor.PluginName)
+	cursor.RunID = strings.TrimSpace(cursor.RunID)
+	if cursor.RunID == "" {
+		return AgentDriverReportCursor{}
+	}
+	result, err := s.db.Exec(
+		"UPDATE sessions SET agent_driver_plugin_name = '', agent_driver_run_id = '', agent_driver_report_seq = 0 WHERE id = ? AND agent_driver_plugin_name = ? AND agent_driver_run_id = ?",
+		id,
+		cursor.PluginName,
+		cursor.RunID,
+	)
+	if err != nil {
+		log.Printf("[store] EndAgentDriverRun: failed for session %s: %v", id, err)
+		return AgentDriverReportCursor{}
+	}
+	updated, _ := result.RowsAffected()
+	if updated != 1 {
+		return AgentDriverReportCursor{}
+	}
+	return cursor
+}
+
+// ApplyAgentDriverState applies an ordered status report for the active external-driver run.
+func (s *Store) ApplyAgentDriverState(id, runID string, seq uint64, state string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	runID = strings.TrimSpace(runID)
+	if runID == "" || seq == 0 {
+		return false
+	}
+	now := time.Now().Format(time.RFC3339Nano)
+	if s.db == nil {
+		session := s.sessions[id]
+		cursor := s.agentDriverRuns[id]
+		if session == nil || cursor.RunID != runID || seq <= cursor.Seq {
+			return false
+		}
+		cursor.Seq = seq
+		s.agentDriverRuns[id] = cursor
+		session.State = protocol.SessionState(state)
+		session.StateSince = now
+		session.StateUpdatedAt = now
+		return true
+	}
+	result, err := s.db.Exec(`
+		UPDATE sessions
+		SET state = ?, state_since = ?, state_updated_at = ?, agent_driver_report_seq = ?
+		WHERE id = ? AND agent_driver_run_id = ? AND agent_driver_report_seq < ?`,
+		state,
+		now,
+		now,
+		seq,
+		id,
+		runID,
+		seq,
+	)
+	if err != nil {
+		log.Printf("[store] ApplyAgentDriverState: failed for session %s: %v", id, err)
+		return false
+	}
+	updated, _ := result.RowsAffected()
+	return updated == 1
+}
+
+// ApplyAgentDriverMetadata applies ordered opaque metadata for the active external-driver run.
+func (s *Store) ApplyAgentDriverMetadata(id, runID string, seq uint64, metadata string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	runID = strings.TrimSpace(runID)
+	if runID == "" || seq == 0 {
+		return false
+	}
+	if s.db == nil {
+		cursor := s.agentDriverRuns[id]
+		if s.sessions[id] == nil || cursor.RunID != runID || seq <= cursor.Seq {
+			return false
+		}
+		cursor.Seq = seq
+		s.agentDriverRuns[id] = cursor
+		if s.agentMetadata == nil {
+			s.agentMetadata = make(map[string]string)
+		}
+		s.agentMetadata[id] = strings.TrimSpace(metadata)
+		return true
+	}
+	result, err := s.db.Exec(`
+		UPDATE sessions
+		SET agent_metadata = ?, agent_driver_report_seq = ?
+		WHERE id = ? AND agent_driver_run_id = ? AND agent_driver_report_seq < ?`,
+		strings.TrimSpace(metadata),
+		seq,
+		id,
+		runID,
+		seq,
+	)
+	if err != nil {
+		log.Printf("[store] ApplyAgentDriverMetadata: failed for session %s: %v", id, err)
+		return false
+	}
+	updated, _ := result.RowsAffected()
+	return updated == 1
 }
 
 // ToggleMute toggles a session's muted state

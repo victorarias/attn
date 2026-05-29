@@ -1038,8 +1038,8 @@ type InstallPluginMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
-	// Path corresponds to the JSON schema field "path".
-	Path string `json:"path"`
+	// Source corresponds to the JSON schema field "source".
+	Source string `json:"source"`
 }
 
 type KillSessionMessage struct {
@@ -1549,7 +1549,7 @@ type RefreshPRsResultMessage struct {
 
 type RegisterMessage struct {
 	// Agent corresponds to the JSON schema field "agent".
-	Agent *SessionAgent `json:"agent,omitempty,omitzero"`
+	Agent *string `json:"agent,omitempty,omitzero"`
 
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2023,7 +2023,7 @@ type ReviewState struct {
 
 type Session struct {
 	// Agent corresponds to the JSON schema field "agent".
-	Agent SessionAgent `json:"agent"`
+	Agent string `json:"agent"`
 
 	// Branch corresponds to the JSON schema field "branch".
 	Branch *string `json:"branch,omitempty,omitzero"`
@@ -2074,14 +2074,6 @@ type Session struct {
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
-
-type SessionAgent string
-
-const SessionAgentClaude SessionAgent = "claude"
-const SessionAgentCodex SessionAgent = "codex"
-const SessionAgentCopilot SessionAgent = "copilot"
-const SessionAgentPi SessionAgent = "pi"
-const SessionAgentShell SessionAgent = "shell"
 
 type SessionExitedMessage struct {
 	// Event corresponds to the JSON schema field "event".
@@ -2273,9 +2265,6 @@ type SpawnSessionMessage struct {
 
 	// Label corresponds to the JSON schema field "label".
 	Label *string `json:"label,omitempty,omitzero"`
-
-	// PiExecutable corresponds to the JSON schema field "pi_executable".
-	PiExecutable *string `json:"pi_executable,omitempty,omitzero"`
 
 	// ResumePicker corresponds to the JSON schema field "resume_picker".
 	ResumePicker *bool `json:"resume_picker,omitempty,omitzero"`

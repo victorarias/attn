@@ -72,17 +72,6 @@ func TestEffectiveCapabilities_SanitizedAgentName(t *testing.T) {
 	}
 }
 
-func TestBuiltInPiDriver_MinimalCapabilities(t *testing.T) {
-	d := Get("pi")
-	if d == nil {
-		t.Fatal("expected pi driver to be registered")
-	}
-	caps := EffectiveCapabilities(d)
-	if caps.HasTranscript || caps.HasHooks || caps.HasClassifier {
-		t.Fatalf("pi should be minimal by default, got %+v", caps)
-	}
-}
-
 type behaviorProviderDriver struct {
 	testDriver
 	behavior TranscriptWatcherBehavior

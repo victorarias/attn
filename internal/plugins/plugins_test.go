@@ -59,6 +59,85 @@ func TestInstallPathWithOptionsUsesProvidedEnvironment(t *testing.T) {
 	}
 }
 
+func TestInstallSourceWithOptionsUsesLocalDirectory(t *testing.T) {
+	installMarker, env := fakeBunEnvironment(t)
+	sourceDir := filepath.Join(t.TempDir(), "source")
+	writeTestPlugin(t, sourceDir, "worktree-provider")
+
+	manifest, err := InstallSourceWithOptions(sourceDir, filepath.Join(t.TempDir(), "plugins"), InstallOptions{Env: env})
+	if err != nil {
+		t.Fatalf("InstallSourceWithOptions failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(manifest.Dir, installMarker)); err != nil {
+		t.Fatalf("local source dependency marker stat failed: %v", err)
+	}
+}
+
+func TestInstallSourceWithOptionsClonesGitRepositoryUsingProvidedEnvironment(t *testing.T) {
+	installMarker, env := fakeBunEnvironment(t)
+	binDir := strings.SplitN(strings.TrimPrefix(env[0], "PATH="), string(os.PathListSeparator), 2)[0]
+	gitScript := `#!/bin/sh
+set -eu
+test "$PLUGIN_CLONE_TEST" = "expected"
+test "$1" = "clone"
+test "$2" = "--depth"
+test "$3" = "1"
+test "$4" = "git@ghe.spotify.net:victora/attn-snipe.git"
+mkdir -p "$5/src"
+cat > "$5/attn-plugin.toml" <<'EOF'
+name = "attn-snipe"
+version = "0.1.0"
+attn_api_version = 1
+
+[plugin]
+entrypoint = "src/index.ts"
+EOF
+: > "$5/src/index.ts"
+`
+	if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(gitScript), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	env = append(env, "PLUGIN_CLONE_TEST=expected")
+
+	manifest, err := InstallSourceWithOptions(
+		"git@ghe.spotify.net:victora/attn-snipe.git",
+		filepath.Join(t.TempDir(), "plugins"),
+		InstallOptions{Env: env},
+	)
+	if err != nil {
+		t.Fatalf("InstallSourceWithOptions failed: %v", err)
+	}
+	if manifest.Name != "attn-snipe" {
+		t.Fatalf("installed name=%q, want attn-snipe", manifest.Name)
+	}
+	if _, err := os.Stat(filepath.Join(manifest.Dir, installMarker)); err != nil {
+		t.Fatalf("git source dependency marker stat failed: %v", err)
+	}
+}
+
+func TestInstallSourceWithOptionsRedactsCredentialsFromCloneFailure(t *testing.T) {
+	_, env := fakeBunEnvironment(t)
+	binDir := strings.SplitN(strings.TrimPrefix(env[0], "PATH="), string(os.PathListSeparator), 2)[0]
+	script := "#!/bin/sh\necho \"$4\" >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write failing git: %v", err)
+	}
+	source := "https://user:token@example.com/team/plugin.git?secret=value"
+
+	_, err := InstallSourceWithOptions(source, filepath.Join(t.TempDir(), "plugins"), InstallOptions{Env: env})
+	if err == nil {
+		t.Fatal("InstallSourceWithOptions error=nil, want clone failure")
+	}
+	for _, secret := range []string{"user:token", "secret=value"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Fatalf("clone error leaked %q: %v", secret, err)
+		}
+	}
+	if !strings.Contains(err.Error(), "REDACTED") {
+		t.Fatalf("clone error=%v, want redacted source detail", err)
+	}
+}
+
 func TestInstallPathRejectsDuplicatePlugin(t *testing.T) {
 	installFakeBun(t)
 	sourceDir := filepath.Join(t.TempDir(), "source")

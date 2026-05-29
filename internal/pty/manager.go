@@ -50,7 +50,10 @@ type SpawnOptions struct {
 	ClaudeExecutable  string
 	CodexExecutable   string
 	CopilotExecutable string
-	PiExecutable      string
+	ExternalCommand   []string
+	ExternalEnv       []string
+	ExternalCWD       string
+	LifecycleID       string
 
 	// LoginShellEnv, when non-nil, is a pre-computed login shell environment
 	// that replaces the ReadLoginShellEnv call.
@@ -79,9 +82,10 @@ type AttachInfo struct {
 }
 
 type ExitInfo struct {
-	ID       string
-	ExitCode int
-	Signal   string
+	ID          string
+	ExitCode    int
+	Signal      string
+	LifecycleID string
 }
 
 type SessionInfo struct {
@@ -150,7 +154,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		opts.Rows = 24
 	}
 
-	agent := normalizeAgent(opts.Agent)
+	agent := normalizeAgent(opts.Agent, len(opts.ExternalCommand) > 0)
 	attnPath := ""
 	if agent != "shell" {
 		attnPath = resolveAttnPath()
@@ -174,8 +178,11 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		usedShell string
 	)
 	for i, shellPath := range shellCandidates {
-		cmd = buildSpawnCommand(opts, agent, shellPath, attnPath)
+		cmd = buildSpawnCommand(opts, agent, shellPath, attnPath, cmdEnv)
 		cmd.Dir = opts.CWD
+		if strings.TrimSpace(opts.ExternalCWD) != "" {
+			cmd.Dir = opts.ExternalCWD
+		}
 		cmd.Env = cmdEnv
 
 		ptmx, lastErr = creackpty.StartWithSize(cmd, &creackpty.Winsize{
@@ -242,7 +249,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	go session.readLoop(func(exitCode int, signal string) {
 		m.logf("pty exited: id=%s code=%d signal=%s", session.id, exitCode, signal)
 		if onExit != nil {
-			onExit(ExitInfo{ID: session.id, ExitCode: exitCode, Signal: signal})
+			onExit(ExitInfo{ID: session.id, ExitCode: exitCode, Signal: signal, LifecycleID: opts.LifecycleID})
 		}
 	}, m.logf)
 
@@ -374,7 +381,7 @@ func (m *Manager) getSession(id string) (*Session, error) {
 	return session, nil
 }
 
-func normalizeAgent(agent string) string {
+func normalizeAgent(agent string, external bool) string {
 	a := strings.TrimSpace(strings.ToLower(agent))
 	if a == "" {
 		return "codex"
@@ -385,12 +392,22 @@ func normalizeAgent(agent string) string {
 	if agentdriver.Get(a) != nil {
 		return a
 	}
+	if external {
+		return a
+	}
 	return "codex"
 }
 
-func buildSpawnCommand(opts SpawnOptions, agent, shellPath, attnPath string) *exec.Cmd {
+func buildSpawnCommand(opts SpawnOptions, agent, shellPath, attnPath string, env []string) *exec.Cmd {
 	if agent == "shell" {
 		return exec.Command(shellPath, "-l")
+	}
+	if len(opts.ExternalCommand) > 0 {
+		command := opts.ExternalCommand[0]
+		if resolved, ok := resolveExternalCommandPath(command, env); ok {
+			command = resolved
+		}
+		return exec.Command(command, opts.ExternalCommand[1:]...)
 	}
 
 	args := []string{attnPath}
@@ -408,6 +425,28 @@ func buildSpawnCommand(opts SpawnOptions, agent, shellPath, attnPath string) *ex
 
 	cmdline := "exec " + shellJoin(args)
 	return exec.Command(shellPath, "-l", "-c", cmdline)
+}
+
+func resolveExternalCommandPath(command string, env []string) (string, bool) {
+	command = strings.TrimSpace(command)
+	if command == "" || strings.ContainsRune(command, filepath.Separator) {
+		return "", false
+	}
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, "PATH=") {
+			continue
+		}
+		candidates := make([]string, 0)
+		for _, dir := range filepath.SplitList(strings.TrimPrefix(entry, "PATH=")) {
+			if dir == "" {
+				candidates = append(candidates, "."+string(filepath.Separator)+command)
+				continue
+			}
+			candidates = append(candidates, filepath.Join(dir, command))
+		}
+		return firstExecutablePath(candidates)
+	}
+	return "", false
 }
 
 // readCachedShellEnvFromProcess reads a JSON-encoded login shell env that the
@@ -440,8 +479,8 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 			logf("pty spawn: failed to capture login shell env from %s: %v", loginShell, err)
 		}
 	}
-	// Don't leak the cache transport var into spawned shells.
-	env = filterEnvKeys(env, "ATTN_CACHED_SHELL_ENV")
+	// Don't leak worker-only configuration transport vars into spawned shells.
+	env = filterEnvKeys(env, "ATTN_CACHED_SHELL_ENV", "ATTN_PTY_EXTERNAL_ENV")
 
 	// Strip CLAUDECODE after all merges so spawned sessions don't think
 	// they're nested.  This var leaks into the daemon env when started
@@ -488,10 +527,10 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 			if opts.CopilotExecutable != "" && opts.CopilotExecutable != "copilot" {
 				env = mergeEnvironment(env, []string{"ATTN_COPILOT_EXECUTABLE=" + opts.CopilotExecutable})
 			}
-			if opts.PiExecutable != "" && opts.PiExecutable != "pi" {
-				env = mergeEnvironment(env, []string{"ATTN_PI_EXECUTABLE=" + opts.PiExecutable})
-			}
 		}
+	}
+	if len(opts.ExternalEnv) > 0 {
+		env = mergeEnvironment(env, opts.ExternalEnv)
 	}
 	return env
 }
@@ -507,8 +546,6 @@ func configuredExecutableForAgent(opts SpawnOptions, agent string) string {
 		return strings.TrimSpace(opts.CodexExecutable)
 	case "copilot":
 		return strings.TrimSpace(opts.CopilotExecutable)
-	case "pi":
-		return strings.TrimSpace(opts.PiExecutable)
 	default:
 		return ""
 	}

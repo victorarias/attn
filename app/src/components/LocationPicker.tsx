@@ -50,6 +50,7 @@ interface PickerTarget {
   projectsDirectory?: string;
   placeholder: string;
   daemonInstanceId?: string;
+  agentsAvailable?: string[];
 }
 
 interface PathSelectableItem {
@@ -86,9 +87,8 @@ const DEFAULT_AGENT_AVAILABILITY: AgentAvailability = {
   codex: true,
   claude: true,
   copilot: true,
-  pi: false,
 };
-const FIXED_AGENT_ORDER: SessionAgent[] = ['claude', 'codex', 'copilot', 'pi'];
+const FIXED_AGENT_ORDER: SessionAgent[] = ['claude', 'codex', 'copilot'];
 
 const normalizeAgent = (value?: string): SessionAgent | null => {
   if (!value) return null;
@@ -167,8 +167,7 @@ export function LocationPicker({
   endpoints = [],
 }: LocationPickerProps) {
   const { settings, setSetting } = useSettings();
-  const effectiveAgentAvailability = agentAvailability || DEFAULT_AGENT_AVAILABILITY;
-  const hasAvailableAgents = hasAnyAvailableAgents(effectiveAgentAvailability);
+  const localAgentAvailability = agentAvailability || DEFAULT_AGENT_AVAILABILITY;
   const noAgentsMessage = 'No supported agent CLI found in PATH.';
 
   const [mode, setMode] = useState<Mode>('path-input');
@@ -212,6 +211,7 @@ export function LocationPicker({
         projectsDirectory: endpoint.capabilities?.projects_directory,
         placeholder: `Type path on ${endpoint.name} (e.g., ~/projects/repo)`,
         daemonInstanceId: endpoint.capabilities?.daemon_instance_id,
+        agentsAvailable: endpoint.capabilities?.agents_available,
       })),
     ],
     [availableEndpoints, projectsDirectory],
@@ -221,6 +221,19 @@ export function LocationPicker({
     [selectableTargets, targetId],
   );
   const selectedEndpointId = selectedTarget?.endpointId;
+  const effectiveAgentAvailability = useMemo<AgentAvailability>(() => {
+    if (!selectedEndpointId || !selectedTarget.agentsAvailable) {
+      return localAgentAvailability;
+    }
+    return selectedTarget.agentsAvailable.reduce<AgentAvailability>((availability, candidate) => {
+      const normalized = normalizeAgent(candidate);
+      if (normalized) {
+        availability[normalized] = true;
+      }
+      return availability;
+    }, {});
+  }, [localAgentAvailability, selectedEndpointId, selectedTarget.agentsAvailable]);
+  const hasAvailableAgents = hasAnyAvailableAgents(effectiveAgentAvailability);
   const yoloKeys = useMemo(
     () => yoloSettingKeys(selectedTarget.id, selectedTarget.daemonInstanceId),
     [selectedTarget.daemonInstanceId, selectedTarget.id],
@@ -807,7 +820,7 @@ export function LocationPicker({
                     role="radio"
                     aria-checked={agent === candidate}
                     disabled={!available}
-                    title={!available ? `${agentLabel(candidate)} CLI not found in PATH` : undefined}
+                    title={!available ? `${agentLabel(candidate)} is not available on ${selectedTarget.name}` : undefined}
                   >
                     <span className="agent-option-name">{agentLabel(candidate)}</span>
                     {available && shortcut && <kbd className="agent-shortcut">{shortcut}</kbd>}

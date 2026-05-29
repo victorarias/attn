@@ -102,10 +102,10 @@ func (d *Daemon) clearAllSessions() {
 		}
 	}
 
-	d.store.ClearSessions()
 	for sessionID := range sessionIDs {
 		d.terminateSession(sessionID, syscall.SIGTERM)
 		d.clearLongRunTracking(sessionID)
 	}
+	d.store.ClearSessions()
 	d.broadcastSessionsUpdated()
 }

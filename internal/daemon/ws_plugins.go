@@ -18,13 +18,13 @@ func (d *Daemon) handleListPluginsWS(client *wsClient) {
 }
 
 func (d *Daemon) handleInstallPluginWS(client *wsClient, msg *protocol.InstallPluginMessage) {
-	path := strings.TrimSpace(msg.Path)
-	if path == "" {
-		d.sendPluginActionResult(client, "install", "", false, "plugin path is required")
+	source := strings.TrimSpace(msg.Source)
+	if source == "" {
+		d.sendPluginActionResult(client, "install", "", false, "plugin source is required")
 		return
 	}
 
-	manifest, err := plugins.InstallPathWithOptions(path, d.pluginDir, plugins.InstallOptions{
+	manifest, err := plugins.InstallSourceWithOptions(source, d.pluginDir, plugins.InstallOptions{
 		Env: d.pluginCommandEnv(),
 	})
 	if err != nil {

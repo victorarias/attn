@@ -1,14 +1,14 @@
 # Attn Plugin System
 
-**Status**: DRAFT — design conversation in progress, not ready to implement. Many decisions are proposals from the current conversation that have not been explicitly confirmed; see §Open Questions.
+**Status**: IN PROGRESS — provider/plugin runtime and the generic agent-driver host surface are implemented. Remaining proposals are tracked in §Open Questions and §Deferred.
 **Date**: 2026-04-16
 **Owner**: victor
 
 ## Summary
 
-Replace the current pattern of integrating coding agents via in-tree Go drivers (`internal/agent/claude.go`, `codex.go`, `copilot.go`, and the previously proposed `pi.go`) with an out-of-process plugin system that can also provide daemon extension points for repository and workflow-specific behavior.
+Replace the current pattern of integrating coding agents via in-tree Go drivers (`internal/agent/claude.go`, `codex.go`, `copilot.go`, and previously proposed agent additions) with an out-of-process plugin system that can also provide daemon extension points for repository and workflow-specific behavior.
 
-A third party can write a plugin in TypeScript (Bun runtime), point attn at it via `attn plugin install <git-url>`, and extend attn without touching its Go code. Agent plugins can work end-to-end — state reporting, classification, resume, session metadata — while provider plugins can claim daemon operations such as custom worktree creation and deletion.
+A third party can write a plugin in TypeScript (Bun runtime), install its local checkout via `attn plugin install --path <dir>` or paste a Git repository URL into Settings, and extend attn without touching its Go code. Agent plugins can work end-to-end — state reporting, classification, resume, session metadata — while provider plugins can claim daemon operations such as custom worktree creation and deletion.
 
 ### Goals
 
@@ -49,7 +49,7 @@ These have been explicitly confirmed in conversation:
 - **One mechanism covers agent drivers AND future non-driver plugins.** Plugins declare concrete surfaces they handle during the daemon handshake. No generic role taxonomy in the base protocol, and no second system for worktree customization, attn-as-agent, assistants, dashboards, etc.
 - **Provider plugins are first-class.** Plugins may claim daemon-owned extension points that must run inside an attn operation, returning structured `handled`, `decline`, or `error` outcomes so attn can continue, fall back, or fail coherently.
 - **TypeScript with Bun as the canonical runtime.**
-- **Pi is the first agent-driver plugin, not an in-tree driver.** See companion plan `2026-04-16-pi-plugin.md`. The first provider use case is user-owned worktree customization, proving that plugins are not limited to agent integration.
+- **Agent-driver plugins are consumer-neutral.** Attn provides the host contract and leaves each external agent's command mapping, lifecycle observation, metadata, and classification policy in its own plugin. The first provider use case is user-owned worktree customization, proving that plugins are not limited to agent integration.
 - **Trust model: user-installed = user-trusted.** Installing a plugin is equivalent to `curl | bash` from that repo. No sandboxing, no signing, no confirmation prompts, no catalog curation. Document clearly in the plugin-authoring README and move on.
 - **No auth.** Unix socket filesystem permissions gate access. Consistent with existing frontend↔daemon and daemon↔daemon trust model in attn today.
 - **Claude, codex, copilot stay in-tree.** No forcing function to migrate. Long-term they could become plugins but that's zero-pressure.
@@ -65,7 +65,7 @@ These were proposed in conversation but not explicitly confirmed:
 4. **Remote daemons.** Proposed: plugins are daemon-local. Each daemon has its own plugin set. Install per host (SSH to remote, run `attn plugin install` there). Cross-daemon control plugins are deferred — likely exposing the same JSON-RPC over the hub's existing WebSocket later. User raised this as an open question worth capturing; design sketched but not confirmed.
 5. **SDK shape and timing.** User pushed back on designing SDK top-down. **Revised approach: the first real plugins are written against raw JSON-RPC first. After the provider path proved out, extract a small SDK from those patterns; let richer plugin surfaces wait until their concrete implementations exist.** The protocol must still stay ergonomic enough to consume without a wrapper.
 6. **Manifest format.** Probably TOML — minimal, human-readable, Bun ecosystem-neutral. Alternatives: JSON, YAML. Not confirmed.
-7. **Install sources.** `attn plugin install <git-url>` as the headline, `--path <dir>` for local development. Not confirmed.
+7. **Install sources.** Settings accepts a pasted Git repository URL or local directory. The CLI currently keeps `--path <dir>` for local development; a Git-source CLI form is deferred until it has a concrete use case.
 8. **API versioning discipline.** Proposed: strict `attn_api_version: 1` refuses to load on mismatch. Additive protocol changes don't bump version. Not confirmed.
 9. **Socket coexistence.** Existing one-message-per-connection hook protocol (claude hooks, whatever remains of the old pi plan's pattern) must keep working. Proposed: detect JSON-RPC handshake by first-message shape and switch the connection's mode. Not confirmed.
 10. **JSON-RPC framing.** Proposed: newline-delimited JSON. Alternative: LSP-style Content-Length headers. Unix socket + JSON makes newline-delimited the simpler choice.
@@ -81,7 +81,7 @@ These were proposed in conversation but not explicitly confirmed:
 │                 │ socket   │                            │
 │                 │          │  ┌──────────────────────┐  │
 │                 │          │  │ user-facing agent    │  │
-│                 │          │  │ (pi, gemini, ...)    │  │
+│                 │          │  │ (external driver)    │  │
 │                 │          │  └──────────────────────┘  │
 │                 │          │   spawned by plugin via    │
 │                 │          │   driver.spawn response    │
@@ -89,16 +89,17 @@ These were proposed in conversation but not explicitly confirmed:
 └─────────────────┘          └────────────────────────────┘
 ```
 
-### Plugin lifecycle — future driver flow
+### Plugin lifecycle — driver flow
 
 1. attn spawns the plugin binary at daemon startup (or user runs it in dev mode).
 2. Plugin connects to `~/.attn/attn.sock`, sends `hello { name, version, attn_api_version, surfaces? }`.
-3. attn replies with accepted capabilities. Future driver support adds explicit driver-specific methods when that phase lands; the base handshake does not carry a speculative role field.
-4. When user runs `attn -s foo` with agent = the registered name, attn calls `driver.spawn { session_id, cwd, agent_args, resume, fork, yolo }` on the plugin.
+3. attn replies with accepted capabilities. An agent plugin then calls `driver.register { agent, capabilities }`; the base handshake does not carry a speculative role field.
+4. When a session starts with agent = the registered name, attn calls `driver.spawn { session_id, run_id, cwd, label, yolo }` on the plugin. On reload of that same session, it calls `driver.resume` with the stored opaque metadata. Capability inputs such as `yolo` express attn-level behavior, not required command-line flag names; each driver returns the agent-specific equivalent argv.
 5. Plugin responds `{ argv, env, cwd }`. attn spawns that command in a PTY under the session. **Attn owns the PTY. Plugin owns agent-specific semantics.**
 6. Plugin stages companion files (extensions, hooks) however it likes. Plugin monitors the agent however it likes.
-7. Plugin reports state via `session.report_state`, `session.report_stop`, `session.report_metadata`.
-8. Plugin exits when attn shuts down or its own lifecycle ends.
+7. Plugin reports state via `session.report_state`, `session.report_stop`, `session.report_metadata`. The daemon supplies a fresh `run_id` per launched PTY and persists the spawning plugin as that run's owner; only that owner can report or receive close notification for the run. The plugin sequences reports within that run so asynchronous work cannot overwrite newer status or a replacement run.
+8. When an attn-owned plugin agent PTY exits or has been killed successfully, attn calls `driver.session_closed` on the recorded run owner so the plugin can dispose bridge tokens, watchers, classifiers, and staged launch resources for that run.
+9. Plugin exits when attn shuts down or its own lifecycle ends.
 
 ### Provider and lifecycle surfaces
 
@@ -169,12 +170,12 @@ Decline response:
 
 ### 1. Schema normalization (prerequisite)
 
-Remove agent-specific fields from core schema and protocol. Replaces the pi-specific additions from the superseded pi plan.
+Remove agent-specific fields from core schema and protocol. Replaces the agent-specific additions proposed during earlier integration exploration and keeps concrete agent plugins independent.
 
 - Generic `agent_metadata TEXT` column on `sessions` (JSON blob, opaque to core) replacing any proposed `pi_session_file` / `pi_session_id` columns.
-- Rename any pi-specific protocol commands → `agent_session_linked { agent, metadata }`.
-- Lock in `classifier_hint` on `stop` as the standard (already generalizable).
-- Store: `SetAgentMetadata(sessionID, jsonBlob)` / `GetAgentMetadata(sessionID)`.
+- Use generic `session.report_metadata` rather than any agent-specific linkage command.
+- Use `session.report_stop { verdict }`; classifiers stay plugin-owned and emit only their ordered result.
+- Store: `ApplyAgentDriverMetadata(sessionID, runID, seq, jsonBlob)` / `GetAgentMetadata(sessionID)`, so metadata writes follow the same stale-report ordering rule as state.
 
 ### 2. Control API over unix socket
 
@@ -183,7 +184,7 @@ Extend the daemon's existing unix socket handler to recognize a JSON-RPC 2.0 han
 **Handshake:**
 ```json
 → {"jsonrpc":"2.0","id":1,"method":"hello","params":{
-    "name":"pi-driver","version":"0.1.0",
+    "name":"example-driver","version":"0.1.0",
     "attn_api_version":1}}
 ← {"jsonrpc":"2.0","id":1,"result":{"ok":true}}
 ```
@@ -193,13 +194,15 @@ Extend the daemon's existing unix socket handler to recognize a JSON-RPC 2.0 han
 | Method                        | Direction       | Purpose                                                                 |
 |-------------------------------|-----------------|-------------------------------------------------------------------------|
 | `driver.register`             | plugin → attn   | Declare `{ agent, capabilities }`                                       |
-| `driver.spawn`                | attn → plugin   | Request `{ argv, env, cwd }` for a new session                          |
-| `driver.resume`               | attn → plugin   | Same, for resume                                                         |
-| `driver.fork`                 | attn → plugin   | Same, for fork                                                           |
-| `session.report_state`        | plugin → attn   | `{ session_id, state }`                                                  |
-| `session.report_stop`         | plugin → attn   | `{ session_id, text?, classifier_hint?, verdict? }`                      |
-| `session.report_metadata`     | plugin → attn   | `{ session_id, metadata }` (generic, replaces `pi_session_linked`)       |
-| `pty.request_spawn`           | plugin → attn   | (Optional) ask attn to spawn additional processes under the session    |
+| `driver.spawn`                | attn → plugin   | Request `{ session_id, run_id, ... }`, returning `{ argv, env, cwd }` for a new session |
+| `driver.resume`               | attn → plugin   | Same, for resume; receives a fresh `run_id` for the replacement PTY      |
+| `driver.session_closed`       | attn → plugin   | `{ session_id, run_id, reason, exit_code?, signal? }`; dispose resources for the ended PTY run |
+| `session.report_state`        | plugin → attn   | `{ session_id, run_id, seq, state }`; stale or ended-run status is discarded |
+| `session.report_stop`         | plugin → attn   | `{ session_id, run_id, seq, verdict }`; classification reuses the `seq` assigned when stop was observed |
+| `session.report_metadata`     | plugin → attn   | `{ session_id, run_id, seq, metadata }`; persists opaque native-session data |
+| `pty.request_spawn`           | plugin → attn   | Deferred: optionally spawn additional processes under the session       |
+
+`seq` is monotonic across reports within one `run_id`. The daemon stores the run's spawning plugin identity alongside its cursor, preventing a later plugin that registers the same agent identifier from taking over the active run. When classification begins after an observed stop, it reserves its report sequence at that observation; any later lifecycle report receives a higher sequence and therefore wins even if classification finishes afterward.
 
 **Worktree surfaces (initial):**
 
@@ -222,7 +225,7 @@ a session.
 
 Commands:
 
-- `attn plugin install <git-url>` — clone to `~/.attn/plugins/<name>/`, validate manifest, run `bun install`, register, spawn.
+- Settings plugin install from `<git-url>` — clone temporarily, validate manifest, copy to `~/.attn/plugins/<name>/`, run `bun install`, register, spawn.
 - `attn plugin install --path <dir>` — same, from local directory (development).
 - `attn plugin list` — installed plugins and status.
 - `attn plugin remove <name>` — uninstall + stop.
@@ -233,10 +236,10 @@ Commands:
 
 Manifest (`attn-plugin.toml` at repo root):
 ```toml
-name = "pi-driver"
+name = "example-driver"
 version = "0.1.0"
 attn_api_version = 1
-description = "Pi coding agent driver for attn"
+description = "Example external coding agent driver for attn"
 
 [plugin]
 entrypoint = "src/index.ts"
@@ -247,15 +250,15 @@ entrypoint = "src/index.ts"
 
 Rough phasing — to refine:
 
-### Phase 0 — Schema normalization
+### Phase 0 — Schema normalization (implemented)
 
-Prereq. Standalone PR. No user-visible behavior change.
+Core sessions carry opaque `agent_metadata`, and `SessionAgent` is an open identifier so external driver IDs survive storage and protocol transport.
 
-### Phase 1 — Protocol + socket handler
+### Phase 1 — Protocol + socket handler (implemented)
 
 Extend daemon socket handler to accept JSON-RPC handshake and maintain a long-running plugin connection. Exercise request/response flow end-to-end against throwaway test plugins so both daemon-initiated calls and plugin-initiated calls are proven before real provider or driver work lands. Document the wire protocol.
 
-### Phase 2 — Provider registration + worktree proving use case
+### Phase 2 — Provider registration + worktree proving use case (implemented)
 
 Add concrete surface declaration and provider dispatch in the daemon. Ship `worktree.before_create`, `worktree.create`, `worktree.after_create`, and `worktree.delete` as the first extension points, with fallthrough to attn's built-in Git behavior when create providers decline.
 
@@ -267,11 +270,18 @@ The proving plugin is a user-owned worktree provider that mirrors the existing s
 
 This phase proves that plugins can participate in daemon-owned operations, not only launch agents or react after the fact.
 
-### Phase 3 — CLI + installer + dev mode
+### Phase 3 — CLI + installer + dev mode (partially implemented)
 
-Ship the `attn plugin` command family. Manifest parser. Plugin spawn/reconcile loop in the daemon.
+Implemented: manifest parsing, installed-plugin spawn/reconcile in the daemon,
+installation from a Git repository URL in Settings, and the local development
+path needed for the first real plugins: `attn plugin install --path <dir>`,
+`attn plugin list`, and `attn plugin remove <name>`.
 
-### Phase 4 — Provider SDK foundation
+Still to ship: CLI Git URL install, update, foreground dev/auto-restart mode,
+and live traffic inspection. None blocks building or exercising an external
+driver locally through `--path` or installing it directly from Settings.
+
+### Phase 4 — Provider SDK foundation (implemented)
 
 Extract the proven raw JSON-RPC provider client into a small TypeScript SDK:
 
@@ -284,9 +294,44 @@ Extract the proven raw JSON-RPC provider client into a small TypeScript SDK:
 
 Keep broader surfaces out until their first concrete plugins exercise those paths.
 
-### Phase 5 — Pi as the first agent-driver plugin
+### Phase 5 — Generic agent-driver host (implemented)
 
-See companion plan `2026-04-16-pi-plugin.md`. Pi forces any driver-protocol gaps to surface after the provider model has already been validated against a non-agent extension point.
+Add an external-driver surface after the provider model has already validated
+long-running plugin connectivity and daemon-owned dispatch:
+
+- Plugins register open agent identifiers and capabilities dynamically.
+- Attn requests a new launch through `driver.spawn`; reload uses
+  `driver.resume` only when the driver advertises that capability and otherwise
+  requests a new spawn.
+- Plugins return `argv`, `env`, and `cwd`; attn remains the PTY owner.
+- Each launched PTY receives a fresh run identity and a persisted spawning
+  plugin owner. Sequenced metadata/state/stop reports are accepted only from
+  that owner and cannot supersede fresher activity.
+- Attn issues `driver.session_closed` only after the owned PTY has exited or a
+  kill has completed, so plugin cleanup never invalidates a still-running
+  process after failed termination.
+- Opaque metadata, generic `yolo` intent, health reporting, and dynamic picker
+  availability allow concrete plugins to implement their agent-specific
+  behavior without core schema or command-line knowledge.
+
+#### Driver host verification harness (implemented)
+
+The driver host is gated by a deterministic process-boundary test, not only mocked RPC unit tests. The test starts an installed fixture plugin through the plugin process manager, registers a dynamic driver over the real Unix JSON-RPC socket, creates and resumes sessions through the real WebSocket API, and launches the returned command through the production worker PTY path.
+
+The harness verifies:
+
+- registration makes the fixture agent selectable and plugin disconnect removes it
+- `driver.spawn` receives the requested `yolo` behavioral intent
+- returned `argv`, `env`, and `cwd` determine what actually runs inside the PTY
+- state, stop verdict, and opaque native-session metadata survive sequenced reports sent immediately during launch
+- after a session is live, plugin reports produce visible `working` then `waiting_input` WebSocket status transitions
+- delayed state and stop/classification reports cannot overwrite a newer sequence or a replacement run
+- `driver.resume` receives persisted metadata from the prior run and its immediate reports survive resumed PTY startup
+- PTY exit produces `driver.session_closed` with the specific ended `run_id`
+
+This is the minimum regression gate for any external agent driver: a plugin
+that works in the harness has crossed the same daemon, socket, WebSocket,
+session-store, and PTY boundaries it will cross in production.
 
 ### Phase 6 — Broader plugin surfaces
 
@@ -296,20 +341,16 @@ Provider dispatch and future driver work are the tightest V1 requirements. Assis
 
 "Write your first plugin" tutorial. `attn plugin new driver <name>` scaffolding. Example plugins repo. README for external plugin authors.
 
-## Immediate follow-up after plugin registration
+## Runtime health foundation (implemented)
 
-The next plugin slice should close the runtime-health gap exposed by installed plugins before moving on to broader driver surfaces:
+The runtime-health and Settings gaps exposed by installed plugins were closed before the generic agent-driver host:
 
 1. **Plugin healthcheck, end to end.**
-   - Add an explicit daemon↔plugin health protocol instead of treating an open socket as sufficient proof of health.
-   - Model the daemon state distinction clearly: process running, socket connected, health response fresh/stale/unhealthy.
-   - Extend `@victorarias/attn-plugin` with the health responder/client behavior required by the protocol, publish the SDK update, and update the user-owned `services-pilot-worktrees` plugin to consume it.
-   - Surface the resulting health state through plugin inventory/UI so "connected but wedged" is distinguishable from "starting" or "stopped".
+   - The daemon uses an explicit health protocol instead of treating an open socket as sufficient proof of health.
+   - Process running, socket connected, and healthy/unhealthy/unknown plugin state are distinguished in inventory and Settings.
 
-2. **Settings panel redesign, after prototyping.**
-   - The current Settings modal has accumulated too many unrelated sections and is now materially harder to scan and operate.
-   - Do a dedicated prototype pass first to explore structure, grouping, navigation, and plugin-management ergonomics before changing production UI.
-   - Treat this as a Settings information-architecture redesign, not a plugin-only visual cleanup; the plugin section is the forcing case that made the broader problem obvious.
+2. **Settings panel redesign.**
+   - Settings is organized as a workbench with separate areas for plugins, agents, connectivity, and related preferences instead of one mixed panel.
 
 ## Deferred — post-V1
 
@@ -319,12 +360,12 @@ In priority order of what might come next:
 - **Cross-daemon control API.** Expose the same JSON-RPC surface over the hub's existing WebSocket at `:9849` so future control plugins can span daemons. Useful for attn-as-agent and dashboards.
 - **Custom UI extensions.** Separate design.
 - **Plugin install over SSH / hub** — `attn --endpoint <server> plugin install <url>`. Nice-to-have, requires proxying through the hub.
+- **Concrete agent-driver integrations.** Each external agent integration should be designed and distributed as its own plugin on top of this generic host contract.
 - **Claude / codex / copilot migration** to plugins. Zero pressure; only if there's a reason.
 
 ## References
 
-- **Superseded pi plan:** `docs/plans/2026-04-07-pi-integration.md` — behavioral design still load-bearing for pi plugin.
-- **Pi plugin plan:** `docs/plans/2026-04-16-pi-plugin.md`.
+- **Deferred Pi exploration:** `docs/plans/2026-04-07-pi-integration.md`.
 - **Existing agent driver interface:** `internal/agent/driver.go`.
 - **Existing socket handler:** `internal/daemon/daemon.go` (`handleConnection`).
 - **Hub module (cross-daemon context):** `internal/hub/`.

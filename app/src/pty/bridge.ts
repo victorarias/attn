@@ -20,7 +20,6 @@ export interface PtySpawnArgs {
   claude_executable?: string;
   codex_executable?: string;
   copilot_executable?: string;
-  pi_executable?: string;
 }
 
 export interface PtyAttachArgs {

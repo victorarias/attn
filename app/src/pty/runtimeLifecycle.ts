@@ -24,7 +24,7 @@ export interface SpawnPtyRuntimeOperations {
   attachFreshRuntime(args: PtySpawnArgs): Promise<unknown>;
   spawnRuntime(args: PtySpawnArgs): Promise<unknown>;
   resizeRuntime(id: string, cols: number, rows: number, reason: string): void;
-  logClaudeResumeRecovery?(details: { id: string; recoverable: boolean }): void;
+  logResumeRecovery?(details: { id: string; agent?: string; recoverable: boolean }): void;
   logKnownWorkspaceRespawn?(details: { id: string; endpointId?: string; error: unknown }): void;
 }
 
@@ -64,14 +64,15 @@ export async function spawnPtyRuntime(
       });
       return;
     } catch (attachError) {
-      if (context.existingSession?.agent === 'claude') {
+      if (context.existingSession?.agent === 'claude' || context.existingSession?.recoverable) {
         const resumeArgs: PtySpawnArgs = {
           ...args,
           resume_session_id: args.id,
           resume_picker: null,
         };
-        operations.logClaudeResumeRecovery?.({
+        operations.logResumeRecovery?.({
           id: args.id,
+          agent: context.existingSession.agent,
           recoverable: Boolean(context.existingSession.recoverable),
         });
         try {

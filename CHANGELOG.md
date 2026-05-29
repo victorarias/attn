@@ -26,6 +26,20 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-05-25]
+
+### Added
+- **Agent Driver Plugins**: Installed plugins can now register coding agents, launch or resume them inside attn-owned terminals, report session state and stop verdicts, and persist opaque agent session metadata for future resumes.
+- **Plugin Installation Sources**: Plugins can now be installed from a pasted Git repository URL in Settings as well as from a local source directory.
+
+### Changed
+- **External Agent Selection**: Plugin-provided agents are advertised dynamically in local and remote session pickers. Unshipped in-tree external-agent placeholders are removed in favor of standalone plugins.
+
+### Fixed
+- **Plugin Session Reporting**: Reports emitted immediately while a plugin launches or resumes a session are retained during terminal startup; per-launch run IDs, persisted plugin ownership, and sequenced reports prevent stale or replacement-plugin updates after newer activity or relaunch. Plugins are notified only after their attn-owned PTY has actually closed or been killed.
+
+---
+
 ## [2026-05-23]
 
 ### Changed
@@ -566,7 +580,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Generic Launch Preparation Hook**: Add optional driver pre-launch setup (`LaunchPreparer`) so agent-specific prep (like Claude resume transcript copy) is encapsulated in the agent driver.
 - **Generic Settings Writer**: Add `wrapper.WriteSettingsConfig()` for writing driver-provided settings/hook files (not Claude-specific anymore).
 - **Minimal Pi Driver**: Add an initial `pi` driver with transcript/hook/classifier/state-detector capabilities disabled by default, so Pi can be integrated incrementally.
-- **Dynamic Agent Settings Surface**: Settings now carry per-agent availability and executable keys for all registered drivers (for example `pi_available`, `pi_executable`, or future `<agent>_available/<agent>_executable`).
+- **Dynamic Agent Settings Surface**: Settings now carry per-agent availability and executable keys for attn-owned drivers.
 - **Copilot Resume Transcript Discovery API**: Add `transcript.FindCopilotTranscriptForResume()` to expose resume-ID transcript lookup as shared transcript package functionality.
 
 ### Changed

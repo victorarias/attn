@@ -157,6 +157,10 @@ func TestMigrations_MigratedColumnsExist(t *testing.T) {
 		{"sessions", "recoverable"},
 		{"sessions", "resume_session_id"},
 		{"sessions", "endpoint_id"},
+		{"sessions", "agent_metadata"},
+		{"sessions", "agent_driver_plugin_name"},
+		{"sessions", "agent_driver_run_id"},
+		{"sessions", "agent_driver_report_seq"},
 	}
 
 	for _, tc := range migratedColumns {
@@ -206,7 +210,7 @@ func TestMigration37_ConvertsSessionLayoutToWorkspaceLayout(t *testing.T) {
 		VALUES
 			('sess-legacy', 'main', 'sess-legacy', 'main', 'Session', '2026-05-01T00:00:00Z', '2026-05-01T00:00:00Z'),
 			('sess-legacy', 'pane-shell', 'runtime-shell', 'shell', 'Shell 1', '2026-05-01T00:00:00Z', '2026-05-01T00:00:00Z');
-		DELETE FROM schema_migrations WHERE version = 37;
+		DELETE FROM schema_migrations WHERE version >= 37;
 	`); err != nil {
 		db.Close()
 		t.Fatalf("seed legacy layout error = %v", err)

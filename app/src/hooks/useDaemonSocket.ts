@@ -153,7 +153,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '65';
+const PROTOCOL_VERSION = '67';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
 // injects this global before any page script runs — see
@@ -2133,7 +2133,6 @@ export function useDaemonSocket({
         ...(args.claude_executable && { claude_executable: args.claude_executable }),
         ...(args.codex_executable && { codex_executable: args.codex_executable }),
         ...(args.copilot_executable && { copilot_executable: args.copilot_executable }),
-        ...(args.pi_executable && { pi_executable: args.pi_executable }),
       }));
 
       setTimeout(() => {
@@ -2430,10 +2429,11 @@ export function useDaemonSocket({
             },
             spawnRuntime: sendSpawnSession,
             resizeRuntime: sendPtyResize,
-            logClaudeResumeRecovery: ({ id, recoverable }) => {
+            logResumeRecovery: ({ id, agent, recoverable }) => {
               console.log(
-                '[DaemonSocket] Recovering session %s via resume (recoverable=%s)',
+                '[DaemonSocket] Recovering session %s (%s) via resume (recoverable=%s)',
                 id,
+                agent ?? 'unknown',
                 String(recoverable),
               );
             },
@@ -2791,7 +2791,7 @@ export function useDaemonSocket({
     });
   }, []);
 
-  const sendInstallPlugin = useCallback((path: string): Promise<PluginActionResult> => {
+  const sendInstallPlugin = useCallback((source: string): Promise<PluginActionResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -2800,7 +2800,7 @@ export function useDaemonSocket({
       }
       const key = 'plugin_action:install:pending';
       pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'install_plugin', path }));
+      ws.send(JSON.stringify({ cmd: 'install_plugin', source }));
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);

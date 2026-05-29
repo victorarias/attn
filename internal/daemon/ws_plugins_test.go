@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -70,5 +71,53 @@ func TestDaemon_HandleListPluginsWS_ReturnsInstalledPlugins(t *testing.T) {
 	plugins, ok := event["plugins"].([]interface{})
 	if !ok || len(plugins) != 1 {
 		t.Fatalf("plugins=%v, want one plugin", event["plugins"])
+	}
+}
+
+func TestDaemon_HandleInstallPluginWS_InstallsGitSource(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+	d.pluginDir = filepath.Join(t.TempDir(), "plugins")
+
+	binDir := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir fake tool directory: %v", err)
+	}
+	gitScript := `#!/bin/sh
+set -eu
+test "$1" = "clone"
+test "$4" = "git@ghe.spotify.net:victora/attn-snipe.git"
+mkdir -p "$5/src"
+cat > "$5/attn-plugin.toml" <<'EOF'
+name = "attn-snipe"
+version = "0.1.0"
+attn_api_version = 1
+
+[plugin]
+entrypoint = "src/index.ts"
+EOF
+: > "$5/src/index.ts"
+`
+	if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(gitScript), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "bun"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake bun: %v", err)
+	}
+	d.loginShellEnv = []string{"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH")}
+
+	client := &wsClient{send: make(chan outboundMessage, 1)}
+	d.handleInstallPluginWS(client, &protocol.InstallPluginMessage{
+		Source: "git@ghe.spotify.net:victora/attn-snipe.git",
+	})
+
+	event := readOutboundEvent(t, client)
+	if event["event"] != protocol.EventPluginActionResult || event["action"] != "install" || event["success"] != true {
+		t.Fatalf("install result=%v, want successful install action", event)
+	}
+	if event["name"] != "attn-snipe" {
+		t.Fatalf("installed name=%v, want attn-snipe", event["name"])
+	}
+	if _, err := os.Stat(filepath.Join(d.pluginDir, "attn-snipe", "attn-plugin.toml")); err != nil {
+		t.Fatalf("installed plugin manifest missing: %v", err)
 	}
 }

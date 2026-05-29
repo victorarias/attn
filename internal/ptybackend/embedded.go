@@ -25,7 +25,7 @@ func (b *EmbeddedBackend) SetExitHandler(handler func(ExitInfo)) {
 		return
 	}
 	b.manager.SetExitHandler(func(info pty.ExitInfo) {
-		handler(ExitInfo{ID: info.ID, ExitCode: info.ExitCode, Signal: info.Signal})
+		handler(ExitInfo{ID: info.ID, ExitCode: info.ExitCode, Signal: info.Signal, LifecycleID: info.LifecycleID})
 	})
 }
 
@@ -48,7 +48,10 @@ func (b *EmbeddedBackend) Spawn(_ context.Context, opts SpawnOptions) error {
 		ClaudeExecutable:  opts.ClaudeExecutable,
 		CodexExecutable:   opts.CodexExecutable,
 		CopilotExecutable: opts.CopilotExecutable,
-		PiExecutable:      opts.PiExecutable,
+		ExternalCommand:   opts.ExternalCommand,
+		ExternalEnv:       opts.ExternalEnv,
+		ExternalCWD:       opts.ExternalCWD,
+		LifecycleID:       opts.LifecycleID,
 		LoginShellEnv:     opts.LoginShellEnv,
 	})
 }

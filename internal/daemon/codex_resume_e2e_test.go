@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
 
@@ -149,7 +151,9 @@ func removePTYSession(t *testing.T, d *Daemon, sessionID string) {
 
 	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := d.ptyBackend.Remove(ctx, sessionID); err != nil {
+	if err := d.ptyBackend.Remove(ctx, sessionID); err != nil &&
+		!errors.Is(err, pty.ErrSessionNotFound) &&
+		!errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("remove pty session: %v", err)
 	}
 }

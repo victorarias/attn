@@ -2,6 +2,7 @@ package hub
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -364,6 +365,7 @@ func TestCapabilitiesFromInitialStateIncludesRemoteWebFields(t *testing.T) {
 		DaemonInstanceID: protocol.Ptr("d-123"),
 		Settings: map[string]interface{}{
 			"codex_available":    "true",
+			"snipe_available":    "true",
 			"tailscale_enabled":  "true",
 			"tailscale_status":   "running",
 			"tailscale_url":      "https://gpu-box.tail.ts.net/",
@@ -376,6 +378,9 @@ func TestCapabilitiesFromInitialStateIncludesRemoteWebFields(t *testing.T) {
 	})
 	if caps == nil {
 		t.Fatal("capabilitiesFromInitialState() = nil")
+	}
+	if got := strings.Join(caps.AgentsAvailable, ","); got != "codex,snipe" {
+		t.Fatalf("caps.AgentsAvailable = %q, want dynamic plugin agent", got)
 	}
 	if protocol.Deref(caps.TailscaleEnabled) != true {
 		t.Fatalf("caps.TailscaleEnabled = %v, want true", protocol.Deref(caps.TailscaleEnabled))
@@ -391,6 +396,40 @@ func TestCapabilitiesFromInitialStateIncludesRemoteWebFields(t *testing.T) {
 	}
 	if got := protocol.Deref(caps.TailscaleAuthURL); got != "https://login.tailscale.example/auth" {
 		t.Fatalf("caps.TailscaleAuthURL = %q, want auth URL", got)
+	}
+}
+
+func TestManagerHandleRemoteSettingsUpdatedRefreshesDynamicAgentAvailability(t *testing.T) {
+	endpointStore := store.New()
+	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
+	if err != nil {
+		t.Fatalf("AddEndpoint() error = %v", err)
+	}
+
+	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager.mu.Lock()
+	manager.runtimes[record.ID].info.Capabilities = &protocol.EndpointCapabilities{
+		AgentsAvailable: []string{"codex"},
+	}
+	manager.mu.Unlock()
+
+	manager.handleRemoteSettingsUpdated(record.ID, &protocol.SettingsUpdatedMessage{
+		Settings: map[string]interface{}{
+			"codex_available": "true",
+			"snipe_available": "true",
+		},
+	})
+	if got := strings.Join(manager.List()[0].Capabilities.AgentsAvailable, ","); got != "codex,snipe" {
+		t.Fatalf("agents after plugin registration = %q, want codex,snipe", got)
+	}
+
+	manager.handleRemoteSettingsUpdated(record.ID, &protocol.SettingsUpdatedMessage{
+		Settings: map[string]interface{}{
+			"codex_available": "true",
+		},
+	})
+	if got := strings.Join(manager.List()[0].Capabilities.AgentsAvailable, ","); got != "codex" {
+		t.Fatalf("agents after plugin disconnect = %q, want codex", got)
 	}
 }
 

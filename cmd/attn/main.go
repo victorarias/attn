@@ -226,7 +226,9 @@ func runPTYWorker() {
 	fs.StringVar(&cfg.ClaudeExecutable, "claude-executable", "", "claude executable override")
 	fs.StringVar(&cfg.CodexExecutable, "codex-executable", "", "codex executable override")
 	fs.StringVar(&cfg.CopilotExecutable, "copilot-executable", "", "copilot executable override")
-	fs.StringVar(&cfg.PiExecutable, "pi-executable", "", "pi executable override")
+	var externalCommandJSON string
+	fs.StringVar(&externalCommandJSON, "external-command-json", "", "external plugin driver argv as JSON")
+	fs.StringVar(&cfg.ExternalCWD, "external-cwd", "", "external plugin driver working directory")
 	fs.StringVar(&cfg.RegistryPath, "registry-path", "", "registry path")
 	fs.StringVar(&cfg.SocketPath, "socket-path", "", "socket path")
 	fs.StringVar(&cfg.ControlToken, "control-token", "", "control token")
@@ -235,6 +237,18 @@ func runPTYWorker() {
 	fs.StringVar(&cfg.OwnerNonce, "owner-nonce", "", "daemon owner nonce")
 
 	_ = fs.Parse(os.Args[2:])
+	if externalCommandJSON != "" {
+		if err := json.Unmarshal([]byte(externalCommandJSON), &cfg.ExternalCommand); err != nil {
+			fmt.Fprintf(os.Stderr, "pty-worker error: invalid --external-command-json: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	if externalEnvJSON := os.Getenv("ATTN_PTY_EXTERNAL_ENV"); externalEnvJSON != "" {
+		if err := json.Unmarshal([]byte(externalEnvJSON), &cfg.ExternalEnv); err != nil {
+			fmt.Fprintf(os.Stderr, "pty-worker error: invalid ATTN_PTY_EXTERNAL_ENV: %v\n", err)
+			os.Exit(1)
+		}
+	}
 	if cols > 0 {
 		if cols > 65535 {
 			fmt.Fprintf(os.Stderr, "pty-worker error: --cols must be <= 65535 (got %d)\n", cols)

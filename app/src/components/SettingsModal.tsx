@@ -50,7 +50,7 @@ interface SettingsModalProps {
   onRemoveEndpoint: (endpointId: string) => Promise<{ success: boolean }>;
   onSetEndpointRemoteWeb: (endpointId: string, enabled: boolean) => Promise<{ success: boolean }>;
   onListPlugins: () => Promise<PluginListResult>;
-  onInstallPlugin: (path: string) => Promise<{ success: boolean; name?: string }>;
+  onInstallPlugin: (source: string) => Promise<{ success: boolean; name?: string }>;
   onRemovePlugin: (name: string) => Promise<{ success: boolean; name?: string }>;
   onSetPluginPriority: (name: string, priority: number) => Promise<{ success: boolean; name?: string }>;
   onSetSetting: (key: string, value: string) => void;
@@ -159,6 +159,10 @@ export function SettingsModal({
   const orderedAgentList = useMemo(
     () => orderedAgents(agentAvailability, resolvedDefaultAgent, 'codex'),
     [agentAvailability, resolvedDefaultAgent],
+  );
+  const executableAgentList = useMemo(
+    () => orderedAgentList.filter((agent) => ['codex', 'claude', 'copilot'].includes(agent)),
+    [orderedAgentList],
   );
   const agentCapabilityOrder = useMemo(
     () => AGENT_CAPABILITY_ORDER.map((cap) => cap as string),
@@ -511,15 +515,15 @@ export function SettingsModal({
   }, []);
 
   const handleInstallPlugin = useCallback(async () => {
-    const path = pluginSourcePath.trim();
-    if (path === '') {
-      setPluginError('Plugin directory is required');
+    const source = pluginSourcePath.trim();
+    if (source === '') {
+      setPluginError('Plugin source is required');
       return;
     }
     setPluginError(null);
     setPluginActionName('install');
     try {
-      await onInstallPlugin(path);
+      await onInstallPlugin(source);
       setPluginSourcePath('');
       await refreshPlugins();
     } catch (error) {
@@ -1138,7 +1142,7 @@ export function SettingsModal({
         <div className="settings-kicker">Extensions</div>
         <h3>Plugins</h3>
         <p className="settings-description">
-          Install user-owned plugins from local directories and control provider dispatch priority.
+          Install user-owned plugins from a local directory or Git repository and control provider dispatch priority.
         </p>
       </div>
       <div className="settings-block-body">
@@ -1147,9 +1151,9 @@ export function SettingsModal({
             type="text"
             value={pluginSourcePath}
             onChange={(e) => setPluginSourcePath(e.target.value)}
-            placeholder="/Users/you/src/my-attn-plugin"
+            placeholder="git@host:team/my-attn-plugin.git or /Users/you/src/my-attn-plugin"
             className="settings-input"
-            aria-label="Plugin directory"
+            aria-label="Plugin source"
             disabled={pluginActionName !== null}
             autoCapitalize="none"
             autoCorrect="off"
@@ -1247,7 +1251,7 @@ export function SettingsModal({
         </div>
         <div className="settings-block-body">
           <div className="settings-field-grid">
-            {orderedAgentList.map((agent) => {
+            {executableAgentList.map((agent) => {
               const available = isAgentAvailable(agentAvailability, agent);
               const inputId = `settings-${agent}-exec`;
               const value = agentExecutables[agent] || '';

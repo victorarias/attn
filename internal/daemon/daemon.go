@@ -132,6 +132,10 @@ type Daemon struct {
 	tailscale        *tailscaleRuntime
 	plugins          *pluginRegistry
 	pluginProcesses  *pluginProcessRegistry
+	pluginDriverMu   sync.Mutex
+	pluginLaunching  map[string]pluginSessionLaunch
+	pluginReports    map[string][]pendingPluginReport
+	pluginExits      map[string]ptybackend.ExitInfo
 	pluginDir        string
 
 	loginShellEnvMu sync.RWMutex
@@ -657,7 +661,7 @@ func (d *Daemon) pruneSessionsWithoutPTY() int {
 		if _, ok := liveIDs[session.ID]; ok {
 			continue
 		}
-		if agentdriver.RecoverOnMissingPTY(agentdriver.Get(string(session.Agent))) {
+		if d.recoverOnMissingPTY(session) {
 			d.store.UpdateState(session.ID, protocol.StateIdle)
 			d.store.SetRecoverable(session.ID, true)
 			recoverable++
@@ -670,6 +674,35 @@ func (d *Daemon) pruneSessionsWithoutPTY() int {
 		d.logf("marked %d sessions as recoverable on startup", recoverable)
 	}
 	return removed
+}
+
+func (d *Daemon) recoverOnMissingPTY(session *protocol.Session) bool {
+	if session == nil {
+		return false
+	}
+	if agentdriver.RecoverOnMissingPTY(agentdriver.Get(string(session.Agent))) {
+		return true
+	}
+	if run := d.store.GetAgentDriverRun(session.ID); run.RunID != "" {
+		return true
+	}
+	if strings.TrimSpace(d.store.GetAgentMetadata(session.ID)) != "" {
+		return true
+	}
+	if d.plugins != nil {
+		if driver, ok := d.plugins.driver(string(session.Agent)); ok && driver.Capabilities["resume"] {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *Daemon) pluginDriverReportsState(agent protocol.SessionAgent) bool {
+	if d.plugins == nil {
+		return false
+	}
+	driver, ok := d.plugins.driver(string(agent))
+	return ok && driver.Capabilities["state_reporting"]
 }
 
 func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
@@ -882,6 +915,13 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			report.Changed = true
 		}
 		if haveInfo {
+			if run := d.store.GetAgentDriverRun(sessionID); run.RunID != "" &&
+				(d.pluginDriverReportsState(existing.Agent) ||
+					existing.State == protocol.SessionStateWaitingInput ||
+					existing.State == protocol.SessionStatePendingApproval) {
+				// Persisted plugin reports remain authoritative across daemon recovery.
+				continue
+			}
 			nextState := sessionStateFromRecoveredInfo(info)
 			if existing.State != nextState {
 				d.store.UpdateState(sessionID, string(nextState))
@@ -929,7 +969,7 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			report.SkippedIdle++
 			continue
 		}
-		if agentdriver.RecoverOnMissingPTY(agentdriver.Get(string(session.Agent))) {
+		if d.recoverOnMissingPTY(session) {
 			d.store.UpdateState(session.ID, protocol.StateIdle)
 			d.store.SetRecoverable(session.ID, true)
 			report.StateUpdated++
@@ -1055,7 +1095,10 @@ func normalizeStoredSessionAgent(agent string, fallback protocol.SessionAgent) p
 	if agentdriver.Get(normalized) != nil {
 		return protocol.SessionAgent(normalized)
 	}
-	return protocol.NormalizeSessionAgent(protocol.SessionAgent(normalized), fallback)
+	if normalizePluginAgent(normalized) != "" {
+		return protocol.SessionAgent(normalized)
+	}
+	return protocol.NormalizeSessionAgent(fallback, protocol.SessionAgentCodex)
 }
 
 func sessionStateFromRecoveredInfo(info ptybackend.SessionInfo) protocol.SessionState {
@@ -1106,9 +1149,26 @@ func (d *Daemon) doneContext() context.Context {
 }
 
 func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
+	if d.queueExitDuringPluginLaunch(info) {
+		return
+	}
+	if d.supersededExitDuringPluginLaunch(info) {
+		if activeRun := d.store.GetAgentDriverRun(info.ID); activeRun.RunID == info.LifecycleID {
+			d.closePluginDriverSession(info.ID, "exited", &info.ExitCode, info.Signal)
+		}
+		return
+	}
+	if info.LifecycleID != "" {
+		activeRun := d.store.GetAgentDriverRun(info.ID)
+		if activeRun.RunID != "" && activeRun.RunID != info.LifecycleID {
+			d.logf("ignoring stale plugin PTY exit: session=%s exited_run=%s active_run=%s", info.ID, info.LifecycleID, activeRun.RunID)
+			return
+		}
+	}
 	d.stopTranscriptWatcher(info.ID)
 	d.clearLongRunTracking(info.ID)
 	d.handleReviewLoopSourceSessionExit(info.ID)
+	d.closePluginDriverSession(info.ID, "exited", &info.ExitCode, info.Signal)
 
 	if d.ptyBackend != nil {
 		if err := d.removePTYSession(info.ID); err != nil {
@@ -1176,9 +1236,16 @@ func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
 	d.markForcedStopClassification(sessionID)
 
 	if d.ptyBackend == nil {
+		d.closePluginDriverSession(sessionID, "killed", nil, signalName(sig))
 		return
 	}
-	if err := d.ptyBackend.Kill(context.Background(), sessionID, sig); err != nil && !errors.Is(err, pty.ErrSessionNotFound) {
+	err := d.ptyBackend.Kill(context.Background(), sessionID, sig)
+	if err == nil || errors.Is(err, pty.ErrSessionNotFound) {
+		// Production backends return from Kill only once the child has exited.
+		// Close here because worker lifecycle delivery can trail that return.
+		d.closePluginDriverSession(sessionID, "killed", nil, signalName(sig))
+	}
+	if err != nil && !errors.Is(err, pty.ErrSessionNotFound) {
 		d.logf("terminate session failed for %s: %v", sessionID, err)
 	}
 	_ = d.ptyBackend.Remove(context.Background(), sessionID)
@@ -1205,6 +1272,10 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 func (d *Daemon) handlePTYState(sessionID, state string) {
 	session := d.store.Get(sessionID)
 	if session == nil {
+		return
+	}
+	if run := d.store.GetAgentDriverRun(sessionID); run.RunID != "" && d.pluginDriverReportsState(session.Agent) {
+		// External drivers own state through sequenced session.report_* calls.
 		return
 	}
 	agent := session.Agent
@@ -2262,7 +2333,7 @@ func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
 // updateAndBroadcastStateWithTimestamp updates state only if the timestamp is newer
 // than the current state. Used by classifier to prevent stale results from overwriting
 // newer state updates that arrived during classification.
-func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, updatedAt time.Time) {
+func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, updatedAt time.Time) bool {
 	if d.store.UpdateStateWithTimestamp(sessionID, state, updatedAt) {
 		switch state {
 		case protocol.StateWorking:
@@ -2280,9 +2351,11 @@ func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, u
 			})
 			d.recomputeAndBroadcastWorkspaceForSession(sessionID)
 		}
+		return true
 	} else {
 		d.logf("state update discarded: session=%s state=%s (newer state exists)", sessionID, state)
 	}
+	return false
 }
 
 // broadcastRateLimited broadcasts a rate limit event to WebSocket clients

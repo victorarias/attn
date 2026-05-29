@@ -1384,13 +1384,7 @@ func capabilitiesFromInitialState(msg *protocol.InitialStateMessage) *protocol.E
 		return nil
 	}
 	settings := msg.Settings
-	agents := make([]string, 0, 4)
-	for _, agent := range []string{"claude", "codex", "copilot", "pi"} {
-		key := agent + "_available"
-		if truthySetting(settings[key]) {
-			agents = append(agents, agent)
-		}
-	}
+	agents, _ := agentsAvailableFromSettings(settings)
 
 	caps := &protocol.EndpointCapabilities{
 		ProtocolVersion: protocol.Deref(msg.ProtocolVersion),
@@ -1406,6 +1400,23 @@ func capabilitiesFromInitialState(msg *protocol.InitialStateMessage) *protocol.E
 		caps.DaemonInstanceID = protocol.Ptr(value)
 	}
 	return mergeCapabilitiesFromSettings(caps, settings)
+}
+
+func agentsAvailableFromSettings(settings map[string]interface{}) ([]string, bool) {
+	agents := make([]string, 0, 4)
+	foundAvailability := false
+	for key, value := range settings {
+		if !strings.HasSuffix(key, "_available") {
+			continue
+		}
+		foundAvailability = true
+		agent := strings.TrimSuffix(key, "_available")
+		if strings.TrimSpace(agent) != "" && truthySetting(value) {
+			agents = append(agents, agent)
+		}
+	}
+	sort.Strings(agents)
+	return agents, foundAvailability
 }
 
 func truthySetting(value interface{}) bool {
@@ -1443,6 +1454,9 @@ func mergeCapabilitiesFromSettings(existing *protocol.EndpointCapabilities, sett
 
 	if settings == nil {
 		return &caps
+	}
+	if agents, ok := agentsAvailableFromSettings(settings); ok {
+		caps.AgentsAvailable = agents
 	}
 	if value := stringSetting(settings[settingProjectsDirectory]); value != "" {
 		caps.ProjectsDirectory = protocol.Ptr(value)

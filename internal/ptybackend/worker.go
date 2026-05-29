@@ -88,6 +88,7 @@ type workerSession struct {
 	RegistryPath string
 	ControlToken string
 	WorkerPID    int
+	LifecycleID  string
 
 	mu              sync.Mutex
 	controlMu       sync.Mutex
@@ -372,6 +373,7 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 		SocketPath:   socketPath,
 		RegistryPath: filepath.Join(b.registryDir(), sessionID+".json"),
 		ControlToken: token,
+		LifecycleID:  opts.LifecycleID,
 	}
 
 	b.mu.Lock()
@@ -435,8 +437,15 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 	if opts.CopilotExecutable != "" {
 		args = append(args, "--copilot-executable", opts.CopilotExecutable)
 	}
-	if opts.PiExecutable != "" {
-		args = append(args, "--pi-executable", opts.PiExecutable)
+	if len(opts.ExternalCommand) > 0 {
+		encoded, err := json.Marshal(opts.ExternalCommand)
+		if err != nil {
+			return fmt.Errorf("encode external command: %w", err)
+		}
+		args = append(args, "--external-command-json", string(encoded))
+	}
+	if opts.ExternalCWD != "" {
+		args = append(args, "--external-cwd", opts.ExternalCWD)
 	}
 
 	binaryPath := b.resolveBinaryPath()
@@ -468,6 +477,13 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 		if envJSON, err := json.Marshal(opts.LoginShellEnv); err == nil {
 			workerEnv = append(workerEnv, "ATTN_CACHED_SHELL_ENV="+string(envJSON))
 		}
+	}
+	if len(opts.ExternalEnv) > 0 {
+		envJSON, err := json.Marshal(opts.ExternalEnv)
+		if err != nil {
+			return fmt.Errorf("encode external environment: %w", err)
+		}
+		workerEnv = append(workerEnv, "ATTN_PTY_EXTERNAL_ENV="+string(envJSON))
 	}
 	cmd.Env = workerEnv
 
@@ -1701,7 +1717,7 @@ func (b *WorkerBackend) startPoller(session *workerSession) {
 						onExit := b.onExit
 						b.hooksMu.RUnlock()
 						if onExit != nil {
-							go onExit(ExitInfo{ID: session.SessionID, ExitCode: 1, Signal: "worker_unreachable"})
+							go onExit(ExitInfo{ID: session.SessionID, ExitCode: 1, Signal: "worker_unreachable", LifecycleID: session.LifecycleID})
 						}
 						b.forceSessionEviction(session)
 						return
@@ -1757,7 +1773,7 @@ func (b *WorkerBackend) startPoller(session *workerSession) {
 					onExit := b.onExit
 					b.hooksMu.RUnlock()
 					if onExit != nil {
-						go onExit(ExitInfo{ID: session.SessionID, ExitCode: exitCode, Signal: exitSignal})
+						go onExit(ExitInfo{ID: session.SessionID, ExitCode: exitCode, Signal: exitSignal, LifecycleID: session.LifecycleID})
 					}
 				}
 			}
@@ -1939,7 +1955,7 @@ func (b *WorkerBackend) handleLifecycleEvent(session *workerSession, evt ptywork
 		onExit := b.onExit
 		b.hooksMu.RUnlock()
 		if onExit != nil {
-			go onExit(ExitInfo{ID: session.SessionID, ExitCode: exitCode, Signal: exitSignal})
+			go onExit(ExitInfo{ID: session.SessionID, ExitCode: exitCode, Signal: exitSignal, LifecycleID: session.LifecycleID})
 		}
 	}
 }
