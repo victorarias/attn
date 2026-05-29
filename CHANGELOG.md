@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-05-29]
+
+### Fixed
+- **Codex Activity State**: Codex sessions now use hooks exclusively for live activity state, preventing completed sessions from remaining green due to stale transcript activity.
+
 ## [2026-05-27]
 
 ### Changed

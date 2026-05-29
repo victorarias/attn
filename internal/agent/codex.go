@@ -16,7 +16,6 @@ type Codex struct{}
 
 var _ Driver = (*Codex)(nil)
 var _ TranscriptFinder = (*Codex)(nil)
-var _ TranscriptWatcherBehaviorProvider = (*Codex)(nil)
 var _ ClassifierProvider = (*Codex)(nil)
 var _ PTYStatePolicyProvider = (*Codex)(nil)
 var _ ExecutableClassifierProvider = (*Codex)(nil)
@@ -37,14 +36,14 @@ func (c *Codex) ResolveExecutable(configured string) string {
 }
 
 func (c *Codex) Capabilities() Capabilities {
+	// Transcripts remain needed for Stop-hook classification; live state is hook-owned.
 	return Capabilities{
-		HasHooks:             true,
-		HasTranscript:        true,
-		HasTranscriptWatcher: true,
-		HasClassifier:        true,
-		HasStateDetector:     false,
-		HasResume:            true,
-		HasYolo:              true,
+		HasHooks:         true,
+		HasTranscript:    true,
+		HasClassifier:    true,
+		HasStateDetector: false,
+		HasResume:        true,
+		HasYolo:          true,
 	}
 }
 
@@ -113,10 +112,6 @@ func (c *Codex) FindTranscriptForResume(resumeID string) string {
 
 func (c *Codex) BootstrapBytes() int64 {
 	return 256 * 1024
-}
-
-func (c *Codex) NewTranscriptWatcherBehavior() TranscriptWatcherBehavior {
-	return &codexTranscriptWatcherBehavior{}
 }
 
 func (c *Codex) RecoveredRunningState(ptyState string) protocol.SessionState {
