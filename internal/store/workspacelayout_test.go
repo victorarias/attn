@@ -59,6 +59,20 @@ func TestWorkspaceSaveLoadRoundTrip(t *testing.T) {
 	if loaded.Layout.Type != "split" || len(loaded.Layout.Children) != 2 {
 		t.Fatalf("Layout = %+v, want split with 2 children", loaded.Layout)
 	}
+
+	panes := s.ListWorkspaceLayoutPanes("workspace-1")
+	if len(panes) != 2 {
+		t.Fatalf("ListWorkspaceLayoutPanes() len = %d, want 2", len(panes))
+	}
+	if panes[0].PaneID != workspacelayout.MainPaneID || panes[1].PaneID != "pane-b" {
+		t.Fatalf("ListWorkspaceLayoutPanes() = %+v, want stable pane order", panes)
+	}
+	if workspaceID, paneID, ok := s.FindWorkspaceLayoutPaneBySessionID("sess-1"); !ok || workspaceID != "workspace-1" || paneID != workspacelayout.MainPaneID {
+		t.Fatalf("FindWorkspaceLayoutPaneBySessionID() = (%q, %q, %v), want workspace-1/main/true", workspaceID, paneID, ok)
+	}
+	if workspaceID, paneID, ok := s.FindWorkspaceLayoutPaneByRuntimeID("runtime-b"); !ok || workspaceID != "workspace-1" || paneID != "pane-b" {
+		t.Fatalf("FindWorkspaceLayoutPaneByRuntimeID() = (%q, %q, %v), want workspace-1/pane-b/true", workspaceID, paneID, ok)
+	}
 }
 
 func TestRemoveWorkspaceDeletesLayoutRows(t *testing.T) {
