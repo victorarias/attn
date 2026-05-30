@@ -114,7 +114,7 @@ describe('useSessionWorkspaceController', () => {
     const { result } = renderHook(() => useSessionWorkspaceController([session], session.id));
 
     act(() => {
-      result.current.setWorkspaceRef(session.id)({
+      result.current.setWorkspaceRef(session.workspaceId)({
         fitPane: vi.fn(),
         fitActivePane,
         focusPane: vi.fn(),
@@ -147,7 +147,7 @@ describe('useSessionWorkspaceController', () => {
     const { result } = renderHook(() => useSessionWorkspaceController([session], session.id));
 
     act(() => {
-      result.current.setWorkspaceRef(session.id)({
+      result.current.setWorkspaceRef(session.workspaceId)({
         fitPane: vi.fn(),
         fitActivePane: vi.fn(),
         focusPane: vi.fn(),
@@ -167,7 +167,7 @@ describe('useSessionWorkspaceController', () => {
     });
 
     act(() => {
-      result.current.removeWorkspaceRef(session.id);
+      result.current.removeWorkspaceRef(session.workspaceId);
     });
 
     expect(result.current.getPaneText(session.id, SESSION_PANE_ID)).toBe('');

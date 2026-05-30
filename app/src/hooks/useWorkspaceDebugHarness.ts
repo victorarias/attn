@@ -34,7 +34,7 @@ export function useWorkspaceDebugHarness({
     window.__TEST_GET_SESSION_PANE_TEXT = (sessionId: string) => {
       const session = sessions.find((entry) => entry.id === sessionId);
       const paneId = session?.workspace.agents.find((entry) => entry.sessionId === sessionId)?.id || '';
-      return workspaceRefs.current.get(sessionId)?.getPaneText(paneId) || '';
+      return workspaceRefs.current.get(session?.workspaceId || sessionId)?.getPaneText(paneId) || '';
     };
 
     window.__TEST_GET_ACTIVE_SESSION_PANE_TEXT = () => {
@@ -46,7 +46,7 @@ export function useWorkspaceDebugHarness({
       if (!session || !activePaneId) {
         return '';
       }
-      return workspaceRefs.current.get(activeSessionId)?.getPaneText(activePaneId) || '';
+      return workspaceRefs.current.get(session.workspaceId || activeSessionId)?.getPaneText(activePaneId) || '';
     };
 
     window.__TEST_GET_ACTIVE_SESSION_PANE_RUNTIME = (sessionId: string) => {

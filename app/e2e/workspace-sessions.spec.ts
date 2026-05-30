@@ -71,7 +71,7 @@ test.describe('Workspace Sessions', () => {
     await expect(page.locator('[data-testid="sidebar-workspace-workspace-b"]')).toBeVisible();
 
     await page.locator('[data-testid="session-a1"]').click();
-    await expect(page.locator('[data-session-terminal-workspace="a1"]')).toBeVisible({ timeout: 2000 });
+    await expect(page.locator('[data-session-terminal-workspace="workspace-a"]')).toBeVisible({ timeout: 2000 });
 
     await page.locator('[data-testid="sidebar-session-a2"]').click();
     await expect(page.locator('[data-testid="sidebar-workspace-workspace-a"]')).toHaveClass(/selected/);

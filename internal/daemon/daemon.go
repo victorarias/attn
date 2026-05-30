@@ -32,6 +32,7 @@ import (
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/transcript"
+	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
 type repoCache struct {
@@ -2855,6 +2856,11 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 	// Add session directly to store
 	d.store.Add(&msg.Session)
 	d.associateSessionWithWorkspace(msg.Session.ID, workspaceID)
+	paneID := "pane-" + msg.Session.ID
+	if err := d.store.SaveWorkspaceLayout(workspacelayout.DefaultWorkspaceLayout(workspaceID, paneID, msg.Session.ID)); err != nil {
+		d.sendError(conn, err.Error())
+		return
+	}
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients

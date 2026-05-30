@@ -251,8 +251,8 @@ function elementMetrics(element: Element | null) {
   };
 }
 
-function getSessionWorkspaceRoot(sessionId: string) {
-  const root = document.querySelector(`[data-session-terminal-workspace="${sessionId}"]`);
+function getSessionWorkspaceRoot(workspaceId: string) {
+  const root = document.querySelector(`[data-session-terminal-workspace="${workspaceId}"]`);
   return root instanceof HTMLElement ? root : null;
 }
 
@@ -381,8 +381,9 @@ function collectVisualSnapshot(
       const runtimeIdByPaneId = new Map(
         workspaceModel.panes.map((pane) => [pane.paneId, pane.runtimeId] as const),
       );
-      const workspaceDom = collectWorkspaceShellMetrics(session.id);
-      const workspaceView = collectWorkspaceViewState(session.id);
+      const workspaceId = session.workspaceId || session.id;
+      const workspaceDom = collectWorkspaceShellMetrics(workspaceId);
+      const workspaceView = collectWorkspaceViewState(workspaceId);
       const rootBounds = workspaceDom.workspaceRoot?.bounds;
       const paneLayoutById = new Map(
         workspaceModel.layout.panes.map((pane) => [
@@ -409,7 +410,7 @@ function collectVisualSnapshot(
           model: workspaceModel,
           view: workspaceView,
           dom: workspaceDom,
-          splits: collectSplitDomMetrics(session.id),
+          splits: collectSplitDomMetrics(workspaceId),
         },
         sidebarItem: sidebarItem instanceof HTMLElement
           ? {
@@ -476,8 +477,9 @@ function collectSessionUiState(
   const firstAgentPane = firstAgentPaneId
     ? document.querySelector(`[data-pane-session-id="${session.id}"][data-pane-id="${firstAgentPaneId}"]`)
     : null;
-  const workspaceDom = collectWorkspaceShellMetrics(session.id);
-  const workspaceView = collectWorkspaceViewState(session.id);
+  const workspaceId = session.workspaceId || session.id;
+  const workspaceDom = collectWorkspaceShellMetrics(workspaceId);
+  const workspaceView = collectWorkspaceViewState(workspaceId);
   const workspaceModel = serializeWorkspaceModel(session, getActivePaneIdForSession);
 
   return {
@@ -499,7 +501,7 @@ function collectSessionUiState(
       model: workspaceModel,
       view: workspaceView,
       dom: workspaceDom,
-      splits: collectSplitDomMetrics(session.id),
+      splits: collectSplitDomMetrics(workspaceId),
     },
     agentPaneBounds: rectSnapshot(firstAgentPane),
   };

@@ -24,11 +24,12 @@ import { CopyToast, useCopyToast } from './components/CopyToast';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
-import { useSessionStore } from './store/sessions';
+import { useSessionStore, type Session, type TerminalWorkspaceState } from './store/sessions';
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
+import { hasPane } from './types/workspace';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -74,6 +75,55 @@ interface GitHubReleaseResponse {
   html_url?: string;
   prerelease?: boolean;
   draft?: boolean;
+}
+
+function terminalStateForWorkspaceSessions(sessions: Session[]): TerminalWorkspaceState | null {
+  let selected: TerminalWorkspaceState | null = null;
+  for (const session of sessions) {
+    const candidate = session.workspace;
+    if (!candidate.layoutTree && candidate.agents.length === 0) {
+      continue;
+    }
+    if (!selected || candidate.agents.length > selected.agents.length) {
+      selected = candidate;
+    }
+  }
+  return selected;
+}
+
+function activePaneIdForWorkspace(
+  workspace: TerminalWorkspaceState,
+  focusedSessionId: string | null,
+): string {
+  if (focusedSessionId) {
+    const focusedPane = workspace.agents.find((pane) => pane.sessionId === focusedSessionId);
+    if (focusedPane) {
+      return focusedPane.id;
+    }
+  }
+  return workspace.agents[0]?.id || '';
+}
+
+function activePaneIdForFocusedSession(
+  workspace: TerminalWorkspaceState,
+  session: Session | null,
+  getActivePaneIdForSession: (session: Session | undefined | null) => string,
+): string {
+  const sessionPaneIds = new Set(
+    workspace.agents
+      .filter((pane) => pane.sessionId === session?.id)
+      .map((pane) => pane.id),
+  );
+  const sessionActivePaneId = getActivePaneIdForSession(session);
+  if (
+    sessionActivePaneId
+    && sessionPaneIds.has(sessionActivePaneId)
+    && workspace.layoutTree
+    && hasPane(workspace.layoutTree, sessionActivePaneId)
+  ) {
+    return sessionActivePaneId;
+  }
+  return activePaneIdForWorkspace(workspace, session?.id ?? null);
 }
 
 function parseSemver(version: string): [number, number, number] | null {
@@ -1535,7 +1585,7 @@ sendFetchPRDetails,
         closeSession(id);
       }
 
-      removeWorkspaceRef(id);
+      removeWorkspaceRef(session?.workspaceId || id);
     },
     [alwaysKeepWorktrees, closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterSession]
   );
@@ -2209,7 +2259,7 @@ sendFetchPRDetails,
     toggleDockPanel,
   ]);
 
-  const activeSessionZoomed = activeSessionId ? Boolean(zoomModeBySessionId[activeSessionId]) : false;
+  const activeSessionZoomed = activeWorkspaceId ? Boolean(zoomModeBySessionId[activeWorkspaceId]) : false;
 
   const sidebarFooterShortcuts = useMemo<FooterShortcut[]>(() => (
     activeSessionId
@@ -2220,7 +2270,7 @@ sendFetchPRDetails,
           { label: '⌘⌥←↑→↓ pane' },
         ]
       : []
-  ), [activeSessionId, activeSessionZoomed]);
+  ), [activeWorkspaceId, activeSessionZoomed]);
 
   const handleStartReviewLoop = useCallback(async (prompt: string, iterationLimit: number, presetId?: string) => {
     if (!activeSessionId) return;
@@ -2395,15 +2445,18 @@ sendFetchPRDetails,
         <div className="terminal-pane">
           <div className="terminal-main-area">
             {workspaceViews.map((workspace) => {
-              const activeSessionInWorkspace = activeSessionId && workspace.sessions.some((entry) => entry.id === activeSessionId)
-                ? sessions.find((entry) => entry.id === activeSessionId)
-                : null;
-              const rootSession = activeSessionInWorkspace
-                || sessions.find((entry) => entry.id === workspace.firstSessionId)
-                || null;
-              if (!rootSession) {
+              const workspaceState = terminalStateForWorkspaceSessions(workspace.sessions);
+              if (!workspaceState) {
                 return null;
               }
+              const focusedSession = workspace.focusedSessionId
+                ? workspace.sessions.find((session) => session.id === workspace.focusedSessionId) ?? null
+                : null;
+              const activePaneId = activePaneIdForFocusedSession(
+                workspaceState,
+                focusedSession,
+                getActivePaneIdForSession,
+              );
               const isActiveWorkspace = workspace.id === activeWorkspaceId;
               return (
                 <div
@@ -2411,11 +2464,8 @@ sendFetchPRDetails,
                   className={`terminal-wrapper ${isActiveWorkspace ? 'active' : ''}`}
                 >
                   <SessionTerminalWorkspace
-                    ref={setWorkspaceRef(rootSession.id)}
-                    sessionId={rootSession.id}
-                    sessionLabel={rootSession.label}
-                    sessionAgent={rootSession.agent}
-                    sessionEndpointId={rootSession.endpointId}
+                    ref={setWorkspaceRef(workspace.id)}
+                    workspaceId={workspace.id}
                     workspaceSessions={workspace.sessions.map((entry) => ({
                       id: entry.id,
                       label: entry.label,
@@ -2423,9 +2473,8 @@ sendFetchPRDetails,
                       cwd: entry.cwd,
                       endpointId: entry.endpointId,
                     }))}
-                    cwd={rootSession.cwd}
-                    workspace={rootSession.workspace}
-                    activePaneId={getActivePaneIdForSession(rootSession)}
+                    workspace={workspaceState}
+                    activePaneId={activePaneId}
                     fontSize={terminalFontSize}
                     resolvedTheme={resolvedTheme}
                     focusRequestToken={utilityFocusRequestToken}
@@ -2439,11 +2488,17 @@ sendFetchPRDetails,
                       void createSplitSession('shell', direction, targetPaneId);
                     }}
                     onClosePane={(paneId) => {
-                      void handleClosePane(rootSession.id, paneId).catch(console.error);
+                      const paneSessionId = workspaceState.agents.find((pane) => pane.id === paneId)?.sessionId;
+                      if (paneSessionId) {
+                        void handleClosePane(paneSessionId, paneId).catch(console.error);
+                      }
                     }}
                     onFocusPane={(paneId) => {
-                      const agentPane = (rootSession.workspace.agents || []).find((pane) => pane.id === paneId);
-                      const paneSessionId = agentPane?.sessionId || rootSession.id;
+                      const agentPane = workspaceState.agents.find((pane) => pane.id === paneId);
+                      const paneSessionId = agentPane?.sessionId;
+                      if (!paneSessionId) {
+                        return;
+                      }
                       setActivePane(paneSessionId, paneId);
                       if (paneSessionId !== activeSessionId) {
                         setActiveSession(paneSessionId);
@@ -2451,9 +2506,9 @@ sendFetchPRDetails,
                     }}
                     onZoomModeChange={(zoomed) => {
                       setZoomModeBySessionId((prev) => (
-                        prev[rootSession.id] === zoomed
+                        prev[workspace.id] === zoomed
                           ? prev
-                          : { ...prev, [rootSession.id]: zoomed }
+                          : { ...prev, [workspace.id]: zoomed }
                       ));
                     }}
                     onNavigateOutOfSession={handleNavigateOutOfSession}

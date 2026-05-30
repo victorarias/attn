@@ -141,10 +141,8 @@ describe('SessionTerminalWorkspace', () => {
 
     render(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={createSingleAgentWorkspace()}
         activePaneId={SESSION_PANE_ID}
         fontSize={14}
@@ -172,10 +170,8 @@ describe('SessionTerminalWorkspace', () => {
 
     render(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={{
           ...createSingleAgentWorkspace(),
           layoutTree: {
@@ -214,10 +210,8 @@ describe('SessionTerminalWorkspace', () => {
 
     render(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={{
           agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
           layoutTree: {
@@ -255,10 +249,8 @@ describe('SessionTerminalWorkspace', () => {
 
     render(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={{
           agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, ],
           layoutTree: {
@@ -304,10 +296,8 @@ describe('SessionTerminalWorkspace', () => {
 
     render(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={{
           agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, ],
           layoutTree: {
@@ -342,10 +332,8 @@ describe('SessionTerminalWorkspace', () => {
   it('applies stored split ratios in the rendered layout', () => {
     const { container } = render(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={{
           agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
           layoutTree: {
@@ -390,10 +378,8 @@ describe('SessionTerminalWorkspace', () => {
   it('keeps the session pane mounted when the split topology changes around it', () => {
     const { rerender } = render(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="codex"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "codex", cwd: "/tmp/repo" }]}
         workspace={{
           agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
           layoutTree: {
@@ -422,10 +408,8 @@ describe('SessionTerminalWorkspace', () => {
 
     rerender(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="codex"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "codex", cwd: "/tmp/repo" }]}
         workspace={{
           agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, 
             { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' },
@@ -466,10 +450,8 @@ describe('SessionTerminalWorkspace', () => {
 
     rerender(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="codex"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "codex", cwd: "/tmp/repo" }]}
         workspace={{
           agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
           layoutTree: {
@@ -502,10 +484,8 @@ describe('SessionTerminalWorkspace', () => {
   it('lets zoom arm before splitting and applies once a split exists', () => {
     const { container, rerender } = render(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={createSingleAgentWorkspace()}
         activePaneId={SESSION_PANE_ID}
         fontSize={14}
@@ -524,15 +504,13 @@ describe('SessionTerminalWorkspace', () => {
       registeredShortcuts.get('terminal.toggleZoom')?.();
     });
 
-    expect(container.querySelector('[data-session-terminal-workspace="session-1"]')).toHaveAttribute('data-zoomed-pane-id', SESSION_PANE_ID);
+    expect(container.querySelector('[data-session-terminal-workspace="workspace-session-1"]')).toHaveAttribute('data-zoomed-pane-id', SESSION_PANE_ID);
     expect(container.querySelector('[data-split-id="root"]')).toBeNull();
 
     rerender(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={{
           agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
           layoutTree: {
@@ -591,10 +569,8 @@ describe('SessionTerminalWorkspace', () => {
 
     const { container, rerender } = render(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={workspace}
         activePaneId="bottom-right"
         fontSize={14}
@@ -616,16 +592,14 @@ describe('SessionTerminalWorkspace', () => {
       registeredShortcuts.get('terminal.toggleZoom')?.();
     });
 
-    expect(container.querySelector('[data-session-terminal-workspace="session-1"]')).toHaveAttribute('data-zoomed-pane-id', 'bottom-right');
+    expect(container.querySelector('[data-session-terminal-workspace="workspace-session-1"]')).toHaveAttribute('data-zoomed-pane-id', 'bottom-right');
     expect(container.querySelector('[data-split-id="root"]')).toHaveAttribute('data-split-ratio', '0.240');
     expect(container.querySelector('[data-split-id="right"]')).toHaveAttribute('data-split-ratio', '0.240');
 
     rerender(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={workspace}
         activePaneId={SESSION_PANE_ID}
         fontSize={14}
@@ -640,7 +614,7 @@ describe('SessionTerminalWorkspace', () => {
       />
     );
 
-    expect(container.querySelector('[data-session-terminal-workspace="session-1"]')).toHaveAttribute('data-zoomed-pane-id', SESSION_PANE_ID);
+    expect(container.querySelector('[data-session-terminal-workspace="workspace-session-1"]')).toHaveAttribute('data-zoomed-pane-id', SESSION_PANE_ID);
     expect(container.querySelector('[data-split-id="root"]')).toHaveAttribute('data-split-ratio', '0.760');
     expect(container.querySelector('[data-split-id="right"]')).toHaveAttribute('data-split-ratio', '0.500');
   });
@@ -651,10 +625,8 @@ describe('SessionTerminalWorkspace', () => {
 
     const { rerender } = render(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={{
           agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
           layoutTree: {
@@ -686,10 +658,8 @@ describe('SessionTerminalWorkspace', () => {
 
     rerender(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={createSingleAgentWorkspace()}
         activePaneId={SESSION_PANE_ID}
         fontSize={14}
@@ -728,10 +698,8 @@ describe('SessionTerminalWorkspace', () => {
 
     const { rerender } = render(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={workspace}
         activePaneId="pane-session-1"
         fontSize={14}
@@ -750,10 +718,8 @@ describe('SessionTerminalWorkspace', () => {
 
     rerender(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={workspace}
         activePaneId="pane-session-1"
         fontSize={14}
@@ -791,10 +757,8 @@ describe('SessionTerminalWorkspace', () => {
 
     const { rerender } = render(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={workspace}
         activePaneId="pane-session-1"
         fontSize={14}
@@ -815,10 +779,8 @@ describe('SessionTerminalWorkspace', () => {
 
     rerender(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
         workspace={workspace}
         activePaneId="pane-session-1"
         fontSize={14}
@@ -848,11 +810,8 @@ describe('SessionTerminalWorkspace', () => {
     }));
     render(
       <SessionTerminalWorkspace
-        sessionId="session-1"
-        sessionLabel="Session 1"
-        sessionAgent="claude"
-        sessionEndpointId="ep-remote"
-        cwd="/tmp/repo"
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo", endpointId: "ep-remote" }]}
         workspace={{
           agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
           layoutTree: {
