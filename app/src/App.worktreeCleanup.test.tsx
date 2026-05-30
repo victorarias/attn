@@ -86,7 +86,36 @@ vi.mock('./components/Dashboard', () => ({
   ),
 }));
 vi.mock('./components/AttentionDrawer', () => ({ AttentionDrawer: () => null }));
-vi.mock('./components/LocationPicker', () => ({ LocationPicker: () => null }));
+vi.mock('./components/LocationPicker', () => ({
+  LocationPicker: ({
+    isOpen,
+    onClose,
+    onCreateWorktreeSession,
+  }: {
+    isOpen: boolean;
+    onClose: () => void;
+    onCreateWorktreeSession?: (
+      mainRepo: string,
+      branch: string,
+      startingFrom: string,
+      endpointId: string | undefined,
+      agent: 'codex',
+      yoloMode: boolean,
+    ) => void;
+  }) => (
+    isOpen ? (
+      <button
+        data-testid="mock-create-worktree-session"
+        onClick={() => {
+          onCreateWorktreeSession?.('/tmp/repo', 'feat-async', 'main', undefined, 'codex', false);
+          onClose();
+        }}
+      >
+        Create Worktree Session
+      </button>
+    ) : null
+  ),
+}));
 vi.mock('./components/UndoToast', () => ({ UndoToast: () => null }));
 vi.mock('./components/ChangesPanel', () => ({ ChangesPanel: () => null }));
 vi.mock('./components/DiffDetailPanel', () => ({ DiffDetailPanel: () => null }));
@@ -271,6 +300,62 @@ describe('worktree cleanup prompt', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+  });
+
+  it('moves worktree-backed session creation out of the picker', async () => {
+    const createWorktree = deferred<{ success: true; path: string }>();
+    const createSession = vi.fn(async () => 'created-1');
+    mockSessionStoreReturn.sessions = [];
+    mockSessionStoreReturn.activeSessionId = null;
+    mockSessionStoreReturn.createSession = createSession;
+    mockDaemonStoreReturn.daemonSessions = [];
+    mockDaemonSocketReturn.sendCreateWorktree = vi.fn(() => createWorktree.promise);
+
+    const { rerender } = render(<App />);
+
+    const keyboardArgs = mockUseKeyboardShortcuts.mock.calls[mockUseKeyboardShortcuts.mock.calls.length - 1]?.[0] as {
+      onNewSession?: () => void;
+    };
+    act(() => {
+      keyboardArgs.onNewSession?.();
+    });
+
+    await userEvent.click(screen.getByTestId('mock-create-worktree-session'));
+
+    expect(screen.queryByTestId('mock-create-worktree-session')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toHaveTextContent('Creating worktree');
+    expect(mockDaemonSocketReturn.sendCreateWorktree).toHaveBeenCalledWith('/tmp/repo', 'feat-async', undefined, 'main', undefined);
+
+    act(() => {
+      keyboardArgs.onNewSession?.();
+    });
+    await userEvent.click(screen.getByTestId('mock-create-worktree-session'));
+    expect(mockDaemonSocketReturn.sendCreateWorktree).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      createWorktree.resolve({ success: true, path: '/tmp/repo--feat-async' });
+      await createWorktree.promise;
+    });
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith(
+        'repo--feat-async',
+        '/tmp/repo--feat-async',
+        expect.any(String),
+        'codex',
+        undefined,
+        false,
+        expect.stringMatching(/^workspace-/),
+      );
+    });
+    expect(screen.getByRole('dialog')).toHaveTextContent('Starting session');
+
+    mockDaemonStoreReturn.daemonSessions = [{ id: 'created-1', label: 'repo--feat-async', directory: '/tmp/repo--feat-async', state: 'launching' }];
+    rerender(<App />);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Starting session')).not.toBeInTheDocument();
     });
   });
 

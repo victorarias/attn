@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-05-30]
 
 ### Fixed
+- **Session Creation**: Creating sessions from new worktrees now runs in the background with the same compact progress surface as worktree cleanup, so slow repository/plugin setup no longer traps the app in the picker.
 - **Codex Resize Redraws**: Attn now coalesces Codex's synchronized terminal redraws during pane resizes, preventing old scrollback from visibly streaming through the embedded terminal when layouts change.
 - **Ghostty Shift-Tab**: Shift-Tab in embedded Ghostty terminals now reaches agents as reverse-tab input instead of being treated like a prompt submit.
 - **Worktree Cleanup**: Failed worktree deletes now keep attn state intact, explain forceable local-change failures, and let you explicitly force-delete the local worktree and local branch without touching remotes.
