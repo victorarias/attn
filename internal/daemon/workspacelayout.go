@@ -362,14 +362,29 @@ func ptySpawnShellOptions(runtimeID, cwd, label string) ptybackend.SpawnOptions 
 }
 
 func (d *Daemon) handleWorkspaceLayoutClosePane(client *wsClient, msg *protocol.WorkspaceLayoutClosePaneMessage) {
-	if msg.PaneID == workspacelayout.MainPaneID {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutClosePane, msg.WorkspaceID, protocol.Ptr(msg.PaneID), fmt.Errorf("agent pane cannot be closed"))
-		return
-	}
-
 	snapshot, err := d.ensureWorkspaceLayout(msg.WorkspaceID)
 	if err != nil {
 		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutClosePane, msg.WorkspaceID, protocol.Ptr(msg.PaneID), err)
+		return
+	}
+
+	if msg.PaneID == workspacelayout.MainPaneID {
+		for _, pane := range snapshot.Panes {
+			if pane.PaneID != workspacelayout.MainPaneID || strings.TrimSpace(pane.SessionID) == "" {
+				continue
+			}
+			if session := d.unregisterSession(pane.SessionID, syscall.SIGTERM); session != nil {
+				d.removeWorkspaceLayoutPaneForSession(session.ID)
+				d.wsHub.Broadcast(&protocol.WebSocketEvent{
+					Event:   protocol.EventSessionUnregistered,
+					Session: d.sessionForBroadcast(session),
+				})
+				d.dissociateSessionFromWorkspace(session.ID)
+			}
+			d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutClosePane, msg.WorkspaceID, protocol.Ptr(msg.PaneID), nil)
+			return
+		}
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutClosePane, msg.WorkspaceID, protocol.Ptr(msg.PaneID), fmt.Errorf("pane not found: %s", msg.PaneID))
 		return
 	}
 
@@ -419,7 +434,7 @@ func (d *Daemon) handleWorkspaceLayoutClosePane(client *wsClient, msg *protocol.
 
 func (d *Daemon) removeWorkspaceLayoutPaneForSession(sessionID string) {
 	workspaceID, paneID, ok := d.store.FindWorkspaceLayoutPaneBySessionID(sessionID)
-	if !ok || paneID == "" || paneID == workspacelayout.MainPaneID {
+	if !ok || paneID == "" {
 		return
 	}
 	snapshot, err := d.ensureWorkspaceLayout(workspaceID)
@@ -427,6 +442,12 @@ func (d *Daemon) removeWorkspaceLayoutPaneForSession(sessionID string) {
 		d.logf("workspace layout session unregister reconcile failed for session %s: %v", sessionID, err)
 		return
 	}
+
+	if paneID == workspacelayout.MainPaneID {
+		d.promoteWorkspaceLayoutPaneForClosedMainSession(workspaceID, sessionID, snapshot)
+		return
+	}
+
 	layout, _ := workspacelayout.Remove(snapshot.Layout, paneID)
 	nextPanes := make([]workspacelayout.Pane, 0, len(snapshot.Panes))
 	for _, pane := range snapshot.Panes {
@@ -439,6 +460,52 @@ func (d *Daemon) removeWorkspaceLayoutPaneForSession(sessionID string) {
 	normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot, snapshot.Panes[0].SessionID)
 	if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
 		d.logf("workspace layout session unregister save failed for session %s: %v", sessionID, err)
+		return
+	}
+	d.broadcastWorkspaceLayoutUpdated(workspaceID)
+}
+
+func (d *Daemon) promoteWorkspaceLayoutPaneForClosedMainSession(workspaceID, closedSessionID string, snapshot *workspacelayout.WorkspaceLayout) {
+	var replacement workspacelayout.Pane
+	foundReplacement := false
+	for _, pane := range snapshot.Panes {
+		if pane.PaneID == workspacelayout.MainPaneID {
+			continue
+		}
+		if pane.Kind != workspacelayout.PaneKindAgent || strings.TrimSpace(pane.SessionID) == "" {
+			continue
+		}
+		replacement = pane
+		foundReplacement = true
+		break
+	}
+	if !foundReplacement {
+		return
+	}
+
+	layout, _ := workspacelayout.Remove(snapshot.Layout, replacement.PaneID)
+	nextPanes := make([]workspacelayout.Pane, 0, len(snapshot.Panes))
+	nextPanes = append(nextPanes, workspacelayout.Pane{
+		PaneID:    workspacelayout.MainPaneID,
+		RuntimeID: replacement.RuntimeID,
+		SessionID: replacement.SessionID,
+		Kind:      workspacelayout.PaneKindAgent,
+		Title:     replacement.Title,
+	})
+	for _, pane := range snapshot.Panes {
+		if pane.PaneID == workspacelayout.MainPaneID || pane.PaneID == replacement.PaneID || pane.SessionID == closedSessionID {
+			continue
+		}
+		nextPanes = append(nextPanes, pane)
+	}
+	snapshot.Layout = layout
+	snapshot.Panes = nextPanes
+	if snapshot.ActivePaneID == replacement.PaneID || snapshot.ActivePaneID == workspacelayout.MainPaneID {
+		snapshot.ActivePaneID = workspacelayout.MainPaneID
+	}
+	normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot, replacement.SessionID)
+	if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
+		d.logf("workspace layout main session promotion save failed for session %s: %v", closedSessionID, err)
 		return
 	}
 	d.broadcastWorkspaceLayoutUpdated(workspaceID)

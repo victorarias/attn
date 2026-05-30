@@ -429,6 +429,19 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		CopilotExecutable: protocol.Deref(msg.CopilotExecutable),
 		LoginShellEnv:     d.cachedLoginShellEnv(),
 	}
+	if existingSession != nil {
+		for _, liveID := range d.ptyBackend.SessionIDs(context.Background()) {
+			if liveID != msg.ID {
+				continue
+			}
+			d.sendToClient(client, protocol.SpawnResultMessage{
+				Event:   protocol.EventSpawnResult,
+				ID:      msg.ID,
+				Success: true,
+			})
+			return
+		}
+	}
 	pluginRunID := ""
 	if hasPluginDriver {
 		pluginRunID = uuid.NewString()

@@ -2635,6 +2635,86 @@ func TestDaemon_HandleUnregisterWS_RemovesWorkspaceAndBroadcastsSessionUnregiste
 	}
 }
 
+func TestDaemon_HandleUnregisterWS_PromotesAnotherSessionWhenClosingMainPane(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	workspaceID := "workspace-shared"
+	now := time.Now().UTC().Format(time.RFC3339)
+	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: "shared", Directory: t.TempDir()})
+	for _, session := range []*protocol.Session{
+		{
+			ID:             "sess-main",
+			Label:          "main",
+			Directory:      t.TempDir(),
+			State:          protocol.StateWorking,
+			StateSince:     now,
+			StateUpdatedAt: now,
+			LastSeen:       now,
+			WorkspaceID:    protocol.Ptr(workspaceID),
+		},
+		{
+			ID:             "sess-next",
+			Label:          "next",
+			Directory:      t.TempDir(),
+			State:          protocol.StateWorking,
+			StateSince:     now,
+			StateUpdatedAt: now,
+			LastSeen:       now,
+			WorkspaceID:    protocol.Ptr(workspaceID),
+		},
+	} {
+		d.store.Add(session)
+	}
+	if err := d.store.SaveWorkspaceLayout(workspacelayout.WorkspaceLayout{
+		WorkspaceID:  workspaceID,
+		ActivePaneID: workspacelayout.MainPaneID,
+		Layout: workspacelayout.Node{
+			Type:      "split",
+			SplitID:   "split-1",
+			Direction: workspacelayout.DirectionVertical,
+			Ratio:     0.5,
+			Children: []workspacelayout.Node{
+				{Type: "pane", PaneID: workspacelayout.MainPaneID},
+				{Type: "pane", PaneID: "pane-next"},
+			},
+		},
+		Panes: []workspacelayout.Pane{
+			{PaneID: workspacelayout.MainPaneID, RuntimeID: "sess-main", SessionID: "sess-main", Kind: workspacelayout.PaneKindAgent, Title: "main"},
+			{PaneID: "pane-next", RuntimeID: "sess-next", SessionID: "sess-next", Kind: workspacelayout.PaneKindAgent, Title: "next"},
+		},
+	}); err != nil {
+		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
+	}
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 8),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+	d.wsHub.clients[client] = true
+	go d.wsHub.run()
+
+	d.handleUnregisterWS(client, &protocol.UnregisterMessage{ID: "sess-main"})
+
+	if got := d.store.Get("sess-main"); got != nil {
+		t.Fatalf("closed session still exists: %+v", got)
+	}
+	if got := d.store.Get("sess-next"); got == nil {
+		t.Fatal("replacement session was removed")
+	}
+	layout := d.store.GetWorkspaceLayout(workspaceID)
+	if layout == nil {
+		t.Fatal("workspace layout was removed")
+	}
+	if len(layout.Panes) != 1 {
+		t.Fatalf("layout panes len = %d, want 1: %+v", len(layout.Panes), layout.Panes)
+	}
+	if pane := layout.Panes[0]; pane.PaneID != workspacelayout.MainPaneID || pane.SessionID != "sess-next" {
+		t.Fatalf("promoted pane = %+v, want main pane for sess-next", pane)
+	}
+	if layout.Layout.Type != "pane" || layout.Layout.PaneID != workspacelayout.MainPaneID {
+		t.Fatalf("layout tree = %+v, want single main pane", layout.Layout)
+	}
+}
+
 func TestDaemon_NewAddsWarningWhenPersistenceFallsBackToMemory(t *testing.T) {
 	t.Setenv("ATTN_DB_PATH", filepath.Join("/dev/null", "attn.db"))
 

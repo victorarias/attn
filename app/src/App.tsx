@@ -36,6 +36,7 @@ import { useUIScale } from './hooks/useUIScale';
 import { useTheme } from './hooks/useTheme';
 import { useOpenPR, type OpenPRProgress } from './hooks/useOpenPR';
 import { useUiAutomationBridge } from './hooks/useUiAutomationBridge';
+import { ptySpawn } from './pty/bridge';
 import {
   agentLabel,
   getAgentAvailability,
@@ -59,6 +60,14 @@ const CHANGES_BRANCH_DIFF_SLOW_THRESHOLD_MS = 5_000;
 const CHANGES_BRANCH_DIFF_SLOW_COOLDOWN_MS = 30_000;
 
 type LocationPickerPurpose = 'workspace' | 'session';
+
+interface SplitSessionOptions {
+  baseSessionId?: string;
+  cwd?: string;
+  endpointId?: string;
+  label?: string;
+  yoloMode?: boolean;
+}
 
 interface GitHubReleaseResponse {
   tag_name?: string;
@@ -278,7 +287,6 @@ function App() {
     sendRefreshPRs,
     sendRegisterWorkspace,
     sendUnregisterSession,
-    sendUnregisterWorkspace,
     sendSetSetting,
     sendCreateWorktree,
     sendDeleteWorktree,
@@ -393,7 +401,6 @@ function App() {
         sendRefreshPRs={sendRefreshPRs}
         sendRegisterWorkspace={sendRegisterWorkspace}
         sendUnregisterSession={sendUnregisterSession}
-        sendUnregisterWorkspace={sendUnregisterWorkspace}
         sendSetSetting={sendSetSetting}
         sendCreateWorktree={sendCreateWorktree}
         sendDeleteWorktree={sendDeleteWorktree}
@@ -475,7 +482,6 @@ interface AppContentProps {
   sendRefreshPRs: ReturnType<typeof useDaemonSocket>['sendRefreshPRs'];
   sendRegisterWorkspace: ReturnType<typeof useDaemonSocket>['sendRegisterWorkspace'];
   sendUnregisterSession: ReturnType<typeof useDaemonSocket>['sendUnregisterSession'];
-  sendUnregisterWorkspace: ReturnType<typeof useDaemonSocket>['sendUnregisterWorkspace'];
   sendSetSetting: ReturnType<typeof useDaemonSocket>['sendSetSetting'];
   sendCreateWorktree: ReturnType<typeof useDaemonSocket>['sendCreateWorktree'];
   sendDeleteWorktree: ReturnType<typeof useDaemonSocket>['sendDeleteWorktree'];
@@ -552,7 +558,6 @@ function AppContent({
   sendRefreshPRs,
   sendRegisterWorkspace,
   sendUnregisterSession,
-  sendUnregisterWorkspace,
   sendSetSetting,
   sendCreateWorktree,
   sendDeleteWorktree,
@@ -1252,8 +1257,11 @@ sendFetchPRDetails,
     agent: SessionAgent,
     direction: 'vertical' | 'horizontal',
     targetPaneId?: string,
+    options: SplitSessionOptions = {},
   ) => {
-    const activeSession = activeLocalSession;
+    const activeSession = options.baseSessionId
+      ? sessions.find((session) => session.id === options.baseSessionId)
+      : activeLocalSession;
     if (!activeSession?.workspaceId) {
       handleNewWorkspace();
       return;
@@ -1261,24 +1269,34 @@ sendFetchPRDetails,
     const sessionId = crypto.randomUUID();
     const workspaceId = activeSession.workspaceId;
     const paneId = targetPaneId || getActivePaneIdForSession(activeSession);
-    const label = nextSplitSessionLabel(workspaceId, agent);
+    const label = options.label || nextSplitSessionLabel(workspaceId, agent);
+    let spawned = false;
 
     try {
       await createSession(
         label,
-        activeSession.cwd,
+        options.cwd || activeSession.cwd,
         sessionId,
         agent,
-        activeSession.endpointId,
-        agent === 'shell' ? false : activeSession.yoloMode,
+        options.endpointId ?? activeSession.endpointId,
+        agent === 'shell' ? false : options.yoloMode ?? activeSession.yoloMode,
         workspaceId,
       );
+      const spawnArgs = takeSessionSpawnArgs(sessionId, 80, 24);
+      if (spawnArgs) {
+        await ptySpawn({ args: spawnArgs });
+        spawned = true;
+      }
       await sendWorkspaceSplitPane(workspaceId, paneId, direction, { id: sessionId, title: label });
       setView('session');
       setActiveSession(sessionId);
       setUtilityFocusRequestToken((token) => token + 1);
     } catch (error) {
-      closeSession(sessionId);
+      if (spawned) {
+        await sendUnregisterSession(sessionId).catch(console.error);
+      } else {
+        closeSession(sessionId);
+      }
       showError(error instanceof Error ? error.message : 'Failed to create session split');
     }
   }, [
@@ -1289,14 +1307,21 @@ sendFetchPRDetails,
     handleNewWorkspace,
     nextSplitSessionLabel,
     sendWorkspaceSplitPane,
+    sendUnregisterSession,
+    sessions,
     setActiveSession,
     showError,
+    takeSessionSpawnArgs,
   ]);
 
   const handleNewSession = useCallback(() => {
-    const agent = activeLocalSession?.agent || 'codex';
-    void createSplitSession(agent, 'vertical');
-  }, [activeLocalSession?.agent, createSplitSession]);
+    if (!activeLocalSession?.workspaceId) {
+      handleNewWorkspace();
+      return;
+    }
+    setLocationPickerPurpose('session');
+    setLocationPickerOpen(true);
+  }, [activeLocalSession?.workspaceId, handleNewWorkspace]);
 
   const handleLocationSelect = useCallback(
     async (path: string, agent: SessionAgent, endpointId?: string, yoloMode = false) => {
@@ -1327,6 +1352,15 @@ sendFetchPRDetails,
       }
       // Note: Location is automatically tracked by daemon when session registers
       const folderName = path.split('/').pop() || 'session';
+      if (locationPickerPurpose === 'session' && activeLocalSession?.workspaceId) {
+        await createSplitSession(selectedAgent, 'vertical', undefined, {
+          cwd: path,
+          endpointId,
+          label: folderName,
+          yoloMode,
+        });
+        return;
+      }
       setSessionCreationJob({
         id: jobId,
         label: folderName,
@@ -1349,7 +1383,7 @@ sendFetchPRDetails,
         ));
       }
     },
-    [agentAvailability, createWorkspaceSession, daemonEndpoints, hasAvailableAgents, showError]
+    [activeLocalSession?.workspaceId, agentAvailability, createSplitSession, createWorkspaceSession, daemonEndpoints, hasAvailableAgents, locationPickerPurpose, showError]
   );
 
   const handleCreateWorktreeSession = useCallback((
@@ -1449,27 +1483,16 @@ sendFetchPRDetails,
         }
       }
 
-      // Closing the workspace owns all agent and utility PTY teardown.
       const localDaemonSession = daemonSessions.find(ds => ds.id === session?.id);
       if (localDaemonSession && session) {
-        const workspaceId = session.workspaceId || `workspace-${session.id}`;
-        const workspaceSessionCount = enrichedLocalSessions.filter((entry) => (
-          (entry.workspaceId || `workspace-${entry.id}`) === workspaceId
-        )).length;
-        const sessionPane = (session.workspace.agents || []).find((pane) => pane.sessionId === session.id);
-        const canCloseSingleSessionPane = sessionPane && sessionPane.id !== MAIN_TERMINAL_PANE_ID;
-        if (workspaceSessionCount > 1 && canCloseSingleSessionPane) {
-          await sendUnregisterSession(session.id);
-        } else {
-          await sendUnregisterWorkspace(workspaceId);
-        }
+        await sendUnregisterSession(session.id);
       } else {
         closeSession(id);
       }
 
       removeWorkspaceRef(id);
     },
-    [alwaysKeepWorktrees, closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterSession, sendUnregisterWorkspace]
+    [alwaysKeepWorktrees, closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterSession]
   );
 
   const handleRequestCloseSession = useCallback((id: string) => {
@@ -1531,8 +1554,7 @@ sendFetchPRDetails,
     reloadSession,
     setSetting: sendSetSetting,
     splitPane: (sessionId, paneId, direction) => {
-      const workspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId ?? sessionId;
-      return sendWorkspaceSplitPane(workspaceId, paneId, direction);
+      return createSplitSession('shell', direction, paneId, { baseSessionId: sessionId });
     },
     closePane: handleClosePane,
     focusPane: (sessionId: string, paneId: string) => {
@@ -2378,6 +2400,12 @@ sendFetchPRDetails,
                       void createSplitSession('shell', direction, targetPaneId);
                     }}
                     onClosePane={(paneId) => {
+                      const agentPane = (rootSession.workspace.agents || []).find((pane) => pane.id === paneId);
+                      const paneSessionId = agentPane?.sessionId || (paneId === MAIN_TERMINAL_PANE_ID ? rootSession.id : null);
+                      if (paneSessionId) {
+                        handleRequestCloseSession(paneSessionId);
+                        return;
+                      }
                       void handleClosePane(rootSession.id, paneId).catch(console.error);
                     }}
                     onFocusPane={(paneId) => {

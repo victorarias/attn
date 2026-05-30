@@ -60,7 +60,7 @@ async function createSession(
 
 test.describe('Keyboard Shortcuts', () => {
   test.describe('Terminal Workspace', () => {
-    test('⌘N creates a session-backed vertical split in the current workspace', async ({ page, daemon }) => {
+    test('⌘N opens the new-session dialog for the current workspace', async ({ page, daemon }) => {
       await daemon.start();
       await page.goto('/');
       await page.waitForSelector('.dashboard');
@@ -74,9 +74,10 @@ test.describe('Keyboard Shortcuts', () => {
       await page.keyboard.press('Meta+n');
 
       const selectedWorkspaceSessions = page.locator('.workspace-group.selected .session-item');
-      await expect(selectedWorkspaceSessions).toHaveCount(2, { timeout: 5000 });
-      await expect(page.locator('.workspace-group.selected')).toContainText('codex 2');
-      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2, { timeout: 5000 });
+      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.picker-title')).toHaveText('New Session Location');
+      await expect(selectedWorkspaceSessions).toHaveCount(1);
+      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(1);
     });
 
     test('⌘D creates a session-backed shell split in the current workspace', async ({ page, daemon }) => {
