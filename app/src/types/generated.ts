@@ -612,6 +612,7 @@ export enum DeleteCommentResultMessageEvent {
 export interface DeleteWorktreeMessage {
     cmd:          GitOperationKind;
     endpoint_id?: string;
+    force?:       boolean;
     path:         string;
     [property: string]: any;
 }
@@ -624,13 +625,22 @@ export interface DeleteWorktreeResultMessage {
     endpoint_id?: string;
     error?:       string;
     event:        DeleteWorktreeResultMessageEvent;
+    forceable?:   boolean;
     path:         string;
+    reason_kind?: ReasonKind;
     success:      boolean;
     [property: string]: any;
 }
 
 export enum DeleteWorktreeResultMessageEvent {
     DeleteWorktreeResult = "delete_worktree_result",
+}
+
+export enum ReasonKind {
+    DirtyWorktree = "dirty_worktree",
+    GitError = "git_error",
+    NotFound = "not_found",
+    ProviderError = "provider_error",
 }
 
 export interface DetachSessionMessage {
@@ -4592,13 +4602,16 @@ const typeMap: any = {
     "DeleteWorktreeMessage": o([
         { json: "cmd", js: "cmd", typ: r("GitOperationKind") },
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
+        { json: "force", js: "force", typ: u(undefined, true) },
         { json: "path", js: "path", typ: "" },
     ], "any"),
     "DeleteWorktreeResultMessage": o([
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("DeleteWorktreeResultMessageEvent") },
+        { json: "forceable", js: "forceable", typ: u(undefined, true) },
         { json: "path", js: "path", typ: "" },
+        { json: "reason_kind", js: "reason_kind", typ: u(undefined, r("ReasonKind")) },
         { json: "success", js: "success", typ: true },
     ], "any"),
     "DetachSessionMessage": o([
@@ -5866,6 +5879,12 @@ const typeMap: any = {
     ],
     "DeleteWorktreeResultMessageEvent": [
         "delete_worktree_result",
+    ],
+    "ReasonKind": [
+        "dirty_worktree",
+        "git_error",
+        "not_found",
+        "provider_error",
     ],
     "DetachSessionMessageCmd": [
         "detach_session",

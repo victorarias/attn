@@ -646,7 +646,8 @@ sendFetchPRDetails,
     requestId: number | null;
     isDeleting: boolean;
     error: string | null;
-  }>({ requestId: null, isDeleting: false, error: null });
+    forceable: boolean;
+  }>({ requestId: null, isDeleting: false, error: null, forceable: false });
   const [pendingSessionClose, setPendingSessionClose] = useState<{
     id: string;
     label: string;
@@ -1268,7 +1269,7 @@ sendFetchPRDetails,
           // Show cleanup prompt
           const cleanupRequestId = cleanupRequestIdRef.current + 1;
           cleanupRequestIdRef.current = cleanupRequestId;
-          setWorktreeCleanupState({ requestId: cleanupRequestId, isDeleting: false, error: null });
+          setWorktreeCleanupState({ requestId: cleanupRequestId, isDeleting: false, error: null, forceable: false });
           setClosedWorktree({ id: cleanupRequestId, path: session.cwd, branch: session.branch });
         }
       }
@@ -1466,7 +1467,7 @@ sendFetchPRDetails,
 
   // Worktree cleanup prompt handlers
   const handleWorktreeKeep = useCallback(() => {
-    setWorktreeCleanupState({ requestId: null, isDeleting: false, error: null });
+    setWorktreeCleanupState({ requestId: null, isDeleting: false, error: null, forceable: false });
     setClosedWorktree(null);
   }, []);
 
@@ -1479,17 +1480,22 @@ sendFetchPRDetails,
       return;
     }
     const deleteTarget = closedWorktree;
+    const force = worktreeCleanupState.forceable;
     setWorktreeCleanupState((current) => (
       current.requestId === deleteTarget.id
-        ? { requestId: deleteTarget.id, isDeleting: true, error: null }
+        ? { requestId: deleteTarget.id, isDeleting: true, error: null, forceable: false }
         : current
     ));
     try {
-      await sendDeleteWorktree(deleteTarget.path);
+      if (force) {
+        await sendDeleteWorktree(deleteTarget.path, undefined, { force: true });
+      } else {
+        await sendDeleteWorktree(deleteTarget.path);
+      }
       // Note: Deleted paths are automatically filtered by daemon on next fetch
       setWorktreeCleanupState((current) => (
         current.requestId === deleteTarget.id
-          ? { requestId: null, isDeleting: false, error: null }
+          ? { requestId: null, isDeleting: false, error: null, forceable: false }
           : current
       ));
       setClosedWorktree((current) => (
@@ -1500,15 +1506,15 @@ sendFetchPRDetails,
       console.error('[App] Failed to delete worktree:', err);
       setWorktreeCleanupState((current) => (
         current.requestId === deleteTarget.id
-          ? { requestId: deleteTarget.id, isDeleting: false, error: message }
+          ? { requestId: deleteTarget.id, isDeleting: false, error: message, forceable: Boolean((err as { forceable?: boolean }).forceable) }
           : current
       ));
     }
-  }, [closedWorktree, sendDeleteWorktree, worktreeCleanupState.isDeleting, worktreeCleanupState.requestId]);
+  }, [closedWorktree, sendDeleteWorktree, worktreeCleanupState.forceable, worktreeCleanupState.isDeleting, worktreeCleanupState.requestId]);
 
   const handleWorktreeAlwaysKeep = useCallback(() => {
     setAlwaysKeepWorktrees(true);
-    setWorktreeCleanupState({ requestId: null, isDeleting: false, error: null });
+    setWorktreeCleanupState({ requestId: null, isDeleting: false, error: null, forceable: false });
     setClosedWorktree(null);
   }, []);
 
@@ -2283,6 +2289,7 @@ sendFetchPRDetails,
         branchName={closedWorktree?.branch}
         isDeleting={worktreeCleanupState.isDeleting}
         deleteError={worktreeCleanupState.error}
+        deleteForceable={worktreeCleanupState.forceable}
         onKeep={handleWorktreeKeep}
         onDelete={handleWorktreeDelete}
         onAlwaysKeep={handleWorktreeAlwaysKeep}

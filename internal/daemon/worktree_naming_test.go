@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -100,7 +102,7 @@ func TestDoDeleteWorktree_BroadcastsGitOperationLifecycle(t *testing.T) {
 	cap := captureBroadcasts(d)
 	endpointID := "endpoint-1"
 
-	if err := d.doDeleteWorktree(worktreePath, protocol.Ptr(endpointID)); err != nil {
+	if err := d.doDeleteWorktree(worktreePath, protocol.Ptr(endpointID), deleteWorktreeOptions{}); err != nil {
 		t.Fatalf("doDeleteWorktree failed: %v", err)
 	}
 
@@ -152,6 +154,117 @@ func TestDoDeleteWorktree_BroadcastsGitOperationLifecycle(t *testing.T) {
 	if finished.Operation.DurationMs == nil {
 		t.Fatalf("finished operation missing duration_ms")
 	}
+}
+
+func TestDoDeleteWorktree_NormalDeleteFailurePreservesAttnState(t *testing.T) {
+	tmpDir := t.TempDir()
+	mainDir := filepath.Join(tmpDir, "repo")
+	if err := os.MkdirAll(mainDir, 0755); err != nil {
+		t.Fatalf("failed to create main repo dir: %v", err)
+	}
+	runGitDaemon(t, mainDir, "init")
+	runGitDaemon(t, mainDir, "commit", "--allow-empty", "-m", "init")
+	worktreePath := filepath.Join(tmpDir, "repo--dirty")
+	runGitDaemon(t, mainDir, "worktree", "add", "-b", "feat/dirty", worktreePath)
+	if err := os.WriteFile(filepath.Join(worktreePath, "local.txt"), []byte("local change\n"), 0644); err != nil {
+		t.Fatalf("write dirty file: %v", err)
+	}
+
+	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
+	d.registerCreatedWorktree(mainDir, worktreePath, "feat/dirty")
+	addWorktreeSession(t, d, "session-dirty", worktreePath, mainDir, "feat/dirty")
+
+	err := d.doDeleteWorktree(worktreePath, nil, deleteWorktreeOptions{})
+	if err == nil {
+		t.Fatal("doDeleteWorktree succeeded on dirty worktree without force")
+	}
+	var deleteErr *deleteWorktreeError
+	if !errors.As(err, &deleteErr) {
+		t.Fatalf("error type = %T, want *deleteWorktreeError", err)
+	}
+	if deleteErr.kind != deleteWorktreeFailureDirtyWorktree || !deleteErr.forceable {
+		t.Fatalf("delete error kind=%q forceable=%v, want dirty forceable", deleteErr.kind, deleteErr.forceable)
+	}
+	if wt := d.store.GetWorktree(worktreePath); wt == nil {
+		t.Fatal("worktree store row was removed after failed normal delete")
+	}
+	if session := d.store.Get("session-dirty"); session == nil {
+		t.Fatal("session was removed after failed normal delete")
+	}
+	if _, statErr := os.Stat(worktreePath); statErr != nil {
+		t.Fatalf("worktree path missing after failed normal delete: %v", statErr)
+	}
+	if !gitCommandSucceeds(mainDir, "rev-parse", "--verify", "feat/dirty") {
+		t.Fatal("local branch was deleted after failed normal delete")
+	}
+}
+
+func TestDoDeleteWorktree_ForceDeleteCleansUpAfterGitDelete(t *testing.T) {
+	tmpDir := t.TempDir()
+	mainDir := filepath.Join(tmpDir, "repo")
+	if err := os.MkdirAll(mainDir, 0755); err != nil {
+		t.Fatalf("failed to create main repo dir: %v", err)
+	}
+	runGitDaemon(t, mainDir, "init")
+	runGitDaemon(t, mainDir, "commit", "--allow-empty", "-m", "init")
+	worktreePath := filepath.Join(tmpDir, "repo--dirty-force")
+	runGitDaemon(t, mainDir, "worktree", "add", "-b", "feat/dirty-force", worktreePath)
+	if err := os.WriteFile(filepath.Join(worktreePath, "local.txt"), []byte("local change\n"), 0644); err != nil {
+		t.Fatalf("write dirty file: %v", err)
+	}
+
+	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
+	d.registerCreatedWorktree(mainDir, worktreePath, "feat/dirty-force")
+	addWorktreeSession(t, d, "session-force", worktreePath, mainDir, "feat/dirty-force")
+
+	if err := d.doDeleteWorktree(worktreePath, nil, deleteWorktreeOptions{Force: true}); err != nil {
+		t.Fatalf("doDeleteWorktree force failed: %v", err)
+	}
+	if wt := d.store.GetWorktree(worktreePath); wt != nil {
+		t.Fatal("worktree store row remains after force delete")
+	}
+	if session := d.store.Get("session-force"); session != nil {
+		t.Fatal("session remains after successful force delete")
+	}
+	worktrees := d.store.ListWorktreesByRepo(mainDir)
+	for _, wt := range worktrees {
+		if wt.Path == worktreePath {
+			t.Fatal("worktree still listed by store after force delete")
+		}
+	}
+	if gitCommandSucceeds(mainDir, "rev-parse", "--verify", "feat/dirty-force") {
+		t.Fatal("local branch remains after force delete")
+	}
+}
+
+func addWorktreeSession(t *testing.T, d *Daemon, id, directory, mainRepo, branch string) {
+	t.Helper()
+	now := time.Now().Format(time.RFC3339Nano)
+	d.store.Add(&protocol.Session{
+		ID:             id,
+		Label:          id,
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      directory,
+		Branch:         protocol.Ptr(branch),
+		IsWorktree:     protocol.Ptr(true),
+		MainRepo:       protocol.Ptr(mainRepo),
+		State:          protocol.SessionStateIdle,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+}
+
+func gitCommandSucceeds(dir string, args ...string) bool {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	return cmd.Run() == nil
 }
 
 func runGitDaemon(t *testing.T, dir string, args ...string) {

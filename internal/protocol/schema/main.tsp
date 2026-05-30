@@ -460,6 +460,7 @@ model DeleteWorktreeMessage {
   cmd: "delete_worktree";
   path: string;
   endpoint_id?: string;
+  force?: boolean;
 }
 
 model GetSettingsMessage {
@@ -1000,6 +1001,8 @@ model DeleteWorktreeResultMessage {
   endpoint_id?: string;
   success: boolean;
   error?: string;
+  forceable?: boolean;
+  reason_kind?: "dirty_worktree" | "provider_error" | "not_found" | "git_error";
 }
 
 model GitOperationStartedMessage {

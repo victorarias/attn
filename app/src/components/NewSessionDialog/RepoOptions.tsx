@@ -18,7 +18,7 @@ interface RepoOptionsProps {
   onSelectMainRepo: () => void;
   onSelectWorktree: (path: string) => void;
   onCreateWorktree: (branchName: string, startingFrom: string) => Promise<void>;
-  onDeleteWorktree?: (path: string) => Promise<void>;
+  onDeleteWorktree?: (path: string, options?: { force?: boolean }) => Promise<void>;
   onError?: (message: string) => void;
   onRefresh: () => void;
   onBack: () => void;
@@ -68,6 +68,16 @@ type DestinationItem =
       name: string;
       detail: string;
     };
+
+type DeleteFailure = {
+  path: string;
+  message: string;
+  forceable: boolean;
+};
+
+type ForceableError = Error & {
+  forceable?: boolean;
+};
 
 export const RepoOptions: React.FC<RepoOptionsProps> = ({
   repoInfo,
@@ -120,14 +130,18 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   const [newWorktreeName, setNewWorktreeName] = useState('');
   const [startingBranch, setStartingBranch] = useState<'current' | 'default'>('current');
   const [pendingDeletePath, setPendingDeletePath] = useState<string | null>(null);
+  const [deleteFailure, setDeleteFailure] = useState<DeleteFailure | null>(null);
   const [creatingWorktree, setCreatingWorktree] = useState(false);
   const [deletingPath, setDeletingPath] = useState<string | null>(null);
   const isBusy = creatingWorktree || deletingPath !== null;
 
   // Sub-state Escape handling via the stack so LIFO order is preserved.
   // pendingDeletePath and showNewWorktree are pushed above LocationPicker's handler.
-  const cancelPendingDelete = useCallback(() => setPendingDeletePath(null), []);
-  useEscapeStack(cancelPendingDelete, pendingDeletePath !== null);
+  const cancelPendingDelete = useCallback(() => {
+    setPendingDeletePath(null);
+    setDeleteFailure(null);
+  }, []);
+  useEscapeStack(cancelPendingDelete, pendingDeletePath !== null || deleteFailure !== null);
 
   const cancelNewWorktree = useCallback(() => {
     setShowNewWorktree(false);
@@ -138,6 +152,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
 
   useEffect(() => {
     setPendingDeletePath(null);
+    setDeleteFailure(null);
     setFocusIndex((prev) => {
       if (showNewWorktree || prev === createWorktreeIndex) {
         return prev;
@@ -160,8 +175,9 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   }, [pendingDeletePath]);
 
   useEffect(() => {
-    const activeIndex = pendingDeletePath
-      ? destinationItems.findIndex((item) => item.path === pendingDeletePath)
+    const activeDeletePath = pendingDeletePath || deleteFailure?.path || null;
+    const activeIndex = activeDeletePath
+      ? destinationItems.findIndex((item) => item.path === activeDeletePath)
       : committedDestinationIndex;
     if (activeIndex < 0) {
       return;
@@ -169,7 +185,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
     destinationListRef.current
       ?.querySelector<HTMLElement>(`[data-option-index="${activeIndex}"]`)
       ?.scrollIntoView({ block: 'nearest' });
-  }, [committedDestinationIndex, destinationItems, pendingDeletePath]);
+  }, [committedDestinationIndex, deleteFailure, destinationItems, pendingDeletePath]);
 
   const focusedDestination = focusIndex >= 0 && focusIndex < destinationItems.length
     ? destinationItems[focusIndex]
@@ -194,6 +210,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
       return;
     }
     setPendingDeletePath(null);
+    setDeleteFailure(null);
     setFocusIndex(createWorktreeIndex);
     setShowNewWorktree(true);
   }, [createWorktreeIndex, isBusy]);
@@ -204,6 +221,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
     }
     setShowNewWorktree(false);
     setNewWorktreeName('');
+    setDeleteFailure(null);
     setPendingDeletePath(path);
   }, [isBusy]);
 
@@ -224,30 +242,40 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
     openNewWorktree();
   }, [destinationItems, isBusy, onSelectMainRepo, onSelectWorktree, onSelectedPathChange, openNewWorktree]);
 
-  const executeDelete = useCallback(async () => {
-    if (!pendingDeletePath || !onDeleteWorktree || deletingPath) {
+  const executeDelete = useCallback(async (force = false) => {
+    const targetPath = force ? deleteFailure?.path : pendingDeletePath;
+    if (!targetPath || !onDeleteWorktree || deletingPath) {
       return;
     }
 
-    const pathToDelete = pendingDeletePath;
-    const deletedIndex = destinationItems.findIndex((item) => item.path === pendingDeletePath);
-    const survivingItems = destinationItems.filter((item) => item.path !== pendingDeletePath);
+    const pathToDelete = targetPath;
+    const deletedIndex = destinationItems.findIndex((item) => item.path === pathToDelete);
+    const survivingItems = destinationItems.filter((item) => item.path !== pathToDelete);
     const nextSelectedPath = survivingItems[Math.min(deletedIndex, survivingItems.length - 1)]?.path || repoInfo.repo;
 
     try {
       setDeletingPath(pathToDelete);
       setPendingDeletePath(null);
-      await onDeleteWorktree(pathToDelete);
+      setDeleteFailure(null);
+      await onDeleteWorktree(pathToDelete, force ? { force: true } : undefined);
       onSelectedPathChange(nextSelectedPath);
       setFocusIndex(Math.min(deletedIndex, survivingItems.length - 1));
     } catch (err) {
       console.error('Delete failed:', err);
-      onError?.(err instanceof Error ? err.message : 'Delete failed');
+      const message = err instanceof Error ? err.message : 'Delete failed';
+      if (!force && (err as ForceableError)?.forceable) {
+        setDeleteFailure({ path: pathToDelete, message, forceable: true });
+      } else {
+        onError?.(message);
+        if (force) {
+          setDeleteFailure({ path: pathToDelete, message, forceable: false });
+        }
+      }
     } finally {
       setDeletingPath(null);
       setPendingDeletePath(null);
     }
-  }, [deletingPath, destinationItems, onDeleteWorktree, onError, onSelectedPathChange, pendingDeletePath, repoInfo.repo]);
+  }, [deleteFailure, deletingPath, destinationItems, onDeleteWorktree, onError, onSelectedPathChange, pendingDeletePath, repoInfo.repo]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (isBusy) {
@@ -256,10 +284,24 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
       return;
     }
 
+    if (deleteFailure) {
+      e.stopPropagation();
+      if ((e.key === 'y' || e.key === 'Y') && deleteFailure.forceable) {
+        void executeDelete(true);
+        e.preventDefault();
+      } else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape') {
+        setDeleteFailure(null);
+        e.preventDefault();
+      } else {
+        setDeleteFailure(null);
+      }
+      return;
+    }
+
     if (pendingDeletePath) {
       e.stopPropagation();
       if (e.key === 'y' || e.key === 'Y') {
-        void executeDelete();
+        void executeDelete(false);
         e.preventDefault();
       } else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape') {
         setPendingDeletePath(null);
@@ -374,6 +416,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
     onRefresh,
     openNewWorktree,
     pendingDeletePath,
+    deleteFailure,
     repoInfo.currentBranch,
     repoInfo.defaultBranch,
     committedDestinationIndex,
@@ -384,6 +427,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   const renderDestination = (itemIndex: number, item: DestinationItem) => {
     const isSelected = committedDestinationIndex === itemIndex;
     const isDeleting = pendingDeletePath === item.path;
+    const failedDelete = deleteFailure?.path === item.path ? deleteFailure : null;
     const isDeleteRunning = deletingPath === item.path;
 
     if (isDeleteRunning) {
@@ -400,6 +444,19 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
       return (
         <div className="repo-option-item selected delete-confirm">
           <span className="delete-prompt">Delete {baseName(item.path)}? (y/n)</span>
+        </div>
+      );
+    }
+
+    if (failedDelete) {
+      return (
+        <div className="repo-option-item selected delete-confirm delete-failed">
+          <span className="delete-prompt">
+            Delete failed: {failedDelete.message}
+          </span>
+          <span className="delete-prompt-detail">
+            {failedDelete.forceable ? 'Force delete local worktree and branch? (y/n)' : 'Press Esc to dismiss'}
+          </span>
         </div>
       );
     }

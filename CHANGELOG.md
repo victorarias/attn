@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Codex Resize Redraws**: Attn now coalesces Codex's synchronized terminal redraws during pane resizes, preventing old scrollback from visibly streaming through the embedded terminal when layouts change.
+- **Worktree Cleanup**: Failed worktree deletes now keep attn state intact, explain forceable local-change failures, and let you explicitly force-delete the local worktree and local branch without touching remotes.
 
 ---
 

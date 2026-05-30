@@ -102,7 +102,7 @@ func CreateWorktreeFromRemoteBranch(repoDir, remoteBranch, path string) (string,
 // DeleteWorktree removes a worktree
 // If the worktree directory doesn't exist, it prunes stale entries instead
 // Always runs prune after removal to ensure git metadata is fully cleaned
-func DeleteWorktree(repoDir, path string) error {
+func DeleteWorktree(repoDir, path string, force bool) error {
 	path = CanonicalizePath(path)
 	// Check if directory exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -114,7 +114,12 @@ func DeleteWorktree(repoDir, path string) error {
 	}
 
 	// Directory exists - remove normally
-	if out, err := runGitCombined(OpWorktree, repoDir, "worktree", "remove", path); err != nil {
+	args := []string{"worktree", "remove"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, path)
+	if out, err := runGitCombined(OpWorktree, repoDir, args...); err != nil {
 		return fmt.Errorf("git worktree remove failed: %s", out)
 	}
 

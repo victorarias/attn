@@ -421,6 +421,39 @@ describe('worktree cleanup prompt', () => {
     expect(screen.queryByText('/tmp/repo/.worktrees/feature-a')).not.toBeInTheDocument();
   });
 
+  it('retries cleanup delete with force after a forceable failure', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const forceableError = Object.assign(new Error('contains modified or untracked files'), {
+      forceable: true,
+    });
+    const sendDeleteWorktree = vi.fn((_path: string, _endpointId?: string, options?: { force?: boolean }) => {
+      if (!options?.force) {
+        return Promise.reject(forceableError);
+      }
+      return Promise.resolve({ success: true });
+    });
+    mockDaemonSocketReturn.sendDeleteWorktree = sendDeleteWorktree;
+
+    render(<App />);
+
+    await userEvent.click(screen.getByTestId('close-session'));
+    await waitFor(() => {
+      expect(screen.getByText('/tmp/repo/.worktrees/feature-a')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete worktree' }));
+
+    expect(await screen.findByRole('button', { name: 'Force delete' })).toBeInTheDocument();
+    expect(screen.getByText(/contains modified or untracked files/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Force delete' }));
+
+    await waitFor(() => {
+      expect(sendDeleteWorktree).toHaveBeenLastCalledWith('/tmp/repo/.worktrees/feature-a', undefined, { force: true });
+    });
+    consoleError.mockRestore();
+  });
+
   it('marks remote long-run sessions as visualized after the visibility delay', async () => {
     vi.useFakeTimers();
     const sendSessionVisualized = vi.fn();

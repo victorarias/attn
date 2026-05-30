@@ -153,7 +153,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '67';
+const PROTOCOL_VERSION = '68';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
 // injects this global before any page script runs — see
@@ -223,7 +223,18 @@ interface WorktreeActionResult {
   path?: string;
   endpoint_id?: string;
   error?: string;
+  forceable?: boolean;
+  reason_kind?: string;
 }
+
+export type DeleteWorktreeOptions = {
+  force?: boolean;
+};
+
+export type WorktreeActionError = Error & {
+  forceable?: boolean;
+  reason_kind?: string;
+};
 
 interface PluginActionResult {
   success: boolean;
@@ -1718,7 +1729,10 @@ export function useDaemonSocket({
               if (data.success) {
                 pendingAction.resolve({ success: true, path: data.path, endpoint_id: data.endpoint_id });
               } else {
-                pendingAction.reject(new Error(data.error || 'Worktree action failed'));
+                const error = new Error(data.error || 'Worktree action failed') as WorktreeActionError;
+                error.forceable = data.forceable;
+                error.reason_kind = data.reason_kind;
+                pendingAction.reject(error);
               }
             }
             break;
@@ -2734,7 +2748,7 @@ export function useDaemonSocket({
     });
   }, []);
 
-  const sendDeleteWorktree = useCallback((path: string, endpointId?: string): Promise<WorktreeActionResult> => {
+  const sendDeleteWorktree = useCallback((path: string, endpointId?: string, options: DeleteWorktreeOptions = {}): Promise<WorktreeActionResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -2756,6 +2770,7 @@ export function useDaemonSocket({
         cmd: 'delete_worktree',
         path,
         ...(endpointId && { endpoint_id: endpointId }),
+        ...(options.force && { force: true }),
       }));
     });
   }, []);

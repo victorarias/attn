@@ -428,6 +428,9 @@ type DeleteWorktreeMessage struct {
 	// EndpointID corresponds to the JSON schema field "endpoint_id".
 	EndpointID *string `json:"endpoint_id,omitempty,omitzero"`
 
+	// Force corresponds to the JSON schema field "force".
+	Force *bool `json:"force,omitempty,omitzero"`
+
 	// Path corresponds to the JSON schema field "path".
 	Path string `json:"path"`
 }
@@ -442,8 +445,14 @@ type DeleteWorktreeResultMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
 
+	// Forceable corresponds to the JSON schema field "forceable".
+	Forceable *bool `json:"forceable,omitempty,omitzero"`
+
 	// Path corresponds to the JSON schema field "path".
 	Path string `json:"path"`
+
+	// ReasonKind corresponds to the JSON schema field "reason_kind".
+	ReasonKind interface{} `json:"reason_kind,omitempty,omitzero"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`

@@ -309,4 +309,42 @@ describe('RepoOptions', () => {
       expect(screen.queryByRole('status', { name: 'Deleting repo--feature' })).not.toBeInTheDocument();
     });
   });
+
+  it('offers force delete after normal delete fails with a forceable error', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const error = Object.assign(new Error('contains modified or untracked files'), {
+      forceable: true,
+    });
+    const onDeleteWorktree = vi.fn(async (_path: string, options?: { force?: boolean }) => {
+      if (!options?.force) {
+        throw error;
+      }
+    });
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo--feature"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={vi.fn(async () => {})}
+        onDeleteWorktree={onDeleteWorktree}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'D' });
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'y' });
+
+    expect(await screen.findByText(/Delete failed: contains modified or untracked files/)).toBeInTheDocument();
+    expect(screen.getByText(/Force delete local worktree and branch/)).toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'y' });
+
+    await waitFor(() => {
+      expect(onDeleteWorktree).toHaveBeenLastCalledWith('/tmp/repo--feature', { force: true });
+    });
+    consoleError.mockRestore();
+  });
 });

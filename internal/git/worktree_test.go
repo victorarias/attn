@@ -85,7 +85,7 @@ func TestDeleteWorktree(t *testing.T) {
 	wtDir := filepath.Join(tmpDir, "wt-to-delete")
 	runGit(t, mainDir, "worktree", "add", "-b", "temp", wtDir)
 
-	err := DeleteWorktree(mainDir, wtDir)
+	err := DeleteWorktree(mainDir, wtDir, false)
 	if err != nil {
 		t.Fatalf("DeleteWorktree failed: %v", err)
 	}
@@ -95,6 +95,42 @@ func TestDeleteWorktree(t *testing.T) {
 	for _, wt := range worktrees {
 		if wt.Path == wtDir {
 			t.Error("worktree should have been removed")
+		}
+	}
+}
+
+func TestDeleteWorktreeDirtyRequiresForce(t *testing.T) {
+	tmpDir := t.TempDir()
+	mainDir := filepath.Join(tmpDir, "main")
+	if err := os.MkdirAll(mainDir, 0755); err != nil {
+		t.Fatalf("Failed to create main dir: %v", err)
+	}
+	runGit(t, mainDir, "init")
+	runGit(t, mainDir, "commit", "--allow-empty", "-m", "init")
+
+	wtDir := filepath.Join(tmpDir, "dirty-wt")
+	runGit(t, mainDir, "worktree", "add", "-b", "dirty", wtDir)
+	if err := os.WriteFile(filepath.Join(wtDir, "local.txt"), []byte("local change\n"), 0644); err != nil {
+		t.Fatalf("write dirty file: %v", err)
+	}
+
+	if err := DeleteWorktree(mainDir, wtDir, false); err == nil {
+		t.Fatal("DeleteWorktree without force succeeded on dirty worktree")
+	}
+	if _, err := os.Stat(wtDir); err != nil {
+		t.Fatalf("dirty worktree disappeared after non-force delete: %v", err)
+	}
+
+	if err := DeleteWorktree(mainDir, wtDir, true); err != nil {
+		t.Fatalf("DeleteWorktree with force failed: %v", err)
+	}
+	worktrees, err := ListWorktrees(mainDir)
+	if err != nil {
+		t.Fatalf("ListWorktrees failed: %v", err)
+	}
+	for _, wt := range worktrees {
+		if wt.Path == wtDir {
+			t.Fatal("force-deleted worktree should have been removed")
 		}
 	}
 }

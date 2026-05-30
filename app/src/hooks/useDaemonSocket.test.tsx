@@ -256,6 +256,78 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('sends force option for delete worktree requests', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.sendDeleteWorktree('/tmp/repo--feature', undefined, { force: true });
+
+    await waitFor(() => {
+      expect(JSON.parse(ws.sent[ws.sent.length - 1])).toMatchObject({
+        cmd: 'delete_worktree',
+        path: '/tmp/repo--feature',
+        force: true,
+      });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'delete_worktree_result',
+        path: '/tmp/repo--feature',
+        success: true,
+      });
+    });
+
+    await expect(promise).resolves.toMatchObject({ success: true });
+
+    unmount();
+  });
+
+  it('preserves forceable delete worktree failure details on rejection', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    const promise = result.current.sendDeleteWorktree('/tmp/repo--feature');
+
+    act(() => {
+      ws.emit({
+        event: 'delete_worktree_result',
+        path: '/tmp/repo--feature',
+        success: false,
+        error: 'contains modified or untracked files',
+        forceable: true,
+        reason_kind: 'dirty_worktree',
+      });
+    });
+
+    await expect(promise).rejects.toMatchObject({
+      message: 'contains modified or untracked files',
+      forceable: true,
+      reason_kind: 'dirty_worktree',
+    });
+
+    unmount();
+  });
+
   it('rejects answerReviewLoop immediately when error result only echoes loop_id', async () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({
@@ -525,7 +597,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '67',
+        protocol_version: '68',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -607,7 +679,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '67',
+        protocol_version: '68',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -742,7 +814,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '67',
+        protocol_version: '68',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -835,7 +907,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '67',
+        protocol_version: '68',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -932,7 +1004,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '67',
+        protocol_version: '68',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1015,7 +1087,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '67',
+        protocol_version: '68',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -1130,7 +1202,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '67',
+        protocol_version: '68',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -1197,7 +1269,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '67',
+        protocol_version: '68',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',
