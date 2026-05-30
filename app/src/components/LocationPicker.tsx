@@ -638,6 +638,9 @@ export function LocationPicker({
       return;
     }
     setAgent(nextAgent);
+    if (nextAgent === TERMINAL_AGENT) {
+      return;
+    }
     setSetting(SESSION_AGENT_KEY, nextAgent);
   }, [effectiveAgentAvailability, setSetting]);
 

@@ -510,8 +510,9 @@ describe('LocationPicker', () => {
   });
 
   it('offers Terminal as an agent with Alt+T for workspace and session pickers', async () => {
+    const setSetting = vi.fn();
     const { rerender } = render(
-      <SettingsProvider settings={{}} setSetting={vi.fn()}>
+      <SettingsProvider settings={{}} setSetting={setSetting}>
         <LocationPicker
           isOpen
           purpose="workspace"
@@ -534,6 +535,7 @@ describe('LocationPicker', () => {
     await waitFor(() => {
       expect(terminalOption).toHaveAttribute('aria-checked', 'true');
     });
+    expect(setSetting).not.toHaveBeenCalledWith('new_session_agent', 'shell');
 
     rerender(
       <SettingsProvider settings={{}} setSetting={vi.fn()}>
