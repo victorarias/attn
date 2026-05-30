@@ -191,7 +191,14 @@ export function Sidebar({
     onMutedExpandedChange?.(v);
   };
 
-  const visualIndexOfWorkspace = (id: string) => visualIndexByWorkspaceId.get(id) ?? -1;
+  const visibleWorkspaces = workspaces.filter((workspace) => workspace.sessions.length > 0);
+  const visibleVisualOrder = visualOrder.filter((workspace) => workspace.sessions.length > 0);
+  const visibleVisualIndexByWorkspaceId = new Map(
+    visibleVisualOrder.map((workspace, index) => [workspace.id, index]),
+  );
+  const visualIndexOfWorkspace = (id: string) => (
+    visibleVisualIndexByWorkspaceId.get(id) ?? visualIndexByWorkspaceId.get(id) ?? -1
+  );
   const dockShortcutHints = Array.from(new Map([
     ...headerActions
       .filter((action) => action.shortcutHint && !action.disabled)
@@ -223,7 +230,7 @@ export function Sidebar({
             </button>
           ))}
           <div className="icon-divider" />
-          {visualOrder.map((workspace) => (
+          {visibleVisualOrder.map((workspace) => (
             <button
               key={workspace.id}
               className={`icon-btn session-icon ${selectedWorkspaceId === workspace.id ? 'active' : ''}`}
@@ -300,7 +307,6 @@ export function Sidebar({
                       className={displayMode === mode ? 'active' : ''}
                       onClick={() => {
                         setDisplayMode(mode);
-                        setSettingsOpen(false);
                       }}
                     >
                       {mode}
@@ -314,7 +320,7 @@ export function Sidebar({
       </div>
 
       <div className="session-list">
-        {workspaces.map((workspace) => {
+        {visibleWorkspaces.map((workspace) => {
           const workspaceIndex = visualIndexOfWorkspace(workspace.id);
           return (
             <div

@@ -1658,7 +1658,8 @@ sendFetchPRDetails,
     [daemonWorkspaces, enrichedLocalSessions],
   );
   const sidebarWorkspaceViews = useMemo(
-    () => buildWorkspaceViewModels(daemonWorkspaces, unmutedEnrichedSessions),
+    () => buildWorkspaceViewModels(daemonWorkspaces, unmutedEnrichedSessions)
+      .filter((workspace) => workspace.sessions.length > 0),
     [daemonWorkspaces, unmutedEnrichedSessions],
   );
   const workspaceSelection = useWorkspaceSelectionController(workspaceViews, activeSessionId);

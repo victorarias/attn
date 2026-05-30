@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { Sidebar, type FooterShortcut } from './Sidebar';
-import { buildWorkspaceViewModels } from '../utils/workspaceViewModels';
+import { buildWorkspaceViewModels, type WorkspaceWithSessions } from '../utils/workspaceViewModels';
 
 interface TestSession {
   id: string;
@@ -156,6 +156,48 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('sidebar-workspace-workspace-/repo/a')).toHaveTextContent('⌘1');
     expect(screen.getByTestId('sidebar-workspace-workspace-/repo/b')).toHaveTextContent('⌘2');
     expect(screen.getByTestId('sidebar-session-a1')).not.toHaveTextContent('⌘1');
+  });
+
+  it('hides sessionless workspaces from the sidebar and shortcut order', () => {
+    const sidebarData = buildSidebarData([
+      { id: 'a1', label: 'A1', state: 'idle', cwd: '/repo/a' },
+      { id: 'b1', label: 'B1', state: 'idle', cwd: '/repo/b' },
+    ]);
+    const emptyWorkspace: WorkspaceWithSessions<TestSession> = {
+      id: 'workspace-/repo/empty',
+      title: 'empty',
+      directory: '/repo/empty',
+      sessions: [],
+      firstSessionId: null,
+      focusedSessionId: null,
+    };
+    const visualOrder = [emptyWorkspace, ...sidebarData.visualOrder];
+    render(
+      <Sidebar
+        {...baseProps}
+        workspaces={visualOrder}
+        visualOrder={visualOrder}
+        visualIndexByWorkspaceId={new Map(visualOrder.map((workspace, index) => [workspace.id, index]))}
+      />
+    );
+
+    expect(screen.queryByTestId('sidebar-workspace-workspace-/repo/empty')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-workspace-workspace-/repo/a')).toHaveTextContent('⌘1');
+    expect(screen.getByTestId('sidebar-workspace-workspace-/repo/b')).toHaveTextContent('⌘2');
+  });
+
+  it('keeps display options visible after selecting a mode', () => {
+    render(
+      <Sidebar
+        {...baseProps}
+        {...buildSidebarData([])}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sidebar settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'tight' }));
+
+    expect(screen.getByRole('dialog', { name: 'Sidebar settings' })).toBeInTheDocument();
   });
 
   it('renders dock action hints alongside custom footer shortcuts when provided', () => {
