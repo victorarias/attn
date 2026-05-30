@@ -687,28 +687,24 @@ func applyMigration37(tx *sql.Tx) error {
 		FROM sessions
 		WHERE workspace_id IS NOT NULL AND workspace_id != '';
 
-		INSERT OR IGNORE INTO workspace_layouts (workspace_id, active_pane_id, layout_json, updated_at)
-		SELECT s.workspace_id, sw.active_pane_id, sw.layout_json, sw.updated_at
-		FROM session_workspaces sw
-		JOIN sessions s ON s.id = sw.session_id;
 		INSERT OR IGNORE INTO workspace_layout_panes (
 			workspace_id, pane_id, runtime_id, session_id, kind, title, created_at, updated_at
 		)
-		SELECT s.workspace_id, p.pane_id, p.runtime_id,
-			CASE WHEN p.kind = 'main' THEN p.session_id ELSE NULL END,
-			CASE WHEN p.kind = 'main' THEN 'agent' ELSE 'shell' END,
-			CASE WHEN p.kind = 'main' AND p.title = 'Session' THEN 'Agent' ELSE p.title END,
+		SELECT s.workspace_id, 'pane-' || p.session_id, p.session_id, p.session_id,
+			'agent',
+			CASE WHEN p.title = 'Session' THEN 'Agent' ELSE p.title END,
 			p.created_at, p.updated_at
 		FROM workspace_panes p
-		JOIN sessions s ON s.id = p.session_id;
+		JOIN sessions s ON s.id = p.session_id
+		WHERE p.kind = 'main';
 
 		INSERT OR IGNORE INTO workspace_layouts (workspace_id, active_pane_id, layout_json, updated_at)
-		SELECT workspace_id, 'main', '{"type":"pane","pane_id":"main"}', datetime('now')
+		SELECT workspace_id, 'pane-' || id, '{"type":"pane","pane_id":"pane-' || id || '"}', datetime('now')
 		FROM sessions WHERE workspace_id IS NOT NULL AND workspace_id != '';
 		INSERT OR IGNORE INTO workspace_layout_panes (
 			workspace_id, pane_id, runtime_id, session_id, kind, title, created_at, updated_at
 		)
-		SELECT workspace_id, 'main', id, id, 'agent', 'Agent', datetime('now'), datetime('now')
+		SELECT workspace_id, 'pane-' || id, id, id, 'agent', 'Agent', datetime('now'), datetime('now')
 		FROM sessions WHERE workspace_id IS NOT NULL AND workspace_id != '';
 
 		DROP TABLE IF EXISTS canvas_workspace_panels;

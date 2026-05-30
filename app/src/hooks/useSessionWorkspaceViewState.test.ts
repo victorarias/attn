@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { Session } from '../store/sessions';
-import { MAIN_TERMINAL_PANE_ID } from '../store/sessions';
+const SESSION_PANE_ID = 'pane-session';
 import { useSessionWorkspaceViewState } from './useSessionWorkspaceViewState';
 
 function buildSession(overrides?: Partial<Session>): Session {
@@ -14,10 +14,10 @@ function buildSession(overrides?: Partial<Session>): Session {
     agent: 'claude',
     transcriptMatched: true,
     workspace: {
-      terminals: [],
-      layoutTree: { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+      agents: [],
+      layoutTree: { type: 'pane', paneId: SESSION_PANE_ID },
     },
-    daemonActivePaneId: MAIN_TERMINAL_PANE_ID,
+    daemonActivePaneId: SESSION_PANE_ID,
     ...overrides,
   };
 }
@@ -26,14 +26,14 @@ describe('useSessionWorkspaceViewState', () => {
   it('prefers local active pane while topology is stable', () => {
     const session = buildSession({
       workspace: {
-        terminals: [{ id: 'pane-a', ptyId: 'runtime-a', title: 'Shell 1' }],
+        agents: [{ id: 'pane-a', runtimeId: 'runtime-a', title: "Session", sessionId: 'session-1' }],
         layoutTree: {
           type: 'split',
           splitId: 'root',
           direction: 'vertical',
           ratio: 0.5,
           children: [
-            { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+            { type: 'pane', paneId: SESSION_PANE_ID },
             { type: 'pane', paneId: 'pane-a' },
           ],
         },
@@ -46,23 +46,23 @@ describe('useSessionWorkspaceViewState', () => {
     });
 
     act(() => {
-      result.current.setActivePane(session.id, MAIN_TERMINAL_PANE_ID);
+      result.current.setActivePane(session.id, SESSION_PANE_ID);
     });
 
-    expect(result.current.getActivePaneIdForSession(session)).toBe(MAIN_TERMINAL_PANE_ID);
+    expect(result.current.getActivePaneIdForSession(session)).toBe(SESSION_PANE_ID);
   });
 
   it('falls back to the daemon preferred pane when topology changes', () => {
     const initial = buildSession({
       workspace: {
-        terminals: [{ id: 'pane-a', ptyId: 'runtime-a', title: 'Shell 1' }],
+        agents: [{ id: 'pane-a', runtimeId: 'runtime-a', title: "Session", sessionId: 'session-1' }],
         layoutTree: {
           type: 'split',
           splitId: 'root',
           direction: 'vertical',
           ratio: 0.5,
           children: [
-            { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+            { type: 'pane', paneId: SESSION_PANE_ID },
             { type: 'pane', paneId: 'pane-a' },
           ],
         },
@@ -75,20 +75,20 @@ describe('useSessionWorkspaceViewState', () => {
     });
 
     act(() => {
-      result.current.setActivePane(initial.id, MAIN_TERMINAL_PANE_ID);
+      result.current.setActivePane(initial.id, SESSION_PANE_ID);
     });
 
     const updated = buildSession({
       id: initial.id,
       workspace: {
-        terminals: [{ id: 'pane-b', ptyId: 'runtime-b', title: 'Shell 2' }],
+        agents: [{ id: 'pane-b', runtimeId: 'runtime-b', title: "Session", sessionId: 'session-1' }],
         layoutTree: {
           type: 'split',
           splitId: 'root-2',
           direction: 'horizontal',
           ratio: 0.5,
           children: [
-            { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+            { type: 'pane', paneId: SESSION_PANE_ID },
             { type: 'pane', paneId: 'pane-b' },
           ],
         },
@@ -104,9 +104,9 @@ describe('useSessionWorkspaceViewState', () => {
   it('restores focus to the previously active pane after closing the current pane', () => {
     const initial = buildSession({
       workspace: {
-        terminals: [
-          { id: 'pane-a', ptyId: 'runtime-a', title: 'Shell 1' },
-          { id: 'pane-b', ptyId: 'runtime-b', title: 'Shell 2' },
+        agents: [
+          { id: 'pane-a', runtimeId: 'runtime-a', title: "Session", sessionId: 'session-1' },
+          { id: 'pane-b', runtimeId: 'runtime-b', title: "Session", sessionId: 'session-1' },
         ],
         layoutTree: {
           type: 'split',
@@ -120,7 +120,7 @@ describe('useSessionWorkspaceViewState', () => {
               direction: 'vertical',
               ratio: 0.5,
               children: [
-                { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+                { type: 'pane', paneId: SESSION_PANE_ID },
                 { type: 'pane', paneId: 'pane-a' },
               ],
             },
@@ -144,19 +144,19 @@ describe('useSessionWorkspaceViewState', () => {
     const updated = buildSession({
       id: initial.id,
       workspace: {
-        terminals: [{ id: 'pane-a', ptyId: 'runtime-a', title: 'Shell 1' }],
+        agents: [{ id: 'pane-a', runtimeId: 'runtime-a', title: "Session", sessionId: 'session-1' }],
         layoutTree: {
           type: 'split',
           splitId: 'root',
           direction: 'vertical',
           ratio: 0.5,
           children: [
-            { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+            { type: 'pane', paneId: SESSION_PANE_ID },
             { type: 'pane', paneId: 'pane-a' },
           ],
         },
       },
-      daemonActivePaneId: MAIN_TERMINAL_PANE_ID,
+      daemonActivePaneId: SESSION_PANE_ID,
     });
 
     rerender({ sessions: [updated] });
@@ -167,14 +167,14 @@ describe('useSessionWorkspaceViewState', () => {
   it('falls back to the left pane when closing the current pane without prior pane history', () => {
     const initial = buildSession({
       workspace: {
-        terminals: [{ id: 'pane-b', ptyId: 'runtime-b', title: 'Shell 2' }],
+        agents: [{ id: 'pane-b', runtimeId: 'runtime-b', title: "Session", sessionId: 'session-1' }],
         layoutTree: {
           type: 'split',
           splitId: 'root',
           direction: 'vertical',
           ratio: 0.5,
           children: [
-            { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+            { type: 'pane', paneId: SESSION_PANE_ID },
             { type: 'pane', paneId: 'pane-b' },
           ],
         },
@@ -193,14 +193,14 @@ describe('useSessionWorkspaceViewState', () => {
     const updated = buildSession({
       id: initial.id,
       workspace: {
-        terminals: [],
-        layoutTree: { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+        agents: [],
+        layoutTree: { type: 'pane', paneId: SESSION_PANE_ID },
       },
-      daemonActivePaneId: MAIN_TERMINAL_PANE_ID,
+      daemonActivePaneId: SESSION_PANE_ID,
     });
 
     rerender({ sessions: [updated] });
 
-    expect(result.current.getActivePaneIdForSession(updated)).toBe(MAIN_TERMINAL_PANE_ID);
+    expect(result.current.getActivePaneIdForSession(updated)).toBe(SESSION_PANE_ID);
   });
 });

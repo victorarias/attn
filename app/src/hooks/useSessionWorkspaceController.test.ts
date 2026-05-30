@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Session } from '../store/sessions';
-import { MAIN_TERMINAL_PANE_ID } from '../store/sessions';
+const SESSION_PANE_ID = 'pane-session';
 import { useSessionWorkspaceController } from './useSessionWorkspaceController';
 
 vi.mock('../components/SessionTerminalWorkspace/paneRuntimeEventRouter', () => ({
@@ -89,10 +89,10 @@ function buildSession(overrides?: Partial<Session>): Session {
     agent: 'claude',
     transcriptMatched: true,
     workspace: {
-      terminals: [],
-      layoutTree: { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+      agents: [],
+      layoutTree: { type: 'pane', paneId: SESSION_PANE_ID },
     },
-    daemonActivePaneId: MAIN_TERMINAL_PANE_ID,
+    daemonActivePaneId: SESSION_PANE_ID,
     ...overrides,
   };
 }
@@ -138,8 +138,8 @@ describe('useSessionWorkspaceController', () => {
     });
 
     expect(fitActivePane).toHaveBeenCalledOnce();
-    expect(result.current.getPaneText(session.id, MAIN_TERMINAL_PANE_ID)).toBe('pane text');
-    expect(result.current.getPaneSize(session.id, MAIN_TERMINAL_PANE_ID)).toEqual({ cols: 80, rows: 24 });
+    expect(result.current.getPaneText(session.id, SESSION_PANE_ID)).toBe('pane text');
+    expect(result.current.getPaneSize(session.id, SESSION_PANE_ID)).toEqual({ cols: 80, rows: 24 });
   });
 
   it('forgets workspace handles when removed', () => {
@@ -170,7 +170,7 @@ describe('useSessionWorkspaceController', () => {
       result.current.removeWorkspaceRef(session.id);
     });
 
-    expect(result.current.getPaneText(session.id, MAIN_TERMINAL_PANE_ID)).toBe('');
-    expect(result.current.getPaneSize(session.id, MAIN_TERMINAL_PANE_ID)).toBeNull();
+    expect(result.current.getPaneText(session.id, SESSION_PANE_ID)).toBe('');
+    expect(result.current.getPaneSize(session.id, SESSION_PANE_ID)).toBeNull();
   });
 });

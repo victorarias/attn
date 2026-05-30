@@ -497,8 +497,8 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		return
 	}
 
-	// Utility shell PTYs omit workspace_id; shell panes with workspace_id are
-	// first-class sessions and are shown in the workspace sidebar.
+	// Workspace-owned PTYs are first-class sessions and are shown in the
+	// workspace sidebar.
 	registerAsSession := !isShell || workspaceID != ""
 	if registerAsSession {
 		d.clearLongRunTracking(msg.ID)

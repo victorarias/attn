@@ -3,7 +3,6 @@ import { emit, listen } from '@tauri-apps/api/event';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Session } from '../store/sessions';
-import { MAIN_TERMINAL_PANE_ID } from '../store/sessions';
 import type { SessionAgent } from '../types/sessionAgent';
 import type { TerminalSplitDirection } from '../types/workspace';
 import { SHORTCUTS, type ShortcutId } from '../shortcuts';
@@ -127,43 +126,20 @@ function resolvePaneId(
 }
 
 function resolveRuntimeId(session: Session, paneId: string): string {
-  const agent = session.workspace.agents?.find((entry) => entry.id === paneId);
+  const agent = session.workspace.agents.find((entry) => entry.id === paneId);
   if (agent?.runtimeId) {
     return agent.runtimeId;
   }
-  const terminal = session.workspace.terminals.find((entry) => entry.id === paneId);
-  if (!terminal?.ptyId) {
-    throw new Error(`No runtime found for pane ${paneId}`);
-  }
-  return terminal.ptyId;
+  throw new Error(`No runtime found for pane ${paneId}`);
 }
 
 function paneEntries(session: Session) {
-  const agentPanes =
-    session.workspace.agents && session.workspace.agents.length > 0
-      ? session.workspace.agents
-      : [
-          {
-            id: MAIN_TERMINAL_PANE_ID,
-            runtimeId: session.id,
-            sessionId: session.id,
-            title: 'Session',
-          },
-        ];
-  return [
-    ...agentPanes.map((agent) => ({
+  return session.workspace.agents.map((agent) => ({
       paneId: agent.id,
       runtimeId: agent.runtimeId,
-      kind: 'main',
+      kind: 'agent',
       title: agent.title || 'Session',
-    })),
-    ...session.workspace.terminals.map((terminal) => ({
-      paneId: terminal.id,
-      runtimeId: terminal.ptyId,
-      kind: 'shell',
-      title: terminal.title,
-    })),
-  ];
+    }));
 }
 
 function serializeWorkspaceModel(
@@ -176,7 +152,7 @@ function serializeWorkspaceModel(
     panes: paneEntries(session),
     layoutTree: session.workspace.layoutTree,
     layout: collectWorkspaceLayoutDiagnostics(session.workspace.layoutTree),
-    shellPaneCount: session.workspace.terminals.length,
+    sessionPaneCount: session.workspace.agents.length,
   };
 }
 
@@ -207,7 +183,7 @@ function summarizeSession(
     agent: session.agent,
     activePaneId: getActivePaneIdForSession(session),
     daemonActivePaneId: session.daemonActivePaneId,
-    shellPaneCount: session.workspace.terminals.length,
+    sessionPaneCount: session.workspace.agents.length,
   };
 }
 
@@ -440,10 +416,7 @@ function collectVisualSnapshot(
             runtimeId,
             runtimeAttached: runtimeId ? isRuntimeAttached(runtimeId) : false,
             active: activePaneId === paneId,
-            kind:
-              session.workspace.agents?.some((entry) => entry.id === paneId) || paneId === MAIN_TERMINAL_PANE_ID
-                ? 'main'
-                : 'shell',
+            kind: 'agent',
             path: paneElement instanceof HTMLElement ? paneElement.dataset.panePath || null : null,
             bounds: rectSnapshot(paneElement),
             className: paneElement instanceof HTMLElement ? paneElement.className : null,
@@ -473,7 +446,7 @@ function collectSessionUiState(
       selected: false,
       sidebarItem: null,
       workspaceBounds: null,
-      mainPaneBounds: null,
+      agentPaneBounds: null,
       activePaneId: null,
       daemonActivePaneId: null,
       label: null,
@@ -484,9 +457,10 @@ function collectSessionUiState(
   const sidebarItem = document.querySelector(
     `[data-testid="sidebar-session-${session.id}"]`
   );
-  const mainPane = document.querySelector(
-    `[data-pane-session-id="${session.id}"][data-pane-id="${MAIN_TERMINAL_PANE_ID}"]`
-  );
+  const firstAgentPaneId = session.workspace.agents[0]?.id || '';
+  const firstAgentPane = firstAgentPaneId
+    ? document.querySelector(`[data-pane-session-id="${session.id}"][data-pane-id="${firstAgentPaneId}"]`)
+    : null;
   const workspaceDom = collectWorkspaceShellMetrics(session.id);
   const workspaceView = collectWorkspaceViewState(session.id);
   const workspaceModel = serializeWorkspaceModel(session, getActivePaneIdForSession);
@@ -512,7 +486,7 @@ function collectSessionUiState(
       dom: workspaceDom,
       splits: collectSplitDomMetrics(session.id),
     },
-    mainPaneBounds: rectSnapshot(mainPane),
+    agentPaneBounds: rectSnapshot(firstAgentPane),
   };
 }
 
@@ -565,7 +539,7 @@ function collectRenderHealthSnapshot(
         const terminal = terminalsByPaneId.get(pane.paneId) || null;
         return {
           paneId: pane.paneId,
-          kind: pane.kind as 'main' | 'shell',
+          kind: pane.kind as 'agent',
           active: pane.active,
           inputFocused: isSessionPaneInputFocused(session.id, pane.paneId),
           size: pane.size,
@@ -609,10 +583,9 @@ function collectRenderHealthSnapshot(
 function collectSessionRuntimeIds(sessions: Session[]) {
   const runtimeIds = new Set<string>();
   for (const session of sessions) {
-    runtimeIds.add(session.id);
-    for (const terminal of session.workspace.terminals) {
-      if (terminal.ptyId) {
-        runtimeIds.add(terminal.ptyId);
+    for (const agent of session.workspace.agents) {
+      if (agent.runtimeId) {
+        runtimeIds.add(agent.runtimeId);
       }
     }
   }
@@ -1043,7 +1016,7 @@ async function capturePerfSnapshot(
       }
     : await getBrowserMemorySnapshot();
   const totalPaneCount = scopedSessions.reduce(
-    (sum, session) => sum + 1 + session.workspace.terminals.length,
+    (sum, session) => sum + session.workspace.agents.length,
     0,
   );
   return {
@@ -1075,7 +1048,7 @@ async function capturePerfSnapshot(
         label: session.label,
         state: session.state,
         activePaneId: getActivePaneIdForSession(session),
-        shellPaneCount: session.workspace.terminals.length,
+        sessionPaneCount: session.workspace.agents.length,
       })),
     },
     browserMemory,
@@ -1314,7 +1287,9 @@ export function useUiAutomationBridge({
         if (!sessionId) {
           throw new Error('reload_session requires sessionId');
         }
-        const size = getPaneSize(sessionId, MAIN_TERMINAL_PANE_ID) || undefined;
+        const session = sessions.find((entry) => entry.id === sessionId);
+        const paneId = session?.workspace.agents.find((agent) => agent.sessionId === sessionId)?.id;
+        const size = paneId ? getPaneSize(sessionId, paneId) || undefined : undefined;
         await reloadSession(sessionId, size);
         await settleUi();
         return { sessionId };
@@ -1917,9 +1892,8 @@ export function useUiAutomationBridge({
           ? Math.floor(payload.flushEvery)
           : 1;
         const runtimeId =
-          session.workspace.agents?.find((entry) => entry.id === paneId)?.runtimeId ||
-          session.workspace.terminals.find((entry) => entry.id === paneId)?.ptyId ||
-          (paneId === MAIN_TERMINAL_PANE_ID ? session.id : `bench:${paneId}`);
+          session.workspace.agents.find((entry) => entry.id === paneId)?.runtimeId ||
+          `bench:${paneId}`;
         const bytes = buildBenchmarkBytes(chunkBytes);
         const base64Payload = encodeBytesToBase64(bytes);
 

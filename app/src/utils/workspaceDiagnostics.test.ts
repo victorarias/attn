@@ -10,7 +10,7 @@ describe('workspaceDiagnostics', () => {
       direction: 'vertical',
       ratio: 0.25,
       children: [
-        { type: 'pane', paneId: 'main' },
+        { type: 'pane', paneId: 'pane-session' },
         {
           type: 'split',
           splitId: 'right-split',
@@ -30,7 +30,7 @@ describe('workspaceDiagnostics', () => {
     expect(snapshot.splitCount).toBe(2);
     expect(snapshot.panes).toEqual([
       {
-        paneId: 'main',
+        paneId: 'pane-session',
         path: 'root/0',
         depth: 1,
         bounds: { left: 0, top: 0, right: 0.25, bottom: 1, width: 0.25, height: 1 },
@@ -85,7 +85,7 @@ describe('workspaceDiagnostics', () => {
           direction: 'vertical',
           ratio: 0.5,
           children: [
-            { type: 'pane', paneId: 'main' },
+            { type: 'pane', paneId: 'pane-session' },
             { type: 'pane', paneId: 'shell-a' },
           ],
         },

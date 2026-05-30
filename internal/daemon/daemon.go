@@ -1187,8 +1187,6 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 			})
 			d.recomputeAndBroadcastWorkspaceForSession(info.ID)
 		}
-	} else {
-		d.handleWorkspaceLayoutRuntimeExit(info.ID, info.ExitCode, info.Signal)
 	}
 
 	event := &protocol.WebSocketEvent{

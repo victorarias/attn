@@ -14,7 +14,7 @@ export interface PaneRenderHealthWarning {
 
 export interface PaneRenderHealthInput {
   paneId: string;
-  kind: 'main' | 'shell';
+  kind: 'agent';
   active: boolean;
   inputFocused: boolean;
   size: { cols: number; rows: number } | null;
@@ -45,7 +45,7 @@ export interface PaneRenderHealthInput {
 
 export interface PaneRenderHealth {
   paneId: string;
-  kind: 'main' | 'shell';
+  kind: 'agent';
   active: boolean;
   inputFocused: boolean;
   size: { cols: number; rows: number } | null;

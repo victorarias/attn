@@ -6,13 +6,11 @@ import { normalizeSessionAgent } from '../types/sessionAgent';
 import type { DaemonWorkspace } from '../hooks/useDaemonSocket';
 import { listenPtyEvents, ptyKill, ptySpawn, type PtySpawnArgs } from '../pty/bridge';
 import {
-  MAIN_TERMINAL_PANE_ID,
   createDefaultWorkspaceState,
   workspaceSnapshotFromDaemonWorkspace,
   type TerminalWorkspaceState,
 } from '../types/workspace';
 
-export { MAIN_TERMINAL_PANE_ID };
 export type { TerminalWorkspaceState };
 
 export interface Session {
@@ -163,7 +161,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       yoloMode,
       transcriptMatched: resolvedAgent !== 'codex',
       workspace: createDefaultWorkspaceState(),
-      daemonActivePaneId: MAIN_TERMINAL_PANE_ID,
+      daemonActivePaneId: '',
     };
 
     set((state) => ({
@@ -352,7 +350,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           branch: nextBranch,
           isWorktree: nextIsWorktree,
           workspace: existing?.workspace ?? createDefaultWorkspaceState(),
-          daemonActivePaneId: existing?.daemonActivePaneId ?? MAIN_TERMINAL_PANE_ID,
+          daemonActivePaneId: existing?.daemonActivePaneId ?? '',
         } satisfies Session;
       });
 
@@ -413,7 +411,7 @@ if (import.meta.env.DEV) {
           workspaceId: `workspace-${session.id}`,
           transcriptMatched: (session.agent ?? 'codex') !== 'codex',
           workspace: createDefaultWorkspaceState(),
-          daemonActivePaneId: MAIN_TERMINAL_PANE_ID,
+          daemonActivePaneId: '',
         },
       ],
     }));
@@ -427,7 +425,7 @@ if (import.meta.env.DEV) {
     }));
   };
 
-  window.__TEST_SET_SESSION_WORKSPACE = (sessionId: string, workspace: TerminalWorkspaceState, daemonActivePaneId = MAIN_TERMINAL_PANE_ID) => {
+  window.__TEST_SET_SESSION_WORKSPACE = (sessionId: string, workspace: TerminalWorkspaceState, daemonActivePaneId = workspace.agents[0]?.id || '') => {
     useSessionStore.setState((state) => ({
       sessions: state.sessions.map((session) =>
         session.id === sessionId

@@ -100,7 +100,7 @@ test.describe('Ghostty terminal interactions', () => {
 
     await expect
       .poll(
-        async () => page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-link') ?? ''),
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-link') ?? ''),
         { timeout: 5000 },
       )
       .toContain(url);
@@ -135,7 +135,7 @@ test.describe('Ghostty terminal interactions', () => {
 
     await expect
       .poll(
-        async () => page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-link-offset') ?? ''),
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-link-offset') ?? ''),
         { timeout: 5000 },
       )
       .toContain(url);
@@ -165,7 +165,7 @@ test.describe('Ghostty terminal interactions', () => {
 
     await expect
       .poll(
-        async () => page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-link-tracked') ?? ''),
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-link-tracked') ?? ''),
         { timeout: 5000 },
       )
       .toContain(url);
@@ -189,7 +189,7 @@ test.describe('Ghostty terminal interactions', () => {
     await writeTerminalOutput(page, 's-image-paste', '\u001b[2J\u001b[Hready');
     await expect
       .poll(
-        async () => page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-image-paste') ?? ''),
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-image-paste') ?? ''),
         { timeout: 5000 },
       )
       .toContain('ready');
@@ -251,7 +251,7 @@ test.describe('Ghostty terminal interactions', () => {
 
     await expect
       .poll(
-        async () => page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-double-click') ?? ''),
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-double-click') ?? ''),
         { timeout: 5000 },
       )
       .toContain('selectable-word');
@@ -332,7 +332,7 @@ test.describe('Ghostty terminal interactions', () => {
     )).join('\r\n');
     await writeTerminalOutput(page, 's-selection-scroll', `\u001b[2J\u001b[H${lines}`);
 
-    const visibleText = await page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-selection-scroll') ?? '');
+    const visibleText = await page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-selection-scroll') ?? '');
     expect(visibleText).toContain(anchor);
 
     const terminalBounds = await terminal.boundingBox();

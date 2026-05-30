@@ -30,7 +30,7 @@ Instructions for the subagents:
 - they should not make code changes
 - they should give concrete, actionable feedback with rationale
 
-Instructions for you, the main agent:
+Instructions for you, the coordinating agent:
 - you are the only agent that makes code changes
 - collect the subagent feedback, critically evaluate it, and decide what to act on
 - do not blindly accept every suggestion

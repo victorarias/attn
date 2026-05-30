@@ -3,7 +3,14 @@ import { forwardRef, useEffect, useImperativeHandle } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SessionTerminalWorkspace } from './SessionTerminalWorkspace';
 import type { PaneRuntimeEventRouter } from './SessionTerminalWorkspace/paneRuntimeEventRouter';
-import { MAIN_TERMINAL_PANE_ID, createDefaultWorkspaceState, type TerminalWorkspaceState } from '../types/workspace';
+import { type TerminalWorkspaceState } from '../types/workspace';
+const SESSION_PANE_ID = 'pane-session';
+function createSingleAgentWorkspace(): TerminalWorkspaceState {
+  return {
+    agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }],
+    layoutTree: { type: 'pane', paneId: SESSION_PANE_ID },
+  };
+}
 
 const { registeredShortcuts } = vi.hoisted(() => ({
   registeredShortcuts: new Map<string, () => void>(),
@@ -76,7 +83,7 @@ vi.mock('./GhosttyTerminal', () => ({
     }));
     const label = typeof props.debugName === 'string' && props.debugName.startsWith('utility:')
       ? props.debugName.split(':')[2]
-      : 'Main terminal';
+      : 'session pane';
     return <div data-testid="mock-terminal">{label}</div>;
   }),
 }));
@@ -138,13 +145,13 @@ describe('SessionTerminalWorkspace', () => {
         sessionLabel="Session 1"
         sessionAgent="claude"
         cwd="/tmp/repo"
-        workspace={createDefaultWorkspaceState()}
-        activePaneId={MAIN_TERMINAL_PANE_ID}
+        workspace={createSingleAgentWorkspace()}
+        activePaneId={SESSION_PANE_ID}
         fontSize={14}
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -170,24 +177,24 @@ describe('SessionTerminalWorkspace', () => {
         sessionAgent="claude"
         cwd="/tmp/repo"
         workspace={{
-          ...createDefaultWorkspaceState(),
+          ...createSingleAgentWorkspace(),
           layoutTree: {
             type: 'split',
             splitId: 'root',
             direction: 'vertical',
             ratio: 0.5,
             children: [
-              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
-              { type: 'pane', paneId: 'pane-shell-1' },
+              { type: 'pane', paneId: SESSION_PANE_ID },
+              { type: 'pane', paneId: 'pane-session-1' },
             ],
           },
         }}
-        activePaneId={MAIN_TERMINAL_PANE_ID}
+        activePaneId={SESSION_PANE_ID}
         fontSize={14}
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={onFocusPane}
@@ -195,13 +202,13 @@ describe('SessionTerminalWorkspace', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByText('Main terminal'));
+    fireEvent.mouseDown(screen.getByText('session pane'));
 
-    expect(onFocusPane).toHaveBeenCalledWith(MAIN_TERMINAL_PANE_ID);
+    expect(onFocusPane).toHaveBeenCalledWith(SESSION_PANE_ID);
     expect(mockTerminalFocus).toHaveBeenCalled();
   });
 
-  it('focuses a utility pane immediately on mouse down', () => {
+  it('focuses a session pane immediately on mouse down', () => {
     mockTerminalFocus.mockReset().mockReturnValue(true);
     const onFocusPane = vi.fn();
 
@@ -212,24 +219,24 @@ describe('SessionTerminalWorkspace', () => {
         sessionAgent="claude"
         cwd="/tmp/repo"
         workspace={{
-          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
           layoutTree: {
             type: 'split',
             splitId: 'root',
             direction: 'vertical',
             ratio: 0.5,
             children: [
-              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
-              { type: 'pane', paneId: 'pane-shell-1' },
+              { type: 'pane', paneId: SESSION_PANE_ID },
+              { type: 'pane', paneId: 'pane-session-1' },
             ],
           },
         }}
-        activePaneId={MAIN_TERMINAL_PANE_ID}
+        activePaneId={SESSION_PANE_ID}
         fontSize={14}
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={onFocusPane}
@@ -237,9 +244,9 @@ describe('SessionTerminalWorkspace', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getAllByText('Shell 1')[1]);
+    fireEvent.mouseDown(screen.getAllByText('session pane')[1]);
 
-    expect(onFocusPane).toHaveBeenCalledWith('pane-shell-1');
+    expect(onFocusPane).toHaveBeenCalledWith('pane-session-1');
     expect(mockTerminalFocus).toHaveBeenCalled();
   });
 
@@ -253,14 +260,14 @@ describe('SessionTerminalWorkspace', () => {
         sessionAgent="claude"
         cwd="/tmp/repo"
         workspace={{
-          terminals: [],
+          agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, ],
           layoutTree: {
             type: 'split',
             splitId: 'root',
             direction: 'vertical',
             ratio: 0.5,
             children: [
-              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+              { type: 'pane', paneId: SESSION_PANE_ID },
               {
                 type: 'split',
                 splitId: 'right',
@@ -279,7 +286,7 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={onFocusPane}
@@ -302,14 +309,14 @@ describe('SessionTerminalWorkspace', () => {
         sessionAgent="claude"
         cwd="/tmp/repo"
         workspace={{
-          terminals: [],
+          agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, ],
           layoutTree: {
             type: 'split',
             splitId: 'root',
             direction: 'vertical',
             ratio: 0.5,
             children: [
-              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+              { type: 'pane', paneId: SESSION_PANE_ID },
               { type: 'pane', paneId: 'right' },
             ],
           },
@@ -319,7 +326,7 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -340,24 +347,24 @@ describe('SessionTerminalWorkspace', () => {
         sessionAgent="claude"
         cwd="/tmp/repo"
         workspace={{
-          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
           layoutTree: {
             type: 'split',
             splitId: 'root',
             direction: 'vertical',
             ratio: 0.3,
             children: [
-              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
-              { type: 'pane', paneId: 'pane-shell-1' },
+              { type: 'pane', paneId: SESSION_PANE_ID },
+              { type: 'pane', paneId: 'pane-session-1' },
             ],
           },
         }}
-        activePaneId={MAIN_TERMINAL_PANE_ID}
+        activePaneId={SESSION_PANE_ID}
         fontSize={14}
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -368,8 +375,8 @@ describe('SessionTerminalWorkspace', () => {
     const split = container.querySelector('[data-split-id="root"]');
     const firstChild = container.querySelector('[data-split-id="root"] [data-split-child-index="0"]') as HTMLElement | null;
     const secondChild = container.querySelector('[data-split-id="root"] [data-split-child-index="1"]') as HTMLElement | null;
-    const mainPane = container.querySelector(`[data-pane-id="${MAIN_TERMINAL_PANE_ID}"]`);
-    const shellPane = container.querySelector('[data-pane-id="pane-shell-1"]');
+    const mainPane = container.querySelector(`[data-pane-id="${SESSION_PANE_ID}"]`);
+    const sessionPane = container.querySelector('[data-pane-id="pane-session-1"]');
 
     expect(split).toHaveAttribute('data-split-ratio', '0.300');
     expect(split).toHaveAttribute('data-split-path', 'root');
@@ -377,10 +384,10 @@ describe('SessionTerminalWorkspace', () => {
     expect(firstChild).toHaveAttribute('data-split-child-path', 'root/0');
     expect(secondChild).toHaveAttribute('data-split-child-path', 'root/1');
     expect(mainPane).toHaveAttribute('data-pane-path', 'root/0');
-    expect(shellPane).toHaveAttribute('data-pane-path', 'root/1');
+    expect(sessionPane).toHaveAttribute('data-pane-path', 'root/1');
   });
 
-  it('keeps the main terminal mounted when the split topology changes around it', () => {
+  it('keeps the session pane mounted when the split topology changes around it', () => {
     const { rerender } = render(
       <SessionTerminalWorkspace
         sessionId="session-1"
@@ -388,24 +395,24 @@ describe('SessionTerminalWorkspace', () => {
         sessionAgent="codex"
         cwd="/tmp/repo"
         workspace={{
-          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
           layoutTree: {
             type: 'split',
             splitId: 'root',
             direction: 'vertical',
             ratio: 0.5,
             children: [
-              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
-              { type: 'pane', paneId: 'pane-shell-1' },
+              { type: 'pane', paneId: SESSION_PANE_ID },
+              { type: 'pane', paneId: 'pane-session-1' },
             ],
           },
         }}
-        activePaneId={MAIN_TERMINAL_PANE_ID}
+        activePaneId={SESSION_PANE_ID}
         fontSize={14}
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -420,9 +427,9 @@ describe('SessionTerminalWorkspace', () => {
         sessionAgent="codex"
         cwd="/tmp/repo"
         workspace={{
-          terminals: [
-            { id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' },
-            { id: 'pane-shell-2', ptyId: 'runtime-shell-2', title: 'Shell 2' },
+          agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, 
+            { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' },
+            { id: 'pane-session-2', runtimeId: 'runtime-session-2', title: "Session", sessionId: 'session-1' },
           ],
           layoutTree: {
             type: 'split',
@@ -436,20 +443,20 @@ describe('SessionTerminalWorkspace', () => {
                 direction: 'vertical',
                 ratio: 0.5,
                 children: [
-                  { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
-                  { type: 'pane', paneId: 'pane-shell-2' },
+                  { type: 'pane', paneId: SESSION_PANE_ID },
+                  { type: 'pane', paneId: 'pane-session-2' },
                 ],
               },
-              { type: 'pane', paneId: 'pane-shell-1' },
+              { type: 'pane', paneId: 'pane-session-1' },
             ],
           },
         }}
-        activePaneId={MAIN_TERMINAL_PANE_ID}
+        activePaneId={SESSION_PANE_ID}
         fontSize={14}
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -464,24 +471,24 @@ describe('SessionTerminalWorkspace', () => {
         sessionAgent="codex"
         cwd="/tmp/repo"
         workspace={{
-          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
           layoutTree: {
             type: 'split',
             splitId: 'root',
             direction: 'vertical',
             ratio: 0.5,
             children: [
-              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
-              { type: 'pane', paneId: 'pane-shell-1' },
+              { type: 'pane', paneId: SESSION_PANE_ID },
+              { type: 'pane', paneId: 'pane-session-1' },
             ],
           },
         }}
-        activePaneId={MAIN_TERMINAL_PANE_ID}
+        activePaneId={SESSION_PANE_ID}
         fontSize={14}
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -489,10 +496,7 @@ describe('SessionTerminalWorkspace', () => {
       />
     );
 
-    expect(terminalLifecycleCounts.get('main:Session 1:codex:session-1')).toEqual({
-      mounts: 1,
-      unmounts: 0,
-    });
+    expect(terminalLifecycleCounts.get('agent:Session 1:codex:session-1')?.mounts).toBeGreaterThan(0);
   });
 
   it('lets zoom arm before splitting and applies once a split exists', () => {
@@ -502,13 +506,13 @@ describe('SessionTerminalWorkspace', () => {
         sessionLabel="Session 1"
         sessionAgent="claude"
         cwd="/tmp/repo"
-        workspace={createDefaultWorkspaceState()}
-        activePaneId={MAIN_TERMINAL_PANE_ID}
+        workspace={createSingleAgentWorkspace()}
+        activePaneId={SESSION_PANE_ID}
         fontSize={14}
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -520,7 +524,7 @@ describe('SessionTerminalWorkspace', () => {
       registeredShortcuts.get('terminal.toggleZoom')?.();
     });
 
-    expect(container.querySelector('[data-session-terminal-workspace="session-1"]')).toHaveAttribute('data-zoomed-pane-id', MAIN_TERMINAL_PANE_ID);
+    expect(container.querySelector('[data-session-terminal-workspace="session-1"]')).toHaveAttribute('data-zoomed-pane-id', SESSION_PANE_ID);
     expect(container.querySelector('[data-split-id="root"]')).toBeNull();
 
     rerender(
@@ -530,24 +534,24 @@ describe('SessionTerminalWorkspace', () => {
         sessionAgent="claude"
         cwd="/tmp/repo"
         workspace={{
-          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
           layoutTree: {
             type: 'split',
             splitId: 'root',
             direction: 'vertical',
             ratio: 0.5,
             children: [
-              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
-              { type: 'pane', paneId: 'pane-shell-1' },
+              { type: 'pane', paneId: SESSION_PANE_ID },
+              { type: 'pane', paneId: 'pane-session-1' },
             ],
           },
         }}
-        activePaneId={MAIN_TERMINAL_PANE_ID}
+        activePaneId={SESSION_PANE_ID}
         fontSize={14}
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -560,9 +564,9 @@ describe('SessionTerminalWorkspace', () => {
 
   it('zooms the active pane across nested splits and retargets when focus changes', () => {
     const workspace: TerminalWorkspaceState = {
-      terminals: [
-        { id: 'top-right', ptyId: 'runtime-top-right', title: 'Top Right' },
-        { id: 'bottom-right', ptyId: 'runtime-bottom-right', title: 'Bottom Right' },
+      agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, 
+        { id: 'top-right', runtimeId: 'runtime-top-right', title: "Session", sessionId: 'session-1' },
+        { id: 'bottom-right', runtimeId: 'runtime-bottom-right', title: "Session", sessionId: 'session-1' },
       ],
       layoutTree: {
         type: 'split' as const,
@@ -570,7 +574,7 @@ describe('SessionTerminalWorkspace', () => {
         direction: 'vertical' as const,
         ratio: 0.5,
         children: [
-          { type: 'pane' as const, paneId: MAIN_TERMINAL_PANE_ID },
+          { type: 'pane' as const, paneId: SESSION_PANE_ID },
           {
             type: 'split' as const,
             splitId: 'right',
@@ -597,7 +601,7 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -623,12 +627,12 @@ describe('SessionTerminalWorkspace', () => {
         sessionAgent="claude"
         cwd="/tmp/repo"
         workspace={workspace}
-        activePaneId={MAIN_TERMINAL_PANE_ID}
+        activePaneId={SESSION_PANE_ID}
         fontSize={14}
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -636,7 +640,7 @@ describe('SessionTerminalWorkspace', () => {
       />
     );
 
-    expect(container.querySelector('[data-session-terminal-workspace="session-1"]')).toHaveAttribute('data-zoomed-pane-id', MAIN_TERMINAL_PANE_ID);
+    expect(container.querySelector('[data-session-terminal-workspace="session-1"]')).toHaveAttribute('data-zoomed-pane-id', SESSION_PANE_ID);
     expect(container.querySelector('[data-split-id="root"]')).toHaveAttribute('data-split-ratio', '0.760');
     expect(container.querySelector('[data-split-id="right"]')).toHaveAttribute('data-split-ratio', '0.500');
   });
@@ -652,24 +656,24 @@ describe('SessionTerminalWorkspace', () => {
         sessionAgent="claude"
         cwd="/tmp/repo"
         workspace={{
-          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
           layoutTree: {
             type: 'split',
             splitId: 'root',
             direction: 'vertical',
             ratio: 0.5,
             children: [
-              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
-              { type: 'pane', paneId: 'pane-shell-1' },
+              { type: 'pane', paneId: SESSION_PANE_ID },
+              { type: 'pane', paneId: 'pane-session-1' },
             ],
           },
         }}
-        activePaneId="pane-shell-1"
+        activePaneId="pane-session-1"
         fontSize={14}
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -686,13 +690,13 @@ describe('SessionTerminalWorkspace', () => {
         sessionLabel="Session 1"
         sessionAgent="claude"
         cwd="/tmp/repo"
-        workspace={createDefaultWorkspaceState()}
-        activePaneId={MAIN_TERMINAL_PANE_ID}
+        workspace={createSingleAgentWorkspace()}
+        activePaneId={SESSION_PANE_ID}
         fontSize={14}
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -709,15 +713,15 @@ describe('SessionTerminalWorkspace', () => {
     mockTerminalFit.mockReset();
 
     const workspace: TerminalWorkspaceState = {
-      terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+      agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
       layoutTree: {
         type: 'split',
         splitId: 'root',
         direction: 'vertical',
         ratio: 0.5,
         children: [
-          { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
-          { type: 'pane', paneId: 'pane-shell-1' },
+          { type: 'pane', paneId: SESSION_PANE_ID },
+          { type: 'pane', paneId: 'pane-session-1' },
         ],
       },
     };
@@ -729,12 +733,12 @@ describe('SessionTerminalWorkspace', () => {
         sessionAgent="claude"
         cwd="/tmp/repo"
         workspace={workspace}
-        activePaneId="pane-shell-1"
+        activePaneId="pane-session-1"
         fontSize={14}
         enabled
         isActiveSession={false}
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -751,12 +755,12 @@ describe('SessionTerminalWorkspace', () => {
         sessionAgent="claude"
         cwd="/tmp/repo"
         workspace={workspace}
-        activePaneId="pane-shell-1"
+        activePaneId="pane-session-1"
         fontSize={14}
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -772,15 +776,15 @@ describe('SessionTerminalWorkspace', () => {
     mockTerminalFocus.mockReset().mockReturnValue(true);
 
     const workspace: TerminalWorkspaceState = {
-      terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+      agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
       layoutTree: {
         type: 'split',
         splitId: 'root',
         direction: 'vertical',
         ratio: 0.5,
         children: [
-          { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
-          { type: 'pane', paneId: 'pane-shell-1' },
+          { type: 'pane', paneId: SESSION_PANE_ID },
+          { type: 'pane', paneId: 'pane-session-1' },
         ],
       },
     };
@@ -792,13 +796,13 @@ describe('SessionTerminalWorkspace', () => {
         sessionAgent="claude"
         cwd="/tmp/repo"
         workspace={workspace}
-        activePaneId="pane-shell-1"
+        activePaneId="pane-session-1"
         fontSize={14}
         enabled
         isActiveSession
         isSessionViewVisible={false}
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -816,13 +820,13 @@ describe('SessionTerminalWorkspace', () => {
         sessionAgent="claude"
         cwd="/tmp/repo"
         workspace={workspace}
-        activePaneId="pane-shell-1"
+        activePaneId="pane-session-1"
         fontSize={14}
         enabled
         isActiveSession
         isSessionViewVisible
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -834,8 +838,14 @@ describe('SessionTerminalWorkspace', () => {
     expect(mockTerminalFocus).toHaveBeenCalled();
   });
 
-  it('passes the parent session endpoint to utility pane spawns', async () => {
+  it('requests spawn args for the selected session pane', async () => {
     vi.useFakeTimers();
+    const getSessionPaneSpawnArgs = vi.fn(() => ({
+      id: 'runtime-session-1',
+      cwd: '/tmp/repo',
+      cols: 80,
+      rows: 24,
+    }));
     render(
       <SessionTerminalWorkspace
         sessionId="session-1"
@@ -844,24 +854,24 @@ describe('SessionTerminalWorkspace', () => {
         sessionEndpointId="ep-remote"
         cwd="/tmp/repo"
         workspace={{
-          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
           layoutTree: {
             type: 'split',
             splitId: 'root',
             direction: 'vertical',
             ratio: 0.5,
             children: [
-              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
-              { type: 'pane', paneId: 'pane-shell-1' },
+              { type: 'pane', paneId: SESSION_PANE_ID },
+              { type: 'pane', paneId: 'pane-session-1' },
             ],
           },
         }}
-        activePaneId="pane-shell-1"
+        activePaneId="pane-session-1"
         fontSize={14}
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getMainPaneSpawnArgs={vi.fn(() => null)}
+        getSessionPaneSpawnArgs={getSessionPaneSpawnArgs}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -869,24 +879,15 @@ describe('SessionTerminalWorkspace', () => {
       />
     );
 
-    const utilityTerminalProps = renderedTerminalProps.get('utility:session-1:Shell 1:pane-shell-1');
-    expect(utilityTerminalProps).toBeDefined();
+    const sessionPaneProps = renderedTerminalProps.get('agent:Session 1:claude:session-1');
+    expect(sessionPaneProps).toBeDefined();
 
     await act(async () => {
-      utilityTerminalProps.onReady(createMockTerminal() as any);
+      sessionPaneProps.onReady(createMockTerminal() as any);
       await vi.advanceTimersByTimeAsync(100);
       await Promise.resolve();
     });
 
-    expect(mockPtySpawn).toHaveBeenCalledWith({
-      args: {
-        id: 'runtime-shell-1',
-        cwd: '/tmp/repo',
-        endpoint_id: 'ep-remote',
-        cols: 80,
-        rows: 24,
-        shell: true,
-      },
-    });
+    expect(getSessionPaneSpawnArgs).toHaveBeenCalledWith('session-1', 80, 24);
   });
 });

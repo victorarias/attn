@@ -8,7 +8,6 @@ import (
 )
 
 const (
-	LegacyMainPaneID  = "main"
 	DefaultPaneTitle  = "Agent"
 	DefaultSplitRatio = 0.5
 )
@@ -24,7 +23,6 @@ type PaneKind string
 
 const (
 	PaneKindAgent PaneKind = "agent"
-	PaneKindShell PaneKind = "shell"
 )
 
 type Pane struct {
@@ -108,21 +106,19 @@ func NormalizeWorkspaceLayout(snapshot WorkspaceLayout) WorkspaceLayout {
 		if runtimeID == "" {
 			continue
 		}
+		sessionID := strings.TrimSpace(pane.SessionID)
+		if sessionID == "" {
+			continue
+		}
 		title := strings.TrimSpace(pane.Title)
 		if title == "" {
 			title = paneID
-		}
-		kind := pane.Kind
-		sessionID := strings.TrimSpace(pane.SessionID)
-		if kind != PaneKindAgent || sessionID == "" {
-			kind = PaneKindShell
-			sessionID = ""
 		}
 		panesByID[paneID] = Pane{
 			PaneID:    paneID,
 			RuntimeID: runtimeID,
 			SessionID: sessionID,
-			Kind:      kind,
+			Kind:      PaneKindAgent,
 			Title:     title,
 		}
 	}
@@ -346,20 +342,4 @@ func collectPaneIDs(node Node, ids *[]string) {
 			collectPaneIDs(child, ids)
 		}
 	}
-}
-
-func SortedShellRuntimeIDs(snapshot WorkspaceLayout) []string {
-	runtimeIDs := make([]string, 0, len(snapshot.Panes))
-	for _, pane := range snapshot.Panes {
-		if pane.Kind != PaneKindShell {
-			continue
-		}
-		runtimeID := strings.TrimSpace(pane.RuntimeID)
-		if runtimeID == "" {
-			continue
-		}
-		runtimeIDs = append(runtimeIDs, runtimeID)
-	}
-	sort.Strings(runtimeIDs)
-	return runtimeIDs
 }

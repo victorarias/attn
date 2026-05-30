@@ -2744,7 +2744,6 @@ type WorkspaceLayoutPane struct {
 type WorkspaceLayoutPaneKind string
 
 const WorkspaceLayoutPaneKindAgent WorkspaceLayoutPaneKind = "agent"
-const WorkspaceLayoutPaneKindShell WorkspaceLayoutPaneKind = "shell"
 
 type WorkspaceLayoutRenamePaneMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
@@ -2755,26 +2754,6 @@ type WorkspaceLayoutRenamePaneMessage struct {
 
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
-}
-
-type WorkspaceLayoutRuntimeExitedMessage struct {
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// ExitCode corresponds to the JSON schema field "exit_code".
-	ExitCode int `json:"exit_code"`
-
-	// PaneID corresponds to the JSON schema field "pane_id".
-	PaneID string `json:"pane_id"`
-
-	// RuntimeID corresponds to the JSON schema field "runtime_id".
-	RuntimeID string `json:"runtime_id"`
-
-	// Signal corresponds to the JSON schema field "signal".
-	Signal *string `json:"signal,omitempty,omitzero"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`

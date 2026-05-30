@@ -153,7 +153,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '68';
+const PROTOCOL_VERSION = '69';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
 // injects this global before any page script runs — see
@@ -494,13 +494,11 @@ function resolveRuntimeLogContext(
   sessions: DaemonSession[],
   workspaces: DaemonWorkspace[],
   runtimeID: string,
-): { sessionId?: string; paneId?: string; paneKind?: 'main' | 'shell' } {
+): { sessionId?: string; paneId?: string; paneKind?: 'agent' } {
   const session = sessions.find((entry) => entry.id === runtimeID);
   if (session) {
     return {
       sessionId: session.id,
-      paneId: 'main',
-      paneKind: 'main',
     };
   }
   for (const workspace of workspaces) {
@@ -511,7 +509,7 @@ function resolveRuntimeLogContext(
       return {
         sessionId: pane.session_id,
         paneId: pane.pane_id,
-        paneKind: pane.kind === 'agent' ? 'main' : 'shell',
+        paneKind: 'agent',
       };
     }
   }
@@ -939,11 +937,8 @@ export function useDaemonSocket({
         circuitResetTimeoutRef.current = null;
       }
 
-      // Identify ourselves first thing. The Tauri app declares no
-      // capabilities — it relies on the daemon's legacy defaults
-      // (shell PTYs from spawn_session are utility terminals, not
-      // sessions). Sending hello at all is still useful for daemon-side
-      // diagnostics (client kind/version in logs).
+      // Identify ourselves first thing. Sending hello is useful for
+      // daemon-side diagnostics (client kind/version in logs).
       ws.send(
         JSON.stringify({
           cmd: 'client_hello',
@@ -1126,10 +1121,6 @@ export function useDaemonSocket({
             }
             break;
           }
-
-          case 'workspace_layout_runtime_exited':
-            // The canonical pane removal arrives via workspace_layout_updated.
-            break;
 
           case 'workspace_registered':
           case 'workspace_state_changed':
@@ -2458,7 +2449,7 @@ export function useDaemonSocket({
               );
             },
             logKnownWorkspaceRespawn: ({ id, endpointId, error }) => {
-              console.warn('[DaemonSocket] Known workspace runtime attach failed, respawning shell pane', {
+              console.warn('[DaemonSocket] Known workspace runtime attach failed, respawning session pane', {
                 id,
                 endpoint_id: endpointId,
                 error: error instanceof Error ? error.message : String(error),

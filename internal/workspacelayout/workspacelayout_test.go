@@ -131,8 +131,8 @@ func TestNormalizeWorkspaceLayoutRebalancesSameDirectionChains(t *testing.T) {
 		},
 		Panes: []Pane{
 			{PaneID: "pane-root", RuntimeID: "sess-1", SessionID: "sess-1", Kind: PaneKindAgent, Title: DefaultPaneTitle},
-			{PaneID: "pane-a", RuntimeID: "runtime-a", Kind: PaneKindShell, Title: "Shell 1"},
-			{PaneID: "pane-b", RuntimeID: "runtime-b", Kind: PaneKindShell, Title: "Shell 2"},
+			{PaneID: "pane-a", RuntimeID: "sess-a", SessionID: "sess-a", Kind: PaneKindAgent, Title: "Agent 1"},
+			{PaneID: "pane-b", RuntimeID: "sess-b", SessionID: "sess-b", Kind: PaneKindAgent, Title: "Agent 2"},
 		},
 	}
 
@@ -174,7 +174,7 @@ func TestNormalizeWorkspaceLayoutRebalancesAfterRemovingPaneFromChain(t *testing
 		},
 		Panes: []Pane{
 			{PaneID: "pane-root", RuntimeID: "sess-1", SessionID: "sess-1", Kind: PaneKindAgent, Title: DefaultPaneTitle},
-			{PaneID: "pane-b", RuntimeID: "runtime-b", Kind: PaneKindShell, Title: "Shell 2"},
+			{PaneID: "pane-b", RuntimeID: "sess-b", SessionID: "sess-b", Kind: PaneKindAgent, Title: "Agent 2"},
 		},
 	}
 

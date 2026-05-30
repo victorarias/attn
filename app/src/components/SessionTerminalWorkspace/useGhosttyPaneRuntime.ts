@@ -9,7 +9,7 @@ import type { TerminalVisibleStyleSnapshot } from '../../utils/terminalStyleSumm
 export interface PaneRuntimeSpec {
   paneId: string;
   runtimeId: string;
-  paneKind: 'main' | 'shell';
+  paneKind: 'agent';
   agent?: string;
   sessionId?: string;
   testSessionId?: string;
@@ -123,7 +123,7 @@ export function useGhosttyPaneRuntime(
             id: pane.runtimeId,
             cols: size.cols,
             rows: size.rows,
-            shell: pane.paneKind === 'shell',
+            shell: false,
             agent: pane.agent,
             policy: 'same_app_remount',
           },
@@ -172,7 +172,7 @@ export function useGhosttyPaneRuntime(
     if (!isActiveSessionRef.current) return;
     const pane = paneFor(paneId);
     if (!pane || !readyRuntimesRef.current.has(pane.runtimeId)) return;
-    if (pane.paneKind === 'main' && isSuspiciousTerminalSize(cols, rows)) return;
+    if (isSuspiciousTerminalSize(cols, rows)) return;
     void ptyResize({ id: pane.runtimeId, cols, rows, reason: options?.reason ?? 'ghostty_fit' });
   }, [isActiveSessionRef, paneFor]);
 

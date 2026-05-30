@@ -41,10 +41,10 @@ describe('sessions store', () => {
     const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
 
     expect(session?.workspace).toEqual({
-      terminals: [],
-      layoutTree: { type: 'pane', paneId: 'main' },
+      agents: [],
+      layoutTree: null,
     });
-    expect(session?.daemonActivePaneId).toBe('main');
+    expect(session?.daemonActivePaneId).toBe('');
   });
 
   it('syncFromDaemonSessions hydrates canonical session data and preserves local workspace state', () => {
@@ -60,14 +60,14 @@ describe('sessions store', () => {
           transcriptMatched: false,
           daemonActivePaneId: 'pane-a',
           workspace: {
-            terminals: [{ id: 'pane-a', ptyId: 'runtime-a', title: 'Shell 1' }],
+            agents: [{ id: 'pane-a', runtimeId: 'runtime-a', title: "Session", sessionId: 'session-1' }],
             layoutTree: {
               type: 'split',
               splitId: 'root',
               direction: 'vertical',
               ratio: 0.5,
               children: [
-                { type: 'pane', paneId: 'main' },
+                { type: 'pane', paneId: 'pane-session' },
                 { type: 'pane', paneId: 'pane-a' },
               ],
             },
@@ -102,7 +102,7 @@ describe('sessions store', () => {
       daemonActivePaneId: 'pane-a',
     });
     expect(session.workspace).toMatchObject({
-      terminals: [{ id: 'pane-a', ptyId: 'runtime-a', title: 'Shell 1' }],
+      agents: [{ id: 'pane-a', runtimeId: 'runtime-a', title: "Session", sessionId: 'session-1' }],
     });
   });
 
@@ -147,13 +147,13 @@ describe('sessions store', () => {
             direction: 'vertical',
             ratio: 0.5,
             children: [
-              { type: 'pane', pane_id: 'main' },
+              { type: 'pane', pane_id: 'pane-session' },
               { type: 'pane', pane_id: 'pane-shell' },
             ],
           }),
           panes: [
-            { pane_id: 'main', kind: WorkspaceLayoutPaneKind.Agent, title: 'Agent', runtime_id: sessionId, session_id: sessionId },
-            { pane_id: 'pane-shell', kind: WorkspaceLayoutPaneKind.Shell, title: 'Shell 1', runtime_id: 'runtime-shell' },
+            { pane_id: 'pane-session', kind: WorkspaceLayoutPaneKind.Agent, title: 'Agent', runtime_id: sessionId, session_id: sessionId },
+            { pane_id: 'pane-shell', kind: WorkspaceLayoutPaneKind.Agent, title: 'Shell 1', runtime_id: 'runtime-shell', session_id: 'sess-shell' },
           ],
         },
       },
@@ -162,10 +162,8 @@ describe('sessions store', () => {
     const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
     expect(session?.workspace).toEqual({
       agents: [
-        { id: 'main', runtimeId: sessionId, sessionId, title: 'Agent' },
-      ],
-      terminals: [
-        { id: 'pane-shell', ptyId: 'runtime-shell', title: 'Shell 1' },
+        { id: 'pane-session', runtimeId: sessionId, sessionId, title: 'Agent' },
+        { id: 'pane-shell', runtimeId: 'runtime-shell', sessionId: 'sess-shell', title: 'Shell 1' },
       ],
       layoutTree: {
         type: 'split',
@@ -173,7 +171,7 @@ describe('sessions store', () => {
         direction: 'vertical',
         ratio: 0.5,
         children: [
-          { type: 'pane', paneId: 'main' },
+          { type: 'pane', paneId: 'pane-session' },
           { type: 'pane', paneId: 'pane-shell' },
         ],
       },
@@ -195,7 +193,7 @@ describe('sessions store', () => {
           active_pane_id: 'missing-pane',
           layout_json: '{not-json',
           panes: [
-            { pane_id: 'main', kind: WorkspaceLayoutPaneKind.Agent, title: 'Agent', runtime_id: sessionId, session_id: sessionId },
+            { pane_id: 'pane-session', kind: WorkspaceLayoutPaneKind.Agent, title: 'Agent', runtime_id: sessionId, session_id: sessionId },
           ],
         },
       },
@@ -209,7 +207,7 @@ describe('sessions store', () => {
           active_pane_id: 'pane-x',
           layout_json: '',
           panes: [
-            { pane_id: 'pane-x', kind: WorkspaceLayoutPaneKind.Shell, title: 'Shell X', runtime_id: 'runtime-x' },
+            { pane_id: 'pane-x', kind: WorkspaceLayoutPaneKind.Agent, title: 'Shell X', runtime_id: 'runtime-x' },
           ],
         },
       },
@@ -217,13 +215,10 @@ describe('sessions store', () => {
 
     const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
     expect(session?.workspace).toEqual({
-      agents: [
-        { id: 'main', runtimeId: sessionId, sessionId, title: 'Agent' },
-      ],
-      terminals: [],
-      layoutTree: { type: 'pane', paneId: 'main' },
+      agents: [{ id: 'pane-session', runtimeId: sessionId, sessionId, title: 'Agent' }],
+      layoutTree: null,
     });
-    expect(session?.daemonActivePaneId).toBe('main');
+    expect(session?.daemonActivePaneId).toBe('pane-session');
   });
 
   it('reloadSession preserves endpoint routing for remote sessions', async () => {

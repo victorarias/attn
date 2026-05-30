@@ -33,7 +33,7 @@ export interface TerminalPerfSnapshot {
   sessionId: string | null;
   paneId: string | null;
   runtimeId: string | null;
-  paneKind: 'main' | 'shell' | null;
+  paneKind: 'agent' | null;
   isActivePane: boolean | null;
   isActiveSession: boolean | null;
   cols: number;

@@ -12,6 +12,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Workspace Sidebar**: The session sidebar now presents workspaces as the primary navigation unit, keeps existing sidebar tools visible, and adds local display options for open, tight, and boxed workspace layouts.
 - **Workspace Shortcuts**: Command-N now opens the new-session picker for the current workspace, while Command-Shift-N opens the new-workspace picker.
 
+### Removed
+- **Non-Session Terminal Panes**: Workspace panes are now always backed by sessions; legacy standalone terminal panes and first-pane special handling were removed from the app, daemon, protocol, and database migration path.
+
 ### Fixed
 - **Session Creation**: Creating sessions from new worktrees now runs in the background with the same compact progress surface as worktree cleanup, so slow repository/plugin setup no longer traps the app in the picker.
 - **Terminal URL Clicks**: Command-clicking URLs in Ghostty terminals now uses the rendered terminal canvas position, preventing clicks on the row above a URL from opening it when the canvas is vertically offset.

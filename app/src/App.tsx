@@ -24,7 +24,7 @@ import { CopyToast, useCopyToast } from './components/CopyToast';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
-import { MAIN_TERMINAL_PANE_ID, useSessionStore } from './store/sessions';
+import { useSessionStore } from './store/sessions';
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
@@ -1500,7 +1500,7 @@ sendFetchPRDetails,
     if (!session) {
       return;
     }
-    const splitCount = session.workspace.terminals.length;
+    const splitCount = Math.max(0, session.workspace.agents.length - 1);
     if (splitCount > 0) {
       setPendingSessionClose({
         id: session.id,
@@ -1823,28 +1823,25 @@ sendFetchPRDetails,
       return;
     }
 
-    if (activeSession.workspace.terminals.length > 0) {
-      const activePaneId = getActivePaneIdForSession(activeSession);
-      const activePaneIsAgent = (activeSession.workspace.agents || [])
-        .some((pane) => pane.id === activePaneId);
-      if (activePaneId !== MAIN_TERMINAL_PANE_ID && !activePaneIsAgent) {
-        void handleClosePane(activeSessionId, activePaneId).catch((error) => {
-          showError(error instanceof Error ? error.message : 'Failed to close split pane');
-        });
-        return;
-      }
+    const activePaneId = getActivePaneIdForSession(activeSession);
+    const activePane = activeSession.workspace.agents.find((pane) => pane.id === activePaneId);
+    if (activePane?.sessionId && activePane.sessionId !== activeSessionId) {
+      handleRequestCloseSession(activePane.sessionId);
+      return;
     }
 
     handleRequestCloseSession(activeSessionId);
-  }, [activeSessionId, getActivePaneIdForSession, handleClosePane, handleRequestCloseSession, sessions, showError]);
+  }, [activeSessionId, getActivePaneIdForSession, handleRequestCloseSession, sessions]);
 
   const handleReloadSession = useCallback((id: string) => {
-    const size = getPaneSize(id, MAIN_TERMINAL_PANE_ID) || undefined;
+    const session = sessions.find((entry) => entry.id === id);
+    const paneId = session?.workspace.agents.find((pane) => pane.sessionId === id)?.id;
+    const size = paneId ? getPaneSize(id, paneId) || undefined : undefined;
     void reloadSession(id, size).catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
       showError(`Failed to reload session: ${message}`);
     });
-  }, [getPaneSize, reloadSession, showError]);
+  }, [getPaneSize, reloadSession, sessions, showError]);
 
   // Open file in diff detail panel
   const handleFileSelect = useCallback((path: string, _staged: boolean) => {
@@ -2394,7 +2391,7 @@ sendFetchPRDetails,
                     isActiveSession={isActiveWorkspace}
                     isSessionViewVisible={view === 'session'}
                     eventRouter={paneRuntimeEventRouter}
-                    getMainPaneSpawnArgs={(cols, rows) => takeSessionSpawnArgs(rootSession.id, cols, rows)}
+                    getSessionPaneSpawnArgs={(paneSessionId, cols, rows) => takeSessionSpawnArgs(paneSessionId, cols, rows)}
                     getAgentPaneSpawnArgs={(paneSessionId, cols, rows) => takeSessionSpawnArgs(paneSessionId, cols, rows)}
                     onSplitPane={(targetPaneId, direction) => {
                       void createSplitSession('shell', direction, targetPaneId);

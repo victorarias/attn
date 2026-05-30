@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { MAIN_TERMINAL_PANE_ID, findPaneInDirection, type TerminalLayoutNode } from './workspace';
+import { findPaneInDirection, type TerminalLayoutNode } from './workspace';
+const SESSION_PANE_ID = 'pane-session';
 
 describe('findPaneInDirection', () => {
   it('moves horizontally across sibling panes', () => {
@@ -9,13 +10,13 @@ describe('findPaneInDirection', () => {
       direction: 'vertical',
       ratio: 0.5,
       children: [
-        { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+        { type: 'pane', paneId: SESSION_PANE_ID },
         { type: 'pane', paneId: 'right' },
       ],
     };
 
-    expect(findPaneInDirection(layout, MAIN_TERMINAL_PANE_ID, 'right')).toBe('right');
-    expect(findPaneInDirection(layout, 'right', 'left')).toBe(MAIN_TERMINAL_PANE_ID);
+    expect(findPaneInDirection(layout, SESSION_PANE_ID, 'right')).toBe('right');
+    expect(findPaneInDirection(layout, 'right', 'left')).toBe(SESSION_PANE_ID);
   });
 
   it('moves vertically inside a nested split', () => {
@@ -25,7 +26,7 @@ describe('findPaneInDirection', () => {
       direction: 'vertical',
       ratio: 0.5,
       children: [
-        { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+        { type: 'pane', paneId: SESSION_PANE_ID },
         {
           type: 'split',
           splitId: 'right',
@@ -75,12 +76,12 @@ describe('findPaneInDirection', () => {
       direction: 'vertical',
       ratio: 0.5,
       children: [
-        { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+        { type: 'pane', paneId: SESSION_PANE_ID },
         { type: 'pane', paneId: 'right' },
       ],
     };
 
-    expect(findPaneInDirection(layout, MAIN_TERMINAL_PANE_ID, 'left')).toBeNull();
+    expect(findPaneInDirection(layout, SESSION_PANE_ID, 'left')).toBeNull();
     expect(findPaneInDirection(layout, 'right', 'right')).toBeNull();
     expect(findPaneInDirection(layout, 'missing', 'right')).toBeNull();
   });

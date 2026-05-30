@@ -162,7 +162,7 @@ vi.mock('./hooks/usePRsNeedingAttention', () => ({
 }));
 
 vi.mock('./store/sessions', () => ({
-  MAIN_TERMINAL_PANE_ID: 'main',
+  
   useSessionStore: () => mockUseSessionStore(),
 }));
 
@@ -200,7 +200,7 @@ describe('worktree cleanup prompt', () => {
           daemonActivePaneId: 'main',
           workspace: {
             terminals: [],
-            layoutTree: { type: 'pane', paneId: 'main' },
+            layoutTree: { type: 'pane', paneId: 'pane-session' },
           },
         },
       ],
@@ -474,7 +474,7 @@ describe('worktree cleanup prompt', () => {
         daemonActivePaneId: 'main',
         workspace: {
           terminals: [],
-          layoutTree: { type: 'pane', paneId: 'main' },
+          layoutTree: { type: 'pane', paneId: 'pane-session' },
         },
       },
     ];
@@ -558,7 +558,7 @@ describe('worktree cleanup prompt', () => {
           endpointId: 'ep-1',
           workspace: {
             terminals: [],
-            layoutTree: { type: 'pane', paneId: 'main' },
+            layoutTree: { type: 'pane', paneId: 'pane-session' },
           },
         },
       ],
@@ -723,15 +723,15 @@ describe('worktree cleanup prompt', () => {
           transcriptMatched: true,
           daemonActivePaneId: 'main',
           workspace: {
-            terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+            terminals: [{ id: 'pane-session-1', ptyId: 'runtime-session-1', title: 'session pane 1' }],
             layoutTree: {
               type: 'split',
               splitId: 'root',
               direction: 'vertical',
               ratio: 0.5,
               children: [
-                { type: 'pane', paneId: 'main' },
-                { type: 'pane', paneId: 'pane-shell-1' },
+                { type: 'pane', paneId: 'pane-session' },
+                { type: 'pane', paneId: 'pane-session-1' },
               ],
             },
           },
@@ -795,15 +795,15 @@ describe('worktree cleanup prompt', () => {
           transcriptMatched: true,
           daemonActivePaneId: 'main',
           workspace: {
-            terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+            terminals: [{ id: 'pane-session-1', ptyId: 'runtime-session-1', title: 'session pane 1' }],
             layoutTree: {
               type: 'split',
               splitId: 'root',
               direction: 'vertical',
               ratio: 0.5,
               children: [
-                { type: 'pane', paneId: 'main' },
-                { type: 'pane', paneId: 'pane-shell-1' },
+                { type: 'pane', paneId: 'pane-session' },
+                { type: 'pane', paneId: 'pane-session-1' },
               ],
             },
           },
@@ -836,7 +836,7 @@ describe('worktree cleanup prompt', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('uses Cmd+W to close the active utility pane before closing the session', async () => {
+  it('uses Cmd+W to close the active session pane before closing the session', async () => {
     mockUseSessionStore.mockReturnValue({
       sessions: [
         {
@@ -846,17 +846,17 @@ describe('worktree cleanup prompt', () => {
           cwd: '/tmp/repo',
           agent: 'claude',
           transcriptMatched: true,
-          daemonActivePaneId: 'pane-shell-1',
+          daemonActivePaneId: 'pane-session-1',
           workspace: {
-            terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+            terminals: [{ id: 'pane-session-1', ptyId: 'runtime-session-1', title: 'session pane 1' }],
             layoutTree: {
               type: 'split',
               splitId: 'root',
               direction: 'vertical',
               ratio: 0.5,
               children: [
-                { type: 'pane', paneId: 'main' },
-                { type: 'pane', paneId: 'pane-shell-1' },
+                { type: 'pane', paneId: 'pane-session' },
+                { type: 'pane', paneId: 'pane-session-1' },
               ],
             },
           },
@@ -887,7 +887,7 @@ describe('worktree cleanup prompt', () => {
     });
 
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('s1', 'pane-shell-1');
+    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('s1', 'pane-session-1');
     expect(mockCloseSession).not.toHaveBeenCalled();
   });
 });

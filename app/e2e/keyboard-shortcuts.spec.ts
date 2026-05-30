@@ -120,7 +120,7 @@ test.describe('Keyboard Shortcuts', () => {
             direction: 'vertical',
             ratio: 0.5,
             children: [
-              { type: 'pane', paneId: 'main' },
+              { type: 'pane', paneId: 'pane-session' },
               { type: 'pane', paneId: 'pane-shell-1' },
             ],
           },
@@ -129,7 +129,7 @@ test.describe('Keyboard Shortcuts', () => {
       await expect(page.locator('[data-pane-session-id="s-zoom"][data-pane-kind="shell"]')).toBeVisible({ timeout: 5000 });
 
       const workspace = page.locator('[data-session-terminal-workspace="s-zoom"]');
-      const mainPane = page.locator('[data-pane-session-id="s-zoom"][data-pane-id="main"]');
+      const mainPane = page.locator('[data-pane-session-id="s-zoom"][data-pane-id="pane-session"]');
       const utilityPane = page.locator('[data-pane-session-id="s-zoom"][data-pane-kind="shell"]').first();
       const rootSplit = page.locator('[data-split-id="root"]');
       const zoomHint = page.getByText('⌘⇧Z zoom');

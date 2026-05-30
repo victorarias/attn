@@ -1,7 +1,5 @@
 import type { WorkspaceLayout as DaemonWorkspaceSnapshot, PaneElement } from './generated';
 
-export const MAIN_TERMINAL_PANE_ID = 'main';
-
 export type TerminalSplitDirection = 'vertical' | 'horizontal';
 export type TerminalNavigationDirection = 'left' | 'right' | 'up' | 'down';
 
@@ -20,12 +18,6 @@ export interface TerminalSplitNode {
 
 export type TerminalLayoutNode = TerminalPaneLeaf | TerminalSplitNode;
 
-export interface UtilityTerminal {
-  id: string;
-  ptyId: string;
-  title: string;
-}
-
 export interface AgentTerminal {
   id: string;
   runtimeId: string;
@@ -34,9 +26,8 @@ export interface AgentTerminal {
 }
 
 export interface TerminalWorkspaceState {
-  agents?: AgentTerminal[];
-  terminals: UtilityTerminal[];
-  layoutTree: TerminalLayoutNode;
+  agents: AgentTerminal[];
+  layoutTree: TerminalLayoutNode | null;
 }
 
 export interface TerminalWorkspaceSnapshot {
@@ -60,8 +51,8 @@ export interface NormalizedPaneBounds extends PaneBounds {
 
 export function createDefaultWorkspaceState(): TerminalWorkspaceState {
   return {
-    terminals: [],
-    layoutTree: { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+    agents: [],
+    layoutTree: null,
   };
 }
 
@@ -226,26 +217,16 @@ function parseLayoutNode(raw: unknown): TerminalLayoutNode | null {
   return null;
 }
 
-function parseLayoutJSON(layoutJSON: string): TerminalLayoutNode {
+function parseLayoutJSON(layoutJSON: string): TerminalLayoutNode | null {
   if (!layoutJSON.trim()) {
-    return createDefaultWorkspaceState().layoutTree;
+    return null;
   }
   try {
     const parsed = JSON.parse(layoutJSON);
-    return parseLayoutNode(parsed) ?? createDefaultWorkspaceState().layoutTree;
+    return parseLayoutNode(parsed);
   } catch {
-    return createDefaultWorkspaceState().layoutTree;
+    return null;
   }
-}
-
-function shellTerminalsFromPanes(panes: PaneElement[]): UtilityTerminal[] {
-  return panes
-    .filter((pane) => pane.kind === 'shell' && typeof pane.runtime_id === 'string' && pane.runtime_id.length > 0)
-    .map((pane) => ({
-      id: pane.pane_id,
-      ptyId: pane.runtime_id as string,
-      title: pane.title || pane.pane_id,
-    }));
 }
 
 function agentTerminalsFromPanes(panes: PaneElement[]): AgentTerminal[] {
@@ -261,19 +242,17 @@ function agentTerminalsFromPanes(panes: PaneElement[]): AgentTerminal[] {
 
 export function workspaceSnapshotFromDaemonWorkspace(workspace: DaemonWorkspaceSnapshot): TerminalWorkspaceSnapshot {
   const agents = agentTerminalsFromPanes(workspace.panes || []);
+  const firstAgentPaneId = agents[0]?.id || '';
   const nextWorkspace: TerminalWorkspaceState = {
-    terminals: shellTerminalsFromPanes(workspace.panes || []),
+    agents,
     layoutTree: parseLayoutJSON(workspace.layout_json || ''),
   };
-  if (agents.length > 0) {
-    nextWorkspace.agents = agents;
-  }
-  const daemonActivePaneId = workspace.active_pane_id || MAIN_TERMINAL_PANE_ID;
+  const daemonActivePaneId = workspace.active_pane_id || firstAgentPaneId;
 
   return {
     workspace: nextWorkspace,
-    daemonActivePaneId: hasPane(nextWorkspace.layoutTree, daemonActivePaneId)
+    daemonActivePaneId: nextWorkspace.layoutTree && hasPane(nextWorkspace.layoutTree, daemonActivePaneId)
       ? daemonActivePaneId
-      : MAIN_TERMINAL_PANE_ID,
+      : firstAgentPaneId,
   };
 }

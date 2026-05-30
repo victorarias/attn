@@ -38,7 +38,7 @@ func TestWorkspaceSaveLoadRoundTrip(t *testing.T) {
 		},
 		Panes: []workspacelayout.Pane{
 			{PaneID: "pane-a", RuntimeID: "sess-1", SessionID: "sess-1", Kind: workspacelayout.PaneKindAgent, Title: workspacelayout.DefaultPaneTitle},
-			{PaneID: "pane-b", RuntimeID: "runtime-b", Kind: workspacelayout.PaneKindShell, Title: "Shell 1"},
+			{PaneID: "pane-b", RuntimeID: "sess-2", SessionID: "sess-2", Kind: workspacelayout.PaneKindAgent, Title: "Session 2"},
 		},
 	}
 
@@ -69,9 +69,6 @@ func TestWorkspaceSaveLoadRoundTrip(t *testing.T) {
 	}
 	if workspaceID, paneID, ok := s.FindWorkspaceLayoutPaneBySessionID("sess-1"); !ok || workspaceID != "workspace-1" || paneID != "pane-a" {
 		t.Fatalf("FindWorkspaceLayoutPaneBySessionID() = (%q, %q, %v), want workspace-1/pane-a/true", workspaceID, paneID, ok)
-	}
-	if workspaceID, paneID, ok := s.FindWorkspaceLayoutPaneByRuntimeID("runtime-b"); !ok || workspaceID != "workspace-1" || paneID != "pane-b" {
-		t.Fatalf("FindWorkspaceLayoutPaneByRuntimeID() = (%q, %q, %v), want workspace-1/pane-b/true", workspaceID, paneID, ok)
 	}
 }
 

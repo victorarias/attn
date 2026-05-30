@@ -4,17 +4,13 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"regexp"
 	"strings"
 	"syscall"
 
 	"github.com/google/uuid"
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
-
-var shellTitlePattern = regexp.MustCompile(`^Shell (\d+)$`)
 
 func (d *Daemon) ensureWorkspaceLayout(workspaceID string) (*workspacelayout.WorkspaceLayout, error) {
 	if d.store.GetWorkspace(workspaceID) == nil {
@@ -150,24 +146,6 @@ func protocolDirection(direction protocol.WorkspaceLayoutSplitDirection) workspa
 	}
 }
 
-func nextShellTitle(snapshot workspacelayout.WorkspaceLayout) string {
-	maxShell := 0
-	for _, pane := range snapshot.Panes {
-		if pane.Kind != workspacelayout.PaneKindShell {
-			continue
-		}
-		matches := shellTitlePattern.FindStringSubmatch(strings.TrimSpace(pane.Title))
-		if len(matches) != 2 {
-			continue
-		}
-		var n int
-		if _, err := fmt.Sscanf(matches[1], "%d", &n); err == nil && n > maxShell {
-			maxShell = n
-		}
-	}
-	return fmt.Sprintf("Shell %d", maxShell+1)
-}
-
 func newWorkspaceLayoutEntityID(prefix string) string {
 	return prefix + "-" + uuid.NewString()
 }
@@ -293,11 +271,6 @@ func (d *Daemon) handleWorkspaceLayoutSplitPane(client *wsClient, msg *protocol.
 		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSplitPane, msg.WorkspaceID, protocol.Ptr(msg.TargetPaneID), err)
 		return
 	}
-	workspace := d.store.GetWorkspace(msg.WorkspaceID)
-	if workspace == nil {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSplitPane, msg.WorkspaceID, protocol.Ptr(msg.TargetPaneID), fmt.Errorf("workspace not found: %s", msg.WorkspaceID))
-		return
-	}
 	if !workspacelayout.HasPane(snapshot.Layout, msg.TargetPaneID) {
 		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSplitPane, msg.WorkspaceID, protocol.Ptr(msg.TargetPaneID), fmt.Errorf("pane not found: %s", msg.TargetPaneID))
 		return
@@ -305,21 +278,19 @@ func (d *Daemon) handleWorkspaceLayoutSplitPane(client *wsClient, msg *protocol.
 
 	paneID := newWorkspaceLayoutEntityID("pane")
 	sessionID := strings.TrimSpace(protocol.Deref(msg.SessionID))
-	runtimeID := sessionID
-	if runtimeID == "" {
-		runtimeID = newWorkspaceLayoutEntityID("runtime")
+	if sessionID == "" {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSplitPane, msg.WorkspaceID, protocol.Ptr(msg.TargetPaneID), fmt.Errorf("session_id is required"))
+		return
+	}
+	session := d.store.Get(sessionID)
+	if session == nil {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSplitPane, msg.WorkspaceID, protocol.Ptr(msg.TargetPaneID), fmt.Errorf("session not found: %s", sessionID))
+		return
 	}
 	splitID := newWorkspaceLayoutEntityID("split")
 	title := strings.TrimSpace(protocol.Deref(msg.Title))
 	if title == "" {
-		title = nextShellTitle(*snapshot)
-	}
-
-	if sessionID == "" {
-		if err := d.ptyBackend.Spawn(context.Background(), ptySpawnShellOptions(runtimeID, workspace.Directory, title)); err != nil {
-			d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSplitPane, msg.WorkspaceID, protocol.Ptr(msg.TargetPaneID), err)
-			return
-		}
+		title = session.Label
 	}
 
 	layout, changed := workspacelayout.Split(
@@ -331,43 +302,26 @@ func (d *Daemon) handleWorkspaceLayoutSplitPane(client *wsClient, msg *protocol.
 		workspacelayout.DefaultSplitRatio,
 	)
 	if !changed {
-		_ = d.removePTYSession(runtimeID)
 		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSplitPane, msg.WorkspaceID, protocol.Ptr(msg.TargetPaneID), fmt.Errorf("pane not found: %s", msg.TargetPaneID))
 		return
 	}
 
 	snapshot.Layout = layout
 	snapshot.ActivePaneID = paneID
-	pane := workspacelayout.Pane{
+	snapshot.Panes = append(snapshot.Panes, workspacelayout.Pane{
 		PaneID:    paneID,
-		RuntimeID: runtimeID,
-		Kind:      workspacelayout.PaneKindShell,
+		RuntimeID: sessionID,
+		SessionID: sessionID,
+		Kind:      workspacelayout.PaneKindAgent,
 		Title:     title,
-	}
-	if sessionID != "" {
-		pane.SessionID = sessionID
-		pane.Kind = workspacelayout.PaneKindAgent
-	}
-	snapshot.Panes = append(snapshot.Panes, pane)
+	})
 	normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot)
 	if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
-		_ = d.removePTYSession(runtimeID)
 		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSplitPane, msg.WorkspaceID, protocol.Ptr(msg.TargetPaneID), err)
 		return
 	}
 	d.broadcastWorkspaceLayoutUpdated(msg.WorkspaceID)
 	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSplitPane, msg.WorkspaceID, protocol.Ptr(msg.TargetPaneID), nil)
-}
-
-func ptySpawnShellOptions(runtimeID, cwd, label string) ptybackend.SpawnOptions {
-	return ptybackend.SpawnOptions{
-		ID:    runtimeID,
-		CWD:   cwd,
-		Agent: protocol.AgentShellValue,
-		Label: label,
-		Cols:  80,
-		Rows:  24,
-	}
 }
 
 func (d *Daemon) handleWorkspaceLayoutClosePane(client *wsClient, msg *protocol.WorkspaceLayoutClosePaneMessage) {
@@ -377,13 +331,11 @@ func (d *Daemon) handleWorkspaceLayoutClosePane(client *wsClient, msg *protocol.
 		return
 	}
 
-	runtimeID := ""
 	sessionID := ""
 	nextPanes := make([]workspacelayout.Pane, 0, len(snapshot.Panes))
 	found := false
 	for _, pane := range snapshot.Panes {
 		if pane.PaneID == msg.PaneID {
-			runtimeID = pane.RuntimeID
 			sessionID = pane.SessionID
 			found = true
 			continue
@@ -421,9 +373,6 @@ func (d *Daemon) handleWorkspaceLayoutClosePane(client *wsClient, msg *protocol.
 		return
 	}
 	d.broadcastWorkspaceLayoutUpdated(msg.WorkspaceID)
-	if strings.TrimSpace(runtimeID) != "" {
-		d.terminateSession(runtimeID, syscall.SIGTERM)
-	}
 }
 
 func (d *Daemon) removeWorkspaceLayoutPaneForSession(sessionID string) {
@@ -457,63 +406,6 @@ func (d *Daemon) removeWorkspaceLayoutPaneForSession(sessionID string) {
 	d.broadcastWorkspaceLayoutUpdated(workspaceID)
 }
 
-func (d *Daemon) killWorkspaceLayoutRuntimes(workspaceID string) {
-	snapshot, err := d.ensureWorkspaceLayout(workspaceID)
-	if err != nil {
-		return
-	}
-	for _, runtimeID := range workspacelayout.SortedShellRuntimeIDs(*snapshot) {
-		d.terminateSession(runtimeID, syscall.SIGTERM)
-	}
-}
-
-func (d *Daemon) handleWorkspaceLayoutRuntimeExit(runtimeID string, exitCode int, signal string) bool {
-	workspaceID, paneID, ok := d.store.FindWorkspaceLayoutPaneByRuntimeID(runtimeID)
-	if !ok {
-		return false
-	}
-
-	snapshot, err := d.ensureWorkspaceLayout(workspaceID)
-	if err != nil {
-		d.logf("workspace layout runtime exit reconcile failed for runtime %s: %v", runtimeID, err)
-		return false
-	}
-
-	layout, _ := workspacelayout.Remove(snapshot.Layout, paneID)
-	nextPanes := make([]workspacelayout.Pane, 0, len(snapshot.Panes))
-	for _, pane := range snapshot.Panes {
-		if pane.PaneID != paneID {
-			nextPanes = append(nextPanes, pane)
-		}
-	}
-	snapshot.Layout = layout
-	snapshot.Panes = nextPanes
-	normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot)
-	if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
-		d.logf("workspace layout runtime exit save failed for runtime %s: %v", runtimeID, err)
-		return false
-	}
-
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:       protocol.EventWorkspaceLayoutRuntimeExited,
-		WorkspaceID: protocol.Ptr(workspaceID),
-		PaneID:      protocol.Ptr(paneID),
-		RuntimeID:   protocol.Ptr(runtimeID),
-		ExitCode:    protocol.Ptr(exitCode),
-		Signal:      optionalStringPtr(signal),
-	})
-	d.broadcastWorkspaceLayoutUpdated(workspaceID)
-	return true
-}
-
-func optionalStringPtr(value string) *string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	return protocol.Ptr(value)
-}
-
 func (d *Daemon) reconcileWorkspaceLayoutsWithPTYBackend(ctx context.Context) {
 	if d.store == nil {
 		return
@@ -526,7 +418,6 @@ func (d *Daemon) reconcileWorkspaceLayoutsWithPTYBackend(ctx context.Context) {
 		}
 	}
 
-	referencedRuntimeIDs := make(map[string]struct{})
 	for _, workspace := range d.workspaces.list() {
 		snapshot, err := d.ensureWorkspaceLayout(workspace.ID)
 		if err != nil {
@@ -537,16 +428,11 @@ func (d *Daemon) reconcileWorkspaceLayoutsWithPTYBackend(ctx context.Context) {
 		nextPanes := make([]workspacelayout.Pane, 0, len(snapshot.Panes))
 		changed := false
 		for _, pane := range snapshot.Panes {
-			if pane.Kind != workspacelayout.PaneKindShell {
+			if pane.Kind == workspacelayout.PaneKindAgent && strings.TrimSpace(pane.SessionID) != "" {
 				nextPanes = append(nextPanes, pane)
 				continue
 			}
-			if _, ok := liveIDs[pane.RuntimeID]; !ok {
-				changed = true
-				continue
-			}
-			referencedRuntimeIDs[pane.RuntimeID] = struct{}{}
-			nextPanes = append(nextPanes, pane)
+			changed = true
 		}
 
 		if changed {
@@ -557,18 +443,10 @@ func (d *Daemon) reconcileWorkspaceLayoutsWithPTYBackend(ctx context.Context) {
 			}
 			continue
 		}
-		for _, pane := range snapshot.Panes {
-			if pane.Kind == workspacelayout.PaneKindShell && pane.RuntimeID != "" {
-				referencedRuntimeIDs[pane.RuntimeID] = struct{}{}
-			}
-		}
 	}
 
 	for runtimeID := range liveIDs {
 		if d.store.Get(runtimeID) != nil {
-			continue
-		}
-		if _, ok := referencedRuntimeIDs[runtimeID]; ok {
 			continue
 		}
 		if err := d.removePTYSession(runtimeID); err != nil {

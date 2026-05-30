@@ -139,17 +139,20 @@ func TestManagerRemoteWorkspacesTrackAndClear(t *testing.T) {
 		Status:    protocol.WorkspaceStatusWorking,
 		Layout: &protocol.WorkspaceLayout{
 			WorkspaceID:  "ws-a",
-			ActivePaneID: "main",
-			LayoutJson:   `{"type":"pane","paneId":"main"}`,
+			ActivePaneID: "pane-session",
+			LayoutJson:   `{"type":"pane","paneId":"pane-session"}`,
 			Panes: []protocol.WorkspaceLayoutPane{{
-				PaneID: "main",
-				Kind:   protocol.WorkspaceLayoutPaneKindAgent,
-				Title:  "Agent",
+				PaneID:    "pane-session",
+				Kind:      protocol.WorkspaceLayoutPaneKindAgent,
+				Title:     "Agent",
+				RuntimeID: protocol.Ptr("sess-a"),
+				SessionID: protocol.Ptr("sess-a"),
 			}, {
-				PaneID:    "shell-1",
-				Kind:      protocol.WorkspaceLayoutPaneKindShell,
-				Title:     "Shell 1",
-				RuntimeID: protocol.Ptr("runtime-a"),
+				PaneID:    "agent-2",
+				Kind:      protocol.WorkspaceLayoutPaneKindAgent,
+				Title:     "Agent 2",
+				RuntimeID: protocol.Ptr("sess-b"),
+				SessionID: protocol.Ptr("sess-b"),
 			}},
 		},
 	}}); !changed {
@@ -162,12 +165,14 @@ func TestManagerRemoteWorkspacesTrackAndClear(t *testing.T) {
 		Status:    protocol.WorkspaceStatusIdle,
 		Layout: &protocol.WorkspaceLayout{
 			WorkspaceID:  "ws-b",
-			ActivePaneID: "main",
-			LayoutJson:   `{"type":"pane","paneId":"main"}`,
+			ActivePaneID: "pane-session",
+			LayoutJson:   `{"type":"pane","paneId":"pane-session"}`,
 			Panes: []protocol.WorkspaceLayoutPane{{
-				PaneID: "main",
-				Kind:   protocol.WorkspaceLayoutPaneKindAgent,
-				Title:  "Agent",
+				PaneID:    "pane-session",
+				Kind:      protocol.WorkspaceLayoutPaneKindAgent,
+				Title:     "Agent",
+				RuntimeID: protocol.Ptr("sess-b"),
+				SessionID: protocol.Ptr("sess-b"),
 			}},
 		}},
 	}); !changed {
@@ -193,8 +198,8 @@ func TestManagerRemoteWorkspacesTrackAndClear(t *testing.T) {
 	if endpointID, ok := manager.EndpointIDForWorkspace("ws-a"); !ok || endpointID != first.ID {
 		t.Fatalf("EndpointIDForWorkspace(ws-a) = (%q, %v), want (%q, true)", endpointID, ok, first.ID)
 	}
-	if endpointID, ok := manager.EndpointIDForPTYTarget("runtime-a"); !ok || endpointID != first.ID {
-		t.Fatalf("EndpointIDForPTYTarget(runtime-a) = (%q, %v), want (%q, true)", endpointID, ok, first.ID)
+	if endpointID, ok := manager.EndpointIDForPTYTarget("sess-a"); !ok || endpointID != first.ID {
+		t.Fatalf("EndpointIDForPTYTarget(sess-a) = (%q, %v), want (%q, true)", endpointID, ok, first.ID)
 	}
 
 	if changed := manager.clearRemoteWorkspaceLayouts(first.ID); !changed {
@@ -219,8 +224,8 @@ func TestManagerIgnoresLayoutUpdatesForRemovedRemoteWorkspaces(t *testing.T) {
 	}
 	if changed := manager.upsertRemoteWorkspaceLayout(record.ID, protocol.WorkspaceLayout{
 		WorkspaceID:  "ws-1",
-		ActivePaneID: "main",
-		LayoutJson:   `{"type":"pane","paneId":"main"}`,
+		ActivePaneID: "pane-session",
+		LayoutJson:   `{"type":"pane","paneId":"pane-session"}`,
 	}); !changed {
 		t.Fatal("upsertRemoteWorkspaceLayout() reported no change")
 	}
@@ -230,8 +235,8 @@ func TestManagerIgnoresLayoutUpdatesForRemovedRemoteWorkspaces(t *testing.T) {
 	}
 	if changed := manager.upsertRemoteWorkspaceLayout(record.ID, protocol.WorkspaceLayout{
 		WorkspaceID:  "ws-1",
-		ActivePaneID: "main",
-		LayoutJson:   `{"type":"pane","paneId":"main"}`,
+		ActivePaneID: "pane-session",
+		LayoutJson:   `{"type":"pane","paneId":"pane-session"}`,
 	}); changed {
 		t.Fatal("upsertRemoteWorkspaceLayout() should ignore removed workspace")
 	}
@@ -256,8 +261,8 @@ func TestManagerForgetSessionLeavesRemoteWorkspaceUntilWorkspaceEvent(t *testing
 	}
 	if changed := manager.upsertRemoteWorkspaceLayout(record.ID, protocol.WorkspaceLayout{
 		WorkspaceID:  "ws-1",
-		ActivePaneID: "main",
-		LayoutJson:   `{"type":"pane","paneId":"main"}`,
+		ActivePaneID: "pane-session",
+		LayoutJson:   `{"type":"pane","paneId":"pane-session"}`,
 	}); !changed {
 		t.Fatal("upsertRemoteWorkspaceLayout() reported no change")
 	}
@@ -551,7 +556,7 @@ func TestManagerObserveRemoteEventCachesReviewCommentAndLoopOwnership(t *testing
 		State: &protocol.ReviewState{
 			ReviewID: "review-1",
 			RepoPath: "/srv/repo",
-			Branch:   "main",
+			Branch:   "pane-session",
 		},
 	})
 	if err != nil {

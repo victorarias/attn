@@ -2607,7 +2607,7 @@ func TestDaemon_HandleUnregisterWS_RemovesSessionPaneAndBroadcastsSessionUnregis
 		Layout:       workspacelayout.DefaultLayout("pane-agent"),
 		Panes: []workspacelayout.Pane{
 			{PaneID: "pane-agent", RuntimeID: session.ID, SessionID: session.ID, Kind: workspacelayout.PaneKindAgent, Title: workspacelayout.DefaultPaneTitle},
-			{PaneID: "pane-shell-1", RuntimeID: "runtime-shell-1", Kind: workspacelayout.PaneKindShell, Title: "Shell 1"},
+			{PaneID: "pane-agent-2", RuntimeID: "sess-2", SessionID: "sess-2", Kind: workspacelayout.PaneKindAgent, Title: "Agent 2"},
 		},
 	}); err != nil {
 		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
@@ -2627,10 +2627,10 @@ func TestDaemon_HandleUnregisterWS_RemovesSessionPaneAndBroadcastsSessionUnregis
 	}
 	layout := d.store.GetWorkspaceLayout(workspaceID)
 	if layout == nil {
-		t.Fatalf("store.GetWorkspaceLayout(%q) = nil, want shell-only layout", workspaceID)
+		t.Fatalf("store.GetWorkspaceLayout(%q) = nil, want remaining pane layout", workspaceID)
 	}
-	if len(layout.Panes) != 1 || layout.Panes[0].PaneID != "pane-shell-1" {
-		t.Fatalf("layout panes after unregister = %+v, want shell pane only", layout.Panes)
+	if len(layout.Panes) != 1 || layout.Panes[0].PaneID != "pane-agent-2" {
+		t.Fatalf("layout panes after unregister = %+v, want remaining agent pane only", layout.Panes)
 	}
 
 	event := readOutboundEvent(t, client)
@@ -2649,8 +2649,8 @@ func TestDaemon_HandleUnregisterWS_RemovesLegacyMainPaneWithoutPromotion(t *test
 	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: "shared", Directory: t.TempDir()})
 	for _, session := range []*protocol.Session{
 		{
-			ID:             "sess-main",
-			Label:          "main",
+			ID:             "sess-primary",
+			Label:          "Agent",
 			Directory:      t.TempDir(),
 			State:          protocol.StateWorking,
 			StateSince:     now,
@@ -2673,19 +2673,19 @@ func TestDaemon_HandleUnregisterWS_RemovesLegacyMainPaneWithoutPromotion(t *test
 	}
 	if err := d.store.SaveWorkspaceLayout(workspacelayout.WorkspaceLayout{
 		WorkspaceID:  workspaceID,
-		ActivePaneID: workspacelayout.LegacyMainPaneID,
+		ActivePaneID: "pane-session",
 		Layout: workspacelayout.Node{
 			Type:      "split",
 			SplitID:   "split-1",
 			Direction: workspacelayout.DirectionVertical,
 			Ratio:     0.5,
 			Children: []workspacelayout.Node{
-				{Type: "pane", PaneID: workspacelayout.LegacyMainPaneID},
+				{Type: "pane", PaneID: "pane-session"},
 				{Type: "pane", PaneID: "pane-next"},
 			},
 		},
 		Panes: []workspacelayout.Pane{
-			{PaneID: workspacelayout.LegacyMainPaneID, RuntimeID: "sess-main", SessionID: "sess-main", Kind: workspacelayout.PaneKindAgent, Title: "main"},
+			{PaneID: "pane-session", RuntimeID: "sess-primary", SessionID: "sess-primary", Kind: workspacelayout.PaneKindAgent, Title: "Agent"},
 			{PaneID: "pane-next", RuntimeID: "sess-next", SessionID: "sess-next", Kind: workspacelayout.PaneKindAgent, Title: "next"},
 		},
 	}); err != nil {
@@ -2699,9 +2699,9 @@ func TestDaemon_HandleUnregisterWS_RemovesLegacyMainPaneWithoutPromotion(t *test
 	d.wsHub.clients[client] = true
 	go d.wsHub.run()
 
-	d.handleUnregisterWS(client, &protocol.UnregisterMessage{ID: "sess-main"})
+	d.handleUnregisterWS(client, &protocol.UnregisterMessage{ID: "sess-primary"})
 
-	if got := d.store.Get("sess-main"); got != nil {
+	if got := d.store.Get("sess-primary"); got != nil {
 		t.Fatalf("closed session still exists: %+v", got)
 	}
 	if got := d.store.Get("sess-next"); got == nil {

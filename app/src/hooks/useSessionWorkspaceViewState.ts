@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Session } from '../store/sessions';
-import { MAIN_TERMINAL_PANE_ID } from '../store/sessions';
 import { findPaneInDirection, hasPane } from '../types/workspace';
 
 interface SessionWorkspaceViewStateController {
@@ -37,21 +36,17 @@ export function useSessionWorkspaceViewState(
     }
     return JSON.stringify({
       layoutTree: session.workspace.layoutTree,
-      terminals: session.workspace.terminals.map((terminal) => ({
-        id: terminal.id,
-        ptyId: terminal.ptyId,
-        title: terminal.title,
-      })),
+      agents: session.workspace.agents.map((agent) => agent.id),
     });
   }, []);
 
   const getDaemonPreferredPaneId = useCallback((session: Session | undefined | null) => {
-    if (!session) {
-      return MAIN_TERMINAL_PANE_ID;
+    if (!session || !session.workspace.layoutTree) {
+      return '';
     }
     return hasPane(session.workspace.layoutTree, session.daemonActivePaneId)
       ? session.daemonActivePaneId
-      : MAIN_TERMINAL_PANE_ID;
+      : session.workspace.agents[0]?.id || '';
   }, []);
 
   useEffect(() => {
@@ -64,11 +59,12 @@ export function useSessionWorkspaceViewState(
         const previousSignature = workspaceTopologyRef.current[session.id];
         const topologyChanged = previousSignature !== signature;
         const localPaneId = prev[session.id];
-        const localPaneValid = Boolean(localPaneId && hasPane(session.workspace.layoutTree, localPaneId));
+        const localPaneValid = Boolean(localPaneId && session.workspace.layoutTree && hasPane(session.workspace.layoutTree, localPaneId));
         const preparedClosePaneFocus = pendingClosePaneFocusRef.current[session.id];
         const preparedClosePaneValid = Boolean(
           topologyChanged &&
           preparedClosePaneFocus &&
+          session.workspace.layoutTree &&
           hasPane(session.workspace.layoutTree, preparedClosePaneFocus)
         );
         const nextPaneId = preparedClosePaneValid
@@ -101,8 +97,8 @@ export function useSessionWorkspaceViewState(
   }, [getDaemonPreferredPaneId, getWorkspaceTopologySignature, rememberPaneActivation, sessions]);
 
   const getActivePaneIdForSession = useCallback((session: Session | undefined | null) => {
-    if (!session) {
-      return MAIN_TERMINAL_PANE_ID;
+    if (!session || !session.workspace.layoutTree) {
+      return '';
     }
     const currentTopology = getWorkspaceTopologySignature(session);
     const previousTopology = workspaceTopologyRef.current[session.id];
@@ -124,32 +120,34 @@ export function useSessionWorkspaceViewState(
   }, [rememberPaneActivation]);
 
   const prepareClosePaneFocus = useCallback((session: Session | undefined | null, paneId: string) => {
-    if (!session || !paneId) {
-      return MAIN_TERMINAL_PANE_ID;
+    if (!session || !paneId || !session.workspace.layoutTree) {
+      return '';
     }
 
+    const layoutTree = session.workspace.layoutTree;
     const activePaneId = getActivePaneIdForSession(session);
-    if (activePaneId !== paneId && hasPane(session.workspace.layoutTree, activePaneId)) {
+    if (activePaneId !== paneId && hasPane(layoutTree, activePaneId)) {
       pendingClosePaneFocusRef.current[session.id] = activePaneId;
       return activePaneId;
     }
 
     const priorPaneId = [...(paneActivationHistoryRef.current[session.id] || [])]
       .reverse()
-      .find((candidate) => candidate !== paneId && hasPane(session.workspace.layoutTree, candidate));
+      .find((candidate) => candidate !== paneId && hasPane(layoutTree, candidate));
     if (priorPaneId) {
       pendingClosePaneFocusRef.current[session.id] = priorPaneId;
       return priorPaneId;
     }
 
-    const leftPaneId = findPaneInDirection(session.workspace.layoutTree, paneId, 'left');
+    const leftPaneId = findPaneInDirection(layoutTree, paneId, 'left');
     if (leftPaneId) {
       pendingClosePaneFocusRef.current[session.id] = leftPaneId;
       return leftPaneId;
     }
 
-    pendingClosePaneFocusRef.current[session.id] = MAIN_TERMINAL_PANE_ID;
-    return MAIN_TERMINAL_PANE_ID;
+    const fallbackPaneId = session.workspace.agents[0]?.id || '';
+    pendingClosePaneFocusRef.current[session.id] = fallbackPaneId;
+    return fallbackPaneId;
   }, [getActivePaneIdForSession]);
 
   const clearPreparedClosePaneFocus = useCallback((sessionId: string) => {

@@ -317,7 +317,6 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 	// mutate the in-memory association map, which would race the snapshot
 	// the registry hands out otherwise.
 	memberIDs := d.workspaces.sessionIDs(id)
-	d.killWorkspaceLayoutRuntimes(id)
 	for _, sid := range memberIDs {
 		closed := d.unregisterSession(sid, syscall.SIGTERM)
 		if closed != nil {

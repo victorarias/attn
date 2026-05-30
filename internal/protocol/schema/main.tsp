@@ -40,7 +40,6 @@ enum WorkspaceStatus {
 
 enum WorkspaceLayoutPaneKind {
   agent,
-  shell,
 }
 
 enum WorkspaceLayoutSplitDirection {
@@ -918,15 +917,6 @@ model WorkspaceLayoutActionResultMessage {
   error?: string;
 }
 
-model WorkspaceLayoutRuntimeExitedMessage {
-  event: "workspace_layout_runtime_exited";
-  workspace_id: string;
-  pane_id: string;
-  runtime_id: string;
-  exit_code: int32;
-  signal?: string;
-}
-
 model PRsUpdatedMessage {
   event: "prs_updated";
   prs?: PR[];
@@ -1506,7 +1496,6 @@ alias DaemonEvent =
   | WorkspaceLayoutMessage
   | WorkspaceLayoutUpdatedMessage
   | WorkspaceLayoutActionResultMessage
-  | WorkspaceLayoutRuntimeExitedMessage
   | PRsUpdatedMessage
   | ReposUpdatedMessage
   | AuthorsUpdatedMessage

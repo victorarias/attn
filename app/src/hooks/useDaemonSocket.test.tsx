@@ -597,7 +597,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '68',
+        protocol_version: '69',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -606,11 +606,11 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           status: 'idle',
           layout: {
             workspace_id: 'workspace-sess-remote',
-            active_pane_id: 'main',
+            active_pane_id: 'pane-session',
             layout_json: '',
             panes: [{
               pane_id: 'pane-shell-1',
-              kind: 'shell',
+              kind: 'agent',
               runtime_id: 'runtime-shell-1',
               title: 'Shell 1',
             }],
@@ -679,7 +679,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '68',
+        protocol_version: '69',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -814,7 +814,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '68',
+        protocol_version: '69',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -907,7 +907,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '68',
+        protocol_version: '69',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -981,7 +981,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('applies raw scrollback replay when attaching a daemon-known non-shell session', async () => {
+  it('applies raw scrollback replay when attaching a daemon-known session pane', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
     const onPRsUpdate = vi.fn();
@@ -1004,7 +1004,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '68',
+        protocol_version: '69',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1087,7 +1087,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '68',
+        protocol_version: '69',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -1096,11 +1096,11 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           status: 'idle',
           layout: {
             workspace_id: 'workspace-sess-remote',
-            active_pane_id: 'main',
+            active_pane_id: 'pane-session',
             layout_json: '',
             panes: [{
               pane_id: 'pane-shell-1',
-              kind: 'shell',
+              kind: 'agent',
               runtime_id: 'runtime-shell-1',
               title: 'Shell 1',
             }],
@@ -1202,7 +1202,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '68',
+        protocol_version: '69',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -1217,10 +1217,10 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           status: 'working',
           layout: {
             workspace_id: 'workspace-sess-stale',
-            active_pane_id: 'main',
+            active_pane_id: 'pane-session',
             layout_json: '',
             panes: [{
-              pane_id: 'main',
+              pane_id: 'pane-session',
               kind: 'agent',
               title: 'Agent',
               session_id: 'sess-stale',
@@ -1269,7 +1269,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '68',
+        protocol_version: '69',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',
@@ -1284,10 +1284,10 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           status: 'working',
           layout: {
             workspace_id: 'workspace-sess-removed',
-            active_pane_id: 'main',
+            active_pane_id: 'pane-session',
             layout_json: '',
             panes: [{
-              pane_id: 'main',
+              pane_id: 'pane-session',
               kind: 'agent',
               title: 'Agent',
               session_id: 'sess-removed',
