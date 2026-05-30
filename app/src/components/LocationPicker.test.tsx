@@ -1,6 +1,6 @@
 import { useState, type ComponentProps } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '../test/utils';
+import { fireEvent, render, screen, waitFor, within } from '../test/utils';
 import { LocationPicker } from './LocationPicker';
 import { SettingsProvider } from '../contexts/SettingsContext';
 import type { RecentLocation } from '../hooks/useDaemonSocket';
@@ -506,6 +506,73 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('radio', { name: /codex/i })).toHaveAttribute('aria-checked', 'true');
+    });
+  });
+
+  it('offers Terminal as an agent with Alt+T for workspace and session pickers', async () => {
+    const { rerender } = render(
+      <SettingsProvider settings={{}} setSetting={vi.fn()}>
+        <LocationPicker
+          isOpen
+          purpose="workspace"
+          onClose={vi.fn()}
+          onSelect={vi.fn()}
+          endpoints={[]}
+          agentAvailability={{ claude: true, codex: true, copilot: false }}
+        />
+      </SettingsProvider>,
+    );
+
+    const terminalOption = screen.getByRole('radio', { name: /terminal/i });
+    expect(terminalOption).toBeEnabled();
+    expect(within(terminalOption).getByText('⌥T')).toBeInTheDocument();
+    expect(within(terminalOption).queryByText(/⌥[1-9]/)).not.toBeInTheDocument();
+
+    const input = screen.getByRole('textbox');
+    input.focus();
+    fireEvent.keyDown(input, { key: '†', code: 'KeyT', altKey: true });
+    await waitFor(() => {
+      expect(terminalOption).toHaveAttribute('aria-checked', 'true');
+    });
+
+    rerender(
+      <SettingsProvider settings={{}} setSetting={vi.fn()}>
+        <LocationPicker
+          isOpen
+          purpose="session"
+          onClose={vi.fn()}
+          onSelect={vi.fn()}
+          endpoints={[]}
+          agentAvailability={{ claude: true, codex: true, copilot: false }}
+        />
+      </SettingsProvider>,
+    );
+
+    expect(screen.getByRole('radio', { name: /terminal/i })).toBeEnabled();
+    expect(screen.getByText('⌥T')).toBeInTheDocument();
+  });
+
+  it('offers Terminal for remote targets even when the remote reports only agent CLIs', async () => {
+    renderPicker({
+      endpoints: [{
+        id: 'ep-1',
+        name: 'gpu-box',
+        ssh_target: 'ai-sandbox',
+        status: 'connected',
+        enabled: true,
+        capabilities: {
+          protocol_version: '46',
+          agents_available: ['codex'],
+          projects_directory: '/srv/projects',
+        },
+      }],
+    });
+
+    fireEvent.click(screen.getByRole('radio', { name: /gpu-box/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('radio', { name: /terminal/i })).toBeEnabled();
+      expect(screen.getByRole('radio', { name: /codex/i })).toBeEnabled();
     });
   });
 

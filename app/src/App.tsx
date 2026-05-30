@@ -59,6 +59,7 @@ const CHANGES_BRANCH_DIFF_INTERVAL_MS = 30_000;
 const CHANGES_BRANCH_DIFF_STATUS_DEBOUNCE_MS = 750;
 const CHANGES_BRANCH_DIFF_SLOW_THRESHOLD_MS = 5_000;
 const CHANGES_BRANCH_DIFF_SLOW_COOLDOWN_MS = 30_000;
+const TERMINAL_AGENT: SessionAgent = 'shell';
 
 type LocationPickerPurpose = 'workspace' | 'session';
 
@@ -1435,17 +1436,19 @@ sendFetchPRDetails,
           showError(`Endpoint ${endpoint.name} is ${endpoint.status}.`);
           return;
         }
-        if (!endpoint.capabilities?.agents_available.includes(agent)) {
+        if (agent !== TERMINAL_AGENT && !endpoint.capabilities?.agents_available.includes(agent)) {
           showError(`${agentLabel(agent)} is not available on ${endpoint.name}.`);
           return;
         }
         selectedAgent = agent;
       } else {
-        if (!hasAvailableAgents) {
+        if (agent !== TERMINAL_AGENT && !hasAvailableAgents) {
           showError('No supported agent CLI found in PATH.');
           return;
         }
-        selectedAgent = resolvePreferredAgent(agent, agentAvailability, 'codex');
+        selectedAgent = agent === TERMINAL_AGENT
+          ? TERMINAL_AGENT
+          : resolvePreferredAgent(agent, agentAvailability, 'codex');
       }
       // Note: Location is automatically tracked by daemon when session registers
       const folderName = path.split('/').pop() || 'session';
