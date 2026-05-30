@@ -759,6 +759,31 @@ describe('worktree cleanup prompt', () => {
             },
           },
         },
+        {
+          id: 'runtime-session-1',
+          label: 'session pane 1',
+          state: 'working',
+          cwd: '/tmp/repo',
+          agent: 'shell',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-session-1',
+          workspace: {
+            agents: [
+              { id: 'pane-session', runtimeId: 's1', sessionId: 's1', title: 'session-with-split' },
+              { id: 'pane-session-1', runtimeId: 'runtime-session-1', sessionId: 'runtime-session-1', title: 'session pane 1' },
+            ],
+            layoutTree: {
+              type: 'split',
+              splitId: 'root',
+              direction: 'vertical',
+              ratio: 0.5,
+              children: [
+                { type: 'pane', paneId: 'pane-session' },
+                { type: 'pane', paneId: 'pane-session-1' },
+              ],
+            },
+          },
+        },
       ],
       activeSessionId: 's1',
       connect: vi.fn(async () => {}),
@@ -831,6 +856,31 @@ describe('worktree cleanup prompt', () => {
             },
           },
         },
+        {
+          id: 'runtime-session-1',
+          label: 'session pane 1',
+          state: 'working',
+          cwd: '/tmp/repo',
+          agent: 'shell',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-session-1',
+          workspace: {
+            agents: [
+              { id: 'pane-session', runtimeId: 's1', sessionId: 's1', title: 'session-with-split' },
+              { id: 'pane-session-1', runtimeId: 'runtime-session-1', sessionId: 'runtime-session-1', title: 'session pane 1' },
+            ],
+            layoutTree: {
+              type: 'split',
+              splitId: 'root',
+              direction: 'vertical',
+              ratio: 0.5,
+              children: [
+                { type: 'pane', paneId: 'pane-session' },
+                { type: 'pane', paneId: 'pane-session-1' },
+              ],
+            },
+          },
+        },
       ],
       activeSessionId: 's1',
       connect: vi.fn(async () => {}),
@@ -855,6 +905,48 @@ describe('worktree cleanup prompt', () => {
     expect(mockCloseSession).not.toHaveBeenCalled();
   });
 
+  it('closes a single-pane session through the workspace pane path', async () => {
+    mockUseSessionStore.mockReturnValue({
+      sessions: [
+        {
+          id: 'shell-1',
+          label: 'shell',
+          state: 'working',
+          cwd: '/tmp/repo',
+          agent: 'shell',
+          workspaceId: 'workspace-shell-1',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-shell-1',
+          workspace: {
+            agents: [
+              { id: 'pane-shell-1', runtimeId: 'shell-1', sessionId: 'shell-1', title: 'shell' },
+            ],
+            layoutTree: { type: 'pane', paneId: 'pane-shell-1' },
+          },
+        },
+      ],
+      activeSessionId: 'shell-1',
+      connect: vi.fn(async () => {}),
+      connected: true,
+      launcherConfig: { executables: {} },
+      createSession: vi.fn(async () => 'shell-1'),
+      closeSession: mockCloseSession,
+      setActiveSession: vi.fn(),
+      takeSessionSpawnArgs: vi.fn(() => null),
+      reloadSession: vi.fn(async () => {}),
+      setLauncherConfig: vi.fn(),
+      syncFromDaemonSessions: vi.fn(),
+      syncFromDaemonWorkspaces: vi.fn(),
+    });
+
+    render(<App />);
+
+    await userEvent.click(screen.getByTestId('close-session'));
+
+    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('workspace-shell-1', 'pane-shell-1');
+    expect(mockCloseSession).not.toHaveBeenCalled();
+  });
+
   it('uses Cmd+W to close the active session pane before closing the session', async () => {
     mockUseSessionStore.mockReturnValue({
       sessions: [
@@ -864,6 +956,31 @@ describe('worktree cleanup prompt', () => {
           state: 'working',
           cwd: '/tmp/repo',
           agent: 'claude',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-session-1',
+          workspace: {
+            agents: [
+              { id: 'pane-session', runtimeId: 's1', sessionId: 's1', title: 'session-with-split' },
+              { id: 'pane-session-1', runtimeId: 'runtime-session-1', sessionId: 'runtime-session-1', title: 'session pane 1' },
+            ],
+            layoutTree: {
+              type: 'split',
+              splitId: 'root',
+              direction: 'vertical',
+              ratio: 0.5,
+              children: [
+                { type: 'pane', paneId: 'pane-session' },
+                { type: 'pane', paneId: 'pane-session-1' },
+              ],
+            },
+          },
+        },
+        {
+          id: 'runtime-session-1',
+          label: 'session pane 1',
+          state: 'working',
+          cwd: '/tmp/repo',
+          agent: 'shell',
           transcriptMatched: true,
           daemonActivePaneId: 'pane-session-1',
           workspace: {

@@ -1560,22 +1560,27 @@ sendFetchPRDetails,
     showCopyToast('Copied to clipboard');
   }, [showCopyToast]);
 
+  const prepareWorktreeCleanupPrompt = useCallback((session: (typeof enrichedLocalSessions)[number] | undefined) => {
+    if (!session?.isWorktree || !session.cwd) {
+      return;
+    }
+
+    const sessionsInSameDir = enrichedLocalSessions.filter(s => s.cwd === session.cwd);
+    const isLastSession = sessionsInSameDir.length === 1;
+    if (!isLastSession || alwaysKeepWorktrees) {
+      return;
+    }
+
+    const cleanupRequestId = cleanupRequestIdRef.current + 1;
+    cleanupRequestIdRef.current = cleanupRequestId;
+    setWorktreeCleanupState({ requestId: cleanupRequestId, isDeleting: false, error: null, forceable: false });
+    setClosedWorktree({ id: cleanupRequestId, path: session.cwd, branch: session.branch });
+  }, [alwaysKeepWorktrees, enrichedLocalSessions]);
+
   const handleCloseSession = useCallback(
     async (id: string) => {
-      // Check if session is a worktree and last in directory
       const session = enrichedLocalSessions.find(s => s.id === id);
-      if (session?.isWorktree && session.cwd) {
-        const sessionsInSameDir = enrichedLocalSessions.filter(s => s.cwd === session.cwd);
-        const isLastSession = sessionsInSameDir.length === 1;
-
-        if (isLastSession && !alwaysKeepWorktrees) {
-          // Show cleanup prompt
-          const cleanupRequestId = cleanupRequestIdRef.current + 1;
-          cleanupRequestIdRef.current = cleanupRequestId;
-          setWorktreeCleanupState({ requestId: cleanupRequestId, isDeleting: false, error: null, forceable: false });
-          setClosedWorktree({ id: cleanupRequestId, path: session.cwd, branch: session.branch });
-        }
-      }
+      prepareWorktreeCleanupPrompt(session);
 
       const localDaemonSession = daemonSessions.find(ds => ds.id === session?.id);
       if (localDaemonSession && session) {
@@ -1586,17 +1591,19 @@ sendFetchPRDetails,
 
       removeWorkspaceRef(session?.workspaceId || id);
     },
-    [alwaysKeepWorktrees, closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterSession]
+    [closeSession, daemonSessions, enrichedLocalSessions, prepareWorktreeCleanupPrompt, removeWorkspaceRef, sendUnregisterSession]
   );
 
   const handleClosePane = useCallback((sessionId: string, paneId: string) => {
+    const session = enrichedLocalSessions.find((entry) => entry.id === sessionId);
+    prepareWorktreeCleanupPrompt(session);
     prepareClosePaneFocus(sessionId, paneId);
     const workspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId ?? sessionId;
     return sendWorkspaceClosePane(workspaceId, paneId).catch((error) => {
       clearPreparedClosePaneFocus(sessionId);
       throw error;
     });
-  }, [clearPreparedClosePaneFocus, prepareClosePaneFocus, sendWorkspaceClosePane, sessions]);
+  }, [clearPreparedClosePaneFocus, enrichedLocalSessions, prepareClosePaneFocus, prepareWorktreeCleanupPrompt, sendWorkspaceClosePane, sessions]);
 
   const handleRequestCloseSession = useCallback((id: string) => {
     const session = sessions.find((entry) => entry.id === id);
@@ -1605,7 +1612,7 @@ sendFetchPRDetails,
     }
 
     const sessionPane = session.workspace.agents.find((pane) => pane.sessionId === session.id);
-    if (sessionPane && session.workspace.agents.length > 1) {
+    if (sessionPane) {
       void handleClosePane(session.id, sessionPane.id).catch(console.error);
       return;
     }
@@ -1921,7 +1928,7 @@ sendFetchPRDetails,
     }
 
     const activePaneId = getActivePaneIdForSession(activeSession);
-    if (activePaneId && activeSession.workspace.agents.length > 1) {
+    if (activePaneId) {
       void handleClosePane(activeSessionId, activePaneId);
       return;
     }
