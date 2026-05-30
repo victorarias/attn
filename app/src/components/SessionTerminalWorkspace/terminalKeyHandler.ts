@@ -5,6 +5,17 @@ export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
   return (event: KeyboardEvent) => {
     if (
       event.type === 'keydown'
+      && (event.key === 'Tab' || event.key === 'ISO_Left_Tab')
+      && event.shiftKey
+      && !event.ctrlKey
+      && !event.metaKey
+      && !event.altKey
+    ) {
+      sendToPty('\x1b[Z');
+      return false;
+    }
+    if (
+      event.type === 'keydown'
       && event.ctrlKey
       && !event.metaKey
       && !event.altKey
