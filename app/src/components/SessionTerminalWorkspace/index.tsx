@@ -76,6 +76,13 @@ interface SessionTerminalWorkspaceProps {
   sessionLabel: string;
   sessionAgent: SessionAgent;
   sessionEndpointId?: string;
+  workspaceSessions?: Array<{
+    id: string;
+    label: string;
+    agent: SessionAgent;
+    cwd: string;
+    endpointId?: string;
+  }>;
   cwd: string;
   workspace: TerminalWorkspaceState;
   activePaneId: string;
@@ -87,6 +94,7 @@ interface SessionTerminalWorkspaceProps {
   isSessionViewVisible?: boolean;
   eventRouter: PaneRuntimeEventRouter;
   getMainPaneSpawnArgs: (cols: number, rows: number) => PtySpawnArgs | null;
+  getAgentPaneSpawnArgs?: (sessionId: string, cols: number, rows: number) => PtySpawnArgs | null;
   onSplitPane: (targetPaneId: string, direction: TerminalSplitDirection) => void;
   onClosePane: (paneId: string) => void;
   onFocusPane: (paneId: string) => void;
@@ -100,6 +108,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     sessionLabel,
     sessionAgent,
     sessionEndpointId,
+    workspaceSessions = [],
     cwd,
     workspace,
     activePaneId,
@@ -111,6 +120,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     isSessionViewVisible = true,
     eventRouter,
     getMainPaneSpawnArgs,
+    getAgentPaneSpawnArgs,
     onSplitPane,
     onClosePane,
     onFocusPane,
@@ -141,16 +151,45 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       return ids;
     }, [workspace.layoutTree]);
 
+    const sessionById = useMemo(() => new Map([
+      [sessionId, { id: sessionId, label: sessionLabel, agent: sessionAgent, cwd, endpointId: sessionEndpointId }],
+      ...workspaceSessions.map((entry) => [entry.id, entry] as const),
+    ]), [cwd, sessionAgent, sessionEndpointId, sessionId, sessionLabel, workspaceSessions]);
+
+    const agentPanes = useMemo(() => (
+      workspace.agents && workspace.agents.length > 0
+        ? workspace.agents
+        : [{
+            id: MAIN_TERMINAL_PANE_ID,
+            runtimeId: sessionId,
+            sessionId,
+            title: 'Agent',
+          }]
+    ), [sessionId, workspace.agents]);
+
+    const agentPaneById = useMemo(
+      () => new Map(agentPanes.map((pane) => [pane.id, pane])),
+      [agentPanes],
+    );
+
     const runtimePanes = useMemo(() => ([
-      {
-        paneId: MAIN_TERMINAL_PANE_ID,
-        runtimeId: sessionId,
-        paneKind: 'main' as const,
-        agent: sessionAgent,
-        sessionId,
-        testSessionId: sessionId,
-        getSpawnArgs: ({ cols, rows }: { cols: number; rows: number }) => getMainPaneSpawnArgs(cols, rows),
-      },
+      ...agentPanes.map((pane) => {
+        const paneSession = sessionById.get(pane.sessionId);
+        return {
+          paneId: pane.id,
+          runtimeId: pane.runtimeId,
+          paneKind: 'main' as const,
+          agent: paneSession?.agent ?? sessionAgent,
+          sessionId: pane.sessionId,
+          testSessionId: pane.sessionId,
+          getSpawnArgs: ({ cols, rows }: { cols: number; rows: number }) => {
+            if (pane.sessionId === sessionId) {
+              return getMainPaneSpawnArgs(cols, rows);
+            }
+            return getAgentPaneSpawnArgs?.(pane.sessionId, cols, rows) ?? null;
+          },
+        };
+      }),
       ...workspace.terminals.map((terminal) => ({
         paneId: terminal.id,
         runtimeId: terminal.ptyId,
@@ -165,7 +204,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           shell: true,
         }),
       })),
-    ]), [cwd, getMainPaneSpawnArgs, sessionAgent, sessionEndpointId, sessionId, workspace.terminals]);
+    ]), [agentPanes, cwd, getAgentPaneSpawnArgs, getMainPaneSpawnArgs, sessionAgent, sessionEndpointId, sessionById, sessionId, workspace.terminals]);
 
     const runtime = useGhosttyPaneRuntime(runtimePanes, activePaneId, eventRouter, isActiveSessionRef);
     const fitPane = runtime.fitPane;
@@ -381,11 +420,11 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     }, [onClosePane]);
 
     const handleCloseActiveTerminal = useCallback(() => {
-      if (activePaneId === MAIN_TERMINAL_PANE_ID) {
+      if (agentPaneById.has(activePaneId)) {
         return;
       }
       handleCloseTerminal(activePaneId);
-    }, [activePaneId, handleCloseTerminal]);
+    }, [activePaneId, agentPaneById, handleCloseTerminal]);
 
     const toggleMaximizeActivePane = useCallback(() => {
       setZoomedPaneId(null);
@@ -424,16 +463,16 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       onNavigateOutOfSession(direction);
     }, [activePaneId, effectivePaneId, onFocusPane, onNavigateOutOfSession, renderedLayoutTree, runtime, sessionId]);
 
-    const handleMainPaneMouseDown = useCallback(() => {
+    const handleAgentPaneMouseDown = useCallback((paneId: string) => {
       recordPaneRuntimeDebugEvent({
         scope: 'workspace',
         sessionId,
-        paneId: MAIN_TERMINAL_PANE_ID,
-        message: 'main pane mouse down',
+        paneId,
+        message: 'agent pane mouse down',
         details: activeElementSummary,
       });
-      onFocusPane(MAIN_TERMINAL_PANE_ID);
-      runtime.focusPane(MAIN_TERMINAL_PANE_ID);
+      onFocusPane(paneId);
+      runtime.focusPane(paneId);
     }, [onFocusPane, runtime, sessionId]);
 
     const handleUtilityPaneMouseDown = useCallback((paneId: string) => {
@@ -473,7 +512,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     useShortcut('terminal.splitHorizontal', () => { handleSplit('horizontal'); }, sessionVisible);
     useShortcut('terminal.toggleZoom', toggleZoomActivePane, sessionVisible);
     useShortcut('terminal.toggleMaximize', toggleMaximizeActivePane, sessionVisible);
-    useShortcut('terminal.close', handleCloseActiveTerminal, sessionVisible && splitLayoutActive && activePaneId !== MAIN_TERMINAL_PANE_ID);
+    useShortcut('terminal.close', handleCloseActiveTerminal, sessionVisible && splitLayoutActive && !agentPaneById.has(activePaneId));
     useShortcut('terminal.focusLeft', () => handleMovePane('left'), sessionVisible);
     useShortcut('terminal.focusRight', () => handleMovePane('right'), sessionVisible);
     useShortcut('terminal.focusUp', () => handleMovePane('up'), sessionVisible);
@@ -494,15 +533,18 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       }
       const frameStyle = paneFrameStyle(bounds);
 
-      if (paneId === MAIN_TERMINAL_PANE_ID) {
+      const agentPane = agentPaneById.get(paneId);
+      if (agentPane) {
+        const paneSession = sessionById.get(agentPane.sessionId);
+        const paneTitle = paneSession?.label || agentPane.title || 'Session';
         return (
           <div
-            key={MAIN_TERMINAL_PANE_ID}
-            className={`workspace-pane main-pane ${activePaneId === MAIN_TERMINAL_PANE_ID ? 'active' : ''}`}
-            onMouseDown={handleMainPaneMouseDown}
-            data-pane-session-id={sessionId}
-            data-pane-id={MAIN_TERMINAL_PANE_ID}
-            data-pane-kind="main"
+            key={agentPane.id}
+            className={`workspace-pane main-pane ${activePaneId === agentPane.id ? 'active' : ''}`}
+            onMouseDown={() => handleAgentPaneMouseDown(agentPane.id)}
+            data-pane-session-id={agentPane.sessionId}
+            data-pane-id={agentPane.id}
+            data-pane-kind="agent"
             data-pane-path={path}
             style={frameStyle}
           >
@@ -510,18 +552,18 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
               className={`workspace-pane-header ${showMainHeader ? '' : 'workspace-pane-header-hidden'}`.trim()}
               aria-hidden={showMainHeader ? undefined : true}
             >
-              {showMainHeader ? <span className="workspace-pane-title">Session</span> : null}
+              {showMainHeader ? <span className="workspace-pane-title">{paneTitle}</span> : null}
             </div>
             <div className="workspace-pane-body">
               <GhosttyTerminal
-                ref={(handle) => runtime.setTerminalHandle(MAIN_TERMINAL_PANE_ID, handle)}
+                ref={(handle) => runtime.setTerminalHandle(agentPane.id, handle)}
                 fontSize={fontSize}
                 resolvedTheme={resolvedTheme}
-                debugName={`main:${sessionLabel}:${sessionAgent}:${sessionId}`}
-                runtimeLogMeta={{ sessionId, paneId: MAIN_TERMINAL_PANE_ID, runtimeId: sessionId, paneKind: 'main', isActivePane: activePaneId === MAIN_TERMINAL_PANE_ID, isActiveSession, paneCount: paneIds.length }}
-                onInput={runtime.handleTerminalInput(MAIN_TERMINAL_PANE_ID)}
-                onReady={handleGhosttyTerminalReady(MAIN_TERMINAL_PANE_ID)}
-                onResize={runtime.handleTerminalResize(MAIN_TERMINAL_PANE_ID)}
+                debugName={`main:${paneTitle}:${paneSession?.agent ?? sessionAgent}:${agentPane.sessionId}`}
+                runtimeLogMeta={{ sessionId: agentPane.sessionId, paneId: agentPane.id, runtimeId: agentPane.runtimeId, paneKind: 'main', isActivePane: activePaneId === agentPane.id, isActiveSession, paneCount: paneIds.length }}
+                onInput={runtime.handleTerminalInput(agentPane.id)}
+                onReady={handleGhosttyTerminalReady(agentPane.id)}
+                onResize={runtime.handleTerminalResize(agentPane.id)}
               />
             </div>
           </div>
@@ -575,12 +617,14 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       activePaneId,
       fontSize,
       handleCloseTerminal,
-      handleMainPaneMouseDown,
+      handleAgentPaneMouseDown,
       handleGhosttyTerminalReady,
       handleUtilityPaneMouseDown,
       paneFrameStyle,
       panePaths,
       renderedPaneBounds,
+      agentPaneById,
+      sessionById,
       workspace.terminals,
       resolvedTheme,
       runtime,
@@ -594,11 +638,12 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       if (!effectivePaneId) {
         return '';
       }
-      if (effectivePaneId === MAIN_TERMINAL_PANE_ID) {
-        return 'Session';
+      const agentPane = agentPaneById.get(effectivePaneId);
+      if (agentPane) {
+        return sessionById.get(agentPane.sessionId)?.label || agentPane.title || 'Session';
       }
       return workspace.terminals.find((terminal) => terminal.id === effectivePaneId)?.title || 'Pane';
-    }, [effectivePaneId, workspace.terminals]);
+    }, [agentPaneById, effectivePaneId, sessionById, workspace.terminals]);
 
     return (
       <div

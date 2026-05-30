@@ -50,8 +50,8 @@ vi.mock('./components/Sidebar', () => ({
   ReviewLoopIcon: () => null,
   DiffIcon: () => null,
   PRsIcon: () => null,
-  Sidebar: ({ visualOrder, onCloseSession }: { visualOrder: Array<{ id: string }>; onCloseSession: (id: string) => void }) => (
-    <button data-testid="close-session" onClick={() => onCloseSession(visualOrder[0].id)}>
+  Sidebar: ({ visualOrder, onCloseSession }: { visualOrder: Array<{ firstSessionId: string | null }>; onCloseSession: (id: string) => void }) => (
+    <button data-testid="close-session" onClick={() => visualOrder[0].firstSessionId && onCloseSession(visualOrder[0].firstSessionId)}>
       Close Session
     </button>
   ),

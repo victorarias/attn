@@ -26,7 +26,15 @@ export interface UtilityTerminal {
   title: string;
 }
 
+export interface AgentTerminal {
+  id: string;
+  runtimeId: string;
+  sessionId: string;
+  title: string;
+}
+
 export interface TerminalWorkspaceState {
+  agents?: AgentTerminal[];
   terminals: UtilityTerminal[];
   layoutTree: TerminalLayoutNode;
 }
@@ -240,11 +248,32 @@ function shellTerminalsFromPanes(panes: PaneElement[]): UtilityTerminal[] {
     }));
 }
 
+function agentTerminalsFromPanes(panes: PaneElement[]): AgentTerminal[] {
+  const agentPanes = panes
+    .filter((pane) => pane.kind === 'agent' && typeof pane.runtime_id === 'string' && typeof pane.session_id === 'string');
+  if (
+    agentPanes.length === 0 ||
+    (agentPanes.length === 1 && agentPanes[0].pane_id === MAIN_TERMINAL_PANE_ID)
+  ) {
+    return [];
+  }
+  return agentPanes.map((pane) => ({
+    id: pane.pane_id,
+    runtimeId: pane.runtime_id as string,
+    sessionId: pane.session_id as string,
+    title: pane.title || pane.pane_id,
+  }));
+}
+
 export function workspaceSnapshotFromDaemonWorkspace(workspace: DaemonWorkspaceSnapshot): TerminalWorkspaceSnapshot {
+  const agents = agentTerminalsFromPanes(workspace.panes || []);
   const nextWorkspace: TerminalWorkspaceState = {
     terminals: shellTerminalsFromPanes(workspace.panes || []),
     layoutTree: parseLayoutJSON(workspace.layout_json || ''),
   };
+  if (agents.length > 0) {
+    nextWorkspace.agents = agents;
+  }
   const daemonActivePaneId = workspace.active_pane_id || MAIN_TERMINAL_PANE_ID;
 
   return {

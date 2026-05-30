@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { Sidebar, type FooterShortcut } from './Sidebar';
-import { getVisualSessionOrder, groupSessionsByDirectory } from '../utils/sessionGrouping';
+import { buildWorkspaceViewModels } from '../utils/workspaceViewModels';
 
 interface TestSession {
   id: string;
@@ -19,20 +19,25 @@ interface TestSession {
 }
 
 function buildSidebarData(sessions: TestSession[]) {
-  const visualOrder = getVisualSessionOrder(sessions);
+  const workspaces = buildWorkspaceViewModels([], sessions.map((session) => ({
+    ...session,
+    workspaceId: session.cwd ? `workspace-${session.cwd}` : `workspace-${session.id}`,
+  })));
   return {
-    sessionGroups: groupSessionsByDirectory(sessions),
-    visualOrder,
-    visualIndexBySessionId: new Map(visualOrder.map((session, index) => [session.id, index])),
+    workspaces,
+    visualOrder: workspaces,
+    visualIndexByWorkspaceId: new Map(workspaces.map((workspace, index) => [workspace.id, index])),
   };
 }
 
 const baseProps = {
   selectedId: null,
+  selectedWorkspaceId: null,
   collapsed: false,
   headerActions: [],
   footerShortcuts: undefined as FooterShortcut[] | undefined,
   onSelectSession: () => {},
+  onSelectWorkspace: () => {},
   onNewSession: () => {},
   onCloseSession: () => {},
   onReloadSession: () => {},
@@ -135,7 +140,7 @@ describe('Sidebar', () => {
     expect(screen.getByLabelText('Review loop running')).toBeInTheDocument();
   });
 
-  it('renders session shortcuts in grouped visual order', () => {
+  it('renders workspace shortcuts in workspace visual order', () => {
     const sessions: TestSession[] = [
       { id: 'a1', label: 'A1', state: 'idle', cwd: '/repo/a' },
       { id: 'b1', label: 'B1', state: 'idle', cwd: '/repo/b' },
@@ -148,9 +153,9 @@ describe('Sidebar', () => {
       />
     );
 
-    expect(screen.getByTestId('sidebar-session-a1')).toHaveTextContent('⌘1');
-    expect(screen.getByTestId('sidebar-session-a2')).toHaveTextContent('⌘2');
-    expect(screen.getByTestId('sidebar-session-b1')).toHaveTextContent('⌘3');
+    expect(screen.getByTestId('sidebar-workspace-workspace-/repo/a')).toHaveTextContent('⌘1');
+    expect(screen.getByTestId('sidebar-workspace-workspace-/repo/b')).toHaveTextContent('⌘2');
+    expect(screen.getByTestId('sidebar-session-a1')).not.toHaveTextContent('⌘1');
   });
 
   it('renders dock action hints alongside custom footer shortcuts when provided', () => {
@@ -199,7 +204,7 @@ describe('Sidebar', () => {
       />
     );
 
-    expect(screen.getByText('gpu-box')).toBeInTheDocument();
+    expect(screen.getAllByText('gpu-box')).toHaveLength(2);
     expect(screen.getByTestId('close-session-remote-1')).toBeInTheDocument();
     expect(screen.getByTestId('reload-session-remote-1')).toBeInTheDocument();
   });

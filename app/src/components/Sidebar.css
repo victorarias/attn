@@ -178,6 +178,49 @@
   margin-bottom: 8px;
 }
 
+.workspace-group {
+  margin-bottom: 8px;
+  border-radius: 8px;
+}
+
+.workspace-group.selected {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.workspace-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.workspace-group-header:hover {
+  background: var(--color-bg-elevated);
+}
+
+.workspace-group.selected .workspace-group-header {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.workspace-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
 .session-group-header {
   display: flex;
   flex-direction: column;

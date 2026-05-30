@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { StateIndicator } from './StateIndicator';
 import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
-import type { SessionGroup } from '../utils/sessionGrouping';
+import type { WorkspaceWithSessions } from '../utils/workspaceViewModels';
 
 interface LocalSession {
   id: string;
@@ -20,6 +20,8 @@ interface LocalSession {
   reviewLoopStatus?: string;
   muted?: boolean;
 }
+
+type SidebarWorkspace = WorkspaceWithSessions<LocalSession>;
 
 function reviewLoopIndicator(status?: string): { glyph: string; label: string } | null {
   switch (status) {
@@ -39,10 +41,11 @@ function reviewLoopIndicator(status?: string): { glyph: string; label: string } 
 }
 
 interface SidebarProps {
-  sessionGroups: SessionGroup<LocalSession>[];
-  visualOrder: LocalSession[];
-  visualIndexBySessionId: Map<string, number>;
+  workspaces: SidebarWorkspace[];
+  visualOrder: SidebarWorkspace[];
+  visualIndexByWorkspaceId: Map<string, number>;
   selectedId: string | null;
+  selectedWorkspaceId: string | null;
   collapsed: boolean;
   headerActions: SidebarHeaderAction[];
   footerShortcuts?: FooterShortcut[];
@@ -51,6 +54,7 @@ interface SidebarProps {
   onMutedExpandedChange?: (expanded: boolean) => void;
   onMuteSession?: (id: string) => void;
   onSelectSession: (id: string) => void;
+  onSelectWorkspace: (id: string) => void;
   onNewSession: () => void;
   onCloseSession: (id: string) => void;
   onReloadSession: (id: string) => void;
@@ -149,10 +153,11 @@ export function PRsIcon() {
 }
 
 export function Sidebar({
-  sessionGroups,
+  workspaces,
   visualOrder,
-  visualIndexBySessionId,
+  visualIndexByWorkspaceId,
   selectedId,
+  selectedWorkspaceId,
   collapsed,
   headerActions,
   footerShortcuts,
@@ -161,6 +166,7 @@ export function Sidebar({
   onMutedExpandedChange,
   onMuteSession,
   onSelectSession,
+  onSelectWorkspace,
   onNewSession,
   onCloseSession,
   onReloadSession,
@@ -174,7 +180,7 @@ export function Sidebar({
     onMutedExpandedChange?.(v);
   };
 
-  const visualIndexOf = (id: string) => visualIndexBySessionId.get(id) ?? -1;
+  const visualIndexOfWorkspace = (id: string) => visualIndexByWorkspaceId.get(id) ?? -1;
   const dockShortcutHints = Array.from(new Map([
     ...headerActions
       .filter((action) => action.shortcutHint && !action.disabled)
@@ -206,16 +212,16 @@ export function Sidebar({
             </button>
           ))}
           <div className="icon-divider" />
-          {visualOrder.map((session) => (
+          {visualOrder.map((workspace) => (
             <button
-              key={session.id}
-              className={`icon-btn session-icon ${selectedId === session.id ? 'active' : ''}`}
-              onClick={() => onSelectSession(session.id)}
-              title={`${session.label} (⌘${visualIndexOf(session.id) + 1})`}
+              key={workspace.id}
+              className={`icon-btn session-icon ${selectedWorkspaceId === workspace.id ? 'active' : ''}`}
+              onClick={() => onSelectWorkspace(workspace.id)}
+              title={`${workspace.title} (⌘${visualIndexOfWorkspace(workspace.id) + 1})`}
             >
               ▸
-              {isAttentionSessionState(session.state) && (
-                <span className={`mini-badge ${session.state === 'pending_approval' ? 'pending' : ''} ${session.state === 'unknown' ? 'unknown' : ''}`} />
+              {workspace.sessions.some((session) => isAttentionSessionState(session.state)) && (
+                <span className={`mini-badge ${workspace.status === 'pending_approval' ? 'pending' : ''} ${workspace.status === 'unknown' ? 'unknown' : ''}`} />
               )}
             </button>
           ))}
@@ -267,106 +273,29 @@ export function Sidebar({
       </div>
 
       <div className="session-list">
-        {sessionGroups.map((group) => {
-          const isSingleSession = group.sessions.length === 1;
-
-          if (isSingleSession) {
-            const session = group.sessions[0];
-            const globalIndex = visualIndexOf(session.id);
-            return (
-              <div
-                key={session.id}
-                className={`session-item ${selectedId === session.id ? 'selected' : ''} ${session.recoverable ? 'recoverable' : ''} ${session.reviewLoopStatus ? `session-item--loop-${session.reviewLoopStatus}` : ''}`}
-                data-testid={`sidebar-session-${session.id}`}
-                data-state={session.state}
-                onClick={() => onSelectSession(session.id)}
-                title={session.recoverable ? 'Session will be recovered when opened' : undefined}
-              >
-                <StateIndicator state={session.state} size="md" seed={session.id} />
-                <div className="session-info">
-                  <span className="session-label">{session.label}</span>
-                  {session.endpointName && (
-                    <span className={`session-endpoint-badge status-${session.endpointStatus || 'connected'}`}>
-                      {session.endpointName}
-                    </span>
-                  )}
-                  {session.branch && (
-                    <span className="session-branch">{session.branch}</span>
-                  )}
-                  {session.recoverable && (
-                    <span className="session-recoverable">recoverable</span>
-                  )}
-                  {reviewLoopIndicator(session.reviewLoopStatus) && (
-                    <span
-                      className={`session-loop-indicator session-loop-indicator--${session.reviewLoopStatus}`}
-                      title={reviewLoopIndicator(session.reviewLoopStatus)?.label}
-                      aria-label={reviewLoopIndicator(session.reviewLoopStatus)?.label}
-                    >
-                      {reviewLoopIndicator(session.reviewLoopStatus)?.glyph}
-                    </span>
-                  )}
-                </div>
-                {session.isWorktree && <span className="worktree-indicator">⎇</span>}
-                <span className="session-shortcut">⌘{globalIndex + 1}</span>
-                <div className="session-actions">
-                  {onMuteSession && (
-                    <button
-                      className="session-action-btn mute-session-btn"
-                      data-testid={`mute-session-${session.id}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onMuteSession(session.id);
-                      }}
-                      title="Mute session"
-                      aria-label={`Mute session ${session.label}`}
-                    >
-                      ⊘
-                    </button>
-                  )}
-                  <button
-                    className="session-action-btn close-session-btn"
-                    data-testid={`close-session-${session.id}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onCloseSession(session.id);
-                    }}
-                    title="Close session (⌘⇧W)"
-                    aria-label={`Close session ${session.label}`}
-                  >
-                    ×
-                  </button>
-                  <button
-                    className="session-action-btn reload-session-btn"
-                    data-testid={`reload-session-${session.id}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onReloadSession(session.id);
-                    }}
-                    title="Reload session"
-                    aria-label={`Reload session ${session.label}`}
-                  >
-                    ↻
-                  </button>
-                </div>
-              </div>
-            );
-          }
-
+        {workspaces.map((workspace) => {
+          const workspaceIndex = visualIndexOfWorkspace(workspace.id);
           return (
-            <div key={group.directory} className="session-group">
-              <div className="session-group-header">
-                <span className="session-label">{group.label}</span>
-                {group.endpointName && (
-                  <span className={`session-endpoint-badge status-${group.endpointStatus || 'connected'}`}>
-                    {group.endpointName}
+            <div
+              key={`${workspace.endpointId || 'local'}:${workspace.id}`}
+              className={`workspace-group ${selectedWorkspaceId === workspace.id ? 'selected' : ''}`}
+              data-testid={`sidebar-workspace-${workspace.id}`}
+            >
+              <button
+                type="button"
+                className="workspace-group-header"
+                onClick={() => onSelectWorkspace(workspace.id)}
+              >
+                <StateIndicator state={(workspace.status as UISessionState | undefined) || 'idle'} size="md" seed={workspace.id} />
+                <span className="workspace-label">{workspace.title}</span>
+                {workspace.endpointId && workspace.sessions[0]?.endpointName && (
+                  <span className={`session-endpoint-badge status-${workspace.sessions[0].endpointStatus || 'connected'}`}>
+                    {workspace.sessions[0].endpointName}
                   </span>
                 )}
-                {group.branch && (
-                  <span className="session-branch">{group.branch}</span>
-                )}
-              </div>
-              {group.sessions.map((session) => {
-                const globalIndex = visualIndexOf(session.id);
+                <span className="session-shortcut">⌘{workspaceIndex + 1}</span>
+              </button>
+              {workspace.sessions.map((session) => {
                 return (
                   <div
                     key={session.id}
@@ -396,7 +325,6 @@ export function Sidebar({
                       </span>
                     )}
                     {session.isWorktree && <span className="worktree-indicator">⎇</span>}
-                    <span className="session-shortcut">⌘{globalIndex + 1}</span>
                     <div className="session-actions">
                       {onMuteSession && (
                         <button

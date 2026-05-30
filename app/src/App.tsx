@@ -44,7 +44,8 @@ import {
   resolvePreferredAgent,
 } from './utils/agentAvailability';
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
-import { groupSessionsByDirectory } from './utils/sessionGrouping';
+import { buildWorkspaceViewModels } from './utils/workspaceViewModels';
+import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
 import './App.css';
 
 const RELEASES_LATEST_API = 'https://api.github.com/repos/victorarias/attn/releases/latest';
@@ -1652,47 +1653,63 @@ sendFetchPRDetails,
     }
   }, [unmutedEnrichedSessions, handleSelectSession]);
 
-  const sessionGroups = useMemo(() => groupSessionsByDirectory(unmutedEnrichedSessions), [unmutedEnrichedSessions]);
+  const workspaceViews = useMemo(
+    () => buildWorkspaceViewModels(daemonWorkspaces, unmutedEnrichedSessions),
+    [daemonWorkspaces, unmutedEnrichedSessions],
+  );
+  const workspaceSelection = useWorkspaceSelectionController(workspaceViews, activeSessionId);
+  const activeWorkspaceId = workspaceSelection.activeWorkspaceId;
 
-  // Use visual (grouped) order so ⌘1-9 and prev/next match the sidebar
-  const visualSessions = useMemo(() => sessionGroups.flatMap((group) => group.sessions), [sessionGroups]);
-  const visualIndexBySessionId = useMemo(() => {
-    return new Map(visualSessions.map((session, index) => [session.id, index]));
-  }, [visualSessions]);
+  // Use workspace order so ⌘1-9 and prev/next match the top-level sidebar rows.
+  const visualWorkspaces = workspaceViews;
+  const visualIndexByWorkspaceId = useMemo(() => {
+    return new Map(visualWorkspaces.map((workspace, index) => [workspace.id, index]));
+  }, [visualWorkspaces]);
 
-  const handleSelectSessionByIndex = useCallback(
-    (index: number) => {
-      const session = visualSessions[index];
-      if (session) {
-        handleSelectSession(session.id);
+  const handleSelectWorkspace = useCallback(
+    (workspaceId: string) => {
+      const workspace = workspaceViews.find((entry) => entry.id === workspaceId);
+      const sessionId = workspace?.firstSessionId;
+      if (sessionId) {
+        handleSelectSession(sessionId);
       }
     },
-    [visualSessions, handleSelectSession]
+    [handleSelectSession, workspaceViews],
   );
 
-  const handlePrevSession = useCallback(() => {
-    if (!activeSessionId || visualSessions.length === 0) return;
-    const currentIndex = visualIndexBySessionId.get(activeSessionId);
-    if (currentIndex === undefined) return;
-    const prevIndex = currentIndex > 0 ? currentIndex - 1 : visualSessions.length - 1;
-    handleSelectSession(visualSessions[prevIndex].id);
-  }, [activeSessionId, visualSessions, visualIndexBySessionId, handleSelectSession]);
+  const handleSelectWorkspaceByIndex = useCallback(
+    (index: number) => {
+      const workspace = visualWorkspaces[index];
+      if (workspace) {
+        handleSelectWorkspace(workspace.id);
+      }
+    },
+    [visualWorkspaces, handleSelectWorkspace]
+  );
 
-  const handleNextSession = useCallback(() => {
-    if (!activeSessionId || visualSessions.length === 0) return;
-    const currentIndex = visualIndexBySessionId.get(activeSessionId);
+  const handlePrevWorkspace = useCallback(() => {
+    if (!activeWorkspaceId || visualWorkspaces.length === 0) return;
+    const currentIndex = visualIndexByWorkspaceId.get(activeWorkspaceId);
     if (currentIndex === undefined) return;
-    const nextIndex = currentIndex < visualSessions.length - 1 ? currentIndex + 1 : 0;
-    handleSelectSession(visualSessions[nextIndex].id);
-  }, [activeSessionId, visualSessions, visualIndexBySessionId, handleSelectSession]);
+    const prevIndex = currentIndex > 0 ? currentIndex - 1 : visualWorkspaces.length - 1;
+    handleSelectWorkspace(visualWorkspaces[prevIndex].id);
+  }, [activeWorkspaceId, visualWorkspaces, visualIndexByWorkspaceId, handleSelectWorkspace]);
+
+  const handleNextWorkspace = useCallback(() => {
+    if (!activeWorkspaceId || visualWorkspaces.length === 0) return;
+    const currentIndex = visualIndexByWorkspaceId.get(activeWorkspaceId);
+    if (currentIndex === undefined) return;
+    const nextIndex = currentIndex < visualWorkspaces.length - 1 ? currentIndex + 1 : 0;
+    handleSelectWorkspace(visualWorkspaces[nextIndex].id);
+  }, [activeWorkspaceId, visualWorkspaces, visualIndexByWorkspaceId, handleSelectWorkspace]);
 
   const handleNavigateOutOfSession = useCallback((direction: 'left' | 'right' | 'up' | 'down') => {
     if (direction === 'left' || direction === 'up') {
-      handlePrevSession();
+      handlePrevWorkspace();
       return;
     }
-    handleNextSession();
-  }, [handleNextSession, handlePrevSession]);
+    handleNextWorkspace();
+  }, [handleNextWorkspace, handlePrevWorkspace]);
 
   const handleCloseCurrentSessionShortcut = useCallback(() => {
     if (!activeSessionId) {
@@ -1706,7 +1723,9 @@ sendFetchPRDetails,
 
     if (activeSession.workspace.terminals.length > 0) {
       const activePaneId = getActivePaneIdForSession(activeSession);
-      if (activePaneId !== MAIN_TERMINAL_PANE_ID) {
+      const activePaneIsAgent = (activeSession.workspace.agents || [])
+        .some((pane) => pane.id === activePaneId);
+      if (activePaneId !== MAIN_TERMINAL_PANE_ID && !activePaneIsAgent) {
         void handleClosePane(activeSessionId, activePaneId).catch((error) => {
           showError(error instanceof Error ? error.message : 'Failed to close split pane');
         });
@@ -2115,9 +2134,9 @@ sendFetchPRDetails,
     onToggleDrawer: () => toggleDockPanel('attention'),
     onGoToDashboard: goToDashboard,
     onJumpToWaiting: handleJumpToWaiting,
-    onSelectSession: handleSelectSessionByIndex,
-    onPrevSession: handlePrevSession,
-    onNextSession: handleNextSession,
+    onSelectSession: handleSelectWorkspaceByIndex,
+    onPrevSession: handlePrevWorkspace,
+    onNextSession: handleNextWorkspace,
     onToggleSidebar: toggleSidebarCollapse,
     onRefreshPRs: handleRefreshPRs,
     onToggleDiffPanel: () => {
@@ -2212,10 +2231,11 @@ sendFetchPRDetails,
       {/* Session view - always rendered to keep terminals alive */}
       <div className={`view-container ${view === 'session' ? 'visible' : 'hidden'}`}>
         <Sidebar
-          sessionGroups={sessionGroups}
-          visualOrder={visualSessions}
-          visualIndexBySessionId={visualIndexBySessionId}
+          workspaces={workspaceViews}
+          visualOrder={visualWorkspaces}
+          visualIndexByWorkspaceId={visualIndexByWorkspaceId}
           selectedId={activeSessionId}
+          selectedWorkspaceId={activeWorkspaceId}
           collapsed={sidebarCollapsed}
           headerActions={sidebarHeaderActions}
           footerShortcuts={sidebarFooterShortcuts}
@@ -2224,6 +2244,7 @@ sendFetchPRDetails,
           onMutedExpandedChange={setSidebarMutedExpanded}
           onMuteSession={sendMuteSession}
           onSelectSession={handleSelectSession}
+          onSelectWorkspace={handleSelectWorkspace}
           onNewSession={handleNewSession}
           onCloseSession={handleRequestCloseSession}
           onReloadSession={handleReloadSession}
@@ -2232,48 +2253,73 @@ sendFetchPRDetails,
         />
         <div className="terminal-pane">
           <div className="terminal-main-area">
-            {sessions.map((session) => (
-              <div
-                key={session.id}
-                className={`terminal-wrapper ${session.id === activeSessionId ? 'active' : ''}`}
-              >
-                <SessionTerminalWorkspace
-                  ref={setWorkspaceRef(session.id)}
-                  sessionId={session.id}
-                  sessionLabel={session.label}
-                  sessionAgent={session.agent}
-                  sessionEndpointId={session.endpointId}
-                  cwd={session.cwd}
-                  workspace={session.workspace}
-                  activePaneId={getActivePaneIdForSession(session)}
-                  fontSize={terminalFontSize}
-                  resolvedTheme={resolvedTheme}
-                  focusRequestToken={utilityFocusRequestToken}
-                  enabled={!locationPickerOpen}
-                  isActiveSession={session.id === activeSessionId}
-                  isSessionViewVisible={view === 'session'}
-                  eventRouter={paneRuntimeEventRouter}
-                  getMainPaneSpawnArgs={(cols, rows) => takeSessionSpawnArgs(session.id, cols, rows)}
-                  onSplitPane={(targetPaneId, direction) => {
-                    void sendWorkspaceSplitPane(session.workspaceId, targetPaneId, direction).catch(console.error);
-                  }}
-                  onClosePane={(paneId) => {
-                    void handleClosePane(session.id, paneId).catch(console.error);
-                  }}
-                  onFocusPane={(paneId) => {
-                    setActivePane(session.id, paneId);
-                  }}
-                  onZoomModeChange={(zoomed) => {
-                    setZoomModeBySessionId((prev) => (
-                      prev[session.id] === zoomed
-                        ? prev
-                        : { ...prev, [session.id]: zoomed }
-                    ));
-                  }}
-                  onNavigateOutOfSession={handleNavigateOutOfSession}
-                />
-              </div>
-            ))}
+            {workspaceViews.map((workspace) => {
+              const activeSessionInWorkspace = activeSessionId && workspace.sessions.some((entry) => entry.id === activeSessionId)
+                ? sessions.find((entry) => entry.id === activeSessionId)
+                : null;
+              const rootSession = activeSessionInWorkspace
+                || sessions.find((entry) => entry.id === workspace.firstSessionId)
+                || null;
+              if (!rootSession) {
+                return null;
+              }
+              const isActiveWorkspace = workspace.id === activeWorkspaceId;
+              return (
+                <div
+                  key={`${workspace.endpointId || 'local'}:${workspace.id}`}
+                  className={`terminal-wrapper ${isActiveWorkspace ? 'active' : ''}`}
+                >
+                  <SessionTerminalWorkspace
+                    ref={setWorkspaceRef(rootSession.id)}
+                    sessionId={rootSession.id}
+                    sessionLabel={rootSession.label}
+                    sessionAgent={rootSession.agent}
+                    sessionEndpointId={rootSession.endpointId}
+                    workspaceSessions={workspace.sessions.map((entry) => ({
+                      id: entry.id,
+                      label: entry.label,
+                      agent: entry.agent,
+                      cwd: entry.cwd,
+                      endpointId: entry.endpointId,
+                    }))}
+                    cwd={rootSession.cwd}
+                    workspace={rootSession.workspace}
+                    activePaneId={getActivePaneIdForSession(rootSession)}
+                    fontSize={terminalFontSize}
+                    resolvedTheme={resolvedTheme}
+                    focusRequestToken={utilityFocusRequestToken}
+                    enabled={!locationPickerOpen}
+                    isActiveSession={isActiveWorkspace}
+                    isSessionViewVisible={view === 'session'}
+                    eventRouter={paneRuntimeEventRouter}
+                    getMainPaneSpawnArgs={(cols, rows) => takeSessionSpawnArgs(rootSession.id, cols, rows)}
+                    getAgentPaneSpawnArgs={(paneSessionId, cols, rows) => takeSessionSpawnArgs(paneSessionId, cols, rows)}
+                    onSplitPane={(targetPaneId, direction) => {
+                      void sendWorkspaceSplitPane(rootSession.workspaceId, targetPaneId, direction).catch(console.error);
+                    }}
+                    onClosePane={(paneId) => {
+                      void handleClosePane(rootSession.id, paneId).catch(console.error);
+                    }}
+                    onFocusPane={(paneId) => {
+                      const agentPane = (rootSession.workspace.agents || []).find((pane) => pane.id === paneId);
+                      const paneSessionId = agentPane?.sessionId || rootSession.id;
+                      setActivePane(paneSessionId, paneId);
+                      if (paneSessionId !== activeSessionId) {
+                        setActiveSession(paneSessionId);
+                      }
+                    }}
+                    onZoomModeChange={(zoomed) => {
+                      setZoomModeBySessionId((prev) => (
+                        prev[rootSession.id] === zoomed
+                          ? prev
+                          : { ...prev, [rootSession.id]: zoomed }
+                      ));
+                    }}
+                    onNavigateOutOfSession={handleNavigateOutOfSession}
+                  />
+                </div>
+              );
+            })}
             {sessions.length === 0 && (
               <div className="no-sessions">
                 <p>No active sessions</p>
