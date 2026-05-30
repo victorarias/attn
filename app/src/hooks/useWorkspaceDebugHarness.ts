@@ -33,7 +33,9 @@ export function useWorkspaceDebugHarness({
     }
 
     window.__TEST_GET_MAIN_TERMINAL_TEXT = (sessionId: string) => {
-      return workspaceRefs.current.get(sessionId)?.getPaneText(MAIN_TERMINAL_PANE_ID) || '';
+      const session = sessions.find((entry) => entry.id === sessionId);
+      const paneId = session?.workspace.agents?.find((entry) => entry.sessionId === sessionId)?.id || MAIN_TERMINAL_PANE_ID;
+      return workspaceRefs.current.get(sessionId)?.getPaneText(paneId) || '';
     };
 
     window.__TEST_GET_ACTIVE_UTILITY_TEXT = () => {
@@ -42,7 +44,7 @@ export function useWorkspaceDebugHarness({
       }
       const session = sessions.find((entry) => entry.id === activeSessionId);
       const activePaneId = getActivePaneIdForSession(session);
-      if (!session || activePaneId === MAIN_TERMINAL_PANE_ID) {
+      if (!session || session.workspace.agents?.some((entry) => entry.id === activePaneId) || activePaneId === MAIN_TERMINAL_PANE_ID) {
         return '';
       }
       return workspaceRefs.current.get(activeSessionId)?.getPaneText(activePaneId) || '';
@@ -51,7 +53,7 @@ export function useWorkspaceDebugHarness({
     window.__TEST_GET_ACTIVE_UTILITY_PTY = (sessionId: string) => {
       const session = sessions.find((entry) => entry.id === sessionId);
       const activePaneId = getActivePaneIdForSession(session);
-      if (!session || activePaneId === MAIN_TERMINAL_PANE_ID) {
+      if (!session || session.workspace.agents?.some((entry) => entry.id === activePaneId) || activePaneId === MAIN_TERMINAL_PANE_ID) {
         return null;
       }
       const terminal = session.workspace.terminals.find((entry) => entry.id === activePaneId);
@@ -65,7 +67,10 @@ export function useWorkspaceDebugHarness({
         label: session.label,
         activePaneId: getActivePaneIdForSession(session),
         daemonActivePaneId: session.daemonActivePaneId,
-        paneIds: [MAIN_TERMINAL_PANE_ID, ...session.workspace.terminals.map((terminal) => terminal.id)],
+        paneIds: [
+          ...(session.workspace.agents?.map((agent) => agent.id) || [MAIN_TERMINAL_PANE_ID]),
+          ...session.workspace.terminals.map((terminal) => terminal.id),
+        ],
       })),
       ...activeElementSummary(),
     });

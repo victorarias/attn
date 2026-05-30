@@ -86,7 +86,7 @@ async function openTerminalSession(
   await page.waitForSelector('.dashboard');
   await createSession(page, daemon, sessionId);
   await page.locator(`[data-testid="session-${sessionId}"]`).click();
-  const terminal = page.locator(`[data-pane-session-id="${sessionId}"][data-pane-id="main"] .terminal-container`);
+  const terminal = page.locator(`[data-pane-session-id="${sessionId}"][data-pane-kind="agent"] .terminal-container`);
   await expect(terminal).toBeVisible({ timeout: 5000 });
   return terminal;
 }
