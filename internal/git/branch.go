@@ -164,9 +164,14 @@ func CreateBranch(repoDir, branch string) error {
 
 // GetCurrentBranch returns the current branch name for the repository.
 func GetCurrentBranch(repoDir string) (string, error) {
-	out, err := runGitOutput(OpMetadata, repoDir, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := runGitOutput(OpMetadata, repoDir, "symbolic-ref", "--short", "HEAD")
+	if err == nil {
+		return strings.TrimSpace(string(out)), nil
+	}
+
+	out, err = runGitOutput(OpMetadata, repoDir, "rev-parse", "--short", "HEAD")
 	if err != nil {
-		return "", fmt.Errorf("git rev-parse failed: %w", err)
+		return "", fmt.Errorf("git current branch failed: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
