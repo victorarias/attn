@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { Session } from '../store/sessions';
+import type { TerminalWorkspaceState } from '../types/workspace';
 const SESSION_PANE_ID = 'pane-session';
 import { useSessionWorkspaceViewState } from './useSessionWorkspaceViewState';
 
@@ -23,6 +24,48 @@ function buildSession(overrides?: Partial<Session>): Session {
 }
 
 describe('useSessionWorkspaceViewState', () => {
+  it('tracks active pane at workspace scope across sessions', () => {
+    const workspace: TerminalWorkspaceState = {
+      agents: [
+        { id: 'pane-agent', runtimeId: 'session-agent', title: 'Agent', sessionId: 'session-agent' },
+        { id: 'pane-shell', runtimeId: 'session-shell', title: 'Shell', sessionId: 'session-shell' },
+      ],
+      layoutTree: {
+        type: 'split' as const,
+        splitId: 'root',
+        direction: 'vertical' as const,
+        ratio: 0.5,
+        children: [
+          { type: 'pane' as const, paneId: 'pane-agent' },
+          { type: 'pane' as const, paneId: 'pane-shell' },
+        ],
+      },
+    };
+    const agentSession = buildSession({
+      id: 'session-agent',
+      workspaceId: 'workspace-shared',
+      workspace,
+      daemonActivePaneId: 'pane-agent',
+    });
+    const shellSession = buildSession({
+      id: 'session-shell',
+      workspaceId: 'workspace-shared',
+      workspace,
+      daemonActivePaneId: 'pane-agent',
+    });
+
+    const { result } = renderHook(({ sessions }) => useSessionWorkspaceViewState(sessions), {
+      initialProps: { sessions: [agentSession, shellSession] },
+    });
+
+    act(() => {
+      result.current.setActivePane(shellSession.id, 'pane-shell');
+    });
+
+    expect(result.current.getActivePaneIdForSession(agentSession)).toBe('pane-shell');
+    expect(result.current.getActivePaneIdForSession(shellSession)).toBe('pane-shell');
+  });
+
   it('prefers local active pane while topology is stable', () => {
     const session = buildSession({
       workspace: {

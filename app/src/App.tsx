@@ -110,15 +110,9 @@ function activePaneIdForFocusedSession(
   session: Session | null,
   getActivePaneIdForSession: (session: Session | undefined | null) => string,
 ): string {
-  const sessionPaneIds = new Set(
-    workspace.agents
-      .filter((pane) => pane.sessionId === session?.id)
-      .map((pane) => pane.id),
-  );
   const sessionActivePaneId = getActivePaneIdForSession(session);
   if (
     sessionActivePaneId
-    && sessionPaneIds.has(sessionActivePaneId)
     && workspace.layoutTree
     && hasPane(workspace.layoutTree, sessionActivePaneId)
   ) {
@@ -1634,10 +1628,15 @@ sendFetchPRDetails,
 
   const handleSelectSession = useCallback(
     (id: string) => {
+      const session = sessions.find((entry) => entry.id === id);
+      const sessionPane = session?.workspace.agents.find((pane) => pane.sessionId === id);
+      if (sessionPane) {
+        setActivePane(id, sessionPane.id);
+      }
       setActiveSession(id);
       setUtilityFocusRequestToken((token) => token + 1);
     },
-    [setActiveSession]
+    [sessions, setActivePane, setActiveSession]
   );
 
   useUiAutomationBridge({

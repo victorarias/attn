@@ -122,4 +122,29 @@ test.describe('Workspace Sessions', () => {
     await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
     await expect(page.locator('.picker-title')).toHaveText('New Workspace Location');
   });
+
+  test('clicking and keyboard navigation focus panes across sessions in one workspace', async ({ page, daemon }) => {
+    await daemon.start();
+    await page.goto('/');
+    await page.waitForSelector('.dashboard');
+
+    await injectWorkspace(page, 'workspace-focus', [
+      { id: 'focus-agent', label: 'focus-agent', paneId: 'pane-focus-agent', cwd: '/tmp/workspace-focus' },
+      { id: 'focus-shell', label: 'focus-shell', paneId: 'pane-focus-shell', cwd: '/tmp/workspace-focus' },
+    ], 'pane-focus-agent');
+
+    await page.locator('[data-testid="session-focus-agent"]').click();
+    const activeWorkspace = page.locator('[data-session-terminal-workspace="workspace-focus"]');
+    await expect(activeWorkspace).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-testid="sidebar-session-focus-agent"]')).toHaveClass(/selected/);
+    await expect(activeWorkspace).toHaveAttribute('data-active-pane-id', 'pane-focus-agent');
+
+    await activeWorkspace.locator('[data-pane-id="pane-focus-shell"]').click();
+    await expect(page.locator('[data-testid="sidebar-session-focus-shell"]')).toHaveClass(/selected/);
+    await expect(activeWorkspace).toHaveAttribute('data-active-pane-id', 'pane-focus-shell');
+
+    await page.keyboard.press('Meta+Alt+ArrowLeft');
+    await expect(page.locator('[data-testid="sidebar-session-focus-agent"]')).toHaveClass(/selected/);
+    await expect(activeWorkspace).toHaveAttribute('data-active-pane-id', 'pane-focus-agent');
+  });
 });
