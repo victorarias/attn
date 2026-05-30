@@ -10,6 +10,7 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const INPUT_DRIVER_SOURCE = path.join(SCRIPT_DIR, 'InputDriver.swift');
 const INPUT_DRIVER_BUILD_DIR = path.join(SCRIPT_DIR, '.build');
 const INPUT_DRIVER_BINARY = path.join(INPUT_DRIVER_BUILD_DIR, 'attn-real-input-driver');
+const CODESIGN_IDENTITY_SCRIPT = path.resolve(SCRIPT_DIR, '..', '..', '..', 'scripts', 'macos-codesign-identity.sh');
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -165,13 +166,29 @@ export class MacOSDriver {
     const binaryExists = fs.existsSync(INPUT_DRIVER_BINARY);
     const sourceMtime = fs.statSync(INPUT_DRIVER_SOURCE).mtimeMs;
     const binaryMtime = binaryExists ? fs.statSync(INPUT_DRIVER_BINARY).mtimeMs : 0;
-    if (binaryExists && binaryMtime >= sourceMtime) {
-      return INPUT_DRIVER_BINARY;
+    if (!binaryExists || binaryMtime < sourceMtime) {
+      await execFileAsync('/usr/bin/swiftc', [INPUT_DRIVER_SOURCE, '-o', INPUT_DRIVER_BINARY], {
+        timeout: 30_000,
+      });
     }
-    await execFileAsync('/usr/bin/swiftc', [INPUT_DRIVER_SOURCE, '-o', INPUT_DRIVER_BINARY], {
-      timeout: 30_000,
-    });
+    await this.signInputDriverIfPossible(INPUT_DRIVER_BINARY);
     return INPUT_DRIVER_BINARY;
+  }
+
+  async signInputDriverIfPossible(binaryPath) {
+    if (process.platform !== 'darwin' || !fs.existsSync(CODESIGN_IDENTITY_SCRIPT)) {
+      return;
+    }
+    const { stdout } = await execFileAsync('bash', [CODESIGN_IDENTITY_SCRIPT, 'find'], {
+      timeout: 5_000,
+    });
+    const identity = stdout.toString().trim();
+    if (!identity || identity === '-') {
+      return;
+    }
+    await execFileAsync('/usr/bin/codesign', ['--force', '--sign', identity, binaryPath], {
+      timeout: 10_000,
+    });
   }
 
   async runInputDriver(args) {

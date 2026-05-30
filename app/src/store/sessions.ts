@@ -77,6 +77,7 @@ interface TestSession {
   state: UISessionState;
   cwd: string;
   agent?: SessionAgent;
+  workspaceId?: string;
   branch?: string;
   isWorktree?: boolean;
 }
@@ -436,7 +437,7 @@ if (import.meta.env.DEV) {
         {
           ...session,
           agent: session.agent ?? 'codex',
-          workspaceId: `workspace-${session.id}`,
+          workspaceId: session.workspaceId ?? `workspace-${session.id}`,
           transcriptMatched: (session.agent ?? 'codex') !== 'codex',
           workspace: createDefaultWorkspaceState(),
           daemonActivePaneId: '',

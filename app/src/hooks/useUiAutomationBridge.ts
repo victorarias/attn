@@ -133,10 +133,23 @@ function resolveRuntimeId(session: Session, paneId: string): string {
   throw new Error(`No runtime found for pane ${paneId}`);
 }
 
+function resolvePaneOwnerSessionId(session: Session, paneId: string): string {
+  return session.workspace.agents.find((entry) => entry.id === paneId)?.sessionId || session.id;
+}
+
+function resolveWorkspaceViewSessionId(session: Session, sessions: Session[], activeSessionId: string | null): string {
+  const activeSession = activeSessionId ? sessions.find((entry) => entry.id === activeSessionId) : null;
+  if (activeSession?.workspaceId && activeSession.workspaceId === session.workspaceId) {
+    return activeSession.id;
+  }
+  return session.id;
+}
+
 function paneEntries(session: Session) {
   return session.workspace.agents.map((agent) => ({
       paneId: agent.id,
       runtimeId: agent.runtimeId,
+      sessionId: agent.sessionId,
       kind: 'agent',
       title: agent.title || 'Session',
     }));
@@ -406,13 +419,15 @@ function collectVisualSnapshot(
           : null,
         workspaceBounds: workspaceDom.workspaceRoot?.bounds ?? null,
         panes: paneIds.map((paneId) => {
+          const ownerSessionId = workspaceModel.panes.find((pane) => pane.paneId === paneId)?.sessionId || session.id;
           const paneElement = document.querySelector(
-            `[data-pane-session-id="${session.id}"][data-pane-id="${paneId}"]`
+            `[data-pane-session-id="${ownerSessionId}"][data-pane-id="${paneId}"]`
           );
           const modelLayout = paneLayoutById.get(paneId) ?? null;
           const runtimeId = runtimeIdByPaneId.get(paneId) ?? null;
           return {
             paneId,
+            sessionId: ownerSessionId,
             runtimeId,
             runtimeAttached: runtimeId ? isRuntimeAttached(runtimeId) : false,
             active: activePaneId === paneId,
@@ -523,7 +538,7 @@ function collectRenderHealthSnapshot(
   const sessionHealth = filteredSessions.map((session) => {
     const terminalsByPaneId = new Map(
       terminalPerf
-        .filter((terminal) => terminal.sessionId === session.id)
+        .filter((terminal) => (session.panes || []).some((pane) => pane.sessionId === terminal.sessionId && pane.paneId === terminal.paneId))
         .map((terminal) => {
           terminalNames.add(terminal.terminalName);
           return [terminal.paneId || '', terminal] as const;
@@ -541,7 +556,7 @@ function collectRenderHealthSnapshot(
           paneId: pane.paneId,
           kind: pane.kind as 'agent',
           active: pane.active,
-          inputFocused: isSessionPaneInputFocused(session.id, pane.paneId),
+          inputFocused: isSessionPaneInputFocused(pane.sessionId || session.id, pane.paneId),
           size: pane.size,
           paneBounds: boxFromRect(pane.bounds),
           projectedBounds: boxFromRect(pane.layout?.projectedBounds),
@@ -1493,10 +1508,11 @@ export function useUiAutomationBridge({
           throw new Error('Session not found');
         }
         const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
         selectSession(sessionId);
-        focusPane(sessionId, paneId);
+        focusPane(viewSessionId, paneId);
         await settleUi();
-        return { sessionId, paneId };
+        return { sessionId, paneId, viewSessionId };
       }
       case 'click_pane': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
@@ -1505,11 +1521,13 @@ export function useUiAutomationBridge({
           throw new Error('Session not found');
         }
         const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const ownerSessionId = resolvePaneOwnerSessionId(session, paneId);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
         selectSession(sessionId);
         await settleUi(1);
-        clickPaneElement(sessionId, paneId);
+        clickPaneElement(ownerSessionId, paneId);
         await settleUi(2);
-        return { sessionId, paneId };
+        return { sessionId, paneId, ownerSessionId, viewSessionId };
       }
       case 'scroll_pane_to_top': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
@@ -1518,14 +1536,15 @@ export function useUiAutomationBridge({
           throw new Error('Session not found');
         }
         const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
         selectSession(sessionId);
         await settleUi(1);
-        const success = scrollSessionPaneToTop(sessionId, paneId);
+        const success = scrollSessionPaneToTop(viewSessionId, paneId);
         if (!success) {
           throw new Error(`Failed to scroll pane ${paneId} to top`);
         }
         await settleUi(1);
-        return { sessionId, paneId };
+        return { sessionId, paneId, viewSessionId };
       }
       case 'wheel_pane': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
@@ -1534,13 +1553,15 @@ export function useUiAutomationBridge({
           throw new Error('Session not found');
         }
         const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const ownerSessionId = resolvePaneOwnerSessionId(session, paneId);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
         const deltaY = typeof payload.deltaY === 'number' ? payload.deltaY : 0;
         const deltaMode = typeof payload.deltaMode === 'number' ? payload.deltaMode : WheelEvent.DOM_DELTA_PIXEL;
         selectSession(sessionId);
         await settleUi(1);
-        wheelPaneElement(sessionId, paneId, deltaY, deltaMode);
+        wheelPaneElement(ownerSessionId, paneId, deltaY, deltaMode);
         await settleUi(2);
-        return { sessionId, paneId, deltaY, deltaMode };
+        return { sessionId, paneId, ownerSessionId, viewSessionId, deltaY, deltaMode };
       }
       case 'drag_pane_selection': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
@@ -1549,7 +1570,8 @@ export function useUiAutomationBridge({
           throw new Error('Session not found');
         }
         const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
-        const size = getPaneSize(sessionId, paneId);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
+        const size = getPaneSize(viewSessionId, paneId);
         const start = payload.start as { col?: unknown; row?: unknown } | undefined;
         const end = payload.end as { col?: unknown; row?: unknown } | undefined;
         if (!size
@@ -1560,14 +1582,14 @@ export function useUiAutomationBridge({
         selectSession(sessionId);
         await settleUi(1);
         dragPaneSelection(
-          sessionId,
+          viewSessionId,
           paneId,
           size,
           { col: start.col, row: start.row },
           { col: end.col, row: end.row },
         );
         await settleUi(2);
-        return { sessionId, paneId, start, end };
+        return { sessionId, paneId, viewSessionId, start, end };
       }
       case 'dispatch_shortcut': {
         const shortcutId = typeof payload.shortcutId === 'string' ? payload.shortcutId as ShortcutId : null;
@@ -1608,11 +1630,12 @@ export function useUiAutomationBridge({
           throw new Error('type_pane_via_ui requires text');
         }
         const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
-        const success = typeInSessionPaneViaUI(sessionId, paneId, text);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
+        const success = typeInSessionPaneViaUI(viewSessionId, paneId, text);
         if (!success) {
           throw new Error(`Failed to type into pane ${paneId} via UI input`);
         }
-        return { sessionId, paneId };
+        return { sessionId, paneId, viewSessionId };
       }
       case 'read_pane_text': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
@@ -1621,11 +1644,13 @@ export function useUiAutomationBridge({
           throw new Error('Session not found');
         }
         const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
         return {
           sessionId,
           paneId,
-          text: getPaneText(sessionId, paneId),
-          size: getPaneSize(sessionId, paneId),
+          viewSessionId,
+          text: getPaneText(viewSessionId, paneId),
+          size: getPaneSize(viewSessionId, paneId),
         };
       }
       case 'read_pane_style': {
@@ -1635,11 +1660,13 @@ export function useUiAutomationBridge({
           throw new Error('Session not found');
         }
         const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
         return {
           sessionId,
           paneId,
-          size: getPaneSize(sessionId, paneId),
-          style: getPaneVisibleStyleSummary(sessionId, paneId),
+          viewSessionId,
+          size: getPaneSize(viewSessionId, paneId),
+          style: getPaneVisibleStyleSummary(viewSessionId, paneId),
         };
       }
       case 'get_pane_state': {
@@ -1661,7 +1688,7 @@ export function useUiAutomationBridge({
         return {
           sessionId,
           paneId,
-          inputFocused: isSessionPaneInputFocused(sessionId, paneId),
+          inputFocused: isSessionPaneInputFocused(resolveWorkspaceViewSessionId(session, sessions, activeSessionId), paneId),
           activePaneId: getActivePaneIdForSession(session),
           pane: snapshot.sessions[0]?.panes.find((pane) => pane.paneId === paneId) || null,
           renderHealth: collectRenderHealthSnapshot(

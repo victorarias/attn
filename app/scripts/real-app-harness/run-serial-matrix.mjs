@@ -16,6 +16,16 @@ if (process.env.ATTN_HARNESS_PROFILE === undefined) {
 
 const scenarioCatalog = [
   {
+    id: 'workspace-shell-lifecycle',
+    label: 'Workspace shell lifecycle',
+    command: ['pnpm', 'run', 'real-app:scenario-workspace-shell-lifecycle'],
+  },
+  {
+    id: 'workspace-switching',
+    label: 'Workspace switching',
+    command: ['pnpm', 'run', 'real-app:scenario-workspace-switching'],
+  },
+  {
     id: 'tr205-codex',
     label: 'TR-205 remote codex',
     command: ['pnpm', 'run', 'real-app:scenario-tr205'],
