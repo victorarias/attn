@@ -95,19 +95,21 @@ func (r *workspaceRegistry) associateSession(sessionID, workspaceID, title strin
 	return true
 }
 
-func (r *workspaceRegistry) dissociateSession(sessionID string) string {
+func (r *workspaceRegistry) dissociateSession(sessionID string) (string, int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	workspaceID, ok := r.sessionToWorkspace[sessionID]
 	if !ok {
-		return ""
+		return "", 0
 	}
 	delete(r.sessionToWorkspace, sessionID)
+	remaining := 0
 	if entry, ok := r.workspaces[workspaceID]; ok {
 		delete(entry.sessionIDs, sessionID)
+		remaining = len(entry.sessionIDs)
 	}
-	return workspaceID
+	return workspaceID, remaining
 }
 
 func (r *workspaceRegistry) workspaceIDForSession(sessionID string) string {
@@ -419,11 +421,23 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 	if d.workspaces == nil {
 		return
 	}
-	workspaceID := d.workspaces.dissociateSession(sessionID)
+	workspaceID, remaining := d.workspaces.dissociateSession(sessionID)
 	if workspaceID == "" {
 		return
 	}
 	d.store.SetSessionWorkspaceID(sessionID, "")
+	if remaining == 0 {
+		snapshot, removed := d.workspaces.unregister(workspaceID)
+		if !removed {
+			return
+		}
+		d.store.RemoveWorkspace(workspaceID)
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event:     protocol.EventWorkspaceUnregistered,
+			Workspace: &snapshot,
+		})
+		return
+	}
 	updated, changed := d.recomputeWorkspaceStatus(workspaceID)
 	if !changed {
 		updated, _ = d.workspaces.snapshot(workspaceID)

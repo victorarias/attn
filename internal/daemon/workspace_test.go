@@ -140,12 +140,43 @@ func TestWorkspaceRegistry_AssociateAndDissociate(t *testing.T) {
 		t.Fatal("associate to unknown workspace should fail")
 	}
 
-	// dissociate returns the workspace and removes the link
-	if got := r.dissociateSession("s1"); got != "ws2" {
-		t.Fatalf("dissociate returned %q, want ws2", got)
+	// dissociate returns the workspace, remaining session count, and removes the link
+	if got, remaining := r.dissociateSession("s1"); got != "ws2" || remaining != 0 {
+		t.Fatalf("dissociate returned (%q, %d), want (ws2, 0)", got, remaining)
 	}
 	if r.workspaceIDForSession("s1") != "" {
 		t.Fatal("session still associated after dissociate")
+	}
+}
+
+func TestDissociateLastSessionUnregistersWorkspace(t *testing.T) {
+	d := newDaemonForTest(t)
+	now := string(protocol.TimestampNow())
+
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: "ws1", Title: "ws", Directory: "/repo",
+	})
+	d.store.Add(&protocol.Session{
+		ID: "s1", Label: "s1", Agent: protocol.SessionAgentCodex, Directory: "/repo",
+		State: protocol.SessionStateIdle, StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	})
+	d.associateSessionWithWorkspace("s1", "ws1")
+
+	cap := captureBroadcasts(d)
+	d.dissociateSessionFromWorkspace("s1")
+
+	if workspace := d.store.GetWorkspace("ws1"); workspace != nil {
+		t.Fatalf("workspace still exists after last session dissociated: %+v", workspace)
+	}
+	if got := d.workspaces.workspaceIDForSession("s1"); got != "" {
+		t.Fatalf("session still associated with workspace %q", got)
+	}
+	events := cap.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("expected one workspace_unregistered broadcast, got %d: %+v", len(events), events)
+	}
+	if events[0].Event != protocol.EventWorkspaceUnregistered {
+		t.Fatalf("broadcast = %q, want %q", events[0].Event, protocol.EventWorkspaceUnregistered)
 	}
 }
 

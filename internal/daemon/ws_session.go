@@ -50,12 +50,12 @@ func (d *Daemon) handleUnregisterWS(client *wsClient, msg *protocol.UnregisterMe
 		}
 	}
 	if session != nil {
-		d.removeWorkspaceLayoutPaneForSession(session.ID)
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:   protocol.EventSessionUnregistered,
 			Session: d.sessionForBroadcast(session),
 		})
 		d.dissociateSessionFromWorkspace(session.ID)
+		d.removeWorkspaceLayoutPaneForSession(session.ID)
 	}
 	d.broadcastSessionsUpdated()
 }

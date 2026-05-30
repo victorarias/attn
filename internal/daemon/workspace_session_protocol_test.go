@@ -68,6 +68,9 @@ func TestWorkspaceSessionProtocolLifecycleMatchesAppOrder(t *testing.T) {
 	if snapshot := d.store.GetWorkspaceLayout(workspaceID); snapshot != nil {
 		t.Fatalf("workspace layout still exists after closing only pane: %+v", snapshot)
 	}
+	if workspace := d.store.GetWorkspace(workspaceID); workspace != nil {
+		t.Fatalf("workspace still exists after closing its only session pane: %+v", workspace)
+	}
 	if _, _, ok := d.store.FindWorkspaceLayoutPaneBySessionID(sessionID); ok {
 		t.Fatalf("session %s still has a workspace pane mapping", sessionID)
 	}
@@ -132,6 +135,9 @@ func TestWorkspaceLayoutClosePaneKeepsLayoutUntilSessionUnregistered(t *testing.
 	}
 	if snapshot := d.store.GetWorkspaceLayout(workspaceID); snapshot != nil {
 		t.Fatalf("workspace layout still exists after closing only pane: %+v", snapshot)
+	}
+	if workspace := d.store.GetWorkspace(workspaceID); workspace != nil {
+		t.Fatalf("workspace still exists after closing its only session pane: %+v", workspace)
 	}
 }
 
