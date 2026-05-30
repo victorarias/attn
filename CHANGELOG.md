@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Codex Resize Redraws**: Attn now coalesces Codex's synchronized terminal redraws during pane resizes, preventing old scrollback from visibly streaming through the embedded terminal when layouts change.
+- **Empty Git Repositories**: Selecting an empty Git repository now loads repo metadata instead of failing while resolving the current branch.
 
 ---
 

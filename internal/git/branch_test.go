@@ -58,6 +58,32 @@ func TestCheckoutRemoteBranch(t *testing.T) {
 	}
 }
 
+func TestGetCurrentBranchEmptyRepo(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init", "-b", "main")
+
+	branch, err := GetCurrentBranch(dir)
+	if err != nil {
+		t.Fatalf("GetCurrentBranch failed: %v", err)
+	}
+	if branch != "main" {
+		t.Fatalf("expected main, got %q", branch)
+	}
+}
+
+func TestListBranchesWithCommitsEmptyRepo(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init", "-b", "main")
+
+	branches, err := ListBranchesWithCommits(dir)
+	if err != nil {
+		t.Fatalf("ListBranchesWithCommits failed: %v", err)
+	}
+	if len(branches) != 0 {
+		t.Fatalf("expected no committed branches, got %+v", branches)
+	}
+}
+
 func TestListBranchesWithCommits(t *testing.T) {
 	// Create temp directory with subdirectories for main repo and worktree
 	tmpDir := t.TempDir()
