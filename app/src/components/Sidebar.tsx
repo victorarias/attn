@@ -103,6 +103,15 @@ function CollapseIcon() {
   );
 }
 
+function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3 8h10M3 4.5h10M3 11.5h10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M6 4.5h1.8M9.2 8H11M5.2 11.5H7" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function ExpandIcon() {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -174,6 +183,8 @@ export function Sidebar({
   onToggleCollapse,
 }: SidebarProps) {
   const [mutedExpandedLocal, setMutedExpandedLocal] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [displayMode, setDisplayMode] = useState<'open' | 'tight' | 'boxed'>('boxed');
   const mutedExpanded = mutedExpandedProp ?? mutedExpandedLocal;
   const setMutedExpanded = (v: boolean) => {
     setMutedExpandedLocal(v);
@@ -238,9 +249,12 @@ export function Sidebar({
   }
 
   return (
-    <div className="sidebar">
+    <div className={`sidebar sidebar--display-${displayMode}`}>
       <div className="sidebar-header">
         <div className="sidebar-tool-row">
+          <button className="home-btn" onClick={onGoToDashboard} title="Dashboard (⌘G)" aria-label="Dashboard">
+            <HomeIcon />
+          </button>
           {headerActions.map((action) => (
             <button
               key={action.id}
@@ -256,19 +270,46 @@ export function Sidebar({
               )}
             </button>
           ))}
+          <button className="collapse-btn" onClick={onToggleCollapse} title="Collapse sidebar" aria-label="Collapse sidebar">
+            <CollapseIcon />
+          </button>
         </div>
         <div className="sidebar-header-row">
-          <button className="home-btn" onClick={onGoToDashboard} title="Dashboard (⌘G)" aria-label="Dashboard">
-            <HomeIcon />
-          </button>
-          <span className="sidebar-title">Sessions</span>
+          <span className="sidebar-title">Workspaces</span>
           <span className="home-shortcut">⌘G</span>
           <button className="new-session-btn" onClick={onNewSession} title="New Session (⌘N)" aria-label="New Session">
             <PlusIcon />
           </button>
-          <button className="collapse-btn" onClick={onToggleCollapse} title="Collapse sidebar" aria-label="Collapse sidebar">
-            <CollapseIcon />
-          </button>
+          <div className="sidebar-settings-anchor">
+            <button
+              className={`sidebar-settings-btn ${settingsOpen ? 'active' : ''}`}
+              onClick={() => setSettingsOpen((open) => !open)}
+              title="Sidebar settings"
+              aria-label="Sidebar settings"
+              aria-expanded={settingsOpen}
+            >
+              <SettingsIcon />
+            </button>
+            {settingsOpen && (
+              <div className="sidebar-settings-popover" role="dialog" aria-label="Sidebar settings">
+                <span className="sidebar-settings-label">Display</span>
+                <div className="sidebar-display-toggle" role="group" aria-label="Sidebar display">
+                  {(['open', 'tight', 'boxed'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      className={displayMode === mode ? 'active' : ''}
+                      onClick={() => {
+                        setDisplayMode(mode);
+                        setSettingsOpen(false);
+                      }}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

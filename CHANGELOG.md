@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-05-30]
 
+### Changed
+- **Workspace Sidebar**: The session sidebar now presents workspaces as the primary navigation unit, keeps existing sidebar tools visible, and adds local display options for open, tight, and boxed workspace layouts.
+
 ### Fixed
 - **Session Creation**: Creating sessions from new worktrees now runs in the background with the same compact progress surface as worktree cleanup, so slow repository/plugin setup no longer traps the app in the picker.
 - **Terminal URL Clicks**: Command-clicking URLs in Ghostty terminals now uses the rendered terminal canvas position, preventing clicks on the row above a URL from opening it when the canvas is vertically offset.
