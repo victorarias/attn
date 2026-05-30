@@ -10,10 +10,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Workspace Sidebar**: The session sidebar now presents workspaces as the primary navigation unit, keeps existing sidebar tools visible, and adds local display options for open, tight, and boxed workspace layouts.
+- **Workspace Shortcuts**: Command-N now adds a new session to the current workspace, while Command-Shift-N opens the new-workspace picker.
 
 ### Fixed
 - **Session Creation**: Creating sessions from new worktrees now runs in the background with the same compact progress surface as worktree cleanup, so slow repository/plugin setup no longer traps the app in the picker.
 - **Terminal URL Clicks**: Command-clicking URLs in Ghostty terminals now uses the rendered terminal canvas position, preventing clicks on the row above a URL from opening it when the canvas is vertically offset.
+- **Workspace Splits**: Command-D and Command-Shift-D now create session-backed shell splits that appear in the workspace sidebar.
 - **Workspace Sidebar**: Empty workspaces no longer appear in the sidebar, display options stay open while switching modes, and session controls remain aligned at the row edge.
 - **Codex Resize Redraws**: Attn now coalesces Codex's synchronized terminal redraws during pane resizes, preventing old scrollback from visibly streaming through the embedded terminal when layouts change.
 - **Ghostty Shift-Tab**: Shift-Tab in embedded Ghostty terminals now reaches agents as reverse-tab input instead of being treated like a prompt submit.

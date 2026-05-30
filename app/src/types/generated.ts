@@ -2605,7 +2605,9 @@ export enum WorkspaceLayoutRuntimeExitedMessageEvent {
 export interface WorkspaceLayoutSplitPaneMessage {
     cmd:            WorkspaceLayoutSplitPaneMessageCmd;
     direction:      WorkspaceLayoutSplitDirection;
+    session_id?:    string;
     target_pane_id: string;
+    title?:         string;
     workspace_id:   string;
     [property: string]: any;
 }
@@ -5752,7 +5754,9 @@ const typeMap: any = {
     "WorkspaceLayoutSplitPaneMessage": o([
         { json: "cmd", js: "cmd", typ: r("WorkspaceLayoutSplitPaneMessageCmd") },
         { json: "direction", js: "direction", typ: r("WorkspaceLayoutSplitDirection") },
+        { json: "session_id", js: "session_id", typ: u(undefined, "") },
         { json: "target_pane_id", js: "target_pane_id", typ: "" },
+        { json: "title", js: "title", typ: u(undefined, "") },
         { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "WorkspaceLayoutUpdatedMessage": o([

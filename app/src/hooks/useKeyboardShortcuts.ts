@@ -5,7 +5,7 @@ import { isAccelKeyPressed } from '../shortcuts/platform';
 
 interface KeyboardShortcutsConfig {
   onNewSession: () => void;
-  onNewWorktreeSession?: () => void;
+  onNewWorkspace?: () => void;
   onCloseSession: () => void;
   onToggleDrawer: () => void;
   onGoToDashboard: () => void;
@@ -29,7 +29,7 @@ interface KeyboardShortcutsConfig {
 
 export function useKeyboardShortcuts({
   onNewSession,
-  onNewWorktreeSession,
+  onNewWorkspace,
   onCloseSession,
   onToggleDrawer,
   onGoToDashboard,
@@ -52,7 +52,7 @@ export function useKeyboardShortcuts({
 }: KeyboardShortcutsConfig) {
   // Session management
   useShortcut('session.new', onNewSession, enabled);
-  useShortcut('session.newWorktree', onNewWorktreeSession ?? (() => {}), enabled && !!onNewWorktreeSession);
+  useShortcut('session.newWorkspace', onNewWorkspace ?? (() => {}), enabled && !!onNewWorkspace);
   useShortcut('session.close', onCloseSession, enabled);
   useShortcut('session.prev', onPrevSession, enabled);
   useShortcut('session.next', onNextSession, enabled);

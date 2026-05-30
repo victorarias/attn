@@ -785,6 +785,8 @@ model WorkspaceLayoutSplitPaneMessage {
   workspace_id: string;
   target_pane_id: string;
   direction: WorkspaceLayoutSplitDirection;
+  session_id?: string;
+  title?: string;
 }
 
 model WorkspaceLayoutClosePaneMessage {

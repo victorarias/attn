@@ -2792,8 +2792,14 @@ type WorkspaceLayoutSplitPaneMessage struct {
 	// Direction corresponds to the JSON schema field "direction".
 	Direction WorkspaceLayoutSplitDirection `json:"direction"`
 
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+
 	// TargetPaneID corresponds to the JSON schema field "target_pane_id".
 	TargetPaneID string `json:"target_pane_id"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title *string `json:"title,omitempty,omitzero"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`

@@ -2368,7 +2368,12 @@ export function useDaemonSocket({
     });
   }, [sendOrQueueCommand]);
 
-  const sendWorkspaceSplitPane = useCallback((workspaceId: string, targetPaneId: string, direction: 'vertical' | 'horizontal') => {
+  const sendWorkspaceSplitPane = useCallback((
+    workspaceId: string,
+    targetPaneId: string,
+    direction: 'vertical' | 'horizontal',
+    session?: { id: string; title?: string },
+  ) => {
     return sendWorkspaceCommand(
       'workspace_layout_split_pane',
       workspaceId,
@@ -2377,6 +2382,7 @@ export function useDaemonSocket({
         workspace_id: workspaceId,
         target_pane_id: targetPaneId,
         direction,
+        ...(session ? { session_id: session.id, title: session.title } : {}),
       },
       targetPaneId,
     );

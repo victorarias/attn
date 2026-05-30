@@ -205,6 +205,7 @@ describe('shortcut registry', () => {
 
     it('has expected session shortcuts defined', () => {
       expect(SHORTCUTS['session.new']).toEqual({ key: 'n', meta: true });
+      expect(SHORTCUTS['session.newWorkspace']).toEqual({ key: 'n', meta: true, shift: true });
       expect(SHORTCUTS['session.close']).toEqual({ key: 'w', meta: true });
       expect(SHORTCUTS['session.goToDashboard']).toEqual({ key: 'g', meta: true });
       expect(SHORTCUTS['dock.diff']).toEqual({ key: 'g', meta: true, shift: true });

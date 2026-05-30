@@ -626,7 +626,7 @@ export function Dashboard({
 
       <footer className="dashboard-footer">
         <div className="footer-shortcuts">
-          <span className="shortcut"><kbd>⌘N</kbd> new session</span>
+          <span className="shortcut"><kbd>⌘⇧N</kbd> new workspace</span>
           <span className="shortcut"><kbd>⌘1-9</kbd> switch session</span>
           <span className="shortcut"><kbd>⌘,</kbd> settings</span>
         </div>

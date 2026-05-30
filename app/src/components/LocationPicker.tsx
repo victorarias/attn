@@ -62,6 +62,7 @@ interface PathSelectableItem {
 
 interface LocationPickerProps {
   isOpen: boolean;
+  purpose?: 'workspace' | 'session';
   onClose: () => void;
   onSelect: (path: string, agent: SessionAgent, endpointId?: string, yoloMode?: boolean) => void;
   onGetRecentLocations?: (endpointId?: string) => Promise<{ locations: RecentLocation[]; home_path?: string }>;
@@ -154,6 +155,7 @@ type Mode = 'path-input' | 'repo-options';
 
 export function LocationPicker({
   isOpen,
+  purpose = 'session',
   onClose,
   onSelect,
   onGetRecentLocations,
@@ -171,6 +173,17 @@ export function LocationPicker({
   const { settings, setSetting } = useSettings();
   const localAgentAvailability = agentAvailability || DEFAULT_AGENT_AVAILABILITY;
   const noAgentsMessage = 'No supported agent CLI found in PATH.';
+  const copy = purpose === 'workspace'
+    ? {
+        agentAria: 'Initial workspace session agent',
+        targetAria: 'Workspace target',
+        title: 'New Workspace Location',
+      }
+    : {
+        agentAria: 'Session agent',
+        targetAria: 'Session target',
+        title: 'New Session Location',
+      };
 
   const [mode, setMode] = useState<Mode>('path-input');
   const [inputValue, setInputValue] = useState('');
@@ -830,7 +843,7 @@ export function LocationPicker({
         <div className="picker-agent-bar">
           <div className="picker-agent-label">SESSION AGENT</div>
           <div className="picker-agent-controls">
-            <div className="agent-toggle" role="radiogroup" aria-label="Session agent">
+            <div className="agent-toggle" role="radiogroup" aria-label={copy.agentAria}>
               {orderedAgentList.map((candidate) => {
                 const available = isAgentAvailable(effectiveAgentAvailability, candidate);
                 const shortcutNumber = agentShortcutByName.get(candidate);
@@ -859,7 +872,7 @@ export function LocationPicker({
           <div className="picker-endpoint-leading">
             <div className="picker-endpoint-label">SESSION TARGET</div>
           </div>
-          <div className="picker-endpoint-controls" role="radiogroup" aria-label="Session target">
+          <div className="picker-endpoint-controls" role="radiogroup" aria-label={copy.targetAria}>
             {selectableTargets.map((target) => {
               const shortcutKey = targetShortcutByID.get(target.id);
               const active = target.id === selectedTarget.id;
@@ -898,7 +911,7 @@ export function LocationPicker({
             <div className="picker-header">
               <div className="picker-header-top">
                 <div className="picker-title" data-testid="location-picker-title">
-                  New Session Location
+                  {copy.title}
                 </div>
                 <div
                   className={`picker-endpoint-hint ${!yoloSupported ? 'disabled' : ''}`}

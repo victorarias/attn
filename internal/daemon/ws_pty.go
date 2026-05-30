@@ -371,13 +371,14 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 	}
 	isShell := agent == protocol.AgentShellValue
 	workspaceID := strings.TrimSpace(msg.WorkspaceID)
-	if !isShell {
-		if workspaceID == "" {
-			d.sendCommandError(client, protocol.CmdSpawnSession, "missing workspace_id")
-			return
-		}
+	if workspaceID != "" {
 		if d.store.GetWorkspace(workspaceID) == nil {
 			d.sendCommandError(client, protocol.CmdSpawnSession, "unknown workspace")
+			return
+		}
+	} else if !isShell {
+		if workspaceID == "" {
+			d.sendCommandError(client, protocol.CmdSpawnSession, "missing workspace_id")
 			return
 		}
 	}
@@ -483,13 +484,17 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		return
 	}
 
-	// Shell PTYs remain utility runtimes owned by a workspace layout.
-	registerAsSession := !isShell
+	// Utility shell PTYs omit workspace_id; shell panes with workspace_id are
+	// first-class sessions and are shown in the workspace sidebar.
+	registerAsSession := !isShell || workspaceID != ""
 	if registerAsSession {
 		d.clearLongRunTracking(msg.ID)
 		branchInfo, _ := git.GetBranchInfo(cwd)
 		nowStr := string(protocol.TimestampNow())
 		initialState := protocol.SessionStateLaunching
+		if isShell {
+			initialState = protocol.SessionStateWorking
+		}
 		initialStateSince := nowStr
 		initialStateUpdatedAt := nowStr
 		if existingSession != nil {
@@ -546,7 +551,9 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		if pendingResumeID := d.consumePendingResumeSessionID(session.ID); pendingResumeID != "" {
 			d.store.SetResumeSessionID(session.ID, pendingResumeID)
 		}
-		d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, spawnStartedAt)
+		if !isShell {
+			d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, spawnStartedAt)
+		}
 		d.store.UpsertRecentLocation(cwd, label)
 		d.associateSessionWithWorkspace(session.ID, workspaceID)
 		if _, err := d.ensureWorkspaceLayout(workspaceID); err != nil {

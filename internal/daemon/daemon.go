@@ -1727,6 +1727,7 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 
 	// Broadcast to WebSocket clients
 	if session != nil {
+		d.removeWorkspaceLayoutPaneForSession(session.ID)
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:   protocol.EventSessionUnregistered,
 			Session: d.sessionForBroadcast(session),

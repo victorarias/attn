@@ -34,7 +34,7 @@ export const SHORTCUTS = {
 
   // Session management
   'session.new': { key: 'n', meta: true },
-  'session.newWorktree': { key: 'n', meta: true, shift: true },
+  'session.newWorkspace': { key: 'n', meta: true, shift: true },
   'session.close': { key: 'w', meta: true },
   'session.prev': { key: 'ArrowUp', meta: true },
   'session.next': { key: 'ArrowDown', meta: true },

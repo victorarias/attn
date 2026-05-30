@@ -60,6 +60,45 @@ async function createSession(
 
 test.describe('Keyboard Shortcuts', () => {
   test.describe('Terminal Workspace', () => {
+    test('⌘N creates a session-backed vertical split in the current workspace', async ({ page, daemon }) => {
+      await daemon.start();
+      await page.goto('/');
+      await page.waitForSelector('.dashboard');
+
+      await createSession(page, daemon, { id: 's-new', label: 'Root', state: 'working', cwd: '/tmp/test/new-session' });
+      await expect(page.locator('[data-testid="session-s-new"]')).toBeVisible({ timeout: 5000 });
+
+      await page.locator('[data-testid="session-s-new"]').click();
+      await expect(page.locator('[data-session-terminal-workspace="s-new"]')).toBeVisible({ timeout: 2000 });
+
+      await page.keyboard.press('Meta+n');
+
+      const selectedWorkspaceSessions = page.locator('.workspace-group.selected .session-item');
+      await expect(selectedWorkspaceSessions).toHaveCount(2, { timeout: 5000 });
+      await expect(page.locator('.workspace-group.selected')).toContainText('codex 2');
+      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2, { timeout: 5000 });
+    });
+
+    test('⌘D creates a session-backed shell split in the current workspace', async ({ page, daemon }) => {
+      await daemon.start();
+      await page.goto('/');
+      await page.waitForSelector('.dashboard');
+
+      await createSession(page, daemon, { id: 's-shell', label: 'Root', state: 'working', cwd: '/tmp/test/shell-session' });
+      await expect(page.locator('[data-testid="session-s-shell"]')).toBeVisible({ timeout: 5000 });
+
+      await page.locator('[data-testid="session-s-shell"]').click();
+      await expect(page.locator('[data-session-terminal-workspace="s-shell"]')).toBeVisible({ timeout: 2000 });
+      await page.locator('.terminal-wrapper.active .terminal-container').click();
+
+      await page.keyboard.press('Meta+d');
+
+      const selectedWorkspaceSessions = page.locator('.workspace-group.selected .session-item');
+      await expect(selectedWorkspaceSessions).toHaveCount(2, { timeout: 5000 });
+      await expect(page.locator('.workspace-group.selected')).toContainText('shell');
+      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2, { timeout: 5000 });
+    });
+
     test('⌘⇧Z zooms toward the active pane without hiding the others', async ({ page, daemon }) => {
       await daemon.start();
       await page.goto('/');

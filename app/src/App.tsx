@@ -58,6 +58,8 @@ const CHANGES_BRANCH_DIFF_STATUS_DEBOUNCE_MS = 750;
 const CHANGES_BRANCH_DIFF_SLOW_THRESHOLD_MS = 5_000;
 const CHANGES_BRANCH_DIFF_SLOW_COOLDOWN_MS = 30_000;
 
+type LocationPickerPurpose = 'workspace' | 'session';
+
 interface GitHubReleaseResponse {
   tag_name?: string;
   html_url?: string;
@@ -275,6 +277,7 @@ function App() {
     sendPRVisited,
     sendRefreshPRs,
     sendRegisterWorkspace,
+    sendUnregisterSession,
     sendUnregisterWorkspace,
     sendSetSetting,
     sendCreateWorktree,
@@ -389,6 +392,7 @@ function App() {
         sendPRVisited={sendPRVisited}
         sendRefreshPRs={sendRefreshPRs}
         sendRegisterWorkspace={sendRegisterWorkspace}
+        sendUnregisterSession={sendUnregisterSession}
         sendUnregisterWorkspace={sendUnregisterWorkspace}
         sendSetSetting={sendSetSetting}
         sendCreateWorktree={sendCreateWorktree}
@@ -470,6 +474,7 @@ interface AppContentProps {
   sendPRVisited: ReturnType<typeof useDaemonSocket>['sendPRVisited'];
   sendRefreshPRs: ReturnType<typeof useDaemonSocket>['sendRefreshPRs'];
   sendRegisterWorkspace: ReturnType<typeof useDaemonSocket>['sendRegisterWorkspace'];
+  sendUnregisterSession: ReturnType<typeof useDaemonSocket>['sendUnregisterSession'];
   sendUnregisterWorkspace: ReturnType<typeof useDaemonSocket>['sendUnregisterWorkspace'];
   sendSetSetting: ReturnType<typeof useDaemonSocket>['sendSetSetting'];
   sendCreateWorktree: ReturnType<typeof useDaemonSocket>['sendCreateWorktree'];
@@ -546,6 +551,7 @@ function AppContent({
   sendPRVisited,
   sendRefreshPRs,
   sendRegisterWorkspace,
+  sendUnregisterSession,
   sendUnregisterWorkspace,
   sendSetSetting,
   sendCreateWorktree,
@@ -1114,6 +1120,7 @@ sendFetchPRDetails,
 
   // Location picker state management
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const [locationPickerPurpose, setLocationPickerPurpose] = useState<LocationPickerPurpose>('workspace');
 
   // Thumbs (Quick Find) state
   const [thumbsOpen, setThumbsOpen] = useState(false);
@@ -1226,13 +1233,70 @@ sendFetchPRDetails,
 
   // No auto-creation - user clicks "+" to start a session
 
-  const handleNewSession = useCallback(() => {
+  const handleNewWorkspace = useCallback(() => {
+    setLocationPickerPurpose('workspace');
     setLocationPickerOpen(true);
   }, []);
 
-  const handleNewWorktreeSession = useCallback(() => {
-    setLocationPickerOpen(true);
-  }, []);
+  const nextSplitSessionLabel = useCallback((workspaceId: string, agent: SessionAgent) => {
+    const normalizedAgent = normalizeSessionAgent(agent, 'codex');
+    const base = normalizedAgent === 'shell' ? 'shell' : normalizedAgent;
+    const matchingCount = sessions.filter((session) => (
+      session.workspaceId === workspaceId
+      && normalizeSessionAgent(session.agent, 'codex') === normalizedAgent
+    )).length;
+    return matchingCount === 0 ? base : `${base} ${matchingCount + 1}`;
+  }, [sessions]);
+
+  const createSplitSession = useCallback(async (
+    agent: SessionAgent,
+    direction: 'vertical' | 'horizontal',
+    targetPaneId?: string,
+  ) => {
+    const activeSession = activeLocalSession;
+    if (!activeSession?.workspaceId) {
+      handleNewWorkspace();
+      return;
+    }
+    const sessionId = crypto.randomUUID();
+    const workspaceId = activeSession.workspaceId;
+    const paneId = targetPaneId || getActivePaneIdForSession(activeSession);
+    const label = nextSplitSessionLabel(workspaceId, agent);
+
+    try {
+      await createSession(
+        label,
+        activeSession.cwd,
+        sessionId,
+        agent,
+        activeSession.endpointId,
+        agent === 'shell' ? false : activeSession.yoloMode,
+        workspaceId,
+      );
+      await sendWorkspaceSplitPane(workspaceId, paneId, direction, { id: sessionId, title: label });
+      setView('session');
+      setActiveSession(sessionId);
+      setUtilityFocusRequestToken((token) => token + 1);
+    } catch (error) {
+      closeSession(sessionId);
+      showError(error instanceof Error ? error.message : 'Failed to create session split');
+    }
+  }, [
+    activeLocalSession,
+    closeSession,
+    createSession,
+    getActivePaneIdForSession,
+    handleNewWorkspace,
+    nextSplitSessionLabel,
+    sendWorkspaceSplitPane,
+    setActiveSession,
+    showError,
+  ]);
+
+  const handleNewSession = useCallback(() => {
+    const agent = activeLocalSession?.agent || 'codex';
+    void createSplitSession(agent, 'vertical');
+  }, [activeLocalSession?.agent, createSplitSession]);
 
   const handleLocationSelect = useCallback(
     async (path: string, agent: SessionAgent, endpointId?: string, yoloMode = false) => {
@@ -1388,14 +1452,24 @@ sendFetchPRDetails,
       // Closing the workspace owns all agent and utility PTY teardown.
       const localDaemonSession = daemonSessions.find(ds => ds.id === session?.id);
       if (localDaemonSession && session) {
-        await sendUnregisterWorkspace(session.workspaceId || `workspace-${session.id}`);
+        const workspaceId = session.workspaceId || `workspace-${session.id}`;
+        const workspaceSessionCount = enrichedLocalSessions.filter((entry) => (
+          (entry.workspaceId || `workspace-${entry.id}`) === workspaceId
+        )).length;
+        const sessionPane = (session.workspace.agents || []).find((pane) => pane.sessionId === session.id);
+        const canCloseSingleSessionPane = sessionPane && sessionPane.id !== MAIN_TERMINAL_PANE_ID;
+        if (workspaceSessionCount > 1 && canCloseSingleSessionPane) {
+          await sendUnregisterSession(session.id);
+        } else {
+          await sendUnregisterWorkspace(workspaceId);
+        }
       } else {
         closeSession(id);
       }
 
       removeWorkspaceRef(id);
     },
-    [alwaysKeepWorktrees, closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterWorkspace]
+    [alwaysKeepWorktrees, closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterSession, sendUnregisterWorkspace]
   );
 
   const handleRequestCloseSession = useCallback((id: string) => {
@@ -2135,7 +2209,7 @@ sendFetchPRDetails,
   // Use keyboard shortcuts hook
   useKeyboardShortcuts({
     onNewSession: handleNewSession,
-    onNewWorktreeSession: handleNewWorktreeSession,
+    onNewWorkspace: handleNewWorkspace,
     onCloseSession: handleCloseCurrentSessionShortcut,
     onToggleDrawer: () => toggleDockPanel('attention'),
     onGoToDashboard: goToDashboard,
@@ -2301,7 +2375,7 @@ sendFetchPRDetails,
                     getMainPaneSpawnArgs={(cols, rows) => takeSessionSpawnArgs(rootSession.id, cols, rows)}
                     getAgentPaneSpawnArgs={(paneSessionId, cols, rows) => takeSessionSpawnArgs(paneSessionId, cols, rows)}
                     onSplitPane={(targetPaneId, direction) => {
-                      void sendWorkspaceSplitPane(rootSession.workspaceId, targetPaneId, direction).catch(console.error);
+                      void createSplitSession('shell', direction, targetPaneId);
                     }}
                     onClosePane={(paneId) => {
                       void handleClosePane(rootSession.id, paneId).catch(console.error);
@@ -2329,7 +2403,7 @@ sendFetchPRDetails,
             {sessions.length === 0 && (
               <div className="no-sessions">
                 <p>No active sessions</p>
-                <p>Click "+" in the sidebar to start a new session</p>
+                <p>Press ⌘⇧N to start a new workspace</p>
               </div>
             )}
           </div>
@@ -2431,6 +2505,7 @@ sendFetchPRDetails,
 
       <LocationPicker
         isOpen={locationPickerOpen}
+        purpose={locationPickerPurpose}
         onClose={closeLocationPicker}
         onSelect={handleLocationSelect}
         onGetRecentLocations={sendGetRecentLocations}

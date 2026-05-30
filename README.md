@@ -72,7 +72,7 @@ The app nudges you when a new release exists. No auto-install — you pick when.
 ## Quick start
 
 1. Launch **attn** from Applications.
-2. **Cmd+N** — pick an agent, pick a directory, go.
+2. **Cmd+Shift+N** — pick an agent, pick a directory, go.
 3. Watch the sidebar. Colors tell you who needs you.
 4. Optional: add an SSH endpoint in Settings and run remote or VM sessions from the same picker.
 
@@ -91,8 +91,8 @@ Long-run review behavior: if a run takes 5+ minutes, attn keeps it yellow when i
 
 | Shortcut | What it does |
 |---|---|
-| Cmd+N | New session |
-| Cmd+Shift+N | New session in a worktree |
+| Cmd+N | New session in current workspace |
+| Cmd+Shift+N | New workspace |
 | Cmd+F | Quick Find |
 | Cmd+K | Attention drawer (who needs me?) |
 | Cmd+\` | Utility terminal |
