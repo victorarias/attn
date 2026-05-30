@@ -17,6 +17,11 @@ export interface WorkspaceViewWorkspace {
   status?: string;
   endpointId?: string;
   endpoint_id?: string;
+  layout?: {
+    panes?: Array<{
+      session_id?: string;
+    }>;
+  };
 }
 
 export interface WorkspaceWithSessions<TSession extends WorkspaceViewSession = WorkspaceViewSession> {
@@ -153,4 +158,40 @@ export function firstSessionIdForWorkspace<TSession extends WorkspaceViewSession
   workspace: WorkspaceWithSessions<TSession> | undefined | null,
 ): string | null {
   return workspace?.firstSessionId ?? null;
+}
+
+export function filterSessionsRepresentedInWorkspaceLayouts<TSession extends WorkspaceViewSession>(
+  workspaces: WorkspaceViewWorkspace[],
+  sessions: TSession[],
+): TSession[] {
+  const workspaceIdsWithLayout = new Set(
+    workspaces
+      .filter((workspace) => Boolean(workspace.layout))
+      .map((workspace) => workspace.id),
+  );
+  if (workspaceIdsWithLayout.size === 0) {
+    return sessions;
+  }
+
+  const sessionIdsByWorkspaceId = new Map<string, Set<string>>();
+  for (const workspace of workspaces) {
+    if (!workspace.layout) {
+      continue;
+    }
+    const sessionIds = sessionIdsByWorkspaceId.get(workspace.id) || new Set<string>();
+    for (const pane of workspace.layout.panes || []) {
+      if (pane.session_id) {
+        sessionIds.add(pane.session_id);
+      }
+    }
+    sessionIdsByWorkspaceId.set(workspace.id, sessionIds);
+  }
+
+  return sessions.filter((session) => {
+    const workspaceId = sessionWorkspaceId(session);
+    if (!workspaceIdsWithLayout.has(workspaceId)) {
+      return true;
+    }
+    return sessionIdsByWorkspaceId.get(workspaceId)?.has(session.id) ?? false;
+  });
 }

@@ -46,7 +46,7 @@ import {
   resolvePreferredAgent,
 } from './utils/agentAvailability';
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
-import { buildWorkspaceViewModels } from './utils/workspaceViewModels';
+import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
 import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
 import './App.css';
 
@@ -922,8 +922,9 @@ sendFetchPRDetails,
     };
   });
 
-  const unmutedEnrichedSessions = enrichedLocalSessions.filter((s) => !s.muted);
-  const mutedEnrichedSessions = enrichedLocalSessions.filter((s) => s.muted);
+  const visibleEnrichedSessions = filterSessionsRepresentedInWorkspaceLayouts(daemonWorkspaces, enrichedLocalSessions);
+  const unmutedEnrichedSessions = visibleEnrichedSessions.filter((s) => !s.muted);
+  const mutedEnrichedSessions = visibleEnrichedSessions.filter((s) => s.muted);
 
   const {
     eventRouter: paneRuntimeEventRouter,
@@ -1854,8 +1855,8 @@ sendFetchPRDetails,
   }, [unmutedEnrichedSessions, handleSelectSession]);
 
   const workspaceViews = useMemo(
-    () => buildWorkspaceViewModels(daemonWorkspaces, enrichedLocalSessions),
-    [daemonWorkspaces, enrichedLocalSessions],
+    () => buildWorkspaceViewModels(daemonWorkspaces, visibleEnrichedSessions),
+    [daemonWorkspaces, visibleEnrichedSessions],
   );
   const sidebarWorkspaceViews = useMemo(
     () => buildWorkspaceViewModels(daemonWorkspaces, unmutedEnrichedSessions)

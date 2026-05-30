@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildWorkspaceViewModels, firstSessionIdForWorkspace } from './workspaceViewModels';
+import {
+  buildWorkspaceViewModels,
+  filterSessionsRepresentedInWorkspaceLayouts,
+  firstSessionIdForWorkspace,
+} from './workspaceViewModels';
 
 describe('workspaceViewModels', () => {
   it('orders workspaces by daemon order and nests sessions by workspace id', () => {
@@ -120,5 +124,31 @@ describe('workspaceViewModels', () => {
     );
 
     expect(workspace.focusedSessionId).toBe('a1');
+  });
+
+  it('filters sessions that are no longer represented in an authoritative workspace layout', () => {
+    const sessions = [
+      { id: 'a1', label: 'Agent 1', workspaceId: 'workspace-a' },
+      { id: 'a2', label: 'Agent 2', workspaceId: 'workspace-a' },
+      { id: 'stale', label: 'Stale', workspaceId: 'workspace-a' },
+      { id: 'pending', label: 'Pending', workspaceId: 'workspace-pending' },
+    ];
+
+    const filtered = filterSessionsRepresentedInWorkspaceLayouts(
+      [{
+        id: 'workspace-a',
+        title: 'A',
+        directory: '/repo/a',
+        layout: {
+          panes: [
+            { session_id: 'a1' },
+            { session_id: 'a2' },
+          ],
+        },
+      }],
+      sessions,
+    );
+
+    expect(filtered.map((session) => session.id)).toEqual(['a1', 'a2', 'pending']);
   });
 });
