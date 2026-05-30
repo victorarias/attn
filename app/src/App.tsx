@@ -15,6 +15,7 @@ import { ChangesPanel } from './components/ChangesPanel';
 import { DiffDetailPanel } from './components/DiffDetailPanel';
 import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
 import { OpenPRLauncherProgress } from './components/OpenPRLauncherProgress';
+import { SessionCreationProgress, type SessionCreationPhase } from './components/SessionCreationProgress';
 import { RightDock } from './components/RightDock';
 import { SessionTerminalWorkspace } from './components/SessionTerminalWorkspace';
 import { ThumbsModal } from './components/ThumbsModal';
@@ -113,6 +114,15 @@ type OpenPRLauncherJob = {
   id: number;
   pr: DaemonPR;
   progress: OpenPRProgress;
+};
+
+type SessionCreationJob = {
+  id: number;
+  label: string;
+  path: string;
+  phase: SessionCreationPhase;
+  sessionId?: string;
+  error?: string | null;
 };
 
 function App() {
@@ -583,6 +593,9 @@ sendFetchPRDetails,
 }: AppContentProps) {
   const [openPRLauncherJob, setOpenPRLauncherJob] = useState<OpenPRLauncherJob | null>(null);
   const openPRLauncherIdRef = useRef(0);
+  const [sessionCreationJob, setSessionCreationJob] = useState<SessionCreationJob | null>(null);
+  const sessionCreationJobIdRef = useRef(0);
+  const worktreeSessionCreateEndpointsRef = useRef<Set<string>>(new Set());
   const {
     connect,
     sessions,
@@ -610,6 +623,26 @@ sendFetchPRDetails,
     sendRegisterWorkspace(workspaceId, label, cwd, endpointId);
     return createSession(label, cwd, sessionId, agent, endpointId, yoloMode, workspaceId);
   }, [createSession, sendRegisterWorkspace]);
+
+  useEffect(() => {
+    if (!sessionCreationJob?.sessionId || sessionCreationJob.error) {
+      return;
+    }
+    if (daemonSessions.some((session) => session.id === sessionCreationJob.sessionId)) {
+      setSessionCreationJob((current) => (
+        current?.id === sessionCreationJob.id ? null : current
+      ));
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setSessionCreationJob((current) => (
+        current?.id === sessionCreationJob.id
+          ? { ...current, error: 'Session startup timed out.' }
+          : current
+      ));
+    }, 35_000);
+    return () => window.clearTimeout(timeoutId);
+  }, [daemonSessions, sessionCreationJob]);
 
   // UI scale for font sizing (Cmd+/Cmd-) - now uses SettingsContext
   const { scale, increaseScale, decreaseScale, resetScale } = useUIScale();
@@ -1202,6 +1235,8 @@ sendFetchPRDetails,
 
   const handleLocationSelect = useCallback(
     async (path: string, agent: SessionAgent, endpointId?: string, yoloMode = false) => {
+      const jobId = sessionCreationJobIdRef.current + 1;
+      sessionCreationJobIdRef.current = jobId;
       let selectedAgent: SessionAgent;
       if (endpointId) {
         const endpoint = daemonEndpoints.find((entry) => entry.id === endpointId);
@@ -1227,10 +1262,85 @@ sendFetchPRDetails,
       }
       // Note: Location is automatically tracked by daemon when session registers
       const folderName = path.split('/').pop() || 'session';
-      await createWorkspaceSession(folderName, path, undefined, selectedAgent, endpointId, yoloMode);
+      setSessionCreationJob({
+        id: jobId,
+        label: folderName,
+        path,
+        phase: 'starting_session',
+        error: null,
+      });
+      try {
+        const sessionId = await createWorkspaceSession(folderName, path, undefined, selectedAgent, endpointId, yoloMode);
+        setSessionCreationJob((current) => (
+          current?.id === jobId
+            ? { ...current, sessionId, phase: 'starting_session' }
+            : current
+        ));
+      } catch (err) {
+        setSessionCreationJob((current) => (
+          current?.id === jobId
+            ? { ...current, error: err instanceof Error ? err.message : 'Failed to create session' }
+            : current
+        ));
+      }
     },
     [agentAvailability, createWorkspaceSession, daemonEndpoints, hasAvailableAgents, showError]
   );
+
+  const handleCreateWorktreeSession = useCallback((
+    mainRepo: string,
+    branchName: string,
+    startingFrom: string,
+    endpointId: string | undefined,
+    agent: SessionAgent,
+    yoloMode: boolean,
+  ) => {
+    const endpointKey = endpointId || 'local';
+    if (worktreeSessionCreateEndpointsRef.current.has(endpointKey)) {
+      showError('A worktree session is already being created for this target.');
+      return;
+    }
+    worktreeSessionCreateEndpointsRef.current.add(endpointKey);
+    const jobId = sessionCreationJobIdRef.current + 1;
+    sessionCreationJobIdRef.current = jobId;
+    setSessionCreationJob({
+      id: jobId,
+      label: branchName,
+      path: mainRepo,
+      phase: 'creating_worktree',
+      error: null,
+    });
+
+    void (async () => {
+      try {
+        const result = await sendCreateWorktree(mainRepo, branchName, undefined, startingFrom, endpointId);
+        if (!result.success || !result.path) {
+          throw new Error(result.error || 'Failed to create worktree');
+        }
+        const worktreePath = result.path;
+        setSessionCreationJob((current) => (
+          current?.id === jobId
+            ? { ...current, path: worktreePath, phase: 'starting_session' }
+            : current
+        ));
+        const folderName = worktreePath.split('/').pop() || branchName || 'session';
+        const sessionId = await createWorkspaceSession(folderName, worktreePath, undefined, agent, endpointId, yoloMode);
+        setSessionCreationJob((current) => (
+          current?.id === jobId
+            ? { ...current, label: folderName, path: worktreePath, phase: 'starting_session', sessionId }
+            : current
+        ));
+      } catch (err) {
+        setSessionCreationJob((current) => (
+          current?.id === jobId
+            ? { ...current, error: err instanceof Error ? err.message : 'Failed to create session' }
+            : current
+        ));
+      } finally {
+        worktreeSessionCreateEndpointsRef.current.delete(endpointKey);
+      }
+    })();
+  }, [createWorkspaceSession, sendCreateWorktree, showError]);
 
   const closeLocationPicker = useCallback(() => {
     setLocationPickerOpen(false);
@@ -2276,6 +2386,7 @@ sendFetchPRDetails,
         onInspectPath={sendInspectPath}
         onGetRepoInfo={getRepoInfo}
         onCreateWorktree={sendCreateWorktree}
+        onCreateWorktreeSession={handleCreateWorktreeSession}
         onDeleteWorktree={sendDeleteWorktree}
         onError={showError}
         projectsDirectory={settings.projects_directory}
@@ -2283,6 +2394,14 @@ sendFetchPRDetails,
         endpoints={daemonEndpoints}
       />
       <UndoToast />
+      <SessionCreationProgress
+        isVisible={sessionCreationJob !== null}
+        label={sessionCreationJob?.label || ''}
+        path={sessionCreationJob?.path || ''}
+        phase={sessionCreationJob?.phase || 'starting_session'}
+        error={sessionCreationJob?.error}
+        onDismiss={() => setSessionCreationJob(null)}
+      />
       <WorktreeCleanupPrompt
         isVisible={closedWorktree !== null}
         worktreePath={closedWorktree?.path || ''}

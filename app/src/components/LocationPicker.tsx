@@ -69,6 +69,7 @@ interface LocationPickerProps {
   onInspectPath?: (path: string, endpointId?: string) => Promise<InspectPathResult>;
   onGetRepoInfo?: (mainRepo: string, endpointId?: string) => Promise<{ success: boolean; info?: BackendRepoInfo; error?: string }>;
   onCreateWorktree?: (mainRepo: string, branch: string, path?: string, startingFrom?: string, endpointId?: string) => Promise<{ success: boolean; path?: string; error?: string }>;
+  onCreateWorktreeSession?: (mainRepo: string, branch: string, startingFrom: string, endpointId: string | undefined, agent: SessionAgent, yoloMode: boolean) => void;
   onDeleteWorktree?: (path: string, endpointId?: string, options?: { force?: boolean }) => Promise<{ success: boolean; error?: string }>;
   onError?: (message: string) => void;
   projectsDirectory?: string;
@@ -160,6 +161,7 @@ export function LocationPicker({
   onInspectPath,
   onGetRepoInfo,
   onCreateWorktree,
+  onCreateWorktreeSession,
   onDeleteWorktree,
   onError,
   projectsDirectory,
@@ -657,6 +659,20 @@ export function LocationPicker({
       return;
     }
 
+    if (onCreateWorktreeSession) {
+      const selectedAgent = resolvePreferredAgent(agent, effectiveAgentAvailability, 'codex');
+      onCreateWorktreeSession(
+        repoRootPath,
+        branchName,
+        startingFrom,
+        selectedEndpointId,
+        selectedAgent,
+        yoloMode && yoloSupported,
+      );
+      onClose();
+      return;
+    }
+
     const requestGeneration = beginRequestGeneration();
     try {
       const result = await onCreateWorktree(repoRootPath, branchName, undefined, startingFrom, selectedEndpointId);
@@ -681,11 +697,17 @@ export function LocationPicker({
     hasAvailableAgents,
     isRequestCurrent,
     launchSelection,
+    onClose,
     onCreateWorktree,
+    onCreateWorktreeSession,
     onError,
     repoRootPath,
+    agent,
+    effectiveAgentAvailability,
     selectedEndpointId,
     setSelectedPathFromPhysical,
+    yoloMode,
+    yoloSupported,
   ]);
 
   const handleRefresh = useCallback(async () => {
