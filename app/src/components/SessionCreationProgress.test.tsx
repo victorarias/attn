@@ -52,15 +52,18 @@ describe('SessionCreationProgress', () => {
     );
 
     expect(screen.getByRole('dialog')).toHaveTextContent('Creating worktree');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    screen.getByRole('button', { name: 'Other work' }).focus();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(700);
     });
 
-    expect(screen.getByRole('button', { name: /session setup/i })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Other work' })).toHaveFocus();
     expect(container.querySelector('.worktree-cleanup-prompt')).toHaveClass('surface-hidden');
 
-    screen.getByRole('button', { name: 'Other work' }).focus();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
     });

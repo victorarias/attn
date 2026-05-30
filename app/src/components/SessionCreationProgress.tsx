@@ -172,17 +172,17 @@ export function SessionCreationProgress({
     }
     hasCompactedRef.current = true;
     compactTimerRef.current = window.setTimeout(() => {
-      setCompactAnimated(true, true);
+      setCompactAnimated(true, false);
     }, 280);
     return clearCompactTimer;
   }, [clearCompactTimer, hasError, isVisible, setCompactAnimated]);
 
   useEffect(() => {
-    if (!isVisible || isCompact) {
+    if (!isVisible || isCompact || !hasError) {
       return;
     }
     requestAnimationFrame(() => dialogRef.current?.focus());
-  }, [isCompact, isVisible]);
+  }, [hasError, isCompact, isVisible]);
 
   if (!isVisible) return null;
 
