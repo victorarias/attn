@@ -152,7 +152,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '70';
+const PROTOCOL_VERSION = '71';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
 // injects this global before any page script runs — see
@@ -793,7 +793,7 @@ export function useDaemonSocket({
       case 'unregister_workspace':
         rejectPendingByPredicate((key) => key.startsWith('unregister_workspace:'), error);
         return;
-      case 'workspace_layout_split_pane':
+      case 'workspace_layout_add_session_pane':
       case 'workspace_layout_close_pane':
       case 'workspace_layout_focus_pane':
       case 'workspace_layout_rename_pane':
@@ -2362,23 +2362,26 @@ export function useDaemonSocket({
     });
   }, [sendOrQueueCommand]);
 
-  const sendWorkspaceSplitPane = useCallback((
+  const sendWorkspaceAddSessionPane = useCallback((
     workspaceId: string,
-    targetPaneId: string,
-    direction: 'vertical' | 'horizontal',
-    session?: { id: string; title?: string },
+    sessionId: string,
+    title?: string,
+    options: { paneId?: string; targetPaneId?: string; direction?: 'vertical' | 'horizontal' } = {},
   ) => {
+    const paneId = options.paneId || `pane-${sessionId}`;
     return sendWorkspaceCommand(
-      'workspace_layout_split_pane',
+      'workspace_layout_add_session_pane',
       workspaceId,
       {
-        cmd: 'workspace_layout_split_pane',
+        cmd: 'workspace_layout_add_session_pane',
         workspace_id: workspaceId,
-        target_pane_id: targetPaneId,
-        direction,
-        ...(session ? { session_id: session.id, title: session.title } : {}),
+        pane_id: paneId,
+        session_id: sessionId,
+        ...(title ? { title } : {}),
+        ...(options.targetPaneId ? { target_pane_id: options.targetPaneId } : {}),
+        ...(options.direction ? { direction: options.direction } : {}),
       },
-      targetPaneId,
+      paneId,
     );
   }, [sendWorkspaceCommand]);
 
@@ -3706,7 +3709,7 @@ export function useDaemonSocket({
     sendUnsubscribeGitStatus,
     sendSessionVisualized,
     sendWorkspaceGet,
-    sendWorkspaceSplitPane,
+    sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
     sendWorkspaceFocusPane,
     sendWorkspaceRenamePane,

@@ -18,6 +18,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Fixed
 - **Session Creation**: Creating sessions from new worktrees now runs in the background with the same compact progress surface as worktree cleanup, so slow repository/plugin setup no longer traps the app in the picker.
 - **Terminal URL Clicks**: Command-clicking URLs in Ghostty terminals now uses the rendered terminal canvas position, preventing clicks on the row above a URL from opening it when the canvas is vertically offset.
+- **Session Startup**: New workspace sessions and split sessions now appear as daemon-owned loading panes until the shell/agent actually starts, and failed starts remain visible with the failure reason instead of leaving blank panes.
 - **Workspace Splits**: Command-D and Command-Shift-D now create session-backed shell splits that appear in the workspace sidebar.
 - **Workspace Closing**: Closing a session removes only that session from its workspace, including when the closed session is occupying the first pane.
 - **Workspace Sidebar**: Empty workspaces no longer appear in the sidebar, display options stay open while switching modes, and session controls remain aligned at the row edge.

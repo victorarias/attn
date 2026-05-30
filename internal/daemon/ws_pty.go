@@ -20,6 +20,7 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
 // Each attach gets its own subscriber id. The PTY session's subscriber map is
@@ -354,6 +355,23 @@ func resolveSpawnCWD(cwd string) string {
 	return cwd
 }
 
+func (d *Daemon) sendSpawnFailure(client *wsClient, sessionID string, err error) {
+	errMsg := ""
+	if err != nil {
+		errMsg = err.Error()
+	}
+	if strings.TrimSpace(errMsg) == "" {
+		errMsg = "spawn failed"
+	}
+	d.setWorkspacePaneStatusForSession(sessionID, workspacelayout.PaneStatusFailed, errMsg)
+	d.sendToClient(client, protocol.SpawnResultMessage{
+		Event:   protocol.EventSpawnResult,
+		ID:      sessionID,
+		Success: false,
+		Error:   protocol.Ptr(errMsg),
+	})
+}
+
 func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSessionMessage) {
 	requestedAgent := strings.TrimSpace(strings.ToLower(msg.Agent))
 	pluginDriver, hasPluginDriver := d.ensurePluginRegistry().driver(requestedAgent)
@@ -361,23 +379,20 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 	if hasPluginDriver {
 		agent = pluginDriver.Agent
 	} else if requestedAgent != "" && requestedAgent != protocol.AgentShellValue && agentdriver.Get(requestedAgent) == nil {
-		d.sendToClient(client, protocol.SpawnResultMessage{
-			Event:   protocol.EventSpawnResult,
-			ID:      msg.ID,
-			Success: false,
-			Error:   protocol.Ptr(fmt.Sprintf("agent %q is not available", requestedAgent)),
-		})
+		d.sendSpawnFailure(client, msg.ID, fmt.Errorf("agent %q is not available", requestedAgent))
 		return
 	}
 	isShell := agent == protocol.AgentShellValue
 	workspaceID := strings.TrimSpace(msg.WorkspaceID)
 	if workspaceID != "" {
 		if d.store.GetWorkspace(workspaceID) == nil {
+			d.setWorkspacePaneStatusForSession(msg.ID, workspacelayout.PaneStatusFailed, "unknown workspace")
 			d.sendCommandError(client, protocol.CmdSpawnSession, "unknown workspace")
 			return
 		}
 	} else if !isShell {
 		if workspaceID == "" {
+			d.setWorkspacePaneStatusForSession(msg.ID, workspacelayout.PaneStatusFailed, "missing workspace_id")
 			d.sendCommandError(client, protocol.CmdSpawnSession, "missing workspace_id")
 			return
 		}
@@ -390,12 +405,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		label = filepath.Base(cwd)
 	}
 	if msg.Cols <= 0 || msg.Rows <= 0 || msg.Cols > maxPTYDimValue || msg.Rows > maxPTYDimValue {
-		d.sendToClient(client, protocol.SpawnResultMessage{
-			Event:   protocol.EventSpawnResult,
-			ID:      msg.ID,
-			Success: false,
-			Error:   protocol.Ptr(fmt.Sprintf("invalid terminal size cols=%d rows=%d (expected 1..%d)", msg.Cols, msg.Rows, maxPTYDimValue)),
-		})
+		d.sendSpawnFailure(client, msg.ID, fmt.Errorf("invalid terminal size cols=%d rows=%d (expected 1..%d)", msg.Cols, msg.Rows, maxPTYDimValue))
 		return
 	}
 	resumeSessionID := protocol.Deref(msg.ResumeSessionID)
@@ -460,23 +470,13 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		result, err := d.resolvePluginDriverLaunch(pluginDriver, params, existingSession != nil && pluginDriver.Capabilities["resume"])
 		if err != nil {
 			d.finishPluginSessionLaunch(msg.ID, false)
-			d.sendToClient(client, protocol.SpawnResultMessage{
-				Event:   protocol.EventSpawnResult,
-				ID:      msg.ID,
-				Success: false,
-				Error:   protocol.Ptr(err.Error()),
-			})
+			d.sendSpawnFailure(client, msg.ID, err)
 			return
 		}
 		commandEnv, err := pluginCommandEnv(result.Env)
 		if err != nil {
 			d.finishPluginSessionLaunch(msg.ID, false)
-			d.sendToClient(client, protocol.SpawnResultMessage{
-				Event:   protocol.EventSpawnResult,
-				ID:      msg.ID,
-				Success: false,
-				Error:   protocol.Ptr(err.Error()),
-			})
+			d.sendSpawnFailure(client, msg.ID, err)
 			return
 		}
 		spawnOpts.ExternalCommand = append([]string(nil), result.Argv...)
@@ -488,12 +488,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		if hasPluginDriver {
 			d.finishPluginSessionLaunch(msg.ID, false)
 		}
-		d.sendToClient(client, protocol.SpawnResultMessage{
-			Event:   protocol.EventSpawnResult,
-			ID:      msg.ID,
-			Success: false,
-			Error:   protocol.Ptr(err.Error()),
-		})
+		d.sendSpawnFailure(client, msg.ID, err)
 		return
 	}
 
@@ -569,9 +564,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		}
 		d.store.UpsertRecentLocation(cwd, label)
 		d.associateSessionWithWorkspace(session.ID, workspaceID)
-		if _, err := d.ensureWorkspaceLayout(workspaceID); err != nil {
-			d.logf("workspace bootstrap failed for workspace %s: %v", workspaceID, err)
-		}
+		d.setWorkspacePaneStatusForSession(session.ID, workspacelayout.PaneStatusReady, "")
 		eventType := protocol.EventSessionRegistered
 		if existingSession != nil {
 			eventType = protocol.EventSessionStateChanged
@@ -580,7 +573,6 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			Event:   eventType,
 			Session: d.sessionForBroadcast(session),
 		})
-		d.broadcastWorkspaceLayout(workspaceID)
 		d.recomputeAndBroadcastWorkspaceForSession(session.ID)
 	}
 	if hasPluginDriver {

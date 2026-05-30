@@ -25,12 +25,22 @@ const (
 	PaneKindAgent PaneKind = "agent"
 )
 
+type PaneStatus string
+
+const (
+	PaneStatusSpawning PaneStatus = "spawning"
+	PaneStatusReady    PaneStatus = "ready"
+	PaneStatusFailed   PaneStatus = "failed"
+)
+
 type Pane struct {
 	PaneID    string
 	RuntimeID string
 	SessionID string
 	Kind      PaneKind
 	Title     string
+	Status    PaneStatus
+	Error     string
 }
 
 type Node struct {
@@ -69,6 +79,7 @@ func DefaultWorkspaceLayout(workspaceID, paneID, sessionID string) WorkspaceLayo
 				SessionID: sessionID,
 				Kind:      PaneKindAgent,
 				Title:     DefaultPaneTitle,
+				Status:    PaneStatusReady,
 			},
 		},
 	}
@@ -114,12 +125,21 @@ func NormalizeWorkspaceLayout(snapshot WorkspaceLayout) WorkspaceLayout {
 		if title == "" {
 			title = paneID
 		}
+		status := pane.Status
+		if status == "" {
+			status = PaneStatusReady
+		}
+		if status != PaneStatusSpawning && status != PaneStatusReady && status != PaneStatusFailed {
+			status = PaneStatusReady
+		}
 		panesByID[paneID] = Pane{
 			PaneID:    paneID,
 			RuntimeID: runtimeID,
 			SessionID: sessionID,
 			Kind:      PaneKindAgent,
 			Title:     title,
+			Status:    status,
+			Error:     strings.TrimSpace(pane.Error),
 		}
 	}
 

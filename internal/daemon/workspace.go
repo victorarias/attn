@@ -403,9 +403,6 @@ func (d *Daemon) associateSessionWithWorkspace(sessionID, workspaceID string) {
 		return
 	}
 	d.store.SetSessionWorkspaceID(sessionID, workspaceID)
-	if err := d.ensureAgentPaneInWorkspace(workspaceID, sessionID, title); err != nil {
-		d.logf("workspace layout agent pane ensure failed for session %s: %v", sessionID, err)
-	}
 	updated, changed := d.recomputeWorkspaceStatus(workspaceID)
 	if !changed {
 		updated, _ = d.workspaces.snapshot(workspaceID)

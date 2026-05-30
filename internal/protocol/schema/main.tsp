@@ -42,6 +42,12 @@ enum WorkspaceLayoutPaneKind {
   agent,
 }
 
+enum WorkspaceLayoutPaneStatus {
+  spawning,
+  ready,
+  failed,
+}
+
 enum WorkspaceLayoutSplitDirection {
   vertical,
   horizontal,
@@ -268,6 +274,8 @@ model WorkspaceLayoutPane {
   session_id?: string;
   kind: WorkspaceLayoutPaneKind;
   title: string;
+  status: WorkspaceLayoutPaneStatus;
+  error?: string;
 }
 
 model WorkspaceLayout {
@@ -778,13 +786,14 @@ model WorkspaceLayoutGetMessage {
   workspace_id: string;
 }
 
-model WorkspaceLayoutSplitPaneMessage {
-  cmd: "workspace_layout_split_pane";
+model WorkspaceLayoutAddSessionPaneMessage {
+  cmd: "workspace_layout_add_session_pane";
   workspace_id: string;
-  target_pane_id: string;
-  direction: WorkspaceLayoutSplitDirection;
-  session_id?: string;
+  pane_id?: string;
+  session_id: string;
   title?: string;
+  target_pane_id?: string;
+  direction?: WorkspaceLayoutSplitDirection;
 }
 
 model WorkspaceLayoutClosePaneMessage {

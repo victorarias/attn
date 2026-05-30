@@ -2633,7 +2633,13 @@ func TestDaemon_HandleUnregisterWS_RemovesSessionPaneAndBroadcastsSessionUnregis
 		t.Fatalf("layout panes after unregister = %+v, want remaining agent pane only", layout.Panes)
 	}
 
-	event := readOutboundEvent(t, client)
+	var event map[string]interface{}
+	for i := 0; i < 3; i++ {
+		event = readOutboundEvent(t, client)
+		if asString(event["event"]) == protocol.EventSessionUnregistered {
+			break
+		}
+	}
 	if asString(event["event"]) != protocol.EventSessionUnregistered {
 		t.Fatalf("unexpected event after unregister: %+v", event)
 	}

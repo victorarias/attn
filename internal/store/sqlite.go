@@ -324,6 +324,7 @@ var migrations = []migration{
 		ALTER TABLE sessions ADD COLUMN agent_driver_run_id TEXT NOT NULL DEFAULT '';
 		ALTER TABLE sessions ADD COLUMN agent_driver_report_seq INTEGER NOT NULL DEFAULT 0;
 	`},
+	{40, "add workspace pane lifecycle status", ""},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -449,6 +450,11 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 39 {
 			if err := applyMigration39(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 40 {
+			if err := applyMigration40(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -753,6 +759,28 @@ func applyMigration39(tx *sql.Tx) error {
 	}
 	if !hasReportSeq {
 		if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN agent_driver_report_seq INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyMigration40(tx *sql.Tx) error {
+	hasStatus, err := columnExists(tx, "workspace_layout_panes", "status")
+	if err != nil {
+		return err
+	}
+	if !hasStatus {
+		if _, err := tx.Exec("ALTER TABLE workspace_layout_panes ADD COLUMN status TEXT NOT NULL DEFAULT 'ready'"); err != nil {
+			return err
+		}
+	}
+	hasError, err := columnExists(tx, "workspace_layout_panes", "error")
+	if err != nil {
+		return err
+	}
+	if !hasError {
+		if _, err := tx.Exec("ALTER TABLE workspace_layout_panes ADD COLUMN error TEXT NOT NULL DEFAULT ''"); err != nil {
 			return err
 		}
 	}

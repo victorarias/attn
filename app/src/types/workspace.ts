@@ -23,6 +23,8 @@ export interface AgentTerminal {
   runtimeId: string;
   sessionId: string;
   title: string;
+  status?: 'spawning' | 'ready' | 'failed';
+  error?: string;
 }
 
 export interface TerminalWorkspaceState {
@@ -232,12 +234,17 @@ function parseLayoutJSON(layoutJSON: string): TerminalLayoutNode | null {
 function agentTerminalsFromPanes(panes: PaneElement[]): AgentTerminal[] {
   return panes
     .filter((pane) => pane.kind === 'agent' && typeof pane.runtime_id === 'string' && typeof pane.session_id === 'string')
-    .map((pane) => ({
-      id: pane.pane_id,
-      runtimeId: pane.runtime_id as string,
-      sessionId: pane.session_id as string,
-      title: pane.title || pane.pane_id,
-    }));
+    .map((pane) => {
+      const status = pane.status && pane.status !== 'ready' ? pane.status : undefined;
+      return {
+        id: pane.pane_id,
+        runtimeId: pane.runtime_id as string,
+        sessionId: pane.session_id as string,
+        title: pane.title || pane.pane_id,
+        ...(status ? { status } : {}),
+        ...(pane.error ? { error: pane.error } : {}),
+      };
+    });
 }
 
 export function workspaceSnapshotFromDaemonWorkspace(workspace: DaemonWorkspaceSnapshot): TerminalWorkspaceSnapshot {

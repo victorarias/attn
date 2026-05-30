@@ -166,7 +166,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     );
 
     const runtimePanes = useMemo(() => ([
-      ...agentPanes.map((pane) => {
+      ...agentPanes.filter((pane) => !pane.status || pane.status === 'ready').map((pane) => {
         const paneSession = sessionById.get(pane.sessionId);
         return {
           paneId: pane.id,
@@ -511,6 +511,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       if (agentPane) {
         const paneSession = sessionById.get(agentPane.sessionId);
         const paneTitle = paneSession?.label || agentPane.title || 'Session';
+        const paneStatus = agentPane.status || 'ready';
+        const isPaneStarting = paneStatus === 'spawning';
+        const isPaneFailed = paneStatus === 'failed';
         return (
           <div
             key={agentPane.id}
@@ -529,16 +532,23 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
               {showMainHeader ? <span className="workspace-pane-title">{paneTitle}</span> : null}
             </div>
             <div className="workspace-pane-body">
-              <GhosttyTerminal
-                ref={(handle) => runtime.setTerminalHandle(agentPane.id, handle)}
-                fontSize={fontSize}
-                resolvedTheme={resolvedTheme}
-                debugName={`agent:${paneTitle}:${paneSession?.agent ?? sessionAgent}:${agentPane.sessionId}`}
-                runtimeLogMeta={{ sessionId: agentPane.sessionId, paneId: agentPane.id, runtimeId: agentPane.runtimeId, paneKind: 'agent', isActivePane: activePaneId === agentPane.id, isActiveSession, paneCount: paneIds.length }}
-                onInput={runtime.handleTerminalInput(agentPane.id)}
-                onReady={handleGhosttyTerminalReady(agentPane.id)}
-                onResize={runtime.handleTerminalResize(agentPane.id)}
-              />
+              {isPaneStarting || isPaneFailed ? (
+                <div className={`workspace-pane-status workspace-pane-status--${paneStatus}`}>
+                  <span className="workspace-pane-status-spinner" aria-hidden="true" />
+                  <span>{isPaneFailed ? (agentPane.error || 'Session failed to start') : `Starting ${paneTitle}...`}</span>
+                </div>
+              ) : (
+                <GhosttyTerminal
+                  ref={(handle) => runtime.setTerminalHandle(agentPane.id, handle)}
+                  fontSize={fontSize}
+                  resolvedTheme={resolvedTheme}
+                  debugName={`agent:${paneTitle}:${paneSession?.agent ?? sessionAgent}:${agentPane.sessionId}`}
+                  runtimeLogMeta={{ sessionId: agentPane.sessionId, paneId: agentPane.id, runtimeId: agentPane.runtimeId, paneKind: 'agent', isActivePane: activePaneId === agentPane.id, isActiveSession, paneCount: paneIds.length }}
+                  onInput={runtime.handleTerminalInput(agentPane.id)}
+                  onReady={handleGhosttyTerminalReady(agentPane.id)}
+                  onResize={runtime.handleTerminalResize(agentPane.id)}
+                />
+              )}
             </div>
           </div>
         );

@@ -73,7 +73,7 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdPtyResize,
 		protocol.CmdKillSession,
 		protocol.CmdWorkspaceLayoutGet,
-		protocol.CmdWorkspaceLayoutSplitPane,
+		protocol.CmdWorkspaceLayoutAddSessionPane,
 		protocol.CmdWorkspaceLayoutClosePane,
 		protocol.CmdWorkspaceLayoutFocusPane,
 		protocol.CmdWorkspaceLayoutRenamePane,

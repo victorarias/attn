@@ -346,13 +346,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         } satisfies Session;
       });
 
-      const syncedIds = new Set(syncedSessions.map((session) => session.id));
+      const pendingLayoutSessions = state.sessions.filter((session) => (
+        !syncedSessions.some((synced) => synced.id === session.id)
+        && session.workspace.agents.some((pane) => pane.sessionId === session.id && pane.status !== 'ready')
+      ));
+      const allSessions = [...syncedSessions, ...pendingLayoutSessions];
+      const syncedIds = new Set(allSessions.map((session) => session.id));
       const prunedRecent = state.recentSessionIds.filter((entry) => syncedIds.has(entry));
 
       let nextActiveSessionID = state.activeSessionId;
       let nextRecent = prunedRecent;
       if (nextActiveSessionID && !syncedIds.has(nextActiveSessionID)) {
-        const fallback = pickFallbackActive(nextActiveSessionID, syncedSessions, prunedRecent);
+        const fallback = pickFallbackActive(nextActiveSessionID, allSessions, prunedRecent);
         nextActiveSessionID = fallback;
         nextRecent = fallback
           ? prunedRecent.filter((entry) => entry !== fallback)
@@ -360,7 +365,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       }
 
       return {
-        sessions: syncedSessions,
+        sessions: allSessions,
         activeSessionId: nextActiveSessionID,
         recentSessionIds: nextRecent,
       };
@@ -375,13 +380,44 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         workspaceSnapshotFromDaemonWorkspace(workspace.layout!),
       ]));
 
-    set((state) => ({
-      sessions: state.sessions.map((session) => ({
+    set((state) => {
+      const sessions = state.sessions.map((session) => ({
         ...session,
         workspace: workspaceByID.get(session.workspaceId)?.workspace ?? session.workspace,
         daemonActivePaneId: workspaceByID.get(session.workspaceId)?.daemonActivePaneId ?? session.daemonActivePaneId,
-      })),
-    }));
+      }));
+      const existingIDs = new Set(sessions.map((session) => session.id));
+
+      for (const workspace of daemonWorkspaces) {
+        if (!workspace.layout) {
+          continue;
+        }
+        const snapshot = workspaceByID.get(workspace.id);
+        if (!snapshot) {
+          continue;
+        }
+        for (const pane of snapshot.workspace.agents) {
+          if (existingIDs.has(pane.sessionId) || pane.status === 'ready') {
+            continue;
+          }
+          existingIDs.add(pane.sessionId);
+          sessions.push({
+            id: pane.sessionId,
+            label: pane.title || workspace.title,
+            state: pane.status === 'failed' ? 'unknown' : 'launching',
+            cwd: workspace.directory,
+            workspaceId: workspace.id,
+            agent: 'codex',
+            endpointId: workspace.endpoint_id,
+            transcriptMatched: true,
+            workspace: snapshot.workspace,
+            daemonActivePaneId: snapshot.daemonActivePaneId,
+          });
+        }
+      }
+
+      return { sessions };
+    });
   },
 }));
 

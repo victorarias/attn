@@ -866,8 +866,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleKillSession(client, msg.(*protocol.KillSessionMessage))
 	case protocol.CmdWorkspaceLayoutGet:
 		d.handleWorkspaceLayoutGet(client, msg.(*protocol.WorkspaceLayoutGetMessage))
-	case protocol.CmdWorkspaceLayoutSplitPane:
-		d.handleWorkspaceLayoutSplitPane(client, msg.(*protocol.WorkspaceLayoutSplitPaneMessage))
+	case protocol.CmdWorkspaceLayoutAddSessionPane:
+		d.handleWorkspaceLayoutAddSessionPane(client, msg.(*protocol.WorkspaceLayoutAddSessionPaneMessage))
 	case protocol.CmdWorkspaceLayoutClosePane:
 		d.handleWorkspaceLayoutClosePane(client, msg.(*protocol.WorkspaceLayoutClosePaneMessage))
 	case protocol.CmdWorkspaceLayoutFocusPane:
@@ -1013,8 +1013,8 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.WorkspaceLayoutGetMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspaceLayoutSplitPane:
-		if typed, ok := msg.(*protocol.WorkspaceLayoutSplitPaneMessage); ok {
+	case protocol.CmdWorkspaceLayoutAddSessionPane:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutAddSessionPaneMessage); ok {
 			return typed.WorkspaceID
 		}
 	case protocol.CmdWorkspaceLayoutClosePane:

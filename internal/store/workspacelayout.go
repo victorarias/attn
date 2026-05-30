@@ -65,10 +65,14 @@ func (s *Store) SaveWorkspaceLayout(snapshot workspacelayout.WorkspaceLayout) er
 		if createdAt == "" {
 			createdAt = now
 		}
+		status := string(pane.Status)
+		if status == "" {
+			status = string(workspacelayout.PaneStatusReady)
+		}
 		if _, err := tx.Exec(`
-			INSERT INTO workspace_layout_panes (workspace_id, pane_id, runtime_id, session_id, kind, title, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		`, snapshot.WorkspaceID, pane.PaneID, pane.RuntimeID, nilIfEmpty(pane.SessionID), pane.Kind, pane.Title, createdAt, now); err != nil {
+			INSERT INTO workspace_layout_panes (workspace_id, pane_id, runtime_id, session_id, kind, title, status, error, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, snapshot.WorkspaceID, pane.PaneID, pane.RuntimeID, nilIfEmpty(pane.SessionID), pane.Kind, pane.Title, status, pane.Error, createdAt, now); err != nil {
 			return err
 		}
 	}
@@ -108,7 +112,7 @@ func (s *Store) GetWorkspaceLayout(workspaceID string) *workspacelayout.Workspac
 	}
 
 	rows, err := s.db.Query(`
-		SELECT pane_id, runtime_id, session_id, kind, title
+		SELECT pane_id, runtime_id, session_id, kind, title, status, error
 		FROM workspace_layout_panes
 		WHERE workspace_id = ?
 		ORDER BY created_at ASC, pane_id ASC
@@ -127,7 +131,7 @@ func (s *Store) GetWorkspaceLayout(workspaceID string) *workspacelayout.Workspac
 	for rows.Next() {
 		var pane workspacelayout.Pane
 		var sessionID sql.NullString
-		if err := rows.Scan(&pane.PaneID, &pane.RuntimeID, &sessionID, &pane.Kind, &pane.Title); err != nil {
+		if err := rows.Scan(&pane.PaneID, &pane.RuntimeID, &sessionID, &pane.Kind, &pane.Title, &pane.Status, &pane.Error); err != nil {
 			log.Printf("[store] GetWorkspaceLayout: failed to scan pane for workspace %s: %v", workspaceID, err)
 			continue
 		}

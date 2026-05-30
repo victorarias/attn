@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useSessionStore } from './sessions';
-import { WorkspaceLayoutPaneKind, WorkspaceStatus } from '../types/generated';
+import { WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceStatus } from '../types/generated';
 
 const { mockPtySpawn, mockPtyKill } = vi.hoisted(() => ({
   mockPtySpawn: vi.fn(),
@@ -152,8 +152,8 @@ describe('sessions store', () => {
             ],
           }),
           panes: [
-            { pane_id: 'pane-session', kind: WorkspaceLayoutPaneKind.Agent, title: 'Agent', runtime_id: sessionId, session_id: sessionId },
-            { pane_id: 'pane-shell', kind: WorkspaceLayoutPaneKind.Agent, title: 'Shell 1', runtime_id: 'runtime-shell', session_id: 'sess-shell' },
+            { pane_id: 'pane-session', kind: WorkspaceLayoutPaneKind.Agent, title: 'Agent', runtime_id: sessionId, session_id: sessionId, status: WorkspaceLayoutPaneStatus.Ready },
+            { pane_id: 'pane-shell', kind: WorkspaceLayoutPaneKind.Agent, title: 'Shell 1', runtime_id: 'runtime-shell', session_id: 'sess-shell', status: WorkspaceLayoutPaneStatus.Ready },
           ],
         },
       },
@@ -193,7 +193,7 @@ describe('sessions store', () => {
           active_pane_id: 'missing-pane',
           layout_json: '{not-json',
           panes: [
-            { pane_id: 'pane-session', kind: WorkspaceLayoutPaneKind.Agent, title: 'Agent', runtime_id: sessionId, session_id: sessionId },
+            { pane_id: 'pane-session', kind: WorkspaceLayoutPaneKind.Agent, title: 'Agent', runtime_id: sessionId, session_id: sessionId, status: WorkspaceLayoutPaneStatus.Ready },
           ],
         },
       },
@@ -207,7 +207,7 @@ describe('sessions store', () => {
           active_pane_id: 'pane-x',
           layout_json: '',
           panes: [
-            { pane_id: 'pane-x', kind: WorkspaceLayoutPaneKind.Agent, title: 'Shell X', runtime_id: 'runtime-x' },
+            { pane_id: 'pane-x', kind: WorkspaceLayoutPaneKind.Agent, title: 'Shell X', runtime_id: 'runtime-x', status: WorkspaceLayoutPaneStatus.Ready },
           ],
         },
       },

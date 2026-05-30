@@ -310,7 +310,7 @@ function App() {
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
     sendSessionVisualized,
-    sendWorkspaceSplitPane,
+    sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
     sendRuntimeInput,
     isRuntimeAttached,
@@ -425,7 +425,7 @@ function App() {
         sendSubscribeGitStatus={sendSubscribeGitStatus}
         sendUnsubscribeGitStatus={sendUnsubscribeGitStatus}
         sendSessionVisualized={sendSessionVisualized}
-        sendWorkspaceSplitPane={sendWorkspaceSplitPane}
+        sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
         sendRuntimeInput={sendRuntimeInput}
         isRuntimeAttached={isRuntimeAttached}
@@ -507,7 +507,7 @@ interface AppContentProps {
   sendSubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendSubscribeGitStatus'];
   sendUnsubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendUnsubscribeGitStatus'];
   sendSessionVisualized: ReturnType<typeof useDaemonSocket>['sendSessionVisualized'];
-  sendWorkspaceSplitPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceSplitPane'];
+  sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
   sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
   isRuntimeAttached: ReturnType<typeof useDaemonSocket>['isRuntimeAttached'];
@@ -584,7 +584,7 @@ sendFetchPRDetails,
   sendSubscribeGitStatus,
   sendUnsubscribeGitStatus,
   sendSessionVisualized,
-  sendWorkspaceSplitPane,
+  sendWorkspaceAddSessionPane,
   sendWorkspaceClosePane,
   sendRuntimeInput,
   isRuntimeAttached,
@@ -638,10 +638,13 @@ sendFetchPRDetails,
     const workspaceId = `workspace-${sessionId}`;
     let localCreated = false;
     let spawned = false;
+    let paneAdded = false;
     try {
       await sendRegisterWorkspace(workspaceId, label, cwd, endpointId);
       const createdSessionId = await createSession(label, cwd, sessionId, agent, endpointId, yoloMode, workspaceId);
       localCreated = true;
+      await sendWorkspaceAddSessionPane(workspaceId, sessionId, label);
+      paneAdded = true;
       const spawnArgs = takeSessionSpawnArgs(sessionId, 80, 24);
       if (!spawnArgs) {
         throw new Error('Session spawn arguments were not prepared.');
@@ -652,16 +655,19 @@ sendFetchPRDetails,
     } catch (error) {
       if (spawned) {
         await sendUnregisterSession(sessionId).catch(console.error);
-      } else if (localCreated) {
+      } else if (localCreated && !paneAdded) {
         closeSession(sessionId);
       }
-      await sendUnregisterWorkspace(workspaceId).catch(console.error);
+      if (!paneAdded) {
+        await sendUnregisterWorkspace(workspaceId).catch(console.error);
+      }
       throw error;
     }
   }, [
     closeSession,
     createSession,
     sendRegisterWorkspace,
+    sendWorkspaceAddSessionPane,
     sendUnregisterSession,
     sendUnregisterWorkspace,
     takeSessionSpawnArgs,
@@ -848,12 +854,18 @@ sendFetchPRDetails,
   const enrichedLocalSessions = sessions.map((s) => {
     const daemonSession = daemonSessions.find((ds) => ds.id === s.id);
     const rawState = daemonSession?.state ?? s.state;
+    const paneStatus = s.workspace.agents.find((pane) => pane.sessionId === s.id)?.status;
+    const paneState = paneStatus === 'failed'
+      ? 'unknown'
+      : paneStatus === 'spawning'
+        ? 'launching'
+        : null;
     const reviewLoop = reviewLoopsBySessionId[s.id];
     const endpointId = daemonSession?.endpoint_id ?? s.endpointId;
     const endpoint = endpointId ? endpointById.get(endpointId) : undefined;
     return {
       ...s,
-      state: normalizeSessionState(rawState),
+      state: paneState || normalizeSessionState(rawState),
       endpointId,
       endpointName: endpoint?.name,
       endpointStatus: endpoint?.status,
@@ -1302,6 +1314,7 @@ sendFetchPRDetails,
     const paneId = targetPaneId || getActivePaneIdForSession(activeSession);
     const label = options.label || nextSplitSessionLabel(workspaceId, agent);
     let spawned = false;
+    let paneAdded = false;
 
     try {
       await createSession(
@@ -1314,18 +1327,19 @@ sendFetchPRDetails,
         workspaceId,
       );
       const spawnArgs = takeSessionSpawnArgs(sessionId, 80, 24);
+      await sendWorkspaceAddSessionPane(workspaceId, sessionId, label, { targetPaneId: paneId, direction });
+      paneAdded = true;
       if (spawnArgs) {
         await ptySpawn({ args: spawnArgs });
         spawned = true;
       }
-      await sendWorkspaceSplitPane(workspaceId, paneId, direction, { id: sessionId, title: label });
       setView('session');
       setActiveSession(sessionId);
       setUtilityFocusRequestToken((token) => token + 1);
     } catch (error) {
       if (spawned) {
         await sendUnregisterSession(sessionId).catch(console.error);
-      } else {
+      } else if (!paneAdded) {
         closeSession(sessionId);
       }
       showError(error instanceof Error ? error.message : 'Failed to create session split');
@@ -1337,7 +1351,7 @@ sendFetchPRDetails,
     getActivePaneIdForSession,
     handleNewWorkspace,
     nextSplitSessionLabel,
-    sendWorkspaceSplitPane,
+    sendWorkspaceAddSessionPane,
     sendUnregisterSession,
     sessions,
     setActiveSession,
