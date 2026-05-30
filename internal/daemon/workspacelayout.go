@@ -412,6 +412,17 @@ func (d *Daemon) handleWorkspaceLayoutClosePane(client *wsClient, msg *protocol.
 	snapshot.Layout = layout
 	snapshot.Panes = nextPanes
 	normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot)
+
+	if strings.TrimSpace(sessionID) != "" {
+		if session := d.unregisterSession(sessionID, syscall.SIGTERM); session != nil {
+			d.wsHub.Broadcast(&protocol.WebSocketEvent{
+				Event:   protocol.EventSessionUnregistered,
+				Session: d.sessionForBroadcast(session),
+			})
+			d.dissociateSessionFromWorkspace(session.ID)
+		}
+	}
+
 	if len(normalized.Panes) == 0 {
 		d.store.RemoveWorkspaceLayout(msg.WorkspaceID)
 	} else {
@@ -422,18 +433,9 @@ func (d *Daemon) handleWorkspaceLayoutClosePane(client *wsClient, msg *protocol.
 	}
 	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutClosePane, msg.WorkspaceID, protocol.Ptr(msg.PaneID), nil)
 
-	if strings.TrimSpace(sessionID) != "" {
-		if session := d.unregisterSession(sessionID, syscall.SIGTERM); session != nil {
-			d.wsHub.Broadcast(&protocol.WebSocketEvent{
-				Event:   protocol.EventSessionUnregistered,
-				Session: d.sessionForBroadcast(session),
-			})
-			d.dissociateSessionFromWorkspace(session.ID)
-		}
+	if len(normalized.Panes) > 0 {
 		d.broadcastWorkspaceLayoutUpdated(msg.WorkspaceID)
-		return
 	}
-	d.broadcastWorkspaceLayoutUpdated(msg.WorkspaceID)
 }
 
 func (d *Daemon) removeWorkspaceLayoutPaneForSession(sessionID string) {

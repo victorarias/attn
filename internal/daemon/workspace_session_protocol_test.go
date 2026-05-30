@@ -73,6 +73,68 @@ func TestWorkspaceSessionProtocolLifecycleMatchesAppOrder(t *testing.T) {
 	}
 }
 
+func TestWorkspaceLayoutClosePaneKeepsLayoutUntilSessionUnregistered(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	client := newWorkspaceProtocolTestClient()
+	workspaceID := "workspace-close-order"
+	sessionID := "session-close-order"
+	paneID := "pane-session-close-order"
+	cwd := t.TempDir()
+
+	backend := &fakeSpawnBackend{}
+	backend.onKill = func() {
+		if session := d.store.Get(sessionID); session == nil {
+			t.Fatalf("session %s was removed before pty kill", sessionID)
+		}
+		if snapshot := d.store.GetWorkspaceLayout(workspaceID); snapshot == nil {
+			t.Fatalf("workspace layout %s was removed while session %s still existed", workspaceID, sessionID)
+		}
+		if _, _, ok := d.store.FindWorkspaceLayoutPaneBySessionID(sessionID); !ok {
+			t.Fatalf("workspace pane mapping for session %s was removed before pty kill", sessionID)
+		}
+	}
+	d.ptyBackend = backend
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        workspaceID,
+		Title:     "Close Order",
+		Directory: cwd,
+	})
+	d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutAddSessionPane,
+		WorkspaceID: workspaceID,
+		PaneID:      protocol.Ptr(paneID),
+		SessionID:   sessionID,
+		Title:       protocol.Ptr("shell"),
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, paneID, true)
+	d.handleSpawnSession(client, &protocol.SpawnSessionMessage{
+		Cmd:         protocol.CmdSpawnSession,
+		ID:          sessionID,
+		Label:       protocol.Ptr("shell"),
+		Cwd:         cwd,
+		Agent:       protocol.AgentShellValue,
+		WorkspaceID: workspaceID,
+		Cols:        80,
+		Rows:        24,
+	})
+	expectSpawnResult(t, client, sessionID, true)
+
+	d.handleWorkspaceLayoutClosePane(client, &protocol.WorkspaceLayoutClosePaneMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutClosePane,
+		WorkspaceID: workspaceID,
+		PaneID:      paneID,
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutClosePane, workspaceID, paneID, true)
+	if session := d.store.Get(sessionID); session != nil {
+		t.Fatalf("session %s still registered after close", sessionID)
+	}
+	if snapshot := d.store.GetWorkspaceLayout(workspaceID); snapshot != nil {
+		t.Fatalf("workspace layout still exists after closing only pane: %+v", snapshot)
+	}
+}
+
 func TestWorkspaceSessionProtocolSpawnFailureMarksPaneFailed(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.ptyBackend = &failingSpawnBackend{err: errors.New("boom")}
