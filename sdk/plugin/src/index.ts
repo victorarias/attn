@@ -36,6 +36,7 @@ export type WorktreeDeleteParams = {
   main_repo: string;
   path: string;
   branch?: string;
+  force: boolean;
 };
 
 export type WorktreeDeleteResult = ProviderResult;

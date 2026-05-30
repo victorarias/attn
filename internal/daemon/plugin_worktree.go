@@ -39,6 +39,7 @@ type worktreeDeleteProviderParams struct {
 	MainRepo string `json:"main_repo"`
 	Path     string `json:"path"`
 	Branch   string `json:"branch,omitempty"`
+	Force    bool   `json:"force"`
 }
 
 type worktreeDeleteProviderResult struct {
@@ -141,7 +142,7 @@ func (d *Daemon) dispatchWorktreeCreateProvider(mainRepo, branch, startingFrom, 
 	return "", "", false, nil
 }
 
-func (d *Daemon) dispatchWorktreeDeleteProvider(mainRepo, path, branch string) (bool, error) {
+func (d *Daemon) dispatchWorktreeDeleteProvider(mainRepo, path, branch string, force bool) (bool, error) {
 	providers := d.ensurePluginRegistry().handlersForSurface(worktreeDeleteProviderSurface)
 	if len(providers) == 0 {
 		return false, nil
@@ -151,6 +152,7 @@ func (d *Daemon) dispatchWorktreeDeleteProvider(mainRepo, path, branch string) (
 		MainRepo: mainRepo,
 		Path:     path,
 		Branch:   branch,
+		Force:    force,
 	}
 	for _, provider := range providers {
 		var result worktreeDeleteProviderResult

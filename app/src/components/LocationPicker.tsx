@@ -69,7 +69,7 @@ interface LocationPickerProps {
   onInspectPath?: (path: string, endpointId?: string) => Promise<InspectPathResult>;
   onGetRepoInfo?: (mainRepo: string, endpointId?: string) => Promise<{ success: boolean; info?: BackendRepoInfo; error?: string }>;
   onCreateWorktree?: (mainRepo: string, branch: string, path?: string, startingFrom?: string, endpointId?: string) => Promise<{ success: boolean; path?: string; error?: string }>;
-  onDeleteWorktree?: (path: string, endpointId?: string) => Promise<{ success: boolean; error?: string }>;
+  onDeleteWorktree?: (path: string, endpointId?: string, options?: { force?: boolean }) => Promise<{ success: boolean; error?: string }>;
   onError?: (message: string) => void;
   projectsDirectory?: string;
   agentAvailability?: AgentAvailability;
@@ -988,9 +988,11 @@ export function LocationPicker({
             onSelectMainRepo={handleSelectMainRepo}
             onSelectWorktree={handleSelectWorktree}
             onCreateWorktree={handleCreateWorktree}
-            onDeleteWorktree={onDeleteWorktree ? async (path) => {
+            onDeleteWorktree={onDeleteWorktree ? async (path, options) => {
               const requestGeneration = requestGenerationRef.current;
-              const deleteResult = await onDeleteWorktree(path, selectedEndpointId);
+              const deleteResult = options
+                ? await onDeleteWorktree(path, selectedEndpointId, options)
+                : await onDeleteWorktree(path, selectedEndpointId);
               if (!deleteResult.success) {
                 throw new Error(deleteResult.error || 'Failed to delete worktree');
               }

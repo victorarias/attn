@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -421,13 +422,16 @@ func TestDoDeleteWorktree_ProviderHandledFinalizesDaemonState(t *testing.T) {
 		if params.Branch != "feat/provider-delete" {
 			t.Fatalf("provider delete branch=%q, want feat/provider-delete", params.Branch)
 		}
-		if err := git.DeleteWorktree(mainDir, worktreePath); err != nil {
+		if !params.Force {
+			t.Fatalf("provider delete force=false, want true")
+		}
+		if err := git.DeleteWorktree(mainDir, worktreePath, params.Force); err != nil {
 			t.Fatalf("provider delete worktree failed: %v", err)
 		}
 		return worktreeDeleteProviderResult{Status: providerStatusHandled}
 	})
 
-	if err := d.doDeleteWorktree(worktreePath, nil); err != nil {
+	if err := d.doDeleteWorktree(worktreePath, nil, deleteWorktreeOptions{Force: true}); err != nil {
 		t.Fatalf("doDeleteWorktree failed: %v", err)
 	}
 	waitForProviderResponse(t, responseDone)
@@ -474,10 +478,13 @@ func TestDoDeleteWorktree_ProviderDeclineFallsBackToBuiltInGit(t *testing.T) {
 		if params.Path != worktreePath {
 			t.Fatalf("provider delete path=%q, want %q", params.Path, worktreePath)
 		}
+		if params.Force {
+			t.Fatal("provider delete force=true, want false")
+		}
 		return worktreeDeleteProviderResult{Status: providerStatusDecline}
 	})
 
-	if err := d.doDeleteWorktree(worktreePath, nil); err != nil {
+	if err := d.doDeleteWorktree(worktreePath, nil, deleteWorktreeOptions{}); err != nil {
 		t.Fatalf("doDeleteWorktree fallback failed: %v", err)
 	}
 	waitForProviderResponse(t, responseDone)
@@ -495,6 +502,63 @@ func TestDoDeleteWorktree_ProviderDeclineFallsBackToBuiltInGit(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("declining delete provider connection did not close")
+	}
+}
+
+func TestDoDeleteWorktree_ProviderErrorPreservesDaemonState(t *testing.T) {
+	tmpDir, mainDir := initProviderTestRepo(t)
+	worktreePath := filepath.Join(tmpDir, "provider-error-delete")
+	runGitDaemon(t, mainDir, "worktree", "add", "-b", "feat/provider-error-delete", worktreePath)
+	worktreePath = git.CanonicalizePath(worktreePath)
+
+	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
+	d.registerCreatedWorktree(mainDir, worktreePath, "feat/provider-error-delete")
+
+	client, done := startPluginPipe(t, d, "failing-delete-provider", []string{worktreeDeleteProviderSurface})
+	defer client.Close()
+
+	responseDone := respondToDeleteProviderCall(t, client, func(params worktreeDeleteProviderParams) worktreeDeleteProviderResult {
+		if !params.Force {
+			t.Fatal("provider delete force=false, want true")
+		}
+		return worktreeDeleteProviderResult{Status: providerStatusError, Error: "custom policy failed"}
+	})
+
+	err := d.doDeleteWorktree(worktreePath, nil, deleteWorktreeOptions{Force: true})
+	if err == nil {
+		t.Fatal("doDeleteWorktree succeeded after provider error")
+	}
+	waitForProviderResponse(t, responseDone)
+
+	var deleteErr *deleteWorktreeError
+	if !errors.As(err, &deleteErr) {
+		t.Fatalf("error type = %T, want *deleteWorktreeError", err)
+	}
+	if deleteErr.kind != deleteWorktreeFailureProviderError || deleteErr.forceable {
+		t.Fatalf("delete error kind=%q forceable=%v, want provider non-forceable", deleteErr.kind, deleteErr.forceable)
+	}
+	if wt := d.store.GetWorktree(worktreePath); wt == nil {
+		t.Fatal("provider failure removed worktree from store")
+	}
+	worktrees, listErr := git.ListWorktrees(mainDir)
+	if listErr != nil {
+		t.Fatalf("list worktrees after provider error: %v", listErr)
+	}
+	var found bool
+	for _, worktree := range worktrees {
+		if worktree.Path == worktreePath {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("provider failure removed git worktree")
+	}
+
+	_ = client.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("failing delete provider connection did not close")
 	}
 }
 

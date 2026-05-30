@@ -2,6 +2,7 @@
 package daemon
 
 import (
+	"errors"
 	"net"
 	"os"
 	"slices"
@@ -206,27 +207,40 @@ func (d *Daemon) discoverWorktree(path string) *store.Worktree {
 	return nil
 }
 
+type deleteWorktreeOptions struct {
+	Force bool
+}
+
+type deleteWorktreeFailureKind string
+
+const (
+	deleteWorktreeFailureDirtyWorktree deleteWorktreeFailureKind = "dirty_worktree"
+	deleteWorktreeFailureProviderError deleteWorktreeFailureKind = "provider_error"
+	deleteWorktreeFailureNotFound      deleteWorktreeFailureKind = "not_found"
+	deleteWorktreeFailureGitError      deleteWorktreeFailureKind = "git_error"
+)
+
+type deleteWorktreeError struct {
+	err       error
+	kind      deleteWorktreeFailureKind
+	forceable bool
+}
+
+func (e *deleteWorktreeError) Error() string {
+	return e.err.Error()
+}
+
+func (e *deleteWorktreeError) Unwrap() error {
+	return e.err
+}
+
 // doDeleteWorktree removes a worktree from git and the store.
-// Also cleans up any sessions in that directory.
-func (d *Daemon) doDeleteWorktree(path string, endpointID *string) (err error) {
+// Also cleans up any sessions in that directory after external deletion succeeds.
+func (d *Daemon) doDeleteWorktree(path string, endpointID *string, opts deleteWorktreeOptions) (err error) {
 	finishOperation := d.beginGitOperation(protocol.GitOperationKindDeleteWorktree, path, endpointID)
 	defer func() {
 		finishOperation(err)
 	}()
-
-	// Stop/remove sessions in this directory before deleting the worktree.
-	for _, session := range d.store.List("") {
-		if session.Directory != path {
-			continue
-		}
-		d.terminateSession(session.ID, syscall.SIGTERM)
-		d.store.Remove(session.ID)
-		d.clearLongRunTracking(session.ID)
-		d.wsHub.Broadcast(&protocol.WebSocketEvent{
-			Event:   protocol.EventSessionUnregistered,
-			Session: d.sessionForBroadcast(session),
-		})
-	}
 
 	wt := d.store.GetWorktree(path)
 	if wt == nil {
@@ -244,9 +258,13 @@ func (d *Daemon) doDeleteWorktree(path string, endpointID *string) (err error) {
 						Path: path,
 					}},
 				})
+				d.cleanupDeletedWorktreeSessions(path)
 				return nil
 			}
-			return &worktreeNotFoundError{path: path}
+			return &deleteWorktreeError{
+				err:  &worktreeNotFoundError{path: path},
+				kind: deleteWorktreeFailureNotFound,
+			}
 		}
 	}
 
@@ -254,13 +272,16 @@ func (d *Daemon) doDeleteWorktree(path string, endpointID *string) (err error) {
 	branch := wt.Branch
 	mainRepo := wt.MainRepo
 
-	handled, err := d.dispatchWorktreeDeleteProvider(mainRepo, path, branch)
+	handled, err := d.dispatchWorktreeDeleteProvider(mainRepo, path, branch, opts.Force)
 	if err != nil {
-		return err
+		return &deleteWorktreeError{
+			err:  err,
+			kind: deleteWorktreeFailureProviderError,
+		}
 	}
 	if !handled {
-		if err := git.DeleteWorktree(mainRepo, path); err != nil {
-			return err
+		if err := git.DeleteWorktree(mainRepo, path, opts.Force); err != nil {
+			return d.classifyDeleteWorktreeGitError(path, opts.Force, err)
 		}
 	}
 
@@ -269,6 +290,7 @@ func (d *Daemon) doDeleteWorktree(path string, endpointID *string) (err error) {
 }
 
 func (d *Daemon) finalizeDeletedWorktree(path, mainRepo, branch string) {
+	d.cleanupDeletedWorktreeSessions(path)
 	d.store.RemoveWorktree(path)
 
 	// Also delete the branch (force=true since worktree is already deleted).
@@ -288,6 +310,45 @@ func (d *Daemon) finalizeDeletedWorktree(path, mainRepo, branch string) {
 			Path: path,
 		}},
 	})
+}
+
+func (d *Daemon) cleanupDeletedWorktreeSessions(path string) {
+	for _, session := range d.store.List("") {
+		if session.Directory != path {
+			continue
+		}
+		d.terminateSession(session.ID, syscall.SIGTERM)
+		d.store.Remove(session.ID)
+		d.clearLongRunTracking(session.ID)
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event:   protocol.EventSessionUnregistered,
+			Session: d.sessionForBroadcast(session),
+		})
+	}
+}
+
+func (d *Daemon) classifyDeleteWorktreeGitError(path string, force bool, err error) error {
+	kind := deleteWorktreeFailureGitError
+	forceable := false
+	if !force && d.worktreeHasLocalChanges(path) {
+		kind = deleteWorktreeFailureDirtyWorktree
+		forceable = true
+	}
+	return &deleteWorktreeError{
+		err:       err,
+		kind:      kind,
+		forceable: forceable,
+	}
+}
+
+func (d *Daemon) worktreeHasLocalChanges(path string) bool {
+	status, err := getGitStatusWithOptions(path, gitStatusOptions{
+		mode: gitStatusModeFull,
+	})
+	if err != nil || status == nil || status.Error != nil {
+		return false
+	}
+	return len(status.Staged) > 0 || len(status.Unstaged) > 0 || len(status.Untracked) > 0
 }
 
 type worktreeNotFoundError struct {
@@ -319,7 +380,9 @@ func (d *Daemon) handleCreateWorktree(conn net.Conn, msg *protocol.CreateWorktre
 }
 
 func (d *Daemon) handleDeleteWorktree(conn net.Conn, msg *protocol.DeleteWorktreeMessage) {
-	if err := d.doDeleteWorktree(msg.Path, msg.EndpointID); err != nil {
+	if err := d.doDeleteWorktree(msg.Path, msg.EndpointID, deleteWorktreeOptions{
+		Force: protocol.Deref(msg.Force),
+	}); err != nil {
 		d.sendError(conn, err.Error())
 		return
 	}
@@ -365,7 +428,9 @@ func (d *Daemon) handleDeleteWorktreeWS(client *wsClient, msg *protocol.DeleteWo
 			})
 		}()
 
-		err := d.doDeleteWorktree(msg.Path, msg.EndpointID)
+		err := d.doDeleteWorktree(msg.Path, msg.EndpointID, deleteWorktreeOptions{
+			Force: protocol.Deref(msg.Force),
+		})
 		result := protocol.DeleteWorktreeResultMessage{
 			Event:      protocol.EventDeleteWorktreeResult,
 			Path:       msg.Path,
@@ -374,6 +439,13 @@ func (d *Daemon) handleDeleteWorktreeWS(client *wsClient, msg *protocol.DeleteWo
 		}
 		if err != nil {
 			result.Error = protocol.Ptr(err.Error())
+			var deleteErr *deleteWorktreeError
+			if errors.As(err, &deleteErr) {
+				if deleteErr.kind != "" {
+					result.ReasonKind = string(deleteErr.kind)
+				}
+				result.Forceable = protocol.Ptr(deleteErr.forceable)
+			}
 			d.logf("Delete worktree failed for %s: %v", msg.Path, err)
 		} else {
 			d.logf("Delete worktree succeeded: %s", msg.Path)

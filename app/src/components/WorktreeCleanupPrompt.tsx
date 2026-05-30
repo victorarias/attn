@@ -10,6 +10,7 @@ interface WorktreeCleanupPromptProps {
   branchName?: string;
   isDeleting?: boolean;
   deleteError?: string | null;
+  deleteForceable?: boolean;
   onKeep: () => void;
   onDelete: () => void;
   onAlwaysKeep: () => void;
@@ -21,6 +22,7 @@ export function WorktreeCleanupPrompt({
   branchName,
   isDeleting = false,
   deleteError = null,
+  deleteForceable = false,
   onKeep,
   onDelete,
   onAlwaysKeep,
@@ -291,7 +293,7 @@ export function WorktreeCleanupPrompt({
   if (!isVisible) return null;
 
   const dialogTitle = hasError
-    ? 'Worktree was not deleted'
+    ? deleteForceable ? 'Force delete this worktree?' : 'Worktree was not deleted'
     : isDeleting
       ? 'Deleting worktree'
       : 'Keep this worktree for later?';
@@ -335,6 +337,9 @@ export function WorktreeCleanupPrompt({
               <div className={`cleanup-operation ${hasError ? 'failed' : ''}`} role={isDeleting ? 'status' : 'alert'}>
                 <span className="cleanup-operation-label">{hasError ? 'Delete failed' : 'Removing worktree'}</span>
                 <span className="cleanup-operation-detail">{statusCopy}</span>
+                {hasError && deleteForceable && (
+                  <span className="cleanup-operation-detail">This removes the local folder and local branch. Remote branches are untouched.</span>
+                )}
                 {isDeleting && <span className="cleanup-meter" aria-hidden="true"><span /></span>}
               </div>
             )}
@@ -350,7 +355,7 @@ export function WorktreeCleanupPrompt({
             onClick={onDelete}
               disabled={isDeleting}
           >
-            {hasError ? 'Retry delete' : 'Delete worktree'}
+            {hasError ? deleteForceable ? 'Force delete' : 'Retry delete' : 'Delete worktree'}
           </button>
           <button
             ref={alwaysRef}

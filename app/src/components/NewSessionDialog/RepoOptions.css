@@ -131,6 +131,16 @@
   color: #dc2626;
   font-weight: 500;
   grid-column: 1 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.delete-prompt-detail {
+  color: #fca5a5;
+  font-size: var(--font-size-sm);
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* Icons */
