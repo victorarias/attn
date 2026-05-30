@@ -2265,7 +2265,7 @@ sendFetchPRDetails,
     activeSessionId
       ? [
           { label: '⌘D split v' },
-          { label: '⌘⇧D split h' },
+          { label: '⌘⇧N split h' },
           { label: '⌘⇧Z zoom', active: activeSessionZoomed },
           { label: '⌘⌥←↑→↓ pane' },
         ]
@@ -2519,7 +2519,7 @@ sendFetchPRDetails,
             {sessions.length === 0 && (
               <div className="no-sessions">
                 <p>No active sessions</p>
-                <p>Press ⌘⇧N to start a new workspace</p>
+                <p>Press ⌘T to start a new workspace</p>
               </div>
             )}
           </div>

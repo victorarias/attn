@@ -39,7 +39,7 @@ function createLocationPickerRepo(worktreeBranches: string[]) {
 
 test.describe('LocationPicker', () => {
   test.describe('Basic Dialog Operations', () => {
-    test('opens new workspace dialog with Cmd+Shift+N', async ({ page, daemon }) => {
+    test('opens new workspace dialog with Cmd+T', async ({ page, daemon }) => {
       await daemon.start();
       await page.goto('/');
       await page.waitForSelector('.dashboard');
@@ -47,8 +47,8 @@ test.describe('LocationPicker', () => {
       // Dialog should not be visible initially
       await expect(page.locator('.location-picker-overlay')).not.toBeVisible();
 
-      // Open with Cmd+Shift+N
-      await page.keyboard.press('Meta+Shift+n');
+      // Open with Cmd+T
+      await page.keyboard.press('Meta+t');
 
       // Dialog should be visible
       await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
@@ -62,7 +62,7 @@ test.describe('LocationPicker', () => {
       await page.waitForSelector('.dashboard');
 
       // Open dialog
-      await page.keyboard.press('Meta+Shift+n');
+      await page.keyboard.press('Meta+t');
       await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
       // Close with Escape
@@ -76,7 +76,7 @@ test.describe('LocationPicker', () => {
       await page.waitForSelector('.dashboard');
 
       // Open dialog and switch to any available non-disabled agent
-      await page.keyboard.press('Meta+Shift+n');
+      await page.keyboard.press('Meta+t');
       await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
       const enabledAgents = page.locator('.agent-option:not(:disabled)');
       const enabledCount = await enabledAgents.count();
@@ -92,7 +92,7 @@ test.describe('LocationPicker', () => {
       // Close and reopen to verify persistence
       await page.keyboard.press('Escape');
       await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 2000 });
-      await page.keyboard.press('Meta+Shift+n');
+      await page.keyboard.press('Meta+t');
       await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
       await expect(page.locator('.agent-option', { hasText: agentName })).toHaveClass(/active/);
     });
@@ -105,7 +105,7 @@ test.describe('LocationPicker', () => {
       await page.waitForSelector('.dashboard');
 
       // Open dialog
-      await page.keyboard.press('Meta+Shift+n');
+      await page.keyboard.press('Meta+t');
       await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
       // Type to filter (if there are any recent locations)
@@ -133,7 +133,7 @@ test.describe('LocationPicker', () => {
       await page.waitForSelector('.dashboard');
 
       // Open dialog
-      await page.keyboard.press('Meta+Shift+n');
+      await page.keyboard.press('Meta+t');
       await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
       // Type a path that should trigger suggestions
@@ -162,7 +162,7 @@ test.describe('LocationPicker', () => {
       await page.waitForSelector('.dashboard');
 
       // Open dialog
-      await page.keyboard.press('Meta+Shift+n');
+      await page.keyboard.press('Meta+t');
       await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
       // Type ~/Library/ to get a predictable set of directories, then search for a substring
@@ -207,7 +207,7 @@ test.describe('LocationPicker', () => {
       await page.waitForSelector('.dashboard');
 
       // Open dialog
-      await page.keyboard.press('Meta+Shift+n');
+      await page.keyboard.press('Meta+t');
       await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
       // Type path to get suggestions
@@ -242,7 +242,7 @@ test.describe('LocationPicker', () => {
       await page.waitForSelector('.dashboard');
 
       // Open dialog
-      await page.keyboard.press('Meta+Shift+n');
+      await page.keyboard.press('Meta+t');
       await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
       // Type something that won't match anything
@@ -268,7 +268,7 @@ test.describe('LocationPicker', () => {
         await page.waitForSelector('.dashboard');
 
         for (const typedPath of [repo.worktrees[0].path, `${repo.worktrees[0].path}/`]) {
-          await page.keyboard.press('Meta+Shift+n');
+          await page.keyboard.press('Meta+t');
           await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
           const input = page.locator('[data-testid="location-picker-path-input"]');
@@ -296,7 +296,7 @@ test.describe('LocationPicker', () => {
       try {
         await page.goto('/');
         await page.waitForSelector('.dashboard');
-        await page.keyboard.press('Meta+Shift+n');
+        await page.keyboard.press('Meta+t');
         await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
         const input = page.locator('[data-testid="location-picker-path-input"]');
@@ -326,7 +326,7 @@ test.describe('LocationPicker', () => {
       try {
         await page.goto('/');
         await page.waitForSelector('.dashboard');
-        await page.keyboard.press('Meta+Shift+n');
+        await page.keyboard.press('Meta+t');
         await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
         const input = page.locator('[data-testid="location-picker-path-input"]');
@@ -357,7 +357,7 @@ test.describe('LocationPicker', () => {
       try {
         await page.goto('/');
         await page.waitForSelector('.dashboard');
-        await page.keyboard.press('Meta+Shift+n');
+        await page.keyboard.press('Meta+t');
         await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
         const input = page.locator('[data-testid="location-picker-path-input"]');
@@ -393,7 +393,7 @@ test.describe('LocationPicker', () => {
         await page.goto('/');
         await page.waitForSelector('.dashboard');
 
-        await page.keyboard.press('Meta+Shift+n');
+        await page.keyboard.press('Meta+t');
         await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
         const input = page.locator('[data-testid="location-picker-path-input"]');

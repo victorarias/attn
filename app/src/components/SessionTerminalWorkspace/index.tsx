@@ -388,7 +388,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     }, [activePaneId, onSplitPane]);
 
     const handleNewTerminal = useCallback(() => {
-      onSplitPane(activePaneId, 'vertical');
+      onSplitPane(activePaneId, 'horizontal');
     }, [activePaneId, onSplitPane]);
 
     const handleClosePane = useCallback((paneId: string) => {

@@ -105,6 +105,27 @@ test.describe('Keyboard Shortcuts', () => {
       await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2, { timeout: 5000 });
     });
 
+    test('⌘⇧N creates a session-backed horizontal shell split in the current workspace', async ({ page, daemon }) => {
+      await daemon.start();
+      await page.goto('/');
+      await page.waitForSelector('.dashboard');
+
+      await createSession(page, daemon, { id: 's-horizontal', label: 'Root', state: 'working', cwd: '/tmp/test/horizontal-session' });
+      await expect(page.locator('[data-testid="session-s-horizontal"]')).toBeVisible({ timeout: 5000 });
+
+      await page.locator('[data-testid="session-s-horizontal"]').click();
+      await expect(page.locator('[data-session-terminal-workspace="workspace-s-horizontal"]')).toBeVisible({ timeout: 2000 });
+      await page.locator('.terminal-wrapper.active .terminal-container').click();
+
+      await page.keyboard.press('Meta+Shift+n');
+
+      const selectedWorkspaceSessions = page.locator('.workspace-group.selected .session-item');
+      await expect(selectedWorkspaceSessions).toHaveCount(2, { timeout: 5000 });
+      await expect(page.locator('.workspace-group.selected')).toContainText('shell');
+      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2, { timeout: 5000 });
+      await expect(page.locator('.terminal-wrapper.active [data-split-direction="horizontal"]')).toHaveCount(1, { timeout: 5000 });
+    });
+
     test('⌘⇧Z zooms toward the active pane without hiding the others', async ({ page, daemon }) => {
       await daemon.start();
       await page.goto('/');

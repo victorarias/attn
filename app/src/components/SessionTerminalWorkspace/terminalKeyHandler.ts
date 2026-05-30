@@ -31,6 +31,9 @@ export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
     const accel = isMacLikePlatform() ? event.metaKey : (event.metaKey || event.ctrlKey);
     if (event.type === 'keydown' && accel && !event.altKey) {
       if (!event.shiftKey && event.key.toLowerCase() === 't') {
+        return !triggerShortcut('session.newWorkspace');
+      }
+      if (event.shiftKey && event.key.toLowerCase() === 'n') {
         return !triggerShortcut('terminal.new');
       }
       if (!event.shiftKey && event.key.toLowerCase() === 'd') {

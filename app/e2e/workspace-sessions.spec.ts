@@ -100,7 +100,7 @@ test.describe('Workspace Sessions', () => {
     await expect(page.locator('.terminal-wrapper.active [data-pane-id="pane-b2"]')).toBeVisible();
   });
 
-  test('Cmd+Shift+N opens the new-workspace picker while Cmd+N opens new-session picker', async ({ page, daemon }) => {
+  test('Cmd+T opens the new-workspace picker while Cmd+N opens new-session picker', async ({ page, daemon }) => {
     await daemon.start();
     await page.goto('/');
     await page.waitForSelector('.dashboard');
@@ -118,7 +118,7 @@ test.describe('Workspace Sessions', () => {
     await page.keyboard.press('Escape');
     await expect(page.locator('.location-picker-overlay')).toHaveCount(0, { timeout: 2000 });
 
-    await page.keyboard.press('Meta+Shift+n');
+    await page.keyboard.press('Meta+t');
     await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
     await expect(page.locator('.picker-title')).toHaveText('New Workspace Location');
   });
