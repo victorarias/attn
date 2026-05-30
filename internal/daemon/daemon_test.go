@@ -2778,6 +2778,7 @@ func TestDaemon_HandleClientMessage_ClearWarnings(t *testing.T) {
 	}
 
 	client := &wsClient{}
+	client.setIdentity("daemon-test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 	d.handleClientMessage(client, []byte(`{"cmd":"clear_warnings"}`))
 
 	if got := len(d.getWarnings()); got != 0 {
@@ -2804,6 +2805,7 @@ func TestDaemon_ClearWarningsNotReplayedInInitialState(t *testing.T) {
 	client := &wsClient{
 		send: make(chan outboundMessage, 4),
 	}
+	client.setIdentity("daemon-test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 
 	d.sendInitialState(client)
 	first := <-client.send
@@ -2842,6 +2844,7 @@ func TestDaemon_InitialState_IncludesDaemonInstanceID(t *testing.T) {
 		send:            make(chan outboundMessage, 2),
 		attachedStreams: make(map[string]ptybackend.Stream),
 	}
+	client.setIdentity("daemon-test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 
 	d.sendInitialState(client)
 	msg := <-client.send
@@ -2864,6 +2867,7 @@ func TestDaemon_GitHubHostsMessages_UseRegisteredHosts(t *testing.T) {
 		send:            make(chan outboundMessage, 2),
 		attachedStreams: make(map[string]ptybackend.Stream),
 	}
+	client.setIdentity("daemon-test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 
 	d.sendInitialState(client)
 	msg := <-client.send
@@ -2893,6 +2897,7 @@ func TestDaemon_RecoveryBarrier_BlocksPTYCommands(t *testing.T) {
 		send:            make(chan outboundMessage, 2),
 		attachedStreams: make(map[string]ptybackend.Stream),
 	}
+	client.setIdentity("daemon-test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 
 	d.handleClientMessage(client, []byte(`{"cmd":"attach_session","id":"sess-1"}`))
 
@@ -2932,6 +2937,7 @@ func TestDaemon_RecoveryBarrier_BlocksClearSessions(t *testing.T) {
 		send:            make(chan outboundMessage, 2),
 		attachedStreams: make(map[string]ptybackend.Stream),
 	}
+	client.setIdentity("daemon-test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 
 	d.handleClientMessage(client, []byte(`{"cmd":"clear_sessions"}`))
 
@@ -3496,6 +3502,7 @@ func TestDaemon_WebClientAttachFlowOverWebSocket(t *testing.T) {
 	if !initialStateIncludesSession(initial, sessionID) {
 		t.Fatalf("initial_state did not include smoke session %q", sessionID)
 	}
+	sendWorkspaceClientHello(t, conn)
 
 	if err := writeWS(conn, map[string]interface{}{
 		"cmd": protocol.CmdAttachSession,
@@ -3628,6 +3635,18 @@ func waitForProtocolWebSocketEvent(t *testing.T, conn *websocket.Conn, want stri
 
 	t.Fatalf("timed out waiting for websocket event %s", want)
 	return protocol.WebSocketEvent{}
+}
+
+func sendWorkspaceClientHello(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+	if err := writeWS(conn, map[string]interface{}{
+		"cmd":          protocol.CmdClientHello,
+		"client_kind":  "daemon-test",
+		"version":      "protocol-" + protocol.ProtocolVersion,
+		"capabilities": []string{protocol.CapabilityWorkspaceSessions},
+	}); err != nil {
+		t.Fatalf("send client hello: %v", err)
+	}
 }
 
 func initialStateIncludesSession(event map[string]interface{}, sessionID string) bool {
@@ -4002,6 +4021,7 @@ func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {
 		t.Fatalf("Read initial state error: %v", err)
 	}
 	t.Logf("Initial state: %s", string(initialData))
+	sendWorkspaceClientHello(t, conn)
 
 	// Send approve command
 	prID := protocol.FormatPRID(ghClient.Host(), "test/repo", 42)
@@ -4229,6 +4249,7 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 	if initialState.Prs[0].Muted {
 		t.Error("Expected PR to not be muted initially")
 	}
+	sendWorkspaceClientHello(t, wsConn)
 
 	// Send mute_pr command
 	muteCmd := map[string]interface{}{
@@ -4317,6 +4338,7 @@ func TestDaemon_MuteRepo_ViaWebSocket(t *testing.T) {
 	json.Unmarshal(initialData, &initialState)
 	// Note: Repos can be empty but should be present (may be nil if JSON doesn't include empty arrays)
 	// This is fine - we just test that after muting, we get updates
+	sendWorkspaceClientHello(t, wsConn)
 
 	// Send mute_repo command
 	muteCmd := map[string]interface{}{

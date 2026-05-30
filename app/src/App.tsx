@@ -286,6 +286,7 @@ function App() {
     sendPRVisited,
     sendRefreshPRs,
     sendRegisterWorkspace,
+    sendUnregisterWorkspace,
     sendUnregisterSession,
     sendSetSetting,
     sendCreateWorktree,
@@ -400,6 +401,7 @@ function App() {
         sendPRVisited={sendPRVisited}
         sendRefreshPRs={sendRefreshPRs}
         sendRegisterWorkspace={sendRegisterWorkspace}
+        sendUnregisterWorkspace={sendUnregisterWorkspace}
         sendUnregisterSession={sendUnregisterSession}
         sendSetSetting={sendSetSetting}
         sendCreateWorktree={sendCreateWorktree}
@@ -481,6 +483,7 @@ interface AppContentProps {
   sendPRVisited: ReturnType<typeof useDaemonSocket>['sendPRVisited'];
   sendRefreshPRs: ReturnType<typeof useDaemonSocket>['sendRefreshPRs'];
   sendRegisterWorkspace: ReturnType<typeof useDaemonSocket>['sendRegisterWorkspace'];
+  sendUnregisterWorkspace: ReturnType<typeof useDaemonSocket>['sendUnregisterWorkspace'];
   sendUnregisterSession: ReturnType<typeof useDaemonSocket>['sendUnregisterSession'];
   sendSetSetting: ReturnType<typeof useDaemonSocket>['sendSetSetting'];
   sendCreateWorktree: ReturnType<typeof useDaemonSocket>['sendCreateWorktree'];
@@ -557,6 +560,7 @@ function AppContent({
   sendPRVisited,
   sendRefreshPRs,
   sendRegisterWorkspace,
+  sendUnregisterWorkspace,
   sendUnregisterSession,
   sendSetSetting,
   sendCreateWorktree,
@@ -632,9 +636,36 @@ sendFetchPRDetails,
   ) => {
     const sessionId = providedSessionId || crypto.randomUUID();
     const workspaceId = `workspace-${sessionId}`;
-    sendRegisterWorkspace(workspaceId, label, cwd, endpointId);
-    return createSession(label, cwd, sessionId, agent, endpointId, yoloMode, workspaceId);
-  }, [createSession, sendRegisterWorkspace]);
+    let localCreated = false;
+    let spawned = false;
+    try {
+      await sendRegisterWorkspace(workspaceId, label, cwd, endpointId);
+      const createdSessionId = await createSession(label, cwd, sessionId, agent, endpointId, yoloMode, workspaceId);
+      localCreated = true;
+      const spawnArgs = takeSessionSpawnArgs(sessionId, 80, 24);
+      if (!spawnArgs) {
+        throw new Error('Session spawn arguments were not prepared.');
+      }
+      await ptySpawn({ args: spawnArgs });
+      spawned = true;
+      return createdSessionId;
+    } catch (error) {
+      if (spawned) {
+        await sendUnregisterSession(sessionId).catch(console.error);
+      } else if (localCreated) {
+        closeSession(sessionId);
+      }
+      await sendUnregisterWorkspace(workspaceId).catch(console.error);
+      throw error;
+    }
+  }, [
+    closeSession,
+    createSession,
+    sendRegisterWorkspace,
+    sendUnregisterSession,
+    sendUnregisterWorkspace,
+    takeSessionSpawnArgs,
+  ]);
 
   useEffect(() => {
     if (!sessionCreationJob?.sessionId || sessionCreationJob.error) {
@@ -1824,14 +1855,13 @@ sendFetchPRDetails,
     }
 
     const activePaneId = getActivePaneIdForSession(activeSession);
-    const activePane = activeSession.workspace.agents.find((pane) => pane.id === activePaneId);
-    if (activePane?.sessionId && activePane.sessionId !== activeSessionId) {
-      handleRequestCloseSession(activePane.sessionId);
+    if (activePaneId && activeSession.workspace.agents.length > 1) {
+      void handleClosePane(activeSessionId, activePaneId);
       return;
     }
 
     handleRequestCloseSession(activeSessionId);
-  }, [activeSessionId, getActivePaneIdForSession, handleRequestCloseSession, sessions]);
+  }, [activeSessionId, getActivePaneIdForSession, handleClosePane, handleRequestCloseSession, sessions]);
 
   const handleReloadSession = useCallback((id: string) => {
     const session = sessions.find((entry) => entry.id === id);

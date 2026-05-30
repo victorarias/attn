@@ -13,6 +13,9 @@ const mockUseKeyboardShortcuts = vi.fn();
 const mockSendWorkspaceClosePane = vi.fn(async () => ({ success: true }));
 const mockCloseSession = vi.fn();
 const mockOpenPR = vi.hoisted(() => vi.fn());
+const { mockPtySpawn } = vi.hoisted(() => ({
+  mockPtySpawn: vi.fn(async () => {}),
+}));
 let mockSessionStoreReturn: Record<string, unknown>;
 let mockDaemonStoreReturn: Record<string, unknown>;
 let mockDaemonSocketReturn: Record<string, unknown>;
@@ -174,6 +177,14 @@ vi.mock('./hooks/useDaemonSocket', () => ({
   useDaemonSocket: (args: unknown) => mockUseDaemonSocket(args),
 }));
 
+vi.mock('./pty/bridge', async () => {
+  const actual = await vi.importActual<typeof import('./pty/bridge')>('./pty/bridge');
+  return {
+    ...actual,
+    ptySpawn: mockPtySpawn,
+  };
+});
+
 describe('worktree cleanup prompt', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -199,7 +210,7 @@ describe('worktree cleanup prompt', () => {
           isWorktree: true,
           daemonActivePaneId: 'main',
           workspace: {
-            terminals: [],
+            agents: [{ id: 'pane-session', runtimeId: 's1', sessionId: 's1', title: 'worktree-session' }],
             layoutTree: { type: 'pane', paneId: 'pane-session' },
           },
         },
@@ -309,6 +320,15 @@ describe('worktree cleanup prompt', () => {
     mockSessionStoreReturn.sessions = [];
     mockSessionStoreReturn.activeSessionId = null;
     mockSessionStoreReturn.createSession = createSession;
+    mockSessionStoreReturn.takeSessionSpawnArgs = vi.fn((id: string) => ({
+      id,
+      cwd: '/tmp/repo--feat-async',
+      cols: 80,
+      rows: 24,
+      label: 'repo--feat-async',
+      agent: 'codex',
+      workspace_id: `workspace-${id}`,
+    }));
     mockDaemonStoreReturn.daemonSessions = [];
     mockDaemonSocketReturn.sendCreateWorktree = vi.fn(() => createWorktree.promise);
 
@@ -473,7 +493,7 @@ describe('worktree cleanup prompt', () => {
         isWorktree: true,
         daemonActivePaneId: 'main',
         workspace: {
-          terminals: [],
+          agents: [{ id: 'pane-session', runtimeId: 's2', sessionId: 's2', title: 'second-worktree-session' }],
           layoutTree: { type: 'pane', paneId: 'pane-session' },
         },
       },
@@ -557,7 +577,7 @@ describe('worktree cleanup prompt', () => {
           daemonActivePaneId: 'main',
           endpointId: 'ep-1',
           workspace: {
-            terminals: [],
+            agents: [{ id: 'pane-session', runtimeId: 'remote-1', sessionId: 'remote-1', title: 'remote-session' }],
             layoutTree: { type: 'pane', paneId: 'pane-session' },
           },
         },
@@ -711,7 +731,7 @@ describe('worktree cleanup prompt', () => {
     });
   });
 
-  it('prompts before closing a split session from the agent pane with Cmd+W', async () => {
+  it('closes the active pane before closing the workspace from Cmd+W', async () => {
     mockUseSessionStore.mockReturnValue({
       sessions: [
         {
@@ -723,7 +743,10 @@ describe('worktree cleanup prompt', () => {
           transcriptMatched: true,
           daemonActivePaneId: 'main',
           workspace: {
-            terminals: [{ id: 'pane-session-1', ptyId: 'runtime-session-1', title: 'session pane 1' }],
+            agents: [
+              { id: 'pane-session', runtimeId: 's1', sessionId: 's1', title: 'session-with-split' },
+              { id: 'pane-session-1', runtimeId: 'runtime-session-1', sessionId: 'runtime-session-1', title: 'session pane 1' },
+            ],
             layoutTree: {
               type: 'split',
               splitId: 'root',
@@ -763,24 +786,21 @@ describe('worktree cleanup prompt', () => {
 
     render(<App />);
 
+    await waitFor(() => {
+      expect(mockUseKeyboardShortcuts.mock.calls.length).toBeGreaterThan(1);
+    });
     const keyboardCall = mockUseKeyboardShortcuts.mock.calls[mockUseKeyboardShortcuts.mock.calls.length - 1];
     const keyboardArgs = keyboardCall?.[0] as { onCloseSession: () => void } | undefined;
     expect(keyboardArgs).toBeDefined();
 
-    act(() => {
+    await act(async () => {
       keyboardArgs?.onCloseSession();
+      await Promise.resolve();
     });
 
-    const dialog = screen.getByRole('dialog');
-    expect(dialog).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(mockCloseSession).not.toHaveBeenCalled();
-
-    fireEvent.keyDown(dialog, { key: 'y' });
-
-    await waitFor(() => {
-      expect(mockCloseSession).toHaveBeenCalledWith('s1');
-    });
-    expect(mockSendWorkspaceClosePane).not.toHaveBeenCalled();
+    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('s1', 'pane-session');
   });
 
   it('cancels split-session close from the sidebar with Escape', async () => {
@@ -795,7 +815,10 @@ describe('worktree cleanup prompt', () => {
           transcriptMatched: true,
           daemonActivePaneId: 'main',
           workspace: {
-            terminals: [{ id: 'pane-session-1', ptyId: 'runtime-session-1', title: 'session pane 1' }],
+            agents: [
+              { id: 'pane-session', runtimeId: 's1', sessionId: 's1', title: 'session-with-split' },
+              { id: 'pane-session-1', runtimeId: 'runtime-session-1', sessionId: 'runtime-session-1', title: 'session pane 1' },
+            ],
             layoutTree: {
               type: 'split',
               splitId: 'root',
@@ -848,7 +871,10 @@ describe('worktree cleanup prompt', () => {
           transcriptMatched: true,
           daemonActivePaneId: 'pane-session-1',
           workspace: {
-            terminals: [{ id: 'pane-session-1', ptyId: 'runtime-session-1', title: 'session pane 1' }],
+            agents: [
+              { id: 'pane-session', runtimeId: 's1', sessionId: 's1', title: 'session-with-split' },
+              { id: 'pane-session-1', runtimeId: 'runtime-session-1', sessionId: 'runtime-session-1', title: 'session pane 1' },
+            ],
             layoutTree: {
               type: 'split',
               splitId: 'root',
@@ -882,8 +908,9 @@ describe('worktree cleanup prompt', () => {
     const keyboardArgs = keyboardCall?.[0] as { onCloseSession: () => void } | undefined;
     expect(keyboardArgs).toBeDefined();
 
-    act(() => {
+    await act(async () => {
       keyboardArgs?.onCloseSession();
+      await Promise.resolve();
     });
 
     expect(screen.queryByRole('dialog')).toBeNull();

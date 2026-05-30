@@ -10,7 +10,11 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "69"
+const ProtocolVersion = "70"
+
+// CapabilityWorkspaceSessions is required for websocket clients that use the
+// interactive daemon API. Clients without it are not workspace-first clients.
+const CapabilityWorkspaceSessions = "workspace_sessions"
 
 // SessionAgent labels in-tree and externally registered agent identifiers.
 type SessionAgent = string

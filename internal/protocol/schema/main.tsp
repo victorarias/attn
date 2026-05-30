@@ -314,10 +314,9 @@ model EndpointInfo {
 // Command Messages (Client → Daemon)
 // ============================================================================
 
-// Sent first thing after a WebSocket connect so the daemon can serve
-// per-client behavior gated on capabilities. Clients that don't send a
-// hello are treated as the legacy default (no capabilities) for
-// backwards compatibility.
+// Sent first thing after a WebSocket connect. Interactive clients must
+// advertise workspace_sessions so the daemon only accepts workspace-first
+// clients.
 //
 model ClientHelloMessage {
   cmd: "client_hello";

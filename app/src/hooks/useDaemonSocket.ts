@@ -51,8 +51,7 @@ import { recordTerminalRuntimeLog } from '../utils/terminalRuntimeLog';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
 import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
 
-// Re-export types from generated for consumers
-// Use type aliases to maintain backward compatibility
+// Short names for daemon payloads used throughout the app.
 export type DaemonSession = GeneratedSession;
 export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
@@ -153,7 +152,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '69';
+const PROTOCOL_VERSION = '70';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
 // injects this global before any page script runs — see
@@ -548,6 +547,7 @@ const GIT_WORKTREE_TIMEOUT_MS = 30 * 60_000;
 const GIT_NETWORK_TIMEOUT_MS = 30 * 60_000;
 const GIT_CLONE_TIMEOUT_MS = 90 * 60_000;
 const GITHUB_REFRESH_TIMEOUT_MS = 5 * 60_000;
+const WORKSPACE_SESSIONS_CAPABILITY = 'workspace_sessions';
 
 export function isTransientAttachError(error: unknown): boolean {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -944,7 +944,7 @@ export function useDaemonSocket({
           cmd: 'client_hello',
           client_kind: 'tauri-app',
           version: `protocol-${PROTOCOL_VERSION}`,
-          capabilities: [],
+          capabilities: [WORKSPACE_SESSIONS_CAPABILITY],
         }),
       );
 
@@ -1125,6 +1125,9 @@ export function useDaemonSocket({
           case 'workspace_registered':
           case 'workspace_state_changed':
             if (data.workspace) {
+              const key = `register_workspace:${data.workspace.id}`;
+              pendingActionsRef.current.get(key)?.resolve(undefined);
+              pendingActionsRef.current.delete(key);
               const nextWorkspaces = upsertWorkspaceByID(workspacesRef.current, data.workspace);
               workspacesRef.current = nextWorkspaces;
               onWorkspacesUpdate(nextWorkspaces);
@@ -2636,11 +2639,26 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'clear_sessions' }));
   }, []);
 
-  const sendRegisterWorkspace = useCallback((workspaceId: string, title: string, directory: string, endpointId?: string) => {
-    sendOrQueueCommand(
-      { cmd: 'register_workspace', id: workspaceId, title, directory, ...(endpointId ? { endpoint_id: endpointId } : {}) },
-      { waitForInitialState: true },
-    );
+  const sendRegisterWorkspace = useCallback((workspaceId: string, title: string, directory: string, endpointId?: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if (!workspaceId) {
+        resolve();
+        return;
+      }
+      const key = `register_workspace:${workspaceId}`;
+      pendingActionsRef.current.set(key, { resolve: () => resolve(), reject });
+      sendOrQueueCommand(
+        { cmd: 'register_workspace', id: workspaceId, title, directory, ...(endpointId ? { endpoint_id: endpointId } : {}) },
+        { waitForInitialState: true },
+      );
+      window.setTimeout(() => {
+        if (!pendingActionsRef.current.has(key)) {
+          return;
+        }
+        pendingActionsRef.current.delete(key);
+        reject(new Error(`Workspace registration timed out for ${workspaceId}`));
+      }, 10_000);
+    });
   }, [sendOrQueueCommand]);
 
   const sendUnregisterWorkspace = useCallback((workspaceId: string): Promise<void> => {

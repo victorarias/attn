@@ -194,15 +194,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   closeSession: (id: string) => {
-    const { sessions, removeSessionLocalState } = get();
-    const session = sessions.find((s) => s.id === id);
-
-    if (session) {
-      // Legacy local-only fallback for sessions that never became daemon-managed.
-      ptyKill({ id }).catch(console.error);
-    }
-
-    removeSessionLocalState(id);
+    get().removeSessionLocalState(id);
   },
 
   setActiveSession: (id: string | null) => {
