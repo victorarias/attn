@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
 
@@ -803,7 +803,7 @@ describe('worktree cleanup prompt', () => {
     expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('s1', 'pane-session');
   });
 
-  it('cancels split-session close from the sidebar with Escape', async () => {
+  it('closes a session pane from the sidebar without showing the split terminal prompt', async () => {
     mockUseSessionStore.mockReturnValue({
       sessions: [
         {
@@ -850,13 +850,9 @@ describe('worktree cleanup prompt', () => {
 
     await userEvent.click(screen.getByTestId('close-session'));
 
-    const dialog = screen.getByRole('dialog');
-    expect(dialog).toBeInTheDocument();
-
-    fireEvent.keyDown(dialog, { key: 'Escape' });
-
-    expect(mockCloseSession).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).toBeNull();
+    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('s1', 'pane-session');
+    expect(mockCloseSession).not.toHaveBeenCalled();
   });
 
   it('uses Cmd+W to close the active session pane before closing the session', async () => {

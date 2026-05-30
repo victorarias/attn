@@ -1540,22 +1540,29 @@ sendFetchPRDetails,
     [alwaysKeepWorktrees, closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterSession]
   );
 
+  const handleClosePane = useCallback((sessionId: string, paneId: string) => {
+    prepareClosePaneFocus(sessionId, paneId);
+    const workspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId ?? sessionId;
+    return sendWorkspaceClosePane(workspaceId, paneId).catch((error) => {
+      clearPreparedClosePaneFocus(sessionId);
+      throw error;
+    });
+  }, [clearPreparedClosePaneFocus, prepareClosePaneFocus, sendWorkspaceClosePane, sessions]);
+
   const handleRequestCloseSession = useCallback((id: string) => {
     const session = sessions.find((entry) => entry.id === id);
     if (!session) {
       return;
     }
-    const splitCount = Math.max(0, session.workspace.agents.length - 1);
-    if (splitCount > 0) {
-      setPendingSessionClose({
-        id: session.id,
-        label: session.label,
-        splitCount,
-      });
+
+    const sessionPane = session.workspace.agents.find((pane) => pane.sessionId === session.id);
+    if (sessionPane && session.workspace.agents.length > 1) {
+      void handleClosePane(session.id, sessionPane.id).catch(console.error);
       return;
     }
+
     void handleCloseSession(id);
-  }, [handleCloseSession, sessions]);
+  }, [handleClosePane, handleCloseSession, sessions]);
 
   const handleCancelSessionClose = useCallback(() => {
     setPendingSessionClose(null);
@@ -1577,15 +1584,6 @@ sendFetchPRDetails,
     },
     [setActiveSession]
   );
-
-  const handleClosePane = useCallback((sessionId: string, paneId: string) => {
-    prepareClosePaneFocus(sessionId, paneId);
-    const workspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId ?? sessionId;
-    return sendWorkspaceClosePane(workspaceId, paneId).catch((error) => {
-      clearPreparedClosePaneFocus(sessionId);
-      throw error;
-    });
-  }, [clearPreparedClosePaneFocus, prepareClosePaneFocus, sendWorkspaceClosePane, sessions]);
 
   useUiAutomationBridge({
     sessions,
@@ -2441,11 +2439,6 @@ sendFetchPRDetails,
                       void createSplitSession('shell', direction, targetPaneId);
                     }}
                     onClosePane={(paneId) => {
-                      const agentPane = (rootSession.workspace.agents || []).find((pane) => pane.id === paneId);
-                      if (agentPane?.sessionId) {
-                        handleRequestCloseSession(agentPane.sessionId);
-                        return;
-                      }
                       void handleClosePane(rootSession.id, paneId).catch(console.error);
                     }}
                     onFocusPane={(paneId) => {
