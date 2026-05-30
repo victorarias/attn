@@ -18,7 +18,6 @@ export const SHORTCUTS = {
   // Terminal panel
   'terminal.open': { key: '`', meta: true },
   'terminal.collapse': { key: '~', shift: true },  // Shift+` produces ~ on US keyboards
-  'terminal.new': { key: 'n', meta: true, shift: true },
   'terminal.splitVertical': { key: 'd', meta: true },
   'terminal.splitHorizontal': { key: 'd', meta: true, shift: true },
   'terminal.toggleZoom': { key: 'z', meta: true, shift: true },
@@ -34,6 +33,7 @@ export const SHORTCUTS = {
 
   // Session management
   'session.new': { key: 'n', meta: true },
+  'session.newHorizontal': { key: 'n', meta: true, shift: true },
   'session.newWorkspace': { key: 't', meta: true },
   'session.close': { key: 'w', meta: true },
   'session.prev': { key: 'ArrowUp', meta: true },

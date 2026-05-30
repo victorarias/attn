@@ -191,7 +191,6 @@ describe('shortcut registry', () => {
     it('has expected terminal shortcuts defined', () => {
       expect(SHORTCUTS['terminal.open']).toEqual({ key: '`', meta: true });
       expect(SHORTCUTS['terminal.collapse']).toEqual({ key: '~', shift: true });
-      expect(SHORTCUTS['terminal.new']).toEqual({ key: 'n', meta: true, shift: true });
       expect(SHORTCUTS['terminal.splitVertical']).toEqual({ key: 'd', meta: true });
       expect(SHORTCUTS['terminal.splitHorizontal']).toEqual({ key: 'd', meta: true, shift: true });
       expect(SHORTCUTS['terminal.toggleZoom']).toEqual({ key: 'z', meta: true, shift: true });
@@ -205,6 +204,7 @@ describe('shortcut registry', () => {
 
     it('has expected session shortcuts defined', () => {
       expect(SHORTCUTS['session.new']).toEqual({ key: 'n', meta: true });
+      expect(SHORTCUTS['session.newHorizontal']).toEqual({ key: 'n', meta: true, shift: true });
       expect(SHORTCUTS['session.newWorkspace']).toEqual({ key: 't', meta: true });
       expect(SHORTCUTS['session.close']).toEqual({ key: 'w', meta: true });
       expect(SHORTCUTS['session.goToDashboard']).toEqual({ key: 'g', meta: true });

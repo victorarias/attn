@@ -387,10 +387,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       onSplitPane(activePaneId, direction);
     }, [activePaneId, onSplitPane]);
 
-    const handleNewTerminal = useCallback(() => {
-      onSplitPane(activePaneId, 'horizontal');
-    }, [activePaneId, onSplitPane]);
-
     const handleClosePane = useCallback((paneId: string) => {
       onClosePane(paneId);
     }, [onClosePane]);
@@ -471,7 +467,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     }, [focusPaneIfCurrentlyActive, runtime]);
 
     useShortcut('terminal.open', focusActivePane, sessionVisible);
-    useShortcut('terminal.new', () => { void handleNewTerminal(); }, sessionVisible);
     useShortcut('terminal.splitVertical', () => { handleSplit('vertical'); }, sessionVisible);
     useShortcut('terminal.splitHorizontal', () => { handleSplit('horizontal'); }, sessionVisible);
     useShortcut('terminal.toggleZoom', toggleZoomActivePane, sessionVisible);

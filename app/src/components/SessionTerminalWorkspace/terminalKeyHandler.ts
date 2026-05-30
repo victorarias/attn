@@ -34,7 +34,7 @@ export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
         return !triggerShortcut('session.newWorkspace');
       }
       if (event.shiftKey && event.key.toLowerCase() === 'n') {
-        return !triggerShortcut('terminal.new');
+        return !triggerShortcut('session.newHorizontal');
       }
       if (!event.shiftKey && event.key.toLowerCase() === 'd') {
         return !triggerShortcut('terminal.splitVertical');

@@ -29,7 +29,7 @@ import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, Daemon
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
-import { hasPane } from './types/workspace';
+import { hasPane, type TerminalSplitDirection } from './types/workspace';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -1219,6 +1219,7 @@ sendFetchPRDetails,
   // Location picker state management
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [locationPickerPurpose, setLocationPickerPurpose] = useState<LocationPickerPurpose>('workspace');
+  const [locationPickerSessionDirection, setLocationPickerSessionDirection] = useState<TerminalSplitDirection>('vertical');
 
   // Thumbs (Quick Find) state
   const [thumbsOpen, setThumbsOpen] = useState(false);
@@ -1409,12 +1410,13 @@ sendFetchPRDetails,
     takeSessionSpawnArgs,
   ]);
 
-  const handleNewSession = useCallback(() => {
+  const handleNewSession = useCallback((direction: TerminalSplitDirection = 'vertical') => {
     if (!activeLocalSession?.workspaceId) {
       handleNewWorkspace();
       return;
     }
     setLocationPickerPurpose('session');
+    setLocationPickerSessionDirection(direction);
     setLocationPickerOpen(true);
   }, [activeLocalSession?.workspaceId, handleNewWorkspace]);
 
@@ -1448,7 +1450,7 @@ sendFetchPRDetails,
       // Note: Location is automatically tracked by daemon when session registers
       const folderName = path.split('/').pop() || 'session';
       if (locationPickerPurpose === 'session' && activeLocalSession?.workspaceId) {
-        await createSplitSession(selectedAgent, 'vertical', undefined, {
+        await createSplitSession(selectedAgent, locationPickerSessionDirection, undefined, {
           cwd: path,
           endpointId,
           label: folderName,
@@ -1478,7 +1480,7 @@ sendFetchPRDetails,
         ));
       }
     },
-    [activeLocalSession?.workspaceId, agentAvailability, createSplitSession, createWorkspaceSession, daemonEndpoints, hasAvailableAgents, locationPickerPurpose, showError]
+    [activeLocalSession?.workspaceId, agentAvailability, createSplitSession, createWorkspaceSession, daemonEndpoints, hasAvailableAgents, locationPickerPurpose, locationPickerSessionDirection, showError]
   );
 
   const handleCreateWorktreeSession = useCallback((
@@ -2265,7 +2267,8 @@ sendFetchPRDetails,
     activeSessionId
       ? [
           { label: '⌘D split v' },
-          { label: '⌘⇧N split h' },
+          { label: '⌘⇧D split h' },
+          { label: '⌘⇧N session h' },
           { label: '⌘⇧Z zoom', active: activeSessionZoomed },
           { label: '⌘⌥←↑→↓ pane' },
         ]
@@ -2319,7 +2322,8 @@ sendFetchPRDetails,
   // Terminal panel handlers for active session
   // Use keyboard shortcuts hook
   useKeyboardShortcuts({
-    onNewSession: handleNewSession,
+    onNewSession: () => handleNewSession('vertical'),
+    onNewSessionHorizontal: () => handleNewSession('horizontal'),
     onNewWorkspace: handleNewWorkspace,
     onCloseSession: handleCloseCurrentSessionShortcut,
     onToggleDrawer: () => toggleDockPanel('attention'),
@@ -2407,7 +2411,7 @@ sendFetchPRDetails,
           endpoints={daemonEndpoints}
           onRebootstrapEndpoint={handleRebootstrapEndpoint}
           onSelectSession={handleSelectSession}
-          onNewSession={handleNewSession}
+          onNewSession={() => handleNewSession('vertical')}
           onRefreshPRs={handleRefreshPRs}
           onOpenPR={handleOpenPR}
           onOpenSettings={() => setSettingsOpen(true)}
@@ -2436,7 +2440,7 @@ sendFetchPRDetails,
           onMuteSession={sendMuteSession}
           onSelectSession={handleSelectSession}
           onSelectWorkspace={handleSelectWorkspace}
-          onNewSession={handleNewSession}
+          onNewSession={() => handleNewSession('vertical')}
           onCloseSession={handleRequestCloseSession}
           onReloadSession={handleReloadSession}
           onGoToDashboard={goToDashboard}

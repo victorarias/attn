@@ -60,7 +60,7 @@ describe('installTerminalKeyHandler', () => {
     expect(sendToPty).not.toHaveBeenCalled();
   });
 
-  it('routes Cmd+Shift+N to new terminal/session split when terminal owns the key event', () => {
+  it('routes Cmd+Shift+N to new horizontal session when terminal owns the key event', () => {
     vi.mocked(triggerShortcut).mockReturnValue(true);
     const sendToPty = vi.fn();
     const handler = installTerminalKeyHandler(sendToPty);
@@ -71,7 +71,7 @@ describe('installTerminalKeyHandler', () => {
     });
 
     expect(handler(event)).toBe(false);
-    expect(triggerShortcut).toHaveBeenCalledWith('terminal.new');
+    expect(triggerShortcut).toHaveBeenCalledWith('session.newHorizontal');
     expect(sendToPty).not.toHaveBeenCalled();
   });
 });

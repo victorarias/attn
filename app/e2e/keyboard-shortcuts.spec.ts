@@ -105,7 +105,7 @@ test.describe('Keyboard Shortcuts', () => {
       await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2, { timeout: 5000 });
     });
 
-    test('⌘⇧N creates a session-backed horizontal shell split in the current workspace', async ({ page, daemon }) => {
+    test('⌘⇧D creates a session-backed horizontal shell split in the current workspace', async ({ page, daemon }) => {
       await daemon.start();
       await page.goto('/');
       await page.waitForSelector('.dashboard');
@@ -117,12 +117,41 @@ test.describe('Keyboard Shortcuts', () => {
       await expect(page.locator('[data-session-terminal-workspace="workspace-s-horizontal"]')).toBeVisible({ timeout: 2000 });
       await page.locator('.terminal-wrapper.active .terminal-container').click();
 
-      await page.keyboard.press('Meta+Shift+n');
+      await page.keyboard.press('Meta+Shift+d');
 
       const selectedWorkspaceSessions = page.locator('.workspace-group.selected .session-item');
       await expect(selectedWorkspaceSessions).toHaveCount(2, { timeout: 5000 });
       await expect(page.locator('.workspace-group.selected')).toContainText('shell');
       await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2, { timeout: 5000 });
+      await expect(page.locator('.terminal-wrapper.active [data-split-direction="horizontal"]')).toHaveCount(1, { timeout: 5000 });
+    });
+
+    test('⌘⇧N creates a picked session on a horizontal split in the current workspace', async ({ page, daemon }) => {
+      await daemon.start();
+      await page.goto('/');
+      await page.waitForSelector('.dashboard');
+
+      await createSession(page, daemon, { id: 's-picked-horizontal', label: 'Root', state: 'working', cwd: '/tmp/test/picked-horizontal-session' });
+      await expect(page.locator('[data-testid="session-s-picked-horizontal"]')).toBeVisible({ timeout: 5000 });
+
+      await page.locator('[data-testid="session-s-picked-horizontal"]').click();
+      await expect(page.locator('[data-session-terminal-workspace="workspace-s-picked-horizontal"]')).toBeVisible({ timeout: 2000 });
+
+      await page.keyboard.press('Meta+Shift+n');
+      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.picker-title')).toHaveText('New Session Location');
+      await expect(page.locator('.workspace-group.selected .session-item')).toHaveCount(1);
+
+      const enabledAgent = page.locator('.agent-option:not(:disabled)').first();
+      await expect(enabledAgent).toBeVisible();
+      await enabledAgent.click();
+      await page.locator('[data-testid="location-picker-path-input"]').fill('/tmp');
+      await page.keyboard.press('Enter');
+
+      const selectedWorkspaceSessions = page.locator('.workspace-group.selected .session-item');
+      await expect(selectedWorkspaceSessions).toHaveCount(2, { timeout: 10000 });
+      await expect(page.locator('.workspace-group.selected')).toContainText('tmp');
+      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2, { timeout: 10000 });
       await expect(page.locator('.terminal-wrapper.active [data-split-direction="horizontal"]')).toHaveCount(1, { timeout: 5000 });
     });
 
