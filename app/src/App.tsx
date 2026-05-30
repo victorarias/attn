@@ -1654,6 +1654,10 @@ sendFetchPRDetails,
   }, [unmutedEnrichedSessions, handleSelectSession]);
 
   const workspaceViews = useMemo(
+    () => buildWorkspaceViewModels(daemonWorkspaces, enrichedLocalSessions),
+    [daemonWorkspaces, enrichedLocalSessions],
+  );
+  const sidebarWorkspaceViews = useMemo(
     () => buildWorkspaceViewModels(daemonWorkspaces, unmutedEnrichedSessions),
     [daemonWorkspaces, unmutedEnrichedSessions],
   );
@@ -1661,20 +1665,21 @@ sendFetchPRDetails,
   const activeWorkspaceId = workspaceSelection.activeWorkspaceId;
 
   // Use workspace order so ⌘1-9 and prev/next match the top-level sidebar rows.
-  const visualWorkspaces = workspaceViews;
+  const visualWorkspaces = sidebarWorkspaceViews;
   const visualIndexByWorkspaceId = useMemo(() => {
     return new Map(visualWorkspaces.map((workspace, index) => [workspace.id, index]));
   }, [visualWorkspaces]);
 
   const handleSelectWorkspace = useCallback(
     (workspaceId: string) => {
-      const workspace = workspaceViews.find((entry) => entry.id === workspaceId);
+      const workspace = sidebarWorkspaceViews.find((entry) => entry.id === workspaceId)
+        || workspaceViews.find((entry) => entry.id === workspaceId);
       const sessionId = workspace?.firstSessionId;
       if (sessionId) {
         handleSelectSession(sessionId);
       }
     },
-    [handleSelectSession, workspaceViews],
+    [handleSelectSession, sidebarWorkspaceViews, workspaceViews],
   );
 
   const handleSelectWorkspaceByIndex = useCallback(
@@ -2231,7 +2236,7 @@ sendFetchPRDetails,
       {/* Session view - always rendered to keep terminals alive */}
       <div className={`view-container ${view === 'session' ? 'visible' : 'hidden'}`}>
         <Sidebar
-          workspaces={workspaceViews}
+          workspaces={sidebarWorkspaceViews}
           visualOrder={visualWorkspaces}
           visualIndexByWorkspaceId={visualIndexByWorkspaceId}
           selectedId={activeSessionId}
