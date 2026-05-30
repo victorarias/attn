@@ -144,6 +144,14 @@ function cellFromRect(
   cols: number,
 ) {
   if (!rect) return null;
+  if (
+    event.clientX < rect.left
+    || event.clientX >= rect.right
+    || event.clientY < rect.top
+    || event.clientY >= rect.bottom
+  ) {
+    return null;
+  }
   return {
     row: Math.max(0, Math.min(rows - 1, Math.floor((event.clientY - rect.top) / cellHeight))),
     col: Math.max(0, Math.min(cols, Math.floor((event.clientX - rect.left) / cellWidth))),
@@ -731,10 +739,18 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // from verified replay without sending historical replies to the live PTY.
     }, [clearSynchronizedOutputRenderTimer, fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, resizeLocal, resolvedTheme, write]);
 
-    const cellFromPointer = (event: React.MouseEvent) => {
+    const cellFromPointer = (event: React.MouseEvent | React.WheelEvent) => {
       const renderer = rendererRef.current;
-      const rect = containerRef.current?.getBoundingClientRect();
+      const rect = canvasRef.current?.getBoundingClientRect();
       if (!renderer || !rect) return null;
+      if (
+        event.clientX < rect.left
+        || event.clientX >= rect.right
+        || event.clientY < rect.top
+        || event.clientY >= rect.bottom
+      ) {
+        return null;
+      }
       return {
         row: Math.max(0, Math.min((terminalRef.current?.rows ?? 1) - 1, Math.floor((event.clientY - rect.top) / renderer.cellHeight))),
         col: Math.max(0, Math.min((terminalRef.current?.cols ?? 1), Math.floor((event.clientX - rect.left) / renderer.cellWidth))),

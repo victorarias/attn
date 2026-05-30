@@ -124,11 +124,44 @@ test.describe('Ghostty terminal interactions', () => {
     await expectOpenedUrl(page, url);
   });
 
+  test('hit-tests URL clicks against the rendered canvas when it is vertically offset', async ({ page, daemon }) => {
+    await installOpenerProbe(page);
+    const terminal = await openTerminalSession(page, daemon, 's-link-offset');
+    await page.addStyleTag({
+      content: '.terminal-container canvas { margin-top: 18px !important; }',
+    });
+    const url = 'https://example.test/offset-link';
+    await writeTerminalOutput(page, 's-link-offset', `\u001b[2J\u001b[Hnot-a-link\u001b[2;1H${url}`);
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-link-offset') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain(url);
+
+    await page.keyboard.down('Meta');
+    await terminal.click({ position: { x: 100, y: 26 } });
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_URLS?: string[] }).__OPENED_TERMINAL_URLS ?? [],
+        ),
+        { timeout: 500 },
+      )
+      .toEqual([]);
+
+    await terminal.click({ position: { x: 100, y: 48 } });
+    await page.keyboard.up('Meta');
+
+    await expectOpenedUrl(page, url);
+  });
+
   test('cmd+click opens a visible URL while terminal mouse tracking is active', async ({ page, daemon }) => {
     await installOpenerProbe(page);
     const terminal = await openTerminalSession(page, daemon, 's-link-tracked');
     const url = 'https://example.test/tracked-link';
-    await writeTerminalOutput(page, 's-link-tracked', `\u001b[2J\u001b[H\u001b[?1000h${url}`);
+    await writeTerminalOutput(page, 's-link-tracked', `\u001b[2J\u001b[H\u001b[?1000h${url} `);
 
     await expect
       .poll(
