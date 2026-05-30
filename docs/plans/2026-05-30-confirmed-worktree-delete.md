@@ -95,7 +95,14 @@ The first user confirmation authorizes a normal delete only. The second confirma
 - [x] Update frontend confirmation UI.
 - [x] Add backend and frontend tests.
 - [x] Run focused Go and frontend verification.
-- [ ] Run real-app/manual verification.
+- [x] Run real-app/manual verification.
+- [x] Open PR, resolve merge conflict with `main`, pass CI, and receive required review.
+
+## Outcome
+
+PR: https://github.com/victorarias/attn/pull/239
+
+Status: ready to merge. CI passed, `figgyster` approved, Codex review returned `+1`, and there are no inline review comments.
 
 ## Decisions
 
