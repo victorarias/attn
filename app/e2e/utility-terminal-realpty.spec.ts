@@ -560,7 +560,7 @@ test.describe('Utility Terminal Real PTY', () => {
       .toBe(true);
   });
 
-  test('main session keeps keyboard interactivity after returning from a split', async ({ page, daemon }) => {
+  test('agent session keeps keyboard interactivity after returning from a split', async ({ page, daemon }) => {
     test.skip(!realPtyEnabled, 'Requires real PTY (VITE_FORCE_REAL_PTY=1)');
 
     const { wsUrl } = await daemon.start();

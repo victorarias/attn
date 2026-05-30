@@ -126,7 +126,7 @@ describe('SessionTerminalWorkspace', () => {
     vi.useRealTimers();
   });
 
-  it('focuses the main pane exactly once on active session render — no retries', () => {
+  it('focuses the agent pane exactly once on active session render — no retries', () => {
     vi.useFakeTimers();
     // Focus fails — but focusActivePane should not retry; retries belong to the
     // init/ready path (focusPaneIfCurrentlyActive) which runs from Terminal callbacks.

@@ -256,7 +256,7 @@ test.describe('Keyboard Shortcuts', () => {
 
       // Switching from a focused Ghostty terminal must not forward the shortcut's digit.
       await page.locator('[data-testid="session-s1"]').click();
-      const firstTerminal = page.locator('[data-pane-session-id="s1"][data-pane-id="main"] .terminal-container');
+      const firstTerminal = page.locator('[data-pane-session-id="s1"][data-pane-kind="agent"] .terminal-container');
       await expect(firstTerminal).toBeVisible({ timeout: 5000 });
       await firstTerminal.focus();
 

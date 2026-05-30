@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	MainPaneID        = "main"
+	LegacyMainPaneID  = "main"
 	DefaultPaneTitle  = "Agent"
 	DefaultSplitRatio = 0.5
 )
@@ -52,21 +52,21 @@ type WorkspaceLayout struct {
 	UpdatedAt    string
 }
 
-func DefaultLayout() Node {
+func DefaultLayout(paneID string) Node {
 	return Node{
 		Type:   "pane",
-		PaneID: MainPaneID,
+		PaneID: paneID,
 	}
 }
 
-func DefaultWorkspaceLayout(workspaceID, sessionID string) WorkspaceLayout {
+func DefaultWorkspaceLayout(workspaceID, paneID, sessionID string) WorkspaceLayout {
 	return WorkspaceLayout{
 		WorkspaceID:  workspaceID,
-		ActivePaneID: MainPaneID,
-		Layout:       DefaultLayout(),
+		ActivePaneID: paneID,
+		Layout:       DefaultLayout(paneID),
 		Panes: []Pane{
 			{
-				PaneID:    MainPaneID,
+				PaneID:    paneID,
 				RuntimeID: sessionID,
 				SessionID: sessionID,
 				Kind:      PaneKindAgent,
@@ -86,30 +86,22 @@ func EncodeLayout(node Node) (string, error) {
 
 func DecodeLayout(layoutJSON string) (Node, error) {
 	if strings.TrimSpace(layoutJSON) == "" {
-		return DefaultLayout(), nil
+		return Node{}, nil
 	}
 	var node Node
 	if err := json.Unmarshal([]byte(layoutJSON), &node); err != nil {
-		return DefaultLayout(), err
+		return Node{}, err
 	}
 	return node, nil
 }
 
-func NormalizeWorkspaceLayout(snapshot WorkspaceLayout, mainSessionID string) WorkspaceLayout {
+func NormalizeWorkspaceLayout(snapshot WorkspaceLayout) WorkspaceLayout {
 	normalized := snapshot
 
-	panesByID := make(map[string]Pane, len(normalized.Panes)+1)
-	panesByID[MainPaneID] = Pane{
-		PaneID:    MainPaneID,
-		RuntimeID: strings.TrimSpace(mainSessionID),
-		SessionID: strings.TrimSpace(mainSessionID),
-		Kind:      PaneKindAgent,
-		Title:     DefaultPaneTitle,
-	}
-
+	panesByID := make(map[string]Pane, len(normalized.Panes))
 	for _, pane := range normalized.Panes {
 		paneID := strings.TrimSpace(pane.PaneID)
-		if paneID == "" || paneID == MainPaneID {
+		if paneID == "" {
 			continue
 		}
 		runtimeID := strings.TrimSpace(pane.RuntimeID)
@@ -144,10 +136,10 @@ func NormalizeWorkspaceLayout(snapshot WorkspaceLayout, mainSessionID string) Wo
 		}
 	}
 	if !slices.Contains(paneIDs, normalized.ActivePaneID) {
-		normalized.ActivePaneID = MainPaneID
-	}
-	if !slices.Contains(paneIDs, normalized.ActivePaneID) && len(paneIDs) > 0 {
-		normalized.ActivePaneID = paneIDs[0]
+		normalized.ActivePaneID = ""
+		if len(paneIDs) > 0 {
+			normalized.ActivePaneID = paneIDs[0]
+		}
 	}
 	return normalized
 }
@@ -155,9 +147,21 @@ func NormalizeWorkspaceLayout(snapshot WorkspaceLayout, mainSessionID string) Wo
 func NormalizeLayout(node Node, panesByID map[string]Pane) Node {
 	normalized, empty := normalizeNode(node, panesByID)
 	if empty {
-		return DefaultLayout()
+		return fallbackLayout(panesByID)
 	}
 	return rebalanceSplitChains(normalized)
+}
+
+func fallbackLayout(panesByID map[string]Pane) Node {
+	paneIDs := make([]string, 0, len(panesByID))
+	for paneID := range panesByID {
+		paneIDs = append(paneIDs, paneID)
+	}
+	sort.Strings(paneIDs)
+	if len(paneIDs) == 0 {
+		return Node{}
+	}
+	return DefaultLayout(paneIDs[0])
 }
 
 func rebalanceSplitChains(node Node) Node {
@@ -277,7 +281,7 @@ func Remove(node Node, paneID string) (Node, bool) {
 		return node, false
 	}
 	if empty {
-		return DefaultLayout(), true
+		return Node{}, true
 	}
 	return next, true
 }

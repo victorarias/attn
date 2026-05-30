@@ -711,7 +711,7 @@ describe('worktree cleanup prompt', () => {
     });
   });
 
-  it('prompts before closing a split session from the main pane with Cmd+W', async () => {
+  it('prompts before closing a split session from the agent pane with Cmd+W', async () => {
     mockUseSessionStore.mockReturnValue({
       sessions: [
         {

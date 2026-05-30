@@ -127,8 +127,9 @@ function resolvePaneId(
 }
 
 function resolveRuntimeId(session: Session, paneId: string): string {
-  if (paneId === MAIN_TERMINAL_PANE_ID) {
-    return session.id;
+  const agent = session.workspace.agents?.find((entry) => entry.id === paneId);
+  if (agent?.runtimeId) {
+    return agent.runtimeId;
   }
   const terminal = session.workspace.terminals.find((entry) => entry.id === paneId);
   if (!terminal?.ptyId) {
@@ -138,13 +139,24 @@ function resolveRuntimeId(session: Session, paneId: string): string {
 }
 
 function paneEntries(session: Session) {
+  const agentPanes =
+    session.workspace.agents && session.workspace.agents.length > 0
+      ? session.workspace.agents
+      : [
+          {
+            id: MAIN_TERMINAL_PANE_ID,
+            runtimeId: session.id,
+            sessionId: session.id,
+            title: 'Session',
+          },
+        ];
   return [
-    {
-      paneId: MAIN_TERMINAL_PANE_ID,
-      runtimeId: session.id,
+    ...agentPanes.map((agent) => ({
+      paneId: agent.id,
+      runtimeId: agent.runtimeId,
       kind: 'main',
-      title: 'Session',
-    },
+      title: agent.title || 'Session',
+    })),
     ...session.workspace.terminals.map((terminal) => ({
       paneId: terminal.id,
       runtimeId: terminal.ptyId,
@@ -428,7 +440,10 @@ function collectVisualSnapshot(
             runtimeId,
             runtimeAttached: runtimeId ? isRuntimeAttached(runtimeId) : false,
             active: activePaneId === paneId,
-            kind: paneId === MAIN_TERMINAL_PANE_ID ? 'main' : 'shell',
+            kind:
+              session.workspace.agents?.some((entry) => entry.id === paneId) || paneId === MAIN_TERMINAL_PANE_ID
+                ? 'main'
+                : 'shell',
             path: paneElement instanceof HTMLElement ? paneElement.dataset.panePath || null : null,
             bounds: rectSnapshot(paneElement),
             className: paneElement instanceof HTMLElement ? paneElement.className : null,
@@ -1901,9 +1916,10 @@ export function useUiAutomationBridge({
         const flushEvery = typeof payload.flushEvery === 'number' && payload.flushEvery > 0
           ? Math.floor(payload.flushEvery)
           : 1;
-        const runtimeId = paneId === MAIN_TERMINAL_PANE_ID
-          ? session.id
-          : session.workspace.terminals.find((entry) => entry.id === paneId)?.ptyId || `bench:${paneId}`;
+        const runtimeId =
+          session.workspace.agents?.find((entry) => entry.id === paneId)?.runtimeId ||
+          session.workspace.terminals.find((entry) => entry.id === paneId)?.ptyId ||
+          (paneId === MAIN_TERMINAL_PANE_ID ? session.id : `bench:${paneId}`);
         const bytes = buildBenchmarkBytes(chunkBytes);
         const base64Payload = encodeBytesToBase64(bytes);
 

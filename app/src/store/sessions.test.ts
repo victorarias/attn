@@ -161,6 +161,9 @@ describe('sessions store', () => {
 
     const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
     expect(session?.workspace).toEqual({
+      agents: [
+        { id: 'main', runtimeId: sessionId, sessionId, title: 'Agent' },
+      ],
       terminals: [
         { id: 'pane-shell', ptyId: 'runtime-shell', title: 'Shell 1' },
       ],
@@ -214,6 +217,9 @@ describe('sessions store', () => {
 
     const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
     expect(session?.workspace).toEqual({
+      agents: [
+        { id: 'main', runtimeId: sessionId, sessionId, title: 'Agent' },
+      ],
       terminals: [],
       layoutTree: { type: 'pane', paneId: 'main' },
     });

@@ -105,7 +105,6 @@ func (s *Store) GetWorkspaceLayout(workspaceID string) *workspacelayout.Workspac
 	layout, err := workspacelayout.DecodeLayout(layoutJSON)
 	if err != nil {
 		log.Printf("[store] GetWorkspaceLayout: failed to decode layout for workspace %s: %v", workspaceID, err)
-		layout = workspacelayout.DefaultLayout()
 	}
 
 	rows, err := s.db.Query(`

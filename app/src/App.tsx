@@ -2401,9 +2401,8 @@ sendFetchPRDetails,
                     }}
                     onClosePane={(paneId) => {
                       const agentPane = (rootSession.workspace.agents || []).find((pane) => pane.id === paneId);
-                      const paneSessionId = agentPane?.sessionId || (paneId === MAIN_TERMINAL_PANE_ID ? rootSession.id : null);
-                      if (paneSessionId) {
-                        handleRequestCloseSession(paneSessionId);
+                      if (agentPane?.sessionId) {
+                        handleRequestCloseSession(agentPane.sessionId);
                         return;
                       }
                       void handleClosePane(rootSession.id, paneId).catch(console.error);
