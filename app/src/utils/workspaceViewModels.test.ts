@@ -40,6 +40,26 @@ describe('workspaceViewModels', () => {
     ]);
   });
 
+  it('keeps daemon workspaces renderable before their sessions arrive', () => {
+    const viewModels = buildWorkspaceViewModels(
+      [{ id: 'workspace-pending', title: 'Pending', directory: '/repo/pending', status: 'launching' }],
+      [],
+    );
+
+    expect(viewModels).toEqual([
+      {
+        id: 'workspace-pending',
+        title: 'Pending',
+        directory: '/repo/pending',
+        status: 'launching',
+        endpointId: undefined,
+        sessions: [],
+        firstSessionId: null,
+        focusedSessionId: null,
+      },
+    ]);
+  });
+
   it('nests remote sessions under endpoint-less daemon workspace snapshots', () => {
     const viewModels = buildWorkspaceViewModels(
       [{ id: 'workspace-remote', title: 'Remote', directory: '/srv/repo' }],

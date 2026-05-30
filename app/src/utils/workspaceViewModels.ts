@@ -142,7 +142,7 @@ function toWorkspaceViewModel<TSession extends WorkspaceViewSession>(
     title: workspace.title,
     directory: workspace.directory,
     status: workspace.status,
-    endpointId: workspaceEndpointId(workspace) || sessionEndpointId(sessions[0]),
+    endpointId: workspaceEndpointId(workspace) || (sessions[0] ? sessionEndpointId(sessions[0]) : undefined),
     sessions,
     firstSessionId,
     focusedSessionId,
