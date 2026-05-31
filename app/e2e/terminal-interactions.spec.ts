@@ -350,6 +350,7 @@ test.describe('Ghostty terminal interactions', () => {
   test('keeps copied selection attached to its text while scrolling', async ({ page, context, daemon }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const terminal = await openTerminalSession(page, daemon, 's-selection-scroll');
+    await page.evaluate(() => navigator.clipboard.writeText(''));
     const anchor = 'SELECTED_ANCHOR_LINE';
     const lines = Array.from({ length: 80 }, (_, index) => (
       index === 79 ? anchor : `SCROLL_LINE_${String(index).padStart(3, '0')}`
@@ -361,10 +362,10 @@ test.describe('Ghostty terminal interactions', () => {
 
     const terminalBounds = await terminal.boundingBox();
     expect(terminalBounds).not.toBeNull();
-    const rowY = terminalBounds!.height - 8;
-    await terminal.hover({ position: { x: 2, y: rowY } });
+    const rowY = terminalBounds!.y + terminalBounds!.height - 12;
+    await page.mouse.move(terminalBounds!.x + 2, rowY);
     await page.mouse.down();
-    await terminal.hover({ position: { x: 220, y: rowY } });
+    await page.mouse.move(terminalBounds!.x + 220, rowY);
     await page.mouse.up();
     await expect
       .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
