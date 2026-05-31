@@ -122,13 +122,18 @@ commit="$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || printf 'unknown')"
 short_commit="$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')"
 
 dirty="false"
-if ! git -C "${ROOT_DIR}" diff --quiet --ignore-submodules --; then
-  dirty="true"
-elif ! git -C "${ROOT_DIR}" diff --cached --quiet --ignore-submodules --; then
-  dirty="true"
-elif [[ -n "$(git -C "${ROOT_DIR}" ls-files --others --exclude-standard)" ]]; then
-  dirty="true"
-fi
+while IFS= read -r -d '' relative_path; do
+  if ! should_exclude_path "${relative_path}"; then
+    dirty="true"
+    break
+  fi
+done < <(
+  {
+    git -C "${ROOT_DIR}" diff --name-only -z --ignore-submodules --
+    git -C "${ROOT_DIR}" diff --cached --name-only -z --ignore-submodules --
+    git -C "${ROOT_DIR}" ls-files --others --exclude-standard -z
+  } | sort -zu
+)
 
 if [[ "${dirty}" == "false" ]]; then
   emit_result "git:${commit}" "${commit}" "${short_commit}" "${dirty}"
