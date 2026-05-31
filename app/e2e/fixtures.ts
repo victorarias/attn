@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as net from 'net';
 import { fileURLToPath } from 'url';
+import { WHATS_NEW_ID, WHATS_NEW_STORAGE_KEY } from '../src/hooks/useWhatsNew';
 
 // Mock GitHub Server
 class MockGitHubServer {
@@ -596,6 +597,17 @@ type Fixtures = {
 };
 
 export const test = base.extend<Fixtures>({
+  page: async ({ page }, use) => {
+    await page.addInitScript(({ storageKey, releaseId }) => {
+      window.localStorage.setItem(storageKey, releaseId);
+    }, {
+      storageKey: WHATS_NEW_STORAGE_KEY,
+      releaseId: WHATS_NEW_ID,
+    });
+
+    await use(page);
+  },
+
   mockGitHub: async ({}, use) => {
     const mock = new MockGitHubServer();
     await mock.start();
