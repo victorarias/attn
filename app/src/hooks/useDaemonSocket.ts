@@ -410,6 +410,12 @@ export interface BranchDiffFilesResult {
   error?: string;
 }
 
+export interface SessionExitInfo {
+  id: string;
+  exitCode: number;
+  signal?: string;
+}
+
 interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   onWorkspacesUpdate: (workspaces: DaemonWorkspace[]) => void;
@@ -424,6 +430,7 @@ interface UseDaemonSocketOptions {
   onSettingError?: (message: string) => void;
   onGitStatusUpdate?: (status: GitStatusUpdate) => void;
   onReviewLoopUpdate?: (state: ReviewLoopState | null) => void;
+  onSessionExited?: (info: SessionExitInfo) => void;
   endpoint?: DaemonEndpointProfile;
   wsUrl?: string;
 }
@@ -651,6 +658,7 @@ export function useDaemonSocket({
   onSettingError,
   onGitStatusUpdate,
   onReviewLoopUpdate,
+  onSessionExited,
   endpoint,
   wsUrl,
 }: UseDaemonSocketOptions) {
@@ -1512,6 +1520,13 @@ export function useDaemonSocket({
                 code: data.exit_code ?? 0,
                 signal: data.signal,
               });
+              if (onSessionExited) {
+                onSessionExited({
+                  id: data.id,
+                  exitCode: data.exit_code ?? 0,
+                  signal: data.signal,
+                });
+              }
             }
             break;
 

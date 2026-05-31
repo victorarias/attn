@@ -25,7 +25,7 @@ import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { useSessionStore, type Session, type TerminalWorkspaceState } from './store/sessions';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState, SessionExitInfo } from './hooks/useDaemonSocket';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
@@ -325,6 +325,18 @@ function App() {
     setUpdateAvailableVersion(null);
   }, [updateAvailableVersion]);
 
+  // Bridge daemon session-exit events to AppContent's pane-aware close handler.
+  // useDaemonSocket lives here in the outer App, but the close logic (worktree
+  // cleanup, focus fallback, pane vs session) lives in AppContent, so AppContent
+  // registers its handler into this ref and we forward exits through it.
+  const sessionExitHandlerRef = useRef<((info: SessionExitInfo) => void) | null>(null);
+  const registerSessionExitHandler = useCallback((handler: ((info: SessionExitInfo) => void) | null) => {
+    sessionExitHandlerRef.current = handler;
+  }, []);
+  const handleSessionExited = useCallback((info: SessionExitInfo) => {
+    sessionExitHandlerRef.current?.(info);
+  }, []);
+
   // Connect to daemon WebSocket
   const {
     sendPRAction,
@@ -401,6 +413,7 @@ function App() {
       if (!state) return;
       setReviewLoopsBySessionId(prev => ({ ...prev, [state.source_session_id]: state }));
     },
+    onSessionExited: handleSessionExited,
   });
 
   const setReviewLoopStateForSession = useCallback((sessionId: string, state: ReviewLoopState | null) => {
@@ -496,6 +509,7 @@ function App() {
         setReviewLoopIterationLimit={setReviewLoopIterationLimit}
         setReviewLoopStateForSession={setReviewLoopStateForSession}
         clearGitStatus={clearGitStatus}
+        registerSessionExitHandler={registerSessionExitHandler}
       />
     </SettingsProvider>
   );
@@ -578,6 +592,7 @@ interface AppContentProps {
   setReviewLoopIterationLimit: ReturnType<typeof useDaemonSocket>['setReviewLoopIterationLimit'];
   setReviewLoopStateForSession: (sessionId: string, state: ReviewLoopState | null) => void;
   clearGitStatus: () => void;
+  registerSessionExitHandler: (handler: ((info: SessionExitInfo) => void) | null) => void;
 }
 
 function AppContent({
@@ -655,6 +670,7 @@ sendFetchPRDetails,
   setReviewLoopIterationLimit,
   setReviewLoopStateForSession,
   clearGitStatus,
+  registerSessionExitHandler,
 }: AppContentProps) {
   const [openPRLauncherJob, setOpenPRLauncherJob] = useState<OpenPRLauncherJob | null>(null);
   const openPRLauncherIdRef = useRef(0);
@@ -1666,6 +1682,22 @@ sendFetchPRDetails,
 
     void handleCloseSession(id);
   }, [handleClosePane, handleCloseSession, sessions]);
+
+  // Auto-close a session when its process exits cleanly. A clean voluntary exit
+  // (code 0, no signal) means the user quit the agent/shell and there's nothing
+  // left to do in that pane. Non-zero exits and signal kills (crashes, reloads,
+  // explicit closes) keep the pane open so the error and exit code stay visible.
+  const handleSessionProcessExit = useCallback((info: SessionExitInfo) => {
+    if (info.exitCode !== 0 || info.signal) {
+      return;
+    }
+    handleRequestCloseSession(info.id);
+  }, [handleRequestCloseSession]);
+
+  useEffect(() => {
+    registerSessionExitHandler(handleSessionProcessExit);
+    return () => registerSessionExitHandler(null);
+  }, [registerSessionExitHandler, handleSessionProcessExit]);
 
   const handleCancelSessionClose = useCallback(() => {
     setPendingSessionClose(null);

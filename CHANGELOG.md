@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-05-31]
 
 ### Changed
+- **Auto-Close On Exit**: When a session's process exits cleanly (exit code 0), the session now closes itself instead of leaving a dead `[Process exited]` pane around. Sessions that crash or are killed (non-zero exit) stay open so you can still read the error.
 - **Workspace Muting**: Muting now applies to whole workspaces instead of individual sessions. Muted workspaces move to the muted section together with all of their sessions, and session rows no longer expose mute controls.
 
 ### Removed

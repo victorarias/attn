@@ -141,6 +141,33 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('forwards session_exited to onSessionExited with exit code and signal', async () => {
+    const onSessionExited = vi.fn();
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        onSessionExited,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+
+    // Clean voluntary exit: no signal.
+    ws.emit({ event: 'session_exited', id: 'clean-exit', exit_code: 0 });
+    expect(onSessionExited).toHaveBeenCalledWith({ id: 'clean-exit', exitCode: 0, signal: undefined });
+
+    // Signal kill (e.g. reload/close): signal is forwarded so consumers can skip auto-close.
+    ws.emit({ event: 'session_exited', id: 'killed', exit_code: -1, signal: 'SIGTERM' });
+    expect(onSessionExited).toHaveBeenCalledWith({ id: 'killed', exitCode: -1, signal: 'SIGTERM' });
+
+    unmount();
+  });
+
   it('resolves getReviewLoopRun from show result keyed by loop_id', async () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({
