@@ -810,6 +810,19 @@ func applyMigration41(tx *sql.Tx) error {
 		return err
 	}
 	if hasSessionMuted {
+		if _, err := tx.Exec(`
+			UPDATE workspaces
+			SET muted = 1
+			WHERE id IN (
+				SELECT DISTINCT workspace_id
+				FROM sessions
+				WHERE muted = 1
+					AND workspace_id IS NOT NULL
+					AND workspace_id != ''
+			)
+		`); err != nil {
+			return err
+		}
 		if _, err := tx.Exec("ALTER TABLE sessions DROP COLUMN muted"); err != nil {
 			return err
 		}

@@ -314,25 +314,29 @@ func (d *Daemon) handleRegisterWorkspace(client *wsClient, msg *protocol.Registe
 }
 
 func (d *Daemon) handleMuteWorkspaceWS(client *wsClient, msg *protocol.MuteWorkspaceMessage) {
-	id := strings.TrimSpace(msg.WorkspaceID)
+	if _, errMsg := d.toggleWorkspaceMute(msg.WorkspaceID); errMsg != "" {
+		d.sendCommandError(client, protocol.CmdMuteWorkspace, errMsg)
+	}
+}
+
+func (d *Daemon) toggleWorkspaceMute(workspaceID string) (protocol.Workspace, string) {
+	id := strings.TrimSpace(workspaceID)
 	if id == "" {
-		d.sendCommandError(client, protocol.CmdMuteWorkspace, "missing workspace_id")
-		return
+		return protocol.Workspace{}, "missing workspace_id"
 	}
 	if d.workspaces == nil {
-		d.sendCommandError(client, protocol.CmdMuteWorkspace, "workspace registry unavailable")
-		return
+		return protocol.Workspace{}, "workspace registry unavailable"
 	}
 	snapshot, ok := d.workspaces.toggleMuted(id)
 	if !ok {
-		d.sendCommandError(client, protocol.CmdMuteWorkspace, "workspace not found")
-		return
+		return protocol.Workspace{}, "workspace not found"
 	}
 	d.store.ToggleWorkspaceMute(id)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:     protocol.EventWorkspaceStateChanged,
 		Workspace: &snapshot,
 	})
+	return snapshot, ""
 }
 
 // handleUnregisterWorkspace closes the workspace AND every session that

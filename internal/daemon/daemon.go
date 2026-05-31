@@ -1628,6 +1628,12 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleMutePR(conn, msg.(*protocol.MutePRMessage))
 	case protocol.CmdMuteRepo:
 		d.handleMuteRepo(conn, msg.(*protocol.MuteRepoMessage))
+	case protocol.CmdMuteWorkspace:
+		if _, errMsg := d.toggleWorkspaceMute(msg.(*protocol.MuteWorkspaceMessage).WorkspaceID); errMsg != "" {
+			d.sendError(conn, errMsg)
+			return
+		}
+		d.sendOK(conn)
 	case protocol.CmdCollapseRepo:
 		d.handleCollapseRepo(conn, msg.(*protocol.CollapseRepoMessage))
 	case protocol.CmdQueryRepos:

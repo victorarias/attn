@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 )
@@ -274,6 +275,89 @@ func TestMigration37_ConvertsSessionLayoutToWorkspaceLayout(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("legacy table %s still exists", legacyTable)
 		}
+	}
+}
+
+func TestMigration41_PreservesMutedSessionsAsMutedWorkspaces(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration-41.db")
+	rawDB, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open raw sqlite db: %v", err)
+	}
+	if _, err := rawDB.Exec(`
+		CREATE TABLE sessions (
+			id TEXT PRIMARY KEY,
+			label TEXT NOT NULL,
+			directory TEXT NOT NULL,
+			state TEXT NOT NULL DEFAULT 'idle',
+			state_since TEXT NOT NULL,
+			state_updated_at TEXT NOT NULL,
+			todos TEXT,
+			last_seen TEXT NOT NULL,
+			workspace_id TEXT,
+			muted INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL,
+			directory TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		);
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at TEXT NOT NULL
+		);
+		INSERT INTO workspaces (id, title, directory, created_at) VALUES
+			('ws-muted', 'Muted workspace', '/repo/muted', '2026-05-31T00:00:00Z'),
+			('ws-active', 'Active workspace', '/repo/active', '2026-05-31T00:00:00Z');
+		INSERT INTO sessions (
+			id, label, directory, state, state_since, state_updated_at, last_seen, workspace_id, muted
+		) VALUES
+			('s-muted', 'Muted session', '/repo/muted', 'idle', '2026-05-31T00:00:00Z', '2026-05-31T00:00:00Z', '2026-05-31T00:00:00Z', 'ws-muted', 1),
+			('s-active', 'Active session', '/repo/active', 'idle', '2026-05-31T00:00:00Z', '2026-05-31T00:00:00Z', '2026-05-31T00:00:00Z', 'ws-active', 0);
+	`); err != nil {
+		rawDB.Close()
+		t.Fatalf("seed migration 41 legacy db: %v", err)
+	}
+	for version := 1; version <= 40; version++ {
+		if _, err := rawDB.Exec(
+			"INSERT INTO schema_migrations (version, applied_at) VALUES (?, datetime('now'))",
+			version,
+		); err != nil {
+			rawDB.Close()
+			t.Fatalf("seed migration version %d: %v", version, err)
+		}
+	}
+	rawDB.Close()
+
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() migrating version 41 error = %v", err)
+	}
+	defer db.Close()
+
+	for _, tc := range []struct {
+		workspaceID string
+		wantMuted   int
+	}{
+		{"ws-muted", 1},
+		{"ws-active", 0},
+	} {
+		var got int
+		if err := db.QueryRow("SELECT muted FROM workspaces WHERE id = ?", tc.workspaceID).Scan(&got); err != nil {
+			t.Fatalf("query workspace %s muted: %v", tc.workspaceID, err)
+		}
+		if got != tc.wantMuted {
+			t.Fatalf("workspace %s muted = %d, want %d", tc.workspaceID, got, tc.wantMuted)
+		}
+	}
+
+	var sessionMutedColumns int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'muted'").Scan(&sessionMutedColumns); err != nil {
+		t.Fatalf("query sessions.muted column: %v", err)
+	}
+	if sessionMutedColumns != 0 {
+		t.Fatalf("sessions.muted column still exists after migration")
 	}
 }
 
