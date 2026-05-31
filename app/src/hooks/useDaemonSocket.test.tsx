@@ -554,6 +554,78 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('keeps shell sessions in daemon session updates', async () => {
+    const onSessionsUpdate = vi.fn();
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '72',
+        sessions: [
+          {
+            id: 'agent-1',
+            label: 'Agent',
+            agent: 'codex',
+            directory: '/tmp/repo',
+            workspace_id: 'workspace-1',
+            state: 'working',
+          },
+          {
+            id: 'shell-1',
+            label: 'Shell',
+            agent: 'shell',
+            directory: '/tmp/repo',
+            workspace_id: 'workspace-1',
+            state: 'working',
+          },
+        ],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    expect(onSessionsUpdate).toHaveBeenLastCalledWith([
+      expect.objectContaining({ id: 'agent-1', agent: 'codex' }),
+      expect.objectContaining({ id: 'shell-1', agent: 'shell' }),
+    ]);
+
+    act(() => {
+      ws.emit({
+        event: 'session_registered',
+        session: {
+          id: 'shell-2',
+          label: 'Shell 2',
+          agent: 'shell',
+          directory: '/tmp/repo',
+          workspace_id: 'workspace-1',
+          state: 'working',
+        },
+      });
+    });
+
+    expect(onSessionsUpdate).toHaveBeenLastCalledWith([
+      expect.objectContaining({ id: 'agent-1', agent: 'codex' }),
+      expect.objectContaining({ id: 'shell-1', agent: 'shell' }),
+      expect.objectContaining({ id: 'shell-2', agent: 'shell' }),
+    ]);
+
+    unmount();
+  });
+
   it('retries transient worker attach failures after respawn', async () => {
     const waits: number[] = [];
     const attach = vi.fn()

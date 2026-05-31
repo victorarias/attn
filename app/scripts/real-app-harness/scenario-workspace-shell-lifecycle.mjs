@@ -88,6 +88,17 @@ async function writeAndAssertToken(client, sessionId, pane, token) {
   );
 }
 
+async function assertWorkspacePaneSessionsListed(client, sessionId, workspace, description) {
+  const state = await client.request('get_state');
+  const listedSessionIds = new Set((state.sessions || []).map((session) => session.id));
+  const missing = (workspace.panes || [])
+    .map((pane) => pane.sessionId)
+    .filter((paneSessionId) => paneSessionId && !listedSessionIds.has(paneSessionId));
+  if (missing.length > 0) {
+    throw new Error(`${description}: workspace has pane sessions missing from the app session list: ${missing.join(', ')}`);
+  }
+}
+
 async function capturePaneTexts(client, runDir, prefix, sessionId, panes) {
   const payload = {};
   for (const pane of panes) {
@@ -155,18 +166,21 @@ async function main() {
       sessionWaitMs: 30_000,
     });
     let workspace = await waitForPaneCount(client, sessionId, 1, 'initial shell workspace pane');
+    await assertWorkspacePaneSessionsListed(client, sessionId, workspace, 'initial shell workspace');
     const initialPane = workspace.panes[0];
     await client.request('select_session', { sessionId });
     await waitForShellPaneReady(client, sessionId, initialPane.paneId, 'initial shell pane ready');
 
     const vertical = await splitWithShortcut(client, sessionId, 'terminal.splitVertical', 2);
     workspace = vertical.workspace;
+    await assertWorkspacePaneSessionsListed(client, sessionId, workspace, 'vertical shell split');
     const verticalPane = vertical.pane;
     await waitForFreshSplitPaneAttached(client, sessionId, verticalPane.paneId);
 
     await client.request('focus_pane', { sessionId, paneId: verticalPane.paneId });
     const horizontal = await splitWithShortcut(client, sessionId, 'terminal.splitHorizontal', 3);
     workspace = horizontal.workspace;
+    await assertWorkspacePaneSessionsListed(client, sessionId, workspace, 'horizontal shell split');
     const horizontalPane = horizontal.pane;
     await waitForFreshSplitPaneAttached(client, sessionId, horizontalPane.paneId);
 
@@ -180,6 +194,7 @@ async function main() {
     await client.request('focus_pane', { sessionId, paneId: verticalPane.paneId });
     await client.request('dispatch_shortcut', { shortcutId: 'terminal.close' });
     workspace = await waitForPaneCount(client, sessionId, 2, 'workspace remains after closing one session pane');
+    await assertWorkspacePaneSessionsListed(client, sessionId, workspace, 'after closing one shell split');
     if ((workspace.panes || []).some((pane) => pane.paneId === verticalPane.paneId)) {
       throw new Error(`Closed pane ${verticalPane.paneId} is still present: ${JSON.stringify(workspace, null, 2)}`);
     }

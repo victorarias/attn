@@ -224,7 +224,6 @@ vi.mock('./hooks/usePRsNeedingAttention', () => ({
 }));
 
 vi.mock('./store/sessions', () => ({
-  
   useSessionStore: () => mockUseSessionStore(),
 }));
 

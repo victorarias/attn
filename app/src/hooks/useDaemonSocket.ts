@@ -428,15 +428,10 @@ interface UseDaemonSocketOptions {
   wsUrl?: string;
 }
 
-function isHiddenSidebarSession(session: DaemonSession): boolean {
-  return session.agent === 'shell';
-}
-
 function dedupeSessionsByID(sessions: DaemonSession[]): DaemonSession[] {
   const deduped: DaemonSession[] = [];
   const indexByID = new Map<string, number>();
   for (const session of sessions) {
-    if (isHiddenSidebarSession(session)) continue;
     const existingIndex = indexByID.get(session.id);
     if (existingIndex === undefined) {
       indexByID.set(session.id, deduped.length);
@@ -449,7 +444,6 @@ function dedupeSessionsByID(sessions: DaemonSession[]): DaemonSession[] {
 }
 
 function upsertSessionByID(sessions: DaemonSession[], session: DaemonSession): DaemonSession[] {
-  if (isHiddenSidebarSession(session)) return sessions;
   const index = sessions.findIndex((entry) => entry.id === session.id);
   if (index === -1) {
     return [...sessions, session];

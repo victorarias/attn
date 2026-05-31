@@ -404,7 +404,7 @@ describe('SessionTerminalWorkspace', () => {
         workspaceId="workspace-session-1"
         workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "codex", cwd: "/tmp/repo" }]}
         workspace={{
-          agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, 
+          agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' },
             { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' },
             { id: 'pane-session-2', runtimeId: 'runtime-session-2', title: "Session", sessionId: 'session-1' },
           ],
@@ -531,7 +531,7 @@ describe('SessionTerminalWorkspace', () => {
 
   it('zooms the active pane across nested splits and retargets when focus changes', () => {
     const workspace: TerminalWorkspaceState = {
-      agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, 
+      agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' },
         { id: 'top-right', runtimeId: 'runtime-top-right', title: "Session", sessionId: 'session-1' },
         { id: 'bottom-right', runtimeId: 'runtime-bottom-right', title: "Session", sessionId: 'session-1' },
       ],
