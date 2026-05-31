@@ -41,6 +41,11 @@ const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-workspace-close-one-session-keeps-selection'],
   },
   {
+    id: 'autoclose-on-exit',
+    label: 'Auto-close on clean exit, keep failed exits',
+    command: ['pnpm', 'run', 'real-app:scenario-autoclose-on-exit'],
+  },
+  {
     id: 'tr205-codex',
     label: 'TR-205 remote codex',
     command: ['pnpm', 'run', 'real-app:scenario-tr205'],

@@ -44,6 +44,7 @@
     "real-app:scenario-workspace-switching": "node scripts/real-app-harness/scenario-workspace-switching.mjs",
     "real-app:scenario-workspace-close-last-session-switches-back": "node scripts/real-app-harness/scenario-workspace-close-last-session-switches-back.mjs",
     "real-app:scenario-workspace-close-one-session-keeps-selection": "node scripts/real-app-harness/scenario-workspace-close-one-session-keeps-selection.mjs",
+    "real-app:scenario-autoclose-on-exit": "node scripts/real-app-harness/scenario-autoclose-on-exit.mjs",
     "real-app:serial-matrix": "node scripts/real-app-harness/run-serial-matrix.mjs",
     "e2e": "playwright test",
     "e2e:settings-visual": "playwright test e2e/settings-visual.spec.ts",
