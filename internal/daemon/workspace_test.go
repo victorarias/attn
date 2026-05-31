@@ -377,16 +377,10 @@ func TestSessionForBroadcast_PopulatesWorkspaceID(t *testing.T) {
 	if got == nil {
 		t.Fatal("nil broadcast clone")
 	}
-	if got.WorkspaceID == nil || *got.WorkspaceID != "ws1" {
-		t.Fatalf("workspace_id = %v, want pointer to ws1", got.WorkspaceID)
+	if got.WorkspaceID != "ws1" {
+		t.Fatalf("workspace_id = %q, want ws1", got.WorkspaceID)
 	}
 
-	// After dissociation the field should be cleared.
-	d.dissociateSessionFromWorkspace("s1")
-	got = d.sessionForBroadcast(d.store.Get("s1"))
-	if got.WorkspaceID != nil {
-		t.Fatalf("workspace_id should be nil after dissociate, got %v", *got.WorkspaceID)
-	}
 }
 
 func TestListWorkspaces_IncludesRegistered(t *testing.T) {
@@ -401,17 +395,6 @@ func TestListWorkspaces_IncludesRegistered(t *testing.T) {
 	list := d.listWorkspaces()
 	if len(list) != 2 {
 		t.Fatalf("expected 2 workspaces, got %d (%+v)", len(list), list)
-	}
-}
-
-func TestAssociateSessionWithWorkspace_StaleIDIsDropped(t *testing.T) {
-	d := newDaemonForTest(t)
-	cap := captureBroadcasts(d)
-	// Stale workspace_id (from a client whose previous workspace was lost on a
-	// daemon restart). Should NOT broadcast or panic.
-	d.associateSessionWithWorkspace("s1", "ghost")
-	if events := cap.snapshot(); len(events) != 0 {
-		t.Fatalf("expected no broadcast for stale workspace_id, got %d", len(events))
 	}
 }
 
@@ -500,7 +483,7 @@ func TestLoadWorkspacesFromStore_RebuildsRegistryAndReassociates(t *testing.T) {
 	d.store.AddWorkspace(&protocol.Workspace{ID: "ws1", Title: "ws", Directory: "/repo"})
 	d.store.Add(&protocol.Session{
 		ID: "s1", Label: "s1", Agent: protocol.SessionAgentCodex, Directory: "/repo",
-		WorkspaceID: protocol.Ptr("ws1"),
+		WorkspaceID: "ws1",
 		State:       protocol.SessionStateWorking,
 		StateSince:  now, StateUpdatedAt: now, LastSeen: now,
 	})
@@ -536,14 +519,16 @@ func TestAssociateSessionWithWorkspace_PersistsToStore(t *testing.T) {
 	d.associateSessionWithWorkspace("s1", "ws1")
 
 	got := d.store.Get("s1")
-	if got == nil || got.WorkspaceID == nil || *got.WorkspaceID != "ws1" {
+	if got == nil || got.WorkspaceID != "ws1" {
 		t.Fatalf("workspace_id was not persisted on session: %+v", got)
 	}
 
-	// And the dissociate path clears it.
+	// Unregister deletes the session row; it should not leave behind a
+	// workspace-less persisted session.
+	d.store.Remove("s1")
 	d.dissociateSessionFromWorkspace("s1")
 	got = d.store.Get("s1")
-	if got == nil || got.WorkspaceID != nil {
-		t.Fatalf("workspace_id was not cleared on dissociate: %+v", got)
+	if got != nil {
+		t.Fatalf("session should be removed instead of workspace_id being cleared: %+v", got)
 	}
 }

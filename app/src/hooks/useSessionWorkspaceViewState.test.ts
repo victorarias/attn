@@ -246,4 +246,21 @@ describe('useSessionWorkspaceViewState', () => {
 
     expect(result.current.getActivePaneIdForSession(updated)).toBe(SESSION_PANE_ID);
   });
+
+  it('does not create pane state under a stale session id when session ownership is unknown', () => {
+    const session = buildSession();
+    const { result, rerender } = renderHook(({ sessions }) => useSessionWorkspaceViewState(sessions), {
+      initialProps: { sessions: [session] },
+    });
+
+    rerender({ sessions: [] });
+
+    act(() => {
+      result.current.setActivePane(session.id, 'pane-stale');
+    });
+
+    rerender({ sessions: [session] });
+
+    expect(result.current.getActivePaneIdForSession(session)).toBe(SESSION_PANE_ID);
+  });
 });

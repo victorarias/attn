@@ -2,7 +2,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { waitForPaneInputFocus, waitForPaneText, waitForPaneVisible } from './scenarioAssertions.mjs';
+import {
+  waitForFirstWorkspacePane,
+  waitForPaneInputFocus,
+  waitForPaneText,
+  waitForPaneVisible,
+} from './scenarioAssertions.mjs';
 
 function compact(text) {
   return text.replace(/\s+/g, '');
@@ -114,71 +119,73 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function ensureClaudeMainPromptReady(client, sessionId, timeoutMs = 40_000) {
+export async function ensureClaudeInitialPanePromptReady(client, sessionId, timeoutMs = 40_000) {
   const startedAt = Date.now();
   let trustHandled = false;
 
   while (Date.now() - startedAt < timeoutMs) {
     await client.request('select_session', { sessionId });
-    await waitForPaneVisible(client, sessionId, 'main', 20_000);
-    const pane = await client.request('read_pane_text', { sessionId, paneId: 'main' }, { timeoutMs: 20_000 });
+    const initialPane = await waitForFirstWorkspacePane(client, sessionId, `initial pane for Claude session ${sessionId}`, 20_000);
+    await waitForPaneVisible(client, sessionId, initialPane.paneId, 20_000);
+    const pane = await client.request('read_pane_text', { sessionId, paneId: initialPane.paneId }, { timeoutMs: 20_000 });
     const text = pane?.text || '';
 
     if (hasTrustPrompt(text)) {
-      await client.request('click_pane', { sessionId, paneId: 'main' });
-      await waitForPaneInputFocus(client, sessionId, 'main', 15_000);
-      await client.request('type_pane_via_ui', { sessionId, paneId: 'main', text: '1' });
-      await client.request('write_pane', { sessionId, paneId: 'main', text: '\r', submit: false });
+      await client.request('click_pane', { sessionId, paneId: initialPane.paneId });
+      await waitForPaneInputFocus(client, sessionId, initialPane.paneId, 15_000);
+      await client.request('type_pane_via_ui', { sessionId, paneId: initialPane.paneId, text: '1' });
+      await client.request('write_pane', { sessionId, paneId: initialPane.paneId, text: '\r', submit: false });
       trustHandled = true;
       await delay(500);
       continue;
     }
 
     if (hasClaudePrompt(text)) {
-      await client.request('click_pane', { sessionId, paneId: 'main' });
-      await waitForPaneInputFocus(client, sessionId, 'main', 15_000);
-      return { trustHandled, text };
+      await client.request('click_pane', { sessionId, paneId: initialPane.paneId });
+      await waitForPaneInputFocus(client, sessionId, initialPane.paneId, 15_000);
+      return { trustHandled, paneId: initialPane.paneId, text };
     }
   }
 
   throw new Error(`Timed out waiting for Claude prompt readiness in session ${sessionId}`);
 }
 
-export async function ensureCodexMainPromptReady(client, sessionId, timeoutMs = 40_000) {
+export async function ensureCodexInitialPanePromptReady(client, sessionId, timeoutMs = 40_000) {
   const startedAt = Date.now();
   let trustHandled = false;
   let updatePromptHandled = false;
 
   while (Date.now() - startedAt < timeoutMs) {
     await client.request('select_session', { sessionId });
-    await waitForPaneVisible(client, sessionId, 'main', 20_000);
-    const pane = await client.request('read_pane_text', { sessionId, paneId: 'main' }, { timeoutMs: 20_000 });
+    const initialPane = await waitForFirstWorkspacePane(client, sessionId, `initial pane for Codex session ${sessionId}`, 20_000);
+    await waitForPaneVisible(client, sessionId, initialPane.paneId, 20_000);
+    const pane = await client.request('read_pane_text', { sessionId, paneId: initialPane.paneId }, { timeoutMs: 20_000 });
     const text = pane?.text || '';
 
     if (hasTrustPrompt(text)) {
-      await client.request('click_pane', { sessionId, paneId: 'main' });
-      await waitForPaneInputFocus(client, sessionId, 'main', 15_000);
-      await client.request('type_pane_via_ui', { sessionId, paneId: 'main', text: '1' });
-      await client.request('write_pane', { sessionId, paneId: 'main', text: '\r', submit: false });
+      await client.request('click_pane', { sessionId, paneId: initialPane.paneId });
+      await waitForPaneInputFocus(client, sessionId, initialPane.paneId, 15_000);
+      await client.request('type_pane_via_ui', { sessionId, paneId: initialPane.paneId, text: '1' });
+      await client.request('write_pane', { sessionId, paneId: initialPane.paneId, text: '\r', submit: false });
       trustHandled = true;
       await delay(500);
       continue;
     }
 
     if (hasCodexUpdatePrompt(text)) {
-      await client.request('click_pane', { sessionId, paneId: 'main' });
-      await waitForPaneInputFocus(client, sessionId, 'main', 15_000);
-      await client.request('type_pane_via_ui', { sessionId, paneId: 'main', text: '3' });
-      await client.request('write_pane', { sessionId, paneId: 'main', text: '\r', submit: false });
+      await client.request('click_pane', { sessionId, paneId: initialPane.paneId });
+      await waitForPaneInputFocus(client, sessionId, initialPane.paneId, 15_000);
+      await client.request('type_pane_via_ui', { sessionId, paneId: initialPane.paneId, text: '3' });
+      await client.request('write_pane', { sessionId, paneId: initialPane.paneId, text: '\r', submit: false });
       updatePromptHandled = true;
       await delay(500);
       continue;
     }
 
     if (hasCodexPrompt(text)) {
-      await client.request('click_pane', { sessionId, paneId: 'main' });
-      await waitForPaneInputFocus(client, sessionId, 'main', 15_000);
-      return { trustHandled, updatePromptHandled, text };
+      await client.request('click_pane', { sessionId, paneId: initialPane.paneId });
+      await waitForPaneInputFocus(client, sessionId, initialPane.paneId, 15_000);
+      return { trustHandled, updatePromptHandled, paneId: initialPane.paneId, text };
     }
 
     await delay(300);
@@ -199,9 +206,10 @@ export async function promptClaudeForStructuredBlock(client, sessionId, token, l
     ...lines,
   ].join('\n');
 
-  await client.request('click_pane', { sessionId, paneId: 'main' });
-  await waitForPaneInputFocus(client, sessionId, 'main', 15_000);
-  await client.request('write_pane', { sessionId, paneId: 'main', text: `${prompt}\r`, submit: false });
+  const initialPane = await waitForFirstWorkspacePane(client, sessionId, `initial pane for Claude prompt ${sessionId}`, 20_000);
+  await client.request('click_pane', { sessionId, paneId: initialPane.paneId });
+  await waitForPaneInputFocus(client, sessionId, initialPane.paneId, 15_000);
+  await client.request('write_pane', { sessionId, paneId: initialPane.paneId, text: `${prompt}\r`, submit: false });
 
-  return { prompt, expectedLines: lines };
+  return { prompt, expectedLines: lines, paneId: initialPane.paneId };
 }

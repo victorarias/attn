@@ -4,17 +4,15 @@ import { useGhosttyPaneRuntime } from './useGhosttyPaneRuntime';
 import type { PaneRuntimeEventBinding, PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import type { GhosttyTerminalHandle } from '../GhosttyTerminal';
 
-const { mockPtyAttach, mockPtyResize, mockPtySpawn, mockPtyWrite } = vi.hoisted(() => ({
+const { mockPtyAttach, mockPtyResize, mockPtyWrite } = vi.hoisted(() => ({
   mockPtyAttach: vi.fn((_request?: unknown) => Promise.resolve()),
   mockPtyResize: vi.fn((_request?: unknown) => Promise.resolve()),
-  mockPtySpawn: vi.fn((_request?: unknown) => Promise.resolve()),
   mockPtyWrite: vi.fn((_request?: unknown) => Promise.resolve()),
 }));
 
 vi.mock('../../pty/bridge', () => ({
   ptyAttach: mockPtyAttach,
   ptyResize: mockPtyResize,
-  ptySpawn: mockPtySpawn,
   ptyWrite: mockPtyWrite,
 }));
 
@@ -44,7 +42,6 @@ describe('useGhosttyPaneRuntime', () => {
     binding = null;
     mockPtyAttach.mockClear();
     mockPtyResize.mockClear();
-    mockPtySpawn.mockClear();
     mockPtyWrite.mockClear();
     delete (window as Window & { __TEST_SESSION_INPUT_EVENTS?: unknown }).__TEST_SESSION_INPUT_EVENTS;
     router = {
@@ -55,14 +52,13 @@ describe('useGhosttyPaneRuntime', () => {
     };
   });
 
-  it('spawns with measured geometry and forwards input directly', async () => {
+  it('attaches with measured geometry and forwards input directly', async () => {
     const { result } = renderHook(() => useGhosttyPaneRuntime([
       {
         paneId: 'pane-session',
         runtimeId: 'runtime-1',
         paneKind: 'agent',
         testSessionId: 'session-1',
-        getSpawnArgs: (size) => ({ id: 'runtime-1', cwd: '/tmp', ...size }),
       },
     ], 'pane-session', router, { current: true }));
     const terminal = createTerminal();
@@ -73,7 +69,17 @@ describe('useGhosttyPaneRuntime', () => {
       result.current.handleTerminalInput('pane-session')('hello');
     });
 
-    expect(mockPtySpawn).toHaveBeenCalledWith({ args: { id: 'runtime-1', cwd: '/tmp', cols: 120, rows: 40 } });
+    expect(mockPtyAttach).toHaveBeenCalledWith({
+      args: {
+        id: 'runtime-1',
+        cols: 120,
+        rows: 40,
+        shell: false,
+        agent: undefined,
+        policy: 'fresh_spawn',
+      },
+      forceResizeBeforeAttach: false,
+    });
     expect(mockPtyWrite).toHaveBeenCalledWith({ id: 'runtime-1', data: 'hello' });
     expect((window as Window & {
       __TEST_SESSION_INPUT_EVENTS?: Array<{ sessionId: string; event: string; data?: string }>;
@@ -89,7 +95,7 @@ describe('useGhosttyPaneRuntime', () => {
       result.current.handleTerminalInput('pane-session')('\u001b[1;1R');
     });
     const { result } = renderHook(() => useGhosttyPaneRuntime([
-      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent', getSpawnArgs: () => null },
+      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
     ], 'pane-session', router, { current: true }));
 
     act(() => result.current.setTerminalHandle('pane-session', terminal));
@@ -115,7 +121,7 @@ describe('useGhosttyPaneRuntime', () => {
       }
     });
     const { result } = renderHook(() => useGhosttyPaneRuntime([
-      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent', getSpawnArgs: () => null },
+      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
     ], 'pane-session', router, { current: true }));
 
     act(() => result.current.setTerminalHandle('pane-session', terminal));
@@ -138,7 +144,6 @@ describe('useGhosttyPaneRuntime', () => {
         paneId: 'pane-session',
         runtimeId: 'runtime-1',
         paneKind: 'agent',
-        getSpawnArgs: (size) => ({ id: 'runtime-1', cwd: '/tmp', ...size }),
       },
     ], 'pane-session', router, { current: true }));
     const terminal = createTerminal();
@@ -152,7 +157,7 @@ describe('useGhosttyPaneRuntime', () => {
 
   it('resizes daemon-attached runtimes after their first delivered PTY event', async () => {
     const { result } = renderHook(() => useGhosttyPaneRuntime([
-      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent', getSpawnArgs: () => null },
+      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
     ], 'pane-session', router, { current: true }));
     const terminal = createTerminal();
 
@@ -171,7 +176,7 @@ describe('useGhosttyPaneRuntime', () => {
 
   it('reattaches a ready runtime when its terminal model remounts', async () => {
     const { result } = renderHook(() => useGhosttyPaneRuntime([
-      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent', agent: 'claude', getSpawnArgs: () => null },
+      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent', agent: 'claude' },
     ], 'pane-session', router, { current: true }));
     const firstTerminal = createTerminal();
     const remountedTerminal = createTerminal();
@@ -192,6 +197,7 @@ describe('useGhosttyPaneRuntime', () => {
         agent: 'claude',
         policy: 'same_app_remount',
       },
+      forceResizeBeforeAttach: true,
     });
   });
 
@@ -201,20 +207,18 @@ describe('useGhosttyPaneRuntime', () => {
         paneId: 'pane-session',
         runtimeId: 'runtime-1',
         paneKind: 'agent',
-        getSpawnArgs: (size) => ({ id: 'runtime-1', cwd: '/tmp', ...size }),
       },
       {
         paneId: 'pane-session-2',
         runtimeId: 'runtime-2',
         paneKind: 'agent',
-        getSpawnArgs: (size) => ({ id: 'runtime-2', cwd: '/tmp', ...size }),
       },
     ], 'pane-session', router, { current: true }));
-    const mainTerminal = createTerminal();
+    const firstTerminal = createTerminal();
     const secondTerminal = createTerminal();
 
     await act(async () => {
-      await result.current.handleTerminalReady('pane-session')(mainTerminal);
+      await result.current.handleTerminalReady('pane-session')(firstTerminal);
       await result.current.handleTerminalReady('pane-session-2')(secondTerminal);
       result.current.handleTerminalResize('pane-session')(10, 6);
       result.current.handleTerminalResize('pane-session-2')(10, 6);

@@ -1689,7 +1689,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		d.sendError(conn, "missing workspace_id")
 		return
 	}
-	session.WorkspaceID = protocol.Ptr(workspaceID)
+	session.WorkspaceID = workspaceID
 	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: session.Label, Directory: session.Directory, Status: protocol.WorkspaceStatusLaunching})
 	d.workspaces.register(workspaceID, session.Label, session.Directory)
 	d.store.Add(session)
@@ -2844,7 +2844,7 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 	d.clearLongRunTracking(msg.Session.ID)
 	msg.Session.Agent = normalizeStoredSessionAgent(string(msg.Session.Agent), protocol.SessionAgentCodex)
 	workspaceID := "workspace-" + msg.Session.ID
-	msg.Session.WorkspaceID = protocol.Ptr(workspaceID)
+	msg.Session.WorkspaceID = workspaceID
 	d.store.AddWorkspace(&protocol.Workspace{
 		ID:        workspaceID,
 		Title:     msg.Session.Label,

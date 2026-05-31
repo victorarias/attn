@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import {
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -20,14 +20,15 @@ import {
   captureSessionArtifacts,
   scrollPaneToTop,
   shellPanes,
+  waitForFirstWorkspacePane,
   waitForNewShellPane,
   waitForPaneState,
   waitForPaneVisible,
   waitForSessionWorkspace,
 } from './scenarioAssertions.mjs';
 import {
-  ensureClaudeMainPromptReady,
-  ensureCodexMainPromptReady,
+  ensureClaudeInitialPanePromptReady,
+  ensureCodexInitialPanePromptReady,
   preTrustClaudeFolder,
   promptClaudeForStructuredBlock,
 } from './scenarioAgents.mjs';
@@ -79,7 +80,7 @@ function shrunkWidthThreshold(baselineWidth) {
   return Math.ceil(baselineWidth * 0.75);
 }
 
-function agentVisibleContentOptions(agent, token = null, description = 'local main pane content') {
+function agentVisibleContentOptions(agent, token = null, description = 'local initial pane content') {
   if (agent === 'claude') {
     return {
       contains: token,
@@ -103,7 +104,7 @@ function agentVisibleContentOptions(agent, token = null, description = 'local ma
   };
 }
 
-function recoveredHeaderOptionsForAgent(agent, description = 'local main pane header after close') {
+function recoveredHeaderOptionsForAgent(agent, description = 'local initial pane header after close') {
   if (agent === 'claude') {
     return {
       contains: 'Claude Code',
@@ -169,12 +170,12 @@ function nativeCoverageThresholdsForAgent(agent) {
 
 async function prepareAgentBaseline(client, runner, sessionId, agent, token) {
   if (agent === 'claude') {
-    await ensureClaudeMainPromptReady(client, sessionId, 45_000);
+    await ensureClaudeInitialPanePromptReady(client, sessionId, 45_000);
     const fixture = await promptClaudeForStructuredBlock(client, sessionId, token, 4);
     runner.writeJson('agent-fixture.json', fixture);
     return token;
   }
-  await ensureCodexMainPromptReady(client, sessionId, 45_000);
+  await ensureCodexInitialPanePromptReady(client, sessionId, 45_000);
   return 'OpenAI Codex';
 }
 
@@ -202,6 +203,7 @@ async function main() {
 
   const transcriptAnchorToken = `${options.agent === 'claude' ? 'TR402CLAUDE' : 'TR402CODEX'}${Date.now()}`;
   let sessionId = null;
+  let initialPaneId = null;
   let splitPaneId = null;
   let baselineMainState = null;
   let baselineMainNativeMetrics = null;
@@ -226,45 +228,46 @@ async function main() {
     }
 
     sessionId = await runner.step('create_local_session', async () => {
-      return createSessionAndWaitForMain({
+      return createSessionAndWaitForInitialPane({
         client,
         observer,
         cwd: runner.sessionDir,
         label: `tr402-local-${options.agent}-${runner.runId}`,
         agent: options.agent,
-        waitForMainVisible: false,
+        waitForInitialPaneVisible: false,
       });
     });
 
     await runner.step('capture_baseline_main', async () => {
       await client.request('select_session', { sessionId });
       const requiredVisibleText = await prepareAgentBaseline(client, runner, sessionId, options.agent, transcriptAnchorToken);
-      await waitForPaneVisible(client, sessionId, 'main', 45_000);
+      initialPaneId = (await waitForFirstWorkspacePane(client, sessionId, `initial ${options.agent} pane`, 20_000)).paneId;
+      await waitForPaneVisible(client, sessionId, initialPaneId, 45_000);
       baselineMainState = await assertPaneVisibleContent(
         client,
         sessionId,
-        'main',
-        agentVisibleContentOptions(options.agent, requiredVisibleText, `${options.agent} main pane visible content before split close scenario`),
+        initialPaneId,
+        agentVisibleContentOptions(options.agent, requiredVisibleText, `${options.agent} initial pane visible content before split close scenario`),
       );
-      await assertPaneCoverage(client, sessionId, 'main', {
+      await assertPaneCoverage(client, sessionId, initialPaneId, {
         minWidthRatio: 0.8,
         minHeightRatio: 0.7,
         timeoutMs: 20_000,
-        description: `${options.agent} main pane coverage before split close scenario`,
+        description: `${options.agent} initial pane coverage before split close scenario`,
       });
       baselineMainNativeMetrics = await assertPaneNativePaintCoverage(
         client,
         runner.runDir,
-        '01-baseline-main',
+        '01-baseline-initial-pane',
         sessionId,
-        'main',
+        initialPaneId,
         {
           target: 'paneBody',
           minBusyColumnRatio: nativeCoverageThresholds.minBusyColumnRatio,
           minBusyRowRatio: nativeCoverageThresholds.minBusyRowRatio,
           minBBoxWidthRatio: nativeCoverageThresholds.minBBoxWidthRatio,
           minBBoxHeightRatio: nativeCoverageThresholds.minBBoxHeightRatio,
-          description: `${options.agent} main pane native paint coverage before split close scenario`,
+          description: `${options.agent} initial pane native paint coverage before split close scenario`,
         },
       );
       await captureSessionArtifacts(client, runner.runDir, '01-baseline', sessionId);
@@ -275,7 +278,7 @@ async function main() {
       const existingPaneIds = new Set((workspaceBefore.panes || []).map((pane) => pane.paneId));
       await client.request('split_pane', {
         sessionId,
-        targetPaneId: 'main',
+        targetPaneId: initialPaneId,
         direction: 'vertical',
       });
       const newPane = await waitForNewShellPane(
@@ -288,36 +291,36 @@ async function main() {
       splitMainState = await waitForPaneState(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         (state) => {
           const width = state?.pane?.bounds?.width ?? 0;
           const baselineWidth = baselineMainState?.pane?.bounds?.width ?? 0;
           return width > 0 && width <= shrunkWidthThreshold(baselineWidth);
         },
-        `${options.agent} main pane width to shrink after split`,
+        `${options.agent} initial pane width to shrink after split`,
         20_000,
       );
       const thresholds = recoveryThresholdsForAgent(options.agent);
       if (options.agent === 'claude') {
-        await scrollPaneToTop(client, sessionId, 'main');
+        await scrollPaneToTop(client, sessionId, initialPaneId);
         splitOpenContentPreservation = {
           ok: null,
           skipped: true,
           reason: 'Claude welcome/header reflows materially while split is open; post-close recovery is the decisive check.',
         };
       } else {
-        await scrollPaneToTop(client, sessionId, 'main');
+        await scrollPaneToTop(client, sessionId, initialPaneId);
         await assertPaneVisibleContentPreserved(
           client,
           sessionId,
-          'main',
+          initialPaneId,
           baselineMainState?.pane?.visibleContent || null,
           {
             minNonEmptyLineRatio: Math.max(0.5, thresholds.minNonEmptyLineRatio - 0.15),
             minCharCountRatio: Math.max(0.35, thresholds.minCharCountRatio - 0.15),
             minAnchorMatches: Math.max(2, thresholds.minAnchorMatches - 1),
             timeoutMs: 20_000,
-            description: `${options.agent} main pane content preserved while split is open`,
+            description: `${options.agent} initial pane content preserved while split is open`,
           },
         );
         splitOpenContentPreservation = { ok: true };
@@ -341,55 +344,55 @@ async function main() {
       recoveredMainState = await waitForPaneState(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         (state) => {
           const width = state?.pane?.bounds?.width ?? 0;
           return width >= recoveredWidthThreshold(baselineMainState?.pane?.bounds?.width ?? 0);
         },
-        `${options.agent} main pane width to recover after closing split`,
+        `${options.agent} initial pane width to recover after closing split`,
         20_000,
       );
-      await scrollPaneToTop(client, sessionId, 'main');
+      await scrollPaneToTop(client, sessionId, initialPaneId);
       await assertPaneVisibleContent(
         client,
         sessionId,
-        'main',
-        recoveredHeaderOptionsForAgent(options.agent, `${options.agent} main pane header recovered after closing split`),
+        initialPaneId,
+        recoveredHeaderOptionsForAgent(options.agent, `${options.agent} initial pane header recovered after closing split`),
       );
       await assertPaneVisibleContentPreserved(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         baselineMainState?.pane?.visibleContent || null,
         {
           minNonEmptyLineRatio: thresholds.minNonEmptyLineRatio,
           minCharCountRatio: thresholds.minCharCountRatio,
           minAnchorMatches: thresholds.minAnchorMatches,
           timeoutMs: 20_000,
-          description: `${options.agent} main pane content recovered after closing split`,
+          description: `${options.agent} initial pane content recovered after closing split`,
         },
       );
-      await assertPaneCoverage(client, sessionId, 'main', {
+      await assertPaneCoverage(client, sessionId, initialPaneId, {
         minWidthRatio: 0.85,
         minHeightRatio: 0.7,
         timeoutMs: 20_000,
-        description: `${options.agent} main pane coverage after closing split`,
+        description: `${options.agent} initial pane coverage after closing split`,
       });
-      await assertPaneNativePaintCoverage(client, runner.runDir, '03-after-close-main', sessionId, 'main', {
+      await assertPaneNativePaintCoverage(client, runner.runDir, '03-after-close-initial-pane', sessionId, initialPaneId, {
         target: 'paneBody',
         minBusyColumnRatio: nativeCoverageThresholds.minBusyColumnRatio,
         minBusyRowRatio: nativeCoverageThresholds.minBusyRowRatio,
         minBBoxWidthRatio: nativeCoverageThresholds.minBBoxWidthRatio,
         minBBoxHeightRatio: nativeCoverageThresholds.minBBoxHeightRatio,
-        description: `${options.agent} main pane native paint coverage after closing split`,
+        description: `${options.agent} initial pane native paint coverage after closing split`,
       });
       if (baselineMainNativeMetrics) {
         await assertPaneNativePaintRecovered(
           client,
           runner.runDir,
-          '03-after-close-main-stability',
+          '03-after-close-initial-pane-stability',
           sessionId,
-          'main',
+          initialPaneId,
           baselineMainNativeMetrics,
           {
             target: 'paneBody',
@@ -398,7 +401,7 @@ async function main() {
             maxBBoxWidthRatioRegression: thresholds.maxBBoxWidthRatioRegression,
             maxBBoxHeightRatioRegression: thresholds.maxBBoxHeightRatioRegression,
             maxActivePixelRatioRegression: null,
-            description: `${options.agent} main pane native paint recovery after closing split`,
+            description: `${options.agent} initial pane native paint recovery after closing split`,
           },
         );
       }

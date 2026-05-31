@@ -11,6 +11,7 @@ function createSpawnArgs(overrides: Partial<PtySpawnArgs> = {}): PtySpawnArgs {
   return {
     id: 'runtime-1',
     cwd: '/tmp/repo',
+    workspace_id: 'workspace-runtime-1',
     cols: 80,
     rows: 24,
     ...overrides,
@@ -23,7 +24,6 @@ function createOperations(): SpawnPtyRuntimeOperations & {
   spawnRuntime: ReturnType<typeof vi.fn<SpawnPtyRuntimeOperations['spawnRuntime']>>;
   resizeRuntime: ReturnType<typeof vi.fn<SpawnPtyRuntimeOperations['resizeRuntime']>>;
   logResumeRecovery: ReturnType<typeof vi.fn<NonNullable<SpawnPtyRuntimeOperations['logResumeRecovery']>>>;
-  logKnownWorkspaceRespawn: ReturnType<typeof vi.fn<NonNullable<SpawnPtyRuntimeOperations['logKnownWorkspaceRespawn']>>>;
 } {
   return {
     attachExistingRuntime: vi.fn<SpawnPtyRuntimeOperations['attachExistingRuntime']>(),
@@ -31,7 +31,6 @@ function createOperations(): SpawnPtyRuntimeOperations & {
     spawnRuntime: vi.fn<SpawnPtyRuntimeOperations['spawnRuntime']>(),
     resizeRuntime: vi.fn<SpawnPtyRuntimeOperations['resizeRuntime']>(),
     logResumeRecovery: vi.fn<NonNullable<SpawnPtyRuntimeOperations['logResumeRecovery']>>(),
-    logKnownWorkspaceRespawn: vi.fn<NonNullable<SpawnPtyRuntimeOperations['logKnownWorkspaceRespawn']>>(),
   };
 }
 
@@ -85,6 +84,27 @@ describe('runtimeLifecycle', () => {
     );
     expect(operations.spawnRuntime).not.toHaveBeenCalled();
     expect(operations.attachFreshRuntime).not.toHaveBeenCalled();
+  });
+
+  it('spawns explicit creates even if workspace layout already references the runtime', async () => {
+    const operations = createOperations();
+
+    await spawnPtyRuntime(
+      createSpawnArgs({ intent: 'create', shell: true }),
+      {
+        alreadyAttached: false,
+        runtimeKnownToDaemon: true,
+      },
+      operations,
+    );
+
+    expect(operations.attachExistingRuntime).not.toHaveBeenCalled();
+    expect(operations.spawnRuntime).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'runtime-1',
+      intent: 'create',
+      shell: true,
+    }));
+    expect(operations.attachFreshRuntime).toHaveBeenCalledWith(expect.objectContaining({ id: 'runtime-1' }));
   });
 
   it('resumes Claude sessions after attach failure and re-attaches them', async () => {
@@ -157,34 +177,23 @@ describe('runtimeLifecycle', () => {
     expect(operations.attachExistingRuntime).toHaveBeenCalledTimes(2);
   });
 
-  it('recreates daemon-known workspace runtimes in place after attach failure', async () => {
+  it('does not recreate daemon-known runtimes after attach failure without session state', async () => {
     const operations = createOperations();
     operations.attachExistingRuntime.mockRejectedValueOnce(new Error('session not found'));
 
-    await spawnPtyRuntime(
-      createSpawnArgs({ endpoint_id: 'ep-remote', shell: true }),
-      {
-        alreadyAttached: false,
-        runtimeKnownToDaemon: true,
-      },
-      operations,
-    );
+    await expect(
+      spawnPtyRuntime(
+        createSpawnArgs({ endpoint_id: 'ep-remote', shell: true }),
+        {
+          alreadyAttached: false,
+          runtimeKnownToDaemon: true,
+        },
+        operations,
+      ),
+    ).rejects.toThrow('No live PTY found for this session.');
 
-    expect(operations.logKnownWorkspaceRespawn).toHaveBeenCalledWith({
-      id: 'runtime-1',
-      endpointId: 'ep-remote',
-      error: expect.any(Error),
-    });
-    expect(operations.spawnRuntime).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'runtime-1',
-        endpoint_id: 'ep-remote',
-        shell: true,
-      }),
-    );
-    expect(operations.attachFreshRuntime).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'runtime-1' }),
-    );
+    expect(operations.spawnRuntime).not.toHaveBeenCalled();
+    expect(operations.attachFreshRuntime).not.toHaveBeenCalled();
   });
 
   it('throws a user-facing error when a daemon-known non-Claude session cannot be reattached', async () => {
@@ -212,7 +221,7 @@ describe('runtimeLifecycle', () => {
     operations.spawnRuntime.mockRejectedValueOnce(new Error('session already exists'));
 
     await spawnPtyRuntime(
-      createSpawnArgs({ shell: true }),
+      createSpawnArgs({ intent: 'create', shell: true }),
       {
         alreadyAttached: false,
         runtimeKnownToDaemon: false,

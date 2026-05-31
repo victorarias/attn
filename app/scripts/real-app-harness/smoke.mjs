@@ -8,13 +8,14 @@ import { UiAutomationClient } from './uiAutomationClient.mjs';
 import {
   captureScreenshot,
   createRunContext,
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
 } from './common.mjs';
 import {
   compactTerminalText,
+  waitForFirstWorkspacePane,
   waitForNewShellPane,
   waitForPaneInputFocus,
   waitForPaneState,
@@ -44,7 +45,7 @@ async function main() {
     await launchFreshAppAndConnect(client, observer);
     await captureScreenshot(driver, path.join(runDir, '01-app-launched.png'));
 
-    const sessionId = await createSessionAndWaitForMain({
+    const sessionId = await createSessionAndWaitForInitialPane({
       client,
       observer,
       cwd: sessionDir,
@@ -61,9 +62,10 @@ async function main() {
 
     const workspaceBeforeSplit = await client.request('get_workspace', { sessionId });
     const existingPaneIds = new Set((workspaceBeforeSplit.panes || []).map((pane) => pane.paneId));
+    const initialPane = await waitForFirstWorkspacePane(client, sessionId, `initial pane for session ${sessionId}`, 20_000);
     await client.request('split_pane', {
       sessionId,
-      targetPaneId: 'main',
+      targetPaneId: initialPane.paneId,
       direction: 'vertical',
     });
     const utilityPane = await waitForNewShellPane(

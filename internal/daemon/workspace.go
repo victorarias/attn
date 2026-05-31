@@ -74,9 +74,7 @@ func (r *workspaceRegistry) unregister(id string) (protocol.Workspace, bool) {
 	return snapshotEntry(entry), true
 }
 
-// associateSession binds a session to a workspace. No-op if the workspace is
-// not registered (e.g., session spawned with a stale workspace_id after the
-// daemon dropped its in-memory state).
+// associateSession binds a session to an already registered workspace.
 func (r *workspaceRegistry) associateSession(sessionID, workspaceID, title string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -359,7 +357,7 @@ func (d *Daemon) loadWorkspacesFromStore() {
 		if session == nil {
 			continue
 		}
-		if wsID := protocol.Deref(session.WorkspaceID); wsID != "" {
+		if wsID := session.WorkspaceID; wsID != "" {
 			d.workspaces.associateSession(session.ID, wsID, session.Label)
 		}
 	}
@@ -400,11 +398,10 @@ func (d *Daemon) associateSessionWithWorkspace(sessionID, workspaceID string) {
 		title = session.Label
 	}
 	if !d.workspaces.associateSession(sessionID, workspaceID, title) {
-		// Stale workspace_id from a client that outlived a daemon restart.
-		// Drop silently — broadcast nothing.
+		d.logf("workspace association rejected for session %s: workspace not registered: %s", sessionID, workspaceID)
 		return
 	}
-	d.store.SetSessionWorkspaceID(sessionID, workspaceID)
+	d.store.AssignSessionWorkspace(sessionID, workspaceID)
 	updated, changed := d.recomputeWorkspaceStatus(workspaceID)
 	if !changed {
 		updated, _ = d.workspaces.snapshot(workspaceID)
@@ -425,7 +422,6 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 	if workspaceID == "" {
 		return
 	}
-	d.store.SetSessionWorkspaceID(sessionID, "")
 	if remaining == 0 {
 		snapshot, removed := d.workspaces.unregister(workspaceID)
 		if !removed {
@@ -455,8 +451,8 @@ func (d *Daemon) decorateSessionWithWorkspace(session *protocol.Session) {
 		return
 	}
 	if id := d.workspaces.workspaceIDForSession(session.ID); id != "" {
-		session.WorkspaceID = protocol.Ptr(id)
+		session.WorkspaceID = id
 	} else {
-		session.WorkspaceID = nil
+		session.WorkspaceID = ""
 	}
 }

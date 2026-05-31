@@ -87,7 +87,7 @@ function normalizeAttachAgent(agent?: string | null, shell?: boolean): string | 
 }
 
 function deriveAttachReplayPreference(agent: string | null): AttachReplayPreference {
-  return agent === 'codex' ? 'prefer_raw_scrollback' : 'default';
+  return agent === 'codex' || agent === 'shell' ? 'prefer_raw_scrollback' : 'default';
 }
 
 export function classifyAttachReplay(
@@ -142,9 +142,12 @@ export function classifyAttachReplay(
   const replayAllowedByPolicy = context?.policy === 'relaunch_restore'
     || context?.policy === 'same_app_remount'
     || codexRawReplayBootstrap;
+  const geometryMismatchSkipsReplay = !preserveAttachedGeometry
+    && hasScreenSnapshot
+    && (attachedGeometryMismatch || replayGeometryMismatch);
   const replaySkipped = hasReplayPayload && (
     !replayAllowedByPolicy ||
-    (!preserveAttachedGeometry && (attachedGeometryMismatch || replayGeometryMismatch))
+    geometryMismatchSkipsReplay
   );
   const replayApplied = hasReplayPayload && !replaySkipped;
 

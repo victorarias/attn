@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import {
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -17,6 +17,7 @@ import {
   assertPaneVisibleContentPreserved,
   captureSessionArtifacts,
   waitForNewShellPane,
+  waitForFirstWorkspacePane,
   waitForPaneReflowed,
   waitForPaneState,
   waitForPaneText,
@@ -24,7 +25,7 @@ import {
   waitForSessionWorkspace,
 } from './scenarioAssertions.mjs';
 import {
-  ensureClaudeMainPromptReady,
+  ensureClaudeInitialPanePromptReady,
   promptClaudeForStructuredBlock,
 } from './scenarioAgents.mjs';
 
@@ -60,6 +61,7 @@ async function main() {
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
 
   let sessionId = null;
+  let initialPaneId = null;
   let utilityPaneId = null;
   let baselineMainVisibleContent = null;
   const utilityToken = `TR201SHELL${Date.now()}`;
@@ -71,26 +73,27 @@ async function main() {
     });
 
     sessionId = await runner.step('create_session', async () => {
-      return createSessionAndWaitForMain({
+      return createSessionAndWaitForInitialPane({
         client,
         observer,
         cwd: runner.sessionDir,
         label: `tr201-local-${runner.runId}`,
         agent: 'claude',
-        promptReadyFn: ensureClaudeMainPromptReady,
+        promptReadyFn: ensureClaudeInitialPanePromptReady,
       });
     });
 
     utilityPaneId = await runner.step('prepare_split_session_before_relaunch', async () => {
       const fixture = await promptClaudeForStructuredBlock(client, sessionId, agentToken, 4);
+      initialPaneId = fixture.paneId;
       runner.writeJson('agent-fixture.json', fixture);
 
       await waitForPaneText(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         (text) => text.includes(agentToken),
-        'main pane text before relaunch',
+        'initial pane text before relaunch',
         45_000,
       );
 
@@ -98,7 +101,7 @@ async function main() {
       const existingPaneIds = new Set((workspaceBefore.panes || []).map((pane) => pane.paneId));
       await client.request('split_pane', {
         sessionId,
-        targetPaneId: 'main',
+        targetPaneId: initialPaneId,
         direction: 'vertical',
       });
       const utilityPane = await waitForNewShellPane(
@@ -109,9 +112,9 @@ async function main() {
         20_000,
       );
 
-      await waitForPaneReflowed(client, sessionId, 'main', 20_000, 'main pane reflowed after split before baseline capture');
+      await waitForPaneReflowed(client, sessionId, initialPaneId, 20_000, 'initial pane reflowed after split before baseline capture');
 
-      const baselineMainState = await assertPaneVisibleContent(client, sessionId, 'main', {
+      const baselineMainState = await assertPaneVisibleContent(client, sessionId, initialPaneId, {
         contains: agentToken,
         allowWrappedContains: true,
         minNonEmptyLines: 4,
@@ -119,14 +122,14 @@ async function main() {
         minCharCount: 90,
         minMaxLineLength: 16,
         timeoutMs: 30_000,
-        description: 'main pane visible content before relaunch',
+        description: 'initial pane visible content before relaunch',
       });
       baselineMainVisibleContent = baselineMainState?.pane?.visibleContent || null;
-      await assertPaneCoverage(client, sessionId, 'main', {
+      await assertPaneCoverage(client, sessionId, initialPaneId, {
         minWidthRatio: 0.78,
         minHeightRatio: 0.72,
         timeoutMs: 20_000,
-        description: 'main pane coverage before relaunch',
+        description: 'initial pane coverage before relaunch',
       });
 
       await client.request('focus_pane', { sessionId, paneId: utilityPane.paneId });
@@ -187,7 +190,7 @@ async function main() {
         sessionId,
         (workspace) => {
           const paneIds = new Set((workspace.panes || []).map((pane) => pane.paneId));
-          return paneIds.has('main') && paneIds.has(utilityPaneId);
+          return paneIds.has(initialPaneId) && paneIds.has(utilityPaneId);
         },
         `restored split workspace for ${sessionId}`,
         30_000,
@@ -198,10 +201,13 @@ async function main() {
         paneCount: (restoredWorkspace.panes || []).length,
       });
 
-      await waitForPaneVisible(client, sessionId, 'main', 20_000);
+      if (!initialPaneId) {
+        initialPaneId = (await waitForFirstWorkspacePane(client, sessionId, 'restored initial pane', 20_000)).paneId;
+      }
+      await waitForPaneVisible(client, sessionId, initialPaneId, 20_000);
       await waitForPaneVisible(client, sessionId, utilityPaneId, 20_000);
 
-      await assertPaneVisibleContent(client, sessionId, 'main', {
+      await assertPaneVisibleContent(client, sessionId, initialPaneId, {
         contains: agentToken,
         allowWrappedContains: true,
         minNonEmptyLines: 4,
@@ -209,26 +215,26 @@ async function main() {
         minCharCount: 90,
         minMaxLineLength: 16,
         timeoutMs: 30_000,
-        description: 'main pane visible content after relaunch',
+        description: 'initial pane visible content after relaunch',
       });
       await assertPaneVisibleContentPreserved(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         baselineMainVisibleContent,
         {
           minNonEmptyLineRatio: 0.75,
           minCharCountRatio: 0.7,
           minAnchorMatches: 2,
           timeoutMs: 20_000,
-          description: 'main pane content preserved after relaunch',
+          description: 'initial pane content preserved after relaunch',
         },
       );
-      await assertPaneCoverage(client, sessionId, 'main', {
+      await assertPaneCoverage(client, sessionId, initialPaneId, {
         minWidthRatio: 0.78,
         minHeightRatio: 0.72,
         timeoutMs: 20_000,
-        description: 'main pane coverage after relaunch',
+        description: 'initial pane coverage after relaunch',
       });
 
       await assertPaneVisibleContent(client, sessionId, utilityPaneId, {

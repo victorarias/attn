@@ -147,6 +147,37 @@ describe('attachPlanning', () => {
     expect(plan.replayAllowedByPolicy).toBe(true);
   });
 
+  it('prefers raw scrollback for shell same-app remounts', () => {
+    const plan = classifyAttachReplay({
+      cols: 80,
+      rows: 24,
+      screen_cols: 80,
+      screen_rows: 24,
+      screen_snapshot: 'prompt-only',
+      screen_snapshot_fresh: true,
+      scrollback: 'shell-history',
+    }, createAttachRequestContext({ cols: 80, rows: 24, agent: 'shell' }, 'same_app_remount'));
+
+    expect(plan.replayKind).toBe('scrollback');
+    expect(plan.screenSnapshotSuppressed).toBe(true);
+    expect(plan.replayApplied).toBe(true);
+    expect(plan.respondToTerminalQueries).toBe(false);
+  });
+
+  it('applies raw scrollback for same-app remounts even when the pane expands after a split closes', () => {
+    const plan = classifyAttachReplay({
+      cols: 31,
+      rows: 12,
+      replay_segments: [{ cols: 31, rows: 12, data: 'shell-history' }],
+    }, createAttachRequestContext({ cols: 31, rows: 25, agent: 'shell' }, 'same_app_remount'));
+
+    expect(plan.replayKind).toBe('scrollback');
+    expect(plan.attachedGeometryMismatch).toBe(true);
+    expect(plan.replayGeometryMismatch).toBe(true);
+    expect(plan.replayApplied).toBe(true);
+    expect(plan.replaySkipped).toBe(false);
+  });
+
   it('still skips fresh_spawn replay for non-Codex agents', () => {
     const plan = classifyAttachReplay({
       cols: 68,

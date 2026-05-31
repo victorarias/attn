@@ -384,18 +384,14 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 	}
 	isShell := agent == protocol.AgentShellValue
 	workspaceID := strings.TrimSpace(msg.WorkspaceID)
-	if workspaceID != "" {
-		if d.store.GetWorkspace(workspaceID) == nil {
-			d.setWorkspacePaneStatusForSession(msg.ID, workspacelayout.PaneStatusFailed, "unknown workspace")
-			d.sendCommandError(client, protocol.CmdSpawnSession, "unknown workspace")
-			return
-		}
-	} else if !isShell {
-		if workspaceID == "" {
-			d.setWorkspacePaneStatusForSession(msg.ID, workspacelayout.PaneStatusFailed, "missing workspace_id")
-			d.sendCommandError(client, protocol.CmdSpawnSession, "missing workspace_id")
-			return
-		}
+	if workspaceID == "" {
+		d.sendCommandError(client, protocol.CmdSpawnSession, "missing workspace_id")
+		return
+	}
+	if d.store.GetWorkspace(workspaceID) == nil {
+		d.setWorkspacePaneStatusForSession(msg.ID, workspacelayout.PaneStatusFailed, "unknown workspace")
+		d.sendCommandError(client, protocol.CmdSpawnSession, "unknown workspace")
+		return
 	}
 	spawnStartedAt := time.Now()
 	existingSession := d.store.Get(msg.ID)
@@ -492,10 +488,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		return
 	}
 
-	// Workspace-owned PTYs are first-class sessions and are shown in the
-	// workspace sidebar.
-	registerAsSession := !isShell || workspaceID != ""
-	if registerAsSession {
+	{
 		d.clearLongRunTracking(msg.ID)
 		branchInfo, _ := git.GetBranchInfo(cwd)
 		nowStr := string(protocol.TimestampNow())
@@ -530,7 +523,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			StateSince:     initialStateSince,
 			StateUpdatedAt: initialStateUpdatedAt,
 			LastSeen:       nowStr,
-			WorkspaceID:    protocol.Ptr(workspaceID),
+			WorkspaceID:    workspaceID,
 		}
 		if branchInfo != nil {
 			if branchInfo.Branch != "" {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   assertPaneVisibleContentPreserved,
+  waitForFirstWorkspacePane,
   waitForPaneInputFocus,
   waitForPaneTextChange,
   waitForPaneVisible,
@@ -111,6 +112,27 @@ describe('waitForPaneVisible', () => {
   });
 });
 
+describe('waitForFirstWorkspacePane', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('resolves the first daemon-reported pane instead of assuming a fixed pane id', async () => {
+    vi.useFakeTimers();
+    const client = {
+      request: vi.fn()
+        .mockResolvedValueOnce({ panes: [] })
+        .mockResolvedValueOnce({ panes: [{ paneId: 'session-pane-1', runtimeId: 'runtime-1' }] }),
+    };
+
+    const pending = waitForFirstWorkspacePane(client, 'session-1', 'first pane', 2_000);
+    await vi.advanceTimersByTimeAsync(500);
+
+    await expect(pending).resolves.toEqual({ paneId: 'session-pane-1', runtimeId: 'runtime-1' });
+    expect(client.request).toHaveBeenCalledWith('get_workspace', { sessionId: 'session-1' }, { timeoutMs: 20_000 });
+  });
+});
+
 describe('assertPaneVisibleContentPreserved', () => {
   it('allows healthy widen recovery when anchors fully match but wrapped line count drops', async () => {
     const baselineVisibleContent = {
@@ -160,7 +182,7 @@ describe('assertPaneVisibleContentPreserved', () => {
     await expect(assertPaneVisibleContentPreserved(
       client,
       'session-1',
-      'main',
+      'pane-a',
       baselineVisibleContent,
       {
         minNonEmptyLineRatio: 0.7,
@@ -221,7 +243,7 @@ describe('assertPaneVisibleContentPreserved', () => {
     await expect(assertPaneVisibleContentPreserved(
       client,
       'session-1',
-      'main',
+      'pane-a',
       baselineVisibleContent,
       {
         minNonEmptyLineRatio: 0.5,

@@ -32,10 +32,10 @@ import { promisify } from 'node:util';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import {
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
 } from './common.mjs';
-import { sleep } from './scenarioAssertions.mjs';
+import { sleep, waitForFirstWorkspacePane } from './scenarioAssertions.mjs';
 
 const execFileAsync = promisify(execFile);
 const ATTN_BUNDLE_ID = 'com.attn.manager';
@@ -117,7 +117,7 @@ async function main() {
 
   try {
     await launchFreshAppAndConnect(client, observer);
-    const sessionId = await createSessionAndWaitForMain({
+    const sessionId = await createSessionAndWaitForInitialPane({
       client,
       observer,
       cwd: sessionDir,
@@ -127,7 +127,8 @@ async function main() {
     });
     const ws0 = await client.request('get_workspace', { sessionId });
     const before = new Set((ws0.panes || []).map((p) => p.paneId));
-    await client.request('split_pane', { sessionId, targetPaneId: 'main', direction: 'vertical' });
+    const initialPane = await waitForFirstWorkspacePane(client, sessionId, 'initial pane for raf probe split', 20_000);
+    await client.request('split_pane', { sessionId, targetPaneId: initialPane.paneId, direction: 'vertical' });
     await sleep(1_000);
     const wsAfter = await client.request('get_workspace', { sessionId });
     const newPane = (wsAfter.panes || []).find((p) => !before.has(p.paneId));

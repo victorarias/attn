@@ -299,8 +299,8 @@ test.describe('Keyboard Shortcuts', () => {
     });
   });
 
-  test.describe('Session Selection', () => {
-    test('⌘1-9 selects session by index', async ({ page, daemon }) => {
+  test.describe('Workspace Selection', () => {
+    test('⌘1-9 selects workspace by index', async ({ page, daemon }) => {
       await daemon.start();
       await page.goto('/');
       await page.waitForSelector('.dashboard');

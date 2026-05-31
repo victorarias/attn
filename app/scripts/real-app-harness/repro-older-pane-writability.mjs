@@ -6,13 +6,14 @@ import { DaemonObserver } from './daemonObserver.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import {
   createRunContext,
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
 } from './common.mjs';
 import {
   compactTerminalText,
+  waitForFirstWorkspacePane,
   waitForNewShellPane,
   waitForPaneInputFocus,
   waitForPaneState,
@@ -76,7 +77,7 @@ async function main() {
   try {
     await launchFreshAppAndConnect(client, observer);
 
-    const sessionId = await createSessionAndWaitForMain({
+    const sessionId = await createSessionAndWaitForInitialPane({
       client,
       observer,
       cwd: sessionDir,
@@ -92,7 +93,8 @@ async function main() {
 
     const wsBeforeFirstSplit = await client.request('get_workspace', { sessionId });
     const paneIdsBeforeFirstSplit = new Set((wsBeforeFirstSplit.panes || []).map((pane) => pane.paneId));
-    await client.request('split_pane', { sessionId, targetPaneId: 'main', direction: 'vertical' });
+    const initialPane = await waitForFirstWorkspacePane(client, sessionId, `initial pane for session ${sessionId}`, 20_000);
+    await client.request('split_pane', { sessionId, targetPaneId: initialPane.paneId, direction: 'vertical' });
     const firstUtilityPane = await waitForNewShellPane(
       client,
       sessionId,

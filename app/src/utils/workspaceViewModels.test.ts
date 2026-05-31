@@ -27,21 +27,13 @@ describe('workspaceViewModels', () => {
     expect(viewModels.map((workspace) => workspace.firstSessionId)).toEqual(['a1', 'b1']);
   });
 
-  it('creates fallback workspaces for sessions missing daemon workspace snapshots', () => {
+  it('does not invent workspaces when daemon workspace snapshots are missing', () => {
     const viewModels = buildWorkspaceViewModels([], [
       { id: 's1', label: 'One', workspaceId: 'workspace-s1', cwd: '/repo/one' },
-      { id: 's2', label: 'Two', cwd: '/repo/two' },
+      { id: 's2', label: 'Two', workspaceId: 'workspace-s2', cwd: '/repo/two' },
     ]);
 
-    expect(viewModels.map((workspace) => ({
-      id: workspace.id,
-      title: workspace.title,
-      directory: workspace.directory,
-      sessions: workspace.sessions.map((session) => session.id),
-    }))).toEqual([
-      { id: 'workspace-s1', title: 'one', directory: '/repo/one', sessions: ['s1'] },
-      { id: 'workspace-s2', title: 'two', directory: '/repo/two', sessions: ['s2'] },
-    ]);
+    expect(viewModels).toEqual([]);
   });
 
   it('keeps daemon workspaces renderable before their sessions arrive', () => {

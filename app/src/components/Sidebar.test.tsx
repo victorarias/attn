@@ -19,10 +19,25 @@ interface TestSession {
 }
 
 function buildSidebarData(sessions: TestSession[]) {
-  const workspaces = buildWorkspaceViewModels([], sessions.map((session) => ({
+  const viewSessions = sessions.map((session) => ({
     ...session,
     workspaceId: session.cwd ? `workspace-${session.cwd}` : `workspace-${session.id}`,
-  })));
+  }));
+  const workspaceIds = new Set<string>();
+  const workspaces = buildWorkspaceViewModels(
+    viewSessions
+      .filter((session) => {
+        if (workspaceIds.has(session.workspaceId)) return false;
+        workspaceIds.add(session.workspaceId);
+        return true;
+      })
+      .map((session) => ({
+        id: session.workspaceId,
+        title: session.label,
+        directory: session.cwd || session.id,
+      })),
+    viewSessions,
+  );
   return {
     workspaces,
     visualOrder: workspaces,
@@ -158,7 +173,7 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('sidebar-session-a1')).not.toHaveTextContent('⌘1');
   });
 
-  it('hides sessionless workspaces from the sidebar and shortcut order', () => {
+  it('hides empty workspaces from the sidebar and shortcut order', () => {
     const sidebarData = buildSidebarData([
       { id: 'a1', label: 'A1', state: 'idle', cwd: '/repo/a' },
       { id: 'b1', label: 'B1', state: 'idle', cwd: '/repo/b' },

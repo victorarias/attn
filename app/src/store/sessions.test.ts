@@ -37,7 +37,7 @@ describe('sessions store', () => {
   });
 
   it('creates sessions with a default daemon-owned workspace view model', async () => {
-    const sessionId = await useSessionStore.getState().createSession('test', '/tmp/test');
+    const sessionId = await useSessionStore.getState().createSession('test', '/tmp/test', 'sess-test', 'codex', undefined, false, 'workspace-sess-test');
     const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
 
     expect(session?.workspace).toEqual({
@@ -82,6 +82,7 @@ describe('sessions store', () => {
         label: 'New Label',
         agent: 'claude',
         directory: '/tmp/new',
+        workspace_id: 'workspace-sess-1',
         endpoint_id: 'ep-1',
         state: 'idle',
         branch: 'feature/workspace',
@@ -106,8 +107,195 @@ describe('sessions store', () => {
     });
   });
 
+  it('syncFromDaemonSessions removes closed ready workspace sessions and restores recent selection', () => {
+    useSessionStore.setState({
+      activeSessionId: 'split-session',
+      recentSessionIds: ['root-session'],
+      sessions: [
+        {
+          id: 'root-session',
+          label: 'Root',
+          state: 'idle',
+          cwd: '/tmp/workspace',
+          workspaceId: 'workspace-root',
+          agent: 'shell',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-split',
+          workspace: {
+            agents: [
+              { id: 'pane-root', runtimeId: 'root-session', title: 'Root', sessionId: 'root-session' },
+              { id: 'pane-split', runtimeId: 'split-session', title: 'Split', sessionId: 'split-session' },
+            ],
+            layoutTree: {
+              type: 'split',
+              splitId: 'root',
+              direction: 'vertical',
+              ratio: 0.5,
+              children: [
+                { type: 'pane', paneId: 'pane-root' },
+                { type: 'pane', paneId: 'pane-split' },
+              ],
+            },
+          },
+        },
+        {
+          id: 'split-session',
+          label: 'Split',
+          state: 'idle',
+          cwd: '/tmp/workspace',
+          workspaceId: 'workspace-root',
+          agent: 'shell',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-split',
+          workspace: {
+            agents: [
+              { id: 'pane-root', runtimeId: 'root-session', title: 'Root', sessionId: 'root-session' },
+              { id: 'pane-split', runtimeId: 'split-session', title: 'Split', sessionId: 'split-session' },
+            ],
+            layoutTree: {
+              type: 'split',
+              splitId: 'root',
+              direction: 'vertical',
+              ratio: 0.5,
+              children: [
+                { type: 'pane', paneId: 'pane-root' },
+                { type: 'pane', paneId: 'pane-split' },
+              ],
+            },
+          },
+        },
+      ],
+    });
+
+    useSessionStore.getState().syncFromDaemonSessions([
+      {
+        id: 'root-session',
+        label: 'Root',
+        agent: 'shell',
+        directory: '/tmp/workspace',
+        workspace_id: 'workspace-root',
+        state: 'idle',
+      },
+    ]);
+
+    const state = useSessionStore.getState();
+    expect(state.sessions.map((session) => session.id)).toEqual(['root-session']);
+    expect(state.activeSessionId).toBe('root-session');
+    expect(state.recentSessionIds).toEqual([]);
+  });
+
+  it('syncFromDaemonSessions falls back to a remaining same-workspace session when recent selection is empty', () => {
+    useSessionStore.setState({
+      activeSessionId: 'split-session',
+      recentSessionIds: [],
+      sessions: [
+        {
+          id: 'root-session',
+          label: 'Root',
+          state: 'idle',
+          cwd: '/tmp/workspace',
+          workspaceId: 'workspace-root',
+          agent: 'shell',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-split',
+          workspace: {
+            agents: [
+              { id: 'pane-root', runtimeId: 'root-session', title: 'Root', sessionId: 'root-session' },
+              { id: 'pane-split', runtimeId: 'split-session', title: 'Split', sessionId: 'split-session' },
+            ],
+            layoutTree: null,
+          },
+        },
+        {
+          id: 'split-session',
+          label: 'Split',
+          state: 'idle',
+          cwd: '/tmp/workspace',
+          workspaceId: 'workspace-root',
+          agent: 'shell',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-split',
+          workspace: {
+            agents: [
+              { id: 'pane-root', runtimeId: 'root-session', title: 'Root', sessionId: 'root-session' },
+              { id: 'pane-split', runtimeId: 'split-session', title: 'Split', sessionId: 'split-session' },
+            ],
+            layoutTree: null,
+          },
+        },
+      ],
+    });
+
+    useSessionStore.getState().syncFromDaemonSessions([
+      {
+        id: 'root-session',
+        label: 'Root',
+        agent: 'shell',
+        directory: '/tmp/workspace',
+        workspace_id: 'workspace-root',
+        state: 'idle',
+      },
+    ]);
+
+    const state = useSessionStore.getState();
+    expect(state.sessions.map((session) => session.id)).toEqual(['root-session']);
+    expect(state.activeSessionId).toBe('root-session');
+  });
+
+  it('syncFromDaemonSessions falls back to another remaining session when a whole workspace closes', () => {
+    useSessionStore.setState({
+      activeSessionId: 'closing-session',
+      recentSessionIds: [],
+      sessions: [
+        {
+          id: 'previous-session',
+          label: 'Previous',
+          state: 'idle',
+          cwd: '/tmp/previous',
+          workspaceId: 'workspace-previous',
+          agent: 'shell',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-previous',
+          workspace: {
+            agents: [{ id: 'pane-previous', runtimeId: 'previous-session', title: 'Previous', sessionId: 'previous-session' }],
+            layoutTree: { type: 'pane', paneId: 'pane-previous' },
+          },
+        },
+        {
+          id: 'closing-session',
+          label: 'Closing',
+          state: 'idle',
+          cwd: '/tmp/closing',
+          workspaceId: 'workspace-closing',
+          agent: 'shell',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-closing',
+          workspace: {
+            agents: [{ id: 'pane-closing', runtimeId: 'closing-session', title: 'Closing', sessionId: 'closing-session' }],
+            layoutTree: { type: 'pane', paneId: 'pane-closing' },
+          },
+        },
+      ],
+    });
+
+    useSessionStore.getState().syncFromDaemonSessions([
+      {
+        id: 'previous-session',
+        label: 'Previous',
+        agent: 'shell',
+        directory: '/tmp/previous',
+        workspace_id: 'workspace-previous',
+        state: 'idle',
+      },
+    ]);
+
+    const state = useSessionStore.getState();
+    expect(state.sessions.map((session) => session.id)).toEqual(['previous-session']);
+    expect(state.activeSessionId).toBe('previous-session');
+  });
+
   it('takeSessionSpawnArgs applies launcher overrides', async () => {
-    const sessionId = await useSessionStore.getState().createSession('Spawn Test', '/tmp/workspace', 'sess-spawn', 'claude', 'ep-1', true);
+    const sessionId = await useSessionStore.getState().createSession('Spawn Test', '/tmp/workspace', 'sess-spawn', 'claude', 'ep-1', true, 'workspace-sess-spawn');
     useSessionStore.getState().setLauncherConfig({
       executables: { claude: '/opt/bin/claude-custom' },
     });
@@ -130,7 +318,7 @@ describe('sessions store', () => {
   });
 
   it('syncFromDaemonWorkspaces replaces the local split workspace from daemon snapshots', async () => {
-    const sessionId = await useSessionStore.getState().createSession('Workspace', '/tmp/workspace');
+    const sessionId = await useSessionStore.getState().createSession('Workspace', '/tmp/workspace', 'sess-workspace', 'codex', undefined, false, 'workspace-sess-workspace');
 
     useSessionStore.getState().syncFromDaemonWorkspaces([
       {
@@ -152,8 +340,8 @@ describe('sessions store', () => {
             ],
           }),
           panes: [
-            { pane_id: 'pane-session', kind: WorkspaceLayoutPaneKind.Agent, title: 'Agent', runtime_id: sessionId, session_id: sessionId, status: WorkspaceLayoutPaneStatus.Ready },
-            { pane_id: 'pane-shell', kind: WorkspaceLayoutPaneKind.Agent, title: 'Shell 1', runtime_id: 'runtime-shell', session_id: 'sess-shell', status: WorkspaceLayoutPaneStatus.Ready },
+            { workspace_id: `workspace-${sessionId}`, pane_id: 'pane-session', kind: WorkspaceLayoutPaneKind.Agent, title: 'Agent', runtime_id: sessionId, session_id: sessionId, status: WorkspaceLayoutPaneStatus.Ready },
+            { workspace_id: `workspace-${sessionId}`, pane_id: 'pane-shell', kind: WorkspaceLayoutPaneKind.Agent, title: 'Shell 1', runtime_id: 'runtime-shell', session_id: 'sess-shell', status: WorkspaceLayoutPaneStatus.Ready },
           ],
         },
       },
@@ -180,7 +368,7 @@ describe('sessions store', () => {
   });
 
   it('syncFromDaemonWorkspaces ignores unknown sessions and keeps defaults on invalid layout payloads', async () => {
-    const sessionId = await useSessionStore.getState().createSession('Workspace', '/tmp/workspace');
+    const sessionId = await useSessionStore.getState().createSession('Workspace', '/tmp/workspace', 'sess-workspace', 'codex', undefined, false, 'workspace-sess-workspace');
 
     useSessionStore.getState().syncFromDaemonWorkspaces([
       {
@@ -193,7 +381,7 @@ describe('sessions store', () => {
           active_pane_id: 'missing-pane',
           layout_json: '{not-json',
           panes: [
-            { pane_id: 'pane-session', kind: WorkspaceLayoutPaneKind.Agent, title: 'Agent', runtime_id: sessionId, session_id: sessionId, status: WorkspaceLayoutPaneStatus.Ready },
+            { workspace_id: `workspace-${sessionId}`, pane_id: 'pane-session', kind: WorkspaceLayoutPaneKind.Agent, title: 'Agent', runtime_id: sessionId, session_id: sessionId, status: WorkspaceLayoutPaneStatus.Ready },
           ],
         },
       },
@@ -207,7 +395,7 @@ describe('sessions store', () => {
           active_pane_id: 'pane-x',
           layout_json: '',
           panes: [
-            { pane_id: 'pane-x', kind: WorkspaceLayoutPaneKind.Agent, title: 'Shell X', runtime_id: 'runtime-x', status: WorkspaceLayoutPaneStatus.Ready },
+            { workspace_id: 'workspace-unknown-session', pane_id: 'pane-x', kind: WorkspaceLayoutPaneKind.Agent, title: 'Shell X', runtime_id: 'runtime-x', status: WorkspaceLayoutPaneStatus.Ready },
           ],
         },
       },
@@ -222,7 +410,7 @@ describe('sessions store', () => {
   });
 
   it('reloadSession preserves endpoint routing for remote sessions', async () => {
-    await useSessionStore.getState().createSession('Remote', '/srv/repo', 'sess-remote', 'codex', 'ep-remote', true);
+    await useSessionStore.getState().createSession('Remote', '/srv/repo', 'sess-remote', 'codex', 'ep-remote', true, 'workspace-sess-remote');
 
     await useSessionStore.getState().reloadSession('sess-remote', { cols: 120, rows: 40 });
 

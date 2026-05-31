@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import {
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -16,10 +16,11 @@ import {
   assertPaneVisibleContent,
   captureSessionArtifacts,
   sleep,
+  waitForFirstWorkspacePane,
   waitForPaneState,
   waitForPaneVisible,
 } from './scenarioAssertions.mjs';
-import { ensureCodexMainPromptReady } from './scenarioAgents.mjs';
+import { ensureCodexInitialPanePromptReady } from './scenarioAgents.mjs';
 
 function normalizeBaselineWindowBounds(bounds) {
   return {
@@ -69,12 +70,12 @@ function assertCompleteCodexHeaderFrame(state, description) {
   }
 }
 
-async function waitForCompleteCodexHeaderFrame(client, sessionId, description, timeoutMs = 5_000) {
+async function waitForCompleteCodexHeaderFrame(client, sessionId, paneId, description, timeoutMs = 5_000) {
   const startedAt = Date.now();
   let lastState = null;
   let lastError = null;
   while (Date.now() - startedAt < timeoutMs) {
-    lastState = await client.request('get_pane_state', { sessionId, paneId: 'main' });
+    lastState = await client.request('get_pane_state', { sessionId, paneId });
     try {
       assertCompleteCodexHeaderFrame(lastState, description);
       return lastState;
@@ -99,7 +100,7 @@ async function main() {
     prefix: 'scenario-tr401-local-codex-main-window-resize',
     metadata: {
       agent: 'codex',
-      focus: 'fresh Codex main pane window resize header preservation',
+      focus: 'fresh Codex initial pane window resize header preservation',
     },
   });
   const client = new UiAutomationClient({ appPath: options.appPath });
@@ -109,6 +110,7 @@ async function main() {
   let baselineWindow = null;
   let narrowWindow = null;
   let restoredWindow = null;
+  let initialPaneId = null;
   let baselineMain = null;
   let narrowMain = null;
   let restoredMain = null;
@@ -124,27 +126,28 @@ async function main() {
     });
 
     sessionId = await runner.step('create_codex_session', async () => {
-      return createSessionAndWaitForMain({
+      return createSessionAndWaitForInitialPane({
         client,
         observer,
         cwd: runner.sessionDir,
         label: `tr401-codex-main-${runner.runId}`,
         agent: 'codex',
-        waitForMainVisible: false,
+        waitForInitialPaneVisible: false,
       });
     });
 
     await runner.step('capture_baseline_header', async () => {
       await client.request('select_session', { sessionId });
-      await ensureCodexMainPromptReady(client, sessionId, 45_000);
-      await waitForPaneVisible(client, sessionId, 'main', 20_000);
+      const readiness = await ensureCodexInitialPanePromptReady(client, sessionId, 45_000);
+      initialPaneId = readiness.paneId || (await waitForFirstWorkspacePane(client, sessionId, 'Codex initial pane', 20_000)).paneId;
+      await waitForPaneVisible(client, sessionId, initialPaneId, 20_000);
       baselineMain = await assertPaneVisibleContent(
         client,
         sessionId,
-        'main',
-        codexHeaderOptions('Codex header visible before main-pane window resize'),
+        initialPaneId,
+        codexHeaderOptions('Codex header visible before initial-pane window resize'),
       );
-      baselineMain = await waitForCompleteCodexHeaderFrame(client, sessionId, 'Codex baseline header frame');
+      baselineMain = await waitForCompleteCodexHeaderFrame(client, sessionId, initialPaneId, 'Codex baseline header frame');
       await captureSessionArtifacts(client, runner.runDir, '01-baseline', sessionId);
     });
 
@@ -153,29 +156,29 @@ async function main() {
       narrowMain = await waitForPaneState(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         (state) => {
           const width = state?.pane?.bounds?.width ?? 0;
           const baselineWidth = baselineMain?.pane?.bounds?.width ?? 0;
           return width > 0 && width <= Math.floor(baselineWidth * 0.65);
         },
-        'Codex main pane width to shrink after window resize',
+        'Codex initial pane width to shrink after window resize',
         20_000,
       );
       await captureSessionArtifacts(client, runner.runDir, '02-narrow-before-assert', sessionId);
       narrowMain = await assertPaneVisibleContent(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         codexHeaderOptions('Codex header visible after narrowing main-only window'),
       );
-      narrowMain = await waitForCompleteCodexHeaderFrame(client, sessionId, 'Codex narrowed header frame');
+      narrowMain = await waitForCompleteCodexHeaderFrame(client, sessionId, initialPaneId, 'Codex narrowed header frame');
       await captureSessionArtifacts(client, runner.runDir, '02-narrow-after-assert', sessionId);
-      await assertPaneCoverage(client, sessionId, 'main', {
+      await assertPaneCoverage(client, sessionId, initialPaneId, {
         minWidthRatio: 0.75,
         minHeightRatio: 0.7,
         timeoutMs: 20_000,
-        description: 'Codex main pane coverage after narrowing main-only window',
+        description: 'Codex initial pane coverage after narrowing single-pane window',
       });
       return nextWindow;
     });
@@ -185,23 +188,23 @@ async function main() {
       restoredMain = await waitForPaneState(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         (state) => {
           const width = state?.pane?.bounds?.width ?? 0;
           const baselineWidth = baselineMain?.pane?.bounds?.width ?? 0;
           return width >= Math.floor(baselineWidth * 0.95);
         },
-        'Codex main pane width to restore after window resize',
+        'Codex initial pane width to restore after window resize',
         20_000,
       );
       await captureSessionArtifacts(client, runner.runDir, '03-restored-before-assert', sessionId);
       restoredMain = await assertPaneVisibleContent(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         codexHeaderOptions('Codex header visible after restoring main-only window'),
       );
-      restoredMain = await waitForCompleteCodexHeaderFrame(client, sessionId, 'Codex restored header frame');
+      restoredMain = await waitForCompleteCodexHeaderFrame(client, sessionId, initialPaneId, 'Codex restored header frame');
       await captureSessionArtifacts(client, runner.runDir, '03-restored-after-assert', sessionId);
       return nextWindow;
     });

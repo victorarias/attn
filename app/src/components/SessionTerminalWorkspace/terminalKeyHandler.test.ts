@@ -74,4 +74,48 @@ describe('installTerminalKeyHandler', () => {
     expect(triggerShortcut).toHaveBeenCalledWith('session.newHorizontal');
     expect(sendToPty).not.toHaveBeenCalled();
   });
+
+  it('routes Cmd+number to workspace selection when terminal owns the key event', () => {
+    vi.mocked(triggerShortcut).mockReturnValue(true);
+    const sendToPty = vi.fn();
+    const handler = installTerminalKeyHandler(sendToPty);
+    const event = new KeyboardEvent('keydown', {
+      key: '™',
+      code: 'Digit2',
+      metaKey: true,
+    });
+
+    expect(handler(event)).toBe(false);
+    expect(triggerShortcut).toHaveBeenCalledWith('workspace.select2');
+    expect(sendToPty).not.toHaveBeenCalled();
+  });
+
+  it('routes Cmd+number by key when code is unavailable', () => {
+    vi.mocked(triggerShortcut).mockReturnValue(true);
+    const sendToPty = vi.fn();
+    const handler = installTerminalKeyHandler(sendToPty);
+    const event = new KeyboardEvent('keydown', {
+      key: '3',
+      metaKey: true,
+    });
+
+    expect(handler(event)).toBe(false);
+    expect(triggerShortcut).toHaveBeenCalledWith('workspace.select3');
+    expect(sendToPty).not.toHaveBeenCalled();
+  });
+
+  it('falls back to session close for Cmd+W when no split-pane close handler is active', () => {
+    vi.mocked(triggerShortcut).mockImplementation((shortcut) => shortcut === 'session.close');
+    const sendToPty = vi.fn();
+    const handler = installTerminalKeyHandler(sendToPty);
+    const event = new KeyboardEvent('keydown', {
+      key: 'w',
+      metaKey: true,
+    });
+
+    expect(handler(event)).toBe(false);
+    expect(triggerShortcut).toHaveBeenNthCalledWith(1, 'terminal.close');
+    expect(triggerShortcut).toHaveBeenNthCalledWith(2, 'session.close');
+    expect(sendToPty).not.toHaveBeenCalled();
+  });
 });

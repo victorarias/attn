@@ -48,20 +48,21 @@ async function waitForPaneText(request, sessionId, paneId, predicate, timeoutMs 
   );
 }
 
-async function waitForUiSessionVisible(request, sessionId, timeoutMs = 15_000) {
+async function waitForFirstWorkspacePane(request, sessionId, timeoutMs = 15_000) {
   const startedAt = Date.now();
-  let lastState = null;
+  let lastWorkspace = null;
 
   while (Date.now() - startedAt < timeoutMs) {
-    lastState = await request('get_pane_state', { sessionId, paneId: 'main' }).catch(() => null);
-    if (lastState?.pane?.bounds) {
-      return lastState;
+    lastWorkspace = await request('get_workspace', { sessionId }).catch(() => null);
+    const pane = (lastWorkspace?.panes || [])[0] || null;
+    if (pane?.paneId) {
+      return pane;
     }
     await sleep(250);
   }
 
   throw new Error(
-    `Timed out waiting for UI session ${sessionId} to be visible. Last pane state:\n${JSON.stringify(lastState, null, 2)}`
+    `Timed out waiting for first workspace pane in ${sessionId}. Last workspace:\n${JSON.stringify(lastWorkspace, null, 2)}`
   );
 }
 
@@ -215,31 +216,32 @@ async function main() {
     const sessionId = created.sessionId;
     trace.log('session:created', { sessionId, label: sessionLabel, cwd: sessionDir });
 
-    await waitForUiSessionVisible(request, sessionId, 20_000);
-    await request('get_pane_state', { sessionId, paneId: 'main' });
-    await request('read_pane_text', { sessionId, paneId: 'main' });
+    const initialPane = await waitForFirstWorkspacePane(request, sessionId, 20_000);
+    const initialPaneId = initialPane.paneId;
+    await request('get_pane_state', { sessionId, paneId: initialPaneId });
+    await request('read_pane_text', { sessionId, paneId: initialPaneId });
 
-    await waitForPaneVisible(request, sessionId, 'main', 20_000);
+    await waitForPaneVisible(request, sessionId, initialPaneId, 20_000);
 
     const trustPrompt = await waitForPaneText(
       request,
       sessionId,
-      'main',
+      initialPaneId,
       (text) => text.includes('Do you trust this folder?') || text.includes('Security guide'),
       30_000
     );
     fs.writeFileSync(path.join(runDir, '02-trust-prompt.txt'), trustPrompt.text || '', 'utf8');
 
     await request('select_session', { sessionId });
-    await waitForPaneState(request, sessionId, 'main', (state) => state.activePaneId === 'main');
-    await request('click_pane', { sessionId, paneId: 'main' });
-    await waitForPaneState(request, sessionId, 'main', (state) => state.activePaneId === 'main' && state.inputFocused);
-    await request('type_pane_via_ui', { sessionId, paneId: 'main', text: trustToken });
+    await waitForPaneState(request, sessionId, initialPaneId, (state) => state.activePaneId === initialPaneId);
+    await request('click_pane', { sessionId, paneId: initialPaneId });
+    await waitForPaneState(request, sessionId, initialPaneId, (state) => state.activePaneId === initialPaneId && state.inputFocused);
+    await request('type_pane_via_ui', { sessionId, paneId: initialPaneId, text: trustToken });
 
     const trustSelection = await waitForPaneText(
       request,
       sessionId,
-      'main',
+      initialPaneId,
       (text) => compact(text).includes('1yesitrustthisfolder') || compact(text).includes('1.Yes,Itrustthisfolder'),
       10_000
     );
@@ -247,7 +249,7 @@ async function main() {
 
     await request('write_pane', {
       sessionId,
-      paneId: 'main',
+      paneId: initialPaneId,
       text: '\r',
       submit: false,
     });
@@ -255,20 +257,20 @@ async function main() {
     const trustedMain = await waitForPaneText(
       request,
       sessionId,
-      'main',
+      initialPaneId,
       (text) => !text.includes('Do you trust this folder?') && compact(text).includes('❯'),
       30_000
     );
     fs.writeFileSync(path.join(runDir, '04-main-ready.txt'), trustedMain.text || '', 'utf8');
-    await waitForPaneVisible(request, sessionId, 'main', 10_000);
+    await waitForPaneVisible(request, sessionId, initialPaneId, 10_000);
 
-    await request('click_pane', { sessionId, paneId: 'main' });
-    await waitForPaneState(request, sessionId, 'main', (state) => state.activePaneId === 'main' && state.inputFocused);
-    await request('type_pane_via_ui', { sessionId, paneId: 'main', text: mainToken1 });
+    await request('click_pane', { sessionId, paneId: initialPaneId });
+    await waitForPaneState(request, sessionId, initialPaneId, (state) => state.activePaneId === initialPaneId && state.inputFocused);
+    await request('type_pane_via_ui', { sessionId, paneId: initialPaneId, text: mainToken1 });
     const mainVisible1 = await waitForPaneText(
       request,
       sessionId,
-      'main',
+      initialPaneId,
       (text) => compact(text).includes(compact(mainToken1)),
       15_000
     );
@@ -294,14 +296,14 @@ async function main() {
     );
     fs.writeFileSync(path.join(runDir, '07-shell-token.txt'), shellVisible.text || '', 'utf8');
 
-    await request('click_pane', { sessionId, paneId: 'main' });
-    await waitForPaneState(request, sessionId, 'main', (state) => state.activePaneId === 'main' && state.inputFocused);
-    await request('type_pane_via_ui', { sessionId, paneId: 'main', text: mainToken2 });
+    await request('click_pane', { sessionId, paneId: initialPaneId });
+    await waitForPaneState(request, sessionId, initialPaneId, (state) => state.activePaneId === initialPaneId && state.inputFocused);
+    await request('type_pane_via_ui', { sessionId, paneId: initialPaneId, text: mainToken2 });
 
     const mainVisible2 = await waitForPaneText(
       request,
       sessionId,
-      'main',
+      initialPaneId,
       (text) => compact(text).includes(compact(mainToken2)),
       15_000
     );
@@ -313,6 +315,7 @@ async function main() {
       ok: true,
       runId,
       sessionId,
+      initialPaneId,
       shellPane,
       tokens: {
         mainToken1,

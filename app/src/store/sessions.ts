@@ -34,7 +34,7 @@ export interface DaemonSessionSnapshot {
   label: string;
   agent?: string;
   directory: string;
-  workspace_id?: string;
+  workspace_id: string;
   endpoint_id?: string;
   state: string;
   branch?: string;
@@ -56,7 +56,15 @@ interface SessionStore {
 
   // Actions
   connect: () => Promise<void>;
-  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string, yoloMode?: boolean, workspaceId?: string) => Promise<string>;
+  createSession: (
+    label: string,
+    cwd: string,
+    id: string | undefined,
+    agent: SessionAgent | undefined,
+    endpointId: string | undefined,
+    yoloMode: boolean | undefined,
+    workspaceId: string,
+  ) => Promise<string>;
   closeSession: (id: string) => void;
   removeSessionLocalState: (id: string) => void;
   setActiveSession: (id: string | null) => void;
@@ -77,7 +85,7 @@ interface TestSession {
   state: UISessionState;
   cwd: string;
   agent?: SessionAgent;
-  workspaceId?: string;
+  workspaceId: string;
   branch?: string;
   isWorktree?: boolean;
 }
@@ -101,6 +109,7 @@ function pickFallbackActive(
   removedId: string,
   remainingSessions: Session[],
   recent: string[],
+  removedSession?: Session | null,
 ): string | null {
   const existing = new Set(remainingSessions.map((entry) => entry.id));
   for (const candidate of recent) {
@@ -108,7 +117,13 @@ function pickFallbackActive(
       return candidate;
     }
   }
-  return null;
+  if (removedSession?.workspaceId) {
+    const sameWorkspace = remainingSessions.find((entry) => entry.workspaceId === removedSession.workspaceId);
+    if (sameWorkspace) {
+      return sameWorkspace.id;
+    }
+  }
+  return remainingSessions[0]?.id ?? null;
 }
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
@@ -146,10 +161,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  createSession: async (label: string, cwd: string, providedId?: string, agent?: SessionAgent, endpointId?: string, yoloMode = false, providedWorkspaceId?: string) => {
+  createSession: async (
+    label: string,
+    cwd: string,
+    providedId: string | undefined,
+    agent: SessionAgent | undefined,
+    endpointId: string | undefined,
+    yoloMode: boolean | undefined,
+    providedWorkspaceId: string,
+  ) => {
     // Use provided ID or generate new one
     const id = providedId || crypto.randomUUID();
-    const workspaceId = providedWorkspaceId || `workspace-${id}`;
+    if (!providedWorkspaceId) {
+      throw new Error('createSession requires workspaceId');
+    }
+    const workspaceId = providedWorkspaceId;
     const resolvedAgent: SessionAgent = agent ?? 'claude';
     const session: Session = {
       id,
@@ -159,7 +185,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       workspaceId,
       agent: resolvedAgent,
       endpointId,
-      yoloMode,
+      yoloMode: yoloMode ?? false,
       transcriptMatched: resolvedAgent !== 'codex',
       workspace: createDefaultWorkspaceState(),
       daemonActivePaneId: '',
@@ -179,12 +205,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   removeSessionLocalState: (id: string) => {
     const { sessions, activeSessionId, recentSessionIds } = get();
+    const removedSession = sessions.find((session) => session.id === id) ?? null;
     const newSessions = sessions.filter((s) => s.id !== id);
     const newRecent = recentSessionIds.filter((entry) => entry !== id);
     let newActiveId = activeSessionId;
 
     if (activeSessionId === id) {
-      newActiveId = pickFallbackActive(id, newSessions, recentSessionIds);
+      newActiveId = pickFallbackActive(id, newSessions, recentSessionIds, removedSession);
     }
 
     set({
@@ -229,6 +256,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       cwd: session.cwd,
       workspace_id: session.workspaceId,
       ...(session.endpointId ? { endpoint_id: session.endpointId } : {}),
+      intent: 'create',
       label: session.label,
       cols: resolvedCols,
       rows: resolvedRows,
@@ -274,6 +302,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           cwd: session.cwd,
           workspace_id: session.workspaceId,
           ...(session.endpointId ? { endpoint_id: session.endpointId } : {}),
+          intent: 'reload',
           reload: true,
           label: session.label,
           cols,
@@ -312,7 +341,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         const normalizedState = normalizeSessionState(daemonSession.state);
         const nextAgent: SessionAgent = normalizeSessionAgent(daemonSession.agent, existing?.agent ?? 'codex');
         const nextEndpointId = daemonSession.endpoint_id ?? existing?.endpointId;
-        const nextWorkspaceId = daemonSession.workspace_id ?? existing?.workspaceId ?? `workspace-${daemonSession.id}`;
+        const nextWorkspaceId = daemonSession.workspace_id;
         const nextBranch = daemonSession.branch ?? existing?.branch;
         const nextIsWorktree = daemonSession.is_worktree ?? existing?.isWorktree;
 
@@ -349,7 +378,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
       const pendingLayoutSessions = state.sessions.filter((session) => (
         !syncedSessions.some((synced) => synced.id === session.id)
-        && session.workspace.agents.some((pane) => pane.sessionId === session.id && pane.status !== 'ready')
+        && session.workspace.agents.some((pane) => pane.sessionId === session.id && pane.status === 'spawning')
       ));
       const allSessions = [...syncedSessions, ...pendingLayoutSessions];
       const syncedIds = new Set(allSessions.map((session) => session.id));
@@ -358,7 +387,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       let nextActiveSessionID = state.activeSessionId;
       let nextRecent = prunedRecent;
       if (nextActiveSessionID && !syncedIds.has(nextActiveSessionID)) {
-        const fallback = pickFallbackActive(nextActiveSessionID, allSessions, prunedRecent);
+        const removedSession = state.sessions.find((session) => session.id === nextActiveSessionID) ?? null;
+        const fallback = pickFallbackActive(nextActiveSessionID, allSessions, prunedRecent, removedSession);
         nextActiveSessionID = fallback;
         nextRecent = fallback
           ? prunedRecent.filter((entry) => entry !== fallback)
@@ -431,13 +461,17 @@ declare global {
 // Expose test helpers for E2E testing (only in development)
 if (import.meta.env.DEV) {
   window.__TEST_INJECT_SESSION = (session: TestSession) => {
+    if (!session.workspaceId) {
+      throw new Error('__TEST_INJECT_SESSION requires workspaceId');
+    }
+    const workspaceId = session.workspaceId;
     useSessionStore.setState((state) => ({
       sessions: [
         ...state.sessions,
         {
           ...session,
+          workspaceId,
           agent: session.agent ?? 'codex',
-          workspaceId: session.workspaceId ?? `workspace-${session.id}`,
           transcriptMatched: (session.agent ?? 'codex') !== 'codex',
           workspace: createDefaultWorkspaceState(),
           daemonActivePaneId: '',

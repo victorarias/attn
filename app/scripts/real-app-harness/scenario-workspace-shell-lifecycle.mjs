@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   createRunContext,
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -12,6 +12,7 @@ import {
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import {
+  captureSessionArtifacts,
   waitForPaneAttached,
   waitForPaneShellReady,
   waitForPaneText,
@@ -87,6 +88,17 @@ async function writeAndAssertToken(client, sessionId, pane, token) {
   );
 }
 
+async function capturePaneTexts(client, runDir, prefix, sessionId, panes) {
+  const payload = {};
+  for (const pane of panes) {
+    payload[pane.paneId] = await client.request('read_pane_text', {
+      sessionId,
+      paneId: pane.paneId,
+    }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
+  }
+  fs.writeFileSync(path.join(runDir, `${prefix}-pane-texts.json`), `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+}
+
 async function closeWorkspacePanes(client, sessionId) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const workspace = await client.request('get_workspace', { sessionId }).catch(() => null);
@@ -131,14 +143,15 @@ async function main() {
 
   try {
     await launchFreshAppAndConnect(client, observer);
+    await client.request('set_terminal_runtime_trace', { enabled: true }).catch(() => {});
 
-    sessionId = await createSessionAndWaitForMain({
+    sessionId = await createSessionAndWaitForInitialPane({
       client,
       observer,
       cwd: sessionDir,
       label: `ws-life-${runId}`,
       agent: 'shell',
-      waitForMainVisible: false,
+      waitForInitialPaneVisible: false,
       sessionWaitMs: 30_000,
     });
     let workspace = await waitForPaneCount(client, sessionId, 1, 'initial shell workspace pane');
@@ -171,8 +184,14 @@ async function main() {
       throw new Error(`Closed pane ${verticalPane.paneId} is still present: ${JSON.stringify(workspace, null, 2)}`);
     }
 
-    await waitForPaneText(client, sessionId, initialPane.paneId, (text) => text.includes(tokenA), 'initial pane token survived close', 15_000);
-    await waitForPaneText(client, sessionId, horizontalPane.paneId, (text) => text.includes(tokenC), 'remaining split token survived close', 15_000);
+    try {
+      await waitForPaneText(client, sessionId, initialPane.paneId, (text) => text.includes(tokenA), 'initial pane token survived close', 15_000);
+      await waitForPaneText(client, sessionId, horizontalPane.paneId, (text) => text.includes(tokenC), 'remaining split token survived close', 15_000);
+    } catch (error) {
+      await captureSessionArtifacts(client, runDir, 'token-survival-failure', sessionId).catch(() => {});
+      await capturePaneTexts(client, runDir, 'token-survival-failure', sessionId, [initialPane, verticalPane, horizontalPane]).catch(() => {});
+      throw error;
+    }
 
     const summary = {
       ok: true,

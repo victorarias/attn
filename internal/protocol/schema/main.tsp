@@ -123,7 +123,7 @@ model Session {
   agent: string;                // Built-in ID or registered plugin driver ID
   directory: string;
   endpoint_id?: string;         // Optional: owning endpoint for remote/session-aware routing
-  workspace_id?: string;        // Owning workspace; required for newly-created sessions
+  workspace_id: string;         // Owning workspace
   branch?: string;              // Optional: might not be in git repo
   is_worktree?: boolean;        // Optional: false if not worktree
   main_repo?: string;           // Optional: only set if worktree
@@ -270,7 +270,7 @@ model GitFileChange {
 model WorkspaceLayoutPane {
   pane_id: string;
   runtime_id?: string;
-  workspace_id?: string;
+  workspace_id: string;
   session_id?: string;
   kind: WorkspaceLayoutPaneKind;
   title: string;
@@ -337,7 +337,7 @@ model RegisterMessage {
   cmd: "register";
   id: string;
   label?: string;
-  agent?: string;               // Optional for legacy wrappers or registered plugin IDs
+  agent?: string;               // Optional for registered plugin IDs
   dir: string;
   workspace_id: string;
 }

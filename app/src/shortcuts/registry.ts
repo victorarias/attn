@@ -4,6 +4,7 @@ import { isMacLikePlatform } from './platform';
 
 export interface ShortcutDef {
   key: string;
+  code?: string;
   meta?: boolean;
   shift?: boolean;
   ctrl?: boolean;
@@ -42,6 +43,17 @@ export const SHORTCUTS = {
   'session.jumpToWaiting': { key: 'j', meta: true },
   'session.toggleSidebar': { key: 'b', meta: true, shift: true },
   'session.refreshPRs': { key: 'r', meta: true },
+
+  // Workspace switching
+  'workspace.select1': { key: '1', code: 'Digit1', meta: true },
+  'workspace.select2': { key: '2', code: 'Digit2', meta: true },
+  'workspace.select3': { key: '3', code: 'Digit3', meta: true },
+  'workspace.select4': { key: '4', code: 'Digit4', meta: true },
+  'workspace.select5': { key: '5', code: 'Digit5', meta: true },
+  'workspace.select6': { key: '6', code: 'Digit6', meta: true },
+  'workspace.select7': { key: '7', code: 'Digit7', meta: true },
+  'workspace.select8': { key: '8', code: 'Digit8', meta: true },
+  'workspace.select9': { key: '9', code: 'Digit9', meta: true },
 
   // Dock panels
   'dock.diff': { key: 'g', meta: true, shift: true },
@@ -107,7 +119,8 @@ export function validateNoConflicts(): void {
  * Check if a keyboard event matches a shortcut definition
  */
 export function matchesShortcut(e: KeyboardEvent, def: ShortcutDef): boolean {
-  const keyMatches = e.key.toLowerCase() === def.key.toLowerCase();
+  const keyMatches = e.key.toLowerCase() === def.key.toLowerCase()
+    || (!!def.code && e.code === def.code);
   const wantsMeta = !!def.meta;
   const isMac = isMacLikePlatform();
   const accelPressed = isMac ? e.metaKey : (e.metaKey || e.ctrlKey);

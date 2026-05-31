@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import {
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -16,6 +16,7 @@ import {
   assertPaneVisibleContent,
   captureSessionArtifacts,
   compactTerminalText,
+  waitForFirstWorkspacePane,
   waitForNewShellPane,
   waitForPaneAttached,
   waitForPaneStyle,
@@ -23,7 +24,7 @@ import {
   waitForPaneVisible,
   waitForSessionWorkspace,
 } from './scenarioAssertions.mjs';
-import { ensureClaudeMainPromptReady } from './scenarioAgents.mjs';
+import { ensureClaudeInitialPanePromptReady } from './scenarioAgents.mjs';
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -71,6 +72,7 @@ async function main() {
   const expectedLastToken = `${formatToken}-italic-rgb-bg`;
 
   let sessionId = null;
+  let initialPaneId = null;
   let utilityPaneId = null;
   let baselineStyle = null;
 
@@ -80,22 +82,23 @@ async function main() {
     });
 
     sessionId = await runner.step('create_session', async () => {
-      return createSessionAndWaitForMain({
+      return createSessionAndWaitForInitialPane({
         client,
         observer,
         cwd: runner.sessionDir,
         label: `tr204-local-formatting-${runner.runId}`,
         agent: 'claude',
-        promptReadyFn: ensureClaudeMainPromptReady,
+        promptReadyFn: ensureClaudeInitialPanePromptReady,
       });
     });
 
     utilityPaneId = await runner.step('seed_formatted_utility_output', async () => {
+      initialPaneId = (await waitForFirstWorkspacePane(client, sessionId, 'initial pane for formatting split', 20_000)).paneId;
       const workspaceBefore = await client.request('get_workspace', { sessionId });
       const existingPaneIds = new Set((workspaceBefore.panes || []).map((pane) => pane.paneId));
       await client.request('split_pane', {
         sessionId,
-        targetPaneId: 'main',
+        targetPaneId: initialPaneId,
         direction: 'vertical',
       });
       const utilityPane = await waitForNewShellPane(

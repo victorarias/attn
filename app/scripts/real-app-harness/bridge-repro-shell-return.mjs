@@ -38,6 +38,10 @@ function shellPanes(workspace) {
   return (workspace?.panes || []).filter((pane) => pane.kind === 'shell' && pane.runtime_id);
 }
 
+function firstWorkspacePane(workspace) {
+  return (workspace?.panes || [])[0] || null;
+}
+
 async function waitForPaneText(client, sessionId, paneId, needle, timeoutMs = 8_000) {
   const startedAt = Date.now();
   let lastText = '';
@@ -164,9 +168,13 @@ async function main() {
     await tryCaptureScreenshot(client, runDir, '02-session-created.png');
 
     const initialWorkspace = await client.request('get_workspace', { sessionId: await resolveUiSessionId() });
+    const initialPane = firstWorkspacePane(initialWorkspace);
+    if (!initialPane?.paneId) {
+      throw new Error(`Initial pane not found for ${daemonSessionId}`);
+    }
     await client.request('split_pane', {
       sessionId: daemonSessionId,
-      targetPaneId: initialWorkspace.activePaneId || 'main',
+      targetPaneId: initialWorkspace.activePaneId || initialPane.paneId,
       direction: 'vertical',
     });
 

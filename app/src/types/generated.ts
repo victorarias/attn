@@ -388,7 +388,7 @@ export interface SessionElement {
     state_since:                  string;
     state_updated_at:             string;
     todos?:                       string[];
-    workspace_id?:                string;
+    workspace_id:                 string;
     [property: string]: any;
 }
 
@@ -1217,14 +1217,14 @@ export interface Layout {
 }
 
 export interface PaneElement {
-    error?:        string;
-    kind:          WorkspaceLayoutPaneKind;
-    pane_id:       string;
-    runtime_id?:   string;
-    session_id?:   string;
-    status:        WorkspaceLayoutPaneStatus;
-    title:         string;
-    workspace_id?: string;
+    error?:       string;
+    kind:         WorkspaceLayoutPaneKind;
+    pane_id:      string;
+    runtime_id?:  string;
+    session_id?:  string;
+    status:       WorkspaceLayoutPaneStatus;
+    title:        string;
+    workspace_id: string;
     [property: string]: any;
 }
 
@@ -2116,7 +2116,7 @@ export interface Session {
     state_since:                  string;
     state_updated_at:             string;
     todos?:                       string[];
-    workspace_id?:                string;
+    workspace_id:                 string;
     [property: string]: any;
 }
 
@@ -2594,14 +2594,14 @@ export enum WorkspaceLayoutMessageEvent {
 }
 
 export interface WorkspaceLayoutPane {
-    error?:        string;
-    kind:          WorkspaceLayoutPaneKind;
-    pane_id:       string;
-    runtime_id?:   string;
-    session_id?:   string;
-    status:        WorkspaceLayoutPaneStatus;
-    title:         string;
-    workspace_id?: string;
+    error?:       string;
+    kind:         WorkspaceLayoutPaneKind;
+    pane_id:      string;
+    runtime_id?:  string;
+    session_id?:  string;
+    status:       WorkspaceLayoutPaneStatus;
+    title:        string;
+    workspace_id: string;
     [property: string]: any;
 }
 
@@ -4481,7 +4481,7 @@ const typeMap: any = {
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
-        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "BranchDiffFile": o([
         { json: "additions", js: "additions", typ: u(undefined, 0) },
@@ -4956,7 +4956,7 @@ const typeMap: any = {
         { json: "session_id", js: "session_id", typ: u(undefined, "") },
         { json: "status", js: "status", typ: r("WorkspaceLayoutPaneStatus") },
         { json: "title", js: "title", typ: "" },
-        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "InjectTestPRMessage": o([
         { json: "cmd", js: "cmd", typ: r("InjectTestPRMessageCmd") },
@@ -5470,7 +5470,7 @@ const typeMap: any = {
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
-        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "SessionExitedMessage": o([
         { json: "event", js: "event", typ: r("SessionExitedMessageEvent") },
@@ -5744,7 +5744,7 @@ const typeMap: any = {
         { json: "session_id", js: "session_id", typ: u(undefined, "") },
         { json: "status", js: "status", typ: r("WorkspaceLayoutPaneStatus") },
         { json: "title", js: "title", typ: "" },
-        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "WorkspaceLayoutRenamePaneMessage": o([
         { json: "cmd", js: "cmd", typ: r("WorkspaceLayoutRenamePaneMessageCmd") },

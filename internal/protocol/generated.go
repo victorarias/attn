@@ -2081,7 +2081,7 @@ type Session struct {
 	Todos []string `json:"todos,omitempty,omitzero"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 type SessionExitedMessage struct {
@@ -2767,7 +2767,7 @@ type WorkspaceLayoutPane struct {
 	Title string `json:"title"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 type WorkspaceLayoutPaneKind string

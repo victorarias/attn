@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import {
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -18,6 +18,7 @@ import {
   compactTerminalText,
   captureSessionArtifacts,
   shellPanes,
+  waitForFirstWorkspacePane,
   waitForNewShellPane,
   waitForPaneShellReady,
   waitForPaneTextChange,
@@ -129,6 +130,7 @@ async function main() {
 
   let endpoint = null;
   let sessionId = null;
+  let initialPaneId = null;
   let initialShellPaneId = null;
   let postRelaunchMainSplitPaneId = null;
   let postRelaunchShellSplitPaneId = null;
@@ -219,14 +221,14 @@ async function main() {
     });
 
     sessionId = await runner.step('create_remote_session', async () => {
-      const resultSessionId = await createSessionAndWaitForMain({
+      const resultSessionId = await createSessionAndWaitForInitialPane({
         client,
         observer,
         cwd: remoteDirectory,
         label: `tr502-${runner.runId}`,
         agent: options.remoteAgent,
         endpointId: endpoint.id,
-        waitForMainVisible: false,
+        waitForInitialPaneVisible: false,
       });
       await observer.waitForWorkspace(
         resultSessionId,
@@ -246,39 +248,40 @@ async function main() {
 
     initialShellPaneId = await runner.step('create_initial_split_before_relaunch', async () => {
       await client.request('select_session', { sessionId });
-      await waitForPaneVisible(client, sessionId, 'main', 30_000);
-      const mainPaneState = await assertPaneVisibleContent(client, sessionId, 'main', {
+      initialPaneId = (await waitForFirstWorkspacePane(client, sessionId, 'remote initial pane before relaunch', 30_000)).paneId;
+      await waitForPaneVisible(client, sessionId, initialPaneId, 30_000);
+      const mainPaneState = await assertPaneVisibleContent(client, sessionId, initialPaneId, {
         minNonEmptyLines: 2,
         minDenseLines: 0,
         minCharCount: 20,
         minMaxLineLength: 12,
         timeoutMs: 30_000,
-        description: 'remote main pane visible content before relaunch',
+        description: 'remote initial pane visible content before relaunch',
       });
-      await assertPaneCoverage(client, sessionId, 'main', {
+      await assertPaneCoverage(client, sessionId, initialPaneId, {
         minWidthRatio: 0.8,
         minHeightRatio: 0.7,
         timeoutMs: 20_000,
-        description: 'remote main pane coverage before relaunch',
+        description: 'remote initial pane coverage before relaunch',
       });
       await assertPaneNativePaintCoverage(
         client,
         runner.runDir,
-        '01-pre-relaunch-main',
+        '01-pre-relaunch-initial-pane',
         sessionId,
-        'main',
+        initialPaneId,
         {
           target: 'paneBody',
           minBusyColumnRatio: 0.35,
           minBusyRowRatio: 0.12,
           minBBoxWidthRatio: 0.35,
           minBBoxHeightRatio: 0.12,
-          description: 'remote main pane native paint coverage before relaunch',
+          description: 'remote initial pane native paint coverage before relaunch',
         },
       );
       await client.request('split_pane', {
         sessionId,
-        targetPaneId: 'main',
+        targetPaneId: initialPaneId,
         direction: 'vertical',
       });
       const workspace = await waitForSessionWorkspace(
@@ -292,13 +295,13 @@ async function main() {
       if (!initialPane?.paneId) {
         throw new Error('Initial remote split pane missing');
       }
-      await assertPaneVisibleContent(client, sessionId, 'main', {
+      await assertPaneVisibleContent(client, sessionId, initialPaneId, {
         minNonEmptyLines: 2,
         minDenseLines: 0,
         minCharCount: 40,
         minMaxLineLength: 20,
         timeoutMs: 20_000,
-        description: 'remote main pane remains visibly populated after initial split',
+        description: 'remote initial pane remains visibly populated after initial split',
       });
       return initialPane.paneId;
     });
@@ -360,35 +363,35 @@ async function main() {
         sessionId,
         (workspace) => {
           const paneIds = new Set((workspace.panes || []).map((pane) => pane.paneId));
-          return paneIds.has('main') && paneIds.has(initialShellPaneId);
+          return paneIds.has(initialPaneId) && paneIds.has(initialShellPaneId);
         },
         `frontend workspace after relaunch for ${sessionId}`,
         45_000,
       );
       await client.request('select_session', { sessionId });
-      await waitForPaneVisible(client, sessionId, 'main', 30_000);
+      await waitForPaneVisible(client, sessionId, initialPaneId, 30_000);
       await waitForPaneVisible(client, sessionId, initialShellPaneId, 30_000);
-      const restoredMainState = await assertPaneVisibleContent(client, sessionId, 'main', {
+      const restoredMainState = await assertPaneVisibleContent(client, sessionId, initialPaneId, {
         minNonEmptyLines: 2,
         minDenseLines: 0,
         minCharCount: 20,
         minMaxLineLength: 12,
         timeoutMs: 30_000,
-        description: 'remote main pane visible content after relaunch',
+        description: 'remote initial pane visible content after relaunch',
       });
-      await assertPaneCoverage(client, sessionId, 'main', {
+      await assertPaneCoverage(client, sessionId, initialPaneId, {
         minWidthRatio: 0.8,
         minHeightRatio: 0.7,
         timeoutMs: 20_000,
-        description: 'remote main pane coverage after relaunch',
+        description: 'remote initial pane coverage after relaunch',
       });
-      await assertPaneNativePaintCoverage(client, runner.runDir, '02-post-relaunch-main', sessionId, 'main', {
+      await assertPaneNativePaintCoverage(client, runner.runDir, '02-post-relaunch-initial-pane', sessionId, initialPaneId, {
         target: 'paneBody',
         minBusyColumnRatio: 0.35,
         minBusyRowRatio: 0.07,
         minBBoxWidthRatio: 0.35,
         minBBoxHeightRatio: 0.12,
-        description: 'remote main pane native paint coverage after relaunch',
+        description: 'remote initial pane native paint coverage after relaunch',
       });
       await waitForPaneText(
         client,
@@ -414,23 +417,23 @@ async function main() {
       const existingPaneIds = new Set((workspaceBefore.panes || []).map((pane) => pane.paneId));
       await client.request('split_pane', {
         sessionId,
-        targetPaneId: 'main',
+        targetPaneId: initialPaneId,
         direction: 'vertical',
       });
       const newPane = await waitForNewShellPane(
         client,
         sessionId,
         existingPaneIds,
-        'new remote shell after relaunch split from main',
+        'new remote shell after relaunch split from initial pane',
         30_000,
       );
-      await assertPaneVisibleContent(client, sessionId, 'main', {
+      await assertPaneVisibleContent(client, sessionId, initialPaneId, {
         minNonEmptyLines: 2,
         minDenseLines: 0,
         minCharCount: 40,
         minMaxLineLength: 20,
         timeoutMs: 20_000,
-        description: 'remote main pane remains visibly populated after relaunch split',
+        description: 'remote initial pane remains visibly populated after relaunch split',
       });
       return newPane.paneId;
     });

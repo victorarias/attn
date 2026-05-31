@@ -364,9 +364,13 @@ function getShellPanes(workspace) {
 async function createUtilityPanes(client, observer, sessionId, count) {
   let workspace = await client.request('get_workspace', { sessionId });
   for (let index = 0; index < count; index += 1) {
+    const targetPaneId = workspace.activePaneId || workspace.panes?.[0]?.paneId;
+    if (!targetPaneId) {
+      throw new Error(`No pane available to split in workspace ${sessionId}`);
+    }
     await client.request('split_pane', {
       sessionId,
-      targetPaneId: workspace.activePaneId || 'main',
+      targetPaneId,
       direction: 'vertical',
     });
     workspace = await observer.waitForWorkspace(

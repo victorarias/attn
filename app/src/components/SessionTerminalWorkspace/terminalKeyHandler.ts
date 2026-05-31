@@ -30,6 +30,13 @@ export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
     }
     const accel = isMacLikePlatform() ? event.metaKey : (event.metaKey || event.ctrlKey);
     if (event.type === 'keydown' && accel && !event.altKey) {
+      if (!event.shiftKey) {
+        const digitMatch = event.code.match(/^Digit([1-9])$/);
+        const digit = digitMatch?.[1] ?? (/^[1-9]$/.test(event.key) ? event.key : null);
+        if (digit) {
+          return !triggerShortcut(`workspace.select${digit}` as Parameters<typeof triggerShortcut>[0]);
+        }
+      }
       if (!event.shiftKey && event.key.toLowerCase() === 't') {
         return !triggerShortcut('session.newWorkspace');
       }
@@ -49,8 +56,10 @@ export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
         return !triggerShortcut('terminal.toggleMaximize');
       }
       if (!event.shiftKey && event.key.toLowerCase() === 'w') {
-        triggerShortcut('terminal.close');
-        return false;
+        if (triggerShortcut('terminal.close')) {
+          return false;
+        }
+        return !triggerShortcut('session.close');
       }
     }
     if (event.key === 'Enter' && event.shiftKey && !event.ctrlKey && !event.altKey) {

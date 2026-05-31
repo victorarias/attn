@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { ptyAttach, ptyResize, ptySpawn, ptyWrite, type PtyEventPayload } from '../../pty/bridge';
+import { ptyAttach, ptyResize, ptyWrite, type PtyEventPayload } from '../../pty/bridge';
 import { isSuspiciousTerminalSize } from '../../utils/terminalDebug';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import type { GhosttyTerminalHandle } from '../GhosttyTerminal';
@@ -13,7 +13,6 @@ export interface PaneRuntimeSpec {
   agent?: string;
   sessionId?: string;
   testSessionId?: string;
-  getSpawnArgs: (size: { cols: number; rows: number }) => Parameters<typeof ptySpawn>[0]['args'] | null;
 }
 
 function decodePtyBytes(payload: string): Uint8Array {
@@ -115,28 +114,9 @@ export function useGhosttyPaneRuntime(
     const pane = paneFor(paneId);
     const size = terminal.getSize();
     if (!pane || !size || connectingRef.current.has(pane.runtimeId)) return;
-    if (readyRuntimesRef.current.has(pane.runtimeId)) {
-      connectingRef.current.add(pane.runtimeId);
-      try {
-        await ptyAttach({
-          args: {
-            id: pane.runtimeId,
-            cols: size.cols,
-            rows: size.rows,
-            shell: false,
-            agent: pane.agent,
-            policy: 'same_app_remount',
-          },
-        });
-      } catch (error) {
-        await terminal.write(`\r\n[Failed to reattach PTY: ${String(error)}]\r\n`);
-      } finally {
-        connectingRef.current.delete(pane.runtimeId);
-      }
-      return;
-    }
-    const args = pane.getSpawnArgs(size);
-    if (!args) return;
+    const attachPolicy = readyRuntimesRef.current.has(pane.runtimeId)
+      ? 'same_app_remount'
+      : 'fresh_spawn';
     if (import.meta.env.DEV && pane.testSessionId) {
       const testWindow = window as Window & {
         __TEST_SESSION_INPUT_EVENTS?: Array<{ sessionId: string; event: 'connect_terminal' | 'send_to_pty'; data?: string }>;
@@ -146,10 +126,20 @@ export function useGhosttyPaneRuntime(
     }
     connectingRef.current.add(pane.runtimeId);
     try {
-      await ptySpawn({ args });
+      await ptyAttach({
+        args: {
+          id: pane.runtimeId,
+          cols: size.cols,
+          rows: size.rows,
+          shell: false,
+          agent: pane.agent,
+          policy: attachPolicy,
+        },
+        forceResizeBeforeAttach: attachPolicy === 'same_app_remount',
+      });
       readyRuntimesRef.current.add(pane.runtimeId);
     } catch (error) {
-      await terminal.write(`\r\n[Failed to connect PTY: ${String(error)}]\r\n`);
+      await terminal.write(`\r\n[Failed to attach PTY: ${String(error)}]\r\n`);
     } finally {
       connectingRef.current.delete(pane.runtimeId);
     }

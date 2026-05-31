@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import {
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -12,13 +12,14 @@ import { createScenarioRunner } from './scenarioRunner.mjs';
 import { cleanupSessionViaAppClose } from './scenarioCleanup.mjs';
 import {
   captureSessionArtifacts,
+  waitForFirstWorkspacePane,
   waitForNewShellPane,
   waitForPaneInputFocus,
   waitForPaneTextChange,
   waitForPaneVisible,
   waitForSessionWorkspace,
 } from './scenarioAssertions.mjs';
-import { ensureCodexMainPromptReady } from './scenarioAgents.mjs';
+import { ensureCodexInitialPanePromptReady } from './scenarioAgents.mjs';
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -98,6 +99,7 @@ async function main() {
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
 
   let sessionId = null;
+  let initialPaneId = null;
   let splitPaneId = null;
   const token = `TR303TYPE${Date.now()}`;
 
@@ -107,29 +109,33 @@ async function main() {
     });
 
     sessionId = await runner.step('create_local_session', async () => {
-      return createSessionAndWaitForMain({
+      return createSessionAndWaitForInitialPane({
         client,
         observer,
         cwd: runner.sessionDir,
         label: `tr303-local-codex-${runner.runId}`,
         agent: 'codex',
-        waitForMainVisible: false,
+        waitForInitialPaneVisible: false,
       });
     });
 
     await runner.step('prepare_main_prompt', async () => {
       await client.request('select_session', { sessionId });
-      await ensureCodexMainPromptReady(client, sessionId, 45_000);
-      await waitForPaneVisible(client, sessionId, 'main', 20_000);
+      const readiness = await ensureCodexInitialPanePromptReady(client, sessionId, 45_000);
+      initialPaneId = readiness.paneId;
+      await waitForPaneVisible(client, sessionId, initialPaneId, 20_000);
       await captureSessionArtifacts(client, runner.runDir, '01-baseline', sessionId);
     });
 
     splitPaneId = await runner.step('split_and_close', async () => {
+      if (!initialPaneId) {
+        initialPaneId = (await waitForFirstWorkspacePane(client, sessionId, 'initial pane before split close', 20_000)).paneId;
+      }
       const workspaceBefore = await client.request('get_workspace', { sessionId });
       const existingPaneIds = new Set((workspaceBefore.panes || []).map((pane) => pane.paneId));
       await client.request('split_pane', {
         sessionId,
-        targetPaneId: 'main',
+        targetPaneId: initialPaneId,
         direction: 'vertical',
       });
       const newPane = await waitForNewShellPane(client, sessionId, existingPaneIds, 'new shell pane after split', 30_000);
@@ -141,26 +147,29 @@ async function main() {
         'workspace collapse after split close',
         20_000,
       );
-      await waitForPaneVisible(client, sessionId, 'main', 20_000);
+      await waitForPaneVisible(client, sessionId, initialPaneId, 20_000);
       await captureSessionArtifacts(client, runner.runDir, '02-after-close', sessionId);
       return newPane.paneId;
     });
 
     await runner.step('type_and_assert_no_redraw', async () => {
       await client.request('select_session', { sessionId });
-      await client.request('click_pane', { sessionId, paneId: 'main' });
-      await waitForPaneInputFocus(client, sessionId, 'main', 15_000);
+      if (!initialPaneId) {
+        initialPaneId = (await waitForFirstWorkspacePane(client, sessionId, 'initial pane before post-close typing', 20_000)).paneId;
+      }
+      await client.request('click_pane', { sessionId, paneId: initialPaneId });
+      await waitForPaneInputFocus(client, sessionId, initialPaneId, 15_000);
 
       const beforeTrace = await client.request('dump_terminal_runtime_trace', {}, { timeoutMs: 10_000 });
       const beforeCount = Array.isArray(beforeTrace?.events) ? beforeTrace.events.length : 0;
-      const beforeTextPayload = await client.request('read_pane_text', { sessionId, paneId: 'main' }, { timeoutMs: 20_000 });
+      const beforeTextPayload = await client.request('read_pane_text', { sessionId, paneId: initialPaneId }, { timeoutMs: 20_000 });
       const beforeText = beforeTextPayload?.text || '';
 
-      await client.request('type_pane_via_ui', { sessionId, paneId: 'main', text: token });
+      await client.request('type_pane_via_ui', { sessionId, paneId: initialPaneId, text: token });
       await waitForPaneTextChange(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         beforeText,
         'local codex pane text change after typing post-close token',
         15_000,

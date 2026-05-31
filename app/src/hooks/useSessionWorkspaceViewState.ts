@@ -19,11 +19,11 @@ export function useSessionWorkspaceViewState(
   const [localActivePaneByWorkspaceId, setLocalActivePaneByWorkspaceId] = useState<Record<string, string>>({});
 
   const workspaceKeyForSession = useCallback((session: Session | undefined | null) => {
-    return session?.workspaceId || session?.id || '';
+    return session?.workspaceId ?? '';
   }, []);
 
   const workspaceKeyForSessionId = useCallback((sessionId: string) => {
-    return sessionWorkspaceIdRef.current[sessionId] || sessionId;
+    return sessionWorkspaceIdRef.current[sessionId] ?? '';
   }, []);
 
   const rememberPaneActivation = useCallback((sessionId: string, paneId: string) => {
@@ -31,6 +31,9 @@ export function useSessionWorkspaceViewState(
       return;
     }
     const workspaceKey = workspaceKeyForSessionId(sessionId);
+    if (!workspaceKey) {
+      return;
+    }
     const existing = paneActivationHistoryRef.current[workspaceKey] || [];
     if (existing[existing.length - 1] === paneId) {
       return;
@@ -141,6 +144,9 @@ export function useSessionWorkspaceViewState(
   const setActivePane = useCallback((sessionId: string, paneId: string) => {
     rememberPaneActivation(sessionId, paneId);
     const workspaceKey = workspaceKeyForSessionId(sessionId);
+    if (!workspaceKey) {
+      return;
+    }
     setLocalActivePaneByWorkspaceId((prev) => (
       prev[workspaceKey] === paneId ? prev : { ...prev, [workspaceKey]: paneId }
     ));

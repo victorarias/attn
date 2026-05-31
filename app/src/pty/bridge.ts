@@ -5,8 +5,9 @@ import { recordPtyListenerError } from '../utils/ptyPerf';
 export interface PtySpawnArgs {
   id: string;
   cwd: string;
-  workspace_id?: string;
+  workspace_id: string;
   endpoint_id?: string;
+  intent?: 'create' | 'reload';
   reload?: boolean;
   cols: number;
   rows: number;
@@ -176,7 +177,11 @@ export async function ptyAttach(request: {
 }) {
   if (mockEnabled()) {
     if (!mockSessions.has(request.args.id)) {
-      return;
+      mockSessions.add(request.args.id);
+      const banner = `attn mock pty: ${request.args.id}\r\n`;
+      setTimeout(() => {
+        emitPtyEvent({ event: 'data', id: request.args.id, data: encodeBase64(banner) });
+      }, 30);
     }
     return;
   }

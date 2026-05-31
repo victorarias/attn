@@ -20,16 +20,16 @@ const mockEventRouter: PaneRuntimeEventRouter = {
   registerBinding: vi.fn(() => () => {}),
 };
 
-const { mockPtyResize, mockPtySpawn, mockPtyWrite } = vi.hoisted(() => ({
+const { mockPtyAttach, mockPtyResize, mockPtyWrite } = vi.hoisted(() => ({
+  mockPtyAttach: vi.fn(() => Promise.resolve()),
   mockPtyResize: vi.fn(() => Promise.resolve()),
-  mockPtySpawn: vi.fn(() => Promise.resolve()),
   mockPtyWrite: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('../pty/bridge', () => ({
   listenPtyEvents: vi.fn(() => Promise.resolve(() => {})),
+  ptyAttach: mockPtyAttach,
   ptyResize: mockPtyResize,
-  ptySpawn: mockPtySpawn,
   ptyWrite: mockPtyWrite,
 }));
 
@@ -127,8 +127,8 @@ describe('SessionTerminalWorkspace', () => {
     terminalLifecycleCounts.clear();
     vi.mocked(mockEventRouter.registerBinding).mockClear();
     mockTerminalFit.mockReset();
+    mockPtyAttach.mockReset();
     mockPtyResize.mockReset();
-    mockPtySpawn.mockReset();
     mockPtyWrite.mockReset();
     vi.useRealTimers();
   });
@@ -149,7 +149,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -190,7 +189,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={onFocusPane}
@@ -230,7 +228,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={onFocusPane}
@@ -278,7 +275,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={onFocusPane}
@@ -316,7 +312,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -352,7 +347,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -398,7 +392,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -440,7 +433,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -470,7 +462,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -492,7 +483,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -529,7 +519,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -577,7 +566,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -606,7 +594,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -645,7 +632,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -666,7 +652,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -706,7 +691,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession={false}
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -726,7 +710,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -766,7 +749,6 @@ describe('SessionTerminalWorkspace', () => {
         isActiveSession
         isSessionViewVisible={false}
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -788,7 +770,6 @@ describe('SessionTerminalWorkspace', () => {
         isActiveSession
         isSessionViewVisible
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -800,14 +781,8 @@ describe('SessionTerminalWorkspace', () => {
     expect(mockTerminalFocus).toHaveBeenCalled();
   });
 
-  it('requests spawn args for the selected session pane', async () => {
+  it('attaches the selected session pane runtime on terminal ready', async () => {
     vi.useFakeTimers();
-    const getSessionPaneSpawnArgs = vi.fn(() => ({
-      id: 'runtime-session-1',
-      cwd: '/tmp/repo',
-      cols: 80,
-      rows: 24,
-    }));
     render(
       <SessionTerminalWorkspace
         workspaceId="workspace-session-1"
@@ -830,7 +805,6 @@ describe('SessionTerminalWorkspace', () => {
         enabled
         isActiveSession
         eventRouter={mockEventRouter}
-        getSessionPaneSpawnArgs={getSessionPaneSpawnArgs}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -847,6 +821,16 @@ describe('SessionTerminalWorkspace', () => {
       await Promise.resolve();
     });
 
-    expect(getSessionPaneSpawnArgs).toHaveBeenCalledWith('session-1', 80, 24);
+    expect(mockPtyAttach).toHaveBeenCalledWith({
+      args: {
+        id: 'runtime-session-1',
+        cols: 80,
+        rows: 24,
+        shell: false,
+        agent: 'claude',
+        policy: 'fresh_spawn',
+      },
+      forceResizeBeforeAttach: false,
+    });
   });
 });

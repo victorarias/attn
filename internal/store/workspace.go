@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"log"
 	"time"
 
@@ -93,20 +92,22 @@ func (s *Store) ListWorkspaces() []*protocol.Workspace {
 	return out
 }
 
-// SetSessionWorkspaceID updates the workspace_id column on a session. Pass
-// empty string to clear the association.
-func (s *Store) SetSessionWorkspaceID(sessionID, workspaceID string) {
+// AssignSessionWorkspace updates the workspace_id column on a session. A live
+// persisted session must always have an owning workspace; callers that are
+// unregistering a session should delete the session row instead of clearing
+// this field.
+func (s *Store) AssignSessionWorkspace(sessionID, workspaceID string) {
+	if workspaceID == "" {
+		log.Printf("[store] AssignSessionWorkspace: refusing empty workspace for session %s", sessionID)
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
 		return
 	}
-	var arg sql.NullString
-	if workspaceID != "" {
-		arg = sql.NullString{String: workspaceID, Valid: true}
-	}
-	if _, err := s.db.Exec(`UPDATE sessions SET workspace_id = ? WHERE id = ?`, arg, sessionID); err != nil {
-		log.Printf("[store] SetSessionWorkspaceID: failed for session %s: %v", sessionID, err)
+	if _, err := s.db.Exec(`UPDATE sessions SET workspace_id = ? WHERE id = ?`, workspaceID, sessionID); err != nil {
+		log.Printf("[store] AssignSessionWorkspace: failed for session %s: %v", sessionID, err)
 	}
 }
 

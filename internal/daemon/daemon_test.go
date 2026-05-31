@@ -2597,7 +2597,7 @@ func TestDaemon_HandleUnregisterWS_RemovesSessionPaneAndBroadcastsSessionUnregis
 		StateSince:     time.Now().UTC().Format(time.RFC3339),
 		StateUpdatedAt: time.Now().UTC().Format(time.RFC3339),
 		LastSeen:       time.Now().UTC().Format(time.RFC3339),
-		WorkspaceID:    protocol.Ptr(workspaceID),
+		WorkspaceID:    workspaceID,
 	}
 	d.store.Add(session)
 	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: "test", Directory: session.Directory})
@@ -2648,7 +2648,7 @@ func TestDaemon_HandleUnregisterWS_RemovesSessionPaneAndBroadcastsSessionUnregis
 	}
 }
 
-func TestDaemon_HandleUnregisterWS_RemovesLegacyMainPaneWithoutPromotion(t *testing.T) {
+func TestDaemon_HandleUnregisterWS_RemovesSessionPaneWithoutPromotingAnotherPane(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	workspaceID := "workspace-shared"
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -2662,7 +2662,7 @@ func TestDaemon_HandleUnregisterWS_RemovesLegacyMainPaneWithoutPromotion(t *test
 			StateSince:     now,
 			StateUpdatedAt: now,
 			LastSeen:       now,
-			WorkspaceID:    protocol.Ptr(workspaceID),
+			WorkspaceID:    workspaceID,
 		},
 		{
 			ID:             "sess-next",
@@ -2672,7 +2672,7 @@ func TestDaemon_HandleUnregisterWS_RemovesLegacyMainPaneWithoutPromotion(t *test
 			StateSince:     now,
 			StateUpdatedAt: now,
 			LastSeen:       now,
-			WorkspaceID:    protocol.Ptr(workspaceID),
+			WorkspaceID:    workspaceID,
 		},
 	} {
 		d.store.Add(session)

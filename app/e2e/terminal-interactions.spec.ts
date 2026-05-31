@@ -140,8 +140,29 @@ test.describe('Ghostty terminal interactions', () => {
       )
       .toContain(url);
 
+    const rowTargets = await terminal.evaluate((element, sessionId) => {
+      const canvas = element.querySelector('canvas');
+      if (!canvas) {
+        throw new Error('Terminal canvas not found');
+      }
+      const paneSize = (window as Window & {
+        __TEST_GET_SESSION_PANE_SIZE?: (id: string) => { rows: number } | null;
+      }).__TEST_GET_SESSION_PANE_SIZE?.(sessionId);
+      if (!paneSize?.rows) {
+        throw new Error('Terminal pane size not available');
+      }
+      const terminalRect = element.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
+      const rowHeight = canvasRect.height / paneSize.rows;
+      const canvasTop = canvasRect.top - terminalRect.top;
+      return {
+        firstRowY: canvasTop + rowHeight * 0.5,
+        secondRowY: canvasTop + rowHeight * 1.5,
+      };
+    }, 's-link-offset');
+
     await page.keyboard.down('Meta');
-    await terminal.click({ position: { x: 100, y: 26 } });
+    await terminal.click({ position: { x: 100, y: rowTargets.firstRowY } });
     await expect
       .poll(
         async () => page.evaluate(
@@ -151,7 +172,7 @@ test.describe('Ghostty terminal interactions', () => {
       )
       .toEqual([]);
 
-    await terminal.click({ position: { x: 100, y: 48 } });
+    await terminal.click({ position: { x: 100, y: rowTargets.secondRowY } });
     await page.keyboard.up('Meta');
 
     await expectOpenedUrl(page, url);

@@ -7,6 +7,7 @@ import { activeElementSummary } from '../utils/paneRuntimeDebug';
 declare global {
   interface Window {
     __TEST_GET_SESSION_PANE_TEXT?: (sessionId: string) => string;
+    __TEST_GET_SESSION_PANE_SIZE?: (sessionId: string) => { cols: number; rows: number } | null;
     __TEST_GET_ACTIVE_SESSION_PANE_TEXT?: () => string;
     __TEST_GET_ACTIVE_SESSION_PANE_RUNTIME?: (sessionId: string) => string | null;
     __ATTN_PANE_DEBUG_STATE?: () => Record<string, unknown>;
@@ -33,8 +34,20 @@ export function useWorkspaceDebugHarness({
 
     window.__TEST_GET_SESSION_PANE_TEXT = (sessionId: string) => {
       const session = sessions.find((entry) => entry.id === sessionId);
+      if (!session) {
+        return '';
+      }
       const paneId = session?.workspace.agents.find((entry) => entry.sessionId === sessionId)?.id || '';
-      return workspaceRefs.current.get(session?.workspaceId || sessionId)?.getPaneText(paneId) || '';
+      return workspaceRefs.current.get(session.workspaceId)?.getPaneText(paneId) || '';
+    };
+
+    window.__TEST_GET_SESSION_PANE_SIZE = (sessionId: string) => {
+      const session = sessions.find((entry) => entry.id === sessionId);
+      if (!session) {
+        return null;
+      }
+      const paneId = session?.workspace.agents.find((entry) => entry.sessionId === sessionId)?.id || '';
+      return workspaceRefs.current.get(session.workspaceId)?.getPaneSize(paneId) || null;
     };
 
     window.__TEST_GET_ACTIVE_SESSION_PANE_TEXT = () => {
@@ -46,7 +59,7 @@ export function useWorkspaceDebugHarness({
       if (!session || !activePaneId) {
         return '';
       }
-      return workspaceRefs.current.get(session.workspaceId || activeSessionId)?.getPaneText(activePaneId) || '';
+      return workspaceRefs.current.get(session.workspaceId)?.getPaneText(activePaneId) || '';
     };
 
     window.__TEST_GET_ACTIVE_SESSION_PANE_RUNTIME = (sessionId: string) => {
@@ -72,6 +85,7 @@ export function useWorkspaceDebugHarness({
 
     return () => {
       delete window.__TEST_GET_SESSION_PANE_TEXT;
+      delete window.__TEST_GET_SESSION_PANE_SIZE;
       delete window.__TEST_GET_ACTIVE_SESSION_PANE_TEXT;
       delete window.__TEST_GET_ACTIVE_SESSION_PANE_RUNTIME;
       delete window.__ATTN_PANE_DEBUG_STATE;

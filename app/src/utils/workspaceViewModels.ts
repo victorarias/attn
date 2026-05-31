@@ -40,11 +40,11 @@ interface WorkspaceViewModelOptions {
 }
 
 function sessionWorkspaceId(session: WorkspaceViewSession): string {
-  return session.workspaceId || session.workspace_id || `workspace-${session.id}`;
-}
-
-function sessionDirectory(session: WorkspaceViewSession): string {
-  return session.cwd || session.directory || session.id;
+  const workspaceId = session.workspaceId || session.workspace_id;
+  if (!workspaceId) {
+    throw new Error(`Session ${session.id} is missing workspace ownership`);
+  }
+  return workspaceId;
 }
 
 function sessionEndpointId(session: WorkspaceViewSession): string | undefined {
@@ -53,10 +53,6 @@ function sessionEndpointId(session: WorkspaceViewSession): string | undefined {
 
 function workspaceEndpointId(workspace: WorkspaceViewWorkspace): string | undefined {
   return workspace.endpointId || workspace.endpoint_id;
-}
-
-function fallbackTitle(directory: string): string {
-  return directory.split('/').filter(Boolean).pop() || directory;
 }
 
 function workspaceKey(workspaceId: string, endpointId?: string): string {
@@ -94,24 +90,6 @@ export function buildWorkspaceViewModels<TSession extends WorkspaceViewSession>(
     const workspaceSessions = sessionsByWorkspace.get(key) || [];
     consumed.add(key);
     result.push(toWorkspaceViewModel(workspace, workspaceSessions, options));
-  }
-
-  for (const session of sessions) {
-    const workspaceId = sessionWorkspaceId(session);
-    const endpointId = sessionEndpointId(session);
-    const key = workspaceKey(workspaceId, endpointId);
-    if (consumed.has(key)) {
-      continue;
-    }
-    consumed.add(key);
-    const workspaceSessions = sessionsByWorkspace.get(key) || [];
-    const directory = sessionDirectory(workspaceSessions[0] || session);
-    result.push(toWorkspaceViewModel({
-      id: workspaceId,
-      title: fallbackTitle(directory),
-      directory,
-      endpoint_id: endpointId,
-    }, workspaceSessions, options));
   }
 
   return result;

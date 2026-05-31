@@ -7,7 +7,7 @@ process.env.ATTN_HARNESS_ALWAYS_ON_TOP = '0';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -17,6 +17,7 @@ import { DaemonObserver } from './daemonObserver.mjs';
 import { MacOSDriver } from './macosDriver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 import { cleanupSessionViaAppClose } from './scenarioCleanup.mjs';
+import { waitForFirstWorkspacePane } from './scenarioAssertions.mjs';
 
 const execFileAsync = promisify(execFile);
 const WITNESS_BUNDLE_ID = 'com.apple.Terminal';
@@ -93,6 +94,7 @@ async function main() {
   const driver = new MacOSDriver({ appPath: options.appPath });
 
   let sessionId = null;
+  let initialPaneId = null;
   const observations = {
     witnessBundleId: WITNESS_BUNDLE_ID,
     attnBundleId: ATTN_BUNDLE_ID,
@@ -104,7 +106,7 @@ async function main() {
     });
 
     sessionId = await runner.step('create_session_via_bridge', async () => {
-      return createSessionAndWaitForMain({
+      return createSessionAndWaitForInitialPane({
         client,
         observer,
         cwd: runner.sessionDir,
@@ -113,6 +115,7 @@ async function main() {
         sessionWaitMs: 60_000,
       });
     });
+    initialPaneId = (await waitForFirstWorkspacePane(client, sessionId, 'initial pane for focus probe', 20_000)).paneId;
 
     await runner.step('record_baseline_post_launch', async () => {
       observations.baselineAfterLaunchFrontmost = await frontmostBundleId();
@@ -149,7 +152,7 @@ async function main() {
       // Focus-free path: bridge TCP socket → useUiAutomationBridge → splitPane.
       await client.request('split_pane', {
         sessionId,
-        targetPaneId: 'main',
+        targetPaneId: initialPaneId,
         direction: 'vertical',
       });
       await sleep(500);

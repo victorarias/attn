@@ -176,6 +176,7 @@ function serializeSession(session: Session, getActivePaneIdForSession: (session:
     label: session.label,
     state: session.state,
     cwd: session.cwd,
+    workspaceId: session.workspaceId,
     agent: session.agent,
     activePaneId: workspace.activePaneId,
     daemonActivePaneId: workspace.daemonActivePaneId,
@@ -381,7 +382,7 @@ function collectVisualSnapshot(
       const runtimeIdByPaneId = new Map(
         workspaceModel.panes.map((pane) => [pane.paneId, pane.runtimeId] as const),
       );
-      const workspaceId = session.workspaceId || session.id;
+      const workspaceId = session.workspaceId;
       const workspaceDom = collectWorkspaceShellMetrics(workspaceId);
       const workspaceView = collectWorkspaceViewState(workspaceId);
       const rootBounds = workspaceDom.workspaceRoot?.bounds;
@@ -477,7 +478,7 @@ function collectSessionUiState(
   const firstAgentPane = firstAgentPaneId
     ? document.querySelector(`[data-pane-session-id="${session.id}"][data-pane-id="${firstAgentPaneId}"]`)
     : null;
-  const workspaceId = session.workspaceId || session.id;
+  const workspaceId = session.workspaceId;
   const workspaceDom = collectWorkspaceShellMetrics(workspaceId);
   const workspaceView = collectWorkspaceViewState(workspaceId);
   const workspaceModel = serializeWorkspaceModel(session, getActivePaneIdForSession);
@@ -712,6 +713,7 @@ function dispatchShortcutEvent(shortcutId: ShortcutId) {
   }
   const shortcutDef = shortcut as {
     key: string;
+    code?: string;
     meta?: boolean;
     ctrl?: boolean;
     alt?: boolean;
@@ -720,6 +722,7 @@ function dispatchShortcutEvent(shortcutId: ShortcutId) {
 
   const event = new KeyboardEvent('keydown', {
     key: shortcutDef.key,
+    code: shortcutDef.code,
     metaKey: !!shortcutDef.meta,
     ctrlKey: !!shortcutDef.ctrl,
     altKey: !!shortcutDef.alt,
@@ -870,7 +873,9 @@ function collectLocationPickerUiState() {
       pathInputValue: '',
       currentDir: '',
       selectedTarget: null,
+      selectedAgent: null,
       targets: [],
+      agents: [],
       recents: [],
       directories: [],
       emptyText: '',
@@ -888,6 +893,14 @@ function collectLocationPickerUiState() {
       label: button.querySelector('.endpoint-option-name')?.textContent?.trim() || '',
       meta: button.querySelector('.endpoint-option-meta')?.textContent?.trim() || '',
       endpointId: button.dataset.endpointId || null,
+      active: button.classList.contains('active'),
+      disabled: button.disabled,
+    }));
+  const agentButtons = Array.from(root.querySelectorAll('.agent-option'))
+    .filter((button): button is HTMLButtonElement => button instanceof HTMLButtonElement)
+    .map((button) => ({
+      label: button.querySelector('.agent-option-name')?.textContent?.trim() || '',
+      shortcut: button.querySelector('.agent-shortcut')?.textContent?.trim() || '',
       active: button.classList.contains('active'),
       disabled: button.disabled,
     }));
@@ -945,7 +958,9 @@ function collectLocationPickerUiState() {
     pathInputValue: pathInput instanceof HTMLInputElement ? pathInput.value : '',
     currentDir: breadcrumb?.textContent?.trim() || '',
     selectedTarget: targetButtons.find((button) => button.active)?.label || null,
+    selectedAgent: agentButtons.find((button) => button.active)?.label || null,
     targets: targetButtons,
+    agents: agentButtons,
     recents: pickerItems.filter((item) => item.kind === 'recent'),
     directories: pickerItems.filter((item) => item.kind === 'directory'),
     emptyText: empty?.textContent?.trim() || '',

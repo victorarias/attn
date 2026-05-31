@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import {
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -20,6 +20,7 @@ import {
   captureSessionArtifacts,
   scrollPaneToTop,
   shellPanes,
+  waitForFirstWorkspacePane,
   waitForPaneText,
   waitForNewShellPane,
   waitForPaneState,
@@ -27,8 +28,8 @@ import {
   waitForSessionWorkspace,
 } from './scenarioAssertions.mjs';
 import {
-  ensureClaudeMainPromptReady,
-  ensureCodexMainPromptReady,
+  ensureClaudeInitialPanePromptReady,
+  ensureCodexInitialPanePromptReady,
   promptClaudeForStructuredBlock,
 } from './scenarioAgents.mjs';
 import {
@@ -95,7 +96,7 @@ function buildTranscriptAnchorPrompt(token, lineCount = 4) {
   ).join('\n');
 }
 
-function recoveredHeaderOptionsForRemoteAgent(agent, description = 'remote main pane header after relaunch close') {
+function recoveredHeaderOptionsForRemoteAgent(agent, description = 'remote initial pane header after relaunch close') {
   if (String(agent || '').toLowerCase() === 'claude') {
     return {
       contains: 'Claude Code',
@@ -119,15 +120,15 @@ function recoveredHeaderOptionsForRemoteAgent(agent, description = 'remote main 
   };
 }
 
-async function seedTranscriptAnchor(client, sessionId, anchorPrompt, anchorToken) {
+async function seedTranscriptAnchor(client, sessionId, paneId, anchorPrompt, anchorToken) {
   await client.request('select_session', { sessionId });
-  await client.request('write_pane', { sessionId, paneId: 'main', text: anchorPrompt });
+  await client.request('write_pane', { sessionId, paneId, text: anchorPrompt });
   await waitForPaneText(
     client,
     sessionId,
-    'main',
+    paneId,
     (text) => text.includes(anchorToken),
-    `main transcript anchor ${anchorToken}`,
+    `initial pane transcript anchor ${anchorToken}`,
     30_000,
   );
 }
@@ -135,21 +136,22 @@ async function seedTranscriptAnchor(client, sessionId, anchorPrompt, anchorToken
 async function prepareRemoteAgentBaseline(client, runner, sessionId, remoteAgent, transcriptAnchorToken, transcriptAnchorPrompt) {
   const agent = String(remoteAgent || 'codex').toLowerCase();
   if (agent === 'claude') {
-    await ensureClaudeMainPromptReady(client, sessionId, 45_000);
+    const readiness = await ensureClaudeInitialPanePromptReady(client, sessionId, 45_000);
     const fixture = await promptClaudeForStructuredBlock(client, sessionId, transcriptAnchorToken, 4);
     runner.writeJson('agent-fixture.json', fixture);
-    return transcriptAnchorToken;
+    return { paneId: fixture.paneId || readiness.paneId, requiredVisibleText: transcriptAnchorToken };
   }
 
-  await ensureCodexMainPromptReady(client, sessionId, 45_000);
-  await seedTranscriptAnchor(client, sessionId, transcriptAnchorPrompt, transcriptAnchorToken);
-  return transcriptAnchorToken;
+  const readiness = await ensureCodexInitialPanePromptReady(client, sessionId, 45_000);
+  const paneId = readiness.paneId || (await waitForFirstWorkspacePane(client, sessionId, 'remote Codex initial pane', 30_000)).paneId;
+  await seedTranscriptAnchor(client, sessionId, paneId, transcriptAnchorPrompt, transcriptAnchorToken);
+  return { paneId, requiredVisibleText: transcriptAnchorToken };
 }
 
-async function captureMainHealthyState(client, runner, sessionId, prefix, descriptionBase, requiredVisibleText = null) {
-  await waitForPaneVisible(client, sessionId, 'main', 30_000);
-  await scrollPaneToTop(client, sessionId, 'main');
-  const state = await assertPaneVisibleContent(client, sessionId, 'main', {
+async function captureInitialPaneHealthyState(client, runner, sessionId, paneId, prefix, descriptionBase, requiredVisibleText = null) {
+  await waitForPaneVisible(client, sessionId, paneId, 30_000);
+  await scrollPaneToTop(client, sessionId, paneId);
+  const state = await assertPaneVisibleContent(client, sessionId, paneId, {
     contains: requiredVisibleText,
     allowWrappedContains: Boolean(requiredVisibleText),
     minNonEmptyLines: 2,
@@ -159,7 +161,7 @@ async function captureMainHealthyState(client, runner, sessionId, prefix, descri
     timeoutMs: 30_000,
     description: `${descriptionBase} visible content`,
   });
-  await assertPaneCoverage(client, sessionId, 'main', {
+  await assertPaneCoverage(client, sessionId, paneId, {
     minWidthRatio: 0.8,
     minHeightRatio: 0.7,
     timeoutMs: 20_000,
@@ -172,7 +174,7 @@ async function captureMainHealthyState(client, runner, sessionId, prefix, descri
       runner.runDir,
       prefix,
       sessionId,
-      'main',
+      paneId,
       {
         target: 'paneBody',
         minBusyColumnRatio: 0.35,
@@ -198,10 +200,11 @@ async function closePaneAndAssertRecovery({
   client,
   runner,
   sessionId,
+  initialPaneId,
   paneId,
   baselineVisibleContent,
   baselineNativeMetrics,
-  previousMainWidth,
+  previousInitialPaneWidth,
   minPaneCountAfterClose,
   label,
   minNonEmptyLineRatio = 0.7,
@@ -213,7 +216,7 @@ async function closePaneAndAssertRecovery({
   headerRecoveryOptions = null,
 }) {
   await client.request('select_session', { sessionId });
-  await waitForPaneVisible(client, sessionId, 'main', 20_000);
+  await waitForPaneVisible(client, sessionId, initialPaneId, 20_000);
   await client.request('focus_pane', { sessionId, paneId });
   await waitForPaneVisible(client, sessionId, paneId, 20_000);
   await client.request('close_pane', { sessionId, paneId });
@@ -224,35 +227,35 @@ async function closePaneAndAssertRecovery({
     `${label} workspace collapse`,
     20_000,
   );
-  const recoveredMainState = await waitForPaneState(
+  const recoveredInitialPaneState = await waitForPaneState(
     client,
     sessionId,
-    'main',
-    (state) => (state?.pane?.bounds?.width ?? 0) >= minRecoveredWidth(previousMainWidth),
-    `${label} main width recovery`,
+    initialPaneId,
+    (state) => (state?.pane?.bounds?.width ?? 0) >= minRecoveredWidth(previousInitialPaneWidth),
+    `${label} initial pane width recovery`,
     20_000,
   );
-  await scrollPaneToTop(client, sessionId, 'main');
+  await scrollPaneToTop(client, sessionId, initialPaneId);
   if (headerRecoveryOptions) {
-    await assertPaneVisibleContent(client, sessionId, 'main', headerRecoveryOptions);
+    await assertPaneVisibleContent(client, sessionId, initialPaneId, headerRecoveryOptions);
   }
   if (preserveVisibleContent) {
     await assertPaneVisibleContentPreserved(
       client,
       sessionId,
-      'main',
+      initialPaneId,
       baselineVisibleContent,
       {
         minNonEmptyLineRatio,
         minCharCountRatio,
         minAnchorMatches,
         timeoutMs: 20_000,
-        description: `${label} main content recovery`,
+        description: `${label} initial pane content recovery`,
       },
     );
   }
   if (requiredVisibleText) {
-    await assertPaneVisibleContent(client, sessionId, 'main', {
+    await assertPaneVisibleContent(client, sessionId, initialPaneId, {
       contains: requiredVisibleText,
       allowWrappedContains: true,
       minNonEmptyLines: 2,
@@ -260,24 +263,24 @@ async function closePaneAndAssertRecovery({
       minCharCount: 20,
       minMaxLineLength: 12,
       timeoutMs: 20_000,
-      description: `${label} main anchor visibility`,
+      description: `${label} initial pane anchor visibility`,
     });
   }
-  await assertPaneCoverage(client, sessionId, 'main', {
+  await assertPaneCoverage(client, sessionId, initialPaneId, {
     minWidthRatio: 0.85,
     minHeightRatio: 0.7,
     timeoutMs: 20_000,
-    description: `${label} main coverage`,
+    description: `${label} initial pane coverage`,
   });
   let candidateNativeMetrics = null;
   try {
-    candidateNativeMetrics = await assertPaneNativePaintCoverage(client, runner.runDir, `${label}-main`, sessionId, 'main', {
+    candidateNativeMetrics = await assertPaneNativePaintCoverage(client, runner.runDir, `${label}-initial-pane`, sessionId, initialPaneId, {
       target: 'paneBody',
       minBusyColumnRatio: 0.35,
       minBusyRowRatio: 0.1,
       minBBoxWidthRatio: 0.35,
       minBBoxHeightRatio: 0.12,
-      description: `${label} main native paint coverage`,
+      description: `${label} initial pane native paint coverage`,
     });
   } catch (error) {
     if (!isNativeCaptureUnavailable(error)) {
@@ -285,15 +288,15 @@ async function closePaneAndAssertRecovery({
     }
     runner.writeText(`${label}-native-unavailable.txt`, error instanceof Error ? error.stack || error.message : String(error));
   }
-  const finalMainState = await client.request('get_pane_state', { sessionId, paneId: 'main' });
+  const finalMainState = await client.request('get_pane_state', { sessionId, paneId: initialPaneId });
   if (enforceNativeStability && baselineNativeMetrics && candidateNativeMetrics) {
-    const widenedPastPreviousWidth = (finalMainState?.pane?.bounds?.width ?? 0) > previousMainWidth + 1;
+    const widenedPastPreviousWidth = (finalMainState?.pane?.bounds?.width ?? 0) > previousInitialPaneWidth + 1;
     await assertPaneNativePaintRecovered(
       client,
       runner.runDir,
-      `${label}-main-stability`,
+      `${label}-initial-pane-stability`,
       sessionId,
-      'main',
+      initialPaneId,
       baselineNativeMetrics,
       {
         target: 'paneBody',
@@ -302,14 +305,14 @@ async function closePaneAndAssertRecovery({
         maxBBoxWidthRatioRegression: widenedPastPreviousWidth ? null : 0.12,
         maxBBoxHeightRatioRegression: widenedPastPreviousWidth ? null : 0.1,
         maxActivePixelRatioRegression: null,
-        description: `${label} main native paint recovery`,
+        description: `${label} initial pane native paint recovery`,
       },
     );
   }
   return {
     state: finalMainState,
     nativeMetrics: candidateNativeMetrics,
-    widthState: recoveredMainState,
+    widthState: recoveredInitialPaneState,
   };
 }
 
@@ -354,6 +357,7 @@ async function main() {
 
   let endpoint = null;
   let sessionId = null;
+  let initialPaneId = null;
   let initialShellPaneId = null;
   let postRelaunchMainSplitPaneId = null;
   let postRelaunchShellSplitPaneId = null;
@@ -428,14 +432,14 @@ async function main() {
     });
 
     sessionId = await runner.step('create_remote_session', async () => {
-      const resultSessionId = await createSessionAndWaitForMain({
+      const resultSessionId = await createSessionAndWaitForInitialPane({
         client,
         observer,
         cwd: remoteDirectory,
         label: `tr205-${runner.runId}`,
         agent: options.remoteAgent,
         endpointId: endpoint.id,
-        waitForMainVisible: false,
+        waitForInitialPaneVisible: false,
       });
       await observer.waitForWorkspace(
         resultSessionId,
@@ -446,9 +450,9 @@ async function main() {
       return resultSessionId;
     });
 
-    await runner.step('capture_baseline_main', async () => {
+    await runner.step('capture_baseline_initial_pane', async () => {
       await client.request('select_session', { sessionId });
-      const requiredVisibleText = await prepareRemoteAgentBaseline(
+      const baseline = await prepareRemoteAgentBaseline(
         client,
         runner,
         sessionId,
@@ -456,25 +460,27 @@ async function main() {
         transcriptAnchorToken,
         transcriptAnchorPrompt,
       );
-      baselineMainState = await captureMainHealthyState(
+      initialPaneId = baseline.paneId;
+      baselineMainState = await captureInitialPaneHealthyState(
         client,
         runner,
         sessionId,
-        '01-baseline-main',
-        'baseline main before relaunch-close scenario',
-        requiredVisibleText,
+        initialPaneId,
+        '01-baseline-initial-pane',
+        'baseline initial pane before relaunch-close scenario',
+        baseline.requiredVisibleText,
       );
       await captureSessionArtifacts(client, runner.runDir, '01-baseline', sessionId);
     });
 
     initialShellPaneId = await runner.step('create_initial_split_before_relaunch', async () => {
       await client.request('select_session', { sessionId });
-      await waitForPaneVisible(client, sessionId, 'main', 20_000);
+      await waitForPaneVisible(client, sessionId, initialPaneId, 20_000);
       const workspaceBefore = await client.request('get_workspace', { sessionId });
       const existingPaneIds = new Set((workspaceBefore.panes || []).map((pane) => pane.paneId));
       await client.request('split_pane', {
         sessionId,
-        targetPaneId: 'main',
+        targetPaneId: initialPaneId,
         direction: 'vertical',
       });
       const newPane = await waitForNewShellPane(
@@ -484,7 +490,7 @@ async function main() {
         'initial split before relaunch',
         30_000,
       );
-      await assertPaneVisibleContent(client, sessionId, 'main', {
+      await assertPaneVisibleContent(client, sessionId, initialPaneId, {
         contains: transcriptAnchorToken,
         allowWrappedContains: true,
         minNonEmptyLines: 8,
@@ -492,14 +498,15 @@ async function main() {
         minCharCount: 200,
         minMaxLineLength: 30,
         timeoutMs: 20_000,
-        description: 'main transcript anchor preserved after initial split before relaunch',
+        description: 'initial pane transcript anchor preserved after initial split before relaunch',
       });
-      initialSplitMainState = await captureMainHealthyState(
+      initialSplitMainState = await captureInitialPaneHealthyState(
         client,
         runner,
         sessionId,
-        '02-after-initial-split-main',
-        'main after initial split before relaunch',
+        initialPaneId,
+        '02-after-initial-split-initial-pane',
+        'initial pane after initial split before relaunch',
         transcriptAnchorToken,
       );
       await captureSessionArtifacts(client, runner.runDir, '02-after-initial-split', sessionId);
@@ -509,50 +516,51 @@ async function main() {
     await runner.step('relaunch_and_restore_session', async () => {
       await relaunchAppAndConnect(client, observer);
       await client.request('select_session', { sessionId });
-      await waitForPaneVisible(client, sessionId, 'main', 30_000);
+      await waitForPaneVisible(client, sessionId, initialPaneId, 30_000);
       await waitForPaneVisible(client, sessionId, initialShellPaneId, 30_000);
-      restoredMainState = await captureMainHealthyState(
+      restoredMainState = await captureInitialPaneHealthyState(
         client,
         runner,
         sessionId,
-        '03-post-relaunch-main',
-        'restored main after relaunch',
+        initialPaneId,
+        '03-post-relaunch-initial-pane',
+        'restored initial pane after relaunch',
         transcriptAnchorToken,
       );
       await assertPaneVisibleContentPreserved(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         initialSplitMainState?.state?.pane?.visibleContent || null,
         {
           minNonEmptyLineRatio: 0.7,
           minCharCountRatio: 0.55,
           minAnchorMatches: 2,
           timeoutMs: 20_000,
-          description: 'restored main content matches pre-relaunch split state',
+          description: 'restored initial pane content matches pre-relaunch split state',
         },
       );
       await captureSessionArtifacts(client, runner.runDir, '03-post-relaunch', sessionId);
     });
 
-    postRelaunchMainSplitPaneId = await runner.step('split_from_main_after_relaunch', async () => {
+    postRelaunchMainSplitPaneId = await runner.step('split_from_initial_pane_after_relaunch', async () => {
       await client.request('select_session', { sessionId });
-      await waitForPaneVisible(client, sessionId, 'main', 20_000);
+      await waitForPaneVisible(client, sessionId, initialPaneId, 20_000);
       const workspaceBefore = await client.request('get_workspace', { sessionId });
       const existingPaneIds = new Set((workspaceBefore.panes || []).map((pane) => pane.paneId));
       await client.request('split_pane', {
         sessionId,
-        targetPaneId: 'main',
+        targetPaneId: initialPaneId,
         direction: 'vertical',
       });
       const newPane = await waitForNewShellPane(
         client,
         sessionId,
         existingPaneIds,
-        'new shell after relaunch split from main',
+        'new shell after relaunch split from initial pane',
         30_000,
       );
-      await assertPaneVisibleContent(client, sessionId, 'main', {
+      await assertPaneVisibleContent(client, sessionId, initialPaneId, {
         contains: transcriptAnchorToken,
         allowWrappedContains: true,
         minNonEmptyLines: 8,
@@ -560,9 +568,9 @@ async function main() {
         minCharCount: 200,
         minMaxLineLength: 30,
         timeoutMs: 20_000,
-        description: 'main transcript anchor preserved after relaunch split from main',
+        description: 'initial pane transcript anchor preserved after relaunch split from initial pane',
       });
-      await captureSessionArtifacts(client, runner.runDir, '04-after-main-split', sessionId);
+      await captureSessionArtifacts(client, runner.runDir, '04-after-initial-pane-split', sessionId);
       return newPane?.paneId || null;
     });
 
@@ -589,16 +597,17 @@ async function main() {
 
     await runner.step('close_relaunched_splits_and_assert_recovery', async () => {
       await client.request('select_session', { sessionId });
-      await waitForPaneVisible(client, sessionId, 'main', 20_000);
-      let previousMainWidth = (await client.request('get_pane_state', { sessionId, paneId: 'main' }))?.pane?.bounds?.width ?? 0;
+      await waitForPaneVisible(client, sessionId, initialPaneId, 20_000);
+      let previousInitialPaneWidth = (await client.request('get_pane_state', { sessionId, paneId: initialPaneId }))?.pane?.bounds?.width ?? 0;
       const firstRecovered = await closePaneAndAssertRecovery({
         client,
         runner,
         sessionId,
+        initialPaneId,
         paneId: postRelaunchShellSplitPaneId,
         baselineVisibleContent: restoredMainState?.state?.pane?.visibleContent || null,
         baselineNativeMetrics: null,
-        previousMainWidth,
+        previousInitialPaneWidth,
         minPaneCountAfterClose: 3,
         label: '06-after-closing-shell-split',
         minNonEmptyLineRatio: 0.45,
@@ -607,32 +616,34 @@ async function main() {
         enforceNativeStability: false,
         requiredVisibleText: transcriptAnchorToken,
       });
-      previousMainWidth = firstRecovered?.state?.pane?.bounds?.width ?? firstRecovered?.widthState?.pane?.bounds?.width ?? previousMainWidth;
+      previousInitialPaneWidth = firstRecovered?.state?.pane?.bounds?.width ?? firstRecovered?.widthState?.pane?.bounds?.width ?? previousInitialPaneWidth;
       await captureSessionArtifacts(client, runner.runDir, '06-after-closing-shell-split', sessionId);
 
       const secondRecovered = await closePaneAndAssertRecovery({
         client,
         runner,
         sessionId,
+        initialPaneId,
         paneId: postRelaunchMainSplitPaneId,
         baselineVisibleContent: firstRecovered?.state?.pane?.visibleContent || restoredMainState?.state?.pane?.visibleContent || null,
         baselineNativeMetrics: firstRecovered?.nativeMetrics || restoredMainState?.nativeMetrics || null,
-        previousMainWidth,
+        previousInitialPaneWidth,
         minPaneCountAfterClose: 2,
-        label: '07-after-closing-main-split',
+        label: '07-after-closing-initial-pane-split',
         minNonEmptyLineRatio: 0.7,
         minCharCountRatio: 0.55,
         minAnchorMatches: 2,
         enforceNativeStability: true,
         requiredVisibleText: transcriptAnchorToken,
       });
-      previousMainWidth = secondRecovered?.state?.pane?.bounds?.width ?? secondRecovered?.widthState?.pane?.bounds?.width ?? previousMainWidth;
-      await captureSessionArtifacts(client, runner.runDir, '07-after-closing-main-split', sessionId);
+      previousInitialPaneWidth = secondRecovered?.state?.pane?.bounds?.width ?? secondRecovered?.widthState?.pane?.bounds?.width ?? previousInitialPaneWidth;
+      await captureSessionArtifacts(client, runner.runDir, '07-after-closing-initial-pane-split', sessionId);
 
       finalMainState = await closePaneAndAssertRecovery({
         client,
         runner,
         sessionId,
+        initialPaneId,
         paneId: initialShellPaneId,
         baselineVisibleContent:
           options.remoteAgent === 'claude'
@@ -642,7 +653,7 @@ async function main() {
           options.remoteAgent === 'claude'
             ? (baselineMainState?.nativeMetrics || null)
             : (secondRecovered?.nativeMetrics || baselineMainState?.nativeMetrics || null),
-        previousMainWidth,
+        previousInitialPaneWidth,
         minPaneCountAfterClose: 1,
         label: '08-after-closing-initial-split',
         minNonEmptyLineRatio: 0.75,
@@ -653,7 +664,7 @@ async function main() {
         preserveVisibleContent: options.remoteAgent !== 'claude',
         headerRecoveryOptions: recoveredHeaderOptionsForRemoteAgent(
           options.remoteAgent,
-          '08-after-closing-initial-split main header recovery',
+          '08-after-closing-initial-split initial pane header recovery',
         ),
       });
       await captureSessionArtifacts(client, runner.runDir, '08-after-closing-initial-split', sessionId);
@@ -668,6 +679,7 @@ async function main() {
       remoteAgent: options.remoteAgent,
       transcriptAnchorToken,
       panes: {
+        initialPaneId,
         initialShellPaneId,
         postRelaunchMainSplitPaneId,
         postRelaunchShellSplitPaneId,
@@ -696,6 +708,7 @@ async function main() {
       sessionId,
       endpointId: endpoint?.id || null,
       panes: {
+        initialPaneId,
         initialShellPaneId,
         postRelaunchMainSplitPaneId,
         postRelaunchShellSplitPaneId,

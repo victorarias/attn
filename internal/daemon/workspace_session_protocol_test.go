@@ -182,6 +182,51 @@ func TestWorkspaceSessionProtocolSpawnFailureMarksPaneFailed(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSessionProtocolRejectsShellSpawnWithoutWorkspace(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &fakeSpawnBackend{}
+	client := newWorkspaceProtocolTestClient()
+	sessionID := "session-shell-without-workspace"
+
+	d.handleSpawnSession(client, &protocol.SpawnSessionMessage{
+		Cmd:   protocol.CmdSpawnSession,
+		ID:    sessionID,
+		Label: protocol.Ptr("shell"),
+		Cwd:   t.TempDir(),
+		Agent: protocol.AgentShellValue,
+		Cols:  80,
+		Rows:  24,
+	})
+
+	expectCommandError(t, client, protocol.CmdSpawnSession, "missing workspace_id")
+	if session := d.store.Get(sessionID); session != nil {
+		t.Fatalf("shell spawn without workspace registered session %s", sessionID)
+	}
+}
+
+func TestWorkspaceSessionProtocolRejectsShellSpawnForUnknownWorkspace(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &fakeSpawnBackend{}
+	client := newWorkspaceProtocolTestClient()
+	sessionID := "session-shell-unknown-workspace"
+
+	d.handleSpawnSession(client, &protocol.SpawnSessionMessage{
+		Cmd:         protocol.CmdSpawnSession,
+		ID:          sessionID,
+		Label:       protocol.Ptr("shell"),
+		Cwd:         t.TempDir(),
+		Agent:       protocol.AgentShellValue,
+		Cols:        80,
+		Rows:        24,
+		WorkspaceID: "missing-workspace",
+	})
+
+	expectCommandError(t, client, protocol.CmdSpawnSession, "unknown workspace")
+	if session := d.store.Get(sessionID); session != nil {
+		t.Fatalf("shell spawn for unknown workspace registered session %s", sessionID)
+	}
+}
+
 func TestWorkspaceLayoutSplitPaneCommandIsUnsupported(t *testing.T) {
 	if _, _, err := protocol.ParseMessage([]byte(`{"cmd":"workspace_layout_split_pane","workspace_id":"ws","target_pane_id":"pane","direction":"vertical"}`)); err == nil {
 		t.Fatal("legacy workspace_layout_split_pane command parsed successfully")
@@ -240,6 +285,29 @@ func expectSpawnResult(t *testing.T, client *wsClient, sessionID string, success
 			return
 		case <-deadline:
 			t.Fatalf("timed out waiting for spawn_result for %s", sessionID)
+		}
+	}
+}
+
+func expectCommandError(t *testing.T, client *wsClient, cmd, errorContains string) {
+	t.Helper()
+	deadline := time.After(1 * time.Second)
+	for {
+		select {
+		case outbound := <-client.send:
+			var event protocol.WebSocketEvent
+			if err := json.Unmarshal(outbound.payload, &event); err != nil || event.Event != protocol.EventCommandError {
+				continue
+			}
+			if protocol.Deref(event.Cmd) != cmd {
+				continue
+			}
+			if !strings.Contains(protocol.Deref(event.Error), errorContains) {
+				t.Fatalf("command_error error = %q, want containing %q; payload=%s", protocol.Deref(event.Error), errorContains, string(outbound.payload))
+			}
+			return
+		case <-deadline:
+			t.Fatalf("timed out waiting for command_error for %s", cmd)
 		}
 	}
 }

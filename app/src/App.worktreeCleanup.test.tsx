@@ -30,6 +30,57 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function buildMockDaemonWorkspaces() {
+  const sessions = (mockUseSessionStore()?.sessions ?? []) as Array<{
+    id: string;
+    label: string;
+    cwd: string;
+    workspaceId: string;
+    workspace?: {
+      agents?: Array<{ id: string; sessionId?: string }>;
+    };
+  }>;
+  const byWorkspace = new Map<string, typeof sessions>();
+  for (const session of sessions) {
+    const current = byWorkspace.get(session.workspaceId) ?? [];
+    current.push(session);
+    byWorkspace.set(session.workspaceId, current);
+  }
+  return Array.from(byWorkspace.entries()).map(([workspaceId, workspaceSessions]) => {
+    const firstSession = workspaceSessions[0];
+    const paneIds = new Set<string>();
+    const panes = workspaceSessions.flatMap((session) => (
+      session.workspace?.agents ?? [{ id: `pane-${session.id}`, sessionId: session.id }]
+    ))
+      .filter((pane) => {
+        if (paneIds.has(pane.id)) {
+          return false;
+        }
+        paneIds.add(pane.id);
+        return true;
+      })
+      .map((pane) => ({
+        workspace_id: workspaceId,
+        pane_id: pane.id,
+        kind: 'agent',
+        runtime_id: pane.sessionId ?? pane.id,
+        session_id: pane.sessionId ?? pane.id,
+        title: pane.sessionId ?? pane.id,
+      }));
+    return {
+      id: workspaceId,
+      title: firstSession.label,
+      directory: firstSession.cwd,
+      status: 'active',
+      layout: {
+        active_pane_id: panes[0]?.pane_id ?? '',
+        layout_json: '',
+        panes,
+      },
+    };
+  });
+}
+
 vi.mock('@tauri-apps/plugin-deep-link', () => ({
   onOpenUrl: vi.fn(async () => () => {}),
   getCurrent: vi.fn(async () => []),
@@ -53,8 +104,16 @@ vi.mock('./components/Sidebar', () => ({
   ReviewLoopIcon: () => null,
   DiffIcon: () => null,
   PRsIcon: () => null,
-  Sidebar: ({ visualOrder, onCloseSession }: { visualOrder: Array<{ firstSessionId: string | null }>; onCloseSession: (id: string) => void }) => (
-    <button data-testid="close-session" onClick={() => visualOrder[0].firstSessionId && onCloseSession(visualOrder[0].firstSessionId)}>
+  Sidebar: ({
+    selectedId,
+    visualOrder,
+    onCloseSession,
+  }: {
+    selectedId: string | null;
+    visualOrder: Array<{ firstSessionId: string | null }>;
+    onCloseSession: (id: string) => void;
+  }) => (
+    <button data-testid="close-session" onClick={() => (visualOrder[0]?.firstSessionId ?? selectedId) && onCloseSession((visualOrder[0]?.firstSessionId ?? selectedId)!)}>
       Close Session
     </button>
   ),
@@ -173,9 +232,17 @@ vi.mock('./store/daemonSessions', () => ({
   useDaemonStore: () => mockUseDaemonStore(),
 }));
 
-vi.mock('./hooks/useDaemonSocket', () => ({
-  useDaemonSocket: (args: unknown) => mockUseDaemonSocket(args),
-}));
+vi.mock('./hooks/useDaemonSocket', async () => {
+  const React = await import('react');
+  return {
+    useDaemonSocket: (args: { onWorkspacesUpdate?: (workspaces: ReturnType<typeof buildMockDaemonWorkspaces>) => void }) => {
+      React.useEffect(() => {
+        args.onWorkspacesUpdate?.(buildMockDaemonWorkspaces());
+      }, []);
+      return mockUseDaemonSocket(args);
+    },
+  };
+});
 
 vi.mock('./pty/bridge', async () => {
   const actual = await vi.importActual<typeof import('./pty/bridge')>('./pty/bridge');
@@ -204,6 +271,7 @@ describe('worktree cleanup prompt', () => {
           label: 'worktree-session',
           state: 'working',
           cwd: '/tmp/repo/.worktrees/feature-a',
+          workspaceId: 'workspace-s1',
           agent: 'claude',
           transcriptMatched: true,
           branch: 'feature-a',
@@ -487,6 +555,7 @@ describe('worktree cleanup prompt', () => {
         label: 'second-worktree-session',
         state: 'working',
         cwd: '/tmp/repo/.worktrees/feature-b',
+        workspaceId: 'workspace-s2',
         agent: 'claude',
         transcriptMatched: true,
         branch: 'feature-b',
@@ -571,6 +640,7 @@ describe('worktree cleanup prompt', () => {
           label: 'remote-session',
           state: 'waiting_input',
           cwd: '/srv/repo',
+          workspaceId: 'workspace-remote-1',
           agent: 'claude',
           transcriptMatched: true,
           branch: 'main',
@@ -739,6 +809,7 @@ describe('worktree cleanup prompt', () => {
           label: 'session-with-split',
           state: 'working',
           cwd: '/tmp/repo',
+          workspaceId: 'workspace-s1',
           agent: 'claude',
           transcriptMatched: true,
           daemonActivePaneId: 'main',
@@ -764,6 +835,7 @@ describe('worktree cleanup prompt', () => {
           label: 'session pane 1',
           state: 'working',
           cwd: '/tmp/repo',
+          workspaceId: 'workspace-s1',
           agent: 'shell',
           transcriptMatched: true,
           daemonActivePaneId: 'pane-session-1',
@@ -825,7 +897,7 @@ describe('worktree cleanup prompt', () => {
 
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(mockCloseSession).not.toHaveBeenCalled();
-    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('s1', 'pane-session');
+    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('workspace-s1', 'pane-session');
   });
 
   it('closes a session pane from the sidebar without showing the split terminal prompt', async () => {
@@ -836,6 +908,7 @@ describe('worktree cleanup prompt', () => {
           label: 'session-with-split',
           state: 'working',
           cwd: '/tmp/repo',
+          workspaceId: 'workspace-s1',
           agent: 'claude',
           transcriptMatched: true,
           daemonActivePaneId: 'main',
@@ -861,6 +934,7 @@ describe('worktree cleanup prompt', () => {
           label: 'session pane 1',
           state: 'working',
           cwd: '/tmp/repo',
+          workspaceId: 'workspace-s1',
           agent: 'shell',
           transcriptMatched: true,
           daemonActivePaneId: 'pane-session-1',
@@ -901,7 +975,7 @@ describe('worktree cleanup prompt', () => {
     await userEvent.click(screen.getByTestId('close-session'));
 
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('s1', 'pane-session');
+    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('workspace-s1', 'pane-session');
     expect(mockCloseSession).not.toHaveBeenCalled();
   });
 
@@ -955,6 +1029,7 @@ describe('worktree cleanup prompt', () => {
           label: 'session-with-split',
           state: 'working',
           cwd: '/tmp/repo',
+          workspaceId: 'workspace-s1',
           agent: 'claude',
           transcriptMatched: true,
           daemonActivePaneId: 'pane-session-1',
@@ -980,6 +1055,7 @@ describe('worktree cleanup prompt', () => {
           label: 'session pane 1',
           state: 'working',
           cwd: '/tmp/repo',
+          workspaceId: 'workspace-s1',
           agent: 'shell',
           transcriptMatched: true,
           daemonActivePaneId: 'pane-session-1',
@@ -1027,7 +1103,7 @@ describe('worktree cleanup prompt', () => {
     });
 
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('s1', 'pane-session-1');
+    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('workspace-s1', 'pane-session-1');
     expect(mockCloseSession).not.toHaveBeenCalled();
   });
 });

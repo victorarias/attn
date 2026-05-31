@@ -47,7 +47,10 @@ async function main() {
     }
 
     const initialState = await client.request('get_workspace', { sessionId });
-    const targetPaneId = initialState.activePaneId || 'main';
+    const targetPaneId = initialState.activePaneId || initialState.panes?.[0]?.paneId;
+    if (!targetPaneId) {
+      throw new Error(`No pane available to split in workspace ${sessionId}`);
+    }
     await client.request('split_pane', {
       sessionId,
       targetPaneId,

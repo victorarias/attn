@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -19,7 +19,7 @@ import {
   captureSessionArtifacts,
   waitForPaneVisible,
 } from './scenarioAssertions.mjs';
-import { ensureCodexMainPromptReady } from './scenarioAgents.mjs';
+import { ensureCodexInitialPanePromptReady } from './scenarioAgents.mjs';
 import { currentHarnessProfile } from './harnessProfile.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -56,10 +56,10 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function submitCodexPromptViaUi(client, sessionId, text) {
+async function submitCodexPromptViaUi(client, sessionId, paneId, text) {
   await client.request('type_pane_via_ui', {
     sessionId,
-    paneId: 'main',
+    paneId,
     text,
   });
   // Codex treats fast character streams as paste bursts and intentionally
@@ -68,7 +68,7 @@ async function submitCodexPromptViaUi(client, sessionId, text) {
   await delay(250);
   await client.request('type_pane_via_ui', {
     sessionId,
-    paneId: 'main',
+    paneId,
     text: '\n',
   });
 }
@@ -278,6 +278,7 @@ async function main() {
   let isolatedCodexHome = null;
   let nativeSessionId = null;
   let transcript = null;
+  let initialPaneId = null;
 
   try {
     realCodexExecutable = await runner.step('resolve_real_codex_executable', async () => {
@@ -301,25 +302,26 @@ async function main() {
     });
 
     sessionId = await runner.step('create_real_codex_session', async () => {
-      return createSessionAndWaitForMain({
+      return createSessionAndWaitForInitialPane({
         client,
         observer,
         cwd: runner.sessionDir,
         label: `codex-resume-${runner.runId}`,
         agent: 'codex',
-        waitForMainVisible: false,
+        waitForInitialPaneVisible: false,
       });
     });
 
     nativeSessionId = await runner.step('assert_real_codex_hook_records_native_id', async () => {
-      await waitForPaneVisible(client, sessionId, 'main', 30_000);
-      const readiness = await ensureCodexMainPromptReady(client, sessionId, 60_000);
+      const readiness = await ensureCodexInitialPanePromptReady(client, sessionId, 60_000);
+      initialPaneId = readiness.paneId;
+      await waitForPaneVisible(client, sessionId, initialPaneId, 30_000);
       runner.writeJson('codex-readiness.json', readiness);
-      await submitCodexPromptViaUi(client, sessionId, 'Reply with exactly: ok');
+      await submitCodexPromptViaUi(client, sessionId, initialPaneId, 'Reply with exactly: ok');
       await delay(1000);
       runner.writeJson('codex-after-submit.json', await client.request('read_pane_text', {
         sessionId,
-        paneId: 'main',
+        paneId: initialPaneId,
       }));
       const resumeId = await waitForStoredResumeId(dbPath, sessionId, 45_000);
       runner.assert(resumeId !== sessionId, 'stored resume id is Codex native id, not attn wrapper id', {
@@ -375,6 +377,7 @@ async function main() {
 
     const summary = runner.finishSuccess({
       sessionId,
+      initialPaneId,
       codexExecutable: realCodexExecutable,
       dbPath,
       nativeSessionId,
@@ -384,6 +387,7 @@ async function main() {
   } catch (error) {
     const summary = runner.finishFailure(error, {
       sessionId,
+      initialPaneId,
       codexExecutable: realCodexExecutable,
       dbPath,
       nativeSessionId,

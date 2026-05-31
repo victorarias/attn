@@ -17,7 +17,7 @@ func TestStoreWorkspaceRoundTripAndMembership(t *testing.T) {
 	s.AddWorkspace(&protocol.Workspace{ID: "workspace-1", Title: "Project", Directory: "/tmp/project"})
 	s.Add(&protocol.Session{
 		ID: "session-1", Label: "Agent", Agent: protocol.SessionAgentCodex,
-		Directory: "/tmp/project", WorkspaceID: protocol.Ptr("workspace-1"),
+		Directory: "/tmp/project", WorkspaceID: "workspace-1",
 		State: protocol.SessionStateIdle, StateSince: string(protocol.TimestampNow()),
 		StateUpdatedAt: string(protocol.TimestampNow()), LastSeen: string(protocol.TimestampNow()),
 	})
@@ -29,5 +29,28 @@ func TestStoreWorkspaceRoundTripAndMembership(t *testing.T) {
 	members := s.SessionsInWorkspace("workspace-1")
 	if len(members) != 1 || members[0] != "session-1" {
 		t.Fatalf("SessionsInWorkspace() = %#v, want session-1", members)
+	}
+}
+
+func TestAssignSessionWorkspaceRefusesEmptyWorkspace(t *testing.T) {
+	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewWithDB error: %v", err)
+	}
+	defer s.Close()
+
+	now := string(protocol.TimestampNow())
+	s.Add(&protocol.Session{
+		ID: "session-1", Label: "Agent", Agent: protocol.SessionAgentCodex,
+		Directory: "/tmp/project", WorkspaceID: "workspace-1",
+		State: protocol.SessionStateIdle, StateSince: now,
+		StateUpdatedAt: now, LastSeen: now,
+	})
+
+	s.AssignSessionWorkspace("session-1", "")
+
+	got := s.Get("session-1")
+	if got == nil || got.WorkspaceID != "workspace-1" {
+		t.Fatalf("workspace_id after empty assignment = %+v, want workspace-1", got)
 	}
 }

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   createRunContext,
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -13,6 +13,7 @@ import { DaemonObserver } from './daemonObserver.mjs';
 import { bundleIdentifierForProfile } from './harnessProfile.mjs';
 import { MacOSDriver } from './macosDriver.mjs';
 import {
+  captureSessionArtifacts,
   waitForPaneAttached,
   waitForPaneShellReady,
   waitForPaneText,
@@ -56,6 +57,11 @@ async function waitForActiveSession(client, sessionId, description, timeoutMs = 
   throw new Error(`Timed out waiting for ${description}. Last state:\n${JSON.stringify(lastState, null, 2)}`);
 }
 
+async function focusAppForNativeShortcut(driver) {
+  await driver.activateApp();
+  await driver.clickWindow(0.5, 0.5);
+}
+
 async function closeExistingSessions(client, sessionRootDir) {
   const initial = await client.request('get_state');
   const harnessSessions = (initial.sessions || []).filter((session) => session.cwd?.startsWith(sessionRootDir));
@@ -76,13 +82,13 @@ async function closeExistingSessions(client, sessionRootDir) {
 
 async function createShellWorkspace(client, observer, cwd, label) {
   fs.mkdirSync(cwd, { recursive: true });
-  const sessionId = await createSessionAndWaitForMain({
+  const sessionId = await createSessionAndWaitForInitialPane({
     client,
     observer,
     cwd,
     label,
     agent: 'shell',
-    waitForMainVisible: false,
+    waitForInitialPaneVisible: false,
     sessionWaitMs: 30_000,
   });
   const workspace = await waitForPaneCount(client, sessionId, 1, `initial pane for ${label}`);
@@ -151,6 +157,17 @@ async function writeAndAssertToken(client, sessionId, pane, token) {
   );
 }
 
+async function capturePaneTexts(client, runDir, prefix, sessionId, panes) {
+  const payload = {};
+  for (const pane of panes) {
+    payload[pane.paneId] = await client.request('read_pane_text', {
+      sessionId,
+      paneId: pane.paneId,
+    }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
+  }
+  fs.writeFileSync(path.join(runDir, `${prefix}-pane-texts.json`), `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+}
+
 async function closeWorkspacePanes(client, sessionId) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const workspace = await client.request('get_workspace', { sessionId }).catch(() => null);
@@ -198,7 +215,9 @@ async function main() {
   console.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
 
   try {
+    process.env.ATTN_HARNESS_PARK_VISIBLE_PX ??= '0';
     await launchFreshAppAndConnect(client, observer);
+    await client.request('set_terminal_runtime_trace', { enabled: true }).catch(() => {});
     await closeExistingSessions(client, options.sessionRootDir);
 
     const workspaceA = await createShellWorkspace(client, observer, path.join(sessionDir, 'alpha'), `ws-switch-alpha-${runId}`);
@@ -224,7 +243,7 @@ async function main() {
     await client.request('select_session', { sessionId: workspaceB.sessionId });
     await assertWorkspaceVisible(client, workspaceB.sessionId, workspaceA.sessionId, 2);
 
-    await driver.activateApp();
+    await focusAppForNativeShortcut(driver);
     await driver.pressKey('1', { command: true });
     await waitForActiveSession(client, workspaceA.sessionId, 'Cmd+1 selecting first workspace session');
     await assertWorkspaceVisible(client, workspaceA.sessionId, workspaceB.sessionId, 2);
@@ -242,8 +261,16 @@ async function main() {
 
     await client.request('select_session', { sessionId: workspaceA.sessionId });
     await assertWorkspaceVisible(client, workspaceA.sessionId, workspaceB.sessionId, 2);
-    await waitForPaneText(client, workspaceA.sessionId, workspaceA.firstPane.paneId, (text) => text.includes(tokenA1), 'workspace A first token after workspace B close', 15_000);
-    await waitForPaneText(client, workspaceA.sessionId, splitA.paneId, (text) => text.includes(tokenA2), 'workspace A split token after workspace B close', 15_000);
+    try {
+      await waitForPaneText(client, workspaceA.sessionId, workspaceA.firstPane.paneId, (text) => text.includes(tokenA1), 'workspace A first token after workspace B close', 15_000);
+      await waitForPaneText(client, workspaceA.sessionId, splitA.paneId, (text) => text.includes(tokenA2), 'workspace A split token after workspace B close', 15_000);
+    } catch (error) {
+      await captureSessionArtifacts(client, runDir, 'workspace-a-token-failure', workspaceA.sessionId).catch(() => {});
+      await captureSessionArtifacts(client, runDir, 'workspace-b-token-failure', workspaceB.sessionId).catch(() => {});
+      await capturePaneTexts(client, runDir, 'workspace-a-token-failure', workspaceA.sessionId, [workspaceA.firstPane, splitA]).catch(() => {});
+      await capturePaneTexts(client, runDir, 'workspace-b-token-failure', workspaceB.sessionId, [workspaceB.firstPane, splitB]).catch(() => {});
+      throw error;
+    }
 
     const summary = {
       ok: true,

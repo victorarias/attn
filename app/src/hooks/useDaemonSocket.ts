@@ -152,7 +152,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '71';
+const PROTOCOL_VERSION = '72';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
 // injects this global before any page script runs — see
@@ -537,6 +537,13 @@ function upsertWorkspaceByID(workspaces: DaemonWorkspace[], workspace: DaemonWor
 
 function workspaceActionKey(action: string, workspaceId: string, paneId?: string): string {
   return `workspace:${action}:${workspaceId}:${paneId || ''}`;
+}
+
+function isValidWorkspaceActionResult(data: WebSocketEvent): data is WebSocketEvent & {
+  action: string;
+  workspace_id: string;
+} {
+  return Boolean(data.action && data.workspace_id);
 }
 
 const ATTACH_RETRY_TIMEOUT_MS = 3_000;
@@ -1095,8 +1102,12 @@ export function useDaemonSocket({
             break;
 
           case 'workspace_layout_action_result': {
-            const action = data.action || '';
-            const workspaceId = data.workspace_id || '';
+            if (!isValidWorkspaceActionResult(data)) {
+              console.warn('[Daemon] Ignoring malformed workspace action result:', data);
+              break;
+            }
+            const action = data.action;
+            const workspaceId = data.workspace_id;
             const paneId = data.pane_id;
             recordPaneRuntimeDebugEvent({
               scope: 'daemon',
@@ -2128,7 +2139,7 @@ export function useDaemonSocket({
         cmd: 'spawn_session',
         id: args.id,
         cwd: args.cwd,
-        ...(args.workspace_id && { workspace_id: args.workspace_id }),
+        workspace_id: args.workspace_id,
         ...(args.endpoint_id && { endpoint_id: args.endpoint_id }),
         agent: args.shell ? 'shell' : (args.agent || 'codex'),
         cols: args.cols,
@@ -2453,13 +2464,6 @@ export function useDaemonSocket({
                 agent ?? 'unknown',
                 String(recoverable),
               );
-            },
-            logKnownWorkspaceRespawn: ({ id, endpointId, error }) => {
-              console.warn('[DaemonSocket] Known workspace runtime attach failed, respawning session pane', {
-                id,
-                endpoint_id: endpointId,
-                error: error instanceof Error ? error.message : String(error),
-              });
             },
           },
         );

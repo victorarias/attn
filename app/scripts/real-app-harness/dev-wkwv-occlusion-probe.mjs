@@ -40,9 +40,10 @@ import { DaemonObserver } from './daemonObserver.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import {
   launchFreshAppAndConnect,
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
 } from './common.mjs';
 import {
+  waitForFirstWorkspacePane,
   waitForNewShellPane,
   waitForPaneInputFocus,
   waitForPaneState,
@@ -137,7 +138,7 @@ async function main() {
   try {
     await launchFreshAppAndConnect(client, observer);
 
-    const sessionId = await createSessionAndWaitForMain({
+    const sessionId = await createSessionAndWaitForInitialPane({
       client,
       observer,
       cwd: sessionDir,
@@ -149,7 +150,8 @@ async function main() {
 
     const ws0 = await client.request('get_workspace', { sessionId });
     const before = new Set((ws0.panes || []).map((p) => p.paneId));
-    await client.request('split_pane', { sessionId, targetPaneId: 'main', direction: 'vertical' });
+    const initialPane = await waitForFirstWorkspacePane(client, sessionId, 'initial pane for occlusion probe split', 20_000);
+    await client.request('split_pane', { sessionId, targetPaneId: initialPane.paneId, direction: 'vertical' });
     const pane = await waitForNewShellPane(client, sessionId, before, 'shell pane for probe', 20_000);
     console.log(`[probe] pane=${pane.paneId}`);
 

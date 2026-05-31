@@ -71,6 +71,10 @@ interface SplitSessionOptions {
   yoloMode?: boolean;
 }
 
+function paneIdForSession(sessionId: string): string {
+  return `pane-${sessionId}`;
+}
+
 interface GitHubReleaseResponse {
   tag_name?: string;
   html_url?: string;
@@ -671,6 +675,30 @@ sendFetchPRDetails,
     syncFromDaemonWorkspaces,
   } = useSessionStore();
 
+  const rollbackSessionCreation = useCallback(async ({
+    sessionId,
+    workspaceId,
+    paneId,
+    unregisterWorkspace,
+  }: {
+    sessionId: string;
+    workspaceId: string;
+    paneId?: string;
+    unregisterWorkspace?: boolean;
+  }) => {
+    if (paneId) {
+      await sendWorkspaceClosePane(workspaceId, paneId).catch((error) => {
+        console.error('[App] Failed to rollback workspace pane:', error);
+      });
+    }
+    closeSession(sessionId);
+    if (unregisterWorkspace) {
+      await sendUnregisterWorkspace(workspaceId).catch((error) => {
+        console.error('[App] Failed to rollback workspace:', error);
+      });
+    }
+  }, [closeSession, sendUnregisterWorkspace, sendWorkspaceClosePane]);
+
   const createWorkspaceSession = useCallback(async (
     label: string,
     cwd: string,
@@ -681,39 +709,39 @@ sendFetchPRDetails,
   ) => {
     const sessionId = providedSessionId || crypto.randomUUID();
     const workspaceId = `workspace-${sessionId}`;
+    const paneId = paneIdForSession(sessionId);
     let localCreated = false;
-    let spawned = false;
     let paneAdded = false;
     try {
       await sendRegisterWorkspace(workspaceId, label, cwd, endpointId);
       const createdSessionId = await createSession(label, cwd, sessionId, agent, endpointId, yoloMode, workspaceId);
       localCreated = true;
-      await sendWorkspaceAddSessionPane(workspaceId, sessionId, label);
+      await sendWorkspaceAddSessionPane(workspaceId, sessionId, label, { paneId });
       paneAdded = true;
       const spawnArgs = takeSessionSpawnArgs(sessionId, 80, 24);
       if (!spawnArgs) {
         throw new Error('Session spawn arguments were not prepared.');
       }
       await ptySpawn({ args: spawnArgs });
-      spawned = true;
       return createdSessionId;
     } catch (error) {
-      if (spawned) {
-        await sendUnregisterSession(sessionId).catch(console.error);
-      } else if (localCreated && !paneAdded) {
-        closeSession(sessionId);
-      }
-      if (!paneAdded) {
+      if (localCreated) {
+        await rollbackSessionCreation({
+          sessionId,
+          workspaceId,
+          paneId: paneAdded ? paneId : undefined,
+          unregisterWorkspace: true,
+        });
+      } else {
         await sendUnregisterWorkspace(workspaceId).catch(console.error);
       }
       throw error;
     }
   }, [
-    closeSession,
     createSession,
+    rollbackSessionCreation,
     sendRegisterWorkspace,
     sendWorkspaceAddSessionPane,
-    sendUnregisterSession,
     sendUnregisterWorkspace,
     takeSessionSpawnArgs,
   ]);
@@ -986,6 +1014,12 @@ sendFetchPRDetails,
       setView('session');
     }
   }, [activeSessionId]);
+
+  useEffect(() => {
+    if (view === 'session' && !activeSessionId && sessions.length > 0) {
+      setActiveSession(sessions[0].id);
+    }
+  }, [activeSessionId, sessions, setActiveSession, view]);
 
   // Track when the currently-selected session became visible.
   useEffect(() => {
@@ -1359,8 +1393,8 @@ sendFetchPRDetails,
     const sessionId = crypto.randomUUID();
     const workspaceId = activeSession.workspaceId;
     const paneId = targetPaneId || getActivePaneIdForSession(activeSession);
+    const newPaneId = paneIdForSession(sessionId);
     const label = options.label || nextSplitSessionLabel(workspaceId, agent);
-    let spawned = false;
     let paneAdded = false;
 
     try {
@@ -1374,32 +1408,32 @@ sendFetchPRDetails,
         workspaceId,
       );
       const spawnArgs = takeSessionSpawnArgs(sessionId, 80, 24);
-      await sendWorkspaceAddSessionPane(workspaceId, sessionId, label, { targetPaneId: paneId, direction });
+      await sendWorkspaceAddSessionPane(workspaceId, sessionId, label, { paneId: newPaneId, targetPaneId: paneId, direction });
       paneAdded = true;
       if (spawnArgs) {
         await ptySpawn({ args: spawnArgs });
-        spawned = true;
+      } else {
+        throw new Error('Session spawn arguments were not prepared.');
       }
       setView('session');
       setActiveSession(sessionId);
       setUtilityFocusRequestToken((token) => token + 1);
     } catch (error) {
-      if (spawned) {
-        await sendUnregisterSession(sessionId).catch(console.error);
-      } else if (!paneAdded) {
-        closeSession(sessionId);
-      }
+      await rollbackSessionCreation({
+        sessionId,
+        workspaceId,
+        paneId: paneAdded ? newPaneId : undefined,
+      });
       showError(error instanceof Error ? error.message : 'Failed to create session split');
     }
   }, [
     activeLocalSession,
-    closeSession,
     createSession,
     getActivePaneIdForSession,
     handleNewWorkspace,
     nextSplitSessionLabel,
+    rollbackSessionCreation,
     sendWorkspaceAddSessionPane,
-    sendUnregisterSession,
     sessions,
     setActiveSession,
     showError,
@@ -1590,7 +1624,9 @@ sendFetchPRDetails,
         closeSession(id);
       }
 
-      removeWorkspaceRef(session?.workspaceId || id);
+      if (session) {
+        removeWorkspaceRef(session.workspaceId);
+      }
     },
     [closeSession, daemonSessions, enrichedLocalSessions, prepareWorktreeCleanupPrompt, removeWorkspaceRef, sendUnregisterSession]
   );
@@ -1598,13 +1634,26 @@ sendFetchPRDetails,
   const handleClosePane = useCallback((sessionId: string, paneId: string) => {
     const session = enrichedLocalSessions.find((entry) => entry.id === sessionId);
     prepareWorktreeCleanupPrompt(session);
-    prepareClosePaneFocus(sessionId, paneId);
-    const workspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId ?? sessionId;
-    return sendWorkspaceClosePane(workspaceId, paneId).catch((error) => {
-      clearPreparedClosePaneFocus(sessionId);
-      throw error;
-    });
-  }, [clearPreparedClosePaneFocus, enrichedLocalSessions, prepareClosePaneFocus, prepareWorktreeCleanupPrompt, sendWorkspaceClosePane, sessions]);
+    const fallbackPaneId = prepareClosePaneFocus(sessionId, paneId);
+    const fallbackSessionId = session?.workspace.agents.find((pane) => (
+      pane.id === fallbackPaneId && pane.id !== paneId
+    ))?.sessionId;
+    const workspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId;
+    if (!workspaceId) {
+      return Promise.reject(new Error(`Cannot close pane ${paneId}: session ${sessionId} has no workspace`));
+    }
+    return sendWorkspaceClosePane(workspaceId, paneId)
+      .then((result) => {
+        if (fallbackSessionId) {
+          setActiveSession(fallbackSessionId);
+        }
+        return result;
+      })
+      .catch((error) => {
+        clearPreparedClosePaneFocus(sessionId);
+        throw error;
+      });
+  }, [clearPreparedClosePaneFocus, enrichedLocalSessions, prepareClosePaneFocus, prepareWorktreeCleanupPrompt, sendWorkspaceClosePane, sessions, setActiveSession]);
 
   const handleRequestCloseSession = useCallback((id: string) => {
     const session = sessions.find((entry) => entry.id === id);
@@ -2339,7 +2388,7 @@ sendFetchPRDetails,
     onToggleDrawer: () => toggleDockPanel('attention'),
     onGoToDashboard: goToDashboard,
     onJumpToWaiting: handleJumpToWaiting,
-    onSelectSession: handleSelectWorkspaceByIndex,
+    onSelectWorkspaceByIndex: handleSelectWorkspaceByIndex,
     onPrevSession: handlePrevWorkspace,
     onNextSession: handleNextWorkspace,
     onToggleSidebar: toggleSidebarCollapse,
@@ -2463,8 +2512,10 @@ sendFetchPRDetails,
               if (!workspaceState) {
                 return null;
               }
-              const focusedSession = workspace.focusedSessionId
-                ? workspace.sessions.find((session) => session.id === workspace.focusedSessionId) ?? null
+              const focusedSessionId = workspaceSelection.focusedSessionIdByWorkspace[workspace.id]
+                ?? workspace.focusedSessionId;
+              const focusedSession = focusedSessionId
+                ? workspace.sessions.find((session) => session.id === focusedSessionId) ?? null
                 : null;
               const activePaneId = activePaneIdForFocusedSession(
                 workspaceState,
@@ -2496,8 +2547,6 @@ sendFetchPRDetails,
                     isActiveSession={isActiveWorkspace}
                     isSessionViewVisible={view === 'session'}
                     eventRouter={paneRuntimeEventRouter}
-                    getSessionPaneSpawnArgs={(paneSessionId, cols, rows) => takeSessionSpawnArgs(paneSessionId, cols, rows)}
-                    getAgentPaneSpawnArgs={(paneSessionId, cols, rows) => takeSessionSpawnArgs(paneSessionId, cols, rows)}
                     onSplitPane={(targetPaneId, direction) => {
                       void createSplitSession('shell', direction, targetPaneId);
                     }}

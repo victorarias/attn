@@ -12,7 +12,6 @@ import {
   type TerminalWorkspaceState,
 } from '../../types/workspace';
 import type { SessionAgent } from '../../types/sessionAgent';
-import type { PtySpawnArgs } from '../../pty/bridge';
 import { useGhosttyPaneRuntime } from './useGhosttyPaneRuntime';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import { activeElementSummary, recordPaneRuntimeDebugEvent } from '../../utils/paneRuntimeDebug';
@@ -88,8 +87,6 @@ interface SessionTerminalWorkspaceProps {
   isActiveSession: boolean;
   isSessionViewVisible?: boolean;
   eventRouter: PaneRuntimeEventRouter;
-  getSessionPaneSpawnArgs: (sessionId: string, cols: number, rows: number) => PtySpawnArgs | null;
-  getAgentPaneSpawnArgs?: (sessionId: string, cols: number, rows: number) => PtySpawnArgs | null;
   onSplitPane: (targetPaneId: string, direction: TerminalSplitDirection) => void;
   onClosePane: (paneId: string) => void;
   onFocusPane: (paneId: string) => void;
@@ -110,8 +107,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     isActiveSession,
     isSessionViewVisible = true,
     eventRouter,
-    getSessionPaneSpawnArgs,
-    getAgentPaneSpawnArgs,
     onSplitPane,
     onClosePane,
     onFocusPane,
@@ -166,14 +161,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           agent: paneSession?.agent ?? 'shell',
           sessionId: pane.sessionId,
           testSessionId: pane.sessionId,
-          getSpawnArgs: ({ cols, rows }: { cols: number; rows: number }) => {
-            return getSessionPaneSpawnArgs(pane.sessionId, cols, rows)
-              ?? getAgentPaneSpawnArgs?.(pane.sessionId, cols, rows)
-              ?? null;
-          },
         };
       }),
-    ]), [agentPanes, getAgentPaneSpawnArgs, getSessionPaneSpawnArgs, sessionById]);
+    ]), [agentPanes, sessionById]);
 
     const runtime = useGhosttyPaneRuntime(runtimePanes, activePaneId, eventRouter, isActiveSessionRef);
     const fitPane = runtime.fitPane;
@@ -183,7 +173,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       [activePaneId, runtimePanes],
     );
     const splitLayoutActive = workspace.layoutTree?.type === 'split';
-    const showMainHeader = paneIds.length > 1;
+    const showPaneHeader = paneIds.length > 1;
     const effectivePaneId = maximizedPaneId && paneIds.includes(maximizedPaneId) ? maximizedPaneId : null;
     const effectiveZoomedPaneId = zoomedPaneId && paneIds.includes(zoomedPaneId) ? zoomedPaneId : null;
     const renderedLayoutTree = useMemo(() => {
@@ -502,7 +492,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         return (
           <div
             key={agentPane.id}
-            className={`workspace-pane main-pane ${activePaneId === agentPane.id ? 'active' : ''}`}
+            className={`workspace-pane ${activePaneId === agentPane.id ? 'active' : ''}`}
             onMouseDown={() => handleAgentPaneMouseDown(agentPane.id)}
             data-pane-session-id={agentPane.sessionId}
             data-pane-id={agentPane.id}
@@ -511,10 +501,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
             style={frameStyle}
           >
             <div
-              className={`workspace-pane-header ${showMainHeader ? '' : 'workspace-pane-header-hidden'}`.trim()}
-              aria-hidden={showMainHeader ? undefined : true}
+              className={`workspace-pane-header ${showPaneHeader ? '' : 'workspace-pane-header-hidden'}`.trim()}
+              aria-hidden={showPaneHeader ? undefined : true}
             >
-              {showMainHeader ? <span className="workspace-pane-title">{paneTitle}</span> : null}
+              {showPaneHeader ? <span className="workspace-pane-title">{paneTitle}</span> : null}
             </div>
             <div className="workspace-pane-body">
               {isPaneStarting || isPaneFailed ? (
@@ -552,7 +542,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       sessionById,
       resolvedTheme,
       runtime,
-      showMainHeader,
+      showPaneHeader,
     ]);
 
     const focusModeTitle = useMemo(() => {
