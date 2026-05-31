@@ -1338,8 +1338,7 @@ func sessionsMatch(left, right protocol.Session) bool {
 		protocol.Deref(left.NeedsReviewAfterLongRun) == protocol.Deref(right.NeedsReviewAfterLongRun) &&
 		protocol.Deref(left.Recoverable) == protocol.Deref(right.Recoverable) &&
 		strings.Join(left.Todos, "\x00") == strings.Join(right.Todos, "\x00") &&
-		left.LastSeen == right.LastSeen &&
-		left.Muted == right.Muted
+		left.LastSeen == right.LastSeen
 }
 
 func workspaceLayoutsEqual(left, right map[string]protocol.Workspace) bool {

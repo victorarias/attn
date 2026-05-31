@@ -141,8 +141,8 @@ func (s *Store) Add(session *protocol.Session) {
 	session.Agent = protocol.SessionAgent(normalizedAgent)
 	_, err = s.db.Exec(`
 		INSERT INTO sessions
-		(id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, recoverable)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			label = excluded.label,
 			agent = excluded.agent,
@@ -157,7 +157,6 @@ func (s *Store) Add(session *protocol.Session) {
 			state_updated_at = excluded.state_updated_at,
 			todos = excluded.todos,
 			last_seen = excluded.last_seen,
-			muted = excluded.muted,
 			recoverable = excluded.recoverable`,
 		session.ID,
 		session.Label,
@@ -173,7 +172,6 @@ func (s *Store) Add(session *protocol.Session) {
 		session.StateUpdatedAt,
 		string(todosJSON),
 		session.LastSeen,
-		boolToInt(session.Muted),
 		boolToInt(protocol.Deref(session.Recoverable)),
 	)
 	if err != nil {
@@ -193,11 +191,11 @@ func (s *Store) Get(id string) *protocol.Session {
 	var session protocol.Session
 	var todosJSON string
 	var stateSince, stateUpdatedAt, lastSeen string
-	var muted, isWorktree, recoverable int
+	var isWorktree, recoverable int
 	var endpointID, workspaceID, branch, mainRepo sql.NullString
 
 	err := s.db.QueryRow(`
-		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
+		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, recoverable
 		FROM sessions WHERE id = ?`, id).Scan(
 		&session.ID,
 		&session.Label,
@@ -213,7 +211,6 @@ func (s *Store) Get(id string) *protocol.Session {
 		&stateUpdatedAt,
 		&todosJSON,
 		&lastSeen,
-		&muted,
 		&recoverable,
 	)
 	if err != nil {
@@ -238,7 +235,6 @@ func (s *Store) Get(id string) *protocol.Session {
 	session.StateSince = stateSince
 	session.StateUpdatedAt = stateUpdatedAt
 	session.LastSeen = lastSeen
-	session.Muted = muted == 1
 	if recoverable == 1 {
 		session.Recoverable = protocol.Ptr(true)
 	}
@@ -322,11 +318,11 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 
 	if stateFilter == "" {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, recoverable
 			FROM sessions ORDER BY label, id`)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, recoverable
 			FROM sessions WHERE state = ? ORDER BY label, id`, stateFilter)
 	}
 	if err != nil {
@@ -339,7 +335,7 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		var session protocol.Session
 		var todosJSON string
 		var stateSince, stateUpdatedAt, lastSeen string
-		var muted, isWorktree, recoverable int
+		var isWorktree, recoverable int
 		var endpointID, workspaceID, branch, mainRepo sql.NullString
 
 		err := rows.Scan(
@@ -357,7 +353,6 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 			&stateUpdatedAt,
 			&todosJSON,
 			&lastSeen,
-			&muted,
 			&recoverable,
 		)
 		if err != nil {
@@ -382,7 +377,6 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		session.StateSince = stateSince
 		session.StateUpdatedAt = stateUpdatedAt
 		session.LastSeen = lastSeen
-		session.Muted = muted == 1
 		if recoverable == 1 {
 			session.Recoverable = protocol.Ptr(true)
 		}
@@ -831,24 +825,6 @@ func (s *Store) ApplyAgentDriverMetadata(id, runID string, seq uint64, metadata 
 	}
 	updated, _ := result.RowsAffected()
 	return updated == 1
-}
-
-// ToggleMute toggles a session's muted state
-func (s *Store) ToggleMute(id string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.db == nil {
-		if session := s.sessions[id]; session != nil {
-			session.Muted = !session.Muted
-		}
-		return
-	}
-
-	_, err := s.db.Exec("UPDATE sessions SET muted = NOT muted WHERE id = ?", id)
-	if err != nil {
-		log.Printf("[store] ToggleMute: failed for session %s: %v", id, err)
-	}
 }
 
 // SetPRs replaces all PRs, preserving muted state, detail fields, and computing HasNewChanges

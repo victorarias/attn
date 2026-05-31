@@ -8,8 +8,8 @@ import {
 describe('workspaceViewModels', () => {
   it('orders workspaces by daemon order and nests sessions by workspace id', () => {
     const workspaces = [
-      { id: 'workspace-a', title: 'A', directory: '/repo/a', status: 'idle' },
-      { id: 'workspace-b', title: 'B', directory: '/repo/b', status: 'working' },
+      { id: 'workspace-a', title: 'A', directory: '/repo/a', status: 'idle', muted: false },
+      { id: 'workspace-b', title: 'B', directory: '/repo/b', status: 'working', muted: false },
     ];
     const sessions = [
       { id: 'b1', label: 'B1', workspaceId: 'workspace-b', cwd: '/repo/b' },
@@ -38,7 +38,7 @@ describe('workspaceViewModels', () => {
 
   it('keeps daemon workspaces renderable before their sessions arrive', () => {
     const viewModels = buildWorkspaceViewModels(
-      [{ id: 'workspace-pending', title: 'Pending', directory: '/repo/pending', status: 'launching' }],
+      [{ id: 'workspace-pending', title: 'Pending', directory: '/repo/pending', status: 'launching', muted: false }],
       [],
     );
 
@@ -48,6 +48,7 @@ describe('workspaceViewModels', () => {
         title: 'Pending',
         directory: '/repo/pending',
         status: 'launching',
+        muted: false,
         endpointId: undefined,
         sessions: [],
         firstSessionId: null,

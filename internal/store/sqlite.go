@@ -20,8 +20,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	state_since TEXT NOT NULL,
 	state_updated_at TEXT NOT NULL,
 	todos TEXT,
-	last_seen TEXT NOT NULL,
-	muted INTEGER NOT NULL DEFAULT 0
+	last_seen TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS prs (
@@ -288,12 +287,13 @@ var migrations = []migration{
 	{33, "drop unused wont_fix columns from review_comments", ""},
 	{34, "add profile to endpoints", "ALTER TABLE endpoints ADD COLUMN profile TEXT NOT NULL DEFAULT ''"},
 	{35, "create canvas-workspaces table and add workspace_id to sessions", `
-		CREATE TABLE IF NOT EXISTS workspaces (
-			id TEXT PRIMARY KEY,
-			title TEXT NOT NULL,
-			directory TEXT NOT NULL,
-			created_at TEXT NOT NULL
-		);
+	CREATE TABLE IF NOT EXISTS workspaces (
+		id TEXT PRIMARY KEY,
+		title TEXT NOT NULL,
+		directory TEXT NOT NULL,
+		muted INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL
+	);
 		ALTER TABLE sessions ADD COLUMN workspace_id TEXT;
 		CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id ON sessions(workspace_id);
 	`},
@@ -325,6 +325,9 @@ var migrations = []migration{
 		ALTER TABLE sessions ADD COLUMN agent_driver_report_seq INTEGER NOT NULL DEFAULT 0;
 	`},
 	{40, "add workspace pane lifecycle status", ""},
+	{41, "move session mute state to workspaces", `
+		ALTER TABLE workspaces ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -455,6 +458,11 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 40 {
 			if err := applyMigration40(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 41 {
+			if err := applyMigration41(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -781,6 +789,28 @@ func applyMigration40(tx *sql.Tx) error {
 	}
 	if !hasError {
 		if _, err := tx.Exec("ALTER TABLE workspace_layout_panes ADD COLUMN error TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyMigration41(tx *sql.Tx) error {
+	hasWorkspaceMuted, err := columnExists(tx, "workspaces", "muted")
+	if err != nil {
+		return err
+	}
+	if !hasWorkspaceMuted {
+		if _, err := tx.Exec("ALTER TABLE workspaces ADD COLUMN muted INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+	}
+	hasSessionMuted, err := columnExists(tx, "sessions", "muted")
+	if err != nil {
+		return err
+	}
+	if hasSessionMuted {
+		if _, err := tx.Exec("ALTER TABLE sessions DROP COLUMN muted"); err != nil {
 			return err
 		}
 	}

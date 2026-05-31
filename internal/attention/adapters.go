@@ -24,9 +24,6 @@ func (s SessionAdapter) AttentionLabel() string {
 }
 
 func (s SessionAdapter) NeedsAttention() bool {
-	if s.Session.Muted {
-		return false
-	}
 	return s.Session.State == protocol.SessionStateWaitingInput ||
 		s.Session.State == protocol.SessionStatePendingApproval ||
 		s.Session.State == protocol.SessionStateUnknown
@@ -50,7 +47,7 @@ func (s SessionAdapter) AttentionSince() time.Time {
 }
 
 func (s SessionAdapter) AttentionMuted() bool {
-	return s.Session.Muted
+	return false
 }
 
 // PRAdapter wraps a protocol.PR to implement Source.

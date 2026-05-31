@@ -26,9 +26,32 @@ func TestStoreWorkspaceRoundTripAndMembership(t *testing.T) {
 	if got == nil || got.Title != "Project" {
 		t.Fatalf("GetWorkspace() = %#v, want persisted workspace", got)
 	}
+	if got.Muted {
+		t.Fatalf("new workspace muted = true, want false")
+	}
 	members := s.SessionsInWorkspace("workspace-1")
 	if len(members) != 1 || members[0] != "session-1" {
 		t.Fatalf("SessionsInWorkspace() = %#v, want session-1", members)
+	}
+}
+
+func TestToggleWorkspaceMute(t *testing.T) {
+	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewWithDB error: %v", err)
+	}
+	defer s.Close()
+
+	s.AddWorkspace(&protocol.Workspace{ID: "workspace-1", Title: "Project", Directory: "/tmp/project"})
+
+	s.ToggleWorkspaceMute("workspace-1")
+	if got := s.GetWorkspace("workspace-1"); got == nil || !got.Muted {
+		t.Fatalf("workspace after first toggle = %+v, want muted", got)
+	}
+
+	s.ToggleWorkspaceMute("workspace-1")
+	if got := s.GetWorkspace("workspace-1"); got == nil || got.Muted {
+		t.Fatalf("workspace after second toggle = %+v, want unmuted", got)
 	}
 }
 

@@ -152,7 +152,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '72';
+const PROTOCOL_VERSION = '73';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
 // injects this global before any page script runs — see
@@ -2579,11 +2579,15 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'mute_author', author }));
   }, [onAuthorsUpdate]);
 
-  // Mute a session (toggle muted state)
-  const sendMuteSession = useCallback((id: string) => {
+  // Mute a workspace (toggle muted state)
+  const sendMuteWorkspace = useCallback((workspaceId: string, endpointId?: string) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ cmd: 'mute', id }));
+    ws.send(JSON.stringify({
+      cmd: 'mute_workspace',
+      workspace_id: workspaceId,
+      ...(endpointId ? { endpoint_id: endpointId } : {}),
+    }));
   }, []);
 
   // Request daemon to refresh PRs from GitHub
@@ -3675,7 +3679,7 @@ export function useDaemonSocket({
     sendMutePR,
     sendMuteRepo,
     sendMuteAuthor,
-    sendMuteSession,
+    sendMuteWorkspace,
     sendRefreshPRs,
     sendFetchPRDetails,
     sendClearSessions,

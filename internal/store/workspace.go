@@ -19,12 +19,12 @@ func (s *Store) AddWorkspace(ws *protocol.Workspace) {
 	}
 	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err := s.db.Exec(`
-		INSERT INTO workspaces (id, title, directory, created_at)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO workspaces (id, title, directory, muted, created_at)
+		VALUES (?, ?, ?, COALESCE(?, 0), ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
 			directory = excluded.directory`,
-		ws.ID, ws.Title, ws.Directory, createdAt,
+		ws.ID, ws.Title, ws.Directory, boolToInt(ws.Muted), createdAt,
 	); err != nil {
 		log.Printf("[store] AddWorkspace: failed to upsert workspace %s: %v", ws.ID, err)
 	}
@@ -57,12 +57,14 @@ func (s *Store) GetWorkspace(id string) *protocol.Workspace {
 		return nil
 	}
 	var ws protocol.Workspace
+	var muted int
 	err := s.db.QueryRow(`
-		SELECT id, title, directory FROM workspaces WHERE id = ?`, id).
-		Scan(&ws.ID, &ws.Title, &ws.Directory)
+		SELECT id, title, directory, muted FROM workspaces WHERE id = ?`, id).
+		Scan(&ws.ID, &ws.Title, &ws.Directory, &muted)
 	if err != nil {
 		return nil
 	}
+	ws.Muted = muted == 1
 	return &ws
 }
 
@@ -75,7 +77,7 @@ func (s *Store) ListWorkspaces() []*protocol.Workspace {
 	if s.db == nil {
 		return nil
 	}
-	rows, err := s.db.Query(`SELECT id, title, directory FROM workspaces ORDER BY created_at`)
+	rows, err := s.db.Query(`SELECT id, title, directory, muted FROM workspaces ORDER BY created_at`)
 	if err != nil {
 		return nil
 	}
@@ -84,12 +86,29 @@ func (s *Store) ListWorkspaces() []*protocol.Workspace {
 	var out []*protocol.Workspace
 	for rows.Next() {
 		var ws protocol.Workspace
-		if err := rows.Scan(&ws.ID, &ws.Title, &ws.Directory); err != nil {
+		var muted int
+		if err := rows.Scan(&ws.ID, &ws.Title, &ws.Directory, &muted); err != nil {
 			continue
 		}
+		ws.Muted = muted == 1
 		out = append(out, &ws)
 	}
 	return out
+}
+
+// ToggleWorkspaceMute toggles a workspace's muted state. Session mute state is
+// not part of the app-facing model; muting is owned by the workspace.
+func (s *Store) ToggleWorkspaceMute(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	if _, err := s.db.Exec(`UPDATE workspaces SET muted = NOT muted WHERE id = ?`, id); err != nil {
+		log.Printf("[store] ToggleWorkspaceMute: failed for workspace %s: %v", id, err)
+	}
 }
 
 // AssignSessionWorkspace updates the workspace_id column on a session. A live

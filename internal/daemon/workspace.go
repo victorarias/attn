@@ -18,6 +18,7 @@ type workspaceEntry struct {
 	title     string
 	directory string
 	status    protocol.WorkspaceStatus
+	muted     bool
 	// sessionIDs in this workspace, used for status rollup.
 	sessionIDs map[string]struct{}
 }
@@ -39,7 +40,7 @@ func newWorkspaceRegistry() *workspaceRegistry {
 
 // register inserts or updates a workspace. Returns the snapshot to broadcast
 // and a flag indicating whether this is a new registration vs an update.
-func (r *workspaceRegistry) register(id, title, directory string) (protocol.Workspace, bool) {
+func (r *workspaceRegistry) register(id, title, directory string, muted bool) (protocol.Workspace, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -54,7 +55,19 @@ func (r *workspaceRegistry) register(id, title, directory string) (protocol.Work
 	}
 	entry.title = title
 	entry.directory = directory
+	entry.muted = muted
 	return snapshotEntry(entry), !existed
+}
+
+func (r *workspaceRegistry) toggleMuted(id string) (protocol.Workspace, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.workspaces[id]
+	if !ok {
+		return protocol.Workspace{}, false
+	}
+	entry.muted = !entry.muted
+	return snapshotEntry(entry), true
 }
 
 func (r *workspaceRegistry) unregister(id string) (protocol.Workspace, bool) {
@@ -173,6 +186,7 @@ func snapshotEntry(e *workspaceEntry) protocol.Workspace {
 		Title:     e.title,
 		Directory: e.directory,
 		Status:    e.status,
+		Muted:     e.muted,
 	}
 }
 
@@ -271,7 +285,9 @@ func (d *Daemon) handleRegisterWorkspace(client *wsClient, msg *protocol.Registe
 	if d.workspaces == nil {
 		d.workspaces = newWorkspaceRegistry()
 	}
-	snapshot, isNew := d.workspaces.register(id, title, directory)
+	existing := d.store.GetWorkspace(id)
+	muted := existing != nil && existing.Muted
+	snapshot, isNew := d.workspaces.register(id, title, directory, muted)
 	d.store.AddWorkspace(&snapshot)
 	// Make workspace directories available in the recent-locations picker.
 	label := title
@@ -293,6 +309,28 @@ func (d *Daemon) handleRegisterWorkspace(client *wsClient, msg *protocol.Registe
 	}
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:     eventName,
+		Workspace: &snapshot,
+	})
+}
+
+func (d *Daemon) handleMuteWorkspaceWS(client *wsClient, msg *protocol.MuteWorkspaceMessage) {
+	id := strings.TrimSpace(msg.WorkspaceID)
+	if id == "" {
+		d.sendCommandError(client, protocol.CmdMuteWorkspace, "missing workspace_id")
+		return
+	}
+	if d.workspaces == nil {
+		d.sendCommandError(client, protocol.CmdMuteWorkspace, "workspace registry unavailable")
+		return
+	}
+	snapshot, ok := d.workspaces.toggleMuted(id)
+	if !ok {
+		d.sendCommandError(client, protocol.CmdMuteWorkspace, "workspace not found")
+		return
+	}
+	d.store.ToggleWorkspaceMute(id)
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:     protocol.EventWorkspaceStateChanged,
 		Workspace: &snapshot,
 	})
 }
@@ -351,7 +389,7 @@ func (d *Daemon) loadWorkspacesFromStore() {
 		if ws == nil {
 			continue
 		}
-		d.workspaces.register(ws.ID, ws.Title, ws.Directory)
+		d.workspaces.register(ws.ID, ws.Title, ws.Directory, ws.Muted)
 	}
 	for _, session := range d.store.List("") {
 		if session == nil {

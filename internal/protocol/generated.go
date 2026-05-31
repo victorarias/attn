@@ -1163,14 +1163,6 @@ type MuteAuthorMessage struct {
 	Cmd string `json:"cmd"`
 }
 
-type MuteMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// ID corresponds to the JSON schema field "id".
-	ID string `json:"id"`
-}
-
 type MutePRMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1185,6 +1177,17 @@ type MuteRepoMessage struct {
 
 	// Repo corresponds to the JSON schema field "repo".
 	Repo string `json:"repo"`
+}
+
+type MuteWorkspaceMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
 }
 
 type PR struct {
@@ -2058,9 +2061,6 @@ type Session struct {
 	// MainRepo corresponds to the JSON schema field "main_repo".
 	MainRepo *string `json:"main_repo,omitempty,omitzero"`
 
-	// Muted corresponds to the JSON schema field "muted".
-	Muted bool `json:"muted"`
-
 	// NeedsReviewAfterLongRun corresponds to the JSON schema field
 	// "needs_review_after_long_run".
 	NeedsReviewAfterLongRun *bool `json:"needs_review_after_long_run,omitempty,omitzero"`
@@ -2638,6 +2638,9 @@ type Workspace struct {
 
 	// Layout corresponds to the JSON schema field "layout".
 	Layout *WorkspaceLayout `json:"layout,omitempty,omitzero"`
+
+	// Muted corresponds to the JSON schema field "muted".
+	Muted bool `json:"muted"`
 
 	// Status corresponds to the JSON schema field "status".
 	Status WorkspaceStatus `json:"status"`

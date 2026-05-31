@@ -1622,8 +1622,6 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		visualizedMsg := msg.(*protocol.SessionVisualizedMessage)
 		d.handleSessionVisualized(visualizedMsg.ID)
 		d.sendOK(conn)
-	case protocol.CmdMute:
-		d.handleMute(conn, msg.(*protocol.MuteMessage))
 	case protocol.CmdQueryPRs:
 		d.handleQueryPRs(conn, msg.(*protocol.QueryPRsMessage))
 	case protocol.CmdMutePR:
@@ -1691,7 +1689,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	}
 	session.WorkspaceID = workspaceID
 	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: session.Label, Directory: session.Directory, Status: protocol.WorkspaceStatusLaunching})
-	d.workspaces.register(workspaceID, session.Label, session.Directory)
+	d.workspaces.register(workspaceID, session.Label, session.Directory, false)
 	d.store.Add(session)
 	if resumeSessionID := d.consumePendingResumeSessionID(session.ID); resumeSessionID != "" {
 		d.store.SetResumeSessionID(session.ID, resumeSessionID)
@@ -2400,11 +2398,6 @@ func (d *Daemon) handleHeartbeat(conn net.Conn, msg *protocol.HeartbeatMessage) 
 	d.sendOK(conn)
 }
 
-func (d *Daemon) handleMute(conn net.Conn, msg *protocol.MuteMessage) {
-	d.store.ToggleMute(msg.ID)
-	d.sendOK(conn)
-}
-
 func (d *Daemon) handleQueryPRs(conn net.Conn, msg *protocol.QueryPRsMessage) {
 	prs := d.store.ListPRs(protocol.Deref(msg.Filter))
 	resp := protocol.Response{
@@ -2856,7 +2849,7 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 			Status:    protocol.WorkspaceStatusLaunching,
 		})
 	}
-	d.workspaces.register(workspaceID, msg.Session.Label, msg.Session.Directory)
+	d.workspaces.register(workspaceID, msg.Session.Label, msg.Session.Directory, false)
 
 	// Add session directly to store
 	d.store.Add(&msg.Session)

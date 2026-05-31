@@ -165,11 +165,11 @@ func (c *Client) Heartbeat(id string) error {
 	return err
 }
 
-// ToggleMute toggles a session's muted state
-func (c *Client) ToggleMute(id string) error {
-	msg := protocol.MuteMessage{
-		Cmd: protocol.CmdMute,
-		ID:  id,
+// ToggleWorkspaceMute toggles a workspace's muted state.
+func (c *Client) ToggleWorkspaceMute(workspaceID string) error {
+	msg := protocol.MuteWorkspaceMessage{
+		Cmd:         protocol.CmdMuteWorkspace,
+		WorkspaceID: workspaceID,
 	}
 	_, err := c.send(msg)
 	return err

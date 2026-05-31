@@ -934,7 +934,7 @@
   opacity: 0.8;
 }
 
-/* Muted sessions summary group */
+/* Muted workspaces summary group */
 .session-group.muted-summary {
   cursor: pointer;
   border-top: 1px solid var(--color-border);

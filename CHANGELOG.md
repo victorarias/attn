@@ -6,6 +6,16 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-05-31]
+
+### Changed
+- **Workspace Muting**: Muting now applies to whole workspaces instead of individual sessions. Muted workspaces move to the muted section together with all of their sessions, and session rows no longer expose mute controls.
+
+### Removed
+- **Session Muting**: Session-level mute state was removed from the app, daemon protocol, and session database schema.
+
+---
+
 ## [2026-05-30]
 
 ### Changed
