@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
+import { WHATS_NEW_ID, WHATS_NEW_STORAGE_KEY } from './hooks/useWhatsNew';
 
 const mockUseSessionStore = vi.fn();
 const mockUseDaemonStore = vi.fn();
@@ -255,6 +256,9 @@ describe('worktree cleanup prompt', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    // Keep the one-time "what's new" announcement suppressed; it is unrelated
+    // to worktree cleanup and would otherwise render over the app under test.
+    localStorage.setItem(WHATS_NEW_STORAGE_KEY, WHATS_NEW_ID);
     vi.useRealTimers();
     mockOpenPR.mockResolvedValue({
       success: true,
@@ -443,6 +447,23 @@ describe('worktree cleanup prompt', () => {
 
     await waitFor(() => {
       expect(screen.queryByText('Starting session')).not.toBeInTheDocument();
+    });
+  });
+
+  it('disables app shortcuts while the first-run whats-new modal is open', async () => {
+    localStorage.removeItem(WHATS_NEW_STORAGE_KEY);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toHaveTextContent('attn is organized around workspaces');
+    });
+
+    await waitFor(() => {
+      const keyboardArgs = mockUseKeyboardShortcuts.mock.calls[mockUseKeyboardShortcuts.mock.calls.length - 1]?.[0] as {
+        enabled?: boolean;
+      };
+      expect(keyboardArgs.enabled).toBe(false);
     });
   });
 

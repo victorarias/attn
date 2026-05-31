@@ -8,12 +8,9 @@ import type { TerminalSplitDirection } from '../types/workspace';
 import { SHORTCUTS, type ShortcutId } from '../shortcuts';
 import { getTerminalPerfSnapshot } from '../utils/terminalPerf';
 import { getReviewPerfSnapshot } from '../utils/reviewPerf';
-import { getAllResizeEvents } from '../utils/terminalDebug';
 import { clearPtyPerfSnapshot, getPtyPerfSnapshot, recordPtyDecode, recordWsJsonParse } from '../utils/ptyPerf';
 import { buildSessionRenderHealth } from '../utils/renderHealth';
-import { buildRuntimeTimelineSnapshot } from '../utils/runtimeTimeline';
 import { collectWorkspaceLayoutDiagnostics, projectWorkspaceBounds } from '../utils/workspaceDiagnostics';
-import { clearTerminalRuntimeLog, setTerminalRuntimeTraceEnabled } from '../utils/terminalRuntimeLog';
 import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot } from '../utils/terminalStyleSummary';
 
@@ -536,14 +533,12 @@ function collectRenderHealthSnapshot(
   );
   const terminalPerf = getTerminalPerfSnapshot();
   const filteredSessions = visualSnapshot.sessions || [];
-  const terminalNames = new Set<string>();
 
   const sessionHealth = filteredSessions.map((session) => {
     const terminalsByPaneId = new Map(
       terminalPerf
         .filter((terminal) => (session.panes || []).some((pane) => pane.sessionId === terminal.sessionId && pane.paneId === terminal.paneId))
         .map((terminal) => {
-          terminalNames.add(terminal.terminalName);
           return [terminal.paneId || '', terminal] as const;
         }),
     );
@@ -582,8 +577,6 @@ function collectRenderHealthSnapshot(
     paneCount += session.summary.paneCount;
   }
 
-  const resizeEvents = getAllResizeEvents().filter((event) => terminalNames.has(event.terminalName));
-
   return {
     activeSessionId,
     capturedAt: new Date().toISOString(),
@@ -594,7 +587,6 @@ function collectRenderHealthSnapshot(
       errorPaneCount,
     },
     sessions: sessionHealth,
-    resizeEvents,
   };
 }
 
@@ -1034,12 +1026,7 @@ async function capturePerfSnapshot(
   const terminals = options?.sessionIds
     ? allTerminalPerf.filter((terminal) => terminal.sessionId && scopedSessionIds.has(terminal.sessionId))
     : allTerminalPerf;
-  const terminalNames = new Set(terminals.map((terminal) => terminal.terminalName));
-  const resizeEvents = terminalNames.size > 0
-    ? getAllResizeEvents().filter((event) => terminalNames.has(event.terminalName))
-    : getAllResizeEvents();
   const ptySnapshot = getPtyPerfSnapshot();
-  const terminalRuntimeTrace = window.__ATTN_TERMINAL_RUNTIME_DUMP?.() || [];
   const browserMemory = options?.includeMemory === false
     ? {
         performanceMemory: null,
@@ -1085,22 +1072,12 @@ async function capturePerfSnapshot(
     },
     browserMemory,
     terminals,
-    terminalRuntimeTraceEventCount: terminalRuntimeTrace.length,
     review: getReviewPerfSnapshot(),
-    paneDebugEventCount: window.__ATTN_PANE_DEBUG_DUMP?.().length || 0,
-    resizeEventCount: resizeEvents.length,
-    resizeEvents,
     pty: ptySnapshot,
     ptyFocus: summarizePtyRecentTraffic(
       ptySnapshot.recentEvents,
       scopedRuntimeIds.size > 0 ? scopedRuntimeIds : null,
     ),
-    runtimeTimeline: buildRuntimeTimelineSnapshot({
-      events: terminalRuntimeTrace,
-      terminals,
-      pty: ptySnapshot,
-      runtimeIds: scopedRuntimeIds.size > 0 ? scopedRuntimeIds : null,
-    }),
   };
 }
 
@@ -1839,38 +1816,6 @@ export function useUiAutomationBridge({
         }
         return collectReviewLoopUiState(sessionId);
       }
-      case 'set_pane_debug': {
-        const enabled = payload.enabled !== false;
-        window.__ATTN_PANE_DEBUG_ENABLE?.(enabled);
-        if (enabled) {
-          window.__ATTN_PANE_DEBUG_CLEAR?.();
-        }
-        return { enabled, file: window.__ATTN_PANE_DEBUG_FILE || null };
-      }
-      case 'dump_pane_debug':
-        return {
-          file: window.__ATTN_PANE_DEBUG_FILE || null,
-          state: window.__ATTN_PANE_DEBUG_STATE?.() || null,
-          events: window.__ATTN_PANE_DEBUG_DUMP?.() || [],
-        };
-      case 'set_terminal_runtime_trace': {
-        const enabled = payload.enabled !== false;
-        setTerminalRuntimeTraceEnabled(enabled);
-        if (enabled) {
-          window.__ATTN_TERMINAL_RUNTIME_CLEAR?.();
-        } else {
-          clearTerminalRuntimeLog();
-        }
-        return {
-          enabled,
-          file: window.__ATTN_TERMINAL_RUNTIME_FILE || null,
-        };
-      }
-      case 'dump_terminal_runtime_trace':
-        return {
-          file: window.__ATTN_TERMINAL_RUNTIME_FILE || null,
-          events: window.__ATTN_TERMINAL_RUNTIME_DUMP?.() || [],
-        };
       case 'capture_structured_snapshot':
         return collectVisualSnapshot(
           sessions,

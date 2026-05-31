@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { vi } from 'vitest';
+import { WHATS_NEW_ID, WHATS_NEW_STORAGE_KEY } from '../hooks/useWhatsNew';
 
 // Mock Tauri APIs that components might use
 vi.mock('@tauri-apps/api/core', () => ({
@@ -66,4 +67,9 @@ if (typeof window !== 'undefined') {
     });
   };
   ensureLocalStorage();
+
+  // Treat the one-time "what's new" announcement as already seen so it does not
+  // render over unrelated component/App tests. Tests that exercise the modal
+  // clear localStorage and assert the gating themselves.
+  window.localStorage.setItem(WHATS_NEW_STORAGE_KEY, WHATS_NEW_ID);
 }

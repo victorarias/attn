@@ -74,6 +74,20 @@ describe('installTerminalKeyHandler', () => {
     expect(sendToPty).not.toHaveBeenCalled();
   });
 
+  it('routes Cmd+/ to the shortcuts cheatsheet when terminal owns the key event', () => {
+    vi.mocked(triggerShortcut).mockReturnValue(true);
+    const sendToPty = vi.fn();
+    const handler = installTerminalKeyHandler(sendToPty);
+    const event = new KeyboardEvent('keydown', {
+      key: '/',
+      metaKey: true,
+    });
+
+    expect(handler(event)).toBe(false);
+    expect(triggerShortcut).toHaveBeenCalledWith('ui.showShortcuts');
+    expect(sendToPty).not.toHaveBeenCalled();
+  });
+
   it('routes Cmd+Shift+N to new horizontal session when terminal owns the key event', () => {
     vi.mocked(triggerShortcut).mockReturnValue(true);
     const sendToPty = vi.fn();

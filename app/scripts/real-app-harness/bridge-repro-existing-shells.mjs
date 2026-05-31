@@ -50,7 +50,6 @@ async function main() {
   const client = new UiAutomationClient({ appPath: options.appPath });
   await client.waitForManifest(5_000);
   await client.waitForReady(5_000);
-  await client.request('set_pane_debug', { enabled: true });
 
   const initialState = await client.request('get_state');
   const session = (initialState.sessions || []).find((entry) => shellPanes(entry).length >= 2);
@@ -71,9 +70,7 @@ async function main() {
   const firstVisible = await waitForPaneText(client, session.id, firstShell.paneId, firstToken, 10_000);
 
   const snapshot = await client.request('capture_structured_snapshot');
-  const debugDump = await client.request('dump_pane_debug');
   saveJson(path.join(runDir, 'structured-snapshot.json'), snapshot);
-  saveJson(path.join(runDir, 'pane-debug.json'), debugDump);
   fs.writeFileSync(path.join(runDir, 'second-shell-text.txt'), secondVisible.text || '', 'utf8');
   fs.writeFileSync(path.join(runDir, 'first-shell-revisit-text.txt'), firstVisible.text || '', 'utf8');
 

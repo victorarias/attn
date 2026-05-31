@@ -217,7 +217,6 @@ async function main() {
   try {
     process.env.ATTN_HARNESS_PARK_VISIBLE_PX ??= '0';
     await launchFreshAppAndConnect(client, observer);
-    await client.request('set_terminal_runtime_trace', { enabled: true }).catch(() => {});
     await closeExistingSessions(client, options.sessionRootDir);
 
     const workspaceA = await createShellWorkspace(client, observer, path.join(sessionDir, 'alpha'), `ws-switch-alpha-${runId}`);

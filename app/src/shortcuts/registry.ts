@@ -70,6 +70,9 @@ export const SHORTCUTS = {
   // Settings
   'ui.openSettings': { key: ',', meta: true },
 
+  // Keyboard shortcuts cheatsheet
+  'ui.showShortcuts': { key: '/', meta: true },
+
   // Font scaling
   'ui.increaseFontSize': { key: '=', meta: true },
   'ui.decreaseFontSize': { key: '-', meta: true },

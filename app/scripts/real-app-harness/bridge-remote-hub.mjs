@@ -1200,13 +1200,6 @@ Remote hub options:
     }
     saveJson(path.join(runDir, 'session-ui-selected.json'), selectedSession);
 
-    const paneDebugConfig = await client.request('set_pane_debug', { enabled: true });
-    const terminalRuntimeTraceConfig = await client.request('set_terminal_runtime_trace', { enabled: true });
-    saveJson(path.join(runDir, 'runtime-debug-config.json'), {
-      paneDebug: paneDebugConfig,
-      terminalRuntimeTrace: terminalRuntimeTraceConfig,
-    });
-
     setStep('remote-pty-interaction');
     const utilityPane = await client.request('split_pane', {
       sessionId: remoteSessionId,
@@ -1687,18 +1680,6 @@ printf '%s\\n' ${shellQuote(diffMarker)} >> ${shellQuote(preparedRepo.trackedFil
         }, { timeoutMs: 10_000 });
         saveJson(path.join(runDir, 'remote-utility-pane-state-failure.json'), paneState);
       }
-    } catch {
-      // Ignore failure artifact errors.
-    }
-    try {
-      const paneDebug = await client.request('dump_pane_debug', {}, { timeoutMs: 10_000 });
-      saveJson(path.join(runDir, 'pane-debug-failure.json'), paneDebug);
-    } catch {
-      // Ignore failure artifact errors.
-    }
-    try {
-      const terminalRuntimeTrace = await client.request('dump_terminal_runtime_trace', {}, { timeoutMs: 10_000 });
-      saveJson(path.join(runDir, 'terminal-runtime-trace-failure.json'), terminalRuntimeTrace);
     } catch {
       // Ignore failure artifact errors.
     }
