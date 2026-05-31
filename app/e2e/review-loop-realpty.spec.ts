@@ -7,11 +7,13 @@ async function injectLocalSession(
   session: { id: string; label: string; state: string; cwd?: string }
 ) {
   await page.evaluate((s) => {
+    const workspaceId = `workspace-${s.id}`;
     window.__TEST_INJECT_SESSION?.({
       id: s.id,
       label: s.label,
       state: s.state as 'working' | 'waiting_input' | 'idle',
       cwd: s.cwd || '/tmp/test',
+      workspaceId,
     });
   }, session);
 }

@@ -6,14 +6,21 @@ async function injectLocalSession(
   session: { id: string; label: string; state: string; cwd?: string; isWorktree?: boolean; branch?: string }
 ) {
   await page.evaluate((s) => {
+    const paneId = `pane-${s.id}`;
+    const workspaceId = `workspace-${s.id}`;
     window.__TEST_INJECT_SESSION?.({
       id: s.id,
       label: s.label,
       state: s.state as 'working' | 'waiting_input' | 'idle',
       cwd: s.cwd || '/tmp/test',
+      workspaceId,
       ...(s.isWorktree !== undefined ? { isWorktree: s.isWorktree } : {}),
       ...(s.branch ? { branch: s.branch } : {}),
     });
+    window.__TEST_SET_SESSION_WORKSPACE?.(s.id, {
+      agents: [{ id: paneId, runtimeId: s.id, sessionId: s.id, title: s.label }],
+      layoutTree: { type: 'pane', paneId },
+    }, paneId);
   }, session);
 }
 
@@ -26,6 +33,7 @@ async function createSession(
       label: string;
       state: string;
       directory?: string;
+      workspace_id?: string;
       is_worktree?: boolean;
       branch?: string;
       main_repo?: string;
@@ -52,6 +60,7 @@ async function createSession(
     label: session.label,
     state: session.state,
     directory: cwd,
+    workspace_id: `workspace-${session.id}`,
     is_worktree: session.is_worktree,
     branch: session.branch,
     main_repo: session.main_repo,
@@ -60,6 +69,96 @@ async function createSession(
 
 test.describe('Keyboard Shortcuts', () => {
   test.describe('Terminal Workspace', () => {
+    test('⌘N opens the new-session dialog for the current workspace', async ({ page, daemon }) => {
+      await daemon.start();
+      await page.goto('/');
+      await page.waitForSelector('.dashboard');
+
+      await createSession(page, daemon, { id: 's-new', label: 'Root', state: 'working', cwd: '/tmp/test/new-session' });
+      await expect(page.locator('[data-testid="session-s-new"]')).toBeVisible({ timeout: 5000 });
+
+      await page.locator('[data-testid="session-s-new"]').click();
+      await expect(page.locator('[data-session-terminal-workspace="workspace-s-new"]')).toBeVisible({ timeout: 2000 });
+
+      await page.keyboard.press('Meta+n');
+
+      const selectedWorkspaceSessions = page.locator('.workspace-group.selected .session-item');
+      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.picker-title')).toHaveText('New Session Location');
+      await expect(selectedWorkspaceSessions).toHaveCount(1);
+      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(1);
+    });
+
+    test('⌘D creates a session-backed shell split in the current workspace', async ({ page, daemon }) => {
+      await daemon.start();
+      await page.goto('/');
+      await page.waitForSelector('.dashboard');
+
+      await createSession(page, daemon, { id: 's-shell', label: 'Root', state: 'working', cwd: '/tmp/test/shell-session' });
+      await expect(page.locator('[data-testid="session-s-shell"]')).toBeVisible({ timeout: 5000 });
+
+      await page.locator('[data-testid="session-s-shell"]').click();
+      await expect(page.locator('[data-session-terminal-workspace="workspace-s-shell"]')).toBeVisible({ timeout: 2000 });
+      await page.locator('.terminal-wrapper.active .terminal-container').click();
+
+      await page.keyboard.press('Meta+d');
+
+      const selectedWorkspaceSessions = page.locator('.workspace-group.selected .session-item');
+      await expect(selectedWorkspaceSessions).toHaveCount(2, { timeout: 5000 });
+      await expect(page.locator('.workspace-group.selected')).toContainText('shell');
+      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2, { timeout: 5000 });
+    });
+
+    test('⌘⇧D creates a session-backed horizontal shell split in the current workspace', async ({ page, daemon }) => {
+      await daemon.start();
+      await page.goto('/');
+      await page.waitForSelector('.dashboard');
+
+      await createSession(page, daemon, { id: 's-horizontal', label: 'Root', state: 'working', cwd: '/tmp/test/horizontal-session' });
+      await expect(page.locator('[data-testid="session-s-horizontal"]')).toBeVisible({ timeout: 5000 });
+
+      await page.locator('[data-testid="session-s-horizontal"]').click();
+      await expect(page.locator('[data-session-terminal-workspace="workspace-s-horizontal"]')).toBeVisible({ timeout: 2000 });
+      await page.locator('.terminal-wrapper.active .terminal-container').click();
+
+      await page.keyboard.press('Meta+Shift+d');
+
+      const selectedWorkspaceSessions = page.locator('.workspace-group.selected .session-item');
+      await expect(selectedWorkspaceSessions).toHaveCount(2, { timeout: 5000 });
+      await expect(page.locator('.workspace-group.selected')).toContainText('shell');
+      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2, { timeout: 5000 });
+      await expect(page.locator('.terminal-wrapper.active [data-split-direction="horizontal"]')).toHaveCount(1, { timeout: 5000 });
+    });
+
+    test('⌘⇧N creates a picked session on a horizontal split in the current workspace', async ({ page, daemon }) => {
+      await daemon.start();
+      await page.goto('/');
+      await page.waitForSelector('.dashboard');
+
+      await createSession(page, daemon, { id: 's-picked-horizontal', label: 'Root', state: 'working', cwd: '/tmp/test/picked-horizontal-session' });
+      await expect(page.locator('[data-testid="session-s-picked-horizontal"]')).toBeVisible({ timeout: 5000 });
+
+      await page.locator('[data-testid="session-s-picked-horizontal"]').click();
+      await expect(page.locator('[data-session-terminal-workspace="workspace-s-picked-horizontal"]')).toBeVisible({ timeout: 2000 });
+
+      await page.keyboard.press('Meta+Shift+n');
+      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.picker-title')).toHaveText('New Session Location');
+      await expect(page.locator('.workspace-group.selected .session-item')).toHaveCount(1);
+
+      const enabledAgent = page.locator('.agent-option:not(:disabled)').first();
+      await expect(enabledAgent).toBeVisible();
+      await enabledAgent.click();
+      await page.locator('[data-testid="location-picker-path-input"]').fill('/tmp');
+      await page.keyboard.press('Enter');
+
+      const selectedWorkspaceSessions = page.locator('.workspace-group.selected .session-item');
+      await expect(selectedWorkspaceSessions).toHaveCount(2, { timeout: 10000 });
+      await expect(page.locator('.workspace-group.selected')).toContainText('tmp');
+      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2, { timeout: 10000 });
+      await expect(page.locator('.terminal-wrapper.active [data-split-direction="horizontal"]')).toHaveCount(1, { timeout: 5000 });
+    });
+
     test('⌘⇧Z zooms toward the active pane without hiding the others', async ({ page, daemon }) => {
       await daemon.start();
       await page.goto('/');
@@ -73,24 +172,27 @@ test.describe('Keyboard Shortcuts', () => {
 
       await page.evaluate(() => {
         window.__TEST_SET_SESSION_WORKSPACE?.('s-zoom', {
-          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          agents: [
+            { id: 'pane-session', runtimeId: 's-zoom', sessionId: 's-zoom', title: 'Zoom' },
+            { id: 'pane-shell-1', runtimeId: 'runtime-shell-1', sessionId: 's-zoom', title: 'Shell 1' },
+          ],
           layoutTree: {
             type: 'split',
             splitId: 'root',
             direction: 'vertical',
             ratio: 0.5,
             children: [
-              { type: 'pane', paneId: 'main' },
+              { type: 'pane', paneId: 'pane-session' },
               { type: 'pane', paneId: 'pane-shell-1' },
             ],
           },
         }, 'pane-shell-1');
       });
-      await expect(page.locator('[data-pane-session-id="s-zoom"][data-pane-kind="shell"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-pane-session-id="s-zoom"][data-pane-id="pane-shell-1"]')).toBeVisible({ timeout: 5000 });
 
-      const workspace = page.locator('[data-session-terminal-workspace="s-zoom"]');
-      const mainPane = page.locator('[data-pane-session-id="s-zoom"][data-pane-id="main"]');
-      const utilityPane = page.locator('[data-pane-session-id="s-zoom"][data-pane-kind="shell"]').first();
+      const workspace = page.locator('[data-session-terminal-workspace="workspace-s-zoom"]');
+      const mainPane = page.locator('[data-pane-session-id="s-zoom"][data-pane-id="pane-session"]');
+      const utilityPane = page.locator('[data-pane-session-id="s-zoom"][data-pane-id="pane-shell-1"]').first();
       const rootSplit = page.locator('[data-split-id="root"]');
       const zoomHint = page.getByText('⌘⇧Z zoom');
 
@@ -122,7 +224,7 @@ test.describe('Keyboard Shortcuts', () => {
       await expect(utilityPane).toBeVisible();
 
       await mainPane.click();
-      await expect(workspace).toHaveAttribute('data-zoomed-pane-id', 'main', { timeout: 2000 });
+      await expect(workspace).toHaveAttribute('data-zoomed-pane-id', 'pane-session', { timeout: 2000 });
       await expect(rootSplit).toHaveAttribute('data-split-ratio', '0.760', { timeout: 2000 });
       await expect(zoomHint).toHaveAttribute('data-active', 'true');
 
@@ -201,8 +303,8 @@ test.describe('Keyboard Shortcuts', () => {
     });
   });
 
-  test.describe('Session Selection', () => {
-    test('⌘1-9 selects session by index', async ({ page, daemon }) => {
+  test.describe('Workspace Selection', () => {
+    test('⌘1-9 selects workspace by index', async ({ page, daemon }) => {
       await daemon.start();
       await page.goto('/');
       await page.waitForSelector('.dashboard');
@@ -216,12 +318,12 @@ test.describe('Keyboard Shortcuts', () => {
 
       // Switching from a focused Ghostty terminal must not forward the shortcut's digit.
       await page.locator('[data-testid="session-s1"]').click();
-      const firstTerminal = page.locator('[data-pane-session-id="s1"][data-pane-id="main"] .terminal-container');
+      const firstTerminal = page.locator('[data-pane-session-id="s1"][data-pane-kind="agent"] .terminal-container');
       await expect(firstTerminal).toBeVisible({ timeout: 5000 });
       await firstTerminal.focus();
 
       await page.keyboard.press('Meta+2');
-      await expect(page.locator('[data-session-terminal-workspace="s2"]')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('[data-session-terminal-workspace="workspace-s2"]')).toBeVisible({ timeout: 2000 });
       expect(await page.evaluate(() => (
         window.__TEST_GET_SESSION_INPUT_EVENTS?.('s1') ?? []
       ).filter((event) => event.event === 'send_to_pty').length)).toBe(0);

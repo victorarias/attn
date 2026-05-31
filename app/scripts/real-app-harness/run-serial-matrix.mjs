@@ -16,6 +16,31 @@ if (process.env.ATTN_HARNESS_PROFILE === undefined) {
 
 const scenarioCatalog = [
   {
+    id: 'workspace-shell-lifecycle',
+    label: 'Workspace shell lifecycle',
+    command: ['pnpm', 'run', 'real-app:scenario-workspace-shell-lifecycle'],
+  },
+  {
+    id: 'workspace-creation-shortcuts',
+    label: 'Workspace creation shortcuts',
+    command: ['pnpm', 'run', 'real-app:scenario-workspace-creation-shortcuts'],
+  },
+  {
+    id: 'workspace-switching',
+    label: 'Workspace switching',
+    command: ['pnpm', 'run', 'real-app:scenario-workspace-switching'],
+  },
+  {
+    id: 'workspace-close-last-session-switches-back',
+    label: 'Workspace close last session switches back',
+    command: ['pnpm', 'run', 'real-app:scenario-workspace-close-last-session-switches-back'],
+  },
+  {
+    id: 'workspace-close-one-session-keeps-selection',
+    label: 'Workspace close one session keeps selection',
+    command: ['pnpm', 'run', 'real-app:scenario-workspace-close-one-session-keeps-selection'],
+  },
+  {
     id: 'tr205-codex',
     label: 'TR-205 remote codex',
     command: ['pnpm', 'run', 'real-app:scenario-tr205'],
@@ -71,8 +96,8 @@ const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-tr401-local-codex'],
   },
   {
-    id: 'tr401-codex-main',
-    label: 'TR-401 Codex fresh main-pane resize',
+    id: 'tr401-codex-initial-pane',
+    label: 'TR-401 Codex fresh initial-pane resize',
     command: ['pnpm', 'run', 'real-app:scenario-tr401-codex-main'],
   },
   {

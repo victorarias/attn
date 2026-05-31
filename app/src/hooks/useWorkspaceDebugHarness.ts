@@ -1,15 +1,15 @@
 import { useEffect } from 'react';
 import type { RefObject } from 'react';
 import type { Session } from '../store/sessions';
-import { MAIN_TERMINAL_PANE_ID } from '../store/sessions';
 import type { SessionTerminalWorkspaceHandle } from '../components/SessionTerminalWorkspace';
 import { activeElementSummary } from '../utils/paneRuntimeDebug';
 
 declare global {
   interface Window {
-    __TEST_GET_MAIN_TERMINAL_TEXT?: (sessionId: string) => string;
-    __TEST_GET_ACTIVE_UTILITY_TEXT?: () => string;
-    __TEST_GET_ACTIVE_UTILITY_PTY?: (sessionId: string) => string | null;
+    __TEST_GET_SESSION_PANE_TEXT?: (sessionId: string) => string;
+    __TEST_GET_SESSION_PANE_SIZE?: (sessionId: string) => { cols: number; rows: number } | null;
+    __TEST_GET_ACTIVE_SESSION_PANE_TEXT?: () => string;
+    __TEST_GET_ACTIVE_SESSION_PANE_RUNTIME?: (sessionId: string) => string | null;
     __ATTN_PANE_DEBUG_STATE?: () => Record<string, unknown>;
   }
 }
@@ -32,30 +32,43 @@ export function useWorkspaceDebugHarness({
       return;
     }
 
-    window.__TEST_GET_MAIN_TERMINAL_TEXT = (sessionId: string) => {
-      return workspaceRefs.current.get(sessionId)?.getPaneText(MAIN_TERMINAL_PANE_ID) || '';
+    window.__TEST_GET_SESSION_PANE_TEXT = (sessionId: string) => {
+      const session = sessions.find((entry) => entry.id === sessionId);
+      if (!session) {
+        return '';
+      }
+      const paneId = session?.workspace.agents.find((entry) => entry.sessionId === sessionId)?.id || '';
+      return workspaceRefs.current.get(session.workspaceId)?.getPaneText(paneId) || '';
     };
 
-    window.__TEST_GET_ACTIVE_UTILITY_TEXT = () => {
+    window.__TEST_GET_SESSION_PANE_SIZE = (sessionId: string) => {
+      const session = sessions.find((entry) => entry.id === sessionId);
+      if (!session) {
+        return null;
+      }
+      const paneId = session?.workspace.agents.find((entry) => entry.sessionId === sessionId)?.id || '';
+      return workspaceRefs.current.get(session.workspaceId)?.getPaneSize(paneId) || null;
+    };
+
+    window.__TEST_GET_ACTIVE_SESSION_PANE_TEXT = () => {
       if (!activeSessionId) {
         return '';
       }
       const session = sessions.find((entry) => entry.id === activeSessionId);
       const activePaneId = getActivePaneIdForSession(session);
-      if (!session || activePaneId === MAIN_TERMINAL_PANE_ID) {
+      if (!session || !activePaneId) {
         return '';
       }
-      return workspaceRefs.current.get(activeSessionId)?.getPaneText(activePaneId) || '';
+      return workspaceRefs.current.get(session.workspaceId)?.getPaneText(activePaneId) || '';
     };
 
-    window.__TEST_GET_ACTIVE_UTILITY_PTY = (sessionId: string) => {
+    window.__TEST_GET_ACTIVE_SESSION_PANE_RUNTIME = (sessionId: string) => {
       const session = sessions.find((entry) => entry.id === sessionId);
       const activePaneId = getActivePaneIdForSession(session);
-      if (!session || activePaneId === MAIN_TERMINAL_PANE_ID) {
+      if (!session || !activePaneId) {
         return null;
       }
-      const terminal = session.workspace.terminals.find((entry) => entry.id === activePaneId);
-      return terminal?.ptyId ?? null;
+      return session.workspace.agents.find((entry) => entry.id === activePaneId)?.runtimeId ?? null;
     };
 
     window.__ATTN_PANE_DEBUG_STATE = () => ({
@@ -65,15 +78,16 @@ export function useWorkspaceDebugHarness({
         label: session.label,
         activePaneId: getActivePaneIdForSession(session),
         daemonActivePaneId: session.daemonActivePaneId,
-        paneIds: [MAIN_TERMINAL_PANE_ID, ...session.workspace.terminals.map((terminal) => terminal.id)],
+        paneIds: session.workspace.agents.map((agent) => agent.id),
       })),
       ...activeElementSummary(),
     });
 
     return () => {
-      delete window.__TEST_GET_MAIN_TERMINAL_TEXT;
-      delete window.__TEST_GET_ACTIVE_UTILITY_TEXT;
-      delete window.__TEST_GET_ACTIVE_UTILITY_PTY;
+      delete window.__TEST_GET_SESSION_PANE_TEXT;
+      delete window.__TEST_GET_SESSION_PANE_SIZE;
+      delete window.__TEST_GET_ACTIVE_SESSION_PANE_TEXT;
+      delete window.__TEST_GET_ACTIVE_SESSION_PANE_RUNTIME;
       delete window.__ATTN_PANE_DEBUG_STATE;
     };
   }, [activeSessionId, getActivePaneIdForSession, sessions, workspaceRefs]);

@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
 
@@ -13,6 +13,9 @@ const mockUseKeyboardShortcuts = vi.fn();
 const mockSendWorkspaceClosePane = vi.fn(async () => ({ success: true }));
 const mockCloseSession = vi.fn();
 const mockOpenPR = vi.hoisted(() => vi.fn());
+const { mockPtySpawn } = vi.hoisted(() => ({
+  mockPtySpawn: vi.fn(async () => {}),
+}));
 let mockSessionStoreReturn: Record<string, unknown>;
 let mockDaemonStoreReturn: Record<string, unknown>;
 let mockDaemonSocketReturn: Record<string, unknown>;
@@ -25,6 +28,57 @@ function deferred<T>() {
     reject = promiseReject;
   });
   return { promise, resolve, reject };
+}
+
+function buildMockDaemonWorkspaces() {
+  const sessions = (mockUseSessionStore()?.sessions ?? []) as Array<{
+    id: string;
+    label: string;
+    cwd: string;
+    workspaceId: string;
+    workspace?: {
+      agents?: Array<{ id: string; sessionId?: string }>;
+    };
+  }>;
+  const byWorkspace = new Map<string, typeof sessions>();
+  for (const session of sessions) {
+    const current = byWorkspace.get(session.workspaceId) ?? [];
+    current.push(session);
+    byWorkspace.set(session.workspaceId, current);
+  }
+  return Array.from(byWorkspace.entries()).map(([workspaceId, workspaceSessions]) => {
+    const firstSession = workspaceSessions[0];
+    const paneIds = new Set<string>();
+    const panes = workspaceSessions.flatMap((session) => (
+      session.workspace?.agents ?? [{ id: `pane-${session.id}`, sessionId: session.id }]
+    ))
+      .filter((pane) => {
+        if (paneIds.has(pane.id)) {
+          return false;
+        }
+        paneIds.add(pane.id);
+        return true;
+      })
+      .map((pane) => ({
+        workspace_id: workspaceId,
+        pane_id: pane.id,
+        kind: 'agent',
+        runtime_id: pane.sessionId ?? pane.id,
+        session_id: pane.sessionId ?? pane.id,
+        title: pane.sessionId ?? pane.id,
+      }));
+    return {
+      id: workspaceId,
+      title: firstSession.label,
+      directory: firstSession.cwd,
+      status: 'active',
+      layout: {
+        active_pane_id: panes[0]?.pane_id ?? '',
+        layout_json: '',
+        panes,
+      },
+    };
+  });
 }
 
 vi.mock('@tauri-apps/plugin-deep-link', () => ({
@@ -50,8 +104,16 @@ vi.mock('./components/Sidebar', () => ({
   ReviewLoopIcon: () => null,
   DiffIcon: () => null,
   PRsIcon: () => null,
-  Sidebar: ({ visualOrder, onCloseSession }: { visualOrder: Array<{ id: string }>; onCloseSession: (id: string) => void }) => (
-    <button data-testid="close-session" onClick={() => onCloseSession(visualOrder[0].id)}>
+  Sidebar: ({
+    selectedId,
+    visualOrder,
+    onCloseSession,
+  }: {
+    selectedId: string | null;
+    visualOrder: Array<{ firstSessionId: string | null }>;
+    onCloseSession: (id: string) => void;
+  }) => (
+    <button data-testid="close-session" onClick={() => (visualOrder[0]?.firstSessionId ?? selectedId) && onCloseSession((visualOrder[0]?.firstSessionId ?? selectedId)!)}>
       Close Session
     </button>
   ),
@@ -162,7 +224,6 @@ vi.mock('./hooks/usePRsNeedingAttention', () => ({
 }));
 
 vi.mock('./store/sessions', () => ({
-  MAIN_TERMINAL_PANE_ID: 'main',
   useSessionStore: () => mockUseSessionStore(),
 }));
 
@@ -170,9 +231,25 @@ vi.mock('./store/daemonSessions', () => ({
   useDaemonStore: () => mockUseDaemonStore(),
 }));
 
-vi.mock('./hooks/useDaemonSocket', () => ({
-  useDaemonSocket: (args: unknown) => mockUseDaemonSocket(args),
-}));
+vi.mock('./hooks/useDaemonSocket', async () => {
+  const React = await import('react');
+  return {
+    useDaemonSocket: (args: { onWorkspacesUpdate?: (workspaces: ReturnType<typeof buildMockDaemonWorkspaces>) => void }) => {
+      React.useEffect(() => {
+        args.onWorkspacesUpdate?.(buildMockDaemonWorkspaces());
+      }, []);
+      return mockUseDaemonSocket(args);
+    },
+  };
+});
+
+vi.mock('./pty/bridge', async () => {
+  const actual = await vi.importActual<typeof import('./pty/bridge')>('./pty/bridge');
+  return {
+    ...actual,
+    ptySpawn: mockPtySpawn,
+  };
+});
 
 describe('worktree cleanup prompt', () => {
   beforeEach(() => {
@@ -193,14 +270,15 @@ describe('worktree cleanup prompt', () => {
           label: 'worktree-session',
           state: 'working',
           cwd: '/tmp/repo/.worktrees/feature-a',
+          workspaceId: 'workspace-s1',
           agent: 'claude',
           transcriptMatched: true,
           branch: 'feature-a',
           isWorktree: true,
           daemonActivePaneId: 'main',
           workspace: {
-            terminals: [],
-            layoutTree: { type: 'pane', paneId: 'main' },
+            agents: [{ id: 'pane-session', runtimeId: 's1', sessionId: 's1', title: 'worktree-session' }],
+            layoutTree: { type: 'pane', paneId: 'pane-session' },
           },
         },
       ],
@@ -263,7 +341,7 @@ describe('worktree cleanup prompt', () => {
       sendUnsubscribeGitStatus: fn,
       sendSessionVisualized: fn,
       sendWorkspaceClosePane: mockSendWorkspaceClosePane,
-      sendWorkspaceSplitPane: fn,
+      sendWorkspaceAddSessionPane: vi.fn(async () => ({ success: true })),
       sendGetFileDiff: vi.fn(async () => ({ success: true, original: '', modified: '' })),
       sendGetBranchDiffFiles: vi.fn(async () => ({ success: true, base_ref: 'main', files: [] })),
       getRepoInfo: vi.fn(async () => ({ success: true, is_git_repo: true, branch: 'main' })),
@@ -309,6 +387,15 @@ describe('worktree cleanup prompt', () => {
     mockSessionStoreReturn.sessions = [];
     mockSessionStoreReturn.activeSessionId = null;
     mockSessionStoreReturn.createSession = createSession;
+    mockSessionStoreReturn.takeSessionSpawnArgs = vi.fn((id: string) => ({
+      id,
+      cwd: '/tmp/repo--feat-async',
+      cols: 80,
+      rows: 24,
+      label: 'repo--feat-async',
+      agent: 'codex',
+      workspace_id: `workspace-${id}`,
+    }));
     mockDaemonStoreReturn.daemonSessions = [];
     mockDaemonSocketReturn.sendCreateWorktree = vi.fn(() => createWorktree.promise);
 
@@ -467,14 +554,15 @@ describe('worktree cleanup prompt', () => {
         label: 'second-worktree-session',
         state: 'working',
         cwd: '/tmp/repo/.worktrees/feature-b',
+        workspaceId: 'workspace-s2',
         agent: 'claude',
         transcriptMatched: true,
         branch: 'feature-b',
         isWorktree: true,
         daemonActivePaneId: 'main',
         workspace: {
-          terminals: [],
-          layoutTree: { type: 'pane', paneId: 'main' },
+          agents: [{ id: 'pane-session', runtimeId: 's2', sessionId: 's2', title: 'second-worktree-session' }],
+          layoutTree: { type: 'pane', paneId: 'pane-session' },
         },
       },
     ];
@@ -551,14 +639,15 @@ describe('worktree cleanup prompt', () => {
           label: 'remote-session',
           state: 'waiting_input',
           cwd: '/srv/repo',
+          workspaceId: 'workspace-remote-1',
           agent: 'claude',
           transcriptMatched: true,
           branch: 'main',
           daemonActivePaneId: 'main',
           endpointId: 'ep-1',
           workspace: {
-            terminals: [],
-            layoutTree: { type: 'pane', paneId: 'main' },
+            agents: [{ id: 'pane-session', runtimeId: 'remote-1', sessionId: 'remote-1', title: 'remote-session' }],
+            layoutTree: { type: 'pane', paneId: 'pane-session' },
           },
         },
       ],
@@ -619,7 +708,7 @@ describe('worktree cleanup prompt', () => {
       sendUnsubscribeGitStatus: fn,
       sendSessionVisualized,
       sendWorkspaceClosePane: mockSendWorkspaceClosePane,
-      sendWorkspaceSplitPane: fn,
+      sendWorkspaceAddSessionPane: vi.fn(async () => ({ success: true })),
       sendGetFileDiff: vi.fn(async () => ({ success: true, original: '', modified: '' })),
       sendGetBranchDiffFiles: vi.fn(async () => ({ success: true, base_ref: 'main', files: [] })),
       getRepoInfo: vi.fn(async () => ({ success: true, is_git_repo: true, branch: 'main' })),
@@ -711,7 +800,7 @@ describe('worktree cleanup prompt', () => {
     });
   });
 
-  it('prompts before closing a split session from the main pane with Cmd+W', async () => {
+  it('closes the active pane before closing the workspace from Cmd+W', async () => {
     mockUseSessionStore.mockReturnValue({
       sessions: [
         {
@@ -719,19 +808,49 @@ describe('worktree cleanup prompt', () => {
           label: 'session-with-split',
           state: 'working',
           cwd: '/tmp/repo',
+          workspaceId: 'workspace-s1',
           agent: 'claude',
           transcriptMatched: true,
           daemonActivePaneId: 'main',
           workspace: {
-            terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+            agents: [
+              { id: 'pane-session', runtimeId: 's1', sessionId: 's1', title: 'session-with-split' },
+              { id: 'pane-session-1', runtimeId: 'runtime-session-1', sessionId: 'runtime-session-1', title: 'session pane 1' },
+            ],
             layoutTree: {
               type: 'split',
               splitId: 'root',
               direction: 'vertical',
               ratio: 0.5,
               children: [
-                { type: 'pane', paneId: 'main' },
-                { type: 'pane', paneId: 'pane-shell-1' },
+                { type: 'pane', paneId: 'pane-session' },
+                { type: 'pane', paneId: 'pane-session-1' },
+              ],
+            },
+          },
+        },
+        {
+          id: 'runtime-session-1',
+          label: 'session pane 1',
+          state: 'working',
+          cwd: '/tmp/repo',
+          workspaceId: 'workspace-s1',
+          agent: 'shell',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-session-1',
+          workspace: {
+            agents: [
+              { id: 'pane-session', runtimeId: 's1', sessionId: 's1', title: 'session-with-split' },
+              { id: 'pane-session-1', runtimeId: 'runtime-session-1', sessionId: 'runtime-session-1', title: 'session pane 1' },
+            ],
+            layoutTree: {
+              type: 'split',
+              splitId: 'root',
+              direction: 'vertical',
+              ratio: 0.5,
+              children: [
+                { type: 'pane', paneId: 'pane-session' },
+                { type: 'pane', paneId: 'pane-session-1' },
               ],
             },
           },
@@ -763,27 +882,24 @@ describe('worktree cleanup prompt', () => {
 
     render(<App />);
 
+    await waitFor(() => {
+      expect(mockUseKeyboardShortcuts.mock.calls.length).toBeGreaterThan(1);
+    });
     const keyboardCall = mockUseKeyboardShortcuts.mock.calls[mockUseKeyboardShortcuts.mock.calls.length - 1];
     const keyboardArgs = keyboardCall?.[0] as { onCloseSession: () => void } | undefined;
     expect(keyboardArgs).toBeDefined();
 
-    act(() => {
+    await act(async () => {
       keyboardArgs?.onCloseSession();
+      await Promise.resolve();
     });
 
-    const dialog = screen.getByRole('dialog');
-    expect(dialog).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(mockCloseSession).not.toHaveBeenCalled();
-
-    fireEvent.keyDown(dialog, { key: 'y' });
-
-    await waitFor(() => {
-      expect(mockCloseSession).toHaveBeenCalledWith('s1');
-    });
-    expect(mockSendWorkspaceClosePane).not.toHaveBeenCalled();
+    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('workspace-s1', 'pane-session');
   });
 
-  it('cancels split-session close from the sidebar with Escape', async () => {
+  it('closes a session pane from the sidebar without showing the split terminal prompt', async () => {
     mockUseSessionStore.mockReturnValue({
       sessions: [
         {
@@ -791,19 +907,49 @@ describe('worktree cleanup prompt', () => {
           label: 'session-with-split',
           state: 'working',
           cwd: '/tmp/repo',
+          workspaceId: 'workspace-s1',
           agent: 'claude',
           transcriptMatched: true,
           daemonActivePaneId: 'main',
           workspace: {
-            terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+            agents: [
+              { id: 'pane-session', runtimeId: 's1', sessionId: 's1', title: 'session-with-split' },
+              { id: 'pane-session-1', runtimeId: 'runtime-session-1', sessionId: 'runtime-session-1', title: 'session pane 1' },
+            ],
             layoutTree: {
               type: 'split',
               splitId: 'root',
               direction: 'vertical',
               ratio: 0.5,
               children: [
-                { type: 'pane', paneId: 'main' },
-                { type: 'pane', paneId: 'pane-shell-1' },
+                { type: 'pane', paneId: 'pane-session' },
+                { type: 'pane', paneId: 'pane-session-1' },
+              ],
+            },
+          },
+        },
+        {
+          id: 'runtime-session-1',
+          label: 'session pane 1',
+          state: 'working',
+          cwd: '/tmp/repo',
+          workspaceId: 'workspace-s1',
+          agent: 'shell',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-session-1',
+          workspace: {
+            agents: [
+              { id: 'pane-session', runtimeId: 's1', sessionId: 's1', title: 'session-with-split' },
+              { id: 'pane-session-1', runtimeId: 'runtime-session-1', sessionId: 'runtime-session-1', title: 'session pane 1' },
+            ],
+            layoutTree: {
+              type: 'split',
+              splitId: 'root',
+              direction: 'vertical',
+              ratio: 0.5,
+              children: [
+                { type: 'pane', paneId: 'pane-session' },
+                { type: 'pane', paneId: 'pane-session-1' },
               ],
             },
           },
@@ -827,16 +973,54 @@ describe('worktree cleanup prompt', () => {
 
     await userEvent.click(screen.getByTestId('close-session'));
 
-    const dialog = screen.getByRole('dialog');
-    expect(dialog).toBeInTheDocument();
-
-    fireEvent.keyDown(dialog, { key: 'Escape' });
-
-    expect(mockCloseSession).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).toBeNull();
+    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('workspace-s1', 'pane-session');
+    expect(mockCloseSession).not.toHaveBeenCalled();
   });
 
-  it('uses Cmd+W to close the active utility pane before closing the session', async () => {
+  it('closes a single-pane session through the workspace pane path', async () => {
+    mockUseSessionStore.mockReturnValue({
+      sessions: [
+        {
+          id: 'shell-1',
+          label: 'shell',
+          state: 'working',
+          cwd: '/tmp/repo',
+          agent: 'shell',
+          workspaceId: 'workspace-shell-1',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-shell-1',
+          workspace: {
+            agents: [
+              { id: 'pane-shell-1', runtimeId: 'shell-1', sessionId: 'shell-1', title: 'shell' },
+            ],
+            layoutTree: { type: 'pane', paneId: 'pane-shell-1' },
+          },
+        },
+      ],
+      activeSessionId: 'shell-1',
+      connect: vi.fn(async () => {}),
+      connected: true,
+      launcherConfig: { executables: {} },
+      createSession: vi.fn(async () => 'shell-1'),
+      closeSession: mockCloseSession,
+      setActiveSession: vi.fn(),
+      takeSessionSpawnArgs: vi.fn(() => null),
+      reloadSession: vi.fn(async () => {}),
+      setLauncherConfig: vi.fn(),
+      syncFromDaemonSessions: vi.fn(),
+      syncFromDaemonWorkspaces: vi.fn(),
+    });
+
+    render(<App />);
+
+    await userEvent.click(screen.getByTestId('close-session'));
+
+    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('workspace-shell-1', 'pane-shell-1');
+    expect(mockCloseSession).not.toHaveBeenCalled();
+  });
+
+  it('uses Cmd+W to close the active session pane before closing the session', async () => {
     mockUseSessionStore.mockReturnValue({
       sessions: [
         {
@@ -844,19 +1028,49 @@ describe('worktree cleanup prompt', () => {
           label: 'session-with-split',
           state: 'working',
           cwd: '/tmp/repo',
+          workspaceId: 'workspace-s1',
           agent: 'claude',
           transcriptMatched: true,
-          daemonActivePaneId: 'pane-shell-1',
+          daemonActivePaneId: 'pane-session-1',
           workspace: {
-            terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+            agents: [
+              { id: 'pane-session', runtimeId: 's1', sessionId: 's1', title: 'session-with-split' },
+              { id: 'pane-session-1', runtimeId: 'runtime-session-1', sessionId: 'runtime-session-1', title: 'session pane 1' },
+            ],
             layoutTree: {
               type: 'split',
               splitId: 'root',
               direction: 'vertical',
               ratio: 0.5,
               children: [
-                { type: 'pane', paneId: 'main' },
-                { type: 'pane', paneId: 'pane-shell-1' },
+                { type: 'pane', paneId: 'pane-session' },
+                { type: 'pane', paneId: 'pane-session-1' },
+              ],
+            },
+          },
+        },
+        {
+          id: 'runtime-session-1',
+          label: 'session pane 1',
+          state: 'working',
+          cwd: '/tmp/repo',
+          workspaceId: 'workspace-s1',
+          agent: 'shell',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-session-1',
+          workspace: {
+            agents: [
+              { id: 'pane-session', runtimeId: 's1', sessionId: 's1', title: 'session-with-split' },
+              { id: 'pane-session-1', runtimeId: 'runtime-session-1', sessionId: 'runtime-session-1', title: 'session pane 1' },
+            ],
+            layoutTree: {
+              type: 'split',
+              splitId: 'root',
+              direction: 'vertical',
+              ratio: 0.5,
+              children: [
+                { type: 'pane', paneId: 'pane-session' },
+                { type: 'pane', paneId: 'pane-session-1' },
               ],
             },
           },
@@ -882,12 +1096,13 @@ describe('worktree cleanup prompt', () => {
     const keyboardArgs = keyboardCall?.[0] as { onCloseSession: () => void } | undefined;
     expect(keyboardArgs).toBeDefined();
 
-    act(() => {
+    await act(async () => {
       keyboardArgs?.onCloseSession();
+      await Promise.resolve();
     });
 
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('s1', 'pane-shell-1');
+    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('workspace-s1', 'pane-session-1');
     expect(mockCloseSession).not.toHaveBeenCalled();
   });
 });

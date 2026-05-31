@@ -32,13 +32,13 @@ func TestWorkspaceSaveLoadRoundTrip(t *testing.T) {
 			Direction: workspacelayout.DirectionVertical,
 			Ratio:     workspacelayout.DefaultSplitRatio,
 			Children: []workspacelayout.Node{
-				{Type: "pane", PaneID: workspacelayout.MainPaneID},
+				{Type: "pane", PaneID: "pane-a"},
 				{Type: "pane", PaneID: "pane-b"},
 			},
 		},
 		Panes: []workspacelayout.Pane{
-			{PaneID: workspacelayout.MainPaneID, RuntimeID: "sess-1", SessionID: "sess-1", Kind: workspacelayout.PaneKindAgent, Title: workspacelayout.DefaultPaneTitle},
-			{PaneID: "pane-b", RuntimeID: "runtime-b", Kind: workspacelayout.PaneKindShell, Title: "Shell 1"},
+			{PaneID: "pane-a", RuntimeID: "sess-1", SessionID: "sess-1", Kind: workspacelayout.PaneKindAgent, Title: workspacelayout.DefaultPaneTitle},
+			{PaneID: "pane-b", RuntimeID: "sess-2", SessionID: "sess-2", Kind: workspacelayout.PaneKindAgent, Title: "Session 2"},
 		},
 	}
 
@@ -64,14 +64,11 @@ func TestWorkspaceSaveLoadRoundTrip(t *testing.T) {
 	if len(panes) != 2 {
 		t.Fatalf("ListWorkspaceLayoutPanes() len = %d, want 2", len(panes))
 	}
-	if panes[0].PaneID != workspacelayout.MainPaneID || panes[1].PaneID != "pane-b" {
+	if panes[0].PaneID != "pane-a" || panes[1].PaneID != "pane-b" {
 		t.Fatalf("ListWorkspaceLayoutPanes() = %+v, want stable pane order", panes)
 	}
-	if workspaceID, paneID, ok := s.FindWorkspaceLayoutPaneBySessionID("sess-1"); !ok || workspaceID != "workspace-1" || paneID != workspacelayout.MainPaneID {
-		t.Fatalf("FindWorkspaceLayoutPaneBySessionID() = (%q, %q, %v), want workspace-1/main/true", workspaceID, paneID, ok)
-	}
-	if workspaceID, paneID, ok := s.FindWorkspaceLayoutPaneByRuntimeID("runtime-b"); !ok || workspaceID != "workspace-1" || paneID != "pane-b" {
-		t.Fatalf("FindWorkspaceLayoutPaneByRuntimeID() = (%q, %q, %v), want workspace-1/pane-b/true", workspaceID, paneID, ok)
+	if workspaceID, paneID, ok := s.FindWorkspaceLayoutPaneBySessionID("sess-1"); !ok || workspaceID != "workspace-1" || paneID != "pane-a" {
+		t.Fatalf("FindWorkspaceLayoutPaneBySessionID() = (%q, %q, %v), want workspace-1/pane-a/true", workspaceID, paneID, ok)
 	}
 }
 
@@ -91,7 +88,7 @@ func TestRemoveWorkspaceDeletesLayoutRows(t *testing.T) {
 	})
 	s.AddWorkspace(&protocol.Workspace{ID: "workspace-1", Title: "Session 1", Directory: "/tmp/sess-1"})
 
-	if err := s.SaveWorkspaceLayout(workspacelayout.DefaultWorkspaceLayout("workspace-1", "sess-1")); err != nil {
+	if err := s.SaveWorkspaceLayout(workspacelayout.DefaultWorkspaceLayout("workspace-1", "pane-a", "sess-1")); err != nil {
 		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
 	}
 
@@ -119,7 +116,7 @@ func TestInMemoryFallbackSupportsSessionWorkspaceAndState(t *testing.T) {
 		LastSeen:       string(protocol.TimestampNow()),
 	})
 
-	snapshot := workspacelayout.DefaultWorkspaceLayout("workspace-1", "sess-1")
+	snapshot := workspacelayout.DefaultWorkspaceLayout("workspace-1", "pane-a", "sess-1")
 	if err := s.SaveWorkspaceLayout(snapshot); err != nil {
 		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
 	}
@@ -136,8 +133,8 @@ func TestInMemoryFallbackSupportsSessionWorkspaceAndState(t *testing.T) {
 	if loadedWorkspace == nil {
 		t.Fatal("GetWorkspaceLayout() = nil, want snapshot")
 	}
-	if loadedWorkspace.ActivePaneID != workspacelayout.MainPaneID {
-		t.Fatalf("ActivePaneID = %q, want %q", loadedWorkspace.ActivePaneID, workspacelayout.MainPaneID)
+	if loadedWorkspace.ActivePaneID != "pane-a" {
+		t.Fatalf("ActivePaneID = %q, want pane-a", loadedWorkspace.ActivePaneID)
 	}
 
 	s.UpdateState("sess-1", protocol.StateWaitingInput)

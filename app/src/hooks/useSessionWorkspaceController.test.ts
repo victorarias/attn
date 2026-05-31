@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Session } from '../store/sessions';
-import { MAIN_TERMINAL_PANE_ID } from '../store/sessions';
+const SESSION_PANE_ID = 'pane-session';
 import { useSessionWorkspaceController } from './useSessionWorkspaceController';
 
 vi.mock('../components/SessionTerminalWorkspace/paneRuntimeEventRouter', () => ({
@@ -89,10 +89,10 @@ function buildSession(overrides?: Partial<Session>): Session {
     agent: 'claude',
     transcriptMatched: true,
     workspace: {
-      terminals: [],
-      layoutTree: { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+      agents: [],
+      layoutTree: { type: 'pane', paneId: SESSION_PANE_ID },
     },
-    daemonActivePaneId: MAIN_TERMINAL_PANE_ID,
+    daemonActivePaneId: SESSION_PANE_ID,
     ...overrides,
   };
 }
@@ -114,7 +114,7 @@ describe('useSessionWorkspaceController', () => {
     const { result } = renderHook(() => useSessionWorkspaceController([session], session.id));
 
     act(() => {
-      result.current.setWorkspaceRef(session.id)({
+      result.current.setWorkspaceRef(session.workspaceId)({
         fitPane: vi.fn(),
         fitActivePane,
         focusPane: vi.fn(),
@@ -138,8 +138,8 @@ describe('useSessionWorkspaceController', () => {
     });
 
     expect(fitActivePane).toHaveBeenCalledOnce();
-    expect(result.current.getPaneText(session.id, MAIN_TERMINAL_PANE_ID)).toBe('pane text');
-    expect(result.current.getPaneSize(session.id, MAIN_TERMINAL_PANE_ID)).toEqual({ cols: 80, rows: 24 });
+    expect(result.current.getPaneText(session.id, SESSION_PANE_ID)).toBe('pane text');
+    expect(result.current.getPaneSize(session.id, SESSION_PANE_ID)).toEqual({ cols: 80, rows: 24 });
   });
 
   it('forgets workspace handles when removed', () => {
@@ -147,7 +147,7 @@ describe('useSessionWorkspaceController', () => {
     const { result } = renderHook(() => useSessionWorkspaceController([session], session.id));
 
     act(() => {
-      result.current.setWorkspaceRef(session.id)({
+      result.current.setWorkspaceRef(session.workspaceId)({
         fitPane: vi.fn(),
         fitActivePane: vi.fn(),
         focusPane: vi.fn(),
@@ -167,10 +167,40 @@ describe('useSessionWorkspaceController', () => {
     });
 
     act(() => {
-      result.current.removeWorkspaceRef(session.id);
+      result.current.removeWorkspaceRef(session.workspaceId);
     });
 
-    expect(result.current.getPaneText(session.id, MAIN_TERMINAL_PANE_ID)).toBe('');
-    expect(result.current.getPaneSize(session.id, MAIN_TERMINAL_PANE_ID)).toBeNull();
+    expect(result.current.getPaneText(session.id, SESSION_PANE_ID)).toBe('');
+    expect(result.current.getPaneSize(session.id, SESSION_PANE_ID)).toBeNull();
+  });
+
+  it('does not treat a session id as a workspace id for stale session helpers', () => {
+    const focusPane = vi.fn();
+    const getPaneText = vi.fn(() => 'stale text');
+    const { result } = renderHook(() => useSessionWorkspaceController([], null));
+
+    act(() => {
+      result.current.setWorkspaceRef('session-1')({
+        fitPane: vi.fn(),
+        fitActivePane: vi.fn(),
+        focusPane,
+        focusActivePane: vi.fn(),
+        typePaneTextViaUI: vi.fn(() => true),
+        isPaneInputFocused: vi.fn(() => true),
+        scrollPaneToTop: vi.fn(() => true),
+        getPaneText,
+        getPaneSize: vi.fn(() => ({ cols: 80, rows: 24 })),
+        getPaneVisibleContent: vi.fn(() => buildVisibleContent('stale text')),
+        getPaneVisibleStyleSummary: vi.fn(() => buildVisibleStyleSummary()),
+        resetPaneTerminal: vi.fn(() => true),
+        injectPaneBytes: vi.fn(async () => true),
+        injectPaneBase64: vi.fn(async () => true),
+        drainPaneTerminal: vi.fn(async () => true),
+      });
+      result.current.focusSessionPane('session-1', SESSION_PANE_ID);
+    });
+
+    expect(focusPane).not.toHaveBeenCalled();
+    expect(result.current.getPaneText('session-1', SESSION_PANE_ID)).toBe('');
   });
 });

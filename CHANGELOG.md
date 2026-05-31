@@ -8,9 +8,20 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-05-30]
 
+### Changed
+- **Workspace Sidebar**: The session sidebar now presents workspaces as the primary navigation unit, keeps existing sidebar tools visible, and adds local display options for open, tight, and boxed workspace layouts.
+- **Workspace Shortcuts**: Command-N now opens the new-session picker for the current workspace, while Command-Shift-N opens the new-workspace picker.
+
+### Removed
+- **Non-Session Terminal Panes**: Workspace panes are now always backed by sessions; legacy standalone terminal panes and first-pane special handling were removed from the app, daemon, protocol, and database migration path.
+
 ### Fixed
 - **Session Creation**: Creating sessions from new worktrees now runs in the background with the same compact progress surface as worktree cleanup, so slow repository/plugin setup no longer traps the app in the picker.
 - **Terminal URL Clicks**: Command-clicking URLs in Ghostty terminals now uses the rendered terminal canvas position, preventing clicks on the row above a URL from opening it when the canvas is vertically offset.
+- **Session Startup**: New workspace sessions and split sessions now appear as daemon-owned loading panes until the shell/agent actually starts, and failed starts remain visible with the failure reason instead of leaving blank panes.
+- **Workspace Splits**: Command-D and Command-Shift-D now create session-backed shell splits that appear in the workspace sidebar.
+- **Workspace Closing**: Closing a session removes only that session from its workspace, including when the closed session is occupying the first pane; closing the final session closes the workspace too.
+- **Workspace Sidebar**: Empty workspaces no longer appear in the sidebar, display options stay open while switching modes, and session controls remain aligned at the row edge.
 - **Codex Resize Redraws**: Attn now coalesces Codex's synchronized terminal redraws during pane resizes, preventing old scrollback from visibly streaming through the embedded terminal when layouts change.
 - **Ghostty Shift-Tab**: Shift-Tab in embedded Ghostty terminals now reaches agents as reverse-tab input instead of being treated like a prompt submit.
 - **Worktree Cleanup**: Failed worktree deletes now keep attn state intact, explain forceable local-change failures, and let you explicitly force-delete the local worktree and local branch without touching remotes.

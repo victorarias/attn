@@ -37,9 +37,7 @@ type wsClient struct {
 	pendingRemote   map[string]struct{}          // remote runtime IDs awaiting attach_result
 	attachMu        sync.Mutex
 
-	// Identity + capabilities declared via client_hello. Clients that
-	// never send hello have an empty capabilities map and are treated as
-	// the legacy default (matches the Tauri app's pre-hello behavior).
+	// Identity + capabilities declared via client_hello.
 	clientKind    string
 	clientVersion string
 	capabilities  map[string]struct{}
@@ -62,6 +60,10 @@ func (c *wsClient) HasCapability(cap string) bool {
 	defer c.identityMu.RUnlock()
 	_, ok := c.capabilities[cap]
 	return ok
+}
+
+func (c *wsClient) speaksWorkspaceProtocol() bool {
+	return c.HasCapability(protocol.CapabilityWorkspaceSessions)
 }
 
 // setIdentity records the hello payload on the client. Idempotent —
@@ -720,6 +722,15 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	if shouldLogWSCommand(cmd) {
 		d.logf("WebSocket parsed cmd: %s", cmd)
 	}
+	if cmd != protocol.CmdClientHello && !client.speaksWorkspaceProtocol() {
+		errMsg := fmt.Sprintf("client must send client_hello with %q capability", protocol.CapabilityWorkspaceSessions)
+		d.logf("rejecting websocket command %s: %s", cmd, errMsg)
+		d.sendCommandError(client, cmd, errMsg)
+		if client.conn != nil {
+			_ = client.conn.Close(websocket.StatusPolicyViolation, errMsg)
+		}
+		return
+	}
 	if d.isRecovering() && blocksDuringRecovery(cmd) {
 		d.sendCommandError(client, cmd, "daemon_recovering")
 		return
@@ -855,8 +866,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleKillSession(client, msg.(*protocol.KillSessionMessage))
 	case protocol.CmdWorkspaceLayoutGet:
 		d.handleWorkspaceLayoutGet(client, msg.(*protocol.WorkspaceLayoutGetMessage))
-	case protocol.CmdWorkspaceLayoutSplitPane:
-		d.handleWorkspaceLayoutSplitPane(client, msg.(*protocol.WorkspaceLayoutSplitPaneMessage))
+	case protocol.CmdWorkspaceLayoutAddSessionPane:
+		d.handleWorkspaceLayoutAddSessionPane(client, msg.(*protocol.WorkspaceLayoutAddSessionPaneMessage))
 	case protocol.CmdWorkspaceLayoutClosePane:
 		d.handleWorkspaceLayoutClosePane(client, msg.(*protocol.WorkspaceLayoutClosePaneMessage))
 	case protocol.CmdWorkspaceLayoutFocusPane:
@@ -1002,8 +1013,8 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.WorkspaceLayoutGetMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspaceLayoutSplitPane:
-		if typed, ok := msg.(*protocol.WorkspaceLayoutSplitPaneMessage); ok {
+	case protocol.CmdWorkspaceLayoutAddSessionPane:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutAddSessionPaneMessage); ok {
 			return typed.WorkspaceID
 		}
 	case protocol.CmdWorkspaceLayoutClosePane:

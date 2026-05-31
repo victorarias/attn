@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import {
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -14,13 +14,14 @@ import {
   assertPaneVisibleContent,
   captureSessionArtifacts,
   compactTerminalText,
+  waitForFirstWorkspacePane,
   waitForNewShellPane,
   waitForPaneInputFocus,
   waitForPaneState,
   waitForPaneText,
   waitForPaneVisible,
 } from './scenarioAssertions.mjs';
-import { ensureClaudeMainPromptReady } from './scenarioAgents.mjs';
+import { ensureClaudeInitialPanePromptReady } from './scenarioAgents.mjs';
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -57,6 +58,7 @@ async function main() {
 
   let primarySessionId = null;
   let secondarySessionId = null;
+  let primaryInitialPaneId = null;
   let utilityPaneId = null;
 
   try {
@@ -65,22 +67,23 @@ async function main() {
     });
 
     primarySessionId = await runner.step('create_primary_session', async () => {
-      return createSessionAndWaitForMain({
+      return createSessionAndWaitForInitialPane({
         client,
         observer,
         cwd: runner.sessionDir,
         label: `tr301-primary-${runner.runId}`,
         agent: 'claude',
-        promptReadyFn: ensureClaudeMainPromptReady,
+        promptReadyFn: ensureClaudeInitialPanePromptReady,
       });
     });
 
     utilityPaneId = await runner.step('create_primary_utility', async () => {
       const workspaceBefore = await client.request('get_workspace', { sessionId: primarySessionId });
       const existingPaneIds = new Set((workspaceBefore.panes || []).map((pane) => pane.paneId));
+      primaryInitialPaneId = (await waitForFirstWorkspacePane(client, primarySessionId, 'primary initial pane before utility split', 20_000)).paneId;
       await client.request('split_pane', {
         sessionId: primarySessionId,
-        targetPaneId: 'main',
+        targetPaneId: primaryInitialPaneId,
         direction: 'vertical',
       });
       const utilityPane = await waitForNewShellPane(
@@ -96,13 +99,13 @@ async function main() {
     });
 
     secondarySessionId = await runner.step('create_secondary_session', async () => {
-      return createSessionAndWaitForMain({
+      return createSessionAndWaitForInitialPane({
         client,
         observer,
         cwd: runner.sessionDir,
         label: `tr301-secondary-${runner.runId}`,
         agent: 'claude',
-        promptReadyFn: ensureClaudeMainPromptReady,
+        promptReadyFn: ensureClaudeInitialPanePromptReady,
       });
     });
 
@@ -117,13 +120,13 @@ async function main() {
         'primary utility pane to remain the active pane after session switch',
         20_000,
       );
-      await assertPaneVisibleContent(client, primarySessionId, 'main', {
+      await assertPaneVisibleContent(client, primarySessionId, primaryInitialPaneId, {
         minNonEmptyLines: 2,
         minDenseLines: 0,
         minCharCount: 20,
         minMaxLineLength: 8,
         timeoutMs: 20_000,
-        description: 'primary Claude main pane content preserved after session switch',
+        description: 'primary Claude initial pane content preserved after session switch',
       });
       await waitForPaneInputFocus(client, primarySessionId, utilityPaneId, 20_000, { stableMs: 700 });
       await client.request('type_pane_via_ui', {

@@ -31,6 +31,10 @@ export function shellPanes(workspace) {
   return (workspace?.panes || []).filter((pane) => pane.kind === 'shell');
 }
 
+export function firstWorkspacePane(workspace) {
+  return (workspace?.panes || [])[0] || null;
+}
+
 function isRetryableAutomationAbsence(error) {
   const message = error instanceof Error ? error.message : String(error || '');
   return message.includes('Session not found') || message.includes('Pane not found');
@@ -341,6 +345,17 @@ export async function waitForSessionWorkspace(client, sessionId, predicate, desc
   throw new Error(
     `Timed out waiting for ${description}. Last request error: ${lastError instanceof Error ? lastError.message : 'none'}\nLast workspace:\n${JSON.stringify(lastWorkspace, null, 2)}`
   );
+}
+
+export async function waitForFirstWorkspacePane(client, sessionId, description, timeoutMs = 20_000) {
+  const workspace = await waitForSessionWorkspace(
+    client,
+    sessionId,
+    (entry) => Boolean(firstWorkspacePane(entry)?.paneId),
+    description || `first pane for session ${sessionId}`,
+    timeoutMs,
+  );
+  return firstWorkspacePane(workspace);
 }
 
 export async function waitForNewShellPane(client, sessionId, existingPaneIds, description, timeoutMs = 20_000) {

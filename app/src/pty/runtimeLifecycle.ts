@@ -25,7 +25,6 @@ export interface SpawnPtyRuntimeOperations {
   spawnRuntime(args: PtySpawnArgs): Promise<unknown>;
   resizeRuntime(id: string, cols: number, rows: number, reason: string): void;
   logResumeRecovery?(details: { id: string; agent?: string; recoverable: boolean }): void;
-  logKnownWorkspaceRespawn?(details: { id: string; endpointId?: string; error: unknown }): void;
 }
 
 export function normalizeAttachPolicy(
@@ -47,6 +46,7 @@ export async function spawnPtyRuntime(
   operations: SpawnPtyRuntimeOperations,
 ): Promise<void> {
   const forceRespawn = args.reload === true;
+  const freshCreate = args.intent === 'create';
 
   if (context.alreadyAttached && !forceRespawn) {
     operations.resizeRuntime(args.id, args.cols, args.rows, 'already_attached');
@@ -57,7 +57,7 @@ export async function spawnPtyRuntime(
     operations.resizeRuntime(args.id, args.cols, args.rows, 'spawn_bootstrap');
   }
 
-  if (!forceRespawn && context.runtimeKnownToDaemon) {
+  if (!forceRespawn && !freshCreate && context.runtimeKnownToDaemon) {
     try {
       await operations.attachExistingRuntime(args, {
         policy: 'relaunch_restore',
@@ -88,17 +88,9 @@ export async function spawnPtyRuntime(
         return;
       }
 
-      if (!context.existingSession) {
-        operations.logKnownWorkspaceRespawn?.({
-          id: args.id,
-          endpointId: args.endpoint_id,
-          error: attachError,
-        });
-      } else {
-        throw new Error(
-          'No live PTY found for this session. It likely ended when the daemon restarted. Close it and start a new session.',
-        );
-      }
+      throw new Error(
+        'No live PTY found for this session. It likely ended when the daemon restarted. Close it and start a new session.',
+      );
     }
   }
 

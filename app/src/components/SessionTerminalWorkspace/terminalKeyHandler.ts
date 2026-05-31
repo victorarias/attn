@@ -30,8 +30,21 @@ export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
     }
     const accel = isMacLikePlatform() ? event.metaKey : (event.metaKey || event.ctrlKey);
     if (event.type === 'keydown' && accel && !event.altKey) {
+      if (!event.shiftKey) {
+        const digitMatch = event.code.match(/^Digit([1-9])$/);
+        const digit = digitMatch?.[1] ?? (/^[1-9]$/.test(event.key) ? event.key : null);
+        if (digit) {
+          return !triggerShortcut(`workspace.select${digit}` as Parameters<typeof triggerShortcut>[0]);
+        }
+      }
       if (!event.shiftKey && event.key.toLowerCase() === 't') {
-        return !triggerShortcut('terminal.new');
+        return !triggerShortcut('session.newWorkspace');
+      }
+      if (!event.shiftKey && event.key.toLowerCase() === 'q') {
+        return !triggerShortcut('app.quit');
+      }
+      if (event.shiftKey && event.key.toLowerCase() === 'n') {
+        return !triggerShortcut('session.newHorizontal');
       }
       if (!event.shiftKey && event.key.toLowerCase() === 'd') {
         return !triggerShortcut('terminal.splitVertical');
@@ -46,8 +59,10 @@ export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
         return !triggerShortcut('terminal.toggleMaximize');
       }
       if (!event.shiftKey && event.key.toLowerCase() === 'w') {
-        triggerShortcut('terminal.close');
-        return false;
+        if (triggerShortcut('terminal.close')) {
+          return false;
+        }
+        return !triggerShortcut('session.close');
       }
     }
     if (event.key === 'Enter' && event.shiftKey && !event.ctrlKey && !event.altKey) {

@@ -272,9 +272,13 @@ async function main() {
     });
 
     const initialWorkspace = await client.request('get_workspace', { sessionId }, { timeoutMs: 10_000 });
+    const targetPaneId = initialWorkspace.activePaneId || initialWorkspace.panes?.[0]?.paneId;
+    if (!targetPaneId) {
+      throw new Error(`No pane available to split in workspace ${sessionId}`);
+    }
     await client.request('split_pane', {
       sessionId,
-      targetPaneId: initialWorkspace.activePaneId || 'main',
+      targetPaneId,
       direction: 'vertical',
     }, { timeoutMs: 30_000 });
 

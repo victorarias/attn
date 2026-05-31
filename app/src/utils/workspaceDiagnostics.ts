@@ -94,10 +94,13 @@ export function projectWorkspaceBounds(
 }
 
 export function collectWorkspaceLayoutDiagnostics(
-  layoutTree: TerminalLayoutNode,
+  layoutTree: TerminalLayoutNode | null,
 ): WorkspaceLayoutDiagnosticSnapshot {
   const panes: WorkspacePaneLayoutDiagnostic[] = [];
   const splits: WorkspaceSplitLayoutDiagnostic[] = [];
+  if (!layoutTree) {
+    return { paneCount: 0, splitCount: 0, panes, splits };
+  }
 
   const walk = (
     node: TerminalLayoutNode,

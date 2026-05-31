@@ -238,8 +238,8 @@ func TestMigration37_ConvertsSessionLayoutToWorkspaceLayout(t *testing.T) {
 	).Scan(&activePaneID, &layoutJSON); err != nil {
 		t.Fatalf("select migrated layout error = %v", err)
 	}
-	if activePaneID != "pane-shell" || layoutJSON != `{"type":"split"}` {
-		t.Fatalf("migrated layout = (%q, %q), want pane-shell and original JSON", activePaneID, layoutJSON)
+	if activePaneID != "pane-sess-legacy" || layoutJSON != `{"type":"pane","pane_id":"pane-sess-legacy"}` {
+		t.Fatalf("migrated layout = (%q, %q), want session-backed pane layout", activePaneID, layoutJSON)
 	}
 
 	rows, err := migrated.Query("SELECT pane_id, kind, session_id FROM workspace_layout_panes WHERE workspace_id = ? ORDER BY pane_id", workspaceID)
@@ -262,8 +262,8 @@ func TestMigration37_ConvertsSessionLayoutToWorkspaceLayout(t *testing.T) {
 		pane.sessionID = sessionID
 		panes = append(panes, pane)
 	}
-	if len(panes) != 2 || panes[0].kind != "agent" || panes[0].sessionID == nil || *panes[0].sessionID != "sess-legacy" || panes[1].kind != "shell" || panes[1].sessionID != nil {
-		t.Fatalf("migrated panes = %+v, want agent-owned main and utility shell", panes)
+	if len(panes) != 1 || panes[0].paneID != "pane-sess-legacy" || panes[0].kind != "agent" || panes[0].sessionID == nil || *panes[0].sessionID != "sess-legacy" {
+		t.Fatalf("migrated panes = %+v, want one session-owned agent pane", panes)
 	}
 
 	for _, legacyTable := range []string{"session_workspaces", "workspace_panes"} {

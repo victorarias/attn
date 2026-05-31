@@ -497,6 +497,11 @@ fn ensure_daemon(_app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
 async fn list_directory(path: String, prefix: Option<String>) -> Result<Vec<String>, String> {
     use std::fs;
     use std::path::Path;
@@ -739,6 +744,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_directory,
             ensure_daemon,
+            quit_app,
             open_in_editor,
             get_build_profile,
             thumbs::extract_patterns,

@@ -4,17 +4,15 @@ import { useGhosttyPaneRuntime } from './useGhosttyPaneRuntime';
 import type { PaneRuntimeEventBinding, PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import type { GhosttyTerminalHandle } from '../GhosttyTerminal';
 
-const { mockPtyAttach, mockPtyResize, mockPtySpawn, mockPtyWrite } = vi.hoisted(() => ({
+const { mockPtyAttach, mockPtyResize, mockPtyWrite } = vi.hoisted(() => ({
   mockPtyAttach: vi.fn((_request?: unknown) => Promise.resolve()),
   mockPtyResize: vi.fn((_request?: unknown) => Promise.resolve()),
-  mockPtySpawn: vi.fn((_request?: unknown) => Promise.resolve()),
   mockPtyWrite: vi.fn((_request?: unknown) => Promise.resolve()),
 }));
 
 vi.mock('../../pty/bridge', () => ({
   ptyAttach: mockPtyAttach,
   ptyResize: mockPtyResize,
-  ptySpawn: mockPtySpawn,
   ptyWrite: mockPtyWrite,
 }));
 
@@ -44,7 +42,6 @@ describe('useGhosttyPaneRuntime', () => {
     binding = null;
     mockPtyAttach.mockClear();
     mockPtyResize.mockClear();
-    mockPtySpawn.mockClear();
     mockPtyWrite.mockClear();
     delete (window as Window & { __TEST_SESSION_INPUT_EVENTS?: unknown }).__TEST_SESSION_INPUT_EVENTS;
     router = {
@@ -55,25 +52,34 @@ describe('useGhosttyPaneRuntime', () => {
     };
   });
 
-  it('spawns with measured geometry and forwards input directly', async () => {
+  it('attaches with measured geometry and forwards input directly', async () => {
     const { result } = renderHook(() => useGhosttyPaneRuntime([
       {
-        paneId: 'main',
+        paneId: 'pane-session',
         runtimeId: 'runtime-1',
-        paneKind: 'main',
+        paneKind: 'agent',
         testSessionId: 'session-1',
-        getSpawnArgs: (size) => ({ id: 'runtime-1', cwd: '/tmp', ...size }),
       },
-    ], 'main', router, { current: true }));
+    ], 'pane-session', router, { current: true }));
     const terminal = createTerminal();
 
     await act(async () => {
-      result.current.setTerminalHandle('main', terminal);
-      await result.current.handleTerminalReady('main')(terminal);
-      result.current.handleTerminalInput('main')('hello');
+      result.current.setTerminalHandle('pane-session', terminal);
+      await result.current.handleTerminalReady('pane-session')(terminal);
+      result.current.handleTerminalInput('pane-session')('hello');
     });
 
-    expect(mockPtySpawn).toHaveBeenCalledWith({ args: { id: 'runtime-1', cwd: '/tmp', cols: 120, rows: 40 } });
+    expect(mockPtyAttach).toHaveBeenCalledWith({
+      args: {
+        id: 'runtime-1',
+        cols: 120,
+        rows: 40,
+        shell: false,
+        agent: undefined,
+        policy: 'fresh_spawn',
+      },
+      forceResizeBeforeAttach: false,
+    });
     expect(mockPtyWrite).toHaveBeenCalledWith({ id: 'runtime-1', data: 'hello' });
     expect((window as Window & {
       __TEST_SESSION_INPUT_EVENTS?: Array<{ sessionId: string; event: string; data?: string }>;
@@ -86,13 +92,13 @@ describe('useGhosttyPaneRuntime', () => {
   it('allows explicit bootstrap replay to return terminal responses to the live PTY', async () => {
     const terminal = createTerminal();
     vi.mocked(terminal.write).mockImplementation(async () => {
-      result.current.handleTerminalInput('main')('\u001b[1;1R');
+      result.current.handleTerminalInput('pane-session')('\u001b[1;1R');
     });
     const { result } = renderHook(() => useGhosttyPaneRuntime([
-      { paneId: 'main', runtimeId: 'runtime-1', paneKind: 'main', getSpawnArgs: () => null },
-    ], 'main', router, { current: true }));
+      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
+    ], 'pane-session', router, { current: true }));
 
-    act(() => result.current.setTerminalHandle('main', terminal));
+    act(() => result.current.setTerminalHandle('pane-session', terminal));
     await act(async () => {
       binding?.onEvent({
         event: 'data',
@@ -111,14 +117,14 @@ describe('useGhosttyPaneRuntime', () => {
     const terminal = createTerminal();
     vi.mocked(terminal.write).mockImplementation(async (_data, options) => {
       if (!options?.suppressResponses) {
-        result.current.handleTerminalInput('main')('\u001b[1;1R');
+        result.current.handleTerminalInput('pane-session')('\u001b[1;1R');
       }
     });
     const { result } = renderHook(() => useGhosttyPaneRuntime([
-      { paneId: 'main', runtimeId: 'runtime-1', paneKind: 'main', getSpawnArgs: () => null },
-    ], 'main', router, { current: true }));
+      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
+    ], 'pane-session', router, { current: true }));
 
-    act(() => result.current.setTerminalHandle('main', terminal));
+    act(() => result.current.setTerminalHandle('pane-session', terminal));
     await act(async () => {
       binding?.onEvent({
         event: 'data',
@@ -135,16 +141,15 @@ describe('useGhosttyPaneRuntime', () => {
   it('sends only ordinary active-session resize updates after the runtime is ready', async () => {
     const { result } = renderHook(() => useGhosttyPaneRuntime([
       {
-        paneId: 'main',
+        paneId: 'pane-session',
         runtimeId: 'runtime-1',
-        paneKind: 'main',
-        getSpawnArgs: (size) => ({ id: 'runtime-1', cwd: '/tmp', ...size }),
+        paneKind: 'agent',
       },
-    ], 'main', router, { current: true }));
+    ], 'pane-session', router, { current: true }));
     const terminal = createTerminal();
     await act(async () => {
-      await result.current.handleTerminalReady('main')(terminal);
-      result.current.handleTerminalResize('main')(130, 45, { reason: 'test' });
+      await result.current.handleTerminalReady('pane-session')(terminal);
+      result.current.handleTerminalResize('pane-session')(130, 45, { reason: 'test' });
     });
 
     expect(mockPtyResize).toHaveBeenCalledWith({ id: 'runtime-1', cols: 130, rows: 45, reason: 'test' });
@@ -152,18 +157,18 @@ describe('useGhosttyPaneRuntime', () => {
 
   it('resizes daemon-attached runtimes after their first delivered PTY event', async () => {
     const { result } = renderHook(() => useGhosttyPaneRuntime([
-      { paneId: 'main', runtimeId: 'runtime-1', paneKind: 'main', getSpawnArgs: () => null },
-    ], 'main', router, { current: true }));
+      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
+    ], 'pane-session', router, { current: true }));
     const terminal = createTerminal();
 
-    act(() => result.current.setTerminalHandle('main', terminal));
+    act(() => result.current.setTerminalHandle('pane-session', terminal));
     await act(async () => {
       binding?.onEvent({
         event: 'data',
         id: 'runtime-1',
         data: btoa('ready'),
       });
-      result.current.handleTerminalResize('main')(130, 45, { reason: 'attached' });
+      result.current.handleTerminalResize('pane-session')(130, 45, { reason: 'attached' });
     });
 
     expect(mockPtyResize).toHaveBeenCalledWith({ id: 'runtime-1', cols: 130, rows: 45, reason: 'attached' });
@@ -171,16 +176,16 @@ describe('useGhosttyPaneRuntime', () => {
 
   it('reattaches a ready runtime when its terminal model remounts', async () => {
     const { result } = renderHook(() => useGhosttyPaneRuntime([
-      { paneId: 'main', runtimeId: 'runtime-1', paneKind: 'main', agent: 'claude', getSpawnArgs: () => null },
-    ], 'main', router, { current: true }));
+      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent', agent: 'claude' },
+    ], 'pane-session', router, { current: true }));
     const firstTerminal = createTerminal();
     const remountedTerminal = createTerminal();
 
-    act(() => result.current.setTerminalHandle('main', firstTerminal));
+    act(() => result.current.setTerminalHandle('pane-session', firstTerminal));
     await act(async () => {
       binding?.onEvent({ event: 'data', id: 'runtime-1', data: btoa('ready') });
-      result.current.setTerminalHandle('main', null);
-      await result.current.handleTerminalReady('main')(remountedTerminal);
+      result.current.setTerminalHandle('pane-session', null);
+      await result.current.handleTerminalReady('pane-session')(remountedTerminal);
     });
 
     expect(mockPtyAttach).toHaveBeenCalledWith({
@@ -192,35 +197,34 @@ describe('useGhosttyPaneRuntime', () => {
         agent: 'claude',
         policy: 'same_app_remount',
       },
+      forceResizeBeforeAttach: true,
     });
   });
 
-  it('does not send transient unusable main-pane sizes to the PTY', async () => {
+  it('does not send transient unusable session-pane sizes to the PTY', async () => {
     const { result } = renderHook(() => useGhosttyPaneRuntime([
       {
-        paneId: 'main',
+        paneId: 'pane-session',
         runtimeId: 'runtime-1',
-        paneKind: 'main',
-        getSpawnArgs: (size) => ({ id: 'runtime-1', cwd: '/tmp', ...size }),
+        paneKind: 'agent',
       },
       {
-        paneId: 'shell',
+        paneId: 'pane-session-2',
         runtimeId: 'runtime-2',
-        paneKind: 'shell',
-        getSpawnArgs: (size) => ({ id: 'runtime-2', cwd: '/tmp', shell: true, ...size }),
+        paneKind: 'agent',
       },
-    ], 'main', router, { current: true }));
-    const mainTerminal = createTerminal();
-    const shellTerminal = createTerminal();
+    ], 'pane-session', router, { current: true }));
+    const firstTerminal = createTerminal();
+    const secondTerminal = createTerminal();
 
     await act(async () => {
-      await result.current.handleTerminalReady('main')(mainTerminal);
-      await result.current.handleTerminalReady('shell')(shellTerminal);
-      result.current.handleTerminalResize('main')(10, 6);
-      result.current.handleTerminalResize('shell')(10, 6);
+      await result.current.handleTerminalReady('pane-session')(firstTerminal);
+      await result.current.handleTerminalReady('pane-session-2')(secondTerminal);
+      result.current.handleTerminalResize('pane-session')(10, 6);
+      result.current.handleTerminalResize('pane-session-2')(10, 6);
     });
 
     expect(mockPtyResize).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'runtime-1', cols: 10, rows: 6 }));
-    expect(mockPtyResize).toHaveBeenCalledWith({ id: 'runtime-2', cols: 10, rows: 6, reason: 'ghostty_fit' });
+    expect(mockPtyResize).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'runtime-2', cols: 10, rows: 6 }));
   });
 });

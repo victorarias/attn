@@ -324,6 +324,7 @@ var migrations = []migration{
 		ALTER TABLE sessions ADD COLUMN agent_driver_run_id TEXT NOT NULL DEFAULT '';
 		ALTER TABLE sessions ADD COLUMN agent_driver_report_seq INTEGER NOT NULL DEFAULT 0;
 	`},
+	{40, "add workspace pane lifecycle status", ""},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -449,6 +450,11 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 39 {
 			if err := applyMigration39(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 40 {
+			if err := applyMigration40(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -687,28 +693,24 @@ func applyMigration37(tx *sql.Tx) error {
 		FROM sessions
 		WHERE workspace_id IS NOT NULL AND workspace_id != '';
 
-		INSERT OR IGNORE INTO workspace_layouts (workspace_id, active_pane_id, layout_json, updated_at)
-		SELECT s.workspace_id, sw.active_pane_id, sw.layout_json, sw.updated_at
-		FROM session_workspaces sw
-		JOIN sessions s ON s.id = sw.session_id;
 		INSERT OR IGNORE INTO workspace_layout_panes (
 			workspace_id, pane_id, runtime_id, session_id, kind, title, created_at, updated_at
 		)
-		SELECT s.workspace_id, p.pane_id, p.runtime_id,
-			CASE WHEN p.kind = 'main' THEN p.session_id ELSE NULL END,
-			CASE WHEN p.kind = 'main' THEN 'agent' ELSE 'shell' END,
-			CASE WHEN p.kind = 'main' AND p.title = 'Session' THEN 'Agent' ELSE p.title END,
+		SELECT s.workspace_id, 'pane-' || p.session_id, p.session_id, p.session_id,
+			'agent',
+			CASE WHEN p.title = 'Session' THEN 'Agent' ELSE p.title END,
 			p.created_at, p.updated_at
 		FROM workspace_panes p
-		JOIN sessions s ON s.id = p.session_id;
+		JOIN sessions s ON s.id = p.session_id
+		WHERE p.kind = 'main';
 
 		INSERT OR IGNORE INTO workspace_layouts (workspace_id, active_pane_id, layout_json, updated_at)
-		SELECT workspace_id, 'main', '{"type":"pane","pane_id":"main"}', datetime('now')
+		SELECT workspace_id, 'pane-' || id, '{"type":"pane","pane_id":"pane-' || id || '"}', datetime('now')
 		FROM sessions WHERE workspace_id IS NOT NULL AND workspace_id != '';
 		INSERT OR IGNORE INTO workspace_layout_panes (
 			workspace_id, pane_id, runtime_id, session_id, kind, title, created_at, updated_at
 		)
-		SELECT workspace_id, 'main', id, id, 'agent', 'Agent', datetime('now'), datetime('now')
+		SELECT workspace_id, 'pane-' || id, id, id, 'agent', 'Agent', datetime('now'), datetime('now')
 		FROM sessions WHERE workspace_id IS NOT NULL AND workspace_id != '';
 
 		DROP TABLE IF EXISTS canvas_workspace_panels;
@@ -757,6 +759,28 @@ func applyMigration39(tx *sql.Tx) error {
 	}
 	if !hasReportSeq {
 		if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN agent_driver_report_seq INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyMigration40(tx *sql.Tx) error {
+	hasStatus, err := columnExists(tx, "workspace_layout_panes", "status")
+	if err != nil {
+		return err
+	}
+	if !hasStatus {
+		if _, err := tx.Exec("ALTER TABLE workspace_layout_panes ADD COLUMN status TEXT NOT NULL DEFAULT 'ready'"); err != nil {
+			return err
+		}
+	}
+	hasError, err := columnExists(tx, "workspace_layout_panes", "error")
+	if err != nil {
+		return err
+	}
+	if !hasError {
+		if _, err := tx.Exec("ALTER TABLE workspace_layout_panes ADD COLUMN error TEXT NOT NULL DEFAULT ''"); err != nil {
 			return err
 		}
 	}

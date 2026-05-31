@@ -17,6 +17,11 @@ export interface WorkspaceViewWorkspace {
   status?: string;
   endpointId?: string;
   endpoint_id?: string;
+  layout?: {
+    panes?: Array<{
+      session_id?: string;
+    }>;
+  };
 }
 
 export interface WorkspaceWithSessions<TSession extends WorkspaceViewSession = WorkspaceViewSession> {
@@ -35,11 +40,11 @@ interface WorkspaceViewModelOptions {
 }
 
 function sessionWorkspaceId(session: WorkspaceViewSession): string {
-  return session.workspaceId || session.workspace_id || `workspace-${session.id}`;
-}
-
-function sessionDirectory(session: WorkspaceViewSession): string {
-  return session.cwd || session.directory || session.id;
+  const workspaceId = session.workspaceId || session.workspace_id;
+  if (!workspaceId) {
+    throw new Error(`Session ${session.id} is missing workspace ownership`);
+  }
+  return workspaceId;
 }
 
 function sessionEndpointId(session: WorkspaceViewSession): string | undefined {
@@ -48,10 +53,6 @@ function sessionEndpointId(session: WorkspaceViewSession): string | undefined {
 
 function workspaceEndpointId(workspace: WorkspaceViewWorkspace): string | undefined {
   return workspace.endpointId || workspace.endpoint_id;
-}
-
-function fallbackTitle(directory: string): string {
-  return directory.split('/').filter(Boolean).pop() || directory;
 }
 
 function workspaceKey(workspaceId: string, endpointId?: string): string {
@@ -91,24 +92,6 @@ export function buildWorkspaceViewModels<TSession extends WorkspaceViewSession>(
     result.push(toWorkspaceViewModel(workspace, workspaceSessions, options));
   }
 
-  for (const session of sessions) {
-    const workspaceId = sessionWorkspaceId(session);
-    const endpointId = sessionEndpointId(session);
-    const key = workspaceKey(workspaceId, endpointId);
-    if (consumed.has(key)) {
-      continue;
-    }
-    consumed.add(key);
-    const workspaceSessions = sessionsByWorkspace.get(key) || [];
-    const directory = sessionDirectory(workspaceSessions[0] || session);
-    result.push(toWorkspaceViewModel({
-      id: workspaceId,
-      title: fallbackTitle(directory),
-      directory,
-      endpoint_id: endpointId,
-    }, workspaceSessions, options));
-  }
-
   return result;
 }
 
@@ -142,7 +125,7 @@ function toWorkspaceViewModel<TSession extends WorkspaceViewSession>(
     title: workspace.title,
     directory: workspace.directory,
     status: workspace.status,
-    endpointId: workspaceEndpointId(workspace) || sessionEndpointId(sessions[0]),
+    endpointId: workspaceEndpointId(workspace) || (sessions[0] ? sessionEndpointId(sessions[0]) : undefined),
     sessions,
     firstSessionId,
     focusedSessionId,
@@ -153,4 +136,40 @@ export function firstSessionIdForWorkspace<TSession extends WorkspaceViewSession
   workspace: WorkspaceWithSessions<TSession> | undefined | null,
 ): string | null {
   return workspace?.firstSessionId ?? null;
+}
+
+export function filterSessionsRepresentedInWorkspaceLayouts<TSession extends WorkspaceViewSession>(
+  workspaces: WorkspaceViewWorkspace[],
+  sessions: TSession[],
+): TSession[] {
+  const workspaceIdsWithLayout = new Set(
+    workspaces
+      .filter((workspace) => Boolean(workspace.layout))
+      .map((workspace) => workspace.id),
+  );
+  if (workspaceIdsWithLayout.size === 0) {
+    return sessions;
+  }
+
+  const sessionIdsByWorkspaceId = new Map<string, Set<string>>();
+  for (const workspace of workspaces) {
+    if (!workspace.layout) {
+      continue;
+    }
+    const sessionIds = sessionIdsByWorkspaceId.get(workspace.id) || new Set<string>();
+    for (const pane of workspace.layout.panes || []) {
+      if (pane.session_id) {
+        sessionIds.add(pane.session_id);
+      }
+    }
+    sessionIdsByWorkspaceId.set(workspace.id, sessionIds);
+  }
+
+  return sessions.filter((session) => {
+    const workspaceId = sessionWorkspaceId(session);
+    if (!workspaceIdsWithLayout.has(workspaceId)) {
+      return true;
+    }
+    return sessionIdsByWorkspaceId.get(workspaceId)?.has(session.id) ?? false;
+  });
 }

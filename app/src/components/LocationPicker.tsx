@@ -62,6 +62,7 @@ interface PathSelectableItem {
 
 interface LocationPickerProps {
   isOpen: boolean;
+  purpose?: 'workspace' | 'session';
   onClose: () => void;
   onSelect: (path: string, agent: SessionAgent, endpointId?: string, yoloMode?: boolean) => void;
   onGetRecentLocations?: (endpointId?: string) => Promise<{ locations: RecentLocation[]; home_path?: string }>;
@@ -81,15 +82,17 @@ const MAX_RECENT_LOCATIONS = 10;
 const SESSION_AGENT_KEY = 'new_session_agent';
 const SESSION_YOLO_KEY = 'new_session_yolo';
 const LOCAL_TARGET = '__local__';
-const TARGET_SHORTCUT_KEYS = ['q', 'w', 'e', 'r', 't', 'a', 's', 'd', 'f', 'g', 'z', 'x', 'c', 'v', 'b'];
-const TARGET_SHORTCUT_CODES = ['KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB'];
+const TERMINAL_AGENT: SessionAgent = 'shell';
+const TARGET_SHORTCUT_KEYS = ['q', 'w', 'e', 'r', 'a', 's', 'd', 'f', 'g', 'z', 'x', 'c', 'v', 'b'];
+const TARGET_SHORTCUT_CODES = ['KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB'];
 
 const DEFAULT_AGENT_AVAILABILITY: AgentAvailability = {
+  shell: true,
   codex: true,
   claude: true,
   copilot: true,
 };
-const FIXED_AGENT_ORDER: SessionAgent[] = ['claude', 'codex', 'copilot'];
+const FIXED_AGENT_ORDER: SessionAgent[] = [TERMINAL_AGENT, 'claude', 'codex', 'copilot'];
 
 const normalizeAgent = (value?: string): SessionAgent | null => {
   if (!value) return null;
@@ -132,6 +135,32 @@ function yoloSettingKeys(targetId: string, daemonInstanceId?: string): string[] 
   return keys;
 }
 
+function pickerAgentLabel(agent: SessionAgent): string {
+  return agent === TERMINAL_AGENT ? 'Terminal' : agentLabel(agent);
+}
+
+function withoutTerminalAgent(availability: AgentAvailability): AgentAvailability {
+  const { [TERMINAL_AGENT]: _terminal, ...rest } = availability;
+  return rest;
+}
+
+function resolvePickerAgent(
+  preferred: SessionAgent | undefined,
+  availability: AgentAvailability,
+  fallback: SessionAgent = 'codex',
+): SessionAgent {
+  if (preferred === TERMINAL_AGENT && availability[TERMINAL_AGENT]) {
+    return TERMINAL_AGENT;
+  }
+  const nonTerminalAvailability = withoutTerminalAgent(availability);
+  if (hasAnyAvailableAgents(nonTerminalAvailability)) {
+    return resolvePreferredAgent(preferred, nonTerminalAvailability, fallback);
+  }
+  return availability[TERMINAL_AGENT]
+    ? TERMINAL_AGENT
+    : resolvePreferredAgent(preferred, availability, fallback);
+}
+
 function initialInputPathForTarget(target: PickerTarget): string | undefined {
   if (target.projectsDirectory) {
     return target.projectsDirectory;
@@ -154,6 +183,7 @@ type Mode = 'path-input' | 'repo-options';
 
 export function LocationPicker({
   isOpen,
+  purpose = 'session',
   onClose,
   onSelect,
   onGetRecentLocations,
@@ -171,6 +201,17 @@ export function LocationPicker({
   const { settings, setSetting } = useSettings();
   const localAgentAvailability = agentAvailability || DEFAULT_AGENT_AVAILABILITY;
   const noAgentsMessage = 'No supported agent CLI found in PATH.';
+  const copy = purpose === 'workspace'
+    ? {
+        agentAria: 'Initial workspace session agent',
+        targetAria: 'Workspace target',
+        title: 'New Workspace Location',
+      }
+    : {
+        agentAria: 'Session agent',
+        targetAria: 'Session target',
+        title: 'New Session Location',
+      };
 
   const [mode, setMode] = useState<Mode>('path-input');
   const [inputValue, setInputValue] = useState('');
@@ -224,16 +265,21 @@ export function LocationPicker({
   );
   const selectedEndpointId = selectedTarget?.endpointId;
   const effectiveAgentAvailability = useMemo<AgentAvailability>(() => {
+    const withTerminal = (availability: AgentAvailability): AgentAvailability => ({
+      ...availability,
+      [TERMINAL_AGENT]: true,
+    });
     if (!selectedEndpointId || !selectedTarget.agentsAvailable) {
-      return localAgentAvailability;
+      return withTerminal(localAgentAvailability);
     }
-    return selectedTarget.agentsAvailable.reduce<AgentAvailability>((availability, candidate) => {
+    const endpointAvailability = selectedTarget.agentsAvailable.reduce<AgentAvailability>((availability, candidate) => {
       const normalized = normalizeAgent(candidate);
       if (normalized) {
         availability[normalized] = true;
       }
       return availability;
     }, {});
+    return withTerminal(endpointAvailability);
   }, [localAgentAvailability, selectedEndpointId, selectedTarget.agentsAvailable]);
   const hasAvailableAgents = hasAnyAvailableAgents(effectiveAgentAvailability);
   const yoloKeys = useMemo(
@@ -305,7 +351,7 @@ export function LocationPicker({
   }, [effectiveAgentAvailability]);
   const agentShortcutByName = useMemo(() => {
     const shortcuts = new Map<SessionAgent, number>();
-    orderedAgentList.forEach((candidate, index) => {
+    orderedAgentList.filter((candidate) => candidate !== TERMINAL_AGENT).forEach((candidate, index) => {
       shortcuts.set(candidate, index + 1);
     });
     return shortcuts;
@@ -338,12 +384,12 @@ export function LocationPicker({
 
   useEffect(() => {
     if (!savedAgent) return;
-    const resolvedSavedAgent = resolvePreferredAgent(savedAgent, effectiveAgentAvailability, 'codex');
+    const resolvedSavedAgent = resolvePickerAgent(savedAgent, effectiveAgentAvailability, 'codex');
     setAgent((prev) => (prev === resolvedSavedAgent ? prev : resolvedSavedAgent));
   }, [effectiveAgentAvailability, savedAgent]);
 
   useEffect(() => {
-    const resolvedAgent = resolvePreferredAgent(agent, effectiveAgentAvailability, 'codex');
+    const resolvedAgent = resolvePickerAgent(agent, effectiveAgentAvailability, 'codex');
     if (resolvedAgent !== agent) {
       setAgent(resolvedAgent);
     }
@@ -474,7 +520,7 @@ export function LocationPicker({
   }, [highlightedIndex]);
 
   const launchSelection = useCallback((path: string) => {
-    const selectedAgent = resolvePreferredAgent(agent, effectiveAgentAvailability, 'codex');
+    const selectedAgent = resolvePickerAgent(agent, effectiveAgentAvailability, 'codex');
     onSelect(path, selectedAgent, selectedEndpointId, yoloMode && yoloSupported);
     onClose();
   }, [agent, effectiveAgentAvailability, onClose, onSelect, selectedEndpointId, yoloMode, yoloSupported]);
@@ -592,6 +638,9 @@ export function LocationPicker({
       return;
     }
     setAgent(nextAgent);
+    if (nextAgent === TERMINAL_AGENT) {
+      return;
+    }
     setSetting(SESSION_AGENT_KEY, nextAgent);
   }, [effectiveAgentAvailability, setSetting]);
 
@@ -660,7 +709,7 @@ export function LocationPicker({
     }
 
     if (onCreateWorktreeSession) {
-      const selectedAgent = resolvePreferredAgent(agent, effectiveAgentAvailability, 'codex');
+      const selectedAgent = resolvePickerAgent(agent, effectiveAgentAvailability, 'codex');
       onCreateWorktreeSession(
         repoRootPath,
         branchName,
@@ -775,6 +824,12 @@ export function LocationPicker({
 
   const handleDialogKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.altKey && !e.metaKey && !e.ctrlKey) {
+      if (e.code === 'KeyT') {
+        e.preventDefault();
+        handleAgentChange(TERMINAL_AGENT);
+        return;
+      }
+
       const shortcutTargetId = targetShortcutIDByCode.get(e.code);
       if (shortcutTargetId) {
         e.preventDefault();
@@ -785,7 +840,7 @@ export function LocationPicker({
       const digitMatch = /^Digit([1-9])$/.exec(e.code);
       if (digitMatch) {
         const idx = Number(digitMatch[1]) - 1;
-        const nextAgent = orderedAgentList[idx];
+        const nextAgent = orderedAgentList.filter((candidate) => candidate !== TERMINAL_AGENT)[idx];
         if (nextAgent) {
           e.preventDefault();
           handleAgentChange(nextAgent);
@@ -830,11 +885,14 @@ export function LocationPicker({
         <div className="picker-agent-bar">
           <div className="picker-agent-label">SESSION AGENT</div>
           <div className="picker-agent-controls">
-            <div className="agent-toggle" role="radiogroup" aria-label="Session agent">
+            <div className="agent-toggle" role="radiogroup" aria-label={copy.agentAria}>
               {orderedAgentList.map((candidate) => {
                 const available = isAgentAvailable(effectiveAgentAvailability, candidate);
                 const shortcutNumber = agentShortcutByName.get(candidate);
-                const shortcut = shortcutNumber && shortcutNumber <= 9 ? `⌥${shortcutNumber}` : null;
+                const shortcut = candidate === TERMINAL_AGENT
+                  ? '⌥T'
+                  : shortcutNumber && shortcutNumber <= 9 ? `⌥${shortcutNumber}` : null;
+                const label = pickerAgentLabel(candidate);
                 return (
                   <button
                     key={candidate}
@@ -845,9 +903,9 @@ export function LocationPicker({
                     role="radio"
                     aria-checked={agent === candidate}
                     disabled={!available}
-                    title={!available ? `${agentLabel(candidate)} is not available on ${selectedTarget.name}` : undefined}
+                    title={!available ? `${label} is not available on ${selectedTarget.name}` : undefined}
                   >
-                    <span className="agent-option-name">{agentLabel(candidate)}</span>
+                    <span className="agent-option-name">{label}</span>
                     {available && shortcut && <kbd className="agent-shortcut">{shortcut}</kbd>}
                   </button>
                 );
@@ -859,7 +917,7 @@ export function LocationPicker({
           <div className="picker-endpoint-leading">
             <div className="picker-endpoint-label">SESSION TARGET</div>
           </div>
-          <div className="picker-endpoint-controls" role="radiogroup" aria-label="Session target">
+          <div className="picker-endpoint-controls" role="radiogroup" aria-label={copy.targetAria}>
             {selectableTargets.map((target) => {
               const shortcutKey = targetShortcutByID.get(target.id);
               const active = target.id === selectedTarget.id;
@@ -898,7 +956,7 @@ export function LocationPicker({
             <div className="picker-header">
               <div className="picker-header-top">
                 <div className="picker-title" data-testid="location-picker-title">
-                  New Session Location
+                  {copy.title}
                 </div>
                 <div
                   className={`picker-endpoint-hint ${!yoloSupported ? 'disabled' : ''}`}

@@ -59,7 +59,7 @@ function makeTerminalSnapshot(): TerminalPerfSnapshot {
     sessionId: 'session-1',
     paneId: 'pane-1',
     runtimeId: 'runtime-1',
-    paneKind: 'shell',
+    paneKind: 'agent',
     isActivePane: true,
     isActiveSession: true,
     cols: 58,
@@ -192,7 +192,7 @@ describe('runtimeTimeline', () => {
       runtimeId: 'runtime-1',
       sessionId: 'session-1',
       paneId: 'pane-1',
-      paneKind: 'shell',
+      paneKind: 'agent',
       flags: {
         replayBeforeFirstLiveOutput: true,
         inputBeforeFirstLiveOutput: true,

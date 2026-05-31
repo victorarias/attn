@@ -1,0 +1,1283 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>attn workspace sidebar sketch</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #050606;
+      --panel: #0b0c0c;
+      --panel-2: #101111;
+      --panel-3: #171818;
+      --line: #232626;
+      --line-2: #343838;
+      --text: #e8ece8;
+      --muted: #848b87;
+      --dim: #5d6460;
+      --green: #67d184;
+      --amber: #d7aa4a;
+      --red: #e36d63;
+      --blue: #63a6f2;
+      --violet: #b894ff;
+      --cyan: #62d4c6;
+      --shadow: rgba(0, 0, 0, 0.46);
+      --sidebar-w: 308px;
+      font-family: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 74% 12%, rgba(98, 212, 198, 0.08), transparent 26rem),
+        linear-gradient(180deg, #080909, #030303 70%);
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: minmax(272px, var(--sidebar-w)) 1fr;
+      height: 100vh;
+      border-top: 1px solid #161818;
+    }
+
+    .sidebar {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.025), transparent 28%),
+        var(--panel);
+      border-right: 1px solid var(--line);
+      min-width: 0;
+      box-shadow: 18px 0 42px rgba(0, 0, 0, 0.22);
+    }
+
+    .traffic {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 38px;
+      padding: 0 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+    }
+
+    .dot.red { background: #ff6159; }
+    .dot.yellow { background: #ffbd2e; }
+    .dot.green { background: #28c840; }
+
+    .settings-popover .mode-bar {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px;
+      background: #111313;
+      border: 1px solid #242828;
+      border-radius: 7px;
+    }
+
+    .mode-btn {
+      color: var(--muted);
+      border: 0;
+      background: transparent;
+      padding: 4px 7px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 11px;
+      line-height: 1;
+    }
+
+    .mode-btn.active {
+      color: var(--text);
+      background: #2a2d2d;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto;
+      gap: 6px;
+      padding: 8px 9px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(0,0,0,0.15);
+    }
+
+    .tool-strip {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 5px;
+      padding: 7px 9px 0;
+      background: rgba(0,0,0,0.15);
+    }
+
+    .search {
+      min-width: 0;
+      height: 28px;
+      border: 1px solid #242828;
+      border-radius: 6px;
+      background: #090a0a;
+      color: var(--text);
+      padding: 0 9px;
+      outline: none;
+    }
+
+    .search:focus {
+      border-color: #3e4644;
+      box-shadow: 0 0 0 2px rgba(98, 212, 198, 0.12);
+    }
+
+    .icon-btn {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border: 1px solid #242828;
+      border-radius: 6px;
+      color: var(--text);
+      background: #111313;
+      cursor: pointer;
+    }
+
+    .icon-btn:hover {
+      background: #1a1d1d;
+      border-color: #343a39;
+    }
+
+    .icon-btn.active {
+      color: var(--cyan);
+      border-color: rgba(98, 212, 198, 0.36);
+      background: rgba(98, 212, 198, 0.08);
+    }
+
+    .icon-btn.disabled {
+      opacity: 0.38;
+      cursor: default;
+    }
+
+    .icon-btn.has-badge {
+      position: relative;
+    }
+
+    .tool-badge {
+      position: absolute;
+      right: -4px;
+      top: -5px;
+      min-width: 15px;
+      height: 15px;
+      padding: 0 3px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      background: var(--amber);
+      color: #161103;
+      font-size: 9px;
+      font-weight: 700;
+      box-shadow: 0 0 0 2px var(--panel);
+    }
+
+    .list {
+      overflow: auto;
+      padding: 8px 7px 14px;
+    }
+
+    .list::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .list::-webkit-scrollbar-thumb {
+      background: #272b2a;
+      border-radius: 999px;
+    }
+
+    .workspace {
+      position: relative;
+      margin: 0 0 8px;
+      border-radius: 8px;
+    }
+
+    .workspace.hidden {
+      display: none;
+    }
+
+    .workspace-row,
+    .session-row,
+    .row-hit {
+      width: 100%;
+      border: 0;
+      text-align: left;
+      color: inherit;
+      cursor: pointer;
+    }
+
+    .workspace-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 4px;
+      align-items: center;
+      min-height: 54px;
+      background: transparent;
+      border-radius: 8px;
+      position: relative;
+    }
+
+    .row-hit {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      min-height: inherit;
+      padding: 8px 8px;
+      background: transparent;
+      border-radius: inherit;
+    }
+
+    .workspace.selected > .workspace-row {
+      background: rgba(255,255,255,0.078);
+    }
+
+    .workspace.selected > .workspace-row::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 8px;
+      bottom: 8px;
+      width: 2px;
+      border-radius: 3px;
+      background: var(--cyan);
+    }
+
+    .workspace.attention > .workspace-row::after {
+      content: "";
+      position: absolute;
+      right: 9px;
+      bottom: 7px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--amber);
+      box-shadow: 0 0 0 3px rgba(215,170,74,0.13);
+    }
+
+    .ws-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      display: grid;
+      place-items: center;
+      background: #1a1d1c;
+      color: #cbd2ce;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
+      font-size: 13px;
+    }
+
+    .ws-main,
+    .session-main {
+      min-width: 0;
+      display: grid;
+      gap: 3px;
+    }
+
+    .ws-title,
+    .session-title {
+      min-width: 0;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      letter-spacing: 0;
+    }
+
+    .ws-title {
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .session-title {
+      font-size: 12px;
+      font-weight: 560;
+    }
+
+    .ws-meta,
+    .session-meta {
+      min-width: 0;
+      color: var(--muted);
+      font-size: 10.5px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .ws-count {
+      align-self: start;
+      color: var(--dim);
+      font-size: 10px;
+      padding-top: 2px;
+    }
+
+    .sessions {
+      display: grid;
+      gap: 2px;
+      padding: 0 4px 6px 24px;
+      margin-left: 18px;
+      border-left: 1px solid rgba(255,255,255,0.055);
+    }
+
+    .session-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 4px;
+      align-items: center;
+      min-height: 42px;
+      border-radius: 7px;
+      background: transparent;
+      opacity: 0.72;
+      position: relative;
+    }
+
+    .session-row .row-hit {
+      grid-template-columns: 22px minmax(0, 1fr) auto;
+      gap: 7px;
+      padding: 6px 7px;
+    }
+
+    .session-row:hover {
+      opacity: 0.92;
+      background: rgba(255,255,255,0.035);
+    }
+
+    .session-row.focused {
+      opacity: 1;
+      background: rgba(255,255,255,0.11);
+    }
+
+    .variant-borders .session-row.focused {
+      box-shadow: inset 0 0 0 1px rgba(98, 212, 198, 0.42);
+      background: rgba(98, 212, 198, 0.07);
+    }
+
+    .session-icon {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #202323;
+      color: #c5ccc8;
+      font-size: 11px;
+    }
+
+    .state {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--dim);
+      margin-right: 2px;
+    }
+
+    .state.working { background: var(--green); }
+    .state.waiting { background: var(--amber); }
+    .state.idle { background: var(--dim); }
+    .state.pending { background: var(--violet); }
+
+    .collapsed .sessions {
+      display: none;
+    }
+
+    .collapsed .workspace-row {
+      min-height: 47px;
+    }
+
+    .variant-compact .workspace {
+      margin-bottom: 3px;
+    }
+
+    .variant-compact .workspace-row {
+      min-height: 45px;
+      grid-template-columns: 24px minmax(0, 1fr) auto;
+      padding-top: 6px;
+      padding-bottom: 6px;
+    }
+
+    .variant-compact .ws-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+    }
+
+    .variant-compact .sessions {
+      padding-left: 18px;
+      margin-left: 14px;
+    }
+
+    .variant-compact .session-row {
+      min-height: 34px;
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .variant-compact .session-icon {
+      width: 16px;
+      height: 16px;
+      font-size: 9px;
+    }
+
+    .variant-separated .workspace.selected {
+      background: rgba(255,255,255,0.025);
+      padding: 2px;
+      box-shadow:
+        inset 0 0 0 1px rgba(98, 212, 198, 0.34),
+        0 8px 22px rgba(0,0,0,0.24);
+    }
+
+    .row-actions {
+      display: flex;
+      gap: 3px;
+      align-items: center;
+      padding-right: 4px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 120ms ease;
+    }
+
+    .workspace-row:hover .row-actions,
+    .workspace-row:focus-within .row-actions,
+    .session-row:hover .row-actions,
+    .session-row:focus-within .row-actions {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .row-action {
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      border: 1px solid #2b302f;
+      border-radius: 5px;
+      background: #131616;
+      color: #cbd2ce;
+      cursor: pointer;
+      font-size: 10px;
+    }
+
+    .row-action:hover {
+      background: #1d2120;
+      border-color: #3a4140;
+    }
+
+    .row-action.danger:hover {
+      color: var(--red);
+      border-color: rgba(227, 109, 99, 0.38);
+    }
+
+    .muted-section {
+      margin-top: 9px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .muted-header {
+      width: 100%;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 10.5px;
+      padding: 0 8px;
+      border-radius: 6px;
+    }
+
+    .muted-header:hover {
+      background: rgba(255,255,255,0.035);
+      color: var(--text);
+    }
+
+    .muted-list {
+      display: none;
+      gap: 2px;
+      padding: 4px 4px 0 20px;
+    }
+
+    .muted-section.open .muted-list {
+      display: grid;
+    }
+
+    .muted-section .session-row {
+      opacity: 0.46;
+    }
+
+    .footer {
+      display: grid;
+      gap: 7px;
+      padding: 9px;
+      border-top: 1px solid var(--line);
+      background: #080909;
+    }
+
+    .legend {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .shortcut-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      color: var(--dim);
+      font-size: 10px;
+    }
+
+    kbd {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: #171a1a;
+      color: #cfd6d2;
+      border: 1px solid #2c3130;
+      font: inherit;
+    }
+
+    .main {
+      display: grid;
+      grid-template-rows: 40px minmax(0, 1fr);
+      min-width: 0;
+      background: #020202;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 1fr;
+      align-items: center;
+      gap: 12px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      background: #080909;
+    }
+
+    .top-title {
+      min-width: 0;
+      display: flex;
+      align-items: baseline;
+      gap: 9px;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .top-title strong {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 13px;
+    }
+
+    .top-title span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .workspace-stage {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 48% 52%;
+      min-height: 0;
+      gap: 1px;
+      background: var(--line);
+    }
+
+    .pane {
+      min-width: 0;
+      min-height: 0;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.018), transparent 20%),
+        #030303;
+      display: grid;
+      grid-template-rows: 30px minmax(0, 1fr);
+      opacity: 0.52;
+      transition: opacity 160ms ease, outline-color 160ms ease;
+      outline: 1px solid transparent;
+      outline-offset: -1px;
+    }
+
+    .pane.focused {
+      opacity: 1;
+      outline-color: rgba(98, 212, 198, 0.36);
+    }
+
+    .pane:nth-child(3) {
+      grid-column: 1 / span 2;
+    }
+
+    .workspace-stage.panes-1 {
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr;
+    }
+
+    .workspace-stage.panes-1 .pane,
+    .workspace-stage.panes-2 .pane,
+    .workspace-stage.panes-4 .pane {
+      grid-column: auto;
+    }
+
+    .workspace-stage.panes-2 {
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr;
+    }
+
+    .workspace-stage.panes-4 {
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+    }
+
+    .workspace-stage.panes-many {
+      grid-template-columns: repeat(3, 1fr);
+      grid-auto-rows: minmax(0, 1fr);
+    }
+
+    .workspace-stage.panes-many .pane {
+      grid-column: auto;
+    }
+
+    .pane-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 0 10px;
+      border-bottom: 1px solid #121414;
+      background: #080909;
+      color: #cbd2ce;
+      font-size: 11px;
+    }
+
+    .pane-head span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .term {
+      min-width: 0;
+      min-height: 0;
+      padding: 13px 15px;
+      color: #cad2ce;
+      font-size: 12px;
+      line-height: 1.55;
+      overflow: hidden;
+      white-space: pre-wrap;
+    }
+
+    .term .prompt {
+      color: var(--green);
+    }
+
+    .term .warn {
+      color: var(--amber);
+    }
+
+    .term .blue {
+      color: var(--blue);
+    }
+
+    .settings-popover {
+      position: fixed;
+      z-index: 10;
+      width: 218px;
+      background: #111313;
+      border: 1px solid #303635;
+      border-radius: 8px;
+      box-shadow: 0 18px 44px var(--shadow);
+      padding: 9px;
+      display: none;
+    }
+
+    .settings-popover.open {
+      display: grid;
+      gap: 9px;
+    }
+
+    .settings-title {
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .settings-row {
+      display: grid;
+      gap: 5px;
+    }
+
+    .toast {
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      min-width: 260px;
+      border-radius: 8px;
+      border: 1px solid #303635;
+      background: #111313;
+      color: var(--text);
+      padding: 10px 12px;
+      box-shadow: 0 18px 44px var(--shadow);
+      font-size: 12px;
+      transform: translateY(14px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+
+    .toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .empty-note {
+      padding: 18px 10px;
+      color: var(--dim);
+      font-size: 12px;
+    }
+
+    @media (max-width: 860px) {
+      :root {
+        --sidebar-w: 274px;
+      }
+
+      .shell {
+        grid-template-columns: minmax(246px, var(--sidebar-w)) 1fr;
+      }
+
+      .workspace-stage {
+        grid-template-columns: 1fr;
+        grid-template-rows: repeat(3, 1fr);
+      }
+
+      .pane:nth-child(3) {
+        grid-column: auto;
+      }
+
+    }
+  </style>
+</head>
+<body>
+  <div class="shell" id="app">
+    <aside class="sidebar variant-borders" id="sidebar">
+      <div class="traffic">
+        <span class="dot red"></span>
+        <span class="dot yellow"></span>
+        <span class="dot green"></span>
+      </div>
+
+      <div class="tool-strip" aria-label="Sidebar tools">
+        <button class="icon-btn active" id="go-dashboard" title="Dashboard (Cmd G)" aria-label="Dashboard">⌂</button>
+        <button class="icon-btn" title="Open in Editor (Cmd Shift E)" aria-label="Open in Editor">↗</button>
+        <button class="icon-btn active" title="Review Loop (Cmd Shift R)" aria-label="Review Loop">⟳</button>
+        <button class="icon-btn active" title="Diff Panel (Cmd Shift G)" aria-label="Diff Panel">⇄</button>
+        <button class="icon-btn has-badge" title="PRs Drawer (Cmd Shift P)" aria-label="PRs Drawer">⑂<span class="tool-badge">1</span></button>
+        <button class="icon-btn" id="collapse-sidebar" title="Collapse sidebar (Cmd Shift B)" aria-label="Collapse sidebar">‹</button>
+      </div>
+
+      <div class="toolbar">
+        <input class="search" id="search" placeholder="Search workspaces..." aria-label="Search workspaces">
+        <button class="icon-btn" id="new-session" title="New session in selected workspace" aria-label="New session">+</button>
+        <button class="icon-btn" id="new-workspace" title="New workspace" aria-label="New workspace">++</button>
+        <button class="icon-btn" id="sidebar-settings" title="Sidebar settings" aria-label="Sidebar settings">⋯</button>
+      </div>
+
+      <div class="list" id="workspace-list"></div>
+
+      <div class="footer">
+        <div class="legend">
+          <span><i class="state waiting"></i>needs input</span>
+          <span><i class="state working"></i>working</span>
+          <span><i class="state idle"></i>idle</span>
+        </div>
+        <div class="shortcut-row"><span>new session in workspace</span><kbd>Cmd N</kbd></div>
+        <div class="shortcut-row"><span>new workspace</span><kbd>Cmd Shift N</kbd></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="top-title">
+          <strong id="stage-title"></strong>
+          <span id="stage-subtitle"></span>
+        </div>
+      </div>
+      <section class="workspace-stage" id="stage"></section>
+    </main>
+  </div>
+
+  <div class="settings-popover" id="settings-popover" role="dialog" aria-label="Sidebar settings">
+    <div class="settings-row">
+      <div class="settings-title">Sidebar density</div>
+      <div class="mode-bar" role="group" aria-label="sidebar sketch variant">
+        <button class="mode-btn" data-variant="default">open</button>
+        <button class="mode-btn" data-variant="compact">tight</button>
+        <button class="mode-btn active" data-variant="separated">boxed</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const workspaces = [
+      {
+        id: 'attn',
+        title: 'attn',
+        directory: '~/projects/victor/attn',
+        branch: 'workspace-sidebar',
+        selectedSessionId: 'attn-codex',
+        sessions: [
+          { id: 'attn-codex', agent: 'Codex', title: 'workspace migration', state: 'working', branch: 'workspace-sidebar' },
+          { id: 'attn-claude', agent: 'Claude', title: 'review daemon model', state: 'waiting', branch: 'workspace-sidebar' },
+          { id: 'attn-fish', agent: 'fish', title: 'shell', state: 'idle', branch: 'workspace-sidebar' },
+        ],
+      },
+      {
+        id: 'jdk',
+        title: 'jdk-full',
+        directory: '/tmp/attn-large-repo-test/jdk-full',
+        branch: 'master',
+        selectedSessionId: 'jdk-shell',
+        sessions: [
+          { id: 'jdk-shell', agent: 'fish', title: 'git status loop', state: 'working', branch: 'master' },
+          { id: 'jdk-codex', agent: 'Codex', title: 'diff scanner', state: 'idle', branch: 'master' },
+        ],
+      },
+      {
+        id: 'victor',
+        title: 'victor',
+        directory: '~/projects/victor',
+        branch: 'main',
+        selectedSessionId: 'victor-claude',
+        sessions: [
+          { id: 'victor-claude', agent: 'Claude', title: 'notes organizer', state: 'idle', branch: 'main' },
+        ],
+      },
+      {
+        id: 'site',
+        title: 'homepage',
+        directory: '~/projects/victor/site',
+        branch: 'pricing-copy',
+        selectedSessionId: 'site-codex',
+        sessions: [
+          { id: 'site-codex', agent: 'Codex', title: 'landing polish', state: 'pending', branch: 'pricing-copy' },
+          { id: 'site-fish', agent: 'fish', title: 'vite dev', state: 'working', branch: 'pricing-copy' },
+        ],
+      },
+    ];
+
+    const mutedSessions = [
+      { id: 'muted-docs', agent: 'Codex', title: 'old docs pass', state: 'idle', branch: 'main' },
+      { id: 'muted-shell', agent: 'fish', title: 'quiet shell', state: 'idle', branch: 'scratch' },
+    ];
+
+    let selectedWorkspaceId = 'attn';
+    let variant = 'separated';
+    let nextWorkspaceNumber = 5;
+    let nextSessionNumber = 4;
+
+    const list = document.getElementById('workspace-list');
+    const stage = document.getElementById('stage');
+    const stageTitle = document.getElementById('stage-title');
+    const stageSubtitle = document.getElementById('stage-subtitle');
+    const sidebar = document.getElementById('sidebar');
+    const search = document.getElementById('search');
+    const settingsPopover = document.getElementById('settings-popover');
+    const toast = document.getElementById('toast');
+
+    function statusRank(state) {
+      return { waiting: 4, pending: 3, working: 2, idle: 1 }[state] || 0;
+    }
+
+    function rollup(workspace) {
+      return workspace.sessions.reduce((best, session) => (
+        statusRank(session.state) > statusRank(best) ? session.state : best
+      ), 'idle');
+    }
+
+    function iconFor(agent) {
+      if (agent === 'Codex') return 'AI';
+      if (agent === 'Claude') return 'C';
+      return '>';
+    }
+
+    function workspaceMatches(workspace, query) {
+      if (!query) return true;
+      const haystack = [
+        workspace.title,
+        workspace.directory,
+        workspace.branch,
+        ...workspace.sessions.flatMap((session) => [session.title, session.agent, session.branch]),
+      ].join(' ').toLowerCase();
+      return haystack.includes(query.toLowerCase());
+    }
+
+    function render() {
+      list.className = `list variant-${variant}`;
+      const query = search.value.trim();
+      const visible = workspaces.filter((workspace) => workspaceMatches(workspace, query));
+
+      list.innerHTML = visible.length
+        ? visible.map((workspace, index) => renderWorkspace(workspace, index)).join('') + renderMutedSection()
+        : '<div class="empty-note">No matching workspaces</div>';
+
+      const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId) || workspaces[0];
+      renderStage(selectedWorkspace);
+      bindRows();
+    }
+
+    function renderWorkspace(workspace, index) {
+      const selected = workspace.id === selectedWorkspaceId;
+      const state = rollup(workspace);
+      const attention = state === 'waiting' || state === 'pending';
+      const sessionRows = workspace.sessions.map((session) => {
+        const focused = selected && session.id === workspace.selectedSessionId;
+        return `
+          <div class="session-row ${focused ? 'focused' : ''}" data-workspace-row="${workspace.id}" data-session-row="${session.id}">
+            <button class="row-hit session-hit" data-workspace="${workspace.id}" data-session="${session.id}">
+              <span class="session-icon">${iconFor(session.agent)}</span>
+              <span class="session-main">
+                <span class="session-title">${escapeHtml(session.title)}</span>
+                <span class="session-meta">${escapeHtml(session.agent)} · ${escapeHtml(session.branch)}</span>
+              </span>
+              <span class="state ${session.state}"></span>
+            </button>
+            <span class="row-actions">
+              <button class="row-action rename-session" data-workspace="${workspace.id}" data-session="${session.id}" title="Rename session" aria-label="Rename session">r</button>
+              <button class="row-action mute-session" data-workspace="${workspace.id}" data-session="${session.id}" title="Mute session" aria-label="Mute session">⊘</button>
+              <button class="row-action reload-session" data-workspace="${workspace.id}" data-session="${session.id}" title="Reload session" aria-label="Reload session">↻</button>
+              <button class="row-action close-session danger" data-workspace="${workspace.id}" data-session="${session.id}" title="Close session (Cmd Shift W)" aria-label="Close session">×</button>
+            </span>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <section class="workspace ${selected ? 'selected' : ''} ${attention ? 'attention' : ''}" data-workspace-card="${workspace.id}">
+          <div class="workspace-row" data-workspace-row="${workspace.id}">
+            <button class="row-hit workspace-hit" data-workspace="${workspace.id}">
+              <span class="ws-icon">${state === 'waiting' ? '!' : state === 'pending' ? '?' : '#'} </span>
+              <span class="ws-main">
+                <span class="ws-title">${escapeHtml(workspace.title)}</span>
+                <span class="ws-meta">${escapeHtml(workspace.directory)} · ${escapeHtml(workspace.branch)}</span>
+              </span>
+              <span class="ws-count">Cmd ${index + 1}</span>
+            </button>
+            <span class="row-actions">
+              <button class="row-action rename-workspace" data-workspace="${workspace.id}" title="Rename workspace" aria-label="Rename workspace">r</button>
+            </span>
+          </div>
+          <div class="sessions">${sessionRows}</div>
+        </section>
+      `;
+    }
+
+    function renderMutedSection() {
+      if (mutedSessions.length === 0) return '';
+      const rows = mutedSessions.map((session) => `
+        <div class="session-row" data-muted-session="${session.id}">
+          <button class="row-hit">
+            <span class="session-icon">${iconFor(session.agent)}</span>
+            <span class="session-main">
+              <span class="session-title">${escapeHtml(session.title)}</span>
+              <span class="session-meta">${escapeHtml(session.agent)} · ${escapeHtml(session.branch)}</span>
+            </span>
+            <span class="state ${session.state}"></span>
+          </button>
+          <span class="row-actions">
+            <button class="row-action unmute-session" data-session="${session.id}" title="Unmute session" aria-label="Unmute session">⊙</button>
+          </span>
+        </div>
+      `).join('');
+      return `
+        <section class="muted-section" id="muted-section">
+          <button class="muted-header" id="muted-toggle" aria-expanded="false">
+            <span>▸ muted sessions</span>
+            <span>${mutedSessions.length}</span>
+          </button>
+          <div class="muted-list">${rows}</div>
+        </section>
+      `;
+    }
+
+    function renderStage(workspace) {
+      if (!workspace) return;
+      const activeSession = workspace.sessions.find((session) => session.id === workspace.selectedSessionId) || workspace.sessions[0];
+      stageTitle.textContent = workspace.title;
+      stageSubtitle.textContent = `${workspace.directory} · ${workspace.sessions.length} sessions`;
+
+      stage.className = `workspace-stage panes-${paneClass(workspace.sessions.length)}`;
+      stage.innerHTML = workspace.sessions.map((session, index) => {
+        const focused = activeSession && session.id === activeSession.id;
+        return `
+          <article class="pane ${focused ? 'focused' : ''}" data-pane-session="${session.id}">
+            <div class="pane-head">
+              <span>${escapeHtml(session.title)}</span>
+              <span>${escapeHtml(session.agent)} · ${escapeHtml(session.state)}</span>
+            </div>
+            <div class="term">${terminalText(workspace, session, index)}</div>
+          </article>
+        `;
+      }).join('');
+    }
+
+    function terminalText(workspace, session, index) {
+      const lines = [
+        `<span class="prompt">${workspace.directory} git:(${session.branch})</span>`,
+        `${session.agent.toLowerCase()} ${session.title.replaceAll(' ', '-')}`,
+        '',
+      ];
+      if (session.state === 'waiting') {
+        lines.push('<span class="warn">needs input:</span> choose how to apply workspace/session split');
+      } else if (session.state === 'pending') {
+        lines.push('<span class="warn">pending approval:</span> command wants to edit files');
+      } else if (session.state === 'working') {
+        lines.push('reading workspace model...', 'patching sidebar...', '<span class="blue">stream:</span> sessions stay panes inside workspace');
+      } else {
+        lines.push('idle', 'last output preserved');
+      }
+      lines.push('', `pane ${index + 1} · session ${session.id}`);
+      return lines.join('\n');
+    }
+
+    function bindRows() {
+      document.querySelectorAll('.workspace-hit').forEach((row) => {
+        row.addEventListener('click', () => selectWorkspace(row.dataset.workspace));
+      });
+
+      document.querySelectorAll('.session-hit').forEach((row) => {
+        row.addEventListener('click', () => selectSession(row.dataset.workspace, row.dataset.session));
+      });
+
+      document.querySelectorAll('.rename-workspace').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          renameWorkspace(button.dataset.workspace);
+        });
+      });
+
+      document.querySelectorAll('.rename-session').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          renameSession(button.dataset.workspace, button.dataset.session);
+        });
+      });
+
+      document.querySelectorAll('.mute-session').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          showToast('Mute session affordance');
+        });
+      });
+
+      document.querySelectorAll('.reload-session').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          showToast('Reload session affordance');
+        });
+      });
+
+      document.querySelectorAll('.close-session').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          showToast('Close session affordance');
+        });
+      });
+
+      document.querySelectorAll('.unmute-session').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          showToast('Unmute session affordance');
+        });
+      });
+
+      const mutedToggle = document.getElementById('muted-toggle');
+      const mutedSection = document.getElementById('muted-section');
+      if (mutedToggle && mutedSection) {
+        mutedToggle.addEventListener('click', () => {
+          mutedSection.classList.toggle('open');
+          const open = mutedSection.classList.contains('open');
+          mutedToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+          mutedToggle.querySelector('span').textContent = `${open ? '▾' : '▸'} muted sessions`;
+        });
+      }
+    }
+
+    function selectWorkspace(workspaceId) {
+      const workspace = workspaces.find((entry) => entry.id === workspaceId);
+      if (!workspace) return;
+      selectedWorkspaceId = workspace.id;
+      if (!workspace.selectedSessionId && workspace.sessions[0]) {
+        workspace.selectedSessionId = workspace.sessions[0].id;
+      }
+      render();
+    }
+
+    function selectSession(workspaceId, sessionId) {
+      const workspace = workspaces.find((entry) => entry.id === workspaceId);
+      if (!workspace) return;
+      workspace.selectedSessionId = sessionId;
+      selectedWorkspaceId = workspaceId;
+      render();
+    }
+
+    function newSession() {
+      const workspace = workspaces.find((entry) => entry.id === selectedWorkspaceId);
+      if (!workspace) return;
+      const id = `${workspace.id}-new-${nextSessionNumber++}`;
+      workspace.sessions.push({
+        id,
+        agent: nextSessionNumber % 2 ? 'Codex' : 'fish',
+        title: `new session ${workspace.sessions.length + 1}`,
+        state: 'working',
+        branch: workspace.branch,
+      });
+      workspace.selectedSessionId = id;
+      showToast(`Created session inside ${workspace.title}`);
+      render();
+    }
+
+    function newWorkspace() {
+      const id = `workspace-${nextWorkspaceNumber++}`;
+      const sessionId = `${id}-session-1`;
+      workspaces.unshift({
+        id,
+        title: `new-workspace-${nextWorkspaceNumber - 1}`,
+        directory: `~/projects/new-workspace-${nextWorkspaceNumber - 1}`,
+        branch: 'main',
+        selectedSessionId: sessionId,
+        sessions: [
+          { id: sessionId, agent: 'Codex', title: 'initial session', state: 'working', branch: 'main' },
+        ],
+      });
+      selectedWorkspaceId = id;
+      showToast('Created workspace and initial session');
+      render();
+    }
+
+    function paneClass(count) {
+      if (count <= 1) return '1';
+      if (count === 2) return '2';
+      if (count === 3) return '3';
+      if (count === 4) return '4';
+      return 'many';
+    }
+
+    function renameWorkspace(workspaceId = selectedWorkspaceId) {
+      const workspace = workspaces.find((entry) => entry.id === workspaceId);
+      if (!workspace) return;
+      const name = prompt('Workspace title', workspace.title);
+      if (!name) return;
+      workspace.title = name.trim() || workspace.title;
+      render();
+    }
+
+    function renameSession(workspaceId, sessionId) {
+      const workspace = workspaces.find((entry) => entry.id === workspaceId);
+      if (!workspace) return;
+      const session = workspace.sessions.find((entry) => entry.id === sessionId);
+      if (!session) return;
+      const name = prompt('Session title', session.title);
+      if (!name) return;
+      session.title = name.trim() || session.title;
+      render();
+    }
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add('show');
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => toast.classList.remove('show'), 1800);
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
+    }
+
+    document.querySelectorAll('.mode-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        variant = button.dataset.variant;
+        document.querySelectorAll('.mode-btn').forEach((entry) => entry.classList.toggle('active', entry === button));
+        sidebar.classList.toggle('variant-borders', variant === 'separated');
+        settingsPopover.classList.remove('open');
+        render();
+      });
+    });
+
+    document.getElementById('new-session').addEventListener('click', newSession);
+    document.getElementById('new-workspace').addEventListener('click', newWorkspace);
+    document.getElementById('go-dashboard').addEventListener('click', () => showToast('Dashboard affordance'));
+    document.getElementById('collapse-sidebar').addEventListener('click', () => showToast('Collapse sidebar affordance'));
+    document.getElementById('sidebar-settings').addEventListener('click', (event) => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      settingsPopover.style.left = `${Math.max(8, rect.right - 218)}px`;
+      settingsPopover.style.top = `${rect.bottom + 8}px`;
+      settingsPopover.classList.toggle('open');
+    });
+    search.addEventListener('input', render);
+
+    window.addEventListener('click', (event) => {
+      if (!settingsPopover.contains(event.target) && event.target.id !== 'sidebar-settings') {
+        settingsPopover.classList.remove('open');
+      }
+    });
+
+    window.addEventListener('keydown', (event) => {
+      if (!event.metaKey) return;
+      if (event.shiftKey && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        newWorkspace();
+        return;
+      }
+      if (!event.shiftKey && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        newSession();
+        return;
+      }
+      const numeric = Number(event.key);
+      if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 9) {
+        const workspace = workspaces[numeric - 1];
+        if (workspace) {
+          event.preventDefault();
+          selectWorkspace(workspace.id);
+        }
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildWorkspaceViewModels, firstSessionIdForWorkspace } from './workspaceViewModels';
+import {
+  buildWorkspaceViewModels,
+  filterSessionsRepresentedInWorkspaceLayouts,
+  firstSessionIdForWorkspace,
+} from './workspaceViewModels';
 
 describe('workspaceViewModels', () => {
   it('orders workspaces by daemon order and nests sessions by workspace id', () => {
@@ -23,20 +27,32 @@ describe('workspaceViewModels', () => {
     expect(viewModels.map((workspace) => workspace.firstSessionId)).toEqual(['a1', 'b1']);
   });
 
-  it('creates fallback workspaces for sessions missing daemon workspace snapshots', () => {
+  it('does not invent workspaces when daemon workspace snapshots are missing', () => {
     const viewModels = buildWorkspaceViewModels([], [
       { id: 's1', label: 'One', workspaceId: 'workspace-s1', cwd: '/repo/one' },
-      { id: 's2', label: 'Two', cwd: '/repo/two' },
+      { id: 's2', label: 'Two', workspaceId: 'workspace-s2', cwd: '/repo/two' },
     ]);
 
-    expect(viewModels.map((workspace) => ({
-      id: workspace.id,
-      title: workspace.title,
-      directory: workspace.directory,
-      sessions: workspace.sessions.map((session) => session.id),
-    }))).toEqual([
-      { id: 'workspace-s1', title: 'one', directory: '/repo/one', sessions: ['s1'] },
-      { id: 'workspace-s2', title: 'two', directory: '/repo/two', sessions: ['s2'] },
+    expect(viewModels).toEqual([]);
+  });
+
+  it('keeps daemon workspaces renderable before their sessions arrive', () => {
+    const viewModels = buildWorkspaceViewModels(
+      [{ id: 'workspace-pending', title: 'Pending', directory: '/repo/pending', status: 'launching' }],
+      [],
+    );
+
+    expect(viewModels).toEqual([
+      {
+        id: 'workspace-pending',
+        title: 'Pending',
+        directory: '/repo/pending',
+        status: 'launching',
+        endpointId: undefined,
+        sessions: [],
+        firstSessionId: null,
+        focusedSessionId: null,
+      },
     ]);
   });
 
@@ -100,5 +116,31 @@ describe('workspaceViewModels', () => {
     );
 
     expect(workspace.focusedSessionId).toBe('a1');
+  });
+
+  it('filters sessions that are no longer represented in an authoritative workspace layout', () => {
+    const sessions = [
+      { id: 'a1', label: 'Agent 1', workspaceId: 'workspace-a' },
+      { id: 'a2', label: 'Agent 2', workspaceId: 'workspace-a' },
+      { id: 'stale', label: 'Stale', workspaceId: 'workspace-a' },
+      { id: 'pending', label: 'Pending', workspaceId: 'workspace-pending' },
+    ];
+
+    const filtered = filterSessionsRepresentedInWorkspaceLayouts(
+      [{
+        id: 'workspace-a',
+        title: 'A',
+        directory: '/repo/a',
+        layout: {
+          panes: [
+            { session_id: 'a1' },
+            { session_id: 'a2' },
+          ],
+        },
+      }],
+      sessions,
+    );
+
+    expect(filtered.map((session) => session.id)).toEqual(['a1', 'a2', 'pending']);
   });
 });

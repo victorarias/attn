@@ -40,7 +40,12 @@ enum WorkspaceStatus {
 
 enum WorkspaceLayoutPaneKind {
   agent,
-  shell,
+}
+
+enum WorkspaceLayoutPaneStatus {
+  spawning,
+  ready,
+  failed,
 }
 
 enum WorkspaceLayoutSplitDirection {
@@ -118,7 +123,7 @@ model Session {
   agent: string;                // Built-in ID or registered plugin driver ID
   directory: string;
   endpoint_id?: string;         // Optional: owning endpoint for remote/session-aware routing
-  workspace_id?: string;        // Owning workspace; required for newly-created sessions
+  workspace_id: string;         // Owning workspace
   branch?: string;              // Optional: might not be in git repo
   is_worktree?: boolean;        // Optional: false if not worktree
   main_repo?: string;           // Optional: only set if worktree
@@ -265,10 +270,12 @@ model GitFileChange {
 model WorkspaceLayoutPane {
   pane_id: string;
   runtime_id?: string;
-  workspace_id?: string;
+  workspace_id: string;
   session_id?: string;
   kind: WorkspaceLayoutPaneKind;
   title: string;
+  status: WorkspaceLayoutPaneStatus;
+  error?: string;
 }
 
 model WorkspaceLayout {
@@ -315,10 +322,9 @@ model EndpointInfo {
 // Command Messages (Client → Daemon)
 // ============================================================================
 
-// Sent first thing after a WebSocket connect so the daemon can serve
-// per-client behavior gated on capabilities. Clients that don't send a
-// hello are treated as the legacy default (no capabilities) for
-// backwards compatibility.
+// Sent first thing after a WebSocket connect. Interactive clients must
+// advertise workspace_sessions so the daemon only accepts workspace-first
+// clients.
 //
 model ClientHelloMessage {
   cmd: "client_hello";
@@ -331,7 +337,7 @@ model RegisterMessage {
   cmd: "register";
   id: string;
   label?: string;
-  agent?: string;               // Optional for legacy wrappers or registered plugin IDs
+  agent?: string;               // Optional for registered plugin IDs
   dir: string;
   workspace_id: string;
 }
@@ -780,11 +786,14 @@ model WorkspaceLayoutGetMessage {
   workspace_id: string;
 }
 
-model WorkspaceLayoutSplitPaneMessage {
-  cmd: "workspace_layout_split_pane";
+model WorkspaceLayoutAddSessionPaneMessage {
+  cmd: "workspace_layout_add_session_pane";
   workspace_id: string;
-  target_pane_id: string;
-  direction: WorkspaceLayoutSplitDirection;
+  pane_id?: string;
+  session_id: string;
+  title?: string;
+  target_pane_id?: string;
+  direction?: WorkspaceLayoutSplitDirection;
 }
 
 model WorkspaceLayoutClosePaneMessage {
@@ -914,15 +923,6 @@ model WorkspaceLayoutActionResultMessage {
   pane_id?: string;
   success: boolean;
   error?: string;
-}
-
-model WorkspaceLayoutRuntimeExitedMessage {
-  event: "workspace_layout_runtime_exited";
-  workspace_id: string;
-  pane_id: string;
-  runtime_id: string;
-  exit_code: int32;
-  signal?: string;
 }
 
 model PRsUpdatedMessage {
@@ -1504,7 +1504,6 @@ alias DaemonEvent =
   | WorkspaceLayoutMessage
   | WorkspaceLayoutUpdatedMessage
   | WorkspaceLayoutActionResultMessage
-  | WorkspaceLayoutRuntimeExitedMessage
   | PRsUpdatedMessage
   | ReposUpdatedMessage
   | AuthorsUpdatedMessage

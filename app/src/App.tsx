@@ -24,11 +24,12 @@ import { CopyToast, useCopyToast } from './components/CopyToast';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
-import { MAIN_TERMINAL_PANE_ID, useSessionStore } from './store/sessions';
+import { useSessionStore, type Session, type TerminalWorkspaceState } from './store/sessions';
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
+import { hasPane, type TerminalSplitDirection } from './types/workspace';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -36,6 +37,7 @@ import { useUIScale } from './hooks/useUIScale';
 import { useTheme } from './hooks/useTheme';
 import { useOpenPR, type OpenPRProgress } from './hooks/useOpenPR';
 import { useUiAutomationBridge } from './hooks/useUiAutomationBridge';
+import { ptySpawn } from './pty/bridge';
 import {
   agentLabel,
   getAgentAvailability,
@@ -44,7 +46,8 @@ import {
   resolvePreferredAgent,
 } from './utils/agentAvailability';
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
-import { groupSessionsByDirectory } from './utils/sessionGrouping';
+import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
+import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
 import './App.css';
 
 const RELEASES_LATEST_API = 'https://api.github.com/repos/victorarias/attn/releases/latest';
@@ -56,12 +59,70 @@ const CHANGES_BRANCH_DIFF_INTERVAL_MS = 30_000;
 const CHANGES_BRANCH_DIFF_STATUS_DEBOUNCE_MS = 750;
 const CHANGES_BRANCH_DIFF_SLOW_THRESHOLD_MS = 5_000;
 const CHANGES_BRANCH_DIFF_SLOW_COOLDOWN_MS = 30_000;
+const TERMINAL_AGENT: SessionAgent = 'shell';
+
+type LocationPickerPurpose = 'workspace' | 'session';
+
+interface SplitSessionOptions {
+  baseSessionId?: string;
+  cwd?: string;
+  endpointId?: string;
+  label?: string;
+  yoloMode?: boolean;
+}
+
+function paneIdForSession(sessionId: string): string {
+  return `pane-${sessionId}`;
+}
 
 interface GitHubReleaseResponse {
   tag_name?: string;
   html_url?: string;
   prerelease?: boolean;
   draft?: boolean;
+}
+
+function terminalStateForWorkspaceSessions(sessions: Session[]): TerminalWorkspaceState | null {
+  let selected: TerminalWorkspaceState | null = null;
+  for (const session of sessions) {
+    const candidate = session.workspace;
+    if (!candidate.layoutTree && candidate.agents.length === 0) {
+      continue;
+    }
+    if (!selected || candidate.agents.length > selected.agents.length) {
+      selected = candidate;
+    }
+  }
+  return selected;
+}
+
+function activePaneIdForWorkspace(
+  workspace: TerminalWorkspaceState,
+  focusedSessionId: string | null,
+): string {
+  if (focusedSessionId) {
+    const focusedPane = workspace.agents.find((pane) => pane.sessionId === focusedSessionId);
+    if (focusedPane) {
+      return focusedPane.id;
+    }
+  }
+  return workspace.agents[0]?.id || '';
+}
+
+function activePaneIdForFocusedSession(
+  workspace: TerminalWorkspaceState,
+  session: Session | null,
+  getActivePaneIdForSession: (session: Session | undefined | null) => string,
+): string {
+  const sessionActivePaneId = getActivePaneIdForSession(session);
+  if (
+    sessionActivePaneId
+    && workspace.layoutTree
+    && hasPane(workspace.layoutTree, sessionActivePaneId)
+  ) {
+    return sessionActivePaneId;
+  }
+  return activePaneIdForWorkspace(workspace, session?.id ?? null);
 }
 
 function parseSemver(version: string): [number, number, number] | null {
@@ -275,6 +336,7 @@ function App() {
     sendRefreshPRs,
     sendRegisterWorkspace,
     sendUnregisterWorkspace,
+    sendUnregisterSession,
     sendSetSetting,
     sendCreateWorktree,
     sendDeleteWorktree,
@@ -297,7 +359,7 @@ function App() {
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
     sendSessionVisualized,
-    sendWorkspaceSplitPane,
+    sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
     sendRuntimeInput,
     isRuntimeAttached,
@@ -389,6 +451,7 @@ function App() {
         sendRefreshPRs={sendRefreshPRs}
         sendRegisterWorkspace={sendRegisterWorkspace}
         sendUnregisterWorkspace={sendUnregisterWorkspace}
+        sendUnregisterSession={sendUnregisterSession}
         sendSetSetting={sendSetSetting}
         sendCreateWorktree={sendCreateWorktree}
         sendDeleteWorktree={sendDeleteWorktree}
@@ -411,7 +474,7 @@ function App() {
         sendSubscribeGitStatus={sendSubscribeGitStatus}
         sendUnsubscribeGitStatus={sendUnsubscribeGitStatus}
         sendSessionVisualized={sendSessionVisualized}
-        sendWorkspaceSplitPane={sendWorkspaceSplitPane}
+        sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
         sendRuntimeInput={sendRuntimeInput}
         isRuntimeAttached={isRuntimeAttached}
@@ -470,6 +533,7 @@ interface AppContentProps {
   sendRefreshPRs: ReturnType<typeof useDaemonSocket>['sendRefreshPRs'];
   sendRegisterWorkspace: ReturnType<typeof useDaemonSocket>['sendRegisterWorkspace'];
   sendUnregisterWorkspace: ReturnType<typeof useDaemonSocket>['sendUnregisterWorkspace'];
+  sendUnregisterSession: ReturnType<typeof useDaemonSocket>['sendUnregisterSession'];
   sendSetSetting: ReturnType<typeof useDaemonSocket>['sendSetSetting'];
   sendCreateWorktree: ReturnType<typeof useDaemonSocket>['sendCreateWorktree'];
   sendDeleteWorktree: ReturnType<typeof useDaemonSocket>['sendDeleteWorktree'];
@@ -492,7 +556,7 @@ interface AppContentProps {
   sendSubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendSubscribeGitStatus'];
   sendUnsubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendUnsubscribeGitStatus'];
   sendSessionVisualized: ReturnType<typeof useDaemonSocket>['sendSessionVisualized'];
-  sendWorkspaceSplitPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceSplitPane'];
+  sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
   sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
   isRuntimeAttached: ReturnType<typeof useDaemonSocket>['isRuntimeAttached'];
@@ -546,6 +610,7 @@ function AppContent({
   sendRefreshPRs,
   sendRegisterWorkspace,
   sendUnregisterWorkspace,
+  sendUnregisterSession,
   sendSetSetting,
   sendCreateWorktree,
   sendDeleteWorktree,
@@ -568,7 +633,7 @@ sendFetchPRDetails,
   sendSubscribeGitStatus,
   sendUnsubscribeGitStatus,
   sendSessionVisualized,
-  sendWorkspaceSplitPane,
+  sendWorkspaceAddSessionPane,
   sendWorkspaceClosePane,
   sendRuntimeInput,
   isRuntimeAttached,
@@ -610,6 +675,30 @@ sendFetchPRDetails,
     syncFromDaemonWorkspaces,
   } = useSessionStore();
 
+  const rollbackSessionCreation = useCallback(async ({
+    sessionId,
+    workspaceId,
+    paneId,
+    unregisterWorkspace,
+  }: {
+    sessionId: string;
+    workspaceId: string;
+    paneId?: string;
+    unregisterWorkspace?: boolean;
+  }) => {
+    if (paneId) {
+      await sendWorkspaceClosePane(workspaceId, paneId).catch((error) => {
+        console.error('[App] Failed to rollback workspace pane:', error);
+      });
+    }
+    closeSession(sessionId);
+    if (unregisterWorkspace) {
+      await sendUnregisterWorkspace(workspaceId).catch((error) => {
+        console.error('[App] Failed to rollback workspace:', error);
+      });
+    }
+  }, [closeSession, sendUnregisterWorkspace, sendWorkspaceClosePane]);
+
   const createWorkspaceSession = useCallback(async (
     label: string,
     cwd: string,
@@ -620,9 +709,42 @@ sendFetchPRDetails,
   ) => {
     const sessionId = providedSessionId || crypto.randomUUID();
     const workspaceId = `workspace-${sessionId}`;
-    sendRegisterWorkspace(workspaceId, label, cwd, endpointId);
-    return createSession(label, cwd, sessionId, agent, endpointId, yoloMode, workspaceId);
-  }, [createSession, sendRegisterWorkspace]);
+    const paneId = paneIdForSession(sessionId);
+    let localCreated = false;
+    let paneAdded = false;
+    try {
+      await sendRegisterWorkspace(workspaceId, label, cwd, endpointId);
+      const createdSessionId = await createSession(label, cwd, sessionId, agent, endpointId, yoloMode, workspaceId);
+      localCreated = true;
+      await sendWorkspaceAddSessionPane(workspaceId, sessionId, label, { paneId });
+      paneAdded = true;
+      const spawnArgs = takeSessionSpawnArgs(sessionId, 80, 24);
+      if (!spawnArgs) {
+        throw new Error('Session spawn arguments were not prepared.');
+      }
+      await ptySpawn({ args: spawnArgs });
+      return createdSessionId;
+    } catch (error) {
+      if (localCreated) {
+        await rollbackSessionCreation({
+          sessionId,
+          workspaceId,
+          paneId: paneAdded ? paneId : undefined,
+          unregisterWorkspace: true,
+        });
+      } else {
+        await sendUnregisterWorkspace(workspaceId).catch(console.error);
+      }
+      throw error;
+    }
+  }, [
+    createSession,
+    rollbackSessionCreation,
+    sendRegisterWorkspace,
+    sendWorkspaceAddSessionPane,
+    sendUnregisterWorkspace,
+    takeSessionSpawnArgs,
+  ]);
 
   useEffect(() => {
     if (!sessionCreationJob?.sessionId || sessionCreationJob.error) {
@@ -805,12 +927,18 @@ sendFetchPRDetails,
   const enrichedLocalSessions = sessions.map((s) => {
     const daemonSession = daemonSessions.find((ds) => ds.id === s.id);
     const rawState = daemonSession?.state ?? s.state;
+    const paneStatus = s.workspace.agents.find((pane) => pane.sessionId === s.id)?.status;
+    const paneState = paneStatus === 'failed'
+      ? 'unknown'
+      : paneStatus === 'spawning'
+        ? 'launching'
+        : null;
     const reviewLoop = reviewLoopsBySessionId[s.id];
     const endpointId = daemonSession?.endpoint_id ?? s.endpointId;
     const endpoint = endpointId ? endpointById.get(endpointId) : undefined;
     return {
       ...s,
-      state: normalizeSessionState(rawState),
+      state: paneState || normalizeSessionState(rawState),
       endpointId,
       endpointName: endpoint?.name,
       endpointStatus: endpoint?.status,
@@ -822,8 +950,9 @@ sendFetchPRDetails,
     };
   });
 
-  const unmutedEnrichedSessions = enrichedLocalSessions.filter((s) => !s.muted);
-  const mutedEnrichedSessions = enrichedLocalSessions.filter((s) => s.muted);
+  const visibleEnrichedSessions = filterSessionsRepresentedInWorkspaceLayouts(daemonWorkspaces, enrichedLocalSessions);
+  const unmutedEnrichedSessions = visibleEnrichedSessions.filter((s) => !s.muted);
+  const mutedEnrichedSessions = visibleEnrichedSessions.filter((s) => s.muted);
 
   const {
     eventRouter: paneRuntimeEventRouter,
@@ -885,6 +1014,12 @@ sendFetchPRDetails,
       setView('session');
     }
   }, [activeSessionId]);
+
+  useEffect(() => {
+    if (view === 'session' && !activeSessionId && sessions.length > 0) {
+      setActiveSession(sessions[0].id);
+    }
+  }, [activeSessionId, sessions, setActiveSession, view]);
 
   // Track when the currently-selected session became visible.
   useEffect(() => {
@@ -1113,6 +1248,8 @@ sendFetchPRDetails,
 
   // Location picker state management
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const [locationPickerPurpose, setLocationPickerPurpose] = useState<LocationPickerPurpose>('workspace');
+  const [locationPickerSessionDirection, setLocationPickerSessionDirection] = useState<TerminalSplitDirection>('vertical');
 
   // Thumbs (Quick Find) state
   const [thumbsOpen, setThumbsOpen] = useState(false);
@@ -1225,13 +1362,93 @@ sendFetchPRDetails,
 
   // No auto-creation - user clicks "+" to start a session
 
-  const handleNewSession = useCallback(() => {
+  const handleNewWorkspace = useCallback(() => {
+    setLocationPickerPurpose('workspace');
     setLocationPickerOpen(true);
   }, []);
 
-  const handleNewWorktreeSession = useCallback(() => {
+  const nextSplitSessionLabel = useCallback((workspaceId: string, agent: SessionAgent) => {
+    const normalizedAgent = normalizeSessionAgent(agent, 'codex');
+    const base = normalizedAgent === 'shell' ? 'shell' : normalizedAgent;
+    const matchingCount = sessions.filter((session) => (
+      session.workspaceId === workspaceId
+      && normalizeSessionAgent(session.agent, 'codex') === normalizedAgent
+    )).length;
+    return matchingCount === 0 ? base : `${base} ${matchingCount + 1}`;
+  }, [sessions]);
+
+  const createSplitSession = useCallback(async (
+    agent: SessionAgent,
+    direction: 'vertical' | 'horizontal',
+    targetPaneId?: string,
+    options: SplitSessionOptions = {},
+  ) => {
+    const activeSession = options.baseSessionId
+      ? sessions.find((session) => session.id === options.baseSessionId)
+      : activeLocalSession;
+    if (!activeSession?.workspaceId) {
+      handleNewWorkspace();
+      return;
+    }
+    const sessionId = crypto.randomUUID();
+    const workspaceId = activeSession.workspaceId;
+    const paneId = targetPaneId || getActivePaneIdForSession(activeSession);
+    const newPaneId = paneIdForSession(sessionId);
+    const label = options.label || nextSplitSessionLabel(workspaceId, agent);
+    let paneAdded = false;
+
+    try {
+      await createSession(
+        label,
+        options.cwd || activeSession.cwd,
+        sessionId,
+        agent,
+        options.endpointId ?? activeSession.endpointId,
+        agent === 'shell' ? false : options.yoloMode ?? activeSession.yoloMode,
+        workspaceId,
+      );
+      const spawnArgs = takeSessionSpawnArgs(sessionId, 80, 24);
+      await sendWorkspaceAddSessionPane(workspaceId, sessionId, label, { paneId: newPaneId, targetPaneId: paneId, direction });
+      paneAdded = true;
+      if (spawnArgs) {
+        await ptySpawn({ args: spawnArgs });
+      } else {
+        throw new Error('Session spawn arguments were not prepared.');
+      }
+      setView('session');
+      setActiveSession(sessionId);
+      setUtilityFocusRequestToken((token) => token + 1);
+    } catch (error) {
+      await rollbackSessionCreation({
+        sessionId,
+        workspaceId,
+        paneId: paneAdded ? newPaneId : undefined,
+      });
+      showError(error instanceof Error ? error.message : 'Failed to create session split');
+    }
+  }, [
+    activeLocalSession,
+    createSession,
+    getActivePaneIdForSession,
+    handleNewWorkspace,
+    nextSplitSessionLabel,
+    rollbackSessionCreation,
+    sendWorkspaceAddSessionPane,
+    sessions,
+    setActiveSession,
+    showError,
+    takeSessionSpawnArgs,
+  ]);
+
+  const handleNewSession = useCallback((direction: TerminalSplitDirection = 'vertical') => {
+    if (!activeLocalSession?.workspaceId) {
+      handleNewWorkspace();
+      return;
+    }
+    setLocationPickerPurpose('session');
+    setLocationPickerSessionDirection(direction);
     setLocationPickerOpen(true);
-  }, []);
+  }, [activeLocalSession?.workspaceId, handleNewWorkspace]);
 
   const handleLocationSelect = useCallback(
     async (path: string, agent: SessionAgent, endpointId?: string, yoloMode = false) => {
@@ -1248,20 +1465,31 @@ sendFetchPRDetails,
           showError(`Endpoint ${endpoint.name} is ${endpoint.status}.`);
           return;
         }
-        if (!endpoint.capabilities?.agents_available.includes(agent)) {
+        if (agent !== TERMINAL_AGENT && !endpoint.capabilities?.agents_available.includes(agent)) {
           showError(`${agentLabel(agent)} is not available on ${endpoint.name}.`);
           return;
         }
         selectedAgent = agent;
       } else {
-        if (!hasAvailableAgents) {
+        if (agent !== TERMINAL_AGENT && !hasAvailableAgents) {
           showError('No supported agent CLI found in PATH.');
           return;
         }
-        selectedAgent = resolvePreferredAgent(agent, agentAvailability, 'codex');
+        selectedAgent = agent === TERMINAL_AGENT
+          ? TERMINAL_AGENT
+          : resolvePreferredAgent(agent, agentAvailability, 'codex');
       }
       // Note: Location is automatically tracked by daemon when session registers
       const folderName = path.split('/').pop() || 'session';
+      if (locationPickerPurpose === 'session' && activeLocalSession?.workspaceId) {
+        await createSplitSession(selectedAgent, locationPickerSessionDirection, undefined, {
+          cwd: path,
+          endpointId,
+          label: folderName,
+          yoloMode,
+        });
+        return;
+      }
       setSessionCreationJob({
         id: jobId,
         label: folderName,
@@ -1284,7 +1512,7 @@ sendFetchPRDetails,
         ));
       }
     },
-    [agentAvailability, createWorkspaceSession, daemonEndpoints, hasAvailableAgents, showError]
+    [activeLocalSession?.workspaceId, agentAvailability, createSplitSession, createWorkspaceSession, daemonEndpoints, hasAvailableAgents, locationPickerPurpose, locationPickerSessionDirection, showError]
   );
 
   const handleCreateWorktreeSession = useCallback((
@@ -1367,52 +1595,80 @@ sendFetchPRDetails,
     showCopyToast('Copied to clipboard');
   }, [showCopyToast]);
 
+  const prepareWorktreeCleanupPrompt = useCallback((session: (typeof enrichedLocalSessions)[number] | undefined) => {
+    if (!session?.isWorktree || !session.cwd) {
+      return;
+    }
+
+    const sessionsInSameDir = enrichedLocalSessions.filter(s => s.cwd === session.cwd);
+    const isLastSession = sessionsInSameDir.length === 1;
+    if (!isLastSession || alwaysKeepWorktrees) {
+      return;
+    }
+
+    const cleanupRequestId = cleanupRequestIdRef.current + 1;
+    cleanupRequestIdRef.current = cleanupRequestId;
+    setWorktreeCleanupState({ requestId: cleanupRequestId, isDeleting: false, error: null, forceable: false });
+    setClosedWorktree({ id: cleanupRequestId, path: session.cwd, branch: session.branch });
+  }, [alwaysKeepWorktrees, enrichedLocalSessions]);
+
   const handleCloseSession = useCallback(
     async (id: string) => {
-      // Check if session is a worktree and last in directory
       const session = enrichedLocalSessions.find(s => s.id === id);
-      if (session?.isWorktree && session.cwd) {
-        const sessionsInSameDir = enrichedLocalSessions.filter(s => s.cwd === session.cwd);
-        const isLastSession = sessionsInSameDir.length === 1;
+      prepareWorktreeCleanupPrompt(session);
 
-        if (isLastSession && !alwaysKeepWorktrees) {
-          // Show cleanup prompt
-          const cleanupRequestId = cleanupRequestIdRef.current + 1;
-          cleanupRequestIdRef.current = cleanupRequestId;
-          setWorktreeCleanupState({ requestId: cleanupRequestId, isDeleting: false, error: null, forceable: false });
-          setClosedWorktree({ id: cleanupRequestId, path: session.cwd, branch: session.branch });
-        }
-      }
-
-      // Closing the workspace owns all agent and utility PTY teardown.
       const localDaemonSession = daemonSessions.find(ds => ds.id === session?.id);
       if (localDaemonSession && session) {
-        await sendUnregisterWorkspace(session.workspaceId || `workspace-${session.id}`);
+        await sendUnregisterSession(session.id);
       } else {
         closeSession(id);
       }
 
-      removeWorkspaceRef(id);
+      if (session) {
+        removeWorkspaceRef(session.workspaceId);
+      }
     },
-    [alwaysKeepWorktrees, closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterWorkspace]
+    [closeSession, daemonSessions, enrichedLocalSessions, prepareWorktreeCleanupPrompt, removeWorkspaceRef, sendUnregisterSession]
   );
+
+  const handleClosePane = useCallback((sessionId: string, paneId: string) => {
+    const session = enrichedLocalSessions.find((entry) => entry.id === sessionId);
+    prepareWorktreeCleanupPrompt(session);
+    const fallbackPaneId = prepareClosePaneFocus(sessionId, paneId);
+    const fallbackSessionId = session?.workspace.agents.find((pane) => (
+      pane.id === fallbackPaneId && pane.id !== paneId
+    ))?.sessionId;
+    const workspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId;
+    if (!workspaceId) {
+      return Promise.reject(new Error(`Cannot close pane ${paneId}: session ${sessionId} has no workspace`));
+    }
+    return sendWorkspaceClosePane(workspaceId, paneId)
+      .then((result) => {
+        if (fallbackSessionId) {
+          setActiveSession(fallbackSessionId);
+        }
+        return result;
+      })
+      .catch((error) => {
+        clearPreparedClosePaneFocus(sessionId);
+        throw error;
+      });
+  }, [clearPreparedClosePaneFocus, enrichedLocalSessions, prepareClosePaneFocus, prepareWorktreeCleanupPrompt, sendWorkspaceClosePane, sessions, setActiveSession]);
 
   const handleRequestCloseSession = useCallback((id: string) => {
     const session = sessions.find((entry) => entry.id === id);
     if (!session) {
       return;
     }
-    const splitCount = session.workspace.terminals.length;
-    if (splitCount > 0) {
-      setPendingSessionClose({
-        id: session.id,
-        label: session.label,
-        splitCount,
-      });
+
+    const sessionPane = session.workspace.agents.find((pane) => pane.sessionId === session.id);
+    if (sessionPane) {
+      void handleClosePane(session.id, sessionPane.id).catch(console.error);
       return;
     }
+
     void handleCloseSession(id);
-  }, [handleCloseSession, sessions]);
+  }, [handleClosePane, handleCloseSession, sessions]);
 
   const handleCancelSessionClose = useCallback(() => {
     setPendingSessionClose(null);
@@ -1429,20 +1685,16 @@ sendFetchPRDetails,
 
   const handleSelectSession = useCallback(
     (id: string) => {
+      const session = sessions.find((entry) => entry.id === id);
+      const sessionPane = session?.workspace.agents.find((pane) => pane.sessionId === id);
+      if (sessionPane) {
+        setActivePane(id, sessionPane.id);
+      }
       setActiveSession(id);
       setUtilityFocusRequestToken((token) => token + 1);
     },
-    [setActiveSession]
+    [sessions, setActivePane, setActiveSession]
   );
-
-  const handleClosePane = useCallback((sessionId: string, paneId: string) => {
-    prepareClosePaneFocus(sessionId, paneId);
-    const workspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId ?? sessionId;
-    return sendWorkspaceClosePane(workspaceId, paneId).catch((error) => {
-      clearPreparedClosePaneFocus(sessionId);
-      throw error;
-    });
-  }, [clearPreparedClosePaneFocus, prepareClosePaneFocus, sendWorkspaceClosePane, sessions]);
 
   useUiAutomationBridge({
     sessions,
@@ -1456,8 +1708,7 @@ sendFetchPRDetails,
     reloadSession,
     setSetting: sendSetSetting,
     splitPane: (sessionId, paneId, direction) => {
-      const workspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId ?? sessionId;
-      return sendWorkspaceSplitPane(workspaceId, paneId, direction);
+      return createSplitSession('shell', direction, paneId, { baseSessionId: sessionId });
     },
     closePane: handleClosePane,
     focusPane: (sessionId: string, paneId: string) => {
@@ -1652,47 +1903,69 @@ sendFetchPRDetails,
     }
   }, [unmutedEnrichedSessions, handleSelectSession]);
 
-  const sessionGroups = useMemo(() => groupSessionsByDirectory(unmutedEnrichedSessions), [unmutedEnrichedSessions]);
+  const workspaceViews = useMemo(
+    () => buildWorkspaceViewModels(daemonWorkspaces, visibleEnrichedSessions),
+    [daemonWorkspaces, visibleEnrichedSessions],
+  );
+  const sidebarWorkspaceViews = useMemo(
+    () => buildWorkspaceViewModels(daemonWorkspaces, unmutedEnrichedSessions)
+      .filter((workspace) => workspace.sessions.length > 0),
+    [daemonWorkspaces, unmutedEnrichedSessions],
+  );
+  const workspaceSelection = useWorkspaceSelectionController(workspaceViews, activeSessionId);
+  const activeWorkspaceId = workspaceSelection.activeWorkspaceId;
 
-  // Use visual (grouped) order so ⌘1-9 and prev/next match the sidebar
-  const visualSessions = useMemo(() => sessionGroups.flatMap((group) => group.sessions), [sessionGroups]);
-  const visualIndexBySessionId = useMemo(() => {
-    return new Map(visualSessions.map((session, index) => [session.id, index]));
-  }, [visualSessions]);
+  // Use workspace order so ⌘1-9 and prev/next match the top-level sidebar rows.
+  const visualWorkspaces = sidebarWorkspaceViews;
+  const visualIndexByWorkspaceId = useMemo(() => {
+    return new Map(visualWorkspaces.map((workspace, index) => [workspace.id, index]));
+  }, [visualWorkspaces]);
 
-  const handleSelectSessionByIndex = useCallback(
-    (index: number) => {
-      const session = visualSessions[index];
-      if (session) {
-        handleSelectSession(session.id);
+  const handleSelectWorkspace = useCallback(
+    (workspaceId: string) => {
+      const workspace = sidebarWorkspaceViews.find((entry) => entry.id === workspaceId)
+        || workspaceViews.find((entry) => entry.id === workspaceId);
+      const sessionId = workspace?.firstSessionId;
+      if (sessionId) {
+        handleSelectSession(sessionId);
       }
     },
-    [visualSessions, handleSelectSession]
+    [handleSelectSession, sidebarWorkspaceViews, workspaceViews],
   );
 
-  const handlePrevSession = useCallback(() => {
-    if (!activeSessionId || visualSessions.length === 0) return;
-    const currentIndex = visualIndexBySessionId.get(activeSessionId);
-    if (currentIndex === undefined) return;
-    const prevIndex = currentIndex > 0 ? currentIndex - 1 : visualSessions.length - 1;
-    handleSelectSession(visualSessions[prevIndex].id);
-  }, [activeSessionId, visualSessions, visualIndexBySessionId, handleSelectSession]);
+  const handleSelectWorkspaceByIndex = useCallback(
+    (index: number) => {
+      const workspace = visualWorkspaces[index];
+      if (workspace) {
+        handleSelectWorkspace(workspace.id);
+      }
+    },
+    [visualWorkspaces, handleSelectWorkspace]
+  );
 
-  const handleNextSession = useCallback(() => {
-    if (!activeSessionId || visualSessions.length === 0) return;
-    const currentIndex = visualIndexBySessionId.get(activeSessionId);
+  const handlePrevWorkspace = useCallback(() => {
+    if (!activeWorkspaceId || visualWorkspaces.length === 0) return;
+    const currentIndex = visualIndexByWorkspaceId.get(activeWorkspaceId);
     if (currentIndex === undefined) return;
-    const nextIndex = currentIndex < visualSessions.length - 1 ? currentIndex + 1 : 0;
-    handleSelectSession(visualSessions[nextIndex].id);
-  }, [activeSessionId, visualSessions, visualIndexBySessionId, handleSelectSession]);
+    const prevIndex = currentIndex > 0 ? currentIndex - 1 : visualWorkspaces.length - 1;
+    handleSelectWorkspace(visualWorkspaces[prevIndex].id);
+  }, [activeWorkspaceId, visualWorkspaces, visualIndexByWorkspaceId, handleSelectWorkspace]);
+
+  const handleNextWorkspace = useCallback(() => {
+    if (!activeWorkspaceId || visualWorkspaces.length === 0) return;
+    const currentIndex = visualIndexByWorkspaceId.get(activeWorkspaceId);
+    if (currentIndex === undefined) return;
+    const nextIndex = currentIndex < visualWorkspaces.length - 1 ? currentIndex + 1 : 0;
+    handleSelectWorkspace(visualWorkspaces[nextIndex].id);
+  }, [activeWorkspaceId, visualWorkspaces, visualIndexByWorkspaceId, handleSelectWorkspace]);
 
   const handleNavigateOutOfSession = useCallback((direction: 'left' | 'right' | 'up' | 'down') => {
     if (direction === 'left' || direction === 'up') {
-      handlePrevSession();
+      handlePrevWorkspace();
       return;
     }
-    handleNextSession();
-  }, [handleNextSession, handlePrevSession]);
+    handleNextWorkspace();
+  }, [handleNextWorkspace, handlePrevWorkspace]);
 
   const handleCloseCurrentSessionShortcut = useCallback(() => {
     if (!activeSessionId) {
@@ -1704,26 +1977,24 @@ sendFetchPRDetails,
       return;
     }
 
-    if (activeSession.workspace.terminals.length > 0) {
-      const activePaneId = getActivePaneIdForSession(activeSession);
-      if (activePaneId !== MAIN_TERMINAL_PANE_ID) {
-        void handleClosePane(activeSessionId, activePaneId).catch((error) => {
-          showError(error instanceof Error ? error.message : 'Failed to close split pane');
-        });
-        return;
-      }
+    const activePaneId = getActivePaneIdForSession(activeSession);
+    if (activePaneId) {
+      void handleClosePane(activeSessionId, activePaneId);
+      return;
     }
 
     handleRequestCloseSession(activeSessionId);
-  }, [activeSessionId, getActivePaneIdForSession, handleClosePane, handleRequestCloseSession, sessions, showError]);
+  }, [activeSessionId, getActivePaneIdForSession, handleClosePane, handleRequestCloseSession, sessions]);
 
   const handleReloadSession = useCallback((id: string) => {
-    const size = getPaneSize(id, MAIN_TERMINAL_PANE_ID) || undefined;
+    const session = sessions.find((entry) => entry.id === id);
+    const paneId = session?.workspace.agents.find((pane) => pane.sessionId === id)?.id;
+    const size = paneId ? getPaneSize(id, paneId) || undefined : undefined;
     void reloadSession(id, size).catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
       showError(`Failed to reload session: ${message}`);
     });
-  }, [getPaneSize, reloadSession, showError]);
+  }, [getPaneSize, reloadSession, sessions, showError]);
 
   // Open file in diff detail panel
   const handleFileSelect = useCallback((path: string, _staged: boolean) => {
@@ -2049,18 +2320,19 @@ sendFetchPRDetails,
     toggleDockPanel,
   ]);
 
-  const activeSessionZoomed = activeSessionId ? Boolean(zoomModeBySessionId[activeSessionId]) : false;
+  const activeSessionZoomed = activeWorkspaceId ? Boolean(zoomModeBySessionId[activeWorkspaceId]) : false;
 
   const sidebarFooterShortcuts = useMemo<FooterShortcut[]>(() => (
     activeSessionId
       ? [
           { label: '⌘D split v' },
           { label: '⌘⇧D split h' },
+          { label: '⌘⇧N session h' },
           { label: '⌘⇧Z zoom', active: activeSessionZoomed },
           { label: '⌘⌥←↑→↓ pane' },
         ]
       : []
-  ), [activeSessionId, activeSessionZoomed]);
+  ), [activeWorkspaceId, activeSessionZoomed]);
 
   const handleStartReviewLoop = useCallback(async (prompt: string, iterationLimit: number, presetId?: string) => {
     if (!activeSessionId) return;
@@ -2106,18 +2378,27 @@ sendFetchPRDetails,
     }
   }, [activeSessionId, answerReviewLoop, setReviewLoopStateForSession, showError]);
 
+  const handleQuitApp = useCallback(() => {
+    if (isTauri()) {
+      void invoke('quit_app');
+      return;
+    }
+    window.close();
+  }, []);
+
   // Terminal panel handlers for active session
   // Use keyboard shortcuts hook
   useKeyboardShortcuts({
-    onNewSession: handleNewSession,
-    onNewWorktreeSession: handleNewWorktreeSession,
+    onNewSession: () => handleNewSession('vertical'),
+    onNewSessionHorizontal: () => handleNewSession('horizontal'),
+    onNewWorkspace: handleNewWorkspace,
     onCloseSession: handleCloseCurrentSessionShortcut,
     onToggleDrawer: () => toggleDockPanel('attention'),
     onGoToDashboard: goToDashboard,
     onJumpToWaiting: handleJumpToWaiting,
-    onSelectSession: handleSelectSessionByIndex,
-    onPrevSession: handlePrevSession,
-    onNextSession: handleNextSession,
+    onSelectWorkspaceByIndex: handleSelectWorkspaceByIndex,
+    onPrevSession: handlePrevWorkspace,
+    onNextSession: handleNextWorkspace,
     onToggleSidebar: toggleSidebarCollapse,
     onRefreshPRs: handleRefreshPRs,
     onToggleDiffPanel: () => {
@@ -2135,6 +2416,7 @@ sendFetchPRDetails,
     onIncreaseFontSize: increaseScale,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
+    onQuit: handleQuitApp,
     enabled: !locationPickerOpen && !thumbsOpen,
   });
 
@@ -2197,7 +2479,7 @@ sendFetchPRDetails,
           endpoints={daemonEndpoints}
           onRebootstrapEndpoint={handleRebootstrapEndpoint}
           onSelectSession={handleSelectSession}
-          onNewSession={handleNewSession}
+          onNewSession={() => handleNewSession('vertical')}
           onRefreshPRs={handleRefreshPRs}
           onOpenPR={handleOpenPR}
           onOpenSettings={() => setSettingsOpen(true)}
@@ -2212,10 +2494,11 @@ sendFetchPRDetails,
       {/* Session view - always rendered to keep terminals alive */}
       <div className={`view-container ${view === 'session' ? 'visible' : 'hidden'}`}>
         <Sidebar
-          sessionGroups={sessionGroups}
-          visualOrder={visualSessions}
-          visualIndexBySessionId={visualIndexBySessionId}
+          workspaces={sidebarWorkspaceViews}
+          visualOrder={visualWorkspaces}
+          visualIndexByWorkspaceId={visualIndexByWorkspaceId}
           selectedId={activeSessionId}
+          selectedWorkspaceId={activeWorkspaceId}
           collapsed={sidebarCollapsed}
           headerActions={sidebarHeaderActions}
           footerShortcuts={sidebarFooterShortcuts}
@@ -2224,7 +2507,8 @@ sendFetchPRDetails,
           onMutedExpandedChange={setSidebarMutedExpanded}
           onMuteSession={sendMuteSession}
           onSelectSession={handleSelectSession}
-          onNewSession={handleNewSession}
+          onSelectWorkspace={handleSelectWorkspace}
+          onNewSession={() => handleNewSession('vertical')}
           onCloseSession={handleRequestCloseSession}
           onReloadSession={handleReloadSession}
           onGoToDashboard={goToDashboard}
@@ -2232,52 +2516,82 @@ sendFetchPRDetails,
         />
         <div className="terminal-pane">
           <div className="terminal-main-area">
-            {sessions.map((session) => (
-              <div
-                key={session.id}
-                className={`terminal-wrapper ${session.id === activeSessionId ? 'active' : ''}`}
-              >
-                <SessionTerminalWorkspace
-                  ref={setWorkspaceRef(session.id)}
-                  sessionId={session.id}
-                  sessionLabel={session.label}
-                  sessionAgent={session.agent}
-                  sessionEndpointId={session.endpointId}
-                  cwd={session.cwd}
-                  workspace={session.workspace}
-                  activePaneId={getActivePaneIdForSession(session)}
-                  fontSize={terminalFontSize}
-                  resolvedTheme={resolvedTheme}
-                  focusRequestToken={utilityFocusRequestToken}
-                  enabled={!locationPickerOpen}
-                  isActiveSession={session.id === activeSessionId}
-                  isSessionViewVisible={view === 'session'}
-                  eventRouter={paneRuntimeEventRouter}
-                  getMainPaneSpawnArgs={(cols, rows) => takeSessionSpawnArgs(session.id, cols, rows)}
-                  onSplitPane={(targetPaneId, direction) => {
-                    void sendWorkspaceSplitPane(session.workspaceId, targetPaneId, direction).catch(console.error);
-                  }}
-                  onClosePane={(paneId) => {
-                    void handleClosePane(session.id, paneId).catch(console.error);
-                  }}
-                  onFocusPane={(paneId) => {
-                    setActivePane(session.id, paneId);
-                  }}
-                  onZoomModeChange={(zoomed) => {
-                    setZoomModeBySessionId((prev) => (
-                      prev[session.id] === zoomed
-                        ? prev
-                        : { ...prev, [session.id]: zoomed }
-                    ));
-                  }}
-                  onNavigateOutOfSession={handleNavigateOutOfSession}
-                />
-              </div>
-            ))}
+            {workspaceViews.map((workspace) => {
+              const workspaceState = terminalStateForWorkspaceSessions(workspace.sessions);
+              if (!workspaceState) {
+                return null;
+              }
+              const focusedSessionId = workspaceSelection.focusedSessionIdByWorkspace[workspace.id]
+                ?? workspace.focusedSessionId;
+              const focusedSession = focusedSessionId
+                ? workspace.sessions.find((session) => session.id === focusedSessionId) ?? null
+                : null;
+              const activePaneId = activePaneIdForFocusedSession(
+                workspaceState,
+                focusedSession,
+                getActivePaneIdForSession,
+              );
+              const isActiveWorkspace = workspace.id === activeWorkspaceId;
+              return (
+                <div
+                  key={`${workspace.endpointId || 'local'}:${workspace.id}`}
+                  className={`terminal-wrapper ${isActiveWorkspace ? 'active' : ''}`}
+                >
+                  <SessionTerminalWorkspace
+                    ref={setWorkspaceRef(workspace.id)}
+                    workspaceId={workspace.id}
+                    workspaceSessions={workspace.sessions.map((entry) => ({
+                      id: entry.id,
+                      label: entry.label,
+                      agent: entry.agent,
+                      cwd: entry.cwd,
+                      endpointId: entry.endpointId,
+                    }))}
+                    workspace={workspaceState}
+                    activePaneId={activePaneId}
+                    fontSize={terminalFontSize}
+                    resolvedTheme={resolvedTheme}
+                    focusRequestToken={utilityFocusRequestToken}
+                    enabled={!locationPickerOpen}
+                    isActiveSession={isActiveWorkspace}
+                    isSessionViewVisible={view === 'session'}
+                    eventRouter={paneRuntimeEventRouter}
+                    onSplitPane={(targetPaneId, direction) => {
+                      void createSplitSession('shell', direction, targetPaneId);
+                    }}
+                    onClosePane={(paneId) => {
+                      const paneSessionId = workspaceState.agents.find((pane) => pane.id === paneId)?.sessionId;
+                      if (paneSessionId) {
+                        void handleClosePane(paneSessionId, paneId).catch(console.error);
+                      }
+                    }}
+                    onFocusPane={(paneId) => {
+                      const agentPane = workspaceState.agents.find((pane) => pane.id === paneId);
+                      const paneSessionId = agentPane?.sessionId;
+                      if (!paneSessionId) {
+                        return;
+                      }
+                      setActivePane(paneSessionId, paneId);
+                      if (paneSessionId !== activeSessionId) {
+                        setActiveSession(paneSessionId);
+                      }
+                    }}
+                    onZoomModeChange={(zoomed) => {
+                      setZoomModeBySessionId((prev) => (
+                        prev[workspace.id] === zoomed
+                          ? prev
+                          : { ...prev, [workspace.id]: zoomed }
+                      ));
+                    }}
+                    onNavigateOutOfSession={handleNavigateOutOfSession}
+                  />
+                </div>
+              );
+            })}
             {sessions.length === 0 && (
               <div className="no-sessions">
                 <p>No active sessions</p>
-                <p>Click "+" in the sidebar to start a new session</p>
+                <p>Press ⌘T to start a new workspace</p>
               </div>
             )}
           </div>
@@ -2379,6 +2693,7 @@ sendFetchPRDetails,
 
       <LocationPicker
         isOpen={locationPickerOpen}
+        purpose={locationPickerPurpose}
         onClose={closeLocationPicker}
         onSelect={handleLocationSelect}
         onGetRecentLocations={sendGetRecentLocations}

@@ -1,4 +1,4 @@
-.PHONY: run build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-dev app-screenshot dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-dev ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
 
 # Bare `make` does the full prod inner loop: install + open the app.
 # `make install` is install-only (for scripts/CI that drive the launch
@@ -29,10 +29,7 @@ ZIG ?= zig
 # Prefer a stable local development identity so macOS privacy grants survive
 # source rebuilds. Contributors without a certificate retain the ad-hoc
 # fallback; callers may override this with a pinned identity or fingerprint.
-MACOS_CODESIGN_IDENTITY ?= $(shell security find-identity -v -p codesigning 2>/dev/null | awk '/"Apple Development:/ { print $$2 }' | LC_ALL=C sort | head -1)
-ifeq ($(strip $(MACOS_CODESIGN_IDENTITY)),)
-MACOS_CODESIGN_IDENTITY := -
-endif
+MACOS_CODESIGN_IDENTITY ?=
 
 build:
 	go build -ldflags "$(GO_LDFLAGS)" -o $(OUTPUT) $(BUILD_DIR)
@@ -119,7 +116,7 @@ install: build-app
 	@$(APP_BINARY) daemon ensure >/dev/null
 	@echo "Installed attn.app to ~/Applications"
 
-install-daemon: build
+install-daemon: ensure-codesign-identity build
 	@if [ ! -d "$(APP_BUNDLE)" ]; then \
 		echo "No installed attn.app found in ~/Applications; run make install first"; \
 		exit 1; \
@@ -127,8 +124,11 @@ install-daemon: build
 	@echo ">>> Updating PROD daemon at $(APP_BINARY)"
 	cp $(OUTPUT) $(APP_BINARY)
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" $(APP_BINARY); \
-		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" $(APP_BUNDLE); \
+		identity="$(MACOS_CODESIGN_IDENTITY)"; \
+		if [ -z "$$identity" ]; then identity="$$(bash ./scripts/macos-codesign-identity.sh find)"; fi; \
+		if [ -z "$$identity" ]; then identity="-"; fi; \
+		codesign --force --sign "$$identity" $(APP_BINARY); \
+		codesign --force --sign "$$identity" $(APP_BUNDLE); \
 	fi
 	@$(APP_BINARY) daemon ensure >/dev/null
 	@echo "Updated bundled daemon at $(APP_BINARY)"
@@ -156,7 +156,7 @@ install-dev: build-app-dev
 	@$(DEV_DAEMON_ENV) $(APP_BINARY_DEV) daemon ensure >/dev/null
 	@echo "Installed $(APP_BUNDLE_DEV) — profile=dev, data=~/.attn-dev, port=29849"
 
-install-daemon-dev: build
+install-daemon-dev: ensure-codesign-identity build
 	@if [ ! -d "$(APP_BUNDLE_DEV)" ]; then \
 		echo "No installed attn-dev.app found in ~/Applications; run make dev first"; \
 		exit 1; \
@@ -164,8 +164,11 @@ install-daemon-dev: build
 	@echo ">>> Updating DEV daemon at $(APP_BINARY_DEV)"
 	cp $(OUTPUT) $(APP_BINARY_DEV)
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" $(APP_BINARY_DEV); \
-		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" $(APP_BUNDLE_DEV); \
+		identity="$(MACOS_CODESIGN_IDENTITY)"; \
+		if [ -z "$$identity" ]; then identity="$$(bash ./scripts/macos-codesign-identity.sh find)"; fi; \
+		if [ -z "$$identity" ]; then identity="-"; fi; \
+		codesign --force --sign "$$identity" $(APP_BINARY_DEV); \
+		codesign --force --sign "$$identity" $(APP_BUNDLE_DEV); \
 	fi
 	@$(DEV_DAEMON_ENV) $(APP_BINARY_DEV) daemon ensure >/dev/null
 	@echo "Updated bundled dev daemon at $(APP_BINARY_DEV)"
@@ -208,12 +211,15 @@ define build_tauri_app
 		printf '{\n  "version": "%s",\n  "sourceFingerprint": "%s",\n  "gitCommit": "%s",\n  "buildTime": "%s"\n}\n' '$(VERSION)' '$(SOURCE_FINGERPRINT)' '$(GIT_COMMIT)' '$(BUILD_TIME)' > app/src-tauri/target/release/bundle/macos/$(2).app/Contents/Resources/build-identity.json; \
 	fi
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" app/src-tauri/target/release/bundle/macos/$(2).app/Contents/MacOS/attn; \
-		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" app/src-tauri/target/release/bundle/macos/$(2).app; \
+		identity="$(MACOS_CODESIGN_IDENTITY)"; \
+		if [ -z "$$identity" ]; then identity="$$(bash ./scripts/macos-codesign-identity.sh find)"; fi; \
+		if [ -z "$$identity" ]; then identity="-"; fi; \
+		codesign --force --sign "$$identity" app/src-tauri/target/release/bundle/macos/$(2).app/Contents/MacOS/attn; \
+		codesign --force --sign "$$identity" app/src-tauri/target/release/bundle/macos/$(2).app; \
 	fi
 endef
 
-build-app: build
+build-app: ensure-codesign-identity build
 	$(call build_tauri_app,VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)',attn,)
 
 # Dev build. Bakes ATTN_BUILD_PROFILE=dev into the Rust binary and
@@ -224,7 +230,15 @@ build-app: build
 # because the runtime sees ATTN_PROFILE=dev; prod builds get it off
 # unless the user sets ATTN_AUTOMATION=1.
 # Output: app/src-tauri/target/release/bundle/macos/attn-dev.app
-build-app-dev: build
+ensure-codesign-identity:
+	@identity="$$(bash ./scripts/macos-codesign-identity.sh ensure)"; \
+	if [ "$$identity" = "-" ]; then \
+		echo "No stable macOS code-signing identity available; falling back to ad-hoc signing."; \
+	else \
+		echo "Using macOS code-signing identity $$identity"; \
+	fi
+
+build-app-dev: ensure-codesign-identity build
 	$(call build_tauri_app,ATTN_BUILD_PROFILE=dev VITE_ATTN_BUILD_PROFILE=dev VITE_DAEMON_PORT=29849 VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)',attn-dev,--config src-tauri/tauri.dev.conf.json)
 
 app-screenshot:
@@ -232,11 +246,14 @@ app-screenshot:
 
 # Sign the installed app and bundled CLI/daemon sidecar using the configured
 # stable identity when available; falls back to ad-hoc without a certificate.
-sign-app:
+sign-app: ensure-codesign-identity
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" ~/Applications/attn.app/Contents/MacOS/attn; \
-		codesign --force --sign "$(MACOS_CODESIGN_IDENTITY)" ~/Applications/attn.app; \
-		echo "Signed ~/Applications/attn.app with identity $(MACOS_CODESIGN_IDENTITY)"; \
+		identity="$(MACOS_CODESIGN_IDENTITY)"; \
+		if [ -z "$$identity" ]; then identity="$$(bash ./scripts/macos-codesign-identity.sh find)"; fi; \
+		if [ -z "$$identity" ]; then identity="-"; fi; \
+		codesign --force --sign "$$identity" ~/Applications/attn.app/Contents/MacOS/attn; \
+		codesign --force --sign "$$identity" ~/Applications/attn.app; \
+		echo "Signed ~/Applications/attn.app with identity $$identity"; \
 	else \
 		echo "sign-app is only needed on macOS"; \
 	fi

@@ -2,22 +2,25 @@ import { test, expect } from './fixtures';
 
 async function createSession(
   page: import('@playwright/test').Page,
-  daemon: { injectSession: (session: { id: string; label: string; state: string; directory?: string }) => Promise<void> },
+  daemon: { injectSession: (session: { id: string; label: string; state: string; directory?: string; workspace_id?: string }) => Promise<void> },
   id: string,
 ) {
-  await page.evaluate((sessionId) => {
+  const workspaceId = `workspace-${id}`;
+  await page.evaluate(({ sessionId, workspaceId }) => {
     window.__TEST_INJECT_SESSION?.({
       id: sessionId,
       label: 'Terminal Links',
       state: 'working',
       cwd: '/tmp/test/terminal-links',
+      workspaceId,
     });
-  }, id);
+  }, { sessionId: id, workspaceId });
   await daemon.injectSession({
     id,
     label: 'Terminal Links',
     state: 'working',
     directory: '/tmp/test/terminal-links',
+    workspace_id: workspaceId,
   });
 }
 
@@ -78,7 +81,7 @@ async function expectTerminalInputCount(
 
 async function openTerminalSession(
   page: import('@playwright/test').Page,
-  daemon: { injectSession: (session: { id: string; label: string; state: string; directory?: string }) => Promise<void> },
+  daemon: { injectSession: (session: { id: string; label: string; state: string; directory?: string; workspace_id?: string }) => Promise<void> },
   sessionId: string,
 ) {
   await daemon.start();
@@ -86,7 +89,7 @@ async function openTerminalSession(
   await page.waitForSelector('.dashboard');
   await createSession(page, daemon, sessionId);
   await page.locator(`[data-testid="session-${sessionId}"]`).click();
-  const terminal = page.locator(`[data-pane-session-id="${sessionId}"][data-pane-id="main"] .terminal-container`);
+  const terminal = page.locator(`[data-pane-session-id="${sessionId}"][data-pane-kind="agent"] .terminal-container`);
   await expect(terminal).toBeVisible({ timeout: 5000 });
   return terminal;
 }
@@ -100,7 +103,7 @@ test.describe('Ghostty terminal interactions', () => {
 
     await expect
       .poll(
-        async () => page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-link') ?? ''),
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-link') ?? ''),
         { timeout: 5000 },
       )
       .toContain(url);
@@ -135,13 +138,34 @@ test.describe('Ghostty terminal interactions', () => {
 
     await expect
       .poll(
-        async () => page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-link-offset') ?? ''),
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-link-offset') ?? ''),
         { timeout: 5000 },
       )
       .toContain(url);
 
+    const rowTargets = await terminal.evaluate((element, sessionId) => {
+      const canvas = element.querySelector('canvas');
+      if (!canvas) {
+        throw new Error('Terminal canvas not found');
+      }
+      const paneSize = (window as Window & {
+        __TEST_GET_SESSION_PANE_SIZE?: (id: string) => { rows: number } | null;
+      }).__TEST_GET_SESSION_PANE_SIZE?.(sessionId);
+      if (!paneSize?.rows) {
+        throw new Error('Terminal pane size not available');
+      }
+      const terminalRect = element.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
+      const rowHeight = canvasRect.height / paneSize.rows;
+      const canvasTop = canvasRect.top - terminalRect.top;
+      return {
+        firstRowY: canvasTop + rowHeight * 0.5,
+        secondRowY: canvasTop + rowHeight * 1.5,
+      };
+    }, 's-link-offset');
+
     await page.keyboard.down('Meta');
-    await terminal.click({ position: { x: 100, y: 26 } });
+    await terminal.click({ position: { x: 100, y: rowTargets.firstRowY } });
     await expect
       .poll(
         async () => page.evaluate(
@@ -151,7 +175,7 @@ test.describe('Ghostty terminal interactions', () => {
       )
       .toEqual([]);
 
-    await terminal.click({ position: { x: 100, y: 48 } });
+    await terminal.click({ position: { x: 100, y: rowTargets.secondRowY } });
     await page.keyboard.up('Meta');
 
     await expectOpenedUrl(page, url);
@@ -165,7 +189,7 @@ test.describe('Ghostty terminal interactions', () => {
 
     await expect
       .poll(
-        async () => page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-link-tracked') ?? ''),
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-link-tracked') ?? ''),
         { timeout: 5000 },
       )
       .toContain(url);
@@ -189,7 +213,7 @@ test.describe('Ghostty terminal interactions', () => {
     await writeTerminalOutput(page, 's-image-paste', '\u001b[2J\u001b[Hready');
     await expect
       .poll(
-        async () => page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-image-paste') ?? ''),
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-image-paste') ?? ''),
         { timeout: 5000 },
       )
       .toContain('ready');
@@ -251,7 +275,7 @@ test.describe('Ghostty terminal interactions', () => {
 
     await expect
       .poll(
-        async () => page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-double-click') ?? ''),
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-double-click') ?? ''),
         { timeout: 5000 },
       )
       .toContain('selectable-word');
@@ -332,7 +356,7 @@ test.describe('Ghostty terminal interactions', () => {
     )).join('\r\n');
     await writeTerminalOutput(page, 's-selection-scroll', `\u001b[2J\u001b[H${lines}`);
 
-    const visibleText = await page.evaluate(() => window.__TEST_GET_MAIN_TERMINAL_TEXT?.('s-selection-scroll') ?? '');
+    const visibleText = await page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-selection-scroll') ?? '');
     expect(visibleText).toContain(anchor);
 
     const terminalBounds = await terminal.boundingBox();

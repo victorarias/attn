@@ -62,7 +62,7 @@ interface GhosttyTerminalProps {
     sessionId: string;
     paneId: string;
     runtimeId: string;
-    paneKind: 'main' | 'shell';
+    paneKind: 'agent';
     isActivePane: boolean;
     isActiveSession: boolean;
     paneCount: number;
@@ -581,7 +581,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       // frame before the session becomes visible again.
       if (runtimeMetaRef.current && !runtimeMetaRef.current.isActiveSession) return;
       const dims = renderer.fitDimensions(container.clientWidth, container.clientHeight);
-      if (runtimeMetaRef.current?.paneKind === 'main' && isSuspiciousTerminalSize(dims.cols, dims.rows)) {
+      if (runtimeMetaRef.current?.paneKind === 'agent' && isSuspiciousTerminalSize(dims.cols, dims.rows)) {
         return;
       }
       if (dims.cols === terminal.cols && dims.rows === terminal.rows) return;

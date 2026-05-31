@@ -2081,7 +2081,7 @@ type Session struct {
 	Todos []string `json:"todos,omitempty,omitzero"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 type SessionExitedMessage struct {
@@ -2683,6 +2683,29 @@ type WorkspaceLayoutActionResultMessage struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
+type WorkspaceLayoutAddSessionPaneMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Direction corresponds to the JSON schema field "direction".
+	Direction *WorkspaceLayoutSplitDirection `json:"direction,omitempty,omitzero"`
+
+	// PaneID corresponds to the JSON schema field "pane_id".
+	PaneID *string `json:"pane_id,omitempty,omitzero"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// TargetPaneID corresponds to the JSON schema field "target_pane_id".
+	TargetPaneID *string `json:"target_pane_id,omitempty,omitzero"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title *string `json:"title,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
 type WorkspaceLayoutClosePaneMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2722,6 +2745,9 @@ type WorkspaceLayoutMessage struct {
 }
 
 type WorkspaceLayoutPane struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
 	// Kind corresponds to the JSON schema field "kind".
 	Kind WorkspaceLayoutPaneKind `json:"kind"`
 
@@ -2734,17 +2760,25 @@ type WorkspaceLayoutPane struct {
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID *string `json:"session_id,omitempty,omitzero"`
 
+	// Status corresponds to the JSON schema field "status".
+	Status WorkspaceLayoutPaneStatus `json:"status"`
+
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 type WorkspaceLayoutPaneKind string
 
 const WorkspaceLayoutPaneKindAgent WorkspaceLayoutPaneKind = "agent"
-const WorkspaceLayoutPaneKindShell WorkspaceLayoutPaneKind = "shell"
+
+type WorkspaceLayoutPaneStatus string
+
+const WorkspaceLayoutPaneStatusFailed WorkspaceLayoutPaneStatus = "failed"
+const WorkspaceLayoutPaneStatusReady WorkspaceLayoutPaneStatus = "ready"
+const WorkspaceLayoutPaneStatusSpawning WorkspaceLayoutPaneStatus = "spawning"
 
 type WorkspaceLayoutRenamePaneMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
@@ -2760,44 +2794,10 @@ type WorkspaceLayoutRenamePaneMessage struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
-type WorkspaceLayoutRuntimeExitedMessage struct {
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// ExitCode corresponds to the JSON schema field "exit_code".
-	ExitCode int `json:"exit_code"`
-
-	// PaneID corresponds to the JSON schema field "pane_id".
-	PaneID string `json:"pane_id"`
-
-	// RuntimeID corresponds to the JSON schema field "runtime_id".
-	RuntimeID string `json:"runtime_id"`
-
-	// Signal corresponds to the JSON schema field "signal".
-	Signal *string `json:"signal,omitempty,omitzero"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
-}
-
 type WorkspaceLayoutSplitDirection string
 
 const WorkspaceLayoutSplitDirectionHorizontal WorkspaceLayoutSplitDirection = "horizontal"
 const WorkspaceLayoutSplitDirectionVertical WorkspaceLayoutSplitDirection = "vertical"
-
-type WorkspaceLayoutSplitPaneMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Direction corresponds to the JSON schema field "direction".
-	Direction WorkspaceLayoutSplitDirection `json:"direction"`
-
-	// TargetPaneID corresponds to the JSON schema field "target_pane_id".
-	TargetPaneID string `json:"target_pane_id"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
-}
 
 type WorkspaceLayoutUpdatedMessage struct {
 	// Event corresponds to the JSON schema field "event".

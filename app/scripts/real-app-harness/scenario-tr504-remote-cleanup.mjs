@@ -2,7 +2,7 @@
 
 import path from 'node:path';
 import {
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -13,6 +13,7 @@ import { createScenarioRunner } from './scenarioRunner.mjs';
 import { cleanupSessionViaAppClose } from './scenarioCleanup.mjs';
 import {
   captureSessionArtifacts,
+  waitForFirstWorkspacePane,
   waitForNewShellPane,
   waitForPaneVisible,
   waitForSessionWorkspace,
@@ -112,6 +113,7 @@ async function main() {
 
   let endpoint = null;
   let sessionId = null;
+  let initialPaneId = null;
   let splitPaneId = null;
   let activeProcessSnapshot = [];
   let postCloseProcessSnapshot = [];
@@ -183,14 +185,14 @@ async function main() {
     });
 
     sessionId = await runner.step('create_remote_session', async () => {
-      const resultSessionId = await createSessionAndWaitForMain({
+      const resultSessionId = await createSessionAndWaitForInitialPane({
         client,
         observer,
         cwd: remoteDirectory,
         label: `tr504-${runner.runId}`,
         agent: options.remoteAgent,
         endpointId: endpoint.id,
-        waitForMainVisible: false,
+        waitForInitialPaneVisible: false,
       });
       await observer.waitForWorkspace(
         resultSessionId,
@@ -203,12 +205,13 @@ async function main() {
 
     splitPaneId = await runner.step('create_remote_split', async () => {
       await client.request('select_session', { sessionId });
-      await waitForPaneVisible(client, sessionId, 'main', 45_000);
+      initialPaneId = (await waitForFirstWorkspacePane(client, sessionId, 'remote cleanup initial pane', 30_000)).paneId;
+      await waitForPaneVisible(client, sessionId, initialPaneId, 45_000);
       const workspaceBefore = await client.request('get_workspace', { sessionId });
       const existingPaneIds = new Set((workspaceBefore.panes || []).map((pane) => pane.paneId));
       await client.request('split_pane', {
         sessionId,
-        targetPaneId: 'main',
+        targetPaneId: initialPaneId,
         direction: 'vertical',
       });
       const newPane = await waitForNewShellPane(

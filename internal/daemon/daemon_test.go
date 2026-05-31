@@ -2586,8 +2586,9 @@ func TestDaemon_BroadcastRawWSMessage_RemoteSessionExitedClearsRemoteAttachState
 	assertNoOutboundEvent(t, client)
 }
 
-func TestDaemon_HandleUnregisterWS_RemovesWorkspaceAndBroadcastsSessionUnregistered(t *testing.T) {
+func TestDaemon_HandleUnregisterWS_RemovesSessionPaneAndBroadcastsSessionUnregistered(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	workspaceID := "workspace-sess-1"
 	session := &protocol.Session{
 		ID:             "sess-1",
 		Label:          "test",
@@ -2596,15 +2597,17 @@ func TestDaemon_HandleUnregisterWS_RemovesWorkspaceAndBroadcastsSessionUnregiste
 		StateSince:     time.Now().UTC().Format(time.RFC3339),
 		StateUpdatedAt: time.Now().UTC().Format(time.RFC3339),
 		LastSeen:       time.Now().UTC().Format(time.RFC3339),
+		WorkspaceID:    workspaceID,
 	}
 	d.store.Add(session)
+	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: "test", Directory: session.Directory})
 	if err := d.store.SaveWorkspaceLayout(workspacelayout.WorkspaceLayout{
-		WorkspaceID:  "workspace-" + session.ID,
-		ActivePaneID: workspacelayout.MainPaneID,
-		Layout:       workspacelayout.DefaultLayout(),
+		WorkspaceID:  workspaceID,
+		ActivePaneID: "pane-agent",
+		Layout:       workspacelayout.DefaultLayout("pane-agent"),
 		Panes: []workspacelayout.Pane{
-			{PaneID: workspacelayout.MainPaneID, RuntimeID: session.ID, Kind: workspacelayout.PaneKindAgent, Title: workspacelayout.DefaultPaneTitle},
-			{PaneID: "pane-shell-1", RuntimeID: "runtime-shell-1", Kind: workspacelayout.PaneKindShell, Title: "Shell 1"},
+			{PaneID: "pane-agent", RuntimeID: session.ID, SessionID: session.ID, Kind: workspacelayout.PaneKindAgent, Title: workspacelayout.DefaultPaneTitle},
+			{PaneID: "pane-agent-2", RuntimeID: "sess-2", SessionID: "sess-2", Kind: workspacelayout.PaneKindAgent, Title: "Agent 2"},
 		},
 	}); err != nil {
 		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
@@ -2622,16 +2625,106 @@ func TestDaemon_HandleUnregisterWS_RemovesWorkspaceAndBroadcastsSessionUnregiste
 	if got := d.store.Get(session.ID); got != nil {
 		t.Fatalf("store.Get(%q) = %+v, want nil", session.ID, got)
 	}
-	if got := d.store.GetWorkspaceLayout(session.ID); got != nil {
-		t.Fatalf("store.GetWorkspaceLayout(%q) = %+v, want nil", session.ID, got)
+	layout := d.store.GetWorkspaceLayout(workspaceID)
+	if layout == nil {
+		t.Fatalf("store.GetWorkspaceLayout(%q) = nil, want remaining pane layout", workspaceID)
+	}
+	if len(layout.Panes) != 1 || layout.Panes[0].PaneID != "pane-agent-2" {
+		t.Fatalf("layout panes after unregister = %+v, want remaining agent pane only", layout.Panes)
 	}
 
-	event := readOutboundEvent(t, client)
+	var event map[string]interface{}
+	for i := 0; i < 3; i++ {
+		event = readOutboundEvent(t, client)
+		if asString(event["event"]) == protocol.EventSessionUnregistered {
+			break
+		}
+	}
 	if asString(event["event"]) != protocol.EventSessionUnregistered {
 		t.Fatalf("unexpected event after unregister: %+v", event)
 	}
 	if asString(event["session"].(map[string]interface{})["id"]) != session.ID {
 		t.Fatalf("session_unregistered id = %v, want %s", event["session"], session.ID)
+	}
+}
+
+func TestDaemon_HandleUnregisterWS_RemovesSessionPaneWithoutPromotingAnotherPane(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	workspaceID := "workspace-shared"
+	now := time.Now().UTC().Format(time.RFC3339)
+	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: "shared", Directory: t.TempDir()})
+	for _, session := range []*protocol.Session{
+		{
+			ID:             "sess-primary",
+			Label:          "Agent",
+			Directory:      t.TempDir(),
+			State:          protocol.StateWorking,
+			StateSince:     now,
+			StateUpdatedAt: now,
+			LastSeen:       now,
+			WorkspaceID:    workspaceID,
+		},
+		{
+			ID:             "sess-next",
+			Label:          "next",
+			Directory:      t.TempDir(),
+			State:          protocol.StateWorking,
+			StateSince:     now,
+			StateUpdatedAt: now,
+			LastSeen:       now,
+			WorkspaceID:    workspaceID,
+		},
+	} {
+		d.store.Add(session)
+	}
+	if err := d.store.SaveWorkspaceLayout(workspacelayout.WorkspaceLayout{
+		WorkspaceID:  workspaceID,
+		ActivePaneID: "pane-session",
+		Layout: workspacelayout.Node{
+			Type:      "split",
+			SplitID:   "split-1",
+			Direction: workspacelayout.DirectionVertical,
+			Ratio:     0.5,
+			Children: []workspacelayout.Node{
+				{Type: "pane", PaneID: "pane-session"},
+				{Type: "pane", PaneID: "pane-next"},
+			},
+		},
+		Panes: []workspacelayout.Pane{
+			{PaneID: "pane-session", RuntimeID: "sess-primary", SessionID: "sess-primary", Kind: workspacelayout.PaneKindAgent, Title: "Agent"},
+			{PaneID: "pane-next", RuntimeID: "sess-next", SessionID: "sess-next", Kind: workspacelayout.PaneKindAgent, Title: "next"},
+		},
+	}); err != nil {
+		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
+	}
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 8),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+	d.wsHub.clients[client] = true
+	go d.wsHub.run()
+
+	d.handleUnregisterWS(client, &protocol.UnregisterMessage{ID: "sess-primary"})
+
+	if got := d.store.Get("sess-primary"); got != nil {
+		t.Fatalf("closed session still exists: %+v", got)
+	}
+	if got := d.store.Get("sess-next"); got == nil {
+		t.Fatal("replacement session was removed")
+	}
+	layout := d.store.GetWorkspaceLayout(workspaceID)
+	if layout == nil {
+		t.Fatal("workspace layout was removed")
+	}
+	if len(layout.Panes) != 1 {
+		t.Fatalf("layout panes len = %d, want 1: %+v", len(layout.Panes), layout.Panes)
+	}
+	if pane := layout.Panes[0]; pane.PaneID != "pane-next" || pane.SessionID != "sess-next" {
+		t.Fatalf("remaining pane = %+v, want existing pane-next for sess-next", pane)
+	}
+	if layout.Layout.Type != "pane" || layout.Layout.PaneID != "pane-next" {
+		t.Fatalf("layout tree = %+v, want single pane-next pane", layout.Layout)
 	}
 }
 
@@ -2691,6 +2784,7 @@ func TestDaemon_HandleClientMessage_ClearWarnings(t *testing.T) {
 	}
 
 	client := &wsClient{}
+	client.setIdentity("daemon-test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 	d.handleClientMessage(client, []byte(`{"cmd":"clear_warnings"}`))
 
 	if got := len(d.getWarnings()); got != 0 {
@@ -2717,6 +2811,7 @@ func TestDaemon_ClearWarningsNotReplayedInInitialState(t *testing.T) {
 	client := &wsClient{
 		send: make(chan outboundMessage, 4),
 	}
+	client.setIdentity("daemon-test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 
 	d.sendInitialState(client)
 	first := <-client.send
@@ -2755,6 +2850,7 @@ func TestDaemon_InitialState_IncludesDaemonInstanceID(t *testing.T) {
 		send:            make(chan outboundMessage, 2),
 		attachedStreams: make(map[string]ptybackend.Stream),
 	}
+	client.setIdentity("daemon-test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 
 	d.sendInitialState(client)
 	msg := <-client.send
@@ -2777,6 +2873,7 @@ func TestDaemon_GitHubHostsMessages_UseRegisteredHosts(t *testing.T) {
 		send:            make(chan outboundMessage, 2),
 		attachedStreams: make(map[string]ptybackend.Stream),
 	}
+	client.setIdentity("daemon-test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 
 	d.sendInitialState(client)
 	msg := <-client.send
@@ -2806,6 +2903,7 @@ func TestDaemon_RecoveryBarrier_BlocksPTYCommands(t *testing.T) {
 		send:            make(chan outboundMessage, 2),
 		attachedStreams: make(map[string]ptybackend.Stream),
 	}
+	client.setIdentity("daemon-test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 
 	d.handleClientMessage(client, []byte(`{"cmd":"attach_session","id":"sess-1"}`))
 
@@ -2845,6 +2943,7 @@ func TestDaemon_RecoveryBarrier_BlocksClearSessions(t *testing.T) {
 		send:            make(chan outboundMessage, 2),
 		attachedStreams: make(map[string]ptybackend.Stream),
 	}
+	client.setIdentity("daemon-test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 
 	d.handleClientMessage(client, []byte(`{"cmd":"clear_sessions"}`))
 
@@ -3409,6 +3508,7 @@ func TestDaemon_WebClientAttachFlowOverWebSocket(t *testing.T) {
 	if !initialStateIncludesSession(initial, sessionID) {
 		t.Fatalf("initial_state did not include smoke session %q", sessionID)
 	}
+	sendWorkspaceClientHello(t, conn)
 
 	if err := writeWS(conn, map[string]interface{}{
 		"cmd": protocol.CmdAttachSession,
@@ -3541,6 +3641,18 @@ func waitForProtocolWebSocketEvent(t *testing.T, conn *websocket.Conn, want stri
 
 	t.Fatalf("timed out waiting for websocket event %s", want)
 	return protocol.WebSocketEvent{}
+}
+
+func sendWorkspaceClientHello(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+	if err := writeWS(conn, map[string]interface{}{
+		"cmd":          protocol.CmdClientHello,
+		"client_kind":  "daemon-test",
+		"version":      "protocol-" + protocol.ProtocolVersion,
+		"capabilities": []string{protocol.CapabilityWorkspaceSessions},
+	}); err != nil {
+		t.Fatalf("send client hello: %v", err)
+	}
 }
 
 func initialStateIncludesSession(event map[string]interface{}, sessionID string) bool {
@@ -3915,6 +4027,7 @@ func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {
 		t.Fatalf("Read initial state error: %v", err)
 	}
 	t.Logf("Initial state: %s", string(initialData))
+	sendWorkspaceClientHello(t, conn)
 
 	// Send approve command
 	prID := protocol.FormatPRID(ghClient.Host(), "test/repo", 42)
@@ -4142,6 +4255,7 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 	if initialState.Prs[0].Muted {
 		t.Error("Expected PR to not be muted initially")
 	}
+	sendWorkspaceClientHello(t, wsConn)
 
 	// Send mute_pr command
 	muteCmd := map[string]interface{}{
@@ -4230,6 +4344,7 @@ func TestDaemon_MuteRepo_ViaWebSocket(t *testing.T) {
 	json.Unmarshal(initialData, &initialState)
 	// Note: Repos can be empty but should be present (may be nil if JSON doesn't include empty arrays)
 	// This is fine - we just test that after muting, we get updates
+	sendWorkspaceClientHello(t, wsConn)
 
 	// Send mute_repo command
 	muteCmd := map[string]interface{}{

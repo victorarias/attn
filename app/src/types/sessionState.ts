@@ -1,10 +1,3 @@
-// app/src/types/sessionState.ts
-// Re-export SessionState from generated types for backward compatibility
-export { SessionState } from './generated';
-import { SessionState } from './generated';
-
-// Type aliases for backward compatibility
-export type DaemonSessionState = SessionState;
 export type UISessionState =
   | 'launching'
   | 'working'

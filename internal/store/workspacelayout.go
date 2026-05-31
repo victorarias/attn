@@ -65,10 +65,14 @@ func (s *Store) SaveWorkspaceLayout(snapshot workspacelayout.WorkspaceLayout) er
 		if createdAt == "" {
 			createdAt = now
 		}
+		status := string(pane.Status)
+		if status == "" {
+			status = string(workspacelayout.PaneStatusReady)
+		}
 		if _, err := tx.Exec(`
-			INSERT INTO workspace_layout_panes (workspace_id, pane_id, runtime_id, session_id, kind, title, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		`, snapshot.WorkspaceID, pane.PaneID, pane.RuntimeID, nilIfEmpty(pane.SessionID), pane.Kind, pane.Title, createdAt, now); err != nil {
+			INSERT INTO workspace_layout_panes (workspace_id, pane_id, runtime_id, session_id, kind, title, status, error, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, snapshot.WorkspaceID, pane.PaneID, pane.RuntimeID, nilIfEmpty(pane.SessionID), pane.Kind, pane.Title, status, pane.Error, createdAt, now); err != nil {
 			return err
 		}
 	}
@@ -105,11 +109,10 @@ func (s *Store) GetWorkspaceLayout(workspaceID string) *workspacelayout.Workspac
 	layout, err := workspacelayout.DecodeLayout(layoutJSON)
 	if err != nil {
 		log.Printf("[store] GetWorkspaceLayout: failed to decode layout for workspace %s: %v", workspaceID, err)
-		layout = workspacelayout.DefaultLayout()
 	}
 
 	rows, err := s.db.Query(`
-		SELECT pane_id, runtime_id, session_id, kind, title
+		SELECT pane_id, runtime_id, session_id, kind, title, status, error
 		FROM workspace_layout_panes
 		WHERE workspace_id = ?
 		ORDER BY created_at ASC, pane_id ASC
@@ -128,7 +131,7 @@ func (s *Store) GetWorkspaceLayout(workspaceID string) *workspacelayout.Workspac
 	for rows.Next() {
 		var pane workspacelayout.Pane
 		var sessionID sql.NullString
-		if err := rows.Scan(&pane.PaneID, &pane.RuntimeID, &sessionID, &pane.Kind, &pane.Title); err != nil {
+		if err := rows.Scan(&pane.PaneID, &pane.RuntimeID, &sessionID, &pane.Kind, &pane.Title, &pane.Status, &pane.Error); err != nil {
 			log.Printf("[store] GetWorkspaceLayout: failed to scan pane for workspace %s: %v", workspaceID, err)
 			continue
 		}
@@ -166,36 +169,6 @@ func (s *Store) ListWorkspaceLayoutPanes(workspaceID string) []workspacelayout.P
 		return nil
 	}
 	return append([]workspacelayout.Pane(nil), snapshot.Panes...)
-}
-
-func (s *Store) FindWorkspaceLayoutPaneByRuntimeID(runtimeID string) (workspaceID string, paneID string, ok bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.db == nil {
-		for workspaceID, snapshot := range s.workspaces {
-			for _, pane := range snapshot.Panes {
-				if pane.RuntimeID == runtimeID {
-					return workspaceID, pane.PaneID, true
-				}
-			}
-		}
-		return "", "", false
-	}
-
-	var rowWorkspaceID, rowPaneID string
-	err := s.db.QueryRow(`
-		SELECT workspace_id, pane_id
-		FROM workspace_layout_panes
-		WHERE runtime_id = ?
-	`, runtimeID).Scan(&rowWorkspaceID, &rowPaneID)
-	if err != nil {
-		if err != sql.ErrNoRows {
-			log.Printf("[store] FindWorkspaceLayoutPaneByRuntimeID: query failed for runtime %s: %v", runtimeID, err)
-		}
-		return "", "", false
-	}
-	return rowWorkspaceID, rowPaneID, true
 }
 
 func (s *Store) FindWorkspaceLayoutPaneBySessionID(sessionID string) (workspaceID string, paneID string, ok bool) {

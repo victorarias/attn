@@ -74,9 +74,7 @@ func (r *workspaceRegistry) unregister(id string) (protocol.Workspace, bool) {
 	return snapshotEntry(entry), true
 }
 
-// associateSession binds a session to a workspace. No-op if the workspace is
-// not registered (e.g., session spawned with a stale workspace_id after the
-// daemon dropped its in-memory state).
+// associateSession binds a session to an already registered workspace.
 func (r *workspaceRegistry) associateSession(sessionID, workspaceID, title string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -95,19 +93,21 @@ func (r *workspaceRegistry) associateSession(sessionID, workspaceID, title strin
 	return true
 }
 
-func (r *workspaceRegistry) dissociateSession(sessionID string) string {
+func (r *workspaceRegistry) dissociateSession(sessionID string) (string, int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	workspaceID, ok := r.sessionToWorkspace[sessionID]
 	if !ok {
-		return ""
+		return "", 0
 	}
 	delete(r.sessionToWorkspace, sessionID)
+	remaining := 0
 	if entry, ok := r.workspaces[workspaceID]; ok {
 		delete(entry.sessionIDs, sessionID)
+		remaining = len(entry.sessionIDs)
 	}
-	return workspaceID
+	return workspaceID, remaining
 }
 
 func (r *workspaceRegistry) workspaceIDForSession(sessionID string) string {
@@ -317,7 +317,6 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 	// mutate the in-memory association map, which would race the snapshot
 	// the registry hands out otherwise.
 	memberIDs := d.workspaces.sessionIDs(id)
-	d.killWorkspaceLayoutRuntimes(id)
 	for _, sid := range memberIDs {
 		closed := d.unregisterSession(sid, syscall.SIGTERM)
 		if closed != nil {
@@ -358,7 +357,7 @@ func (d *Daemon) loadWorkspacesFromStore() {
 		if session == nil {
 			continue
 		}
-		if wsID := protocol.Deref(session.WorkspaceID); wsID != "" {
+		if wsID := session.WorkspaceID; wsID != "" {
 			d.workspaces.associateSession(session.ID, wsID, session.Label)
 		}
 	}
@@ -399,14 +398,10 @@ func (d *Daemon) associateSessionWithWorkspace(sessionID, workspaceID string) {
 		title = session.Label
 	}
 	if !d.workspaces.associateSession(sessionID, workspaceID, title) {
-		// Stale workspace_id from a client that outlived a daemon restart.
-		// Drop silently — broadcast nothing.
+		d.logf("workspace association rejected for session %s: workspace not registered: %s", sessionID, workspaceID)
 		return
 	}
-	d.store.SetSessionWorkspaceID(sessionID, workspaceID)
-	if err := d.ensureAgentPaneInWorkspace(workspaceID, sessionID, title); err != nil {
-		d.logf("workspace layout agent pane ensure failed for session %s: %v", sessionID, err)
-	}
+	d.store.AssignSessionWorkspace(sessionID, workspaceID)
 	updated, changed := d.recomputeWorkspaceStatus(workspaceID)
 	if !changed {
 		updated, _ = d.workspaces.snapshot(workspaceID)
@@ -423,11 +418,22 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 	if d.workspaces == nil {
 		return
 	}
-	workspaceID := d.workspaces.dissociateSession(sessionID)
+	workspaceID, remaining := d.workspaces.dissociateSession(sessionID)
 	if workspaceID == "" {
 		return
 	}
-	d.store.SetSessionWorkspaceID(sessionID, "")
+	if remaining == 0 {
+		snapshot, removed := d.workspaces.unregister(workspaceID)
+		if !removed {
+			return
+		}
+		d.store.RemoveWorkspace(workspaceID)
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event:     protocol.EventWorkspaceUnregistered,
+			Workspace: &snapshot,
+		})
+		return
+	}
 	updated, changed := d.recomputeWorkspaceStatus(workspaceID)
 	if !changed {
 		updated, _ = d.workspaces.snapshot(workspaceID)
@@ -445,8 +451,8 @@ func (d *Daemon) decorateSessionWithWorkspace(session *protocol.Session) {
 		return
 	}
 	if id := d.workspaces.workspaceIDForSession(session.ID); id != "" {
-		session.WorkspaceID = protocol.Ptr(id)
+		session.WorkspaceID = id
 	} else {
-		session.WorkspaceID = nil
+		session.WorkspaceID = ""
 	}
 }

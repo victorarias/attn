@@ -4,8 +4,8 @@ import { buildPaneRenderHealth, buildSessionRenderHealth } from './renderHealth'
 describe('renderHealth', () => {
   it('treats a pane with full terminal occupancy as healthy', () => {
     const pane = buildPaneRenderHealth({
-      paneId: 'main',
-      kind: 'main',
+      paneId: 'pane-session',
+      kind: 'agent',
       active: true,
       inputFocused: true,
       size: { cols: 120, rows: 36 },
@@ -18,7 +18,7 @@ describe('renderHealth', () => {
       terminal: {
         terminalName: 'main:test',
         sessionId: 'session-1',
-        paneId: 'main',
+        paneId: 'pane-session',
         runtimeId: 'session-1',
         renderer: 'ghostty-webgl',
         visible: true,
@@ -41,7 +41,7 @@ describe('renderHealth', () => {
   it('flags underfilled panes and unfocused active input', () => {
     const pane = buildPaneRenderHealth({
       paneId: 'pane-1',
-      kind: 'shell',
+      kind: 'agent',
       active: true,
       inputFocused: false,
       size: { cols: 27, rows: 46 },
@@ -86,8 +86,8 @@ describe('renderHealth', () => {
       selected: true,
       panes: [
         {
-          paneId: 'main',
-          kind: 'main',
+          paneId: 'pane-session',
+          kind: 'agent',
           active: false,
           inputFocused: false,
           size: { cols: 120, rows: 36 },
@@ -101,7 +101,7 @@ describe('renderHealth', () => {
         },
         {
           paneId: 'pane-1',
-          kind: 'shell',
+          kind: 'agent',
           active: true,
           inputFocused: false,
           size: { cols: 27, rows: 46 },

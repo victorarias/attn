@@ -31,7 +31,7 @@ export interface RuntimeTimelineSummary {
   runtimeId: string;
   sessionId: string | null;
   paneId: string | null;
-  paneKind: 'main' | 'shell' | null;
+  paneKind: 'agent' | null;
   milestones: RuntimeTimelineMilestones;
   latencies: RuntimeTimelineLatencies;
   flags: {
@@ -232,7 +232,7 @@ function maybeUpdateContext(summary: MutableRuntimeTimelineSummary, event: Termi
   }
   if (typeof event.paneId === 'string' && event.paneId.length > 0) {
     summary.paneId = event.paneId;
-    summary.paneKind = event.paneId === 'main' ? 'main' : 'shell';
+    summary.paneKind = 'agent';
   }
 }
 

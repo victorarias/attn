@@ -6,13 +6,11 @@ import { normalizeSessionAgent } from '../types/sessionAgent';
 import type { DaemonWorkspace } from '../hooks/useDaemonSocket';
 import { listenPtyEvents, ptyKill, ptySpawn, type PtySpawnArgs } from '../pty/bridge';
 import {
-  MAIN_TERMINAL_PANE_ID,
   createDefaultWorkspaceState,
   workspaceSnapshotFromDaemonWorkspace,
   type TerminalWorkspaceState,
 } from '../types/workspace';
 
-export { MAIN_TERMINAL_PANE_ID };
 export type { TerminalWorkspaceState };
 
 export interface Session {
@@ -36,7 +34,7 @@ export interface DaemonSessionSnapshot {
   label: string;
   agent?: string;
   directory: string;
-  workspace_id?: string;
+  workspace_id: string;
   endpoint_id?: string;
   state: string;
   branch?: string;
@@ -58,7 +56,15 @@ interface SessionStore {
 
   // Actions
   connect: () => Promise<void>;
-  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string, yoloMode?: boolean, workspaceId?: string) => Promise<string>;
+  createSession: (
+    label: string,
+    cwd: string,
+    id: string | undefined,
+    agent: SessionAgent | undefined,
+    endpointId: string | undefined,
+    yoloMode: boolean | undefined,
+    workspaceId: string,
+  ) => Promise<string>;
   closeSession: (id: string) => void;
   removeSessionLocalState: (id: string) => void;
   setActiveSession: (id: string | null) => void;
@@ -79,6 +85,7 @@ interface TestSession {
   state: UISessionState;
   cwd: string;
   agent?: SessionAgent;
+  workspaceId: string;
   branch?: string;
   isWorktree?: boolean;
 }
@@ -102,6 +109,7 @@ function pickFallbackActive(
   removedId: string,
   remainingSessions: Session[],
   recent: string[],
+  removedSession?: Session | null,
 ): string | null {
   const existing = new Set(remainingSessions.map((entry) => entry.id));
   for (const candidate of recent) {
@@ -109,7 +117,13 @@ function pickFallbackActive(
       return candidate;
     }
   }
-  return null;
+  if (removedSession?.workspaceId) {
+    const sameWorkspace = remainingSessions.find((entry) => entry.workspaceId === removedSession.workspaceId);
+    if (sameWorkspace) {
+      return sameWorkspace.id;
+    }
+  }
+  return remainingSessions[0]?.id ?? null;
 }
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
@@ -147,10 +161,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  createSession: async (label: string, cwd: string, providedId?: string, agent?: SessionAgent, endpointId?: string, yoloMode = false, providedWorkspaceId?: string) => {
+  createSession: async (
+    label: string,
+    cwd: string,
+    providedId: string | undefined,
+    agent: SessionAgent | undefined,
+    endpointId: string | undefined,
+    yoloMode: boolean | undefined,
+    providedWorkspaceId: string,
+  ) => {
     // Use provided ID or generate new one
     const id = providedId || crypto.randomUUID();
-    const workspaceId = providedWorkspaceId || `workspace-${id}`;
+    if (!providedWorkspaceId) {
+      throw new Error('createSession requires workspaceId');
+    }
+    const workspaceId = providedWorkspaceId;
     const resolvedAgent: SessionAgent = agent ?? 'claude';
     const session: Session = {
       id,
@@ -160,10 +185,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       workspaceId,
       agent: resolvedAgent,
       endpointId,
-      yoloMode,
+      yoloMode: yoloMode ?? false,
       transcriptMatched: resolvedAgent !== 'codex',
       workspace: createDefaultWorkspaceState(),
-      daemonActivePaneId: MAIN_TERMINAL_PANE_ID,
+      daemonActivePaneId: '',
     };
 
     set((state) => ({
@@ -180,12 +205,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   removeSessionLocalState: (id: string) => {
     const { sessions, activeSessionId, recentSessionIds } = get();
+    const removedSession = sessions.find((session) => session.id === id) ?? null;
     const newSessions = sessions.filter((s) => s.id !== id);
     const newRecent = recentSessionIds.filter((entry) => entry !== id);
     let newActiveId = activeSessionId;
 
     if (activeSessionId === id) {
-      newActiveId = pickFallbackActive(id, newSessions, recentSessionIds);
+      newActiveId = pickFallbackActive(id, newSessions, recentSessionIds, removedSession);
     }
 
     set({
@@ -196,15 +222,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   closeSession: (id: string) => {
-    const { sessions, removeSessionLocalState } = get();
-    const session = sessions.find((s) => s.id === id);
-
-    if (session) {
-      // Legacy local-only fallback for sessions that never became daemon-managed.
-      ptyKill({ id }).catch(console.error);
-    }
-
-    removeSessionLocalState(id);
+    get().removeSessionLocalState(id);
   },
 
   setActiveSession: (id: string | null) => {
@@ -238,6 +256,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       cwd: session.cwd,
       workspace_id: session.workspaceId,
       ...(session.endpointId ? { endpoint_id: session.endpointId } : {}),
+      intent: 'create',
       label: session.label,
       cols: resolvedCols,
       rows: resolvedRows,
@@ -283,6 +302,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           cwd: session.cwd,
           workspace_id: session.workspaceId,
           ...(session.endpointId ? { endpoint_id: session.endpointId } : {}),
+          intent: 'reload',
           reload: true,
           label: session.label,
           cols,
@@ -321,7 +341,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         const normalizedState = normalizeSessionState(daemonSession.state);
         const nextAgent: SessionAgent = normalizeSessionAgent(daemonSession.agent, existing?.agent ?? 'codex');
         const nextEndpointId = daemonSession.endpoint_id ?? existing?.endpointId;
-        const nextWorkspaceId = daemonSession.workspace_id ?? existing?.workspaceId ?? `workspace-${daemonSession.id}`;
+        const nextWorkspaceId = daemonSession.workspace_id;
         const nextBranch = daemonSession.branch ?? existing?.branch;
         const nextIsWorktree = daemonSession.is_worktree ?? existing?.isWorktree;
 
@@ -352,17 +372,23 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           branch: nextBranch,
           isWorktree: nextIsWorktree,
           workspace: existing?.workspace ?? createDefaultWorkspaceState(),
-          daemonActivePaneId: existing?.daemonActivePaneId ?? MAIN_TERMINAL_PANE_ID,
+          daemonActivePaneId: existing?.daemonActivePaneId ?? '',
         } satisfies Session;
       });
 
-      const syncedIds = new Set(syncedSessions.map((session) => session.id));
+      const pendingLayoutSessions = state.sessions.filter((session) => (
+        !syncedSessions.some((synced) => synced.id === session.id)
+        && session.workspace.agents.some((pane) => pane.sessionId === session.id && pane.status === 'spawning')
+      ));
+      const allSessions = [...syncedSessions, ...pendingLayoutSessions];
+      const syncedIds = new Set(allSessions.map((session) => session.id));
       const prunedRecent = state.recentSessionIds.filter((entry) => syncedIds.has(entry));
 
       let nextActiveSessionID = state.activeSessionId;
       let nextRecent = prunedRecent;
       if (nextActiveSessionID && !syncedIds.has(nextActiveSessionID)) {
-        const fallback = pickFallbackActive(nextActiveSessionID, syncedSessions, prunedRecent);
+        const removedSession = state.sessions.find((session) => session.id === nextActiveSessionID) ?? null;
+        const fallback = pickFallbackActive(nextActiveSessionID, allSessions, prunedRecent, removedSession);
         nextActiveSessionID = fallback;
         nextRecent = fallback
           ? prunedRecent.filter((entry) => entry !== fallback)
@@ -370,7 +396,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       }
 
       return {
-        sessions: syncedSessions,
+        sessions: allSessions,
         activeSessionId: nextActiveSessionID,
         recentSessionIds: nextRecent,
       };
@@ -385,13 +411,44 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         workspaceSnapshotFromDaemonWorkspace(workspace.layout!),
       ]));
 
-    set((state) => ({
-      sessions: state.sessions.map((session) => ({
+    set((state) => {
+      const sessions = state.sessions.map((session) => ({
         ...session,
         workspace: workspaceByID.get(session.workspaceId)?.workspace ?? session.workspace,
         daemonActivePaneId: workspaceByID.get(session.workspaceId)?.daemonActivePaneId ?? session.daemonActivePaneId,
-      })),
-    }));
+      }));
+      const existingIDs = new Set(sessions.map((session) => session.id));
+
+      for (const workspace of daemonWorkspaces) {
+        if (!workspace.layout) {
+          continue;
+        }
+        const snapshot = workspaceByID.get(workspace.id);
+        if (!snapshot) {
+          continue;
+        }
+        for (const pane of snapshot.workspace.agents) {
+          if (existingIDs.has(pane.sessionId) || pane.status === 'ready') {
+            continue;
+          }
+          existingIDs.add(pane.sessionId);
+          sessions.push({
+            id: pane.sessionId,
+            label: pane.title || workspace.title,
+            state: pane.status === 'failed' ? 'unknown' : 'launching',
+            cwd: workspace.directory,
+            workspaceId: workspace.id,
+            agent: 'codex',
+            endpointId: workspace.endpoint_id,
+            transcriptMatched: true,
+            workspace: snapshot.workspace,
+            daemonActivePaneId: snapshot.daemonActivePaneId,
+          });
+        }
+      }
+
+      return { sessions };
+    });
   },
 }));
 
@@ -404,16 +461,20 @@ declare global {
 // Expose test helpers for E2E testing (only in development)
 if (import.meta.env.DEV) {
   window.__TEST_INJECT_SESSION = (session: TestSession) => {
+    if (!session.workspaceId) {
+      throw new Error('__TEST_INJECT_SESSION requires workspaceId');
+    }
+    const workspaceId = session.workspaceId;
     useSessionStore.setState((state) => ({
       sessions: [
         ...state.sessions,
         {
           ...session,
+          workspaceId,
           agent: session.agent ?? 'codex',
-          workspaceId: `workspace-${session.id}`,
           transcriptMatched: (session.agent ?? 'codex') !== 'codex',
           workspace: createDefaultWorkspaceState(),
-          daemonActivePaneId: MAIN_TERMINAL_PANE_ID,
+          daemonActivePaneId: '',
         },
       ],
     }));
@@ -427,7 +488,7 @@ if (import.meta.env.DEV) {
     }));
   };
 
-  window.__TEST_SET_SESSION_WORKSPACE = (sessionId: string, workspace: TerminalWorkspaceState, daemonActivePaneId = MAIN_TERMINAL_PANE_ID) => {
+  window.__TEST_SET_SESSION_WORKSPACE = (sessionId: string, workspace: TerminalWorkspaceState, daemonActivePaneId = workspace.agents[0]?.id || '') => {
     useSessionStore.setState((state) => ({
       sessions: state.sessions.map((session) =>
         session.id === sessionId

@@ -898,6 +898,7 @@ Remote hub options:
   const endpointName = `harness-${runId}`;
   const createdRemoteSessionIds = new Set();
   let remoteSessionId = null;
+  let remoteInitialPaneId = null;
   let remoteSessionLabel = path.basename(extraOptions.remoteDirectory || `remote-hub-${runId}`) || 'session';
   let remoteWorktreeSessionId = null;
   let remoteWorktreePath = null;
@@ -1058,6 +1059,11 @@ Remote hub options:
       30_000,
     );
     saveJson(path.join(runDir, 'session-ui-created.json'), createdSessionUi);
+    const createdWorkspace = await client.request('get_workspace', { sessionId: remoteSessionId });
+    remoteInitialPaneId = (createdWorkspace.panes || [])[0]?.paneId || null;
+    if (!remoteInitialPaneId) {
+      throw new Error(`Remote initial pane not found for ${remoteSessionId}: ${JSON.stringify(createdWorkspace, null, 2)}`);
+    }
 
     const registered = await observer.waitForSession({
       id: remoteSessionId,
@@ -1332,7 +1338,7 @@ Remote hub options:
 
     const preReloadMainTextState = await client.request('read_pane_text', {
       sessionId: remoteSessionId,
-      paneId: 'main',
+      paneId: remoteInitialPaneId,
     }, {
       timeoutMs: 15_000,
     });
@@ -1346,7 +1352,7 @@ Remote hub options:
     });
     await client.request('focus_pane', {
       sessionId: remoteSessionId,
-      paneId: 'main',
+      paneId: remoteInitialPaneId,
     });
     await observer.waitForScrollbackReady(remoteSessionId, 20_000);
     const reloadedSessionUi = await waitForSessionUiState(
@@ -1366,7 +1372,7 @@ Remote hub options:
     const mainTextAfterReload = await waitForPaneTextChange(
       client,
       remoteSessionId,
-      'main',
+      remoteInitialPaneId,
       preReloadMainText,
       20_000,
     );

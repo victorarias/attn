@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import {
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -19,6 +19,7 @@ import {
   assertPaneVisibleContent,
   assertPaneVisibleContentPreserved,
   captureSessionArtifacts,
+  waitForFirstWorkspacePane,
   waitForNewShellPane,
   waitForPaneAttached,
   waitForPaneState,
@@ -26,8 +27,8 @@ import {
   waitForPaneVisible,
 } from './scenarioAssertions.mjs';
 import {
-  ensureCodexMainPromptReady,
-  ensureClaudeMainPromptReady,
+  ensureCodexInitialPanePromptReady,
+  ensureClaudeInitialPanePromptReady,
   promptClaudeForStructuredBlock,
 } from './scenarioAgents.mjs';
 
@@ -97,7 +98,7 @@ function paneRecoveryThreshold(bounds) {
   };
 }
 
-function mainContentOptions(token, description, phase = 'baseline') {
+function initialPaneContentOptions(token, description, phase = 'baseline') {
   if (phase === 'shrunk') {
     return {
       contains: token,
@@ -203,6 +204,7 @@ async function main() {
   const shellToken = `__TR401_SHELL_${Date.now()}__`;
 
   let sessionId = null;
+  let initialPaneId = null;
   let utilityPaneId = null;
   let baselineWindow = null;
   let shrunkWindow = null;
@@ -228,34 +230,38 @@ async function main() {
     });
 
     sessionId = await runner.step('create_local_session', async () => {
-      return createSessionAndWaitForMain({
+      return createSessionAndWaitForInitialPane({
         client,
         observer,
         cwd: runner.sessionDir,
         label: `tr401-local-${options.agent}-${runner.runId}`,
         agent: options.agent,
-        waitForMainVisible: false,
+        waitForInitialPaneVisible: false,
       });
     });
 
     await runner.step('prepare_split_baseline', async () => {
       await client.request('select_session', { sessionId });
       if (options.agent === 'claude') {
-        await ensureClaudeMainPromptReady(client, sessionId, 45_000);
+        const readiness = await ensureClaudeInitialPanePromptReady(client, sessionId, 45_000);
+        initialPaneId = readiness.paneId;
       } else {
-        await ensureCodexMainPromptReady(client, sessionId, 45_000);
+        const readiness = await ensureCodexInitialPanePromptReady(client, sessionId, 45_000);
+        initialPaneId = readiness.paneId;
       }
-      await waitForPaneVisible(client, sessionId, 'main', 20_000);
+      initialPaneId ||= (await waitForFirstWorkspacePane(client, sessionId, 'initial pane before window resize baseline', 20_000)).paneId;
+      await waitForPaneVisible(client, sessionId, initialPaneId, 20_000);
 
       if (options.agent === 'claude') {
         const fixture = await promptClaudeForStructuredBlock(client, sessionId, agentToken, 6);
+        initialPaneId = fixture.paneId;
         runner.writeJson('agent-fixture.json', fixture);
         await waitForPaneText(
           client,
           sessionId,
-          'main',
+          initialPaneId,
           (text) => text.includes(agentToken),
-          'main pane text to include structured agent token before resize',
+          'initial pane text to include structured agent token before resize',
           45_000,
         );
       }
@@ -264,7 +270,7 @@ async function main() {
       const existingPaneIds = new Set((workspaceBefore.panes || []).map((pane) => pane.paneId));
       await client.request('split_pane', {
         sessionId,
-        targetPaneId: 'main',
+        targetPaneId: initialPaneId,
         direction: 'vertical',
       });
       const utilityPane = await waitForNewShellPane(
@@ -298,8 +304,8 @@ async function main() {
       baselineMainState = await assertPaneVisibleContent(
         client,
         sessionId,
-        'main',
-        mainContentOptions(agentToken, 'main pane visible content before window resize'),
+        initialPaneId,
+        initialPaneContentOptions(agentToken, 'initial pane visible content before window resize'),
       );
       baselineUtilityState = await assertPaneVisibleContent(
         client,
@@ -309,11 +315,11 @@ async function main() {
       );
 
       await Promise.all([
-        assertPaneCoverage(client, sessionId, 'main', {
+        assertPaneCoverage(client, sessionId, initialPaneId, {
           minWidthRatio: 0.78,
           minHeightRatio: 0.72,
           timeoutMs: 20_000,
-          description: 'main pane coverage before window resize',
+          description: 'initial pane coverage before window resize',
         }),
         assertPaneCoverage(client, sessionId, utilityPaneId, {
           minWidthRatio: 0.78,
@@ -324,8 +330,8 @@ async function main() {
         assertPaneUsesVisibleWidth(
           client,
           sessionId,
-          'main',
-          widthUsageOptions('main pane width usage before window resize'),
+          initialPaneId,
+          widthUsageOptions('initial pane width usage before window resize'),
         ),
         assertPaneUsesVisibleWidth(
           client,
@@ -338,13 +344,13 @@ async function main() {
       baselineMainNativeMetrics = await assertPaneNativePaintCoverage(
         client,
         runner.runDir,
-        '01-baseline-main',
+        '01-baseline-initial-pane',
         sessionId,
-        'main',
+        initialPaneId,
         {
           target: 'paneBody',
           ...nativeCoverageThresholds,
-          description: 'main pane native paint coverage before window resize',
+          description: 'initial pane native paint coverage before window resize',
         },
       );
       baselineUtilityNativeMetrics = await assertPaneNativePaintCoverage(
@@ -373,13 +379,13 @@ async function main() {
       shrunkMainState = await waitForPaneState(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         (state) => {
           const width = state?.pane?.bounds?.width ?? 0;
           const height = state?.pane?.bounds?.height ?? 0;
           return width > 0 && height > 0 && width <= mainThreshold.width && height <= mainThreshold.height;
         },
-        'main pane bounds to shrink after window resize',
+        'initial pane bounds to shrink after window resize',
         20_000,
       );
       shrunkUtilityState = await waitForPaneState(
@@ -396,7 +402,7 @@ async function main() {
       );
 
       await Promise.all([
-        waitForPaneVisible(client, sessionId, 'main', 20_000),
+        waitForPaneVisible(client, sessionId, initialPaneId, 20_000),
         waitForPaneVisible(client, sessionId, utilityPaneId, 20_000),
       ]);
 
@@ -404,8 +410,8 @@ async function main() {
         assertPaneVisibleContent(
           client,
           sessionId,
-          'main',
-          mainContentOptions(agentToken, 'main pane visible content after shrinking window', 'shrunk'),
+          initialPaneId,
+          initialPaneContentOptions(agentToken, 'initial pane visible content after shrinking window', 'shrunk'),
         ),
         assertPaneVisibleContent(
           client,
@@ -413,11 +419,11 @@ async function main() {
           utilityPaneId,
           utilityContentOptions(shellToken, 'utility pane visible content after shrinking window', 'shrunk'),
         ),
-        assertPaneCoverage(client, sessionId, 'main', {
+        assertPaneCoverage(client, sessionId, initialPaneId, {
           minWidthRatio: 0.75,
           minHeightRatio: 0.7,
           timeoutMs: 20_000,
-          description: 'main pane coverage after shrinking window',
+          description: 'initial pane coverage after shrinking window',
         }),
         assertPaneCoverage(client, sessionId, utilityPaneId, {
           minWidthRatio: 0.75,
@@ -428,8 +434,8 @@ async function main() {
         assertPaneUsesVisibleWidth(
           client,
           sessionId,
-          'main',
-          widthUsageOptions('main pane width usage after shrinking window', 'shrunk'),
+          initialPaneId,
+          widthUsageOptions('initial pane width usage after shrinking window', 'shrunk'),
         ),
         assertPaneUsesVisibleWidth(
           client,
@@ -442,13 +448,13 @@ async function main() {
       await assertPaneNativePaintCoverage(
         client,
         runner.runDir,
-        '02-shrunk-main',
+        '02-shrunk-initial-pane',
         sessionId,
-        'main',
+        initialPaneId,
         {
           target: 'paneBody',
           ...nativeCoverageThresholds,
-          description: 'main pane native paint coverage after shrinking window',
+          description: 'initial pane native paint coverage after shrinking window',
         },
       );
       await assertPaneNativePaintCoverage(
@@ -477,13 +483,13 @@ async function main() {
       restoredMainState = await waitForPaneState(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         (state) => {
           const width = state?.pane?.bounds?.width ?? 0;
           const height = state?.pane?.bounds?.height ?? 0;
           return width >= mainThreshold.width && height >= mainThreshold.height;
         },
-        'main pane bounds to recover after restoring window',
+        'initial pane bounds to recover after restoring window',
         20_000,
       );
       restoredUtilityState = await waitForPaneState(
@@ -503,8 +509,8 @@ async function main() {
         assertPaneVisibleContent(
           client,
           sessionId,
-          'main',
-          mainContentOptions(agentToken, 'main pane visible content after restoring window'),
+          initialPaneId,
+          initialPaneContentOptions(agentToken, 'initial pane visible content after restoring window'),
         ),
         assertPaneVisibleContent(
           client,
@@ -515,7 +521,7 @@ async function main() {
         assertPaneVisibleContentPreserved(
           client,
           sessionId,
-          'main',
+          initialPaneId,
           baselineMainState?.pane?.visibleContent || null,
           {
             minNonEmptyLineRatio: 0.6,
@@ -526,7 +532,7 @@ async function main() {
               /^\s*[│╭╰].*$/u,
             ],
             timeoutMs: 20_000,
-            description: 'main pane content preserved after restoring window',
+            description: 'initial pane content preserved after restoring window',
           },
         ),
         assertPaneVisibleContentPreserved(
@@ -542,11 +548,11 @@ async function main() {
             description: 'utility pane content preserved after restoring window',
           },
         ),
-        assertPaneCoverage(client, sessionId, 'main', {
+        assertPaneCoverage(client, sessionId, initialPaneId, {
           minWidthRatio: 0.78,
           minHeightRatio: 0.72,
           timeoutMs: 20_000,
-          description: 'main pane coverage after restoring window',
+          description: 'initial pane coverage after restoring window',
         }),
         assertPaneCoverage(client, sessionId, utilityPaneId, {
           minWidthRatio: 0.78,
@@ -557,8 +563,8 @@ async function main() {
         assertPaneUsesVisibleWidth(
           client,
           sessionId,
-          'main',
-          widthUsageOptions('main pane width usage after restoring window'),
+          initialPaneId,
+          widthUsageOptions('initial pane width usage after restoring window'),
         ),
         assertPaneUsesVisibleWidth(
           client,
@@ -571,13 +577,13 @@ async function main() {
       await assertPaneNativePaintCoverage(
         client,
         runner.runDir,
-        '03-restored-main',
+        '03-restored-initial-pane',
         sessionId,
-        'main',
+        initialPaneId,
         {
           target: 'paneBody',
           ...nativeCoverageThresholds,
-          description: 'main pane native paint coverage after restoring window',
+          description: 'initial pane native paint coverage after restoring window',
         },
       );
       await assertPaneNativePaintCoverage(
@@ -606,9 +612,9 @@ async function main() {
         await assertPaneNativePaintRecovered(
           client,
           runner.runDir,
-          '03-restored-main-stability',
+          '03-restored-initial-pane-stability',
           sessionId,
-          'main',
+          initialPaneId,
           baselineMainNativeMetrics,
           {
             target: 'paneBody',
@@ -617,7 +623,7 @@ async function main() {
             maxBBoxWidthRatioRegression: 0.4,
             maxBBoxHeightRatioRegression: 0.3,
             maxActivePixelRatioRegression: null,
-            description: 'main pane native paint recovery after restoring window',
+            description: 'initial pane native paint recovery after restoring window',
           },
         );
       }

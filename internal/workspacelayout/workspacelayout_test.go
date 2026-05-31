@@ -7,8 +7,8 @@ import (
 
 func TestSplitTargetsOnlyRequestedPane(t *testing.T) {
 	root, changed := Split(
-		DefaultLayout(),
-		MainPaneID,
+		DefaultLayout("pane-root"),
+		"pane-root",
 		"pane-a",
 		"split-root",
 		DirectionVertical,
@@ -49,7 +49,7 @@ func TestRemoveCollapsesParentSplit(t *testing.T) {
 		Direction: DirectionVertical,
 		Ratio:     DefaultSplitRatio,
 		Children: []Node{
-			{Type: "pane", PaneID: MainPaneID},
+			{Type: "pane", PaneID: "pane-root"},
 			{
 				Type:      "split",
 				SplitID:   "nested",
@@ -85,24 +85,24 @@ func TestNormalizeWorkspaceLayoutPrunesMissingPanes(t *testing.T) {
 			Direction: DirectionVertical,
 			Ratio:     DefaultSplitRatio,
 			Children: []Node{
-				{Type: "pane", PaneID: MainPaneID},
+				{Type: "pane", PaneID: "pane-root"},
 				{Type: "pane", PaneID: "pane-gone"},
 			},
 		},
 		Panes: []Pane{
-			{PaneID: MainPaneID, RuntimeID: "sess-1", SessionID: "sess-1", Kind: PaneKindAgent, Title: DefaultPaneTitle},
+			{PaneID: "pane-root", RuntimeID: "sess-1", SessionID: "sess-1", Kind: PaneKindAgent, Title: DefaultPaneTitle},
 		},
 	}
 
-	normalized := NormalizeWorkspaceLayout(snapshot, "sess-1")
-	if normalized.Layout.Type != "pane" || normalized.Layout.PaneID != MainPaneID {
+	normalized := NormalizeWorkspaceLayout(snapshot)
+	if normalized.Layout.Type != "pane" || normalized.Layout.PaneID != "pane-root" {
 		t.Fatalf("normalized layout = %+v, want single agent pane", normalized.Layout)
 	}
-	if normalized.ActivePaneID != MainPaneID {
-		t.Fatalf("active pane = %q, want %q", normalized.ActivePaneID, MainPaneID)
+	if normalized.ActivePaneID != "pane-root" {
+		t.Fatalf("active pane = %q, want pane-root", normalized.ActivePaneID)
 	}
-	if len(normalized.Panes) != 1 || normalized.Panes[0].PaneID != MainPaneID {
-		t.Fatalf("normalized panes = %+v, want only main", normalized.Panes)
+	if len(normalized.Panes) != 1 || normalized.Panes[0].PaneID != "pane-root" {
+		t.Fatalf("normalized panes = %+v, want only pane-root", normalized.Panes)
 	}
 }
 
@@ -122,7 +122,7 @@ func TestNormalizeWorkspaceLayoutRebalancesSameDirectionChains(t *testing.T) {
 					Direction: DirectionVertical,
 					Ratio:     DefaultSplitRatio,
 					Children: []Node{
-						{Type: "pane", PaneID: MainPaneID},
+						{Type: "pane", PaneID: "pane-root"},
 						{Type: "pane", PaneID: "pane-a"},
 					},
 				},
@@ -130,13 +130,13 @@ func TestNormalizeWorkspaceLayoutRebalancesSameDirectionChains(t *testing.T) {
 			},
 		},
 		Panes: []Pane{
-			{PaneID: MainPaneID, RuntimeID: "sess-1", SessionID: "sess-1", Kind: PaneKindAgent, Title: DefaultPaneTitle},
-			{PaneID: "pane-a", RuntimeID: "runtime-a", Kind: PaneKindShell, Title: "Shell 1"},
-			{PaneID: "pane-b", RuntimeID: "runtime-b", Kind: PaneKindShell, Title: "Shell 2"},
+			{PaneID: "pane-root", RuntimeID: "sess-1", SessionID: "sess-1", Kind: PaneKindAgent, Title: DefaultPaneTitle},
+			{PaneID: "pane-a", RuntimeID: "sess-a", SessionID: "sess-a", Kind: PaneKindAgent, Title: "Agent 1"},
+			{PaneID: "pane-b", RuntimeID: "sess-b", SessionID: "sess-b", Kind: PaneKindAgent, Title: "Agent 2"},
 		},
 	}
 
-	normalized := NormalizeWorkspaceLayout(snapshot, "sess-1")
+	normalized := NormalizeWorkspaceLayout(snapshot)
 	if normalized.Layout.Type != "split" {
 		t.Fatalf("normalized layout = %+v, want split root", normalized.Layout)
 	}
@@ -165,7 +165,7 @@ func TestNormalizeWorkspaceLayoutRebalancesAfterRemovingPaneFromChain(t *testing
 					Direction: DirectionVertical,
 					Ratio:     DefaultSplitRatio,
 					Children: []Node{
-						{Type: "pane", PaneID: MainPaneID},
+						{Type: "pane", PaneID: "pane-root"},
 						{Type: "pane", PaneID: "pane-gone"},
 					},
 				},
@@ -173,12 +173,12 @@ func TestNormalizeWorkspaceLayoutRebalancesAfterRemovingPaneFromChain(t *testing
 			},
 		},
 		Panes: []Pane{
-			{PaneID: MainPaneID, RuntimeID: "sess-1", SessionID: "sess-1", Kind: PaneKindAgent, Title: DefaultPaneTitle},
-			{PaneID: "pane-b", RuntimeID: "runtime-b", Kind: PaneKindShell, Title: "Shell 2"},
+			{PaneID: "pane-root", RuntimeID: "sess-1", SessionID: "sess-1", Kind: PaneKindAgent, Title: DefaultPaneTitle},
+			{PaneID: "pane-b", RuntimeID: "sess-b", SessionID: "sess-b", Kind: PaneKindAgent, Title: "Agent 2"},
 		},
 	}
 
-	normalized := NormalizeWorkspaceLayout(snapshot, "sess-1")
+	normalized := NormalizeWorkspaceLayout(snapshot)
 	if normalized.Layout.Type != "split" {
 		t.Fatalf("normalized layout = %+v, want split root", normalized.Layout)
 	}

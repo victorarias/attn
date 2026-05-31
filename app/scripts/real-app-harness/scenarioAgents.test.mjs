@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ensureCodexMainPromptReady } from './scenarioAgents.mjs';
+import { ensureCodexInitialPanePromptReady } from './scenarioAgents.mjs';
 
-describe('ensureCodexMainPromptReady', () => {
+describe('ensureCodexInitialPanePromptReady', () => {
   it('accepts the current Codex directory trust dialog before returning ready', async () => {
     let acceptedTrust = false;
     const client = {
       request: vi.fn(async (action) => {
         switch (action) {
+          case 'get_workspace':
+            return {
+              panes: [{ paneId: 'pane-session-1', runtimeId: 'runtime-session-1' }],
+            };
           case 'get_pane_state':
             return {
               pane: { bounds: { width: 640, height: 480 }, inputFocused: true },
@@ -33,17 +37,17 @@ describe('ensureCodexMainPromptReady', () => {
       }),
     };
 
-    await expect(ensureCodexMainPromptReady(client, 'session-1', 2_000)).resolves.toMatchObject({
+    await expect(ensureCodexInitialPanePromptReady(client, 'session-1', 2_000)).resolves.toMatchObject({
       trustHandled: true,
       text: expect.stringContaining('OpenAI Codex'),
     });
     expect(client.request).toHaveBeenCalledWith(
       'type_pane_via_ui',
-      { sessionId: 'session-1', paneId: 'main', text: '1' },
+      { sessionId: 'session-1', paneId: 'pane-session-1', text: '1' },
     );
     expect(client.request).toHaveBeenCalledWith(
       'write_pane',
-      { sessionId: 'session-1', paneId: 'main', text: '\r', submit: false },
+      { sessionId: 'session-1', paneId: 'pane-session-1', text: '\r', submit: false },
     );
   });
 });

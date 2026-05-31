@@ -51,8 +51,7 @@ import { recordTerminalRuntimeLog } from '../utils/terminalRuntimeLog';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
 import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
 
-// Re-export types from generated for consumers
-// Use type aliases to maintain backward compatibility
+// Short names for daemon payloads used throughout the app.
 export type DaemonSession = GeneratedSession;
 export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
@@ -153,7 +152,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '68';
+const PROTOCOL_VERSION = '72';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
 // injects this global before any page script runs — see
@@ -429,15 +428,10 @@ interface UseDaemonSocketOptions {
   wsUrl?: string;
 }
 
-function isHiddenSidebarSession(session: DaemonSession): boolean {
-  return session.agent === 'shell';
-}
-
 function dedupeSessionsByID(sessions: DaemonSession[]): DaemonSession[] {
   const deduped: DaemonSession[] = [];
   const indexByID = new Map<string, number>();
   for (const session of sessions) {
-    if (isHiddenSidebarSession(session)) continue;
     const existingIndex = indexByID.get(session.id);
     if (existingIndex === undefined) {
       indexByID.set(session.id, deduped.length);
@@ -450,7 +444,6 @@ function dedupeSessionsByID(sessions: DaemonSession[]): DaemonSession[] {
 }
 
 function upsertSessionByID(sessions: DaemonSession[], session: DaemonSession): DaemonSession[] {
-  if (isHiddenSidebarSession(session)) return sessions;
   const index = sessions.findIndex((entry) => entry.id === session.id);
   if (index === -1) {
     return [...sessions, session];
@@ -494,13 +487,11 @@ function resolveRuntimeLogContext(
   sessions: DaemonSession[],
   workspaces: DaemonWorkspace[],
   runtimeID: string,
-): { sessionId?: string; paneId?: string; paneKind?: 'main' | 'shell' } {
+): { sessionId?: string; paneId?: string; paneKind?: 'agent' } {
   const session = sessions.find((entry) => entry.id === runtimeID);
   if (session) {
     return {
       sessionId: session.id,
-      paneId: 'main',
-      paneKind: 'main',
     };
   }
   for (const workspace of workspaces) {
@@ -511,7 +502,7 @@ function resolveRuntimeLogContext(
       return {
         sessionId: pane.session_id,
         paneId: pane.pane_id,
-        paneKind: pane.kind === 'agent' ? 'main' : 'shell',
+        paneKind: 'agent',
       };
     }
   }
@@ -542,6 +533,13 @@ function workspaceActionKey(action: string, workspaceId: string, paneId?: string
   return `workspace:${action}:${workspaceId}:${paneId || ''}`;
 }
 
+function isValidWorkspaceActionResult(data: WebSocketEvent): data is WebSocketEvent & {
+  action: string;
+  workspace_id: string;
+} {
+  return Boolean(data.action && data.workspace_id);
+}
+
 const ATTACH_RETRY_TIMEOUT_MS = 3_000;
 const ATTACH_RETRY_DELAY_MS = 150;
 const GIT_METADATA_TIMEOUT_MS = 30 * 60_000;
@@ -550,6 +548,7 @@ const GIT_WORKTREE_TIMEOUT_MS = 30 * 60_000;
 const GIT_NETWORK_TIMEOUT_MS = 30 * 60_000;
 const GIT_CLONE_TIMEOUT_MS = 90 * 60_000;
 const GITHUB_REFRESH_TIMEOUT_MS = 5 * 60_000;
+const WORKSPACE_SESSIONS_CAPABILITY = 'workspace_sessions';
 
 export function isTransientAttachError(error: unknown): boolean {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -795,7 +794,7 @@ export function useDaemonSocket({
       case 'unregister_workspace':
         rejectPendingByPredicate((key) => key.startsWith('unregister_workspace:'), error);
         return;
-      case 'workspace_layout_split_pane':
+      case 'workspace_layout_add_session_pane':
       case 'workspace_layout_close_pane':
       case 'workspace_layout_focus_pane':
       case 'workspace_layout_rename_pane':
@@ -939,17 +938,14 @@ export function useDaemonSocket({
         circuitResetTimeoutRef.current = null;
       }
 
-      // Identify ourselves first thing. The Tauri app declares no
-      // capabilities — it relies on the daemon's legacy defaults
-      // (shell PTYs from spawn_session are utility terminals, not
-      // sessions). Sending hello at all is still useful for daemon-side
-      // diagnostics (client kind/version in logs).
+      // Identify ourselves first thing. Sending hello is useful for
+      // daemon-side diagnostics (client kind/version in logs).
       ws.send(
         JSON.stringify({
           cmd: 'client_hello',
           client_kind: 'tauri-app',
           version: `protocol-${PROTOCOL_VERSION}`,
-          capabilities: [],
+          capabilities: [WORKSPACE_SESSIONS_CAPABILITY],
         }),
       );
 
@@ -1100,8 +1096,12 @@ export function useDaemonSocket({
             break;
 
           case 'workspace_layout_action_result': {
-            const action = data.action || '';
-            const workspaceId = data.workspace_id || '';
+            if (!isValidWorkspaceActionResult(data)) {
+              console.warn('[Daemon] Ignoring malformed workspace action result:', data);
+              break;
+            }
+            const action = data.action;
+            const workspaceId = data.workspace_id;
             const paneId = data.pane_id;
             recordPaneRuntimeDebugEvent({
               scope: 'daemon',
@@ -1127,13 +1127,12 @@ export function useDaemonSocket({
             break;
           }
 
-          case 'workspace_layout_runtime_exited':
-            // The canonical pane removal arrives via workspace_layout_updated.
-            break;
-
           case 'workspace_registered':
           case 'workspace_state_changed':
             if (data.workspace) {
+              const key = `register_workspace:${data.workspace.id}`;
+              pendingActionsRef.current.get(key)?.resolve(undefined);
+              pendingActionsRef.current.delete(key);
               const nextWorkspaces = upsertWorkspaceByID(workspacesRef.current, data.workspace);
               workspacesRef.current = nextWorkspaces;
               onWorkspacesUpdate(nextWorkspaces);
@@ -2134,7 +2133,7 @@ export function useDaemonSocket({
         cmd: 'spawn_session',
         id: args.id,
         cwd: args.cwd,
-        ...(args.workspace_id && { workspace_id: args.workspace_id }),
+        workspace_id: args.workspace_id,
         ...(args.endpoint_id && { endpoint_id: args.endpoint_id }),
         agent: args.shell ? 'shell' : (args.agent || 'codex'),
         cols: args.cols,
@@ -2368,17 +2367,26 @@ export function useDaemonSocket({
     });
   }, [sendOrQueueCommand]);
 
-  const sendWorkspaceSplitPane = useCallback((workspaceId: string, targetPaneId: string, direction: 'vertical' | 'horizontal') => {
+  const sendWorkspaceAddSessionPane = useCallback((
+    workspaceId: string,
+    sessionId: string,
+    title?: string,
+    options: { paneId?: string; targetPaneId?: string; direction?: 'vertical' | 'horizontal' } = {},
+  ) => {
+    const paneId = options.paneId || `pane-${sessionId}`;
     return sendWorkspaceCommand(
-      'workspace_layout_split_pane',
+      'workspace_layout_add_session_pane',
       workspaceId,
       {
-        cmd: 'workspace_layout_split_pane',
+        cmd: 'workspace_layout_add_session_pane',
         workspace_id: workspaceId,
-        target_pane_id: targetPaneId,
-        direction,
+        pane_id: paneId,
+        session_id: sessionId,
+        ...(title ? { title } : {}),
+        ...(options.targetPaneId ? { target_pane_id: options.targetPaneId } : {}),
+        ...(options.direction ? { direction: options.direction } : {}),
       },
-      targetPaneId,
+      paneId,
     );
   }, [sendWorkspaceCommand]);
 
@@ -2450,13 +2458,6 @@ export function useDaemonSocket({
                 agent ?? 'unknown',
                 String(recoverable),
               );
-            },
-            logKnownWorkspaceRespawn: ({ id, endpointId, error }) => {
-              console.warn('[DaemonSocket] Known workspace runtime attach failed, respawning shell pane', {
-                id,
-                endpoint_id: endpointId,
-                error: error instanceof Error ? error.message : String(error),
-              });
             },
           },
         );
@@ -2639,11 +2640,26 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'clear_sessions' }));
   }, []);
 
-  const sendRegisterWorkspace = useCallback((workspaceId: string, title: string, directory: string, endpointId?: string) => {
-    sendOrQueueCommand(
-      { cmd: 'register_workspace', id: workspaceId, title, directory, ...(endpointId ? { endpoint_id: endpointId } : {}) },
-      { waitForInitialState: true },
-    );
+  const sendRegisterWorkspace = useCallback((workspaceId: string, title: string, directory: string, endpointId?: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if (!workspaceId) {
+        resolve();
+        return;
+      }
+      const key = `register_workspace:${workspaceId}`;
+      pendingActionsRef.current.set(key, { resolve: () => resolve(), reject });
+      sendOrQueueCommand(
+        { cmd: 'register_workspace', id: workspaceId, title, directory, ...(endpointId ? { endpoint_id: endpointId } : {}) },
+        { waitForInitialState: true },
+      );
+      window.setTimeout(() => {
+        if (!pendingActionsRef.current.has(key)) {
+          return;
+        }
+        pendingActionsRef.current.delete(key);
+        reject(new Error(`Workspace registration timed out for ${workspaceId}`));
+      }, 10_000);
+    });
   }, [sendOrQueueCommand]);
 
   const sendUnregisterWorkspace = useCallback((workspaceId: string): Promise<void> => {
@@ -3691,7 +3707,7 @@ export function useDaemonSocket({
     sendUnsubscribeGitStatus,
     sendSessionVisualized,
     sendWorkspaceGet,
-    sendWorkspaceSplitPane,
+    sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
     sendWorkspaceFocusPane,
     sendWorkspaceRenamePane,

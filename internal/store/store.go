@@ -56,9 +56,6 @@ func cloneSession(session *protocol.Session) *protocol.Session {
 	if session.EndpointID != nil {
 		cloned.EndpointID = protocol.Ptr(protocol.Deref(session.EndpointID))
 	}
-	if session.WorkspaceID != nil {
-		cloned.WorkspaceID = protocol.Ptr(protocol.Deref(session.WorkspaceID))
-	}
 	if session.Branch != nil {
 		cloned.Branch = protocol.Ptr(protocol.Deref(session.Branch))
 	}
@@ -167,7 +164,7 @@ func (s *Store) Add(session *protocol.Session) {
 		session.Agent,
 		session.Directory,
 		protocol.Deref(session.EndpointID),
-		protocol.Deref(session.WorkspaceID),
+		session.WorkspaceID,
 		protocol.Deref(session.Branch),
 		boolToInt(protocol.Deref(session.IsWorktree)),
 		protocol.Deref(session.MainRepo),
@@ -227,7 +224,7 @@ func (s *Store) Get(id string) *protocol.Session {
 		session.EndpointID = protocol.Ptr(endpointID.String)
 	}
 	if workspaceID.Valid && workspaceID.String != "" {
-		session.WorkspaceID = protocol.Ptr(workspaceID.String)
+		session.WorkspaceID = workspaceID.String
 	}
 	if branch.Valid && branch.String != "" {
 		session.Branch = protocol.Ptr(branch.String)
@@ -371,7 +368,7 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 			session.EndpointID = protocol.Ptr(endpointID.String)
 		}
 		if workspaceID.Valid && workspaceID.String != "" {
-			session.WorkspaceID = protocol.Ptr(workspaceID.String)
+			session.WorkspaceID = workspaceID.String
 		}
 		if branch.Valid && branch.String != "" {
 			session.Branch = protocol.Ptr(branch.String)

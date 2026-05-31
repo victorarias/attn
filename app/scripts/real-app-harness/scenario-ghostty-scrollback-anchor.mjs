@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import {
-  createSessionAndWaitForMain,
+  createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -13,6 +13,7 @@ import { cleanupSessionViaAppClose } from './scenarioCleanup.mjs';
 import {
   captureSessionArtifacts,
   scrollPaneToTop,
+  waitForFirstWorkspacePane,
   waitForNewShellPane,
   waitForPaneAttached,
   waitForPaneState,
@@ -57,22 +58,23 @@ async function main() {
     });
 
     sessionId = await runner.step('create_session', async () => {
-      return createSessionAndWaitForMain({
+      return createSessionAndWaitForInitialPane({
         client,
         observer,
         cwd: runner.sessionDir,
         label: `ghostty-scroll-${runner.runId}`,
         agent: 'codex',
-        waitForMainVisible: false,
+        waitForInitialPaneVisible: false,
       });
     });
 
     shellPaneId = await runner.step('open_shell_pane', async () => {
       const workspace = await client.request('get_workspace', { sessionId });
       const existingPaneIds = new Set((workspace.panes || []).map((pane) => pane.paneId));
+      const initialPane = await waitForFirstWorkspacePane(client, sessionId, 'initial pane for scrollback split', 20_000);
       await client.request('split_pane', {
         sessionId,
-        targetPaneId: 'main',
+        targetPaneId: initialPane.paneId,
         direction: 'vertical',
       });
       const shellPane = await waitForNewShellPane(client, sessionId, existingPaneIds, 'scrollback shell pane', 30_000);

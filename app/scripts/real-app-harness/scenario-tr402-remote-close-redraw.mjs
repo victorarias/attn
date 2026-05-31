@@ -12,6 +12,7 @@ import {
   assertPaneVisibleContentPreserved,
   captureSessionArtifacts,
   shellPanes,
+  waitForFirstWorkspacePane,
   waitForNewShellPane,
   waitForPaneState,
   waitForPaneVisible,
@@ -90,7 +91,7 @@ async function main() {
     metadata: {
       sshTarget: options.sshTarget,
       agent: options.remoteAgent,
-      focus: 'split close triggers targeted redraw and main pane recovery',
+      focus: 'split close triggers targeted redraw and initial pane recovery',
     },
   });
 
@@ -111,6 +112,7 @@ async function main() {
 
   let endpoint = null;
   let sessionId = null;
+  let initialPaneId = null;
   let splitPaneId = null;
   let baselineMainState = null;
   let baselineMainNativeMetrics = null;
@@ -161,34 +163,35 @@ async function main() {
 
     await runner.step('capture_baseline_main', async () => {
       await client.request('select_session', { sessionId });
-      await waitForPaneVisible(client, sessionId, 'main', 45_000);
-      baselineMainState = await assertPaneVisibleContent(client, sessionId, 'main', {
+      initialPaneId = (await waitForFirstWorkspacePane(client, sessionId, 'remote initial pane', 30_000)).paneId;
+      await waitForPaneVisible(client, sessionId, initialPaneId, 45_000);
+      baselineMainState = await assertPaneVisibleContent(client, sessionId, initialPaneId, {
         minNonEmptyLines: 2,
         minDenseLines: 0,
         minCharCount: 20,
         minMaxLineLength: 12,
         timeoutMs: 45_000,
-        description: 'remote main pane visible content before split close scenario',
+        description: 'remote initial pane visible content before split close scenario',
       });
-      await assertPaneCoverage(client, sessionId, 'main', {
+      await assertPaneCoverage(client, sessionId, initialPaneId, {
         minWidthRatio: 0.8,
         minHeightRatio: 0.7,
         timeoutMs: 20_000,
-        description: 'remote main pane coverage before split close scenario',
+        description: 'remote initial pane coverage before split close scenario',
       });
       baselineMainNativeMetrics = await assertPaneNativePaintCoverage(
         client,
         runner.runDir,
-        '01-baseline-main',
+        '01-baseline-initial-pane',
         sessionId,
-        'main',
+        initialPaneId,
         {
           target: 'paneBody',
           minBusyColumnRatio: 0.35,
           minBusyRowRatio: 0.12,
           minBBoxWidthRatio: 0.35,
           minBBoxHeightRatio: 0.12,
-          description: 'remote main pane native paint coverage before split close scenario',
+          description: 'remote initial pane native paint coverage before split close scenario',
         },
       );
       await captureSessionArtifacts(client, runner.runDir, '01-baseline', sessionId);
@@ -199,7 +202,7 @@ async function main() {
       const existingPaneIds = new Set((workspaceBefore.panes || []).map((pane) => pane.paneId));
       await client.request('split_pane', {
         sessionId,
-        targetPaneId: 'main',
+        targetPaneId: initialPaneId,
         direction: 'vertical',
       });
       const newPane = await waitForNewShellPane(
@@ -215,27 +218,27 @@ async function main() {
       splitMainState = await waitForPaneState(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         (state) => {
           const width = state?.pane?.bounds?.width ?? 0;
           const baselineWidth = baselineMainState?.pane?.bounds?.width ?? 0;
           return width > 0 && width <= shrunkWidthThreshold(baselineWidth);
         },
-        'main pane width to shrink after split',
+        'initial pane width to shrink after split',
         20_000,
       );
       try {
         await assertPaneVisibleContentPreserved(
           client,
           sessionId,
-          'main',
+          initialPaneId,
           baselineMainState?.pane?.visibleContent || null,
           {
             minNonEmptyLineRatio: 0.5,
             minCharCountRatio: 0.35,
             minAnchorMatches: 2,
             timeoutMs: 20_000,
-            description: 'remote main pane content preserved while split is open',
+            description: 'remote initial pane content preserved while split is open',
           },
         );
         splitOpenContentPreservation = {
@@ -266,48 +269,48 @@ async function main() {
       recoveredMainState = await waitForPaneState(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         (state) => {
           const width = state?.pane?.bounds?.width ?? 0;
           return width >= recoveredWidthThreshold(baselineMainState?.pane?.bounds?.width ?? 0);
         },
-        'main pane width to recover after closing split',
+        'initial pane width to recover after closing split',
         20_000,
       );
       await assertPaneVisibleContentPreserved(
         client,
         sessionId,
-        'main',
+        initialPaneId,
         baselineMainState?.pane?.visibleContent || null,
         {
           minNonEmptyLineRatio: 0.7,
           minCharCountRatio: 0.6,
           minAnchorMatches: 3,
           timeoutMs: 20_000,
-          description: 'remote main pane content recovered after closing split',
+          description: 'remote initial pane content recovered after closing split',
         },
       );
-      await assertPaneCoverage(client, sessionId, 'main', {
+      await assertPaneCoverage(client, sessionId, initialPaneId, {
         minWidthRatio: 0.85,
         minHeightRatio: 0.7,
         timeoutMs: 20_000,
-        description: 'remote main pane coverage after closing split',
+        description: 'remote initial pane coverage after closing split',
       });
-      await assertPaneNativePaintCoverage(client, runner.runDir, '03-after-close-main', sessionId, 'main', {
+      await assertPaneNativePaintCoverage(client, runner.runDir, '03-after-close-initial-pane', sessionId, initialPaneId, {
         target: 'paneBody',
         minBusyColumnRatio: 0.35,
         minBusyRowRatio: 0.12,
         minBBoxWidthRatio: 0.35,
         minBBoxHeightRatio: 0.12,
-        description: 'remote main pane native paint coverage after closing split',
+        description: 'remote initial pane native paint coverage after closing split',
       });
       if (baselineMainNativeMetrics) {
         await assertPaneNativePaintRecovered(
           client,
           runner.runDir,
-          '03-after-close-main-stability',
+          '03-after-close-initial-pane-stability',
           sessionId,
-          'main',
+          initialPaneId,
           baselineMainNativeMetrics,
           {
             target: 'paneBody',
@@ -316,7 +319,7 @@ async function main() {
             maxBBoxWidthRatioRegression: 0.1,
             maxBBoxHeightRatioRegression: 0.08,
             maxActivePixelRatioRegression: null,
-            description: 'remote main pane native paint recovery after closing split',
+            description: 'remote initial pane native paint recovery after closing split',
           },
         );
       }

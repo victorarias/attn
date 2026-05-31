@@ -153,8 +153,12 @@ func activateApp(bundleId: String) throws {
     guard let app = findRunningApp(bundleId: bundleId) else {
         throw DriverError.appNotRunning(bundleId)
     }
-    app.activate(options: [.activateIgnoringOtherApps])
+    app.unhide()
+    let activated = app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
     Thread.sleep(forTimeInterval: 0.2)
+    if !activated && frontmostBundleIdentifier() != bundleId {
+        throw DriverError.eventCreationFailed("Failed to activate \(bundleId); frontmost=\(frontmostBundleIdentifier())")
+    }
 }
 
 // Non-activating resolution: verify the app is running but do not change
@@ -248,19 +252,25 @@ func mainWindowBounds(bundleId: String) throws -> CGRect {
 
     let bounds = windows
         .filter { (($0[kCGWindowOwnerPID as String] as? pid_t) ?? -1) == pid }
-        .filter { (($0[kCGWindowLayer as String] as? Int) ?? 1) == 0 }
-        .compactMap { entry -> CGRect? in
+        .compactMap { entry -> (CGRect, Int)? in
             guard let rawBounds = entry[kCGWindowBounds as String] as? NSDictionary else {
                 return nil
             }
-            return CGRect(dictionaryRepresentation: rawBounds)
+            guard let rect = CGRect(dictionaryRepresentation: rawBounds) else {
+                return nil
+            }
+            return (rect, (entry[kCGWindowLayer as String] as? Int) ?? 0)
         }
-        .sorted { ($0.width * $0.height) > ($1.width * $1.height) }
+        .sorted {
+            if $0.1 == 0 && $1.1 != 0 { return true }
+            if $0.1 != 0 && $1.1 == 0 { return false }
+            return ($0.0.width * $0.0.height) > ($1.0.width * $1.0.height)
+        }
 
     guard let bounds = bounds.first else {
         throw DriverError.eventCreationFailed("Failed to find an onscreen window for \(bundleId)")
     }
-    return bounds
+    return bounds.0
 }
 
 // Return the CGWindowID of the largest layer-0 onscreen window owned by the
@@ -276,16 +286,19 @@ func mainWindowID(bundleId: String) throws -> CGWindowID {
 
     let matches = windows
         .filter { (($0[kCGWindowOwnerPID as String] as? pid_t) ?? -1) == pid }
-        .filter { (($0[kCGWindowLayer as String] as? Int) ?? 1) == 0 }
-        .compactMap { entry -> (CGWindowID, CGFloat)? in
+        .compactMap { entry -> (CGWindowID, CGFloat, Int)? in
             guard let number = entry[kCGWindowNumber as String] as? CGWindowID else {
                 return nil
             }
             let rect: CGRect = (entry[kCGWindowBounds as String] as? NSDictionary)
                 .flatMap { CGRect(dictionaryRepresentation: $0) } ?? .zero
-            return (number, rect.width * rect.height)
+            return (number, rect.width * rect.height, (entry[kCGWindowLayer as String] as? Int) ?? 0)
         }
-        .sorted { $0.1 > $1.1 }
+        .sorted {
+            if $0.2 == 0 && $1.2 != 0 { return true }
+            if $0.2 != 0 && $1.2 == 0 { return false }
+            return $0.1 > $1.1
+        }
 
     guard let first = matches.first else {
         throw DriverError.eventCreationFailed("No onscreen window for \(bundleId)")
@@ -329,7 +342,7 @@ func virtualKeyCode(for key: String) throws -> CGKeyCode {
     return code
 }
 
-func postKeyCode(_ keyCode: CGKeyCode, modifiers: [String]) throws {
+func postKeyCode(_ keyCode: CGKeyCode, modifiers: [String], targetPid: pid_t? = nil) throws {
     let flags = modifierFlags(modifiers)
     guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true),
           let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: false) else {
@@ -337,9 +350,17 @@ func postKeyCode(_ keyCode: CGKeyCode, modifiers: [String]) throws {
     }
     keyDown.flags = flags
     keyUp.flags = flags
-    keyDown.post(tap: .cghidEventTap)
+    if let targetPid {
+        keyDown.postToPid(targetPid)
+    } else {
+        keyDown.post(tap: .cghidEventTap)
+    }
     Thread.sleep(forTimeInterval: 0.02)
-    keyUp.post(tap: .cghidEventTap)
+    if let targetPid {
+        keyUp.postToPid(targetPid)
+    } else {
+        keyUp.post(tap: .cghidEventTap)
+    }
 }
 
 func keystroke(for character: Character) throws -> (CGKeyCode, [String]) {
@@ -584,13 +605,13 @@ do {
         guard let key = options.key else {
             throw DriverError.invalidArgument("Missing --key value")
         }
-        try postKeyCode(try virtualKeyCode(for: key), modifiers: options.modifiers)
+        try postKeyCode(try virtualKeyCode(for: key), modifiers: options.modifiers, targetPid: try runningPID(bundleId: options.bundleId))
     case "keycode":
         try ensureAccessibility(prompt: options.promptAccessibility)
         guard let keyCode = options.keyCode else {
             throw DriverError.invalidArgument("Missing --key-code value")
         }
-        try postKeyCode(CGKeyCode(keyCode), modifiers: options.modifiers)
+        try postKeyCode(CGKeyCode(keyCode), modifiers: options.modifiers, targetPid: try runningPID(bundleId: options.bundleId))
     case "click":
         try ensureAccessibility(prompt: options.promptAccessibility)
         guard let relativeX = options.relativeX, let relativeY = options.relativeY else {

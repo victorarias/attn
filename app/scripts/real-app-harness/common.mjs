@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { waitForPaneVisible } from './scenarioAssertions.mjs';
+import { waitForFirstWorkspacePane, waitForPaneVisible } from './scenarioAssertions.mjs';
 import {
   defaultAppPathForProfile,
   defaultWSURLForProfile,
@@ -71,7 +71,7 @@ export async function relaunchAppAndConnect(client, observer) {
   await launchFreshAppAndConnect(client, observer);
 }
 
-export async function createSessionAndWaitForMain({
+export async function createSessionAndWaitForInitialPane({
   client,
   observer,
   cwd,
@@ -81,9 +81,11 @@ export async function createSessionAndWaitForMain({
   sessionWaitMs = 30_000,
   promptReadyFn = null,
   promptReadyTimeoutMs = 45_000,
-  waitForMainVisible = true,
-  mainWaitMs = 20_000,
+  waitForInitialPaneVisible,
+  initialPaneWaitMs,
 }) {
+  const shouldWaitForInitialPane = waitForInitialPaneVisible ?? true;
+  const paneWaitMs = initialPaneWaitMs ?? 20_000;
   const result = await client.request('create_session', {
     cwd,
     label,
@@ -94,8 +96,9 @@ export async function createSessionAndWaitForMain({
   if (typeof promptReadyFn === 'function') {
     await promptReadyFn(client, result.sessionId, promptReadyTimeoutMs);
   }
-  if (waitForMainVisible) {
-    await waitForPaneVisible(client, result.sessionId, 'main', mainWaitMs);
+  if (shouldWaitForInitialPane) {
+    const pane = await waitForFirstWorkspacePane(client, result.sessionId, 'initial workspace pane', paneWaitMs);
+    await waitForPaneVisible(client, result.sessionId, pane.paneId, paneWaitMs);
   }
   return result.sessionId;
 }
@@ -107,6 +110,7 @@ export function timestampSlug() {
 export function createRunContext(options, prefix) {
   ensureDir(options.artifactsDir);
   ensureDir(options.sessionRootDir);
+  options.sessionRootDir = fs.realpathSync(options.sessionRootDir);
 
   const runId = `${prefix}-${timestampSlug()}`;
   const runDir = path.join(options.artifactsDir, runId);
