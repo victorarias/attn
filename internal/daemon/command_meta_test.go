@@ -77,6 +77,7 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdWorkspaceLayoutClosePane,
 		protocol.CmdWorkspaceLayoutFocusPane,
 		protocol.CmdWorkspaceLayoutRenamePane,
+		protocol.CmdWorkspaceLayoutSetSplitRatio,
 	}
 
 	for _, cmd := range commands {

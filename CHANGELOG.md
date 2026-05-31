@@ -31,6 +31,9 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 ### Added
 - **Keyboard Shortcuts Cheatsheet**: Press `⌘/` to open a searchable overview of every keyboard shortcut, grouped by workspaces, panes, review, and app actions. The list is generated from the app's shortcut definitions, so it always matches the real bindings.
 - **What's New**: After upgrading, attn shows a one-time summary of the workspace model and its key shortcuts, with a link into the full cheatsheet.
+- **Resizable Splits**: Drag the divider between any two workspace panes to resize the split. The size you set is remembered per split and persists across reconnects and restarts (previously panes were always forced to an equal split).
+- **Docked Panels**: Panels can now dock directly into a workspace's layout as a real, resizable pane instead of floating on top. Drag a panel's title bar onto any terminal to re-dock it on that pane's edge — drop it between two terminals and it slots in between them. Panel placement and size are remembered by the daemon, so they survive restarts and follow you to other clients, just like terminal splits. (The slide-in diff, review, and git-status panels are unchanged.)
+- **Markdown Panel (preview)**: The sidebar's document button docks a markdown panel as the first consumer of docked panels. Content is placeholder for now while the renderer is built out.
 
 ### Changed
 - **Auto-Close On Exit**: When a session's process exits cleanly (exit code 0), the session now closes itself instead of leaving a dead `[Process exited]` pane around. Sessions that crash or are killed (non-zero exit) stay open so you can still read the error.

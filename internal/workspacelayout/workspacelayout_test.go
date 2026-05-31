@@ -186,3 +186,111 @@ func TestNormalizeWorkspaceLayoutRebalancesAfterRemovingPaneFromChain(t *testing
 		t.Fatalf("root ratio = %v, want 0.5", normalized.Layout.Ratio)
 	}
 }
+
+func TestSetSplitRatioLocksMatchingSplit(t *testing.T) {
+	root := Node{
+		Type:      "split",
+		SplitID:   "root",
+		Direction: DirectionVertical,
+		Ratio:     DefaultSplitRatio,
+		Children: []Node{
+			{Type: "pane", PaneID: "pane-a"},
+			{Type: "pane", PaneID: "pane-b"},
+		},
+	}
+
+	updated, ok := SetSplitRatio(root, "root", 0.7)
+	if !ok {
+		t.Fatalf("SetSplitRatio did not find split 'root'")
+	}
+	if !updated.RatioLocked {
+		t.Fatalf("split should be locked after SetSplitRatio")
+	}
+	if math.Abs(updated.Ratio-0.7) > 1e-9 {
+		t.Fatalf("ratio = %v, want 0.7", updated.Ratio)
+	}
+
+	if _, ok := SetSplitRatio(root, "missing", 0.7); ok {
+		t.Fatalf("SetSplitRatio reported a match for a missing split")
+	}
+}
+
+func TestSetSplitRatioClampsToMargin(t *testing.T) {
+	root := Node{
+		Type:      "split",
+		SplitID:   "root",
+		Direction: DirectionVertical,
+		Children: []Node{
+			{Type: "pane", PaneID: "pane-a"},
+			{Type: "pane", PaneID: "pane-b"},
+		},
+	}
+
+	low, _ := SetSplitRatio(root, "root", 0.0)
+	if low.Ratio <= 0 || low.Ratio >= 0.5 {
+		t.Fatalf("clamped low ratio = %v, want small positive margin", low.Ratio)
+	}
+	high, _ := SetSplitRatio(root, "root", 1.0)
+	if high.Ratio >= 1 || high.Ratio <= 0.5 {
+		t.Fatalf("clamped high ratio = %v, want margin below 1", high.Ratio)
+	}
+}
+
+func TestNormalizeWorkspaceLayoutPreservesLockedRatio(t *testing.T) {
+	snapshot := WorkspaceLayout{
+		WorkspaceID:  "workspace-1",
+		ActivePaneID: "pane-a",
+		Layout: Node{
+			Type:        "split",
+			SplitID:     "root",
+			Direction:   DirectionVertical,
+			Ratio:       0.72,
+			RatioLocked: true,
+			Children: []Node{
+				{Type: "pane", PaneID: "pane-root"},
+				{Type: "pane", PaneID: "pane-a"},
+			},
+		},
+		Panes: []Pane{
+			{PaneID: "pane-root", RuntimeID: "sess-1", SessionID: "sess-1", Kind: PaneKindAgent, Title: DefaultPaneTitle},
+			{PaneID: "pane-a", RuntimeID: "sess-a", SessionID: "sess-a", Kind: PaneKindAgent, Title: "Agent 1"},
+		},
+	}
+
+	normalized := NormalizeWorkspaceLayout(snapshot)
+	if normalized.Layout.Type != "split" {
+		t.Fatalf("normalized layout = %+v, want split root", normalized.Layout)
+	}
+	if !normalized.Layout.RatioLocked {
+		t.Fatalf("locked flag lost during normalization")
+	}
+	if math.Abs(normalized.Layout.Ratio-0.72) > 1e-9 {
+		t.Fatalf("locked ratio = %v, want 0.72 (must not rebalance to 0.5)", normalized.Layout.Ratio)
+	}
+}
+
+func TestLockedRatioSurvivesEncodeDecodeRoundTrip(t *testing.T) {
+	root := Node{
+		Type:        "split",
+		SplitID:     "root",
+		Direction:   DirectionVertical,
+		Ratio:       0.33,
+		RatioLocked: true,
+		Children: []Node{
+			{Type: "pane", PaneID: "pane-a"},
+			{Type: "pane", PaneID: "pane-b"},
+		},
+	}
+
+	encoded, err := EncodeLayout(root)
+	if err != nil {
+		t.Fatalf("EncodeLayout: %v", err)
+	}
+	decoded, err := DecodeLayout(encoded)
+	if err != nil {
+		t.Fatalf("DecodeLayout: %v", err)
+	}
+	if !decoded.RatioLocked || math.Abs(decoded.Ratio-0.33) > 1e-9 {
+		t.Fatalf("round-tripped node = %+v, want locked ratio 0.33", decoded)
+	}
+}

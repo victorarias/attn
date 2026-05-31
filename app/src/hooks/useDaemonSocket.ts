@@ -44,6 +44,7 @@ import {
   spawnPtyRuntime,
 } from '../pty/runtimeLifecycle';
 import { createPtyTransportState } from '../pty/transportState';
+import type { TerminalDockEdge } from '../types/workspace';
 import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import { recordPtyCommand, recordWsJsonParse } from '../utils/ptyPerf';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
@@ -150,7 +151,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '73';
+const PROTOCOL_VERSION = '75';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -2150,6 +2151,57 @@ export function useDaemonSocket({
     );
   }, [sendWorkspaceCommand]);
 
+  const sendWorkspaceSetSplitRatio = useCallback((workspaceId: string, splitId: string, ratio: number) => {
+    // No pane_id: the daemon's action result for this command carries an empty
+    // pane_id, so the pending-action key must match (action, workspaceId).
+    return sendWorkspaceCommand(
+      'workspace_layout_set_split_ratio',
+      workspaceId,
+      {
+        cmd: 'workspace_layout_set_split_ratio',
+        workspace_id: workspaceId,
+        split_id: splitId,
+        ratio,
+      },
+    );
+  }, [sendWorkspaceCommand]);
+
+  // Dock (or move) a panel into the workspace layout. Like set_split_ratio, the
+  // daemon's action result carries an empty pane_id. An empty anchorPaneId lets
+  // the daemon pick a sensible anchor (the active pane).
+  const sendWorkspaceDockPanel = useCallback((
+    workspaceId: string,
+    panelId: string,
+    panelKind: string,
+    options: { anchorPaneId?: string; edge?: TerminalDockEdge; ratio?: number } = {},
+  ) => {
+    return sendWorkspaceCommand(
+      'workspace_layout_dock_panel',
+      workspaceId,
+      {
+        cmd: 'workspace_layout_dock_panel',
+        workspace_id: workspaceId,
+        anchor_pane_id: options.anchorPaneId ?? '',
+        edge: options.edge ?? 'right',
+        panel_id: panelId,
+        panel_kind: panelKind,
+        ...(options.ratio != null ? { ratio: options.ratio } : {}),
+      },
+    );
+  }, [sendWorkspaceCommand]);
+
+  const sendWorkspaceUndockPanel = useCallback((workspaceId: string, panelId: string) => {
+    return sendWorkspaceCommand(
+      'workspace_layout_undock_panel',
+      workspaceId,
+      {
+        cmd: 'workspace_layout_undock_panel',
+        workspace_id: workspaceId,
+        panel_id: panelId,
+      },
+    );
+  }, [sendWorkspaceCommand]);
+
   useEffect(() => {
     setPtyBackend({
       spawn: async (args: PtySpawnArgs) => {
@@ -3435,6 +3487,9 @@ export function useDaemonSocket({
     sendWorkspaceClosePane,
     sendWorkspaceFocusPane,
     sendWorkspaceRenamePane,
+    sendWorkspaceSetSplitRatio,
+    sendWorkspaceDockPanel,
+    sendWorkspaceUndockPanel,
     sendRuntimeInput: sendPtyInput,
     isRuntimeAttached,
     sendGetFileDiff,

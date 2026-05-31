@@ -53,6 +53,14 @@ enum WorkspaceLayoutSplitDirection {
   horizontal,
 }
 
+// Which side of the anchor pane a docked panel lands on.
+enum WorkspaceLayoutDockEdge {
+  left,
+  right,
+  top,
+  bottom,
+}
+
 enum HeatState {
   cold,
   warm,
@@ -814,6 +822,34 @@ model WorkspaceLayoutRenamePaneMessage {
   workspace_id: string;
   pane_id: string;
   title: string;
+}
+
+model WorkspaceLayoutSetSplitRatioMessage {
+  cmd: "workspace_layout_set_split_ratio";
+  workspace_id: string;
+  split_id: string;
+  ratio: float64;
+}
+
+// Dock (or move) a panel beside an anchor leaf. Docking is idempotent: an
+// existing instance of panel_id is relocated rather than duplicated. panel_kind
+// is opaque to the daemon — it persists where the panel sits, not what it
+// renders. ratio is the new panel's fraction of the split (optional; defaults to
+// a sensible third).
+model WorkspaceLayoutDockPanelMessage {
+  cmd: "workspace_layout_dock_panel";
+  workspace_id: string;
+  anchor_pane_id: string;
+  edge: WorkspaceLayoutDockEdge;
+  panel_id: string;
+  panel_kind: string;
+  ratio?: float64;
+}
+
+model WorkspaceLayoutUndockPanelMessage {
+  cmd: "workspace_layout_undock_panel";
+  workspace_id: string;
+  panel_id: string;
 }
 
 model RegisterWorkspaceMessage {

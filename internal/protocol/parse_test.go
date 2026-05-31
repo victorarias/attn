@@ -37,6 +37,11 @@ func TestParseCommand(t *testing.T) {
 			wantCmd: CmdWorkspaceLayoutGet,
 		},
 		{
+			name:    "workspace layout set split ratio message",
+			input:   `{"cmd":"workspace_layout_set_split_ratio","workspace_id":"ws1","split_id":"split-1","ratio":0.3}`,
+			wantCmd: CmdWorkspaceLayoutSetSplitRatio,
+		},
+		{
 			name:    "clear warnings message",
 			input:   `{"cmd":"clear_warnings"}`,
 			wantCmd: CmdClearWarnings,
@@ -111,5 +116,68 @@ func TestParseRegister(t *testing.T) {
 	}
 	if Deref(msg.Label) != "drumstick" {
 		t.Errorf("Label = %q, want %q", Deref(msg.Label), "drumstick")
+	}
+}
+
+func TestParseWorkspaceLayoutSetSplitRatio(t *testing.T) {
+	input := `{"cmd":"workspace_layout_set_split_ratio","workspace_id":"ws1","split_id":"split-1","ratio":0.3}`
+	cmd, data, err := ParseMessage([]byte(input))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if cmd != CmdWorkspaceLayoutSetSplitRatio {
+		t.Fatalf("cmd = %q, want %q", cmd, CmdWorkspaceLayoutSetSplitRatio)
+	}
+	msg, ok := data.(*WorkspaceLayoutSetSplitRatioMessage)
+	if !ok {
+		t.Fatalf("data type = %T, want *WorkspaceLayoutSetSplitRatioMessage", data)
+	}
+	if msg.WorkspaceID != "ws1" || msg.SplitID != "split-1" {
+		t.Errorf("ids = %q/%q, want ws1/split-1", msg.WorkspaceID, msg.SplitID)
+	}
+	if msg.Ratio != 0.3 {
+		t.Errorf("ratio = %v, want 0.3", msg.Ratio)
+	}
+}
+
+func TestParseWorkspaceLayoutDockPanel(t *testing.T) {
+	input := `{"cmd":"workspace_layout_dock_panel","workspace_id":"ws1","anchor_pane_id":"pane-a","edge":"right","panel_id":"panel-md","panel_kind":"markdown","ratio":0.3}`
+	cmd, data, err := ParseMessage([]byte(input))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if cmd != CmdWorkspaceLayoutDockPanel {
+		t.Fatalf("cmd = %q, want %q", cmd, CmdWorkspaceLayoutDockPanel)
+	}
+	msg, ok := data.(*WorkspaceLayoutDockPanelMessage)
+	if !ok {
+		t.Fatalf("data type = %T, want *WorkspaceLayoutDockPanelMessage", data)
+	}
+	if msg.AnchorPaneID != "pane-a" || msg.PanelID != "panel-md" || msg.PanelKind != "markdown" {
+		t.Errorf("fields = %q/%q/%q, want pane-a/panel-md/markdown", msg.AnchorPaneID, msg.PanelID, msg.PanelKind)
+	}
+	if msg.Edge != WorkspaceLayoutDockEdgeRight {
+		t.Errorf("edge = %q, want right", msg.Edge)
+	}
+	if msg.Ratio == nil || *msg.Ratio != 0.3 {
+		t.Errorf("ratio = %v, want 0.3", msg.Ratio)
+	}
+}
+
+func TestParseWorkspaceLayoutUndockPanel(t *testing.T) {
+	input := `{"cmd":"workspace_layout_undock_panel","workspace_id":"ws1","panel_id":"panel-md"}`
+	cmd, data, err := ParseMessage([]byte(input))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if cmd != CmdWorkspaceLayoutUndockPanel {
+		t.Fatalf("cmd = %q, want %q", cmd, CmdWorkspaceLayoutUndockPanel)
+	}
+	msg, ok := data.(*WorkspaceLayoutUndockPanelMessage)
+	if !ok {
+		t.Fatalf("data type = %T, want *WorkspaceLayoutUndockPanelMessage", data)
+	}
+	if msg.WorkspaceID != "ws1" || msg.PanelID != "panel-md" {
+		t.Errorf("fields = %q/%q, want ws1/panel-md", msg.WorkspaceID, msg.PanelID)
 	}
 }

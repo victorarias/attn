@@ -25,6 +25,18 @@ const (
 	PaneKindAgent PaneKind = "agent"
 )
 
+// PanelKind labels a docked panel by the surface it renders. The layout package
+// treats it as an opaque token: panels are persisted by where they sit and how
+// big they are, not by what they display. Rendering is entirely a client
+// concern, so new kinds need no daemon change.
+type PanelKind string
+
+const (
+	// PanelKindMarkdown is the first panel consumer. More kinds can be docked
+	// without touching this package.
+	PanelKindMarkdown PanelKind = "markdown"
+)
+
 type PaneStatus string
 
 const (
@@ -44,12 +56,22 @@ type Pane struct {
 }
 
 type Node struct {
-	Type      string    `json:"type"`
-	PaneID    string    `json:"pane_id,omitempty"`
+	Type   string `json:"type"`
+	PaneID string `json:"pane_id,omitempty"`
+	// PanelID and PanelKind describe a docked panel leaf (Type == "panel").
+	// Panels are first-class layout citizens alongside agent panes: they take
+	// real space, resize through the same split machinery, and persist with the
+	// layout. PanelKind is opaque to the daemon (see PanelKind).
+	PanelID   string    `json:"panel_id,omitempty"`
+	PanelKind string    `json:"panel_kind,omitempty"`
 	SplitID   string    `json:"split_id,omitempty"`
 	Direction Direction `json:"direction,omitempty"`
 	Ratio     float64   `json:"ratio,omitempty"`
-	Children  []Node    `json:"children,omitempty"`
+	// RatioLocked marks a split whose ratio the user set explicitly (by
+	// dragging the divider) or that anchors a panel. Locked ratios survive
+	// normalization instead of being rebalanced back to an equal split.
+	RatioLocked bool   `json:"ratio_locked,omitempty"`
+	Children    []Node `json:"children,omitempty"`
 }
 
 type WorkspaceLayout struct {
@@ -189,6 +211,11 @@ func rebalanceSplitChains(node Node) Node {
 	secondChild := rebalanceSplitChains(node.Children[1])
 	node.Children = []Node{firstChild, secondChild}
 
+	// A user-set ratio is authoritative; never rebalance it back to equal.
+	if node.RatioLocked {
+		return node
+	}
+
 	firstSpan := splitChainSpanCount(firstChild, node.Direction)
 	secondSpan := splitChainSpanCount(secondChild, node.Direction)
 	if totalSpan := firstSpan + secondSpan; totalSpan > 0 {
@@ -198,7 +225,9 @@ func rebalanceSplitChains(node Node) Node {
 }
 
 func splitChainSpanCount(node Node, direction Direction) int {
-	if node.Type != "split" || node.Direction != direction || len(node.Children) < 2 {
+	// A locked split is an opaque unit: its children keep the user's ratio, so
+	// an enclosing chain must not redistribute space through it.
+	if node.Type != "split" || node.Direction != direction || len(node.Children) < 2 || node.RatioLocked {
 		return 1
 	}
 	return splitChainSpanCount(node.Children[0], direction) + splitChainSpanCount(node.Children[1], direction)
@@ -213,6 +242,20 @@ func normalizeNode(node Node, panesByID map[string]Pane) (Node, bool) {
 		return Node{
 			Type:   "pane",
 			PaneID: node.PaneID,
+		}, false
+	case "panel":
+		panelID := strings.TrimSpace(node.PanelID)
+		panelKind := strings.TrimSpace(node.PanelKind)
+		// A panel with no identity or kind is meaningless; drop it so an
+		// orphaned panel can't wedge the layout. Panels are otherwise never
+		// pruned by pane bookkeeping — they have no entry in panesByID.
+		if panelID == "" || panelKind == "" {
+			return Node{}, true
+		}
+		return Node{
+			Type:      "panel",
+			PanelID:   panelID,
+			PanelKind: panelKind,
 		}, false
 	case "split":
 		children := make([]Node, 0, 2)
@@ -241,11 +284,12 @@ func normalizeNode(node Node, panesByID map[string]Pane) (Node, bool) {
 				splitID = "split"
 			}
 			return Node{
-				Type:      "split",
-				SplitID:   splitID,
-				Direction: direction,
-				Ratio:     ratio,
-				Children:  children[:2],
+				Type:        "split",
+				SplitID:     splitID,
+				Direction:   direction,
+				Ratio:       ratio,
+				RatioLocked: node.RatioLocked,
+				Children:    children[:2],
 			}, false
 		}
 	default:
@@ -291,6 +335,37 @@ func Split(node Node, targetPaneID, newPaneID, splitID string, direction Directi
 	return node, false
 }
 
+// SetSplitRatio sets and locks the ratio of the split identified by splitID.
+// The returned bool reports whether a matching split was found. The ratio is
+// clamped to a small margin so neither side can collapse to zero.
+func SetSplitRatio(node Node, splitID string, ratio float64) (Node, bool) {
+	const margin = 0.05
+	if ratio < margin {
+		ratio = margin
+	} else if ratio > 1-margin {
+		ratio = 1 - margin
+	}
+	if node.Type != "split" || len(node.Children) < 2 {
+		return node, false
+	}
+	if node.SplitID == splitID {
+		node.Ratio = ratio
+		node.RatioLocked = true
+		return node, true
+	}
+	children := make([]Node, len(node.Children))
+	copy(children, node.Children)
+	for i, child := range children {
+		next, changed := SetSplitRatio(child, splitID, ratio)
+		if changed {
+			children[i] = next
+			node.Children = children
+			return node, true
+		}
+	}
+	return node, false
+}
+
 func Remove(node Node, paneID string) (Node, bool) {
 	next, removed, empty := removeNode(node, paneID)
 	if !removed {
@@ -302,10 +377,15 @@ func Remove(node Node, paneID string) (Node, bool) {
 	return next, true
 }
 
-func removeNode(node Node, paneID string) (Node, bool, bool) {
+func removeNode(node Node, leafID string) (Node, bool, bool) {
 	switch node.Type {
 	case "pane":
-		if node.PaneID == paneID {
+		if node.PaneID == leafID {
+			return Node{}, true, true
+		}
+		return node, false, false
+	case "panel":
+		if node.PanelID == leafID {
 			return Node{}, true, true
 		}
 		return node, false, false
@@ -313,7 +393,7 @@ func removeNode(node Node, paneID string) (Node, bool, bool) {
 		children := make([]Node, 0, 2)
 		removed := false
 		for _, child := range node.Children {
-			next, childRemoved, empty := removeNode(child, paneID)
+			next, childRemoved, empty := removeNode(child, leafID)
 			removed = removed || childRemoved
 			if !empty {
 				children = append(children, next)
@@ -362,4 +442,141 @@ func collectPaneIDs(node Node, ids *[]string) {
 			collectPaneIDs(child, ids)
 		}
 	}
+}
+
+// HasPanel reports whether a docked panel with the given id exists in the tree.
+func HasPanel(node Node, panelID string) bool {
+	switch node.Type {
+	case "panel":
+		return node.PanelID == panelID
+	case "split":
+		for _, child := range node.Children {
+			if HasPanel(child, panelID) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// PanelIDs returns the ids of every docked panel in the tree.
+func PanelIDs(node Node) []string {
+	var ids []string
+	collectPanelIDs(node, &ids)
+	return ids
+}
+
+func collectPanelIDs(node Node, ids *[]string) {
+	switch node.Type {
+	case "panel":
+		*ids = append(*ids, node.PanelID)
+	case "split":
+		for _, child := range node.Children {
+			collectPanelIDs(child, ids)
+		}
+	}
+}
+
+// hasLeaf reports whether a leaf (pane or panel) with the given id exists.
+func hasLeaf(node Node, leafID string) bool {
+	return HasPane(node, leafID) || HasPanel(node, leafID)
+}
+
+// DockPanel inserts (or moves) a panel leaf beside the anchor leaf. Docking is
+// idempotent and doubles as a move: any existing instance of panelID is removed
+// first, then the panel is re-inserted at the new anchor. `before` controls
+// which side of the anchor the panel lands on (children[0] when true), and
+// `direction` whether the new split is side-by-side (vertical) or stacked
+// (horizontal). `ratio` is the children[0] fraction, like every other split.
+//
+// The anchor may be any leaf — a terminal pane or another panel — so panels can
+// be docked between existing panes or next to one another. The new split is
+// RatioLocked so a panel keeps its size instead of being equalized with
+// terminals during normalization.
+func DockPanel(node Node, anchorID string, direction Direction, before bool, splitID, panelID, panelKind string, ratio float64) (Node, bool) {
+	panelID = strings.TrimSpace(panelID)
+	panelKind = strings.TrimSpace(panelKind)
+	anchorID = strings.TrimSpace(anchorID)
+	if panelID == "" || panelKind == "" || anchorID == "" || anchorID == panelID {
+		return node, false
+	}
+	if ratio <= 0 || ratio >= 1 {
+		ratio = DefaultSplitRatio
+	}
+	if direction != DirectionVertical && direction != DirectionHorizontal {
+		direction = DirectionVertical
+	}
+	if strings.TrimSpace(splitID) == "" {
+		splitID = "split"
+	}
+
+	// Move semantics: drop any existing instance so a re-dock relocates rather
+	// than duplicates the panel.
+	cleaned := node
+	if next, removed := Remove(node, panelID); removed {
+		cleaned = next
+	}
+	if cleaned.Type == "" || !hasLeaf(cleaned, anchorID) {
+		return node, false
+	}
+
+	panel := Node{Type: "panel", PanelID: panelID, PanelKind: panelKind}
+	next, ok := insertBesideLeaf(cleaned, anchorID, direction, before, splitID, ratio, panel)
+	if !ok {
+		return node, false
+	}
+	return next, true
+}
+
+func insertBesideLeaf(node Node, anchorID string, direction Direction, before bool, splitID string, ratio float64, panel Node) (Node, bool) {
+	switch node.Type {
+	case "pane":
+		if node.PaneID != anchorID {
+			return node, false
+		}
+		return panelSplit(node, panel, direction, before, splitID, ratio), true
+	case "panel":
+		if node.PanelID != anchorID {
+			return node, false
+		}
+		return panelSplit(node, panel, direction, before, splitID, ratio), true
+	case "split":
+		children := make([]Node, len(node.Children))
+		copy(children, node.Children)
+		for i, child := range children {
+			next, changed := insertBesideLeaf(child, anchorID, direction, before, splitID, ratio, panel)
+			if changed {
+				children[i] = next
+				node.Children = children
+				return node, true
+			}
+		}
+	}
+	return node, false
+}
+
+func panelSplit(anchor, panel Node, direction Direction, before bool, splitID string, ratio float64) Node {
+	children := []Node{anchor, panel}
+	if before {
+		children = []Node{panel, anchor}
+	}
+	return Node{
+		Type:        "split",
+		SplitID:     splitID,
+		Direction:   direction,
+		Ratio:       ratio,
+		RatioLocked: true,
+		Children:    children,
+	}
+}
+
+// UndockPanel removes a docked panel from the tree, collapsing the split that
+// held it so its sibling reclaims the space. The bool reports whether a panel
+// was found and removed.
+func UndockPanel(node Node, panelID string) (Node, bool) {
+	if !HasPanel(node, strings.TrimSpace(panelID)) {
+		return node, false
+	}
+	next, _ := Remove(node, strings.TrimSpace(panelID))
+	return next, true
 }

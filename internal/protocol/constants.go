@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "73"
+const ProtocolVersion = "75"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -110,6 +110,9 @@ const (
 	CmdWorkspaceLayoutClosePane      = "workspace_layout_close_pane"
 	CmdWorkspaceLayoutFocusPane      = "workspace_layout_focus_pane"
 	CmdWorkspaceLayoutRenamePane     = "workspace_layout_rename_pane"
+	CmdWorkspaceLayoutSetSplitRatio  = "workspace_layout_set_split_ratio"
+	CmdWorkspaceLayoutDockPanel      = "workspace_layout_dock_panel"
+	CmdWorkspaceLayoutUndockPanel    = "workspace_layout_undock_panel"
 	CmdRegisterWorkspace             = "register_workspace"
 	CmdUnregisterWorkspace           = "unregister_workspace"
 )
@@ -809,6 +812,27 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg WorkspaceLayoutRenamePaneMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal workspace_layout_rename_pane: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkspaceLayoutSetSplitRatio:
+		var msg WorkspaceLayoutSetSplitRatioMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workspace_layout_set_split_ratio: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkspaceLayoutDockPanel:
+		var msg WorkspaceLayoutDockPanelMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workspace_layout_dock_panel: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkspaceLayoutUndockPanel:
+		var msg WorkspaceLayoutUndockPanelMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workspace_layout_undock_panel: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

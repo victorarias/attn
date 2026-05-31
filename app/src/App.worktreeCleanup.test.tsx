@@ -105,6 +105,7 @@ vi.mock('./components/Sidebar', () => ({
   ReviewLoopIcon: () => null,
   DiffIcon: () => null,
   PRsIcon: () => null,
+  MarkdownIcon: () => null,
   Sidebar: ({
     selectedId,
     visualOrder,

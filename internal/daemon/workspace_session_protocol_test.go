@@ -233,6 +233,214 @@ func TestWorkspaceLayoutSplitPaneCommandIsUnsupported(t *testing.T) {
 	}
 }
 
+func TestWorkspaceLayoutSetSplitRatioPersistsLockedRatio(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	client := newWorkspaceProtocolTestClient()
+	workspaceID := "workspace-split-ratio"
+	cwd := t.TempDir()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        workspaceID,
+		Title:     "Split Ratio",
+		Directory: cwd,
+	})
+	d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutAddSessionPane,
+		WorkspaceID: workspaceID,
+		PaneID:      protocol.Ptr("pane-1"),
+		SessionID:   "session-1",
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, "pane-1", true)
+
+	d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
+		Cmd:          protocol.CmdWorkspaceLayoutAddSessionPane,
+		WorkspaceID:  workspaceID,
+		PaneID:       protocol.Ptr("pane-2"),
+		SessionID:    "session-2",
+		TargetPaneID: protocol.Ptr("pane-1"),
+		Direction:    protocol.Ptr(protocol.WorkspaceLayoutSplitDirectionVertical),
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, "pane-2", true)
+
+	snapshot := d.store.GetWorkspaceLayout(workspaceID)
+	if snapshot == nil {
+		t.Fatal("workspace layout missing after adding two panes")
+	}
+	splitID := firstSplitID(snapshot.Layout)
+	if splitID == "" {
+		t.Fatalf("expected a split in layout, got %+v", snapshot.Layout)
+	}
+
+	// Unknown split id -> failure.
+	d.handleWorkspaceLayoutSetSplitRatio(client, &protocol.WorkspaceLayoutSetSplitRatioMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutSetSplitRatio,
+		WorkspaceID: workspaceID,
+		SplitID:     "does-not-exist",
+		Ratio:       0.3,
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutSetSplitRatio, workspaceID, "", false)
+
+	// Set and lock the real split.
+	d.handleWorkspaceLayoutSetSplitRatio(client, &protocol.WorkspaceLayoutSetSplitRatioMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutSetSplitRatio,
+		WorkspaceID: workspaceID,
+		SplitID:     splitID,
+		Ratio:       0.3,
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutSetSplitRatio, workspaceID, "", true)
+
+	// Re-read through normalization: the locked ratio must survive (a two-pane
+	// split would otherwise be rebalanced back to 0.5).
+	reread, err := d.ensureWorkspaceLayout(workspaceID)
+	if err != nil {
+		t.Fatalf("ensureWorkspaceLayout: %v", err)
+	}
+	split := findSplit(reread.Layout, splitID)
+	if split == nil {
+		t.Fatalf("split %s missing after set ratio: %+v", splitID, reread.Layout)
+	}
+	if !split.RatioLocked {
+		t.Fatalf("split should be locked after set ratio")
+	}
+	if split.Ratio < 0.29 || split.Ratio > 0.31 {
+		t.Fatalf("split ratio = %v, want ~0.3 (locked ratio must not be rebalanced)", split.Ratio)
+	}
+}
+
+func TestWorkspaceLayoutDockPanelPersistsAndMoves(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	client := newWorkspaceProtocolTestClient()
+	workspaceID := "workspace-dock-panel"
+	cwd := t.TempDir()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        workspaceID,
+		Title:     "Dock Panel",
+		Directory: cwd,
+	})
+	d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutAddSessionPane,
+		WorkspaceID: workspaceID,
+		PaneID:      protocol.Ptr("pane-1"),
+		SessionID:   "session-1",
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, "pane-1", true)
+	d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
+		Cmd:          protocol.CmdWorkspaceLayoutAddSessionPane,
+		WorkspaceID:  workspaceID,
+		PaneID:       protocol.Ptr("pane-2"),
+		SessionID:    "session-2",
+		TargetPaneID: protocol.Ptr("pane-1"),
+		Direction:    protocol.Ptr(protocol.WorkspaceLayoutSplitDirectionVertical),
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, "pane-2", true)
+
+	// Dock a markdown panel between the two panes (right of pane-1).
+	d.handleWorkspaceLayoutDockPanel(client, &protocol.WorkspaceLayoutDockPanelMessage{
+		Cmd:          protocol.CmdWorkspaceLayoutDockPanel,
+		WorkspaceID:  workspaceID,
+		AnchorPaneID: "pane-1",
+		Edge:         protocol.WorkspaceLayoutDockEdgeRight,
+		PanelID:      "panel-md",
+		PanelKind:    "markdown",
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutDockPanel, workspaceID, "", true)
+
+	snapshot := d.store.GetWorkspaceLayout(workspaceID)
+	if snapshot == nil {
+		t.Fatal("workspace layout missing after docking panel")
+	}
+	if !workspacelayout.HasPanel(snapshot.Layout, "panel-md") {
+		t.Fatalf("panel not present after dock: %+v", snapshot.Layout)
+	}
+	// Panels never leak into agent-pane bookkeeping.
+	if ids := workspacelayout.PaneIDs(snapshot.Layout); len(ids) != 2 {
+		t.Fatalf("pane ids = %v, want the two agent panes only", ids)
+	}
+	if len(snapshot.Panes) != 2 {
+		t.Fatalf("snapshot panes = %+v, want only the two agent panes", snapshot.Panes)
+	}
+
+	// The cross-restart / cross-client guarantee: the panel survives a layout
+	// JSON round-trip exactly as the store persists it.
+	encoded, err := workspacelayout.EncodeLayout(snapshot.Layout)
+	if err != nil {
+		t.Fatalf("EncodeLayout: %v", err)
+	}
+	decoded, err := workspacelayout.DecodeLayout(encoded)
+	if err != nil {
+		t.Fatalf("DecodeLayout: %v", err)
+	}
+	if !workspacelayout.HasPanel(decoded, "panel-md") {
+		t.Fatal("panel lost across layout JSON reload")
+	}
+
+	// Re-dock the same panel id at a different anchor: it moves, never duplicates.
+	d.handleWorkspaceLayoutDockPanel(client, &protocol.WorkspaceLayoutDockPanelMessage{
+		Cmd:          protocol.CmdWorkspaceLayoutDockPanel,
+		WorkspaceID:  workspaceID,
+		AnchorPaneID: "pane-2",
+		Edge:         protocol.WorkspaceLayoutDockEdgeBottom,
+		PanelID:      "panel-md",
+		PanelKind:    "markdown",
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutDockPanel, workspaceID, "", true)
+	moved := d.store.GetWorkspaceLayout(workspaceID)
+	if ids := workspacelayout.PanelIDs(moved.Layout); len(ids) != 1 {
+		t.Fatalf("panel ids after move = %v, want exactly one", ids)
+	}
+
+	// Undock removes the panel and collapses its split; the panes are untouched.
+	d.handleWorkspaceLayoutUndockPanel(client, &protocol.WorkspaceLayoutUndockPanelMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutUndockPanel,
+		WorkspaceID: workspaceID,
+		PanelID:     "panel-md",
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutUndockPanel, workspaceID, "", true)
+	after := d.store.GetWorkspaceLayout(workspaceID)
+	if workspacelayout.HasPanel(after.Layout, "panel-md") {
+		t.Fatal("panel still present after undock")
+	}
+	if ids := workspacelayout.PaneIDs(after.Layout); len(ids) != 2 {
+		t.Fatalf("pane ids after undock = %v, want the two agent panes intact", ids)
+	}
+
+	// Undocking a panel that's gone is a clean no-op failure.
+	d.handleWorkspaceLayoutUndockPanel(client, &protocol.WorkspaceLayoutUndockPanelMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutUndockPanel,
+		WorkspaceID: workspaceID,
+		PanelID:     "panel-md",
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutUndockPanel, workspaceID, "", false)
+}
+
+func firstSplitID(node workspacelayout.Node) string {
+	if node.Type == "split" {
+		return node.SplitID
+	}
+	for _, child := range node.Children {
+		if id := firstSplitID(child); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+func findSplit(node workspacelayout.Node, splitID string) *workspacelayout.Node {
+	if node.Type == "split" && node.SplitID == splitID {
+		found := node
+		return &found
+	}
+	for i := range node.Children {
+		if found := findSplit(node.Children[i], splitID); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
 func newWorkspaceProtocolTestClient() *wsClient {
 	return &wsClient{
 		send:            make(chan outboundMessage, 32),

@@ -2720,6 +2720,36 @@ type WorkspaceLayoutClosePaneMessage struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
+type WorkspaceLayoutDockEdge string
+
+const WorkspaceLayoutDockEdgeBottom WorkspaceLayoutDockEdge = "bottom"
+const WorkspaceLayoutDockEdgeLeft WorkspaceLayoutDockEdge = "left"
+const WorkspaceLayoutDockEdgeRight WorkspaceLayoutDockEdge = "right"
+const WorkspaceLayoutDockEdgeTop WorkspaceLayoutDockEdge = "top"
+
+type WorkspaceLayoutDockPanelMessage struct {
+	// AnchorPaneID corresponds to the JSON schema field "anchor_pane_id".
+	AnchorPaneID string `json:"anchor_pane_id"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Edge corresponds to the JSON schema field "edge".
+	Edge WorkspaceLayoutDockEdge `json:"edge"`
+
+	// PanelID corresponds to the JSON schema field "panel_id".
+	PanelID string `json:"panel_id"`
+
+	// PanelKind corresponds to the JSON schema field "panel_kind".
+	PanelKind string `json:"panel_kind"`
+
+	// Ratio corresponds to the JSON schema field "ratio".
+	Ratio *float64 `json:"ratio,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
 type WorkspaceLayoutFocusPaneMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2797,10 +2827,35 @@ type WorkspaceLayoutRenamePaneMessage struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
+type WorkspaceLayoutSetSplitRatioMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Ratio corresponds to the JSON schema field "ratio".
+	Ratio float64 `json:"ratio"`
+
+	// SplitID corresponds to the JSON schema field "split_id".
+	SplitID string `json:"split_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
 type WorkspaceLayoutSplitDirection string
 
 const WorkspaceLayoutSplitDirectionHorizontal WorkspaceLayoutSplitDirection = "horizontal"
 const WorkspaceLayoutSplitDirectionVertical WorkspaceLayoutSplitDirection = "vertical"
+
+type WorkspaceLayoutUndockPanelMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// PanelID corresponds to the JSON schema field "panel_id".
+	PanelID string `json:"panel_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
 
 type WorkspaceLayoutUpdatedMessage struct {
 	// Event corresponds to the JSON schema field "event".

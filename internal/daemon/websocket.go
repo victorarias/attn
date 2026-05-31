@@ -874,6 +874,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkspaceLayoutFocusPane(client, msg.(*protocol.WorkspaceLayoutFocusPaneMessage))
 	case protocol.CmdWorkspaceLayoutRenamePane:
 		d.handleWorkspaceLayoutRenamePane(client, msg.(*protocol.WorkspaceLayoutRenamePaneMessage))
+	case protocol.CmdWorkspaceLayoutSetSplitRatio:
+		d.handleWorkspaceLayoutSetSplitRatio(client, msg.(*protocol.WorkspaceLayoutSetSplitRatioMessage))
+	case protocol.CmdWorkspaceLayoutDockPanel:
+		d.handleWorkspaceLayoutDockPanel(client, msg.(*protocol.WorkspaceLayoutDockPanelMessage))
+	case protocol.CmdWorkspaceLayoutUndockPanel:
+		d.handleWorkspaceLayoutUndockPanel(client, msg.(*protocol.WorkspaceLayoutUndockPanelMessage))
 	case protocol.CmdRegisterWorkspace:
 		d.handleRegisterWorkspace(client, msg.(*protocol.RegisterWorkspaceMessage))
 	case protocol.CmdUnregisterWorkspace:
@@ -1023,6 +1029,18 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdWorkspaceLayoutRenamePane:
 		if typed, ok := msg.(*protocol.WorkspaceLayoutRenamePaneMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdWorkspaceLayoutSetSplitRatio:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutSetSplitRatioMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdWorkspaceLayoutDockPanel:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutDockPanelMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdWorkspaceLayoutUndockPanel:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutUndockPanelMessage); ok {
 			return typed.WorkspaceID
 		}
 	}

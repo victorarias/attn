@@ -3,7 +3,7 @@ import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sidebar, type SidebarHeaderAction, type FooterShortcut, ReviewLoopIcon, EditorIcon, DiffIcon, PRsIcon } from './components/Sidebar';
+import { Sidebar, type SidebarHeaderAction, type FooterShortcut, ReviewLoopIcon, EditorIcon, DiffIcon, PRsIcon, MarkdownIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
@@ -31,7 +31,7 @@ import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, Daemon
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
-import { hasPane, type TerminalSplitDirection } from './types/workspace';
+import { hasPane, findPanelByKind, type TerminalSplitDirection } from './types/workspace';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -85,6 +85,10 @@ interface GitHubReleaseResponse {
   prerelease?: boolean;
   draft?: boolean;
 }
+
+// Stable id for the workspace's single markdown panel. One per workspace keeps
+// dock/undock idempotent without tracking per-instance ids.
+const MARKDOWN_PANEL_ID = 'panel-markdown';
 
 function terminalStateForWorkspaceSessions(sessions: Session[]): TerminalWorkspaceState | null {
   let selected: TerminalWorkspaceState | null = null;
@@ -377,6 +381,9 @@ function App() {
     sendSessionVisualized,
     sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
+    sendWorkspaceSetSplitRatio,
+    sendWorkspaceDockPanel,
+    sendWorkspaceUndockPanel,
     sendRuntimeInput,
     isRuntimeAttached,
     sendGetFileDiff,
@@ -493,6 +500,9 @@ function App() {
         sendSessionVisualized={sendSessionVisualized}
         sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
+        sendWorkspaceSetSplitRatio={sendWorkspaceSetSplitRatio}
+        sendWorkspaceDockPanel={sendWorkspaceDockPanel}
+        sendWorkspaceUndockPanel={sendWorkspaceUndockPanel}
         sendRuntimeInput={sendRuntimeInput}
         isRuntimeAttached={isRuntimeAttached}
         sendGetFileDiff={sendGetFileDiff}
@@ -576,6 +586,9 @@ interface AppContentProps {
   sendSessionVisualized: ReturnType<typeof useDaemonSocket>['sendSessionVisualized'];
   sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
+  sendWorkspaceSetSplitRatio: ReturnType<typeof useDaemonSocket>['sendWorkspaceSetSplitRatio'];
+  sendWorkspaceDockPanel: ReturnType<typeof useDaemonSocket>['sendWorkspaceDockPanel'];
+  sendWorkspaceUndockPanel: ReturnType<typeof useDaemonSocket>['sendWorkspaceUndockPanel'];
   sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
   isRuntimeAttached: ReturnType<typeof useDaemonSocket>['isRuntimeAttached'];
   sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
@@ -654,6 +667,9 @@ sendFetchPRDetails,
   sendSessionVisualized,
   sendWorkspaceAddSessionPane,
   sendWorkspaceClosePane,
+  sendWorkspaceSetSplitRatio,
+  sendWorkspaceDockPanel,
+  sendWorkspaceUndockPanel,
   sendRuntimeInput,
   isRuntimeAttached,
   sendGetFileDiff,
@@ -1247,6 +1263,7 @@ sendFetchPRDetails,
   const toggleSidebarCollapse = useCallback(() => {
     setSidebarCollapsed((prev) => !prev);
   }, []);
+
 
   // Auto-collapse sidebar when no sessions, auto-expand when first session is created
   const prevSessionCountRef = useRef(sessions.length);
@@ -1962,6 +1979,36 @@ sendFetchPRDetails,
   const workspaceSelection = useWorkspaceSelectionController(workspaceViews, activeSessionId);
   const activeWorkspaceId = workspaceSelection.activeWorkspaceId;
 
+  // Markdown panel: a daemon-owned docked panel (persisted, cross-client). The
+  // sidebar toggle docks/undocks it in the active workspace; "open" is simply
+  // whether the active workspace's layout holds a markdown panel.
+  const activeWorkspaceLayoutTree = useMemo(() => {
+    if (!activeWorkspaceId) {
+      return null;
+    }
+    const view = workspaceViews.find((workspace) => workspace.id === activeWorkspaceId);
+    if (!view) {
+      return null;
+    }
+    return terminalStateForWorkspaceSessions(view.sessions)?.layoutTree ?? null;
+  }, [activeWorkspaceId, workspaceViews]);
+  const markdownPanel = useMemo(
+    () => findPanelByKind(activeWorkspaceLayoutTree, 'markdown'),
+    [activeWorkspaceLayoutTree],
+  );
+  const markdownPanelOpen = markdownPanel != null;
+
+  const toggleMarkdownPanel = useCallback(() => {
+    if (!activeWorkspaceId) {
+      return;
+    }
+    if (markdownPanel) {
+      void sendWorkspaceUndockPanel(activeWorkspaceId, markdownPanel.panelId).catch(() => {});
+    } else {
+      void sendWorkspaceDockPanel(activeWorkspaceId, MARKDOWN_PANEL_ID, 'markdown', { edge: 'right' }).catch(() => {});
+    }
+  }, [activeWorkspaceId, markdownPanel, sendWorkspaceDockPanel, sendWorkspaceUndockPanel]);
+
   // Use workspace order so ⌘1-9 and prev/next match the top-level sidebar rows.
   const visualWorkspaces = sidebarWorkspaceViews;
   const visualIndexByWorkspaceId = useMemo(() => {
@@ -2354,6 +2401,13 @@ sendFetchPRDetails,
       shortcutHint: `${formatShortcut('dock.attention')} PRs`,
       onClick: () => toggleDockPanel('attention'),
     },
+    {
+      id: 'markdown',
+      title: markdownPanelOpen ? 'Hide Markdown Panel' : 'Show Markdown Panel',
+      icon: <MarkdownIcon />,
+      active: markdownPanelOpen,
+      onClick: toggleMarkdownPanel,
+    },
   ]), [
     activeReviewLoopAvailable,
     activeReviewLoopState?.status,
@@ -2363,8 +2417,10 @@ sendFetchPRDetails,
     attentionPanelOpen,
     diffPanelOpen,
     handleOpenEditorForSession,
+    markdownPanelOpen,
     reviewLoopPanelOpen,
     toggleDockPanel,
+    toggleMarkdownPanel,
   ]);
 
   const activeSessionZoomed = activeWorkspaceId ? Boolean(zoomModeBySessionId[activeWorkspaceId]) : false;
@@ -2613,6 +2669,12 @@ sendFetchPRDetails,
                         void handleClosePane(paneSessionId, paneId).catch(console.error);
                       }
                     }}
+                    onResizeSplit={(splitId, ratio) => {
+                      void sendWorkspaceSetSplitRatio(workspace.id, splitId, ratio).catch(() => {
+                        // Persistence is best-effort; the live override already
+                        // reflects the change and the next layout broadcast reconciles.
+                      });
+                    }}
                     onFocusPane={(paneId) => {
                       const agentPane = workspaceState.agents.find((pane) => pane.id === paneId);
                       const paneSessionId = agentPane?.sessionId;
@@ -2632,6 +2694,12 @@ sendFetchPRDetails,
                       ));
                     }}
                     onNavigateOutOfSession={handleNavigateOutOfSession}
+                    onDockPanel={(panelId, panelKind, anchorPaneId, edge) => {
+                      void sendWorkspaceDockPanel(workspace.id, panelId, panelKind, { anchorPaneId, edge }).catch(() => {});
+                    }}
+                    onUndockPanel={(panelId) => {
+                      void sendWorkspaceUndockPanel(workspace.id, panelId).catch(() => {});
+                    }}
                   />
                 </div>
               );

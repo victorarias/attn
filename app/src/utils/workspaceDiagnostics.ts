@@ -108,13 +108,17 @@ export function collectWorkspaceLayoutDiagnostics(
     depth: number,
     bounds: WorkspaceNormalizedBounds,
   ) => {
-    if (node.type === 'pane') {
-      panes.push({
-        paneId: node.paneId,
-        path,
-        depth,
-        bounds,
-      });
+    if (node.type !== 'split') {
+      // Leaf node: record terminal panes; docked panels occupy space but are
+      // not part of pane diagnostics.
+      if (node.type === 'pane') {
+        panes.push({
+          paneId: node.paneId,
+          path,
+          depth,
+          bounds,
+        });
+      }
       return;
     }
 

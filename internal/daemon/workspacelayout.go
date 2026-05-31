@@ -295,6 +295,138 @@ func (d *Daemon) handleWorkspaceLayoutRenamePane(client *wsClient, msg *protocol
 	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutRenamePane, msg.WorkspaceID, protocol.Ptr(msg.PaneID), nil)
 }
 
+func (d *Daemon) handleWorkspaceLayoutSetSplitRatio(client *wsClient, msg *protocol.WorkspaceLayoutSetSplitRatioMessage) {
+	snapshot, err := d.ensureWorkspaceLayout(msg.WorkspaceID)
+	if err != nil {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSetSplitRatio, msg.WorkspaceID, nil, err)
+		return
+	}
+	splitID := strings.TrimSpace(msg.SplitID)
+	if splitID == "" {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSetSplitRatio, msg.WorkspaceID, nil, fmt.Errorf("split_id is required"))
+		return
+	}
+	layout, ok := workspacelayout.SetSplitRatio(snapshot.Layout, splitID, msg.Ratio)
+	if !ok {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSetSplitRatio, msg.WorkspaceID, nil, fmt.Errorf("split not found: %s", splitID))
+		return
+	}
+	snapshot.Layout = layout
+	if err := d.store.SaveWorkspaceLayout(*snapshot); err != nil {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSetSplitRatio, msg.WorkspaceID, nil, err)
+		return
+	}
+	d.broadcastWorkspaceLayoutUpdated(msg.WorkspaceID)
+	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSetSplitRatio, msg.WorkspaceID, nil, nil)
+}
+
+// defaultPanelFraction is the share of the split a freshly docked panel takes
+// when the client doesn't specify one. Roughly a third keeps the panel readable
+// without crowding the terminals.
+const defaultPanelFraction = 0.32
+
+// dockEdgeToSplit translates a dock edge into a split direction and whether the
+// panel sits before (children[0]) the anchor.
+func dockEdgeToSplit(edge protocol.WorkspaceLayoutDockEdge) (workspacelayout.Direction, bool) {
+	switch edge {
+	case protocol.WorkspaceLayoutDockEdgeLeft:
+		return workspacelayout.DirectionVertical, true
+	case protocol.WorkspaceLayoutDockEdgeTop:
+		return workspacelayout.DirectionHorizontal, true
+	case protocol.WorkspaceLayoutDockEdgeBottom:
+		return workspacelayout.DirectionHorizontal, false
+	default: // right
+		return workspacelayout.DirectionVertical, false
+	}
+}
+
+func (d *Daemon) handleWorkspaceLayoutDockPanel(client *wsClient, msg *protocol.WorkspaceLayoutDockPanelMessage) {
+	snapshot, err := d.ensureWorkspaceLayout(msg.WorkspaceID)
+	if err != nil {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutDockPanel, msg.WorkspaceID, nil, err)
+		return
+	}
+	panelID := strings.TrimSpace(msg.PanelID)
+	panelKind := strings.TrimSpace(msg.PanelKind)
+	anchorPaneID := strings.TrimSpace(msg.AnchorPaneID)
+	if panelID == "" || panelKind == "" {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutDockPanel, msg.WorkspaceID, nil, fmt.Errorf("panel_id and panel_kind are required"))
+		return
+	}
+	// Fall back to the active pane when the client doesn't name an anchor (e.g.
+	// the sidebar toggle just wants the panel somewhere sensible).
+	if anchorPaneID == "" {
+		anchorPaneID = snapshot.ActivePaneID
+	}
+	if !workspacelayout.HasPane(snapshot.Layout, anchorPaneID) {
+		anchorPaneID = firstWorkspaceLayoutPaneID(*snapshot)
+	}
+	if anchorPaneID == "" {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutDockPanel, msg.WorkspaceID, nil, fmt.Errorf("workspace has no anchor pane"))
+		return
+	}
+
+	direction, before := dockEdgeToSplit(msg.Edge)
+	panelFraction := defaultPanelFraction
+	if msg.Ratio != nil && *msg.Ratio > 0 && *msg.Ratio < 1 {
+		panelFraction = *msg.Ratio
+	}
+	// DockPanel takes the children[0] fraction; convert from the panel's share.
+	childZeroRatio := panelFraction
+	if !before {
+		childZeroRatio = 1 - panelFraction
+	}
+
+	layout, ok := workspacelayout.DockPanel(
+		snapshot.Layout,
+		anchorPaneID,
+		direction,
+		before,
+		newWorkspaceLayoutEntityID("split"),
+		panelID,
+		panelKind,
+		childZeroRatio,
+	)
+	if !ok {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutDockPanel, msg.WorkspaceID, nil, fmt.Errorf("could not dock panel against pane: %s", anchorPaneID))
+		return
+	}
+	snapshot.Layout = layout
+	normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot)
+	if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutDockPanel, msg.WorkspaceID, nil, err)
+		return
+	}
+	d.broadcastWorkspaceLayoutUpdated(msg.WorkspaceID)
+	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutDockPanel, msg.WorkspaceID, nil, nil)
+}
+
+func (d *Daemon) handleWorkspaceLayoutUndockPanel(client *wsClient, msg *protocol.WorkspaceLayoutUndockPanelMessage) {
+	snapshot, err := d.ensureWorkspaceLayout(msg.WorkspaceID)
+	if err != nil {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, nil, err)
+		return
+	}
+	panelID := strings.TrimSpace(msg.PanelID)
+	if panelID == "" {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, nil, fmt.Errorf("panel_id is required"))
+		return
+	}
+	layout, ok := workspacelayout.UndockPanel(snapshot.Layout, panelID)
+	if !ok {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, nil, fmt.Errorf("panel not found: %s", panelID))
+		return
+	}
+	snapshot.Layout = layout
+	normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot)
+	if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, nil, err)
+		return
+	}
+	d.broadcastWorkspaceLayoutUpdated(msg.WorkspaceID)
+	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, nil, nil)
+}
+
 func (d *Daemon) handleWorkspaceLayoutAddSessionPane(client *wsClient, msg *protocol.WorkspaceLayoutAddSessionPaneMessage) {
 	snapshot, err := d.currentOrEmptyWorkspaceLayout(msg.WorkspaceID)
 	if err != nil {
