@@ -20,6 +20,8 @@ import { RightDock } from './components/RightDock';
 import { SessionTerminalWorkspace } from './components/SessionTerminalWorkspace';
 import { ThumbsModal } from './components/ThumbsModal';
 import { SettingsModal } from './components/SettingsModal';
+import { ShortcutsModal } from './components/ShortcutsModal';
+import { WhatsNewModal } from './components/WhatsNewModal';
 import { CopyToast, useCopyToast } from './components/CopyToast';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
@@ -33,6 +35,8 @@ import { hasPane, type TerminalSplitDirection } from './types/workspace';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useWhatsNew } from './hooks/useWhatsNew';
+import { formatShortcut, modifierTokens } from './shortcuts';
 import { useUIScale } from './hooks/useUIScale';
 import { useTheme } from './hooks/useTheme';
 import { useOpenPR, type OpenPRProgress } from './hooks/useOpenPR';
@@ -775,6 +779,8 @@ sendFetchPRDetails,
 
   // Settings modal (lifted from Dashboard for Cmd+, access)
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const whatsNew = useWhatsNew();
   const { repoStates, authorStates } = useDaemonStore();
   const mutedRepos = useMemo(() =>
     repoStates.filter(r => r.muted).map(r => r.repo),
@@ -2285,7 +2291,7 @@ sendFetchPRDetails,
           : 'Open in Editor',
       icon: <EditorIcon />,
       disabled: !activeSessionId || (activeRemoteSession && !remoteEditorAvailable),
-      shortcutHint: '⌘⇧E detail',
+      shortcutHint: `${formatShortcut('dock.diffDetail')} detail`,
       onClick: handleOpenEditorForSession,
     },
     {
@@ -2295,7 +2301,7 @@ sendFetchPRDetails,
       active: reviewLoopPanelOpen,
       disabled: !activeReviewLoopAvailable,
       toneClassName: activeReviewLoopState?.status ? `sidebar-tool-btn--loop-${activeReviewLoopState.status}` : undefined,
-      shortcutHint: '⌘⇧R loop',
+      shortcutHint: `${formatShortcut('dock.reviewLoop')} loop`,
       onClick: () => toggleDockPanel('reviewLoop'),
     },
     {
@@ -2304,7 +2310,7 @@ sendFetchPRDetails,
       icon: <DiffIcon />,
       active: diffPanelOpen,
       disabled: !activeSessionId,
-      shortcutHint: '⌘⇧G diff',
+      shortcutHint: `${formatShortcut('dock.diff')} diff`,
       onClick: () => toggleDockPanel('diff'),
     },
     {
@@ -2313,7 +2319,7 @@ sendFetchPRDetails,
       icon: <PRsIcon />,
       active: attentionPanelOpen,
       badge: attentionCount > 0 ? attentionCount : undefined,
-      shortcutHint: '⌘⇧P PRs',
+      shortcutHint: `${formatShortcut('dock.attention')} PRs`,
       onClick: () => toggleDockPanel('attention'),
     },
   ]), [
@@ -2334,14 +2340,14 @@ sendFetchPRDetails,
   const sidebarFooterShortcuts = useMemo<FooterShortcut[]>(() => (
     activeSessionId
       ? [
-          { label: '⌘D split v' },
-          { label: '⌘⇧D split h' },
-          { label: '⌘⇧N session h' },
-          { label: '⌘⇧Z zoom', active: activeSessionZoomed },
-          { label: '⌘⌥←↑→↓ pane' },
+          { label: `${formatShortcut('terminal.splitVertical')} split v` },
+          { label: `${formatShortcut('terminal.splitHorizontal')} split h` },
+          { label: `${formatShortcut('session.newHorizontal')} session h` },
+          { label: `${formatShortcut('terminal.toggleZoom')} zoom`, active: activeSessionZoomed },
+          { label: `${modifierTokens('terminal.focusLeft').join('')}←↑→↓ pane` },
         ]
       : []
-  ), [activeWorkspaceId, activeSessionZoomed]);
+  ), [activeSessionId, activeSessionZoomed]);
 
   const handleStartReviewLoop = useCallback(async (prompt: string, iterationLimit: number, presetId?: string) => {
     if (!activeSessionId) return;
@@ -2422,6 +2428,7 @@ sendFetchPRDetails,
     onToggleAttentionPanel: () => toggleDockPanel('attention'),
     onQuickFind: view === 'session' ? handleOpenQuickFind : undefined,
     onOpenSettings: useCallback(() => setSettingsOpen(prev => !prev), []),
+    onShowShortcuts: useCallback(() => setShortcutsOpen(prev => !prev), []),
     onIncreaseFontSize: increaseScale,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
@@ -2752,6 +2759,18 @@ sendFetchPRDetails,
       />
       <CopyToast message={copyMessage} onDone={clearCopyToast} />
       <ErrorToast message={errorMessage} onDone={clearError} />
+      <ShortcutsModal
+        isOpen={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+      />
+      <WhatsNewModal
+        isOpen={whatsNew.isOpen}
+        onClose={whatsNew.dismiss}
+        onViewShortcuts={() => {
+          whatsNew.dismiss();
+          setShortcutsOpen(true);
+        }}
+      />
       <SettingsModal
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}

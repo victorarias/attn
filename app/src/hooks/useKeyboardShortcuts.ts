@@ -22,6 +22,7 @@ interface KeyboardShortcutsConfig {
   onToggleAttentionPanel?: () => void;
   onQuickFind?: () => void;
   onOpenSettings?: () => void;
+  onShowShortcuts?: () => void;
   onIncreaseFontSize?: () => void;
   onDecreaseFontSize?: () => void;
   onResetFontSize?: () => void;
@@ -48,6 +49,7 @@ export function useKeyboardShortcuts({
   onToggleAttentionPanel,
   onQuickFind,
   onOpenSettings,
+  onShowShortcuts,
   onIncreaseFontSize,
   onDecreaseFontSize,
   onResetFontSize,
@@ -89,6 +91,9 @@ export function useKeyboardShortcuts({
 
   // Settings (always enabled)
   useShortcut('ui.openSettings', onOpenSettings ?? (() => {}), !!onOpenSettings);
+
+  // Keyboard shortcuts cheatsheet (always enabled)
+  useShortcut('ui.showShortcuts', onShowShortcuts ?? (() => {}), !!onShowShortcuts);
 
   // Font scaling (always enabled)
   useShortcut('ui.increaseFontSize', onIncreaseFontSize ?? (() => {}), !!onIncreaseFontSize);

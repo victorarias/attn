@@ -20,9 +20,9 @@ It's a desktop app that wraps your agent CLIs — Claude Code, Codex, Copilot �
 
 ## What you get
 
-**One sidebar to rule them all** — Every agent session, live state at a glance. The one that needs you glows. Click it. Done.
+**Workspaces in one sidebar** — The sidebar groups your work into workspaces, each holding the sessions and terminals for one task. Live state at a glance — the one that needs you glows. Click it. Done.
 
-**Embedded terminals** — No more "which terminal was that in?" Run agents inside the app. Open utility shells next to them. Resume sessions, never leave the window.
+**Panes, splits, and first-class shells** — A workspace can hold several sessions side by side. Split a pane, open a plain shell as its own session from the same dialog you use for agents, and move focus between panes with the keyboard. Never leave the window.
 
 **Remote daemons over SSH** — Keep sessions on a GPU box, Linux host, or local VM and manage them from the same app. Spawn new sessions remotely, browse remote repos, and open remote worktrees without juggling another terminal window.
 
@@ -72,9 +72,10 @@ The app nudges you when a new release exists. No auto-install — you pick when.
 ## Quick start
 
 1. Launch **attn** from Applications.
-2. **Cmd+Shift+N** — pick an agent, pick a directory, go.
+2. **Cmd+T** — start a workspace: pick an agent (or a plain shell), pick a directory, go. **Cmd+N** adds another session to the workspace you're in.
 3. Watch the sidebar. Colors tell you who needs you.
-4. Optional: add an SSH endpoint in Settings and run remote or VM sessions from the same picker.
+4. Press **Cmd+/** any time for the full keyboard shortcuts list.
+5. Optional: add an SSH endpoint in Settings and run remote or VM sessions from the same picker.
 
 ## Session states
 
@@ -91,13 +92,19 @@ Long-run review behavior: if a run takes 5+ minutes, attn keeps it yellow when i
 
 | Shortcut | What it does |
 |---|---|
+| Cmd+T | New workspace (with an initial session) |
 | Cmd+N | New session in current workspace |
-| Cmd+Shift+N | New workspace |
+| Cmd+Shift+N | New session, split sideways |
+| Cmd+Option+←↑→↓ | Move between panes (cross into the next workspace at an edge) |
+| Cmd+1–9 | Jump to a workspace |
 | Cmd+F | Quick Find |
 | Cmd+K | Attention drawer (who needs me?) |
 | Cmd+\` | Utility terminal |
 | Cmd+Up / Down | Jump between sessions |
 | Cmd+R | Refresh PRs |
+| Cmd+/ | All keyboard shortcuts |
+
+Press **Cmd+/** in the app for the full, always-current list.
 
 ### Selecting text in agent terminals
 

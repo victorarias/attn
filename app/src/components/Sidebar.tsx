@@ -2,6 +2,7 @@ import './Sidebar.css';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { StateIndicator } from './StateIndicator';
+import { formatShortcut } from '../shortcuts';
 import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
 import type { WorkspaceWithSessions } from '../utils/workspaceViewModels';
 
@@ -403,7 +404,7 @@ export function Sidebar({
                           e.stopPropagation();
                           onCloseSession(session.id);
                         }}
-                        title="Close session (⌘⇧W)"
+                        title={`Close session (${formatShortcut('session.close')})`}
                         aria-label={`Close session ${session.label}`}
                       >
                         ×
@@ -515,7 +516,7 @@ export function Sidebar({
             {shortcut.label}
           </span>
         ))}
-        <span className="shortcut-hint">⌘⇧B sidebar</span>
+        <span className="shortcut-hint">{`${formatShortcut('session.toggleSidebar')} sidebar`}</span>
       </div>
     </div>
   );

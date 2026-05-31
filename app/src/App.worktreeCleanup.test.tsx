@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
+import { WHATS_NEW_ID, WHATS_NEW_STORAGE_KEY } from './hooks/useWhatsNew';
 
 const mockUseSessionStore = vi.fn();
 const mockUseDaemonStore = vi.fn();
@@ -255,6 +256,9 @@ describe('worktree cleanup prompt', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    // Keep the one-time "what's new" announcement suppressed; it is unrelated
+    // to worktree cleanup and would otherwise render over the app under test.
+    localStorage.setItem(WHATS_NEW_STORAGE_KEY, WHATS_NEW_ID);
     vi.useRealTimers();
     mockOpenPR.mockResolvedValue({
       success: true,

@@ -1,0 +1,234 @@
+/* app/src/components/WhatsNewModal.css */
+
+.whats-new-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 310;
+  animation: whats-new-fadeIn 120ms ease-out;
+}
+
+@keyframes whats-new-fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.whats-new-modal {
+  width: 560px;
+  max-width: calc(100vw - 48px);
+  max-height: 82vh;
+  background: var(--color-bg-app);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 24px 80px rgba(0, 0, 0, 0.8),
+    0 0 140px rgba(255, 107, 53, 0.06);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: whats-new-slideUp 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes whats-new-slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.whats-new-header {
+  position: relative;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: linear-gradient(180deg, rgba(255, 107, 53, 0.06) 0%, transparent 100%);
+  flex-shrink: 0;
+}
+
+.whats-new-eyebrow {
+  font-family: 'SF Pro Text', 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #ff6b35;
+  margin-bottom: 6px;
+}
+
+.whats-new-header h2 {
+  font-family: 'SF Pro Display', 'Inter', -apple-system, sans-serif;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.whats-new-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-dimmed);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+  line-height: 1;
+  border-radius: 6px;
+  transition: all 120ms ease-out;
+}
+
+.whats-new-close:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.whats-new-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 24px 4px;
+}
+
+.whats-new-item {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.whats-new-item:last-child {
+  border-bottom: none;
+}
+
+/* The headline behavior change — a tinted callout card so it stands out. */
+.whats-new-item--key {
+  border-bottom: none;
+  background: rgba(255, 107, 53, 0.08);
+  border: 1px solid rgba(255, 107, 53, 0.28);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin: 8px 0 4px;
+}
+
+.whats-new-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #ff7a47;
+  background: rgba(255, 107, 53, 0.16);
+  padding: 2px 7px;
+  border-radius: 5px;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.whats-new-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 5px;
+}
+
+.whats-new-item-head h3 {
+  font-family: 'SF Pro Text', 'Inter', -apple-system, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.whats-new-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.whats-new-item p {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+.whats-new-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  border-top: 1px solid var(--color-border-subtle);
+  background: rgba(0, 0, 0, 0.2);
+  flex-shrink: 0;
+}
+
+.whats-new-link {
+  background: transparent;
+  border: none;
+  color: var(--color-text-tertiary);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 6px 4px;
+  border-radius: 6px;
+  transition: color 120ms ease-out;
+}
+
+.whats-new-link:hover {
+  color: var(--color-text-primary);
+}
+
+.whats-new-primary {
+  background: linear-gradient(180deg, #ff7a47 0%, #ff5722 100%);
+  border: none;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 8px 18px;
+  border-radius: 8px;
+  box-shadow:
+    0 2px 8px rgba(255, 107, 53, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transition: transform 100ms ease-out, box-shadow 120ms ease-out;
+}
+
+.whats-new-primary:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 4px 12px rgba(255, 107, 53, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.whats-new-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.whats-new-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.whats-new-body::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .whats-new-overlay,
+  .whats-new-modal {
+    animation: none;
+  }
+  .whats-new-primary {
+    transition: none;
+  }
+}

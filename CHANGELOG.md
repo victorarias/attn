@@ -6,7 +6,31 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## Release Highlights — Workspaces
+
+attn is now organized around **workspaces**. The sidebar lists workspaces instead of loose sessions, and each workspace holds the sessions and terminals for one piece of work. This is the headline of the latest release; the dated entries below carry the full detail.
+
+- **⌘N now opens a session inside the current workspace.** It used to start a separate session with its own sidebar row. Press ⌘T when you want a new workspace (a new sidebar row). This is the change most likely to catch you off guard.
+- **Workspaces in the sidebar.** Sessions live inside workspaces. Muting, switching, and the muted section all operate on whole workspaces.
+- **Many sessions per workspace.** Open several sessions and terminals side by side, split a pane, zoom or maximize one, and move focus between panes with the keyboard.
+- **Shells are first-class sessions.** Open a plain shell from the same new-session dialog you use for coding agents — it lives in the workspace like any other session.
+- **A keyboard model for workspaces:**
+  - `⌘T` — new workspace (with an initial session)
+  - `⌘N` — new session in the current workspace
+  - `⌘⇧N` — new session, split sideways
+  - `⌘⌥` + arrow keys — move focus between panes; push past an edge to cross into the next workspace
+  - `⌘1`–`⌘9` — jump straight to a workspace
+  - `⌘/` — open the full, always-current keyboard shortcuts cheatsheet
+
+The app shows a one-time "What's new" summary after this upgrade, and `⌘/` brings up the complete shortcut list any time.
+
+---
+
 ## [2026-05-31]
+
+### Added
+- **Keyboard Shortcuts Cheatsheet**: Press `⌘/` to open a searchable overview of every keyboard shortcut, grouped by workspaces, panes, review, and app actions. The list is generated from the app's shortcut definitions, so it always matches the real bindings.
+- **What's New**: After upgrading, attn shows a one-time summary of the workspace model and its key shortcuts, with a link into the full cheatsheet.
 
 ### Changed
 - **Workspace Muting**: Muting now applies to whole workspaces instead of individual sessions. Muted workspaces move to the muted section together with all of their sessions, and session rows no longer expose mute controls.
@@ -20,7 +44,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Workspace Sidebar**: The session sidebar now presents workspaces as the primary navigation unit, keeps existing sidebar tools visible, and adds local display options for open, tight, and boxed workspace layouts.
-- **Workspace Shortcuts**: Command-N now opens the new-session picker for the current workspace, while Command-Shift-N opens the new-workspace picker.
+- **Workspace Shortcuts**: Command-N opens the new-session picker for the current workspace, Command-Shift-N opens it as a sideways split, and Command-T opens the new-workspace picker.
 
 ### Removed
 - **Non-Session Terminal Panes**: Workspace panes are now always backed by sessions; legacy standalone terminal panes and first-pane special handling were removed from the app, daemon, protocol, and database migration path.
