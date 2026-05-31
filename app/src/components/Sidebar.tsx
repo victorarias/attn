@@ -18,7 +18,6 @@ interface LocalSession {
   endpointStatus?: string;
   recoverable?: boolean;
   reviewLoopStatus?: string;
-  muted?: boolean;
 }
 
 type SidebarWorkspace = WorkspaceWithSessions<LocalSession>;
@@ -49,10 +48,10 @@ interface SidebarProps {
   collapsed: boolean;
   headerActions: SidebarHeaderAction[];
   footerShortcuts?: FooterShortcut[];
-  mutedSessions?: LocalSession[];
+  mutedWorkspaces?: SidebarWorkspace[];
   mutedExpanded?: boolean;
   onMutedExpandedChange?: (expanded: boolean) => void;
-  onMuteSession?: (id: string) => void;
+  onMuteWorkspace?: (workspaceId: string, endpointId?: string) => void;
   onSelectSession: (id: string) => void;
   onSelectWorkspace: (id: string) => void;
   onNewSession: () => void;
@@ -170,10 +169,10 @@ export function Sidebar({
   collapsed,
   headerActions,
   footerShortcuts,
-  mutedSessions = [],
+  mutedWorkspaces = [],
   mutedExpanded: mutedExpandedProp,
   onMutedExpandedChange,
-  onMuteSession,
+  onMuteWorkspace,
   onSelectSession,
   onSelectWorkspace,
   onNewSession,
@@ -328,10 +327,17 @@ export function Sidebar({
               className={`workspace-group ${selectedWorkspaceId === workspace.id ? 'selected' : ''}`}
               data-testid={`sidebar-workspace-${workspace.id}`}
             >
-              <button
-                type="button"
+              <div
+                role="button"
+                tabIndex={0}
                 className="workspace-group-header"
                 onClick={() => onSelectWorkspace(workspace.id)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onSelectWorkspace(workspace.id);
+                  }
+                }}
               >
                 <StateIndicator state={(workspace.status as UISessionState | undefined) || 'idle'} size="md" seed={workspace.id} />
                 <span className="workspace-label">{workspace.title}</span>
@@ -341,7 +347,24 @@ export function Sidebar({
                   </span>
                 )}
                 <span className="session-shortcut">⌘{workspaceIndex + 1}</span>
-              </button>
+                {onMuteWorkspace && (
+                  <span className="workspace-actions">
+                    <button
+                      type="button"
+                      className="workspace-action-btn mute-workspace-btn"
+                      data-testid={`mute-workspace-${workspace.id}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onMuteWorkspace(workspace.id, workspace.endpointId);
+                      }}
+                      title="Mute workspace"
+                      aria-label={`Mute workspace ${workspace.title}`}
+                    >
+                      ⊘
+                    </button>
+                  </span>
+                )}
+              </div>
               {workspace.sessions.map((session) => {
                 return (
                   <div
@@ -373,20 +396,6 @@ export function Sidebar({
                     )}
                     {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                     <div className="session-actions">
-                      {onMuteSession && (
-                        <button
-                          className="session-action-btn mute-session-btn"
-                          data-testid={`mute-session-${session.id}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onMuteSession(session.id);
-                          }}
-                          title="Mute session"
-                          aria-label={`Mute session ${session.label}`}
-                        >
-                          ⊘
-                        </button>
-                      )}
                       <button
                         className="session-action-btn close-session-btn"
                         data-testid={`close-session-${session.id}`}
@@ -420,7 +429,7 @@ export function Sidebar({
         })}
       </div>
 
-      {mutedSessions.length > 0 && (
+      {mutedWorkspaces.length > 0 && (
         <div className="muted-sessions-section">
           <button
             className="muted-sessions-header"
@@ -428,44 +437,65 @@ export function Sidebar({
             aria-expanded={mutedExpanded}
           >
             <span className={`muted-sessions-chevron ${mutedExpanded ? 'expanded' : ''}`}>▸</span>
-            Muted Sessions ({mutedSessions.length})
+            Muted Workspaces ({mutedWorkspaces.length})
           </button>
           {mutedExpanded && (
             <div className="muted-sessions-list">
-              {mutedSessions.map((session) => (
+              {mutedWorkspaces.map((workspace) => (
                 <div
-                  key={session.id}
-                  className={`session-item muted-session ${selectedId === session.id ? 'selected' : ''}`}
-                  data-testid={`sidebar-session-${session.id}`}
-                  data-state={session.state}
-                  onClick={() => onSelectSession(session.id)}
+                  key={`${workspace.endpointId || 'local'}:${workspace.id}`}
+                  className={`workspace-group muted-workspace ${selectedWorkspaceId === workspace.id ? 'selected' : ''}`}
+                  data-testid={`sidebar-muted-workspace-${workspace.id}`}
                 >
-                  <StateIndicator state={session.state} size="md" seed={session.id} />
-                  <div className="session-info">
-                    <span className="session-label">{session.label}</span>
-                    {session.endpointName && (
-                      <span className={`session-endpoint-badge status-${session.endpointStatus || 'connected'}`}>
-                        {session.endpointName}
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className="workspace-group-header"
+                    onClick={() => onSelectWorkspace(workspace.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        onSelectWorkspace(workspace.id);
+                      }
+                    }}
+                  >
+                    <StateIndicator state={(workspace.status as UISessionState | undefined) || 'idle'} size="md" seed={workspace.id} />
+                    <span className="workspace-label">{workspace.title}</span>
+                    {onMuteWorkspace && (
+                      <span className="workspace-actions">
+                        <button
+                          type="button"
+                          className="workspace-action-btn unmute-workspace-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onMuteWorkspace(workspace.id, workspace.endpointId);
+                          }}
+                          title="Unmute workspace"
+                          aria-label={`Unmute workspace ${workspace.title}`}
+                        >
+                          ⊙
+                        </button>
                       </span>
                     )}
-                    {session.branch && (
-                      <span className="session-branch">{session.branch}</span>
-                    )}
                   </div>
-                  <div className="session-actions">
-                    {onMuteSession && (
-                      <button
-                        className="session-action-btn unmute-session-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onMuteSession(session.id);
-                        }}
-                        title="Unmute session"
-                        aria-label={`Unmute session ${session.label}`}
+                  <div className="muted-workspace-sessions">
+                    {workspace.sessions.map((session) => (
+                      <div
+                        key={session.id}
+                        className={`session-item grouped muted-session ${selectedId === session.id ? 'selected' : ''}`}
+                        data-testid={`sidebar-session-${session.id}`}
+                        data-state={session.state}
+                        onClick={() => onSelectSession(session.id)}
                       >
-                        ⊙
-                      </button>
-                    )}
+                        <StateIndicator state={session.state} size="md" seed={session.id} />
+                        <span className="session-label">{session.label}</span>
+                        {session.endpointName && (
+                          <span className={`session-endpoint-badge status-${session.endpointStatus || 'connected'}`}>
+                            {session.endpointName}
+                          </span>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))}

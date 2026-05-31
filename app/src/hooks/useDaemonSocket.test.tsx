@@ -571,7 +571,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '72',
+        protocol_version: '73',
         sessions: [
           {
             id: 'agent-1',
@@ -669,13 +669,14 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '72',
+        protocol_version: '73',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
           title: 'Remote',
           directory: '/tmp/repo',
           status: 'idle',
+          muted: false,
           layout: {
             workspace_id: 'workspace-sess-remote',
             active_pane_id: 'pane-session',
@@ -753,7 +754,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '72',
+        protocol_version: '73',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -885,7 +886,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '72',
+        protocol_version: '73',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -953,7 +954,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '72',
+        protocol_version: '73',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1047,7 +1048,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '72',
+        protocol_version: '73',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1146,7 +1147,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '72',
+        protocol_version: '73',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1231,13 +1232,14 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '72',
+        protocol_version: '73',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
           title: 'Remote',
           directory: '/tmp/repo',
           status: 'idle',
+          muted: false,
           layout: {
             workspace_id: 'workspace-sess-remote',
             active_pane_id: 'pane-session',
@@ -1309,7 +1311,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '72',
+        protocol_version: '73',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -1323,6 +1325,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           title: 'stale',
           directory: '/tmp/repo',
           status: 'working',
+          muted: false,
           layout: {
             workspace_id: 'workspace-sess-stale',
             active_pane_id: 'pane-session',
@@ -1378,7 +1381,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '72',
+        protocol_version: '73',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',
@@ -1392,6 +1395,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           title: 'removed',
           directory: '/tmp/repo',
           status: 'working',
+          muted: false,
           layout: {
             workspace_id: 'workspace-sess-removed',
             active_pane_id: 'pane-session',
@@ -1438,6 +1442,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           title: 'removed',
           directory: '/tmp/repo',
           status: 'idle',
+          muted: false,
         },
       });
     });

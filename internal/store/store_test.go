@@ -370,34 +370,6 @@ func TestStore_UpdateStateWithTimestamp_BackwardCompatibleWithRFC3339(t *testing
 	}
 }
 
-func TestStore_ToggleMute(t *testing.T) {
-	s := New()
-
-	s.Add(&protocol.Session{
-		ID:    "abc123",
-		Muted: false,
-	})
-
-	// First toggle: false -> true
-	s.ToggleMute("abc123")
-	if !s.Get("abc123").Muted {
-		t.Error("expected Muted=true after first toggle")
-	}
-
-	// Second toggle: true -> false
-	s.ToggleMute("abc123")
-	if s.Get("abc123").Muted {
-		t.Error("expected Muted=false after second toggle")
-	}
-}
-
-func TestStore_ToggleMute_NonExistent(t *testing.T) {
-	s := New()
-
-	// Should not panic on non-existent session
-	s.ToggleMute("nonexistent")
-}
-
 func TestStore_SetAndListPRs(t *testing.T) {
 	s := New()
 

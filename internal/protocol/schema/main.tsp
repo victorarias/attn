@@ -134,7 +134,6 @@ model Session {
   recoverable?: boolean;        // True when session can be recovered after daemon restart (agent has resumable conversation)
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
-  muted: boolean;               // Always has value (defaults false)
 }
 
 // Workspace is a directory plus one or more agent sessions and its split layout.
@@ -143,6 +142,7 @@ model Workspace {
   title: string;
   directory: string;
   status: WorkspaceStatus;
+  muted: boolean;               // Muting parks the whole workspace out of attention surfaces.
   layout?: WorkspaceLayout;
 }
 
@@ -386,9 +386,10 @@ model SessionVisualizedMessage {
   id: string;
 }
 
-model MuteMessage {
-  cmd: "mute";
-  id: string;
+model MuteWorkspaceMessage {
+  cmd: "mute_workspace";
+  workspace_id: string;
+  endpoint_id?: string;
 }
 
 model QueryPRsMessage {

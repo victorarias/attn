@@ -326,6 +326,7 @@ describe('sessions store', () => {
         title: 'Workspace',
         directory: '/tmp/workspace',
         status: WorkspaceStatus.Idle,
+        muted: false,
         layout: {
           workspace_id: `workspace-${sessionId}`,
           active_pane_id: 'pane-shell',
@@ -376,6 +377,7 @@ describe('sessions store', () => {
         title: 'Workspace',
         directory: '/tmp/workspace',
         status: WorkspaceStatus.Idle,
+        muted: false,
         layout: {
           workspace_id: `workspace-${sessionId}`,
           active_pane_id: 'missing-pane',
@@ -390,6 +392,7 @@ describe('sessions store', () => {
         title: 'Unknown',
         directory: '/tmp/unknown',
         status: WorkspaceStatus.Idle,
+        muted: false,
         layout: {
           workspace_id: 'workspace-unknown-session',
           active_pane_id: 'pane-x',

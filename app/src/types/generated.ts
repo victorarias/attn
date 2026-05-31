@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, Workspace, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, Workspace, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -88,9 +88,9 @@
 //   const markFileViewedResultMessage = Convert.toMarkFileViewedResultMessage(json);
 //   const mergePRMessage = Convert.toMergePRMessage(json);
 //   const muteAuthorMessage = Convert.toMuteAuthorMessage(json);
-//   const muteMessage = Convert.toMuteMessage(json);
 //   const mutePRMessage = Convert.toMutePRMessage(json);
 //   const muteRepoMessage = Convert.toMuteRepoMessage(json);
+//   const muteWorkspaceMessage = Convert.toMuteWorkspaceMessage(json);
 //   const pR = Convert.toPR(json);
 //   const pRActionResultMessage = Convert.toPRActionResultMessage(json);
 //   const pRRole = Convert.toPRRole(json);
@@ -381,7 +381,6 @@ export interface SessionElement {
     label:                        string;
     last_seen:                    string;
     main_repo?:                   string;
-    muted:                        boolean;
     needs_review_after_long_run?: boolean;
     recoverable?:                 boolean;
     state:                        SessionState;
@@ -1202,6 +1201,7 @@ export interface WorkspaceElement {
     directory: string;
     id:        string;
     layout?:   Layout;
+    muted:     boolean;
     status:    WorkspaceStatus;
     title:     string;
     [property: string]: any;
@@ -1430,16 +1430,6 @@ export enum MuteAuthorMessageCmd {
     MuteAuthor = "mute_author",
 }
 
-export interface MuteMessage {
-    cmd: MuteMessageCmd;
-    id:  string;
-    [property: string]: any;
-}
-
-export enum MuteMessageCmd {
-    Mute = "mute",
-}
-
 export interface MutePRMessage {
     cmd: MutePRMessageCmd;
     id:  string;
@@ -1458,6 +1448,17 @@ export interface MuteRepoMessage {
 
 export enum MuteRepoMessageCmd {
     MuteRepo = "mute_repo",
+}
+
+export interface MuteWorkspaceMessage {
+    cmd:          MuteWorkspaceMessageCmd;
+    endpoint_id?: string;
+    workspace_id: string;
+    [property: string]: any;
+}
+
+export enum MuteWorkspaceMessageCmd {
+    MuteWorkspace = "mute_workspace",
 }
 
 export interface PR {
@@ -2109,7 +2110,6 @@ export interface Session {
     label:                        string;
     last_seen:                    string;
     main_repo?:                   string;
-    muted:                        boolean;
     needs_review_after_long_run?: boolean;
     recoverable?:                 boolean;
     state:                        SessionState;
@@ -2503,6 +2503,7 @@ export interface Workspace {
     directory: string;
     id:        string;
     layout?:   Layout;
+    muted:     boolean;
     status:    WorkspaceStatus;
     title:     string;
     [property: string]: any;
@@ -3386,14 +3387,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("MuteAuthorMessage")), null, 2);
     }
 
-    public static toMuteMessage(json: string): MuteMessage {
-        return cast(JSON.parse(json), r("MuteMessage"));
-    }
-
-    public static muteMessageToJson(value: MuteMessage): string {
-        return JSON.stringify(uncast(value, r("MuteMessage")), null, 2);
-    }
-
     public static toMutePRMessage(json: string): MutePRMessage {
         return cast(JSON.parse(json), r("MutePRMessage"));
     }
@@ -3408,6 +3401,14 @@ export class Convert {
 
     public static muteRepoMessageToJson(value: MuteRepoMessage): string {
         return JSON.stringify(uncast(value, r("MuteRepoMessage")), null, 2);
+    }
+
+    public static toMuteWorkspaceMessage(json: string): MuteWorkspaceMessage {
+        return cast(JSON.parse(json), r("MuteWorkspaceMessage"));
+    }
+
+    public static muteWorkspaceMessageToJson(value: MuteWorkspaceMessage): string {
+        return JSON.stringify(uncast(value, r("MuteWorkspaceMessage")), null, 2);
     }
 
     public static toPR(json: string): PR {
@@ -4474,7 +4475,6 @@ const typeMap: any = {
         { json: "label", js: "label", typ: "" },
         { json: "last_seen", js: "last_seen", typ: "" },
         { json: "main_repo", js: "main_repo", typ: u(undefined, "") },
-        { json: "muted", js: "muted", typ: true },
         { json: "needs_review_after_long_run", js: "needs_review_after_long_run", typ: u(undefined, true) },
         { json: "recoverable", js: "recoverable", typ: u(undefined, true) },
         { json: "state", js: "state", typ: r("SessionState") },
@@ -4938,6 +4938,7 @@ const typeMap: any = {
         { json: "directory", js: "directory", typ: "" },
         { json: "id", js: "id", typ: "" },
         { json: "layout", js: "layout", typ: u(undefined, r("Layout")) },
+        { json: "muted", js: "muted", typ: true },
         { json: "status", js: "status", typ: r("WorkspaceStatus") },
         { json: "title", js: "title", typ: "" },
     ], "any"),
@@ -5044,10 +5045,6 @@ const typeMap: any = {
         { json: "author", js: "author", typ: "" },
         { json: "cmd", js: "cmd", typ: r("MuteAuthorMessageCmd") },
     ], "any"),
-    "MuteMessage": o([
-        { json: "cmd", js: "cmd", typ: r("MuteMessageCmd") },
-        { json: "id", js: "id", typ: "" },
-    ], "any"),
     "MutePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("MutePRMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -5055,6 +5052,11 @@ const typeMap: any = {
     "MuteRepoMessage": o([
         { json: "cmd", js: "cmd", typ: r("MuteRepoMessageCmd") },
         { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "MuteWorkspaceMessage": o([
+        { json: "cmd", js: "cmd", typ: r("MuteWorkspaceMessageCmd") },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "PR": o([
         { json: "approved_by_me", js: "approved_by_me", typ: true },
@@ -5463,7 +5465,6 @@ const typeMap: any = {
         { json: "label", js: "label", typ: "" },
         { json: "last_seen", js: "last_seen", typ: "" },
         { json: "main_repo", js: "main_repo", typ: u(undefined, "") },
-        { json: "muted", js: "muted", typ: true },
         { json: "needs_review_after_long_run", js: "needs_review_after_long_run", typ: u(undefined, true) },
         { json: "recoverable", js: "recoverable", typ: u(undefined, true) },
         { json: "state", js: "state", typ: r("SessionState") },
@@ -5691,6 +5692,7 @@ const typeMap: any = {
         { json: "directory", js: "directory", typ: "" },
         { json: "id", js: "id", typ: "" },
         { json: "layout", js: "layout", typ: u(undefined, r("Layout")) },
+        { json: "muted", js: "muted", typ: true },
         { json: "status", js: "status", typ: r("WorkspaceStatus") },
         { json: "title", js: "title", typ: "" },
     ], "any"),
@@ -6053,14 +6055,14 @@ const typeMap: any = {
     "MuteAuthorMessageCmd": [
         "mute_author",
     ],
-    "MuteMessageCmd": [
-        "mute",
-    ],
     "MutePRMessageCmd": [
         "mute_pr",
     ],
     "MuteRepoMessageCmd": [
         "mute_repo",
+    ],
+    "MuteWorkspaceMessageCmd": [
+        "mute_workspace",
     ],
     "PRActionResultMessageEvent": [
         "pr_action_result",

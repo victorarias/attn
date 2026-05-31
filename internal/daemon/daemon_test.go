@@ -1447,7 +1447,7 @@ func (b *fakeReviewLoopBackend) SetScrollback(sessionID, text string) {
 
 func addTestWorkspace(d *Daemon, id, directory string) {
 	d.store.AddWorkspace(&protocol.Workspace{ID: id, Title: id, Directory: directory, Status: protocol.WorkspaceStatusLaunching})
-	d.workspaces.register(id, id, directory)
+	d.workspaces.register(id, id, directory, false)
 }
 
 func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDForRecoverableClaudeSession(t *testing.T) {

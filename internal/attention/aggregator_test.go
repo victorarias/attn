@@ -18,21 +18,18 @@ func TestAggregator_Aggregate(t *testing.T) {
 			Label:      "working-session",
 			State:      protocol.SessionStateWorking,
 			StateSince: protocol.NewTimestamp(now).String(),
-			Muted:      false,
 		},
 		{
 			ID:         "sess-2",
 			Label:      "waiting-session",
 			State:      protocol.SessionStateWaitingInput,
 			StateSince: protocol.NewTimestamp(older).String(),
-			Muted:      false,
 		},
 		{
 			ID:         "sess-3",
-			Label:      "muted-waiting",
+			Label:      "another-waiting",
 			State:      protocol.SessionStateWaitingInput,
 			StateSince: protocol.NewTimestamp(now).String(),
-			Muted:      true,
 		},
 	}
 
@@ -73,13 +70,13 @@ func TestAggregator_Aggregate(t *testing.T) {
 	agg := NewAggregator(repos, nil)
 	result := agg.Aggregate(sessions, prs)
 
-	// Should have 2 items needing attention: sess-2 and github.com:owner/repo#1
-	if result.TotalCount != 2 {
-		t.Errorf("TotalCount = %d, want 2", result.TotalCount)
+	// Should have 3 items needing attention: two sessions and github.com:owner/repo#1.
+	if result.TotalCount != 3 {
+		t.Errorf("TotalCount = %d, want 3", result.TotalCount)
 	}
 
-	if result.SessionCount != 1 {
-		t.Errorf("SessionCount = %d, want 1", result.SessionCount)
+	if result.SessionCount != 2 {
+		t.Errorf("SessionCount = %d, want 2", result.SessionCount)
 	}
 
 	if result.PRCount != 1 {
@@ -88,8 +85,8 @@ func TestAggregator_Aggregate(t *testing.T) {
 
 	// Items should be sorted by Since (oldest first)
 	// oldest is the PR, then older is the session
-	if len(result.Items) != 2 {
-		t.Fatalf("Expected 2 items, got %d", len(result.Items))
+	if len(result.Items) != 3 {
+		t.Fatalf("Expected 3 items, got %d", len(result.Items))
 	}
 
 	if result.Items[0].Kind != "pr" {
@@ -114,17 +111,7 @@ func TestAggregator_EmptyInput(t *testing.T) {
 	}
 }
 
-func TestAggregator_AllMuted(t *testing.T) {
-	sessions := []protocol.Session{
-		{
-			ID:         "sess-1",
-			Label:      "muted",
-			State:      protocol.SessionStateWaitingInput,
-			StateSince: protocol.TimestampNow().String(),
-			Muted:      true,
-		},
-	}
-
+func TestAggregator_AllPRsMuted(t *testing.T) {
 	prs := []protocol.PR{
 		{
 			ID:          "github.com:owner/repo#1",
@@ -137,10 +124,10 @@ func TestAggregator_AllMuted(t *testing.T) {
 	}
 
 	agg := NewAggregator(nil, nil)
-	result := agg.Aggregate(sessions, prs)
+	result := agg.Aggregate(nil, prs)
 
 	if result.TotalCount != 0 {
-		t.Errorf("TotalCount = %d, want 0 (all muted)", result.TotalCount)
+		t.Errorf("TotalCount = %d, want 0 (all PRs muted)", result.TotalCount)
 	}
 }
 
@@ -174,7 +161,6 @@ func TestSessionAdapter(t *testing.T) {
 		Label:      "Test",
 		State:      protocol.SessionStateWaitingInput,
 		StateSince: protocol.TimestampNow().String(),
-		Muted:      false,
 	}
 
 	adapter := SessionAdapter{Session: session}

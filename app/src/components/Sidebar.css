@@ -478,6 +478,41 @@
   transition: opacity 0.1s;
 }
 
+.workspace-actions {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  margin-left: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s;
+}
+
+.workspace-group-header:hover .workspace-actions,
+.workspace-group-header:focus-within .workspace-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.workspace-action-btn {
+  align-items: center;
+  background: none;
+  border: none;
+  color: var(--color-text-dimmed);
+  cursor: pointer;
+  display: flex;
+  font-size: 14px;
+  height: 20px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 18px;
+}
+
+.workspace-action-btn:hover {
+  color: var(--color-text-primary);
+}
+
 .session-item:hover .session-actions,
 .session-item:focus-within .session-actions {
   opacity: 1;
@@ -753,7 +788,7 @@
   50% { opacity: 0.3; }
 }
 
-/* Muted sessions section */
+/* Muted workspaces section */
 .muted-sessions-section {
   border-top: 1px solid var(--color-border);
   padding: 4px 0;
@@ -799,18 +834,23 @@
   opacity: 0.55;
 }
 
+.muted-workspace {
+  opacity: 0.68;
+}
+
+.muted-workspace:hover,
+.muted-workspace.selected {
+  opacity: 0.9;
+}
+
+.muted-workspace-sessions {
+  padding-bottom: 4px;
+}
+
 .muted-session:hover {
   opacity: 0.75;
 }
 
 .muted-session[data-state="waiting_input"]::before {
   display: none;
-}
-
-.session-action-btn.mute-session-btn {
-  opacity: 0;
-}
-
-.session-item:hover .session-action-btn.mute-session-btn {
-  opacity: 1;
 }

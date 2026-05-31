@@ -331,7 +331,7 @@ function App() {
     sendMutePR,
     sendMuteRepo,
     sendMuteAuthor,
-    sendMuteSession,
+    sendMuteWorkspace,
     sendPRVisited,
     sendRefreshPRs,
     sendRegisterWorkspace,
@@ -446,7 +446,7 @@ function App() {
         sendMutePR={sendMutePR}
         sendMuteRepo={sendMuteRepo}
         sendMuteAuthor={sendMuteAuthor}
-        sendMuteSession={sendMuteSession}
+        sendMuteWorkspace={sendMuteWorkspace}
         sendPRVisited={sendPRVisited}
         sendRefreshPRs={sendRefreshPRs}
         sendRegisterWorkspace={sendRegisterWorkspace}
@@ -528,7 +528,7 @@ interface AppContentProps {
   sendMutePR: ReturnType<typeof useDaemonSocket>['sendMutePR'];
   sendMuteRepo: ReturnType<typeof useDaemonSocket>['sendMuteRepo'];
   sendMuteAuthor: ReturnType<typeof useDaemonSocket>['sendMuteAuthor'];
-  sendMuteSession: ReturnType<typeof useDaemonSocket>['sendMuteSession'];
+  sendMuteWorkspace: ReturnType<typeof useDaemonSocket>['sendMuteWorkspace'];
   sendPRVisited: ReturnType<typeof useDaemonSocket>['sendPRVisited'];
   sendRefreshPRs: ReturnType<typeof useDaemonSocket>['sendRefreshPRs'];
   sendRegisterWorkspace: ReturnType<typeof useDaemonSocket>['sendRegisterWorkspace'];
@@ -605,7 +605,7 @@ function AppContent({
   sendMutePR,
   sendMuteRepo,
   sendMuteAuthor,
-  sendMuteSession,
+  sendMuteWorkspace,
   sendPRVisited,
   sendRefreshPRs,
   sendRegisterWorkspace,
@@ -946,13 +946,10 @@ sendFetchPRDetails,
       isWorktree: daemonSession?.is_worktree ?? s.isWorktree,
       recoverable: daemonSession?.recoverable ?? false,
       reviewLoopStatus: reviewLoop?.status,
-      muted: daemonSession?.muted ?? false,
     };
   });
 
   const visibleEnrichedSessions = filterSessionsRepresentedInWorkspaceLayouts(daemonWorkspaces, enrichedLocalSessions);
-  const unmutedEnrichedSessions = visibleEnrichedSessions.filter((s) => !s.muted);
-  const mutedEnrichedSessions = visibleEnrichedSessions.filter((s) => s.muted);
 
   const {
     eventRouter: paneRuntimeEventRouter,
@@ -1879,7 +1876,24 @@ sendFetchPRDetails,
     setClosedWorktree(null);
   }, []);
 
-  // Calculate attention count for drawer badge (muted sessions excluded)
+  const workspaceViews = useMemo(
+    () => buildWorkspaceViewModels(daemonWorkspaces, visibleEnrichedSessions),
+    [daemonWorkspaces, visibleEnrichedSessions],
+  );
+  const unmutedWorkspaceViews = useMemo(
+    () => workspaceViews.filter((workspace) => !workspace.muted && workspace.sessions.length > 0),
+    [workspaceViews],
+  );
+  const mutedWorkspaceViews = useMemo(
+    () => workspaceViews.filter((workspace) => workspace.muted && workspace.sessions.length > 0),
+    [workspaceViews],
+  );
+  const unmutedEnrichedSessions = useMemo(
+    () => unmutedWorkspaceViews.flatMap((workspace) => workspace.sessions),
+    [unmutedWorkspaceViews],
+  );
+
+  // Calculate attention count for drawer badge (muted workspaces excluded)
   const waitingLocalSessions = unmutedEnrichedSessions
     .filter((s) => isAttentionSessionState(s.state) || s.reviewLoopStatus === 'awaiting_user' || s.reviewLoopStatus === 'error')
     .map((s) => ({
@@ -1903,14 +1917,9 @@ sendFetchPRDetails,
     }
   }, [unmutedEnrichedSessions, handleSelectSession]);
 
-  const workspaceViews = useMemo(
-    () => buildWorkspaceViewModels(daemonWorkspaces, visibleEnrichedSessions),
-    [daemonWorkspaces, visibleEnrichedSessions],
-  );
   const sidebarWorkspaceViews = useMemo(
-    () => buildWorkspaceViewModels(daemonWorkspaces, unmutedEnrichedSessions)
-      .filter((workspace) => workspace.sessions.length > 0),
-    [daemonWorkspaces, unmutedEnrichedSessions],
+    () => unmutedWorkspaceViews,
+    [unmutedWorkspaceViews],
   );
   const workspaceSelection = useWorkspaceSelectionController(workspaceViews, activeSessionId);
   const activeWorkspaceId = workspaceSelection.activeWorkspaceId;
@@ -2470,7 +2479,7 @@ sendFetchPRDetails,
       <div className={`view-container ${view === 'dashboard' ? 'visible' : 'hidden'}`}>
         <Dashboard
           sessions={unmutedEnrichedSessions}
-          mutedSessions={mutedEnrichedSessions}
+          mutedWorkspaces={mutedWorkspaceViews}
           prs={prs}
           isLoading={!hasReceivedInitialState}
           isRefreshing={isRefreshingPRs}
@@ -2502,10 +2511,10 @@ sendFetchPRDetails,
           collapsed={sidebarCollapsed}
           headerActions={sidebarHeaderActions}
           footerShortcuts={sidebarFooterShortcuts}
-          mutedSessions={mutedEnrichedSessions}
+          mutedWorkspaces={mutedWorkspaceViews}
           mutedExpanded={sidebarMutedExpanded}
           onMutedExpandedChange={setSidebarMutedExpanded}
-          onMuteSession={sendMuteSession}
+          onMuteWorkspace={sendMuteWorkspace}
           onSelectSession={handleSelectSession}
           onSelectWorkspace={handleSelectWorkspace}
           onNewSession={() => handleNewSession('vertical')}

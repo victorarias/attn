@@ -15,6 +15,7 @@ export interface WorkspaceViewWorkspace {
   title: string;
   directory: string;
   status?: string;
+  muted?: boolean;
   endpointId?: string;
   endpoint_id?: string;
   layout?: {
@@ -29,6 +30,7 @@ export interface WorkspaceWithSessions<TSession extends WorkspaceViewSession = W
   title: string;
   directory: string;
   status?: string;
+  muted?: boolean;
   endpointId?: string;
   sessions: TSession[];
   firstSessionId: string | null;
@@ -125,6 +127,7 @@ function toWorkspaceViewModel<TSession extends WorkspaceViewSession>(
     title: workspace.title,
     directory: workspace.directory,
     status: workspace.status,
+    muted: workspace.muted ?? false,
     endpointId: workspaceEndpointId(workspace) || (sessions[0] ? sessionEndpointId(sessions[0]) : undefined),
     sessions,
     firstSessionId,

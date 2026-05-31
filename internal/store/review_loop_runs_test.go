@@ -223,7 +223,6 @@ func insertTestSession(t *testing.T, s *Store, sessionID string) {
 		StateSince:     "2026-03-06T09:00:00Z",
 		StateUpdatedAt: "2026-03-06T09:00:00Z",
 		LastSeen:       "2026-03-06T09:00:00Z",
-		Muted:          false,
 	})
 	if got := s.Get(sessionID); got == nil {
 		t.Fatalf("insert test session %q did not persist", sessionID)

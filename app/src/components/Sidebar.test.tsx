@@ -35,6 +35,7 @@ function buildSidebarData(sessions: TestSession[]) {
         id: session.workspaceId,
         title: session.label,
         directory: session.cwd || session.id,
+        muted: false,
       })),
     viewSessions,
   );
@@ -264,5 +265,39 @@ describe('Sidebar', () => {
     expect(screen.getAllByText('gpu-box')).toHaveLength(2);
     expect(screen.getByTestId('close-session-remote-1')).toBeInTheDocument();
     expect(screen.getByTestId('reload-session-remote-1')).toBeInTheDocument();
+  });
+
+  it('mutes workspaces instead of individual sessions', () => {
+    const sidebarData = buildSidebarData([
+      { id: 's1', label: 'active', state: 'idle', cwd: '/repo/active' },
+      { id: 's2', label: 'quiet', state: 'waiting_input', cwd: '/repo/quiet' },
+    ]);
+    const mutedWorkspace = {
+      ...sidebarData.workspaces[1],
+      muted: true,
+    };
+    const onMuteWorkspace = vi.fn();
+
+    render(
+      <Sidebar
+        {...baseProps}
+        workspaces={[sidebarData.workspaces[0]]}
+        visualOrder={[sidebarData.workspaces[0]]}
+        visualIndexByWorkspaceId={new Map([[sidebarData.workspaces[0].id, 0]])}
+        mutedWorkspaces={[mutedWorkspace]}
+        mutedExpanded
+        onMuteWorkspace={onMuteWorkspace}
+      />
+    );
+
+    expect(screen.queryByTestId('mute-session-s1')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mute-workspace-workspace-/repo/active'));
+    expect(onMuteWorkspace).toHaveBeenCalledWith('workspace-/repo/active', undefined);
+
+    expect(screen.getByText('Muted Workspaces (1)')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-muted-workspace-workspace-/repo/quiet')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Unmute workspace quiet' }));
+    expect(onMuteWorkspace).toHaveBeenCalledWith('workspace-/repo/quiet', undefined);
   });
 });

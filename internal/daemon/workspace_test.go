@@ -1,9 +1,12 @@
 package daemon
 
 import (
+	"encoding/json"
+	"net"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -82,7 +85,7 @@ func TestRollupWorkspaceStatus_PriorityOrdering(t *testing.T) {
 
 func TestWorkspaceRegistry_RegisterUnregister(t *testing.T) {
 	r := newWorkspaceRegistry()
-	snapshot, isNew := r.register("ws1", "Workspace 1", "/repo")
+	snapshot, isNew := r.register("ws1", "Workspace 1", "/repo", false)
 	if !isNew {
 		t.Fatal("first register should be new")
 	}
@@ -93,7 +96,7 @@ func TestWorkspaceRegistry_RegisterUnregister(t *testing.T) {
 		t.Fatalf("initial status = %q, want idle", snapshot.Status)
 	}
 
-	_, isNew = r.register("ws1", "Renamed", "/repo")
+	_, isNew = r.register("ws1", "Renamed", "/repo", false)
 	if isNew {
 		t.Fatal("second register should not be new")
 	}
@@ -112,8 +115,8 @@ func TestWorkspaceRegistry_RegisterUnregister(t *testing.T) {
 
 func TestWorkspaceRegistry_AssociateAndDissociate(t *testing.T) {
 	r := newWorkspaceRegistry()
-	r.register("ws1", "ws", "/repo")
-	r.register("ws2", "ws", "/repo")
+	r.register("ws1", "ws", "/repo", false)
+	r.register("ws2", "ws", "/repo", false)
 
 	if !r.associateSession("s1", "ws1", "Session 1") {
 		t.Fatal("associate should succeed")
@@ -182,7 +185,7 @@ func TestDissociateLastSessionUnregistersWorkspace(t *testing.T) {
 
 func TestWorkspaceRegistry_UnregisterCleansSessionLinks(t *testing.T) {
 	r := newWorkspaceRegistry()
-	r.register("ws1", "ws", "/repo")
+	r.register("ws1", "ws", "/repo", false)
 	r.associateSession("s1", "ws1", "Session 1")
 	r.associateSession("s2", "ws1", "Session 2")
 
@@ -260,6 +263,59 @@ func TestHandleRegisterWorkspace_BroadcastsRegisteredThenStateChanged(t *testing
 	}
 	if events[1].Event != protocol.EventWorkspaceStateChanged {
 		t.Fatalf("second broadcast = %q, want workspace_state_changed", events[1].Event)
+	}
+}
+
+func TestHandleConnection_MuteWorkspaceDispatchesSocketCommand(t *testing.T) {
+	d := newDaemonForTest(t)
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        "ws1",
+		Title:     "Workspace 1",
+		Directory: "/repo",
+	})
+	cap := captureBroadcasts(d)
+
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.handleConnection(serverConn)
+	}()
+
+	if err := json.NewEncoder(clientConn).Encode(protocol.MuteWorkspaceMessage{
+		Cmd:         protocol.CmdMuteWorkspace,
+		WorkspaceID: "ws1",
+	}); err != nil {
+		t.Fatalf("send mute_workspace command: %v", err)
+	}
+	var resp protocol.Response
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode mute_workspace response: %v", err)
+	}
+	if !resp.Ok {
+		t.Fatalf("mute_workspace response ok=false error=%v", resp.Error)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("mute_workspace connection did not finish")
+	}
+
+	workspace := d.store.GetWorkspace("ws1")
+	if workspace == nil {
+		t.Fatal("workspace missing from store after mute")
+	}
+	if !workspace.Muted {
+		t.Fatal("workspace not muted in store after socket command")
+	}
+	events := cap.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("expected one workspace_state_changed broadcast, got %d: %+v", len(events), events)
+	}
+	if events[0].Event != protocol.EventWorkspaceStateChanged || events[0].Workspace == nil || !events[0].Workspace.Muted {
+		t.Fatalf("unexpected broadcast: %+v", events[0])
 	}
 }
 

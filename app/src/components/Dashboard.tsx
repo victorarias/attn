@@ -32,9 +32,15 @@ type DashboardSession = {
   reviewLoopStatus?: string;
 };
 
+type DashboardWorkspace = {
+  id: string;
+  title: string;
+  sessions: DashboardSession[];
+};
+
 interface DashboardProps {
   sessions: DashboardSession[];
-  mutedSessions?: DashboardSession[];
+  mutedWorkspaces?: DashboardWorkspace[];
   prs: DaemonPR[];
   isLoading: boolean;
   isRefreshing?: boolean;
@@ -52,7 +58,7 @@ interface DashboardProps {
 
 export function Dashboard({
   sessions,
-  mutedSessions = [],
+  mutedWorkspaces = [],
   prs,
   isLoading,
   isRefreshing,
@@ -312,7 +318,7 @@ export function Dashboard({
             </button>
           </div>
           <div className="card-body">
-            {sessions.length === 0 && mutedSessions.length === 0 ? (
+            {sessions.length === 0 && mutedWorkspaces.length === 0 ? (
               <div className="card-empty">No active sessions</div>
             ) : (
               <>
@@ -458,13 +464,13 @@ export function Dashboard({
                     ))}
                   </div>
                 )}
-                {mutedSessions.length > 0 && (
+                {mutedWorkspaces.length > 0 && (
                   <div
                     className="session-group muted-summary clickable"
                     data-testid="session-group-muted"
                     onClick={onMutedGroupClick}
                   >
-                    <div className="group-label dim">Muted Sessions ({mutedSessions.length})</div>
+                    <div className="group-label dim">Muted Workspaces ({mutedWorkspaces.length})</div>
                   </div>
                 )}
               </>

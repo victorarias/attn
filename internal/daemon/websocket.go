@@ -752,8 +752,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleMuteRepoWS(msg.(*protocol.MuteRepoMessage))
 	case protocol.CmdMuteAuthor:
 		d.handleMuteAuthorWS(msg.(*protocol.MuteAuthorMessage))
-	case protocol.CmdMute:
-		d.handleMuteSessionWS(msg.(*protocol.MuteMessage))
+	case protocol.CmdMuteWorkspace:
+		d.handleMuteWorkspaceWS(client, msg.(*protocol.MuteWorkspaceMessage))
 	case protocol.CmdRefreshPRs:
 		d.handleRefreshPRsWS(client)
 	case protocol.CmdFetchPRDetails:
@@ -979,10 +979,6 @@ func (d *Daemon) tryHandleRemoteWSCommand(client *wsClient, cmd string, msg inte
 
 func remoteCommandSessionID(cmd string, msg interface{}) string {
 	switch cmd {
-	case protocol.CmdMute:
-		if typed, ok := msg.(*protocol.MuteMessage); ok {
-			return typed.ID
-		}
 	case protocol.CmdSessionVisualized:
 		if typed, ok := msg.(*protocol.SessionVisualizedMessage); ok {
 			return typed.ID
@@ -1053,6 +1049,10 @@ func remoteCommandEndpointID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdRegisterWorkspace:
 		if typed, ok := msg.(*protocol.RegisterWorkspaceMessage); ok {
+			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
+		}
+	case protocol.CmdMuteWorkspace:
+		if typed, ok := msg.(*protocol.MuteWorkspaceMessage); ok {
 			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
 		}
 	case protocol.CmdCreateWorktree:
