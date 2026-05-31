@@ -175,6 +175,21 @@ func (c *Client) ToggleWorkspaceMute(workspaceID string) error {
 	return err
 }
 
+// OpenMarkdown docks a live-reloading markdown panel for the given absolute file
+// path. An empty sessionID lets the daemon target the currently selected
+// session's workspace.
+func (c *Client) OpenMarkdown(path, sessionID string) error {
+	msg := protocol.OpenMarkdownMessage{
+		Cmd:  protocol.CmdOpenMarkdown,
+		Path: path,
+	}
+	if sessionID != "" {
+		msg.SessionID = protocol.Ptr(sessionID)
+	}
+	_, err := c.send(msg)
+	return err
+}
+
 // QueryPRs returns PRs matching the filter
 func (c *Client) QueryPRs(filter string) ([]protocol.PR, error) {
 	var filterPtr *string

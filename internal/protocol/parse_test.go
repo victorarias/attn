@@ -181,3 +181,51 @@ func TestParseWorkspaceLayoutUndockPanel(t *testing.T) {
 		t.Errorf("fields = %q/%q, want ws1/panel-md", msg.WorkspaceID, msg.PanelID)
 	}
 }
+
+func TestParseWorkspaceLayoutDockPanelParams(t *testing.T) {
+	input := `{"cmd":"workspace_layout_dock_panel","workspace_id":"ws1","anchor_pane_id":"pane-a","edge":"right","panel_id":"panel-md","panel_kind":"markdown","panel_params":"/abs/file.md"}`
+	_, data, err := ParseMessage([]byte(input))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	msg := data.(*WorkspaceLayoutDockPanelMessage)
+	if msg.PanelParams == nil || *msg.PanelParams != "/abs/file.md" {
+		t.Errorf("panel_params = %v, want /abs/file.md", msg.PanelParams)
+	}
+}
+
+func TestParseWorkspacePanelContentGet(t *testing.T) {
+	input := `{"cmd":"workspace_panel_content_get","workspace_id":"ws1","panel_id":"panel-md"}`
+	cmd, data, err := ParseMessage([]byte(input))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if cmd != CmdWorkspacePanelContentGet {
+		t.Fatalf("cmd = %q, want %q", cmd, CmdWorkspacePanelContentGet)
+	}
+	msg, ok := data.(*WorkspacePanelContentGetMessage)
+	if !ok {
+		t.Fatalf("data type = %T, want *WorkspacePanelContentGetMessage", data)
+	}
+	if msg.WorkspaceID != "ws1" || msg.PanelID != "panel-md" {
+		t.Errorf("fields = %q/%q, want ws1/panel-md", msg.WorkspaceID, msg.PanelID)
+	}
+}
+
+func TestParseOpenMarkdown(t *testing.T) {
+	input := `{"cmd":"open_markdown","path":"/abs/file.md","session_id":"sess-1"}`
+	cmd, data, err := ParseMessage([]byte(input))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if cmd != CmdOpenMarkdown {
+		t.Fatalf("cmd = %q, want %q", cmd, CmdOpenMarkdown)
+	}
+	msg, ok := data.(*OpenMarkdownMessage)
+	if !ok {
+		t.Fatalf("data type = %T, want *OpenMarkdownMessage", data)
+	}
+	if msg.Path != "/abs/file.md" || msg.SessionID == nil || *msg.SessionID != "sess-1" {
+		t.Errorf("fields = %q/%v, want /abs/file.md/sess-1", msg.Path, msg.SessionID)
+	}
+}

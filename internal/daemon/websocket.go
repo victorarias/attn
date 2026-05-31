@@ -880,6 +880,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkspaceLayoutDockPanel(client, msg.(*protocol.WorkspaceLayoutDockPanelMessage))
 	case protocol.CmdWorkspaceLayoutUndockPanel:
 		d.handleWorkspaceLayoutUndockPanel(client, msg.(*protocol.WorkspaceLayoutUndockPanelMessage))
+	case protocol.CmdWorkspacePanelContentGet:
+		d.handleWorkspacePanelContentGet(client, msg.(*protocol.WorkspacePanelContentGetMessage))
 	case protocol.CmdRegisterWorkspace:
 		d.handleRegisterWorkspace(client, msg.(*protocol.RegisterWorkspaceMessage))
 	case protocol.CmdUnregisterWorkspace:

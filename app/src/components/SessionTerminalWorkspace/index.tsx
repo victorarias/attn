@@ -9,10 +9,12 @@ import {
   hasPane,
   findPaneInDirection,
   leafSlotId,
+  panelContentKey,
   type SplitDivider,
   type TerminalNavigationDirection,
   type TerminalLayoutNode,
   type PanelLeaf,
+  type PanelContentState,
   type NormalizedPaneBounds,
   type TerminalSplitDirection,
   type TerminalDockEdge,
@@ -170,6 +172,8 @@ interface SessionTerminalWorkspaceProps {
   onResizeSplit?: (splitId: string, ratio: number) => void;
   onDockPanel?: (panelId: string, panelKind: string, anchorPaneId: string, edge: TerminalDockEdge) => void;
   onUndockPanel?: (panelId: string) => void;
+  panelContents?: Record<string, PanelContentState>;
+  onRequestPanelContent?: (workspaceId: string, panelId: string) => void;
 }
 
 export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandle, SessionTerminalWorkspaceProps>(
@@ -193,6 +197,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onResizeSplit,
     onDockPanel,
     onUndockPanel,
+    panelContents,
+    onRequestPanelContent,
   }, ref) {
     const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null);
     const [zoomedPaneId, setZoomedPaneId] = useState<string | null>(null);
@@ -672,9 +678,12 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           >
             <WorkspaceDockPanel
               panel={panelLeaf}
+              workspaceId={workspaceId}
+              content={panelContents?.[panelContentKey(workspaceId, panelLeaf.panelId)]}
               dragging={draggingPanelId === panelLeaf.panelId}
               onClose={() => onUndockPanel?.(panelLeaf.panelId)}
               onHeaderPointerDown={(event) => beginPanelDrag(panelLeaf.panelId, event)}
+              onRequestContent={onRequestPanelContent ?? (() => {})}
             />
           </div>
         );
@@ -687,6 +696,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       draggingPanelId,
       onUndockPanel,
       panelLeafById,
+      panelContents,
+      onRequestPanelContent,
+      workspaceId,
       fontSize,
       handleAgentPaneMouseDown,
       handleGhosttyTerminalReady,

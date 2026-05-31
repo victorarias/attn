@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "75"
+const ProtocolVersion = "76"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -113,6 +113,8 @@ const (
 	CmdWorkspaceLayoutSetSplitRatio  = "workspace_layout_set_split_ratio"
 	CmdWorkspaceLayoutDockPanel      = "workspace_layout_dock_panel"
 	CmdWorkspaceLayoutUndockPanel    = "workspace_layout_undock_panel"
+	CmdWorkspacePanelContentGet      = "workspace_panel_content_get"
+	CmdOpenMarkdown                  = "open_markdown"
 	CmdRegisterWorkspace             = "register_workspace"
 	CmdUnregisterWorkspace           = "unregister_workspace"
 )
@@ -180,6 +182,7 @@ const (
 	EventWorkspaceLayout             = "workspace_layout"
 	EventWorkspaceLayoutUpdated      = "workspace_layout_updated"
 	EventWorkspaceLayoutActionResult = "workspace_layout_action_result"
+	EventWorkspacePanelContent       = "workspace_panel_content"
 	EventCommandError                = "command_error"
 )
 
@@ -833,6 +836,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg WorkspaceLayoutUndockPanelMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal workspace_layout_undock_panel: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkspacePanelContentGet:
+		var msg WorkspacePanelContentGetMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workspace_panel_content_get: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdOpenMarkdown:
+		var msg OpenMarkdownMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal open_markdown: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

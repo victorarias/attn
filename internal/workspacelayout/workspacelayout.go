@@ -62,11 +62,16 @@ type Node struct {
 	// Panels are first-class layout citizens alongside agent panes: they take
 	// real space, resize through the same split machinery, and persist with the
 	// layout. PanelKind is opaque to the daemon (see PanelKind).
-	PanelID   string    `json:"panel_id,omitempty"`
-	PanelKind string    `json:"panel_kind,omitempty"`
-	SplitID   string    `json:"split_id,omitempty"`
-	Direction Direction `json:"direction,omitempty"`
-	Ratio     float64   `json:"ratio,omitempty"`
+	PanelID   string `json:"panel_id,omitempty"`
+	PanelKind string `json:"panel_kind,omitempty"`
+	// PanelParams is opaque to this package: it persists and reproduces with
+	// the layout, but the daemon's layout machinery never interprets it. A
+	// consumer (e.g. the markdown content service) reads it — for markdown it
+	// holds the absolute path of the file the panel renders.
+	PanelParams string    `json:"panel_params,omitempty"`
+	SplitID     string    `json:"split_id,omitempty"`
+	Direction   Direction `json:"direction,omitempty"`
+	Ratio       float64   `json:"ratio,omitempty"`
 	// RatioLocked marks a split whose ratio the user set explicitly (by
 	// dragging the divider) or that anchors a panel. Locked ratios survive
 	// normalization instead of being rebalanced back to an equal split.
@@ -253,9 +258,10 @@ func normalizeNode(node Node, panesByID map[string]Pane) (Node, bool) {
 			return Node{}, true
 		}
 		return Node{
-			Type:      "panel",
-			PanelID:   panelID,
-			PanelKind: panelKind,
+			Type:        "panel",
+			PanelID:     panelID,
+			PanelKind:   panelKind,
+			PanelParams: node.PanelParams,
 		}, false
 	case "split":
 		children := make([]Node, 0, 2)
@@ -482,6 +488,54 @@ func hasLeaf(node Node, leafID string) bool {
 	return HasPane(node, leafID) || HasPanel(node, leafID)
 }
 
+// PanelParamsByID returns the opaque params of the panel with the given id.
+// The bool reports whether such a panel exists.
+func PanelParamsByID(node Node, panelID string) (string, bool) {
+	switch node.Type {
+	case "panel":
+		if node.PanelID == panelID {
+			return node.PanelParams, true
+		}
+	case "split":
+		for _, child := range node.Children {
+			if params, ok := PanelParamsByID(child, panelID); ok {
+				return params, true
+			}
+		}
+	}
+	return "", false
+}
+
+// PanelLeaf is a flattened view of a docked panel for consumers that need to
+// act on panels (e.g. the markdown content service) without walking the tree.
+type PanelLeaf struct {
+	PanelID     string
+	PanelKind   string
+	PanelParams string
+}
+
+// PanelLeaves returns every docked panel in the tree as a flat slice.
+func PanelLeaves(node Node) []PanelLeaf {
+	var leaves []PanelLeaf
+	collectPanelLeaves(node, &leaves)
+	return leaves
+}
+
+func collectPanelLeaves(node Node, leaves *[]PanelLeaf) {
+	switch node.Type {
+	case "panel":
+		*leaves = append(*leaves, PanelLeaf{
+			PanelID:     node.PanelID,
+			PanelKind:   node.PanelKind,
+			PanelParams: node.PanelParams,
+		})
+	case "split":
+		for _, child := range node.Children {
+			collectPanelLeaves(child, leaves)
+		}
+	}
+}
+
 // DockPanel inserts (or moves) a panel leaf beside the anchor leaf. Docking is
 // idempotent and doubles as a move: any existing instance of panelID is removed
 // first, then the panel is re-inserted at the new anchor. `before` controls
@@ -493,7 +547,7 @@ func hasLeaf(node Node, leafID string) bool {
 // be docked between existing panes or next to one another. The new split is
 // RatioLocked so a panel keeps its size instead of being equalized with
 // terminals during normalization.
-func DockPanel(node Node, anchorID string, direction Direction, before bool, splitID, panelID, panelKind string, ratio float64) (Node, bool) {
+func DockPanel(node Node, anchorID string, direction Direction, before bool, splitID, panelID, panelKind, panelParams string, ratio float64) (Node, bool) {
 	panelID = strings.TrimSpace(panelID)
 	panelKind = strings.TrimSpace(panelKind)
 	anchorID = strings.TrimSpace(anchorID)
@@ -520,7 +574,7 @@ func DockPanel(node Node, anchorID string, direction Direction, before bool, spl
 		return node, false
 	}
 
-	panel := Node{Type: "panel", PanelID: panelID, PanelKind: panelKind}
+	panel := Node{Type: "panel", PanelID: panelID, PanelKind: panelKind, PanelParams: strings.TrimSpace(panelParams)}
 	next, ok := insertBesideLeaf(cleaned, anchorID, direction, before, splitID, ratio, panel)
 	if !ok {
 		return node, false

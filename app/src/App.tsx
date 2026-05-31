@@ -3,7 +3,7 @@ import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sidebar, type SidebarHeaderAction, type FooterShortcut, ReviewLoopIcon, EditorIcon, DiffIcon, PRsIcon, MarkdownIcon } from './components/Sidebar';
+import { Sidebar, type SidebarHeaderAction, type FooterShortcut, ReviewLoopIcon, EditorIcon, DiffIcon, PRsIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
@@ -31,7 +31,7 @@ import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, Daemon
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
-import { hasPane, findPanelByKind, type TerminalSplitDirection } from './types/workspace';
+import { hasPane, type TerminalSplitDirection } from './types/workspace';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -86,9 +86,6 @@ interface GitHubReleaseResponse {
   draft?: boolean;
 }
 
-// Stable id for the workspace's single markdown panel. One per workspace keeps
-// dock/undock idempotent without tracking per-instance ids.
-const MARKDOWN_PANEL_ID = 'panel-markdown';
 
 function terminalStateForWorkspaceSessions(sessions: Session[]): TerminalWorkspaceState | null {
   let selected: TerminalWorkspaceState | null = null;
@@ -384,6 +381,8 @@ function App() {
     sendWorkspaceSetSplitRatio,
     sendWorkspaceDockPanel,
     sendWorkspaceUndockPanel,
+    panelContents,
+    requestPanelContent,
     sendRuntimeInput,
     isRuntimeAttached,
     sendGetFileDiff,
@@ -503,6 +502,8 @@ function App() {
         sendWorkspaceSetSplitRatio={sendWorkspaceSetSplitRatio}
         sendWorkspaceDockPanel={sendWorkspaceDockPanel}
         sendWorkspaceUndockPanel={sendWorkspaceUndockPanel}
+        panelContents={panelContents}
+        requestPanelContent={requestPanelContent}
         sendRuntimeInput={sendRuntimeInput}
         isRuntimeAttached={isRuntimeAttached}
         sendGetFileDiff={sendGetFileDiff}
@@ -589,6 +590,8 @@ interface AppContentProps {
   sendWorkspaceSetSplitRatio: ReturnType<typeof useDaemonSocket>['sendWorkspaceSetSplitRatio'];
   sendWorkspaceDockPanel: ReturnType<typeof useDaemonSocket>['sendWorkspaceDockPanel'];
   sendWorkspaceUndockPanel: ReturnType<typeof useDaemonSocket>['sendWorkspaceUndockPanel'];
+  panelContents: ReturnType<typeof useDaemonSocket>['panelContents'];
+  requestPanelContent: ReturnType<typeof useDaemonSocket>['requestPanelContent'];
   sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
   isRuntimeAttached: ReturnType<typeof useDaemonSocket>['isRuntimeAttached'];
   sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
@@ -670,6 +673,8 @@ sendFetchPRDetails,
   sendWorkspaceSetSplitRatio,
   sendWorkspaceDockPanel,
   sendWorkspaceUndockPanel,
+  panelContents,
+  requestPanelContent,
   sendRuntimeInput,
   isRuntimeAttached,
   sendGetFileDiff,
@@ -1979,35 +1984,9 @@ sendFetchPRDetails,
   const workspaceSelection = useWorkspaceSelectionController(workspaceViews, activeSessionId);
   const activeWorkspaceId = workspaceSelection.activeWorkspaceId;
 
-  // Markdown panel: a daemon-owned docked panel (persisted, cross-client). The
-  // sidebar toggle docks/undocks it in the active workspace; "open" is simply
-  // whether the active workspace's layout holds a markdown panel.
-  const activeWorkspaceLayoutTree = useMemo(() => {
-    if (!activeWorkspaceId) {
-      return null;
-    }
-    const view = workspaceViews.find((workspace) => workspace.id === activeWorkspaceId);
-    if (!view) {
-      return null;
-    }
-    return terminalStateForWorkspaceSessions(view.sessions)?.layoutTree ?? null;
-  }, [activeWorkspaceId, workspaceViews]);
-  const markdownPanel = useMemo(
-    () => findPanelByKind(activeWorkspaceLayoutTree, 'markdown'),
-    [activeWorkspaceLayoutTree],
-  );
-  const markdownPanelOpen = markdownPanel != null;
-
-  const toggleMarkdownPanel = useCallback(() => {
-    if (!activeWorkspaceId) {
-      return;
-    }
-    if (markdownPanel) {
-      void sendWorkspaceUndockPanel(activeWorkspaceId, markdownPanel.panelId).catch(() => {});
-    } else {
-      void sendWorkspaceDockPanel(activeWorkspaceId, MARKDOWN_PANEL_ID, 'markdown', { edge: 'right' }).catch(() => {});
-    }
-  }, [activeWorkspaceId, markdownPanel, sendWorkspaceDockPanel, sendWorkspaceUndockPanel]);
+  // Markdown panels are daemon-owned docked panels opened via `attn open <path>`
+  // (and re-dockable by dragging). There is no empty "show panel" toggle: a
+  // panel only exists once it points at a real file.
 
   // Use workspace order so ⌘1-9 and prev/next match the top-level sidebar rows.
   const visualWorkspaces = sidebarWorkspaceViews;
@@ -2401,13 +2380,6 @@ sendFetchPRDetails,
       shortcutHint: `${formatShortcut('dock.attention')} PRs`,
       onClick: () => toggleDockPanel('attention'),
     },
-    {
-      id: 'markdown',
-      title: markdownPanelOpen ? 'Hide Markdown Panel' : 'Show Markdown Panel',
-      icon: <MarkdownIcon />,
-      active: markdownPanelOpen,
-      onClick: toggleMarkdownPanel,
-    },
   ]), [
     activeReviewLoopAvailable,
     activeReviewLoopState?.status,
@@ -2417,10 +2389,8 @@ sendFetchPRDetails,
     attentionPanelOpen,
     diffPanelOpen,
     handleOpenEditorForSession,
-    markdownPanelOpen,
     reviewLoopPanelOpen,
     toggleDockPanel,
-    toggleMarkdownPanel,
   ]);
 
   const activeSessionZoomed = activeWorkspaceId ? Boolean(zoomModeBySessionId[activeWorkspaceId]) : false;
@@ -2700,6 +2670,8 @@ sendFetchPRDetails,
                     onUndockPanel={(panelId) => {
                       void sendWorkspaceUndockPanel(workspace.id, panelId).catch(() => {});
                     }}
+                    panelContents={panelContents}
+                    onRequestPanelContent={requestPanelContent}
                   />
                 </div>
               );

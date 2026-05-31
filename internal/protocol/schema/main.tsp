@@ -843,6 +843,9 @@ model WorkspaceLayoutDockPanelMessage {
   edge: WorkspaceLayoutDockEdge;
   panel_id: string;
   panel_kind: string;
+  // Opaque per-panel data persisted with the layout. For markdown panels this
+  // is the absolute path of the file the panel renders.
+  panel_params?: string;
   ratio?: float64;
 }
 
@@ -850,6 +853,24 @@ model WorkspaceLayoutUndockPanelMessage {
   cmd: "workspace_layout_undock_panel";
   workspace_id: string;
   panel_id: string;
+}
+
+// Request the current rendered content of a docked panel (e.g. the markdown
+// file a markdown panel points at). The daemon resolves the file from the
+// panel's persisted params, reads it, and replies with WorkspacePanelContentMessage.
+model WorkspacePanelContentGetMessage {
+  cmd: "workspace_panel_content_get";
+  workspace_id: string;
+  panel_id: string;
+}
+
+// Open a markdown file into a docked, live-reloading panel. Sent by the
+// `attn open` CLI over the unix socket. When session_id is empty the daemon
+// targets the currently selected session's workspace.
+model OpenMarkdownMessage {
+  cmd: "open_markdown";
+  path: string;
+  session_id?: string;
 }
 
 model RegisterWorkspaceMessage {
@@ -959,6 +980,20 @@ model WorkspaceLayoutActionResultMessage {
   workspace_id: string;
   pane_id?: string;
   success: boolean;
+  error?: string;
+}
+
+// Rendered content of a docked panel. Sent as the reply to
+// workspace_panel_content_get and broadcast whenever the underlying file
+// changes (live reload). For markdown, content is the raw file text and path is
+// its absolute path; error is set when the file can't be read.
+model WorkspacePanelContentMessage {
+  event: "workspace_panel_content";
+  workspace_id: string;
+  panel_id: string;
+  panel_kind: string;
+  path: string;
+  content: string;
   error?: string;
 }
 
@@ -1449,6 +1484,9 @@ model WebSocketEvent {
   // Session/PR/repo state payloads
   id?: string;
   pane_id?: string;
+  panel_id?: string;
+  panel_kind?: string;
+  content?: string;
   runtime_id?: string;
   session_id?: string;
   workspace_id?: string;
@@ -1541,6 +1579,7 @@ alias DaemonEvent =
   | WorkspaceLayoutMessage
   | WorkspaceLayoutUpdatedMessage
   | WorkspaceLayoutActionResultMessage
+  | WorkspacePanelContentMessage
   | PRsUpdatedMessage
   | ReposUpdatedMessage
   | AuthorsUpdatedMessage

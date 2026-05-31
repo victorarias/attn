@@ -201,6 +201,37 @@ func (s *Store) FindWorkspaceLayoutPaneBySessionID(sessionID string) (workspaceI
 	return rowWorkspaceID, rowPaneID, true
 }
 
+// WorkspaceLayoutIDs returns the ids of every persisted workspace layout. The
+// markdown content service uses this to re-establish file watches on startup.
+func (s *Store) WorkspaceLayoutIDs() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		ids := make([]string, 0, len(s.workspaces))
+		for id := range s.workspaces {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+
+	rows, err := s.db.Query(`SELECT workspace_id FROM workspace_layouts`)
+	if err != nil {
+		log.Printf("[store] WorkspaceLayoutIDs: query failed: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 func (s *Store) RemoveWorkspaceLayout(workspaceID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

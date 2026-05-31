@@ -44,7 +44,7 @@ import {
   spawnPtyRuntime,
 } from '../pty/runtimeLifecycle';
 import { createPtyTransportState } from '../pty/transportState';
-import type { TerminalDockEdge } from '../types/workspace';
+import { panelContentKey, type TerminalDockEdge, type PanelContentState } from '../types/workspace';
 import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import { recordPtyCommand, recordWsJsonParse } from '../utils/ptyPerf';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
@@ -151,7 +151,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '75';
+const PROTOCOL_VERSION = '76';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -618,6 +618,9 @@ export function useDaemonSocket({
   const [rateLimit, setRateLimit] = useState<RateLimitState | null>(null);
   const [warnings, setWarnings] = useState<DaemonWarning[]>([]);
   const [gitOperations, setGitOperations] = useState<Record<string, DaemonGitOperation>>({});
+  // Daemon-served content for docked panels (markdown files), keyed by
+  // panelContentKey. Updated by workspace_panel_content events (reply + live reload).
+  const [panelContents, setPanelContents] = useState<Record<string, PanelContentState>>({});
 
   // Circuit breaker state for reconnect storms
   const reconnectAttemptsRef = useRef(0);
@@ -1005,6 +1008,21 @@ export function useDaemonSocket({
               } else {
                 pending.reject(new Error(data.error || 'Workspace action failed'));
               }
+            }
+            break;
+          }
+
+          case 'workspace_panel_content': {
+            if (typeof data.workspace_id === 'string' && typeof data.panel_id === 'string') {
+              const key = panelContentKey(data.workspace_id, data.panel_id);
+              setPanelContents((prev) => ({
+                ...prev,
+                [key]: {
+                  path: typeof data.path === 'string' ? data.path : '',
+                  content: typeof data.content === 'string' ? data.content : '',
+                  error: typeof data.error === 'string' ? data.error : undefined,
+                },
+              }));
             }
             break;
           }
@@ -2201,6 +2219,16 @@ export function useDaemonSocket({
       },
     );
   }, [sendWorkspaceCommand]);
+
+  // requestPanelContent pulls a panel's current content (used on first render).
+  // The reply and all subsequent live-reload updates arrive as
+  // workspace_panel_content events handled above. Fire-and-forget: no result
+  // tracking needed.
+  const requestPanelContent = useCallback((workspaceId: string, panelId: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'workspace_panel_content_get', workspace_id: workspaceId, panel_id: panelId }));
+  }, []);
 
   useEffect(() => {
     setPtyBackend({
@@ -3490,6 +3518,8 @@ export function useDaemonSocket({
     sendWorkspaceSetSplitRatio,
     sendWorkspaceDockPanel,
     sendWorkspaceUndockPanel,
+    panelContents,
+    requestPanelContent,
     sendRuntimeInput: sendPtyInput,
     isRuntimeAttached,
     sendGetFileDiff,

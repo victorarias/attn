@@ -134,6 +134,9 @@ func main() {
 	case "list":
 		maybePrintProfileBanner()
 		runList()
+	case "open":
+		maybePrintProfileBanner()
+		runOpen()
 	case "_hook-stop":
 		runHookStop()
 	case "_hook-session-start":
@@ -340,6 +343,39 @@ func runList() {
 		fmt.Fprintf(os.Stderr, "error encoding sessions: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// runOpen handles `attn open <file.md> [--session <id>]`, docking a
+// live-reloading markdown panel into a workspace. The session defaults to
+// ATTN_SESSION_ID (set inside attn-managed agents), then the daemon's currently
+// selected session.
+func runOpen() {
+	fs := flag.NewFlagSet("open", flag.ExitOnError)
+	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID, then the selected session)")
+	_ = fs.Parse(os.Args[2:])
+
+	rawPath := strings.TrimSpace(fs.Arg(0))
+	if rawPath == "" {
+		fmt.Fprintln(os.Stderr, "usage: attn open <file.md> [--session <id>]")
+		os.Exit(1)
+	}
+	absPath, err := filepath.Abs(rawPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "open: resolve path: %v\n", err)
+		os.Exit(1)
+	}
+
+	resolvedSession := strings.TrimSpace(*sessionID)
+	if resolvedSession == "" {
+		resolvedSession = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+	}
+
+	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
+	if err := c.OpenMarkdown(absPath, resolvedSession); err != nil {
+		fmt.Fprintf(os.Stderr, "open: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("opened %s\n", absPath)
 }
 
 func runReviewLoop() {

@@ -1190,6 +1190,17 @@ type MuteWorkspaceMessage struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
+type OpenMarkdownMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+}
+
 type PR struct {
 	// ApprovedByMe corresponds to the JSON schema field "approved_by_me".
 	ApprovedByMe bool `json:"approved_by_me"`
@@ -2451,6 +2462,9 @@ type WebSocketEvent struct {
 	// Conflict corresponds to the JSON schema field "conflict".
 	Conflict *bool `json:"conflict,omitempty,omitzero"`
 
+	// Content corresponds to the JSON schema field "content".
+	Content *string `json:"content,omitempty,omitzero"`
+
 	// Data corresponds to the JSON schema field "data".
 	Data *string `json:"data,omitempty,omitzero"`
 
@@ -2495,6 +2509,12 @@ type WebSocketEvent struct {
 
 	// PaneID corresponds to the JSON schema field "pane_id".
 	PaneID *string `json:"pane_id,omitempty,omitzero"`
+
+	// PanelID corresponds to the JSON schema field "panel_id".
+	PanelID *string `json:"panel_id,omitempty,omitzero"`
+
+	// PanelKind corresponds to the JSON schema field "panel_kind".
+	PanelKind *string `json:"panel_kind,omitempty,omitzero"`
 
 	// Path corresponds to the JSON schema field "path".
 	Path *string `json:"path,omitempty,omitzero"`
@@ -2743,6 +2763,9 @@ type WorkspaceLayoutDockPanelMessage struct {
 	// PanelKind corresponds to the JSON schema field "panel_kind".
 	PanelKind string `json:"panel_kind"`
 
+	// PanelParams corresponds to the JSON schema field "panel_params".
+	PanelParams *string `json:"panel_params,omitempty,omitzero"`
+
 	// Ratio corresponds to the JSON schema field "ratio".
 	Ratio *float64 `json:"ratio,omitempty,omitzero"`
 
@@ -2863,6 +2886,40 @@ type WorkspaceLayoutUpdatedMessage struct {
 
 	// WorkspaceLayout corresponds to the JSON schema field "workspace_layout".
 	WorkspaceLayout WorkspaceLayout `json:"workspace_layout"`
+}
+
+type WorkspacePanelContentGetMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// PanelID corresponds to the JSON schema field "panel_id".
+	PanelID string `json:"panel_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspacePanelContentMessage struct {
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// PanelID corresponds to the JSON schema field "panel_id".
+	PanelID string `json:"panel_id"`
+
+	// PanelKind corresponds to the JSON schema field "panel_kind".
+	PanelKind string `json:"panel_kind"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
 }
 
 type WorkspaceRegisteredMessage struct {

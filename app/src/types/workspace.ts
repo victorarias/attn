@@ -23,9 +23,28 @@ export interface PanelLeaf {
   type: 'panel';
   panelId: string;
   panelKind: PanelKind;
+  // Opaque per-panel data persisted with the layout by the daemon. For markdown
+  // panels this is the absolute path of the file the panel renders. Empty when
+  // the daemon persisted no params.
+  panelParams?: string;
 }
 
 export type TerminalLeaf = TerminalPaneLeaf | PanelLeaf;
+
+// Daemon-served rendered content for a docked panel (the markdown file's text).
+// Delivered as the reply to workspace_panel_content_get and re-pushed on every
+// on-disk change (live reload). Absent from the store until the first reply.
+export interface PanelContentState {
+  path: string;
+  content: string;
+  error?: string;
+}
+
+// panelContentKey keys panel content by workspace + panel, since a panel id like
+// `panel-markdown` is reused across workspaces.
+export function panelContentKey(workspaceId: string, panelId: string): string {
+  return `${workspaceId}::${panelId}`;
+}
 
 export interface TerminalSplitNode {
   type: 'split';
@@ -345,6 +364,7 @@ function parseLayoutNode(raw: unknown): TerminalLayoutNode | null {
       type: 'panel',
       panelId: value.panel_id,
       panelKind: value.panel_kind,
+      panelParams: typeof value.panel_params === 'string' ? value.panel_params : undefined,
     };
   }
   if (

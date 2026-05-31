@@ -71,9 +71,17 @@
   line-height: 1.55;
 }
 
-.workspace-dock-panel-unknown {
+/* Non-content states (loading, empty file, unsupported kind, read error). */
+.workspace-dock-panel-message {
   color: var(--color-text-tertiary);
   font-style: italic;
+}
+
+.workspace-dock-panel-error {
+  color: var(--color-status-error, #f87171);
+  font-style: normal;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* Markdown element styling (adapted from the prototype panel). */

@@ -1,65 +1,50 @@
+import { useEffect } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { PanelLeaf } from '../../types/workspace';
+import type { PanelContentState, PanelLeaf } from '../../types/workspace';
 import './WorkspaceDockPanel.css';
 
-// Prototype: fixed sample content. Real `.md` file rendering (fetched from the
-// daemon / disk) is a planned follow-up — the panel plumbing is what this PR
-// establishes.
-const SAMPLE_MARKDOWN = `# Markdown Panel
-
-This panel is a **first-class citizen** of the workspace layout. The daemon owns
-where it sits and how big it is, so it survives app restarts and follows you to
-other clients.
-
-## What works
-
-- **Drag the title bar** onto any terminal to re-dock it between panes.
-- **Drag a divider** to resize it — same machinery as terminal splits.
-- **Close** it from the × and the daemon forgets it.
-
-## Formatting check
-
-Inline \`code\`, a [link](https://example.com), and a list:
-
-1. First
-2. Second
-3. Third
-
-> Blockquotes render too.
-
-\`\`\`ts
-function hello(name: string) {
-  return \`hi \${name}\`;
+function basename(path: string): string {
+  const trimmed = path.replace(/\/+$/, '');
+  const segment = trimmed.split('/').pop();
+  return segment && segment.length > 0 ? segment : trimmed;
 }
-\`\`\`
-
-| Col A | Col B |
-| ----- | ----- |
-| 1     | 2     |
-| 3     | 4     |
-`;
-
-const PANEL_TITLES: Record<string, string> = {
-  markdown: 'README.md',
-};
 
 interface WorkspaceDockPanelProps {
   panel: PanelLeaf;
+  workspaceId: string;
+  content?: PanelContentState;
   dragging: boolean;
   onClose: () => void;
   onHeaderPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onRequestContent: (workspaceId: string, panelId: string) => void;
 }
 
-export function WorkspaceDockPanel({ panel, dragging, onClose, onHeaderPointerDown }: WorkspaceDockPanelProps) {
-  const title = PANEL_TITLES[panel.panelKind] ?? panel.panelKind;
+export function WorkspaceDockPanel({
+  panel,
+  workspaceId,
+  content,
+  dragging,
+  onClose,
+  onHeaderPointerDown,
+  onRequestContent,
+}: WorkspaceDockPanelProps) {
+  // Pull the current content on mount and whenever the panel retargets a new
+  // file. Live-reload updates then arrive as broadcasts (no re-request needed).
+  useEffect(() => {
+    onRequestContent(workspaceId, panel.panelId);
+  }, [workspaceId, panel.panelId, panel.panelParams, onRequestContent]);
+
+  const path = content?.path || panel.panelParams || '';
+  const title = path ? basename(path) : panel.panelKind;
+
   return (
     <div className={`workspace-dock-panel ${dragging ? 'workspace-dock-panel--dragging' : ''}`.trim()}>
       <div
         className="workspace-dock-panel-header"
         onPointerDown={onHeaderPointerDown}
-        title="Drag to re-dock"
+        title={path || 'Drag to re-dock'}
       >
         <span className="workspace-dock-panel-title">{title}</span>
         <button
@@ -75,11 +60,24 @@ export function WorkspaceDockPanel({ panel, dragging, onClose, onHeaderPointerDo
       </div>
       <div className="workspace-dock-panel-body">
         {panel.panelKind === 'markdown' ? (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{SAMPLE_MARKDOWN}</ReactMarkdown>
+          <MarkdownBody content={content} />
         ) : (
-          <div className="workspace-dock-panel-unknown">Unsupported panel: {panel.panelKind}</div>
+          <div className="workspace-dock-panel-message">Unsupported panel: {panel.panelKind}</div>
         )}
       </div>
     </div>
   );
+}
+
+function MarkdownBody({ content }: { content?: PanelContentState }) {
+  if (content === undefined) {
+    return <div className="workspace-dock-panel-message">Loading…</div>;
+  }
+  if (content.error) {
+    return <div className="workspace-dock-panel-message workspace-dock-panel-error">{content.error}</div>;
+  }
+  if (content.content.trim().length === 0) {
+    return <div className="workspace-dock-panel-message">This file is empty.</div>;
+  }
+  return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content.content}</ReactMarkdown>;
 }

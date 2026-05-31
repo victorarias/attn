@@ -15,6 +15,7 @@ func TestDockPanelAfterPaneCreatesLockedSplit(t *testing.T) {
 		"split-md",
 		"panel-md",
 		string(PanelKindMarkdown),
+		"",
 		0.68,
 	)
 	if !ok {
@@ -36,7 +37,7 @@ func TestDockPanelAfterPaneCreatesLockedSplit(t *testing.T) {
 }
 
 func TestDockPanelBeforePaneLandsOnLeft(t *testing.T) {
-	root, ok := DockPanel(DefaultLayout("pane-root"), "pane-root", DirectionVertical, true, "split-md", "panel-md", "markdown", 0.32)
+	root, ok := DockPanel(DefaultLayout("pane-root"), "pane-root", DirectionVertical, true, "split-md", "panel-md", "markdown", "", 0.32)
 	if !ok {
 		t.Fatal("DockPanel did not change layout")
 	}
@@ -57,7 +58,7 @@ func TestDockPanelBetweenPanes(t *testing.T) {
 			{Type: "pane", PaneID: "pane-b"},
 		},
 	}
-	next, ok := DockPanel(tree, "pane-a", DirectionVertical, false, "split-md", "panel-md", "markdown", 0.6)
+	next, ok := DockPanel(tree, "pane-a", DirectionVertical, false, "split-md", "panel-md", "markdown", "", 0.6)
 	if !ok {
 		t.Fatal("DockPanel did not change layout")
 	}
@@ -71,7 +72,7 @@ func TestDockPanelBetweenPanes(t *testing.T) {
 }
 
 func TestDockPanelHorizontalStacks(t *testing.T) {
-	root, ok := DockPanel(DefaultLayout("pane-root"), "pane-root", DirectionHorizontal, false, "split-md", "panel-md", "markdown", 0.7)
+	root, ok := DockPanel(DefaultLayout("pane-root"), "pane-root", DirectionHorizontal, false, "split-md", "panel-md", "markdown", "", 0.7)
 	if !ok {
 		t.Fatal("DockPanel did not change layout")
 	}
@@ -91,11 +92,11 @@ func TestDockPanelMovesExistingInstance(t *testing.T) {
 			{Type: "pane", PaneID: "pane-b"},
 		},
 	}
-	docked, ok := DockPanel(tree, "pane-a", DirectionVertical, false, "split-md", "panel-md", "markdown", 0.6)
+	docked, ok := DockPanel(tree, "pane-a", DirectionVertical, false, "split-md", "panel-md", "markdown", "", 0.6)
 	if !ok {
 		t.Fatal("first dock failed")
 	}
-	moved, ok := DockPanel(docked, "pane-b", DirectionVertical, false, "split-md2", "panel-md", "markdown", 0.6)
+	moved, ok := DockPanel(docked, "pane-b", DirectionVertical, false, "split-md2", "panel-md", "markdown", "", 0.6)
 	if !ok {
 		t.Fatal("re-dock (move) failed")
 	}
@@ -114,7 +115,7 @@ func TestDockPanelMovesExistingInstance(t *testing.T) {
 
 func TestDockPanelUnknownAnchorFails(t *testing.T) {
 	tree := DefaultLayout("pane-root")
-	next, ok := DockPanel(tree, "pane-missing", DirectionVertical, false, "split-md", "panel-md", "markdown", 0.6)
+	next, ok := DockPanel(tree, "pane-missing", DirectionVertical, false, "split-md", "panel-md", "markdown", "", 0.6)
 	if ok {
 		t.Fatal("dock against a missing anchor should fail")
 	}
@@ -125,19 +126,66 @@ func TestDockPanelUnknownAnchorFails(t *testing.T) {
 
 func TestDockPanelRejectsSelfAnchorAndEmptyFields(t *testing.T) {
 	tree := DefaultLayout("pane-root")
-	if _, ok := DockPanel(tree, "panel-md", DirectionVertical, false, "split-md", "panel-md", "markdown", 0.6); ok {
+	if _, ok := DockPanel(tree, "panel-md", DirectionVertical, false, "split-md", "panel-md", "markdown", "", 0.6); ok {
 		t.Fatal("anchoring a panel to itself must fail")
 	}
-	if _, ok := DockPanel(tree, "pane-root", DirectionVertical, false, "split-md", "", "markdown", 0.6); ok {
+	if _, ok := DockPanel(tree, "pane-root", DirectionVertical, false, "split-md", "", "markdown", "", 0.6); ok {
 		t.Fatal("empty panel id must fail")
 	}
-	if _, ok := DockPanel(tree, "pane-root", DirectionVertical, false, "split-md", "panel-md", "", 0.6); ok {
+	if _, ok := DockPanel(tree, "pane-root", DirectionVertical, false, "split-md", "panel-md", "", "", 0.6); ok {
 		t.Fatal("empty panel kind must fail")
 	}
 }
 
+func TestDockPanelPersistsPanelParams(t *testing.T) {
+	path := "/Users/me/project/README.md"
+	docked, ok := DockPanel(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "panel-md", "markdown", path, 0.68)
+	if !ok {
+		t.Fatal("dock failed")
+	}
+	if params, ok := PanelParamsByID(docked, "panel-md"); !ok || params != path {
+		t.Fatalf("PanelParamsByID = (%q, %v), want (%q, true)", params, ok, path)
+	}
+
+	// Params survive normalization and an encode/decode round-trip.
+	snapshot := NormalizeWorkspaceLayout(WorkspaceLayout{
+		WorkspaceID:  "workspace-1",
+		ActivePaneID: "pane-root",
+		Layout:       docked,
+		Panes: []Pane{
+			{PaneID: "pane-root", RuntimeID: "sess-1", SessionID: "sess-1", Kind: PaneKindAgent, Title: DefaultPaneTitle},
+		},
+	})
+	if params, _ := PanelParamsByID(snapshot.Layout, "panel-md"); params != path {
+		t.Fatalf("params lost in normalization: %q", params)
+	}
+	encoded, err := EncodeLayout(snapshot.Layout)
+	if err != nil {
+		t.Fatalf("EncodeLayout: %v", err)
+	}
+	decoded, err := DecodeLayout(encoded)
+	if err != nil {
+		t.Fatalf("DecodeLayout: %v", err)
+	}
+	if params, _ := PanelParamsByID(decoded, "panel-md"); params != path {
+		t.Fatalf("params lost in encode/decode: %q", params)
+	}
+
+	// Re-docking (move) with new params retargets the same panel.
+	moved, ok := DockPanel(decoded, "pane-root", DirectionVertical, false, "split-md", "panel-md", "markdown", "/other/notes.md", 0.5)
+	if !ok {
+		t.Fatal("re-dock failed")
+	}
+	if params, _ := PanelParamsByID(moved, "panel-md"); params != "/other/notes.md" {
+		t.Fatalf("re-dock did not retarget params: %q", params)
+	}
+	if leaves := PanelLeaves(moved); len(leaves) != 1 {
+		t.Fatalf("re-dock should keep a single panel, got %d", len(leaves))
+	}
+}
+
 func TestUndockPanelCollapsesSplit(t *testing.T) {
-	docked, ok := DockPanel(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "panel-md", "markdown", 0.68)
+	docked, ok := DockPanel(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "panel-md", "markdown", "", 0.68)
 	if !ok {
 		t.Fatal("dock failed")
 	}
@@ -157,7 +205,7 @@ func TestUndockPanelCollapsesSplit(t *testing.T) {
 }
 
 func TestNormalizeWorkspaceLayoutPreservesPanelLeaf(t *testing.T) {
-	docked, _ := DockPanel(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "panel-md", "markdown", 0.68)
+	docked, _ := DockPanel(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "panel-md", "markdown", "", 0.68)
 	snapshot := WorkspaceLayout{
 		WorkspaceID:  "workspace-1",
 		ActivePaneID: "pane-root",
@@ -208,7 +256,7 @@ func TestNormalizeDropsMalformedPanel(t *testing.T) {
 }
 
 func TestDockedPanelRatioSurvivesEncodeDecode(t *testing.T) {
-	docked, _ := DockPanel(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "panel-md", "markdown", 0.71)
+	docked, _ := DockPanel(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "panel-md", "markdown", "", 0.71)
 	encoded, err := EncodeLayout(docked)
 	if err != nil {
 		t.Fatalf("EncodeLayout: %v", err)
@@ -229,7 +277,7 @@ func TestDockedPanelRatioSurvivesEncodeDecode(t *testing.T) {
 func TestDockedPanelIsOpaqueToTerminalRebalance(t *testing.T) {
 	// A panel docked into a chain must not be redistributed when a sibling
 	// terminal split rebalances. Build pane-a | md, then split pane-a in two.
-	docked, _ := DockPanel(DefaultLayout("pane-a"), "pane-a", DirectionVertical, false, "split-md", "panel-md", "markdown", 0.7)
+	docked, _ := DockPanel(DefaultLayout("pane-a"), "pane-a", DirectionVertical, false, "split-md", "panel-md", "markdown", "", 0.7)
 	withSecond, changed := Split(docked, "pane-a", "pane-b", "split-terminals", DirectionVertical, DefaultSplitRatio)
 	if !changed {
 		t.Fatal("splitting the terminal pane failed")

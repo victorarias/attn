@@ -341,20 +341,27 @@ func dockEdgeToSplit(edge protocol.WorkspaceLayoutDockEdge) (workspacelayout.Dir
 }
 
 func (d *Daemon) handleWorkspaceLayoutDockPanel(client *wsClient, msg *protocol.WorkspaceLayoutDockPanelMessage) {
-	snapshot, err := d.ensureWorkspaceLayout(msg.WorkspaceID)
+	params := protocol.Deref(msg.PanelParams)
+	err := d.dockPanel(msg.WorkspaceID, msg.AnchorPaneID, msg.PanelID, msg.PanelKind, params, msg.Edge, msg.Ratio)
+	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutDockPanel, msg.WorkspaceID, nil, err)
+}
+
+// dockPanel docks (or moves) a panel into a workspace layout and persists it.
+// It is shared by the websocket dock command and the `attn open` unix command.
+// anchorPaneID may be empty — it falls back to the active pane, then the first
+// pane. panelParams is opaque layout data (the markdown file path, for markdown).
+func (d *Daemon) dockPanel(workspaceID, anchorPaneID, panelID, panelKind, panelParams string, edge protocol.WorkspaceLayoutDockEdge, ratio *float64) error {
+	snapshot, err := d.ensureWorkspaceLayout(workspaceID)
 	if err != nil {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutDockPanel, msg.WorkspaceID, nil, err)
-		return
+		return err
 	}
-	panelID := strings.TrimSpace(msg.PanelID)
-	panelKind := strings.TrimSpace(msg.PanelKind)
-	anchorPaneID := strings.TrimSpace(msg.AnchorPaneID)
+	panelID = strings.TrimSpace(panelID)
+	panelKind = strings.TrimSpace(panelKind)
+	anchorPaneID = strings.TrimSpace(anchorPaneID)
 	if panelID == "" || panelKind == "" {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutDockPanel, msg.WorkspaceID, nil, fmt.Errorf("panel_id and panel_kind are required"))
-		return
+		return fmt.Errorf("panel_id and panel_kind are required")
 	}
-	// Fall back to the active pane when the client doesn't name an anchor (e.g.
-	// the sidebar toggle just wants the panel somewhere sensible).
+	// Fall back to the active pane when the caller doesn't name an anchor.
 	if anchorPaneID == "" {
 		anchorPaneID = snapshot.ActivePaneID
 	}
@@ -362,14 +369,13 @@ func (d *Daemon) handleWorkspaceLayoutDockPanel(client *wsClient, msg *protocol.
 		anchorPaneID = firstWorkspaceLayoutPaneID(*snapshot)
 	}
 	if anchorPaneID == "" {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutDockPanel, msg.WorkspaceID, nil, fmt.Errorf("workspace has no anchor pane"))
-		return
+		return fmt.Errorf("workspace has no anchor pane")
 	}
 
-	direction, before := dockEdgeToSplit(msg.Edge)
+	direction, before := dockEdgeToSplit(edge)
 	panelFraction := defaultPanelFraction
-	if msg.Ratio != nil && *msg.Ratio > 0 && *msg.Ratio < 1 {
-		panelFraction = *msg.Ratio
+	if ratio != nil && *ratio > 0 && *ratio < 1 {
+		panelFraction = *ratio
 	}
 	// DockPanel takes the children[0] fraction; convert from the panel's share.
 	childZeroRatio := panelFraction
@@ -385,20 +391,19 @@ func (d *Daemon) handleWorkspaceLayoutDockPanel(client *wsClient, msg *protocol.
 		newWorkspaceLayoutEntityID("split"),
 		panelID,
 		panelKind,
+		strings.TrimSpace(panelParams),
 		childZeroRatio,
 	)
 	if !ok {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutDockPanel, msg.WorkspaceID, nil, fmt.Errorf("could not dock panel against pane: %s", anchorPaneID))
-		return
+		return fmt.Errorf("could not dock panel against pane: %s", anchorPaneID)
 	}
 	snapshot.Layout = layout
 	normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot)
 	if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutDockPanel, msg.WorkspaceID, nil, err)
-		return
+		return err
 	}
-	d.broadcastWorkspaceLayoutUpdated(msg.WorkspaceID)
-	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutDockPanel, msg.WorkspaceID, nil, nil)
+	d.broadcastWorkspaceLayoutUpdated(workspaceID)
+	return nil
 }
 
 func (d *Daemon) handleWorkspaceLayoutUndockPanel(client *wsClient, msg *protocol.WorkspaceLayoutUndockPanelMessage) {

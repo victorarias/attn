@@ -45,4 +45,16 @@ func TestEnsureAttnClaudeSkillInstalled(t *testing.T) {
 	if !strings.Contains(text, "must not take additional coding action just because the loop produced logs") {
 		t.Fatalf("skill content missing loop autonomy guidance: %q", text)
 	}
+	if !strings.Contains(text, "## Opening A Markdown File") {
+		t.Fatalf("skill content missing markdown-opening section: %q", text)
+	}
+	if !strings.Contains(text, "attn open <path/to/file.md>") {
+		t.Fatalf("skill content missing attn open command: %q", text)
+	}
+	if !strings.Contains(text, "live-reloads") {
+		t.Fatalf("skill content missing live-reload note: %q", text)
+	}
+	if !strings.Contains(text, "open a markdown file") {
+		t.Fatalf("skill description should mention opening markdown: %q", text)
+	}
 }
