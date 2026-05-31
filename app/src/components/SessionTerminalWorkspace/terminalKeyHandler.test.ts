@@ -60,6 +60,20 @@ describe('installTerminalKeyHandler', () => {
     expect(sendToPty).not.toHaveBeenCalled();
   });
 
+  it('routes Cmd+Q to app quit when terminal owns the key event', () => {
+    vi.mocked(triggerShortcut).mockReturnValue(true);
+    const sendToPty = vi.fn();
+    const handler = installTerminalKeyHandler(sendToPty);
+    const event = new KeyboardEvent('keydown', {
+      key: 'q',
+      metaKey: true,
+    });
+
+    expect(handler(event)).toBe(false);
+    expect(triggerShortcut).toHaveBeenCalledWith('app.quit');
+    expect(sendToPty).not.toHaveBeenCalled();
+  });
+
   it('routes Cmd+Shift+N to new horizontal session when terminal owns the key event', () => {
     vi.mocked(triggerShortcut).mockReturnValue(true);
     const sendToPty = vi.fn();

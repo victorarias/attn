@@ -2378,6 +2378,14 @@ sendFetchPRDetails,
     }
   }, [activeSessionId, answerReviewLoop, setReviewLoopStateForSession, showError]);
 
+  const handleQuitApp = useCallback(() => {
+    if (isTauri()) {
+      void invoke('quit_app');
+      return;
+    }
+    window.close();
+  }, []);
+
   // Terminal panel handlers for active session
   // Use keyboard shortcuts hook
   useKeyboardShortcuts({
@@ -2408,6 +2416,7 @@ sendFetchPRDetails,
     onIncreaseFontSize: increaseScale,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
+    onQuit: handleQuitApp,
     enabled: !locationPickerOpen && !thumbsOpen,
   });
 

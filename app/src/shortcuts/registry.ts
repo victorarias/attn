@@ -16,6 +16,9 @@ const ALLOWED_CONFLICT_PAIRS = new Set([
 ]);
 
 export const SHORTCUTS = {
+  // App
+  'app.quit': { key: 'q', meta: true },
+
   // Terminal panel
   'terminal.open': { key: '`', meta: true },
   'terminal.collapse': { key: '~', shift: true },  // Shift+` produces ~ on US keyboards

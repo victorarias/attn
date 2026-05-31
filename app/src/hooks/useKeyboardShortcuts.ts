@@ -25,6 +25,7 @@ interface KeyboardShortcutsConfig {
   onIncreaseFontSize?: () => void;
   onDecreaseFontSize?: () => void;
   onResetFontSize?: () => void;
+  onQuit?: () => void;
   enabled: boolean;
 }
 
@@ -50,8 +51,11 @@ export function useKeyboardShortcuts({
   onIncreaseFontSize,
   onDecreaseFontSize,
   onResetFontSize,
+  onQuit,
   enabled,
 }: KeyboardShortcutsConfig) {
+  useShortcut('app.quit', onQuit ?? (() => {}), !!onQuit);
+
   // Session management
   useShortcut('session.new', onNewSession, enabled);
   useShortcut('session.newHorizontal', onNewSessionHorizontal ?? (() => {}), enabled && !!onNewSessionHorizontal);
