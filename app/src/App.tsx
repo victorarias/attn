@@ -2433,7 +2433,7 @@ sendFetchPRDetails,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
     onQuit: handleQuitApp,
-    enabled: !locationPickerOpen && !thumbsOpen,
+    enabled: !locationPickerOpen && !thumbsOpen && !whatsNew.isOpen,
   });
 
   return (

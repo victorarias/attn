@@ -450,6 +450,23 @@ describe('worktree cleanup prompt', () => {
     });
   });
 
+  it('disables app shortcuts while the first-run whats-new modal is open', async () => {
+    localStorage.removeItem(WHATS_NEW_STORAGE_KEY);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toHaveTextContent('attn is organized around workspaces');
+    });
+
+    await waitFor(() => {
+      const keyboardArgs = mockUseKeyboardShortcuts.mock.calls[mockUseKeyboardShortcuts.mock.calls.length - 1]?.[0] as {
+        enabled?: boolean;
+      };
+      expect(keyboardArgs.enabled).toBe(false);
+    });
+  });
+
   it('does not refresh Changes branch diff while the Changes panel is closed', async () => {
     const sendGetBranchDiffFiles = vi.fn(async () => ({ success: true, base_ref: 'main', files: [] }));
     mockDaemonSocketReturn.sendGetBranchDiffFiles = sendGetBranchDiffFiles;
