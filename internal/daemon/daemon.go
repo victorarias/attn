@@ -2843,21 +2843,59 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 
 	d.clearLongRunTracking(msg.Session.ID)
 	msg.Session.Agent = normalizeStoredSessionAgent(string(msg.Session.Agent), protocol.SessionAgentCodex)
-	workspaceID := "workspace-" + msg.Session.ID
+	workspaceID := strings.TrimSpace(msg.Session.WorkspaceID)
+	if workspaceID == "" {
+		workspaceID = "workspace-" + msg.Session.ID
+	}
 	msg.Session.WorkspaceID = workspaceID
-	d.store.AddWorkspace(&protocol.Workspace{
-		ID:        workspaceID,
-		Title:     msg.Session.Label,
-		Directory: msg.Session.Directory,
-		Status:    protocol.WorkspaceStatusLaunching,
-	})
+	if d.store.GetWorkspace(workspaceID) == nil {
+		d.store.AddWorkspace(&protocol.Workspace{
+			ID:        workspaceID,
+			Title:     msg.Session.Label,
+			Directory: msg.Session.Directory,
+			Status:    protocol.WorkspaceStatusLaunching,
+		})
+	}
 	d.workspaces.register(workspaceID, msg.Session.Label, msg.Session.Directory)
 
 	// Add session directly to store
 	d.store.Add(&msg.Session)
 	d.associateSessionWithWorkspace(msg.Session.ID, workspaceID)
 	paneID := "pane-" + msg.Session.ID
-	if err := d.store.SaveWorkspaceLayout(workspacelayout.DefaultWorkspaceLayout(workspaceID, paneID, msg.Session.ID)); err != nil {
+	layout := workspacelayout.DefaultWorkspaceLayout(workspaceID, paneID, msg.Session.ID)
+	if current := d.store.GetWorkspaceLayout(workspaceID); current != nil {
+		layout = workspacelayout.NormalizeWorkspaceLayout(*current)
+		if !workspacelayout.HasPane(layout.Layout, paneID) {
+			layout.Panes = append(layout.Panes, workspacelayout.Pane{
+				PaneID:    paneID,
+				RuntimeID: msg.Session.ID,
+				SessionID: msg.Session.ID,
+				Kind:      workspacelayout.PaneKindAgent,
+				Title:     msg.Session.Label,
+				Status:    workspacelayout.PaneStatusReady,
+			})
+			targetPaneID := layout.ActivePaneID
+			if targetPaneID == "" {
+				targetPaneID = firstWorkspaceLayoutPaneID(layout)
+			}
+			if targetPaneID == "" || layout.Layout.Type == "" {
+				layout.Layout = workspacelayout.DefaultLayout(paneID)
+			} else {
+				nextLayout, _ := workspacelayout.Split(
+					layout.Layout,
+					targetPaneID,
+					paneID,
+					newWorkspaceLayoutEntityID("split"),
+					workspacelayout.DirectionVertical,
+					workspacelayout.DefaultSplitRatio,
+				)
+				layout.Layout = nextLayout
+			}
+			layout.ActivePaneID = paneID
+			layout = workspacelayout.NormalizeWorkspaceLayout(layout)
+		}
+	}
+	if err := d.store.SaveWorkspaceLayout(layout); err != nil {
 		d.sendError(conn, err.Error())
 		return
 	}

@@ -2,22 +2,25 @@ import { test, expect } from './fixtures';
 
 async function createSession(
   page: import('@playwright/test').Page,
-  daemon: { injectSession: (session: { id: string; label: string; state: string; directory?: string }) => Promise<void> },
+  daemon: { injectSession: (session: { id: string; label: string; state: string; directory?: string; workspace_id?: string }) => Promise<void> },
   id: string,
 ) {
-  await page.evaluate((sessionId) => {
+  const workspaceId = `workspace-${id}`;
+  await page.evaluate(({ sessionId, workspaceId }) => {
     window.__TEST_INJECT_SESSION?.({
       id: sessionId,
       label: 'Terminal Links',
       state: 'working',
       cwd: '/tmp/test/terminal-links',
+      workspaceId,
     });
-  }, id);
+  }, { sessionId: id, workspaceId });
   await daemon.injectSession({
     id,
     label: 'Terminal Links',
     state: 'working',
     directory: '/tmp/test/terminal-links',
+    workspace_id: workspaceId,
   });
 }
 
@@ -78,7 +81,7 @@ async function expectTerminalInputCount(
 
 async function openTerminalSession(
   page: import('@playwright/test').Page,
-  daemon: { injectSession: (session: { id: string; label: string; state: string; directory?: string }) => Promise<void> },
+  daemon: { injectSession: (session: { id: string; label: string; state: string; directory?: string; workspace_id?: string }) => Promise<void> },
   sessionId: string,
 ) {
   await daemon.start();

@@ -9,6 +9,7 @@ type WorkspaceSessionFixture = {
 
 async function injectWorkspace(
   page: import('@playwright/test').Page,
+  daemon: { injectSession: (session: { id: string; label: string; agent?: 'shell'; state: string; directory?: string; workspace_id?: string }) => Promise<void> },
   workspaceId: string,
   sessions: WorkspaceSessionFixture[],
   activePaneId = sessions[0]?.paneId || ''
@@ -50,6 +51,17 @@ async function injectWorkspace(
       window.__TEST_SET_SESSION_WORKSPACE?.(session.id, workspace, activePaneId);
     }
   }, { workspaceId, sessions, activePaneId });
+
+  for (const session of sessions) {
+    await daemon.injectSession({
+      id: session.id,
+      label: session.label,
+      agent: 'shell',
+      state: 'working',
+      directory: session.cwd,
+      workspace_id: workspaceId,
+    });
+  }
 }
 
 test.describe('Workspace Sessions', () => {
@@ -58,11 +70,11 @@ test.describe('Workspace Sessions', () => {
     await page.goto('/');
     await page.waitForSelector('.dashboard');
 
-    await injectWorkspace(page, 'workspace-a', [
+    await injectWorkspace(page, daemon, 'workspace-a', [
       { id: 'a1', label: 'alpha-one', paneId: 'pane-a1', cwd: '/tmp/workspace-a' },
       { id: 'a2', label: 'alpha-two', paneId: 'pane-a2', cwd: '/tmp/workspace-a' },
     ], 'pane-a2');
-    await injectWorkspace(page, 'workspace-b', [
+    await injectWorkspace(page, daemon, 'workspace-b', [
       { id: 'b1', label: 'beta-one', paneId: 'pane-b1', cwd: '/tmp/workspace-b' },
       { id: 'b2', label: 'beta-two', paneId: 'pane-b2', cwd: '/tmp/workspace-b' },
     ], 'pane-b2');
@@ -105,7 +117,7 @@ test.describe('Workspace Sessions', () => {
     await page.goto('/');
     await page.waitForSelector('.dashboard');
 
-    await injectWorkspace(page, 'workspace-shortcuts', [
+    await injectWorkspace(page, daemon, 'workspace-shortcuts', [
       { id: 'shortcut-a', label: 'shortcut-a', paneId: 'pane-shortcut-a', cwd: '/tmp/workspace-shortcuts' },
     ]);
 
@@ -128,7 +140,7 @@ test.describe('Workspace Sessions', () => {
     await page.goto('/');
     await page.waitForSelector('.dashboard');
 
-    await injectWorkspace(page, 'workspace-focus', [
+    await injectWorkspace(page, daemon, 'workspace-focus', [
       { id: 'focus-agent', label: 'focus-agent', paneId: 'pane-focus-agent', cwd: '/tmp/workspace-focus' },
       { id: 'focus-shell', label: 'focus-shell', paneId: 'pane-focus-shell', cwd: '/tmp/workspace-focus' },
     ], 'pane-focus-agent');

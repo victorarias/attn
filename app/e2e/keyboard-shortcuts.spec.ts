@@ -7,11 +7,13 @@ async function injectLocalSession(
 ) {
   await page.evaluate((s) => {
     const paneId = `pane-${s.id}`;
+    const workspaceId = `workspace-${s.id}`;
     window.__TEST_INJECT_SESSION?.({
       id: s.id,
       label: s.label,
       state: s.state as 'working' | 'waiting_input' | 'idle',
       cwd: s.cwd || '/tmp/test',
+      workspaceId,
       ...(s.isWorktree !== undefined ? { isWorktree: s.isWorktree } : {}),
       ...(s.branch ? { branch: s.branch } : {}),
     });
@@ -31,6 +33,7 @@ async function createSession(
       label: string;
       state: string;
       directory?: string;
+      workspace_id?: string;
       is_worktree?: boolean;
       branch?: string;
       main_repo?: string;
@@ -57,6 +60,7 @@ async function createSession(
     label: session.label,
     state: session.state,
     directory: cwd,
+    workspace_id: `workspace-${session.id}`,
     is_worktree: session.is_worktree,
     branch: session.branch,
     main_repo: session.main_repo,
