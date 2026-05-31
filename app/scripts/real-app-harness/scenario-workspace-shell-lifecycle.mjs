@@ -154,7 +154,6 @@ async function main() {
 
   try {
     await launchFreshAppAndConnect(client, observer);
-    await client.request('set_terminal_runtime_trace', { enabled: true }).catch(() => {});
 
     sessionId = await createSessionAndWaitForInitialPane({
       client,

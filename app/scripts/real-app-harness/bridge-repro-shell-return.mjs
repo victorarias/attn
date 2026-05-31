@@ -75,17 +75,6 @@ async function captureBridgeDebugArtifacts(client, runDir, suffix = 'failure') {
   }
 
   try {
-    const debugDump = await client.request('dump_pane_debug');
-    saveJson(path.join(runDir, `pane-debug-${suffix}.json`), debugDump);
-  } catch (error) {
-    fs.writeFileSync(
-      path.join(runDir, `pane-debug-${suffix}.txt`),
-      error instanceof Error ? error.stack || error.message : String(error),
-      'utf8'
-    );
-  }
-
-  try {
     const screenshot = await captureFrontWindowScreenshot(path.join(runDir, `ui-${suffix}.png`));
     saveJson(path.join(runDir, `screenshot-${suffix}.json`), screenshot);
   } catch (error) {
@@ -136,7 +125,6 @@ async function main() {
     await client.waitForFrontendResponsive(20_000);
     await observer.connect();
 
-    await client.request('set_pane_debug', { enabled: true });
     await tryCaptureScreenshot(client, runDir, '01-app-launched.png');
 
     const createResult = await client.request('create_session', {
@@ -248,8 +236,6 @@ async function main() {
 
     await tryCaptureScreenshot(client, runDir, '06-first-shell-after-revisit.png');
 
-    const debugDump = await client.request('dump_pane_debug');
-    saveJson(path.join(runDir, 'pane-debug.json'), debugDump);
     const structuredSnapshot = await client.request('capture_structured_snapshot');
     saveJson(path.join(runDir, 'structured-snapshot.json'), structuredSnapshot);
 

@@ -203,12 +203,6 @@ async function main() {
 
     await runner.step('launch_app_and_connect_daemon', async () => {
       await launchFreshAppAndConnect(client, observer);
-      const paneDebugConfig = await client.request('set_pane_debug', { enabled: true });
-      const terminalRuntimeTraceConfig = await client.request('set_terminal_runtime_trace', { enabled: true });
-      runner.writeJson('ui-debug-config.json', {
-        paneDebugConfig,
-        terminalRuntimeTraceConfig,
-      });
       await removeStaleHarnessEndpoints(observer, 20_000);
     });
 

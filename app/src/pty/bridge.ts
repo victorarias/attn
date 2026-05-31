@@ -1,5 +1,4 @@
 import { isTauri } from '@tauri-apps/api/core';
-import { recordPaneRuntimeDebugEvent } from '../utils/paneRuntimeDebug';
 import { recordPtyListenerError } from '../utils/ptyPerf';
 
 export interface PtySpawnArgs {
@@ -94,23 +93,11 @@ export function emitPtyEvent(payload: PtyEventPayload) {
       (window as unknown as { __TEST_PTY_EVENTS?: PtyEventPayload[] }).__TEST_PTY_EVENTS = [payload];
     }
   }
-  let listenerIndex = 0;
   for (const handler of listeners) {
-    listenerIndex += 1;
     try {
       handler(event);
     } catch (error) {
       recordPtyListenerError(payload.event, payload.id, error);
-      recordPaneRuntimeDebugEvent({
-        scope: 'pty-bridge',
-        runtimeId: payload.id,
-        message: 'PTY listener threw while handling event',
-        details: {
-          event: payload.event,
-          listenerIndex,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      });
     }
   }
 }

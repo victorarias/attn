@@ -44,10 +44,8 @@ import {
   spawnPtyRuntime,
 } from '../pty/runtimeLifecycle';
 import { createPtyTransportState } from '../pty/transportState';
-import { isSuspiciousTerminalSize, isTerminalDebugEnabled } from '../utils/terminalDebug';
-import { recordPaneRuntimeDebugEvent } from '../utils/paneRuntimeDebug';
+import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import { recordPtyCommand, recordWsJsonParse } from '../utils/ptyPerf';
-import { recordTerminalRuntimeLog } from '../utils/terminalRuntimeLog';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
 import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
 
@@ -154,13 +152,6 @@ export interface RateLimitState {
 // Increment when making breaking changes to the protocol
 const PROTOCOL_VERSION = '73';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
-// Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
-// injects this global before any page script runs — see
-// `automation_init_script` in `app/src-tauri/src/lib.rs`. Falsy in
-// non-Tauri environments and prod builds without ATTN_AUTOMATION=1.
-const INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD =
-  typeof window !== 'undefined' &&
-  (window as { __ATTN_AUTOMATION_ENABLED?: boolean }).__ATTN_AUTOMATION_ENABLED === true;
 
 interface PRActionResult {
   success: boolean;
@@ -171,50 +162,6 @@ interface FetchPRDetailsResult {
   success: boolean;
   prs?: DaemonPR[];
   error?: string;
-}
-
-function previewBase64Payload(encoded: string): string {
-  try {
-    return atob(encoded)
-      .slice(0, 32)
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t');
-  } catch {
-    return '';
-  }
-}
-
-function summarizeReplaySegments(
-  segments: Array<{ cols: number; rows: number; data: string }>,
-) {
-  const geometryRuns: Array<{ cols: number; rows: number; segments: number; encodedBytes: number }> = [];
-  for (const segment of segments) {
-    const last = geometryRuns[geometryRuns.length - 1];
-    if (last && last.cols === segment.cols && last.rows === segment.rows) {
-      last.segments += 1;
-      last.encodedBytes += segment.data.length;
-      continue;
-    }
-    geometryRuns.push({
-      cols: segment.cols,
-      rows: segment.rows,
-      segments: 1,
-      encodedBytes: segment.data.length,
-    });
-  }
-
-  return {
-    geometryRunCount: geometryRuns.length,
-    resizeCount: Math.max(geometryRuns.length - 1, 0),
-    firstGeometry: geometryRuns.length > 0
-      ? { cols: geometryRuns[0].cols, rows: geometryRuns[0].rows }
-      : null,
-    lastGeometry: geometryRuns.length > 0
-      ? { cols: geometryRuns[geometryRuns.length - 1].cols, rows: geometryRuns[geometryRuns.length - 1].rows }
-      : null,
-    geometryRuns,
-  };
 }
 
 interface WorktreeActionResult {
@@ -483,32 +430,6 @@ function workspacesIncludeRuntimeID(workspaces: DaemonWorkspace[], runtimeID: st
   return false;
 }
 
-function resolveRuntimeLogContext(
-  sessions: DaemonSession[],
-  workspaces: DaemonWorkspace[],
-  runtimeID: string,
-): { sessionId?: string; paneId?: string; paneKind?: 'agent' } {
-  const session = sessions.find((entry) => entry.id === runtimeID);
-  if (session) {
-    return {
-      sessionId: session.id,
-    };
-  }
-  for (const workspace of workspaces) {
-    for (const pane of workspace.layout?.panes || []) {
-      if (pane.runtime_id !== runtimeID) {
-        continue;
-      }
-      return {
-        sessionId: pane.session_id,
-        paneId: pane.pane_id,
-        paneKind: 'agent',
-      };
-    }
-  }
-  return {};
-}
-
 function upsertEndpointByID(endpoints: DaemonEndpoint[], endpoint: DaemonEndpoint): DaemonEndpoint[] {
   const index = endpoints.findIndex((entry) => entry.id === endpoint.id);
   if (index === -1) {
@@ -724,34 +645,6 @@ export function useDaemonSocket({
       setConnectionError((prev) => (prev === RECOVERY_NOTICE ? null : prev));
       recoveryNoticeTimeoutRef.current = null;
     }, 2000);
-  }, []);
-
-  const recordRuntimeTransportLog = useCallback((
-    runtimeId: string,
-    event: string,
-    message: string,
-    details?: Record<string, unknown>,
-  ) => {
-    if (!runtimeId) {
-      return;
-    }
-    const context = resolveRuntimeLogContext(
-      sessionsRef.current,
-      workspacesRef.current,
-      runtimeId,
-    );
-    recordTerminalRuntimeLog({
-      category: 'transport',
-      event,
-      sessionId: context.sessionId,
-      paneId: context.paneId,
-      runtimeId,
-      message,
-      details: {
-        paneKind: context.paneKind ?? null,
-        ...(details || {}),
-      },
-    });
   }, []);
 
   const pruneAttachedPtySessions = useCallback((sessions: DaemonSession[], workspaces: DaemonWorkspace[]) => {
@@ -1075,15 +968,6 @@ export function useDaemonSocket({
           case 'workspace_layout_updated':
             if (data.workspace_layout) {
               const workspaceID = data.workspace_layout.workspace_id;
-              recordPaneRuntimeDebugEvent({
-                scope: 'daemon',
-                sessionId: workspaceID,
-                paneId: data.workspace_layout.active_pane_id,
-                message: data.event === 'workspace_layout' ? 'workspace layout received' : 'workspace layout updated received',
-                details: {
-                  paneIds: (data.workspace_layout.panes || []).map((pane) => pane.pane_id),
-                },
-              });
               const nextWorkspaces = workspacesRef.current.map((workspace) => (
                 workspace.id === workspaceID
                   ? { ...workspace, layout: data.workspace_layout }
@@ -1103,17 +987,6 @@ export function useDaemonSocket({
             const action = data.action;
             const workspaceId = data.workspace_id;
             const paneId = data.pane_id;
-            recordPaneRuntimeDebugEvent({
-              scope: 'daemon',
-              sessionId: workspaceId,
-              paneId: paneId || undefined,
-              message: 'workspace action result',
-              details: {
-                action,
-                success: data.success ?? false,
-                error: data.error,
-              },
-            });
             const key = workspaceActionKey(action, workspaceId, paneId);
             const pending = pendingActionsRef.current.get(key);
             if (pending) {
@@ -1209,28 +1082,6 @@ export function useDaemonSocket({
             if (data.id) {
               const attachContext = ptyTransportRef.current.getAttachContext(data.id);
               const replayPlan = classifyAttachReplay(data, attachContext);
-              recordRuntimeTransportLog(
-                data.id,
-                'pty.attach.result',
-                data.success ? 'attach session result' : 'attach session failed',
-                {
-                  attachPolicy: attachContext?.policy ?? null,
-                  attachAgent: attachContext?.agent ?? null,
-                  replayPreference: replayPlan.replayPreference,
-                  success: data.success,
-                  replayKind: replayPlan.replayKind,
-                  availableScreenSnapshot: replayPlan.availableScreenSnapshot,
-                  availableRawScrollback: replayPlan.availableRawScrollback,
-                  screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
-                  lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
-                  cols: typeof data.cols === 'number' ? data.cols : null,
-                  rows: typeof data.rows === 'number' ? data.rows : null,
-                  running: data.running ?? null,
-                  replaySkipped: replayPlan.replaySkipped,
-                  requestedCols: replayPlan.requestedCols,
-                  requestedRows: replayPlan.requestedRows,
-                },
-              );
               const key = `pty_attach_${data.id}`;
               const pending = pendingActionsRef.current.get(key);
               if (pending) {
@@ -1295,45 +1146,7 @@ export function useDaemonSocket({
                   });
                 }
                 ptyTransportRef.current.setLastSeq(data.id, attachEffects.nextSeq);
-                if (replayPlan.screenSnapshotSuppressed) {
-                  recordRuntimeTransportLog(data.id, 'pty.attach.snapshot_suppressed', 'attach screen snapshot suppressed by replay preference', {
-                    attachPolicy: attachContext?.policy ?? null,
-                    attachAgent: attachContext?.agent ?? null,
-                    replayPreference: replayPlan.replayPreference,
-                    replayKind: replayPlan.replayKind,
-                    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
-                    availableRawScrollback: replayPlan.availableRawScrollback,
-                  });
-                }
-                if (attachEffects.replayAction.kind === 'skipped') {
-                  recordRuntimeTransportLog(data.id, 'pty.attach.replay_skipped', 'attach replay skipped due to attach policy or geometry mismatch', {
-                    attachPolicy: attachContext?.policy ?? null,
-                    attachAgent: attachContext?.agent ?? null,
-                    replayPreference: replayPlan.replayPreference,
-                    replayKind: replayPlan.replayKind,
-                    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
-                    availableRawScrollback: replayPlan.availableRawScrollback,
-                    screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
-                    attachedCols: replayPlan.attachedCols,
-                    attachedRows: replayPlan.attachedRows,
-                    replayCols: replayPlan.replayCols,
-                    replayRows: replayPlan.replayRows,
-                    requestedCols: replayPlan.requestedCols,
-                    requestedRows: replayPlan.requestedRows,
-                  });
-                } else if (attachEffects.replayAction.kind === 'screen_snapshot') {
-                  recordRuntimeTransportLog(data.id, 'pty.attach.replay_applied', 'attach replay applied', {
-                    attachPolicy: attachContext?.policy ?? null,
-                    attachAgent: attachContext?.agent ?? null,
-                    replayPreference: replayPlan.replayPreference,
-                    replayKind: 'screen_snapshot',
-                    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
-                    availableRawScrollback: replayPlan.availableRawScrollback,
-                    screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
-                    bytes: attachEffects.replayAction.data.length,
-                    lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
-                    replayPayloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? attachEffects.replayAction.data : undefined,
-                  });
+                if (attachEffects.replayAction.kind === 'screen_snapshot') {
                   emitPtyEvent({
                     event: 'data',
                     id: data.id,
@@ -1342,18 +1155,6 @@ export function useDaemonSocket({
                     suppressResponses: !replayPlan.respondToTerminalQueries,
                   });
                 } else if (attachEffects.replayAction.kind === 'scrollback') {
-                  recordRuntimeTransportLog(data.id, 'pty.attach.replay_applied', 'attach replay applied', {
-                    attachPolicy: attachContext?.policy ?? null,
-                    attachAgent: attachContext?.agent ?? null,
-                    replayPreference: replayPlan.replayPreference,
-                    replayKind: 'scrollback',
-                    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
-                    availableRawScrollback: replayPlan.availableRawScrollback,
-                    screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
-                    bytes: attachEffects.replayAction.data.length,
-                    lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
-                    replayPayloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? attachEffects.replayAction.data : undefined,
-                  });
                   emitPtyEvent({
                     event: 'data',
                     id: data.id,
@@ -1362,31 +1163,6 @@ export function useDaemonSocket({
                     suppressResponses: !replayPlan.respondToTerminalQueries,
                   });
                 } else if (attachEffects.replayAction.kind === 'scrollback_segments') {
-                  const bytes = attachEffects.replayAction.segments.reduce(
-                    (sum, segment) => sum + segment.data.length,
-                    0,
-                  );
-                  const segmentSummary = summarizeReplaySegments(attachEffects.replayAction.segments);
-                  recordRuntimeTransportLog(data.id, 'pty.attach.replay_applied', 'attach replay applied', {
-                    attachPolicy: attachContext?.policy ?? null,
-                    attachAgent: attachContext?.agent ?? null,
-                    replayPreference: replayPlan.replayPreference,
-                    replayKind: 'scrollback_segments',
-                    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
-                    availableRawScrollback: replayPlan.availableRawScrollback,
-                    screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
-                    bytes,
-                    segmentCount: attachEffects.replayAction.segments.length,
-                    ...segmentSummary,
-                    lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
-                    replaySegmentsBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD
-                      ? attachEffects.replayAction.segments.map((segment) => ({
-                          cols: segment.cols,
-                          rows: segment.rows,
-                          data: segment.data,
-                        }))
-                      : undefined,
-                  });
                   for (const segment of attachEffects.replayAction.segments) {
                     emitPtyEvent({
                       event: 'local_resize',
@@ -1425,41 +1201,16 @@ export function useDaemonSocket({
 
           case 'pty_output': {
             if (data.id && data.data) {
-              recordPaneRuntimeDebugEvent({
-                scope: 'daemon',
-                runtimeId: data.id,
-                message: 'received pty_output event',
-                details: {
-                  seq: data.seq,
-                  bytes: data.data.length,
-                  preview: previewBase64Payload(data.data),
-                  payloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? data.data : undefined,
-                },
-              });
               const attachKey = `pty_attach_${data.id}`;
               if (pendingActionsRef.current.has(attachKey)) {
                 // Attach replay is emitted before this queue is drained.
                 // Ghostty then serializes those emitted writes in order.
-                recordRuntimeTransportLog(data.id, 'pty.output.queued_during_attach', 'queue pty output while attach pending', {
-                  seq: typeof data.seq === 'number' ? data.seq : null,
-                  bytes: data.data.length,
-                });
                 const queued = enqueuePendingAttachOutput(
                   ptyTransportRef.current.getQueuedAttachOutputs(data.id) || [],
                   { data: data.data, seq: data.seq },
                   MAX_PENDING_ATTACH_OUTPUTS,
                 );
                 ptyTransportRef.current.setQueuedAttachOutputs(data.id, queued);
-                recordPaneRuntimeDebugEvent({
-                  scope: 'daemon',
-                  runtimeId: data.id,
-                  message: 'queue pty_output during pending attach',
-                  details: {
-                    seq: data.seq,
-                    queued: queued.length,
-                    payloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? data.data : undefined,
-                  },
-                });
                 break;
               }
               const outputPlan = planLivePtyOutput({
@@ -1467,31 +1218,11 @@ export function useDaemonSocket({
                 lastSeq: ptyTransportRef.current.getLastSeq(data.id),
               });
               if (outputPlan.shouldDropAsStale) {
-                recordPaneRuntimeDebugEvent({
-                  scope: 'daemon',
-                  runtimeId: data.id,
-                  message: 'drop stale pty_output event',
-                  details: { seq: data.seq, lastSeq: ptyTransportRef.current.getLastSeq(data.id) },
-                });
                 break;
               }
               if (typeof outputPlan.nextSeq === 'number') {
                 ptyTransportRef.current.setLastSeq(data.id, outputPlan.nextSeq);
               }
-              recordRuntimeTransportLog(data.id, 'pty.output.live', 'live pty output', {
-                seq: typeof data.seq === 'number' ? data.seq : null,
-                bytes: data.data.length,
-                payloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? data.data : undefined,
-              });
-              recordPaneRuntimeDebugEvent({
-                scope: 'daemon',
-                runtimeId: data.id,
-                message: 'emit pty_output to bridge',
-                details: {
-                  seq: data.seq,
-                  payloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? data.data : undefined,
-                },
-              });
               emitPtyEvent({ event: 'data', id: data.id, data: data.data, seq: data.seq });
             }
             break;
@@ -2172,11 +1903,6 @@ export function useDaemonSocket({
         ptyTransportRef.current.setAttachContext(id);
       }
       pendingActionsRef.current.set(key, { resolve, reject });
-      recordRuntimeTransportLog(id, 'pty.attach.requested', 'attach session requested', {
-        attachPolicy: context?.policy ?? null,
-        attachAgent: context?.agent ?? null,
-        replayPreference: context?.replayPreference ?? null,
-      });
       recordPtyCommand('attach_session', id);
       ws.send(JSON.stringify({
         cmd: 'attach_session',
@@ -2193,7 +1919,7 @@ export function useDaemonSocket({
         }
       }, 15000);
     });
-  }, [recordRuntimeTransportLog]);
+  }, []);
 
   const sendAttachSessionWithRetry = useCallback(async (id: string, context?: AttachRequestContext): Promise<AttachResult> => {
     return retryTransientAttachRequest(
@@ -2235,35 +1961,24 @@ export function useDaemonSocket({
         initialStateReceived: hasReceivedInitialStateRef.current,
       });
     }
-    recordRuntimeTransportLog(id, 'pty.input.sent', 'pty input sent', {
-      bytes: data.length,
-      source: source ?? null,
-    });
     recordPtyCommand('pty_input', id, data.length, source);
     sendOrQueueCommand(
       { cmd: 'pty_input', id, data, ...(source ? { source } : {}) },
       { waitForInitialState: true },
     );
-  }, [recordRuntimeTransportLog, sendOrQueueCommand]);
+  }, [sendOrQueueCommand]);
 
   const sendPtyResize = useCallback((id: string, cols: number, rows: number, reason?: string) => {
     const suspiciousResize = isSuspiciousTerminalSize(cols, rows);
     if (suspiciousResize) {
       console.warn('[DaemonSocket] Sending suspicious PTY resize', { id, cols, rows, reason: reason || null });
-    } else if (isTerminalDebugEnabled()) {
-      console.log('[DaemonSocket] Sending PTY resize', { id, cols, rows, reason: reason || null });
     }
-    recordRuntimeTransportLog(id, 'pty.resize.sent', 'pty resize sent', {
-      cols,
-      rows,
-      reason: reason || null,
-    });
     recordPtyCommand('pty_resize', id, 0, null);
     sendOrQueueCommand(
       { cmd: 'pty_resize', id, cols, rows },
       { waitForInitialState: true },
     );
-  }, [recordRuntimeTransportLog, sendOrQueueCommand]);
+  }, [sendOrQueueCommand]);
 
   const reconcileAttachedRuntimeGeometry = useCallback((
     args: Pick<PtySpawnArgs, 'id' | 'cols' | 'rows' | 'shell'>,
@@ -2276,12 +1991,9 @@ export function useDaemonSocket({
     const plan = planAttachedRuntimeGeometry(args, attachResult, options);
 
     if (plan.resizeRequired) {
-      recordRuntimeTransportLog(args.id, 'pty.attach.geometry_reconcile', 'reconcile attached PTY geometry', {
-        ...plan,
-      });
       sendPtyResize(args.id, plan.requestedCols, plan.requestedRows, 'daemon_known_attach');
     }
-  }, [recordRuntimeTransportLog, sendPtyResize]);
+  }, [sendPtyResize]);
 
   const attachExistingRuntime = useCallback(async (
     args: Pick<PtyAttachArgs, 'id' | 'cols' | 'rows' | 'shell' | 'agent' | 'reason'>,
@@ -2349,13 +2061,6 @@ export function useDaemonSocket({
     return new Promise((resolve, reject) => {
       const key = workspaceActionKey(action, workspaceId, paneId);
       pendingActionsRef.current.set(key, { resolve, reject });
-      recordPaneRuntimeDebugEvent({
-        scope: 'daemon',
-        sessionId: workspaceId,
-        paneId,
-        message: 'send workspace command',
-        details: { action, payload },
-      });
       sendOrQueueCommand(payload, { waitForInitialState: true });
 
       setTimeout(() => {

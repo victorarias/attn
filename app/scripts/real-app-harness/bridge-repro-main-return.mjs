@@ -150,17 +150,6 @@ async function captureArtifacts(request, runDir, prefix) {
       'utf8'
     );
   }
-
-  try {
-    const debugDump = await request('dump_pane_debug');
-    saveJson(path.join(runDir, `${prefix}-pane-debug.json`), debugDump);
-  } catch (error) {
-    fs.writeFileSync(
-      path.join(runDir, `${prefix}-pane-debug.txt`),
-      error instanceof Error ? error.stack || error.message : String(error),
-      'utf8'
-    );
-  }
 }
 
 async function main() {
@@ -206,7 +195,6 @@ async function main() {
     await client.waitForManifest(20_000);
     await client.waitForReady(20_000);
     await client.waitForFrontendResponsive(20_000);
-    await request('set_pane_debug', { enabled: true });
 
     const created = await request('create_session', {
       cwd: sessionDir,

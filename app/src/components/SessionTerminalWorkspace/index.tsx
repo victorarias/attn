@@ -14,8 +14,6 @@ import {
 import type { SessionAgent } from '../../types/sessionAgent';
 import { useGhosttyPaneRuntime } from './useGhosttyPaneRuntime';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
-import { activeElementSummary, recordPaneRuntimeDebugEvent } from '../../utils/paneRuntimeDebug';
-import { recordTerminalRuntimeLog } from '../../utils/terminalRuntimeLog';
 import { isSuspiciousTerminalSize } from '../../utils/terminalDebug';
 import './SessionTerminalWorkspace.css';
 import type { TerminalVisibleContentSnapshot } from '../../utils/terminalVisibleContent';
@@ -168,10 +166,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     const runtime = useGhosttyPaneRuntime(runtimePanes, activePaneId, eventRouter, isActiveSessionRef);
     const fitPane = runtime.fitPane;
     const getPaneSize = runtime.getPaneSize;
-    const activeRuntimeId = useMemo(
-      () => runtimePanes.find((pane) => pane.paneId === activePaneId)?.runtimeId,
-      [activePaneId, runtimePanes],
-    );
     const splitLayoutActive = workspace.layoutTree?.type === 'split';
     const showPaneHeader = paneIds.length > 1;
     const effectivePaneId = maximizedPaneId && paneIds.includes(maximizedPaneId) ? maximizedPaneId : null;
@@ -270,24 +264,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       onZoomModeChange?.(Boolean(effectiveZoomedPaneId));
     }, [effectiveZoomedPaneId, onZoomModeChange]);
 
-    useEffect(() => {
-      recordTerminalRuntimeLog({
-        category: 'workspace',
-        sessionId: workspaceId,
-        paneId: activePaneId,
-        runtimeId: activeRuntimeId,
-        message: 'workspace active pane state changed',
-        details: {
-          activePaneId,
-          activeRuntimeId: activeRuntimeId ?? null,
-          isActiveSession,
-          enabled,
-          paneCount: paneIds.length,
-          paneIds,
-        },
-      });
-    }, [activePaneId, activeRuntimeId, enabled, isActiveSession, paneIds, workspaceId]);
-
     const focusActivePane = useCallback(() => {
       // Single attempt — terminal is already mounted in every case this fires.
       runtime.focusPane(activePaneId, 0);
@@ -297,19 +273,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       if (!sessionVisible) {
         return;
       }
-      recordPaneRuntimeDebugEvent({
-        scope: 'workspace',
-        sessionId: workspaceId,
-        paneId: activePaneId,
-        message: 'focus active pane effect',
-        details: () => ({
-          enabled,
-          isActiveSession,
-          isSessionViewVisible,
-          focusRequestToken,
-          ...activeElementSummary(),
-        }),
-      });
       focusActivePane();
     }, [activePaneId, focusActivePane, focusRequestToken, isActiveSession, isSessionViewVisible, workspaceId, sessionVisible]);
 
@@ -404,56 +367,28 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       }
       const nextPaneId = findPaneInDirection(visibleLayout, activePaneId, direction);
       if (nextPaneId) {
-        recordPaneRuntimeDebugEvent({
-          scope: 'workspace',
-          sessionId: workspaceId,
-          paneId: activePaneId,
-          message: 'navigate to pane',
-          details: { direction, nextPaneId },
-        });
         onFocusPane(nextPaneId);
         runtime.focusPane(nextPaneId);
         return;
       }
-      recordPaneRuntimeDebugEvent({
-        scope: 'workspace',
-        sessionId: workspaceId,
-        paneId: activePaneId,
-        message: 'navigate out of session',
-        details: { direction },
-      });
       onNavigateOutOfSession(direction);
-    }, [activePaneId, effectivePaneId, onFocusPane, onNavigateOutOfSession, renderedLayoutTree, runtime, workspaceId]);
+    }, [activePaneId, effectivePaneId, onFocusPane, onNavigateOutOfSession, renderedLayoutTree, runtime]);
 
     const handleAgentPaneMouseDown = useCallback((paneId: string) => {
-      recordPaneRuntimeDebugEvent({
-        scope: 'workspace',
-        sessionId: workspaceId,
-        paneId,
-        message: 'agent pane mouse down',
-        details: activeElementSummary,
-      });
       onFocusPane(paneId);
       runtime.focusPane(paneId);
-    }, [onFocusPane, runtime, workspaceId]);
+    }, [onFocusPane, runtime]);
 
-    const focusPaneIfCurrentlyActive = useCallback((paneId: string, phase: 'init' | 'ready') => {
+    const focusPaneIfCurrentlyActive = useCallback((paneId: string) => {
       if (!isActiveSessionRef.current || !sessionViewVisibleRef.current || activePaneIdRef.current !== paneId) {
         return;
       }
-      recordPaneRuntimeDebugEvent({
-        scope: 'workspace',
-        sessionId: workspaceId,
-        paneId,
-        message: `focus pane from terminal ${phase}`,
-        details: activeElementSummary,
-      });
       runtime.focusPane(paneId);
-    }, [runtime, workspaceId]);
+    }, [runtime]);
 
     const handleGhosttyTerminalReady = useCallback((paneId: string) => (terminal: GhosttyTerminalHandle) => {
       void runtime.handleTerminalReady(paneId)(terminal);
-      focusPaneIfCurrentlyActive(paneId, 'ready');
+      focusPaneIfCurrentlyActive(paneId);
     }, [focusPaneIfCurrentlyActive, runtime]);
 
     useShortcut('terminal.open', focusActivePane, sessionVisible);

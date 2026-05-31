@@ -19,7 +19,6 @@ const scenarioCommands = {
   tr201: ['pnpm', ['--dir', 'app', 'run', 'real-app:scenario-tr201']],
   tr204: ['pnpm', ['--dir', 'app', 'run', 'real-app:scenario-tr204']],
   tr301: ['pnpm', ['--dir', 'app', 'run', 'real-app:scenario-tr301']],
-  tr303: ['pnpm', ['--dir', 'app', 'run', 'real-app:scenario-tr303-local-codex']],
   tr401: ['pnpm', ['--dir', 'app', 'run', 'real-app:scenario-tr401']],
   tr402: ['pnpm', ['--dir', 'app', 'run', 'real-app:scenario-tr402-local-claude']],
 };

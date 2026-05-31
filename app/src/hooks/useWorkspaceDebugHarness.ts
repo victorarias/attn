@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import type { RefObject } from 'react';
 import type { Session } from '../store/sessions';
 import type { SessionTerminalWorkspaceHandle } from '../components/SessionTerminalWorkspace';
-import { activeElementSummary } from '../utils/paneRuntimeDebug';
 
 declare global {
   interface Window {
@@ -10,7 +9,6 @@ declare global {
     __TEST_GET_SESSION_PANE_SIZE?: (sessionId: string) => { cols: number; rows: number } | null;
     __TEST_GET_ACTIVE_SESSION_PANE_TEXT?: () => string;
     __TEST_GET_ACTIVE_SESSION_PANE_RUNTIME?: (sessionId: string) => string | null;
-    __ATTN_PANE_DEBUG_STATE?: () => Record<string, unknown>;
   }
 }
 
@@ -71,24 +69,11 @@ export function useWorkspaceDebugHarness({
       return session.workspace.agents.find((entry) => entry.id === activePaneId)?.runtimeId ?? null;
     };
 
-    window.__ATTN_PANE_DEBUG_STATE = () => ({
-      activeSessionId,
-      sessions: sessions.map((session) => ({
-        id: session.id,
-        label: session.label,
-        activePaneId: getActivePaneIdForSession(session),
-        daemonActivePaneId: session.daemonActivePaneId,
-        paneIds: session.workspace.agents.map((agent) => agent.id),
-      })),
-      ...activeElementSummary(),
-    });
-
     return () => {
       delete window.__TEST_GET_SESSION_PANE_TEXT;
       delete window.__TEST_GET_SESSION_PANE_SIZE;
       delete window.__TEST_GET_ACTIVE_SESSION_PANE_TEXT;
       delete window.__TEST_GET_ACTIVE_SESSION_PANE_RUNTIME;
-      delete window.__ATTN_PANE_DEBUG_STATE;
     };
   }, [activeSessionId, getActivePaneIdForSession, sessions, workspaceRefs]);
 }

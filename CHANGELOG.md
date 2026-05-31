@@ -37,6 +37,7 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 
 ### Removed
 - **Session Muting**: Session-level mute state was removed from the app, daemon protocol, and session database schema.
+- **Footer Debug Buttons**: The dashboard footer no longer shows the developer debug toggles (resize debug, runtime trace, pane debug). The footer now points to the `⌘/` shortcuts cheatsheet next to `⌘,` settings.
 
 ---
 
