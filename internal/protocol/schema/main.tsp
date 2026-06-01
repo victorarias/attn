@@ -394,6 +394,11 @@ model SessionVisualizedMessage {
   id: string;
 }
 
+model SessionSelectedMessage {
+  cmd: "session_selected";
+  id: string;
+}
+
 model MuteWorkspaceMessage {
   cmd: "mute_workspace";
   workspace_id: string;
@@ -829,6 +834,7 @@ model WorkspaceLayoutSetSplitRatioMessage {
   workspace_id: string;
   split_id: string;
   ratio: float64;
+  request_id?: string;
 }
 
 // Dock (or move) a panel beside an anchor leaf. Docking is idempotent: an
@@ -843,9 +849,6 @@ model WorkspaceLayoutDockPanelMessage {
   edge: WorkspaceLayoutDockEdge;
   panel_id: string;
   panel_kind: string;
-  // Opaque per-panel data persisted with the layout. For markdown panels this
-  // is the absolute path of the file the panel renders.
-  panel_params?: string;
   ratio?: float64;
 }
 
@@ -979,6 +982,9 @@ model WorkspaceLayoutActionResultMessage {
   action: string;
   workspace_id: string;
   pane_id?: string;
+  split_id?: string;
+  panel_id?: string;
+  request_id?: string;
   success: boolean;
   error?: string;
 }
@@ -1484,6 +1490,7 @@ model WebSocketEvent {
   // Session/PR/repo state payloads
   id?: string;
   pane_id?: string;
+  split_id?: string;
   panel_id?: string;
   panel_kind?: string;
   content?: string;

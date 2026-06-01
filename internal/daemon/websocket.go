@@ -764,6 +764,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleClearWarningsWS()
 	case protocol.CmdSessionVisualized:
 		d.handleSessionVisualizedWS(msg.(*protocol.SessionVisualizedMessage))
+	case protocol.CmdSessionSelected:
+		d.setSelectedSession(msg.(*protocol.SessionSelectedMessage).ID)
 	case protocol.CmdPRVisited:
 		d.handlePRVisitedWS(msg.(*protocol.PRVisitedMessage))
 	case protocol.CmdListWorktrees:
@@ -991,6 +993,10 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.SessionVisualizedMessage); ok {
 			return typed.ID
 		}
+	case protocol.CmdSessionSelected:
+		if typed, ok := msg.(*protocol.SessionSelectedMessage); ok {
+			return typed.ID
+		}
 	case protocol.CmdStartReviewLoop:
 		if typed, ok := msg.(*protocol.StartReviewLoopMessage); ok {
 			return typed.SessionID
@@ -1043,6 +1049,10 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdWorkspaceLayoutUndockPanel:
 		if typed, ok := msg.(*protocol.WorkspaceLayoutUndockPanelMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdWorkspacePanelContentGet:
+		if typed, ok := msg.(*protocol.WorkspacePanelContentGetMessage); ok {
 			return typed.WorkspaceID
 		}
 	}

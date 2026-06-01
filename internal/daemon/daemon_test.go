@@ -985,6 +985,66 @@ func TestDaemon_PruneSessionsWithoutPTY_PreservesPluginMetadataForResume(t *test
 	}
 }
 
+func TestDaemon_PruneSessionsWithoutPTY_RemovesReapedWorkspaceLayout(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	workspaceID := "workspace-stale"
+	sessionID := "codex-stale"
+	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: "Stale", Directory: "/tmp/stale"})
+	d.store.Add(&protocol.Session{
+		ID:             sessionID,
+		Label:          sessionID,
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/stale",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+		WorkspaceID:    workspaceID,
+	})
+	d.workspaces.register(workspaceID, "Stale", "/tmp/stale", false)
+	d.workspaces.associateSession(sessionID, workspaceID, sessionID)
+	if err := d.store.SaveWorkspaceLayout(workspacelayout.WorkspaceLayout{
+		WorkspaceID:  workspaceID,
+		ActivePaneID: "pane-stale",
+		Layout: workspacelayout.Node{
+			Type:      "split",
+			SplitID:   "split-stale",
+			Direction: workspacelayout.DirectionVertical,
+			Ratio:     workspacelayout.DefaultSplitRatio,
+			Children: []workspacelayout.Node{
+				{Type: "pane", PaneID: "pane-stale"},
+				{Type: "panel", PanelID: markdownPanelID, PanelKind: string(workspacelayout.PanelKindMarkdown), PanelParams: "/tmp/notes.md"},
+			},
+		},
+		Panes: []workspacelayout.Pane{{
+			PaneID:    "pane-stale",
+			RuntimeID: sessionID,
+			SessionID: sessionID,
+			Kind:      workspacelayout.PaneKindAgent,
+			Title:     workspacelayout.DefaultPaneTitle,
+		}},
+	}); err != nil {
+		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
+	}
+
+	if removed := d.pruneSessionsWithoutPTY(); removed != 1 {
+		t.Fatalf("pruneSessionsWithoutPTY removed = %d, want 1", removed)
+	}
+	if got := d.store.Get(sessionID); got != nil {
+		t.Fatalf("store.Get(%q) = %+v, want nil", sessionID, got)
+	}
+	if got := d.store.GetWorkspace(workspaceID); got != nil {
+		t.Fatalf("store.GetWorkspace(%q) = %+v, want nil", workspaceID, got)
+	}
+	if _, ok := d.workspaces.snapshot(workspaceID); ok {
+		t.Fatalf("workspace registry still contains %q", workspaceID)
+	}
+	if got := d.store.GetWorkspaceLayout(workspaceID); got != nil {
+		t.Fatalf("store.GetWorkspaceLayout(%q) = %+v, want nil", workspaceID, got)
+	}
+}
+
 func TestDaemon_RunDeferredWorkerReconciliationForcesIdleDemotion(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	now := string(protocol.TimestampNow())

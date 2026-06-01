@@ -375,6 +375,7 @@ function App() {
     sendEnsureRepo,
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
+    sendSessionSelected,
     sendSessionVisualized,
     sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
@@ -496,6 +497,7 @@ function App() {
         sendEnsureRepo={sendEnsureRepo}
         sendSubscribeGitStatus={sendSubscribeGitStatus}
         sendUnsubscribeGitStatus={sendUnsubscribeGitStatus}
+        sendSessionSelected={sendSessionSelected}
         sendSessionVisualized={sendSessionVisualized}
         sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
@@ -584,6 +586,7 @@ interface AppContentProps {
   sendEnsureRepo: ReturnType<typeof useDaemonSocket>['sendEnsureRepo'];
   sendSubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendSubscribeGitStatus'];
   sendUnsubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendUnsubscribeGitStatus'];
+  sendSessionSelected: ReturnType<typeof useDaemonSocket>['sendSessionSelected'];
   sendSessionVisualized: ReturnType<typeof useDaemonSocket>['sendSessionVisualized'];
   sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
@@ -667,6 +670,7 @@ sendFetchPRDetails,
   sendEnsureRepo,
   sendSubscribeGitStatus,
   sendUnsubscribeGitStatus,
+  sendSessionSelected,
   sendSessionVisualized,
   sendWorkspaceAddSessionPane,
   sendWorkspaceClosePane,
@@ -1060,6 +1064,12 @@ sendFetchPRDetails,
       setActiveSession(sessions[0].id);
     }
   }, [activeSessionId, sessions, setActiveSession, view]);
+
+  useEffect(() => {
+    if (view === 'session' && activeSessionId) {
+      sendSessionSelected(activeSessionId);
+    }
+  }, [activeSessionId, sendSessionSelected, view]);
 
   // Track when the currently-selected session became visible.
   useEffect(() => {
@@ -2640,10 +2650,7 @@ sendFetchPRDetails,
                       }
                     }}
                     onResizeSplit={(splitId, ratio) => {
-                      void sendWorkspaceSetSplitRatio(workspace.id, splitId, ratio).catch(() => {
-                        // Persistence is best-effort; the live override already
-                        // reflects the change and the next layout broadcast reconciles.
-                      });
+                      return sendWorkspaceSetSplitRatio(workspace.id, splitId, ratio);
                     }}
                     onFocusPane={(paneId) => {
                       const agentPane = workspaceState.agents.find((pane) => pane.id === paneId);

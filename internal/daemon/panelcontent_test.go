@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -30,6 +31,20 @@ func TestReadMarkdownFile(t *testing.T) {
 	}
 	if _, err := readMarkdownFile(""); err == nil {
 		t.Fatal("expected error for empty path")
+	}
+	fifo := filepath.Join(dir, "doc.fifo")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readMarkdownFile(fifo); err == nil {
+		t.Fatal("expected error for fifo")
+	}
+	tooLarge := filepath.Join(dir, "too-large.md")
+	if err := os.WriteFile(tooLarge, make([]byte, maxMarkdownBytes+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readMarkdownFile(tooLarge); err == nil {
+		t.Fatal("expected error for oversized file")
 	}
 }
 
@@ -118,6 +133,23 @@ func TestWorkspacePanelContentGetMissingFileReportsError(t *testing.T) {
 	if got.Error == nil {
 		t.Fatal("expected error for a missing file so the panel can show a clear state")
 	}
+}
+
+func TestWorkspacePanelContentGetRejectsUnsupportedPanelKind(t *testing.T) {
+	d, client, workspaceID := setupMarkdownWorkspace(t)
+	file := filepath.Join(t.TempDir(), "private.txt")
+	if err := os.WriteFile(file, []byte("must not be returned"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.dockPanel(workspaceID, "pane-1", "panel-future", "future", file, protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+		t.Fatalf("dockPanel: %v", err)
+	}
+	d.handleWorkspacePanelContentGet(client, &protocol.WorkspacePanelContentGetMessage{
+		Cmd:         protocol.CmdWorkspacePanelContentGet,
+		WorkspaceID: workspaceID,
+		PanelID:     "panel-future",
+	})
+	expectCommandError(t, client, protocol.CmdWorkspacePanelContentGet, "unsupported panel kind")
 }
 
 func TestCollectChangedMarkdownPanelsDetectsEdits(t *testing.T) {

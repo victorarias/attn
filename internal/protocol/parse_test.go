@@ -27,6 +27,11 @@ func TestParseCommand(t *testing.T) {
 			wantCmd: CmdQuery,
 		},
 		{
+			name:    "session selected message",
+			input:   `{"cmd":"session_selected","id":"abc"}`,
+			wantCmd: CmdSessionSelected,
+		},
+		{
 			name:    "unregister message",
 			input:   `{"cmd":"unregister","id":"abc"}`,
 			wantCmd: CmdUnregister,
@@ -182,15 +187,15 @@ func TestParseWorkspaceLayoutUndockPanel(t *testing.T) {
 	}
 }
 
-func TestParseWorkspaceLayoutDockPanelParams(t *testing.T) {
+func TestParseWorkspaceLayoutDockPanelIgnoresInjectedParams(t *testing.T) {
 	input := `{"cmd":"workspace_layout_dock_panel","workspace_id":"ws1","anchor_pane_id":"pane-a","edge":"right","panel_id":"panel-md","panel_kind":"markdown","panel_params":"/abs/file.md"}`
 	_, data, err := ParseMessage([]byte(input))
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
 	msg := data.(*WorkspaceLayoutDockPanelMessage)
-	if msg.PanelParams == nil || *msg.PanelParams != "/abs/file.md" {
-		t.Errorf("panel_params = %v, want /abs/file.md", msg.PanelParams)
+	if msg.WorkspaceID != "ws1" || msg.PanelID != "panel-md" || msg.PanelKind != "markdown" {
+		t.Errorf("fields = %q/%q/%q, want ws1/panel-md/markdown", msg.WorkspaceID, msg.PanelID, msg.PanelKind)
 	}
 }
 

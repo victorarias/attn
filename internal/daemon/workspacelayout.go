@@ -147,6 +147,35 @@ func (d *Daemon) sendWorkspaceLayoutActionResult(client *wsClient, action, works
 	d.sendToClient(client, result)
 }
 
+func (d *Daemon) sendWorkspaceLayoutSplitActionResult(client *wsClient, workspaceID, splitID string, requestID *string, err error) {
+	result := protocol.WorkspaceLayoutActionResultMessage{
+		Event:       protocol.EventWorkspaceLayoutActionResult,
+		Action:      protocol.CmdWorkspaceLayoutSetSplitRatio,
+		WorkspaceID: workspaceID,
+		SplitID:     protocol.Ptr(strings.TrimSpace(splitID)),
+		RequestID:   requestID,
+		Success:     err == nil,
+	}
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, result)
+}
+
+func (d *Daemon) sendWorkspaceLayoutPanelActionResult(client *wsClient, action, workspaceID, panelID string, err error) {
+	result := protocol.WorkspaceLayoutActionResultMessage{
+		Event:       protocol.EventWorkspaceLayoutActionResult,
+		Action:      action,
+		WorkspaceID: workspaceID,
+		PanelID:     protocol.Ptr(strings.TrimSpace(panelID)),
+		Success:     err == nil,
+	}
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, result)
+}
+
 func (d *Daemon) broadcastWorkspaceLayoutUpdated(workspaceID string) {
 	snapshot, err := d.protocolWorkspaceLayout(workspaceID)
 	if err != nil {
@@ -298,26 +327,26 @@ func (d *Daemon) handleWorkspaceLayoutRenamePane(client *wsClient, msg *protocol
 func (d *Daemon) handleWorkspaceLayoutSetSplitRatio(client *wsClient, msg *protocol.WorkspaceLayoutSetSplitRatioMessage) {
 	snapshot, err := d.ensureWorkspaceLayout(msg.WorkspaceID)
 	if err != nil {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSetSplitRatio, msg.WorkspaceID, nil, err)
+		d.sendWorkspaceLayoutSplitActionResult(client, msg.WorkspaceID, msg.SplitID, msg.RequestID, err)
 		return
 	}
 	splitID := strings.TrimSpace(msg.SplitID)
 	if splitID == "" {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSetSplitRatio, msg.WorkspaceID, nil, fmt.Errorf("split_id is required"))
+		d.sendWorkspaceLayoutSplitActionResult(client, msg.WorkspaceID, splitID, msg.RequestID, fmt.Errorf("split_id is required"))
 		return
 	}
 	layout, ok := workspacelayout.SetSplitRatio(snapshot.Layout, splitID, msg.Ratio)
 	if !ok {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSetSplitRatio, msg.WorkspaceID, nil, fmt.Errorf("split not found: %s", splitID))
+		d.sendWorkspaceLayoutSplitActionResult(client, msg.WorkspaceID, splitID, msg.RequestID, fmt.Errorf("split not found: %s", splitID))
 		return
 	}
 	snapshot.Layout = layout
 	if err := d.store.SaveWorkspaceLayout(*snapshot); err != nil {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSetSplitRatio, msg.WorkspaceID, nil, err)
+		d.sendWorkspaceLayoutSplitActionResult(client, msg.WorkspaceID, splitID, msg.RequestID, err)
 		return
 	}
 	d.broadcastWorkspaceLayoutUpdated(msg.WorkspaceID)
-	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutSetSplitRatio, msg.WorkspaceID, nil, nil)
+	d.sendWorkspaceLayoutSplitActionResult(client, msg.WorkspaceID, splitID, msg.RequestID, nil)
 }
 
 // defaultPanelFraction is the share of the split a freshly docked panel takes
@@ -341,9 +370,12 @@ func dockEdgeToSplit(edge protocol.WorkspaceLayoutDockEdge) (workspacelayout.Dir
 }
 
 func (d *Daemon) handleWorkspaceLayoutDockPanel(client *wsClient, msg *protocol.WorkspaceLayoutDockPanelMessage) {
-	params := protocol.Deref(msg.PanelParams)
+	params := ""
+	if snapshot := d.store.GetWorkspaceLayout(msg.WorkspaceID); snapshot != nil {
+		params, _ = workspacelayout.PanelParamsByID(snapshot.Layout, strings.TrimSpace(msg.PanelID))
+	}
 	err := d.dockPanel(msg.WorkspaceID, msg.AnchorPaneID, msg.PanelID, msg.PanelKind, params, msg.Edge, msg.Ratio)
-	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutDockPanel, msg.WorkspaceID, nil, err)
+	d.sendWorkspaceLayoutPanelActionResult(client, protocol.CmdWorkspaceLayoutDockPanel, msg.WorkspaceID, msg.PanelID, err)
 }
 
 // dockPanel docks (or moves) a panel into a workspace layout and persists it.
@@ -360,6 +392,9 @@ func (d *Daemon) dockPanel(workspaceID, anchorPaneID, panelID, panelKind, panelP
 	anchorPaneID = strings.TrimSpace(anchorPaneID)
 	if panelID == "" || panelKind == "" {
 		return fmt.Errorf("panel_id and panel_kind are required")
+	}
+	if workspacelayout.HasPane(snapshot.Layout, panelID) {
+		return fmt.Errorf("pane already exists: %s", panelID)
 	}
 	// Fall back to the active pane when the caller doesn't name an anchor.
 	if anchorPaneID == "" {
@@ -409,27 +444,27 @@ func (d *Daemon) dockPanel(workspaceID, anchorPaneID, panelID, panelKind, panelP
 func (d *Daemon) handleWorkspaceLayoutUndockPanel(client *wsClient, msg *protocol.WorkspaceLayoutUndockPanelMessage) {
 	snapshot, err := d.ensureWorkspaceLayout(msg.WorkspaceID)
 	if err != nil {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, nil, err)
+		d.sendWorkspaceLayoutPanelActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, msg.PanelID, err)
 		return
 	}
 	panelID := strings.TrimSpace(msg.PanelID)
 	if panelID == "" {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, nil, fmt.Errorf("panel_id is required"))
+		d.sendWorkspaceLayoutPanelActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, panelID, fmt.Errorf("panel_id is required"))
 		return
 	}
 	layout, ok := workspacelayout.UndockPanel(snapshot.Layout, panelID)
 	if !ok {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, nil, fmt.Errorf("panel not found: %s", panelID))
+		d.sendWorkspaceLayoutPanelActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, panelID, fmt.Errorf("panel not found: %s", panelID))
 		return
 	}
 	snapshot.Layout = layout
 	normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot)
 	if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, nil, err)
+		d.sendWorkspaceLayoutPanelActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, panelID, err)
 		return
 	}
 	d.broadcastWorkspaceLayoutUpdated(msg.WorkspaceID)
-	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, nil, nil)
+	d.sendWorkspaceLayoutPanelActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, panelID, nil)
 }
 
 func (d *Daemon) handleWorkspaceLayoutAddSessionPane(client *wsClient, msg *protocol.WorkspaceLayoutAddSessionPaneMessage) {
@@ -463,6 +498,10 @@ func (d *Daemon) handleWorkspaceLayoutAddSessionPane(client *wsClient, msg *prot
 	}
 	if workspacelayout.HasPane(snapshot.Layout, paneID) {
 		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, protocol.Ptr(paneID), fmt.Errorf("pane already exists: %s", paneID))
+		return
+	}
+	if workspacelayout.HasPanel(snapshot.Layout, paneID) {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, protocol.Ptr(paneID), fmt.Errorf("panel already exists: %s", paneID))
 		return
 	}
 	title := strings.TrimSpace(protocol.Deref(msg.Title))

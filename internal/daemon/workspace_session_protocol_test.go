@@ -278,8 +278,9 @@ func TestWorkspaceLayoutSetSplitRatioPersistsLockedRatio(t *testing.T) {
 		WorkspaceID: workspaceID,
 		SplitID:     "does-not-exist",
 		Ratio:       0.3,
+		RequestID:   protocol.Ptr("request-missing"),
 	})
-	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutSetSplitRatio, workspaceID, "", false)
+	expectWorkspaceLayoutActionResultIDsAndRequestID(t, client, protocol.CmdWorkspaceLayoutSetSplitRatio, workspaceID, "", "does-not-exist", "", "request-missing", false)
 
 	// Set and lock the real split.
 	d.handleWorkspaceLayoutSetSplitRatio(client, &protocol.WorkspaceLayoutSetSplitRatioMessage{
@@ -287,8 +288,9 @@ func TestWorkspaceLayoutSetSplitRatioPersistsLockedRatio(t *testing.T) {
 		WorkspaceID: workspaceID,
 		SplitID:     splitID,
 		Ratio:       0.3,
+		RequestID:   protocol.Ptr("request-real"),
 	})
-	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutSetSplitRatio, workspaceID, "", true)
+	expectWorkspaceLayoutActionResultIDsAndRequestID(t, client, protocol.CmdWorkspaceLayoutSetSplitRatio, workspaceID, "", splitID, "", "request-real", true)
 
 	// Re-read through normalization: the locked ratio must survive (a two-pane
 	// split would otherwise be rebalanced back to 0.5).
@@ -337,16 +339,26 @@ func TestWorkspaceLayoutDockPanelPersistsAndMoves(t *testing.T) {
 	})
 	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, "pane-2", true)
 
-	// Dock a markdown panel between the two panes (right of pane-1).
+	// A panel cannot take over a terminal pane's id.
 	d.handleWorkspaceLayoutDockPanel(client, &protocol.WorkspaceLayoutDockPanelMessage{
 		Cmd:          protocol.CmdWorkspaceLayoutDockPanel,
 		WorkspaceID:  workspaceID,
 		AnchorPaneID: "pane-1",
 		Edge:         protocol.WorkspaceLayoutDockEdgeRight,
-		PanelID:      "panel-md",
+		PanelID:      "pane-2",
 		PanelKind:    "markdown",
 	})
-	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutDockPanel, workspaceID, "", true)
+	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutDockPanel, workspaceID, "", "", "pane-2", false)
+	afterCollision := d.store.GetWorkspaceLayout(workspaceID)
+	if !workspacelayout.HasPane(afterCollision.Layout, "pane-2") || workspacelayout.HasPanel(afterCollision.Layout, "pane-2") {
+		t.Fatalf("pane id collision mutated layout: %+v", afterCollision.Layout)
+	}
+
+	// The trusted open-markdown path assigns the file. WebSocket docking can
+	// move the panel later, but cannot retarget it.
+	if err := d.dockPanel(workspaceID, "pane-1", "panel-md", "markdown", "/tmp/notes.md", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+		t.Fatalf("dockPanel: %v", err)
+	}
 
 	snapshot := d.store.GetWorkspaceLayout(workspaceID)
 	if snapshot == nil {
@@ -361,6 +373,20 @@ func TestWorkspaceLayoutDockPanelPersistsAndMoves(t *testing.T) {
 	}
 	if len(snapshot.Panes) != 2 {
 		t.Fatalf("snapshot panes = %+v, want only the two agent panes", snapshot.Panes)
+	}
+
+	// A terminal pane cannot take over a docked panel's id.
+	d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
+		Cmd:          protocol.CmdWorkspaceLayoutAddSessionPane,
+		WorkspaceID:  workspaceID,
+		PaneID:       protocol.Ptr("panel-md"),
+		SessionID:    "session-3",
+		TargetPaneID: protocol.Ptr("pane-1"),
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, "panel-md", false)
+	afterPaneCollision := d.store.GetWorkspaceLayout(workspaceID)
+	if len(afterPaneCollision.Panes) != 2 || !workspacelayout.HasPanel(afterPaneCollision.Layout, "panel-md") {
+		t.Fatalf("panel id collision mutated layout: %+v", afterPaneCollision)
 	}
 
 	// The cross-restart / cross-client guarantee: the panel survives a layout
@@ -386,10 +412,13 @@ func TestWorkspaceLayoutDockPanelPersistsAndMoves(t *testing.T) {
 		PanelID:      "panel-md",
 		PanelKind:    "markdown",
 	})
-	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutDockPanel, workspaceID, "", true)
+	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutDockPanel, workspaceID, "", "", "panel-md", true)
 	moved := d.store.GetWorkspaceLayout(workspaceID)
 	if ids := workspacelayout.PanelIDs(moved.Layout); len(ids) != 1 {
 		t.Fatalf("panel ids after move = %v, want exactly one", ids)
+	}
+	if params, ok := workspacelayout.PanelParamsByID(moved.Layout, "panel-md"); !ok || params != "/tmp/notes.md" {
+		t.Fatalf("panel params after move = (%q, %v), want (%q, true)", params, ok, "/tmp/notes.md")
 	}
 
 	// Undock removes the panel and collapses its split; the panes are untouched.
@@ -398,7 +427,7 @@ func TestWorkspaceLayoutDockPanelPersistsAndMoves(t *testing.T) {
 		WorkspaceID: workspaceID,
 		PanelID:     "panel-md",
 	})
-	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutUndockPanel, workspaceID, "", true)
+	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutUndockPanel, workspaceID, "", "", "panel-md", true)
 	after := d.store.GetWorkspaceLayout(workspaceID)
 	if workspacelayout.HasPanel(after.Layout, "panel-md") {
 		t.Fatal("panel still present after undock")
@@ -413,7 +442,7 @@ func TestWorkspaceLayoutDockPanelPersistsAndMoves(t *testing.T) {
 		WorkspaceID: workspaceID,
 		PanelID:     "panel-md",
 	})
-	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutUndockPanel, workspaceID, "", false)
+	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutUndockPanel, workspaceID, "", "", "panel-md", false)
 }
 
 func firstSplitID(node workspacelayout.Node) string {
@@ -450,6 +479,16 @@ func newWorkspaceProtocolTestClient() *wsClient {
 
 func expectWorkspaceLayoutActionResult(t *testing.T, client *wsClient, action, workspaceID, paneID string, success bool) {
 	t.Helper()
+	expectWorkspaceLayoutActionResultIDs(t, client, action, workspaceID, paneID, "", "", success)
+}
+
+func expectWorkspaceLayoutActionResultIDs(t *testing.T, client *wsClient, action, workspaceID, paneID, splitID, panelID string, success bool) {
+	t.Helper()
+	expectWorkspaceLayoutActionResultIDsAndRequestID(t, client, action, workspaceID, paneID, splitID, panelID, "", success)
+}
+
+func expectWorkspaceLayoutActionResultIDsAndRequestID(t *testing.T, client *wsClient, action, workspaceID, paneID, splitID, panelID, requestID string, success bool) {
+	t.Helper()
 	deadline := time.After(1 * time.Second)
 	for {
 		select {
@@ -466,6 +505,15 @@ func expectWorkspaceLayoutActionResult(t *testing.T, client *wsClient, action, w
 			}
 			if got := protocol.Deref(result.PaneID); got != paneID {
 				t.Fatalf("workspace action pane_id = %q, want %q; payload=%s", got, paneID, string(outbound.payload))
+			}
+			if got := protocol.Deref(result.SplitID); got != splitID {
+				t.Fatalf("workspace action split_id = %q, want %q; payload=%s", got, splitID, string(outbound.payload))
+			}
+			if got := protocol.Deref(result.PanelID); got != panelID {
+				t.Fatalf("workspace action panel_id = %q, want %q; payload=%s", got, panelID, string(outbound.payload))
+			}
+			if got := protocol.Deref(result.RequestID); got != requestID {
+				t.Fatalf("workspace action request_id = %q, want %q; payload=%s", got, requestID, string(outbound.payload))
 			}
 			return
 		case <-deadline:

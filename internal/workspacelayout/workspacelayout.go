@@ -563,6 +563,9 @@ func DockPanel(node Node, anchorID string, direction Direction, before bool, spl
 	if strings.TrimSpace(splitID) == "" {
 		splitID = "split"
 	}
+	if HasPane(node, panelID) {
+		return node, false
+	}
 
 	// Move semantics: drop any existing instance so a re-dock relocates rather
 	// than duplicates the panel.

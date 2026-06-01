@@ -2117,6 +2117,14 @@ type SessionRegisteredMessage struct {
 	Session Session `json:"session"`
 }
 
+type SessionSelectedMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+}
+
 type SessionState string
 
 type SessionStateChangedMessage struct {
@@ -2612,6 +2620,9 @@ type WebSocketEvent struct {
 	// Signal corresponds to the JSON schema field "signal".
 	Signal *string `json:"signal,omitempty,omitzero"`
 
+	// SplitID corresponds to the JSON schema field "split_id".
+	SplitID *string `json:"split_id,omitempty,omitzero"`
+
 	// Staged corresponds to the JSON schema field "staged".
 	Staged []GitFileChange `json:"staged,omitempty,omitzero"`
 
@@ -2699,6 +2710,15 @@ type WorkspaceLayoutActionResultMessage struct {
 	// PaneID corresponds to the JSON schema field "pane_id".
 	PaneID *string `json:"pane_id,omitempty,omitzero"`
 
+	// PanelID corresponds to the JSON schema field "panel_id".
+	PanelID *string `json:"panel_id,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// SplitID corresponds to the JSON schema field "split_id".
+	SplitID *string `json:"split_id,omitempty,omitzero"`
+
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
 
@@ -2762,9 +2782,6 @@ type WorkspaceLayoutDockPanelMessage struct {
 
 	// PanelKind corresponds to the JSON schema field "panel_kind".
 	PanelKind string `json:"panel_kind"`
-
-	// PanelParams corresponds to the JSON schema field "panel_params".
-	PanelParams *string `json:"panel_params,omitempty,omitzero"`
 
 	// Ratio corresponds to the JSON schema field "ratio".
 	Ratio *float64 `json:"ratio,omitempty,omitzero"`
@@ -2856,6 +2873,9 @@ type WorkspaceLayoutSetSplitRatioMessage struct {
 
 	// Ratio corresponds to the JSON schema field "ratio".
 	Ratio float64 `json:"ratio"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
 
 	// SplitID corresponds to the JSON schema field "split_id".
 	SplitID string `json:"split_id"`

@@ -5,7 +5,6 @@ import {
   getNormalizedPaneBounds,
   getSplitDividers,
   applyRatioOverrides,
-  collectSplitRatios,
   hasPane,
   findPaneInDirection,
   leafSlotId,
@@ -169,7 +168,7 @@ interface SessionTerminalWorkspaceProps {
   onFocusPane: (paneId: string) => void;
   onZoomModeChange?: (zoomed: boolean) => void;
   onNavigateOutOfSession: (direction: TerminalNavigationDirection) => void;
-  onResizeSplit?: (splitId: string, ratio: number) => void;
+  onResizeSplit?: (splitId: string, ratio: number) => Promise<unknown> | void;
   onDockPanel?: (panelId: string, panelKind: string, anchorPaneId: string, edge: TerminalDockEdge) => void;
   onUndockPanel?: (panelId: string) => void;
   panelContents?: Record<string, PanelContentState>;
@@ -308,26 +307,34 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       return zoomLayoutTowardPane(baseLayoutTree, effectiveZoomedPaneId);
     }, [effectivePaneId, effectiveZoomedPaneId, baseLayoutTree]);
 
-    // Reconcile optimistic overrides with the authoritative daemon layout: drop
-    // an override once the daemon's ratio matches it (persistence landed) or the
-    // split disappears. Never drop the split currently being dragged.
+    const clearRatioOverride = useCallback((splitId: string, expectedRatio?: number) => {
+      setRatioOverrides((prev) => {
+        const current = prev.get(splitId);
+        if (current == null || (expectedRatio != null && Math.abs(current - expectedRatio) >= 0.005)) {
+          return prev;
+        }
+        const next = new Map(prev);
+        next.delete(splitId);
+        return next;
+      });
+    }, []);
+
+    // Any daemon layout broadcast is authoritative after a completed drag. Drop
+    // stale local overrides whether persistence landed or another client won.
+    // Never drop the split currently being dragged.
     useEffect(() => {
       setRatioOverrides((prev) => {
         if (prev.size === 0 || !workspace.layoutTree) {
           return prev;
         }
-        const ratios = collectSplitRatios(workspace.layoutTree);
         let changed = false;
         const next = new Map(prev);
-        for (const [splitId, overrideRatio] of prev) {
+        for (const splitId of prev.keys()) {
           if (splitId === draggingSplitRef.current) {
             continue;
           }
-          const daemonRatio = ratios.get(splitId);
-          if (daemonRatio == null || Math.abs(daemonRatio - overrideRatio) < 0.005) {
-            next.delete(splitId);
-            changed = true;
-          }
+          next.delete(splitId);
+          changed = true;
         }
         return changed ? next : prev;
       });
@@ -590,6 +597,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       const teardown = () => {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onCancel);
+        window.removeEventListener('blur', onCancel);
         releaseSelectionLock();
         setDraggingPanelId(null);
         setDockTarget(null);
@@ -604,9 +613,14 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           onDockPanel?.(panelId, panelKind, finalTarget.anchorPaneId, finalTarget.edge);
         }
       };
+      const onCancel = () => {
+        teardown();
+      };
       panelDragCleanupRef.current = teardown;
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onCancel);
+      window.addEventListener('blur', onCancel);
     }, [renderedPaneBounds, agentPaneById, panelLeafById, onDockPanel]);
 
     const renderPaneSurface = useCallback((paneId: string): React.ReactNode => {
@@ -795,6 +809,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       const teardown = () => {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onCancel);
+        window.removeEventListener('blur', onCancel);
         if (ratioRafRef.current != null) {
           window.cancelAnimationFrame(ratioRafRef.current);
           ratioRafRef.current = null;
@@ -802,18 +818,29 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         releaseSelectionLock();
         dragCleanupRef.current = null;
       };
+      const onCancel = () => {
+        teardown();
+        pendingRatioRef.current = null;
+        draggingSplitRef.current = null;
+        clearRatioOverride(splitId);
+      };
       const onUp = (ev: PointerEvent) => {
         const ratio = computeRatio(ev.clientX, ev.clientY);
         teardown();
         pendingRatioRef.current = { splitId, ratio };
         flushRatioOverride();
         draggingSplitRef.current = null;
-        onResizeSplit?.(splitId, ratio);
+        const resizeResult = onResizeSplit?.(splitId, ratio);
+        if (resizeResult) {
+          void resizeResult.catch(() => clearRatioOverride(splitId, ratio));
+        }
       };
       dragCleanupRef.current = teardown;
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
-    }, [flushRatioOverride, onResizeSplit]);
+      window.addEventListener('pointercancel', onCancel);
+      window.addEventListener('blur', onCancel);
+    }, [clearRatioOverride, flushRatioOverride, onResizeSplit]);
 
     useEffect(() => () => {
       dragCleanupRef.current?.();

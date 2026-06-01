@@ -403,6 +403,25 @@ function parseLayoutJSON(layoutJSON: string): TerminalLayoutNode | null {
   }
 }
 
+export function panelIdsFromLayoutJSON(layoutJSON: string): string[] {
+  const ids: string[] = [];
+  const collect = (node: TerminalLayoutNode | null) => {
+    if (!node) {
+      return;
+    }
+    if (node.type === 'panel') {
+      ids.push(node.panelId);
+      return;
+    }
+    if (node.type === 'split') {
+      collect(node.children[0]);
+      collect(node.children[1]);
+    }
+  };
+  collect(parseLayoutJSON(layoutJSON));
+  return ids;
+}
+
 function agentTerminalsFromPanes(panes: PaneElement[]): AgentTerminal[] {
   return panes
     .filter((pane) => pane.kind === 'agent' && typeof pane.runtime_id === 'string' && typeof pane.session_id === 'string')

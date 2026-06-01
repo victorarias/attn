@@ -137,6 +137,26 @@ func TestDockPanelRejectsSelfAnchorAndEmptyFields(t *testing.T) {
 	}
 }
 
+func TestDockPanelRejectsPaneIDCollision(t *testing.T) {
+	tree := Node{
+		Type:      "split",
+		SplitID:   "root",
+		Direction: DirectionVertical,
+		Ratio:     DefaultSplitRatio,
+		Children: []Node{
+			{Type: "pane", PaneID: "pane-a"},
+			{Type: "pane", PaneID: "pane-b"},
+		},
+	}
+	next, ok := DockPanel(tree, "pane-a", DirectionVertical, false, "split-md", "pane-b", "markdown", "", 0.6)
+	if ok {
+		t.Fatal("panel id matching a terminal pane must be rejected")
+	}
+	if !HasPane(next, "pane-a") || !HasPane(next, "pane-b") || HasPanel(next, "pane-b") {
+		t.Fatalf("layout mutated after pane id collision: %+v", next)
+	}
+}
+
 func TestDockPanelPersistsPanelParams(t *testing.T) {
 	path := "/Users/me/project/README.md"
 	docked, ok := DockPanel(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "panel-md", "markdown", path, 0.68)

@@ -2,9 +2,11 @@ package daemon
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -23,8 +25,9 @@ const markdownPanelID = "panel-markdown"
 const markdownPollInterval = 750 * time.Millisecond
 
 // maxMarkdownBytes caps how large a markdown file the daemon will read into a
-// panel. Big enough for any real doc, small enough to never wedge the socket.
-const maxMarkdownBytes = 5 << 20
+// panel. encoding/json can expand a byte to six bytes; keeping the raw preview
+// at 1 MiB leaves room beneath the remote relay's 8 MiB message limit.
+const maxMarkdownBytes = 1 << 20
 
 // panelContentSig is a cheap fingerprint of a file used to detect changes
 // between polls without re-reading the contents every tick.
@@ -82,22 +85,31 @@ func readMarkdownFile(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", fmt.Errorf("no file is associated with this panel")
 	}
-	info, err := os.Stat(path)
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("file not found: %s", path)
 		}
 		return "", err
 	}
-	if info.IsDir() {
-		return "", fmt.Errorf("not a file: %s", path)
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("not a regular file: %s", path)
 	}
 	if info.Size() > maxMarkdownBytes {
 		return "", fmt.Errorf("file is too large to preview (%d bytes, max %d)", info.Size(), maxMarkdownBytes)
 	}
-	data, err := os.ReadFile(path)
+	data, err := io.ReadAll(io.LimitReader(file, maxMarkdownBytes+1))
 	if err != nil {
 		return "", err
+	}
+	if len(data) > maxMarkdownBytes {
+		return "", fmt.Errorf("file is too large to preview (more than %d bytes)", maxMarkdownBytes)
 	}
 	return string(data), nil
 }
@@ -132,7 +144,7 @@ func (d *Daemon) broadcastPanelContent(workspaceID, panelID, kind, path, content
 // next poll tick.
 func (d *Daemon) broadcastPanelContentNow(workspaceID, panelID string) {
 	kind, path, found := d.panelFilePath(workspaceID, panelID)
-	if !found {
+	if !found || kind != string(workspacelayout.PanelKindMarkdown) {
 		return
 	}
 	content, readErr := readMarkdownFile(path)
@@ -145,6 +157,10 @@ func (d *Daemon) handleWorkspacePanelContentGet(client *wsClient, msg *protocol.
 	kind, path, found := d.panelFilePath(msg.WorkspaceID, msg.PanelID)
 	if !found {
 		d.sendCommandError(client, protocol.CmdWorkspacePanelContentGet, fmt.Sprintf("panel not found: %s", msg.PanelID))
+		return
+	}
+	if kind != string(workspacelayout.PanelKindMarkdown) {
+		d.sendCommandError(client, protocol.CmdWorkspacePanelContentGet, fmt.Sprintf("unsupported panel kind: %s", kind))
 		return
 	}
 	content, readErr := readMarkdownFile(path)

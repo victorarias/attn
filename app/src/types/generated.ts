@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, OpenMarkdownMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, Workspace, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockPanelMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockPanelMessage, WorkspaceLayoutUpdatedMessage, WorkspacePanelContentGetMessage, WorkspacePanelContentMessage, WorkspaceRegisteredMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, OpenMarkdownMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, Workspace, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockPanelMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockPanelMessage, WorkspaceLayoutUpdatedMessage, WorkspacePanelContentGetMessage, WorkspacePanelContentMessage, WorkspaceRegisteredMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -143,6 +143,7 @@
 //   const session = Convert.toSession(json);
 //   const sessionExitedMessage = Convert.toSessionExitedMessage(json);
 //   const sessionRegisteredMessage = Convert.toSessionRegisteredMessage(json);
+//   const sessionSelectedMessage = Convert.toSessionSelectedMessage(json);
 //   const sessionState = Convert.toSessionState(json);
 //   const sessionStateChangedMessage = Convert.toSessionStateChangedMessage(json);
 //   const sessionTodosUpdatedMessage = Convert.toSessionTodosUpdatedMessage(json);
@@ -2160,6 +2161,16 @@ export enum SessionRegisteredMessageEvent {
     SessionRegistered = "session_registered",
 }
 
+export interface SessionSelectedMessage {
+    cmd: SessionSelectedMessageCmd;
+    id:  string;
+    [property: string]: any;
+}
+
+export enum SessionSelectedMessageCmd {
+    SessionSelected = "session_selected",
+}
+
 export interface SessionStateChangedMessage {
     event:   SessionStateChangedMessageEvent;
     session: SessionElement;
@@ -2505,6 +2516,7 @@ export interface WebSocketEvent {
     sessions?:              SessionElement[];
     settings?:              { [key: string]: any };
     signal?:                string;
+    split_id?:              string;
     staged?:                StagedElement[];
     stash_ref?:             string;
     success?:               boolean;
@@ -2544,6 +2556,9 @@ export interface WorkspaceLayoutActionResultMessage {
     error?:       string;
     event:        WorkspaceLayoutActionResultMessageEvent;
     pane_id?:     string;
+    panel_id?:    string;
+    request_id?:  string;
+    split_id?:    string;
     success:      boolean;
     workspace_id: string;
     [property: string]: any;
@@ -2590,7 +2605,6 @@ export interface WorkspaceLayoutDockPanelMessage {
     edge:           WorkspaceLayoutDockEdge;
     panel_id:       string;
     panel_kind:     string;
-    panel_params?:  string;
     ratio?:         number;
     workspace_id:   string;
     [property: string]: any;
@@ -2665,6 +2679,7 @@ export enum WorkspaceLayoutRenamePaneMessageCmd {
 export interface WorkspaceLayoutSetSplitRatioMessage {
     cmd:          WorkspaceLayoutSetSplitRatioMessageCmd;
     ratio:        number;
+    request_id?:  string;
     split_id:     string;
     workspace_id: string;
     [property: string]: any;
@@ -3918,6 +3933,14 @@ export class Convert {
 
     public static sessionRegisteredMessageToJson(value: SessionRegisteredMessage): string {
         return JSON.stringify(uncast(value, r("SessionRegisteredMessage")), null, 2);
+    }
+
+    public static toSessionSelectedMessage(json: string): SessionSelectedMessage {
+        return cast(JSON.parse(json), r("SessionSelectedMessage"));
+    }
+
+    public static sessionSelectedMessageToJson(value: SessionSelectedMessage): string {
+        return JSON.stringify(uncast(value, r("SessionSelectedMessage")), null, 2);
     }
 
     public static toSessionState(json: string): SessionState {
@@ -5637,6 +5660,10 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("SessionRegisteredMessageEvent") },
         { json: "session", js: "session", typ: r("SessionElement") },
     ], "any"),
+    "SessionSelectedMessage": o([
+        { json: "cmd", js: "cmd", typ: r("SessionSelectedMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
     "SessionStateChangedMessage": o([
         { json: "event", js: "event", typ: r("SessionStateChangedMessageEvent") },
         { json: "session", js: "session", typ: r("SessionElement") },
@@ -5832,6 +5859,7 @@ const typeMap: any = {
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
         { json: "settings", js: "settings", typ: u(undefined, m("any")) },
         { json: "signal", js: "signal", typ: u(undefined, "") },
+        { json: "split_id", js: "split_id", typ: u(undefined, "") },
         { json: "staged", js: "staged", typ: u(undefined, a(r("StagedElement"))) },
         { json: "stash_ref", js: "stash_ref", typ: u(undefined, "") },
         { json: "success", js: "success", typ: u(undefined, true) },
@@ -5865,6 +5893,9 @@ const typeMap: any = {
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("WorkspaceLayoutActionResultMessageEvent") },
         { json: "pane_id", js: "pane_id", typ: u(undefined, "") },
+        { json: "panel_id", js: "panel_id", typ: u(undefined, "") },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+        { json: "split_id", js: "split_id", typ: u(undefined, "") },
         { json: "success", js: "success", typ: true },
         { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
@@ -5888,7 +5919,6 @@ const typeMap: any = {
         { json: "edge", js: "edge", typ: r("WorkspaceLayoutDockEdge") },
         { json: "panel_id", js: "panel_id", typ: "" },
         { json: "panel_kind", js: "panel_kind", typ: "" },
-        { json: "panel_params", js: "panel_params", typ: u(undefined, "") },
         { json: "ratio", js: "ratio", typ: u(undefined, 3.14) },
         { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
@@ -5924,6 +5954,7 @@ const typeMap: any = {
     "WorkspaceLayoutSetSplitRatioMessage": o([
         { json: "cmd", js: "cmd", typ: r("WorkspaceLayoutSetSplitRatioMessageCmd") },
         { json: "ratio", js: "ratio", typ: 3.14 },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
         { json: "split_id", js: "split_id", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
@@ -6378,6 +6409,9 @@ const typeMap: any = {
     ],
     "SessionRegisteredMessageEvent": [
         "session_registered",
+    ],
+    "SessionSelectedMessageCmd": [
+        "session_selected",
     ],
     "SessionStateChangedMessageEvent": [
         "session_state_changed",
