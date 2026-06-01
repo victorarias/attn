@@ -559,6 +559,135 @@ async fn list_directory(path: String, prefix: Option<String>) -> Result<Vec<Stri
     Ok(directories)
 }
 
+fn is_safe_markdown_target_extension(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| extension.to_ascii_lowercase())
+            .as_deref(),
+        Some(
+            "bmp"
+                | "gif"
+                | "jpeg"
+                | "jpg"
+                | "markdown"
+                | "md"
+                | "pdf"
+                | "png"
+                | "rst"
+                | "text"
+                | "tif"
+                | "tiff"
+                | "txt"
+                | "webp"
+        )
+    )
+}
+
+fn canonical_safe_markdown_target(path: &Path) -> Result<PathBuf, String> {
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|e| format!("Cannot inspect Markdown target {}: {}", path.display(), e))?;
+    if metadata.file_type().is_symlink() {
+        return Err("Markdown panel links cannot open symbolic links.".to_string());
+    }
+    if !metadata.is_file() {
+        return Err("Markdown panel links can only open regular files.".to_string());
+    }
+
+    let canonical = std::fs::canonicalize(path)
+        .map_err(|e| format!("Cannot resolve Markdown target {}: {}", path.display(), e))?;
+    let canonical_metadata = std::fs::metadata(&canonical).map_err(|e| {
+        format!(
+            "Cannot inspect canonical Markdown target {}: {}",
+            canonical.display(),
+            e
+        )
+    })?;
+    if !canonical_metadata.is_file() || !is_safe_markdown_target_extension(&canonical) {
+        return Err("Markdown panel links can only open safe document or image files.".to_string());
+    }
+    Ok(canonical)
+}
+
+#[cfg(target_os = "macos")]
+fn launch_safe_markdown_target(path: &Path) -> Result<(), String> {
+    Command::new("/usr/bin/open")
+        .arg("--")
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Failed to open Markdown target {}: {}", path.display(), e))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn launch_safe_markdown_target(_path: &Path) -> Result<(), String> {
+    Err("Opening Markdown panel links is only supported on macOS.".to_string())
+}
+
+#[tauri::command]
+fn open_safe_markdown_target(path: String) -> Result<(), String> {
+    let canonical = canonical_safe_markdown_target(Path::new(&path))?;
+    launch_safe_markdown_target(&canonical)
+}
+
+#[cfg(test)]
+mod markdown_target_tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let dir = env::temp_dir().join(format!("attn-{name}-{}-{suffix}", std::process::id()));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn canonical_safe_markdown_target_accepts_regular_document_outside_home() {
+        let dir = temp_dir("markdown-target-regular");
+        let file = dir.join("guide.md");
+        fs::write(&file, "# Guide").expect("write guide");
+
+        assert_eq!(
+            canonical_safe_markdown_target(&file).expect("safe Markdown target"),
+            fs::canonicalize(&file).expect("canonical guide")
+        );
+
+        fs::remove_dir_all(dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn canonical_safe_markdown_target_rejects_executable_associated_files() {
+        let dir = temp_dir("markdown-target-command");
+        let file = dir.join("install.command");
+        fs::write(&file, "#!/bin/sh").expect("write command");
+
+        assert!(canonical_safe_markdown_target(&file).is_err());
+
+        fs::remove_dir_all(dir).expect("remove temp dir");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_safe_markdown_target_rejects_symbolic_links() {
+        use std::os::unix::fs::symlink;
+
+        let dir = temp_dir("markdown-target-symlink");
+        let command = dir.join("install.command");
+        let disguised = dir.join("guide.md");
+        fs::write(&command, "#!/bin/sh").expect("write command");
+        symlink(&command, &disguised).expect("create symlink");
+
+        assert!(canonical_safe_markdown_target(&disguised).is_err());
+
+        fs::remove_dir_all(dir).expect("remove temp dir");
+    }
+}
+
 fn shell_escape_unix(arg: &str) -> String {
     if arg.is_empty() {
         return "''".to_string();
@@ -746,6 +875,7 @@ pub fn run() {
             ensure_daemon,
             quit_app,
             open_in_editor,
+            open_safe_markdown_target,
             get_build_profile,
             thumbs::extract_patterns,
             thumbs::reveal_in_finder,

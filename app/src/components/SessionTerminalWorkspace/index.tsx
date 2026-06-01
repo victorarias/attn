@@ -3,28 +3,106 @@ import { GhosttyTerminal, type GhosttyTerminalHandle } from '../GhosttyTerminal'
 import { useShortcut } from '../../shortcuts';
 import {
   getNormalizedPaneBounds,
+  getSplitDividers,
+  applyRatioOverrides,
   hasPane,
   findPaneInDirection,
+  leafSlotId,
+  panelContentKey,
+  type SplitDivider,
   type TerminalNavigationDirection,
   type TerminalLayoutNode,
+  type PanelLeaf,
+  type PanelContentState,
   type NormalizedPaneBounds,
   type TerminalSplitDirection,
+  type TerminalDockEdge,
   type TerminalWorkspaceState,
 } from '../../types/workspace';
 import type { SessionAgent } from '../../types/sessionAgent';
 import { useGhosttyPaneRuntime } from './useGhosttyPaneRuntime';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import { isSuspiciousTerminalSize } from '../../utils/terminalDebug';
+import { lockTextSelection } from '../../utils/dragLock';
 import './SessionTerminalWorkspace.css';
 import type { TerminalVisibleContentSnapshot } from '../../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot } from '../../utils/terminalStyleSummary';
 import type { ResolvedTheme } from '../../utils/terminalSizing';
 import { WorkspaceLayoutRenderer } from './WorkspaceLayoutRenderer';
+import { WorkspaceDockPanel } from './WorkspaceDockPanel';
 
 const ZOOM_PATH_RATIO = 0.76;
 
+// Fraction of the target pane the dock-preview band (and the resulting panel)
+// occupies on the chosen edge.
+const DOCK_BAND_FRACTION = 0.32;
+
+interface DockNormalizedRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+interface DockTarget {
+  anchorPaneId: string;
+  edge: TerminalDockEdge;
+  rect: DockNormalizedRect;
+}
+
+// computeDockTarget maps a pointer position to the pane it's over and the edge
+// it's nearest, returning the band the docked panel would occupy. Only terminal
+// panes are drop targets; a pointer outside every pane returns null (a no-op
+// drop that leaves the panel where it is).
+function computeDockTarget(
+  clientX: number,
+  clientY: number,
+  containerRect: DOMRect,
+  paneRects: Array<{ paneId: string; bounds: NormalizedPaneBounds }>,
+): DockTarget | null {
+  if (containerRect.width <= 0 || containerRect.height <= 0) {
+    return null;
+  }
+  const nx = (clientX - containerRect.left) / containerRect.width;
+  const ny = (clientY - containerRect.top) / containerRect.height;
+  for (const { paneId, bounds } of paneRects) {
+    if (nx < bounds.left || nx > bounds.right || ny < bounds.top || ny > bounds.bottom) {
+      continue;
+    }
+    const px = (nx - bounds.left) / Math.max(bounds.width, 1e-6);
+    const py = (ny - bounds.top) / Math.max(bounds.height, 1e-6);
+    const distances: Array<{ edge: TerminalDockEdge; dist: number }> = [
+      { edge: 'left', dist: px },
+      { edge: 'right', dist: 1 - px },
+      { edge: 'top', dist: py },
+      { edge: 'bottom', dist: 1 - py },
+    ];
+    distances.sort((a, b) => a.dist - b.dist);
+    const edge = distances[0].edge;
+    const bandW = bounds.width * DOCK_BAND_FRACTION;
+    const bandH = bounds.height * DOCK_BAND_FRACTION;
+    let rect: DockNormalizedRect;
+    switch (edge) {
+      case 'left':
+        rect = { left: bounds.left, top: bounds.top, width: bandW, height: bounds.height };
+        break;
+      case 'right':
+        rect = { left: bounds.right - bandW, top: bounds.top, width: bandW, height: bounds.height };
+        break;
+      case 'top':
+        rect = { left: bounds.left, top: bounds.top, width: bounds.width, height: bandH };
+        break;
+      default:
+        rect = { left: bounds.left, top: bounds.bottom - bandH, width: bounds.width, height: bandH };
+        break;
+    }
+    return { anchorPaneId: paneId, edge, rect };
+  }
+  return null;
+}
+
 function zoomLayoutTowardPane(node: TerminalLayoutNode, paneId: string): TerminalLayoutNode {
-  if (node.type === 'pane') {
+  if (node.type !== 'split') {
     return node;
   }
 
@@ -90,6 +168,12 @@ interface SessionTerminalWorkspaceProps {
   onFocusPane: (paneId: string) => void;
   onZoomModeChange?: (zoomed: boolean) => void;
   onNavigateOutOfSession: (direction: TerminalNavigationDirection) => void;
+  onResizeSplit?: (splitId: string, ratio: number) => Promise<unknown> | void;
+  onDockPanel?: (panelId: string, panelKind: string, anchorPaneId: string, edge: TerminalDockEdge) => void;
+  onUndockPanel?: (panelId: string) => void;
+  panelContents?: Record<string, PanelContentState>;
+  allowLocalPanelTargets?: boolean;
+  onRequestPanelContent?: (workspaceId: string, panelId: string) => void;
 }
 
 export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandle, SessionTerminalWorkspaceProps>(
@@ -110,9 +194,26 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onFocusPane,
     onZoomModeChange,
     onNavigateOutOfSession,
+    onResizeSplit,
+    onDockPanel,
+    onUndockPanel,
+    panelContents,
+    allowLocalPanelTargets = true,
+    onRequestPanelContent,
   }, ref) {
     const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null);
     const [zoomedPaneId, setZoomedPaneId] = useState<string | null>(null);
+    // Live, optimistic split ratios while dragging a divider. Reconciled against
+    // the daemon layout once it echoes the persisted (locked) ratio back.
+    const [ratioOverrides, setRatioOverrides] = useState<Map<string, number>>(() => new Map());
+    // Drag-to-dock state. The panel stays docked in the daemon tree throughout
+    // the drag — this is a transient preview (ghost + target highlight) that
+    // resolves to a single dock command on drop.
+    const [draggingPanelId, setDraggingPanelId] = useState<string | null>(null);
+    const [dockTarget, setDockTarget] = useState<DockTarget | null>(null);
+    const [ghostPos, setGhostPos] = useState<{ x: number; y: number } | null>(null);
+    const panelDragCleanupRef = useRef<(() => void) | null>(null);
+    const draggingSplitRef = useRef<string | null>(null);
     const activePaneIdRef = useRef(activePaneId);
     const isActiveSessionRef = useRef(isActiveSession);
     const sessionViewVisibleRef = useRef(isSessionViewVisible);
@@ -127,12 +228,14 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         return ids;
       }
       const collect = (node: TerminalLayoutNode) => {
-        if (node.type === 'pane') {
-          ids.push(node.paneId);
+        if (node.type === 'split') {
+          collect(node.children[0]);
+          collect(node.children[1]);
           return;
         }
-        collect(node.children[0]);
-        collect(node.children[1]);
+        if (node.type === 'pane') {
+          ids.push(node.paneId);
+        }
       };
       collect(workspace.layoutTree);
       return ids;
@@ -148,6 +251,26 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       () => new Map(agentPanes.map((pane) => [pane.id, pane])),
       [agentPanes],
     );
+
+    // Docked panels keyed by panel id, walked from the authoritative layout tree.
+    const panelLeafById = useMemo(() => {
+      const map = new Map<string, PanelLeaf>();
+      const walk = (node: TerminalLayoutNode | null) => {
+        if (!node) {
+          return;
+        }
+        if (node.type === 'split') {
+          walk(node.children[0]);
+          walk(node.children[1]);
+          return;
+        }
+        if (node.type === 'panel') {
+          map.set(node.panelId, node);
+        }
+      };
+      walk(workspace.layoutTree);
+      return map;
+    }, [workspace.layoutTree]);
 
     const runtimePanes = useMemo(() => ([
       ...agentPanes.filter((pane) => !pane.status || pane.status === 'ready').map((pane) => {
@@ -170,18 +293,54 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     const showPaneHeader = paneIds.length > 1;
     const effectivePaneId = maximizedPaneId && paneIds.includes(maximizedPaneId) ? maximizedPaneId : null;
     const effectiveZoomedPaneId = zoomedPaneId && paneIds.includes(zoomedPaneId) ? zoomedPaneId : null;
+    const baseLayoutTree = useMemo(() => (
+      workspace.layoutTree ? applyRatioOverrides(workspace.layoutTree, ratioOverrides) : null
+    ), [workspace.layoutTree, ratioOverrides]);
     const renderedLayoutTree = useMemo(() => {
-      if (!workspace.layoutTree) {
+      if (!baseLayoutTree) {
         return null;
       }
       if (effectivePaneId) {
         return { type: 'pane', paneId: effectivePaneId } satisfies TerminalLayoutNode;
       }
       if (!effectiveZoomedPaneId) {
-        return workspace.layoutTree;
+        return baseLayoutTree;
       }
-      return zoomLayoutTowardPane(workspace.layoutTree, effectiveZoomedPaneId);
-    }, [effectivePaneId, effectiveZoomedPaneId, workspace.layoutTree]);
+      return zoomLayoutTowardPane(baseLayoutTree, effectiveZoomedPaneId);
+    }, [effectivePaneId, effectiveZoomedPaneId, baseLayoutTree]);
+
+    const clearRatioOverride = useCallback((splitId: string, expectedRatio?: number) => {
+      setRatioOverrides((prev) => {
+        const current = prev.get(splitId);
+        if (current == null || (expectedRatio != null && Math.abs(current - expectedRatio) >= 0.005)) {
+          return prev;
+        }
+        const next = new Map(prev);
+        next.delete(splitId);
+        return next;
+      });
+    }, []);
+
+    // Any daemon layout broadcast is authoritative after a completed drag. Drop
+    // stale local overrides whether persistence landed or another client won.
+    // Never drop the split currently being dragged.
+    useEffect(() => {
+      setRatioOverrides((prev) => {
+        if (prev.size === 0 || !workspace.layoutTree) {
+          return prev;
+        }
+        let changed = false;
+        const next = new Map(prev);
+        for (const splitId of prev.keys()) {
+          if (splitId === draggingSplitRef.current) {
+            continue;
+          }
+          next.delete(splitId);
+          changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }, [workspace.layoutTree]);
     const workspaceTopologyKey = JSON.stringify({
       layoutTree: renderedLayoutTree,
       activePaneId,
@@ -196,12 +355,13 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         return paths;
       }
       const walk = (node: TerminalLayoutNode, path: string) => {
-        if (node.type === 'pane') {
-          paths.set(node.paneId, path);
+        if (node.type === 'split') {
+          walk(node.children[0], path + '/0');
+          walk(node.children[1], path + '/1');
           return;
         }
-        walk(node.children[0], path + '/0');
-        walk(node.children[1], path + '/1');
+        // Leaf: terminal panes and docked panels both occupy a slot to render.
+        paths.set(leafSlotId(node), path);
       };
       walk(renderedLayoutTree, 'root');
       return paths;
@@ -409,6 +569,62 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       height: `${bounds.height * 100}%`,
     }), []);
 
+    // Drag a docked panel's header to relocate it. The daemon tree is untouched
+    // until drop, when a single dock command moves it to the previewed target.
+    const beginPanelDrag = useCallback((panelId: string, event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) {
+        return;
+      }
+      event.preventDefault();
+      const container = (event.target as HTMLElement).closest('.session-terminal-panes') as HTMLElement | null;
+      if (!container) {
+        return;
+      }
+      const containerRect = container.getBoundingClientRect();
+      // Snapshot terminal-pane targets: the layout is static during the drag.
+      const paneRects: Array<{ paneId: string; bounds: NormalizedPaneBounds }> = [];
+      for (const [slotId, bounds] of renderedPaneBounds) {
+        if (agentPaneById.has(slotId)) {
+          paneRects.push({ paneId: slotId, bounds });
+        }
+      }
+      const releaseSelectionLock = lockTextSelection('grabbing');
+      setDraggingPanelId(panelId);
+      setGhostPos({ x: event.clientX, y: event.clientY });
+
+      const onMove = (ev: PointerEvent) => {
+        setGhostPos({ x: ev.clientX, y: ev.clientY });
+        setDockTarget(computeDockTarget(ev.clientX, ev.clientY, containerRect, paneRects));
+      };
+      const teardown = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onCancel);
+        window.removeEventListener('blur', onCancel);
+        releaseSelectionLock();
+        setDraggingPanelId(null);
+        setDockTarget(null);
+        setGhostPos(null);
+        panelDragCleanupRef.current = null;
+      };
+      const onUp = (ev: PointerEvent) => {
+        const finalTarget = computeDockTarget(ev.clientX, ev.clientY, containerRect, paneRects);
+        teardown();
+        if (finalTarget) {
+          const panelKind = panelLeafById.get(panelId)?.panelKind ?? '';
+          onDockPanel?.(panelId, panelKind, finalTarget.anchorPaneId, finalTarget.edge);
+        }
+      };
+      const onCancel = () => {
+        teardown();
+      };
+      panelDragCleanupRef.current = teardown;
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onCancel);
+      window.addEventListener('blur', onCancel);
+    }, [renderedPaneBounds, agentPaneById, panelLeafById, onDockPanel]);
+
     const renderPaneSurface = useCallback((paneId: string): React.ReactNode => {
       const path = panePaths.get(paneId) || 'root';
       const bounds = renderedPaneBounds.get(paneId);
@@ -464,9 +680,43 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         );
       }
 
+      const panelLeaf = panelLeafById.get(paneId);
+      if (panelLeaf) {
+        return (
+          <div
+            key={`panel:${panelLeaf.panelId}`}
+            className="workspace-pane workspace-pane--panel"
+            data-pane-id={panelLeaf.panelId}
+            data-pane-kind="panel"
+            data-panel-kind={panelLeaf.panelKind}
+            data-pane-path={path}
+            style={frameStyle}
+          >
+            <WorkspaceDockPanel
+              panel={panelLeaf}
+              workspaceId={workspaceId}
+              content={panelContents?.[panelContentKey(workspaceId, panelLeaf.panelId)]}
+              allowLocalTargets={allowLocalPanelTargets}
+              dragging={draggingPanelId === panelLeaf.panelId}
+              onClose={() => onUndockPanel?.(panelLeaf.panelId)}
+              onHeaderPointerDown={(event) => beginPanelDrag(panelLeaf.panelId, event)}
+              onRequestContent={onRequestPanelContent ?? (() => {})}
+            />
+          </div>
+        );
+      }
+
       return null;
     }, [
       activePaneId,
+      beginPanelDrag,
+      draggingPanelId,
+      onUndockPanel,
+      panelLeafById,
+      panelContents,
+      allowLocalPanelTargets,
+      onRequestPanelContent,
+      workspaceId,
       fontSize,
       handleAgentPaneMouseDown,
       handleGhosttyTerminalReady,
@@ -490,6 +740,116 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       }
       return 'Pane';
     }, [agentPaneById, effectivePaneId, sessionById]);
+
+    // Draggable dividers, one per split. Hidden in focus/zoom mode where there
+    // is no real split to resize.
+    const splitDividers = useMemo<SplitDivider[]>(() => {
+      if (!renderedLayoutTree || effectivePaneId || effectiveZoomedPaneId) {
+        return [];
+      }
+      return getSplitDividers(renderedLayoutTree);
+    }, [renderedLayoutTree, effectivePaneId, effectiveZoomedPaneId]);
+
+    // rAF-coalesced override updates keep terminal re-fits to ~one per frame
+    // while dragging.
+    const ratioRafRef = useRef<number | null>(null);
+    const pendingRatioRef = useRef<{ splitId: string; ratio: number } | null>(null);
+    const dragCleanupRef = useRef<(() => void) | null>(null);
+
+    const flushRatioOverride = useCallback(() => {
+      ratioRafRef.current = null;
+      const pending = pendingRatioRef.current;
+      if (!pending) {
+        return;
+      }
+      setRatioOverrides((prev) => {
+        if (prev.get(pending.splitId) === pending.ratio) {
+          return prev;
+        }
+        const next = new Map(prev);
+        next.set(pending.splitId, pending.ratio);
+        return next;
+      });
+    }, []);
+
+    const handleDividerPointerDown = useCallback((divider: SplitDivider, event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) {
+        return;
+      }
+      event.preventDefault();
+      const container = (event.target as HTMLElement).closest('.session-terminal-panes') as HTMLElement | null;
+      if (!container) {
+        return;
+      }
+      const rect = container.getBoundingClientRect();
+      const { splitId, direction, left, top, right, bottom } = divider;
+      const spanNorm = direction === 'vertical' ? right - left : bottom - top;
+      const axisPx = direction === 'vertical' ? rect.width : rect.height;
+      const spanPx = spanNorm * axisPx;
+      const minRatio = spanPx > 0 ? Math.min(0.45, 120 / spanPx) : 0.1;
+      draggingSplitRef.current = splitId;
+      const releaseSelectionLock = lockTextSelection(
+        direction === 'vertical' ? 'col-resize' : 'row-resize',
+      );
+
+      const computeRatio = (clientX: number, clientY: number): number => {
+        let ratio = 0.5;
+        if (spanNorm > 0) {
+          if (direction === 'vertical') {
+            ratio = ((clientX - rect.left) / rect.width - left) / spanNorm;
+          } else {
+            ratio = ((clientY - rect.top) / rect.height - top) / spanNorm;
+          }
+        }
+        return Math.min(1 - minRatio, Math.max(minRatio, ratio));
+      };
+
+      const onMove = (ev: PointerEvent) => {
+        pendingRatioRef.current = { splitId, ratio: computeRatio(ev.clientX, ev.clientY) };
+        if (ratioRafRef.current == null) {
+          ratioRafRef.current = window.requestAnimationFrame(flushRatioOverride);
+        }
+      };
+      const teardown = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onCancel);
+        window.removeEventListener('blur', onCancel);
+        if (ratioRafRef.current != null) {
+          window.cancelAnimationFrame(ratioRafRef.current);
+          ratioRafRef.current = null;
+        }
+        releaseSelectionLock();
+        dragCleanupRef.current = null;
+      };
+      const onCancel = () => {
+        teardown();
+        pendingRatioRef.current = null;
+        draggingSplitRef.current = null;
+        clearRatioOverride(splitId);
+      };
+      const onUp = (ev: PointerEvent) => {
+        const ratio = computeRatio(ev.clientX, ev.clientY);
+        teardown();
+        pendingRatioRef.current = { splitId, ratio };
+        flushRatioOverride();
+        draggingSplitRef.current = null;
+        const resizeResult = onResizeSplit?.(splitId, ratio);
+        if (resizeResult) {
+          void resizeResult.catch(() => clearRatioOverride(splitId, ratio));
+        }
+      };
+      dragCleanupRef.current = teardown;
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onCancel);
+      window.addEventListener('blur', onCancel);
+    }, [clearRatioOverride, flushRatioOverride, onResizeSplit]);
+
+    useEffect(() => () => {
+      dragCleanupRef.current?.();
+      panelDragCleanupRef.current?.();
+    }, []);
 
     if (!renderedLayoutTree) {
       return (
@@ -535,7 +895,28 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           layoutTree={renderedLayoutTree}
           paneIds={renderedPaneIds}
           renderPane={renderPaneSurface}
+          dividers={splitDividers}
+          onDividerPointerDown={handleDividerPointerDown}
+          overlay={dockTarget ? (
+            <div
+              className="workspace-dock-target"
+              style={{
+                left: `${dockTarget.rect.left * 100}%`,
+                top: `${dockTarget.rect.top * 100}%`,
+                width: `${dockTarget.rect.width * 100}%`,
+                height: `${dockTarget.rect.height * 100}%`,
+              }}
+            />
+          ) : null}
         />
+        {ghostPos && draggingPanelId && (
+          <div
+            className="workspace-dock-ghost"
+            style={{ left: ghostPos.x + 12, top: ghostPos.y + 12 }}
+          >
+            {panelLeafById.get(draggingPanelId)?.panelKind === 'markdown' ? 'README.md' : 'Panel'}
+          </div>
+        )}
       </div>
     );
   }

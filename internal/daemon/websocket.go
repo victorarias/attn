@@ -18,6 +18,7 @@ import (
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
 // wsClient represents a connected WebSocket client
@@ -36,6 +37,11 @@ type wsClient struct {
 	attachedRemote  map[string]struct{}          // remote runtime IDs attached for this client
 	pendingRemote   map[string]struct{}          // remote runtime IDs awaiting attach_result
 	attachMu        sync.Mutex
+
+	// Docked panel content subscriptions keyed by workspace + panel ID.
+	panelContentSubscriptions map[string]struct{}
+	panelContentPending       map[string]time.Time
+	panelContentMu            sync.RWMutex
 
 	// Identity + capabilities declared via client_hello.
 	clientKind    string
@@ -389,6 +395,15 @@ func (h *wsHub) BroadcastRawText(payload []byte) {
 	h.SendRawTextToMatchingClients(payload, nil)
 }
 
+func (h *wsHub) SendValueToMatchingClients(message interface{}, match func(*wsClient) bool) {
+	data, err := json.Marshal(message)
+	if err != nil {
+		h.logf("WebSocket targeted send marshal error: %v", err)
+		return
+	}
+	h.SendRawTextToMatchingClients(data, match)
+}
+
 func (h *wsHub) SendRawTextToMatchingClients(payload []byte, match func(*wsClient) bool) {
 	if len(payload) == 0 {
 		return
@@ -430,6 +445,20 @@ func (h *wsHub) ForEachClient(fn func(*wsClient)) {
 	for client := range h.clients {
 		fn(client)
 	}
+}
+
+func (h *wsHub) AnyClientMatches(match func(*wsClient) bool) bool {
+	if match == nil {
+		return false
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for client := range h.clients {
+		if match(client) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *wsHub) broadcastValue(message interface{}) {
@@ -735,6 +764,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.sendCommandError(client, cmd, "daemon_recovering")
 		return
 	}
+	// Record the UI selection before remote routing. A host-side `attn open`
+	// without --session must fail against the selected remote id rather than
+	// silently reusing a stale local selection.
+	if cmd == protocol.CmdSessionSelected {
+		d.setSelectedSession(msg.(*protocol.SessionSelectedMessage).ID)
+	}
 	if d.tryHandleRemoteWSCommand(client, cmd, msg, data) {
 		return
 	}
@@ -764,6 +799,7 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleClearWarningsWS()
 	case protocol.CmdSessionVisualized:
 		d.handleSessionVisualizedWS(msg.(*protocol.SessionVisualizedMessage))
+	case protocol.CmdSessionSelected:
 	case protocol.CmdPRVisited:
 		d.handlePRVisitedWS(msg.(*protocol.PRVisitedMessage))
 	case protocol.CmdListWorktrees:
@@ -874,6 +910,14 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkspaceLayoutFocusPane(client, msg.(*protocol.WorkspaceLayoutFocusPaneMessage))
 	case protocol.CmdWorkspaceLayoutRenamePane:
 		d.handleWorkspaceLayoutRenamePane(client, msg.(*protocol.WorkspaceLayoutRenamePaneMessage))
+	case protocol.CmdWorkspaceLayoutSetSplitRatio:
+		d.handleWorkspaceLayoutSetSplitRatio(client, msg.(*protocol.WorkspaceLayoutSetSplitRatioMessage))
+	case protocol.CmdWorkspaceLayoutDockPanel:
+		d.handleWorkspaceLayoutDockPanel(client, msg.(*protocol.WorkspaceLayoutDockPanelMessage))
+	case protocol.CmdWorkspaceLayoutUndockPanel:
+		d.handleWorkspaceLayoutUndockPanel(client, msg.(*protocol.WorkspaceLayoutUndockPanelMessage))
+	case protocol.CmdWorkspacePanelContentGet:
+		d.handleWorkspacePanelContentGet(client, msg.(*protocol.WorkspacePanelContentGetMessage))
 	case protocol.CmdRegisterWorkspace:
 		d.handleRegisterWorkspace(client, msg.(*protocol.RegisterWorkspaceMessage))
 	case protocol.CmdUnregisterWorkspace:
@@ -932,7 +976,20 @@ func (d *Daemon) tryHandleRemoteWSCommand(client *wsClient, cmd string, msg inte
 		if !ok {
 			return false
 		}
+		if cmd == protocol.CmdWorkspacePanelContentGet {
+			if typed, ok := msg.(*protocol.WorkspacePanelContentGetMessage); ok {
+				if !client.notePendingPanelContent(typed.WorkspaceID, typed.PanelID) {
+					d.sendCommandError(client, cmd, "too many pending panel content requests")
+					return true
+				}
+			}
+		}
 		if err := d.hubManager.ForwardEndpointCommand(context.Background(), endpointID, raw); err != nil {
+			if cmd == protocol.CmdWorkspacePanelContentGet {
+				if typed, ok := msg.(*protocol.WorkspacePanelContentGetMessage); ok {
+					client.cancelPendingPanelContent(typed.WorkspaceID, typed.PanelID)
+				}
+			}
 			d.sendCommandError(client, cmd, err.Error())
 			return true
 		}
@@ -983,6 +1040,10 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.SessionVisualizedMessage); ok {
 			return typed.ID
 		}
+	case protocol.CmdSessionSelected:
+		if typed, ok := msg.(*protocol.SessionSelectedMessage); ok {
+			return typed.ID
+		}
 	case protocol.CmdStartReviewLoop:
 		if typed, ok := msg.(*protocol.StartReviewLoopMessage); ok {
 			return typed.SessionID
@@ -1023,6 +1084,22 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdWorkspaceLayoutRenamePane:
 		if typed, ok := msg.(*protocol.WorkspaceLayoutRenamePaneMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdWorkspaceLayoutSetSplitRatio:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutSetSplitRatioMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdWorkspaceLayoutDockPanel:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutDockPanelMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdWorkspaceLayoutUndockPanel:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutUndockPanelMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdWorkspacePanelContentGet:
+		if typed, ok := msg.(*protocol.WorkspacePanelContentGetMessage); ok {
 			return typed.WorkspaceID
 		}
 	}
@@ -1231,9 +1308,11 @@ func (d *Daemon) broadcastRawWSMessage(payload []byte) {
 		return
 	}
 	var envelope struct {
-		Event   string `json:"event"`
-		ID      string `json:"id"`
-		Success bool   `json:"success"`
+		Event       string `json:"event"`
+		ID          string `json:"id"`
+		Success     bool   `json:"success"`
+		WorkspaceID string `json:"workspace_id"`
+		PanelID     string `json:"panel_id"`
 	}
 	if err := json.Unmarshal(payload, &envelope); err != nil {
 		d.wsHub.BroadcastRawText(payload)
@@ -1259,6 +1338,31 @@ func (d *Daemon) broadcastRawWSMessage(payload []byte) {
 			return client.wantsRemoteAttachTraffic(envelope.ID)
 		})
 		return
+	case protocol.EventWorkspacePanelContent:
+		if strings.TrimSpace(envelope.WorkspaceID) == "" || strings.TrimSpace(envelope.PanelID) == "" {
+			d.logf("dropping malformed relayed panel content event")
+			return
+		}
+		d.wsHub.SendRawTextToMatchingClients(payload, func(client *wsClient) bool {
+			return client.resolvePendingPanelContent(envelope.WorkspaceID, envelope.PanelID)
+		})
+		return
+	case protocol.EventWorkspaceLayout, protocol.EventWorkspaceLayoutUpdated:
+		var msg struct {
+			WorkspaceLayout *protocol.WorkspaceLayout `json:"workspace_layout"`
+		}
+		if err := json.Unmarshal(payload, &msg); err == nil && msg.WorkspaceLayout != nil {
+			if layout, err := workspacelayout.DecodeLayout(msg.WorkspaceLayout.LayoutJson); err == nil {
+				d.prunePanelContentSubscriptionsForLayout(msg.WorkspaceLayout.WorkspaceID, &layout)
+			}
+		}
+	case protocol.EventWorkspaceUnregistered:
+		var msg struct {
+			Workspace *protocol.Workspace `json:"workspace"`
+		}
+		if err := json.Unmarshal(payload, &msg); err == nil && msg.Workspace != nil {
+			d.prunePanelContentSubscriptionsForLayout(msg.Workspace.ID, nil)
+		}
 	case protocol.EventSessionExited:
 		if strings.TrimSpace(envelope.ID) != "" {
 			d.wsHub.ForEachClient(func(client *wsClient) {

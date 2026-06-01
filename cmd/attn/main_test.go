@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -292,6 +294,40 @@ func TestIsBuildInfoJSONCommand(t *testing.T) {
 	}
 }
 
+func TestDetectPresence(t *testing.T) {
+	t.Run("outside attn", func(t *testing.T) {
+		t.Setenv("ATTN_INSIDE_APP", "")
+		t.Setenv("ATTN_SESSION_ID", "stale-session")
+
+		sessionID, present := detectPresence()
+		if present || sessionID != "" {
+			t.Fatalf("detectPresence() = (%q, %v), want empty session and false", sessionID, present)
+		}
+	})
+
+	t.Run("inside attn", func(t *testing.T) {
+		t.Setenv("ATTN_INSIDE_APP", "1")
+		t.Setenv("ATTN_SESSION_ID", " session-1 ")
+
+		sessionID, present := detectPresence()
+		if !present || sessionID != "session-1" {
+			t.Fatalf("detectPresence() = (%q, %v), want session-1 and true", sessionID, present)
+		}
+	})
+}
+
+func TestWriteHelpMentionsPresenceAndOpen(t *testing.T) {
+	var output bytes.Buffer
+	writeHelp(&output)
+
+	text := output.String()
+	for _, expected := range []string{"presence", "open <file.md> [--session <id>]", "review-loop <command>"} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("help output missing %q: %q", expected, text)
+		}
+	}
+}
+
 func TestApplyLegacyBuildInfoOverrides_UsesLegacyMainInjectionWhenNeeded(t *testing.T) {
 	previousBuildinfoVersion := buildinfo.Version
 	previousBuildinfoBuildTime := buildinfo.BuildTime
@@ -379,5 +415,45 @@ func TestApplyLegacyBuildInfoOverrides_PreservesInjectedBuildinfo(t *testing.T) 
 	}
 	if buildinfo.GitCommit != "fedcba0987654321" {
 		t.Fatalf("buildinfo.GitCommit = %q, want primary buildinfo injection to win", buildinfo.GitCommit)
+	}
+}
+
+func TestParseOpenArgs(t *testing.T) {
+	cases := []struct {
+		name        string
+		args        []string
+		wantPath    string
+		wantSession string
+		wantErr     bool
+	}{
+		// The documented `attn open <file.md> [--session <id>]` trailing form
+		// must honor --session — this is the regression the reviewers flagged:
+		// Go's flag parser stops at the first positional, so a naive Parse would
+		// silently drop a trailing --session.
+		{name: "session after path", args: []string{"README.md", "--session", "sess-1"}, wantPath: "README.md", wantSession: "sess-1"},
+		{name: "session=after path", args: []string{"README.md", "--session=sess-2"}, wantPath: "README.md", wantSession: "sess-2"},
+		{name: "session before path", args: []string{"--session", "sess-3", "README.md"}, wantPath: "README.md", wantSession: "sess-3"},
+		{name: "path only", args: []string{"README.md"}, wantPath: "README.md", wantSession: ""},
+		{name: "no path", args: []string{"--session", "sess-4"}, wantErr: true},
+		{name: "empty", args: []string{}, wantErr: true},
+		{name: "extra positional", args: []string{"a.md", "b.md"}, wantErr: true},
+		{name: "unknown flag", args: []string{"README.md", "--nope"}, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path, session, err := parseOpenArgs(tc.args)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseOpenArgs(%v) = (%q, %q, nil), want error", tc.args, path, session)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseOpenArgs(%v) error = %v", tc.args, err)
+			}
+			if path != tc.wantPath || session != tc.wantSession {
+				t.Fatalf("parseOpenArgs(%v) = (%q, %q), want (%q, %q)", tc.args, path, session, tc.wantPath, tc.wantSession)
+			}
+		})
 	}
 }

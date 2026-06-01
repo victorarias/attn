@@ -12,6 +12,25 @@ function createSingleAgentWorkspace(): TerminalWorkspaceState {
   };
 }
 
+function createSplitWorkspace(ratio = 0.5): TerminalWorkspaceState {
+  return {
+    agents: [
+      { id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' },
+      { id: 'pane-session-2', runtimeId: 'session-2', sessionId: 'session-2', title: 'Session 2' },
+    ],
+    layoutTree: {
+      type: 'split',
+      splitId: 'root',
+      direction: 'vertical',
+      ratio,
+      children: [
+        { type: 'pane', paneId: SESSION_PANE_ID },
+        { type: 'pane', paneId: 'pane-session-2' },
+      ],
+    },
+  };
+}
+
 const { registeredShortcuts } = vi.hoisted(() => ({
   registeredShortcuts: new Map<string, () => void>(),
 }));
@@ -367,6 +386,166 @@ describe('SessionTerminalWorkspace', () => {
     expect(secondChild).toHaveAttribute('data-split-child-path', 'root/1');
     expect(mainPane).toHaveAttribute('data-pane-path', 'root/0');
     expect(sessionPane).toHaveAttribute('data-pane-path', 'root/1');
+  });
+
+  it('rolls back an optimistic split ratio when persistence fails', async () => {
+    const onResizeSplit = vi.fn(() => Promise.reject(new Error('persist failed')));
+    const { container } = render(
+      <SessionTerminalWorkspace
+        workspaceId="workspace-session-1"
+        workspaceSessions={[
+          { id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" },
+          { id: "session-2", label: "Session 2", agent: "claude", cwd: "/tmp/repo" },
+        ]}
+        workspace={createSplitWorkspace()}
+        activePaneId={SESSION_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+        onResizeSplit={onResizeSplit}
+      />
+    );
+    const panes = container.querySelector('.session-terminal-panes') as HTMLElement;
+    vi.spyOn(panes, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, right: 1000, bottom: 500, width: 1000, height: 500, x: 0, y: 0, toJSON: () => {},
+    });
+
+    fireEvent.pointerDown(screen.getByRole('separator'), { button: 0, clientX: 500, clientY: 250 });
+    fireEvent.pointerUp(window, { clientX: 800, clientY: 250 });
+    expect(container.querySelector('.workspace-layout-metadata [data-split-id="root"]')).toHaveAttribute('data-split-ratio', '0.800');
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(onResizeSplit).toHaveBeenCalledWith('root', 0.8);
+    expect(container.querySelector('.workspace-layout-metadata [data-split-id="root"]')).toHaveAttribute('data-split-ratio', '0.500');
+  });
+
+  it('accepts an authoritative split ratio that supersedes an optimistic resize', () => {
+    const onResizeSplit = vi.fn(() => new Promise<void>(() => {}));
+    const workspace = createSplitWorkspace();
+    const { container, rerender } = render(
+      <SessionTerminalWorkspace
+        workspaceId="workspace-session-1"
+        workspaceSessions={[
+          { id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" },
+          { id: "session-2", label: "Session 2", agent: "claude", cwd: "/tmp/repo" },
+        ]}
+        workspace={workspace}
+        activePaneId={SESSION_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+        onResizeSplit={onResizeSplit}
+      />
+    );
+    const panes = container.querySelector('.session-terminal-panes') as HTMLElement;
+    vi.spyOn(panes, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, right: 1000, bottom: 500, width: 1000, height: 500, x: 0, y: 0, toJSON: () => {},
+    });
+
+    fireEvent.pointerDown(screen.getByRole('separator'), { button: 0, clientX: 500, clientY: 250 });
+    fireEvent.pointerUp(window, { clientX: 800, clientY: 250 });
+    expect(container.querySelector('.workspace-layout-metadata [data-split-id="root"]')).toHaveAttribute('data-split-ratio', '0.800');
+
+    rerender(
+      <SessionTerminalWorkspace
+        workspaceId="workspace-session-1"
+        workspaceSessions={[
+          { id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" },
+          { id: "session-2", label: "Session 2", agent: "claude", cwd: "/tmp/repo" },
+        ]}
+        workspace={createSplitWorkspace(0.6)}
+        activePaneId={SESSION_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+        onResizeSplit={onResizeSplit}
+      />
+    );
+
+    expect(container.querySelector('.workspace-layout-metadata [data-split-id="root"]')).toHaveAttribute('data-split-ratio', '0.600');
+  });
+
+  it('releases selection locks when divider and panel drags are cancelled', () => {
+    const { container, rerender } = render(
+      <SessionTerminalWorkspace
+        workspaceId="workspace-session-1"
+        workspaceSessions={[
+          { id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" },
+          { id: "session-2", label: "Session 2", agent: "claude", cwd: "/tmp/repo" },
+        ]}
+        workspace={createSplitWorkspace()}
+        activePaneId={SESSION_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+    const panes = container.querySelector('.session-terminal-panes') as HTMLElement;
+    vi.spyOn(panes, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, right: 1000, bottom: 500, width: 1000, height: 500, x: 0, y: 0, toJSON: () => {},
+    });
+
+    fireEvent.pointerDown(screen.getByRole('separator'), { button: 0, clientX: 500, clientY: 250 });
+    expect(document.body.style.userSelect).toBe('none');
+    fireEvent.pointerCancel(window);
+    expect(document.body.style.userSelect).toBe('');
+
+    rerender(
+      <SessionTerminalWorkspace
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
+        workspace={{
+          agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }],
+          layoutTree: {
+            type: 'split',
+            splitId: 'root-panel',
+            direction: 'vertical',
+            ratio: 0.7,
+            children: [
+              { type: 'pane', paneId: SESSION_PANE_ID },
+              { type: 'panel', panelId: 'panel-md', panelKind: 'markdown', panelParams: '/tmp/notes.md' },
+            ],
+          },
+        }}
+        activePaneId={SESSION_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    fireEvent.pointerDown(container.querySelector('.workspace-dock-panel-header') as HTMLElement, { button: 0, clientX: 750, clientY: 250 });
+    expect(document.body.style.userSelect).toBe('none');
+    fireEvent.blur(window);
+    expect(document.body.style.userSelect).toBe('');
   });
 
   it('keeps the session pane mounted when the split topology changes around it', () => {

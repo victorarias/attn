@@ -161,6 +161,16 @@ export function PRsIcon() {
   );
 }
 
+export function MarkdownIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="1.5" y="3" width="13" height="10" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M3.6 10.4V5.6l2 2.4 2-2.4v4.8" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10.6 5.6v4.2M9 8.4l1.6 1.6 1.6-1.6" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function Sidebar({
   workspaces,
   visualOrder,

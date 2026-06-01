@@ -17,6 +17,7 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdQuery,
 		protocol.CmdHeartbeat,
 		protocol.CmdSessionVisualized,
+		protocol.CmdSessionSelected,
 		protocol.CmdMuteWorkspace,
 		protocol.CmdQueryPRs,
 		protocol.CmdMutePR,
@@ -77,6 +78,10 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdWorkspaceLayoutClosePane,
 		protocol.CmdWorkspaceLayoutFocusPane,
 		protocol.CmdWorkspaceLayoutRenamePane,
+		protocol.CmdWorkspaceLayoutSetSplitRatio,
+		protocol.CmdWorkspaceLayoutDockPanel,
+		protocol.CmdWorkspaceLayoutUndockPanel,
+		protocol.CmdWorkspacePanelContentGet,
 	}
 
 	for _, cmd := range commands {
@@ -184,6 +189,12 @@ func TestRemoteCommandSessionID_IncludesReviewLoopCommands(t *testing.T) {
 			want: "sess-visualized",
 		},
 		{
+			name: "session_selected",
+			cmd:  protocol.CmdSessionSelected,
+			msg:  &protocol.SessionSelectedMessage{ID: "sess-selected"},
+			want: "sess-selected",
+		},
+		{
 			name: "start",
 			cmd:  protocol.CmdStartReviewLoop,
 			msg:  &protocol.StartReviewLoopMessage{SessionID: "sess-start"},
@@ -213,5 +224,12 @@ func TestRemoteCommandSessionID_IncludesReviewLoopCommands(t *testing.T) {
 		if got := remoteCommandSessionID(tc.cmd, tc.msg); got != tc.want {
 			t.Fatalf("%s remoteCommandSessionID() = %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+func TestRemoteCommandWorkspaceID_IncludesPanelContentGet(t *testing.T) {
+	msg := &protocol.WorkspacePanelContentGetMessage{WorkspaceID: "workspace-remote"}
+	if got := remoteCommandWorkspaceID(protocol.CmdWorkspacePanelContentGet, msg); got != msg.WorkspaceID {
+		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, msg.WorkspaceID)
 	}
 }

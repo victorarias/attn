@@ -53,6 +53,14 @@ enum WorkspaceLayoutSplitDirection {
   horizontal,
 }
 
+// Which side of the anchor pane a docked panel lands on.
+enum WorkspaceLayoutDockEdge {
+  left,
+  right,
+  top,
+  bottom,
+}
+
 enum HeatState {
   cold,
   warm,
@@ -383,6 +391,11 @@ model HeartbeatMessage {
 
 model SessionVisualizedMessage {
   cmd: "session_visualized";
+  id: string;
+}
+
+model SessionSelectedMessage {
+  cmd: "session_selected";
   id: string;
 }
 
@@ -816,6 +829,53 @@ model WorkspaceLayoutRenamePaneMessage {
   title: string;
 }
 
+model WorkspaceLayoutSetSplitRatioMessage {
+  cmd: "workspace_layout_set_split_ratio";
+  workspace_id: string;
+  split_id: string;
+  ratio: float64;
+  request_id?: string;
+}
+
+// Dock (or move) a panel beside an anchor leaf. Docking is idempotent: an
+// existing instance of panel_id is relocated rather than duplicated. panel_kind
+// is opaque to the daemon — it persists where the panel sits, not what it
+// renders. ratio is the new panel's fraction of the split (optional; defaults to
+// a sensible third).
+model WorkspaceLayoutDockPanelMessage {
+  cmd: "workspace_layout_dock_panel";
+  workspace_id: string;
+  anchor_pane_id: string;
+  edge: WorkspaceLayoutDockEdge;
+  panel_id: string;
+  panel_kind: string;
+  ratio?: float64;
+}
+
+model WorkspaceLayoutUndockPanelMessage {
+  cmd: "workspace_layout_undock_panel";
+  workspace_id: string;
+  panel_id: string;
+}
+
+// Request the current rendered content of a docked panel (e.g. the markdown
+// file a markdown panel points at). The daemon resolves the file from the
+// panel's persisted params, reads it, and replies with WorkspacePanelContentMessage.
+model WorkspacePanelContentGetMessage {
+  cmd: "workspace_panel_content_get";
+  workspace_id: string;
+  panel_id: string;
+}
+
+// Open a markdown file into a docked, live-reloading panel. Sent by the
+// `attn open` CLI over the unix socket. When session_id is empty the daemon
+// targets the currently selected session's workspace.
+model OpenMarkdownMessage {
+  cmd: "open_markdown";
+  path: string;
+  session_id?: string;
+}
+
 model RegisterWorkspaceMessage {
   cmd: "register_workspace";
   id: string;
@@ -922,7 +982,24 @@ model WorkspaceLayoutActionResultMessage {
   action: string;
   workspace_id: string;
   pane_id?: string;
+  split_id?: string;
+  panel_id?: string;
+  request_id?: string;
   success: boolean;
+  error?: string;
+}
+
+// Rendered content of a docked panel. Sent as the reply to
+// workspace_panel_content_get and broadcast whenever the underlying file
+// changes (live reload). For markdown, content is the raw file text and path is
+// its absolute path; error is set when the file can't be read.
+model WorkspacePanelContentMessage {
+  event: "workspace_panel_content";
+  workspace_id: string;
+  panel_id: string;
+  panel_kind: string;
+  path: string;
+  content: string;
   error?: string;
 }
 
@@ -1413,6 +1490,10 @@ model WebSocketEvent {
   // Session/PR/repo state payloads
   id?: string;
   pane_id?: string;
+  split_id?: string;
+  panel_id?: string;
+  panel_kind?: string;
+  content?: string;
   runtime_id?: string;
   session_id?: string;
   workspace_id?: string;
@@ -1505,6 +1586,7 @@ alias DaemonEvent =
   | WorkspaceLayoutMessage
   | WorkspaceLayoutUpdatedMessage
   | WorkspaceLayoutActionResultMessage
+  | WorkspacePanelContentMessage
   | PRsUpdatedMessage
   | ReposUpdatedMessage
   | AuthorsUpdatedMessage

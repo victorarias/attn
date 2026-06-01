@@ -105,6 +105,7 @@ vi.mock('./components/Sidebar', () => ({
   ReviewLoopIcon: () => null,
   DiffIcon: () => null,
   PRsIcon: () => null,
+  MarkdownIcon: () => null,
   Sidebar: ({
     selectedId,
     visualOrder,
@@ -343,6 +344,7 @@ describe('worktree cleanup prompt', () => {
       sendEnsureRepo: vi.fn(async () => ({ success: true, path: '/tmp/repo' })),
       sendSubscribeGitStatus: fn,
       sendUnsubscribeGitStatus: fn,
+      sendSessionSelected: fn,
       sendSessionVisualized: fn,
       sendWorkspaceClosePane: mockSendWorkspaceClosePane,
       sendWorkspaceAddSessionPane: vi.fn(async () => ({ success: true })),
@@ -708,6 +710,7 @@ describe('worktree cleanup prompt', () => {
   it('marks remote long-run sessions as visualized after the visibility delay', async () => {
     vi.useFakeTimers();
     const sendSessionVisualized = vi.fn();
+    const sendSessionSelected = vi.fn();
     const fn = vi.fn();
 
     mockUseSessionStore.mockReturnValue({
@@ -784,6 +787,7 @@ describe('worktree cleanup prompt', () => {
       sendEnsureRepo: vi.fn(async () => ({ success: true, path: '/tmp/repo' })),
       sendSubscribeGitStatus: fn,
       sendUnsubscribeGitStatus: fn,
+      sendSessionSelected,
       sendSessionVisualized,
       sendWorkspaceClosePane: mockSendWorkspaceClosePane,
       sendWorkspaceAddSessionPane: vi.fn(async () => ({ success: true })),
@@ -818,6 +822,7 @@ describe('worktree cleanup prompt', () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
 
+    expect(sendSessionSelected).toHaveBeenCalledWith('remote-1');
     expect(sendSessionVisualized).toHaveBeenCalledWith('remote-1');
   });
 

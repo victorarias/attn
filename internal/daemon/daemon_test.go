@@ -985,6 +985,66 @@ func TestDaemon_PruneSessionsWithoutPTY_PreservesPluginMetadataForResume(t *test
 	}
 }
 
+func TestDaemon_PruneSessionsWithoutPTY_RemovesReapedWorkspaceLayout(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	workspaceID := "workspace-stale"
+	sessionID := "codex-stale"
+	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: "Stale", Directory: "/tmp/stale"})
+	d.store.Add(&protocol.Session{
+		ID:             sessionID,
+		Label:          sessionID,
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/stale",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+		WorkspaceID:    workspaceID,
+	})
+	d.workspaces.register(workspaceID, "Stale", "/tmp/stale", false)
+	d.workspaces.associateSession(sessionID, workspaceID, sessionID)
+	if err := d.store.SaveWorkspaceLayout(workspacelayout.WorkspaceLayout{
+		WorkspaceID:  workspaceID,
+		ActivePaneID: "pane-stale",
+		Layout: workspacelayout.Node{
+			Type:      "split",
+			SplitID:   "split-stale",
+			Direction: workspacelayout.DirectionVertical,
+			Ratio:     workspacelayout.DefaultSplitRatio,
+			Children: []workspacelayout.Node{
+				{Type: "pane", PaneID: "pane-stale"},
+				{Type: "panel", PanelID: markdownPanelID, PanelKind: string(workspacelayout.PanelKindMarkdown), PanelParams: "/tmp/notes.md"},
+			},
+		},
+		Panes: []workspacelayout.Pane{{
+			PaneID:    "pane-stale",
+			RuntimeID: sessionID,
+			SessionID: sessionID,
+			Kind:      workspacelayout.PaneKindAgent,
+			Title:     workspacelayout.DefaultPaneTitle,
+		}},
+	}); err != nil {
+		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
+	}
+
+	if removed := d.pruneSessionsWithoutPTY(); removed != 1 {
+		t.Fatalf("pruneSessionsWithoutPTY removed = %d, want 1", removed)
+	}
+	if got := d.store.Get(sessionID); got != nil {
+		t.Fatalf("store.Get(%q) = %+v, want nil", sessionID, got)
+	}
+	if got := d.store.GetWorkspace(workspaceID); got != nil {
+		t.Fatalf("store.GetWorkspace(%q) = %+v, want nil", workspaceID, got)
+	}
+	if _, ok := d.workspaces.snapshot(workspaceID); ok {
+		t.Fatalf("workspace registry still contains %q", workspaceID)
+	}
+	if got := d.store.GetWorkspaceLayout(workspaceID); got != nil {
+		t.Fatalf("store.GetWorkspaceLayout(%q) = %+v, want nil", workspaceID, got)
+	}
+}
+
 func TestDaemon_RunDeferredWorkerReconciliationForcesIdleDemotion(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	now := string(protocol.TimestampNow())
@@ -2571,6 +2631,74 @@ func TestDaemon_BroadcastRawWSMessage_RoutesPendingRemotePTYOutputBeforeAttachRe
 	assertNoOutboundEvent(t, clientOther)
 	if clientPending.hasRemoteAttach("remote-runtime-1") {
 		t.Fatal("pending attach should not mark remote runtime attached before attach_result")
+	}
+}
+
+func TestDaemon_BroadcastRawWSMessage_RoutesRemotePanelContentToSubscribedClients(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	clientSubscribed := &wsClient{
+		send:            make(chan outboundMessage, 8),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+	clientOther := &wsClient{
+		send:            make(chan outboundMessage, 8),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+	d.wsHub.clients[clientSubscribed] = true
+	d.wsHub.clients[clientOther] = true
+	clientSubscribed.notePendingPanelContent("remote-workspace", "panel-markdown")
+
+	payload, err := json.Marshal(protocol.WorkspacePanelContentMessage{
+		Event:       protocol.EventWorkspacePanelContent,
+		WorkspaceID: "remote-workspace",
+		PanelID:     "panel-markdown",
+		PanelKind:   string(workspacelayout.PanelKindMarkdown),
+		Path:        "/srv/repo/README.md",
+		Content:     "# Private",
+	})
+	if err != nil {
+		t.Fatalf("marshal workspace_panel_content: %v", err)
+	}
+	d.broadcastRawWSMessage(payload)
+
+	event := readOutboundEvent(t, clientSubscribed)
+	if asString(event["event"]) != protocol.EventWorkspacePanelContent || asString(event["content"]) != "# Private" {
+		t.Fatalf("unexpected panel content event: %+v", event)
+	}
+	assertNoOutboundEvent(t, clientOther)
+	if !clientSubscribed.wantsPanelContent("remote-workspace", "panel-markdown") {
+		t.Fatal("successful relayed panel response should promote the pending request to a subscription")
+	}
+}
+
+func TestDaemon_BroadcastRawWSMessage_PrunesRemotePanelSubscriptionsAfterLayoutUpdate(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	client := &wsClient{
+		send:            make(chan outboundMessage, 8),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+	d.wsHub.clients[client] = true
+	client.subscribePanelContent("remote-workspace", "panel-markdown")
+
+	layoutJSON, err := workspacelayout.EncodeLayout(workspacelayout.DefaultLayout("pane-1"))
+	if err != nil {
+		t.Fatalf("encode layout: %v", err)
+	}
+	payload, err := json.Marshal(protocol.WorkspaceLayoutUpdatedMessage{
+		Event: protocol.EventWorkspaceLayoutUpdated,
+		WorkspaceLayout: protocol.WorkspaceLayout{
+			WorkspaceID:  "remote-workspace",
+			ActivePaneID: "pane-1",
+			LayoutJson:   layoutJSON,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal workspace_layout_updated: %v", err)
+	}
+	d.broadcastRawWSMessage(payload)
+
+	if client.wantsPanelContent("remote-workspace", "panel-markdown") {
+		t.Fatal("removed remote panel subscription survived layout update")
 	}
 }
 

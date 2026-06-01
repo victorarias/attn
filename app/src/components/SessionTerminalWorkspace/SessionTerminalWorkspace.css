@@ -100,9 +100,70 @@
   opacity: 1;
 }
 
+.workspace-pane.workspace-pane--panel {
+  opacity: 1;
+}
+
 .session-terminal-panes > .workspace-pane {
   position: absolute;
   box-sizing: border-box;
+}
+
+.workspace-split-divider {
+  position: absolute;
+  z-index: 5;
+  background: transparent;
+  touch-action: none;
+}
+
+.workspace-split-divider--vertical {
+  width: 9px;
+  transform: translateX(-50%);
+  cursor: col-resize;
+}
+
+.workspace-split-divider--horizontal {
+  height: 9px;
+  transform: translateY(-50%);
+  cursor: row-resize;
+}
+
+.workspace-split-divider::after {
+  content: '';
+  position: absolute;
+  background: transparent;
+  transition: background 100ms ease;
+}
+
+.workspace-split-divider--vertical::after {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.workspace-split-divider--horizontal::after {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  transform: translateY(-50%);
+}
+
+.workspace-split-divider:hover::after,
+.workspace-split-divider:active::after {
+  background: var(--color-border-focus);
+}
+
+.workspace-split-divider--vertical:hover::after,
+.workspace-split-divider--vertical:active::after {
+  width: 3px;
+}
+
+.workspace-split-divider--horizontal:hover::after,
+.workspace-split-divider--horizontal:active::after {
+  height: 3px;
 }
 
 .workspace-split {

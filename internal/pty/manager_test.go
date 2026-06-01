@@ -144,6 +144,23 @@ func TestBuildSpawnEnv_SetsWrapperPath(t *testing.T) {
 	}
 }
 
+func TestBuildSpawnEnv_SetsAttnPresence(t *testing.T) {
+	env := buildSpawnEnv("", SpawnOptions{ID: "session-1"}, "codex", "/tmp/attn-wrapper", nil)
+
+	for _, expected := range []string{"ATTN_INSIDE_APP=1", "ATTN_SESSION_ID=session-1"} {
+		found := false
+		for _, entry := range env {
+			if entry == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected %s in env, got %v", expected, env)
+		}
+	}
+}
+
 func TestBuildSpawnEnv_DoesNotSetAgentExecutableForDefaultBinary(t *testing.T) {
 	env := buildSpawnEnv("", SpawnOptions{ID: "session-1", Executable: "codex"}, "codex", "/tmp/attn-wrapper", nil)
 	for _, entry := range env {

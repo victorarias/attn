@@ -86,6 +86,7 @@ interface GitHubReleaseResponse {
   draft?: boolean;
 }
 
+
 function terminalStateForWorkspaceSessions(sessions: Session[]): TerminalWorkspaceState | null {
   let selected: TerminalWorkspaceState | null = null;
   for (const session of sessions) {
@@ -374,9 +375,15 @@ function App() {
     sendEnsureRepo,
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
+    sendSessionSelected,
     sendSessionVisualized,
     sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
+    sendWorkspaceSetSplitRatio,
+    sendWorkspaceDockPanel,
+    sendWorkspaceUndockPanel,
+    panelContents,
+    requestPanelContent,
     sendRuntimeInput,
     isRuntimeAttached,
     sendGetFileDiff,
@@ -490,9 +497,15 @@ function App() {
         sendEnsureRepo={sendEnsureRepo}
         sendSubscribeGitStatus={sendSubscribeGitStatus}
         sendUnsubscribeGitStatus={sendUnsubscribeGitStatus}
+        sendSessionSelected={sendSessionSelected}
         sendSessionVisualized={sendSessionVisualized}
         sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
+        sendWorkspaceSetSplitRatio={sendWorkspaceSetSplitRatio}
+        sendWorkspaceDockPanel={sendWorkspaceDockPanel}
+        sendWorkspaceUndockPanel={sendWorkspaceUndockPanel}
+        panelContents={panelContents}
+        requestPanelContent={requestPanelContent}
         sendRuntimeInput={sendRuntimeInput}
         isRuntimeAttached={isRuntimeAttached}
         sendGetFileDiff={sendGetFileDiff}
@@ -573,9 +586,15 @@ interface AppContentProps {
   sendEnsureRepo: ReturnType<typeof useDaemonSocket>['sendEnsureRepo'];
   sendSubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendSubscribeGitStatus'];
   sendUnsubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendUnsubscribeGitStatus'];
+  sendSessionSelected: ReturnType<typeof useDaemonSocket>['sendSessionSelected'];
   sendSessionVisualized: ReturnType<typeof useDaemonSocket>['sendSessionVisualized'];
   sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
+  sendWorkspaceSetSplitRatio: ReturnType<typeof useDaemonSocket>['sendWorkspaceSetSplitRatio'];
+  sendWorkspaceDockPanel: ReturnType<typeof useDaemonSocket>['sendWorkspaceDockPanel'];
+  sendWorkspaceUndockPanel: ReturnType<typeof useDaemonSocket>['sendWorkspaceUndockPanel'];
+  panelContents: ReturnType<typeof useDaemonSocket>['panelContents'];
+  requestPanelContent: ReturnType<typeof useDaemonSocket>['requestPanelContent'];
   sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
   isRuntimeAttached: ReturnType<typeof useDaemonSocket>['isRuntimeAttached'];
   sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
@@ -651,9 +670,15 @@ sendFetchPRDetails,
   sendEnsureRepo,
   sendSubscribeGitStatus,
   sendUnsubscribeGitStatus,
+  sendSessionSelected,
   sendSessionVisualized,
   sendWorkspaceAddSessionPane,
   sendWorkspaceClosePane,
+  sendWorkspaceSetSplitRatio,
+  sendWorkspaceDockPanel,
+  sendWorkspaceUndockPanel,
+  panelContents,
+  requestPanelContent,
   sendRuntimeInput,
   isRuntimeAttached,
   sendGetFileDiff,
@@ -1040,6 +1065,12 @@ sendFetchPRDetails,
     }
   }, [activeSessionId, sessions, setActiveSession, view]);
 
+  useEffect(() => {
+    if (view === 'session' && activeSessionId) {
+      sendSessionSelected(activeSessionId);
+    }
+  }, [activeSessionId, sendSessionSelected, view]);
+
   // Track when the currently-selected session became visible.
   useEffect(() => {
     if (view !== 'session' || !activeSessionId) {
@@ -1247,6 +1278,7 @@ sendFetchPRDetails,
   const toggleSidebarCollapse = useCallback(() => {
     setSidebarCollapsed((prev) => !prev);
   }, []);
+
 
   // Auto-collapse sidebar when no sessions, auto-expand when first session is created
   const prevSessionCountRef = useRef(sessions.length);
@@ -1977,6 +2009,10 @@ sendFetchPRDetails,
   const workspaceSelection = useWorkspaceSelectionController(workspaceViews, activeSessionId);
   const activeWorkspaceId = workspaceSelection.activeWorkspaceId;
 
+  // Markdown panels are daemon-owned docked panels opened via `attn open <path>`
+  // (and re-dockable by dragging). There is no empty "show panel" toggle: a
+  // panel only exists once it points at a real file.
+
   // Use workspace order so ⌘1-9 and prev/next match the top-level sidebar rows.
   const visualWorkspaces = sidebarWorkspaceViews;
   const visualIndexByWorkspaceId = useMemo(() => {
@@ -2628,6 +2664,9 @@ sendFetchPRDetails,
                         void handleClosePane(paneSessionId, paneId).catch(console.error);
                       }
                     }}
+                    onResizeSplit={(splitId, ratio) => {
+                      return sendWorkspaceSetSplitRatio(workspace.id, splitId, ratio);
+                    }}
                     onFocusPane={(paneId) => {
                       const agentPane = workspaceState.agents.find((pane) => pane.id === paneId);
                       const paneSessionId = agentPane?.sessionId;
@@ -2647,6 +2686,15 @@ sendFetchPRDetails,
                       ));
                     }}
                     onNavigateOutOfSession={handleNavigateOutOfSession}
+                    onDockPanel={(panelId, panelKind, anchorPaneId, edge) => {
+                      void sendWorkspaceDockPanel(workspace.id, panelId, panelKind, { anchorPaneId, edge }).catch(() => {});
+                    }}
+                    onUndockPanel={(panelId) => {
+                      void sendWorkspaceUndockPanel(workspace.id, panelId).catch(() => {});
+                    }}
+                    panelContents={panelContents}
+                    allowLocalPanelTargets={!workspace.endpointId}
+                    onRequestPanelContent={requestPanelContent}
                   />
                 </div>
               );

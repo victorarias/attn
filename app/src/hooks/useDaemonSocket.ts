@@ -44,6 +44,7 @@ import {
   spawnPtyRuntime,
 } from '../pty/runtimeLifecycle';
 import { createPtyTransportState } from '../pty/transportState';
+import { panelContentKey, panelIdsFromLayoutJSON, type TerminalDockEdge, type PanelContentState } from '../types/workspace';
 import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import { recordPtyCommand, recordWsJsonParse } from '../utils/ptyPerf';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
@@ -89,6 +90,8 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   endpoints?: GeneratedEndpoint[];
   workspace?: GeneratedWorkspaceSnapshot;
   workspace_id?: string;
+  split_id?: string;
+  panel_id?: string;
   data?: string;
   seq?: number;
   scrollback?: string;
@@ -150,7 +153,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '73';
+const PROTOCOL_VERSION = '78';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -457,8 +460,10 @@ function upsertWorkspaceByID(workspaces: DaemonWorkspace[], workspace: DaemonWor
   return updated;
 }
 
-function workspaceActionKey(action: string, workspaceId: string, paneId?: string): string {
-  return `workspace:${action}:${workspaceId}:${paneId || ''}`;
+function workspaceActionKey(action: string, workspaceId: string, entityId?: string, requestId?: string): string {
+  return requestId
+    ? `workspace:${action}:${workspaceId}:request:${requestId}`
+    : `workspace:${action}:${workspaceId}:${entityId || ''}`;
 }
 
 function isValidWorkspaceActionResult(data: WebSocketEvent): data is WebSocketEvent & {
@@ -466,6 +471,56 @@ function isValidWorkspaceActionResult(data: WebSocketEvent): data is WebSocketEv
   workspace_id: string;
 } {
   return Boolean(data.action && data.workspace_id);
+}
+
+function prunePanelContentsForWorkspace(
+  contents: Record<string, PanelContentState>,
+  workspaceId: string,
+  activePanelIds: string[] = [],
+): Record<string, PanelContentState> {
+  const prefix = `${workspaceId}::`;
+  const activeKeys = new Set(activePanelIds.map((panelId) => panelContentKey(workspaceId, panelId)));
+  let changed = false;
+  const next: Record<string, PanelContentState> = {};
+  for (const [key, value] of Object.entries(contents)) {
+    if (key.startsWith(prefix) && !activeKeys.has(key)) {
+      changed = true;
+      continue;
+    }
+    next[key] = value;
+  }
+  return changed ? next : contents;
+}
+
+function prunePanelContentsForWorkspaces(
+  contents: Record<string, PanelContentState>,
+  workspaces: DaemonWorkspace[],
+): Record<string, PanelContentState> {
+  const activeKeys = new Set<string>();
+  for (const workspace of workspaces) {
+    for (const panelId of panelIdsFromLayoutJSON(workspace.layout?.layout_json || '')) {
+      activeKeys.add(panelContentKey(workspace.id, panelId));
+    }
+  }
+  let changed = false;
+  const next: Record<string, PanelContentState> = {};
+  for (const [key, value] of Object.entries(contents)) {
+    if (!activeKeys.has(key)) {
+      changed = true;
+      continue;
+    }
+    next[key] = value;
+  }
+  return changed ? next : contents;
+}
+
+function requestPanelContentsForWorkspaces(ws: WebSocket, workspaces: DaemonWorkspace[]) {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  for (const workspace of workspaces) {
+    for (const panelId of panelIdsFromLayoutJSON(workspace.layout?.layout_json || '')) {
+      ws.send(JSON.stringify({ cmd: 'workspace_panel_content_get', workspace_id: workspace.id, panel_id: panelId }));
+    }
+  }
 }
 
 const ATTACH_RETRY_TIMEOUT_MS = 3_000;
@@ -605,6 +660,7 @@ export function useDaemonSocket({
   const branchDiffInFlightRef = useRef<Map<string, Promise<BranchDiffFilesResult>>>(new Map());
   const ptyTransportRef = useRef(createPtyTransportState<AttachRequestContext>());
   const pendingSessionVisualizedRef = useRef<Set<string>>(new Set());
+  const selectedSessionRef = useRef<string | null>(null);
   const daemonInstanceIDRef = useRef<string>('');
   const hasReceivedInitialStateRef = useRef(false);
   // Once we detect a profile mismatch, we refuse to operate forever — the
@@ -617,6 +673,9 @@ export function useDaemonSocket({
   const [rateLimit, setRateLimit] = useState<RateLimitState | null>(null);
   const [warnings, setWarnings] = useState<DaemonWarning[]>([]);
   const [gitOperations, setGitOperations] = useState<Record<string, DaemonGitOperation>>({});
+  // Daemon-served content for docked panels (markdown files), keyed by
+  // panelContentKey. Updated by workspace_panel_content events (reply + live reload).
+  const [panelContents, setPanelContents] = useState<Record<string, PanelContentState>>({});
 
   // Circuit breaker state for reconnect storms
   const reconnectAttemptsRef = useRef(0);
@@ -699,6 +758,9 @@ export function useDaemonSocket({
       case 'workspace_layout_close_pane':
       case 'workspace_layout_focus_pane':
       case 'workspace_layout_rename_pane':
+      case 'workspace_layout_set_split_ratio':
+      case 'workspace_layout_dock_panel':
+      case 'workspace_layout_undock_panel':
         rejectPendingByPredicate((key) => key.startsWith(`workspace:${cmd}:`), error);
         return;
       case 'approve_pr':
@@ -860,6 +922,9 @@ export function useDaemonSocket({
         }
         pendingSessionVisualizedRef.current.clear();
       }
+      if (selectedSessionRef.current) {
+        ws.send(JSON.stringify({ cmd: 'session_selected', id: selectedSessionRef.current }));
+      }
     };
 
     ws.onmessage = (event) => {
@@ -933,6 +998,7 @@ export function useDaemonSocket({
             const nextWorkspaces = data.workspaces || [];
             workspacesRef.current = nextWorkspaces;
             onWorkspacesUpdate(nextWorkspaces);
+            setPanelContents((prev) => prunePanelContentsForWorkspaces(prev, nextWorkspaces));
             pruneAttachedPtySessions(nextSessions, nextWorkspaces);
             const nextPRs = data.prs || [];
             prsRef.current = nextPRs;
@@ -963,6 +1029,7 @@ export function useDaemonSocket({
             hasReceivedInitialStateRef.current = true;
             setHasReceivedInitialState(true);
             flushQueuedCommands(ws);
+            requestPanelContentsForWorkspaces(ws, nextWorkspaces);
             if (ws.readyState === WebSocket.OPEN) {
               // Re-attach PTY streams only after recovery barrier has lifted and
               // initial_state has arrived.
@@ -975,14 +1042,20 @@ export function useDaemonSocket({
           case 'workspace_layout':
           case 'workspace_layout_updated':
             if (data.workspace_layout) {
-              const workspaceID = data.workspace_layout.workspace_id;
+              const workspaceLayout = data.workspace_layout;
+              const workspaceID = workspaceLayout.workspace_id;
               const nextWorkspaces = workspacesRef.current.map((workspace) => (
                 workspace.id === workspaceID
-                  ? { ...workspace, layout: data.workspace_layout }
+                  ? { ...workspace, layout: workspaceLayout }
                   : workspace
               ));
               workspacesRef.current = nextWorkspaces;
               onWorkspacesUpdate(nextWorkspaces);
+              setPanelContents((prev) => prunePanelContentsForWorkspace(
+                prev,
+                workspaceID,
+                panelIdsFromLayoutJSON(workspaceLayout.layout_json || ''),
+              ));
               pruneAttachedPtySessions(sessionsRef.current, nextWorkspaces);
             }
             break;
@@ -994,8 +1067,8 @@ export function useDaemonSocket({
             }
             const action = data.action;
             const workspaceId = data.workspace_id;
-            const paneId = data.pane_id;
-            const key = workspaceActionKey(action, workspaceId, paneId);
+            const entityId = data.pane_id || data.split_id || data.panel_id;
+            const key = workspaceActionKey(action, workspaceId, entityId, data.request_id);
             const pending = pendingActionsRef.current.get(key);
             if (pending) {
               pendingActionsRef.current.delete(key);
@@ -1004,6 +1077,21 @@ export function useDaemonSocket({
               } else {
                 pending.reject(new Error(data.error || 'Workspace action failed'));
               }
+            }
+            break;
+          }
+
+          case 'workspace_panel_content': {
+            if (typeof data.workspace_id === 'string' && typeof data.panel_id === 'string') {
+              const key = panelContentKey(data.workspace_id, data.panel_id);
+              setPanelContents((prev) => ({
+                ...prev,
+                [key]: {
+                  path: typeof data.path === 'string' ? data.path : '',
+                  content: typeof data.content === 'string' ? data.content : '',
+                  error: typeof data.error === 'string' ? data.error : undefined,
+                },
+              }));
             }
             break;
           }
@@ -1028,6 +1116,7 @@ export function useDaemonSocket({
               const nextWorkspaces = workspacesRef.current.filter((workspace) => workspace.id !== data.workspace!.id);
               workspacesRef.current = nextWorkspaces;
               onWorkspacesUpdate(nextWorkspaces);
+              setPanelContents((prev) => prunePanelContentsForWorkspace(prev, data.workspace!.id));
             }
             break;
 
@@ -2071,10 +2160,11 @@ export function useDaemonSocket({
     action: string,
     workspaceId: string,
     payload: Record<string, unknown>,
-    paneId?: string,
+    entityId?: string,
+    requestId?: string,
   ): Promise<WorkspaceActionResult> => {
     return new Promise((resolve, reject) => {
-      const key = workspaceActionKey(action, workspaceId, paneId);
+      const key = workspaceActionKey(action, workspaceId, entityId, requestId);
       pendingActionsRef.current.set(key, { resolve, reject });
       sendOrQueueCommand(payload, { waitForInitialState: true });
 
@@ -2149,6 +2239,73 @@ export function useDaemonSocket({
       paneId,
     );
   }, [sendWorkspaceCommand]);
+
+  const sendWorkspaceSetSplitRatio = useCallback((workspaceId: string, splitId: string, ratio: number) => {
+    const requestId = nextRequestID('workspace_split_ratio');
+    return sendWorkspaceCommand(
+      'workspace_layout_set_split_ratio',
+      workspaceId,
+      {
+        cmd: 'workspace_layout_set_split_ratio',
+        workspace_id: workspaceId,
+        split_id: splitId,
+        ratio,
+        request_id: requestId,
+      },
+      splitId,
+      requestId,
+    );
+  }, [nextRequestID, sendWorkspaceCommand]);
+
+  // Dock (or move) a panel into the workspace layout. Like set_split_ratio, the
+  // daemon's action result carries an empty pane_id. An empty anchorPaneId lets
+  // the daemon pick a sensible anchor (the active pane).
+  const sendWorkspaceDockPanel = useCallback((
+    workspaceId: string,
+    panelId: string,
+    panelKind: string,
+    options: { anchorPaneId?: string; edge?: TerminalDockEdge; ratio?: number } = {},
+  ) => {
+    return sendWorkspaceCommand(
+      'workspace_layout_dock_panel',
+      workspaceId,
+      {
+        cmd: 'workspace_layout_dock_panel',
+        workspace_id: workspaceId,
+        anchor_pane_id: options.anchorPaneId ?? '',
+        edge: options.edge ?? 'right',
+        panel_id: panelId,
+        panel_kind: panelKind,
+        ...(options.ratio != null ? { ratio: options.ratio } : {}),
+      },
+      panelId,
+    );
+  }, [sendWorkspaceCommand]);
+
+  const sendWorkspaceUndockPanel = useCallback((workspaceId: string, panelId: string) => {
+    return sendWorkspaceCommand(
+      'workspace_layout_undock_panel',
+      workspaceId,
+      {
+        cmd: 'workspace_layout_undock_panel',
+        workspace_id: workspaceId,
+        panel_id: panelId,
+      },
+      panelId,
+    );
+  }, [sendWorkspaceCommand]);
+
+  // requestPanelContent pulls a panel's current content (used on first render).
+  // The reply and all subsequent live-reload updates arrive as
+  // workspace_panel_content events handled above. Fire-and-forget: no result
+  // tracking needed. Queue the pull while disconnected so mounting a panel
+  // during reconnect cannot leave it stale.
+  const requestPanelContent = useCallback((workspaceId: string, panelId: string) => {
+    sendOrQueueCommand(
+      { cmd: 'workspace_panel_content_get', workspace_id: workspaceId, panel_id: panelId },
+      { waitForInitialState: true },
+    );
+  }, [sendOrQueueCommand]);
 
   useEffect(() => {
     setPtyBackend({
@@ -2947,6 +3104,15 @@ export function useDaemonSocket({
     pendingSessionVisualizedRef.current.delete(id);
   }, []);
 
+  // Track ordinary UI selection separately from the delayed long-run review
+  // signal so `attn open` always targets the session currently shown.
+  const sendSessionSelected = useCallback((id: string) => {
+    selectedSessionRef.current = id;
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'session_selected', id }));
+  }, []);
+
   // Get file diff
   // Options: staged (deprecated), baseRef (for PR-like branch diffs)
   const sendGetFileDiff = useCallback((
@@ -3429,12 +3595,18 @@ export function useDaemonSocket({
     sendEnsureRepo,
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
+    sendSessionSelected,
     sendSessionVisualized,
     sendWorkspaceGet,
     sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
     sendWorkspaceFocusPane,
     sendWorkspaceRenamePane,
+    sendWorkspaceSetSplitRatio,
+    sendWorkspaceDockPanel,
+    sendWorkspaceUndockPanel,
+    panelContents,
+    requestPanelContent,
     sendRuntimeInput: sendPtyInput,
     isRuntimeAttached,
     sendGetFileDiff,

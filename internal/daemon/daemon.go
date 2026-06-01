@@ -146,6 +146,16 @@ type Daemon struct {
 	// workspace identity, session membership, and daemon-owned panel
 	// geometry.
 	workspaces *workspaceRegistry
+
+	// selectedSessionID is the session the UI is currently showing, reported via
+	// session_visualized. `attn open` with no explicit session targets it.
+	selectedSessionMu sync.RWMutex
+	selectedSessionID string
+
+	// markdownSeen fingerprints open markdown files so the content watcher only
+	// broadcasts when a file actually changes on disk.
+	markdownSeenMu sync.Mutex
+	markdownSeen   map[string]panelContentSig
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -582,6 +592,9 @@ func (d *Daemon) Start() error {
 	// Start WebSocket hub with daemon's logger
 	d.wsHub.logf = d.logf
 	go d.wsHub.run()
+
+	// Watch open markdown panels for on-disk changes and live-reload them.
+	go d.runMarkdownContentWatcher(d.done)
 
 	// PTY exit events are emitted asynchronously from read loops.
 	if hooks, ok := d.ptyBackend.(ptybackend.LifecycleHooks); ok {
@@ -1652,6 +1665,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleInjectTestPR(conn, msg.(*protocol.InjectTestPRMessage))
 	case protocol.CmdInjectTestSession:
 		d.handleInjectTestSession(conn, msg.(*protocol.InjectTestSessionMessage))
+	case protocol.CmdOpenMarkdown:
+		d.handleOpenMarkdown(conn, msg.(*protocol.OpenMarkdownMessage))
 	case protocol.CmdListWorktrees:
 		d.handleListWorktrees(conn, msg.(*protocol.ListWorktreesMessage))
 	case protocol.CmdCreateWorktree:
@@ -1867,6 +1882,10 @@ func (d *Daemon) classifyOrDeferAfterStop(sessionID, transcriptPath string) {
 }
 
 func (d *Daemon) handleSessionVisualized(sessionID string) {
+	// The frontend reports the focused session here, so this doubles as our
+	// signal for "currently selected session" (used by `attn open`).
+	d.setSelectedSession(sessionID)
+
 	transcriptPath, shouldClassify := d.consumeNeedsReviewAfterLongRun(sessionID)
 	if !shouldClassify {
 		return

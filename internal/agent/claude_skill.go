@@ -8,10 +8,16 @@ import (
 
 const attnClaudeSkillContent = `---
 name: attn
-description: Start and resume attn review loops from Claude Code. Use when a prompt says to use your attn skill to start a review loop or answer a review-loop question.
+description: Drive attn from Claude Code. Use to start or resume attn review loops, answer a review-loop question, or open a markdown file in a UX friendly way.
 ---
 
 # attn Review Loop
+
+Start by checking if the user is running inside attn:
+
+    attn presence
+
+You can get help via ` + "`attn help`" + `.
 
 Use this skill when a prompt tells you to:
 
@@ -141,6 +147,18 @@ you should interpret that as:
 5. report the result briefly
 
 If the user also wants you to monitor it, you may poll with ` + "`attn review-loop show --loop ...`" + ` and report progress, but still treat the loop as autonomous unless the user asks you to take over.
+
+## Opening A Markdown File
+
+When you have written or found a markdown document the user should read, you can show it to the user:
+
+    attn open <path/to/file.md>
+
+Notes:
+
+1. The path may be relative to your current directory or absolute; attn resolves it.
+2. By default the panel opens next to the current attn session (your own), so you usually do not pass ` + "`--session`" + `. To target a specific session, add ` + "`--session <session-id>`" + `.
+3. The panel live-reloads if you edit the file afterward.
 
 ## Important Rules
 
