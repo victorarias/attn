@@ -815,6 +815,57 @@ function dragPaneSelection(
   }));
 }
 
+// dragLeafHeader synthesizes a leaf re-dock drag: pointerdown on the leaf's
+// draggable header, then pointermove/pointerup on window at a drop point given
+// as a fraction of the panes container. This exercises the real beginLeafDrag →
+// computeDockTarget → onMoveLeaf path without a physical OS drag.
+function dragLeafHeader(leafId: string, dropFracX: number, dropFracY: number) {
+  const leaf = document.querySelector(`[data-pane-id="${leafId}"]`);
+  const header = leaf?.querySelector('.workspace-pane-header, .workspace-dock-panel-header');
+  if (!(header instanceof HTMLElement)) {
+    throw new Error(`Draggable leaf header not found for ${leafId}`);
+  }
+  const container = header.closest('.session-terminal-panes');
+  if (!(container instanceof HTMLElement)) {
+    throw new Error(`Panes container not found for leaf ${leafId}`);
+  }
+  const headerRect = header.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+  const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
+  const startX = headerRect.left + headerRect.width / 2;
+  const startY = headerRect.top + headerRect.height / 2;
+  const dropX = containerRect.left + clamp01(dropFracX) * containerRect.width;
+  const dropY = containerRect.top + clamp01(dropFracY) * containerRect.height;
+
+  const fire = (
+    type: string,
+    target: EventTarget,
+    clientX: number,
+    clientY: number,
+    extra: PointerEventInit,
+  ) => {
+    target.dispatchEvent(new PointerEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true,
+      clientX,
+      clientY,
+      ...extra,
+    }));
+  };
+
+  // pointerdown bubbles to React's onPointerDown (beginLeafDrag); move/up reach
+  // the window listeners beginLeafDrag registers.
+  fire('pointerdown', header, startX, startY, { button: 0, buttons: 1 });
+  fire('pointermove', window, dropX, dropY, { buttons: 1 });
+  fire('pointerup', window, dropX, dropY, { button: 0, buttons: 0 });
+
+  return { startX, startY, dropX, dropY };
+}
+
 function clickElement(element: HTMLElement) {
   element.dispatchEvent(new MouseEvent('mousedown', {
     bubbles: true,
@@ -1584,6 +1635,25 @@ export function useUiAutomationBridge({
         );
         await settleUi(2);
         return { sessionId, paneId, viewSessionId, start, end };
+      }
+      case 'drag_leaf': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const session = sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+        const leafId = typeof payload.leafId === 'string' ? payload.leafId : '';
+        if (!leafId) {
+          throw new Error('drag_leaf requires leafId');
+        }
+        const dropFracX = typeof payload.dropFracX === 'number' ? payload.dropFracX : 0.5;
+        const dropFracY = typeof payload.dropFracY === 'number' ? payload.dropFracY : 0.5;
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
+        selectSession(sessionId);
+        await settleUi(2);
+        const points = dragLeafHeader(leafId, dropFracX, dropFracY);
+        await settleUi(2);
+        return { sessionId, leafId, viewSessionId, dropFracX, dropFracY, ...points };
       }
       case 'dispatch_shortcut': {
         const shortcutId = typeof payload.shortcutId === 'string' ? payload.shortcutId as ShortcutId : null;

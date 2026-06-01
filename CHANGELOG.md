@@ -28,6 +28,9 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 
 ## [2026-06-01]
 
+### Added
+- **Drag any pane or panel to rearrange a workspace.** Grab a terminal pane's header (or a markdown panel's header) and drop it on another pane's edge to re-dock it — left, right, top, or bottom. How far in you drop sets the new split's size, snapping to a quarter, third, or half; drop into the workspace's outer edge to span the whole side. Dropping a pane on itself does nothing.
+
 ### Changed
 - **`attn` is clearer about being its own command.** `attn --help`, unknown commands, and unknown flags now print attn's own usage (with its version) instead of quietly handing them to the coding agent. `attn` understands only `-s`, `--resume`, and `--yolo`; it no longer forwards other flags — or anything after `--` — through to the agent.
 - **Stale-`attn` warning.** When the `attn` on your `PATH` is a different version from the running app, attn prints a one-line warning so you can catch an out-of-date binary shadowing the current one (`which -a attn`).

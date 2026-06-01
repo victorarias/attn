@@ -109,6 +109,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdWorkspaceLayoutSetSplitRatio:  commandMetadata(ScopeSession, true, true),
 	protocol.CmdWorkspaceLayoutDockPanel:      commandMetadata(ScopeSession, true, true),
 	protocol.CmdWorkspaceLayoutUndockPanel:    commandMetadata(ScopeSession, true, true),
+	protocol.CmdWorkspaceLayoutMoveLeaf:       commandMetadata(ScopeSession, true, true),
 	protocol.CmdWorkspacePanelContentGet:      commandMetadata(ScopeSession, true, true),
 }
 

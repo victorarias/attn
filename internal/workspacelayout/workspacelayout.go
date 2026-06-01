@@ -488,6 +488,30 @@ func hasLeaf(node Node, leafID string) bool {
 	return HasPane(node, leafID) || HasPanel(node, leafID)
 }
 
+// findLeaf returns the leaf (pane or panel) with the given id so a move can
+// re-insert it elsewhere with its identity intact — and, for panels, its kind
+// and params. The bool reports whether such a leaf exists. Leaves carry no
+// children, so the returned node is self-contained.
+func findLeaf(node Node, leafID string) (Node, bool) {
+	switch node.Type {
+	case "pane":
+		if node.PaneID == leafID {
+			return node, true
+		}
+	case "panel":
+		if node.PanelID == leafID {
+			return node, true
+		}
+	case "split":
+		for _, child := range node.Children {
+			if leaf, ok := findLeaf(child, leafID); ok {
+				return leaf, true
+			}
+		}
+	}
+	return Node{}, false
+}
+
 // PanelParamsByID returns the opaque params of the panel with the given id.
 // The bool reports whether such a panel exists.
 func PanelParamsByID(node Node, panelID string) (string, bool) {
@@ -614,12 +638,12 @@ func insertBesideLeaf(node Node, anchorID string, direction Direction, before bo
 		if node.PaneID != anchorID {
 			return node, false
 		}
-		return panelSplit(node, panel, direction, before, splitID, ratio), true
+		return lockedSplit(node, panel, direction, before, splitID, ratio), true
 	case "panel":
 		if node.PanelID != anchorID {
 			return node, false
 		}
-		return panelSplit(node, panel, direction, before, splitID, ratio), true
+		return lockedSplit(node, panel, direction, before, splitID, ratio), true
 	case "split":
 		children := make([]Node, len(node.Children))
 		copy(children, node.Children)
@@ -635,10 +659,15 @@ func insertBesideLeaf(node Node, anchorID string, direction Direction, before bo
 	return node, false
 }
 
-func panelSplit(anchor, panel Node, direction Direction, before bool, splitID string, ratio float64) Node {
-	children := []Node{anchor, panel}
+// lockedSplit pairs an existing subtree with an incoming leaf under a new split.
+// The split is ratio-locked because the ratio came from an explicit user gesture
+// — a panel dock, or a leaf dropped at a chosen depth — so normalization keeps it
+// instead of rebalancing the pair back to an equal split. `before` places the
+// incoming leaf as children[0] (its left/top side).
+func lockedSplit(existing, incoming Node, direction Direction, before bool, splitID string, ratio float64) Node {
+	children := []Node{existing, incoming}
 	if before {
-		children = []Node{panel, anchor}
+		children = []Node{incoming, existing}
 	}
 	return Node{
 		Type:        "split",
@@ -648,6 +677,59 @@ func panelSplit(anchor, panel Node, direction Direction, before bool, splitID st
 		RatioLocked: true,
 		Children:    children,
 	}
+}
+
+// MoveLeaf relocates an existing leaf (pane or panel) so it sits beside anchorID
+// on the given side. When anchorID is empty the leaf docks against the whole
+// workspace: the entire remaining layout becomes one side of a new root split and
+// the moved leaf the other (a "container" dock). The moved leaf keeps its
+// identity, and for panels its kind and params. The new split is ratio-locked
+// because the ratio came from the user's drop, so normalization preserves the
+// chosen size. `ratio` is the children[0] fraction, matching DockPanel.
+//
+// It is a no-op (returns the input and false) when the move can't or shouldn't
+// happen:
+//   - leafID is empty, or equals anchorID (dropping a leaf on itself)
+//   - leafID is not in the tree
+//   - leafID is the only leaf, so removing it would leave nothing to dock against
+//   - anchorID is non-empty but missing once the leaf is pulled out
+func MoveLeaf(node Node, leafID, anchorID, splitID string, direction Direction, before bool, ratio float64) (Node, bool) {
+	leafID = strings.TrimSpace(leafID)
+	anchorID = strings.TrimSpace(anchorID)
+	if leafID == "" || leafID == anchorID {
+		return node, false
+	}
+	moved, found := findLeaf(node, leafID)
+	if !found {
+		return node, false
+	}
+	if ratio <= 0 || ratio >= 1 {
+		ratio = DefaultSplitRatio
+	}
+	if direction != DirectionVertical && direction != DirectionHorizontal {
+		direction = DirectionVertical
+	}
+	if strings.TrimSpace(splitID) == "" {
+		splitID = "split"
+	}
+
+	cleaned, removed := Remove(node, leafID)
+	if !removed || cleaned.Type == "" {
+		// The leaf was the only thing in the tree; there's nowhere to move it.
+		return node, false
+	}
+
+	if anchorID == "" {
+		return lockedSplit(cleaned, moved, direction, before, splitID, ratio), true
+	}
+	if !hasLeaf(cleaned, anchorID) {
+		return node, false
+	}
+	next, ok := insertBesideLeaf(cleaned, anchorID, direction, before, splitID, ratio, moved)
+	if !ok {
+		return node, false
+	}
+	return next, true
 }
 
 // UndockPanel removes a docked panel from the tree, collapsing the split that

@@ -472,6 +472,60 @@ func (d *Daemon) handleWorkspaceLayoutUndockPanel(client *wsClient, msg *protoco
 	d.sendWorkspaceLayoutPanelActionResult(client, protocol.CmdWorkspaceLayoutUndockPanel, msg.WorkspaceID, panelID, nil)
 }
 
+func (d *Daemon) handleWorkspaceLayoutMoveLeaf(client *wsClient, msg *protocol.WorkspaceLayoutMoveLeafMessage) {
+	err := d.moveLeaf(msg.WorkspaceID, msg.LeafID, msg.AnchorID, msg.Edge, msg.Ratio)
+	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutMoveLeaf, msg.WorkspaceID, protocol.Ptr(strings.TrimSpace(msg.LeafID)), err)
+}
+
+// moveLeaf relocates an existing leaf (terminal pane or docked panel) within a
+// workspace layout and persists it. An empty anchorID docks the leaf against the
+// whole workspace (the root). edge picks the split direction and side; ratio is
+// the moved leaf's fraction of the new split, defaulting to an equal split. The
+// move is rejected (returns an error the client ignores) when it can't happen —
+// a self-drop, an unknown leaf, or the only leaf in the workspace.
+func (d *Daemon) moveLeaf(workspaceID, leafID, anchorID string, edge protocol.WorkspaceLayoutDockEdge, ratio *float64) error {
+	snapshot, err := d.ensureWorkspaceLayout(workspaceID)
+	if err != nil {
+		return err
+	}
+	leafID = strings.TrimSpace(leafID)
+	anchorID = strings.TrimSpace(anchorID)
+	if leafID == "" {
+		return fmt.Errorf("leaf_id is required")
+	}
+
+	direction, before := dockEdgeToSplit(edge)
+	leafFraction := workspacelayout.DefaultSplitRatio
+	if ratio != nil && *ratio > 0 && *ratio < 1 {
+		leafFraction = *ratio
+	}
+	// MoveLeaf takes the children[0] fraction; convert from the moved leaf's share.
+	childZeroRatio := leafFraction
+	if !before {
+		childZeroRatio = 1 - leafFraction
+	}
+
+	layout, ok := workspacelayout.MoveLeaf(
+		snapshot.Layout,
+		leafID,
+		anchorID,
+		newWorkspaceLayoutEntityID("split"),
+		direction,
+		before,
+		childZeroRatio,
+	)
+	if !ok {
+		return fmt.Errorf("could not move leaf: %s", leafID)
+	}
+	snapshot.Layout = layout
+	normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot)
+	if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
+		return err
+	}
+	d.broadcastWorkspaceLayoutUpdated(workspaceID)
+	return nil
+}
+
 func (d *Daemon) handleWorkspaceLayoutAddSessionPane(client *wsClient, msg *protocol.WorkspaceLayoutAddSessionPaneMessage) {
 	snapshot, err := d.currentOrEmptyWorkspaceLayout(msg.WorkspaceID)
 	if err != nil {

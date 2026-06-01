@@ -216,6 +216,22 @@
   display: none;
 }
 
+/* The header doubles as the drag-to-move handle when the workspace has more than
+   one leaf. */
+.workspace-pane-header--draggable {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.workspace-pane-header--draggable:active {
+  cursor: grabbing;
+}
+
+.workspace-pane--dragging {
+  opacity: 0.5;
+}
+
 .workspace-pane-title {
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);

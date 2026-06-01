@@ -858,6 +858,21 @@ model WorkspaceLayoutUndockPanelMessage {
   panel_id: string;
 }
 
+// Move an existing leaf (terminal pane or docked panel) so it sits beside an
+// anchor leaf on the given edge. An empty anchor_id docks the leaf against the
+// whole workspace (the root), spanning that edge. ratio is the moved leaf's
+// fraction of the new split (optional; defaults to an equal split). Dropping a
+// leaf on itself (leaf_id == anchor_id) is a no-op. The new split is ratio-locked
+// so the dropped size survives normalization.
+model WorkspaceLayoutMoveLeafMessage {
+  cmd: "workspace_layout_move_leaf";
+  workspace_id: string;
+  leaf_id: string;
+  anchor_id: string;
+  edge: WorkspaceLayoutDockEdge;
+  ratio?: float64;
+}
+
 // Request the current rendered content of a docked panel (e.g. the markdown
 // file a markdown panel points at). The daemon resolves the file from the
 // panel's persisted params, reads it, and replies with WorkspacePanelContentMessage.

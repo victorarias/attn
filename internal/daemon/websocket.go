@@ -916,6 +916,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkspaceLayoutDockPanel(client, msg.(*protocol.WorkspaceLayoutDockPanelMessage))
 	case protocol.CmdWorkspaceLayoutUndockPanel:
 		d.handleWorkspaceLayoutUndockPanel(client, msg.(*protocol.WorkspaceLayoutUndockPanelMessage))
+	case protocol.CmdWorkspaceLayoutMoveLeaf:
+		d.handleWorkspaceLayoutMoveLeaf(client, msg.(*protocol.WorkspaceLayoutMoveLeafMessage))
 	case protocol.CmdWorkspacePanelContentGet:
 		d.handleWorkspacePanelContentGet(client, msg.(*protocol.WorkspacePanelContentGetMessage))
 	case protocol.CmdRegisterWorkspace:
@@ -1096,6 +1098,10 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdWorkspaceLayoutUndockPanel:
 		if typed, ok := msg.(*protocol.WorkspaceLayoutUndockPanelMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdWorkspaceLayoutMoveLeaf:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutMoveLeafMessage); ok {
 			return typed.WorkspaceID
 		}
 	case protocol.CmdWorkspacePanelContentGet:
