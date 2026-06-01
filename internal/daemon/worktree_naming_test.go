@@ -216,6 +216,10 @@ func TestDoDeleteWorktree_ForceDeleteCleansUpAfterGitDelete(t *testing.T) {
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
 	d.registerCreatedWorktree(mainDir, worktreePath, "feat/dirty-force")
 	addWorktreeSession(t, d, "session-force", worktreePath, mainDir, "feat/dirty-force")
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: "workspace-session-force", Title: "dirty-force", Directory: worktreePath,
+	})
+	d.associateSessionWithWorkspace("session-force", "workspace-session-force")
 
 	if err := d.doDeleteWorktree(worktreePath, nil, deleteWorktreeOptions{Force: true}); err != nil {
 		t.Fatalf("doDeleteWorktree force failed: %v", err)
@@ -225,6 +229,9 @@ func TestDoDeleteWorktree_ForceDeleteCleansUpAfterGitDelete(t *testing.T) {
 	}
 	if session := d.store.Get("session-force"); session != nil {
 		t.Fatal("session remains after successful force delete")
+	}
+	if workspace := d.store.GetWorkspace("workspace-session-force"); workspace != nil {
+		t.Fatalf("workspace remains after successful force delete: %+v", workspace)
 	}
 	worktrees := d.store.ListWorktreesByRepo(mainDir)
 	for _, wt := range worktrees {

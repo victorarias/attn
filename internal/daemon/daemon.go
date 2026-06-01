@@ -668,7 +668,7 @@ func (d *Daemon) pruneSessionsWithoutPTY() int {
 			recoverable++
 			continue
 		}
-		d.store.Remove(session.ID)
+		d.removeReapedSession(session.ID)
 		removed++
 	}
 	if recoverable > 0 {
@@ -977,7 +977,7 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			report.MarkedRecoverable++
 			report.Changed = true
 		} else {
-			d.store.Remove(session.ID)
+			d.removeReapedSession(session.ID)
 			report.Reaped++
 			report.Changed = true
 		}
@@ -1266,6 +1266,12 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 	d.clearClassifiedTurn(sessionID)
 	d.clearClassifyingTurn(sessionID)
 	return session
+}
+
+func (d *Daemon) removeReapedSession(sessionID string) {
+	d.store.Remove(sessionID)
+	d.dissociateSessionFromWorkspace(sessionID)
+	d.removeWorkspaceLayoutPaneForSession(sessionID)
 }
 
 func (d *Daemon) handlePTYState(sessionID, state string) {

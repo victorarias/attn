@@ -744,6 +744,35 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend(t *testing.T) {
 	}
 }
 
+func TestDaemon_ReconcileSessionsWithWorkerBackend_ReapRemovesEmptyWorkspace(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: "ws-stale", Title: "stale", Directory: "/tmp/stale",
+	})
+	d.store.Add(&protocol.Session{
+		ID: "stale-session", Label: "stale", Agent: protocol.SessionAgentCodex, Directory: "/tmp/stale",
+		State: protocol.SessionStateWorking, StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	})
+	d.associateSessionWithWorkspace("stale-session", "ws-stale")
+	d.ptyBackend = &fakeWorkerReconcileBackend{
+		liveIDs: nil,
+		info:    map[string]ptybackend.SessionInfo{},
+	}
+
+	report := d.reconcileSessionsWithWorkerBackend(context.Background(), true, time.Time{})
+
+	if report.Reaped != 1 {
+		t.Fatalf("reaped = %d, want 1", report.Reaped)
+	}
+	if workspace := d.store.GetWorkspace("ws-stale"); workspace != nil {
+		t.Fatalf("empty workspace still persisted after session reap: %+v", workspace)
+	}
+	if _, ok := d.workspaces.snapshot("ws-stale"); ok {
+		t.Fatal("empty workspace still registered after session reap")
+	}
+}
+
 func TestDaemon_ReconcileSessionsWithWorkerBackend_ClaudeSessionsRecoverable(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	now := string(protocol.TimestampNow())

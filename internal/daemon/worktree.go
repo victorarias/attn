@@ -324,6 +324,8 @@ func (d *Daemon) cleanupDeletedWorktreeSessions(path string) {
 			Event:   protocol.EventSessionUnregistered,
 			Session: d.sessionForBroadcast(session),
 		})
+		d.dissociateSessionFromWorkspace(session.ID)
+		d.removeWorkspaceLayoutPaneForSession(session.ID)
 	}
 }
 
