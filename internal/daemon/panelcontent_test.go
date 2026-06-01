@@ -152,6 +152,38 @@ func TestWorkspacePanelContentGetRejectsUnsupportedPanelKind(t *testing.T) {
 	expectCommandError(t, client, protocol.CmdWorkspacePanelContentGet, "unsupported panel kind")
 }
 
+func TestWorkspacePanelContentReloadOnlyReachesSubscribedClients(t *testing.T) {
+	d, subscribed, workspaceID := setupMarkdownWorkspace(t)
+	unrelated := newWorkspaceProtocolTestClient()
+	file := filepath.Join(t.TempDir(), "private.md")
+	if err := os.WriteFile(file, []byte("# Private"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.dockPanel(workspaceID, "pane-1", markdownPanelID, string(workspacelayout.PanelKindMarkdown), file, protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+		t.Fatalf("dockPanel: %v", err)
+	}
+
+	d.wsHub.clients[subscribed] = true
+	d.wsHub.clients[unrelated] = true
+	d.handleWorkspacePanelContentGet(subscribed, &protocol.WorkspacePanelContentGetMessage{
+		Cmd:         protocol.CmdWorkspacePanelContentGet,
+		WorkspaceID: workspaceID,
+		PanelID:     markdownPanelID,
+	})
+	_ = expectPanelContent(t, subscribed, markdownPanelID)
+
+	d.broadcastPanelContentNow(workspaceID, markdownPanelID)
+	got := expectPanelContent(t, subscribed, markdownPanelID)
+	if got.Content != "# Private" {
+		t.Fatalf("content = %q, want the file body", got.Content)
+	}
+	select {
+	case outbound := <-unrelated.send:
+		t.Fatalf("unrelated client received private panel content: %s", string(outbound.payload))
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
 func TestCollectChangedMarkdownPanelsDetectsEdits(t *testing.T) {
 	d, _, workspaceID := setupMarkdownWorkspace(t)
 	file := filepath.Join(t.TempDir(), "live.md")
@@ -170,8 +202,16 @@ func TestCollectChangedMarkdownPanelsDetectsEdits(t *testing.T) {
 	if changed := d.collectChangedMarkdownPanels(); len(changed) != 0 {
 		t.Fatalf("second pass = %+v, want no changes", changed)
 	}
-	// Edit the file (different length guarantees a different fingerprint): change detected.
-	if err := os.WriteFile(file, []byte("v2-longer"), 0o644); err != nil {
+	// Same-size edit with the previous timestamp restored: the content hash must
+	// still detect the change.
+	info, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("v2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(file, info.ModTime(), info.ModTime()); err != nil {
 		t.Fatal(err)
 	}
 	if changed := d.collectChangedMarkdownPanels(); len(changed) != 1 {

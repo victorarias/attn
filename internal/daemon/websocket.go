@@ -37,6 +37,10 @@ type wsClient struct {
 	pendingRemote   map[string]struct{}          // remote runtime IDs awaiting attach_result
 	attachMu        sync.Mutex
 
+	// Docked panel content subscriptions keyed by workspace + panel ID.
+	panelContentSubscriptions map[string]struct{}
+	panelContentMu            sync.RWMutex
+
 	// Identity + capabilities declared via client_hello.
 	clientKind    string
 	clientVersion string
@@ -387,6 +391,15 @@ func (h *wsHub) BroadcastValue(message interface{}) {
 
 func (h *wsHub) BroadcastRawText(payload []byte) {
 	h.SendRawTextToMatchingClients(payload, nil)
+}
+
+func (h *wsHub) SendValueToMatchingClients(message interface{}, match func(*wsClient) bool) {
+	data, err := json.Marshal(message)
+	if err != nil {
+		h.logf("WebSocket targeted send marshal error: %v", err)
+		return
+	}
+	h.SendRawTextToMatchingClients(data, match)
 }
 
 func (h *wsHub) SendRawTextToMatchingClients(payload []byte, match func(*wsClient) bool) {

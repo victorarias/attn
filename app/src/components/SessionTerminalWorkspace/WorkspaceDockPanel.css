@@ -133,6 +133,26 @@
   text-decoration: underline;
 }
 
+.workspace-dock-panel-local-image {
+  display: inline-flex;
+  padding: 3px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg-button);
+  color: #60a5fa;
+  font: inherit;
+  cursor: pointer;
+}
+
+.workspace-dock-panel-local-image:hover {
+  border-color: var(--color-border-focus);
+}
+
+.workspace-dock-panel-blocked-image {
+  color: var(--color-text-tertiary);
+  font-style: italic;
+}
+
 .workspace-dock-panel-body blockquote {
   border-left: 3px solid var(--color-border-focus);
   margin: 10px 0;

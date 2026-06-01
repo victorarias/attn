@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net"
@@ -29,11 +30,14 @@ const markdownPollInterval = 750 * time.Millisecond
 // at 1 MiB leaves room beneath the remote relay's 8 MiB message limit.
 const maxMarkdownBytes = 1 << 20
 
-// panelContentSig is a cheap fingerprint of a file used to detect changes
-// between polls without re-reading the contents every tick.
+// panelContentSig fingerprints a file between polls. The content hash catches
+// same-size rewrites even when an editor restores the previous modification
+// time or the filesystem timestamp granularity is coarse.
 type panelContentSig struct {
 	mod     int64
 	size    int64
+	hash    [sha256.Size]byte
+	hasHash bool
 	missing bool
 }
 
@@ -119,11 +123,45 @@ func statSig(path string) panelContentSig {
 	if err != nil {
 		return panelContentSig{missing: true}
 	}
-	return panelContentSig{mod: info.ModTime().UnixNano(), size: info.Size()}
+	sig := panelContentSig{mod: info.ModTime().UnixNano(), size: info.Size()}
+	content, err := readMarkdownFile(path)
+	if err == nil {
+		sig.hash = sha256.Sum256([]byte(content))
+		sig.hasHash = true
+	}
+	return sig
 }
 
-// broadcastPanelContent pushes a panel's current rendered content to all
-// clients (live reload). Clients that don't have the panel ignore it.
+func panelContentSubscriptionKey(workspaceID, panelID string) string {
+	return workspaceID + "\x00" + panelID
+}
+
+func (c *wsClient) subscribePanelContent(workspaceID, panelID string) {
+	if c == nil {
+		return
+	}
+	key := panelContentSubscriptionKey(workspaceID, panelID)
+	c.panelContentMu.Lock()
+	defer c.panelContentMu.Unlock()
+	if c.panelContentSubscriptions == nil {
+		c.panelContentSubscriptions = make(map[string]struct{})
+	}
+	c.panelContentSubscriptions[key] = struct{}{}
+}
+
+func (c *wsClient) wantsPanelContent(workspaceID, panelID string) bool {
+	if c == nil {
+		return false
+	}
+	key := panelContentSubscriptionKey(workspaceID, panelID)
+	c.panelContentMu.RLock()
+	defer c.panelContentMu.RUnlock()
+	_, ok := c.panelContentSubscriptions[key]
+	return ok
+}
+
+// broadcastPanelContent pushes live reloads only to clients that requested this
+// panel. File bodies must not fan out to unrelated web or relay clients.
 func (d *Daemon) broadcastPanelContent(workspaceID, panelID, kind, path, content string, readErr error) {
 	msg := protocol.WorkspacePanelContentMessage{
 		Event:       protocol.EventWorkspacePanelContent,
@@ -136,7 +174,9 @@ func (d *Daemon) broadcastPanelContent(workspaceID, panelID, kind, path, content
 	if readErr != nil {
 		msg.Error = protocol.Ptr(readErr.Error())
 	}
-	d.wsHub.BroadcastValue(msg)
+	d.wsHub.SendValueToMatchingClients(msg, func(client *wsClient) bool {
+		return client.wantsPanelContent(workspaceID, panelID)
+	})
 }
 
 // broadcastPanelContentNow reads and broadcasts a single panel's content
@@ -163,6 +203,7 @@ func (d *Daemon) handleWorkspacePanelContentGet(client *wsClient, msg *protocol.
 		d.sendCommandError(client, protocol.CmdWorkspacePanelContentGet, fmt.Sprintf("unsupported panel kind: %s", kind))
 		return
 	}
+	client.subscribePanelContent(msg.WorkspaceID, msg.PanelID)
 	content, readErr := readMarkdownFile(path)
 	reply := protocol.WorkspacePanelContentMessage{
 		Event:       protocol.EventWorkspacePanelContent,
