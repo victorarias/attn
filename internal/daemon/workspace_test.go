@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
 func TestRollupWorkspaceStatus_PriorityOrdering(t *testing.T) {
@@ -567,6 +568,9 @@ func TestLoadWorkspacesFromStore_RemovesPersistedOrphans(t *testing.T) {
 	now := string(protocol.TimestampNow())
 
 	d.store.AddWorkspace(&protocol.Workspace{ID: "ws-orphan", Title: "orphan", Directory: "/repo/orphan"})
+	if err := d.store.SaveWorkspaceLayout(workspacelayout.DefaultWorkspaceLayout("ws-orphan", "pane-orphan", "s-orphan")); err != nil {
+		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
+	}
 	d.store.AddWorkspace(&protocol.Workspace{ID: "ws-live", Title: "live", Directory: "/repo/live"})
 	d.store.Add(&protocol.Session{
 		ID: "s-live", Label: "live", Agent: protocol.SessionAgentCodex, Directory: "/repo/live",
@@ -584,24 +588,44 @@ func TestLoadWorkspacesFromStore_RemovesPersistedOrphans(t *testing.T) {
 	if _, ok := d.workspaces.snapshot("ws-orphan"); ok {
 		t.Fatal("orphan workspace registered during load")
 	}
+	if layout := d.store.GetWorkspaceLayout("ws-orphan"); layout != nil {
+		t.Fatalf("orphan workspace layout still persisted after load: %+v", layout)
+	}
 	if workspace := d.store.GetWorkspace("ws-live"); workspace == nil {
 		t.Fatal("live workspace was removed during load")
 	}
 }
 
-func TestLoadWorkspacesFromStore_PreservesRegisteredEmptyWorkspace(t *testing.T) {
+func TestLoadWorkspacesFromStore_PreservesPendingSpawnAcrossRestart(t *testing.T) {
 	d := newDaemonForTest(t)
-	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
-		Cmd: protocol.CmdRegisterWorkspace, ID: "ws-pending", Title: "pending", Directory: "/repo/pending",
-	})
+	d.store.AddWorkspace(&protocol.Workspace{ID: "ws-pending", Title: "pending", Directory: "/repo/pending"})
+	if err := d.store.SaveWorkspaceLayout(workspacelayout.WorkspaceLayout{
+		WorkspaceID:  "ws-pending",
+		ActivePaneID: "pane-pending",
+		Layout:       workspacelayout.DefaultLayout("pane-pending"),
+		Panes: []workspacelayout.Pane{{
+			PaneID:    "pane-pending",
+			RuntimeID: "s-pending",
+			SessionID: "s-pending",
+			Kind:      workspacelayout.PaneKindAgent,
+			Title:     workspacelayout.DefaultPaneTitle,
+			Status:    workspacelayout.PaneStatusSpawning,
+		}},
+	}); err != nil {
+		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
+	}
 
+	d.workspaces = newWorkspaceRegistry()
 	d.loadWorkspacesFromStore()
 
 	if workspace := d.store.GetWorkspace("ws-pending"); workspace == nil {
-		t.Fatal("registered empty workspace was removed during load")
+		t.Fatal("pending empty workspace was removed during restart load")
 	}
 	if _, ok := d.workspaces.snapshot("ws-pending"); !ok {
-		t.Fatal("registered empty workspace missing after load")
+		t.Fatal("pending empty workspace missing after restart load")
+	}
+	if layout := d.store.GetWorkspaceLayout("ws-pending"); layout == nil {
+		t.Fatal("pending workspace layout was removed during restart load")
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"syscall"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
 // The in-memory registry is the runtime cache; the SQLite store is the source
@@ -395,9 +396,11 @@ func (d *Daemon) loadWorkspacesFromStore() {
 		}
 		if len(d.store.SessionsInWorkspace(ws.ID)) == 0 {
 			// Older startup reconciliation paths could reap a session without
-			// removing its workspace. Preserve workspaces already registered
-			// in memory because they may be waiting for their first spawn.
-			if _, ok := d.workspaces.snapshot(ws.ID); !ok {
+			// removing its workspace. Preserve workspaces waiting for their
+			// first spawn: the layout pane is persisted before spawn_session
+			// creates the session row, and load can run after a daemon restart
+			// in that gap.
+			if _, ok := d.workspaces.snapshot(ws.ID); !ok && !d.workspaceHasPendingSpawn(ws.ID) {
 				d.store.RemoveWorkspace(ws.ID)
 				continue
 			}
@@ -417,6 +420,19 @@ func (d *Daemon) loadWorkspacesFromStore() {
 	for _, ws := range d.workspaces.list() {
 		d.recomputeWorkspaceStatus(ws.ID)
 	}
+}
+
+func (d *Daemon) workspaceHasPendingSpawn(workspaceID string) bool {
+	layout := d.store.GetWorkspaceLayout(workspaceID)
+	if layout == nil {
+		return false
+	}
+	for _, pane := range layout.Panes {
+		if pane.Status == workspacelayout.PaneStatusSpawning {
+			return true
+		}
+	}
+	return false
 }
 
 // listWorkspaces returns a snapshot of the current workspaces for InitialState.
