@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -289,6 +291,40 @@ func TestIsBuildInfoJSONCommand(t *testing.T) {
 				t.Fatalf("isBuildInfoJSONCommand(%v) = %v, want %v", tt.args, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDetectPresence(t *testing.T) {
+	t.Run("outside attn", func(t *testing.T) {
+		t.Setenv("ATTN_INSIDE_APP", "")
+		t.Setenv("ATTN_SESSION_ID", "stale-session")
+
+		sessionID, present := detectPresence()
+		if present || sessionID != "" {
+			t.Fatalf("detectPresence() = (%q, %v), want empty session and false", sessionID, present)
+		}
+	})
+
+	t.Run("inside attn", func(t *testing.T) {
+		t.Setenv("ATTN_INSIDE_APP", "1")
+		t.Setenv("ATTN_SESSION_ID", " session-1 ")
+
+		sessionID, present := detectPresence()
+		if !present || sessionID != "session-1" {
+			t.Fatalf("detectPresence() = (%q, %v), want session-1 and true", sessionID, present)
+		}
+	})
+}
+
+func TestWriteHelpMentionsPresenceAndOpen(t *testing.T) {
+	var output bytes.Buffer
+	writeHelp(&output)
+
+	text := output.String()
+	for _, expected := range []string{"presence", "open <file.md> [--session <id>]", "review-loop <command>"} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("help output missing %q: %q", expected, text)
+		}
 	}
 }
 

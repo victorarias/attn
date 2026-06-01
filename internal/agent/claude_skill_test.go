@@ -27,6 +27,12 @@ func TestEnsureAttnClaudeSkillInstalled(t *testing.T) {
 	if !strings.Contains(text, "attn review-loop start --prompt") {
 		t.Fatalf("skill content missing review loop start command: %q", text)
 	}
+	if !strings.Contains(text, "attn presence") {
+		t.Fatalf("skill content missing presence check: %q", text)
+	}
+	if !strings.Contains(text, "attn help") {
+		t.Fatalf("skill content missing help command: %q", text)
+	}
 	if !strings.Contains(text, "attn review-loop answer --loop <loop-id> --interaction <interaction-id> --answer") {
 		t.Fatalf("skill content missing review loop answer command: %q", text)
 	}
@@ -56,5 +62,8 @@ func TestEnsureAttnClaudeSkillInstalled(t *testing.T) {
 	}
 	if !strings.Contains(text, "open a markdown file") {
 		t.Fatalf("skill description should mention opening markdown: %q", text)
+	}
+	if strings.Contains(text, "Do not open files speculatively") {
+		t.Fatalf("skill content should not include speculative-opening guidance: %q", text)
 	}
 }

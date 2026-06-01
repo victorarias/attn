@@ -134,9 +134,13 @@ func main() {
 	case "list":
 		maybePrintProfileBanner()
 		runList()
+	case "presence":
+		runPresence()
 	case "open":
 		maybePrintProfileBanner()
 		runOpen()
+	case "help":
+		runHelp()
 	case "_hook-stop":
 		runHookStop()
 	case "_hook-session-start":
@@ -343,6 +347,44 @@ func runList() {
 		fmt.Fprintf(os.Stderr, "error encoding sessions: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func detectPresence() (sessionID string, present bool) {
+	if os.Getenv("ATTN_INSIDE_APP") != "1" {
+		return "", false
+	}
+	return strings.TrimSpace(os.Getenv("ATTN_SESSION_ID")), true
+}
+
+func runPresence() {
+	sessionID, present := detectPresence()
+	if !present {
+		fmt.Println("not running inside attn")
+		os.Exit(1)
+	}
+	if sessionID == "" {
+		fmt.Println("running inside attn")
+		return
+	}
+	fmt.Printf("running inside attn (session %s)\n", sessionID)
+}
+
+func runHelp() {
+	writeHelp(os.Stdout)
+}
+
+func writeHelp(w io.Writer) {
+	fmt.Fprint(w, `usage: attn <command>
+
+commands:
+  presence                          check whether the current shell runs inside attn
+  open <file.md> [--session <id>]   show a markdown file in attn
+  review-loop <command>             manage an autonomous review loop
+  list                              list sessions
+  daemon <command>                  manage the daemon
+  profile-env <profile|--unset>     print shell commands for selecting a profile
+  version                           print version information
+`)
 }
 
 // parseOpenArgs parses the args for `attn open <file.md> [--session <id>]`.

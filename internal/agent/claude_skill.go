@@ -8,10 +8,16 @@ import (
 
 const attnClaudeSkillContent = `---
 name: attn
-description: Drive attn from Claude Code. Use to start or resume attn review loops, answer a review-loop question, or open a markdown file (plan, notes, report, summary) in a live panel next to the user's terminal so they can read it as rendered markdown.
+description: Drive attn from Claude Code. Use to start or resume attn review loops, answer a review-loop question, or open a markdown file in a UX friendly way.
 ---
 
 # attn Review Loop
+
+Start by checking if the user is running inside attn:
+
+    attn presence
+
+You can get help via ` + "`attn help`" + `.
 
 Use this skill when a prompt tells you to:
 
@@ -144,7 +150,7 @@ If the user also wants you to monitor it, you may poll with ` + "`attn review-lo
 
 ## Opening A Markdown File
 
-When you have written or found a markdown document the user should read, you can show it to them as rendered markdown in a panel docked next to their terminal:
+When you have written or found a markdown document the user should read, you can show it to the user:
 
     attn open <path/to/file.md>
 
@@ -152,10 +158,7 @@ Notes:
 
 1. The path may be relative to your current directory or absolute; attn resolves it.
 2. By default the panel opens next to the current attn session (your own), so you usually do not pass ` + "`--session`" + `. To target a specific session, add ` + "`--session <session-id>`" + `.
-3. The panel live-reloads: if you edit the file afterward, the user's view updates automatically. Prefer writing the document once and then opening it, but later edits are fine.
-4. Good uses: a plan you just wrote, a summary or report, design notes, a checklist. It renders standard markdown (headings, lists, tables, code blocks).
-
-Open a file only when the user asks to see a document, or when showing a rendered document is clearly the most helpful way to deliver what they asked for. Do not open files speculatively.
+3. The panel live-reloads if you edit the file afterward.
 
 ## Important Rules
 
