@@ -21,6 +21,10 @@ make test-all
 go test ./internal/store -run TestList
 ```
 
+## Supported Platform
+
+- attn supports macOS only. Do not add Windows or Linux compatibility code unless explicitly requested.
+
 Use `make install` as the default source/dev install path; it rebuilds and installs the app bundle and ensures the bundled daemon is running. Use `make install-daemon` when only daemon/runtime code changed and you want the faster sidecar-only loop.
 
 ### Iterating On Attn Itself (Attn-On-Attn Testing)

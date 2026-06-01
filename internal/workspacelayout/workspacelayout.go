@@ -506,6 +506,29 @@ func PanelParamsByID(node Node, panelID string) (string, bool) {
 	return "", false
 }
 
+// PanelFractionByID returns the share of its immediate split occupied by a
+// panel. Docking uses this when moving an existing panel so a user resize
+// survives re-docking.
+func PanelFractionByID(node Node, panelID string) (float64, bool) {
+	if node.Type != "split" {
+		return 0, false
+	}
+	if len(node.Children) == 2 {
+		if node.Children[0].Type == "panel" && node.Children[0].PanelID == panelID {
+			return node.Ratio, true
+		}
+		if node.Children[1].Type == "panel" && node.Children[1].PanelID == panelID {
+			return 1 - node.Ratio, true
+		}
+	}
+	for _, child := range node.Children {
+		if fraction, ok := PanelFractionByID(child, panelID); ok {
+			return fraction, true
+		}
+	}
+	return 0, false
+}
+
 // PanelLeaf is a flattened view of a docked panel for consumers that need to
 // act on panels (e.g. the markdown content service) without walking the tree.
 type PanelLeaf struct {

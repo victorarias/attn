@@ -2634,6 +2634,74 @@ func TestDaemon_BroadcastRawWSMessage_RoutesPendingRemotePTYOutputBeforeAttachRe
 	}
 }
 
+func TestDaemon_BroadcastRawWSMessage_RoutesRemotePanelContentToSubscribedClients(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	clientSubscribed := &wsClient{
+		send:            make(chan outboundMessage, 8),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+	clientOther := &wsClient{
+		send:            make(chan outboundMessage, 8),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+	d.wsHub.clients[clientSubscribed] = true
+	d.wsHub.clients[clientOther] = true
+	clientSubscribed.notePendingPanelContent("remote-workspace", "panel-markdown")
+
+	payload, err := json.Marshal(protocol.WorkspacePanelContentMessage{
+		Event:       protocol.EventWorkspacePanelContent,
+		WorkspaceID: "remote-workspace",
+		PanelID:     "panel-markdown",
+		PanelKind:   string(workspacelayout.PanelKindMarkdown),
+		Path:        "/srv/repo/README.md",
+		Content:     "# Private",
+	})
+	if err != nil {
+		t.Fatalf("marshal workspace_panel_content: %v", err)
+	}
+	d.broadcastRawWSMessage(payload)
+
+	event := readOutboundEvent(t, clientSubscribed)
+	if asString(event["event"]) != protocol.EventWorkspacePanelContent || asString(event["content"]) != "# Private" {
+		t.Fatalf("unexpected panel content event: %+v", event)
+	}
+	assertNoOutboundEvent(t, clientOther)
+	if !clientSubscribed.wantsPanelContent("remote-workspace", "panel-markdown") {
+		t.Fatal("successful relayed panel response should promote the pending request to a subscription")
+	}
+}
+
+func TestDaemon_BroadcastRawWSMessage_PrunesRemotePanelSubscriptionsAfterLayoutUpdate(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	client := &wsClient{
+		send:            make(chan outboundMessage, 8),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+	d.wsHub.clients[client] = true
+	client.subscribePanelContent("remote-workspace", "panel-markdown")
+
+	layoutJSON, err := workspacelayout.EncodeLayout(workspacelayout.DefaultLayout("pane-1"))
+	if err != nil {
+		t.Fatalf("encode layout: %v", err)
+	}
+	payload, err := json.Marshal(protocol.WorkspaceLayoutUpdatedMessage{
+		Event: protocol.EventWorkspaceLayoutUpdated,
+		WorkspaceLayout: protocol.WorkspaceLayout{
+			WorkspaceID:  "remote-workspace",
+			ActivePaneID: "pane-1",
+			LayoutJson:   layoutJSON,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal workspace_layout_updated: %v", err)
+	}
+	d.broadcastRawWSMessage(payload)
+
+	if client.wantsPanelContent("remote-workspace", "panel-markdown") {
+		t.Fatal("removed remote panel subscription survived layout update")
+	}
+}
+
 func TestDaemon_BroadcastRawWSMessage_RemoteSessionExitedClearsRemoteAttachState(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	client := &wsClient{

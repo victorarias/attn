@@ -2678,6 +2678,7 @@ sendFetchPRDetails,
                       void sendWorkspaceUndockPanel(workspace.id, panelId).catch(() => {});
                     }}
                     panelContents={panelContents}
+                    allowLocalPanelTargets={!workspace.endpointId}
                     onRequestPanelContent={requestPanelContent}
                   />
                 </div>

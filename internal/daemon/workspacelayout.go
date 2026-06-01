@@ -182,6 +182,7 @@ func (d *Daemon) broadcastWorkspaceLayoutUpdated(workspaceID string) {
 		d.logf("workspace layout update failed for workspace %s: %v", workspaceID, err)
 		return
 	}
+	d.prunePanelContentSubscriptionsForWorkspace(workspaceID)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:           protocol.EventWorkspaceLayoutUpdated,
 		WorkspaceLayout: snapshot,
@@ -194,6 +195,7 @@ func (d *Daemon) broadcastWorkspaceLayout(workspaceID string) {
 		d.logf("workspace layout snapshot failed for workspace %s: %v", workspaceID, err)
 		return
 	}
+	d.prunePanelContentSubscriptionsForWorkspace(workspaceID)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:           protocol.EventWorkspaceLayout,
 		WorkspaceLayout: snapshot,
@@ -409,6 +411,9 @@ func (d *Daemon) dockPanel(workspaceID, anchorPaneID, panelID, panelKind, panelP
 
 	direction, before := dockEdgeToSplit(edge)
 	panelFraction := defaultPanelFraction
+	if existingFraction, ok := workspacelayout.PanelFractionByID(snapshot.Layout, panelID); ok && existingFraction > 0 && existingFraction < 1 {
+		panelFraction = existingFraction
+	}
 	if ratio != nil && *ratio > 0 && *ratio < 1 {
 		panelFraction = *ratio
 	}

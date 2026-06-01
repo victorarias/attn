@@ -25,6 +25,10 @@ const markdownPanelID = "panel-markdown"
 // routinely break).
 const markdownPollInterval = 750 * time.Millisecond
 
+// markdownHashPollInterval catches same-size rewrites whose modification time
+// is preserved without continuously rereading unchanged files.
+const markdownHashPollInterval = 5 * time.Second
+
 // maxMarkdownBytes caps how large a markdown file the daemon will read into a
 // panel. encoding/json can expand a byte to six bytes; keeping the raw preview
 // at 1 MiB leaves room beneath the remote relay's 8 MiB message limit.
@@ -34,11 +38,12 @@ const maxMarkdownBytes = 1 << 20
 // same-size rewrites even when an editor restores the previous modification
 // time or the filesystem timestamp granularity is coarse.
 type panelContentSig struct {
-	mod     int64
-	size    int64
-	hash    [sha256.Size]byte
-	hasHash bool
-	missing bool
+	mod           int64
+	size          int64
+	hash          [sha256.Size]byte
+	hasHash       bool
+	missing       bool
+	hashCheckedAt time.Time
 }
 
 type markdownPanelRef struct {
@@ -82,6 +87,11 @@ func (d *Daemon) panelFilePath(workspaceID, panelID string) (kind, path string, 
 	return "", "", false
 }
 
+func (d *Daemon) panelStillPointsTo(workspaceID, panelID, kind, path string) bool {
+	currentKind, currentPath, found := d.panelFilePath(workspaceID, panelID)
+	return found && currentKind == kind && currentPath == path
+}
+
 // readMarkdownFile reads a markdown file for a panel, returning a friendly error
 // (rather than failing) when the file is missing, a directory, or oversized so
 // the panel can render a clear state instead of going blank.
@@ -123,12 +133,16 @@ func statSig(path string) panelContentSig {
 	if err != nil {
 		return panelContentSig{missing: true}
 	}
-	sig := panelContentSig{mod: info.ModTime().UnixNano(), size: info.Size()}
+	return panelContentSig{mod: info.ModTime().UnixNano(), size: info.Size()}
+}
+
+func refreshPanelContentHash(path string, sig panelContentSig, now time.Time) panelContentSig {
 	content, err := readMarkdownFile(path)
 	if err == nil {
 		sig.hash = sha256.Sum256([]byte(content))
 		sig.hasHash = true
 	}
+	sig.hashCheckedAt = now
 	return sig
 }
 
@@ -136,9 +150,22 @@ func panelContentSubscriptionKey(workspaceID, panelID string) string {
 	return workspaceID + "\x00" + panelID
 }
 
-func (c *wsClient) subscribePanelContent(workspaceID, panelID string) {
+const (
+	maxPanelContentSubscriptions = 128
+	panelContentPendingTTL       = 30 * time.Second
+)
+
+func (c *wsClient) prunePendingPanelContentLocked(now time.Time) {
+	for key, createdAt := range c.panelContentPending {
+		if now.Sub(createdAt) >= panelContentPendingTTL {
+			delete(c.panelContentPending, key)
+		}
+	}
+}
+
+func (c *wsClient) subscribePanelContent(workspaceID, panelID string) bool {
 	if c == nil {
-		return
+		return false
 	}
 	key := panelContentSubscriptionKey(workspaceID, panelID)
 	c.panelContentMu.Lock()
@@ -146,7 +173,74 @@ func (c *wsClient) subscribePanelContent(workspaceID, panelID string) {
 	if c.panelContentSubscriptions == nil {
 		c.panelContentSubscriptions = make(map[string]struct{})
 	}
+	if _, ok := c.panelContentSubscriptions[key]; ok {
+		return true
+	}
+	if len(c.panelContentSubscriptions) >= maxPanelContentSubscriptions {
+		return false
+	}
 	c.panelContentSubscriptions[key] = struct{}{}
+	return true
+}
+
+func (c *wsClient) notePendingPanelContent(workspaceID, panelID string) bool {
+	if c == nil {
+		return false
+	}
+	key := panelContentSubscriptionKey(workspaceID, panelID)
+	c.panelContentMu.Lock()
+	defer c.panelContentMu.Unlock()
+	now := time.Now()
+	c.prunePendingPanelContentLocked(now)
+	if _, ok := c.panelContentSubscriptions[key]; ok {
+		return true
+	}
+	if c.panelContentPending == nil {
+		c.panelContentPending = make(map[string]time.Time)
+	}
+	if _, ok := c.panelContentPending[key]; ok {
+		return true
+	}
+	if len(c.panelContentSubscriptions)+len(c.panelContentPending) >= maxPanelContentSubscriptions {
+		return false
+	}
+	c.panelContentPending[key] = now
+	return true
+}
+
+func (c *wsClient) cancelPendingPanelContent(workspaceID, panelID string) {
+	if c == nil {
+		return
+	}
+	key := panelContentSubscriptionKey(workspaceID, panelID)
+	c.panelContentMu.Lock()
+	defer c.panelContentMu.Unlock()
+	delete(c.panelContentPending, key)
+}
+
+func (c *wsClient) resolvePendingPanelContent(workspaceID, panelID string) bool {
+	if c == nil {
+		return false
+	}
+	key := panelContentSubscriptionKey(workspaceID, panelID)
+	c.panelContentMu.Lock()
+	defer c.panelContentMu.Unlock()
+	c.prunePendingPanelContentLocked(time.Now())
+	if _, ok := c.panelContentSubscriptions[key]; ok {
+		return true
+	}
+	if _, ok := c.panelContentPending[key]; !ok {
+		return false
+	}
+	delete(c.panelContentPending, key)
+	if len(c.panelContentSubscriptions) >= maxPanelContentSubscriptions {
+		return false
+	}
+	if c.panelContentSubscriptions == nil {
+		c.panelContentSubscriptions = make(map[string]struct{})
+	}
+	c.panelContentSubscriptions[key] = struct{}{}
+	return true
 }
 
 func (c *wsClient) wantsPanelContent(workspaceID, panelID string) bool {
@@ -160,9 +254,68 @@ func (c *wsClient) wantsPanelContent(workspaceID, panelID string) bool {
 	return ok
 }
 
+func (c *wsClient) prunePanelContentSubscriptions(workspaceID string, activePanelIDs map[string]struct{}) {
+	if c == nil {
+		return
+	}
+	prefix := strings.TrimSpace(workspaceID) + "\x00"
+	c.panelContentMu.Lock()
+	defer c.panelContentMu.Unlock()
+	for key := range c.panelContentSubscriptions {
+		if strings.HasPrefix(key, prefix) {
+			if _, ok := activePanelIDs[key]; !ok {
+				delete(c.panelContentSubscriptions, key)
+			}
+		}
+	}
+	for key := range c.panelContentPending {
+		if strings.HasPrefix(key, prefix) {
+			if _, ok := activePanelIDs[key]; !ok {
+				delete(c.panelContentPending, key)
+			}
+		}
+	}
+}
+
+func (d *Daemon) hasPanelContentSubscribers(workspaceID, panelID string) bool {
+	return d.wsHub != nil && d.wsHub.AnyClientMatches(func(client *wsClient) bool {
+		return client.wantsPanelContent(workspaceID, panelID)
+	})
+}
+
+func (d *Daemon) prunePanelContentSubscriptionsForLayout(workspaceID string, layout *workspacelayout.Node) {
+	if d.wsHub == nil {
+		return
+	}
+	activePanelIDs := make(map[string]struct{})
+	if layout != nil {
+		for _, leaf := range workspacelayout.PanelLeaves(*layout) {
+			activePanelIDs[panelContentSubscriptionKey(workspaceID, leaf.PanelID)] = struct{}{}
+		}
+	}
+	d.wsHub.ForEachClient(func(client *wsClient) {
+		client.prunePanelContentSubscriptions(workspaceID, activePanelIDs)
+	})
+}
+
+func (d *Daemon) prunePanelContentSubscriptionsForWorkspace(workspaceID string) {
+	if d.store == nil {
+		return
+	}
+	snapshot := d.store.GetWorkspaceLayout(workspaceID)
+	if snapshot == nil {
+		d.prunePanelContentSubscriptionsForLayout(workspaceID, nil)
+		return
+	}
+	d.prunePanelContentSubscriptionsForLayout(workspaceID, &snapshot.Layout)
+}
+
 // broadcastPanelContent pushes live reloads only to clients that requested this
 // panel. File bodies must not fan out to unrelated web or relay clients.
 func (d *Daemon) broadcastPanelContent(workspaceID, panelID, kind, path, content string, readErr error) {
+	if !d.panelStillPointsTo(workspaceID, panelID, kind, path) {
+		return
+	}
 	msg := protocol.WorkspacePanelContentMessage{
 		Event:       protocol.EventWorkspacePanelContent,
 		WorkspaceID: workspaceID,
@@ -194,7 +347,7 @@ func (d *Daemon) broadcastPanelContentNow(workspaceID, panelID string) {
 // handleWorkspacePanelContentGet replies to a client's pull request for a
 // panel's current content (used on first render).
 func (d *Daemon) handleWorkspacePanelContentGet(client *wsClient, msg *protocol.WorkspacePanelContentGetMessage) {
-	kind, path, found := d.panelFilePath(msg.WorkspaceID, msg.PanelID)
+	kind, _, found := d.panelFilePath(msg.WorkspaceID, msg.PanelID)
 	if !found {
 		d.sendCommandError(client, protocol.CmdWorkspacePanelContentGet, fmt.Sprintf("panel not found: %s", msg.PanelID))
 		return
@@ -203,20 +356,39 @@ func (d *Daemon) handleWorkspacePanelContentGet(client *wsClient, msg *protocol.
 		d.sendCommandError(client, protocol.CmdWorkspacePanelContentGet, fmt.Sprintf("unsupported panel kind: %s", kind))
 		return
 	}
-	client.subscribePanelContent(msg.WorkspaceID, msg.PanelID)
-	content, readErr := readMarkdownFile(path)
-	reply := protocol.WorkspacePanelContentMessage{
-		Event:       protocol.EventWorkspacePanelContent,
-		WorkspaceID: msg.WorkspaceID,
-		PanelID:     msg.PanelID,
-		PanelKind:   kind,
-		Path:        path,
-		Content:     content,
+	if !client.subscribePanelContent(msg.WorkspaceID, msg.PanelID) {
+		d.sendCommandError(client, protocol.CmdWorkspacePanelContentGet, "too many panel content subscriptions")
+		return
 	}
-	if readErr != nil {
-		reply.Error = protocol.Ptr(readErr.Error())
+	for attempt := 0; attempt < 2; attempt++ {
+		kind, path, found := d.panelFilePath(msg.WorkspaceID, msg.PanelID)
+		if !found {
+			d.sendCommandError(client, protocol.CmdWorkspacePanelContentGet, fmt.Sprintf("panel not found: %s", msg.PanelID))
+			return
+		}
+		if kind != string(workspacelayout.PanelKindMarkdown) {
+			d.sendCommandError(client, protocol.CmdWorkspacePanelContentGet, fmt.Sprintf("unsupported panel kind: %s", kind))
+			return
+		}
+		content, readErr := readMarkdownFile(path)
+		if !d.panelStillPointsTo(msg.WorkspaceID, msg.PanelID, kind, path) {
+			continue
+		}
+		reply := protocol.WorkspacePanelContentMessage{
+			Event:       protocol.EventWorkspacePanelContent,
+			WorkspaceID: msg.WorkspaceID,
+			PanelID:     msg.PanelID,
+			PanelKind:   kind,
+			Path:        path,
+			Content:     content,
+		}
+		if readErr != nil {
+			reply.Error = protocol.Ptr(readErr.Error())
+		}
+		d.sendToClient(client, reply)
+		return
 	}
-	d.sendToClient(client, reply)
+	d.sendCommandError(client, protocol.CmdWorkspacePanelContentGet, "panel changed while content was loading; retry")
 }
 
 // handleOpenMarkdown docks (or retargets) the markdown panel for a file. Sent by
@@ -299,6 +471,9 @@ func (d *Daemon) collectChangedMarkdownPanels() []markdownPanelRef {
 			if leaf.PanelKind != string(workspacelayout.PanelKindMarkdown) {
 				continue
 			}
+			if !d.hasPanelContentSubscribers(workspaceID, leaf.PanelID) {
+				continue
+			}
 			path := strings.TrimSpace(leaf.PanelParams)
 			if path == "" {
 				continue
@@ -319,13 +494,23 @@ func (d *Daemon) collectChangedMarkdownPanels() []markdownPanelRef {
 		}
 	}
 	var changed []markdownPanelRef
+	now := time.Now()
 	for key, ref := range desired {
 		sig := statSig(ref.path)
-		if prev, had := d.markdownSeen[key]; had && prev == sig {
+		prev, had := d.markdownSeen[key]
+		if !had || prev.mod != sig.mod || prev.size != sig.size || prev.missing != sig.missing {
+			d.markdownSeen[key] = refreshPanelContentHash(ref.path, sig, now)
+			changed = append(changed, ref)
 			continue
 		}
-		d.markdownSeen[key] = sig
-		changed = append(changed, ref)
+		if now.Sub(prev.hashCheckedAt) < markdownHashPollInterval {
+			continue
+		}
+		next := refreshPanelContentHash(ref.path, sig, now)
+		d.markdownSeen[key] = next
+		if prev.hasHash != next.hasHash || prev.hash != next.hash {
+			changed = append(changed, ref)
+		}
 	}
 	return changed
 }

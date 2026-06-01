@@ -46,6 +46,24 @@ func TestDockPanelBeforePaneLandsOnLeft(t *testing.T) {
 	}
 }
 
+func TestPanelFractionByIDReturnsPanelShare(t *testing.T) {
+	right, ok := DockPanel(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-right", "panel-right", "markdown", "", 0.68)
+	if !ok {
+		t.Fatal("right dock failed")
+	}
+	if fraction, ok := PanelFractionByID(right, "panel-right"); !ok || math.Abs(fraction-0.32) > 1e-9 {
+		t.Fatalf("right panel fraction = (%v, %v), want (0.32, true)", fraction, ok)
+	}
+
+	left, ok := DockPanel(DefaultLayout("pane-root"), "pane-root", DirectionVertical, true, "split-left", "panel-left", "markdown", "", 0.32)
+	if !ok {
+		t.Fatal("left dock failed")
+	}
+	if fraction, ok := PanelFractionByID(left, "panel-left"); !ok || math.Abs(fraction-0.32) > 1e-9 {
+		t.Fatalf("left panel fraction = (%v, %v), want (0.32, true)", fraction, ok)
+	}
+}
+
 func TestDockPanelBetweenPanes(t *testing.T) {
 	// panel1 | panel2 → docking to the right of panel1 yields panel1 | md | panel2.
 	tree := Node{

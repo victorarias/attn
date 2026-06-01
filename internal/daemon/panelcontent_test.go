@@ -2,13 +2,17 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/hub"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
@@ -184,8 +188,113 @@ func TestWorkspacePanelContentReloadOnlyReachesSubscribedClients(t *testing.T) {
 	}
 }
 
-func TestCollectChangedMarkdownPanelsDetectsEdits(t *testing.T) {
+func TestBroadcastPanelContentDropsStaleRetargetedRead(t *testing.T) {
+	d, client, workspaceID := setupMarkdownWorkspace(t)
+	oldFile := filepath.Join(t.TempDir(), "old.md")
+	newFile := filepath.Join(t.TempDir(), "new.md")
+	if err := d.dockPanel(workspaceID, "pane-1", markdownPanelID, string(workspacelayout.PanelKindMarkdown), oldFile, protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+		t.Fatalf("dock old panel: %v", err)
+	}
+	d.wsHub.clients[client] = true
+	client.subscribePanelContent(workspaceID, markdownPanelID)
+	if err := d.dockPanel(workspaceID, "pane-1", markdownPanelID, string(workspacelayout.PanelKindMarkdown), newFile, protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+		t.Fatalf("retarget panel: %v", err)
+	}
+
+	d.broadcastPanelContent(workspaceID, markdownPanelID, string(workspacelayout.PanelKindMarkdown), oldFile, "# Old", nil)
+	select {
+	case outbound := <-client.send:
+		t.Fatalf("client received stale panel content: %s", string(outbound.payload))
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	d.broadcastPanelContent(workspaceID, markdownPanelID, string(workspacelayout.PanelKindMarkdown), newFile, "# New", nil)
+	if got := expectPanelContent(t, client, markdownPanelID); got.Content != "# New" || got.Path != newFile {
+		t.Fatalf("panel content = %+v, want current retargeted file", got)
+	}
+}
+
+func TestDockPanelMovePreservesExistingFraction(t *testing.T) {
 	d, _, workspaceID := setupMarkdownWorkspace(t)
+	fraction := 0.41
+	if err := d.dockPanel(workspaceID, "pane-1", markdownPanelID, string(workspacelayout.PanelKindMarkdown), "/tmp/README.md", protocol.WorkspaceLayoutDockEdgeRight, &fraction); err != nil {
+		t.Fatalf("dockPanel: %v", err)
+	}
+	if err := d.dockPanel(workspaceID, "pane-1", markdownPanelID, string(workspacelayout.PanelKindMarkdown), "/tmp/README.md", protocol.WorkspaceLayoutDockEdgeBottom, nil); err != nil {
+		t.Fatalf("re-dock panel: %v", err)
+	}
+
+	snapshot := d.store.GetWorkspaceLayout(workspaceID)
+	if snapshot == nil {
+		t.Fatal("workspace layout missing after panel move")
+	}
+	got, ok := workspacelayout.PanelFractionByID(snapshot.Layout, markdownPanelID)
+	if !ok || math.Abs(got-fraction) > 1e-9 {
+		t.Fatalf("panel fraction after move = (%v, %v), want (%v, true)", got, ok, fraction)
+	}
+}
+
+func TestCollectChangedMarkdownPanelsSkipsUnsubscribedPanels(t *testing.T) {
+	d, _, workspaceID := setupMarkdownWorkspace(t)
+	file := filepath.Join(t.TempDir(), "idle.md")
+	if err := os.WriteFile(file, []byte("# Idle"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.dockPanel(workspaceID, "pane-1", markdownPanelID, string(workspacelayout.PanelKindMarkdown), file, protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+		t.Fatalf("dockPanel: %v", err)
+	}
+
+	if changed := d.collectChangedMarkdownPanels(); len(changed) != 0 {
+		t.Fatalf("unsubscribed panels reported as changed: %+v", changed)
+	}
+}
+
+func TestPendingPanelContentSubscriptionsAreBoundedAndExpire(t *testing.T) {
+	client := newWorkspaceProtocolTestClient()
+	for i := 0; i < maxPanelContentSubscriptions; i++ {
+		if !client.notePendingPanelContent("workspace-md", fmt.Sprintf("panel-%d", i)) {
+			t.Fatalf("pending subscription %d unexpectedly rejected", i)
+		}
+	}
+	if client.notePendingPanelContent("workspace-md", "panel-overflow") {
+		t.Fatal("pending subscription limit was not enforced")
+	}
+
+	client.panelContentMu.Lock()
+	for key := range client.panelContentPending {
+		client.panelContentPending[key] = time.Now().Add(-panelContentPendingTTL)
+	}
+	client.panelContentMu.Unlock()
+	if !client.notePendingPanelContent("workspace-md", "panel-after-expiry") {
+		t.Fatal("expired pending subscriptions were not pruned")
+	}
+}
+
+func TestUndockingPanelPrunesContentSubscription(t *testing.T) {
+	d, client, workspaceID := setupMarkdownWorkspace(t)
+	file := filepath.Join(t.TempDir(), "close.md")
+	if err := os.WriteFile(file, []byte("# Close"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.dockPanel(workspaceID, "pane-1", markdownPanelID, string(workspacelayout.PanelKindMarkdown), file, protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+		t.Fatalf("dockPanel: %v", err)
+	}
+	d.wsHub.clients[client] = true
+	client.subscribePanelContent(workspaceID, markdownPanelID)
+
+	d.handleWorkspaceLayoutUndockPanel(client, &protocol.WorkspaceLayoutUndockPanelMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutUndockPanel,
+		WorkspaceID: workspaceID,
+		PanelID:     markdownPanelID,
+	})
+	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutUndockPanel, workspaceID, "", "", markdownPanelID, true)
+	if client.wantsPanelContent(workspaceID, markdownPanelID) {
+		t.Fatal("panel subscription survived undock")
+	}
+}
+
+func TestCollectChangedMarkdownPanelsDetectsEdits(t *testing.T) {
+	d, client, workspaceID := setupMarkdownWorkspace(t)
 	file := filepath.Join(t.TempDir(), "live.md")
 	if err := os.WriteFile(file, []byte("v1"), 0o644); err != nil {
 		t.Fatal(err)
@@ -193,6 +302,8 @@ func TestCollectChangedMarkdownPanelsDetectsEdits(t *testing.T) {
 	if err := d.dockPanel(workspaceID, "pane-1", markdownPanelID, string(workspacelayout.PanelKindMarkdown), file, protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
 		t.Fatalf("dockPanel: %v", err)
 	}
+	d.wsHub.clients[client] = true
+	client.subscribePanelContent(workspaceID, markdownPanelID)
 
 	// First pass: the freshly opened panel is reported as changed.
 	if changed := d.collectChangedMarkdownPanels(); len(changed) != 1 || changed[0].path != file {
@@ -214,6 +325,11 @@ func TestCollectChangedMarkdownPanelsDetectsEdits(t *testing.T) {
 	if err := os.Chtimes(file, info.ModTime(), info.ModTime()); err != nil {
 		t.Fatal(err)
 	}
+	d.markdownSeenMu.Lock()
+	sig := d.markdownSeen[panelContentSubscriptionKey(workspaceID, markdownPanelID)]
+	sig.hashCheckedAt = time.Now().Add(-markdownHashPollInterval)
+	d.markdownSeen[panelContentSubscriptionKey(workspaceID, markdownPanelID)] = sig
+	d.markdownSeenMu.Unlock()
 	if changed := d.collectChangedMarkdownPanels(); len(changed) != 1 {
 		t.Fatalf("after edit = %+v, want the panel reported changed", changed)
 	}
@@ -261,6 +377,50 @@ func TestOpenMarkdownTargetsSelectedSession(t *testing.T) {
 	params, ok := workspacelayout.PanelParamsByID(snapshot.Layout, markdownPanelID)
 	if !ok || params != file {
 		t.Fatalf("docked panel params = (%q, %v), want %q", params, ok, file)
+	}
+}
+
+func TestOpenMarkdownRejectsBareOpenAfterRemoteSessionSelection(t *testing.T) {
+	d, client, workspaceID := setupMarkdownWorkspace(t)
+	d.setSelectedSession("session-1")
+	d.hubManager = hub.NewManager(d.store, nil, nil, nil, nil)
+	endpoint, err := d.hubManager.AddEndpoint("remote", "remote.example.test", "")
+	if err != nil {
+		t.Fatalf("add endpoint: %v", err)
+	}
+	d.hubManager.ReservePendingSessionRoute(endpoint.ID, "session-remote")
+	client.setIdentity("daemon-test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
+
+	d.handleClientMessage(client, []byte(`{"cmd":"session_selected","id":"session-remote"}`))
+	if got := d.currentlySelectedSession(); got != "session-remote" {
+		t.Fatalf("selected session = %q, want remote session", got)
+	}
+
+	file := filepath.Join(t.TempDir(), "remote.md")
+	if err := os.WriteFile(file, []byte("# Remote"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	go d.handleOpenMarkdown(serverConn, &protocol.OpenMarkdownMessage{
+		Cmd:  protocol.CmdOpenMarkdown,
+		Path: file,
+	})
+
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var resp protocol.Response
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Ok || !strings.Contains(protocol.Deref(resp.Error), "no workspace found for session session-remote") {
+		t.Fatalf("response = %+v, want explicit remote-selection error", resp)
+	}
+	snapshot := d.store.GetWorkspaceLayout(workspaceID)
+	if snapshot == nil {
+		t.Fatal("local workspace layout missing")
+	}
+	if leaves := workspacelayout.PanelLeaves(snapshot.Layout); len(leaves) != 0 {
+		t.Fatalf("local workspace panels = %+v, want no stale local dock", leaves)
 	}
 }
 

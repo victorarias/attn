@@ -172,6 +172,7 @@ interface SessionTerminalWorkspaceProps {
   onDockPanel?: (panelId: string, panelKind: string, anchorPaneId: string, edge: TerminalDockEdge) => void;
   onUndockPanel?: (panelId: string) => void;
   panelContents?: Record<string, PanelContentState>;
+  allowLocalPanelTargets?: boolean;
   onRequestPanelContent?: (workspaceId: string, panelId: string) => void;
 }
 
@@ -197,6 +198,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onDockPanel,
     onUndockPanel,
     panelContents,
+    allowLocalPanelTargets = true,
     onRequestPanelContent,
   }, ref) {
     const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null);
@@ -694,6 +696,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
               panel={panelLeaf}
               workspaceId={workspaceId}
               content={panelContents?.[panelContentKey(workspaceId, panelLeaf.panelId)]}
+              allowLocalTargets={allowLocalPanelTargets}
               dragging={draggingPanelId === panelLeaf.panelId}
               onClose={() => onUndockPanel?.(panelLeaf.panelId)}
               onHeaderPointerDown={(event) => beginPanelDrag(panelLeaf.panelId, event)}
@@ -711,6 +714,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       onUndockPanel,
       panelLeafById,
       panelContents,
+      allowLocalPanelTargets,
       onRequestPanelContent,
       workspaceId,
       fontSize,

@@ -18,6 +18,7 @@ import (
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
 // wsClient represents a connected WebSocket client
@@ -39,6 +40,7 @@ type wsClient struct {
 
 	// Docked panel content subscriptions keyed by workspace + panel ID.
 	panelContentSubscriptions map[string]struct{}
+	panelContentPending       map[string]time.Time
 	panelContentMu            sync.RWMutex
 
 	// Identity + capabilities declared via client_hello.
@@ -445,6 +447,20 @@ func (h *wsHub) ForEachClient(fn func(*wsClient)) {
 	}
 }
 
+func (h *wsHub) AnyClientMatches(match func(*wsClient) bool) bool {
+	if match == nil {
+		return false
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for client := range h.clients {
+		if match(client) {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *wsHub) broadcastValue(message interface{}) {
 	data, err := json.Marshal(message)
 	if err != nil {
@@ -748,6 +764,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.sendCommandError(client, cmd, "daemon_recovering")
 		return
 	}
+	// Record the UI selection before remote routing. A host-side `attn open`
+	// without --session must fail against the selected remote id rather than
+	// silently reusing a stale local selection.
+	if cmd == protocol.CmdSessionSelected {
+		d.setSelectedSession(msg.(*protocol.SessionSelectedMessage).ID)
+	}
 	if d.tryHandleRemoteWSCommand(client, cmd, msg, data) {
 		return
 	}
@@ -778,7 +800,6 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdSessionVisualized:
 		d.handleSessionVisualizedWS(msg.(*protocol.SessionVisualizedMessage))
 	case protocol.CmdSessionSelected:
-		d.setSelectedSession(msg.(*protocol.SessionSelectedMessage).ID)
 	case protocol.CmdPRVisited:
 		d.handlePRVisitedWS(msg.(*protocol.PRVisitedMessage))
 	case protocol.CmdListWorktrees:
@@ -955,7 +976,20 @@ func (d *Daemon) tryHandleRemoteWSCommand(client *wsClient, cmd string, msg inte
 		if !ok {
 			return false
 		}
+		if cmd == protocol.CmdWorkspacePanelContentGet {
+			if typed, ok := msg.(*protocol.WorkspacePanelContentGetMessage); ok {
+				if !client.notePendingPanelContent(typed.WorkspaceID, typed.PanelID) {
+					d.sendCommandError(client, cmd, "too many pending panel content requests")
+					return true
+				}
+			}
+		}
 		if err := d.hubManager.ForwardEndpointCommand(context.Background(), endpointID, raw); err != nil {
+			if cmd == protocol.CmdWorkspacePanelContentGet {
+				if typed, ok := msg.(*protocol.WorkspacePanelContentGetMessage); ok {
+					client.cancelPendingPanelContent(typed.WorkspaceID, typed.PanelID)
+				}
+			}
 			d.sendCommandError(client, cmd, err.Error())
 			return true
 		}
@@ -1274,9 +1308,11 @@ func (d *Daemon) broadcastRawWSMessage(payload []byte) {
 		return
 	}
 	var envelope struct {
-		Event   string `json:"event"`
-		ID      string `json:"id"`
-		Success bool   `json:"success"`
+		Event       string `json:"event"`
+		ID          string `json:"id"`
+		Success     bool   `json:"success"`
+		WorkspaceID string `json:"workspace_id"`
+		PanelID     string `json:"panel_id"`
 	}
 	if err := json.Unmarshal(payload, &envelope); err != nil {
 		d.wsHub.BroadcastRawText(payload)
@@ -1302,6 +1338,31 @@ func (d *Daemon) broadcastRawWSMessage(payload []byte) {
 			return client.wantsRemoteAttachTraffic(envelope.ID)
 		})
 		return
+	case protocol.EventWorkspacePanelContent:
+		if strings.TrimSpace(envelope.WorkspaceID) == "" || strings.TrimSpace(envelope.PanelID) == "" {
+			d.logf("dropping malformed relayed panel content event")
+			return
+		}
+		d.wsHub.SendRawTextToMatchingClients(payload, func(client *wsClient) bool {
+			return client.resolvePendingPanelContent(envelope.WorkspaceID, envelope.PanelID)
+		})
+		return
+	case protocol.EventWorkspaceLayout, protocol.EventWorkspaceLayoutUpdated:
+		var msg struct {
+			WorkspaceLayout *protocol.WorkspaceLayout `json:"workspace_layout"`
+		}
+		if err := json.Unmarshal(payload, &msg); err == nil && msg.WorkspaceLayout != nil {
+			if layout, err := workspacelayout.DecodeLayout(msg.WorkspaceLayout.LayoutJson); err == nil {
+				d.prunePanelContentSubscriptionsForLayout(msg.WorkspaceLayout.WorkspaceID, &layout)
+			}
+		}
+	case protocol.EventWorkspaceUnregistered:
+		var msg struct {
+			Workspace *protocol.Workspace `json:"workspace"`
+		}
+		if err := json.Unmarshal(payload, &msg); err == nil && msg.Workspace != nil {
+			d.prunePanelContentSubscriptionsForLayout(msg.Workspace.ID, nil)
+		}
 	case protocol.EventSessionExited:
 		if strings.TrimSpace(envelope.ID) != "" {
 			d.wsHub.ForEachClient(func(client *wsClient) {

@@ -375,6 +375,7 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 		return
 	}
 	d.store.RemoveWorkspace(id)
+	d.prunePanelContentSubscriptionsForLayout(id, nil)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:     protocol.EventWorkspaceUnregistered,
 		Workspace: &snapshot,
@@ -495,6 +496,7 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 			return
 		}
 		d.store.RemoveWorkspace(workspaceID)
+		d.prunePanelContentSubscriptionsForLayout(workspaceID, nil)
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:     protocol.EventWorkspaceUnregistered,
 			Workspace: &snapshot,

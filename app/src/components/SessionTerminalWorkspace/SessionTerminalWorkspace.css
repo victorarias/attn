@@ -100,6 +100,10 @@
   opacity: 1;
 }
 
+.workspace-pane.workspace-pane--panel {
+  opacity: 1;
+}
+
 .session-terminal-panes > .workspace-pane {
   position: absolute;
   box-sizing: border-box;
