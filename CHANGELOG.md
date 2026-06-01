@@ -35,6 +35,7 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 ### Fixed
 - **Workspace Sessions**: Creating a worktree from the `⌘N` new-session picker now adds the session to the current workspace instead of creating a separate workspace.
 - **Worktree Cleanup**: Provider-managed worktrees with local changes now offer force delete after the normal delete attempt is rejected.
+- **Daemon Logging**: `daemon.log` now automatically keeps a bounded recent tail so long-running installs do not accumulate an unbounded log file.
 
 ---
 
