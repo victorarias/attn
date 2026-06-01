@@ -562,6 +562,49 @@ func TestLoadWorkspacesFromStore_RebuildsRegistryAndReassociates(t *testing.T) {
 	}
 }
 
+func TestLoadWorkspacesFromStore_RemovesPersistedOrphans(t *testing.T) {
+	d := newDaemonForTest(t)
+	now := string(protocol.TimestampNow())
+
+	d.store.AddWorkspace(&protocol.Workspace{ID: "ws-orphan", Title: "orphan", Directory: "/repo/orphan"})
+	d.store.AddWorkspace(&protocol.Workspace{ID: "ws-live", Title: "live", Directory: "/repo/live"})
+	d.store.Add(&protocol.Session{
+		ID: "s-live", Label: "live", Agent: protocol.SessionAgentCodex, Directory: "/repo/live",
+		WorkspaceID: "ws-live",
+		State:       protocol.SessionStateWorking,
+		StateSince:  now, StateUpdatedAt: now, LastSeen: now,
+	})
+
+	d.workspaces = newWorkspaceRegistry()
+	d.loadWorkspacesFromStore()
+
+	if workspace := d.store.GetWorkspace("ws-orphan"); workspace != nil {
+		t.Fatalf("orphan workspace still persisted after load: %+v", workspace)
+	}
+	if _, ok := d.workspaces.snapshot("ws-orphan"); ok {
+		t.Fatal("orphan workspace registered during load")
+	}
+	if workspace := d.store.GetWorkspace("ws-live"); workspace == nil {
+		t.Fatal("live workspace was removed during load")
+	}
+}
+
+func TestLoadWorkspacesFromStore_PreservesRegisteredEmptyWorkspace(t *testing.T) {
+	d := newDaemonForTest(t)
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: "ws-pending", Title: "pending", Directory: "/repo/pending",
+	})
+
+	d.loadWorkspacesFromStore()
+
+	if workspace := d.store.GetWorkspace("ws-pending"); workspace == nil {
+		t.Fatal("registered empty workspace was removed during load")
+	}
+	if _, ok := d.workspaces.snapshot("ws-pending"); !ok {
+		t.Fatal("registered empty workspace missing after load")
+	}
+}
+
 func TestAssociateSessionWithWorkspace_PersistsToStore(t *testing.T) {
 	d := newDaemonForTest(t)
 	now := string(protocol.TimestampNow())

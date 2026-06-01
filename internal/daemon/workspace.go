@@ -393,6 +393,15 @@ func (d *Daemon) loadWorkspacesFromStore() {
 		if ws == nil {
 			continue
 		}
+		if len(d.store.SessionsInWorkspace(ws.ID)) == 0 {
+			// Older startup reconciliation paths could reap a session without
+			// removing its workspace. Preserve workspaces already registered
+			// in memory because they may be waiting for their first spawn.
+			if _, ok := d.workspaces.snapshot(ws.ID); !ok {
+				d.store.RemoveWorkspace(ws.ID)
+				continue
+			}
+		}
 		d.workspaces.register(ws.ID, ws.Title, ws.Directory, ws.Muted)
 	}
 	for _, session := range d.store.List("") {

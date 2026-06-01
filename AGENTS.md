@@ -25,14 +25,14 @@ Use `make install` as the default source/dev install path; it rebuilds and insta
 
 ### Iterating On Attn Itself (Attn-On-Attn Testing)
 
-When changing attn code while the user has a live attn install running, **never** run `make install` or `make install-daemon` — they overwrite the live `attn.app` / restart its daemon mid-session. Use the dev sibling install instead:
+While iterating on attn code, prefer the dev sibling install so rebuilds do not repeatedly interrupt the live production app:
 
 ```bash
 make dev              # builds + installs ~/Applications/attn-dev.app, starts dev daemon on port 29849
 make install-daemon-dev  # faster: only rebuild the Go sidecar inside attn-dev.app
 ```
 
-The dev install is fully isolated: its own bundle identifier (`com.attn.manager.dev`), its own data dir (`~/.attn-dev/`), its own socket, its own port. Prod is never touched. `make install` and `make install-daemon` refuse at parse time if `ATTN_PROFILE` is set in the environment — if you hit that error, you meant `make dev`.
+The dev install is fully isolated: its own bundle identifier (`com.attn.manager.dev`), its own data dir (`~/.attn-dev/`), its own socket, its own port. Once a fix is verified, run `make` to install the production app so the user receives the fix immediately. The production install closes and reopens the app and restarts its daemon; attn is designed to recover persisted session state gracefully. `make install` and `make install-daemon` refuse at parse time if `ATTN_PROFILE` is set in the environment — if you hit that error during iteration, you meant `make dev`.
 
 To make CLI commands (`attn`, `attn list`, etc.) target the dev daemon in your shell, run `eval "$(./attn profile-env dev)"` (bash/zsh) or `./attn profile-env --fish dev | source` (fish). Any `attn` subcommand then prints a one-line `[attn profile=dev ...]` banner so you can always see which daemon you're talking to. Unset with `eval "$(attn profile-env --unset)"`.
 
