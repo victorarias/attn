@@ -452,6 +452,7 @@ describe('worktree cleanup prompt', () => {
 
   it('keeps Cmd+N worktree-backed sessions in the current workspace', async () => {
     const createSession = vi.fn(async (_label: string, _cwd: string, id: string) => id);
+    (mockSessionStoreReturn.sessions as Array<{ endpointId?: string }>)[0].endpointId = 'ep-remote';
     mockSessionStoreReturn.createSession = createSession;
     mockSessionStoreReturn.takeSessionSpawnArgs = vi.fn((id: string) => ({
       id,

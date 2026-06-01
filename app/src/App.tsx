@@ -70,7 +70,7 @@ type LocationPickerPurpose = 'workspace' | 'session';
 interface SplitSessionOptions {
   baseSessionId?: string;
   cwd?: string;
-  endpointId?: string;
+  endpointId?: string | null;
   label?: string;
   yoloMode?: boolean;
 }
@@ -1414,6 +1414,9 @@ sendFetchPRDetails,
     const paneId = targetPaneId || getActivePaneIdForSession(activeSession);
     const newPaneId = paneIdForSession(sessionId);
     const label = options.label || nextSplitSessionLabel(workspaceId, agent);
+    const endpointId = options.endpointId === null
+      ? undefined
+      : options.endpointId ?? activeSession.endpointId;
     let paneAdded = false;
 
     try {
@@ -1422,7 +1425,7 @@ sendFetchPRDetails,
         options.cwd || activeSession.cwd,
         sessionId,
         agent,
-        options.endpointId ?? activeSession.endpointId,
+        endpointId,
         agent === 'shell' ? false : options.yoloMode ?? activeSession.yoloMode,
         workspaceId,
       );
@@ -1503,7 +1506,7 @@ sendFetchPRDetails,
       if (locationPickerPurpose === 'session' && activeLocalSession?.workspaceId) {
         await createSplitSession(selectedAgent, locationPickerSessionDirection, undefined, {
           cwd: path,
-          endpointId,
+          endpointId: endpointId ?? null,
           label: folderName,
           yoloMode,
         });
@@ -1574,7 +1577,7 @@ sendFetchPRDetails,
         if (locationPickerPurpose === 'session' && activeLocalSession?.workspaceId) {
           await createSplitSession(agent, locationPickerSessionDirection, undefined, {
             cwd: worktreePath,
-            endpointId,
+            endpointId: endpointId ?? null,
             label: folderName,
             yoloMode,
           });
