@@ -33,6 +33,12 @@ func TestEnsureAttnClaudeSkillInstalled(t *testing.T) {
 	if !strings.Contains(text, "attn help") {
 		t.Fatalf("skill content missing help command: %q", text)
 	}
+	if !strings.Contains(text, "ATTN_WRAPPER_PATH") {
+		t.Fatalf("skill content missing ATTN_WRAPPER_PATH resolution guidance: %q", text)
+	}
+	if !strings.Contains(text, "which -a attn") {
+		t.Fatalf("skill content missing stale-binary collision note: %q", text)
+	}
 	if !strings.Contains(text, "attn review-loop answer --loop <loop-id> --interaction <interaction-id> --answer") {
 		t.Fatalf("skill content missing review loop answer command: %q", text)
 	}

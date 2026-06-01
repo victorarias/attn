@@ -19,6 +19,21 @@ Start by checking if the user is running inside attn:
 
 You can get help via ` + "`attn help`" + `.
 
+## Which attn binary to run
+
+Inside an attn session the ATTN_WRAPPER_PATH environment variable points at the
+correct attn binary. Prefer it for every command in this skill:
+
+    "$ATTN_WRAPPER_PATH" presence
+
+This skill writes attn for brevity, but run "$ATTN_WRAPPER_PATH" whenever it is
+set, and fall back to attn on PATH only when it is not.
+
+If an attn command fails with "unknown command: ..." or prints Claude Code's
+help instead of attn's, a stale or unrelated attn is probably shadowing the real
+one on PATH. Confirm with "attn --version" and "which -a attn", then prefer
+"$ATTN_WRAPPER_PATH".
+
 Use this skill when a prompt tells you to:
 
 1. use your attn skill to start a review loop
