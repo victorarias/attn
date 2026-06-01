@@ -1571,6 +1571,18 @@ sendFetchPRDetails,
             : current
         ));
         const folderName = worktreePath.split('/').pop() || branchName || 'session';
+        if (locationPickerPurpose === 'session' && activeLocalSession?.workspaceId) {
+          await createSplitSession(agent, locationPickerSessionDirection, undefined, {
+            cwd: worktreePath,
+            endpointId,
+            label: folderName,
+            yoloMode,
+          });
+          setSessionCreationJob((current) => (
+            current?.id === jobId ? null : current
+          ));
+          return;
+        }
         const sessionId = await createWorkspaceSession(folderName, worktreePath, undefined, agent, endpointId, yoloMode);
         setSessionCreationJob((current) => (
           current?.id === jobId
@@ -1587,7 +1599,7 @@ sendFetchPRDetails,
         worktreeSessionCreateEndpointsRef.current.delete(endpointKey);
       }
     })();
-  }, [createWorkspaceSession, sendCreateWorktree, showError]);
+  }, [activeLocalSession?.workspaceId, createSplitSession, createWorkspaceSession, locationPickerPurpose, locationPickerSessionDirection, sendCreateWorktree, showError]);
 
   const closeLocationPicker = useCallback(() => {
     setLocationPickerOpen(false);
