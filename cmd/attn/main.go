@@ -345,18 +345,48 @@ func runList() {
 	}
 }
 
+// parseOpenArgs parses the args for `attn open <file.md> [--session <id>]`.
+// Go's flag parser stops at the first non-flag argument, so a naive Parse would
+// silently ignore `--session` when it trails the path. We parse interspersed
+// flags and positionals so the documented trailing form works exactly like the
+// flag-first form. Returns the raw path and the (untrimmed-of-env) session flag.
+func parseOpenArgs(args []string) (rawPath string, sessionFlag string, err error) {
+	fs := flag.NewFlagSet("open", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID, then the selected session)")
+
+	var positionals []string
+	rest := args
+	for {
+		if perr := fs.Parse(rest); perr != nil {
+			return "", "", perr
+		}
+		rest = fs.Args()
+		if len(rest) == 0 {
+			break
+		}
+		// Consume one positional, then keep parsing flags that follow it.
+		positionals = append(positionals, rest[0])
+		rest = rest[1:]
+	}
+
+	if len(positionals) == 0 {
+		return "", "", fmt.Errorf("missing <file.md> argument")
+	}
+	if len(positionals) > 1 {
+		return "", "", fmt.Errorf("unexpected extra arguments: %v", positionals[1:])
+	}
+	return strings.TrimSpace(positionals[0]), strings.TrimSpace(*sessionID), nil
+}
+
 // runOpen handles `attn open <file.md> [--session <id>]`, docking a
 // live-reloading markdown panel into a workspace. The session defaults to
 // ATTN_SESSION_ID (set inside attn-managed agents), then the daemon's currently
 // selected session.
 func runOpen() {
-	fs := flag.NewFlagSet("open", flag.ExitOnError)
-	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID, then the selected session)")
-	_ = fs.Parse(os.Args[2:])
-
-	rawPath := strings.TrimSpace(fs.Arg(0))
-	if rawPath == "" {
-		fmt.Fprintln(os.Stderr, "usage: attn open <file.md> [--session <id>]")
+	rawPath, sessionFlag, err := parseOpenArgs(os.Args[2:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "attn open: %v\nusage: attn open <file.md> [--session <id>]\n", err)
 		os.Exit(1)
 	}
 	absPath, err := filepath.Abs(rawPath)
@@ -365,7 +395,7 @@ func runOpen() {
 		os.Exit(1)
 	}
 
-	resolvedSession := strings.TrimSpace(*sessionID)
+	resolvedSession := sessionFlag
 	if resolvedSession == "" {
 		resolvedSession = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
 	}

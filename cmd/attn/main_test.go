@@ -381,3 +381,43 @@ func TestApplyLegacyBuildInfoOverrides_PreservesInjectedBuildinfo(t *testing.T) 
 		t.Fatalf("buildinfo.GitCommit = %q, want primary buildinfo injection to win", buildinfo.GitCommit)
 	}
 }
+
+func TestParseOpenArgs(t *testing.T) {
+	cases := []struct {
+		name        string
+		args        []string
+		wantPath    string
+		wantSession string
+		wantErr     bool
+	}{
+		// The documented `attn open <file.md> [--session <id>]` trailing form
+		// must honor --session — this is the regression the reviewers flagged:
+		// Go's flag parser stops at the first positional, so a naive Parse would
+		// silently drop a trailing --session.
+		{name: "session after path", args: []string{"README.md", "--session", "sess-1"}, wantPath: "README.md", wantSession: "sess-1"},
+		{name: "session=after path", args: []string{"README.md", "--session=sess-2"}, wantPath: "README.md", wantSession: "sess-2"},
+		{name: "session before path", args: []string{"--session", "sess-3", "README.md"}, wantPath: "README.md", wantSession: "sess-3"},
+		{name: "path only", args: []string{"README.md"}, wantPath: "README.md", wantSession: ""},
+		{name: "no path", args: []string{"--session", "sess-4"}, wantErr: true},
+		{name: "empty", args: []string{}, wantErr: true},
+		{name: "extra positional", args: []string{"a.md", "b.md"}, wantErr: true},
+		{name: "unknown flag", args: []string{"README.md", "--nope"}, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path, session, err := parseOpenArgs(tc.args)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseOpenArgs(%v) = (%q, %q, nil), want error", tc.args, path, session)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseOpenArgs(%v) error = %v", tc.args, err)
+			}
+			if path != tc.wantPath || session != tc.wantSession {
+				t.Fatalf("parseOpenArgs(%v) = (%q, %q), want (%q, %q)", tc.args, path, session, tc.wantPath, tc.wantSession)
+			}
+		})
+	}
+}
