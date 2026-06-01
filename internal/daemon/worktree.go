@@ -274,10 +274,7 @@ func (d *Daemon) doDeleteWorktree(path string, endpointID *string, opts deleteWo
 
 	handled, err := d.dispatchWorktreeDeleteProvider(mainRepo, path, branch, opts.Force)
 	if err != nil {
-		return &deleteWorktreeError{
-			err:  err,
-			kind: deleteWorktreeFailureProviderError,
-		}
+		return d.classifyDeleteWorktreeProviderError(path, opts.Force, err)
 	}
 	if !handled {
 		if err := git.DeleteWorktree(mainRepo, path, opts.Force); err != nil {
@@ -341,6 +338,26 @@ func (d *Daemon) classifyDeleteWorktreeGitError(path string, force bool, err err
 		kind:      kind,
 		forceable: forceable,
 	}
+}
+
+func (d *Daemon) classifyDeleteWorktreeProviderError(path string, force bool, err error) error {
+	kind := deleteWorktreeFailureProviderError
+	forceable := false
+	if !force && isDirtyWorktreeDeleteError(err) && d.worktreeHasLocalChanges(path) {
+		kind = deleteWorktreeFailureDirtyWorktree
+		forceable = true
+	}
+	return &deleteWorktreeError{
+		err:       err,
+		kind:      kind,
+		forceable: forceable,
+	}
+}
+
+func isDirtyWorktreeDeleteError(err error) bool {
+	message := err.Error()
+	return strings.Contains(message, "contains modified or untracked files") &&
+		strings.Contains(message, "use --force to delete it")
 }
 
 func (d *Daemon) worktreeHasLocalChanges(path string) bool {

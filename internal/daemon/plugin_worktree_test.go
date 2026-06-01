@@ -505,6 +505,56 @@ func TestDoDeleteWorktree_ProviderDeclineFallsBackToBuiltInGit(t *testing.T) {
 	}
 }
 
+func TestDoDeleteWorktree_ProviderDirtyWorktreeErrorIsForceable(t *testing.T) {
+	tmpDir, mainDir := initProviderTestRepo(t)
+	worktreePath := filepath.Join(tmpDir, "provider-dirty-delete")
+	runGitDaemon(t, mainDir, "worktree", "add", "-b", "feat/provider-dirty-delete", worktreePath)
+	if err := os.WriteFile(filepath.Join(worktreePath, "local.txt"), []byte("local change\n"), 0o644); err != nil {
+		t.Fatalf("write dirty file: %v", err)
+	}
+	worktreePath = git.CanonicalizePath(worktreePath)
+
+	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
+	d.registerCreatedWorktree(mainDir, worktreePath, "feat/provider-dirty-delete")
+
+	client, done := startPluginPipe(t, d, "dirty-delete-provider", []string{worktreeDeleteProviderSurface})
+	defer client.Close()
+
+	responseDone := respondToDeleteProviderCall(t, client, func(params worktreeDeleteProviderParams) worktreeDeleteProviderResult {
+		if params.Force {
+			t.Fatal("provider delete force=true, want false")
+		}
+		return worktreeDeleteProviderResult{
+			Status: providerStatusError,
+			Error:  "fatal: worktree contains modified or untracked files, use --force to delete it",
+		}
+	})
+
+	err := d.doDeleteWorktree(worktreePath, nil, deleteWorktreeOptions{})
+	if err == nil {
+		t.Fatal("doDeleteWorktree succeeded on dirty provider-managed worktree")
+	}
+	waitForProviderResponse(t, responseDone)
+
+	var deleteErr *deleteWorktreeError
+	if !errors.As(err, &deleteErr) {
+		t.Fatalf("error type = %T, want *deleteWorktreeError", err)
+	}
+	if deleteErr.kind != deleteWorktreeFailureDirtyWorktree || !deleteErr.forceable {
+		t.Fatalf("delete error kind=%q forceable=%v, want dirty forceable", deleteErr.kind, deleteErr.forceable)
+	}
+	if wt := d.store.GetWorktree(worktreePath); wt == nil {
+		t.Fatal("provider failure removed worktree from store")
+	}
+
+	_ = client.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dirty delete provider connection did not close")
+	}
+}
+
 func TestDoDeleteWorktree_ProviderErrorPreservesDaemonState(t *testing.T) {
 	tmpDir, mainDir := initProviderTestRepo(t)
 	worktreePath := filepath.Join(tmpDir, "provider-error-delete")
