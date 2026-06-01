@@ -450,6 +450,63 @@ describe('worktree cleanup prompt', () => {
     });
   });
 
+  it('keeps Cmd+N worktree-backed sessions in the current workspace', async () => {
+    const createSession = vi.fn(async (_label: string, _cwd: string, id: string) => id);
+    (mockSessionStoreReturn.sessions as Array<{ endpointId?: string }>)[0].endpointId = 'ep-remote';
+    mockSessionStoreReturn.createSession = createSession;
+    mockSessionStoreReturn.takeSessionSpawnArgs = vi.fn((id: string) => ({
+      id,
+      cwd: '/tmp/repo--feat-async',
+      cols: 80,
+      rows: 24,
+      label: 'repo--feat-async',
+      agent: 'codex',
+      workspace_id: 'workspace-s1',
+    }));
+    mockDaemonSocketReturn.sendCreateWorktree = vi.fn(async () => ({
+      success: true,
+      path: '/tmp/repo--feat-async',
+    }));
+
+    render(<App />);
+
+    const keyboardArgs = mockUseKeyboardShortcuts.mock.calls[mockUseKeyboardShortcuts.mock.calls.length - 1]?.[0] as {
+      onNewSession?: () => void;
+    };
+    act(() => {
+      keyboardArgs.onNewSession?.();
+    });
+
+    await userEvent.click(screen.getByTestId('mock-create-worktree-session'));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith(
+        'repo--feat-async',
+        '/tmp/repo--feat-async',
+        expect.any(String),
+        'codex',
+        undefined,
+        false,
+        'workspace-s1',
+      );
+    });
+    const sessionId = createSession.mock.calls[0][2];
+    expect(mockSendRegisterWorkspace).not.toHaveBeenCalled();
+    expect(mockDaemonSocketReturn.sendWorkspaceAddSessionPane).toHaveBeenCalledWith(
+      'workspace-s1',
+      sessionId,
+      'repo--feat-async',
+      {
+        paneId: `pane-${sessionId}`,
+        targetPaneId: 'pane-session',
+        direction: 'vertical',
+      },
+    );
+    await waitFor(() => {
+      expect(screen.queryByText('Starting session')).not.toBeInTheDocument();
+    });
+  });
+
   it('disables app shortcuts while the first-run whats-new modal is open', async () => {
     localStorage.removeItem(WHATS_NEW_STORAGE_KEY);
 

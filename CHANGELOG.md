@@ -26,6 +26,13 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 
 ---
 
+## [2026-06-01]
+
+### Fixed
+- **Workspace Sessions**: Creating a worktree from the `⌘N` new-session picker now adds the session to the current workspace instead of creating a separate workspace.
+
+---
+
 ## [2026-05-31]
 
 ### Added
