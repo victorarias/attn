@@ -80,7 +80,7 @@ func (l *Logger) log(level, msg string) {
 	line := fmt.Sprintf("[%s] %s: %s", timestamp, level, msg)
 	l.logger.Print(line)
 	l.bytesSinceSizeCheck += int64(len(line) + 1)
-	_ = l.maybeTruncateLocked(false)
+	_ = l.maybeTruncateLocked(true)
 }
 
 func (l *Logger) Info(msg string) {
@@ -150,12 +150,14 @@ func (l *Logger) maybeTruncateLocked(force bool) error {
 		}
 	}
 
-	marker := fmt.Sprintf(
-		"[%s] INFO: daemon.log truncated; retained last %d bytes from previous %d-byte log\n",
-		time.Now().Format(truncationMarkerTimeLayout),
-		len(tail),
-		size,
-	)
+	marker := truncationMarker(len(tail), size)
+	if l.maxBytes <= int64(len(marker)) {
+		tail = nil
+		marker = marker[:int(l.maxBytes)]
+	} else if int64(len(marker)+len(tail)) > l.maxBytes {
+		tail = tail[len(tail)-int(l.maxBytes-int64(len(marker))):]
+		marker = truncationMarker(len(tail), size)
+	}
 	if err := l.file.Truncate(0); err != nil {
 		return err
 	}
@@ -179,4 +181,13 @@ func firstNewline(data []byte) int {
 		}
 	}
 	return -1
+}
+
+func truncationMarker(retainedBytes int, previousBytes int64) string {
+	return fmt.Sprintf(
+		"[%s] INFO: daemon.log truncated; retained=%d previous=%d\n",
+		time.Now().Format(truncationMarkerTimeLayout),
+		retainedBytes,
+		previousBytes,
+	)
 }

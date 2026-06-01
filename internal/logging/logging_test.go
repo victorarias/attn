@@ -210,19 +210,19 @@ func TestLogger_TruncatesAfterSingleLargeWrite(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "daemon.log")
 
-	logger, err := newWithLimits(logPath, 220, 40, 20)
+	logger, err := newWithLimits(logPath, 100, 40, 1000)
 	if err != nil {
 		t.Fatalf("newWithLimits() error: %v", err)
 	}
 	defer logger.Close()
 
-	logger.Info("large " + strings.Repeat("x", 300) + " tail")
+	logger.Info("large " + strings.Repeat("x", 500) + " tail")
 
 	info, err := os.Stat(logPath)
 	if err != nil {
 		t.Fatalf("Stat error: %v", err)
 	}
-	if info.Size() > 220 {
+	if info.Size() > 100 {
 		t.Fatalf("expected large write to be truncated immediately, size=%d", info.Size())
 	}
 
