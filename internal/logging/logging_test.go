@@ -144,3 +144,64 @@ func TestLogger_Errorf(t *testing.T) {
 		t.Errorf("log file should contain ERROR level, got: %s", content)
 	}
 }
+
+func TestLogger_TruncatesOversizedLogOnStartup(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "daemon.log")
+	original := strings.Repeat("old line should be removed\n", 20) + "keep line 1\nkeep line 2\n"
+	if err := os.WriteFile(logPath, []byte(original), 0644); err != nil {
+		t.Fatalf("WriteFile error: %v", err)
+	}
+
+	logger, err := newWithLimits(logPath, 120, 40, 16)
+	if err != nil {
+		t.Fatalf("newWithLimits() error: %v", err)
+	}
+	defer logger.Close()
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, "daemon.log truncated") {
+		t.Fatalf("expected truncation marker, got: %s", text)
+	}
+	if !strings.Contains(text, "keep line 1\nkeep line 2\n") {
+		t.Fatalf("expected retained tail, got: %s", text)
+	}
+	if strings.Contains(text, "old line should be removed") {
+		t.Fatalf("expected old prefix to be removed, got: %s", text)
+	}
+}
+
+func TestLogger_TruncatesOversizedLogAfterWrites(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "daemon.log")
+
+	logger, err := newWithLimits(logPath, 180, 80, 1)
+	if err != nil {
+		t.Fatalf("newWithLimits() error: %v", err)
+	}
+	defer logger.Close()
+
+	for i := 0; i < 10; i++ {
+		logger.Infof("line %02d %s", i, strings.Repeat("x", 20))
+	}
+	logger.Info("tail survives")
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, "daemon.log truncated") {
+		t.Fatalf("expected truncation marker, got: %s", text)
+	}
+	if !strings.Contains(text, "tail survives") {
+		t.Fatalf("expected writes after truncation to continue, got: %s", text)
+	}
+	if strings.Contains(text, "line 00") {
+		t.Fatalf("expected earliest log lines to be removed, got: %s", text)
+	}
+}
