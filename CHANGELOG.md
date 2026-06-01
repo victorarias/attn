@@ -28,6 +28,10 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 
 ## [2026-06-01]
 
+### Changed
+- **`attn` is clearer about being its own command.** `attn --help`, unknown commands, and unknown flags now print attn's own usage (with its version) instead of quietly handing them to the coding agent. `attn` understands only `-s`, `--resume`, and `--yolo`; it no longer forwards other flags — or anything after `--` — through to the agent.
+- **Stale-`attn` warning.** When the `attn` on your `PATH` is a different version from the running app, attn prints a one-line warning so you can catch an out-of-date binary shadowing the current one (`which -a attn`).
+
 ### Fixed
 - **Workspace Sessions**: Creating a worktree from the `⌘N` new-session picker now adds the session to the current workspace instead of creating a separate workspace.
 - **Worktree Cleanup**: Provider-managed worktrees with local changes now offer force delete after the normal delete attempt is rejected.

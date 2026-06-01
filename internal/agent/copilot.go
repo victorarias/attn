@@ -53,7 +53,6 @@ func (c *Copilot) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	if opts.YoloMode {
 		args = append(args, "--yolo")
 	}
-	args = append(args, opts.AgentArgs...)
 	return exec.Command(opts.Executable, args...)
 }
 

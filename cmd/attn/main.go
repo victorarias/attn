@@ -139,7 +139,7 @@ func main() {
 	case "open":
 		maybePrintProfileBanner()
 		runOpen()
-	case "help":
+	case "help", "-h", "--help":
 		runHelp()
 	case "_hook-stop":
 		runHookStop()
@@ -155,7 +155,8 @@ func main() {
 			maybePrintProfileBanner()
 			runWrapper()
 		} else {
-			fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
+			fmt.Fprintf(os.Stderr, "attn %s: unknown command %q\n\n", buildinfo.Version, os.Args[1])
+			writeHelp(os.Stderr)
 			os.Exit(1)
 		}
 	}
@@ -335,6 +336,7 @@ func runWSRelay() {
 }
 
 func runList() {
+	warnIfDaemonVersionMismatch()
 	c := client.New("")
 	sessions, err := c.Query("")
 	if err != nil {
@@ -357,6 +359,7 @@ func detectPresence() (sessionID string, present bool) {
 }
 
 func runPresence() {
+	warnIfDaemonVersionMismatch()
 	sessionID, present := detectPresence()
 	if !present {
 		fmt.Println("not running inside attn")
@@ -426,6 +429,7 @@ func parseOpenArgs(args []string) (rawPath string, sessionFlag string, err error
 // ATTN_SESSION_ID (set inside attn-managed agents), then the daemon's currently
 // selected session.
 func runOpen() {
+	warnIfDaemonVersionMismatch()
 	rawPath, sessionFlag, err := parseOpenArgs(os.Args[2:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "attn open: %v\nusage: attn open <file.md> [--session <id>]\n", err)
@@ -455,6 +459,7 @@ func runReviewLoop() {
 		fmt.Fprintln(os.Stderr, "usage: attn review-loop <start|stop|status|show|set-iterations|answer> ...")
 		os.Exit(1)
 	}
+	warnIfDaemonVersionMismatch()
 
 	c := client.New("")
 	switch os.Args[2] {
@@ -618,55 +623,43 @@ type directLaunchArgs struct {
 	resumeID     string
 	resumePicker bool
 	yoloMode     bool
-	agentArgs    []string
 }
 
-func parseDirectLaunchArgs(args []string) directLaunchArgs {
-	fs := flag.NewFlagSet("attn", flag.ContinueOnError)
-	labelFlag := fs.String("s", "", "session label")
-	resumeFlag := fs.String("resume", "", "session ID to resume from")
-	yoloFlag := fs.Bool("yolo", false, "launch agent in yolo mode")
-	resumePicker := false
-
-	var attnArgs []string
-	var agentArgs []string
+// parseDirectLaunchArgs parses the wrapper launch flags. attn understands only
+// -s, --resume, and --yolo; any other argument is an error. We deliberately do
+// not forward unrecognized args to the underlying agent — that implicit
+// passthrough was never used by attn itself and only created confusion (e.g.
+// `attn --help` printing the agent's help instead of attn's).
+func parseDirectLaunchArgs(args []string) (directLaunchArgs, error) {
+	parsed := directLaunchArgs{}
+	label := ""
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
 		case "-s":
-			if i+1 < len(args) {
-				attnArgs = append(attnArgs, arg, args[i+1])
-				i++
+			if i+1 >= len(args) {
+				return directLaunchArgs{}, fmt.Errorf("flag -s needs a value")
 			}
+			label = args[i+1]
+			i++
 		case "--resume":
-			if i+1 < len(args) && args[i+1] != "--" && !strings.HasPrefix(args[i+1], "-") {
-				attnArgs = append(attnArgs, arg, args[i+1])
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				parsed.resumeID = args[i+1]
 				i++
 			} else {
-				resumePicker = true
+				parsed.resumePicker = true
 			}
 		case "--yolo":
-			attnArgs = append(attnArgs, arg)
-		case "--":
-			agentArgs = append(agentArgs, args[i+1:]...)
-			i = len(args)
+			parsed.yoloMode = true
 		default:
-			agentArgs = append(agentArgs, arg)
+			return directLaunchArgs{}, fmt.Errorf("unknown flag %q", arg)
 		}
 	}
-	_ = fs.Parse(attnArgs)
-
-	label := *labelFlag
 	if label == "" {
 		label = wrapper.DefaultLabel()
 	}
-	return directLaunchArgs{
-		label:        label,
-		resumeID:     *resumeFlag,
-		resumePicker: resumePicker,
-		yoloMode:     *yoloFlag,
-		agentArgs:    agentArgs,
-	}
+	parsed.label = label
+	return parsed, nil
 }
 
 func mergeEnv(base []string, extra []string) []string {
@@ -697,6 +690,13 @@ func mergeEnv(base []string, extra []string) []string {
 }
 
 func runAgentDirectly(requestedAgent string) {
+	parsed, err := parseDirectLaunchArgs(os.Args[1:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "attn: %v\n\n", err)
+		writeHelp(os.Stderr)
+		os.Exit(1)
+	}
+
 	pathutil.EnsureGUIPath()
 
 	driver := agentdriver.Get(requestedAgent)
@@ -706,7 +706,6 @@ func runAgentDirectly(requestedAgent string) {
 	}
 	caps := agentdriver.EffectiveCapabilities(driver)
 
-	parsed := parseDirectLaunchArgs(os.Args[1:])
 	if !caps.HasResume && (parsed.resumeID != "" || parsed.resumePicker) {
 		fmt.Fprintf(os.Stderr, "warning: %s resume not supported yet (ignoring --resume)\n", driver.Name())
 		parsed.resumeID = ""
@@ -746,7 +745,6 @@ func runAgentDirectly(requestedAgent string) {
 		Executable:      driver.ResolveExecutable(""),
 		SocketPath:      config.SocketPath(),
 		WrapperPath:     resolveWrapperPath(),
-		AgentArgs:       append([]string(nil), parsed.agentArgs...),
 	}
 
 	if preparer, ok := driver.(agentdriver.LaunchPreparer); ok {

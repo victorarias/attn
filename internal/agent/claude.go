@@ -82,7 +82,6 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 		args = append(args, "--dangerously-skip-permissions")
 	}
 
-	args = append(args, opts.AgentArgs...)
 	return exec.Command(opts.Executable, args...)
 }
 

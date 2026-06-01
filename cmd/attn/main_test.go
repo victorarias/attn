@@ -196,7 +196,10 @@ func TestResolveCopilotTranscript_FallsBackWhenResumePathMissing(t *testing.T) {
 }
 
 func TestParseDirectLaunchArgs_ResumePickerWithFlagAfterResume(t *testing.T) {
-	parsed := parseDirectLaunchArgs([]string{"--resume", "--yolo", "--", "--model", "foo"})
+	parsed, err := parseDirectLaunchArgs([]string{"--resume", "--yolo"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if !parsed.resumePicker {
 		t.Fatalf("expected resume picker to be enabled")
 	}
@@ -206,13 +209,13 @@ func TestParseDirectLaunchArgs_ResumePickerWithFlagAfterResume(t *testing.T) {
 	if !parsed.yoloMode {
 		t.Fatalf("expected yolo flag to be preserved")
 	}
-	if len(parsed.agentArgs) != 2 || parsed.agentArgs[0] != "--model" || parsed.agentArgs[1] != "foo" {
-		t.Fatalf("unexpected agent args: %#v", parsed.agentArgs)
-	}
 }
 
 func TestParseDirectLaunchArgs_ResumeIDStillAccepted(t *testing.T) {
-	parsed := parseDirectLaunchArgs([]string{"--resume", "abc123"})
+	parsed, err := parseDirectLaunchArgs([]string{"--resume", "abc123"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if parsed.resumePicker {
 		t.Fatalf("expected resume picker to be disabled")
 	}
@@ -221,13 +224,32 @@ func TestParseDirectLaunchArgs_ResumeIDStillAccepted(t *testing.T) {
 	}
 }
 
-func TestParseDirectLaunchArgs_YoloFlag(t *testing.T) {
-	parsed := parseDirectLaunchArgs([]string{"--yolo", "--", "--model", "foo"})
+func TestParseDirectLaunchArgs_LabelAndYolo(t *testing.T) {
+	parsed, err := parseDirectLaunchArgs([]string{"-s", "my-label", "--yolo"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.label != "my-label" {
+		t.Fatalf("expected label my-label, got %q", parsed.label)
+	}
 	if !parsed.yoloMode {
 		t.Fatal("expected yolo mode to be enabled")
 	}
-	if len(parsed.agentArgs) != 2 || parsed.agentArgs[0] != "--model" || parsed.agentArgs[1] != "foo" {
-		t.Fatalf("unexpected agent args: %#v", parsed.agentArgs)
+}
+
+// parseDirectLaunchArgs understands only -s/--resume/--yolo. Everything else is
+// rejected rather than silently forwarded to the underlying agent.
+func TestParseDirectLaunchArgs_RejectsUnrecognizedArgs(t *testing.T) {
+	for _, args := range [][]string{
+		{"--model", "foo"}, // arbitrary agent flag
+		{"--"},             // the old passthrough separator
+		{"--help"},         // must not reach the agent
+		{"random"},         // bare positional
+		{"-s"},             // missing label value
+	} {
+		if _, err := parseDirectLaunchArgs(args); err == nil {
+			t.Fatalf("expected error for args %#v, got nil", args)
+		}
 	}
 }
 
