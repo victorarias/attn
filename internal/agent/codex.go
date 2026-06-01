@@ -62,21 +62,11 @@ func (c *Codex) BuildCommand(opts SpawnOpts) *exec.Cmd {
 		args = append(args, "resume")
 	}
 
-	hasCwdFlag := false
-	for i := 0; i < len(opts.AgentArgs); i++ {
-		if opts.AgentArgs[i] == "-C" || opts.AgentArgs[i] == "--cd" {
-			hasCwdFlag = true
-			break
-		}
-	}
-	if !hasCwdFlag {
-		args = append(args, "-C", opts.CWD)
-	}
+	args = append(args, "-C", opts.CWD)
 	if opts.YoloMode {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	}
 
-	args = append(args, opts.AgentArgs...)
 	return exec.Command(opts.Executable, args...)
 }
 

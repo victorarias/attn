@@ -207,9 +207,6 @@ type SpawnOpts struct {
 
 	// ConfigOverrides are agent CLI config overrides generated for this launch.
 	ConfigOverrides []string
-
-	// AgentArgs are passthrough CLI args provided after attn wrapper flags.
-	AgentArgs []string
 }
 
 // --- Optional capability interfaces ---
