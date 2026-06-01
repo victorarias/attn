@@ -205,3 +205,36 @@ func TestLogger_TruncatesOversizedLogAfterWrites(t *testing.T) {
 		t.Fatalf("expected earliest log lines to be removed, got: %s", text)
 	}
 }
+
+func TestLogger_TruncatesAfterSingleLargeWrite(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "daemon.log")
+
+	logger, err := newWithLimits(logPath, 220, 40, 20)
+	if err != nil {
+		t.Fatalf("newWithLimits() error: %v", err)
+	}
+	defer logger.Close()
+
+	logger.Info("large " + strings.Repeat("x", 300) + " tail")
+
+	info, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("Stat error: %v", err)
+	}
+	if info.Size() > 220 {
+		t.Fatalf("expected large write to be truncated immediately, size=%d", info.Size())
+	}
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, "daemon.log truncated") {
+		t.Fatalf("expected truncation marker, got: %s", text)
+	}
+	if !strings.Contains(text, "tail") {
+		t.Fatalf("expected retained tail of large write, got: %s", text)
+	}
+}

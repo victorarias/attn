@@ -80,6 +80,7 @@ func (l *Logger) log(level, msg string) {
 	line := fmt.Sprintf("[%s] %s: %s", timestamp, level, msg)
 	l.logger.Print(line)
 	l.bytesSinceSizeCheck += int64(len(line) + 1)
+	_ = l.maybeTruncateLocked(false)
 }
 
 func (l *Logger) Info(msg string) {
