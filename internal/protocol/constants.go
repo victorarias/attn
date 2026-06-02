@@ -112,10 +112,10 @@ const (
 	CmdWorkspaceLayoutFocusPane      = "workspace_layout_focus_pane"
 	CmdWorkspaceLayoutRenamePane     = "workspace_layout_rename_pane"
 	CmdWorkspaceLayoutSetSplitRatio  = "workspace_layout_set_split_ratio"
-	CmdWorkspaceLayoutDockPanel      = "workspace_layout_dock_panel"
-	CmdWorkspaceLayoutUndockPanel    = "workspace_layout_undock_panel"
+	CmdWorkspaceLayoutDockTile       = "workspace_layout_dock_tile"
+	CmdWorkspaceLayoutUndockTile     = "workspace_layout_undock_tile"
 	CmdWorkspaceLayoutMoveLeaf       = "workspace_layout_move_leaf"
-	CmdWorkspacePanelContentGet      = "workspace_panel_content_get"
+	CmdWorkspaceTileContentGet       = "workspace_tile_content_get"
 	CmdOpenMarkdown                  = "open_markdown"
 	CmdRegisterWorkspace             = "register_workspace"
 	CmdUnregisterWorkspace           = "unregister_workspace"
@@ -184,7 +184,7 @@ const (
 	EventWorkspaceLayout             = "workspace_layout"
 	EventWorkspaceLayoutUpdated      = "workspace_layout_updated"
 	EventWorkspaceLayoutActionResult = "workspace_layout_action_result"
-	EventWorkspacePanelContent       = "workspace_panel_content"
+	EventWorkspaceTileContent        = "workspace_tile_content"
 	EventCommandError                = "command_error"
 )
 
@@ -834,17 +834,17 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdWorkspaceLayoutDockPanel:
-		var msg WorkspaceLayoutDockPanelMessage
+	case CmdWorkspaceLayoutDockTile:
+		var msg WorkspaceLayoutDockTileMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal workspace_layout_dock_panel: %w", err)
+			return "", nil, fmt.Errorf("unmarshal workspace_layout_dock_tile: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdWorkspaceLayoutUndockPanel:
-		var msg WorkspaceLayoutUndockPanelMessage
+	case CmdWorkspaceLayoutUndockTile:
+		var msg WorkspaceLayoutUndockTileMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal workspace_layout_undock_panel: %w", err)
+			return "", nil, fmt.Errorf("unmarshal workspace_layout_undock_tile: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 
@@ -855,10 +855,10 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdWorkspacePanelContentGet:
-		var msg WorkspacePanelContentGetMessage
+	case CmdWorkspaceTileContentGet:
+		var msg WorkspaceTileContentGetMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal workspace_panel_content_get: %w", err)
+			return "", nil, fmt.Errorf("unmarshal workspace_tile_content_get: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

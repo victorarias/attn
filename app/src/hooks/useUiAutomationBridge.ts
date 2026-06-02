@@ -821,7 +821,7 @@ function dragPaneSelection(
 // computeDockTarget → onMoveLeaf path without a physical OS drag.
 function dragLeafHeader(leafId: string, dropFracX: number, dropFracY: number) {
   const leaf = document.querySelector(`[data-pane-id="${leafId}"]`);
-  const header = leaf?.querySelector('.workspace-pane-header, .workspace-dock-panel-header');
+  const header = leaf?.querySelector('.workspace-pane-header, .workspace-dock-tile-header');
   if (!(header instanceof HTMLElement)) {
     throw new Error(`Draggable leaf header not found for ${leafId}`);
   }

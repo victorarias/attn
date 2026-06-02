@@ -29,12 +29,12 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 ## [2026-06-02]
 
 ### Changed
-- **Closing the last terminal no longer throws away a docked panel.** If you leave a markdown panel open and close the workspace's last terminal, the workspace now stays around as a panel-only workspace instead of disappearing with your doc. Panel-only workspaces are hidden from the sidebar by default; turn on "Panel-only workspaces" in the sidebar settings (the gear menu) to see them, where they show a neutral marker instead of a session-state dot.
+- **Closing the last terminal no longer throws away a docked tile.** If you leave a markdown tile open and close the workspace's last terminal, the workspace now stays around as a tile-only workspace instead of disappearing with your doc. Tile-only workspaces are hidden from the sidebar by default; turn on "Tile-only workspaces" in the sidebar settings (the gear menu) to see them, where they show a neutral marker instead of a session-state dot.
 
 ## [2026-06-01]
 
 ### Added
-- **Drag any pane or panel to rearrange a workspace.** Grab a terminal pane's header (or a markdown panel's header) and drop it on another pane's edge to re-dock it — left, right, top, or bottom. How far in you drop sets the new split's size, snapping to a quarter, third, or half; drop into the workspace's outer edge to span the whole side. Dropping a pane on itself does nothing.
+- **Drag any pane or tile to rearrange a workspace.** Grab a terminal pane's header (or a markdown tile's header) and drop it on another pane's edge to re-dock it — left, right, top, or bottom. How far in you drop sets the new split's size, snapping to a quarter, third, or half; drop into the workspace's outer edge to span the whole side. Dropping a pane on itself does nothing.
 
 ### Changed
 - **`attn` is clearer about being its own command.** `attn --help`, unknown commands, and unknown flags now print attn's own usage (with its version) instead of quietly handing them to the coding agent. `attn` understands only `-s`, `--resume`, and `--yolo`; it no longer forwards other flags — or anything after `--` — through to the agent.
@@ -53,8 +53,8 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 - **Keyboard Shortcuts Cheatsheet**: Press `⌘/` to open a searchable overview of every keyboard shortcut, grouped by workspaces, panes, review, and app actions. The list is generated from the app's shortcut definitions, so it always matches the real bindings.
 - **What's New**: After upgrading, attn shows a one-time summary of the workspace model and its key shortcuts, with a link into the full cheatsheet.
 - **Resizable Splits**: Drag the divider between any two workspace panes to resize the split. The size you set is remembered per split and persists across reconnects and restarts (previously panes were always forced to an equal split).
-- **Docked Panels**: Panels can now dock directly into a workspace's layout as a real, resizable pane instead of floating on top. Drag a panel's title bar onto any terminal to re-dock it on that pane's edge — drop it between two terminals and it slots in between them. Panel placement and size are remembered by the daemon, so they survive restarts and follow you to other clients, just like terminal splits. (The slide-in diff, review, and git-status panels are unchanged.)
-- **Open Markdown In A Panel**: Run `attn open <file.md>` to render a markdown file in a docked panel next to your session. The panel live-reloads as the file changes on disk, and like other docked panels its placement is remembered by the daemon across restarts and clients. Agents running in attn can use this too (via the bundled attn skill) to show you a plan, summary, or report as rendered markdown.
+- **Docked Tiles**: Tiles can now dock directly into a workspace's layout as a real, resizable pane instead of floating on top. Drag a tile's title bar onto any terminal to re-dock it on that pane's edge — drop it between two terminals and it slots in between them. Tile placement and size are remembered by the daemon, so they survive restarts and follow you to other clients, just like terminal splits. (The slide-in diff, review, and git-status panels are unchanged.)
+- **Open Markdown In A Tile**: Run `attn open <file.md>` to render a markdown file in a docked tile next to your session. The tile live-reloads as the file changes on disk, and like other docked tiles its placement is remembered by the daemon across restarts and clients. Agents running in attn can use this too (via the bundled attn skill) to show you a plan, summary, or report as rendered markdown.
 - **Attn Presence Check**: Run `attn presence` to check whether the current shell is running inside an attn-managed agent session. Run `attn help` to see the available CLI commands.
 
 ### Changed

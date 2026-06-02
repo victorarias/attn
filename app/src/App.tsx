@@ -163,7 +163,7 @@ function persistDismissedUpdateVersion(version: string): void {
   }
 }
 
-// Sessionless (panel-only) workspaces — those kept alive by a docked panel after
+// Sessionless (tile-only) workspaces — those kept alive by a docked tile after
 // their last terminal closed — are hidden from the sidebar unless the user opts
 // in via the sidebar display popover. The preference persists across launches.
 const SHOW_SESSIONLESS_WORKSPACES_STORAGE_KEY = 'attn.sidebar.showSessionless';
@@ -401,10 +401,10 @@ function App() {
     sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
     sendWorkspaceSetSplitRatio,
-    sendWorkspaceUndockPanel,
+    sendWorkspaceUndockTile,
     sendWorkspaceMoveLeaf,
-    panelContents,
-    requestPanelContent,
+    tileContents,
+    requestTileContent,
     sendRuntimeInput,
     isRuntimeAttached,
     sendGetFileDiff,
@@ -523,10 +523,10 @@ function App() {
         sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
         sendWorkspaceSetSplitRatio={sendWorkspaceSetSplitRatio}
-        sendWorkspaceUndockPanel={sendWorkspaceUndockPanel}
+        sendWorkspaceUndockTile={sendWorkspaceUndockTile}
         sendWorkspaceMoveLeaf={sendWorkspaceMoveLeaf}
-        panelContents={panelContents}
-        requestPanelContent={requestPanelContent}
+        tileContents={tileContents}
+        requestTileContent={requestTileContent}
         sendRuntimeInput={sendRuntimeInput}
         isRuntimeAttached={isRuntimeAttached}
         sendGetFileDiff={sendGetFileDiff}
@@ -612,10 +612,10 @@ interface AppContentProps {
   sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
   sendWorkspaceSetSplitRatio: ReturnType<typeof useDaemonSocket>['sendWorkspaceSetSplitRatio'];
-  sendWorkspaceUndockPanel: ReturnType<typeof useDaemonSocket>['sendWorkspaceUndockPanel'];
+  sendWorkspaceUndockTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceUndockTile'];
   sendWorkspaceMoveLeaf: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeaf'];
-  panelContents: ReturnType<typeof useDaemonSocket>['panelContents'];
-  requestPanelContent: ReturnType<typeof useDaemonSocket>['requestPanelContent'];
+  tileContents: ReturnType<typeof useDaemonSocket>['tileContents'];
+  requestTileContent: ReturnType<typeof useDaemonSocket>['requestTileContent'];
   sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
   isRuntimeAttached: ReturnType<typeof useDaemonSocket>['isRuntimeAttached'];
   sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
@@ -696,10 +696,10 @@ sendFetchPRDetails,
   sendWorkspaceAddSessionPane,
   sendWorkspaceClosePane,
   sendWorkspaceSetSplitRatio,
-  sendWorkspaceUndockPanel,
+  sendWorkspaceUndockTile,
   sendWorkspaceMoveLeaf,
-  panelContents,
-  requestPanelContent,
+  tileContents,
+  requestTileContent,
   sendRuntimeInput,
   isRuntimeAttached,
   sendGetFileDiff,
@@ -2023,7 +2023,7 @@ sendFetchPRDetails,
     }
   }, [unmutedEnrichedSessions, handleSelectSession]);
 
-  // Sessionless (panel-only) workspaces are revealed via the sidebar display
+  // Sessionless (tile-only) workspaces are revealed via the sidebar display
   // popover; the preference is the single source of truth for every derived list
   // below (sidebar render order, ⌘1–9 order, prev/next navigation) so they stay
   // consistent. They never contribute to unmutedWorkspaceViews, which feeds
@@ -2045,9 +2045,9 @@ sendFetchPRDetails,
   const workspaceSelection = useWorkspaceSelectionController(workspaceViews, activeSessionId);
   const activeWorkspaceId = workspaceSelection.activeWorkspaceId;
 
-  // Markdown panels are daemon-owned docked panels opened via `attn open <path>`
-  // (and re-dockable by dragging). There is no empty "show panel" toggle: a
-  // panel only exists once it points at a real file.
+  // Markdown tiles are daemon-owned docked tiles opened via `attn open <path>`
+  // (and re-dockable by dragging). There is no empty "show tile" toggle: a
+  // tile only exists once it points at a real file.
 
   // Use workspace order so ⌘1-9 and prev/next match the top-level sidebar rows.
   const visualWorkspaces = sidebarWorkspaceViews;
@@ -2724,15 +2724,15 @@ sendFetchPRDetails,
                       ));
                     }}
                     onNavigateOutOfSession={handleNavigateOutOfSession}
-                    onUndockPanel={(panelId) => {
-                      void sendWorkspaceUndockPanel(workspace.id, panelId).catch(() => {});
+                    onUndockTile={(tileId) => {
+                      void sendWorkspaceUndockTile(workspace.id, tileId).catch(() => {});
                     }}
                     onMoveLeaf={(leafId, anchorId, edge, ratio) => {
                       void sendWorkspaceMoveLeaf(workspace.id, leafId, { anchorId, edge, ratio }).catch(() => {});
                     }}
-                    panelContents={panelContents}
-                    allowLocalPanelTargets={!workspace.endpointId}
-                    onRequestPanelContent={requestPanelContent}
+                    tileContents={tileContents}
+                    allowLocalTileTargets={!workspace.endpointId}
+                    onRequestTileContent={requestTileContent}
                   />
                 </div>
               );

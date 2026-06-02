@@ -375,7 +375,7 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 		return
 	}
 	d.store.RemoveWorkspace(id)
-	d.prunePanelContentSubscriptionsForLayout(id, nil)
+	d.pruneTileContentSubscriptionsForLayout(id, nil)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:     protocol.EventWorkspaceUnregistered,
 		Workspace: &snapshot,
@@ -400,11 +400,11 @@ func (d *Daemon) loadWorkspacesFromStore() {
 			// removing its workspace. Preserve workspaces waiting for their
 			// first spawn: the layout pane is persisted before spawn_session
 			// creates the session row, and load can run after a daemon restart
-			// in that gap. Also preserve sessionless, panel-only workspaces —
-			// a docked panel keeps a workspace alive across restarts with no
+			// in that gap. Also preserve sessionless, tile-only workspaces —
+			// a docked tile keeps a workspace alive across restarts with no
 			// session of its own.
 			_, registered := d.workspaces.snapshot(ws.ID)
-			if !registered && !d.workspaceHasPendingSpawn(ws.ID) && !d.workspaceLayoutHasPanels(ws.ID) {
+			if !registered && !d.workspaceHasPendingSpawn(ws.ID) && !d.workspaceLayoutHasTiles(ws.ID) {
 				d.store.RemoveWorkspace(ws.ID)
 				continue
 			}
@@ -495,10 +495,10 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 	}
 	if remaining == 0 {
 		// A workspace whose last session leaves normally tears down. But if the
-		// user left a docked panel behind, the workspace lives on as a
-		// sessionless, panel-only workspace. We run before the layout's session
-		// pane is removed, so the stored layout still reflects those panels.
-		if d.workspaceLayoutHasPanels(workspaceID) {
+		// user left a docked tile behind, the workspace lives on as a
+		// sessionless, tile-only workspace. We run before the layout's session
+		// pane is removed, so the stored layout still reflects those tiles.
+		if d.workspaceLayoutHasTiles(workspaceID) {
 			updated, changed := d.recomputeWorkspaceStatus(workspaceID)
 			if !changed {
 				updated, _ = d.workspaces.snapshot(workspaceID)
@@ -514,7 +514,7 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 			return
 		}
 		d.store.RemoveWorkspace(workspaceID)
-		d.prunePanelContentSubscriptionsForLayout(workspaceID, nil)
+		d.pruneTileContentSubscriptionsForLayout(workspaceID, nil)
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:     protocol.EventWorkspaceUnregistered,
 			Workspace: &snapshot,

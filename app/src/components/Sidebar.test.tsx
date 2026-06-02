@@ -252,7 +252,7 @@ describe('Sidebar', () => {
     expect(sessionGroup.querySelector('.workspace-neutral-indicator')).toBeFalsy();
   });
 
-  it('invokes onToggleShowSessionless when the panel-only switch is clicked', () => {
+  it('invokes onToggleShowSessionless when the tile-only switch is clicked', () => {
     const onToggleShowSessionless = vi.fn();
     render(
       <Sidebar

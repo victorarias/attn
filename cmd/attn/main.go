@@ -425,7 +425,7 @@ func parseOpenArgs(args []string) (rawPath string, sessionFlag string, err error
 }
 
 // runOpen handles `attn open <file.md> [--session <id>]`, docking a
-// live-reloading markdown panel into a workspace. The session defaults to
+// live-reloading markdown tile into a workspace. The session defaults to
 // ATTN_SESSION_ID (set inside attn-managed agents), then the daemon's currently
 // selected session.
 func runOpen() {

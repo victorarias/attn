@@ -23,7 +23,7 @@ interface LocalSession {
 
 type SidebarWorkspace = WorkspaceWithSessions<LocalSession>;
 
-// A sessionless workspace only exists because the user left a docked panel
+// A sessionless workspace only exists because the user left a docked tile
 // behind (the daemon tears down workspaces that hold no leaves at all). They're
 // hidden by default and revealed through the sidebar display popover; the
 // preference lives in App so every workspace-order derivation stays consistent.
@@ -344,7 +344,7 @@ export function Sidebar({
                   data-testid="toggle-show-sessionless"
                   onClick={() => onToggleShowSessionless?.()}
                 >
-                  <span className="sidebar-settings-switch-label">Panel-only workspaces</span>
+                  <span className="sidebar-settings-switch-label">Tile-only workspaces</span>
                   <span className={`sidebar-settings-switch ${showSessionless ? 'on' : ''}`} aria-hidden="true" />
                 </button>
               </div>
@@ -378,7 +378,7 @@ export function Sidebar({
                   <span
                     className="workspace-neutral-indicator"
                     data-testid="workspace-neutral-indicator"
-                    title="Panel-only workspace — no active session"
+                    title="Tile-only workspace — no active session"
                   />
                 ) : (
                   <StateIndicator state={(workspace.status as UISessionState | undefined) || 'idle'} size="md" seed={workspace.id} />

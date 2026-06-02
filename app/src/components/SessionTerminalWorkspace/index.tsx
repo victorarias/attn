@@ -8,12 +8,12 @@ import {
   hasPane,
   findPaneInDirection,
   leafSlotId,
-  panelContentKey,
+  tileContentKey,
   type SplitDivider,
   type TerminalNavigationDirection,
   type TerminalLayoutNode,
-  type PanelLeaf,
-  type PanelContentState,
+  type TileLeaf,
+  type TileContentState,
   type NormalizedPaneBounds,
   type TerminalSplitDirection,
   type TerminalDockEdge,
@@ -29,7 +29,7 @@ import type { TerminalVisibleContentSnapshot } from '../../utils/terminalVisible
 import type { TerminalVisibleStyleSnapshot } from '../../utils/terminalStyleSummary';
 import type { ResolvedTheme } from '../../utils/terminalSizing';
 import { WorkspaceLayoutRenderer } from './WorkspaceLayoutRenderer';
-import { WorkspaceDockPanel } from './WorkspaceDockPanel';
+import { WorkspaceDockTile } from './WorkspaceDockTile';
 import { startLeafDrag } from './leafDrag';
 import type { DockTarget } from './dockTarget';
 
@@ -103,14 +103,14 @@ interface SessionTerminalWorkspaceProps {
   onZoomModeChange?: (zoomed: boolean) => void;
   onNavigateOutOfSession: (direction: TerminalNavigationDirection) => void;
   onResizeSplit?: (splitId: string, ratio: number) => Promise<unknown> | void;
-  // Move an existing leaf (terminal pane or docked panel) beside an anchor leaf,
+  // Move an existing leaf (terminal pane or docked tile) beside an anchor leaf,
   // or against the whole workspace when anchorId is ''. ratio is the moved leaf's
   // fraction of the new split.
   onMoveLeaf?: (leafId: string, anchorId: string, edge: TerminalDockEdge, ratio: number) => void;
-  onUndockPanel?: (panelId: string) => void;
-  panelContents?: Record<string, PanelContentState>;
-  allowLocalPanelTargets?: boolean;
-  onRequestPanelContent?: (workspaceId: string, panelId: string) => void;
+  onUndockTile?: (tileId: string) => void;
+  tileContents?: Record<string, TileContentState>;
+  allowLocalTileTargets?: boolean;
+  onRequestTileContent?: (workspaceId: string, tileId: string) => void;
 }
 
 export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandle, SessionTerminalWorkspaceProps>(
@@ -133,23 +133,23 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onNavigateOutOfSession,
     onResizeSplit,
     onMoveLeaf,
-    onUndockPanel,
-    panelContents,
-    allowLocalPanelTargets = true,
-    onRequestPanelContent,
+    onUndockTile,
+    tileContents,
+    allowLocalTileTargets = true,
+    onRequestTileContent,
   }, ref) {
     const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null);
     const [zoomedPaneId, setZoomedPaneId] = useState<string | null>(null);
     // Live, optimistic split ratios while dragging a divider. Reconciled against
     // the daemon layout once it echoes the persisted (locked) ratio back.
     const [ratioOverrides, setRatioOverrides] = useState<Map<string, number>>(() => new Map());
-    // Drag-to-dock state. The panel stays docked in the daemon tree throughout
+    // Drag-to-dock state. The tile stays docked in the daemon tree throughout
     // the drag — this is a transient preview (ghost + target highlight) that
     // resolves to a single dock command on drop.
     const [draggingLeafId, setDraggingLeafId] = useState<string | null>(null);
     const [dockTarget, setDockTarget] = useState<DockTarget | null>(null);
     const [ghostPos, setGhostPos] = useState<{ x: number; y: number } | null>(null);
-    const panelDragCleanupRef = useRef<(() => void) | null>(null);
+    const tileDragCleanupRef = useRef<(() => void) | null>(null);
     const draggingSplitRef = useRef<string | null>(null);
     const activePaneIdRef = useRef(activePaneId);
     const isActiveSessionRef = useRef(isActiveSession);
@@ -189,9 +189,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       [agentPanes],
     );
 
-    // Docked panels keyed by panel id, walked from the authoritative layout tree.
-    const panelLeafById = useMemo(() => {
-      const map = new Map<string, PanelLeaf>();
+    // Docked tiles keyed by tile id, walked from the authoritative layout tree.
+    const tileLeafById = useMemo(() => {
+      const map = new Map<string, TileLeaf>();
       const walk = (node: TerminalLayoutNode | null) => {
         if (!node) {
           return;
@@ -201,8 +201,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           walk(node.children[1]);
           return;
         }
-        if (node.type === 'panel') {
-          map.set(node.panelId, node);
+        if (node.type === 'tile') {
+          map.set(node.tileId, node);
         }
       };
       walk(workspace.layoutTree);
@@ -228,9 +228,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     const getPaneSize = runtime.getPaneSize;
     const splitLayoutActive = workspace.layoutTree?.type === 'split';
     // Show the pane header (which doubles as the drag-to-move handle) whenever the
-    // workspace holds more than one leaf — including panels, so a lone pane sharing
-    // space with a docked panel is still draggable.
-    const showPaneHeader = paneIds.length + panelLeafById.size > 1;
+    // workspace holds more than one leaf — including tiles, so a lone pane sharing
+    // space with a docked tile is still draggable.
+    const showPaneHeader = paneIds.length + tileLeafById.size > 1;
     const effectivePaneId = maximizedPaneId && paneIds.includes(maximizedPaneId) ? maximizedPaneId : null;
     const effectiveZoomedPaneId = zoomedPaneId && paneIds.includes(zoomedPaneId) ? zoomedPaneId : null;
     const baseLayoutTree = useMemo(() => (
@@ -300,7 +300,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           walk(node.children[1], path + '/1');
           return;
         }
-        // Leaf: terminal panes and docked panels both occupy a slot to render.
+        // Leaf: terminal panes and docked tiles both occupy a slot to render.
         paths.set(leafSlotId(node), path);
       };
       walk(renderedLayoutTree, 'root');
@@ -509,7 +509,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       height: `${bounds.height * 100}%`,
     }), []);
 
-    // Drag any leaf's header (terminal pane or docked panel) to relocate it. The
+    // Drag any leaf's header (terminal pane or docked tile) to relocate it. The
     // daemon tree is untouched until drop, when a single move command sends it to
     // the previewed target. The dragged leaf is excluded from the drop targets so
     // hovering it is a no-op (self-drop).
@@ -533,10 +533,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           setDraggingLeafId(null);
           setDockTarget(null);
           setGhostPos(null);
-          panelDragCleanupRef.current = null;
+          tileDragCleanupRef.current = null;
         },
       });
-      panelDragCleanupRef.current = teardown;
+      tileDragCleanupRef.current = teardown;
     }, [renderedPaneBounds, onMoveLeaf]);
 
     const renderPaneSurface = useCallback((paneId: string): React.ReactNode => {
@@ -596,27 +596,27 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         );
       }
 
-      const panelLeaf = panelLeafById.get(paneId);
-      if (panelLeaf) {
+      const tileLeaf = tileLeafById.get(paneId);
+      if (tileLeaf) {
         return (
           <div
-            key={`panel:${panelLeaf.panelId}`}
-            className="workspace-pane workspace-pane--panel"
-            data-pane-id={panelLeaf.panelId}
-            data-pane-kind="panel"
-            data-panel-kind={panelLeaf.panelKind}
+            key={`tile:${tileLeaf.tileId}`}
+            className="workspace-pane workspace-pane--tile"
+            data-pane-id={tileLeaf.tileId}
+            data-pane-kind="tile"
+            data-tile-kind={tileLeaf.tileKind}
             data-pane-path={path}
             style={frameStyle}
           >
-            <WorkspaceDockPanel
-              panel={panelLeaf}
+            <WorkspaceDockTile
+              tile={tileLeaf}
               workspaceId={workspaceId}
-              content={panelContents?.[panelContentKey(workspaceId, panelLeaf.panelId)]}
-              allowLocalTargets={allowLocalPanelTargets}
-              dragging={draggingLeafId === panelLeaf.panelId}
-              onClose={() => onUndockPanel?.(panelLeaf.panelId)}
-              onHeaderPointerDown={(event) => beginLeafDrag(panelLeaf.panelId, event)}
-              onRequestContent={onRequestPanelContent ?? (() => {})}
+              content={tileContents?.[tileContentKey(workspaceId, tileLeaf.tileId)]}
+              allowLocalTargets={allowLocalTileTargets}
+              dragging={draggingLeafId === tileLeaf.tileId}
+              onClose={() => onUndockTile?.(tileLeaf.tileId)}
+              onHeaderPointerDown={(event) => beginLeafDrag(tileLeaf.tileId, event)}
+              onRequestContent={onRequestTileContent ?? (() => {})}
             />
           </div>
         );
@@ -627,11 +627,11 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       activePaneId,
       beginLeafDrag,
       draggingLeafId,
-      onUndockPanel,
-      panelLeafById,
-      panelContents,
-      allowLocalPanelTargets,
-      onRequestPanelContent,
+      onUndockTile,
+      tileLeafById,
+      tileContents,
+      allowLocalTileTargets,
+      onRequestTileContent,
       workspaceId,
       fontSize,
       handleAgentPaneMouseDown,
@@ -658,7 +658,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     }, [agentPaneById, effectivePaneId, sessionById]);
 
     // Label shown in the drag ghost: the dragged leaf's session/title (pane) or
-    // file name/kind (panel).
+    // file name/kind (tile).
     const draggingLeafLabel = useMemo(() => {
       if (!draggingLeafId) {
         return '';
@@ -667,13 +667,13 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       if (agentPane) {
         return sessionById.get(agentPane.sessionId)?.label || agentPane.title || 'Pane';
       }
-      const panel = panelLeafById.get(draggingLeafId);
-      if (panel) {
-        const base = (panel.panelParams ?? '').split('/').filter(Boolean).pop();
-        return base || panel.panelKind || 'Panel';
+      const tile = tileLeafById.get(draggingLeafId);
+      if (tile) {
+        const base = (tile.tileParams ?? '').split('/').filter(Boolean).pop();
+        return base || tile.tileKind || 'Tile';
       }
       return 'Pane';
-    }, [draggingLeafId, agentPaneById, sessionById, panelLeafById]);
+    }, [draggingLeafId, agentPaneById, sessionById, tileLeafById]);
 
     // Draggable dividers, one per split. Hidden in focus/zoom mode where there
     // is no real split to resize.
@@ -782,7 +782,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
 
     useEffect(() => () => {
       dragCleanupRef.current?.();
-      panelDragCleanupRef.current?.();
+      tileDragCleanupRef.current?.();
     }, []);
 
     if (!renderedLayoutTree) {

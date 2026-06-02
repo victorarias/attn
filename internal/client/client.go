@@ -175,7 +175,7 @@ func (c *Client) ToggleWorkspaceMute(workspaceID string) error {
 	return err
 }
 
-// OpenMarkdown docks a live-reloading markdown panel for the given absolute file
+// OpenMarkdown docks a live-reloading markdown tile for the given absolute file
 // path. An empty sessionID lets the daemon target the currently selected
 // session's workspace.
 func (c *Client) OpenMarkdown(path, sessionID string) error {

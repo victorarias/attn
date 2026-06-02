@@ -4,7 +4,7 @@ import {
   applyRatioOverrides,
   collectSplitRatios,
   findPaneInDirection,
-  findPanelByKind,
+  findTileByKind,
   getNormalizedPaneBounds,
   getSplitDividers,
   hasPane,
@@ -165,8 +165,8 @@ describe('collectSplitRatios', () => {
   });
 });
 
-// a | md | b — a docked markdown panel sitting between two terminal panes.
-const paneWithPanel: TerminalLayoutNode = {
+// a | md | b — a docked markdown tile sitting between two terminal panes.
+const paneWithTile: TerminalLayoutNode = {
   type: 'split',
   splitId: 'root',
   direction: 'vertical',
@@ -179,16 +179,16 @@ const paneWithPanel: TerminalLayoutNode = {
       direction: 'vertical',
       ratio: 0.5,
       children: [
-        { type: 'panel', panelId: 'md', panelKind: 'markdown' },
+        { type: 'tile', tileId: 'md', tileKind: 'markdown' },
         { type: 'pane', paneId: 'b' },
       ],
     },
   ],
 };
 
-describe('docked panels', () => {
-  it('positions panel slots alongside panes', () => {
-    const bounds = getNormalizedPaneBounds(paneWithPanel);
+describe('docked tiles', () => {
+  it('positions tile slots alongside panes', () => {
+    const bounds = getNormalizedPaneBounds(paneWithTile);
     // a occupies the left half; md the next quarter; b the last quarter.
     expect(bounds.get('a')!.right).toBeCloseTo(0.5);
     expect(bounds.get('md')!.left).toBeCloseTo(0.5);
@@ -196,26 +196,26 @@ describe('docked panels', () => {
     expect(bounds.get('b')!.left).toBeCloseTo(0.75);
   });
 
-  it('skips panels when navigating between panes', () => {
-    // Right from 'a' jumps over the markdown panel to the next terminal pane.
-    expect(findPaneInDirection(paneWithPanel, 'a', 'right')).toBe('b');
-    expect(findPaneInDirection(paneWithPanel, 'b', 'left')).toBe('a');
-    // A panel is never itself a navigation target.
-    expect(findPaneInDirection(paneWithPanel, 'md', 'left')).toBeNull();
+  it('skips tiles when navigating between panes', () => {
+    // Right from 'a' jumps over the markdown tile to the next terminal pane.
+    expect(findPaneInDirection(paneWithTile, 'a', 'right')).toBe('b');
+    expect(findPaneInDirection(paneWithTile, 'b', 'left')).toBe('a');
+    // A tile is never itself a navigation target.
+    expect(findPaneInDirection(paneWithTile, 'md', 'left')).toBeNull();
   });
 
-  it('hasPane never matches a panel id', () => {
-    expect(hasPane(paneWithPanel, 'md')).toBe(false);
-    expect(hasPane(paneWithPanel, 'a')).toBe(true);
+  it('hasPane never matches a tile id', () => {
+    expect(hasPane(paneWithTile, 'md')).toBe(false);
+    expect(hasPane(paneWithTile, 'a')).toBe(true);
   });
 
-  it('findPanelByKind locates a docked panel', () => {
-    expect(findPanelByKind(paneWithPanel, 'markdown')?.panelId).toBe('md');
-    expect(findPanelByKind(paneWithPanel, 'diff')).toBeNull();
-    expect(findPanelByKind({ type: 'pane', paneId: 'a' }, 'markdown')).toBeNull();
+  it('findTileByKind locates a docked tile', () => {
+    expect(findTileByKind(paneWithTile, 'markdown')?.tileId).toBe('md');
+    expect(findTileByKind(paneWithTile, 'diff')).toBeNull();
+    expect(findTileByKind({ type: 'pane', paneId: 'a' }, 'markdown')).toBeNull();
   });
 
-  it('parses panel leaves out of the daemon layout_json', () => {
+  it('parses tile leaves out of the daemon layout_json', () => {
     const snapshot = workspaceSnapshotFromDaemonWorkspace({
       workspace_id: 'ws',
       active_pane_id: 'pane-a',
@@ -227,19 +227,19 @@ describe('docked panels', () => {
         ratio_locked: true,
         children: [
           { type: 'pane', pane_id: 'pane-a' },
-          { type: 'panel', panel_id: 'panel-md', panel_kind: 'markdown' },
+          { type: 'tile', tile_id: 'tile-md', tile_kind: 'markdown' },
         ],
       }),
       panes: [
         { pane_id: 'pane-a', workspace_id: 'ws', kind: WorkspaceLayoutPaneKind.Agent, title: 'A', status: WorkspaceLayoutPaneStatus.Ready, runtime_id: 'r', session_id: 's' },
       ],
     });
-    expect(findPanelByKind(snapshot.workspace.layoutTree, 'markdown')?.panelId).toBe('panel-md');
-    // The panel does not leak into agent bookkeeping.
+    expect(findTileByKind(snapshot.workspace.layoutTree, 'markdown')?.tileId).toBe('tile-md');
+    // The tile does not leak into agent bookkeeping.
     expect(snapshot.workspace.agents.map((agent) => agent.id)).toEqual(['pane-a']);
   });
 
-  it('drops malformed panel leaves (missing kind)', () => {
+  it('drops malformed tile leaves (missing kind)', () => {
     const snapshot = workspaceSnapshotFromDaemonWorkspace({
       workspace_id: 'ws',
       active_pane_id: 'pane-a',
@@ -250,7 +250,7 @@ describe('docked panels', () => {
         ratio: 0.5,
         children: [
           { type: 'pane', pane_id: 'pane-a' },
-          { type: 'panel', panel_id: 'panel-md' },
+          { type: 'tile', tile_id: 'tile-md' },
         ],
       }),
       panes: [

@@ -109,7 +109,7 @@ export function collectWorkspaceLayoutDiagnostics(
     bounds: WorkspaceNormalizedBounds,
   ) => {
     if (node.type !== 'split') {
-      // Leaf node: record terminal panes; docked panels occupy space but are
+      // Leaf node: record terminal panes; docked tiles occupy space but are
       // not part of pane diagnostics.
       if (node.type === 'pane') {
         panes.push({

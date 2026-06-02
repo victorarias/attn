@@ -483,7 +483,7 @@ describe('SessionTerminalWorkspace', () => {
     expect(container.querySelector('.workspace-layout-metadata [data-split-id="root"]')).toHaveAttribute('data-split-ratio', '0.600');
   });
 
-  it('releases selection locks when divider and panel drags are cancelled', () => {
+  it('releases selection locks when divider and tile drags are cancelled', () => {
     const { container, rerender } = render(
       <SessionTerminalWorkspace
         workspaceId="workspace-session-1"
@@ -521,12 +521,12 @@ describe('SessionTerminalWorkspace', () => {
           agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }],
           layoutTree: {
             type: 'split',
-            splitId: 'root-panel',
+            splitId: 'root-tile',
             direction: 'vertical',
             ratio: 0.7,
             children: [
               { type: 'pane', paneId: SESSION_PANE_ID },
-              { type: 'panel', panelId: 'panel-md', panelKind: 'markdown', panelParams: '/tmp/notes.md' },
+              { type: 'tile', tileId: 'tile-md', tileKind: 'markdown', tileParams: '/tmp/notes.md' },
             ],
           },
         }}
@@ -542,7 +542,7 @@ describe('SessionTerminalWorkspace', () => {
       />
     );
 
-    fireEvent.pointerDown(container.querySelector('.workspace-dock-panel-header') as HTMLElement, { button: 0, clientX: 750, clientY: 250 });
+    fireEvent.pointerDown(container.querySelector('.workspace-dock-tile-header') as HTMLElement, { button: 0, clientX: 750, clientY: 250 });
     expect(document.body.style.userSelect).toBe('none');
     fireEvent.blur(window);
     expect(document.body.style.userSelect).toBe('');

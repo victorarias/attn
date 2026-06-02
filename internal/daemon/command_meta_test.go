@@ -79,9 +79,9 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdWorkspaceLayoutFocusPane,
 		protocol.CmdWorkspaceLayoutRenamePane,
 		protocol.CmdWorkspaceLayoutSetSplitRatio,
-		protocol.CmdWorkspaceLayoutDockPanel,
-		protocol.CmdWorkspaceLayoutUndockPanel,
-		protocol.CmdWorkspacePanelContentGet,
+		protocol.CmdWorkspaceLayoutDockTile,
+		protocol.CmdWorkspaceLayoutUndockTile,
+		protocol.CmdWorkspaceTileContentGet,
 	}
 
 	for _, cmd := range commands {
@@ -227,9 +227,9 @@ func TestRemoteCommandSessionID_IncludesReviewLoopCommands(t *testing.T) {
 	}
 }
 
-func TestRemoteCommandWorkspaceID_IncludesPanelContentGet(t *testing.T) {
-	msg := &protocol.WorkspacePanelContentGetMessage{WorkspaceID: "workspace-remote"}
-	if got := remoteCommandWorkspaceID(protocol.CmdWorkspacePanelContentGet, msg); got != msg.WorkspaceID {
+func TestRemoteCommandWorkspaceID_IncludesTileContentGet(t *testing.T) {
+	msg := &protocol.WorkspaceTileContentGetMessage{WorkspaceID: "workspace-remote"}
+	if got := remoteCommandWorkspaceID(protocol.CmdWorkspaceTileContentGet, msg); got != msg.WorkspaceID {
 		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, msg.WorkspaceID)
 	}
 }

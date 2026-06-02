@@ -38,10 +38,10 @@ type wsClient struct {
 	pendingRemote   map[string]struct{}          // remote runtime IDs awaiting attach_result
 	attachMu        sync.Mutex
 
-	// Docked panel content subscriptions keyed by workspace + panel ID.
-	panelContentSubscriptions map[string]struct{}
-	panelContentPending       map[string]time.Time
-	panelContentMu            sync.RWMutex
+	// Docked tile content subscriptions keyed by workspace + tile ID.
+	tileContentSubscriptions map[string]struct{}
+	tileContentPending       map[string]time.Time
+	tileContentMu            sync.RWMutex
 
 	// Identity + capabilities declared via client_hello.
 	clientKind    string
@@ -912,14 +912,14 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkspaceLayoutRenamePane(client, msg.(*protocol.WorkspaceLayoutRenamePaneMessage))
 	case protocol.CmdWorkspaceLayoutSetSplitRatio:
 		d.handleWorkspaceLayoutSetSplitRatio(client, msg.(*protocol.WorkspaceLayoutSetSplitRatioMessage))
-	case protocol.CmdWorkspaceLayoutDockPanel:
-		d.handleWorkspaceLayoutDockPanel(client, msg.(*protocol.WorkspaceLayoutDockPanelMessage))
-	case protocol.CmdWorkspaceLayoutUndockPanel:
-		d.handleWorkspaceLayoutUndockPanel(client, msg.(*protocol.WorkspaceLayoutUndockPanelMessage))
+	case protocol.CmdWorkspaceLayoutDockTile:
+		d.handleWorkspaceLayoutDockTile(client, msg.(*protocol.WorkspaceLayoutDockTileMessage))
+	case protocol.CmdWorkspaceLayoutUndockTile:
+		d.handleWorkspaceLayoutUndockTile(client, msg.(*protocol.WorkspaceLayoutUndockTileMessage))
 	case protocol.CmdWorkspaceLayoutMoveLeaf:
 		d.handleWorkspaceLayoutMoveLeaf(client, msg.(*protocol.WorkspaceLayoutMoveLeafMessage))
-	case protocol.CmdWorkspacePanelContentGet:
-		d.handleWorkspacePanelContentGet(client, msg.(*protocol.WorkspacePanelContentGetMessage))
+	case protocol.CmdWorkspaceTileContentGet:
+		d.handleWorkspaceTileContentGet(client, msg.(*protocol.WorkspaceTileContentGetMessage))
 	case protocol.CmdRegisterWorkspace:
 		d.handleRegisterWorkspace(client, msg.(*protocol.RegisterWorkspaceMessage))
 	case protocol.CmdUnregisterWorkspace:
@@ -978,18 +978,18 @@ func (d *Daemon) tryHandleRemoteWSCommand(client *wsClient, cmd string, msg inte
 		if !ok {
 			return false
 		}
-		if cmd == protocol.CmdWorkspacePanelContentGet {
-			if typed, ok := msg.(*protocol.WorkspacePanelContentGetMessage); ok {
-				if !client.notePendingPanelContent(typed.WorkspaceID, typed.PanelID) {
-					d.sendCommandError(client, cmd, "too many pending panel content requests")
+		if cmd == protocol.CmdWorkspaceTileContentGet {
+			if typed, ok := msg.(*protocol.WorkspaceTileContentGetMessage); ok {
+				if !client.notePendingTileContent(typed.WorkspaceID, typed.TileID) {
+					d.sendCommandError(client, cmd, "too many pending tile content requests")
 					return true
 				}
 			}
 		}
 		if err := d.hubManager.ForwardEndpointCommand(context.Background(), endpointID, raw); err != nil {
-			if cmd == protocol.CmdWorkspacePanelContentGet {
-				if typed, ok := msg.(*protocol.WorkspacePanelContentGetMessage); ok {
-					client.cancelPendingPanelContent(typed.WorkspaceID, typed.PanelID)
+			if cmd == protocol.CmdWorkspaceTileContentGet {
+				if typed, ok := msg.(*protocol.WorkspaceTileContentGetMessage); ok {
+					client.cancelPendingTileContent(typed.WorkspaceID, typed.TileID)
 				}
 			}
 			d.sendCommandError(client, cmd, err.Error())
@@ -1092,20 +1092,20 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.WorkspaceLayoutSetSplitRatioMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspaceLayoutDockPanel:
-		if typed, ok := msg.(*protocol.WorkspaceLayoutDockPanelMessage); ok {
+	case protocol.CmdWorkspaceLayoutDockTile:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutDockTileMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspaceLayoutUndockPanel:
-		if typed, ok := msg.(*protocol.WorkspaceLayoutUndockPanelMessage); ok {
+	case protocol.CmdWorkspaceLayoutUndockTile:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutUndockTileMessage); ok {
 			return typed.WorkspaceID
 		}
 	case protocol.CmdWorkspaceLayoutMoveLeaf:
 		if typed, ok := msg.(*protocol.WorkspaceLayoutMoveLeafMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspacePanelContentGet:
-		if typed, ok := msg.(*protocol.WorkspacePanelContentGetMessage); ok {
+	case protocol.CmdWorkspaceTileContentGet:
+		if typed, ok := msg.(*protocol.WorkspaceTileContentGetMessage); ok {
 			return typed.WorkspaceID
 		}
 	}
@@ -1318,7 +1318,7 @@ func (d *Daemon) broadcastRawWSMessage(payload []byte) {
 		ID          string `json:"id"`
 		Success     bool   `json:"success"`
 		WorkspaceID string `json:"workspace_id"`
-		PanelID     string `json:"panel_id"`
+		TileID      string `json:"tile_id"`
 	}
 	if err := json.Unmarshal(payload, &envelope); err != nil {
 		d.wsHub.BroadcastRawText(payload)
@@ -1344,13 +1344,13 @@ func (d *Daemon) broadcastRawWSMessage(payload []byte) {
 			return client.wantsRemoteAttachTraffic(envelope.ID)
 		})
 		return
-	case protocol.EventWorkspacePanelContent:
-		if strings.TrimSpace(envelope.WorkspaceID) == "" || strings.TrimSpace(envelope.PanelID) == "" {
-			d.logf("dropping malformed relayed panel content event")
+	case protocol.EventWorkspaceTileContent:
+		if strings.TrimSpace(envelope.WorkspaceID) == "" || strings.TrimSpace(envelope.TileID) == "" {
+			d.logf("dropping malformed relayed tile content event")
 			return
 		}
 		d.wsHub.SendRawTextToMatchingClients(payload, func(client *wsClient) bool {
-			return client.resolvePendingPanelContent(envelope.WorkspaceID, envelope.PanelID)
+			return client.resolvePendingTileContent(envelope.WorkspaceID, envelope.TileID)
 		})
 		return
 	case protocol.EventWorkspaceLayout, protocol.EventWorkspaceLayoutUpdated:
@@ -1359,7 +1359,7 @@ func (d *Daemon) broadcastRawWSMessage(payload []byte) {
 		}
 		if err := json.Unmarshal(payload, &msg); err == nil && msg.WorkspaceLayout != nil {
 			if layout, err := workspacelayout.DecodeLayout(msg.WorkspaceLayout.LayoutJson); err == nil {
-				d.prunePanelContentSubscriptionsForLayout(msg.WorkspaceLayout.WorkspaceID, &layout)
+				d.pruneTileContentSubscriptionsForLayout(msg.WorkspaceLayout.WorkspaceID, &layout)
 			}
 		}
 	case protocol.EventWorkspaceUnregistered:
@@ -1367,7 +1367,7 @@ func (d *Daemon) broadcastRawWSMessage(payload []byte) {
 			Workspace *protocol.Workspace `json:"workspace"`
 		}
 		if err := json.Unmarshal(payload, &msg); err == nil && msg.Workspace != nil {
-			d.prunePanelContentSubscriptionsForLayout(msg.Workspace.ID, nil)
+			d.pruneTileContentSubscriptionsForLayout(msg.Workspace.ID, nil)
 		}
 	case protocol.EventSessionExited:
 		if strings.TrimSpace(envelope.ID) != "" {

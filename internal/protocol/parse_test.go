@@ -145,21 +145,21 @@ func TestParseWorkspaceLayoutSetSplitRatio(t *testing.T) {
 	}
 }
 
-func TestParseWorkspaceLayoutDockPanel(t *testing.T) {
-	input := `{"cmd":"workspace_layout_dock_panel","workspace_id":"ws1","anchor_pane_id":"pane-a","edge":"right","panel_id":"panel-md","panel_kind":"markdown","ratio":0.3}`
+func TestParseWorkspaceLayoutDockTile(t *testing.T) {
+	input := `{"cmd":"workspace_layout_dock_tile","workspace_id":"ws1","anchor_pane_id":"pane-a","edge":"right","tile_id":"tile-md","tile_kind":"markdown","ratio":0.3}`
 	cmd, data, err := ParseMessage([]byte(input))
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	if cmd != CmdWorkspaceLayoutDockPanel {
-		t.Fatalf("cmd = %q, want %q", cmd, CmdWorkspaceLayoutDockPanel)
+	if cmd != CmdWorkspaceLayoutDockTile {
+		t.Fatalf("cmd = %q, want %q", cmd, CmdWorkspaceLayoutDockTile)
 	}
-	msg, ok := data.(*WorkspaceLayoutDockPanelMessage)
+	msg, ok := data.(*WorkspaceLayoutDockTileMessage)
 	if !ok {
-		t.Fatalf("data type = %T, want *WorkspaceLayoutDockPanelMessage", data)
+		t.Fatalf("data type = %T, want *WorkspaceLayoutDockTileMessage", data)
 	}
-	if msg.AnchorPaneID != "pane-a" || msg.PanelID != "panel-md" || msg.PanelKind != "markdown" {
-		t.Errorf("fields = %q/%q/%q, want pane-a/panel-md/markdown", msg.AnchorPaneID, msg.PanelID, msg.PanelKind)
+	if msg.AnchorPaneID != "pane-a" || msg.TileID != "tile-md" || msg.TileKind != "markdown" {
+		t.Errorf("fields = %q/%q/%q, want pane-a/tile-md/markdown", msg.AnchorPaneID, msg.TileID, msg.TileKind)
 	}
 	if msg.Edge != WorkspaceLayoutDockEdgeRight {
 		t.Errorf("edge = %q, want right", msg.Edge)
@@ -169,51 +169,51 @@ func TestParseWorkspaceLayoutDockPanel(t *testing.T) {
 	}
 }
 
-func TestParseWorkspaceLayoutUndockPanel(t *testing.T) {
-	input := `{"cmd":"workspace_layout_undock_panel","workspace_id":"ws1","panel_id":"panel-md"}`
+func TestParseWorkspaceLayoutUndockTile(t *testing.T) {
+	input := `{"cmd":"workspace_layout_undock_tile","workspace_id":"ws1","tile_id":"tile-md"}`
 	cmd, data, err := ParseMessage([]byte(input))
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	if cmd != CmdWorkspaceLayoutUndockPanel {
-		t.Fatalf("cmd = %q, want %q", cmd, CmdWorkspaceLayoutUndockPanel)
+	if cmd != CmdWorkspaceLayoutUndockTile {
+		t.Fatalf("cmd = %q, want %q", cmd, CmdWorkspaceLayoutUndockTile)
 	}
-	msg, ok := data.(*WorkspaceLayoutUndockPanelMessage)
+	msg, ok := data.(*WorkspaceLayoutUndockTileMessage)
 	if !ok {
-		t.Fatalf("data type = %T, want *WorkspaceLayoutUndockPanelMessage", data)
+		t.Fatalf("data type = %T, want *WorkspaceLayoutUndockTileMessage", data)
 	}
-	if msg.WorkspaceID != "ws1" || msg.PanelID != "panel-md" {
-		t.Errorf("fields = %q/%q, want ws1/panel-md", msg.WorkspaceID, msg.PanelID)
+	if msg.WorkspaceID != "ws1" || msg.TileID != "tile-md" {
+		t.Errorf("fields = %q/%q, want ws1/tile-md", msg.WorkspaceID, msg.TileID)
 	}
 }
 
-func TestParseWorkspaceLayoutDockPanelIgnoresInjectedParams(t *testing.T) {
-	input := `{"cmd":"workspace_layout_dock_panel","workspace_id":"ws1","anchor_pane_id":"pane-a","edge":"right","panel_id":"panel-md","panel_kind":"markdown","panel_params":"/abs/file.md"}`
+func TestParseWorkspaceLayoutDockTileIgnoresInjectedParams(t *testing.T) {
+	input := `{"cmd":"workspace_layout_dock_tile","workspace_id":"ws1","anchor_pane_id":"pane-a","edge":"right","tile_id":"tile-md","tile_kind":"markdown","tile_params":"/abs/file.md"}`
 	_, data, err := ParseMessage([]byte(input))
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	msg := data.(*WorkspaceLayoutDockPanelMessage)
-	if msg.WorkspaceID != "ws1" || msg.PanelID != "panel-md" || msg.PanelKind != "markdown" {
-		t.Errorf("fields = %q/%q/%q, want ws1/panel-md/markdown", msg.WorkspaceID, msg.PanelID, msg.PanelKind)
+	msg := data.(*WorkspaceLayoutDockTileMessage)
+	if msg.WorkspaceID != "ws1" || msg.TileID != "tile-md" || msg.TileKind != "markdown" {
+		t.Errorf("fields = %q/%q/%q, want ws1/tile-md/markdown", msg.WorkspaceID, msg.TileID, msg.TileKind)
 	}
 }
 
-func TestParseWorkspacePanelContentGet(t *testing.T) {
-	input := `{"cmd":"workspace_panel_content_get","workspace_id":"ws1","panel_id":"panel-md"}`
+func TestParseWorkspaceTileContentGet(t *testing.T) {
+	input := `{"cmd":"workspace_tile_content_get","workspace_id":"ws1","tile_id":"tile-md"}`
 	cmd, data, err := ParseMessage([]byte(input))
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	if cmd != CmdWorkspacePanelContentGet {
-		t.Fatalf("cmd = %q, want %q", cmd, CmdWorkspacePanelContentGet)
+	if cmd != CmdWorkspaceTileContentGet {
+		t.Fatalf("cmd = %q, want %q", cmd, CmdWorkspaceTileContentGet)
 	}
-	msg, ok := data.(*WorkspacePanelContentGetMessage)
+	msg, ok := data.(*WorkspaceTileContentGetMessage)
 	if !ok {
-		t.Fatalf("data type = %T, want *WorkspacePanelContentGetMessage", data)
+		t.Fatalf("data type = %T, want *WorkspaceTileContentGetMessage", data)
 	}
-	if msg.WorkspaceID != "ws1" || msg.PanelID != "panel-md" {
-		t.Errorf("fields = %q/%q, want ws1/panel-md", msg.WorkspaceID, msg.PanelID)
+	if msg.WorkspaceID != "ws1" || msg.TileID != "tile-md" {
+		t.Errorf("fields = %q/%q, want ws1/tile-md", msg.WorkspaceID, msg.TileID)
 	}
 }
 

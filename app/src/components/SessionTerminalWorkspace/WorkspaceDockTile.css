@@ -1,20 +1,20 @@
-/* A docked panel fills its workspace-pane frame (positioned by the layout) and
+/* A docked tile fills its workspace-pane frame (positioned by the layout) and
    stacks a header over a scrolling body, mirroring a terminal pane's chrome. */
-.workspace-dock-panel {
+.workspace-dock-tile {
   display: flex;
   flex-direction: column;
   width: 100%;
   height: 100%;
-  background: var(--color-bg-panel);
+  background: var(--color-bg-tile);
   color: var(--color-text-primary);
   overflow: hidden;
 }
 
-.workspace-dock-panel--dragging {
+.workspace-dock-tile--dragging {
   opacity: 0.5;
 }
 
-.workspace-dock-panel-header {
+.workspace-dock-tile-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -28,11 +28,11 @@
   touch-action: none;
 }
 
-.workspace-dock-panel-header:active {
+.workspace-dock-tile-header:active {
   cursor: grabbing;
 }
 
-.workspace-dock-panel-title {
+.workspace-dock-tile-title {
   font-size: 12px;
   font-weight: 600;
   color: var(--color-text-secondary);
@@ -41,7 +41,7 @@
   text-overflow: ellipsis;
 }
 
-.workspace-dock-panel-close {
+.workspace-dock-tile-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -57,12 +57,12 @@
   cursor: pointer;
 }
 
-.workspace-dock-panel-close:hover {
+.workspace-dock-tile-close:hover {
   background: var(--color-bg-button);
   color: var(--color-text-primary);
 }
 
-.workspace-dock-panel-body {
+.workspace-dock-tile-body {
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -72,28 +72,28 @@
 }
 
 /* Non-content states (loading, empty file, unsupported kind, read error). */
-.workspace-dock-panel-message {
+.workspace-dock-tile-message {
   color: var(--color-text-tertiary);
   font-style: italic;
 }
 
-.workspace-dock-panel-error {
+.workspace-dock-tile-error {
   color: var(--color-status-error, #f87171);
   font-style: normal;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-/* Markdown element styling (adapted from the prototype panel). */
-.workspace-dock-panel-body > :first-child {
+/* Markdown element styling (adapted from the prototype tile). */
+.workspace-dock-tile-body > :first-child {
   margin-top: 0;
 }
 
-.workspace-dock-panel-body p {
+.workspace-dock-tile-body p {
   margin: 0 0 10px 0;
 }
 
-.workspace-dock-panel-body code {
+.workspace-dock-tile-body code {
   background: var(--color-bg-editor);
   padding: 1px 4px;
   border-radius: 3px;
@@ -101,7 +101,7 @@
   font-size: 12px;
 }
 
-.workspace-dock-panel-body pre {
+.workspace-dock-tile-body pre {
   background: var(--color-bg-editor);
   padding: 10px 12px;
   border-radius: 4px;
@@ -109,31 +109,31 @@
   margin: 10px 0;
 }
 
-.workspace-dock-panel-body pre code {
+.workspace-dock-tile-body pre code {
   background: none;
   padding: 0;
 }
 
-.workspace-dock-panel-body ul,
-.workspace-dock-panel-body ol {
+.workspace-dock-tile-body ul,
+.workspace-dock-tile-body ol {
   margin: 10px 0;
   padding-left: 22px;
 }
 
-.workspace-dock-panel-body li {
+.workspace-dock-tile-body li {
   margin: 4px 0;
 }
 
-.workspace-dock-panel-body a {
+.workspace-dock-tile-body a {
   color: #60a5fa;
   text-decoration: none;
 }
 
-.workspace-dock-panel-body a:hover {
+.workspace-dock-tile-body a:hover {
   text-decoration: underline;
 }
 
-.workspace-dock-panel-local-image {
+.workspace-dock-tile-local-image {
   display: inline-flex;
   padding: 3px 7px;
   border: 1px solid var(--color-border);
@@ -144,64 +144,64 @@
   cursor: pointer;
 }
 
-.workspace-dock-panel-local-image:hover {
+.workspace-dock-tile-local-image:hover {
   border-color: var(--color-border-focus);
 }
 
-.workspace-dock-panel-blocked-image {
+.workspace-dock-tile-blocked-image {
   color: var(--color-text-tertiary);
   font-style: italic;
 }
 
-.workspace-dock-panel-body blockquote {
+.workspace-dock-tile-body blockquote {
   border-left: 3px solid var(--color-border-focus);
   margin: 10px 0;
   padding-left: 12px;
   color: var(--color-text-tertiary);
 }
 
-.workspace-dock-panel-body strong {
+.workspace-dock-tile-body strong {
   font-weight: 600;
 }
 
-.workspace-dock-panel-body h1,
-.workspace-dock-panel-body h2,
-.workspace-dock-panel-body h3,
-.workspace-dock-panel-body h4 {
+.workspace-dock-tile-body h1,
+.workspace-dock-tile-body h2,
+.workspace-dock-tile-body h3,
+.workspace-dock-tile-body h4 {
   margin: 16px 0 8px 0;
   font-weight: 600;
   line-height: 1.3;
 }
 
-.workspace-dock-panel-body h1 {
+.workspace-dock-tile-body h1 {
   font-size: 18px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--color-border-subtle);
 }
 
-.workspace-dock-panel-body h2 {
+.workspace-dock-tile-body h2 {
   font-size: 15px;
 }
 
-.workspace-dock-panel-body table {
+.workspace-dock-tile-body table {
   border-collapse: collapse;
   margin: 10px 0;
   font-size: 12px;
 }
 
-.workspace-dock-panel-body th,
-.workspace-dock-panel-body td {
+.workspace-dock-tile-body th,
+.workspace-dock-tile-body td {
   border: 1px solid var(--color-border);
   padding: 4px 10px;
   text-align: left;
 }
 
-.workspace-dock-panel-body th {
+.workspace-dock-tile-body th {
   background: var(--color-bg-elevated);
   font-weight: 600;
 }
 
-/* Highlight showing where a dragged panel will dock (a half-band of the target
+/* Highlight showing where a dragged tile will dock (a half-band of the target
    pane on the chosen edge). Positioned as a % overlay inside the panes area. */
 .workspace-dock-target {
   position: absolute;
@@ -213,7 +213,7 @@
   box-shadow: inset 0 0 0 1px rgba(255, 107, 53, 0.12);
 }
 
-/* Ghost of the panel following the cursor during a re-dock drag. */
+/* Ghost of the tile following the cursor during a re-dock drag. */
 .workspace-dock-ghost {
   position: fixed;
   z-index: 41;
