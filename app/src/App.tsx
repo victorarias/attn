@@ -380,8 +380,8 @@ function App() {
     sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
     sendWorkspaceSetSplitRatio,
-    sendWorkspaceDockPanel,
     sendWorkspaceUndockPanel,
+    sendWorkspaceMoveLeaf,
     panelContents,
     requestPanelContent,
     sendRuntimeInput,
@@ -502,8 +502,8 @@ function App() {
         sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
         sendWorkspaceSetSplitRatio={sendWorkspaceSetSplitRatio}
-        sendWorkspaceDockPanel={sendWorkspaceDockPanel}
         sendWorkspaceUndockPanel={sendWorkspaceUndockPanel}
+        sendWorkspaceMoveLeaf={sendWorkspaceMoveLeaf}
         panelContents={panelContents}
         requestPanelContent={requestPanelContent}
         sendRuntimeInput={sendRuntimeInput}
@@ -591,8 +591,8 @@ interface AppContentProps {
   sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
   sendWorkspaceSetSplitRatio: ReturnType<typeof useDaemonSocket>['sendWorkspaceSetSplitRatio'];
-  sendWorkspaceDockPanel: ReturnType<typeof useDaemonSocket>['sendWorkspaceDockPanel'];
   sendWorkspaceUndockPanel: ReturnType<typeof useDaemonSocket>['sendWorkspaceUndockPanel'];
+  sendWorkspaceMoveLeaf: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeaf'];
   panelContents: ReturnType<typeof useDaemonSocket>['panelContents'];
   requestPanelContent: ReturnType<typeof useDaemonSocket>['requestPanelContent'];
   sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
@@ -675,8 +675,8 @@ sendFetchPRDetails,
   sendWorkspaceAddSessionPane,
   sendWorkspaceClosePane,
   sendWorkspaceSetSplitRatio,
-  sendWorkspaceDockPanel,
   sendWorkspaceUndockPanel,
+  sendWorkspaceMoveLeaf,
   panelContents,
   requestPanelContent,
   sendRuntimeInput,
@@ -2686,11 +2686,11 @@ sendFetchPRDetails,
                       ));
                     }}
                     onNavigateOutOfSession={handleNavigateOutOfSession}
-                    onDockPanel={(panelId, panelKind, anchorPaneId, edge) => {
-                      void sendWorkspaceDockPanel(workspace.id, panelId, panelKind, { anchorPaneId, edge }).catch(() => {});
-                    }}
                     onUndockPanel={(panelId) => {
                       void sendWorkspaceUndockPanel(workspace.id, panelId).catch(() => {});
+                    }}
+                    onMoveLeaf={(leafId, anchorId, edge, ratio) => {
+                      void sendWorkspaceMoveLeaf(workspace.id, leafId, { anchorId, edge, ratio }).catch(() => {});
                     }}
                     panelContents={panelContents}
                     allowLocalPanelTargets={!workspace.endpointId}

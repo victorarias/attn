@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "78"
+const ProtocolVersion = "79"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -114,6 +114,7 @@ const (
 	CmdWorkspaceLayoutSetSplitRatio  = "workspace_layout_set_split_ratio"
 	CmdWorkspaceLayoutDockPanel      = "workspace_layout_dock_panel"
 	CmdWorkspaceLayoutUndockPanel    = "workspace_layout_undock_panel"
+	CmdWorkspaceLayoutMoveLeaf       = "workspace_layout_move_leaf"
 	CmdWorkspacePanelContentGet      = "workspace_panel_content_get"
 	CmdOpenMarkdown                  = "open_markdown"
 	CmdRegisterWorkspace             = "register_workspace"
@@ -844,6 +845,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg WorkspaceLayoutUndockPanelMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal workspace_layout_undock_panel: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkspaceLayoutMoveLeaf:
+		var msg WorkspaceLayoutMoveLeafMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workspace_layout_move_leaf: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

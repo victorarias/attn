@@ -2817,6 +2817,26 @@ type WorkspaceLayoutMessage struct {
 	WorkspaceLayout WorkspaceLayout `json:"workspace_layout"`
 }
 
+type WorkspaceLayoutMoveLeafMessage struct {
+	// AnchorID corresponds to the JSON schema field "anchor_id".
+	AnchorID string `json:"anchor_id"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Edge corresponds to the JSON schema field "edge".
+	Edge WorkspaceLayoutDockEdge `json:"edge"`
+
+	// LeafID corresponds to the JSON schema field "leaf_id".
+	LeafID string `json:"leaf_id"`
+
+	// Ratio corresponds to the JSON schema field "ratio".
+	Ratio *float64 `json:"ratio,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
 type WorkspaceLayoutPane struct {
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`

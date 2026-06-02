@@ -598,7 +598,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '78',
+        protocol_version: '79',
         sessions: [
           {
             id: 'agent-1',
@@ -696,7 +696,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '78',
+        protocol_version: '79',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -781,7 +781,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '78',
+        protocol_version: '79',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -913,7 +913,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '78',
+        protocol_version: '79',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -978,7 +978,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '78',
+        protocol_version: '79',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -1041,7 +1041,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '78',
+        protocol_version: '79',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -1101,7 +1101,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '78',
+        protocol_version: '79',
         sessions: [],
         workspaces: [{
           id: 'workspace-1',
@@ -1201,7 +1201,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     };
     const initialState = {
       event: 'initial_state',
-      protocol_version: '78',
+      protocol_version: '79',
       sessions: [],
       workspaces: [workspace],
       prs: [],
@@ -1278,7 +1278,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '78',
+        protocol_version: '79',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1372,7 +1372,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '78',
+        protocol_version: '79',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1471,7 +1471,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '78',
+        protocol_version: '79',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1556,7 +1556,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '78',
+        protocol_version: '79',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -1635,7 +1635,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '78',
+        protocol_version: '79',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -1705,7 +1705,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '78',
+        protocol_version: '79',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',

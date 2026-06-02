@@ -153,7 +153,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '78';
+const PROTOCOL_VERSION = '79';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -2257,31 +2257,6 @@ export function useDaemonSocket({
     );
   }, [nextRequestID, sendWorkspaceCommand]);
 
-  // Dock (or move) a panel into the workspace layout. Like set_split_ratio, the
-  // daemon's action result carries an empty pane_id. An empty anchorPaneId lets
-  // the daemon pick a sensible anchor (the active pane).
-  const sendWorkspaceDockPanel = useCallback((
-    workspaceId: string,
-    panelId: string,
-    panelKind: string,
-    options: { anchorPaneId?: string; edge?: TerminalDockEdge; ratio?: number } = {},
-  ) => {
-    return sendWorkspaceCommand(
-      'workspace_layout_dock_panel',
-      workspaceId,
-      {
-        cmd: 'workspace_layout_dock_panel',
-        workspace_id: workspaceId,
-        anchor_pane_id: options.anchorPaneId ?? '',
-        edge: options.edge ?? 'right',
-        panel_id: panelId,
-        panel_kind: panelKind,
-        ...(options.ratio != null ? { ratio: options.ratio } : {}),
-      },
-      panelId,
-    );
-  }, [sendWorkspaceCommand]);
-
   const sendWorkspaceUndockPanel = useCallback((workspaceId: string, panelId: string) => {
     return sendWorkspaceCommand(
       'workspace_layout_undock_panel',
@@ -2292,6 +2267,31 @@ export function useDaemonSocket({
         panel_id: panelId,
       },
       panelId,
+    );
+  }, [sendWorkspaceCommand]);
+
+  // Move an existing leaf (terminal pane or docked panel) beside an anchor leaf.
+  // An empty anchorId docks the leaf against the whole workspace (the root). The
+  // daemon broadcasts the authoritative layout, so this is effectively
+  // fire-and-forget; a rejected move (self-drop, only leaf) just leaves the
+  // layout unchanged.
+  const sendWorkspaceMoveLeaf = useCallback((
+    workspaceId: string,
+    leafId: string,
+    options: { anchorId?: string; edge?: TerminalDockEdge; ratio?: number } = {},
+  ) => {
+    return sendWorkspaceCommand(
+      'workspace_layout_move_leaf',
+      workspaceId,
+      {
+        cmd: 'workspace_layout_move_leaf',
+        workspace_id: workspaceId,
+        leaf_id: leafId,
+        anchor_id: options.anchorId ?? '',
+        edge: options.edge ?? 'right',
+        ...(options.ratio != null ? { ratio: options.ratio } : {}),
+      },
+      leafId,
     );
   }, [sendWorkspaceCommand]);
 
@@ -3603,8 +3603,8 @@ export function useDaemonSocket({
     sendWorkspaceFocusPane,
     sendWorkspaceRenamePane,
     sendWorkspaceSetSplitRatio,
-    sendWorkspaceDockPanel,
     sendWorkspaceUndockPanel,
+    sendWorkspaceMoveLeaf,
     panelContents,
     requestPanelContent,
     sendRuntimeInput: sendPtyInput,
