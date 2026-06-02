@@ -163,6 +163,27 @@ function persistDismissedUpdateVersion(version: string): void {
   }
 }
 
+// Sessionless (panel-only) workspaces — those kept alive by a docked panel after
+// their last terminal closed — are hidden from the sidebar unless the user opts
+// in via the sidebar display popover. The preference persists across launches.
+const SHOW_SESSIONLESS_WORKSPACES_STORAGE_KEY = 'attn.sidebar.showSessionless';
+
+function readShowSessionlessWorkspaces(): boolean {
+  try {
+    return window.localStorage.getItem(SHOW_SESSIONLESS_WORKSPACES_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function persistShowSessionlessWorkspaces(value: boolean): void {
+  try {
+    window.localStorage.setItem(SHOW_SESSIONLESS_WORKSPACES_STORAGE_KEY, value ? '1' : '0');
+  } catch (err) {
+    console.warn('[App] Failed to persist show-sessionless preference:', err);
+  }
+}
+
 function toneForDockPanel(status?: string): 'default' | 'idle' | 'running' | 'awaiting_user' | 'completed' | 'stopped' | 'error' {
   switch (status) {
     case 'running':
@@ -2002,9 +2023,24 @@ sendFetchPRDetails,
     }
   }, [unmutedEnrichedSessions, handleSelectSession]);
 
+  // Sessionless (panel-only) workspaces are revealed via the sidebar display
+  // popover; the preference is the single source of truth for every derived list
+  // below (sidebar render order, ⌘1–9 order, prev/next navigation) so they stay
+  // consistent. They never contribute to unmutedWorkspaceViews, which feeds
+  // session/attention counts.
+  const [showSessionlessWorkspaces, setShowSessionlessWorkspaces] = useState<boolean>(readShowSessionlessWorkspaces);
+  const handleToggleShowSessionlessWorkspaces = useCallback(() => {
+    setShowSessionlessWorkspaces((prev) => {
+      const next = !prev;
+      persistShowSessionlessWorkspaces(next);
+      return next;
+    });
+  }, []);
   const sidebarWorkspaceViews = useMemo(
-    () => unmutedWorkspaceViews,
-    [unmutedWorkspaceViews],
+    () => workspaceViews.filter(
+      (workspace) => !workspace.muted && (workspace.sessions.length > 0 || showSessionlessWorkspaces),
+    ),
+    [workspaceViews, showSessionlessWorkspaces],
   );
   const workspaceSelection = useWorkspaceSelectionController(workspaceViews, activeSessionId);
   const activeWorkspaceId = workspaceSelection.activeWorkspaceId;
@@ -2605,6 +2641,8 @@ sendFetchPRDetails,
           mutedExpanded={sidebarMutedExpanded}
           onMutedExpandedChange={setSidebarMutedExpanded}
           onMuteWorkspace={sendMuteWorkspace}
+          showSessionless={showSessionlessWorkspaces}
+          onToggleShowSessionless={handleToggleShowSessionlessWorkspaces}
           onSelectSession={handleSelectSession}
           onSelectWorkspace={handleSelectWorkspace}
           onNewSession={() => handleNewSession('vertical')}

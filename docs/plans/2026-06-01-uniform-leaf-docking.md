@@ -216,13 +216,17 @@ so a revert doesn't drag the docking UX with it.
 - [x] CHANGELOG updated.
 - [x] Live end-to-end verification in the packaged dev app via a new `drag_leaf` automation verb (synthesizes pointerdown on a leaf header + window move/up). Confirmed: pane→pane bottom dock restructures the tree (pane + panel + pane → panel + stacked pane/pane); fresh split panes keep their PTY scrollback markers across the move and still accept input afterward (no remount). `drag_leaf` lives beside `split_pane`/`click_pane` in `useUiAutomationBridge.ts` and only activates when automation is enabled.
 
-### PR B — Panel-only workspaces (lifecycle + sidebar + panel titling)
-- [ ] `layoutEmpty` teardown rule in `handleWorkspaceLayoutClosePane` (`:607`) + `removeWorkspaceLayoutPaneForSession`; audit the other `RemoveWorkspaceLayout` paths (`:26`) + session-spawn reconcile (must not resurrect the closed agent).
-- [ ] Sessionless workspace: keep workspace name + neutral (non-state) indicator; focus the panel on select (extend the AGENTS.md terminal-focus rule with a "no terminal" branch).
-- [ ] Panel header title from content: markdown H1 → beginning of text → basename fallback (`WorkspaceDockPanel.tsx:237`).
-- [ ] Sidebar display popover toggle for PTY-less workspaces, **hidden by default** (+ persistence) (`Sidebar.tsx:197,311`).
-- [ ] Update `docs/decisions/2026-05-31-docked-panels.md` to last-leaf teardown.
-- [ ] Daemon protocol tests model the real app flow (per `internal/daemon/CLAUDE.md`).
+### PR B — Panel-only workspaces (lifecycle + sidebar reveal) ✅
+- [x] `LayoutEmpty` (no panes *and* no panels) teardown rule replaces `len(Panes)==0` at the three layout sites: `ensureWorkspaceLayout` (the linchpin — every handler calls it), `handleWorkspaceLayoutClosePane`, `removeWorkspaceLayoutPaneForSession`. Helper + unit test in `workspacelayout`.
+- [x] Workspace **entity** survival: guard in `dissociateSessionFromWorkspace` keeps the workspace (and broadcasts a neutral state-changed) when its last session leaves but a panel remains. Relies on the call ordering (dissociate runs before the layout pane is removed, so the stored layout still shows the panel). New `workspaceLayoutHasPanels` helper.
+- [x] Startup reap (`loadWorkspacesFromStore`) keeps sessionless, panel-only workspaces across daemon restarts. Session-spawn reconcile only prunes — never resurrects the closed agent (verified).
+- [x] Sidebar display popover toggle for PTY-less workspaces, **hidden by default** + localStorage persistence; sessionless workspaces render a neutral (non-state) indicator. Derived purely from `sessions.length === 0` (the daemon only retains sessionless workspaces that hold panels), so **no protocol bump**.
+- [x] Updated `docs/decisions/2026-05-31-docked-panels.md` to last-leaf teardown.
+- [x] Daemon protocol tests model the real app flow (close last pane / reap / startup) per `internal/daemon/CLAUDE.md`; frontend tests cover the reveal toggle, neutral indicator, and persistence.
+
+Deferred to a small follow-up (cosmetic, fully separable from lifecycle):
+- [ ] Panel header title from content: markdown H1 → beginning of text → basename fallback (`WorkspaceDockPanel.tsx:237`). A sessionless workspace already renders fine; the panel just shows its basename until this lands.
+- [ ] Focus a panel on select for fully panel-only workspaces (extend the AGENTS.md terminal-focus rule with a "no terminal" branch). Panels are not interactive focus targets today; selection renders the layout without stealing focus, which is acceptable for v1.
 
 ## Decisions
 

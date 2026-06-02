@@ -64,6 +64,43 @@ func TestPanelFractionByIDReturnsPanelShare(t *testing.T) {
 	}
 }
 
+func TestLayoutEmpty(t *testing.T) {
+	cases := []struct {
+		name string
+		node Node
+		want bool
+	}{
+		{"zero value", Node{}, true},
+		{"single pane", DefaultLayout("pane-1"), false},
+		{
+			"panel-only (sessionless)",
+			Node{Type: "panel", PanelID: "panel-md", PanelKind: "markdown"},
+			false,
+		},
+		{
+			"pane beside panel",
+			Node{
+				Type:      "split",
+				SplitID:   "root",
+				Direction: DirectionVertical,
+				Ratio:     DefaultSplitRatio,
+				Children: []Node{
+					{Type: "pane", PaneID: "pane-a"},
+					{Type: "panel", PanelID: "panel-md", PanelKind: "markdown"},
+				},
+			},
+			false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := LayoutEmpty(tc.node); got != tc.want {
+				t.Fatalf("LayoutEmpty(%+v) = %v, want %v", tc.node, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDockPanelBetweenPanes(t *testing.T) {
 	// panel1 | panel2 → docking to the right of panel1 yields panel1 | md | panel2.
 	tree := Node{

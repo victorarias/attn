@@ -22,11 +22,22 @@ func (d *Daemon) ensureWorkspaceLayout(workspaceID string) (*workspacelayout.Wor
 	}
 
 	normalized := workspacelayout.NormalizeWorkspaceLayout(*current)
-	if len(normalized.Panes) == 0 {
+	if workspacelayout.LayoutEmpty(normalized.Layout) {
 		d.store.RemoveWorkspaceLayout(workspaceID)
-		return nil, fmt.Errorf("workspace has no layout panes: %s", workspaceID)
+		return nil, fmt.Errorf("workspace has no layout leaves: %s", workspaceID)
 	}
 	return &normalized, nil
+}
+
+// workspaceLayoutHasPanels reports whether a workspace's stored layout still
+// holds at least one docked panel. It decides whether a workspace outlives its
+// last session: a panel the user left behind keeps the workspace alive.
+func (d *Daemon) workspaceLayoutHasPanels(workspaceID string) bool {
+	snapshot := d.store.GetWorkspaceLayout(workspaceID)
+	if snapshot == nil {
+		return false
+	}
+	return len(workspacelayout.PanelIDs(snapshot.Layout)) > 0
 }
 
 func (d *Daemon) currentOrEmptyWorkspaceLayout(workspaceID string) (*workspacelayout.WorkspaceLayout, error) {
@@ -658,7 +669,10 @@ func (d *Daemon) handleWorkspaceLayoutClosePane(client *wsClient, msg *protocol.
 		}
 	}
 
-	if len(normalized.Panes) == 0 {
+	// A workspace dies only when its last leaf is gone. A panel left behind
+	// keeps the workspace (now sessionless) and its layout alive.
+	layoutEmpty := workspacelayout.LayoutEmpty(normalized.Layout)
+	if layoutEmpty {
 		d.store.RemoveWorkspaceLayout(msg.WorkspaceID)
 	} else {
 		if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
@@ -668,7 +682,7 @@ func (d *Daemon) handleWorkspaceLayoutClosePane(client *wsClient, msg *protocol.
 	}
 	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutClosePane, msg.WorkspaceID, protocol.Ptr(msg.PaneID), nil)
 
-	if len(normalized.Panes) > 0 {
+	if !layoutEmpty {
 		d.broadcastWorkspaceLayoutUpdated(msg.WorkspaceID)
 	}
 }
@@ -693,7 +707,7 @@ func (d *Daemon) removeWorkspaceLayoutPaneForSession(sessionID string) {
 	snapshot.Layout = layout
 	snapshot.Panes = nextPanes
 	normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot)
-	if len(normalized.Panes) == 0 {
+	if workspacelayout.LayoutEmpty(normalized.Layout) {
 		d.store.RemoveWorkspaceLayout(workspaceID)
 	} else {
 		if err := d.store.SaveWorkspaceLayout(normalized); err != nil {

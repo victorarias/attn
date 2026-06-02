@@ -45,8 +45,20 @@ intentionally transient UX.
   keeps its size and is never auto-equalized with terminals during
   normalization. `splitChainSpanCount` treats a locked split as one opaque unit.
 - Panels are excluded from pane bookkeeping (`PaneIDs`, the `panes` array,
-  session reconcile). Closing the last *terminal* still tears down the workspace
-  and takes any orphan panel with it.
+  session reconcile).
+- **A workspace lives while its layout holds any leaf, not just a terminal.**
+  Teardown keys off `workspacelayout.LayoutEmpty` (no panes *and* no panels), not
+  `len(panes) == 0`. Closing the last terminal while a panel remains leaves a
+  sessionless, panel-only workspace alive instead of discarding the panel; the
+  workspace is only torn down once the layout has no leaves at all. The guard
+  lives in `dissociateSessionFromWorkspace` (keep the workspace entity when a
+  panel remains), the layout teardown sites (`ensureWorkspaceLayout`,
+  `handleWorkspaceLayoutClosePane`, `removeWorkspaceLayoutPaneForSession`), and
+  the startup reap (`loadWorkspacesFromStore`). Sessionless workspaces are hidden
+  in the sidebar by default and revealed via the display popover toggle; they
+  render with a neutral, non-state indicator. (Revises the original rule, which
+  tore down the workspace with the last terminal and took any orphan panel
+  with it.)
 
 ## Protocol
 

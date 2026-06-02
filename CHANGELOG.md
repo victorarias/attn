@@ -26,6 +26,11 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 
 ---
 
+## [2026-06-02]
+
+### Changed
+- **Closing the last terminal no longer throws away a docked panel.** If you leave a markdown panel open and close the workspace's last terminal, the workspace now stays around as a panel-only workspace instead of disappearing with your doc. Panel-only workspaces are hidden from the sidebar by default; turn on "Panel-only workspaces" in the sidebar settings (the gear menu) to see them, where they show a neutral marker instead of a session-state dot.
+
 ## [2026-06-01]
 
 ### Added

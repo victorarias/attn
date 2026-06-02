@@ -663,6 +663,74 @@
   color: var(--color-text-primary);
 }
 
+.sidebar-settings-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+}
+
+.sidebar-settings-switch-row:hover {
+  color: var(--color-text-primary);
+}
+
+.sidebar-settings-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  transition: background 0.15s ease;
+}
+
+.sidebar-settings-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.sidebar-settings-switch.on {
+  background: var(--accent);
+}
+
+.sidebar-settings-switch.on::after {
+  transform: translateX(12px);
+  background: #fff;
+}
+
+/* Sessionless (panel-only) workspaces carry content but no agent, so they get a
+   neutral, hollow marker instead of a session state dot. */
+.workspace-neutral-indicator {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--color-text-muted);
+  border-radius: 50%;
+  background: transparent;
+  opacity: 0.6;
+}
+
+.icon-btn.session-icon.sessionless {
+  opacity: 0.7;
+}
+
 .sidebar--display-open .workspace-group.selected {
   border-color: transparent;
   box-shadow: none;

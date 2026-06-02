@@ -488,6 +488,15 @@ func hasLeaf(node Node, leafID string) bool {
 	return HasPane(node, leafID) || HasPanel(node, leafID)
 }
 
+// LayoutEmpty reports whether a layout holds no leaves at all — neither terminal
+// panes nor docked panels. A workspace is torn down only when its layout is
+// empty: a panel the user deliberately left behind keeps the workspace alive
+// even after its last terminal closes. Run this on a normalized layout, where
+// orphaned/invalid leaves have already been pruned.
+func LayoutEmpty(node Node) bool {
+	return len(PaneIDs(node)) == 0 && len(PanelIDs(node)) == 0
+}
+
 // findLeaf returns the leaf (pane or panel) with the given id so a move can
 // re-insert it elsewhere with its identity intact — and, for panels, its kind
 // and params. The bool reports whether such a leaf exists. Leaves carry no

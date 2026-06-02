@@ -1007,16 +1007,7 @@ func TestDaemon_PruneSessionsWithoutPTY_RemovesReapedWorkspaceLayout(t *testing.
 	if err := d.store.SaveWorkspaceLayout(workspacelayout.WorkspaceLayout{
 		WorkspaceID:  workspaceID,
 		ActivePaneID: "pane-stale",
-		Layout: workspacelayout.Node{
-			Type:      "split",
-			SplitID:   "split-stale",
-			Direction: workspacelayout.DirectionVertical,
-			Ratio:     workspacelayout.DefaultSplitRatio,
-			Children: []workspacelayout.Node{
-				{Type: "pane", PaneID: "pane-stale"},
-				{Type: "panel", PanelID: markdownPanelID, PanelKind: string(workspacelayout.PanelKindMarkdown), PanelParams: "/tmp/notes.md"},
-			},
-		},
+		Layout:       workspacelayout.DefaultLayout("pane-stale"),
 		Panes: []workspacelayout.Pane{{
 			PaneID:    "pane-stale",
 			RuntimeID: sessionID,
@@ -1043,6 +1034,59 @@ func TestDaemon_PruneSessionsWithoutPTY_RemovesReapedWorkspaceLayout(t *testing.
 	if got := d.store.GetWorkspaceLayout(workspaceID); got != nil {
 		t.Fatalf("store.GetWorkspaceLayout(%q) = %+v, want nil", workspaceID, got)
 	}
+}
+
+// TestDaemon_PruneSessionsWithoutPTY_KeepsPanelOnlyWorkspace is the counterpart
+// to the teardown test above: when a reaped session leaves a docked panel
+// behind, the prune path keeps the workspace alive as a sessionless, panel-only
+// workspace instead of taking the panel down with it.
+func TestDaemon_PruneSessionsWithoutPTY_KeepsPanelOnlyWorkspace(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	workspaceID := "workspace-stale-panel"
+	sessionID := "codex-stale-panel"
+	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: "Stale Panel", Directory: "/tmp/stale-panel"})
+	d.store.Add(&protocol.Session{
+		ID:             sessionID,
+		Label:          sessionID,
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/stale-panel",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+		WorkspaceID:    workspaceID,
+	})
+	d.workspaces.register(workspaceID, "Stale Panel", "/tmp/stale-panel", false)
+	d.workspaces.associateSession(sessionID, workspaceID, sessionID)
+	if err := d.store.SaveWorkspaceLayout(workspacelayout.WorkspaceLayout{
+		WorkspaceID:  workspaceID,
+		ActivePaneID: "pane-stale",
+		Layout: workspacelayout.Node{
+			Type:      "split",
+			SplitID:   "split-stale",
+			Direction: workspacelayout.DirectionVertical,
+			Ratio:     workspacelayout.DefaultSplitRatio,
+			Children: []workspacelayout.Node{
+				{Type: "pane", PaneID: "pane-stale"},
+				{Type: "panel", PanelID: markdownPanelID, PanelKind: string(workspacelayout.PanelKindMarkdown), PanelParams: "/tmp/notes.md"},
+			},
+		},
+		Panes: []workspacelayout.Pane{{
+			PaneID:    "pane-stale",
+			RuntimeID: sessionID,
+			SessionID: sessionID,
+			Kind:      workspacelayout.PaneKindAgent,
+			Title:     workspacelayout.DefaultPaneTitle,
+		}},
+	}); err != nil {
+		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
+	}
+
+	if removed := d.pruneSessionsWithoutPTY(); removed != 1 {
+		t.Fatalf("pruneSessionsWithoutPTY removed = %d, want 1", removed)
+	}
+	assertPanelOnlyWorkspaceAlive(t, d, workspaceID, sessionID)
 }
 
 func TestDaemon_RunDeferredWorkerReconciliationForcesIdleDemotion(t *testing.T) {
