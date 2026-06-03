@@ -41,16 +41,24 @@ function pointer(type: string, clientX: number, clientY: number): Event {
 function spyHandlers(): LeafDragHandlers & {
   previews: Array<DockTarget | null>;
   drops: Array<{ leafId: string; target: DockTarget }>;
+  activations: number;
   cleanups: number;
 } {
   const previews: Array<DockTarget | null> = [];
   const drops: Array<{ leafId: string; target: DockTarget }> = [];
+  let activations = 0;
   let cleanups = 0;
   return {
     previews,
     drops,
+    get activations() {
+      return activations;
+    },
     get cleanups() {
       return cleanups;
+    },
+    onActivate: () => {
+      activations += 1;
     },
     onPreview: (t) => previews.push(t),
     onGhostMove: () => {},
@@ -144,6 +152,76 @@ describe('startLeafDrag — synthesized pointer gesture', () => {
     window.dispatchEvent(pointer('pointerup', 10, 500));
     expect(h.drops).toHaveLength(1);
     expect(h.drops[0].target).toMatchObject({ anchorId: '', edge: 'left' });
+  });
+
+  it('a plain click (press + release in place) never activates, previews, or drops', () => {
+    // Regression: clicking a pane header lands in the workspace top frame; without
+    // an activation threshold the pointerup resolved a 50% container split.
+    const paneBounds = new Map<string, NormalizedPaneBounds>([
+      ['A', bounds(0, 0, 0.5, 1)],
+      ['B', bounds(0.5, 0, 1, 1)],
+    ]);
+    const h = spyHandlers();
+
+    // Press near B's top edge (a header click) and release at the same point.
+    startLeafDrag('B', 750, 2, container, paneBounds, h);
+    window.dispatchEvent(pointer('pointerup', 750, 2));
+
+    expect(h.activations).toBe(0);
+    expect(h.previews).toHaveLength(0);
+    expect(h.drops).toHaveLength(0);
+    expect(h.cleanups).toBe(1);
+  });
+
+  it('a sub-threshold jitter stays a click: no activation, no drop', () => {
+    const paneBounds = new Map<string, NormalizedPaneBounds>([
+      ['A', bounds(0, 0, 0.5, 1)],
+      ['B', bounds(0.5, 0, 1, 1)],
+    ]);
+    const h = spyHandlers();
+
+    startLeafDrag('B', 750, 2, container, paneBounds, h);
+    // Wiggle within the 4px activation threshold, then release.
+    window.dispatchEvent(pointer('pointermove', 752, 3));
+    window.dispatchEvent(pointer('pointerup', 751, 4));
+
+    expect(h.activations).toBe(0);
+    expect(h.previews).toHaveLength(0);
+    expect(h.drops).toHaveLength(0);
+    expect(h.cleanups).toBe(1);
+  });
+
+  it('activates exactly once when the pointer crosses the threshold', () => {
+    const paneBounds = new Map<string, NormalizedPaneBounds>([
+      ['A', bounds(0, 0, 0.5, 1)],
+      ['B', bounds(0.5, 0, 1, 1)],
+    ]);
+    const h = spyHandlers();
+
+    startLeafDrag('A', 250, 500, container, paneBounds, h);
+    window.dispatchEvent(pointer('pointermove', 400, 500));
+    window.dispatchEvent(pointer('pointermove', 900, 500));
+    expect(h.activations).toBe(1);
+
+    window.dispatchEvent(pointer('pointerup', 900, 500));
+    expect(h.drops).toHaveLength(1);
+  });
+
+  it('drops on a fast drag whose move events were coalesced (up past threshold)', () => {
+    // No intervening pointermove: the gesture never activated, but the pointer
+    // clearly travelled, so pointerup still resolves the drop.
+    const paneBounds = new Map<string, NormalizedPaneBounds>([
+      ['A', bounds(0, 0, 0.5, 1)],
+      ['B', bounds(0.5, 0, 1, 1)],
+    ]);
+    const h = spyHandlers();
+
+    startLeafDrag('A', 250, 500, container, paneBounds, h);
+    window.dispatchEvent(pointer('pointerup', 900, 500));
+
+    expect(h.activations).toBe(0);
+    expect(h.drops).toHaveLength(1);
+    expect(h.drops[0].target).toMatchObject({ anchorId: 'B', edge: 'right' });
   });
 
   it('pointercancel ends the gesture without a drop', () => {
