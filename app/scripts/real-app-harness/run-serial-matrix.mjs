@@ -41,6 +41,11 @@ const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-workspace-close-one-session-keeps-selection'],
   },
   {
+    id: 'tile-only-workspace-select',
+    label: 'Tile-only workspace select + render',
+    command: ['pnpm', 'run', 'real-app:scenario-tile-only-workspace-select'],
+  },
+  {
     id: 'autoclose-on-exit',
     label: 'Auto-close on clean exit, keep failed exits',
     command: ['pnpm', 'run', 'real-app:scenario-autoclose-on-exit'],

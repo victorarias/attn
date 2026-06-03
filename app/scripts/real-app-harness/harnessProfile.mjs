@@ -31,6 +31,14 @@ export function defaultDaemonPortForProfile(profile = currentHarnessProfile()) {
   return profile === 'dev' ? 29849 : 9849;
 }
 
+// Unix socket the `attn` CLI talks to for the active profile. Dev keeps its
+// state under ~/.attn-dev/; prod under ~/.attn/. Pass this as ATTN_SOCKET_PATH
+// when driving the CLI (e.g. `attn open`) against the harness daemon.
+export function socketPathForProfile(profile = currentHarnessProfile()) {
+  const dir = profile === 'dev' ? '.attn-dev' : '.attn';
+  return path.join(os.homedir(), dir, 'attn.sock');
+}
+
 export function defaultWSURLForProfile(profile = currentHarnessProfile()) {
   return `ws://127.0.0.1:${defaultDaemonPortForProfile(profile)}/ws`;
 }

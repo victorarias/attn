@@ -56,4 +56,50 @@ describe('buildWorkspaceSelectionState', () => {
       'workspace-a': 'a1',
     });
   });
+
+  it('activates a sessionless workspace by id when no session can reach it', () => {
+    const selection = buildWorkspaceSelectionState({
+      workspaces: [workspace('workspace-a', ['a1']), workspace('tiles-only', [])],
+      activeSessionId: null,
+      selectedWorkspaceId: 'tiles-only',
+    });
+
+    expect(selection.activeWorkspaceId).toBe('tiles-only');
+    // The tile-only workspace has no session to focus.
+    expect(selection.focusedSessionIdByWorkspace).toEqual({
+      'workspace-a': 'a1',
+    });
+  });
+
+  it('lets an explicitly selected sessionless workspace win over a stale active session', () => {
+    const selection = buildWorkspaceSelectionState({
+      workspaces: [workspace('workspace-a', ['a1']), workspace('tiles-only', [])],
+      // A session elsewhere is still the "active session" in the background.
+      activeSessionId: 'a1',
+      selectedWorkspaceId: 'tiles-only',
+    });
+
+    expect(selection.activeWorkspaceId).toBe('tiles-only');
+  });
+
+  it('ignores a selected workspace that gained sessions and falls back to the active session', () => {
+    const selection = buildWorkspaceSelectionState({
+      workspaces: [workspace('workspace-a', ['a1']), workspace('was-tiles-only', ['x1'])],
+      activeSessionId: 'a1',
+      // Stale selection from when 'was-tiles-only' had no sessions.
+      selectedWorkspaceId: 'was-tiles-only',
+    });
+
+    expect(selection.activeWorkspaceId).toBe('workspace-a');
+  });
+
+  it('ignores a selected workspace that no longer exists', () => {
+    const selection = buildWorkspaceSelectionState({
+      workspaces: [workspace('workspace-a', ['a1'])],
+      activeSessionId: 'a1',
+      selectedWorkspaceId: 'deleted-workspace',
+    });
+
+    expect(selection.activeWorkspaceId).toBe('workspace-a');
+  });
 });

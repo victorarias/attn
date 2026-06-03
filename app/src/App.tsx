@@ -31,7 +31,7 @@ import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, Daemon
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
-import { hasPane, type TerminalSplitDirection } from './types/workspace';
+import { hasPane, workspaceSnapshotFromDaemonWorkspace, type TerminalSplitDirection } from './types/workspace';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -740,6 +740,18 @@ sendFetchPRDetails,
     syncFromDaemonSessions,
     syncFromDaemonWorkspaces,
   } = useSessionStore();
+
+  // Explicit selection of a sessionless (tile-only) workspace. The selection
+  // model is otherwise session-centric — the active workspace is derived from
+  // the active session — but a tile-only workspace has no session to activate
+  // through, so it needs its own selection anchor. Cleared whenever a session is
+  // selected; the selection controller also ignores it once the workspace gains
+  // sessions or disappears.
+  const [selectedSessionlessWorkspaceId, setSelectedSessionlessWorkspaceId] = useState<string | null>(null);
+  // handleSelectWorkspace is defined far below (it depends on the workspace view
+  // models); the automation bridge above it reaches the live handler through
+  // this ref so test scenarios can select a workspace by id.
+  const selectWorkspaceRef = useRef<(workspaceId: string) => void>(() => {});
 
   const rollbackSessionCreation = useCallback(async ({
     sessionId,
@@ -1788,6 +1800,7 @@ sendFetchPRDetails,
 
   const handleSelectSession = useCallback(
     (id: string) => {
+      setSelectedSessionlessWorkspaceId(null);
       const session = sessions.find((entry) => entry.id === id);
       const sessionPane = session?.workspace.agents.find((pane) => pane.sessionId === id);
       if (sessionPane) {
@@ -1807,6 +1820,7 @@ sendFetchPRDetails,
     getActivePaneIdForSession,
     createSession: createWorkspaceSession,
     selectSession: handleSelectSession,
+    selectWorkspace: (workspaceId: string) => selectWorkspaceRef.current(workspaceId),
     closeSession: handleCloseSession,
     reloadSession,
     setSetting: sendSetSetting,
@@ -2042,8 +2056,31 @@ sendFetchPRDetails,
     ),
     [workspaceViews, showSessionlessWorkspaces],
   );
-  const workspaceSelection = useWorkspaceSelectionController(workspaceViews, activeSessionId);
+  const workspaceSelection = useWorkspaceSelectionController(
+    workspaceViews,
+    activeSessionId,
+    selectedSessionlessWorkspaceId,
+  );
   const activeWorkspaceId = workspaceSelection.activeWorkspaceId;
+
+  // Renderable terminal state for tile-only workspaces, built straight from the
+  // daemon's broadcast layout (which keeps the docked tile after the last
+  // terminal closes). The session-derived path can't produce this — there is no
+  // session to carry the layout — so the render loop falls back to this map for
+  // any workspace whose layout has tiles and zero agent panes.
+  const sessionlessWorkspaceStateById = useMemo(() => {
+    const map = new Map<string, TerminalWorkspaceState>();
+    for (const workspace of daemonWorkspaces) {
+      if (!workspace.layout) {
+        continue;
+      }
+      const { workspace: state } = workspaceSnapshotFromDaemonWorkspace(workspace.layout);
+      if (state.layoutTree && state.agents.length === 0) {
+        map.set(workspace.id, state);
+      }
+    }
+    return map;
+  }, [daemonWorkspaces]);
 
   // Markdown tiles are daemon-owned docked tiles opened via `attn open <path>`
   // (and re-dockable by dragging). There is no empty "show tile" toggle: a
@@ -2059,13 +2096,23 @@ sendFetchPRDetails,
     (workspaceId: string) => {
       const workspace = sidebarWorkspaceViews.find((entry) => entry.id === workspaceId)
         || workspaceViews.find((entry) => entry.id === workspaceId);
-      const sessionId = workspace?.firstSessionId;
+      if (!workspace) {
+        return;
+      }
+      const sessionId = workspace.firstSessionId;
       if (sessionId) {
         handleSelectSession(sessionId);
+        return;
       }
+      // Tile-only workspace: activate it by id (it has no session to route
+      // through) and surface the terminal view so its docked layout renders.
+      setSelectedSessionlessWorkspaceId(workspace.id);
+      setView('session');
+      setUtilityFocusRequestToken((token) => token + 1);
     },
-    [handleSelectSession, sidebarWorkspaceViews, workspaceViews],
+    [handleSelectSession, setView, sidebarWorkspaceViews, workspaceViews],
   );
+  selectWorkspaceRef.current = handleSelectWorkspace;
 
   const handleSelectWorkspaceByIndex = useCallback(
     (index: number) => {
@@ -2654,7 +2701,9 @@ sendFetchPRDetails,
         <div className="terminal-pane">
           <div className="terminal-main-area">
             {workspaceViews.map((workspace) => {
-              const workspaceState = terminalStateForWorkspaceSessions(workspace.sessions);
+              const workspaceState = terminalStateForWorkspaceSessions(workspace.sessions)
+                ?? sessionlessWorkspaceStateById.get(workspace.id)
+                ?? null;
               if (!workspaceState) {
                 return null;
               }

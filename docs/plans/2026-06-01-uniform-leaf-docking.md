@@ -224,7 +224,17 @@ so a revert doesn't drag the docking UX with it.
 - [x] Updated `docs/decisions/2026-05-31-docked-tiles.md` to last-leaf teardown.
 - [x] Daemon protocol tests model the real app flow (close last pane / reap / startup) per `internal/daemon/CLAUDE.md`; frontend tests cover the reveal toggle, neutral indicator, and persistence.
 
-Deferred to a small follow-up (cosmetic, fully separable from lifecycle):
+### PR C — Tile-only workspace selection + render ✅
+PR B kept the workspace **entity** alive but left the frontend unable to reach it:
+selection was session-centric, so a sessionless workspace could neither be
+activated nor rendered. (This was mislabeled "cosmetic" below — it was a real
+gap; figgy was right.)
+- [x] `useWorkspaceSelectionController` takes an optional `selectedWorkspaceId`; `activeWorkspaceId` resolves to a selected workspace **only when it is sessionless** (exists + 0 sessions), else the session-derived workspace. A stale/grown selection can never shadow real sessions. Unit tests cover select-by-id, win-over-stale-session, ignore-grew-sessions, ignore-deleted.
+- [x] App owns a `selectedSessionlessWorkspaceId`; `handleSelectWorkspace` activates a tile-only workspace by id (+ `setView('session')`), and `handleSelectSession` clears it so the two selection modes are mutually exclusive.
+- [x] Render loop builds a `TerminalWorkspaceState` for zero-session workspaces straight from the daemon's broadcast layout (`workspaceSnapshotFromDaemonWorkspace`, fallback only when no session carries the layout). `SessionTerminalWorkspace` already renders a tiles-only tree (no agent panes) — no component change needed.
+- [x] Tests: controller unit + `SessionTerminalWorkspace.tileOnly` render test + `App.sessionlessWorkspace` integration (reveal→select→active+tile). Real-app harness scenario `tile-only-workspace-select` (dock tile via `attn open`, close last pane, select by id, assert active + tile rendered) added to the serial matrix. New automation verbs `select_workspace` / `get_workspace_ui_state` mirror the sidebar/⌘1–9 path (no daemon protocol change).
+
+Deferred to a small follow-up (genuinely cosmetic):
 - [ ] Tile header title from content: markdown H1 → beginning of text → basename fallback (`WorkspaceDockTile.tsx:237`). A sessionless workspace already renders fine; the tile just shows its basename until this lands.
 - [ ] Focus a tile on select for fully tile-only workspaces (extend the AGENTS.md terminal-focus rule with a "no terminal" branch). Tiles are not interactive focus targets today; selection renders the layout without stealing focus, which is acceptable for v1.
 
