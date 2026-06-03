@@ -90,6 +90,10 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   endpoints?: GeneratedEndpoint[];
   workspace?: GeneratedWorkspaceSnapshot;
   workspace_id?: string;
+  source_workspace_id?: string;
+  target_workspace_id?: string;
+  leaf_id?: string;
+  final_leaf_id?: string;
   split_id?: string;
   tile_id?: string;
   data?: string;
@@ -153,7 +157,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '79';
+const PROTOCOL_VERSION = '80';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -277,6 +281,7 @@ interface ReviewLoopActionResult {
 interface WorkspaceActionResult {
   success: boolean;
   error?: string;
+  final_leaf_id?: string;
 }
 
 export interface ReviewState {
@@ -456,7 +461,12 @@ function upsertWorkspaceByID(workspaces: DaemonWorkspace[], workspace: DaemonWor
     return [...workspaces, workspace];
   }
   const updated = [...workspaces];
-  updated[index] = workspace;
+  const existing = updated[index];
+  updated[index] = {
+    ...existing,
+    ...workspace,
+    layout: workspace.layout ?? existing.layout,
+  };
   return updated;
 }
 
@@ -1067,13 +1077,13 @@ export function useDaemonSocket({
             }
             const action = data.action;
             const workspaceId = data.workspace_id;
-            const entityId = data.pane_id || data.split_id || data.tile_id;
+            const entityId = data.leaf_id || data.pane_id || data.split_id || data.tile_id;
             const key = workspaceActionKey(action, workspaceId, entityId, data.request_id);
             const pending = pendingActionsRef.current.get(key);
             if (pending) {
               pendingActionsRef.current.delete(key);
               if (data.success) {
-                pending.resolve({ success: true });
+                pending.resolve({ success: true, final_leaf_id: data.final_leaf_id });
               } else {
                 pending.reject(new Error(data.error || 'Workspace action failed'));
               }
@@ -2289,6 +2299,28 @@ export function useDaemonSocket({
         leaf_id: leafId,
         anchor_id: options.anchorId ?? '',
         edge: options.edge ?? 'right',
+        ...(options.ratio != null ? { ratio: options.ratio } : {}),
+      },
+      leafId,
+    );
+  }, [sendWorkspaceCommand]);
+
+  const sendWorkspaceMoveLeafToWorkspace = useCallback((
+    sourceWorkspaceId: string,
+    targetWorkspaceId: string,
+    leafId: string,
+    options: { anchorId?: string; edge?: TerminalDockEdge; ratio?: number } = {},
+  ) => {
+    return sendWorkspaceCommand(
+      'workspace_layout_move_leaf_to_workspace',
+      sourceWorkspaceId,
+      {
+        cmd: 'workspace_layout_move_leaf_to_workspace',
+        source_workspace_id: sourceWorkspaceId,
+        target_workspace_id: targetWorkspaceId,
+        leaf_id: leafId,
+        anchor_id: options.anchorId ?? '',
+        edge: options.edge ?? 'left',
         ...(options.ratio != null ? { ratio: options.ratio } : {}),
       },
       leafId,
@@ -3605,6 +3637,7 @@ export function useDaemonSocket({
     sendWorkspaceSetSplitRatio,
     sendWorkspaceUndockTile,
     sendWorkspaceMoveLeaf,
+    sendWorkspaceMoveLeafToWorkspace,
     tileContents,
     requestTileContent,
     sendRuntimeInput: sendPtyInput,

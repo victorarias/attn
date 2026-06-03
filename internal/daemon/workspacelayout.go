@@ -187,6 +187,23 @@ func (d *Daemon) sendWorkspaceLayoutTileActionResult(client *wsClient, action, w
 	d.sendToClient(client, result)
 }
 
+func (d *Daemon) sendWorkspaceLayoutMoveToWorkspaceResult(client *wsClient, sourceWorkspaceID, targetWorkspaceID, leafID, finalLeafID string, err error) {
+	result := protocol.WorkspaceLayoutActionResultMessage{
+		Event:             protocol.EventWorkspaceLayoutActionResult,
+		Action:            protocol.CmdWorkspaceLayoutMoveLeafToWorkspace,
+		WorkspaceID:       sourceWorkspaceID,
+		SourceWorkspaceID: protocol.Ptr(strings.TrimSpace(sourceWorkspaceID)),
+		TargetWorkspaceID: protocol.Ptr(strings.TrimSpace(targetWorkspaceID)),
+		LeafID:            protocol.Ptr(strings.TrimSpace(leafID)),
+		FinalLeafID:       protocol.Ptr(strings.TrimSpace(finalLeafID)),
+		Success:           err == nil,
+	}
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, result)
+}
+
 func (d *Daemon) broadcastWorkspaceLayoutUpdated(workspaceID string) {
 	snapshot, err := d.protocolWorkspaceLayout(workspaceID)
 	if err != nil {
@@ -488,6 +505,11 @@ func (d *Daemon) handleWorkspaceLayoutMoveLeaf(client *wsClient, msg *protocol.W
 	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutMoveLeaf, msg.WorkspaceID, protocol.Ptr(strings.TrimSpace(msg.LeafID)), err)
 }
 
+func (d *Daemon) handleWorkspaceLayoutMoveLeafToWorkspace(client *wsClient, msg *protocol.WorkspaceLayoutMoveLeafToWorkspaceMessage) {
+	finalLeafID, err := d.moveLeafToWorkspace(msg.SourceWorkspaceID, msg.TargetWorkspaceID, msg.LeafID, protocol.Deref(msg.AnchorID), msg.Edge, msg.Ratio)
+	d.sendWorkspaceLayoutMoveToWorkspaceResult(client, msg.SourceWorkspaceID, msg.TargetWorkspaceID, msg.LeafID, finalLeafID, err)
+}
+
 // moveLeaf relocates an existing leaf (terminal pane or docked tile) within a
 // workspace layout and persists it. An empty anchorID docks the leaf against the
 // whole workspace (the root). edge picks the split direction and side; ratio is
@@ -535,6 +557,172 @@ func (d *Daemon) moveLeaf(workspaceID, leafID, anchorID string, edge protocol.Wo
 	}
 	d.broadcastWorkspaceLayoutUpdated(workspaceID)
 	return nil
+}
+
+func (d *Daemon) moveLeafToWorkspace(sourceWorkspaceID, targetWorkspaceID, leafID, anchorID string, edge protocol.WorkspaceLayoutDockEdge, ratio *float64) (string, error) {
+	sourceWorkspaceID = strings.TrimSpace(sourceWorkspaceID)
+	targetWorkspaceID = strings.TrimSpace(targetWorkspaceID)
+	leafID = strings.TrimSpace(leafID)
+	anchorID = strings.TrimSpace(anchorID)
+	if sourceWorkspaceID == "" || targetWorkspaceID == "" {
+		return "", fmt.Errorf("source_workspace_id and target_workspace_id are required")
+	}
+	if leafID == "" {
+		return "", fmt.Errorf("leaf_id is required")
+	}
+	if sourceWorkspaceID == targetWorkspaceID {
+		if err := d.moveLeaf(sourceWorkspaceID, leafID, anchorID, edge, ratio); err != nil {
+			return "", err
+		}
+		return leafID, nil
+	}
+
+	source, err := d.ensureWorkspaceLayout(sourceWorkspaceID)
+	if err != nil {
+		return "", err
+	}
+	target, err := d.currentOrEmptyWorkspaceLayout(targetWorkspaceID)
+	if err != nil {
+		return "", err
+	}
+
+	var movedPane *workspacelayout.Pane
+	for i := range source.Panes {
+		if source.Panes[i].PaneID == leafID {
+			pane := source.Panes[i]
+			movedPane = &pane
+			break
+		}
+	}
+	if movedPane != nil {
+		for _, pane := range target.Panes {
+			if pane.SessionID != "" && pane.SessionID == movedPane.SessionID {
+				return "", fmt.Errorf("target workspace already has session: %s", movedPane.SessionID)
+			}
+		}
+	}
+
+	direction, before := dockEdgeToSplit(edge)
+	leafFraction := workspacelayout.DefaultSplitRatio
+	if ratio != nil && *ratio > 0 && *ratio < 1 {
+		leafFraction = *ratio
+	}
+	childZeroRatio := leafFraction
+	if !before {
+		childZeroRatio = 1 - leafFraction
+	}
+
+	move, ok := workspacelayout.MoveLeafBetweenLayouts(
+		source.Layout,
+		target.Layout,
+		leafID,
+		anchorID,
+		newWorkspaceLayoutEntityID("split"),
+		direction,
+		before,
+		childZeroRatio,
+		newWorkspaceLayoutEntityID("leaf"),
+	)
+	if !ok {
+		return "", fmt.Errorf("could not move leaf: %s", leafID)
+	}
+
+	source.Layout = move.SourceLayout
+	target.Layout = move.TargetLayout
+	if movedPane != nil {
+		nextSourcePanes := make([]workspacelayout.Pane, 0, len(source.Panes)-1)
+		for _, pane := range source.Panes {
+			if pane.PaneID == movedPane.PaneID {
+				continue
+			}
+			nextSourcePanes = append(nextSourcePanes, pane)
+		}
+		movedPane.PaneID = move.FinalLeafID
+		target.Panes = append(target.Panes, *movedPane)
+		source.Panes = nextSourcePanes
+		target.ActivePaneID = movedPane.PaneID
+	}
+
+	sourceNormalized := workspacelayout.NormalizeWorkspaceLayout(*source)
+	targetNormalized := workspacelayout.NormalizeWorkspaceLayout(*target)
+	sourceEmpty := workspacelayout.LayoutEmpty(sourceNormalized.Layout)
+
+	if err := d.store.SaveWorkspaceLayout(targetNormalized); err != nil {
+		return "", err
+	}
+	if sourceEmpty {
+		d.store.RemoveWorkspaceLayout(sourceWorkspaceID)
+	} else if err := d.store.SaveWorkspaceLayout(sourceNormalized); err != nil {
+		return "", err
+	}
+
+	// Broadcast layout changes before changing session ownership. The frontend
+	// filters visible sessions through workspace layouts, so the opposite order
+	// creates a transient state where the moved session belongs to the target
+	// workspace but the target layout snapshot does not include it yet.
+	d.broadcastWorkspaceLayoutUpdated(targetWorkspaceID)
+	if !sourceEmpty {
+		d.broadcastWorkspaceLayoutUpdated(sourceWorkspaceID)
+	}
+
+	if movedPane != nil && movedPane.SessionID != "" {
+		if d.workspaces != nil {
+			d.workspaces.associateSession(movedPane.SessionID, targetWorkspaceID, movedPane.Title)
+		}
+		d.store.AssignSessionWorkspace(movedPane.SessionID, targetWorkspaceID)
+		if session := d.store.Get(movedPane.SessionID); session != nil {
+			d.wsHub.Broadcast(&protocol.WebSocketEvent{
+				Event:   protocol.EventSessionStateChanged,
+				Session: d.sessionForBroadcast(session),
+			})
+		}
+	}
+
+	if sourceEmpty {
+		d.unregisterWorkspaceIfEmptyAfterMove(sourceWorkspaceID)
+	} else {
+		d.recomputeAndBroadcastWorkspace(sourceWorkspaceID)
+	}
+	d.recomputeAndBroadcastWorkspace(targetWorkspaceID)
+	return move.FinalLeafID, nil
+}
+
+func (d *Daemon) unregisterWorkspaceIfEmptyAfterMove(workspaceID string) {
+	if d.workspaces == nil {
+		return
+	}
+	if len(d.workspaces.sessionIDs(workspaceID)) > 0 || d.workspaceLayoutHasTiles(workspaceID) {
+		d.recomputeAndBroadcastWorkspace(workspaceID)
+		return
+	}
+	snapshot, removed := d.workspaces.unregister(workspaceID)
+	if !removed {
+		return
+	}
+	d.store.RemoveWorkspace(workspaceID)
+	d.pruneTileContentSubscriptionsForLayout(workspaceID, nil)
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:     protocol.EventWorkspaceUnregistered,
+		Workspace: &snapshot,
+	})
+}
+
+func (d *Daemon) recomputeAndBroadcastWorkspace(workspaceID string) {
+	if d.workspaces == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	updated, changed := d.recomputeWorkspaceStatus(workspaceID)
+	if !changed {
+		var ok bool
+		updated, ok = d.workspaces.snapshot(workspaceID)
+		if !ok {
+			return
+		}
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:     protocol.EventWorkspaceStateChanged,
+		Workspace: &updated,
+	})
 }
 
 func (d *Daemon) handleWorkspaceLayoutAddSessionPane(client *wsClient, msg *protocol.WorkspaceLayoutAddSessionPaneMessage) {

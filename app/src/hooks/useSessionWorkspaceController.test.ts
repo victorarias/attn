@@ -130,6 +130,7 @@ describe('useSessionWorkspaceController', () => {
         injectPaneBytes: vi.fn(async () => true),
         injectPaneBase64: vi.fn(async () => true),
         drainPaneTerminal: vi.fn(async () => true),
+        getLeafDropSnapshot: vi.fn(() => null),
       });
     });
 
@@ -163,6 +164,7 @@ describe('useSessionWorkspaceController', () => {
         injectPaneBytes: vi.fn(async () => true),
         injectPaneBase64: vi.fn(async () => true),
         drainPaneTerminal: vi.fn(async () => true),
+        getLeafDropSnapshot: vi.fn(() => null),
       });
     });
 
@@ -196,6 +198,7 @@ describe('useSessionWorkspaceController', () => {
         injectPaneBytes: vi.fn(async () => true),
         injectPaneBase64: vi.fn(async () => true),
         drainPaneTerminal: vi.fn(async () => true),
+        getLeafDropSnapshot: vi.fn(() => null),
       });
       result.current.focusSessionPane('session-1', SESSION_PANE_ID);
     });

@@ -185,6 +185,8 @@
   margin-bottom: 8px;
   border-radius: 8px;
   border: 1px solid transparent;
+  position: relative;
+  overflow: hidden;
 }
 
 .workspace-group.selected {
@@ -194,6 +196,39 @@
 .sidebar--display-boxed .workspace-group.selected {
   border-color: rgba(255, 255, 255, 0.12);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.workspace-group--drag-target {
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.workspace-group--drag-disabled {
+  opacity: 0.45;
+}
+
+.workspace-group--drag-entering {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.workspace-group--drag-entering::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--accent);
+  transform-origin: top;
+  animation: workspace-drag-enter 320ms ease-out both;
+}
+
+@keyframes workspace-drag-enter {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
 }
 
 .workspace-group-header {

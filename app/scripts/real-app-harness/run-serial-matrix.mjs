@@ -31,6 +31,11 @@ const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-workspace-switching'],
   },
   {
+    id: 'workspace-move-leaf',
+    label: 'Workspace move pane between workspaces',
+    command: ['pnpm', 'run', 'real-app:scenario-workspace-move-leaf'],
+  },
+  {
     id: 'workspace-close-last-session-switches-back',
     label: 'Workspace close last session switches back',
     command: ['pnpm', 'run', 'real-app:scenario-workspace-close-last-session-switches-back'],

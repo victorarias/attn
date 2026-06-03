@@ -19,6 +19,11 @@ export interface LeafDragHandlers {
   onCleanup: () => void;
 }
 
+export interface LeafDropSnapshot {
+  container: HTMLElement;
+  paneBounds: Map<string, NormalizedPaneBounds>;
+}
+
 // startLeafDrag registers window listeners for one drag and returns a teardown
 // fn (also invoked internally on drop/cancel). The dragged leaf is excluded from
 // the drop targets, so hovering it previews nothing — a self-drop no-op.
@@ -29,23 +34,30 @@ export function startLeafDrag(
   container: HTMLElement,
   paneBounds: Map<string, NormalizedPaneBounds>,
   handlers: LeafDragHandlers,
+  getDropSnapshot?: () => LeafDropSnapshot | null,
 ): () => void {
-  const containerRect = container.getBoundingClientRect();
-  const leafRects: Array<{ leafId: string; bounds: NormalizedPaneBounds }> = [];
-  const allBounds: NormalizedPaneBounds[] = [];
-  for (const [slotId, bounds] of paneBounds) {
-    allBounds.push(bounds);
-    if (slotId !== leafId) {
-      leafRects.push({ leafId: slotId, bounds });
+  const fallbackSnapshot = { container, paneBounds };
+
+  const computeTarget = (x: number, y: number): DockTarget | null => {
+    const snapshot = getDropSnapshot?.() ?? fallbackSnapshot;
+    const containerRect = snapshot.container.getBoundingClientRect();
+    const leafRects: Array<{ leafId: string; bounds: NormalizedPaneBounds }> = [];
+    const allBounds: NormalizedPaneBounds[] = [];
+    for (const [slotId, bounds] of snapshot.paneBounds) {
+      allBounds.push(bounds);
+      if (slotId !== leafId) {
+        leafRects.push({ leafId: slotId, bounds });
+      }
     }
-  }
-  const containerSides = computeContainerSides(allBounds);
+    const containerSides = computeContainerSides(allBounds);
+    return computeDockTarget(x, y, containerRect, leafRects, containerSides);
+  };
 
   handlers.onGhostMove(clientX, clientY);
 
   const onMove = (ev: PointerEvent) => {
     handlers.onGhostMove(ev.clientX, ev.clientY);
-    handlers.onPreview(computeDockTarget(ev.clientX, ev.clientY, containerRect, leafRects, containerSides));
+    handlers.onPreview(computeTarget(ev.clientX, ev.clientY));
   };
   const teardown = () => {
     window.removeEventListener('pointermove', onMove);
@@ -55,7 +67,7 @@ export function startLeafDrag(
     handlers.onCleanup();
   };
   const onUp = (ev: PointerEvent) => {
-    const finalTarget = computeDockTarget(ev.clientX, ev.clientY, containerRect, leafRects, containerSides);
+    const finalTarget = computeTarget(ev.clientX, ev.clientY);
     teardown();
     if (finalTarget) {
       handlers.onDrop(leafId, finalTarget);

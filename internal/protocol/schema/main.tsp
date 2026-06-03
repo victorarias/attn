@@ -873,6 +873,21 @@ model WorkspaceLayoutMoveLeafMessage {
   ratio?: float64;
 }
 
+// Move an existing leaf from one workspace layout into another workspace layout.
+// source_workspace_id and target_workspace_id must be owned by the same daemon
+// endpoint; live terminal runtimes are not migrated between endpoints. If the
+// target already contains the moved leaf id, the daemon assigns a fresh suffix
+// and reports final_leaf_id in the action result.
+model WorkspaceLayoutMoveLeafToWorkspaceMessage {
+  cmd: "workspace_layout_move_leaf_to_workspace";
+  source_workspace_id: string;
+  target_workspace_id: string;
+  leaf_id: string;
+  anchor_id?: string;
+  edge: WorkspaceLayoutDockEdge;
+  ratio?: float64;
+}
+
 // Request the current rendered content of a docked tile (e.g. the markdown
 // file a markdown tile points at). The daemon resolves the file from the
 // tile's persisted params, reads it, and replies with WorkspaceTileContentMessage.
@@ -996,6 +1011,10 @@ model WorkspaceLayoutActionResultMessage {
   event: "workspace_layout_action_result";
   action: string;
   workspace_id: string;
+  source_workspace_id?: string;
+  target_workspace_id?: string;
+  leaf_id?: string;
+  final_leaf_id?: string;
   pane_id?: string;
   split_id?: string;
   tile_id?: string;

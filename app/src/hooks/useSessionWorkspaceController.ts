@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react';
 import type { Session } from '../store/sessions';
 import type { SessionTerminalWorkspaceHandle } from '../components/SessionTerminalWorkspace';
+import type { LeafDropSnapshot } from '../components/SessionTerminalWorkspace/leafDrag';
 import { usePaneRuntimeEventRouter } from '../components/SessionTerminalWorkspace/paneRuntimeEventRouter';
 import { useSessionWorkspaceViewState } from './useSessionWorkspaceViewState';
 import { useWorkspaceDebugHarness } from './useWorkspaceDebugHarness';
@@ -21,6 +22,7 @@ interface SessionWorkspaceController {
   clearPreparedClosePaneFocus: (sessionId: string) => void;
   setWorkspaceRef: (workspaceId: string) => (ref: SessionTerminalWorkspaceHandle | null) => void;
   removeWorkspaceRef: (workspaceId: string) => void;
+  getWorkspaceLeafDropSnapshot: (workspaceId: string | null | undefined) => LeafDropSnapshot | null;
   focusSessionPane: (sessionId: string, paneId: string, retries?: number) => void;
   typeInSessionPaneViaUI: (sessionId: string, paneId: string, text: string) => boolean;
   isSessionPaneInputFocused: (sessionId: string, paneId: string) => boolean;
@@ -74,6 +76,10 @@ export function useSessionWorkspaceController(
   const removeWorkspaceRef = useCallback((workspaceId: string) => {
     workspaceRefs.current.delete(workspaceId);
   }, []);
+
+  const getWorkspaceLeafDropSnapshot = useCallback((workspaceId: string | null | undefined) => (
+    workspaceId ? workspaceRefs.current.get(workspaceId)?.getLeafDropSnapshot() ?? null : null
+  ), []);
 
   const prepareClosePaneFocus = useCallback((sessionId: string, paneId: string) => {
     const session = sessions.find((entry) => entry.id === sessionId);
@@ -157,6 +163,7 @@ export function useSessionWorkspaceController(
     clearPreparedClosePaneFocus,
     setWorkspaceRef,
     removeWorkspaceRef,
+    getWorkspaceLeafDropSnapshot,
     focusSessionPane,
     typeInSessionPaneViaUI,
     isSessionPaneInputFocused,

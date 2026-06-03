@@ -918,6 +918,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkspaceLayoutUndockTile(client, msg.(*protocol.WorkspaceLayoutUndockTileMessage))
 	case protocol.CmdWorkspaceLayoutMoveLeaf:
 		d.handleWorkspaceLayoutMoveLeaf(client, msg.(*protocol.WorkspaceLayoutMoveLeafMessage))
+	case protocol.CmdWorkspaceLayoutMoveLeafToWorkspace:
+		d.handleWorkspaceLayoutMoveLeafToWorkspace(client, msg.(*protocol.WorkspaceLayoutMoveLeafToWorkspaceMessage))
 	case protocol.CmdWorkspaceTileContentGet:
 		d.handleWorkspaceTileContentGet(client, msg.(*protocol.WorkspaceTileContentGetMessage))
 	case protocol.CmdRegisterWorkspace:
@@ -1103,6 +1105,10 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 	case protocol.CmdWorkspaceLayoutMoveLeaf:
 		if typed, ok := msg.(*protocol.WorkspaceLayoutMoveLeafMessage); ok {
 			return typed.WorkspaceID
+		}
+	case protocol.CmdWorkspaceLayoutMoveLeafToWorkspace:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutMoveLeafToWorkspaceMessage); ok {
+			return typed.SourceWorkspaceID
 		}
 	case protocol.CmdWorkspaceTileContentGet:
 		if typed, ok := msg.(*protocol.WorkspaceTileContentGetMessage); ok {

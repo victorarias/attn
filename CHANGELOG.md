@@ -28,6 +28,9 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 
 ## [2026-06-03]
 
+### Added
+- **Move panes and tiles between workspaces.** Drag a pane or docked tile toward another workspace in the sidebar to switch to it, then drop on the target layout for exact placement. Dropping directly on the sidebar workspace moves it to the left side of that workspace.
+
 ### Changed
 - **Docked tiles read a little nicer.** A markdown tile's header now shows the document's title (its first heading) rather than the file name, falling back to the file name when there's no heading. And when you open a tile-only workspace, the keyboard lands on the tile right away, so the arrow keys scroll it without an extra click.
 

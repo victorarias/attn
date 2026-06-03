@@ -147,6 +147,28 @@ func TestMoveLeafMovesTilePreservingKindAndParams(t *testing.T) {
 	}
 }
 
+func TestMoveLeafBetweenLayoutsRenamesConflictingTileID(t *testing.T) {
+	source := Node{Type: "tile", TileID: "md", TileKind: string(TileKindMarkdown), TileParams: "/source.md"}
+	target := Node{Type: "tile", TileID: "md", TileKind: string(TileKindMarkdown), TileParams: "/target.md"}
+
+	moved, ok := MoveLeafBetweenLayouts(source, target, "md", "", "split-x", DirectionVertical, true, 0.32, "abc123")
+	if !ok {
+		t.Fatal("MoveLeafBetweenLayouts did not move conflicting tile")
+	}
+	if !LayoutEmpty(moved.SourceLayout) {
+		t.Fatalf("source layout = %+v, want empty after moving only tile", moved.SourceLayout)
+	}
+	if moved.FinalLeafID != "md-abc123" {
+		t.Fatalf("FinalLeafID = %q, want md-abc123", moved.FinalLeafID)
+	}
+	if ids := TileIDs(moved.TargetLayout); len(ids) != 2 || !slices.Contains(ids, "md") || !slices.Contains(ids, "md-abc123") {
+		t.Fatalf("target tile ids = %v, want original and renamed tile", ids)
+	}
+	if params, ok := TileParamsByID(moved.TargetLayout, "md-abc123"); !ok || params != "/source.md" {
+		t.Fatalf("renamed tile params = (%q, %v), want /source.md,true", params, ok)
+	}
+}
+
 func TestMoveLeafCollapsesSourceSplitWhenNested(t *testing.T) {
 	// a | (b / c). Move c next to a; the right column collapses to bare b.
 	tree := Node{

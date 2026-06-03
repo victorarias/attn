@@ -187,6 +187,30 @@ func TestParseWorkspaceLayoutUndockTile(t *testing.T) {
 	}
 }
 
+func TestParseWorkspaceLayoutMoveLeafToWorkspace(t *testing.T) {
+	input := `{"cmd":"workspace_layout_move_leaf_to_workspace","source_workspace_id":"ws1","target_workspace_id":"ws2","leaf_id":"pane-a","anchor_id":"pane-b","edge":"left","ratio":0.32}`
+	cmd, data, err := ParseMessage([]byte(input))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if cmd != CmdWorkspaceLayoutMoveLeafToWorkspace {
+		t.Fatalf("cmd = %q, want %q", cmd, CmdWorkspaceLayoutMoveLeafToWorkspace)
+	}
+	msg, ok := data.(*WorkspaceLayoutMoveLeafToWorkspaceMessage)
+	if !ok {
+		t.Fatalf("data type = %T, want *WorkspaceLayoutMoveLeafToWorkspaceMessage", data)
+	}
+	if msg.SourceWorkspaceID != "ws1" || msg.TargetWorkspaceID != "ws2" || msg.LeafID != "pane-a" || Deref(msg.AnchorID) != "pane-b" {
+		t.Errorf("fields = %q/%q/%q/%q, want ws1/ws2/pane-a/pane-b", msg.SourceWorkspaceID, msg.TargetWorkspaceID, msg.LeafID, Deref(msg.AnchorID))
+	}
+	if msg.Edge != WorkspaceLayoutDockEdgeLeft {
+		t.Errorf("edge = %q, want left", msg.Edge)
+	}
+	if msg.Ratio == nil || *msg.Ratio != 0.32 {
+		t.Errorf("ratio = %v, want 0.32", msg.Ratio)
+	}
+}
+
 func TestParseWorkspaceLayoutDockTileIgnoresInjectedParams(t *testing.T) {
 	input := `{"cmd":"workspace_layout_dock_tile","workspace_id":"ws1","anchor_pane_id":"pane-a","edge":"right","tile_id":"tile-md","tile_kind":"markdown","tile_params":"/abs/file.md"}`
 	_, data, err := ParseMessage([]byte(input))
