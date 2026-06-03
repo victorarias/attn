@@ -1,6 +1,7 @@
 package pty
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -69,35 +70,34 @@ func TestApprovalResolver_ClearsAfterPromptGoneAndDebounce(t *testing.T) {
 
 	// Prompt first visible: arm and re-emit pending_approval to sync the PTY
 	// layer's state view (so the later working clear is seen as a change).
-	if state, changed := r.observe(claudeApprovalScreen, base); !changed || state != statePendingApproval {
-		t.Fatalf("expected (%q,true) on first prompt sight, got (%q,%v)", statePendingApproval, state, changed)
+	if sig := r.observe(claudeApprovalScreen, base); sig != approvalArmedPending {
+		t.Fatalf("expected approvalArmedPending on first prompt sight, got %v", sig)
 	}
 	if !r.armed {
 		t.Fatal("resolver should arm while the prompt is visible")
 	}
-	// Prompt still visible on the next sample: armed, no repeat emit.
-	if state, changed := r.observe(claudeApprovalScreen, base.Add(time.Millisecond)); changed {
-		t.Fatalf("should not re-emit pending while prompt stays visible: %q", state)
+	// Prompt still visible on the next sample: armed, no repeat signal.
+	if sig := r.observe(claudeApprovalScreen, base.Add(time.Millisecond)); sig != approvalNone {
+		t.Fatalf("should not re-signal while prompt stays visible, got %v", sig)
 	}
 
 	// Prompt gone: this sample starts the clear debounce window.
 	clearStart := base.Add(100 * time.Millisecond)
-	if _, changed := r.observe(claudeWorkingScreen, clearStart); changed {
-		t.Fatal("should not clear on the first prompt-gone sample")
+	if sig := r.observe(claudeWorkingScreen, clearStart); sig != approvalClearStarted {
+		t.Fatalf("expected approvalClearStarted on first prompt-gone sample, got %v", sig)
 	}
 
 	// Still within the debounce window: no transition yet.
-	if _, changed := r.observe(claudeWorkingScreen, clearStart.Add(approvalClearDebounce-time.Millisecond)); changed {
-		t.Fatal("should not clear before debounce elapses")
+	if sig := r.observe(claudeWorkingScreen, clearStart.Add(approvalClearDebounce-time.Millisecond)); sig != approvalNone {
+		t.Fatalf("should not clear before debounce elapses, got %v", sig)
 	}
 
 	// Debounce elapsed: emit working exactly once.
-	state, changed := r.observe(claudeWorkingScreen, clearStart.Add(approvalClearDebounce+time.Millisecond))
-	if !changed || state != stateWorking {
-		t.Fatalf("expected (%q,true) after debounce, got (%q,%v)", stateWorking, state, changed)
+	if sig := r.observe(claudeWorkingScreen, clearStart.Add(approvalClearDebounce+time.Millisecond)); sig != approvalCleared {
+		t.Fatalf("expected approvalCleared after debounce, got %v", sig)
 	}
-	if state, changed := r.observe(claudeWorkingScreen, base.Add(2*time.Second)); changed {
-		t.Fatalf("should not re-emit after clearing: %q", state)
+	if sig := r.observe(claudeWorkingScreen, base.Add(2*time.Second)); sig != approvalNone {
+		t.Fatalf("should not re-signal after clearing, got %v", sig)
 	}
 }
 
@@ -127,8 +127,8 @@ func TestApprovalResolver_NoTransitionWithoutPrompt(t *testing.T) {
 	r := &approvalResolver{}
 	now := time.Unix(0, 0)
 	for i := range 10 {
-		if state, changed := r.observe(claudeWorkingScreen, now.Add(time.Duration(i)*time.Second)); changed {
-			t.Fatalf("never-armed resolver must not emit: %q", state)
+		if sig := r.observe(claudeWorkingScreen, now.Add(time.Duration(i)*time.Second)); sig != approvalNone {
+			t.Fatalf("never-armed resolver must not signal: %v", sig)
 		}
 	}
 }
@@ -141,7 +141,7 @@ func TestApprovalResolver_PromptReappearsResetsDebounce(t *testing.T) {
 	r.observe(codexWorkingScreen, base.Add(200*time.Millisecond)) // start debounce
 
 	// A second prompt appears (chained multi-step approval) before debounce ends.
-	if _, changed := r.observe(codexApprovalScreen, base.Add(400*time.Millisecond)); changed {
+	if sig := r.observe(codexApprovalScreen, base.Add(400*time.Millisecond)); sig == approvalCleared {
 		t.Fatal("a reappearing prompt must not produce a working transition")
 	}
 	if r.clearedSince != (time.Time{}) {
@@ -150,8 +150,56 @@ func TestApprovalResolver_PromptReappearsResetsDebounce(t *testing.T) {
 
 	// Now resolved for real.
 	r.observe(codexWorkingScreen, base.Add(500*time.Millisecond)) // restart debounce
-	state, changed := r.observe(codexWorkingScreen, base.Add(500*time.Millisecond+approvalClearDebounce))
-	if !changed || state != stateWorking {
-		t.Fatalf("expected working after second prompt resolved, got (%q,%v)", state, changed)
+	if sig := r.observe(codexWorkingScreen, base.Add(500*time.Millisecond+approvalClearDebounce)); sig != approvalCleared {
+		t.Fatalf("expected approvalCleared after second prompt resolved, got %v", sig)
+	}
+}
+
+// TestSession_ApprovalClearsWithoutFurtherOutput is the regression for the core
+// contract: once the approval prompt disappears, the session returns to working
+// even when the approved command produces no further PTY output. The clear must be
+// driven by the scheduled recheck, not by the next output frame — so after the
+// prompt-gone sample we make no further evaluateApproval calls and rely solely on
+// the timer.
+func TestSession_ApprovalClearsWithoutFurtherOutput(t *testing.T) {
+	states := make(chan string, 8)
+	s := &Session{
+		approvalResolver: &approvalResolver{},
+		screen:           newVirtualScreen(80, 24),
+		onState:          func(state string) { states <- state },
+	}
+	s.running = true
+
+	paint := func(screen string) {
+		// Clear+home, then paint the screen with CRLF line breaks so each row
+		// starts at column 0 (matching how a TUI repaints).
+		s.screen.Observe([]byte("\x1b[2J\x1b[H"))
+		s.screen.Observe([]byte(strings.ReplaceAll(screen, "\n", "\r\n")))
+	}
+
+	// Approval prompt appears -> pending emitted immediately (readLoop path).
+	paint(codexApprovalScreen)
+	s.evaluateApproval(time.Now(), false)
+	select {
+	case st := <-states:
+		if st != statePendingApproval {
+			t.Fatalf("expected %q when the prompt appears, got %q", statePendingApproval, st)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected pending_approval when the prompt appears")
+	}
+
+	// User approves: the screen repaints to the working view in a single burst,
+	// then the command goes silent. Only the scheduled recheck can drive the clear.
+	paint(codexWorkingScreen)
+	s.evaluateApproval(time.Now(), false)
+
+	select {
+	case st := <-states:
+		if st != stateWorking {
+			t.Fatalf("expected %q from the scheduled recheck, got %q", stateWorking, st)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("working was not emitted without further PTY output (timer did not drive the clear)")
 	}
 }
