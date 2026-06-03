@@ -95,6 +95,12 @@ type Capabilities struct {
 	// HasStateDetector indicates PTY state detection is enabled for this agent.
 	HasStateDetector bool
 
+	// HasApprovalResolver indicates the daemon should clear pending_approval ->
+	// working off the rendered PTY screen for this agent. Needed by hook-driven
+	// agents that fire no hook when an approval is granted, so the only signal
+	// the tool is now running is the approval prompt leaving the screen.
+	HasApprovalResolver bool
+
 	// HasResume indicates the agent supports resuming previous sessions.
 	HasResume bool
 
@@ -112,6 +118,7 @@ var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
 //   - ATTN_AGENT_<AGENT>_TRANSCRIPT_WATCHER=0|1
 //   - ATTN_AGENT_<AGENT>_CLASSIFIER=0|1
 //   - ATTN_AGENT_<AGENT>_STATE_DETECTOR=0|1
+//   - ATTN_AGENT_<AGENT>_APPROVAL_RESOLVER=0|1
 //   - ATTN_AGENT_<AGENT>_RESUME=0|1
 //   - ATTN_AGENT_<AGENT>_YOLO=0|1
 //
@@ -138,6 +145,9 @@ func EffectiveCapabilities(d Driver) Capabilities {
 	}
 	if v, ok := boolEnv(prefix + "STATE_DETECTOR"); ok {
 		caps.HasStateDetector = v
+	}
+	if v, ok := boolEnv(prefix + "APPROVAL_RESOLVER"); ok {
+		caps.HasApprovalResolver = v
 	}
 	if v, ok := boolEnv(prefix + "RESUME"); ok {
 		caps.HasResume = v

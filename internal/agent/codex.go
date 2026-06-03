@@ -38,12 +38,13 @@ func (c *Codex) ResolveExecutable(configured string) string {
 func (c *Codex) Capabilities() Capabilities {
 	// Transcripts remain needed for Stop-hook classification; live state is hook-owned.
 	return Capabilities{
-		HasHooks:         true,
-		HasTranscript:    true,
-		HasClassifier:    true,
-		HasStateDetector: false,
-		HasResume:        true,
-		HasYolo:          true,
+		HasHooks:            true,
+		HasTranscript:       true,
+		HasClassifier:       true,
+		HasStateDetector:    false,
+		HasApprovalResolver: true,
+		HasResume:           true,
+		HasYolo:             true,
 	}
 }
 
@@ -109,7 +110,11 @@ func (c *Codex) RecoveredRunningState(ptyState string) protocol.SessionState {
 }
 
 func (c *Codex) ShouldApplyPTYState(current protocol.SessionState, incoming string) bool {
-	return false
+	// Codex live state is hook-owned, with one exception: no hook fires when the
+	// user approves a permission request, so the approval prompt leaving the
+	// rendered screen is the only signal the tool is now running. Allow that
+	// single pending_approval -> working transition; ignore all other PTY state.
+	return current == protocol.SessionStatePendingApproval && incoming == protocol.StateWorking
 }
 
 func (c *Codex) ResolveSpawnResumeSessionID(existingSessionID, requestedResumeID, storedResumeID string) string {

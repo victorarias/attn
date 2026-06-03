@@ -228,8 +228,11 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	m.mu.Unlock()
 
 	detectorEnabled := true
+	approvalResolverEnabled := false
 	if d := agentdriver.Get(agent); d != nil {
-		detectorEnabled = agentdriver.EffectiveCapabilities(d).HasStateDetector
+		caps := agentdriver.EffectiveCapabilities(d)
+		detectorEnabled = caps.HasStateDetector
+		approvalResolverEnabled = caps.HasApprovalResolver
 	}
 	if detectorEnabled {
 		switch agent {
@@ -239,7 +242,10 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 			session.detector = newClaudeWorkingDetector()
 		}
 	}
-	if session.detector != nil && onState != nil {
+	if approvalResolverEnabled {
+		session.approvalResolver = &approvalResolver{}
+	}
+	if (session.detector != nil || session.approvalResolver != nil) && onState != nil {
 		session.onState = func(state string) {
 			onState(opts.ID, state)
 		}

@@ -60,12 +60,14 @@ var verdictLineRegex = regexp.MustCompile(`(?i)^\s*(?:VERDICT\s*[:=]\s*)?(WAITIN
 const classifierLogSnippetMaxChars = 600
 
 const (
-	defaultCodexClassifierModels   = "gpt-5.3-codex-spark,gpt-5.3-codex"
-	defaultCodexReasoningEffort    = "low"
-	defaultCodexClassifierTimeout  = 30 * time.Second
-	defaultCodexExecutable         = "codex"
-	codexConfigReasoningEffortKey  = "model_reasoning_effort"
-	codexConfigDisableMCPServersKV = "mcp_servers={}"
+	defaultCodexClassifierModel   = "gpt-5.4-mini"
+	defaultCodexReasoningEffort   = "low"
+	defaultCodexClassifierTimeout = 30 * time.Second
+	defaultCodexExecutable        = "codex"
+	codexConfigReasoningEffortKey = "model_reasoning_effort"
+	// codexConfigDisableShellToolKV removes the built-in shell tool: the
+	// classifier only needs the model to emit a verdict, never to run commands.
+	codexConfigDisableShellToolKV = "features.shell_tool=false"
 )
 
 type codexEvent struct {
@@ -281,22 +283,6 @@ func classifyClaudeMessages(messages []types.Message) (result string, ok bool, l
 	return "", false, lastAssistantResponse
 }
 
-func parseCodexModels(raw string) []string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		raw = defaultCodexClassifierModels
-	}
-	parts := strings.Split(raw, ",")
-	models := make([]string, 0, len(parts))
-	for _, part := range parts {
-		model := strings.TrimSpace(part)
-		if model != "" {
-			models = append(models, model)
-		}
-	}
-	return models
-}
-
 func resolveCodexExecutable(configuredExecutable string) string {
 	if envExecutable := strings.TrimSpace(os.Getenv("ATTN_CODEX_EXECUTABLE")); envExecutable != "" {
 		return envExecutable
@@ -367,9 +353,17 @@ func runCodexClassifierAttempt(ctx context.Context, executable, model, reasoning
 		"exec",
 		"--json",
 		"--output-last-message", lastMessagePath,
+		// Classify regardless of the session's cwd. Codex refuses `exec` outside a
+		// trusted git repo otherwise, which is how a codex turn that ends in an
+		// untrusted dir (e.g. /tmp) gets misclassified as unknown.
+		"--skip-git-repo-check",
+		// Ignore the user's config.toml entirely: the classifier must not inherit
+		// their MCP servers (which add startup latency, auth noise, and tool-schema
+		// tokens) or other agent settings. Auth is read separately and still works.
+		"--ignore-user-config",
 		"-m", model,
 		"-c", fmt.Sprintf("%s=%q", codexConfigReasoningEffortKey, reasoningEffort),
-		"-c", codexConfigDisableMCPServersKV,
+		"-c", codexConfigDisableShellToolKV,
 		prompt,
 	}
 
@@ -554,15 +548,15 @@ func ClassifyWithCopilot(text string, timeout time.Duration) (string, error) {
 	return result, nil
 }
 
-// ClassifyWithCodex uses Codex CLI with explicit model fallback:
-// gpt-5.3-codex-spark (low effort) -> gpt-5.3-codex (low effort).
+// ClassifyWithCodex uses Codex CLI with a single model (default gpt-5.4-mini,
+// low effort; override via ATTN_CODEX_CLASSIFIER_MODEL).
 // Returns "waiting_input", "idle", or "unknown".
 func ClassifyWithCodex(text string, timeout time.Duration) (string, error) {
 	return ClassifyWithCodexExecutable(text, "", timeout)
 }
 
-// ClassifyWithCodexExecutable uses Codex CLI with explicit model fallback:
-// gpt-5.3-codex-spark (low effort) -> gpt-5.3-codex (low effort).
+// ClassifyWithCodexExecutable uses Codex CLI with a single model (default
+// gpt-5.4-mini, low effort; override via ATTN_CODEX_CLASSIFIER_MODEL).
 // Executable resolution order:
 // 1) ATTN_CODEX_EXECUTABLE env var
 // 2) configuredExecutable argument
@@ -592,47 +586,39 @@ func ClassifyWithCodexExecutableInDir(text, configuredExecutable, workDir string
 	if reasoningEffort == "" {
 		reasoningEffort = defaultCodexReasoningEffort
 	}
-	models := parseCodexModels(os.Getenv("ATTN_CODEX_CLASSIFIER_MODELS"))
-	if len(models) == 0 {
-		return "unknown", fmt.Errorf("no codex classifier models configured")
+	model := strings.TrimSpace(os.Getenv("ATTN_CODEX_CLASSIFIER_MODEL"))
+	if model == "" {
+		model = defaultCodexClassifierModel
 	}
 
 	prompt := BuildPrompt(text)
-	var lastErr error
-	for _, model := range models {
-		DefaultLogger(
-			"classifier: calling codex CLI executable=%s model=%s reasoning_effort=%s timeout=%d seconds work_dir=%q",
-			executable,
-			model,
-			reasoningEffort,
-			int(timeout.Seconds()),
-			strings.TrimSpace(workDir),
-		)
+	DefaultLogger(
+		"classifier: calling codex CLI executable=%s model=%s reasoning_effort=%s timeout=%d seconds work_dir=%q",
+		executable,
+		model,
+		reasoningEffort,
+		int(timeout.Seconds()),
+		strings.TrimSpace(workDir),
+	)
 
-		lastMessage, rawJSONL, err := runCodexClassifierAttempt(ctx, executable, model, reasoningEffort, prompt, workDir)
-		if err != nil {
-			DefaultLogger("classifier: codex CLI attempt failed model=%s err=%v", model, err)
-			lastErr = err
-			continue
-		}
+	lastMessage, rawJSONL, err := runCodexClassifierAttempt(ctx, executable, model, reasoningEffort, prompt, workDir)
+	if err != nil {
+		DefaultLogger("classifier: codex CLI failed model=%s err=%v", model, err)
+		return "unknown", fmt.Errorf("codex cli: %w", err)
+	}
 
-		if lastMessage != "" {
-			DefaultLogger("classifier: codex CLI last message (%d chars): %q", len(lastMessage), lastMessage)
-			if result, ok := parseVerdictFromResponse(lastMessage); ok {
-				DefaultLogger("classifier: parsed result: %s", result)
-				return result, nil
-			}
-		}
-
-		if result, ok := parseVerdictFromCodexJSONL([]byte(rawJSONL)); ok {
-			DefaultLogger("classifier: parsed result from codex json stream: %s", result)
+	if lastMessage != "" {
+		DefaultLogger("classifier: codex CLI last message (%d chars): %q", len(lastMessage), lastMessage)
+		if result, ok := parseVerdictFromResponse(lastMessage); ok {
+			DefaultLogger("classifier: parsed result: %s", result)
 			return result, nil
 		}
-		DefaultLogger("classifier: codex response missing explicit WAITING/DONE verdict, returning unknown")
-		return "unknown", nil
 	}
-	if lastErr != nil {
-		return "unknown", fmt.Errorf("codex cli: %w", lastErr)
+
+	if result, ok := parseVerdictFromCodexJSONL([]byte(rawJSONL)); ok {
+		DefaultLogger("classifier: parsed result from codex json stream: %s", result)
+		return result, nil
 	}
+	DefaultLogger("classifier: codex response missing explicit WAITING/DONE verdict, returning unknown")
 	return "unknown", nil
 }

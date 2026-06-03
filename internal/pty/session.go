@@ -80,6 +80,12 @@ type Session struct {
 	stateMu       sync.RWMutex
 	detectorState string
 
+	// approvalResolver clears pending_approval->working off the rendered screen
+	// when the user resolves an approval prompt (no hook fires at that moment).
+	// Driven from readLoop only; throttled by lastApprovalEval.
+	approvalResolver *approvalResolver
+	lastApprovalEval time.Time
+
 	exitMu     sync.RWMutex
 	running    bool
 	exitCode   *int
@@ -215,6 +221,7 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 						s.onState(state)
 					}
 				}
+				s.resolveApproval(data)
 			}
 		}
 		if err != nil {
@@ -247,6 +254,35 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 
 	if onExit != nil {
 		onExit(exitCode, signal)
+	}
+}
+
+// approvalEvalInterval throttles how often the approval resolver inspects the
+// rendered screen. Rendering is cheap but the output stream is dominated by many
+// tiny cursor-addressed frames; sampling at this cadence keeps cost bounded while
+// staying well below approvalClearDebounce.
+const approvalEvalInterval = 100 * time.Millisecond
+
+// resolveApproval feeds the current rendered screen to the approval resolver,
+// throttled to approvalEvalInterval, and forwards any state transition it
+// reports (pending_approval on first sight of the prompt, working once it is
+// resolved). Called from readLoop only.
+func (s *Session) resolveApproval(data []byte) {
+	if s.approvalResolver == nil || s.onState == nil || s.screen == nil || len(data) == 0 {
+		return
+	}
+	now := time.Now()
+	if !s.lastApprovalEval.IsZero() && now.Sub(s.lastApprovalEval) < approvalEvalInterval {
+		return
+	}
+	s.lastApprovalEval = now
+	text := s.screen.renderedText()
+	state, changed := s.approvalResolver.observe(text, now)
+	if changed {
+		s.stateMu.Lock()
+		s.detectorState = state
+		s.stateMu.Unlock()
+		s.onState(state)
 	}
 }
 

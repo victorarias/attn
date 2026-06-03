@@ -3,6 +3,7 @@ package pty
 import (
 	"bytes"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/hinshun/vt10x"
@@ -189,6 +190,49 @@ func (v *virtualScreen) Snapshot() (screenSnapshot, bool) {
 		cursorY:       uint16(cursorY),
 		cursorVisible: view.CursorVisible(),
 	}, true
+}
+
+// renderedText returns the currently visible screen as plain text, one row per
+// line with trailing blanks trimmed. Unlike the raw output tail, this reflects
+// exactly what the user sees after vt10x resolves cursor-addressed redraws and
+// scrollback, which is what state detection (e.g. approval-prompt presence)
+// needs. Returns "" before any output has been observed.
+func (v *virtualScreen) renderedText() string {
+	if v == nil {
+		return ""
+	}
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if !v.wrote {
+		return ""
+	}
+
+	view := v.term
+	view.Lock()
+	defer view.Unlock()
+
+	cols, rows := view.Size()
+	if cols <= 0 || rows <= 0 {
+		return ""
+	}
+
+	var out strings.Builder
+	var line strings.Builder
+	for y := 0; y < rows; y++ {
+		line.Reset()
+		for x := 0; x < cols; x++ {
+			ch := view.Cell(x, y).Char
+			if ch == 0 {
+				ch = ' '
+			}
+			line.WriteRune(ch)
+		}
+		out.WriteString(strings.TrimRight(line.String(), " "))
+		out.WriteByte('\n')
+	}
+	return out.String()
 }
 
 func renderVisibleFrame(view vt10x.View, cols, rows, cursorX, cursorY int, cursorVisible bool) []byte {

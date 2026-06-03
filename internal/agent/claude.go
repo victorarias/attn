@@ -53,6 +53,7 @@ func (c *Claude) Capabilities() Capabilities {
 		HasTranscriptWatcher: true,
 		HasClassifier:        true,
 		HasStateDetector:     true,
+		HasApprovalResolver:  true,
 		HasResume:            true,
 		HasYolo:              true,
 	}
