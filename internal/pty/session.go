@@ -80,6 +80,16 @@ type Session struct {
 	stateMu       sync.RWMutex
 	detectorState string
 
+	// approvalResolver clears pending_approval->working off the rendered screen
+	// when the user resolves an approval prompt (no hook fires at that moment).
+	// Sampled from readLoop (throttled by lastApprovalEval) and from an
+	// independent approvalTimer so the clear completes even when the approved
+	// command produces no further output. approvalMu serializes the two paths.
+	approvalResolver *approvalResolver
+	approvalMu       sync.Mutex
+	lastApprovalEval time.Time
+	approvalTimer    *time.Timer
+
 	exitMu     sync.RWMutex
 	running    bool
 	exitCode   *int
@@ -215,6 +225,9 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 						s.onState(state)
 					}
 				}
+				if len(data) > 0 {
+					s.evaluateApproval(time.Now(), true)
+				}
 			}
 		}
 		if err != nil {
@@ -250,6 +263,85 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 	}
 }
 
+// approvalEvalInterval throttles how often the readLoop path inspects the
+// rendered screen. Rendering is cheap but the output stream is dominated by many
+// tiny cursor-addressed frames; sampling at this cadence keeps cost bounded while
+// staying well below approvalClearDebounce.
+const approvalEvalInterval = 100 * time.Millisecond
+
+// evaluateApproval samples the rendered screen and applies any approval-state
+// transition the resolver reports. It runs on two paths: the readLoop output path
+// (throttle=true, so high-frequency frames don't re-render constantly) and a
+// scheduled recheck (throttle=false). The scheduled recheck is what lets the
+// pending_approval->working clear complete even when the approved command goes
+// quiet and emits no further PTY output.
+func (s *Session) evaluateApproval(now time.Time, throttle bool) {
+	if s.approvalResolver == nil || s.onState == nil || s.screen == nil {
+		return
+	}
+	// Never emit a transition for a session that has already exited; a late
+	// timer firing after exit must not resurrect a "working" state.
+	s.exitMu.RLock()
+	running := s.running
+	s.exitMu.RUnlock()
+	if !running {
+		return
+	}
+
+	s.approvalMu.Lock()
+	if throttle && !s.lastApprovalEval.IsZero() && now.Sub(s.lastApprovalEval) < approvalEvalInterval {
+		s.approvalMu.Unlock()
+		return
+	}
+	s.lastApprovalEval = now
+	signal := s.approvalResolver.observe(s.screen.renderedText(), now)
+	switch signal {
+	case approvalClearStarted:
+		s.scheduleApprovalRecheckLocked()
+	case approvalCleared:
+		s.stopApprovalTimerLocked()
+	}
+	s.approvalMu.Unlock()
+
+	switch signal {
+	case approvalArmedPending:
+		s.applyApprovalState(statePendingApproval)
+	case approvalCleared:
+		s.applyApprovalState(stateWorking)
+	}
+}
+
+func (s *Session) applyApprovalState(state string) {
+	s.stateMu.Lock()
+	s.detectorState = state
+	s.stateMu.Unlock()
+	s.onState(state)
+}
+
+// scheduleApprovalRecheckLocked arms a one-shot recheck a little past the
+// debounce window so the prompt-gone -> working clear fires without depending on
+// further PTY output. Caller holds approvalMu. The small extra margin guarantees
+// the recheck's now.Sub(clearedSince) has crossed approvalClearDebounce.
+func (s *Session) scheduleApprovalRecheckLocked() {
+	s.stopApprovalTimerLocked()
+	s.approvalTimer = time.AfterFunc(approvalClearDebounce+approvalEvalInterval, func() {
+		s.evaluateApproval(time.Now(), false)
+	})
+}
+
+func (s *Session) stopApprovalTimerLocked() {
+	if s.approvalTimer != nil {
+		s.approvalTimer.Stop()
+		s.approvalTimer = nil
+	}
+}
+
+func (s *Session) stopApprovalTimer() {
+	s.approvalMu.Lock()
+	s.stopApprovalTimerLocked()
+	s.approvalMu.Unlock()
+}
+
 func parseExitStatus(waitErr error) (int, string) {
 	if waitErr == nil {
 		return 0, ""
@@ -272,6 +364,10 @@ func parseExitStatus(waitErr error) (int, string) {
 }
 
 func (s *Session) markExited(exitCode int, signal string) {
+	// Cancel any pending approval recheck before flipping running=false so a
+	// timer cannot fire a stale "working" against an exited session.
+	s.stopApprovalTimer()
+
 	s.exitMu.Lock()
 	defer s.exitMu.Unlock()
 

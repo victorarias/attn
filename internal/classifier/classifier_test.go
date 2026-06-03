@@ -359,12 +359,14 @@ func TestParseVerdictFromCodexJSONL_LargeLine(t *testing.T) {
 	}
 }
 
-func TestClassifyWithCodex_ModelFallbackAndLastMessageParse(t *testing.T) {
+func TestClassifyWithCodex_SingleModelAndFlags(t *testing.T) {
 	tmp := t.TempDir()
 	logPath := filepath.Join(tmp, "invocations.log")
+	argsPath := filepath.Join(tmp, "args.log")
 	scriptPath := filepath.Join(tmp, "codex")
 	script := fmt.Sprintf(`#!/bin/sh
 set -eu
+printf '%%s\n' "$*" > %s
 model=""
 last=""
 while [ "$#" -gt 0 ]; do
@@ -385,23 +387,17 @@ done
 echo "$model" >> %s
 echo '{"type":"thread.started","thread_id":"abc"}'
 echo '{"type":"turn.started"}'
-if [ "$model" = "spark" ]; then
-  echo '{"type":"error","message":"model_not_found"}'
-  echo '{"type":"turn.failed","error":{"message":"model_not_found"}}'
-  echo 'rollout noise' >&2
-  exit 1
-fi
 printf '{"verdict":"DONE"}\n' > "$last"
 echo '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"{\"verdict\":\"DONE\"}"}}'
 echo '{"type":"turn.completed"}'
-`, shellEscapeSingleQuotes(logPath))
+`, shellEscapeSingleQuotes(argsPath), shellEscapeSingleQuotes(logPath))
 
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write script: %v", err)
 	}
 
 	t.Setenv("ATTN_CODEX_EXECUTABLE", scriptPath)
-	t.Setenv("ATTN_CODEX_CLASSIFIER_MODELS", "spark,base")
+	t.Setenv("ATTN_CODEX_CLASSIFIER_MODEL", "test-model")
 	t.Setenv("ATTN_CODEX_CLASSIFIER_REASONING_EFFORT", "low")
 
 	got, err := ClassifyWithCodex("done text", 10*time.Second)
@@ -412,13 +408,27 @@ echo '{"type":"turn.completed"}'
 		t.Fatalf("ClassifyWithCodex() = %q, want idle", got)
 	}
 
+	// Exactly one invocation, with the configured model: the fallback is gone.
 	invocationsRaw, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("read log file: %v", err)
 	}
 	invocations := strings.Split(strings.TrimSpace(string(invocationsRaw)), "\n")
-	if len(invocations) != 2 || invocations[0] != "spark" || invocations[1] != "base" {
-		t.Fatalf("model invocations = %q, want [spark base]", invocations)
+	if len(invocations) != 1 || invocations[0] != "test-model" {
+		t.Fatalf("model invocations = %q, want [test-model] (no fallback)", invocations)
+	}
+
+	// The flags that make classification robust must be present: classify
+	// regardless of cwd trust, and ignore the user's config (MCP/tools).
+	argsRaw, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := string(argsRaw)
+	for _, want := range []string{"--skip-git-repo-check", "--ignore-user-config", "features.shell_tool=false"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("codex args missing %q; got: %s", want, args)
+		}
 	}
 }
 
@@ -466,7 +476,7 @@ echo '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","tex
 	}
 
 	t.Setenv("ATTN_CODEX_EXECUTABLE", "")
-	t.Setenv("ATTN_CODEX_CLASSIFIER_MODELS", "base")
+	t.Setenv("ATTN_CODEX_CLASSIFIER_MODEL", "base")
 	t.Setenv("ATTN_CODEX_CLASSIFIER_REASONING_EFFORT", "low")
 
 	got, err := ClassifyWithCodexExecutable("done text", scriptPath, 10*time.Second)
@@ -515,7 +525,7 @@ echo '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","tex
 	}
 
 	t.Setenv("ATTN_CODEX_EXECUTABLE", "")
-	t.Setenv("ATTN_CODEX_CLASSIFIER_MODELS", "base")
+	t.Setenv("ATTN_CODEX_CLASSIFIER_MODEL", "base")
 	t.Setenv("ATTN_CODEX_CLASSIFIER_REASONING_EFFORT", "low")
 
 	got, err := ClassifyWithCodexExecutableInDir("done text", scriptPath, workDir, 10*time.Second)

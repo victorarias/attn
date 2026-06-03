@@ -65,11 +65,30 @@ func TestHandlePTYState_CodexWorkingDoesNotOverrideStoppedStates(t *testing.T) {
 	if got := d.store.Get("codex-waiting"); got.State != protocol.SessionStateWaitingInput {
 		t.Fatalf("codex working PTY should not override waiting_input, got=%s", got.State)
 	}
+}
 
-	addCodexSession("codex-pending", protocol.SessionStatePendingApproval)
+// TestHandlePTYState_CodexWorkingClearsPendingApproval covers the one exception
+// to codex's hook-owned live state: no hook fires when the user approves a
+// permission request, so the approval prompt leaving the rendered screen (a PTY
+// working signal) is the only thing that can move codex out of pending_approval.
+func TestHandlePTYState_CodexWorkingClearsPendingApproval(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "sock"))
+
+	nowStr := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "codex-pending",
+		Label:          "codex-pending",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp",
+		State:          protocol.SessionStatePendingApproval,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	})
+
 	d.handlePTYState("codex-pending", protocol.StateWorking)
-	if got := d.store.Get("codex-pending"); got.State != protocol.SessionStatePendingApproval {
-		t.Fatalf("codex working PTY should not override pending_approval, got=%s", got.State)
+	if got := d.store.Get("codex-pending"); got.State != protocol.SessionStateWorking {
+		t.Fatalf("codex working PTY should clear pending_approval, got=%s", got.State)
 	}
 }
 

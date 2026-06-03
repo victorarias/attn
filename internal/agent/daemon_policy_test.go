@@ -81,8 +81,20 @@ func TestShouldApplyPTYState_AgentOverrides(t *testing.T) {
 	if ShouldApplyPTYState(Get("codex"), protocol.SessionStateWaitingInput, protocol.StateWorking) {
 		t.Fatal("codex should ignore working PTY noise while waiting_input")
 	}
-	if ShouldApplyPTYState(Get("codex"), protocol.SessionStatePendingApproval, protocol.StateWorking) {
-		t.Fatal("codex should ignore working PTY noise while pending_approval")
+	// The one exception: no hook fires when the user approves, so codex relies on
+	// the rendered screen to clear pending_approval -> working.
+	if !ShouldApplyPTYState(Get("codex"), protocol.SessionStatePendingApproval, protocol.StateWorking) {
+		t.Fatal("codex should apply working PTY state to clear pending_approval")
+	}
+	// But only working clears it; other transitions out of pending stay hook-owned.
+	for _, incoming := range []string{
+		protocol.StateWaitingInput,
+		protocol.StateIdle,
+		protocol.StatePendingApproval,
+	} {
+		if ShouldApplyPTYState(Get("codex"), protocol.SessionStatePendingApproval, incoming) {
+			t.Fatalf("codex should ignore %s PTY state while pending_approval", incoming)
+		}
 	}
 	if ShouldApplyPTYState(Get("copilot"), protocol.SessionStatePendingApproval, protocol.StateWorking) {
 		t.Fatal("copilot should ignore working PTY noise while pending_approval")
