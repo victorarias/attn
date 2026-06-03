@@ -1,5 +1,5 @@
 import { createElement, isValidElement, useEffect } from 'react';
-import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import type { PointerEvent as ReactPointerEvent, ReactNode, Ref } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -12,6 +12,60 @@ function basename(path: string): string {
   const trimmed = path.replace(/\/+$/, '');
   const segment = trimmed.split('/').pop();
   return segment && segment.length > 0 ? segment : trimmed;
+}
+
+const MAX_TILE_TITLE_LENGTH = 80;
+
+// Reduce a single line of Markdown to readable plain text for a tile header:
+// drop link/image syntax (keep the label) and emphasis/code markers, collapse
+// whitespace. Intentionally shallow — this titles a header, it doesn't render.
+function stripInlineMarkdown(text: string): string {
+  return text
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[*_`~]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Title a markdown tile from its content: the first meaningful line, with a
+// leading ATX heading marker stripped. For the common `# Title` first line this
+// yields the H1 text; otherwise it yields the beginning of the text. Returns
+// null when the content carries no usable line (caller falls back to basename).
+function markdownTitle(markdown: string): string | null {
+  const lines = markdown.split('\n');
+  let i = 0;
+  // Skip a leading YAML frontmatter block, but only when it is actually closed
+  // (a bare leading `---` is otherwise a horizontal rule we should keep).
+  if (lines[0]?.trim() === '---') {
+    let close = 1;
+    while (close < lines.length && lines[close].trim() !== '---') close += 1;
+    if (close < lines.length) i = close + 1;
+  }
+  for (; i < lines.length; i += 1) {
+    const raw = lines[i].trim();
+    if (!raw) continue;
+    // Skip a thematic break (`---`, `***`, `___`) — a lone leading rule, or an
+    // unclosed frontmatter fence, should not become the title.
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(raw.replace(/\s/g, ''))) continue;
+    const withoutHeading = raw.replace(/^#{1,6}\s+/, '').replace(/\s+#*$/, '');
+    const cleaned = stripInlineMarkdown(withoutHeading);
+    if (!cleaned) continue;
+    return cleaned.length > MAX_TILE_TITLE_LENGTH
+      ? `${cleaned.slice(0, MAX_TILE_TITLE_LENGTH - 1).trimEnd()}…`
+      : cleaned;
+  }
+  return null;
+}
+
+// Display title for a tile header. Prefers a title derived from loaded markdown
+// content, falling back to the file basename and finally the tile kind.
+export function deriveTileTitle(tile: TileLeaf, content?: TileContentState): string {
+  if (tile.tileKind === 'markdown' && content && !content.error) {
+    const fromContent = markdownTitle(content.content);
+    if (fromContent) return fromContent;
+  }
+  const path = content?.path || tile.tileParams || '';
+  return path ? basename(path) : tile.tileKind;
 }
 
 type MarkdownTarget =
@@ -215,6 +269,10 @@ interface WorkspaceDockTileProps {
   onClose: () => void;
   onHeaderPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onRequestContent: (workspaceId: string, tileId: string) => void;
+  // Handle to the scrollable body. A tile-only workspace has no terminal to
+  // focus on select, so the workspace focuses this element to enable keyboard
+  // scrolling. Left undefined for tiles that never receive select-time focus.
+  bodyRef?: Ref<HTMLDivElement>;
 }
 
 export function WorkspaceDockTile({
@@ -226,6 +284,7 @@ export function WorkspaceDockTile({
   onClose,
   onHeaderPointerDown,
   onRequestContent,
+  bodyRef,
 }: WorkspaceDockTileProps) {
   // Pull the current content on mount and whenever the tile retargets a new
   // file. Live-reload updates then arrive as broadcasts (no re-request needed).
@@ -234,7 +293,7 @@ export function WorkspaceDockTile({
   }, [workspaceId, tile.tileId, tile.tileParams, onRequestContent]);
 
   const path = content?.path || tile.tileParams || '';
-  const title = path ? basename(path) : tile.tileKind;
+  const title = deriveTileTitle(tile, content);
 
   return (
     <div className={`workspace-dock-tile ${dragging ? 'workspace-dock-tile--dragging' : ''}`.trim()}>
@@ -255,7 +314,7 @@ export function WorkspaceDockTile({
           ×
         </button>
       </div>
-      <div className="workspace-dock-tile-body">
+      <div className="workspace-dock-tile-body" ref={bodyRef} tabIndex={-1}>
         {tile.tileKind === 'markdown' ? (
           <MarkdownBody content={content} allowLocalTargets={allowLocalTargets} />
         ) : (

@@ -28,11 +28,12 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 
 ## [2026-06-03]
 
+### Changed
+- **Docked tiles read a little nicer.** A markdown tile's header now shows the document's title (its first heading) rather than the file name, falling back to the file name when there's no heading. And when you open a tile-only workspace, the keyboard lands on the tile right away, so the arrow keys scroll it without an extra click.
+
 ### Fixed
 - **Approving a permission request clears the attention light right away.** When an agent is blocked on a permission prompt and you approve it, the session now returns to "working" within about a second — even while the approved command keeps running, and even for a second prompt back-to-back. It used to stay in the flashing "needs you" state for the entire duration of the approved tool, which defeated the point of the light. Works for both Claude and Codex.
 - **Codex sessions no longer get stuck in the purple "unknown" state.** When a Codex turn finished outside a git repository (for example in `/tmp`), attn could not classify it and fell back to "unknown." Codex sessions now settle into the correct done/waiting state regardless of where they run. The end-of-turn check is also leaner and quieter — it no longer loads your Codex MCP servers or tools.
-
----
 
 ## [2026-06-02]
 

@@ -71,6 +71,12 @@
   line-height: 1.55;
 }
 
+/* The body is focused programmatically (tabIndex=-1) so a tile-only workspace
+   can scroll by keyboard on select; it is not a tab stop, so suppress the ring. */
+.workspace-dock-tile-body:focus {
+  outline: none;
+}
+
 /* Non-content states (loading, empty file, unsupported kind, read error). */
 .workspace-dock-tile-message {
   color: var(--color-text-tertiary);

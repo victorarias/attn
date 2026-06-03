@@ -150,6 +150,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     const [dockTarget, setDockTarget] = useState<DockTarget | null>(null);
     const [ghostPos, setGhostPos] = useState<{ x: number; y: number } | null>(null);
     const tileDragCleanupRef = useRef<(() => void) | null>(null);
+    // Scrollable body of the first docked tile, focused on select when the
+    // workspace has no terminal to own focus (see the focus effect below).
+    const firstTileBodyRef = useRef<HTMLDivElement | null>(null);
     const draggingSplitRef = useRef<string | null>(null);
     const activePaneIdRef = useRef(activePaneId);
     const isActiveSessionRef = useRef(isActiveSession);
@@ -208,6 +211,13 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       walk(workspace.layoutTree);
       return map;
     }, [workspace.layoutTree]);
+
+    // First tile in tree order (DFS-left). Used only to route the select-time
+    // focus ref to a single tile when the workspace is fully tile-only.
+    const firstTileId = useMemo(
+      () => (tileLeafById.size > 0 ? tileLeafById.keys().next().value ?? null : null),
+      [tileLeafById],
+    );
 
     const runtimePanes = useMemo(() => ([
       ...agentPanes.filter((pane) => !pane.status || pane.status === 'ready').map((pane) => {
@@ -369,12 +379,23 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       runtime.focusPane(activePaneId, 0);
     }, [activePaneId, runtime]);
 
+    // A fully tile-only workspace has no terminal to own focus. Focus the first
+    // tile's scrollable body so keyboard scrolling works the moment it is shown.
+    // preventScroll keeps the body's own scroll position from jumping on focus.
+    const focusFirstTile = useCallback(() => {
+      firstTileBodyRef.current?.focus({ preventScroll: true });
+    }, []);
+
     useEffect(() => {
       if (!sessionVisible) {
         return;
       }
-      focusActivePane();
-    }, [activePaneId, focusActivePane, focusRequestToken, isActiveSession, isSessionViewVisible, workspaceId, sessionVisible]);
+      if (activePaneId) {
+        focusActivePane();
+        return;
+      }
+      focusFirstTile();
+    }, [activePaneId, focusActivePane, focusFirstTile, focusRequestToken, isActiveSession, isSessionViewVisible, workspaceId, sessionVisible]);
 
     // After relaunch, first-show, or split topology changes, the terminal can briefly keep
     // stale narrow geometry from the previous layout. Re-fitting immediately and then
@@ -617,6 +638,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
               onClose={() => onUndockTile?.(tileLeaf.tileId)}
               onHeaderPointerDown={(event) => beginLeafDrag(tileLeaf.tileId, event)}
               onRequestContent={onRequestTileContent ?? (() => {})}
+              bodyRef={tileLeaf.tileId === firstTileId ? firstTileBodyRef : undefined}
             />
           </div>
         );
@@ -629,6 +651,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       draggingLeafId,
       onUndockTile,
       tileLeafById,
+      firstTileId,
       tileContents,
       allowLocalTileTargets,
       onRequestTileContent,

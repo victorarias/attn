@@ -167,11 +167,15 @@ async function main() {
     const afterSelect = await waitForWorkspaceUi(
       client,
       workspaceId,
-      (state) => state?.active === true && state.sessionVisible === true,
-      'tile-only workspace to become the active, visible workspace after selection',
+      (state) => state?.active === true && state.sessionVisible === true && state.tileBodyFocused === true,
+      'tile-only workspace to become active, visible, and focus its tile body after selection',
     );
     if (!afterSelect.tileIds.includes(tileId) || afterSelect.paneCount !== 0) {
       throw new Error(`Selected tile-only workspace lost its tile or grew panes: ${JSON.stringify(afterSelect, null, 2)}`);
+    }
+    // Title is derived from the markdown H1, not the file basename.
+    if (!afterSelect.tileTitles?.includes('Tile only notes')) {
+      throw new Error(`Tile header did not derive its title from the markdown H1: ${JSON.stringify(afterSelect, null, 2)}`);
     }
 
     const summary = {

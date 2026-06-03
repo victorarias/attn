@@ -234,9 +234,10 @@ gap; figgy was right.)
 - [x] Render loop builds a `TerminalWorkspaceState` for zero-session workspaces straight from the daemon's broadcast layout (`workspaceSnapshotFromDaemonWorkspace`, fallback only when no session carries the layout). `SessionTerminalWorkspace` already renders a tiles-only tree (no agent panes) — no component change needed.
 - [x] Tests: controller unit + `SessionTerminalWorkspace.tileOnly` render test + `App.sessionlessWorkspace` integration (reveal→select→active+tile). Real-app harness scenario `tile-only-workspace-select` (dock tile via `attn open`, close last pane, select by id, assert active + tile rendered) added to the serial matrix. New automation verbs `select_workspace` / `get_workspace_ui_state` mirror the sidebar/⌘1–9 path (no daemon protocol change).
 
-Deferred to a small follow-up (genuinely cosmetic):
-- [ ] Tile header title from content: markdown H1 → beginning of text → basename fallback (`WorkspaceDockTile.tsx:237`). A sessionless workspace already renders fine; the tile just shows its basename until this lands.
-- [ ] Focus a tile on select for fully tile-only workspaces (extend the AGENTS.md terminal-focus rule with a "no terminal" branch). Tiles are not interactive focus targets today; selection renders the layout without stealing focus, which is acceptable for v1.
+### PR D — Tile polish (title from content + focus on select) ✅
+- [x] Tile header title from content: `deriveTileTitle(tile, content)` in `WorkspaceDockTile.tsx` returns the first meaningful markdown line with a leading ATX heading marker stripped (so `# Title` → "Title"), skipping closed YAML frontmatter and lone thematic breaks, truncating past 80 chars; falls back to the file basename, then the tile kind. Unit-tested (8 cases).
+- [x] Focus a tile on select for fully tile-only workspaces: `.workspace-dock-tile-body` is now `tabIndex=-1` (programmatically focusable, not a tab stop); `SessionTerminalWorkspace`'s select-time focus effect focuses the first tile's body via `firstTileBodyRef` when there is no agent pane (`activePaneId === ''`). Mixed pane+tile workspaces are unaffected (a real pane keeps focus). The terminal-focus path is untouched.
+- [x] Tests: `deriveTileTitle` unit tests; `SessionTerminalWorkspace.tileOnly` asserts the body is focused on render. Real-app scenario `tile-only-workspace-select` extended to assert the header shows the markdown H1 and the tile body is focused after select (new `tileTitles` / `tileBodyFocused` fields on the `get_workspace_ui_state` automation verb).
 
 ## Decisions
 
