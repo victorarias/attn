@@ -41,6 +41,7 @@
     "real-app:scenario-workspace-shell-lifecycle": "node scripts/real-app-harness/scenario-workspace-shell-lifecycle.mjs",
     "real-app:scenario-workspace-creation-shortcuts": "node scripts/real-app-harness/scenario-workspace-creation-shortcuts.mjs",
     "real-app:scenario-workspace-switching": "node scripts/real-app-harness/scenario-workspace-switching.mjs",
+    "real-app:scenario-workspace-move-leaf": "node scripts/real-app-harness/scenario-workspace-move-leaf.mjs",
     "real-app:scenario-workspace-close-last-session-switches-back": "node scripts/real-app-harness/scenario-workspace-close-last-session-switches-back.mjs",
     "real-app:scenario-workspace-close-one-session-keeps-selection": "node scripts/real-app-harness/scenario-workspace-close-one-session-keeps-selection.mjs",
     "real-app:scenario-tile-only-workspace-select": "node scripts/real-app-harness/scenario-tile-only-workspace-select.mjs",

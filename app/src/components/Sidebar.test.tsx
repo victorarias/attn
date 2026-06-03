@@ -149,6 +149,35 @@ describe('Sidebar', () => {
     expect(onCloseSession).toHaveBeenCalledWith('s1');
   });
 
+  it('marks same-endpoint workspace rows as leaf drag targets', () => {
+    const sessions: TestSession[] = [
+      { id: 's1', label: 'source', state: 'idle', cwd: '/repo/source' },
+      { id: 's2', label: 'target', state: 'idle', cwd: '/repo/target' },
+    ];
+    const onWorkspaceDragEnter = vi.fn();
+    const onWorkspaceDragDrop = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        {...buildSidebarData(sessions)}
+        leafDrag={{ sourceWorkspaceId: 'workspace-/repo/source' }}
+        dragHoverWorkspaceId="workspace-/repo/target"
+        onWorkspaceDragEnter={onWorkspaceDragEnter}
+        onWorkspaceDragDrop={onWorkspaceDragDrop}
+      />
+    );
+
+    const source = screen.getByTestId('sidebar-workspace-workspace-/repo/source');
+    const target = screen.getByTestId('sidebar-workspace-workspace-/repo/target');
+    expect(source).toHaveClass('workspace-group--drag-disabled');
+    expect(target).toHaveClass('workspace-group--drag-entering');
+
+    fireEvent.pointerEnter(target);
+    fireEvent.pointerUp(target);
+    expect(onWorkspaceDragEnter).toHaveBeenCalledWith(expect.objectContaining({ id: 'workspace-/repo/target' }));
+    expect(onWorkspaceDragDrop).toHaveBeenCalledWith(expect.objectContaining({ id: 'workspace-/repo/target' }));
+  });
+
   it('shows review loop indicator for sessions with loop state', () => {
     const sessions: TestSession[] = [{
       id: 's1',

@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/workspacelayout"
@@ -113,5 +115,142 @@ func TestWorkspaceLayoutMoveLeafSelfDropIsRejected(t *testing.T) {
 	after := d.store.GetWorkspaceLayout(workspaceID).Layout
 	if after.SplitID != before.SplitID || after.Children[0].PaneID != before.Children[0].PaneID {
 		t.Fatalf("self-drop changed the layout: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestWorkspaceLayoutMoveLeafToWorkspaceMovesPaneAndSessionOwnership(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &fakeSpawnBackend{}
+	client := newWorkspaceProtocolTestClient()
+	sourceWorkspaceID := "ws-source"
+	targetWorkspaceID := "ws-target"
+	sourceCwd := t.TempDir()
+	targetCwd := t.TempDir()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        sourceWorkspaceID,
+		Title:     "Source",
+		Directory: sourceCwd,
+	})
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        targetWorkspaceID,
+		Title:     "Target",
+		Directory: targetCwd,
+	})
+	addAndSpawnSessionPane(t, d, client, sourceWorkspaceID, "s-source", "pane-source", "", sourceCwd)
+	addAndSpawnSessionPane(t, d, client, targetWorkspaceID, "s-target", "pane-target", "", targetCwd)
+
+	d.handleWorkspaceLayoutMoveLeafToWorkspace(client, &protocol.WorkspaceLayoutMoveLeafToWorkspaceMessage{
+		Cmd:               protocol.CmdWorkspaceLayoutMoveLeafToWorkspace,
+		SourceWorkspaceID: sourceWorkspaceID,
+		TargetWorkspaceID: targetWorkspaceID,
+		LeafID:            "pane-source",
+		AnchorID:          protocol.Ptr("pane-target"),
+		Edge:              protocol.WorkspaceLayoutDockEdgeRight,
+		Ratio:             protocol.Ptr(0.4),
+	})
+	expectWorkspaceLayoutMoveToWorkspaceResult(t, client, sourceWorkspaceID, targetWorkspaceID, "pane-source", "pane-source", true)
+
+	if sourceLayout := d.store.GetWorkspaceLayout(sourceWorkspaceID); sourceLayout != nil {
+		t.Fatalf("source layout still exists after moving only pane: %+v", sourceLayout)
+	}
+	targetLayout := d.store.GetWorkspaceLayout(targetWorkspaceID)
+	if targetLayout == nil {
+		t.Fatal("target layout missing after move")
+	}
+	if !workspacelayout.HasPane(targetLayout.Layout, "pane-source") || !workspacelayout.HasPane(targetLayout.Layout, "pane-target") {
+		t.Fatalf("target layout = %+v, want both panes", targetLayout.Layout)
+	}
+	if session := d.store.Get("s-source"); session == nil || session.WorkspaceID != targetWorkspaceID {
+		t.Fatalf("moved session = %+v, want workspace %s", session, targetWorkspaceID)
+	}
+	if sourceWorkspace := d.store.GetWorkspace(sourceWorkspaceID); sourceWorkspace != nil {
+		t.Fatalf("empty source workspace still exists: %+v", sourceWorkspace)
+	}
+}
+
+func TestWorkspaceLayoutMoveLeafToWorkspaceBroadcastsLayoutBeforeSessionOwnership(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &fakeSpawnBackend{}
+	client := newWorkspaceProtocolTestClient()
+	sourceWorkspaceID := "ws-source-order"
+	targetWorkspaceID := "ws-target-order"
+	sourceCwd := t.TempDir()
+	targetCwd := t.TempDir()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        sourceWorkspaceID,
+		Title:     "Source",
+		Directory: sourceCwd,
+	})
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        targetWorkspaceID,
+		Title:     "Target",
+		Directory: targetCwd,
+	})
+	addAndSpawnSessionPane(t, d, client, sourceWorkspaceID, "s-source-order", "pane-source", "", sourceCwd)
+	addAndSpawnSessionPane(t, d, client, targetWorkspaceID, "s-target-order", "pane-target", "", targetCwd)
+
+	cap := captureBroadcasts(d)
+	d.handleWorkspaceLayoutMoveLeafToWorkspace(client, &protocol.WorkspaceLayoutMoveLeafToWorkspaceMessage{
+		Cmd:               protocol.CmdWorkspaceLayoutMoveLeafToWorkspace,
+		SourceWorkspaceID: sourceWorkspaceID,
+		TargetWorkspaceID: targetWorkspaceID,
+		LeafID:            "pane-source",
+		AnchorID:          protocol.Ptr("pane-target"),
+		Edge:              protocol.WorkspaceLayoutDockEdgeRight,
+	})
+	expectWorkspaceLayoutMoveToWorkspaceResult(t, client, sourceWorkspaceID, targetWorkspaceID, "pane-source", "pane-source", true)
+
+	events := cap.snapshot()
+	if len(events) < 2 {
+		t.Fatalf("expected layout and session broadcasts, got %d: %+v", len(events), events)
+	}
+	first := events[0]
+	if first.Event != protocol.EventWorkspaceLayoutUpdated || first.WorkspaceLayout == nil || first.WorkspaceLayout.WorkspaceID != targetWorkspaceID {
+		t.Fatalf("first broadcast = %+v, want target workspace_layout_updated", first)
+	}
+	second := events[1]
+	if second.Event != protocol.EventSessionStateChanged || second.Session == nil || second.Session.ID != "s-source-order" || second.Session.WorkspaceID != targetWorkspaceID {
+		t.Fatalf("second broadcast = %+v, want moved session_state_changed", second)
+	}
+}
+
+func expectWorkspaceLayoutMoveToWorkspaceResult(t *testing.T, client *wsClient, sourceWorkspaceID, targetWorkspaceID, leafID, finalLeafID string, success bool) {
+	t.Helper()
+	deadline := time.After(1 * time.Second)
+	for {
+		select {
+		case outbound := <-client.send:
+			var result protocol.WorkspaceLayoutActionResultMessage
+			if err := json.Unmarshal(outbound.payload, &result); err != nil || result.Event != protocol.EventWorkspaceLayoutActionResult {
+				continue
+			}
+			if result.Action != protocol.CmdWorkspaceLayoutMoveLeafToWorkspace || result.WorkspaceID != sourceWorkspaceID {
+				continue
+			}
+			if result.Success != success {
+				t.Fatalf("workspace move success = %v, want %v; payload=%s", result.Success, success, string(outbound.payload))
+			}
+			if got := protocol.Deref(result.SourceWorkspaceID); got != sourceWorkspaceID {
+				t.Fatalf("source_workspace_id = %q, want %q; payload=%s", got, sourceWorkspaceID, string(outbound.payload))
+			}
+			if got := protocol.Deref(result.TargetWorkspaceID); got != targetWorkspaceID {
+				t.Fatalf("target_workspace_id = %q, want %q; payload=%s", got, targetWorkspaceID, string(outbound.payload))
+			}
+			if got := protocol.Deref(result.LeafID); got != leafID {
+				t.Fatalf("leaf_id = %q, want %q; payload=%s", got, leafID, string(outbound.payload))
+			}
+			if got := protocol.Deref(result.FinalLeafID); got != finalLeafID {
+				t.Fatalf("final_leaf_id = %q, want %q; payload=%s", got, finalLeafID, string(outbound.payload))
+			}
+			return
+		case <-deadline:
+			t.Fatalf("timed out waiting for workspace move-to-workspace action")
+		}
 	}
 }

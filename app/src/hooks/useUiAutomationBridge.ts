@@ -55,6 +55,12 @@ interface UseUiAutomationBridgeArgs {
   createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string) => Promise<string>;
   selectSession: (sessionId: string) => void;
   selectWorkspace: (workspaceId: string) => void;
+  moveWorkspaceLeafToWorkspace: (
+    sourceWorkspaceId: string,
+    targetWorkspaceId: string,
+    leafId: string,
+    options?: { anchorId?: string; edge?: 'left' | 'right' | 'top' | 'bottom'; ratio?: number },
+  ) => Promise<unknown>;
   closeSession: (sessionId: string) => Promise<void>;
   reloadSession?: (sessionId: string, size?: { cols: number; rows: number }) => Promise<void>;
   setSetting?: (key: string, value: string) => void;
@@ -1211,6 +1217,7 @@ export function useUiAutomationBridge({
   createSession,
   selectSession,
   selectWorkspace,
+  moveWorkspaceLeafToWorkspace,
   closeSession,
   reloadSession,
   setSetting,
@@ -1709,6 +1716,22 @@ export function useUiAutomationBridge({
         const points = dragLeafHeader(leafId, dropFracX, dropFracY);
         await settleUi(2);
         return { sessionId, leafId, viewSessionId, dropFracX, dropFracY, ...points };
+      }
+      case 'move_workspace_leaf': {
+        const sourceWorkspaceId = typeof payload.sourceWorkspaceId === 'string' ? payload.sourceWorkspaceId : '';
+        const targetWorkspaceId = typeof payload.targetWorkspaceId === 'string' ? payload.targetWorkspaceId : '';
+        const leafId = typeof payload.leafId === 'string' ? payload.leafId : '';
+        if (!sourceWorkspaceId || !targetWorkspaceId || !leafId) {
+          throw new Error('move_workspace_leaf requires sourceWorkspaceId, targetWorkspaceId, and leafId');
+        }
+        const edge = payload.edge === 'right' || payload.edge === 'top' || payload.edge === 'bottom'
+          ? payload.edge
+          : 'left';
+        const anchorId = typeof payload.anchorId === 'string' ? payload.anchorId : '';
+        const ratio = typeof payload.ratio === 'number' ? payload.ratio : undefined;
+        const result = await moveWorkspaceLeafToWorkspace(sourceWorkspaceId, targetWorkspaceId, leafId, { anchorId, edge, ratio });
+        await settleUi(4);
+        return result;
       }
       case 'dispatch_shortcut': {
         const shortcutId = typeof payload.shortcutId === 'string' ? payload.shortcutId as ShortcutId : null;

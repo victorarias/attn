@@ -30,7 +30,7 @@ import type { TerminalVisibleStyleSnapshot } from '../../utils/terminalStyleSumm
 import type { ResolvedTheme } from '../../utils/terminalSizing';
 import { WorkspaceLayoutRenderer } from './WorkspaceLayoutRenderer';
 import { WorkspaceDockTile } from './WorkspaceDockTile';
-import { startLeafDrag } from './leafDrag';
+import { startLeafDrag, type LeafDropSnapshot } from './leafDrag';
 import type { DockTarget } from './dockTarget';
 
 const ZOOM_PATH_RATIO = 0.76;
@@ -77,6 +77,7 @@ export interface SessionTerminalWorkspaceHandle {
   injectPaneBytes: (paneId: string, bytes: Uint8Array) => Promise<boolean>;
   injectPaneBase64: (paneId: string, payload: string) => Promise<boolean>;
   drainPaneTerminal: (paneId: string) => Promise<boolean>;
+  getLeafDropSnapshot: () => LeafDropSnapshot | null;
 }
 
 interface SessionTerminalWorkspaceProps {
@@ -107,6 +108,16 @@ interface SessionTerminalWorkspaceProps {
   // or against the whole workspace when anchorId is ''. ratio is the moved leaf's
   // fraction of the new split.
   onMoveLeaf?: (leafId: string, anchorId: string, edge: TerminalDockEdge, ratio: number) => void;
+  getActiveLeafDropSnapshot?: () => LeafDropSnapshot | null;
+  onLeafDragStart?: (leafId: string) => void;
+  onLeafDragGhostMove?: (clientX: number, clientY: number) => void;
+  onLeafDragPreview?: (target: DockTarget | null) => void;
+  onLeafDragEnd?: () => void;
+  leafDragPreview?: {
+    draggingLeafId: string | null;
+    dockTarget: DockTarget | null;
+    ghostPos: { x: number; y: number } | null;
+  } | null;
   onUndockTile?: (tileId: string) => void;
   tileContents?: Record<string, TileContentState>;
   allowLocalTileTargets?: boolean;
@@ -133,6 +144,12 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onNavigateOutOfSession,
     onResizeSplit,
     onMoveLeaf,
+    getActiveLeafDropSnapshot,
+    onLeafDragStart,
+    onLeafDragGhostMove,
+    onLeafDragPreview,
+    onLeafDragEnd,
+    leafDragPreview,
     onUndockTile,
     tileContents,
     allowLocalTileTargets = true,
@@ -153,6 +170,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     // Scrollable body of the first docked tile, focused on select when the
     // workspace has no terminal to own focus (see the focus effect below).
     const firstTileBodyRef = useRef<HTMLDivElement | null>(null);
+    const panesContainerRef = useRef<HTMLDivElement | null>(null);
     const draggingSplitRef = useRef<string | null>(null);
     const activePaneIdRef = useRef(activePaneId);
     const isActiveSessionRef = useRef(isActiveSession);
@@ -341,7 +359,12 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       injectPaneBytes: runtime.injectPaneBytes,
       injectPaneBase64: runtime.injectPaneBase64,
       drainPaneTerminal: runtime.drainPaneTerminal,
-    }), [activePaneId, runtime]);
+      getLeafDropSnapshot: () => (
+        panesContainerRef.current
+          ? { container: panesContainerRef.current, paneBounds: renderedPaneBounds }
+          : null
+      ),
+    }), [activePaneId, renderedPaneBounds, runtime]);
 
     useEffect(() => {
       if (!maximizedPaneId) {
@@ -544,10 +567,17 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         return;
       }
       const releaseSelectionLock = lockTextSelection('grabbing');
+      onLeafDragStart?.(leafId);
       setDraggingLeafId(leafId);
       const teardown = startLeafDrag(leafId, event.clientX, event.clientY, container, renderedPaneBounds, {
-        onGhostMove: (x, y) => setGhostPos({ x, y }),
-        onPreview: (target) => setDockTarget(target),
+        onGhostMove: (x, y) => {
+          setGhostPos({ x, y });
+          onLeafDragGhostMove?.(x, y);
+        },
+        onPreview: (target) => {
+          setDockTarget(target);
+          onLeafDragPreview?.(target);
+        },
         onDrop: (id, target) => onMoveLeaf?.(id, target.anchorId, target.edge, target.ratio),
         onCleanup: () => {
           releaseSelectionLock();
@@ -555,10 +585,15 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           setDockTarget(null);
           setGhostPos(null);
           tileDragCleanupRef.current = null;
+          onLeafDragEnd?.();
         },
-      });
+      }, getActiveLeafDropSnapshot);
       tileDragCleanupRef.current = teardown;
-    }, [renderedPaneBounds, onMoveLeaf]);
+    }, [getActiveLeafDropSnapshot, onLeafDragEnd, onLeafDragGhostMove, onLeafDragPreview, onLeafDragStart, renderedPaneBounds, onMoveLeaf]);
+
+    const effectiveDraggingLeafId = leafDragPreview?.draggingLeafId ?? draggingLeafId;
+    const effectiveDockTarget = leafDragPreview?.dockTarget ?? dockTarget;
+    const effectiveGhostPos = leafDragPreview?.ghostPos ?? ghostPos;
 
     const renderPaneSurface = useCallback((paneId: string): React.ReactNode => {
       const path = panePaths.get(paneId) || 'root';
@@ -578,7 +613,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         return (
           <div
             key={agentPane.id}
-            className={`workspace-pane ${activePaneId === agentPane.id ? 'active' : ''} ${draggingLeafId === agentPane.id ? 'workspace-pane--dragging' : ''}`.trim()}
+            className={`workspace-pane ${activePaneId === agentPane.id ? 'active' : ''} ${effectiveDraggingLeafId === agentPane.id ? 'workspace-pane--dragging' : ''}`.trim()}
             onMouseDown={() => handleAgentPaneMouseDown(agentPane.id)}
             data-pane-session-id={agentPane.sessionId}
             data-pane-id={agentPane.id}
@@ -634,7 +669,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
               workspaceId={workspaceId}
               content={tileContents?.[tileContentKey(workspaceId, tileLeaf.tileId)]}
               allowLocalTargets={allowLocalTileTargets}
-              dragging={draggingLeafId === tileLeaf.tileId}
+              dragging={effectiveDraggingLeafId === tileLeaf.tileId}
               onClose={() => onUndockTile?.(tileLeaf.tileId)}
               onHeaderPointerDown={(event) => beginLeafDrag(tileLeaf.tileId, event)}
               onRequestContent={onRequestTileContent ?? (() => {})}
@@ -648,7 +683,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     }, [
       activePaneId,
       beginLeafDrag,
-      draggingLeafId,
+      effectiveDraggingLeafId,
       onUndockTile,
       tileLeafById,
       firstTileId,
@@ -683,20 +718,20 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     // Label shown in the drag ghost: the dragged leaf's session/title (pane) or
     // file name/kind (tile).
     const draggingLeafLabel = useMemo(() => {
-      if (!draggingLeafId) {
+      if (!effectiveDraggingLeafId) {
         return '';
       }
-      const agentPane = agentPaneById.get(draggingLeafId);
+      const agentPane = agentPaneById.get(effectiveDraggingLeafId);
       if (agentPane) {
         return sessionById.get(agentPane.sessionId)?.label || agentPane.title || 'Pane';
       }
-      const tile = tileLeafById.get(draggingLeafId);
+      const tile = tileLeafById.get(effectiveDraggingLeafId);
       if (tile) {
         const base = (tile.tileParams ?? '').split('/').filter(Boolean).pop();
         return base || tile.tileKind || 'Tile';
       }
       return 'Pane';
-    }, [draggingLeafId, agentPaneById, sessionById, tileLeafById]);
+    }, [effectiveDraggingLeafId, agentPaneById, sessionById, tileLeafById]);
 
     // Draggable dividers, one per split. Hidden in focus/zoom mode where there
     // is no real split to resize.
@@ -852,24 +887,25 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           layoutTree={renderedLayoutTree}
           paneIds={renderedPaneIds}
           renderPane={renderPaneSurface}
+          containerRef={panesContainerRef}
           dividers={splitDividers}
           onDividerPointerDown={handleDividerPointerDown}
-          overlay={dockTarget ? (
+          overlay={effectiveDockTarget ? (
             <div
               className="workspace-dock-target"
               style={{
-                left: `${dockTarget.rect.left * 100}%`,
-                top: `${dockTarget.rect.top * 100}%`,
-                width: `${dockTarget.rect.width * 100}%`,
-                height: `${dockTarget.rect.height * 100}%`,
+                left: `${effectiveDockTarget.rect.left * 100}%`,
+                top: `${effectiveDockTarget.rect.top * 100}%`,
+                width: `${effectiveDockTarget.rect.width * 100}%`,
+                height: `${effectiveDockTarget.rect.height * 100}%`,
               }}
             />
           ) : null}
         />
-        {ghostPos && draggingLeafId && (
+        {effectiveGhostPos && effectiveDraggingLeafId && (
           <div
             className="workspace-dock-ghost"
-            style={{ left: ghostPos.x + 12, top: ghostPos.y + 12 }}
+            style={{ left: effectiveGhostPos.x + 12, top: effectiveGhostPos.y + 12 }}
           >
             {draggingLeafLabel}
           </div>

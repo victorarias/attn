@@ -1,4 +1,4 @@
-import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from 'react';
 import type { SplitDivider, TerminalLayoutNode } from '../../types/workspace';
 
 function clampSplitRatio(ratio: number): number {
@@ -71,6 +71,7 @@ interface WorkspaceLayoutRendererProps {
   layoutTree: TerminalLayoutNode;
   paneIds: string[];
   renderPane: (paneId: string) => ReactNode;
+  containerRef?: RefObject<HTMLDivElement | null>;
   dividers?: SplitDivider[];
   onDividerPointerDown?: (divider: SplitDivider, event: ReactPointerEvent<HTMLDivElement>) => void;
   // Rendered last inside the panes container (e.g. a drag-to-dock highlight).
@@ -81,12 +82,13 @@ export function WorkspaceLayoutRenderer({
   layoutTree,
   paneIds,
   renderPane,
+  containerRef,
   dividers = [],
   onDividerPointerDown,
   overlay,
 }: WorkspaceLayoutRendererProps) {
   return (
-    <div className="session-terminal-panes">
+    <div className="session-terminal-panes" ref={containerRef}>
       <div className="workspace-layout-metadata" aria-hidden="true">
         {renderLayoutMetadata(layoutTree)}
       </div>

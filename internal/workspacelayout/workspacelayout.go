@@ -741,6 +741,84 @@ func MoveLeaf(node Node, leafID, anchorID, splitID string, direction Direction, 
 	return next, true
 }
 
+type MoveBetweenLayoutsResult struct {
+	SourceLayout Node
+	TargetLayout Node
+	Leaf         Node
+	FinalLeafID  string
+}
+
+// MoveLeafBetweenLayouts removes a leaf from source and inserts it into target.
+// It is used for cross-workspace moves where the pane/tile metadata lives
+// outside the tree and must be carried by the caller. If the target already has
+// a leaf with the moved id, conflictSuffix is appended to the moved leaf id
+// before insertion. An empty target layout accepts the moved leaf as its root.
+func MoveLeafBetweenLayouts(source, target Node, leafID, anchorID, splitID string, direction Direction, before bool, ratio float64, conflictSuffix string) (MoveBetweenLayoutsResult, bool) {
+	leafID = strings.TrimSpace(leafID)
+	anchorID = strings.TrimSpace(anchorID)
+	if leafID == "" {
+		return MoveBetweenLayoutsResult{}, false
+	}
+	moved, found := findLeaf(source, leafID)
+	if !found {
+		return MoveBetweenLayoutsResult{}, false
+	}
+	if ratio <= 0 || ratio >= 1 {
+		ratio = DefaultSplitRatio
+	}
+	if direction != DirectionVertical && direction != DirectionHorizontal {
+		direction = DirectionVertical
+	}
+	if strings.TrimSpace(splitID) == "" {
+		splitID = "split"
+	}
+
+	cleanedSource, removed := Remove(source, leafID)
+	if !removed {
+		return MoveBetweenLayoutsResult{}, false
+	}
+
+	finalLeafID := leafID
+	if hasLeaf(target, finalLeafID) {
+		suffix := strings.TrimSpace(conflictSuffix)
+		if suffix == "" {
+			suffix = "moved"
+		}
+		finalLeafID = finalLeafID + "-" + suffix
+		if moved.Type == "pane" {
+			moved.PaneID = finalLeafID
+		} else if moved.Type == "tile" {
+			moved.TileID = finalLeafID
+		}
+	}
+	if hasLeaf(target, finalLeafID) {
+		return MoveBetweenLayoutsResult{}, false
+	}
+
+	var nextTarget Node
+	if target.Type == "" || LayoutEmpty(target) {
+		nextTarget = moved
+	} else if anchorID == "" {
+		nextTarget = lockedSplit(target, moved, direction, before, splitID, ratio)
+	} else {
+		if !hasLeaf(target, anchorID) {
+			return MoveBetweenLayoutsResult{}, false
+		}
+		inserted, ok := insertBesideLeaf(target, anchorID, direction, before, splitID, ratio, moved)
+		if !ok {
+			return MoveBetweenLayoutsResult{}, false
+		}
+		nextTarget = inserted
+	}
+
+	return MoveBetweenLayoutsResult{
+		SourceLayout: cleanedSource,
+		TargetLayout: nextTarget,
+		Leaf:         moved,
+		FinalLeafID:  finalLeafID,
+	}, true
+}
+
 // UndockTile removes a docked tile from the tree, collapsing the split that
 // held it so its sibling reclaims the space. The bool reports whether a tile
 // was found and removed.

@@ -63,6 +63,11 @@ interface SidebarProps {
   onMuteWorkspace?: (workspaceId: string, endpointId?: string) => void;
   showSessionless?: boolean;
   onToggleShowSessionless?: () => void;
+  leafDrag?: { sourceWorkspaceId: string; endpointId?: string } | null;
+  dragHoverWorkspaceId?: string | null;
+  onWorkspaceDragEnter?: (workspace: SidebarWorkspace) => void;
+  onWorkspaceDragLeave?: (workspace: SidebarWorkspace) => void;
+  onWorkspaceDragDrop?: (workspace: SidebarWorkspace) => void;
   onSelectSession: (id: string) => void;
   onSelectWorkspace: (id: string) => void;
   onNewSession: () => void;
@@ -196,6 +201,11 @@ export function Sidebar({
   onMuteWorkspace,
   showSessionless = false,
   onToggleShowSessionless,
+  leafDrag = null,
+  dragHoverWorkspaceId = null,
+  onWorkspaceDragEnter,
+  onWorkspaceDragLeave,
+  onWorkspaceDragDrop,
   onSelectSession,
   onSelectWorkspace,
   onNewSession,
@@ -219,6 +229,25 @@ export function Sidebar({
   const visibleVisualIndexByWorkspaceId = new Map(
     visibleVisualOrder.map((workspace, index) => [workspace.id, index]),
   );
+
+  const canAcceptLeafDrag = (workspace: SidebarWorkspace) => Boolean(
+    leafDrag
+      && workspace.id !== leafDrag.sourceWorkspaceId
+      && (workspace.endpointId || '') === (leafDrag.endpointId || ''),
+  );
+
+  const workspaceDragClass = (workspace: SidebarWorkspace) => {
+    if (!leafDrag) {
+      return '';
+    }
+    if (!canAcceptLeafDrag(workspace)) {
+      return ' workspace-group--drag-disabled';
+    }
+    if (dragHoverWorkspaceId === workspace.id) {
+      return ' workspace-group--drag-entering';
+    }
+    return ' workspace-group--drag-target';
+  };
   const visualIndexOfWorkspace = (id: string) => (
     visibleVisualIndexByWorkspaceId.get(id) ?? visualIndexByWorkspaceId.get(id) ?? -1
   );
@@ -359,8 +388,23 @@ export function Sidebar({
           return (
             <div
               key={`${workspace.endpointId || 'local'}:${workspace.id}`}
-              className={`workspace-group ${selectedWorkspaceId === workspace.id ? 'selected' : ''}`}
+              className={`workspace-group ${selectedWorkspaceId === workspace.id ? 'selected' : ''}${workspaceDragClass(workspace)}`}
               data-testid={`sidebar-workspace-${workspace.id}`}
+              onPointerEnter={() => {
+                if (canAcceptLeafDrag(workspace)) {
+                  onWorkspaceDragEnter?.(workspace);
+                }
+              }}
+              onPointerLeave={() => {
+                if (canAcceptLeafDrag(workspace)) {
+                  onWorkspaceDragLeave?.(workspace);
+                }
+              }}
+              onPointerUp={() => {
+                if (canAcceptLeafDrag(workspace)) {
+                  onWorkspaceDragDrop?.(workspace);
+                }
+              }}
             >
               <div
                 role="button"
@@ -487,8 +531,23 @@ export function Sidebar({
               {mutedWorkspaces.map((workspace) => (
                 <div
                   key={`${workspace.endpointId || 'local'}:${workspace.id}`}
-                  className={`workspace-group muted-workspace ${selectedWorkspaceId === workspace.id ? 'selected' : ''}`}
+                  className={`workspace-group muted-workspace ${selectedWorkspaceId === workspace.id ? 'selected' : ''}${workspaceDragClass(workspace)}`}
                   data-testid={`sidebar-muted-workspace-${workspace.id}`}
+                  onPointerEnter={() => {
+                    if (canAcceptLeafDrag(workspace)) {
+                      onWorkspaceDragEnter?.(workspace);
+                    }
+                  }}
+                  onPointerLeave={() => {
+                    if (canAcceptLeafDrag(workspace)) {
+                      onWorkspaceDragLeave?.(workspace);
+                    }
+                  }}
+                  onPointerUp={() => {
+                    if (canAcceptLeafDrag(workspace)) {
+                      onWorkspaceDragDrop?.(workspace);
+                    }
+                  }}
                 >
                   <div
                     role="button"

@@ -2707,17 +2707,29 @@ type WorkspaceLayoutActionResultMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
 
+	// FinalLeafID corresponds to the JSON schema field "final_leaf_id".
+	FinalLeafID *string `json:"final_leaf_id,omitempty,omitzero"`
+
+	// LeafID corresponds to the JSON schema field "leaf_id".
+	LeafID *string `json:"leaf_id,omitempty,omitzero"`
+
 	// PaneID corresponds to the JSON schema field "pane_id".
 	PaneID *string `json:"pane_id,omitempty,omitzero"`
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
 
+	// SourceWorkspaceID corresponds to the JSON schema field "source_workspace_id".
+	SourceWorkspaceID *string `json:"source_workspace_id,omitempty,omitzero"`
+
 	// SplitID corresponds to the JSON schema field "split_id".
 	SplitID *string `json:"split_id,omitempty,omitzero"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
+
+	// TargetWorkspaceID corresponds to the JSON schema field "target_workspace_id".
+	TargetWorkspaceID *string `json:"target_workspace_id,omitempty,omitzero"`
 
 	// TileID corresponds to the JSON schema field "tile_id".
 	TileID *string `json:"tile_id,omitempty,omitzero"`
@@ -2835,6 +2847,29 @@ type WorkspaceLayoutMoveLeafMessage struct {
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspaceLayoutMoveLeafToWorkspaceMessage struct {
+	// AnchorID corresponds to the JSON schema field "anchor_id".
+	AnchorID *string `json:"anchor_id,omitempty,omitzero"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Edge corresponds to the JSON schema field "edge".
+	Edge WorkspaceLayoutDockEdge `json:"edge"`
+
+	// LeafID corresponds to the JSON schema field "leaf_id".
+	LeafID string `json:"leaf_id"`
+
+	// Ratio corresponds to the JSON schema field "ratio".
+	Ratio *float64 `json:"ratio,omitempty,omitzero"`
+
+	// SourceWorkspaceID corresponds to the JSON schema field "source_workspace_id".
+	SourceWorkspaceID string `json:"source_workspace_id"`
+
+	// TargetWorkspaceID corresponds to the JSON schema field "target_workspace_id".
+	TargetWorkspaceID string `json:"target_workspace_id"`
 }
 
 type WorkspaceLayoutPane struct {
