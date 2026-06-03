@@ -78,4 +78,15 @@ describe('SessionTerminalWorkspace tile-only (sessionless) rendering', () => {
     // real layout renders the tile surface inside the panes container.
     expect(workspaceRoot?.querySelector('.session-terminal-panes')).not.toBeNull();
   });
+
+  // With no terminal to own focus, selecting (showing) a tile-only workspace
+  // should focus the tile's scrollable body so keyboard scrolling works at once.
+  it('focuses the tile body so the tile-only workspace is keyboard-scrollable', () => {
+    const { container } = renderTileOnly();
+
+    const body = container.querySelector('.workspace-dock-tile-body');
+    expect(body).not.toBeNull();
+    expect(body).toHaveAttribute('tabindex', '-1');
+    expect(document.activeElement).toBe(body);
+  });
 });

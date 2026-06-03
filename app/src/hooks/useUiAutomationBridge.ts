@@ -1416,6 +1416,17 @@ export function useUiAutomationBridge({
         const paneCount = surface
           ? surface.querySelectorAll('[data-pane-kind="agent"]').length
           : 0;
+        const tileTitles = surface
+          ? Array.from(surface.querySelectorAll('.workspace-dock-tile-title'))
+            .map((node) => node.textContent?.trim() || '')
+          : [];
+        const activeBody = document.activeElement;
+        const tileBodyFocused = Boolean(
+          surface
+            && activeBody instanceof HTMLElement
+            && activeBody.classList.contains('workspace-dock-tile-body')
+            && surface.contains(activeBody),
+        );
         return {
           workspaceId,
           rendered: Boolean(surface),
@@ -1423,6 +1434,8 @@ export function useUiAutomationBridge({
           sessionVisible: surface?.getAttribute('data-session-visible') === '1',
           tileIds,
           paneCount,
+          tileTitles,
+          tileBodyFocused,
         };
       }
       case 'location_picker_get_state':
