@@ -542,10 +542,60 @@ describe('SessionTerminalWorkspace', () => {
       />
     );
 
+    // A leaf drag only locks selection once the pointer crosses the activation
+    // threshold — a press alone stays a click (see leafDrag.ts). Press, then move
+    // past the threshold to activate.
     fireEvent.pointerDown(container.querySelector('.workspace-dock-tile-header') as HTMLElement, { button: 0, clientX: 750, clientY: 250 });
+    expect(document.body.style.userSelect).toBe('');
+    fireEvent.pointerMove(window, { clientX: 760, clientY: 280 });
     expect(document.body.style.userSelect).toBe('none');
     fireEvent.blur(window);
     expect(document.body.style.userSelect).toBe('');
+  });
+
+  it('a plain tile-header click does not lock selection or move the tile', () => {
+    const onMoveLeaf = vi.fn();
+    const { container } = render(
+      <SessionTerminalWorkspace
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
+        workspace={{
+          agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }],
+          layoutTree: {
+            type: 'split',
+            splitId: 'root-tile',
+            direction: 'vertical',
+            ratio: 0.7,
+            children: [
+              { type: 'pane', paneId: SESSION_PANE_ID },
+              { type: 'tile', tileId: 'tile-md', tileKind: 'markdown', tileParams: '/tmp/notes.md' },
+            ],
+          },
+        }}
+        activePaneId={SESSION_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onMoveLeaf={onMoveLeaf}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+    const panes = container.querySelector('.session-terminal-panes') as HTMLElement;
+    vi.spyOn(panes, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, right: 1000, bottom: 500, width: 1000, height: 500, x: 0, y: 0, toJSON: () => {},
+    });
+
+    // Press and release on the tile header with no movement: a click, not a drag.
+    const header = container.querySelector('.workspace-dock-tile-header') as HTMLElement;
+    fireEvent.pointerDown(header, { button: 0, clientX: 750, clientY: 8 });
+    fireEvent.pointerUp(window, { clientX: 750, clientY: 8 });
+
+    expect(document.body.style.userSelect).toBe('');
+    expect(onMoveLeaf).not.toHaveBeenCalled();
   });
 
   it('keeps the session pane mounted when the split topology changes around it', () => {

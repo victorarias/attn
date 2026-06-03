@@ -566,10 +566,16 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       if (!container) {
         return;
       }
-      const releaseSelectionLock = lockTextSelection('grabbing');
-      onLeafDragStart?.(leafId);
-      setDraggingLeafId(leafId);
+      // The press only becomes a drag once the pointer crosses the activation
+      // threshold (see startLeafDrag). Defer every visual side effect to
+      // onActivate so a plain header click leaves no trace and never docks.
+      let releaseSelectionLock: (() => void) | null = null;
       const teardown = startLeafDrag(leafId, event.clientX, event.clientY, container, renderedPaneBounds, {
+        onActivate: () => {
+          releaseSelectionLock = lockTextSelection('grabbing');
+          onLeafDragStart?.(leafId);
+          setDraggingLeafId(leafId);
+        },
         onGhostMove: (x, y) => {
           setGhostPos({ x, y });
           onLeafDragGhostMove?.(x, y);
@@ -580,7 +586,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         },
         onDrop: (id, target) => onMoveLeaf?.(id, target.anchorId, target.edge, target.ratio),
         onCleanup: () => {
-          releaseSelectionLock();
+          releaseSelectionLock?.();
+          releaseSelectionLock = null;
           setDraggingLeafId(null);
           setDockTarget(null);
           setGhostPos(null);
