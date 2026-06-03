@@ -739,6 +739,27 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // from verified replay without sending historical replies to the live PTY.
     }, [clearSynchronizedOutputRenderTimer, fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, resizeLocal, resolvedTheme, write]);
 
+    // Release this pane's WebGL2 context when the pane unmounts. Browsers cap the
+    // number of simultaneously-live WebGL contexts (WKWebView's cap is low), and
+    // attn keeps every workspace's panes mounted, so a closed or remounted pane
+    // whose context lingers until non-deterministic GC can starve new panes — the
+    // engine then forcibly loses the oldest context, which surfaces as a frozen
+    // pane or a hard UI freeze when opening a new agent/terminal. loseContext()
+    // reclaims the context deterministically at unmount.
+    //
+    // This lives in its own unmount-only effect (empty deps) on purpose: the init
+    // effect above reuses this same <canvas> when fontSize/theme change, and a
+    // canvas keeps returning the *same* context object from getContext() even
+    // after it is lost. Losing it in the per-init cleanup would hand the rebuilt
+    // renderer a dead context. Capturing the canvas here closes over the element
+    // so the cleanup is order-independent of the init effect's teardown.
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      return () => {
+        canvas?.getContext('webgl2')?.getExtension('WEBGL_lose_context')?.loseContext();
+      };
+    }, []);
+
     const cellFromPointer = (event: React.MouseEvent | React.WheelEvent) => {
       const renderer = rendererRef.current;
       const rect = canvasRef.current?.getBoundingClientRect();
