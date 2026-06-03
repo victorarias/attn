@@ -756,7 +756,7 @@ func forwardsRawEvent(event string) bool {
 		protocol.EventPtyDesync,
 		protocol.EventSessionExited,
 		protocol.EventWorkspaceLayoutActionResult,
-		protocol.EventWorkspacePanelContent,
+		protocol.EventWorkspaceTileContent,
 		protocol.EventCommandError:
 		return true
 	default:

@@ -119,31 +119,31 @@ func TestMoveLeafContainerDockWrapsRoot(t *testing.T) {
 	}
 }
 
-func TestMoveLeafMovesPanelPreservingKindAndParams(t *testing.T) {
+func TestMoveLeafMovesTilePreservingKindAndParams(t *testing.T) {
 	tree := Node{
 		Type:      "split",
 		SplitID:   "root",
 		Direction: DirectionVertical,
 		Ratio:     DefaultSplitRatio,
 		Children: []Node{
-			{Type: "panel", PanelID: "md1", PanelKind: string(PanelKindMarkdown), PanelParams: "/a.md"},
-			{Type: "panel", PanelID: "md2", PanelKind: string(PanelKindMarkdown), PanelParams: "/b.md"},
+			{Type: "tile", TileID: "md1", TileKind: string(TileKindMarkdown), TileParams: "/a.md"},
+			{Type: "tile", TileID: "md2", TileKind: string(TileKindMarkdown), TileParams: "/b.md"},
 		},
 	}
 	moved, ok := MoveLeaf(tree, "md1", "md2", "split-x", DirectionHorizontal, false, 0.5)
 	if !ok {
-		t.Fatal("panel-on-panel move did not change layout")
+		t.Fatal("tile-on-tile move did not change layout")
 	}
 	// md2 stays put; md1 lands beside it carrying its kind + params.
 	right := moved.Children[1]
-	if right.Type != "panel" || right.PanelID != "md1" {
-		t.Fatalf("children[1] = %+v, want relocated md1 panel", right)
+	if right.Type != "tile" || right.TileID != "md1" {
+		t.Fatalf("children[1] = %+v, want relocated md1 tile", right)
 	}
-	if right.PanelKind != string(PanelKindMarkdown) || right.PanelParams != "/a.md" {
-		t.Fatalf("relocated panel lost data: kind=%q params=%q", right.PanelKind, right.PanelParams)
+	if right.TileKind != string(TileKindMarkdown) || right.TileParams != "/a.md" {
+		t.Fatalf("relocated tile lost data: kind=%q params=%q", right.TileKind, right.TileParams)
 	}
-	if ids := PanelIDs(moved); len(ids) != 2 {
-		t.Fatalf("panel ids = %v, want exactly two (no duplicate from the move)", ids)
+	if ids := TileIDs(moved); len(ids) != 2 {
+		t.Fatalf("tile ids = %v, want exactly two (no duplicate from the move)", ids)
 	}
 }
 

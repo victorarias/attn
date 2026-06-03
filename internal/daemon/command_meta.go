@@ -107,10 +107,10 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdWorkspaceLayoutFocusPane:      commandMetadata(ScopeSession, true, true),
 	protocol.CmdWorkspaceLayoutRenamePane:     commandMetadata(ScopeSession, true, true),
 	protocol.CmdWorkspaceLayoutSetSplitRatio:  commandMetadata(ScopeSession, true, true),
-	protocol.CmdWorkspaceLayoutDockPanel:      commandMetadata(ScopeSession, true, true),
-	protocol.CmdWorkspaceLayoutUndockPanel:    commandMetadata(ScopeSession, true, true),
+	protocol.CmdWorkspaceLayoutDockTile:       commandMetadata(ScopeSession, true, true),
+	protocol.CmdWorkspaceLayoutUndockTile:     commandMetadata(ScopeSession, true, true),
 	protocol.CmdWorkspaceLayoutMoveLeaf:       commandMetadata(ScopeSession, true, true),
-	protocol.CmdWorkspacePanelContentGet:      commandMetadata(ScopeSession, true, true),
+	protocol.CmdWorkspaceTileContentGet:       commandMetadata(ScopeSession, true, true),
 }
 
 func shouldLogWSCommand(cmd string) bool {

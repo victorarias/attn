@@ -31,7 +31,7 @@ import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, Daemon
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
-import { hasPane, type TerminalSplitDirection } from './types/workspace';
+import { hasPane, workspaceSnapshotFromDaemonWorkspace, type TerminalSplitDirection } from './types/workspace';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -160,6 +160,27 @@ function persistDismissedUpdateVersion(version: string): void {
     window.localStorage.setItem(UPDATE_BANNER_DISMISSED_STORAGE_KEY, version);
   } catch (err) {
     console.warn('[App] Failed to persist dismissed update version:', err);
+  }
+}
+
+// Sessionless (tile-only) workspaces — those kept alive by a docked tile after
+// their last terminal closed — are hidden from the sidebar unless the user opts
+// in via the sidebar display popover. The preference persists across launches.
+const SHOW_SESSIONLESS_WORKSPACES_STORAGE_KEY = 'attn.sidebar.showSessionless';
+
+function readShowSessionlessWorkspaces(): boolean {
+  try {
+    return window.localStorage.getItem(SHOW_SESSIONLESS_WORKSPACES_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function persistShowSessionlessWorkspaces(value: boolean): void {
+  try {
+    window.localStorage.setItem(SHOW_SESSIONLESS_WORKSPACES_STORAGE_KEY, value ? '1' : '0');
+  } catch (err) {
+    console.warn('[App] Failed to persist show-sessionless preference:', err);
   }
 }
 
@@ -380,10 +401,10 @@ function App() {
     sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
     sendWorkspaceSetSplitRatio,
-    sendWorkspaceUndockPanel,
+    sendWorkspaceUndockTile,
     sendWorkspaceMoveLeaf,
-    panelContents,
-    requestPanelContent,
+    tileContents,
+    requestTileContent,
     sendRuntimeInput,
     isRuntimeAttached,
     sendGetFileDiff,
@@ -502,10 +523,10 @@ function App() {
         sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
         sendWorkspaceSetSplitRatio={sendWorkspaceSetSplitRatio}
-        sendWorkspaceUndockPanel={sendWorkspaceUndockPanel}
+        sendWorkspaceUndockTile={sendWorkspaceUndockTile}
         sendWorkspaceMoveLeaf={sendWorkspaceMoveLeaf}
-        panelContents={panelContents}
-        requestPanelContent={requestPanelContent}
+        tileContents={tileContents}
+        requestTileContent={requestTileContent}
         sendRuntimeInput={sendRuntimeInput}
         isRuntimeAttached={isRuntimeAttached}
         sendGetFileDiff={sendGetFileDiff}
@@ -591,10 +612,10 @@ interface AppContentProps {
   sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
   sendWorkspaceSetSplitRatio: ReturnType<typeof useDaemonSocket>['sendWorkspaceSetSplitRatio'];
-  sendWorkspaceUndockPanel: ReturnType<typeof useDaemonSocket>['sendWorkspaceUndockPanel'];
+  sendWorkspaceUndockTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceUndockTile'];
   sendWorkspaceMoveLeaf: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeaf'];
-  panelContents: ReturnType<typeof useDaemonSocket>['panelContents'];
-  requestPanelContent: ReturnType<typeof useDaemonSocket>['requestPanelContent'];
+  tileContents: ReturnType<typeof useDaemonSocket>['tileContents'];
+  requestTileContent: ReturnType<typeof useDaemonSocket>['requestTileContent'];
   sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
   isRuntimeAttached: ReturnType<typeof useDaemonSocket>['isRuntimeAttached'];
   sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
@@ -675,10 +696,10 @@ sendFetchPRDetails,
   sendWorkspaceAddSessionPane,
   sendWorkspaceClosePane,
   sendWorkspaceSetSplitRatio,
-  sendWorkspaceUndockPanel,
+  sendWorkspaceUndockTile,
   sendWorkspaceMoveLeaf,
-  panelContents,
-  requestPanelContent,
+  tileContents,
+  requestTileContent,
   sendRuntimeInput,
   isRuntimeAttached,
   sendGetFileDiff,
@@ -719,6 +740,18 @@ sendFetchPRDetails,
     syncFromDaemonSessions,
     syncFromDaemonWorkspaces,
   } = useSessionStore();
+
+  // Explicit selection of a sessionless (tile-only) workspace. The selection
+  // model is otherwise session-centric — the active workspace is derived from
+  // the active session — but a tile-only workspace has no session to activate
+  // through, so it needs its own selection anchor. Cleared whenever a session is
+  // selected; the selection controller also ignores it once the workspace gains
+  // sessions or disappears.
+  const [selectedSessionlessWorkspaceId, setSelectedSessionlessWorkspaceId] = useState<string | null>(null);
+  // handleSelectWorkspace is defined far below (it depends on the workspace view
+  // models); the automation bridge above it reaches the live handler through
+  // this ref so test scenarios can select a workspace by id.
+  const selectWorkspaceRef = useRef<(workspaceId: string) => void>(() => {});
 
   const rollbackSessionCreation = useCallback(async ({
     sessionId,
@@ -1767,6 +1800,7 @@ sendFetchPRDetails,
 
   const handleSelectSession = useCallback(
     (id: string) => {
+      setSelectedSessionlessWorkspaceId(null);
       const session = sessions.find((entry) => entry.id === id);
       const sessionPane = session?.workspace.agents.find((pane) => pane.sessionId === id);
       if (sessionPane) {
@@ -1786,6 +1820,7 @@ sendFetchPRDetails,
     getActivePaneIdForSession,
     createSession: createWorkspaceSession,
     selectSession: handleSelectSession,
+    selectWorkspace: (workspaceId: string) => selectWorkspaceRef.current(workspaceId),
     closeSession: handleCloseSession,
     reloadSession,
     setSetting: sendSetSetting,
@@ -2002,16 +2037,54 @@ sendFetchPRDetails,
     }
   }, [unmutedEnrichedSessions, handleSelectSession]);
 
+  // Sessionless (tile-only) workspaces are revealed via the sidebar display
+  // popover; the preference is the single source of truth for every derived list
+  // below (sidebar render order, ⌘1–9 order, prev/next navigation) so they stay
+  // consistent. They never contribute to unmutedWorkspaceViews, which feeds
+  // session/attention counts.
+  const [showSessionlessWorkspaces, setShowSessionlessWorkspaces] = useState<boolean>(readShowSessionlessWorkspaces);
+  const handleToggleShowSessionlessWorkspaces = useCallback(() => {
+    setShowSessionlessWorkspaces((prev) => {
+      const next = !prev;
+      persistShowSessionlessWorkspaces(next);
+      return next;
+    });
+  }, []);
   const sidebarWorkspaceViews = useMemo(
-    () => unmutedWorkspaceViews,
-    [unmutedWorkspaceViews],
+    () => workspaceViews.filter(
+      (workspace) => !workspace.muted && (workspace.sessions.length > 0 || showSessionlessWorkspaces),
+    ),
+    [workspaceViews, showSessionlessWorkspaces],
   );
-  const workspaceSelection = useWorkspaceSelectionController(workspaceViews, activeSessionId);
+  const workspaceSelection = useWorkspaceSelectionController(
+    workspaceViews,
+    activeSessionId,
+    selectedSessionlessWorkspaceId,
+  );
   const activeWorkspaceId = workspaceSelection.activeWorkspaceId;
 
-  // Markdown panels are daemon-owned docked panels opened via `attn open <path>`
-  // (and re-dockable by dragging). There is no empty "show panel" toggle: a
-  // panel only exists once it points at a real file.
+  // Renderable terminal state for tile-only workspaces, built straight from the
+  // daemon's broadcast layout (which keeps the docked tile after the last
+  // terminal closes). The session-derived path can't produce this — there is no
+  // session to carry the layout — so the render loop falls back to this map for
+  // any workspace whose layout has tiles and zero agent panes.
+  const sessionlessWorkspaceStateById = useMemo(() => {
+    const map = new Map<string, TerminalWorkspaceState>();
+    for (const workspace of daemonWorkspaces) {
+      if (!workspace.layout) {
+        continue;
+      }
+      const { workspace: state } = workspaceSnapshotFromDaemonWorkspace(workspace.layout);
+      if (state.layoutTree && state.agents.length === 0) {
+        map.set(workspace.id, state);
+      }
+    }
+    return map;
+  }, [daemonWorkspaces]);
+
+  // Markdown tiles are daemon-owned docked tiles opened via `attn open <path>`
+  // (and re-dockable by dragging). There is no empty "show tile" toggle: a
+  // tile only exists once it points at a real file.
 
   // Use workspace order so ⌘1-9 and prev/next match the top-level sidebar rows.
   const visualWorkspaces = sidebarWorkspaceViews;
@@ -2023,13 +2096,23 @@ sendFetchPRDetails,
     (workspaceId: string) => {
       const workspace = sidebarWorkspaceViews.find((entry) => entry.id === workspaceId)
         || workspaceViews.find((entry) => entry.id === workspaceId);
-      const sessionId = workspace?.firstSessionId;
+      if (!workspace) {
+        return;
+      }
+      const sessionId = workspace.firstSessionId;
       if (sessionId) {
         handleSelectSession(sessionId);
+        return;
       }
+      // Tile-only workspace: activate it by id (it has no session to route
+      // through) and surface the terminal view so its docked layout renders.
+      setSelectedSessionlessWorkspaceId(workspace.id);
+      setView('session');
+      setUtilityFocusRequestToken((token) => token + 1);
     },
-    [handleSelectSession, sidebarWorkspaceViews, workspaceViews],
+    [handleSelectSession, setView, sidebarWorkspaceViews, workspaceViews],
   );
+  selectWorkspaceRef.current = handleSelectWorkspace;
 
   const handleSelectWorkspaceByIndex = useCallback(
     (index: number) => {
@@ -2605,6 +2688,8 @@ sendFetchPRDetails,
           mutedExpanded={sidebarMutedExpanded}
           onMutedExpandedChange={setSidebarMutedExpanded}
           onMuteWorkspace={sendMuteWorkspace}
+          showSessionless={showSessionlessWorkspaces}
+          onToggleShowSessionless={handleToggleShowSessionlessWorkspaces}
           onSelectSession={handleSelectSession}
           onSelectWorkspace={handleSelectWorkspace}
           onNewSession={() => handleNewSession('vertical')}
@@ -2616,7 +2701,9 @@ sendFetchPRDetails,
         <div className="terminal-pane">
           <div className="terminal-main-area">
             {workspaceViews.map((workspace) => {
-              const workspaceState = terminalStateForWorkspaceSessions(workspace.sessions);
+              const workspaceState = terminalStateForWorkspaceSessions(workspace.sessions)
+                ?? sessionlessWorkspaceStateById.get(workspace.id)
+                ?? null;
               if (!workspaceState) {
                 return null;
               }
@@ -2686,15 +2773,15 @@ sendFetchPRDetails,
                       ));
                     }}
                     onNavigateOutOfSession={handleNavigateOutOfSession}
-                    onUndockPanel={(panelId) => {
-                      void sendWorkspaceUndockPanel(workspace.id, panelId).catch(() => {});
+                    onUndockTile={(tileId) => {
+                      void sendWorkspaceUndockTile(workspace.id, tileId).catch(() => {});
                     }}
                     onMoveLeaf={(leafId, anchorId, edge, ratio) => {
                       void sendWorkspaceMoveLeaf(workspace.id, leafId, { anchorId, edge, ratio }).catch(() => {});
                     }}
-                    panelContents={panelContents}
-                    allowLocalPanelTargets={!workspace.endpointId}
-                    onRequestPanelContent={requestPanelContent}
+                    tileContents={tileContents}
+                    allowLocalTileTargets={!workspace.endpointId}
+                    onRequestTileContent={requestTileContent}
                   />
                 </div>
               );

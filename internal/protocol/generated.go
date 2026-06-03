@@ -2518,12 +2518,6 @@ type WebSocketEvent struct {
 	// PaneID corresponds to the JSON schema field "pane_id".
 	PaneID *string `json:"pane_id,omitempty,omitzero"`
 
-	// PanelID corresponds to the JSON schema field "panel_id".
-	PanelID *string `json:"panel_id,omitempty,omitzero"`
-
-	// PanelKind corresponds to the JSON schema field "panel_kind".
-	PanelKind *string `json:"panel_kind,omitempty,omitzero"`
-
 	// Path corresponds to the JSON schema field "path".
 	Path *string `json:"path,omitempty,omitzero"`
 
@@ -2635,6 +2629,12 @@ type WebSocketEvent struct {
 	// TargetPath corresponds to the JSON schema field "target_path".
 	TargetPath *string `json:"target_path,omitempty,omitzero"`
 
+	// TileID corresponds to the JSON schema field "tile_id".
+	TileID *string `json:"tile_id,omitempty,omitzero"`
+
+	// TileKind corresponds to the JSON schema field "tile_kind".
+	TileKind *string `json:"tile_kind,omitempty,omitzero"`
+
 	// Unstaged corresponds to the JSON schema field "unstaged".
 	Unstaged []GitFileChange `json:"unstaged,omitempty,omitzero"`
 
@@ -2710,9 +2710,6 @@ type WorkspaceLayoutActionResultMessage struct {
 	// PaneID corresponds to the JSON schema field "pane_id".
 	PaneID *string `json:"pane_id,omitempty,omitzero"`
 
-	// PanelID corresponds to the JSON schema field "panel_id".
-	PanelID *string `json:"panel_id,omitempty,omitzero"`
-
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
 
@@ -2721,6 +2718,9 @@ type WorkspaceLayoutActionResultMessage struct {
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
+
+	// TileID corresponds to the JSON schema field "tile_id".
+	TileID *string `json:"tile_id,omitempty,omitzero"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`
@@ -2767,7 +2767,7 @@ const WorkspaceLayoutDockEdgeLeft WorkspaceLayoutDockEdge = "left"
 const WorkspaceLayoutDockEdgeRight WorkspaceLayoutDockEdge = "right"
 const WorkspaceLayoutDockEdgeTop WorkspaceLayoutDockEdge = "top"
 
-type WorkspaceLayoutDockPanelMessage struct {
+type WorkspaceLayoutDockTileMessage struct {
 	// AnchorPaneID corresponds to the JSON schema field "anchor_pane_id".
 	AnchorPaneID string `json:"anchor_pane_id"`
 
@@ -2777,14 +2777,14 @@ type WorkspaceLayoutDockPanelMessage struct {
 	// Edge corresponds to the JSON schema field "edge".
 	Edge WorkspaceLayoutDockEdge `json:"edge"`
 
-	// PanelID corresponds to the JSON schema field "panel_id".
-	PanelID string `json:"panel_id"`
-
-	// PanelKind corresponds to the JSON schema field "panel_kind".
-	PanelKind string `json:"panel_kind"`
-
 	// Ratio corresponds to the JSON schema field "ratio".
 	Ratio *float64 `json:"ratio,omitempty,omitzero"`
+
+	// TileID corresponds to the JSON schema field "tile_id".
+	TileID string `json:"tile_id"`
+
+	// TileKind corresponds to the JSON schema field "tile_kind".
+	TileKind string `json:"tile_kind"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`
@@ -2909,12 +2909,12 @@ type WorkspaceLayoutSplitDirection string
 const WorkspaceLayoutSplitDirectionHorizontal WorkspaceLayoutSplitDirection = "horizontal"
 const WorkspaceLayoutSplitDirectionVertical WorkspaceLayoutSplitDirection = "vertical"
 
-type WorkspaceLayoutUndockPanelMessage struct {
+type WorkspaceLayoutUndockTileMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
-	// PanelID corresponds to the JSON schema field "panel_id".
-	PanelID string `json:"panel_id"`
+	// TileID corresponds to the JSON schema field "tile_id".
+	TileID string `json:"tile_id"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`
@@ -2926,40 +2926,6 @@ type WorkspaceLayoutUpdatedMessage struct {
 
 	// WorkspaceLayout corresponds to the JSON schema field "workspace_layout".
 	WorkspaceLayout WorkspaceLayout `json:"workspace_layout"`
-}
-
-type WorkspacePanelContentGetMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// PanelID corresponds to the JSON schema field "panel_id".
-	PanelID string `json:"panel_id"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
-}
-
-type WorkspacePanelContentMessage struct {
-	// Content corresponds to the JSON schema field "content".
-	Content string `json:"content"`
-
-	// Error corresponds to the JSON schema field "error".
-	Error *string `json:"error,omitempty,omitzero"`
-
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// PanelID corresponds to the JSON schema field "panel_id".
-	PanelID string `json:"panel_id"`
-
-	// PanelKind corresponds to the JSON schema field "panel_kind".
-	PanelKind string `json:"panel_kind"`
-
-	// Path corresponds to the JSON schema field "path".
-	Path string `json:"path"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
 }
 
 type WorkspaceRegisteredMessage struct {
@@ -2985,6 +2951,40 @@ const WorkspaceStatusLaunching WorkspaceStatus = "launching"
 const WorkspaceStatusPendingApproval WorkspaceStatus = "pending_approval"
 const WorkspaceStatusWaitingInput WorkspaceStatus = "waiting_input"
 const WorkspaceStatusWorking WorkspaceStatus = "working"
+
+type WorkspaceTileContentGetMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// TileID corresponds to the JSON schema field "tile_id".
+	TileID string `json:"tile_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspaceTileContentMessage struct {
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// TileID corresponds to the JSON schema field "tile_id".
+	TileID string `json:"tile_id"`
+
+	// TileKind corresponds to the JSON schema field "tile_kind".
+	TileKind string `json:"tile_kind"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
 
 type WorkspaceUnregisteredMessage struct {
 	// Event corresponds to the JSON schema field "event".

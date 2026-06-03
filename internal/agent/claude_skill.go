@@ -172,8 +172,8 @@ When you have written or found a markdown document the user should read, you can
 Notes:
 
 1. The path may be relative to your current directory or absolute; attn resolves it.
-2. By default the panel opens next to the current attn session (your own), so you usually do not pass ` + "`--session`" + `. To target a specific session, add ` + "`--session <session-id>`" + `.
-3. The panel live-reloads if you edit the file afterward.
+2. By default the tile opens next to the current attn session (your own), so you usually do not pass ` + "`--session`" + `. To target a specific session, add ` + "`--session <session-id>`" + `.
+3. The tile live-reloads if you edit the file afterward.
 
 ## Important Rules
 

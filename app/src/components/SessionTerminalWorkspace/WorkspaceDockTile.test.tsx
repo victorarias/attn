@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { invoke } from '@tauri-apps/api/core';
-import { WorkspaceDockPanel, resolveMarkdownTarget } from './WorkspaceDockPanel';
+import { WorkspaceDockTile, resolveMarkdownTarget } from './WorkspaceDockTile';
 
 const opener = vi.hoisted(() => ({
   openUrl: vi.fn(async () => {}),
@@ -12,8 +12,8 @@ const invokeMock = vi.mocked(invoke);
 
 function renderMarkdown(content: string, allowLocalTargets = true) {
   return render(
-    <WorkspaceDockPanel
-      panel={{ type: 'panel', panelId: 'panel-markdown', panelKind: 'markdown', panelParams: '/tmp/project/README.md' }}
+    <WorkspaceDockTile
+      tile={{ type: 'tile', tileId: 'tile-markdown', tileKind: 'markdown', tileParams: '/tmp/project/README.md' }}
       workspaceId="workspace-1"
       content={{ path: '/tmp/project/README.md', content }}
       allowLocalTargets={allowLocalTargets}
@@ -25,7 +25,7 @@ function renderMarkdown(content: string, allowLocalTargets = true) {
   );
 }
 
-describe('WorkspaceDockPanel Markdown rendering', () => {
+describe('WorkspaceDockTile Markdown rendering', () => {
   beforeEach(() => {
     invokeMock.mockReset();
     invokeMock.mockResolvedValue(undefined);

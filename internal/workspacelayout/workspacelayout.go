@@ -25,16 +25,16 @@ const (
 	PaneKindAgent PaneKind = "agent"
 )
 
-// PanelKind labels a docked panel by the surface it renders. The layout package
-// treats it as an opaque token: panels are persisted by where they sit and how
+// TileKind labels a docked tile by the surface it renders. The layout package
+// treats it as an opaque token: tiles are persisted by where they sit and how
 // big they are, not by what they display. Rendering is entirely a client
 // concern, so new kinds need no daemon change.
-type PanelKind string
+type TileKind string
 
 const (
-	// PanelKindMarkdown is the first panel consumer. More kinds can be docked
+	// TileKindMarkdown is the first tile consumer. More kinds can be docked
 	// without touching this package.
-	PanelKindMarkdown PanelKind = "markdown"
+	TileKindMarkdown TileKind = "markdown"
 )
 
 type PaneStatus string
@@ -58,22 +58,22 @@ type Pane struct {
 type Node struct {
 	Type   string `json:"type"`
 	PaneID string `json:"pane_id,omitempty"`
-	// PanelID and PanelKind describe a docked panel leaf (Type == "panel").
-	// Panels are first-class layout citizens alongside agent panes: they take
+	// TileID and TileKind describe a docked tile leaf (Type == "tile").
+	// Tiles are first-class layout citizens alongside agent panes: they take
 	// real space, resize through the same split machinery, and persist with the
-	// layout. PanelKind is opaque to the daemon (see PanelKind).
-	PanelID   string `json:"panel_id,omitempty"`
-	PanelKind string `json:"panel_kind,omitempty"`
-	// PanelParams is opaque to this package: it persists and reproduces with
+	// layout. TileKind is opaque to the daemon (see TileKind).
+	TileID   string `json:"tile_id,omitempty"`
+	TileKind string `json:"tile_kind,omitempty"`
+	// TileParams is opaque to this package: it persists and reproduces with
 	// the layout, but the daemon's layout machinery never interprets it. A
 	// consumer (e.g. the markdown content service) reads it — for markdown it
-	// holds the absolute path of the file the panel renders.
-	PanelParams string    `json:"panel_params,omitempty"`
-	SplitID     string    `json:"split_id,omitempty"`
-	Direction   Direction `json:"direction,omitempty"`
-	Ratio       float64   `json:"ratio,omitempty"`
+	// holds the absolute path of the file the tile renders.
+	TileParams string    `json:"tile_params,omitempty"`
+	SplitID    string    `json:"split_id,omitempty"`
+	Direction  Direction `json:"direction,omitempty"`
+	Ratio      float64   `json:"ratio,omitempty"`
 	// RatioLocked marks a split whose ratio the user set explicitly (by
-	// dragging the divider) or that anchors a panel. Locked ratios survive
+	// dragging the divider) or that anchors a tile. Locked ratios survive
 	// normalization instead of being rebalanced back to an equal split.
 	RatioLocked bool   `json:"ratio_locked,omitempty"`
 	Children    []Node `json:"children,omitempty"`
@@ -248,20 +248,20 @@ func normalizeNode(node Node, panesByID map[string]Pane) (Node, bool) {
 			Type:   "pane",
 			PaneID: node.PaneID,
 		}, false
-	case "panel":
-		panelID := strings.TrimSpace(node.PanelID)
-		panelKind := strings.TrimSpace(node.PanelKind)
-		// A panel with no identity or kind is meaningless; drop it so an
-		// orphaned panel can't wedge the layout. Panels are otherwise never
+	case "tile":
+		tileID := strings.TrimSpace(node.TileID)
+		tileKind := strings.TrimSpace(node.TileKind)
+		// A tile with no identity or kind is meaningless; drop it so an
+		// orphaned tile can't wedge the layout. Tiles are otherwise never
 		// pruned by pane bookkeeping — they have no entry in panesByID.
-		if panelID == "" || panelKind == "" {
+		if tileID == "" || tileKind == "" {
 			return Node{}, true
 		}
 		return Node{
-			Type:        "panel",
-			PanelID:     panelID,
-			PanelKind:   panelKind,
-			PanelParams: node.PanelParams,
+			Type:       "tile",
+			TileID:     tileID,
+			TileKind:   tileKind,
+			TileParams: node.TileParams,
 		}, false
 	case "split":
 		children := make([]Node, 0, 2)
@@ -390,8 +390,8 @@ func removeNode(node Node, leafID string) (Node, bool, bool) {
 			return Node{}, true, true
 		}
 		return node, false, false
-	case "panel":
-		if node.PanelID == leafID {
+	case "tile":
+		if node.TileID == leafID {
 			return Node{}, true, true
 		}
 		return node, false, false
@@ -450,14 +450,14 @@ func collectPaneIDs(node Node, ids *[]string) {
 	}
 }
 
-// HasPanel reports whether a docked panel with the given id exists in the tree.
-func HasPanel(node Node, panelID string) bool {
+// HasTile reports whether a docked tile with the given id exists in the tree.
+func HasTile(node Node, tileID string) bool {
 	switch node.Type {
-	case "panel":
-		return node.PanelID == panelID
+	case "tile":
+		return node.TileID == tileID
 	case "split":
 		for _, child := range node.Children {
-			if HasPanel(child, panelID) {
+			if HasTile(child, tileID) {
 				return true
 			}
 		}
@@ -465,31 +465,40 @@ func HasPanel(node Node, panelID string) bool {
 	return false
 }
 
-// PanelIDs returns the ids of every docked panel in the tree.
-func PanelIDs(node Node) []string {
+// TileIDs returns the ids of every docked tile in the tree.
+func TileIDs(node Node) []string {
 	var ids []string
-	collectPanelIDs(node, &ids)
+	collectTileIDs(node, &ids)
 	return ids
 }
 
-func collectPanelIDs(node Node, ids *[]string) {
+func collectTileIDs(node Node, ids *[]string) {
 	switch node.Type {
-	case "panel":
-		*ids = append(*ids, node.PanelID)
+	case "tile":
+		*ids = append(*ids, node.TileID)
 	case "split":
 		for _, child := range node.Children {
-			collectPanelIDs(child, ids)
+			collectTileIDs(child, ids)
 		}
 	}
 }
 
-// hasLeaf reports whether a leaf (pane or panel) with the given id exists.
+// hasLeaf reports whether a leaf (pane or tile) with the given id exists.
 func hasLeaf(node Node, leafID string) bool {
-	return HasPane(node, leafID) || HasPanel(node, leafID)
+	return HasPane(node, leafID) || HasTile(node, leafID)
 }
 
-// findLeaf returns the leaf (pane or panel) with the given id so a move can
-// re-insert it elsewhere with its identity intact — and, for panels, its kind
+// LayoutEmpty reports whether a layout holds no leaves at all — neither terminal
+// panes nor docked tiles. A workspace is torn down only when its layout is
+// empty: a tile the user deliberately left behind keeps the workspace alive
+// even after its last terminal closes. Run this on a normalized layout, where
+// orphaned/invalid leaves have already been pruned.
+func LayoutEmpty(node Node) bool {
+	return len(PaneIDs(node)) == 0 && len(TileIDs(node)) == 0
+}
+
+// findLeaf returns the leaf (pane or tile) with the given id so a move can
+// re-insert it elsewhere with its identity intact — and, for tiles, its kind
 // and params. The bool reports whether such a leaf exists. Leaves carry no
 // children, so the returned node is self-contained.
 func findLeaf(node Node, leafID string) (Node, bool) {
@@ -498,8 +507,8 @@ func findLeaf(node Node, leafID string) (Node, bool) {
 		if node.PaneID == leafID {
 			return node, true
 		}
-	case "panel":
-		if node.PanelID == leafID {
+	case "tile":
+		if node.TileID == leafID {
 			return node, true
 		}
 	case "split":
@@ -512,17 +521,17 @@ func findLeaf(node Node, leafID string) (Node, bool) {
 	return Node{}, false
 }
 
-// PanelParamsByID returns the opaque params of the panel with the given id.
-// The bool reports whether such a panel exists.
-func PanelParamsByID(node Node, panelID string) (string, bool) {
+// TileParamsByID returns the opaque params of the tile with the given id.
+// The bool reports whether such a tile exists.
+func TileParamsByID(node Node, tileID string) (string, bool) {
 	switch node.Type {
-	case "panel":
-		if node.PanelID == panelID {
-			return node.PanelParams, true
+	case "tile":
+		if node.TileID == tileID {
+			return node.TileParams, true
 		}
 	case "split":
 		for _, child := range node.Children {
-			if params, ok := PanelParamsByID(child, panelID); ok {
+			if params, ok := TileParamsByID(child, tileID); ok {
 				return params, true
 			}
 		}
@@ -530,75 +539,75 @@ func PanelParamsByID(node Node, panelID string) (string, bool) {
 	return "", false
 }
 
-// PanelFractionByID returns the share of its immediate split occupied by a
-// panel. Docking uses this when moving an existing panel so a user resize
+// TileFractionByID returns the share of its immediate split occupied by a
+// tile. Docking uses this when moving an existing tile so a user resize
 // survives re-docking.
-func PanelFractionByID(node Node, panelID string) (float64, bool) {
+func TileFractionByID(node Node, tileID string) (float64, bool) {
 	if node.Type != "split" {
 		return 0, false
 	}
 	if len(node.Children) == 2 {
-		if node.Children[0].Type == "panel" && node.Children[0].PanelID == panelID {
+		if node.Children[0].Type == "tile" && node.Children[0].TileID == tileID {
 			return node.Ratio, true
 		}
-		if node.Children[1].Type == "panel" && node.Children[1].PanelID == panelID {
+		if node.Children[1].Type == "tile" && node.Children[1].TileID == tileID {
 			return 1 - node.Ratio, true
 		}
 	}
 	for _, child := range node.Children {
-		if fraction, ok := PanelFractionByID(child, panelID); ok {
+		if fraction, ok := TileFractionByID(child, tileID); ok {
 			return fraction, true
 		}
 	}
 	return 0, false
 }
 
-// PanelLeaf is a flattened view of a docked panel for consumers that need to
-// act on panels (e.g. the markdown content service) without walking the tree.
-type PanelLeaf struct {
-	PanelID     string
-	PanelKind   string
-	PanelParams string
+// TileLeaf is a flattened view of a docked tile for consumers that need to
+// act on tiles (e.g. the markdown content service) without walking the tree.
+type TileLeaf struct {
+	TileID     string
+	TileKind   string
+	TileParams string
 }
 
-// PanelLeaves returns every docked panel in the tree as a flat slice.
-func PanelLeaves(node Node) []PanelLeaf {
-	var leaves []PanelLeaf
-	collectPanelLeaves(node, &leaves)
+// TileLeaves returns every docked tile in the tree as a flat slice.
+func TileLeaves(node Node) []TileLeaf {
+	var leaves []TileLeaf
+	collectTileLeaves(node, &leaves)
 	return leaves
 }
 
-func collectPanelLeaves(node Node, leaves *[]PanelLeaf) {
+func collectTileLeaves(node Node, leaves *[]TileLeaf) {
 	switch node.Type {
-	case "panel":
-		*leaves = append(*leaves, PanelLeaf{
-			PanelID:     node.PanelID,
-			PanelKind:   node.PanelKind,
-			PanelParams: node.PanelParams,
+	case "tile":
+		*leaves = append(*leaves, TileLeaf{
+			TileID:     node.TileID,
+			TileKind:   node.TileKind,
+			TileParams: node.TileParams,
 		})
 	case "split":
 		for _, child := range node.Children {
-			collectPanelLeaves(child, leaves)
+			collectTileLeaves(child, leaves)
 		}
 	}
 }
 
-// DockPanel inserts (or moves) a panel leaf beside the anchor leaf. Docking is
-// idempotent and doubles as a move: any existing instance of panelID is removed
-// first, then the panel is re-inserted at the new anchor. `before` controls
-// which side of the anchor the panel lands on (children[0] when true), and
+// DockTile inserts (or moves) a tile leaf beside the anchor leaf. Docking is
+// idempotent and doubles as a move: any existing instance of tileID is removed
+// first, then the tile is re-inserted at the new anchor. `before` controls
+// which side of the anchor the tile lands on (children[0] when true), and
 // `direction` whether the new split is side-by-side (vertical) or stacked
 // (horizontal). `ratio` is the children[0] fraction, like every other split.
 //
-// The anchor may be any leaf — a terminal pane or another panel — so panels can
+// The anchor may be any leaf — a terminal pane or another tile — so tiles can
 // be docked between existing panes or next to one another. The new split is
-// RatioLocked so a panel keeps its size instead of being equalized with
+// RatioLocked so a tile keeps its size instead of being equalized with
 // terminals during normalization.
-func DockPanel(node Node, anchorID string, direction Direction, before bool, splitID, panelID, panelKind, panelParams string, ratio float64) (Node, bool) {
-	panelID = strings.TrimSpace(panelID)
-	panelKind = strings.TrimSpace(panelKind)
+func DockTile(node Node, anchorID string, direction Direction, before bool, splitID, tileID, tileKind, tileParams string, ratio float64) (Node, bool) {
+	tileID = strings.TrimSpace(tileID)
+	tileKind = strings.TrimSpace(tileKind)
 	anchorID = strings.TrimSpace(anchorID)
-	if panelID == "" || panelKind == "" || anchorID == "" || anchorID == panelID {
+	if tileID == "" || tileKind == "" || anchorID == "" || anchorID == tileID {
 		return node, false
 	}
 	if ratio <= 0 || ratio >= 1 {
@@ -610,45 +619,45 @@ func DockPanel(node Node, anchorID string, direction Direction, before bool, spl
 	if strings.TrimSpace(splitID) == "" {
 		splitID = "split"
 	}
-	if HasPane(node, panelID) {
+	if HasPane(node, tileID) {
 		return node, false
 	}
 
 	// Move semantics: drop any existing instance so a re-dock relocates rather
-	// than duplicates the panel.
+	// than duplicates the tile.
 	cleaned := node
-	if next, removed := Remove(node, panelID); removed {
+	if next, removed := Remove(node, tileID); removed {
 		cleaned = next
 	}
 	if cleaned.Type == "" || !hasLeaf(cleaned, anchorID) {
 		return node, false
 	}
 
-	panel := Node{Type: "panel", PanelID: panelID, PanelKind: panelKind, PanelParams: strings.TrimSpace(panelParams)}
-	next, ok := insertBesideLeaf(cleaned, anchorID, direction, before, splitID, ratio, panel)
+	tile := Node{Type: "tile", TileID: tileID, TileKind: tileKind, TileParams: strings.TrimSpace(tileParams)}
+	next, ok := insertBesideLeaf(cleaned, anchorID, direction, before, splitID, ratio, tile)
 	if !ok {
 		return node, false
 	}
 	return next, true
 }
 
-func insertBesideLeaf(node Node, anchorID string, direction Direction, before bool, splitID string, ratio float64, panel Node) (Node, bool) {
+func insertBesideLeaf(node Node, anchorID string, direction Direction, before bool, splitID string, ratio float64, tile Node) (Node, bool) {
 	switch node.Type {
 	case "pane":
 		if node.PaneID != anchorID {
 			return node, false
 		}
-		return lockedSplit(node, panel, direction, before, splitID, ratio), true
-	case "panel":
-		if node.PanelID != anchorID {
+		return lockedSplit(node, tile, direction, before, splitID, ratio), true
+	case "tile":
+		if node.TileID != anchorID {
 			return node, false
 		}
-		return lockedSplit(node, panel, direction, before, splitID, ratio), true
+		return lockedSplit(node, tile, direction, before, splitID, ratio), true
 	case "split":
 		children := make([]Node, len(node.Children))
 		copy(children, node.Children)
 		for i, child := range children {
-			next, changed := insertBesideLeaf(child, anchorID, direction, before, splitID, ratio, panel)
+			next, changed := insertBesideLeaf(child, anchorID, direction, before, splitID, ratio, tile)
 			if changed {
 				children[i] = next
 				node.Children = children
@@ -661,7 +670,7 @@ func insertBesideLeaf(node Node, anchorID string, direction Direction, before bo
 
 // lockedSplit pairs an existing subtree with an incoming leaf under a new split.
 // The split is ratio-locked because the ratio came from an explicit user gesture
-// — a panel dock, or a leaf dropped at a chosen depth — so normalization keeps it
+// — a tile dock, or a leaf dropped at a chosen depth — so normalization keeps it
 // instead of rebalancing the pair back to an equal split. `before` places the
 // incoming leaf as children[0] (its left/top side).
 func lockedSplit(existing, incoming Node, direction Direction, before bool, splitID string, ratio float64) Node {
@@ -679,13 +688,13 @@ func lockedSplit(existing, incoming Node, direction Direction, before bool, spli
 	}
 }
 
-// MoveLeaf relocates an existing leaf (pane or panel) so it sits beside anchorID
+// MoveLeaf relocates an existing leaf (pane or tile) so it sits beside anchorID
 // on the given side. When anchorID is empty the leaf docks against the whole
 // workspace: the entire remaining layout becomes one side of a new root split and
 // the moved leaf the other (a "container" dock). The moved leaf keeps its
-// identity, and for panels its kind and params. The new split is ratio-locked
+// identity, and for tiles its kind and params. The new split is ratio-locked
 // because the ratio came from the user's drop, so normalization preserves the
-// chosen size. `ratio` is the children[0] fraction, matching DockPanel.
+// chosen size. `ratio` is the children[0] fraction, matching DockTile.
 //
 // It is a no-op (returns the input and false) when the move can't or shouldn't
 // happen:
@@ -732,13 +741,13 @@ func MoveLeaf(node Node, leafID, anchorID, splitID string, direction Direction, 
 	return next, true
 }
 
-// UndockPanel removes a docked panel from the tree, collapsing the split that
-// held it so its sibling reclaims the space. The bool reports whether a panel
+// UndockTile removes a docked tile from the tree, collapsing the split that
+// held it so its sibling reclaims the space. The bool reports whether a tile
 // was found and removed.
-func UndockPanel(node Node, panelID string) (Node, bool) {
-	if !HasPanel(node, strings.TrimSpace(panelID)) {
+func UndockTile(node Node, tileID string) (Node, bool) {
+	if !HasTile(node, strings.TrimSpace(tileID)) {
 		return node, false
 	}
-	next, _ := Remove(node, strings.TrimSpace(panelID))
+	next, _ := Remove(node, strings.TrimSpace(tileID))
 	return next, true
 }

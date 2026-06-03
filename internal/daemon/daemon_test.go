@@ -1007,16 +1007,7 @@ func TestDaemon_PruneSessionsWithoutPTY_RemovesReapedWorkspaceLayout(t *testing.
 	if err := d.store.SaveWorkspaceLayout(workspacelayout.WorkspaceLayout{
 		WorkspaceID:  workspaceID,
 		ActivePaneID: "pane-stale",
-		Layout: workspacelayout.Node{
-			Type:      "split",
-			SplitID:   "split-stale",
-			Direction: workspacelayout.DirectionVertical,
-			Ratio:     workspacelayout.DefaultSplitRatio,
-			Children: []workspacelayout.Node{
-				{Type: "pane", PaneID: "pane-stale"},
-				{Type: "panel", PanelID: markdownPanelID, PanelKind: string(workspacelayout.PanelKindMarkdown), PanelParams: "/tmp/notes.md"},
-			},
-		},
+		Layout:       workspacelayout.DefaultLayout("pane-stale"),
 		Panes: []workspacelayout.Pane{{
 			PaneID:    "pane-stale",
 			RuntimeID: sessionID,
@@ -1043,6 +1034,59 @@ func TestDaemon_PruneSessionsWithoutPTY_RemovesReapedWorkspaceLayout(t *testing.
 	if got := d.store.GetWorkspaceLayout(workspaceID); got != nil {
 		t.Fatalf("store.GetWorkspaceLayout(%q) = %+v, want nil", workspaceID, got)
 	}
+}
+
+// TestDaemon_PruneSessionsWithoutPTY_KeepsTileOnlyWorkspace is the counterpart
+// to the teardown test above: when a reaped session leaves a docked tile
+// behind, the prune path keeps the workspace alive as a sessionless, tile-only
+// workspace instead of taking the tile down with it.
+func TestDaemon_PruneSessionsWithoutPTY_KeepsTileOnlyWorkspace(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	workspaceID := "workspace-stale-tile"
+	sessionID := "codex-stale-tile"
+	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: "Stale Tile", Directory: "/tmp/stale-tile"})
+	d.store.Add(&protocol.Session{
+		ID:             sessionID,
+		Label:          sessionID,
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/stale-tile",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+		WorkspaceID:    workspaceID,
+	})
+	d.workspaces.register(workspaceID, "Stale Tile", "/tmp/stale-tile", false)
+	d.workspaces.associateSession(sessionID, workspaceID, sessionID)
+	if err := d.store.SaveWorkspaceLayout(workspacelayout.WorkspaceLayout{
+		WorkspaceID:  workspaceID,
+		ActivePaneID: "pane-stale",
+		Layout: workspacelayout.Node{
+			Type:      "split",
+			SplitID:   "split-stale",
+			Direction: workspacelayout.DirectionVertical,
+			Ratio:     workspacelayout.DefaultSplitRatio,
+			Children: []workspacelayout.Node{
+				{Type: "pane", PaneID: "pane-stale"},
+				{Type: "tile", TileID: markdownTileID, TileKind: string(workspacelayout.TileKindMarkdown), TileParams: "/tmp/notes.md"},
+			},
+		},
+		Panes: []workspacelayout.Pane{{
+			PaneID:    "pane-stale",
+			RuntimeID: sessionID,
+			SessionID: sessionID,
+			Kind:      workspacelayout.PaneKindAgent,
+			Title:     workspacelayout.DefaultPaneTitle,
+		}},
+	}); err != nil {
+		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
+	}
+
+	if removed := d.pruneSessionsWithoutPTY(); removed != 1 {
+		t.Fatalf("pruneSessionsWithoutPTY removed = %d, want 1", removed)
+	}
+	assertTileOnlyWorkspaceAlive(t, d, workspaceID, sessionID)
 }
 
 func TestDaemon_RunDeferredWorkerReconciliationForcesIdleDemotion(t *testing.T) {
@@ -2634,7 +2678,7 @@ func TestDaemon_BroadcastRawWSMessage_RoutesPendingRemotePTYOutputBeforeAttachRe
 	}
 }
 
-func TestDaemon_BroadcastRawWSMessage_RoutesRemotePanelContentToSubscribedClients(t *testing.T) {
+func TestDaemon_BroadcastRawWSMessage_RoutesRemoteTileContentToSubscribedClients(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	clientSubscribed := &wsClient{
 		send:            make(chan outboundMessage, 8),
@@ -2646,39 +2690,39 @@ func TestDaemon_BroadcastRawWSMessage_RoutesRemotePanelContentToSubscribedClient
 	}
 	d.wsHub.clients[clientSubscribed] = true
 	d.wsHub.clients[clientOther] = true
-	clientSubscribed.notePendingPanelContent("remote-workspace", "panel-markdown")
+	clientSubscribed.notePendingTileContent("remote-workspace", "tile-markdown")
 
-	payload, err := json.Marshal(protocol.WorkspacePanelContentMessage{
-		Event:       protocol.EventWorkspacePanelContent,
+	payload, err := json.Marshal(protocol.WorkspaceTileContentMessage{
+		Event:       protocol.EventWorkspaceTileContent,
 		WorkspaceID: "remote-workspace",
-		PanelID:     "panel-markdown",
-		PanelKind:   string(workspacelayout.PanelKindMarkdown),
+		TileID:      "tile-markdown",
+		TileKind:    string(workspacelayout.TileKindMarkdown),
 		Path:        "/srv/repo/README.md",
 		Content:     "# Private",
 	})
 	if err != nil {
-		t.Fatalf("marshal workspace_panel_content: %v", err)
+		t.Fatalf("marshal workspace_tile_content: %v", err)
 	}
 	d.broadcastRawWSMessage(payload)
 
 	event := readOutboundEvent(t, clientSubscribed)
-	if asString(event["event"]) != protocol.EventWorkspacePanelContent || asString(event["content"]) != "# Private" {
-		t.Fatalf("unexpected panel content event: %+v", event)
+	if asString(event["event"]) != protocol.EventWorkspaceTileContent || asString(event["content"]) != "# Private" {
+		t.Fatalf("unexpected tile content event: %+v", event)
 	}
 	assertNoOutboundEvent(t, clientOther)
-	if !clientSubscribed.wantsPanelContent("remote-workspace", "panel-markdown") {
-		t.Fatal("successful relayed panel response should promote the pending request to a subscription")
+	if !clientSubscribed.wantsTileContent("remote-workspace", "tile-markdown") {
+		t.Fatal("successful relayed tile response should promote the pending request to a subscription")
 	}
 }
 
-func TestDaemon_BroadcastRawWSMessage_PrunesRemotePanelSubscriptionsAfterLayoutUpdate(t *testing.T) {
+func TestDaemon_BroadcastRawWSMessage_PrunesRemoteTileSubscriptionsAfterLayoutUpdate(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	client := &wsClient{
 		send:            make(chan outboundMessage, 8),
 		attachedStreams: make(map[string]ptybackend.Stream),
 	}
 	d.wsHub.clients[client] = true
-	client.subscribePanelContent("remote-workspace", "panel-markdown")
+	client.subscribeTileContent("remote-workspace", "tile-markdown")
 
 	layoutJSON, err := workspacelayout.EncodeLayout(workspacelayout.DefaultLayout("pane-1"))
 	if err != nil {
@@ -2697,8 +2741,8 @@ func TestDaemon_BroadcastRawWSMessage_PrunesRemotePanelSubscriptionsAfterLayoutU
 	}
 	d.broadcastRawWSMessage(payload)
 
-	if client.wantsPanelContent("remote-workspace", "panel-markdown") {
-		t.Fatal("removed remote panel subscription survived layout update")
+	if client.wantsTileContent("remote-workspace", "tile-markdown") {
+		t.Fatal("removed remote tile subscription survived layout update")
 	}
 }
 

@@ -143,7 +143,7 @@ type Daemon struct {
 	loginShellEnv   []string
 
 	// Workspace registry for Tauri and remote clients. Backed by the store for
-	// workspace identity, session membership, and daemon-owned panel
+	// workspace identity, session membership, and daemon-owned tile
 	// geometry.
 	workspaces *workspaceRegistry
 
@@ -155,7 +155,7 @@ type Daemon struct {
 	// markdownSeen fingerprints open markdown files so the content watcher only
 	// broadcasts when a file actually changes on disk.
 	markdownSeenMu sync.Mutex
-	markdownSeen   map[string]panelContentSig
+	markdownSeen   map[string]tileContentSig
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -593,7 +593,7 @@ func (d *Daemon) Start() error {
 	d.wsHub.logf = d.logf
 	go d.wsHub.run()
 
-	// Watch open markdown panels for on-disk changes and live-reload them.
+	// Watch open markdown tiles for on-disk changes and live-reload them.
 	go d.runMarkdownContentWatcher(d.done)
 
 	// PTY exit events are emitted asynchronously from read loops.

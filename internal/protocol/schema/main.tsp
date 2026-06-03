@@ -53,7 +53,7 @@ enum WorkspaceLayoutSplitDirection {
   horizontal,
 }
 
-// Which side of the anchor pane a docked panel lands on.
+// Which side of the anchor pane a docked tile lands on.
 enum WorkspaceLayoutDockEdge {
   left,
   right,
@@ -837,28 +837,28 @@ model WorkspaceLayoutSetSplitRatioMessage {
   request_id?: string;
 }
 
-// Dock (or move) a panel beside an anchor leaf. Docking is idempotent: an
-// existing instance of panel_id is relocated rather than duplicated. panel_kind
-// is opaque to the daemon — it persists where the panel sits, not what it
-// renders. ratio is the new panel's fraction of the split (optional; defaults to
+// Dock (or move) a tile beside an anchor leaf. Docking is idempotent: an
+// existing instance of tile_id is relocated rather than duplicated. tile_kind
+// is opaque to the daemon — it persists where the tile sits, not what it
+// renders. ratio is the new tile's fraction of the split (optional; defaults to
 // a sensible third).
-model WorkspaceLayoutDockPanelMessage {
-  cmd: "workspace_layout_dock_panel";
+model WorkspaceLayoutDockTileMessage {
+  cmd: "workspace_layout_dock_tile";
   workspace_id: string;
   anchor_pane_id: string;
   edge: WorkspaceLayoutDockEdge;
-  panel_id: string;
-  panel_kind: string;
+  tile_id: string;
+  tile_kind: string;
   ratio?: float64;
 }
 
-model WorkspaceLayoutUndockPanelMessage {
-  cmd: "workspace_layout_undock_panel";
+model WorkspaceLayoutUndockTileMessage {
+  cmd: "workspace_layout_undock_tile";
   workspace_id: string;
-  panel_id: string;
+  tile_id: string;
 }
 
-// Move an existing leaf (terminal pane or docked panel) so it sits beside an
+// Move an existing leaf (terminal pane or docked tile) so it sits beside an
 // anchor leaf on the given edge. An empty anchor_id docks the leaf against the
 // whole workspace (the root), spanning that edge. ratio is the moved leaf's
 // fraction of the new split (optional; defaults to an equal split). Dropping a
@@ -873,16 +873,16 @@ model WorkspaceLayoutMoveLeafMessage {
   ratio?: float64;
 }
 
-// Request the current rendered content of a docked panel (e.g. the markdown
-// file a markdown panel points at). The daemon resolves the file from the
-// panel's persisted params, reads it, and replies with WorkspacePanelContentMessage.
-model WorkspacePanelContentGetMessage {
-  cmd: "workspace_panel_content_get";
+// Request the current rendered content of a docked tile (e.g. the markdown
+// file a markdown tile points at). The daemon resolves the file from the
+// tile's persisted params, reads it, and replies with WorkspaceTileContentMessage.
+model WorkspaceTileContentGetMessage {
+  cmd: "workspace_tile_content_get";
   workspace_id: string;
-  panel_id: string;
+  tile_id: string;
 }
 
-// Open a markdown file into a docked, live-reloading panel. Sent by the
+// Open a markdown file into a docked, live-reloading tile. Sent by the
 // `attn open` CLI over the unix socket. When session_id is empty the daemon
 // targets the currently selected session's workspace.
 model OpenMarkdownMessage {
@@ -998,21 +998,21 @@ model WorkspaceLayoutActionResultMessage {
   workspace_id: string;
   pane_id?: string;
   split_id?: string;
-  panel_id?: string;
+  tile_id?: string;
   request_id?: string;
   success: boolean;
   error?: string;
 }
 
-// Rendered content of a docked panel. Sent as the reply to
-// workspace_panel_content_get and broadcast whenever the underlying file
+// Rendered content of a docked tile. Sent as the reply to
+// workspace_tile_content_get and broadcast whenever the underlying file
 // changes (live reload). For markdown, content is the raw file text and path is
 // its absolute path; error is set when the file can't be read.
-model WorkspacePanelContentMessage {
-  event: "workspace_panel_content";
+model WorkspaceTileContentMessage {
+  event: "workspace_tile_content";
   workspace_id: string;
-  panel_id: string;
-  panel_kind: string;
+  tile_id: string;
+  tile_kind: string;
   path: string;
   content: string;
   error?: string;
@@ -1506,8 +1506,8 @@ model WebSocketEvent {
   id?: string;
   pane_id?: string;
   split_id?: string;
-  panel_id?: string;
-  panel_kind?: string;
+  tile_id?: string;
+  tile_kind?: string;
   content?: string;
   runtime_id?: string;
   session_id?: string;
@@ -1601,7 +1601,7 @@ alias DaemonEvent =
   | WorkspaceLayoutMessage
   | WorkspaceLayoutUpdatedMessage
   | WorkspaceLayoutActionResultMessage
-  | WorkspacePanelContentMessage
+  | WorkspaceTileContentMessage
   | PRsUpdatedMessage
   | ReposUpdatedMessage
   | AuthorsUpdatedMessage

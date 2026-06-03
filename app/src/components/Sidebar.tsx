@@ -23,6 +23,14 @@ interface LocalSession {
 
 type SidebarWorkspace = WorkspaceWithSessions<LocalSession>;
 
+// A sessionless workspace only exists because the user left a docked tile
+// behind (the daemon tears down workspaces that hold no leaves at all). They're
+// hidden by default and revealed through the sidebar display popover; the
+// preference lives in App so every workspace-order derivation stays consistent.
+function isSessionless(workspace: SidebarWorkspace): boolean {
+  return workspace.sessions.length === 0;
+}
+
 function reviewLoopIndicator(status?: string): { glyph: string; label: string } | null {
   switch (status) {
     case 'running':
@@ -53,6 +61,8 @@ interface SidebarProps {
   mutedExpanded?: boolean;
   onMutedExpandedChange?: (expanded: boolean) => void;
   onMuteWorkspace?: (workspaceId: string, endpointId?: string) => void;
+  showSessionless?: boolean;
+  onToggleShowSessionless?: () => void;
   onSelectSession: (id: string) => void;
   onSelectWorkspace: (id: string) => void;
   onNewSession: () => void;
@@ -184,6 +194,8 @@ export function Sidebar({
   mutedExpanded: mutedExpandedProp,
   onMutedExpandedChange,
   onMuteWorkspace,
+  showSessionless = false,
+  onToggleShowSessionless,
   onSelectSession,
   onSelectWorkspace,
   onNewSession,
@@ -201,8 +213,9 @@ export function Sidebar({
     onMutedExpandedChange?.(v);
   };
 
-  const visibleWorkspaces = workspaces.filter((workspace) => workspace.sessions.length > 0);
-  const visibleVisualOrder = visualOrder.filter((workspace) => workspace.sessions.length > 0);
+  const isWorkspaceVisible = (workspace: SidebarWorkspace) => !isSessionless(workspace) || showSessionless;
+  const visibleWorkspaces = workspaces.filter(isWorkspaceVisible);
+  const visibleVisualOrder = visualOrder.filter(isWorkspaceVisible);
   const visibleVisualIndexByWorkspaceId = new Map(
     visibleVisualOrder.map((workspace, index) => [workspace.id, index]),
   );
@@ -243,7 +256,7 @@ export function Sidebar({
           {visibleVisualOrder.map((workspace) => (
             <button
               key={workspace.id}
-              className={`icon-btn session-icon ${selectedWorkspaceId === workspace.id ? 'active' : ''}`}
+              className={`icon-btn session-icon ${selectedWorkspaceId === workspace.id ? 'active' : ''} ${isSessionless(workspace) ? 'sessionless' : ''}`}
               onClick={() => onSelectWorkspace(workspace.id)}
               title={`${workspace.title} (⌘${visualIndexOfWorkspace(workspace.id) + 1})`}
             >
@@ -323,6 +336,17 @@ export function Sidebar({
                     </button>
                   ))}
                 </div>
+                <button
+                  type="button"
+                  className="sidebar-settings-switch-row"
+                  role="switch"
+                  aria-checked={showSessionless}
+                  data-testid="toggle-show-sessionless"
+                  onClick={() => onToggleShowSessionless?.()}
+                >
+                  <span className="sidebar-settings-switch-label">Tile-only workspaces</span>
+                  <span className={`sidebar-settings-switch ${showSessionless ? 'on' : ''}`} aria-hidden="true" />
+                </button>
               </div>
             )}
           </div>
@@ -350,7 +374,15 @@ export function Sidebar({
                   }
                 }}
               >
-                <StateIndicator state={(workspace.status as UISessionState | undefined) || 'idle'} size="md" seed={workspace.id} />
+                {isSessionless(workspace) ? (
+                  <span
+                    className="workspace-neutral-indicator"
+                    data-testid="workspace-neutral-indicator"
+                    title="Tile-only workspace — no active session"
+                  />
+                ) : (
+                  <StateIndicator state={(workspace.status as UISessionState | undefined) || 'idle'} size="md" seed={workspace.id} />
+                )}
                 <span className="workspace-label">{workspace.title}</span>
                 {workspace.endpointId && workspace.sessions[0]?.endpointName && (
                   <span className={`session-endpoint-badge status-${workspace.sessions[0].endpointStatus || 'connected'}`}>

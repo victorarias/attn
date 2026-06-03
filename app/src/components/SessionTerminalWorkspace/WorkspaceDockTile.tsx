@@ -5,8 +5,8 @@ import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import type { PanelContentState, PanelLeaf } from '../../types/workspace';
-import './WorkspaceDockPanel.css';
+import type { TileContentState, TileLeaf } from '../../types/workspace';
+import './WorkspaceDockTile.css';
 
 function basename(path: string): string {
   const trimmed = path.replace(/\/+$/, '');
@@ -109,14 +109,14 @@ function openMarkdownTarget(target: MarkdownTarget): void {
     return;
   }
   if (target.kind === 'local' && !isSafeLocalMarkdownTarget(target.value)) {
-    console.warn('[WorkspaceDockPanel] Blocked unsafe local Markdown target:', target.value);
+    console.warn('[WorkspaceDockTile] Blocked unsafe local Markdown target:', target.value);
     return;
   }
   const action = target.kind === 'local'
     ? invoke('open_safe_markdown_target', { path: target.value })
     : openUrl(target.value);
   void action.catch((error) => {
-    console.warn('[WorkspaceDockPanel] Failed to open Markdown target:', error);
+    console.warn('[WorkspaceDockTile] Failed to open Markdown target:', error);
   });
 }
 
@@ -187,7 +187,7 @@ function markdownComponents(documentPath: string, allowLocalTargets: boolean): C
       const target = src ? resolveMarkdownTarget(documentPath, src) : null;
       if (!target || target.kind !== 'local' || !allowLocalTargets || !isSafeLocalMarkdownImageTarget(target.value)) {
         return (
-          <span className="workspace-dock-panel-blocked-image" title={src}>
+          <span className="workspace-dock-tile-blocked-image" title={src}>
             [blocked image: {alt || src || 'unknown source'}]
           </span>
         );
@@ -195,7 +195,7 @@ function markdownComponents(documentPath: string, allowLocalTargets: boolean): C
       return (
         <button
           type="button"
-          className="workspace-dock-panel-local-image"
+          className="workspace-dock-tile-local-image"
           title={target.value}
           onClick={() => openMarkdownTarget(target)}
         >
@@ -206,19 +206,19 @@ function markdownComponents(documentPath: string, allowLocalTargets: boolean): C
   };
 }
 
-interface WorkspaceDockPanelProps {
-  panel: PanelLeaf;
+interface WorkspaceDockTileProps {
+  tile: TileLeaf;
   workspaceId: string;
-  content?: PanelContentState;
+  content?: TileContentState;
   allowLocalTargets?: boolean;
   dragging: boolean;
   onClose: () => void;
   onHeaderPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onRequestContent: (workspaceId: string, panelId: string) => void;
+  onRequestContent: (workspaceId: string, tileId: string) => void;
 }
 
-export function WorkspaceDockPanel({
-  panel,
+export function WorkspaceDockTile({
+  tile,
   workspaceId,
   content,
   allowLocalTargets = true,
@@ -226,55 +226,55 @@ export function WorkspaceDockPanel({
   onClose,
   onHeaderPointerDown,
   onRequestContent,
-}: WorkspaceDockPanelProps) {
-  // Pull the current content on mount and whenever the panel retargets a new
+}: WorkspaceDockTileProps) {
+  // Pull the current content on mount and whenever the tile retargets a new
   // file. Live-reload updates then arrive as broadcasts (no re-request needed).
   useEffect(() => {
-    onRequestContent(workspaceId, panel.panelId);
-  }, [workspaceId, panel.panelId, panel.panelParams, onRequestContent]);
+    onRequestContent(workspaceId, tile.tileId);
+  }, [workspaceId, tile.tileId, tile.tileParams, onRequestContent]);
 
-  const path = content?.path || panel.panelParams || '';
-  const title = path ? basename(path) : panel.panelKind;
+  const path = content?.path || tile.tileParams || '';
+  const title = path ? basename(path) : tile.tileKind;
 
   return (
-    <div className={`workspace-dock-panel ${dragging ? 'workspace-dock-panel--dragging' : ''}`.trim()}>
+    <div className={`workspace-dock-tile ${dragging ? 'workspace-dock-tile--dragging' : ''}`.trim()}>
       <div
-        className="workspace-dock-panel-header"
+        className="workspace-dock-tile-header"
         onPointerDown={onHeaderPointerDown}
         title={path || 'Drag to re-dock'}
       >
-        <span className="workspace-dock-panel-title">{title}</span>
+        <span className="workspace-dock-tile-title">{title}</span>
         <button
           type="button"
-          className="workspace-dock-panel-close"
-          title="Close panel"
-          aria-label="Close panel"
+          className="workspace-dock-tile-close"
+          title="Close tile"
+          aria-label="Close tile"
           onPointerDown={(event) => event.stopPropagation()}
           onClick={onClose}
         >
           ×
         </button>
       </div>
-      <div className="workspace-dock-panel-body">
-        {panel.panelKind === 'markdown' ? (
+      <div className="workspace-dock-tile-body">
+        {tile.tileKind === 'markdown' ? (
           <MarkdownBody content={content} allowLocalTargets={allowLocalTargets} />
         ) : (
-          <div className="workspace-dock-panel-message">Unsupported panel: {panel.panelKind}</div>
+          <div className="workspace-dock-tile-message">Unsupported tile: {tile.tileKind}</div>
         )}
       </div>
     </div>
   );
 }
 
-function MarkdownBody({ content, allowLocalTargets }: { content?: PanelContentState; allowLocalTargets: boolean }) {
+function MarkdownBody({ content, allowLocalTargets }: { content?: TileContentState; allowLocalTargets: boolean }) {
   if (content === undefined) {
-    return <div className="workspace-dock-panel-message">Loading…</div>;
+    return <div className="workspace-dock-tile-message">Loading…</div>;
   }
   if (content.error) {
-    return <div className="workspace-dock-panel-message workspace-dock-panel-error">{content.error}</div>;
+    return <div className="workspace-dock-tile-message workspace-dock-tile-error">{content.error}</div>;
   }
   if (content.content.trim().length === 0) {
-    return <div className="workspace-dock-panel-message">This file is empty.</div>;
+    return <div className="workspace-dock-tile-message">This file is empty.</div>;
   }
   return (
     <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents(content.path, allowLocalTargets)}>

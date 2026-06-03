@@ -310,16 +310,16 @@ func TestWorkspaceLayoutSetSplitRatioPersistsLockedRatio(t *testing.T) {
 	}
 }
 
-func TestWorkspaceLayoutDockPanelPersistsAndMoves(t *testing.T) {
+func TestWorkspaceLayoutDockTilePersistsAndMoves(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	client := newWorkspaceProtocolTestClient()
-	workspaceID := "workspace-dock-panel"
+	workspaceID := "workspace-dock-tile"
 	cwd := t.TempDir()
 
 	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
 		Cmd:       protocol.CmdRegisterWorkspace,
 		ID:        workspaceID,
-		Title:     "Dock Panel",
+		Title:     "Dock Tile",
 		Directory: cwd,
 	})
 	d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
@@ -339,35 +339,35 @@ func TestWorkspaceLayoutDockPanelPersistsAndMoves(t *testing.T) {
 	})
 	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, "pane-2", true)
 
-	// A panel cannot take over a terminal pane's id.
-	d.handleWorkspaceLayoutDockPanel(client, &protocol.WorkspaceLayoutDockPanelMessage{
-		Cmd:          protocol.CmdWorkspaceLayoutDockPanel,
+	// A tile cannot take over a terminal pane's id.
+	d.handleWorkspaceLayoutDockTile(client, &protocol.WorkspaceLayoutDockTileMessage{
+		Cmd:          protocol.CmdWorkspaceLayoutDockTile,
 		WorkspaceID:  workspaceID,
 		AnchorPaneID: "pane-1",
 		Edge:         protocol.WorkspaceLayoutDockEdgeRight,
-		PanelID:      "pane-2",
-		PanelKind:    "markdown",
+		TileID:       "pane-2",
+		TileKind:     "markdown",
 	})
-	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutDockPanel, workspaceID, "", "", "pane-2", false)
+	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutDockTile, workspaceID, "", "", "pane-2", false)
 	afterCollision := d.store.GetWorkspaceLayout(workspaceID)
-	if !workspacelayout.HasPane(afterCollision.Layout, "pane-2") || workspacelayout.HasPanel(afterCollision.Layout, "pane-2") {
+	if !workspacelayout.HasPane(afterCollision.Layout, "pane-2") || workspacelayout.HasTile(afterCollision.Layout, "pane-2") {
 		t.Fatalf("pane id collision mutated layout: %+v", afterCollision.Layout)
 	}
 
 	// The trusted open-markdown path assigns the file. WebSocket docking can
-	// move the panel later, but cannot retarget it.
-	if err := d.dockPanel(workspaceID, "pane-1", "panel-md", "markdown", "/tmp/notes.md", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
-		t.Fatalf("dockPanel: %v", err)
+	// move the tile later, but cannot retarget it.
+	if err := d.dockTile(workspaceID, "pane-1", "tile-md", "markdown", "/tmp/notes.md", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+		t.Fatalf("dockTile: %v", err)
 	}
 
 	snapshot := d.store.GetWorkspaceLayout(workspaceID)
 	if snapshot == nil {
-		t.Fatal("workspace layout missing after docking panel")
+		t.Fatal("workspace layout missing after docking tile")
 	}
-	if !workspacelayout.HasPanel(snapshot.Layout, "panel-md") {
-		t.Fatalf("panel not present after dock: %+v", snapshot.Layout)
+	if !workspacelayout.HasTile(snapshot.Layout, "tile-md") {
+		t.Fatalf("tile not present after dock: %+v", snapshot.Layout)
 	}
-	// Panels never leak into agent-pane bookkeeping.
+	// Tiles never leak into agent-pane bookkeeping.
 	if ids := workspacelayout.PaneIDs(snapshot.Layout); len(ids) != 2 {
 		t.Fatalf("pane ids = %v, want the two agent panes only", ids)
 	}
@@ -375,21 +375,21 @@ func TestWorkspaceLayoutDockPanelPersistsAndMoves(t *testing.T) {
 		t.Fatalf("snapshot panes = %+v, want only the two agent panes", snapshot.Panes)
 	}
 
-	// A terminal pane cannot take over a docked panel's id.
+	// A terminal pane cannot take over a docked tile's id.
 	d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
 		Cmd:          protocol.CmdWorkspaceLayoutAddSessionPane,
 		WorkspaceID:  workspaceID,
-		PaneID:       protocol.Ptr("panel-md"),
+		PaneID:       protocol.Ptr("tile-md"),
 		SessionID:    "session-3",
 		TargetPaneID: protocol.Ptr("pane-1"),
 	})
-	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, "panel-md", false)
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, "tile-md", false)
 	afterPaneCollision := d.store.GetWorkspaceLayout(workspaceID)
-	if len(afterPaneCollision.Panes) != 2 || !workspacelayout.HasPanel(afterPaneCollision.Layout, "panel-md") {
-		t.Fatalf("panel id collision mutated layout: %+v", afterPaneCollision)
+	if len(afterPaneCollision.Panes) != 2 || !workspacelayout.HasTile(afterPaneCollision.Layout, "tile-md") {
+		t.Fatalf("tile id collision mutated layout: %+v", afterPaneCollision)
 	}
 
-	// The cross-restart / cross-client guarantee: the panel survives a layout
+	// The cross-restart / cross-client guarantee: the tile survives a layout
 	// JSON round-trip exactly as the store persists it.
 	encoded, err := workspacelayout.EncodeLayout(snapshot.Layout)
 	if err != nil {
@@ -399,50 +399,50 @@ func TestWorkspaceLayoutDockPanelPersistsAndMoves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeLayout: %v", err)
 	}
-	if !workspacelayout.HasPanel(decoded, "panel-md") {
-		t.Fatal("panel lost across layout JSON reload")
+	if !workspacelayout.HasTile(decoded, "tile-md") {
+		t.Fatal("tile lost across layout JSON reload")
 	}
 
-	// Re-dock the same panel id at a different anchor: it moves, never duplicates.
-	d.handleWorkspaceLayoutDockPanel(client, &protocol.WorkspaceLayoutDockPanelMessage{
-		Cmd:          protocol.CmdWorkspaceLayoutDockPanel,
+	// Re-dock the same tile id at a different anchor: it moves, never duplicates.
+	d.handleWorkspaceLayoutDockTile(client, &protocol.WorkspaceLayoutDockTileMessage{
+		Cmd:          protocol.CmdWorkspaceLayoutDockTile,
 		WorkspaceID:  workspaceID,
 		AnchorPaneID: "pane-2",
 		Edge:         protocol.WorkspaceLayoutDockEdgeBottom,
-		PanelID:      "panel-md",
-		PanelKind:    "markdown",
+		TileID:       "tile-md",
+		TileKind:     "markdown",
 	})
-	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutDockPanel, workspaceID, "", "", "panel-md", true)
+	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutDockTile, workspaceID, "", "", "tile-md", true)
 	moved := d.store.GetWorkspaceLayout(workspaceID)
-	if ids := workspacelayout.PanelIDs(moved.Layout); len(ids) != 1 {
-		t.Fatalf("panel ids after move = %v, want exactly one", ids)
+	if ids := workspacelayout.TileIDs(moved.Layout); len(ids) != 1 {
+		t.Fatalf("tile ids after move = %v, want exactly one", ids)
 	}
-	if params, ok := workspacelayout.PanelParamsByID(moved.Layout, "panel-md"); !ok || params != "/tmp/notes.md" {
-		t.Fatalf("panel params after move = (%q, %v), want (%q, true)", params, ok, "/tmp/notes.md")
+	if params, ok := workspacelayout.TileParamsByID(moved.Layout, "tile-md"); !ok || params != "/tmp/notes.md" {
+		t.Fatalf("tile params after move = (%q, %v), want (%q, true)", params, ok, "/tmp/notes.md")
 	}
 
-	// Undock removes the panel and collapses its split; the panes are untouched.
-	d.handleWorkspaceLayoutUndockPanel(client, &protocol.WorkspaceLayoutUndockPanelMessage{
-		Cmd:         protocol.CmdWorkspaceLayoutUndockPanel,
+	// Undock removes the tile and collapses its split; the panes are untouched.
+	d.handleWorkspaceLayoutUndockTile(client, &protocol.WorkspaceLayoutUndockTileMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutUndockTile,
 		WorkspaceID: workspaceID,
-		PanelID:     "panel-md",
+		TileID:      "tile-md",
 	})
-	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutUndockPanel, workspaceID, "", "", "panel-md", true)
+	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutUndockTile, workspaceID, "", "", "tile-md", true)
 	after := d.store.GetWorkspaceLayout(workspaceID)
-	if workspacelayout.HasPanel(after.Layout, "panel-md") {
-		t.Fatal("panel still present after undock")
+	if workspacelayout.HasTile(after.Layout, "tile-md") {
+		t.Fatal("tile still present after undock")
 	}
 	if ids := workspacelayout.PaneIDs(after.Layout); len(ids) != 2 {
 		t.Fatalf("pane ids after undock = %v, want the two agent panes intact", ids)
 	}
 
-	// Undocking a panel that's gone is a clean no-op failure.
-	d.handleWorkspaceLayoutUndockPanel(client, &protocol.WorkspaceLayoutUndockPanelMessage{
-		Cmd:         protocol.CmdWorkspaceLayoutUndockPanel,
+	// Undocking a tile that's gone is a clean no-op failure.
+	d.handleWorkspaceLayoutUndockTile(client, &protocol.WorkspaceLayoutUndockTileMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutUndockTile,
 		WorkspaceID: workspaceID,
-		PanelID:     "panel-md",
+		TileID:      "tile-md",
 	})
-	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutUndockPanel, workspaceID, "", "", "panel-md", false)
+	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutUndockTile, workspaceID, "", "", "tile-md", false)
 }
 
 func firstSplitID(node workspacelayout.Node) string {
@@ -482,12 +482,12 @@ func expectWorkspaceLayoutActionResult(t *testing.T, client *wsClient, action, w
 	expectWorkspaceLayoutActionResultIDs(t, client, action, workspaceID, paneID, "", "", success)
 }
 
-func expectWorkspaceLayoutActionResultIDs(t *testing.T, client *wsClient, action, workspaceID, paneID, splitID, panelID string, success bool) {
+func expectWorkspaceLayoutActionResultIDs(t *testing.T, client *wsClient, action, workspaceID, paneID, splitID, tileID string, success bool) {
 	t.Helper()
-	expectWorkspaceLayoutActionResultIDsAndRequestID(t, client, action, workspaceID, paneID, splitID, panelID, "", success)
+	expectWorkspaceLayoutActionResultIDsAndRequestID(t, client, action, workspaceID, paneID, splitID, tileID, "", success)
 }
 
-func expectWorkspaceLayoutActionResultIDsAndRequestID(t *testing.T, client *wsClient, action, workspaceID, paneID, splitID, panelID, requestID string, success bool) {
+func expectWorkspaceLayoutActionResultIDsAndRequestID(t *testing.T, client *wsClient, action, workspaceID, paneID, splitID, tileID, requestID string, success bool) {
 	t.Helper()
 	deadline := time.After(1 * time.Second)
 	for {
@@ -509,8 +509,8 @@ func expectWorkspaceLayoutActionResultIDsAndRequestID(t *testing.T, client *wsCl
 			if got := protocol.Deref(result.SplitID); got != splitID {
 				t.Fatalf("workspace action split_id = %q, want %q; payload=%s", got, splitID, string(outbound.payload))
 			}
-			if got := protocol.Deref(result.PanelID); got != panelID {
-				t.Fatalf("workspace action panel_id = %q, want %q; payload=%s", got, panelID, string(outbound.payload))
+			if got := protocol.Deref(result.TileID); got != tileID {
+				t.Fatalf("workspace action tile_id = %q, want %q; payload=%s", got, tileID, string(outbound.payload))
 			}
 			if got := protocol.Deref(result.RequestID); got != requestID {
 				t.Fatalf("workspace action request_id = %q, want %q; payload=%s", got, requestID, string(outbound.payload))

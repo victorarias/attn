@@ -4,46 +4,46 @@ export type TerminalSplitDirection = 'vertical' | 'horizontal';
 export type TerminalNavigationDirection = 'left' | 'right' | 'up' | 'down';
 export type TerminalDockEdge = 'left' | 'right' | 'top' | 'bottom';
 
-// PanelKind is the surface a docked panel renders. The daemon treats it as an
-// opaque token (it persists where a panel sits, not what it shows), so adding a
+// TileKind is the surface a docked tile renders. The daemon treats it as an
+// opaque token (it persists where a tile sits, not what it shows), so adding a
 // kind here is a frontend-only change. Kept open-ended for forward
-// compatibility with panels a newer daemon might persist.
-export type PanelKind = 'markdown' | (string & {});
+// compatibility with tiles a newer daemon might persist.
+export type TileKind = 'markdown' | (string & {});
 
 export interface TerminalPaneLeaf {
   type: 'pane';
   paneId: string;
 }
 
-// A docked panel is a first-class layout leaf alongside terminal panes: it
+// A docked tile is a first-class layout leaf alongside terminal panes: it
 // takes real space and resizes through the same split machinery. Unlike the
 // slide-in overlays (diff/review/git-status), it lives in the daemon-owned
 // layout tree and persists across restart and clients.
-export interface PanelLeaf {
-  type: 'panel';
-  panelId: string;
-  panelKind: PanelKind;
-  // Opaque per-panel data persisted with the layout by the daemon. For markdown
-  // panels this is the absolute path of the file the panel renders. Empty when
+export interface TileLeaf {
+  type: 'tile';
+  tileId: string;
+  tileKind: TileKind;
+  // Opaque per-tile data persisted with the layout by the daemon. For markdown
+  // tiles this is the absolute path of the file the tile renders. Empty when
   // the daemon persisted no params.
-  panelParams?: string;
+  tileParams?: string;
 }
 
-export type TerminalLeaf = TerminalPaneLeaf | PanelLeaf;
+export type TerminalLeaf = TerminalPaneLeaf | TileLeaf;
 
-// Daemon-served rendered content for a docked panel (the markdown file's text).
-// Delivered as the reply to workspace_panel_content_get and re-pushed on every
+// Daemon-served rendered content for a docked tile (the markdown file's text).
+// Delivered as the reply to workspace_tile_content_get and re-pushed on every
 // on-disk change (live reload). Absent from the store until the first reply.
-export interface PanelContentState {
+export interface TileContentState {
   path: string;
   content: string;
   error?: string;
 }
 
-// panelContentKey keys panel content by workspace + panel, since a panel id like
-// `panel-markdown` is reused across workspaces.
-export function panelContentKey(workspaceId: string, panelId: string): string {
-  return `${workspaceId}::${panelId}`;
+// tileContentKey keys tile content by workspace + tile, since a tile id like
+// `tile-markdown` is reused across workspaces.
+export function tileContentKey(workspaceId: string, tileId: string): string {
+  return `${workspaceId}::${tileId}`;
 }
 
 export interface TerminalSplitNode {
@@ -54,13 +54,13 @@ export interface TerminalSplitNode {
   children: [TerminalLayoutNode, TerminalLayoutNode];
 }
 
-export type TerminalLayoutNode = TerminalPaneLeaf | PanelLeaf | TerminalSplitNode;
+export type TerminalLayoutNode = TerminalPaneLeaf | TileLeaf | TerminalSplitNode;
 
 // leafSlotId is the stable key a leaf occupies in bounds/path maps. Terminal
-// panes key by paneId; panels key by panelId. The two id spaces are disjoint by
+// panes key by paneId; tiles key by tileId. The two id spaces are disjoint by
 // construction (distinct daemon prefixes).
 export function leafSlotId(node: TerminalLeaf): string {
-  return node.type === 'pane' ? node.paneId : node.panelId;
+  return node.type === 'pane' ? node.paneId : node.tileId;
 }
 
 export interface AgentTerminal {
@@ -103,17 +103,17 @@ export function createDefaultWorkspaceState(): TerminalWorkspaceState {
   };
 }
 
-// findPanelByKind returns the first docked panel of the given kind, or null.
+// findTileByKind returns the first docked tile of the given kind, or null.
 // Used to drive UI toggles ("is markdown docked in this workspace?").
-export function findPanelByKind(node: TerminalLayoutNode | null, kind: PanelKind): PanelLeaf | null {
+export function findTileByKind(node: TerminalLayoutNode | null, kind: TileKind): TileLeaf | null {
   if (!node) {
     return null;
   }
-  if (node.type === 'panel') {
-    return node.panelKind === kind ? node : null;
+  if (node.type === 'tile') {
+    return node.tileKind === kind ? node : null;
   }
   if (node.type === 'split') {
-    return findPanelByKind(node.children[0], kind) || findPanelByKind(node.children[1], kind);
+    return findTileByKind(node.children[0], kind) || findTileByKind(node.children[1], kind);
   }
   return null;
 }
@@ -122,7 +122,7 @@ export function hasPane(node: TerminalLayoutNode, paneId: string): boolean {
   if (node.type === 'pane') {
     return node.paneId === paneId;
   }
-  if (node.type === 'panel') {
+  if (node.type === 'tile') {
     return false;
   }
   return hasPane(node.children[0], paneId) || hasPane(node.children[1], paneId);
@@ -152,17 +152,17 @@ function withDimensions(bounds: PaneBounds): NormalizedPaneBounds {
   };
 }
 
-type LeafKind = 'pane' | 'panel';
+type LeafKind = 'pane' | 'tile';
 
 interface LeafBounds {
   bounds: PaneBounds;
   kind: LeafKind;
 }
 
-// collectLeafBounds records the normalized rect of every leaf (pane and panel),
-// keyed by its slot id, descending through splits with their ratios. Panels are
+// collectLeafBounds records the normalized rect of every leaf (pane and tile),
+// keyed by its slot id, descending through splits with their ratios. Tiles are
 // recorded so the workspace can position them; the kind lets callers that only
-// care about terminals (navigation) filter panels out.
+// care about terminals (navigation) filter tiles out.
 function collectLeafBounds(
   node: TerminalLayoutNode,
   bounds: PaneBounds,
@@ -172,8 +172,8 @@ function collectLeafBounds(
     result.set(node.paneId, { bounds, kind: 'pane' });
     return;
   }
-  if (node.type === 'panel') {
-    result.set(node.panelId, { bounds, kind: 'panel' });
+  if (node.type === 'tile') {
+    result.set(node.tileId, { bounds, kind: 'tile' });
     return;
   }
 
@@ -191,7 +191,7 @@ function collectLeafBounds(
 }
 
 // getNormalizedPaneBounds returns the normalized rect of every leaf slot
-// (terminal panes and docked panels), keyed by slot id.
+// (terminal panes and docked tiles), keyed by slot id.
 export function getNormalizedPaneBounds(node: TerminalLayoutNode): Map<string, NormalizedPaneBounds> {
   const rects = new Map<string, LeafBounds>();
   collectLeafBounds(node, paneBounds(0, 0, 1, 1), rects);
@@ -281,7 +281,7 @@ export function findPaneInDirection(
 ): string | null {
   const leaves = new Map<string, LeafBounds>();
   collectLeafBounds(node, paneBounds(0, 0, 1, 1), leaves);
-  // Navigation only moves between terminal panes — docked panels are not focus
+  // Navigation only moves between terminal panes — docked tiles are not focus
   // targets.
   const rects = new Map<string, PaneBounds>();
   for (const [slotId, { bounds, kind }] of leaves) {
@@ -354,17 +354,17 @@ function parseLayoutNode(raw: unknown): TerminalLayoutNode | null {
     };
   }
   if (
-    value.type === 'panel' &&
-    typeof value.panel_id === 'string' &&
-    value.panel_id.length > 0 &&
-    typeof value.panel_kind === 'string' &&
-    value.panel_kind.length > 0
+    value.type === 'tile' &&
+    typeof value.tile_id === 'string' &&
+    value.tile_id.length > 0 &&
+    typeof value.tile_kind === 'string' &&
+    value.tile_kind.length > 0
   ) {
     return {
-      type: 'panel',
-      panelId: value.panel_id,
-      panelKind: value.panel_kind,
-      panelParams: typeof value.panel_params === 'string' ? value.panel_params : undefined,
+      type: 'tile',
+      tileId: value.tile_id,
+      tileKind: value.tile_kind,
+      tileParams: typeof value.tile_params === 'string' ? value.tile_params : undefined,
     };
   }
   if (
@@ -403,14 +403,14 @@ function parseLayoutJSON(layoutJSON: string): TerminalLayoutNode | null {
   }
 }
 
-export function panelIdsFromLayoutJSON(layoutJSON: string): string[] {
+export function tileIdsFromLayoutJSON(layoutJSON: string): string[] {
   const ids: string[] = [];
   const collect = (node: TerminalLayoutNode | null) => {
     if (!node) {
       return;
     }
-    if (node.type === 'panel') {
-      ids.push(node.panelId);
+    if (node.type === 'tile') {
+      ids.push(node.tileId);
       return;
     }
     if (node.type === 'split') {

@@ -3,6 +3,17 @@ import { describe, it, expect, vi } from 'vitest';
 import { Sidebar, type FooterShortcut } from './Sidebar';
 import { buildWorkspaceViewModels, type WorkspaceWithSessions } from '../utils/workspaceViewModels';
 
+function sessionlessWorkspace(): WorkspaceWithSessions<TestSession> {
+  return {
+    id: 'workspace-/repo/docs',
+    title: 'docs',
+    directory: '/repo/docs',
+    sessions: [],
+    firstSessionId: null,
+    focusedSessionId: null,
+  };
+}
+
 interface TestSession {
   id: string;
   label: string;
@@ -200,6 +211,61 @@ describe('Sidebar', () => {
     expect(screen.queryByTestId('sidebar-workspace-workspace-/repo/empty')).not.toBeInTheDocument();
     expect(screen.getByTestId('sidebar-workspace-workspace-/repo/a')).toHaveTextContent('⌘1');
     expect(screen.getByTestId('sidebar-workspace-workspace-/repo/b')).toHaveTextContent('⌘2');
+  });
+
+  it('hides sessionless workspaces by default and reveals them when showSessionless is set', () => {
+    const sidebarData = buildSidebarData([{ id: 'a1', label: 'A1', state: 'idle', cwd: '/repo/a' }]);
+    const all = [...sidebarData.visualOrder, sessionlessWorkspace()];
+    const indexMap = new Map(all.map((workspace, index) => [workspace.id, index]));
+
+    const { rerender } = render(
+      <Sidebar {...baseProps} workspaces={all} visualOrder={all} visualIndexByWorkspaceId={indexMap} />
+    );
+    expect(screen.queryByTestId('sidebar-workspace-workspace-/repo/docs')).not.toBeInTheDocument();
+
+    rerender(
+      <Sidebar {...baseProps} workspaces={all} visualOrder={all} visualIndexByWorkspaceId={indexMap} showSessionless />
+    );
+    expect(screen.getByTestId('sidebar-workspace-workspace-/repo/docs')).toBeInTheDocument();
+  });
+
+  it('marks sessionless workspaces with a neutral indicator instead of a state dot', () => {
+    const sidebarData = buildSidebarData([{ id: 'a1', label: 'A1', state: 'working', cwd: '/repo/a' }]);
+    const all = [...sidebarData.visualOrder, sessionlessWorkspace()];
+    render(
+      <Sidebar
+        {...baseProps}
+        workspaces={all}
+        visualOrder={all}
+        visualIndexByWorkspaceId={new Map(all.map((workspace, index) => [workspace.id, index]))}
+        showSessionless
+      />
+    );
+
+    const sessionlessGroup = screen.getByTestId('sidebar-workspace-workspace-/repo/docs');
+    expect(sessionlessGroup.querySelector('.workspace-neutral-indicator')).toBeTruthy();
+    expect(sessionlessGroup.querySelector('.state-indicator')).toBeFalsy();
+
+    // A real session workspace still shows its state dot.
+    const sessionGroup = screen.getByTestId('sidebar-workspace-workspace-/repo/a');
+    expect(sessionGroup.querySelector('.state-indicator')).toBeTruthy();
+    expect(sessionGroup.querySelector('.workspace-neutral-indicator')).toBeFalsy();
+  });
+
+  it('invokes onToggleShowSessionless when the tile-only switch is clicked', () => {
+    const onToggleShowSessionless = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        {...buildSidebarData([])}
+        onToggleShowSessionless={onToggleShowSessionless}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sidebar settings' }));
+    fireEvent.click(screen.getByTestId('toggle-show-sessionless'));
+
+    expect(onToggleShowSessionless).toHaveBeenCalledTimes(1);
   });
 
   it('keeps display options visible after selecting a mode', () => {

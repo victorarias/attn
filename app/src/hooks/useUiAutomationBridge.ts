@@ -54,6 +54,7 @@ interface UseUiAutomationBridgeArgs {
   getActivePaneIdForSession: (session: Session | undefined | null) => string;
   createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string) => Promise<string>;
   selectSession: (sessionId: string) => void;
+  selectWorkspace: (workspaceId: string) => void;
   closeSession: (sessionId: string) => Promise<void>;
   reloadSession?: (sessionId: string, size?: { cols: number; rows: number }) => Promise<void>;
   setSetting?: (key: string, value: string) => void;
@@ -821,7 +822,7 @@ function dragPaneSelection(
 // computeDockTarget → onMoveLeaf path without a physical OS drag.
 function dragLeafHeader(leafId: string, dropFracX: number, dropFracY: number) {
   const leaf = document.querySelector(`[data-pane-id="${leafId}"]`);
-  const header = leaf?.querySelector('.workspace-pane-header, .workspace-dock-panel-header');
+  const header = leaf?.querySelector('.workspace-pane-header, .workspace-dock-tile-header');
   if (!(header instanceof HTMLElement)) {
     throw new Error(`Draggable leaf header not found for ${leafId}`);
   }
@@ -1209,6 +1210,7 @@ export function useUiAutomationBridge({
   getActivePaneIdForSession,
   createSession,
   selectSession,
+  selectWorkspace,
   closeSession,
   reloadSession,
   setSetting,
@@ -1382,6 +1384,46 @@ export function useUiAutomationBridge({
           sessionId,
           getActivePaneIdForSession,
         );
+      }
+      case 'select_workspace': {
+        // Mirrors the sidebar row click and ⌘1–9 (both call selectWorkspace).
+        // Activates a workspace by id, including a tile-only one that has no
+        // session to route selection through.
+        const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : '';
+        if (!workspaceId) {
+          throw new Error('select_workspace requires workspaceId');
+        }
+        selectWorkspace(workspaceId);
+        await settleUi();
+        return { workspaceId };
+      }
+      case 'get_workspace_ui_state': {
+        // Workspace-centric DOM query (the session UI-state verbs key off a
+        // session id, which a tile-only workspace lacks). Reports whether the
+        // workspace's terminal surface is mounted, whether it is the active
+        // (visible) one, and which leaves it is rendering.
+        const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : '';
+        if (!workspaceId) {
+          throw new Error('get_workspace_ui_state requires workspaceId');
+        }
+        const surface = document.querySelector(`[data-session-terminal-workspace="${workspaceId}"]`);
+        const wrapper = surface?.closest('.terminal-wrapper') ?? null;
+        const tileIds = surface
+          ? Array.from(surface.querySelectorAll('[data-pane-kind="tile"]'))
+            .map((node) => node.getAttribute('data-pane-id') || '')
+            .filter(Boolean)
+          : [];
+        const paneCount = surface
+          ? surface.querySelectorAll('[data-pane-kind="agent"]').length
+          : 0;
+        return {
+          workspaceId,
+          rendered: Boolean(surface),
+          active: Boolean(wrapper?.classList.contains('active')),
+          sessionVisible: surface?.getAttribute('data-session-visible') === '1',
+          tileIds,
+          paneCount,
+        };
       }
       case 'location_picker_get_state':
         return collectLocationPickerUiState();
@@ -2076,6 +2118,7 @@ export function useUiAutomationBridge({
     resetSessionPaneTerminal,
     drainSessionPaneTerminal,
     selectSession,
+    selectWorkspace,
     sendRuntimeInput,
     sessions,
     splitPane,

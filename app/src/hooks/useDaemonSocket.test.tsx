@@ -1086,7 +1086,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('prunes cached panel content when its layout leaf or workspace disappears', async () => {
+  it('prunes cached tile content when its layout leaf or workspace disappears', async () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({
         onSessionsUpdate: vi.fn(),
@@ -1112,7 +1112,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           layout: {
             workspace_id: 'workspace-1',
             active_pane_id: 'pane-1',
-            layout_json: '{"type":"split","split_id":"root","direction":"vertical","ratio":0.5,"children":[{"type":"pane","pane_id":"pane-1"},{"type":"panel","panel_id":"panel-md","panel_kind":"markdown"}]}',
+            layout_json: '{"type":"split","split_id":"root","direction":"vertical","ratio":0.5,"children":[{"type":"pane","pane_id":"pane-1"},{"type":"tile","tile_id":"tile-md","tile_kind":"markdown"}]}',
             panes: [],
           },
         }],
@@ -1122,16 +1122,16 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         settings: {},
       });
       ws.emit({
-        event: 'workspace_panel_content',
+        event: 'workspace_tile_content',
         workspace_id: 'workspace-1',
-        panel_id: 'panel-md',
-        panel_kind: 'markdown',
+        tile_id: 'tile-md',
+        tile_kind: 'markdown',
         path: '/tmp/notes.md',
         content: '# Notes',
       });
     });
     await waitFor(() => {
-      expect(result.current.panelContents['workspace-1::panel-md']?.content).toBe('# Notes');
+      expect(result.current.tileContents['workspace-1::tile-md']?.content).toBe('# Notes');
     });
 
     act(() => {
@@ -1146,15 +1146,15 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       });
     });
     await waitFor(() => {
-      expect(result.current.panelContents).toEqual({});
+      expect(result.current.tileContents).toEqual({});
     });
 
     act(() => {
       ws.emit({
-        event: 'workspace_panel_content',
+        event: 'workspace_tile_content',
         workspace_id: 'workspace-1',
-        panel_id: 'panel-md',
-        panel_kind: 'markdown',
+        tile_id: 'tile-md',
+        tile_kind: 'markdown',
         path: '/tmp/notes.md',
         content: '# Notes',
       });
@@ -1170,12 +1170,12 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       });
     });
     await waitFor(() => {
-      expect(result.current.panelContents).toEqual({});
+      expect(result.current.tileContents).toEqual({});
     });
     unmount();
   });
 
-  it('refetches persisted panel content after websocket reconnect', async () => {
+  it('refetches persisted tile content after websocket reconnect', async () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({
         onSessionsUpdate: vi.fn(),
@@ -1195,7 +1195,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       layout: {
         workspace_id: 'workspace-1',
         active_pane_id: 'pane-1',
-        layout_json: '{"type":"split","split_id":"root","direction":"vertical","ratio":0.5,"children":[{"type":"pane","pane_id":"pane-1"},{"type":"panel","panel_id":"panel-md","panel_kind":"markdown"}]}',
+        layout_json: '{"type":"split","split_id":"root","direction":"vertical","ratio":0.5,"children":[{"type":"pane","pane_id":"pane-1"},{"type":"tile","tile_id":"tile-md","tile_kind":"markdown"}]}',
         panes: [],
       },
     };
@@ -1218,16 +1218,16 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit(initialState);
       ws.emit({
-        event: 'workspace_panel_content',
+        event: 'workspace_tile_content',
         workspace_id: 'workspace-1',
-        panel_id: 'panel-md',
-        panel_kind: 'markdown',
+        tile_id: 'tile-md',
+        tile_kind: 'markdown',
         path: '/tmp/notes.md',
         content: '# Before reconnect',
       });
     });
     await waitFor(() => {
-      expect(result.current.panelContents['workspace-1::panel-md']?.content).toBe('# Before reconnect');
+      expect(result.current.tileContents['workspace-1::tile-md']?.content).toBe('# Before reconnect');
     });
 
     act(() => {
@@ -1248,9 +1248,9 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       const sent = reconnected.sent.map((entry) => JSON.parse(entry));
       expect(sent).toContainEqual({ cmd: 'session_selected', id: 'session-selected' });
       expect(sent).toContainEqual({
-        cmd: 'workspace_panel_content_get',
+        cmd: 'workspace_tile_content_get',
         workspace_id: 'workspace-1',
-        panel_id: 'panel-md',
+        tile_id: 'tile-md',
       });
     });
     unmount();
