@@ -347,6 +347,42 @@ test.describe('Ghostty terminal interactions', () => {
       .toEqual([]);
   });
 
+  test('copies a selection even when the mouse is released outside the terminal', async ({ page, context, daemon }) => {
+    // Regression: a selection drag that ends over a sibling overlay (e.g. a split
+    // divider above the pane edge) used to retarget the mouseup away from the
+    // terminal, leaving the selection stuck and never copying it. The drag is now
+    // tracked on the document, so releasing outside the terminal still finalizes.
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const terminal = await openTerminalSession(page, daemon, 's-release-outside');
+    const text = 'release-outside-target';
+    await writeTerminalOutput(page, 's-release-outside', `[2J[H${text}`);
+    await page.evaluate(() => navigator.clipboard.writeText('clipboard-sentinel'));
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-release-outside') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain(text);
+
+    const bounds = await terminal.boundingBox();
+    expect(bounds).not.toBeNull();
+    // Select the text rightward, then jump straight out of the terminal (a single
+    // mousemove, so no intermediate cell shrinks the selection) and release over a
+    // non-terminal element — the way a release on a split divider above the pane
+    // edge retargets the mouseup away from the terminal.
+    const selectionEndX = bounds!.x + bounds!.width / 2;
+    await page.mouse.move(bounds!.x + 2, bounds!.y + 8);
+    await page.mouse.down();
+    await page.mouse.move(selectionEndX, bounds!.y + 8);
+    await page.mouse.move(Math.max(1, bounds!.x - 60), bounds!.y + 8);
+    await page.mouse.up();
+
+    await expect
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .toContain(text);
+  });
+
   test('keeps copied selection attached to its text while scrolling', async ({ page, context, daemon }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const terminal = await openTerminalSession(page, daemon, 's-selection-scroll');
