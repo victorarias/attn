@@ -400,6 +400,11 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 	if label == "" {
 		label = filepath.Base(cwd)
 	}
+	// A non-empty stored label is the durable authority — a respawn or reload
+	// must not revert a user rename, even if the client sends a stale label.
+	if existingSession != nil && strings.TrimSpace(existingSession.Label) != "" {
+		label = existingSession.Label
+	}
 	if msg.Cols <= 0 || msg.Rows <= 0 || msg.Cols > maxPTYDimValue || msg.Rows > maxPTYDimValue {
 		d.sendSpawnFailure(client, msg.ID, fmt.Errorf("invalid terminal size cols=%d rows=%d (expected 1..%d)", msg.Cols, msg.Rows, maxPTYDimValue))
 		return

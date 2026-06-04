@@ -1,6 +1,7 @@
 import './Sidebar.css';
-import type { ReactNode } from 'react';
+import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { useState } from 'react';
+import { RenamePopover } from './RenamePopover';
 import { StateIndicator } from './StateIndicator';
 import { formatShortcut } from '../shortcuts';
 import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
@@ -61,6 +62,8 @@ interface SidebarProps {
   mutedExpanded?: boolean;
   onMutedExpandedChange?: (expanded: boolean) => void;
   onMuteWorkspace?: (workspaceId: string, endpointId?: string) => void;
+  onRenameSession?: (sessionId: string, label: string) => Promise<void>;
+  onRenameWorkspace?: (workspaceId: string, title: string) => Promise<void>;
   showSessionless?: boolean;
   onToggleShowSessionless?: () => void;
   leafDrag?: { sourceWorkspaceId: string; endpointId?: string } | null;
@@ -199,6 +202,8 @@ export function Sidebar({
   mutedExpanded: mutedExpandedProp,
   onMutedExpandedChange,
   onMuteWorkspace,
+  onRenameSession,
+  onRenameWorkspace,
   showSessionless = false,
   onToggleShowSessionless,
   leafDrag = null,
@@ -217,6 +222,23 @@ export function Sidebar({
   const [mutedExpandedLocal, setMutedExpandedLocal] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [displayMode, setDisplayMode] = useState<'open' | 'tight' | 'boxed'>('boxed');
+  const [renameTarget, setRenameTarget] = useState<{
+    kind: 'session' | 'workspace';
+    id: string;
+    name: string;
+    anchor: { top: number; left: number };
+  } | null>(null);
+
+  const openRename = (
+    kind: 'session' | 'workspace',
+    id: string,
+    name: string,
+    event: ReactMouseEvent,
+  ) => {
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setRenameTarget({ kind, id, name, anchor: { top: rect.bottom + 4, left: rect.left } });
+  };
   const mutedExpanded = mutedExpandedProp ?? mutedExpandedLocal;
   const setMutedExpanded = (v: boolean) => {
     setMutedExpandedLocal(v);
@@ -434,8 +456,21 @@ export function Sidebar({
                   </span>
                 )}
                 <span className="session-shortcut">⌘{workspaceIndex + 1}</span>
-                {onMuteWorkspace && (
+                {(onRenameWorkspace || onMuteWorkspace) && (
                   <span className="workspace-actions">
+                    {onRenameWorkspace && (
+                      <button
+                        type="button"
+                        className="workspace-action-btn rename-workspace-btn"
+                        data-testid={`rename-workspace-${workspace.id}`}
+                        onClick={(e) => openRename('workspace', workspace.id, workspace.title, e)}
+                        title="Rename workspace"
+                        aria-label={`Rename workspace ${workspace.title}`}
+                      >
+                        ✎
+                      </button>
+                    )}
+                    {onMuteWorkspace && (
                     <button
                       type="button"
                       className="workspace-action-btn mute-workspace-btn"
@@ -449,6 +484,7 @@ export function Sidebar({
                     >
                       ⊘
                     </button>
+                    )}
                   </span>
                 )}
               </div>
@@ -483,6 +519,17 @@ export function Sidebar({
                     )}
                     {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                     <div className="session-actions">
+                      {onRenameSession && (
+                        <button
+                          className="session-action-btn rename-session-btn"
+                          data-testid={`rename-session-${session.id}`}
+                          onClick={(e) => openRename('session', session.id, session.label, e)}
+                          title="Rename session"
+                          aria-label={`Rename session ${session.label}`}
+                        >
+                          ✎
+                        </button>
+                      )}
                       <button
                         className="session-action-btn close-session-btn"
                         data-testid={`close-session-${session.id}`}
@@ -619,6 +666,23 @@ export function Sidebar({
         ))}
         <span className="shortcut-hint">{`${formatShortcut('session.toggleSidebar')} sidebar`}</span>
       </div>
+
+      {renameTarget && (
+        <RenamePopover
+          key={`${renameTarget.kind}:${renameTarget.id}`}
+          initialValue={renameTarget.name}
+          label={renameTarget.kind === 'workspace' ? 'Rename workspace' : 'Rename session'}
+          anchor={renameTarget.anchor}
+          onSubmit={async (value) => {
+            if (renameTarget.kind === 'workspace') {
+              await onRenameWorkspace?.(renameTarget.id, value);
+            } else {
+              await onRenameSession?.(renameTarget.id, value);
+            }
+          }}
+          onClose={() => setRenameTarget(null)}
+        />
+      )}
     </div>
   );
 }

@@ -82,6 +82,8 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdWorkspaceLayoutDockTile,
 		protocol.CmdWorkspaceLayoutUndockTile,
 		protocol.CmdWorkspaceTileContentGet,
+		protocol.CmdRenameSession,
+		protocol.CmdRenameWorkspace,
 	}
 
 	for _, cmd := range commands {

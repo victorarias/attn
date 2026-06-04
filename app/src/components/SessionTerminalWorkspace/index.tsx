@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { GhosttyTerminal, type GhosttyTerminalHandle } from '../GhosttyTerminal';
+import { RenamePopover } from '../RenamePopover';
 import { useShortcut } from '../../shortcuts';
 import {
   getNormalizedPaneBounds,
@@ -101,6 +102,7 @@ interface SessionTerminalWorkspaceProps {
   onSplitPane: (targetPaneId: string, direction: TerminalSplitDirection) => void;
   onClosePane: (paneId: string) => void;
   onFocusPane: (paneId: string) => void;
+  onRenameSession?: (sessionId: string, label: string) => Promise<void>;
   onZoomModeChange?: (zoomed: boolean) => void;
   onNavigateOutOfSession: (direction: TerminalNavigationDirection) => void;
   onResizeSplit?: (splitId: string, ratio: number) => Promise<unknown> | void;
@@ -140,6 +142,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onSplitPane,
     onClosePane,
     onFocusPane,
+    onRenameSession,
     onZoomModeChange,
     onNavigateOutOfSession,
     onResizeSplit,
@@ -157,6 +160,11 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
   }, ref) {
     const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null);
     const [zoomedPaneId, setZoomedPaneId] = useState<string | null>(null);
+    const [renamePane, setRenamePane] = useState<{
+      sessionId: string;
+      name: string;
+      anchor: { top: number; left: number };
+    } | null>(null);
     // Live, optimistic split ratios while dragging a divider. Reconciled against
     // the daemon layout once it echoes the persisted (locked) ratio back.
     const [ratioOverrides, setRatioOverrides] = useState<Map<string, number>>(() => new Map());
@@ -628,6 +636,28 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
               title={showPaneHeader ? 'Drag to move' : undefined}
             >
               {showPaneHeader ? <span className="workspace-pane-title">{paneTitle}</span> : null}
+              {showPaneHeader && onRenameSession ? (
+                <button
+                  type="button"
+                  className="workspace-pane-rename-btn"
+                  data-testid={`rename-pane-${agentPane.id}`}
+                  // Stop the header's pointerdown drag from starting on the button.
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setRenamePane({
+                      sessionId: agentPane.sessionId,
+                      name: paneTitle,
+                      anchor: { top: rect.bottom + 4, left: rect.left },
+                    });
+                  }}
+                  title="Rename session"
+                  aria-label={`Rename session ${paneTitle}`}
+                >
+                  ✎
+                </button>
+              ) : null}
             </div>
             <div className="workspace-pane-body">
               {isPaneStarting || isPaneFailed ? (
@@ -909,6 +939,16 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           >
             {draggingLeafLabel}
           </div>
+        )}
+        {renamePane && onRenameSession && (
+          <RenamePopover
+            key={renamePane.sessionId}
+            initialValue={renamePane.name}
+            label="Rename session"
+            anchor={renamePane.anchor}
+            onSubmit={(value) => onRenameSession(renamePane.sessionId, value)}
+            onClose={() => setRenamePane(null)}
+          />
         )}
       </div>
     );

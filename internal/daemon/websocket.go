@@ -926,6 +926,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleRegisterWorkspace(client, msg.(*protocol.RegisterWorkspaceMessage))
 	case protocol.CmdUnregisterWorkspace:
 		d.handleUnregisterWorkspace(client, msg.(*protocol.UnregisterWorkspaceMessage))
+	case protocol.CmdRenameSession:
+		d.handleRenameSession(client, msg.(*protocol.RenameSessionMessage))
+	case protocol.CmdRenameWorkspace:
+		d.handleRenameWorkspace(client, msg.(*protocol.RenameWorkspaceMessage))
 	default:
 		d.sendCommandError(client, cmd, "unsupported command")
 	}

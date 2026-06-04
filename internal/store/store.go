@@ -562,6 +562,25 @@ func (s *Store) UpdateBranch(id, branch string, isWorktree bool, mainRepo string
 	}
 }
 
+// UpdateSessionLabel sets a session's display label. This is the durable
+// authority for the name: registration and respawn paths preserve a non-empty
+// stored label rather than overwrite it, so a user rename sticks.
+func (s *Store) UpdateSessionLabel(id, label string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		if session := s.sessions[id]; session != nil {
+			session.Label = label
+		}
+		return
+	}
+
+	if _, err := s.db.Exec(`UPDATE sessions SET label = ? WHERE id = ?`, label, id); err != nil {
+		log.Printf("[store] UpdateSessionLabel: failed for session %s: %v", id, err)
+	}
+}
+
 // Touch updates a session's last seen time
 func (s *Store) Touch(id string) {
 	s.mu.Lock()

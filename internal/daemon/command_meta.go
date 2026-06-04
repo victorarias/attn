@@ -112,6 +112,8 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdWorkspaceLayoutMoveLeaf:            commandMetadata(ScopeSession, true, true),
 	protocol.CmdWorkspaceLayoutMoveLeafToWorkspace: commandMetadata(ScopeSession, true, true),
 	protocol.CmdWorkspaceTileContentGet:            commandMetadata(ScopeSession, true, true),
+	protocol.CmdRenameSession:                      commandMetadata(ScopeSession, false, true),
+	protocol.CmdRenameWorkspace:                    commandMetadata(ScopeEndpoint, false, true),
 }
 
 func shouldLogWSCommand(cmd string) bool {

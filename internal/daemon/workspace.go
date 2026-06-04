@@ -60,6 +60,20 @@ func (r *workspaceRegistry) register(id, title, directory string, muted bool) (p
 	return snapshotEntry(entry), !existed
 }
 
+// rename updates a workspace's cached title. Returns the refreshed snapshot and
+// whether the workspace was found. The store is the durable authority; callers
+// persist the new title alongside this in-memory update.
+func (r *workspaceRegistry) rename(id, title string) (protocol.Workspace, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.workspaces[id]
+	if !ok {
+		return protocol.Workspace{}, false
+	}
+	entry.title = title
+	return snapshotEntry(entry), true
+}
+
 func (r *workspaceRegistry) toggleMuted(id string) (protocol.Workspace, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

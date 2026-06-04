@@ -919,6 +919,22 @@ model UnregisterWorkspaceMessage {
   id: string;
 }
 
+// Rename a session's display label. The stored label is authoritative once set:
+// it survives session re-registration and respawn so a rename is durable.
+model RenameSessionMessage {
+  cmd: "rename_session";
+  session_id: string;
+  label: string;
+}
+
+// Rename a workspace's title. Like the session label, the stored title wins over
+// the name re-derived at register time, so a rename sticks across reconnects.
+model RenameWorkspaceMessage {
+  cmd: "rename_workspace";
+  workspace_id: string;
+  title: string;
+}
+
 // ============================================================================
 // Result/Event Messages (Daemon → Client)
 // ============================================================================
@@ -1005,6 +1021,18 @@ model WorkspaceLayoutMessage {
 model WorkspaceLayoutUpdatedMessage {
   event: "workspace_layout_updated";
   workspace_layout: WorkspaceLayout;
+}
+
+// Result of a rename_session / rename_workspace command. cmd echoes the command
+// name and id is the renamed session_id or workspace_id, so the client can match
+// it to the pending request. The renamed entity is also broadcast separately via
+// session_state_changed / workspace_state_changed.
+model RenameResultMessage {
+  event: "rename_result";
+  cmd: string;
+  id: string;
+  success: boolean;
+  error?: string;
 }
 
 model WorkspaceLayoutActionResultMessage {
@@ -1620,6 +1648,7 @@ alias DaemonEvent =
   | WorkspaceLayoutMessage
   | WorkspaceLayoutUpdatedMessage
   | WorkspaceLayoutActionResultMessage
+  | RenameResultMessage
   | WorkspaceTileContentMessage
   | PRsUpdatedMessage
   | ReposUpdatedMessage
