@@ -302,6 +302,14 @@ func (d *Daemon) handleRegisterWorkspace(client *wsClient, msg *protocol.Registe
 	}
 	existing := d.store.GetWorkspace(id)
 	muted := existing != nil && existing.Muted
+	// Preserve a user-applied rename across re-registration. A reconnect or
+	// retry can re-register the same workspace id with the old derived title;
+	// the only authoritative way to change a title is the rename_workspace
+	// command, so a non-empty stored title always wins here. Mirrors the
+	// session/workspace title guards in handleRegister.
+	if existing != nil && strings.TrimSpace(existing.Title) != "" {
+		title = existing.Title
+	}
 	snapshot, isNew := d.workspaces.register(id, title, directory, muted)
 	d.store.AddWorkspace(&snapshot)
 	// Make workspace directories available in the recent-locations picker.

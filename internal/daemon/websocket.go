@@ -1068,6 +1068,10 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.SetReviewLoopIterationLimitMessage); ok {
 			return typed.SessionID
 		}
+	case protocol.CmdRenameSession:
+		if typed, ok := msg.(*protocol.RenameSessionMessage); ok {
+			return typed.SessionID
+		}
 	}
 	return ""
 }
@@ -1116,6 +1120,10 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdWorkspaceTileContentGet:
 		if typed, ok := msg.(*protocol.WorkspaceTileContentGetMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdRenameWorkspace:
+		if typed, ok := msg.(*protocol.RenameWorkspaceMessage); ok {
 			return typed.WorkspaceID
 		}
 	}

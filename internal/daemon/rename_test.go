@@ -96,6 +96,41 @@ func TestDaemon_HandleRenameWorkspace_PersistsTitle(t *testing.T) {
 	}
 }
 
+// A user rename of a workspace must survive a later register_workspace that
+// carries the old derived title — the kind of stale re-registration a
+// reconnect or retry produces. Without the guard the derived title clobbers
+// the rename in both the store and the in-memory registry.
+func TestDaemon_HandleRegisterWorkspace_PreservesRenamedTitleOnReRegister(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	dir := t.TempDir()
+	client := newRenameTestClient()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: "workspace-1", Title: "derived-title", Directory: dir,
+	})
+	if got := d.store.GetWorkspace("workspace-1"); got == nil || got.Title != "derived-title" {
+		t.Fatalf("initial title = %+v, want derived-title", got)
+	}
+
+	d.handleRenameWorkspace(client, &protocol.RenameWorkspaceMessage{
+		Cmd: protocol.CmdRenameWorkspace, WorkspaceID: "workspace-1", Title: "User Renamed",
+	})
+	if res := expectRenameResult(t, client); !res.Success {
+		t.Fatalf("rename_result success=false error=%q", protocol.Deref(res.Error))
+	}
+
+	// Reconnect/retry re-registers with the stale derived title.
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: "workspace-1", Title: "derived-title", Directory: dir,
+	})
+	if got := d.store.GetWorkspace("workspace-1"); got == nil || got.Title != "User Renamed" {
+		t.Fatalf("stored title after re-register = %+v, want User Renamed", got)
+	}
+	if snap, ok := d.workspaces.snapshot("workspace-1"); !ok || snap.Title != "User Renamed" {
+		t.Fatalf("registry title after re-register = %q ok=%v, want User Renamed", snap.Title, ok)
+	}
+}
+
 func TestDaemon_HandleRenameSession_RejectsEmptyName(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	dir := t.TempDir()
