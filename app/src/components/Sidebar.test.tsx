@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { Sidebar, type FooterShortcut } from './Sidebar';
 import { buildWorkspaceViewModels, type WorkspaceWithSessions } from '../utils/workspaceViewModels';
@@ -394,5 +394,44 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('sidebar-muted-workspace-workspace-/repo/quiet')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Unmute workspace quiet' }));
     expect(onMuteWorkspace).toHaveBeenCalledWith('workspace-/repo/quiet', undefined);
+  });
+
+  it('renames a session through the pencil trigger and popover', async () => {
+    const sessions: TestSession[] = [{ id: 's1', label: 'claude', state: 'idle', agent: 'claude' }];
+    const onRenameSession = vi.fn(async () => {});
+    render(
+      <Sidebar
+        {...baseProps}
+        onRenameSession={onRenameSession}
+        {...buildSidebarData(sessions)}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('rename-session-s1'));
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+    expect(input.value).toBe('claude');
+    fireEvent.change(input, { target: { value: 'renamed-session' } });
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Enter' });
+
+    await waitFor(() => expect(onRenameSession).toHaveBeenCalledWith('s1', 'renamed-session'));
+  });
+
+  it('renames a workspace through the pencil trigger and popover', async () => {
+    const sessions: TestSession[] = [{ id: 's1', label: 'claude', state: 'idle', agent: 'claude' }];
+    const onRenameWorkspace = vi.fn(async () => {});
+    render(
+      <Sidebar
+        {...baseProps}
+        onRenameWorkspace={onRenameWorkspace}
+        {...buildSidebarData(sessions)}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('rename-workspace-workspace-s1'));
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'renamed-workspace' } });
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Enter' });
+
+    await waitFor(() => expect(onRenameWorkspace).toHaveBeenCalledWith('workspace-s1', 'renamed-workspace'));
   });
 });

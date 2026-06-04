@@ -29,6 +29,7 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 ## [2026-06-03]
 
 ### Added
+- **Rename workspaces and sessions.** Hover a workspace or session in the sidebar and click the pencil to give it a name that means something to you. When a workspace has more than one pane, each pane header has the same pencil so you can rename its session right where you're looking. A small popup opens with the current name selected — type to replace it, or press → to keep it and append. Renames stick: they survive reconnects and reloading a session.
 - **Move panes and tiles between workspaces.** Drag a pane or docked tile toward another workspace in the sidebar to switch to it, then drop on the target layout for exact placement. Dropping directly on the sidebar workspace moves it to the left side of that workspace.
 
 ### Changed

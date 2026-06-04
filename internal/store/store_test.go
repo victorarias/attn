@@ -1,6 +1,7 @@
 package store
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -297,6 +298,33 @@ func TestStore_UpdateTodos(t *testing.T) {
 	}
 	if got.Todos[0] != "task 1" {
 		t.Errorf("Todos[0] = %q, want %q", got.Todos[0], "task 1")
+	}
+}
+
+func TestStore_UpdateSessionLabel(t *testing.T) {
+	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewWithDB error: %v", err)
+	}
+	defer s.Close()
+
+	now := string(protocol.TimestampNow())
+	s.Add(&protocol.Session{
+		ID: "abc123", Label: "original", Agent: protocol.SessionAgentCodex,
+		Directory: "/tmp/project", WorkspaceID: "workspace-1",
+		State: protocol.SessionStateIdle, StateSince: now,
+		StateUpdatedAt: now, LastSeen: now,
+	})
+
+	s.UpdateSessionLabel("abc123", "renamed")
+
+	got := s.Get("abc123")
+	if got == nil || got.Label != "renamed" {
+		t.Fatalf("label after rename = %+v, want renamed", got)
+	}
+	// Unrelated columns must survive the targeted update.
+	if got.Directory != "/tmp/project" || got.State != protocol.SessionStateIdle {
+		t.Fatalf("rename mutated unrelated fields: %+v", got)
 	}
 }
 

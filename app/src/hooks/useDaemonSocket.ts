@@ -157,7 +157,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '80';
+const PROTOCOL_VERSION = '81';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -1086,6 +1086,22 @@ export function useDaemonSocket({
                 pending.resolve({ success: true, final_leaf_id: data.final_leaf_id });
               } else {
                 pending.reject(new Error(data.error || 'Workspace action failed'));
+              }
+            }
+            break;
+          }
+
+          case 'rename_result': {
+            if (typeof data.cmd === 'string' && typeof data.id === 'string') {
+              const key = `${data.cmd}:${data.id}`;
+              const pending = pendingActionsRef.current.get(key);
+              if (pending) {
+                pendingActionsRef.current.delete(key);
+                if (data.success) {
+                  pending.resolve(undefined);
+                } else {
+                  pending.reject(new Error(data.error || 'Rename failed'));
+                }
               }
             }
             break;
@@ -2599,6 +2615,52 @@ export function useDaemonSocket({
     });
   }, []);
 
+  const sendRenameSession = useCallback((sessionId: string, label: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const trimmed = label.trim();
+      if (!sessionId || !trimmed) {
+        reject(new Error('Session name cannot be empty'));
+        return;
+      }
+      const key = `rename_session:${sessionId}`;
+      pendingActionsRef.current.set(key, { resolve: () => resolve(), reject });
+      sendOrQueueCommand(
+        { cmd: 'rename_session', session_id: sessionId, label: trimmed },
+        { waitForInitialState: true },
+      );
+      window.setTimeout(() => {
+        if (!pendingActionsRef.current.has(key)) {
+          return;
+        }
+        pendingActionsRef.current.delete(key);
+        reject(new Error(`Rename timed out for session ${sessionId}`));
+      }, 10_000);
+    });
+  }, [sendOrQueueCommand]);
+
+  const sendRenameWorkspace = useCallback((workspaceId: string, title: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const trimmed = title.trim();
+      if (!workspaceId || !trimmed) {
+        reject(new Error('Workspace name cannot be empty'));
+        return;
+      }
+      const key = `rename_workspace:${workspaceId}`;
+      pendingActionsRef.current.set(key, { resolve: () => resolve(), reject });
+      sendOrQueueCommand(
+        { cmd: 'rename_workspace', workspace_id: workspaceId, title: trimmed },
+        { waitForInitialState: true },
+      );
+      window.setTimeout(() => {
+        if (!pendingActionsRef.current.has(key)) {
+          return;
+        }
+        pendingActionsRef.current.delete(key);
+        reject(new Error(`Rename timed out for workspace ${workspaceId}`));
+      }, 10_000);
+    });
+  }, [sendOrQueueCommand]);
+
   // Unregister a single session from daemon
   const sendUnregisterSession = useCallback((sessionId: string): Promise<void> => {
     return new Promise((resolve, reject) => {
@@ -3604,6 +3666,8 @@ export function useDaemonSocket({
     sendUnregisterSession,
     sendRegisterWorkspace,
     sendUnregisterWorkspace,
+    sendRenameSession,
+    sendRenameWorkspace,
     sendPRVisited,
     sendListWorktrees,
     sendCreateWorktree,

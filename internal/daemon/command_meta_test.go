@@ -82,6 +82,8 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdWorkspaceLayoutDockTile,
 		protocol.CmdWorkspaceLayoutUndockTile,
 		protocol.CmdWorkspaceTileContentGet,
+		protocol.CmdRenameSession,
+		protocol.CmdRenameWorkspace,
 	}
 
 	for _, cmd := range commands {
@@ -218,6 +220,12 @@ func TestRemoteCommandSessionID_IncludesReviewLoopCommands(t *testing.T) {
 			msg:  &protocol.SetReviewLoopIterationLimitMessage{SessionID: "sess-set"},
 			want: "sess-set",
 		},
+		{
+			name: "rename_session",
+			cmd:  protocol.CmdRenameSession,
+			msg:  &protocol.RenameSessionMessage{SessionID: "sess-rename"},
+			want: "sess-rename",
+		},
 	}
 
 	for _, tc := range cases {
@@ -230,6 +238,13 @@ func TestRemoteCommandSessionID_IncludesReviewLoopCommands(t *testing.T) {
 func TestRemoteCommandWorkspaceID_IncludesTileContentGet(t *testing.T) {
 	msg := &protocol.WorkspaceTileContentGetMessage{WorkspaceID: "workspace-remote"}
 	if got := remoteCommandWorkspaceID(protocol.CmdWorkspaceTileContentGet, msg); got != msg.WorkspaceID {
+		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, msg.WorkspaceID)
+	}
+}
+
+func TestRemoteCommandWorkspaceID_IncludesRenameWorkspace(t *testing.T) {
+	msg := &protocol.RenameWorkspaceMessage{WorkspaceID: "workspace-rename"}
+	if got := remoteCommandWorkspaceID(protocol.CmdRenameWorkspace, msg); got != msg.WorkspaceID {
 		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, msg.WorkspaceID)
 	}
 }

@@ -55,6 +55,27 @@ func TestToggleWorkspaceMute(t *testing.T) {
 	}
 }
 
+func TestUpdateWorkspaceTitle(t *testing.T) {
+	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewWithDB error: %v", err)
+	}
+	defer s.Close()
+
+	s.AddWorkspace(&protocol.Workspace{ID: "workspace-1", Title: "Project", Directory: "/tmp/project"})
+
+	s.UpdateWorkspaceTitle("workspace-1", "Renamed")
+
+	got := s.GetWorkspace("workspace-1")
+	if got == nil || got.Title != "Renamed" {
+		t.Fatalf("workspace title after rename = %+v, want Renamed", got)
+	}
+	// Other columns must be left intact.
+	if got.Directory != "/tmp/project" {
+		t.Fatalf("directory changed during rename = %q", got.Directory)
+	}
+}
+
 func TestAssignSessionWorkspaceRefusesEmptyWorkspace(t *testing.T) {
 	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

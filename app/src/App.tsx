@@ -387,6 +387,8 @@ function App() {
     sendRefreshPRs,
     sendRegisterWorkspace,
     sendUnregisterWorkspace,
+    sendRenameSession,
+    sendRenameWorkspace,
     sendUnregisterSession,
     sendSetSetting,
     sendCreateWorktree,
@@ -510,6 +512,8 @@ function App() {
         sendRefreshPRs={sendRefreshPRs}
         sendRegisterWorkspace={sendRegisterWorkspace}
         sendUnregisterWorkspace={sendUnregisterWorkspace}
+        sendRenameSession={sendRenameSession}
+        sendRenameWorkspace={sendRenameWorkspace}
         sendUnregisterSession={sendUnregisterSession}
         sendSetSetting={sendSetSetting}
         sendCreateWorktree={sendCreateWorktree}
@@ -600,6 +604,8 @@ interface AppContentProps {
   sendRefreshPRs: ReturnType<typeof useDaemonSocket>['sendRefreshPRs'];
   sendRegisterWorkspace: ReturnType<typeof useDaemonSocket>['sendRegisterWorkspace'];
   sendUnregisterWorkspace: ReturnType<typeof useDaemonSocket>['sendUnregisterWorkspace'];
+  sendRenameSession: ReturnType<typeof useDaemonSocket>['sendRenameSession'];
+  sendRenameWorkspace: ReturnType<typeof useDaemonSocket>['sendRenameWorkspace'];
   sendUnregisterSession: ReturnType<typeof useDaemonSocket>['sendUnregisterSession'];
   sendSetSetting: ReturnType<typeof useDaemonSocket>['sendSetSetting'];
   sendCreateWorktree: ReturnType<typeof useDaemonSocket>['sendCreateWorktree'];
@@ -685,6 +691,8 @@ function AppContent({
   sendRefreshPRs,
   sendRegisterWorkspace,
   sendUnregisterWorkspace,
+  sendRenameSession,
+  sendRenameWorkspace,
   sendUnregisterSession,
   sendSetSetting,
   sendCreateWorktree,
@@ -2810,6 +2818,8 @@ sendFetchPRDetails,
           mutedExpanded={sidebarMutedExpanded}
           onMutedExpandedChange={setSidebarMutedExpanded}
           onMuteWorkspace={sendMuteWorkspace}
+          onRenameSession={sendRenameSession}
+          onRenameWorkspace={sendRenameWorkspace}
           showSessionless={showSessionlessWorkspaces}
           onToggleShowSessionless={handleToggleShowSessionlessWorkspaces}
           leafDrag={leafWorkspaceDrag ? {
@@ -2881,6 +2891,7 @@ sendFetchPRDetails,
                         void handleClosePane(paneSessionId, paneId).catch(console.error);
                       }
                     }}
+                    onRenameSession={sendRenameSession}
                     onResizeSplit={(splitId, ratio) => {
                       return sendWorkspaceSetSplitRatio(workspace.id, splitId, ratio);
                     }}

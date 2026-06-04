@@ -111,6 +111,22 @@ func (s *Store) ToggleWorkspaceMute(id string) {
 	}
 }
 
+// UpdateWorkspaceTitle sets a workspace's title. The stored title is the durable
+// authority for the name: the register path preserves a non-empty stored title
+// instead of re-deriving it from a session label, so a user rename sticks.
+func (s *Store) UpdateWorkspaceTitle(id, title string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	if _, err := s.db.Exec(`UPDATE workspaces SET title = ? WHERE id = ?`, title, id); err != nil {
+		log.Printf("[store] UpdateWorkspaceTitle: failed for workspace %s: %v", id, err)
+	}
+}
+
 // AssignSessionWorkspace updates the workspace_id column on a session. A live
 // persisted session must always have an owning workspace; callers that are
 // unregistering a session should delete the session row instead of clearing

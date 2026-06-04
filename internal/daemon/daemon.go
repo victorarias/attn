@@ -1688,9 +1688,15 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 
 	nowStr := string(protocol.TimestampNow())
 	agent := normalizeStoredSessionAgent(string(protocol.Deref(msg.Agent)), protocol.SessionAgentClaude)
+	// The label from register is a default for first registration. A non-empty
+	// stored label is authoritative so a user rename survives re-registration.
+	sessionLabel := protocol.Deref(msg.Label)
+	if existing != nil && strings.TrimSpace(existing.Label) != "" {
+		sessionLabel = existing.Label
+	}
 	session := &protocol.Session{
 		ID:             msg.ID,
-		Label:          protocol.Deref(msg.Label),
+		Label:          sessionLabel,
 		Agent:          agent,
 		Directory:      msg.Dir,
 		State:          protocol.SessionStateLaunching,
@@ -1715,8 +1721,14 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		return
 	}
 	session.WorkspaceID = workspaceID
-	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: session.Label, Directory: session.Directory, Status: protocol.WorkspaceStatusLaunching})
-	d.workspaces.register(workspaceID, session.Label, session.Directory, false)
+	// Re-deriving the workspace title from the session label would clobber a
+	// renamed workspace. Preserve a non-empty stored title instead.
+	workspaceTitle := session.Label
+	if existingWS := d.store.GetWorkspace(workspaceID); existingWS != nil && strings.TrimSpace(existingWS.Title) != "" {
+		workspaceTitle = existingWS.Title
+	}
+	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: workspaceTitle, Directory: session.Directory, Status: protocol.WorkspaceStatusLaunching})
+	d.workspaces.register(workspaceID, workspaceTitle, session.Directory, false)
 	d.store.Add(session)
 	if resumeSessionID := d.consumePendingResumeSessionID(session.ID); resumeSessionID != "" {
 		d.store.SetResumeSessionID(session.ID, resumeSessionID)
