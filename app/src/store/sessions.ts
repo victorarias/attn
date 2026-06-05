@@ -378,6 +378,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
       const pendingLayoutSessions = state.sessions.filter((session) => (
         !syncedSessions.some((synced) => synced.id === session.id)
+        && session.state === 'launching'
         && session.workspace.agents.some((pane) => pane.sessionId === session.id && pane.status === 'spawning')
       ));
       const allSessions = [...syncedSessions, ...pendingLayoutSessions];

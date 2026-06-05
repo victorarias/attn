@@ -1,3 +1,5 @@
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 
@@ -28,6 +30,30 @@ describe('UiAutomationClient.request', () => {
       'Automation request failed: list_sessions: Session not found',
     );
     expect(client.requestOnce).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('UiAutomationClient production safety', () => {
+  it('refuses a production app target without the explicit acknowledgement', () => {
+    expect(() => new UiAutomationClient({
+      appPath: path.join(os.homedir(), 'Applications', 'attn.app'),
+      bundleId: 'com.attn.manager',
+    })).toThrow('Refusing to run the real-app harness against production');
+  });
+
+  it('uses the production bundle and manifest for an acknowledged production app path', () => {
+    const originalArgv = process.argv;
+    process.argv = [...process.argv, '--run-against-prod'];
+    try {
+      const client = new UiAutomationClient({
+        appPath: path.join(os.homedir(), 'Applications', 'attn.app'),
+      });
+
+      expect(client.bundleId).toBe('com.attn.manager');
+      expect(client.manifestPath).toContain('Application Support/com.attn.manager/debug/ui-automation.json');
+    } finally {
+      process.argv = originalArgv;
+    }
   });
 });
 

@@ -15,13 +15,14 @@ import {
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { MacOSDriver } from './macosDriver.mjs';
+import { bundleIdentifierForProfile } from './harnessProfile.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 import { cleanupSessionViaAppClose } from './scenarioCleanup.mjs';
 import { waitForFirstWorkspacePane } from './scenarioAssertions.mjs';
 
 const execFileAsync = promisify(execFile);
 const WITNESS_BUNDLE_ID = 'com.apple.Terminal';
-const ATTN_BUNDLE_ID = 'com.attn.manager';
+const ATTN_BUNDLE_ID = bundleIdentifierForProfile();
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

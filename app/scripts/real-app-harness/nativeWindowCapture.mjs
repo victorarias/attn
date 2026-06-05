@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { assertProductionRunAllowed, bundleIdentifierForProfile } from './harnessProfile.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -93,7 +94,9 @@ end tell
   return parseWindowBoundsOutput(output, bundleId);
 }
 
-export async function getFrontWindowBounds(bundleId = 'com.attn.manager', options = {}) {
+export async function getFrontWindowBounds(bundleId = null, options = {}) {
+  const targetBundleId = bundleId || options.client?.bundleId || bundleIdentifierForProfile();
+  assertProductionRunAllowed({ bundleId: targetBundleId });
   const automationBounds = await readUiAutomationWindowBounds(options.client);
   if (automationBounds) {
     return automationBounds;
@@ -102,11 +105,11 @@ export async function getFrontWindowBounds(bundleId = 'com.attn.manager', option
   let lastError = null;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     if (attempt > 0) {
-      await activateBundle(bundleId);
+      await activateBundle(targetBundleId);
       await delay(250);
     }
     try {
-      return await readFrontWindowBoundsForBundle(bundleId);
+      return await readFrontWindowBoundsForBundle(targetBundleId);
     } catch (error) {
       lastError = error;
     }
@@ -114,7 +117,7 @@ export async function getFrontWindowBounds(bundleId = 'com.attn.manager', option
 
   throw lastError instanceof Error
     ? lastError
-    : new Error(`Failed to resolve front window bounds for ${bundleId}`);
+    : new Error(`Failed to resolve front window bounds for ${targetBundleId}`);
 }
 
 function boundsWithinTolerance(actual, target, tolerancePx = 6) {
@@ -163,7 +166,8 @@ async function writeUiAutomationWindowBounds(client, targetBounds) {
 }
 
 export async function setFrontWindowBounds(targetBounds, options = {}) {
-  const bundleId = options.bundleId || 'com.attn.manager';
+  const bundleId = options.bundleId || options.client?.bundleId || bundleIdentifierForProfile();
+  assertProductionRunAllowed({ bundleId });
   const normalizedTarget = normalizeLogicalBounds(targetBounds);
   if (!normalizedTarget) {
     throw new Error(`Invalid target window bounds: ${JSON.stringify(targetBounds)}`);
@@ -219,7 +223,8 @@ export async function setFrontWindowBounds(targetBounds, options = {}) {
 }
 
 export async function captureFrontWindowScreenshot(outputPath, options = {}) {
-  const bundleId = options.bundleId || 'com.attn.manager';
+  const bundleId = options.bundleId || options.client?.bundleId || bundleIdentifierForProfile();
+  assertProductionRunAllowed({ bundleId });
   const bounds = await getFrontWindowBounds(bundleId, options);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   await execFileAsync('/usr/sbin/screencapture', [

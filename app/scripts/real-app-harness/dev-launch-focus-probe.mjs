@@ -96,7 +96,7 @@ async function main() {
   }
 
   const finalFrontmost = await frontmost();
-  const attnDriver = new MacOSDriver({ bundleId: 'com.attn.manager' });
+  const attnDriver = new MacOSDriver({ bundleId: client.bundleId, appPath: client.appPath });
   const attnWid = await attnDriver.mainWindowId();
   console.log(`[probe] attn window id after launch=${attnWid}`);
   await client.quitApp().catch(() => {});

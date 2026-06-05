@@ -11,9 +11,13 @@
 //     --command 'pnpm --dir app run real-app:scenario-tr204'
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import {
+  assertProductionRunAllowed,
+  bundleIdentifierForProfile,
+} from './harnessProfile.mjs';
 
 const execFileAsync = promisify(execFile);
-const ATTN_BUNDLE_ID = 'com.attn.manager';
+const ATTN_BUNDLE_ID = bundleIdentifierForProfile();
 
 const scenarioCommands = {
   tr201: ['pnpm', ['--dir', 'app', 'run', 'real-app:scenario-tr201']],
@@ -26,12 +30,18 @@ const scenarioCommands = {
 function parseArgs(argv) {
   const args = [...argv];
   if (args[0] === '--') args.shift();
-  const options = { scenario: null, command: null, intervalMs: 1000 };
+  const options = {
+    scenario: null,
+    command: null,
+    intervalMs: 1000,
+    runAgainstProd: false,
+  };
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (arg === '--scenario') options.scenario = args[++i];
     else if (arg === '--command') options.command = args[++i];
     else if (arg === '--interval-ms') options.intervalMs = Number(args[++i]);
+    else if (arg === '--run-against-prod') options.runAgainstProd = true;
     else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -56,11 +66,16 @@ async function main() {
     console.log(`Usage:
   node verify-focus-behavior.mjs --scenario <id>
   node verify-focus-behavior.mjs --command '<shell>'
+  node verify-focus-behavior.mjs --scenario <id> --run-against-prod
 
 Known scenario ids: ${Object.keys(scenarioCommands).join(', ')}
 `);
     return;
   }
+  assertProductionRunAllowed(
+    { bundleId: ATTN_BUNDLE_ID },
+    options.runAgainstProd ? ['--run-against-prod'] : [],
+  );
 
   let spawnCmd;
   let spawnArgs;
@@ -68,6 +83,9 @@ Known scenario ids: ${Object.keys(scenarioCommands).join(', ')}
     const entry = scenarioCommands[options.scenario];
     if (!entry) throw new Error(`Unknown scenario id: ${options.scenario}`);
     [spawnCmd, spawnArgs] = entry;
+    if (options.runAgainstProd) {
+      spawnArgs = [...spawnArgs, '--', '--run-against-prod'];
+    }
   } else if (options.command) {
     spawnCmd = 'bash';
     spawnArgs = ['-lc', options.command];

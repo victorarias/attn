@@ -3,20 +3,22 @@ import os from 'node:os';
 import path from 'node:path';
 import { waitForFirstWorkspacePane, waitForPaneVisible } from './scenarioAssertions.mjs';
 import {
+  assertProductionRunAllowed,
   defaultAppPathForProfile,
   defaultWSURLForProfile,
   deepLinkSchemeForProfile,
+  profileForAppPath,
 } from './harnessProfile.mjs';
 
 export function parseCommonArgs(argv) {
-  // Default to the prod install; ATTN_HARNESS_PROFILE=dev switches the
-  // whole harness (ws port, app path, bundle id) to the dev sibling
-  // without the caller having to set three separate env vars.
+  // Default to the isolated dev install. Production requires both an explicit
+  // prod target and the --run-against-prod acknowledgement.
   const options = {
     wsUrl: process.env.ATTN_REAL_APP_WS_URL || defaultWSURLForProfile(),
     appPath: process.env.ATTN_REAL_APP_PATH || defaultAppPathForProfile(),
     artifactsDir: process.env.ATTN_REAL_APP_ARTIFACTS_DIR || path.join(os.tmpdir(), 'attn-real-app-harness'),
     sessionRootDir: process.env.ATTN_REAL_APP_SESSION_ROOT || path.join(os.tmpdir(), 'attn-real-app-sessions'),
+    runAgainstProd: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -25,21 +27,35 @@ export function parseCommonArgs(argv) {
     else if (arg === '--app-path') options.appPath = argv[++index];
     else if (arg === '--artifacts-dir') options.artifactsDir = argv[++index];
     else if (arg === '--session-root-dir') options.sessionRootDir = argv[++index];
+    else if (arg === '--run-against-prod') options.runAgainstProd = true;
     else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
+  if (!process.env.ATTN_REAL_APP_WS_URL && !argv.includes('--ws-url')) {
+    options.wsUrl = defaultWSURLForProfile(profileForAppPath(options.appPath));
+  }
+
+  const safetyArgv = argv.length > 0 ? argv : process.argv.slice(2);
+  const isHelp = options.help || safetyArgv.includes('--help') || safetyArgv.includes('-h');
+  if (!isHelp) assertCommonTargetAllowed(options, safetyArgv);
   return options;
+}
+
+export function assertCommonTargetAllowed(options, argv = process.argv.slice(2)) {
+  const safetyArgv = options.runAgainstProd ? ['--run-against-prod'] : argv;
+  assertProductionRunAllowed({ appPath: options.appPath, wsUrl: options.wsUrl }, safetyArgv);
 }
 
 export function printCommonHelp(scriptName) {
   console.log(`Usage: pnpm exec node ${scriptName} [options]
 
 Options:
-  --ws-url <url>             Daemon websocket URL (default: ws://127.0.0.1:9849/ws)
-  --app-path <path>          Packaged app path (default: ~/Applications/attn.app)
+  --ws-url <url>             Daemon websocket URL (default: ws://127.0.0.1:29849/ws)
+  --app-path <path>          Packaged app path (default: ~/Applications/attn-dev.app)
   --artifacts-dir <path>     Directory for screenshots and summary output
   --session-root-dir <path>  Directory where harness-created session cwd roots are created
+  --run-against-prod         Explicitly allow targeting the production app
 `);
 }
 
@@ -132,10 +148,9 @@ export async function bootstrapPackagedAppSession({
   await driver.activateBackground();
   await captureScreenshot(driver, path.join(runDir, '01-app-launched.png'));
 
-  // Scheme is profile-scoped: ATTN_HARNESS_PROFILE=dev → `attn-dev://`,
-  // which the dev bundle registers. Sending `attn://` under a dev
-  // profile would open the prod app instead of attn-dev.app.
-  const scheme = deepLinkSchemeForProfile();
+  // Scheme follows the selected app path so an explicit prod target opens
+  // prod while the default dev target stays isolated.
+  const scheme = deepLinkSchemeForProfile(profileForAppPath(driver.appPath));
   const deepLink = `${scheme}://spawn?cwd=${encodeURIComponent(sessionDir)}&label=${encodeURIComponent(sessionLabel)}`;
   console.log(`[RealAppHarness] deepLink=${deepLink}`);
   await driver.openDeepLink(deepLink);

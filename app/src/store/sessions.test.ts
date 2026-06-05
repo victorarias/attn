@@ -184,6 +184,74 @@ describe('sessions store', () => {
     expect(state.recentSessionIds).toEqual([]);
   });
 
+  it('syncFromDaemonSessions retains a genuinely launching session with a pending workspace pane', () => {
+    useSessionStore.setState({
+      activeSessionId: 'launching-session',
+      recentSessionIds: [],
+      sessions: [
+        {
+          id: 'launching-session',
+          label: 'Launching',
+          state: 'launching',
+          cwd: '/tmp/launching',
+          workspaceId: 'workspace-launching',
+          agent: 'shell',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-launching',
+          workspace: {
+            agents: [{
+              id: 'pane-launching',
+              runtimeId: 'launching-session',
+              title: 'Launching',
+              sessionId: 'launching-session',
+              status: 'spawning',
+            }],
+            layoutTree: { type: 'pane', paneId: 'pane-launching' },
+          },
+        },
+      ],
+    });
+
+    useSessionStore.getState().syncFromDaemonSessions([]);
+
+    expect(useSessionStore.getState().sessions.map((session) => session.id)).toEqual(['launching-session']);
+    expect(useSessionStore.getState().activeSessionId).toBe('launching-session');
+  });
+
+  it('syncFromDaemonSessions removes an exited session with a stale spawning pane', () => {
+    useSessionStore.setState({
+      activeSessionId: 'exited-session',
+      recentSessionIds: [],
+      sessions: [
+        {
+          id: 'exited-session',
+          label: 'Exited shell',
+          state: 'idle',
+          cwd: '/tmp/exited',
+          workspaceId: 'workspace-exited',
+          agent: 'shell',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-exited',
+          workspace: {
+            agents: [{
+              id: 'pane-exited',
+              runtimeId: 'exited-session',
+              title: 'Exited shell',
+              sessionId: 'exited-session',
+              status: 'spawning',
+            }],
+            layoutTree: { type: 'pane', paneId: 'pane-exited' },
+          },
+        },
+      ],
+    });
+
+    useSessionStore.getState().syncFromDaemonSessions([]);
+
+    expect(useSessionStore.getState().sessions).toEqual([]);
+    expect(useSessionStore.getState().activeSessionId).toBeNull();
+  });
+
   it('syncFromDaemonSessions falls back to a remaining same-workspace session when recent selection is empty', () => {
     useSessionStore.setState({
       activeSessionId: 'split-session',

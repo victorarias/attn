@@ -10,7 +10,6 @@ import {
   printCommonHelp,
 } from './common.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
-import { bundleIdentifierForProfile } from './harnessProfile.mjs';
 import { MacOSDriver } from './macosDriver.mjs';
 import {
   captureSessionArtifacts,
@@ -206,7 +205,6 @@ async function main() {
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   const driver = new MacOSDriver({
     appPath: options.appPath,
-    bundleId: bundleIdentifierForProfile(),
   });
   const createdSessionIds = [];
 

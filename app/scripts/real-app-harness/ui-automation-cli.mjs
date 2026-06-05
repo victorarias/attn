@@ -6,9 +6,11 @@ function printHelp() {
   console.log(`Usage: pnpm exec node scripts/real-app-harness/ui-automation-cli.mjs [options] <action> [json-payload]
 
 Options:
-  --launch         Launch ~/Applications/attn.app before connecting
-  --fresh-launch   Quit and relaunch ~/Applications/attn.app before connecting
+  --launch         Launch the selected packaged app before connecting
+  --fresh-launch   Quit and relaunch the selected packaged app before connecting
   --wait-ready     Wait for the frontend automation hook before sending the action
+  --run-against-prod
+                   Explicitly allow targeting the production app
 
 Examples:
   pnpm exec node scripts/real-app-harness/ui-automation-cli.mjs ping
@@ -32,6 +34,9 @@ async function main() {
     if (flag === '--launch') launch = true;
     else if (flag === '--fresh-launch') freshLaunch = true;
     else if (flag === '--wait-ready') waitReady = true;
+    else if (flag === '--run-against-prod') {
+      // The shared UiAutomationClient guard reads this explicit acknowledgement.
+    }
     else if (flag === '--help' || flag === '-h') {
       printHelp();
       return;

@@ -151,7 +151,7 @@ git clone https://github.com/victorarias/attn.git && cd attn
 
 If you use attn daily and want to develop attn *with* attn running, use the dev sibling install instead of reinstalling your live copy. `make dev` builds and launches `~/Applications/attn-dev.app` — separate bundle identifier (`com.attn.manager.dev`), separate data dir (`~/.attn-dev/`), separate WebSocket port (`29849`). Both apps run side-by-side with zero cross-contamination. `make install` and `make install-daemon` refuse at parse time if `ATTN_PROFILE` is set in your shell, so you can't accidentally reinstall the live app while iterating on dev.
 
-The same `ATTN_PROFILE=<name>` env var scopes CLI commands (`eval "$(attn profile-env dev)"` to set it shell-wide), and the real-app serial matrix defaults to the dev install so it never takes over your live app.
+The same `ATTN_PROFILE=<name>` env var scopes CLI commands (`eval "$(attn profile-env dev)"` to set it shell-wide), and every real-app harness command defaults to the dev install so it never takes over your live app. Production harness runs require both an explicit production target and `--run-against-prod`.
 
 ## Docs
 

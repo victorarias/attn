@@ -35,10 +35,15 @@ import {
   createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
 } from './common.mjs';
+import {
+  bundleIdentifierForProfile,
+  defaultAppPathForProfile,
+  defaultWSURLForProfile,
+} from './harnessProfile.mjs';
 import { sleep, waitForFirstWorkspacePane } from './scenarioAssertions.mjs';
 
 const execFileAsync = promisify(execFile);
-const ATTN_BUNDLE_ID = 'com.attn.manager';
+const ATTN_BUNDLE_ID = bundleIdentifierForProfile();
 
 async function frontmostBundle() {
   try {
@@ -105,8 +110,8 @@ async function main() {
   const callerBundleId = await frontmostBundle();
   console.log(`[raf-probe] caller frontmost=${callerBundleId}`);
 
-  const appPath = path.join(os.homedir(), 'Applications', 'attn.app');
-  const observer = new DaemonObserver({ wsUrl: 'ws://127.0.0.1:9849/ws' });
+  const appPath = defaultAppPathForProfile();
+  const observer = new DaemonObserver({ wsUrl: defaultWSURLForProfile() });
   const client = new UiAutomationClient({ appPath });
   const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'raf-probe-'));
 
