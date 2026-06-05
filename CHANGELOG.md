@@ -30,6 +30,7 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 
 ### Fixed
 - **Selecting terminal text to the edge of a split pane no longer gets stuck.** When you dragged a selection up to the divider between split panes, the cursor flipped to the resize arrow and the selection froze — and the text wasn't copied until you clicked again. Selections now finish and copy normally even when you release the mouse right at a pane edge.
+- **Closing a shell no longer leaves a fully black screen.** When a shell exited while its cached pane was still marked as starting, the app could keep an invisible stale session and suppress the normal empty state. Exited shells now disappear cleanly.
 
 ## [2026-06-03]
 
