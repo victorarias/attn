@@ -16,6 +16,9 @@ or:
 make release VERSION_TAG=v0.1.1
 ```
 
+`main` is protected — direct pushes are rejected — so the release lands through a
+pull request rather than a push to `main`.
+
 What it automates:
 
 1. Bumps app version in:
@@ -24,8 +27,15 @@ What it automates:
    - `app/src-tauri/Cargo.toml`
 2. Refreshes lockfiles.
 3. Runs validation (unless `--skip-tests`).
-4. Creates release commit + annotated tag.
-5. Pushes `main` and tag.
+4. Creates a `release/<tag>` branch with the release commit and pushes it.
+5. Opens a PR to `main` and waits for the required CI checks (`Frontend`,
+   `Tauri`, `Daemon`) to pass.
+6. Merges the PR, then tags the merge commit and pushes the tag.
+
+The merge is automatic once CI is green (the repo requires zero approvals). If a
+check fails, the script aborts and leaves the PR open for inspection without
+creating or pushing the tag. Override the 30-minute check-wait with
+`RELEASE_CHECK_TIMEOUT=<seconds>`.
 
 The GitHub release workflow (`.github/workflows/release.yml`) builds and publishes the macOS app artifacts, uploads `attn_aarch64.dmg` for the Homebrew cask, and attaches standalone Linux daemon binaries for `amd64` and `arm64`.
 The cask itself stays `version :latest` and does not need per-release edits.
@@ -69,9 +79,11 @@ Suggested use:
 
 ## Preconditions
 
+- `gh` (GitHub CLI) installed and authenticated (`gh auth login`).
 - Working tree must be clean.
 - Current branch must be `main`.
 - Tag must not already exist locally or on `origin`.
+- `release/<tag>` branch must not already exist locally or on `origin`.
 - `origin` must be writable (push access).
 
 ## After Release
