@@ -26,6 +26,11 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 
 ---
 
+## [2026-06-04]
+
+### Fixed
+- **Selecting terminal text to the edge of a split pane no longer gets stuck.** When you dragged a selection up to the divider between split panes, the cursor flipped to the resize arrow and the selection froze — and the text wasn't copied until you clicked again. Selections now finish and copy normally even when you release the mouse right at a pane edge.
+
 ## [2026-06-03]
 
 ### Added

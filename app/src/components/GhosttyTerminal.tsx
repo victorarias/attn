@@ -136,7 +136,7 @@ function rectSnapshot(rect: DOMRect | null) {
 }
 
 function cellFromRect(
-  event: React.MouseEvent,
+  event: { clientX: number; clientY: number },
   rect: DOMRect | null,
   cellWidth: number,
   cellHeight: number,
@@ -227,6 +227,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const selectingRef = useRef(false);
     const selectionPointerStartRef = useRef<{ clientX: number; clientY: number } | null>(null);
     const selectionDragThresholdMetRef = useRef(false);
+    const selectionDragCleanupRef = useRef<(() => void) | null>(null);
     const trackedMouseButtonRef = useRef<number | null>(null);
     const hoveredCellRef = useRef<{ row: number; col: number } | null>(null);
     const acceleratorHeldRef = useRef(false);
@@ -760,7 +761,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       };
     }, []);
 
-    const cellFromPointer = (event: React.MouseEvent | React.WheelEvent) => {
+    const cellFromPointer = (event: React.MouseEvent | React.WheelEvent | MouseEvent) => {
       const renderer = rendererRef.current;
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!renderer || !rect) return null;
@@ -780,7 +781,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
     const recordPointerHitTest = useCallback((
       eventName: string,
-      event: React.MouseEvent,
+      event: React.MouseEvent | MouseEvent,
       extra: Record<string, unknown> = {},
     ) => {
       const terminal = terminalRef.current;
@@ -900,6 +901,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       };
     }, [updateLinkCursor]);
 
+    useEffect(() => () => {
+      selectionDragCleanupRef.current?.();
+      selectionDragCleanupRef.current = null;
+    }, []);
+
     const sendTrackedMouse = (
       action: 'press' | 'move' | 'release',
       event: React.MouseEvent,
@@ -928,6 +934,83 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       if (action === 'release') trackedMouseButtonRef.current = null;
       event.preventDefault();
       return true;
+    };
+
+    const stopSelectionDrag = () => {
+      selectionDragCleanupRef.current?.();
+      selectionDragCleanupRef.current = null;
+    };
+
+    const finishSelectionDrag = async (event: MouseEvent) => {
+      stopSelectionDrag();
+      if (!selectingRef.current) return;
+      selectingRef.current = false;
+      selectionPointerStartRef.current = null;
+      if (!selectionDragThresholdMetRef.current) {
+        selectionRef.current = null;
+        renderSurface(true);
+      }
+      const text = textForSelectionRange(selectionRef.current);
+      selectedTextRef.current = text || null;
+      if (text) await writeClipboardText(text);
+      const cell = cellFromPointer(event);
+      const uri = cell ? literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col) : null;
+      recordPointerHitTest('mouseup', event, {
+        activeCell: cell,
+        activeUri: uri,
+        opensUri: Boolean(uri && !text && (event.metaKey || event.ctrlKey)),
+        copiedTextLength: text.length,
+        phase: 'after-selection',
+      });
+      if (uri && !text && (event.metaKey || event.ctrlKey)) {
+        void openUrl(uri);
+      }
+    };
+
+    // Track an in-progress selection on the document rather than the terminal
+    // element. The drag must keep updating and finalize even when the pointer
+    // crosses a sibling overlay (e.g. a split divider sitting above the pane
+    // edge), which would otherwise steal the mousemove/mouseup and strand the
+    // selection without ever copying it.
+    const startSelectionDrag = () => {
+      stopSelectionDrag();
+      const onMove = (event: MouseEvent) => {
+        if (!selectingRef.current || !selectionRef.current) return;
+        // The button was released without a mouseup we observed (e.g. focus
+        // loss while over another window): finalize so we never get stuck.
+        if ((event.buttons & 1) === 0) {
+          void finishSelectionDrag(event);
+          return;
+        }
+        const terminal = terminalRef.current;
+        const renderer = rendererRef.current;
+        const cell = cellFromPointer(event);
+        const pointerStart = selectionPointerStartRef.current;
+        if (!terminal || !renderer || !cell || !pointerStart) return;
+        if (!selectionDragThresholdMetRef.current) {
+          const deltaX = event.clientX - pointerStart.clientX;
+          const deltaY = event.clientY - pointerStart.clientY;
+          const threshold = renderer.cellWidth * 0.5;
+          if (deltaX * deltaX + deltaY * deltaY < threshold * threshold) return;
+          selectionDragThresholdMetRef.current = true;
+        }
+        recordPointerHitTest('mousemove', event, {
+          activeCell: cell,
+          phase: 'selection-drag',
+        });
+        const row = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
+        selectionRef.current = { ...selectionRef.current, endRow: row, endCol: cell.col + 1 };
+        renderSurface(true);
+      };
+      const onUp = (event: MouseEvent) => {
+        void finishSelectionDrag(event);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      selectionDragCleanupRef.current = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
     };
 
     return (
@@ -1025,74 +1108,39 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           selectionDragThresholdMetRef.current = false;
           selectionRef.current = { startRow: row, startCol: cell.col, endRow: row, endCol: cell.col };
           renderSurface(true);
+          startSelectionDrag();
         }}
         onMouseMove={(event) => {
+          // While selecting, the drag is owned by the document listeners in
+          // startSelectionDrag() so it survives crossing sibling overlays.
+          if (selectingRef.current) return;
           const hoveredCell = cellFromPointer(event);
           hoveredCellRef.current = hoveredCell;
           acceleratorHeldRef.current = event.metaKey || event.ctrlKey;
           updateLinkCursor(hoveredCell, acceleratorHeldRef.current);
           const hoveredLine = hoveredCell ? lineAtVisibleRow(hoveredCell.row) : '';
           const hoveredUri = hoveredCell ? literalUrlAtColumn(hoveredLine, hoveredCell.col) : null;
-          if (acceleratorHeldRef.current || hoveredUri || selectingRef.current) {
+          if (acceleratorHeldRef.current || hoveredUri) {
             recordPointerHitTest('mousemove', event, {
               activeCell: hoveredCell,
               activeUri: hoveredUri,
-              phase: selectingRef.current ? 'selection-drag' : 'hover',
+              phase: 'hover',
             });
           }
-          if (!selectingRef.current || !selectionRef.current) {
-            sendTrackedMouse('move', event);
-            return;
-          }
-          const terminal = terminalRef.current;
-          const renderer = rendererRef.current;
-          const cell = cellFromPointer(event);
-          const pointerStart = selectionPointerStartRef.current;
-          if (!terminal || !renderer || !cell || !pointerStart) return;
-          if (!selectionDragThresholdMetRef.current) {
-            const deltaX = event.clientX - pointerStart.clientX;
-            const deltaY = event.clientY - pointerStart.clientY;
-            const threshold = renderer.cellWidth * 0.5;
-            if (deltaX * deltaX + deltaY * deltaY < threshold * threshold) return;
-            selectionDragThresholdMetRef.current = true;
-          }
-          const row = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
-          selectionRef.current = { ...selectionRef.current, endRow: row, endCol: cell.col + 1 };
-          renderSurface(true);
+          sendTrackedMouse('move', event);
         }}
         onMouseLeave={() => {
           hoveredCellRef.current = null;
           setLinkCursorActive(false);
         }}
-        onMouseUp={async (event) => {
-          if (!selectingRef.current) {
-            recordPointerHitTest('mouseup', event, {
-              phase: 'tracked-mouse-release',
-            });
-            sendTrackedMouse('release', event);
-            return;
-          }
-          selectingRef.current = false;
-          selectionPointerStartRef.current = null;
-          if (!selectionDragThresholdMetRef.current) {
-            selectionRef.current = null;
-            renderSurface(true);
-          }
-          const text = textForSelectionRange(selectionRef.current);
-          selectedTextRef.current = text || null;
-          if (text) await writeClipboardText(text);
-          const cell = cellFromPointer(event);
-          const uri = cell ? literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col) : null;
+        onMouseUp={(event) => {
+          // A selection release is finalized by the document mouseup listener so
+          // it fires even when the pointer ends over a sibling overlay.
+          if (selectingRef.current) return;
           recordPointerHitTest('mouseup', event, {
-            activeCell: cell,
-            activeUri: uri,
-            opensUri: Boolean(uri && !text && (event.metaKey || event.ctrlKey)),
-            copiedTextLength: text.length,
-            phase: 'after-selection',
+            phase: 'tracked-mouse-release',
           });
-          if (uri && !text && (event.metaKey || event.ctrlKey)) {
-            void openUrl(uri);
-          }
+          sendTrackedMouse('release', event);
         }}
         onDoubleClick={async (event) => {
           const terminal = terminalRef.current;
