@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import {
   assertProductionRunAllowed,
-  bundleIdentifierForProfile,
+  bundleIdentifierForAppPath,
   defaultAppPathForProfile,
 } from './harnessProfile.mjs';
 
@@ -22,12 +22,13 @@ function delay(ms) {
 
 export class MacOSDriver {
   constructor({
-    bundleId = bundleIdentifierForProfile(),
+    bundleId = null,
     appPath = defaultAppPathForProfile(),
     actionDelayMs = 250,
   } = {}) {
-    assertProductionRunAllowed({ appPath, bundleId });
-    this.bundleId = bundleId;
+    const resolvedBundleId = bundleId || bundleIdentifierForAppPath(appPath);
+    assertProductionRunAllowed({ appPath, bundleId: resolvedBundleId });
+    this.bundleId = resolvedBundleId;
     this.appPath = appPath;
     this.actionDelayMs = actionDelayMs;
   }

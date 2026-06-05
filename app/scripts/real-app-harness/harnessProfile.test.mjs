@@ -3,19 +3,23 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   assertProductionRunAllowed,
+  bundleIdentifierForAppPath,
   currentHarnessProfile,
   defaultAppPathForProfile,
   defaultDaemonPortForProfile,
   hasRunAgainstProdFlag,
   isProductionHarnessTarget,
+  profileForAppPath,
 } from './harnessProfile.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { MacOSDriver } from './macosDriver.mjs';
 import { getFrontWindowBounds } from './nativeWindowCapture.mjs';
 
 const originalProfile = process.env.ATTN_HARNESS_PROFILE;
+const originalArgv = process.argv;
 
 afterEach(() => {
+  process.argv = originalArgv;
   if (originalProfile === undefined) {
     delete process.env.ATTN_HARNESS_PROFILE;
   } else {
@@ -47,6 +51,16 @@ describe('real-app harness production safety', () => {
     })).toBe(false);
   });
 
+  it('derives the matching profile and bundle from explicit packaged app paths', () => {
+    const prodAppPath = path.join(os.homedir(), 'Applications', 'attn.app');
+    const devAppPath = path.join(os.homedir(), 'Applications', 'attn-dev.app');
+
+    expect(profileForAppPath(prodAppPath)).toBe('');
+    expect(bundleIdentifierForAppPath(prodAppPath)).toBe('com.attn.manager');
+    expect(profileForAppPath(devAppPath, '')).toBe('dev');
+    expect(bundleIdentifierForAppPath(devAppPath, '')).toBe('com.attn.manager.dev');
+  });
+
   it('requires the explicit production acknowledgement flag', () => {
     expect(() => assertProductionRunAllowed({ profile: '' }, [])).toThrow(
       'Refusing to run the real-app harness against production',
@@ -60,6 +74,16 @@ describe('real-app harness production safety', () => {
       appPath: path.join(os.homedir(), 'Applications', 'attn.app'),
       bundleId: 'com.attn.manager',
     })).toThrow('Refusing to run the real-app harness against production');
+  });
+
+  it('targets the production bundle for an acknowledged production app path', () => {
+    process.argv = [...process.argv, '--run-against-prod'];
+
+    const driver = new MacOSDriver({
+      appPath: path.join(os.homedir(), 'Applications', 'attn.app'),
+    });
+
+    expect(driver.bundleId).toBe('com.attn.manager');
   });
 
   it('protects low-level daemon and native-window operations', async () => {

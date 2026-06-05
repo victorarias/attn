@@ -8,9 +8,10 @@ import { promisify } from 'node:util';
 import { MacOSDriver } from './macosDriver.mjs';
 import {
   assertProductionRunAllowed,
-  bundleIdentifierForProfile,
+  bundleIdentifierForAppPath,
   defaultAppPathForProfile,
   manifestPathForProfile,
+  profileForAppPath,
 } from './harnessProfile.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -21,12 +22,6 @@ const MINIMAL_SYSTEM_PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function defaultManifestPath() {
-  // Profile-aware: the dev bundle writes its manifest under
-  // ~/Library/Application Support/com.attn.manager.dev/...
-  return manifestPathForProfile();
 }
 
 function isTransientManifestReadError(error) {
@@ -115,17 +110,19 @@ function isFatalFrontendResponsivenessError(error) {
 export class UiAutomationClient {
   constructor({
     appPath = defaultAppPathForProfile(),
-    manifestPath = defaultManifestPath(),
+    manifestPath = null,
     launchEnv = null,
     backgroundLaunch = false,
-    bundleId = bundleIdentifierForProfile(),
+    bundleId = null,
   } = {}) {
-    assertProductionRunAllowed({ appPath, bundleId });
+    const appProfile = profileForAppPath(appPath);
+    const resolvedBundleId = bundleId || bundleIdentifierForAppPath(appPath);
+    assertProductionRunAllowed({ appPath, bundleId: resolvedBundleId });
     this.appPath = appPath;
-    this.manifestPath = manifestPath;
+    this.manifestPath = manifestPath || manifestPathForProfile(appProfile);
     this.launchEnv = launchEnv;
     this.backgroundLaunch = backgroundLaunch;
-    this.bundleId = bundleId;
+    this.bundleId = resolvedBundleId;
     this.currentSourceIdentityPromise = null;
     this.verifiedBuildIdentityKey = null;
   }

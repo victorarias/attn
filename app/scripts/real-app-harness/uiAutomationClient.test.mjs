@@ -40,6 +40,21 @@ describe('UiAutomationClient production safety', () => {
       bundleId: 'com.attn.manager',
     })).toThrow('Refusing to run the real-app harness against production');
   });
+
+  it('uses the production bundle and manifest for an acknowledged production app path', () => {
+    const originalArgv = process.argv;
+    process.argv = [...process.argv, '--run-against-prod'];
+    try {
+      const client = new UiAutomationClient({
+        appPath: path.join(os.homedir(), 'Applications', 'attn.app'),
+      });
+
+      expect(client.bundleId).toBe('com.attn.manager');
+      expect(client.manifestPath).toContain('Application Support/com.attn.manager/debug/ui-automation.json');
+    } finally {
+      process.argv = originalArgv;
+    }
+  });
 });
 
 describe('UiAutomationClient.waitForFrontendResponsive', () => {

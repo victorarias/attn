@@ -44,6 +44,19 @@ describe('parseCommonArgs production safety', () => {
     expect(() => parseCommonArgs(['--run-against-prod'])).not.toThrow();
   });
 
+  it('derives the production daemon from an acknowledged production app path', () => {
+    delete process.env.ATTN_HARNESS_PROFILE;
+    delete process.env.ATTN_REAL_APP_WS_URL;
+
+    const options = parseCommonArgs([
+      '--app-path',
+      path.join(os.homedir(), 'Applications', 'attn.app'),
+      '--run-against-prod',
+    ]);
+
+    expect(options.wsUrl).toBe('ws://127.0.0.1:9849/ws');
+  });
+
   it('refuses an explicit production websocket while using the dev app', () => {
     delete process.env.ATTN_HARNESS_PROFILE;
 

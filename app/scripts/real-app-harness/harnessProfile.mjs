@@ -27,6 +27,17 @@ export function bundleIdentifierForProfile(profile = currentHarnessProfile()) {
   return profile === DEV_PROFILE ? 'com.attn.manager.dev' : PROD_BUNDLE_ID;
 }
 
+export function profileForAppPath(appPath, fallbackProfile = currentHarnessProfile()) {
+  const appName = path.basename(appPath || '');
+  if (appName === PROD_APP_NAME) return '';
+  if (appName === 'attn-dev.app') return DEV_PROFILE;
+  return fallbackProfile;
+}
+
+export function bundleIdentifierForAppPath(appPath, fallbackProfile = currentHarnessProfile()) {
+  return bundleIdentifierForProfile(profileForAppPath(appPath, fallbackProfile));
+}
+
 export function defaultAppPathForProfile(profile = currentHarnessProfile()) {
   const name = profile === DEV_PROFILE ? 'attn-dev.app' : PROD_APP_NAME;
   return path.join(os.homedir(), 'Applications', name);

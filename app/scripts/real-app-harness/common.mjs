@@ -7,6 +7,7 @@ import {
   defaultAppPathForProfile,
   defaultWSURLForProfile,
   deepLinkSchemeForProfile,
+  profileForAppPath,
 } from './harnessProfile.mjs';
 
 export function parseCommonArgs(argv) {
@@ -29,6 +30,10 @@ export function parseCommonArgs(argv) {
     else if (arg === '--run-against-prod') options.runAgainstProd = true;
     else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  if (!process.env.ATTN_REAL_APP_WS_URL && !argv.includes('--ws-url')) {
+    options.wsUrl = defaultWSURLForProfile(profileForAppPath(options.appPath));
   }
 
   const safetyArgv = argv.length > 0 ? argv : process.argv.slice(2);
@@ -143,10 +148,9 @@ export async function bootstrapPackagedAppSession({
   await driver.activateBackground();
   await captureScreenshot(driver, path.join(runDir, '01-app-launched.png'));
 
-  // Scheme is profile-scoped: ATTN_HARNESS_PROFILE=dev → `attn-dev://`,
-  // which the dev bundle registers. Sending `attn://` under a dev
-  // profile would open the prod app instead of attn-dev.app.
-  const scheme = deepLinkSchemeForProfile();
+  // Scheme follows the selected app path so an explicit prod target opens
+  // prod while the default dev target stays isolated.
+  const scheme = deepLinkSchemeForProfile(profileForAppPath(driver.appPath));
   const deepLink = `${scheme}://spawn?cwd=${encodeURIComponent(sessionDir)}&label=${encodeURIComponent(sessionLabel)}`;
   console.log(`[RealAppHarness] deepLink=${deepLink}`);
   await driver.openDeepLink(deepLink);
