@@ -2,6 +2,7 @@
 
 import {
   createSessionAndWaitForInitialPane,
+  assertCommonTargetAllowed,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -51,10 +52,12 @@ function parseArgs(argv) {
     else if (arg === '--artifacts-dir') options.artifactsDir = args[++index];
     else if (arg === '--session-root-dir') options.sessionRootDir = args[++index];
     else if (arg === '--agent') options.agent = args[++index] || options.agent;
+    else if (arg === '--run-against-prod') options.runAgainstProd = true;
     else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
+  if (!options.help) assertCommonTargetAllowed(options, args);
   options.agent = String(options.agent || 'codex').toLowerCase();
   if (options.agent !== 'codex' && options.agent !== 'claude') {
     throw new Error(`Unsupported agent for local close-redraw scenario: ${options.agent}`);
@@ -218,8 +221,8 @@ async function main() {
     });
 
     await runner.step('normalize_window_origin_for_capture', async () => {
-      const bounds = await getFrontWindowBounds('com.attn.manager', { client });
-      await setFrontWindowBounds({ ...bounds, x: 80, y: 80 }, { client, bundleId: 'com.attn.manager' });
+      const bounds = await getFrontWindowBounds(client.bundleId, { client });
+      await setFrontWindowBounds({ ...bounds, x: 80, y: 80 }, { client });
     });
 
     if (options.agent === 'claude') {

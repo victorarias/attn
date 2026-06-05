@@ -1,9 +1,13 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import {
+  assertProductionRunAllowed,
+  bundleIdentifierForProfile,
+  defaultAppPathForProfile,
+} from './harnessProfile.mjs';
 
 const execFileAsync = promisify(execFile);
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -18,10 +22,11 @@ function delay(ms) {
 
 export class MacOSDriver {
   constructor({
-    bundleId = 'com.attn.manager',
-    appPath = path.join(os.homedir(), 'Applications', 'attn.app'),
+    bundleId = bundleIdentifierForProfile(),
+    appPath = defaultAppPathForProfile(),
     actionDelayMs = 250,
   } = {}) {
+    assertProductionRunAllowed({ appPath, bundleId });
     this.bundleId = bundleId;
     this.appPath = appPath;
     this.actionDelayMs = actionDelayMs;

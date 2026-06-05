@@ -121,8 +121,8 @@ async function main() {
     });
 
     baselineWindow = await runner.step('normalize_window_bounds', async () => {
-      const currentBounds = await getFrontWindowBounds('com.attn.manager', { client });
-      return setFrontWindowBounds(normalizeBaselineWindowBounds(currentBounds), { client, bundleId: 'com.attn.manager' });
+      const currentBounds = await getFrontWindowBounds(client.bundleId, { client });
+      return setFrontWindowBounds(normalizeBaselineWindowBounds(currentBounds), { client });
     });
 
     sessionId = await runner.step('create_codex_session', async () => {
@@ -152,7 +152,7 @@ async function main() {
     });
 
     narrowWindow = await runner.step('narrow_window_and_capture_header', async () => {
-      const nextWindow = await setFrontWindowBounds(narrowWindowBounds(baselineWindow), { client, bundleId: 'com.attn.manager' });
+      const nextWindow = await setFrontWindowBounds(narrowWindowBounds(baselineWindow), { client });
       narrowMain = await waitForPaneState(
         client,
         sessionId,
@@ -184,7 +184,7 @@ async function main() {
     });
 
     restoredWindow = await runner.step('restore_window_and_capture_header', async () => {
-      const nextWindow = await setFrontWindowBounds(baselineWindow, { client, bundleId: 'com.attn.manager' });
+      const nextWindow = await setFrontWindowBounds(baselineWindow, { client });
       restoredMain = await waitForPaneState(
         client,
         sessionId,

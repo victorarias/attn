@@ -7,6 +7,7 @@ This policy applies to packaged-app scenarios in this directory.
 - Scenarios must match real app usage. Do not invent command sequences that the app cannot perform.
 - If workspace/session product behavior changes, update these scenarios in the same PR.
 - If these scenarios pass while users can reproduce workspace/session errors in the packaged app, treat that as a test design bug.
+- Real-app commands target `attn-dev.app` by default. Production runs must pass `--run-against-prod`; never bypass the shared production-target guard.
 
 ## Workspace Sessions
 

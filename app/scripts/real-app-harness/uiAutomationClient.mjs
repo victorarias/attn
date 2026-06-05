@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { MacOSDriver } from './macosDriver.mjs';
 import {
+  assertProductionRunAllowed,
   bundleIdentifierForProfile,
   defaultAppPathForProfile,
   manifestPathForProfile,
@@ -119,6 +120,7 @@ export class UiAutomationClient {
     backgroundLaunch = false,
     bundleId = bundleIdentifierForProfile(),
   } = {}) {
+    assertProductionRunAllowed({ appPath, bundleId });
     this.appPath = appPath;
     this.manifestPath = manifestPath;
     this.launchEnv = launchEnv;
@@ -188,7 +190,7 @@ export class UiAutomationClient {
 
   #focusDriver() {
     if (!this._focusDriver) {
-      this._focusDriver = new MacOSDriver({ bundleId: this.bundleId });
+      this._focusDriver = new MacOSDriver({ bundleId: this.bundleId, appPath: this.appPath });
     }
     return this._focusDriver;
   }

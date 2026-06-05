@@ -2,6 +2,7 @@
 
 import {
   createSessionAndWaitForInitialPane,
+  assertCommonTargetAllowed,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -77,10 +78,12 @@ function parseArgs(argv) {
     else if (arg === '--remote-directory') options.remoteDirectory = args[++index] || '';
     else if (arg === '--remote-agent') options.remoteAgent = args[++index] || options.remoteAgent;
     else if (arg === '--echo-threshold-ms') options.echoThresholdMs = Number.parseInt(args[++index] || '2500', 10);
+    else if (arg === '--run-against-prod') options.runAgainstProd = true;
     else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
+  if (!options.help) assertCommonTargetAllowed(options, args);
   return {
     options,
     help: Boolean(options.help),

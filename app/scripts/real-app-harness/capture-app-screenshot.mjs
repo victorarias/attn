@@ -8,8 +8,9 @@ function printHelp() {
 
 Options:
   --path <file>      Save a native macOS window screenshot to an explicit path
-  --launch           Launch ~/Applications/attn.app before capturing
-  --fresh-launch     Quit and relaunch ~/Applications/attn.app before capturing
+  --launch           Launch the selected packaged app before capturing
+  --fresh-launch     Quit and relaunch the selected packaged app before capturing
+  --run-against-prod Explicitly allow targeting the production app
   --help, -h         Show this help
 
 Examples:
@@ -33,6 +34,10 @@ async function main() {
     }
     if (arg === '--fresh-launch') {
       freshLaunch = true;
+      continue;
+    }
+    if (arg === '--run-against-prod') {
+      // The shared UiAutomationClient guard reads this explicit acknowledgement.
       continue;
     }
     if (arg === '--path') {
@@ -60,7 +65,7 @@ async function main() {
   await client.waitForFrontendResponsive(20_000);
 
   const targetPath = outputPath || '/tmp/attn-app-window.png';
-  const result = await captureFrontWindowScreenshot(targetPath);
+  const result = await captureFrontWindowScreenshot(targetPath, { client });
   console.log(JSON.stringify(result, null, 2));
 }
 

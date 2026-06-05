@@ -2,6 +2,7 @@
 
 import {
   createSessionAndWaitForInitialPane,
+  assertCommonTargetAllowed,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -48,9 +49,11 @@ function parseArgs(argv) {
     else if (arg === '--artifacts-dir') options.artifactsDir = args[++index];
     else if (arg === '--session-root-dir') options.sessionRootDir = args[++index];
     else if (arg === '--agent') options.agent = args[++index] || options.agent;
+    else if (arg === '--run-against-prod') options.runAgainstProd = true;
     else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
+  if (!options.help) assertCommonTargetAllowed(options, args);
   options.agent = String(options.agent || 'claude').toLowerCase();
   if (options.agent !== 'codex' && options.agent !== 'claude') {
     throw new Error(`Unsupported agent for local window-resize scenario: ${options.agent}`);
@@ -224,9 +227,9 @@ async function main() {
     });
 
     baselineWindow = await runner.step('normalize_window_bounds', async () => {
-      const currentBounds = await getFrontWindowBounds('com.attn.manager', { client });
+      const currentBounds = await getFrontWindowBounds(client.bundleId, { client });
       const targetBounds = normalizeBaselineWindowBounds(currentBounds);
-      return setFrontWindowBounds(targetBounds, { client, bundleId: 'com.attn.manager' });
+      return setFrontWindowBounds(targetBounds, { client });
     });
 
     sessionId = await runner.step('create_local_session', async () => {
@@ -371,7 +374,7 @@ async function main() {
 
     shrunkWindow = await runner.step('shrink_window_and_assert', async () => {
       const targetBounds = shrunkWindowBounds(baselineWindow);
-      const nextWindow = await setFrontWindowBounds(targetBounds, { client, bundleId: 'com.attn.manager' });
+      const nextWindow = await setFrontWindowBounds(targetBounds, { client });
 
       const mainThreshold = paneShrinkThreshold(baselineMainState?.pane?.bounds || {});
       const utilityThreshold = paneShrinkThreshold(baselineUtilityState?.pane?.bounds || {});
@@ -475,7 +478,7 @@ async function main() {
     });
 
     restoredWindow = await runner.step('restore_window_and_assert', async () => {
-      const nextWindow = await setFrontWindowBounds(baselineWindow, { client, bundleId: 'com.attn.manager' });
+      const nextWindow = await setFrontWindowBounds(baselineWindow, { client });
 
       const mainThreshold = paneRecoveryThreshold(baselineMainState?.pane?.bounds || {});
       const utilityThreshold = paneRecoveryThreshold(baselineUtilityState?.pane?.bounds || {});

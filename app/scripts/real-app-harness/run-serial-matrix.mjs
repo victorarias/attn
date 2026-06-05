@@ -2,14 +2,18 @@
 
 import { spawn } from 'node:child_process';
 import { assertPackagedAppBuildMatchesCurrentSource } from './buildPreflight.mjs';
-import { defaultAppPathForProfile } from './harnessProfile.mjs';
+import {
+  assertProductionRunAllowed,
+  defaultAppPathForProfile,
+  defaultWSURLForProfile,
+} from './harnessProfile.mjs';
 
 // Matrix runs against the dev install by default. The dev install is the
 // whole point of the profile feature: iterate on attn-on-attn test
 // scenarios without ever taking over the live prod app. Opt out by
 // setting ATTN_HARNESS_PROFILE to an empty string (prod) or a different
-// profile name explicitly. This must happen before any import that reads
-// the env var at module-load time.
+// profile name explicitly, plus --run-against-prod. This must happen before
+// any import that reads the env var at module-load time.
 if (process.env.ATTN_HARNESS_PROFILE === undefined) {
   process.env.ATTN_HARNESS_PROFILE = 'dev';
 }
@@ -135,6 +139,7 @@ function parseArgs(argv) {
   const selected = [];
   let failFast = false;
   let timeoutMs = 120_000;
+  let runAgainstProd = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -144,8 +149,10 @@ function parseArgs(argv) {
       failFast = true;
     } else if (arg === '--timeout-ms') {
       timeoutMs = Number(args[++index]);
+    } else if (arg === '--run-against-prod') {
+      runAgainstProd = true;
     } else if (arg === '--help' || arg === '-h') {
-      return { help: true, selected: [], failFast: false, timeoutMs: 120_000 };
+      return { help: true, selected: [], failFast: false, timeoutMs: 120_000, runAgainstProd: false };
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -155,7 +162,7 @@ function parseArgs(argv) {
     throw new Error(`Invalid --timeout-ms value: ${timeoutMs}`);
   }
 
-  return { help: false, selected, failFast, timeoutMs };
+  return { help: false, selected, failFast, timeoutMs, runAgainstProd };
 }
 
 function printHelp() {
@@ -164,11 +171,12 @@ function printHelp() {
   node scripts/real-app-harness/run-serial-matrix.mjs --scenario tr205-codex --scenario tr504
   node scripts/real-app-harness/run-serial-matrix.mjs --fail-fast
   node scripts/real-app-harness/run-serial-matrix.mjs --timeout-ms 180000
+  ATTN_HARNESS_PROFILE= node scripts/real-app-harness/run-serial-matrix.mjs --run-against-prod
 
 Target: defaults to the dev install (~/Applications/attn-dev.app, port 29849)
   so the matrix never takes over your live prod app. Run \`make dev\` first
-  if you haven't built one. To point at a different profile set
-  ATTN_HARNESS_PROFILE=<name> (empty for prod) before invoking.
+  if you haven't built one. Production additionally requires the explicit
+  --run-against-prod acknowledgement.
 
 Available scenarios:
 ${scenarioCatalog.map((scenario) => `  - ${scenario.id}: ${scenario.label}`).join('\n')}
@@ -226,10 +234,17 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   });
 }
 
-function runScenario(scenario, timeoutMs) {
+function runScenario(scenario, timeoutMs, runAgainstProd) {
   return new Promise((resolve) => {
     const startedAt = Date.now();
-    const child = spawn(scenario.command[0], scenario.command.slice(1), {
+    const childArgs = [...scenario.command.slice(1)];
+    if (runAgainstProd) {
+      if (!childArgs.includes('--')) {
+        childArgs.push('--');
+      }
+      childArgs.push('--run-against-prod');
+    }
+    const child = spawn(scenario.command[0], childArgs, {
       cwd: process.cwd(),
       stdio: 'inherit',
       env: process.env,
@@ -259,7 +274,7 @@ function runScenario(scenario, timeoutMs) {
 }
 
 async function main() {
-  const { help, selected, failFast, timeoutMs } = parseArgs(process.argv.slice(2));
+  const { help, selected, failFast, timeoutMs, runAgainstProd } = parseArgs(process.argv.slice(2));
   if (help) {
     printHelp();
     return;
@@ -267,6 +282,11 @@ async function main() {
 
   const scenarios = resolveScenarios(selected);
   const appPath = process.env.ATTN_REAL_APP_PATH || defaultAppPathForProfile();
+  const wsUrl = process.env.ATTN_REAL_APP_WS_URL || defaultWSURLForProfile();
+  assertProductionRunAllowed(
+    { appPath, wsUrl },
+    runAgainstProd ? ['--run-against-prod'] : process.argv.slice(2),
+  );
   console.log(`Matrix target: ${appPath} (ATTN_HARNESS_PROFILE=${process.env.ATTN_HARNESS_PROFILE || '<default>'})`);
   const preflightKeys = new Set();
   for (const scenario of scenarios) {
@@ -285,7 +305,7 @@ async function main() {
 
   for (const scenario of scenarios) {
     console.log(`\n=== ${scenario.label} (${scenario.id}) ===`);
-    const result = await runScenario(scenario, timeoutMs);
+    const result = await runScenario(scenario, timeoutMs, runAgainstProd);
     results.push(result);
     const status = result.code === 0 ? 'ok' : (result.timedOut ? 'timed-out' : 'failed');
     console.log(`--- ${scenario.id}: ${status} (${result.durationMs}ms) ---`);

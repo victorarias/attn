@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRunContext } from './common.mjs';
+import { assertProductionRunAllowed, defaultAppPathForProfile } from './harnessProfile.mjs';
 import { captureFrontWindowScreenshot } from './nativeWindowCapture.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 
@@ -11,7 +12,7 @@ function printHelp() {
   console.log(`Usage: pnpm exec node scripts/real-app-harness/bridge-diagnose-session.mjs [options]
 
 Options:
-  --app-path <path>          Packaged app path (default: ~/Applications/attn.app)
+  --app-path <path>          Packaged app path (default: ~/Applications/attn-dev.app)
   --artifacts-dir <path>     Directory for diagnostic output
   --session-root-dir <path>  Unused here, kept for consistent harness output
   --fresh-launch             Quit and relaunch the packaged app before capture
@@ -20,6 +21,7 @@ Options:
   --cwd <path>               Inspect the first session matching this cwd
   --no-select-session        Capture the session as-is without sending select_session
   --settle-frames <n>        Frames to settle before perf capture (default: 2)
+  --run-against-prod         Explicitly allow targeting the production app
 
 Examples:
   pnpm exec node scripts/real-app-harness/bridge-diagnose-session.mjs --label blubs
@@ -33,7 +35,7 @@ function parseArgs(argv) {
     args.shift();
   }
   const options = {
-    appPath: process.env.ATTN_REAL_APP_PATH || path.join(os.homedir(), 'Applications', 'attn.app'),
+    appPath: process.env.ATTN_REAL_APP_PATH || defaultAppPathForProfile(),
     artifactsDir: process.env.ATTN_REAL_APP_ARTIFACTS_DIR || path.join(os.tmpdir(), 'attn-real-app-harness'),
     sessionRootDir: process.env.ATTN_REAL_APP_SESSION_ROOT || path.join(os.tmpdir(), 'attn-real-app-sessions'),
     freshLaunch: false,
@@ -42,6 +44,7 @@ function parseArgs(argv) {
     cwd: '',
     noSelectSession: false,
     settleFrames: 2,
+    runAgainstProd: false,
     help: false,
   };
 
@@ -56,10 +59,17 @@ function parseArgs(argv) {
     else if (arg === '--cwd') options.cwd = args[++index] || '';
     else if (arg === '--no-select-session') options.noSelectSession = true;
     else if (arg === '--settle-frames') options.settleFrames = Math.max(0, Number.parseInt(args[++index] || '2', 10) || 0);
+    else if (arg === '--run-against-prod') options.runAgainstProd = true;
     else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
+  if (!options.help) {
+    assertProductionRunAllowed(
+      { appPath: options.appPath },
+      options.runAgainstProd ? ['--run-against-prod'] : args,
+    );
+  }
   return options;
 }
 
@@ -67,9 +77,9 @@ function saveJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
-async function tryCaptureNativeWindow(runDir) {
+async function tryCaptureNativeWindow(runDir, client) {
   try {
-    return await captureFrontWindowScreenshot(path.join(runDir, 'native-window.png'));
+    return await captureFrontWindowScreenshot(path.join(runDir, 'native-window.png'), { client });
   } catch (error) {
     fs.writeFileSync(
       path.join(runDir, 'native-window.txt'),
@@ -217,7 +227,7 @@ async function main() {
   if (!options.noSelectSession) {
     await client.request('select_session', { sessionId });
   }
-  const nativeScreenshot = await tryCaptureNativeWindow(runDir);
+  const nativeScreenshot = await tryCaptureNativeWindow(runDir, client);
 
   const uiState = await client.request('get_session_ui_state', { sessionId });
   const structuredSnapshot = await client.request('capture_structured_snapshot', {

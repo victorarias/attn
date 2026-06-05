@@ -1,6 +1,11 @@
 import os from 'node:os';
 import path from 'node:path';
 
+const DEV_PROFILE = 'dev';
+const PROD_BUNDLE_ID = 'com.attn.manager';
+const PROD_APP_NAME = 'attn.app';
+const PROD_DAEMON_PORT = '9849';
+
 /**
  * Harness profile resolution. A single env var, ATTN_HARNESS_PROFILE,
  * switches the whole real-app harness between the prod install
@@ -15,27 +20,27 @@ import path from 'node:path';
  */
 
 export function currentHarnessProfile() {
-  return (process.env.ATTN_HARNESS_PROFILE || '').trim().toLowerCase();
+  return (process.env.ATTN_HARNESS_PROFILE ?? DEV_PROFILE).trim().toLowerCase();
 }
 
 export function bundleIdentifierForProfile(profile = currentHarnessProfile()) {
-  return profile === 'dev' ? 'com.attn.manager.dev' : 'com.attn.manager';
+  return profile === DEV_PROFILE ? 'com.attn.manager.dev' : PROD_BUNDLE_ID;
 }
 
 export function defaultAppPathForProfile(profile = currentHarnessProfile()) {
-  const name = profile === 'dev' ? 'attn-dev.app' : 'attn.app';
+  const name = profile === DEV_PROFILE ? 'attn-dev.app' : PROD_APP_NAME;
   return path.join(os.homedir(), 'Applications', name);
 }
 
 export function defaultDaemonPortForProfile(profile = currentHarnessProfile()) {
-  return profile === 'dev' ? 29849 : 9849;
+  return profile === DEV_PROFILE ? 29849 : 9849;
 }
 
 // Unix socket the `attn` CLI talks to for the active profile. Dev keeps its
 // state under ~/.attn-dev/; prod under ~/.attn/. Pass this as ATTN_SOCKET_PATH
 // when driving the CLI (e.g. `attn open`) against the harness daemon.
 export function socketPathForProfile(profile = currentHarnessProfile()) {
-  const dir = profile === 'dev' ? '.attn-dev' : '.attn';
+  const dir = profile === DEV_PROFILE ? '.attn-dev' : '.attn';
   return path.join(os.homedir(), dir, 'attn.sock');
 }
 
@@ -59,5 +64,40 @@ export function manifestPathForProfile(profile = currentHarnessProfile()) {
 //   - dev:  tauri.dev.conf.json declares `attn-dev`
 // Must stay in sync with config.DeepLinkScheme() on the Go side.
 export function deepLinkSchemeForProfile(profile = currentHarnessProfile()) {
-  return profile === 'dev' ? 'attn-dev' : 'attn';
+  return profile === DEV_PROFILE ? 'attn-dev' : 'attn';
+}
+
+export function hasRunAgainstProdFlag(argv = process.argv.slice(2)) {
+  return argv.includes('--run-against-prod');
+}
+
+export function isProductionHarnessTarget({
+  appPath,
+  bundleId,
+  wsUrl,
+  profile = currentHarnessProfile(),
+} = {}) {
+  let wsPort = '';
+  try {
+    wsPort = new URL(wsUrl).port;
+  } catch {
+    // Invalid URLs are handled by their consumer; they are not evidence of prod.
+  }
+  return (
+    profile !== DEV_PROFILE
+    || path.basename(appPath || '') === PROD_APP_NAME
+    || bundleId === PROD_BUNDLE_ID
+    || wsPort === PROD_DAEMON_PORT
+  );
+}
+
+export function assertProductionRunAllowed(target = {}, argv = process.argv.slice(2)) {
+  if (!isProductionHarnessTarget(target) || hasRunAgainstProdFlag(argv)) {
+    return;
+  }
+  throw new Error(
+    'Refusing to run the real-app harness against production. '
+    + 'Use the dev install (default; run `make dev` first), or pass '
+    + '`--run-against-prod` explicitly to allow production app or daemon operations.',
+  );
 }

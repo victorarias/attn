@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { assertProductionRunAllowed, defaultAppPathForProfile } from './harnessProfile.mjs';
 
 const HARNESS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HARNESS_DIR, '../../..');
@@ -134,9 +135,10 @@ function readBinaryBuildInfoSync(binaryPath) {
 }
 
 export function assertPackagedAppBuildMatchesCurrentSource({
-  appPath = path.join(os.homedir(), 'Applications', 'attn.app'),
+  appPath = defaultAppPathForProfile(),
   launchEnv = null,
 } = {}) {
+  assertProductionRunAllowed({ appPath });
   const currentSource = getCurrentSourceIdentitySync();
   const currentFingerprint = readNonEmptyString(currentSource?.fingerprint);
   if (!currentFingerprint) {

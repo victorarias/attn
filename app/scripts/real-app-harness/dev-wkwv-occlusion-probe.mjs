@@ -43,6 +43,11 @@ import {
   createSessionAndWaitForInitialPane,
 } from './common.mjs';
 import {
+  bundleIdentifierForProfile,
+  defaultAppPathForProfile,
+  defaultWSURLForProfile,
+} from './harnessProfile.mjs';
+import {
   waitForFirstWorkspacePane,
   waitForNewShellPane,
   waitForPaneInputFocus,
@@ -59,7 +64,7 @@ const runDir = path.join(os.tmpdir(), 'wkwebview-occlusion', runId);
 fs.mkdirSync(runDir, { recursive: true });
 console.log(`[probe] runDir=${runDir}`);
 
-async function findWindowId(bundleId = 'com.attn.manager') {
+async function findWindowId(bundleId = bundleIdentifierForProfile()) {
   const { stdout } = await execFileAsync('/tmp/find-window-id', [bundleId], { timeout: 5_000 });
   const line = stdout.trim().split('\n')[0] || '';
   const match = line.match(/wid=(\d+)/);
@@ -128,8 +133,8 @@ async function typeAndWaitForEcho(client, sessionId, paneId, token, { useUi = tr
 }
 
 async function main() {
-  const appPath = path.join(os.homedir(), 'Applications', 'attn.app');
-  const observer = new DaemonObserver({ wsUrl: 'ws://127.0.0.1:9849/ws' });
+  const appPath = defaultAppPathForProfile();
+  const observer = new DaemonObserver({ wsUrl: defaultWSURLForProfile() });
   // Setup phase runs with attn frontmost so WKWebView initializes normally;
   // we deliberately occlude later to test paint delivery.
   const client = new UiAutomationClient({ appPath, backgroundLaunch: false });

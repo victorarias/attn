@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   createSessionAndWaitForInitialPane,
+  assertCommonTargetAllowed,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -42,10 +43,12 @@ function parseArgs(argv) {
     else if (arg === '--artifacts-dir') options.artifactsDir = args[++index];
     else if (arg === '--session-root-dir') options.sessionRootDir = args[++index];
     else if (arg === '--codex-executable') options.codexExecutable = args[++index] || '';
+    else if (arg === '--run-against-prod') options.runAgainstProd = true;
     else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
+  if (!options.help) assertCommonTargetAllowed(options, args);
   return {
     options,
     help: Boolean(options.help),

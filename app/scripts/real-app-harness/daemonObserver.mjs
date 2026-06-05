@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import { assertProductionRunAllowed, defaultWSURLForProfile } from './harnessProfile.mjs';
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -26,9 +27,10 @@ function pruneWorkspacesBySessions(sessionsById, workspacesBySessionId) {
 
 export class DaemonObserver {
   constructor({
-    wsUrl = 'ws://127.0.0.1:9849/ws',
+    wsUrl = defaultWSURLForProfile(),
     connectTimeoutMs = 45_000,
   } = {}) {
+    assertProductionRunAllowed({ wsUrl });
     this.wsUrl = wsUrl;
     this.connectTimeoutMs = connectTimeoutMs;
     this.ws = null;
