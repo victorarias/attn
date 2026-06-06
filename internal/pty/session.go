@@ -456,6 +456,51 @@ func (s *Session) info() AttachInfo {
 	}
 }
 
+// screenSnapshot is a lean, read-only view of the current rendered screen plus
+// the sequence watermark. Unlike info() it omits scrollback and replay history,
+// so it is cheap enough to call for many sessions at once (e.g. seeding every
+// grid tile). It registers no subscriber and claims no geometry.
+//
+// The screen is read BEFORE the sequence counter so the reported LastSeq is
+// never behind the rendered bytes. This mirrors info()/Attach: a slightly-ahead
+// seq makes a consumer DROP a chunk already baked into the snapshot (safe),
+// whereas a behind seq would make it RE-APPLY one (double-painting, corrupting).
+func (s *Session) screenSnapshot() AttachInfo {
+	s.metaMu.RLock()
+	cols := s.cols
+	rows := s.rows
+	s.metaMu.RUnlock()
+
+	s.exitMu.RLock()
+	running := s.running
+	s.exitMu.RUnlock()
+
+	pid := 0
+	if s.cmd != nil && s.cmd.Process != nil {
+		pid = s.cmd.Process.Pid
+	}
+
+	info := AttachInfo{
+		Cols:    cols,
+		Rows:    rows,
+		PID:     pid,
+		Running: running,
+	}
+	if s.screen != nil {
+		if snapshot, ok := s.screen.Snapshot(); ok {
+			info.ScreenSnapshot = snapshot.payload
+			info.ScreenCols = snapshot.cols
+			info.ScreenRows = snapshot.rows
+			info.ScreenCursorX = snapshot.cursorX
+			info.ScreenCursorY = snapshot.cursorY
+			info.ScreenCursorVisible = snapshot.cursorVisible
+			info.ScreenSnapshotFresh = true
+		}
+	}
+	info.LastSeq = s.seqCounter.Load()
+	return info
+}
+
 func (s *Session) state() string {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()

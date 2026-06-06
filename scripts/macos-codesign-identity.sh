@@ -10,29 +10,31 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 0
 fi
 
-find_identity() {
-  local identity
-  identity="$(
-    security find-identity -v -p codesigning 2>/dev/null \
-      | awk '/"Apple Development:/ { print $2 }' \
-      | LC_ALL=C sort \
-      | head -1
-  )"
-  if [[ -n "${identity}" ]]; then
-    echo "${identity}"
-    return 0
-  fi
+find_identity_matching() {
+  local pattern="$1"
+  security find-identity -v -p codesigning 2>/dev/null \
+    | awk -v pat="${pattern}" '$0 ~ pat { print $2 }' \
+    | LC_ALL=C sort \
+    | head -1
+}
 
-  identity="$(
-    security find-identity -v -p codesigning 2>/dev/null \
-      | awk -v name="\"${LOCAL_IDENTITY_NAME}\"" '$0 ~ name { print $2 }' \
-      | LC_ALL=C sort \
-      | head -1
-  )"
-  if [[ -n "${identity}" ]]; then
-    echo "${identity}"
-    return 0
-  fi
+find_identity() {
+  local identity pattern
+  # Prefer real Apple-issued identities. Their designated requirement is
+  # Apple-anchored and Team-based, so macOS privacy grants (Screen Recording,
+  # Accessibility, etc.) persist across rebuilds. Fall back to the stable
+  # self-signed local identity, then ad-hoc. Developer ID is preferred over
+  # Apple Development because it is not tied to a provisioning profile/device.
+  for pattern in \
+    '"Developer ID Application:' \
+    '"Apple Development:' \
+    "\"${LOCAL_IDENTITY_NAME}\""; do
+    identity="$(find_identity_matching "${pattern}")"
+    if [[ -n "${identity}" ]]; then
+      echo "${identity}"
+      return 0
+    fi
+  done
 
   echo "-"
 }

@@ -10,6 +10,7 @@ interface KeyboardShortcutsConfig {
   onCloseSession: () => void;
   onToggleDrawer: () => void;
   onGoToDashboard: () => void;
+  onToggleGridMode?: () => void;
   onJumpToWaiting: () => void;
   onSelectWorkspaceByIndex: (index: number) => void;
   onPrevSession: () => void;
@@ -37,6 +38,7 @@ export function useKeyboardShortcuts({
   onCloseSession,
   onToggleDrawer,
   onGoToDashboard,
+  onToggleGridMode,
   onJumpToWaiting,
   onSelectWorkspaceByIndex,
   onPrevSession,
@@ -66,6 +68,7 @@ export function useKeyboardShortcuts({
   useShortcut('session.prev', onPrevSession, enabled);
   useShortcut('session.next', onNextSession, enabled);
   useShortcut('session.goToDashboard', onGoToDashboard, enabled);
+  useShortcut('view.toggleGrid', onToggleGridMode ?? (() => {}), enabled && !!onToggleGridMode);
   useShortcut('session.jumpToWaiting', onJumpToWaiting, enabled);
   useShortcut('session.toggleSidebar', onToggleSidebar ?? (() => {}), enabled && !!onToggleSidebar);
   useShortcut('session.refreshPRs', onRefreshPRs ?? (() => {}), enabled && !!onRefreshPRs);

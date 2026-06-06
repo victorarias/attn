@@ -146,6 +146,26 @@ func TestWorkerBackend_SpawnAttachInputResizeRemove(t *testing.T) {
 	t.Fatalf("timed out waiting for worker output; got=%q", out.String())
 
 gotOutput:
+	// Read-only snapshot round-trips through MethodSnapshot -> callSnapshot and
+	// returns the current rendered screen, which must contain the marker we just
+	// printed. No subscriber is involved.
+	snap, err := backend.Snapshot(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("Snapshot() error: %v", err)
+	}
+	if !snap.Running {
+		t.Fatalf("snapshot running=false, expected true")
+	}
+	if len(snap.ScreenSnapshot) == 0 || !snap.ScreenSnapshotFresh {
+		t.Fatalf("expected a fresh screen snapshot, got %d bytes fresh=%v", len(snap.ScreenSnapshot), snap.ScreenSnapshotFresh)
+	}
+	if !bytes.Contains(snap.ScreenSnapshot, []byte("__ATTN_WORKER__")) {
+		t.Fatalf("snapshot missing printed marker; got %q", snap.ScreenSnapshot)
+	}
+	if snap.ScreenCols == 0 || snap.ScreenRows == 0 {
+		t.Fatalf("snapshot geometry = %dx%d, want non-zero", snap.ScreenCols, snap.ScreenRows)
+	}
+
 	if err := backend.Kill(context.Background(), sessionID, syscall.SIGTERM); err != nil {
 		t.Fatalf("Kill() error: %v", err)
 	}

@@ -31,6 +31,7 @@ import { useSessionStore, type Session, type TerminalWorkspaceState } from './st
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState, SessionExitInfo } from './hooks/useDaemonSocket';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
+import { GridView, type GridSessionTile } from './components/grid/GridView';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
 import { hasPane, workspaceSnapshotFromDaemonWorkspace, type TerminalSplitDirection } from './types/workspace';
 import { useDaemonStore } from './store/daemonSessions';
@@ -379,6 +380,7 @@ function App() {
   // Connect to daemon WebSocket
   const {
     sendPRAction,
+    getScreenSnapshot,
     sendMutePR,
     sendMuteRepo,
     sendMuteAuthor,
@@ -504,6 +506,7 @@ function App() {
         clearSettingError={() => setSettingError(null)}
         // Daemon socket functions
         sendPRAction={sendPRAction}
+        getScreenSnapshot={getScreenSnapshot}
         sendMutePR={sendMutePR}
         sendMuteRepo={sendMuteRepo}
         sendMuteAuthor={sendMuteAuthor}
@@ -596,6 +599,7 @@ interface AppContentProps {
   clearSettingError: () => void;
   // All the daemon socket functions
   sendPRAction: ReturnType<typeof useDaemonSocket>['sendPRAction'];
+  getScreenSnapshot: ReturnType<typeof useDaemonSocket>['getScreenSnapshot'];
   sendMutePR: ReturnType<typeof useDaemonSocket>['sendMutePR'];
   sendMuteRepo: ReturnType<typeof useDaemonSocket>['sendMuteRepo'];
   sendMuteAuthor: ReturnType<typeof useDaemonSocket>['sendMuteAuthor'];
@@ -683,6 +687,7 @@ function AppContent({
   settingError,
   clearSettingError,
   sendPRAction,
+  getScreenSnapshot,
   sendMutePR,
   sendMuteRepo,
   sendMuteAuthor,
@@ -1090,7 +1095,7 @@ sendFetchPRDetails,
   const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
 
   // View state management
-  const [view, setView] = useState<'dashboard' | 'session'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'session' | 'grid'>('dashboard');
   const [dockState, setDockState] = useState<{
     openPanels: Record<DockPanelId, boolean>;
     stack: DockPanelId[];
@@ -1239,6 +1244,12 @@ sendFetchPRDetails,
     setActiveSession(null);
     setView('dashboard');
   }, [setActiveSession]);
+
+  // Cmd+G toggles the global grid view on/off; leaving grid returns to wherever
+  // the user was (a session if one is active, otherwise the dashboard).
+  const toggleGridMode = useCallback(() => {
+    setView((prev) => (prev === 'grid' ? (activeSessionId ? 'session' : 'dashboard') : 'grid'));
+  }, [activeSessionId]);
 
 
   const clearDockPanelCloseTimer = useCallback((panelId: DockPanelId) => {
@@ -2040,6 +2051,24 @@ sendFetchPRDetails,
     [unmutedWorkspaceViews],
   );
 
+  // Global grid tiles: one per live agent pane across all (unmuted) workspaces,
+  // keyed by the PTY runtimeId that grid mode feeds from / routes input to.
+  const gridSessionTiles = useMemo<GridSessionTile[]>(() => {
+    const result: GridSessionTile[] = [];
+    for (const s of unmutedEnrichedSessions) {
+      const pane = s.workspace.agents.find((agent) => agent.sessionId === s.id);
+      if (!pane) continue;
+      result.push({
+        runtimeId: pane.runtimeId,
+        title: pane.title,
+        attention: isAttentionSessionState(s.state)
+          || s.reviewLoopStatus === 'awaiting_user'
+          || s.reviewLoopStatus === 'error',
+      });
+    }
+    return result;
+  }, [unmutedEnrichedSessions]);
+
   // Calculate attention count for drawer badge (muted workspaces excluded)
   const waitingLocalSessions = unmutedEnrichedSessions
     .filter((s) => isAttentionSessionState(s.state) || s.reviewLoopStatus === 'awaiting_user' || s.reviewLoopStatus === 'error')
@@ -2706,6 +2735,7 @@ sendFetchPRDetails,
     onCloseSession: handleCloseCurrentSessionShortcut,
     onToggleDrawer: () => toggleDockPanel('attention'),
     onGoToDashboard: goToDashboard,
+    onToggleGridMode: toggleGridMode,
     onJumpToWaiting: handleJumpToWaiting,
     onSelectWorkspaceByIndex: handleSelectWorkspaceByIndex,
     onPrevSession: handlePrevWorkspace,
@@ -3040,6 +3070,18 @@ sendFetchPRDetails,
           ]}
         />
       </div>
+
+      {/* Grid view — global mission control. Mounted only while active so its
+          single WebGL context is released on exit (mirrors the pane path). */}
+      {view === 'grid' && (
+        <div className="view-container visible">
+          <GridView
+            tiles={gridSessionTiles}
+            resolvedTheme={resolvedTheme}
+            getScreenSnapshot={getScreenSnapshot}
+          />
+        </div>
+      )}
 
       <LocationPicker
         isOpen={locationPickerOpen}

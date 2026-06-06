@@ -211,6 +211,65 @@ func TestSessionInfo_IncludesScreenSnapshotForShellSessions(t *testing.T) {
 	}
 }
 
+func TestScreenSnapshot_ReadOnlyAndLean(t *testing.T) {
+	session := &Session{
+		id:          "codex-1",
+		agent:       "codex",
+		cols:        12,
+		rows:        4,
+		scrollback:  NewRingBuffer(1024),
+		replayLog:   NewReplayLog(1024),
+		screen:      newVirtualScreen(12, 4),
+		running:     true,
+		subscribers: make(map[string]*sessionSubscriber),
+	}
+	// Populate scrollback + replay so the lean contract is meaningfully tested:
+	// the snapshot must omit them even when they hold data.
+	session.scrollback.Write([]byte("history bytes"))
+	session.replayLog.Write([]byte("replay bytes"), 12, 4)
+	session.screen.Observe([]byte("snapshot"))
+	session.seqCounter.Store(7)
+
+	info := session.screenSnapshot()
+
+	if len(info.ScreenSnapshot) == 0 || !info.ScreenSnapshotFresh {
+		t.Fatal("expected a fresh screen snapshot")
+	}
+	if info.ScreenCols != 12 || info.ScreenRows != 4 {
+		t.Fatalf("screen size = %dx%d, want 12x4", info.ScreenCols, info.ScreenRows)
+	}
+	if info.LastSeq != 7 {
+		t.Fatalf("LastSeq = %d, want 7", info.LastSeq)
+	}
+	if !info.Running {
+		t.Fatal("expected Running=true")
+	}
+
+	// Lean: scrollback and replay history are intentionally omitted so the
+	// snapshot stays cheap to serialize for many sessions at once.
+	if len(info.Scrollback) != 0 {
+		t.Fatalf("snapshot must not carry scrollback, got %d bytes", len(info.Scrollback))
+	}
+	if len(info.ReplaySegments) != 0 {
+		t.Fatalf("snapshot must not carry replay segments, got %d", len(info.ReplaySegments))
+	}
+
+	// Read-only: no subscriber registered and no first-attach side effects.
+	if len(session.subscribers) != 0 {
+		t.Fatalf("snapshot must not register a subscriber, got %d", len(session.subscribers))
+	}
+	if session.firstAttachClaim {
+		t.Fatal("snapshot must not claim first attach")
+	}
+}
+
+func TestManagerSnapshot_UnknownSessionErrors(t *testing.T) {
+	m := NewManager(DefaultScrollbackSize, nil)
+	if _, err := m.Snapshot("does-not-exist"); err == nil {
+		t.Fatal("expected an error for an unknown session")
+	}
+}
+
 func TestVirtualScreenSnapshot_RoundTripFullWidthParity(t *testing.T) {
 	screen := newVirtualScreen(5, 3)
 	screen.Observe([]byte("ABCDE\r\n12345\r\nxy"))

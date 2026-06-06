@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "81"
+const ProtocolVersion = "82"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -103,6 +103,7 @@ const (
 	CmdSpawnSession                       = "spawn_session"
 	CmdAttachSession                      = "attach_session"
 	CmdDetachSession                      = "detach_session"
+	CmdGetScreenSnapshot                  = "get_screen_snapshot"
 	CmdPtyInput                           = "pty_input"
 	CmdPtyResize                          = "pty_resize"
 	CmdKillSession                        = "kill_session"
@@ -182,6 +183,7 @@ const (
 	EventPtyOutput                   = "pty_output"
 	EventSpawnResult                 = "spawn_result"
 	EventAttachResult                = "attach_result"
+	EventGetScreenSnapshotResult     = "get_screen_snapshot_result"
 	EventSessionExited               = "session_exited"
 	EventPtyDesync                   = "pty_desync"
 	EventPtyResized                  = "pty_resized"
@@ -772,6 +774,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg DetachSessionMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal detach_session: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdGetScreenSnapshot:
+		var msg GetScreenSnapshotMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal get_screen_snapshot: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

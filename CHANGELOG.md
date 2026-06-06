@@ -26,6 +26,14 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 
 ---
 
+## [2026-06-05]
+
+### Added
+- **Grid view (⌘G).** A global "mission control" that shows every active session at once as a live terminal tile, each outlined as its own panel. Every tile shows the session's current screen the moment the grid opens — no waiting for the next keystroke — and then stays live. Click a tile to zoom it full-screen and type straight into that session; the focused tile gets a highlighted border so it's clear where your keystrokes go, and switching tiles moves your input with it. Press Esc to leave the zoom, or ⌘G to close the grid. Sessions that need you pulse with an orange border so they're easy to spot across all your workspaces.
+
+### Changed
+- **Home is now ⌘⇧H.** Jumping to the dashboard moved off ⌘H — which macOS reserves for Hide — to ⌘⇧H, freeing ⌘G for the new grid view.
+
 ## [2026-06-04]
 
 ### Fixed

@@ -670,6 +670,60 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 	d.sendToClient(client, result)
 }
 
+// handleGetScreenSnapshot serves a read-only snapshot of a session's current
+// screen. It registers no subscriber and starts no stream — purely a seed for
+// observers (grid tiles) that then dedup the live firehose against last_seq.
+func (d *Daemon) handleGetScreenSnapshot(client *wsClient, msg *protocol.GetScreenSnapshotMessage) {
+	provider, ok := d.ptyBackend.(ptybackend.SnapshotProvider)
+	if !ok {
+		d.sendToClient(client, protocol.GetScreenSnapshotResultMessage{
+			Event:   protocol.EventGetScreenSnapshotResult,
+			ID:      msg.ID,
+			Success: false,
+			Error:   protocol.Ptr("screen snapshot not supported"),
+		})
+		return
+	}
+
+	info, err := provider.Snapshot(context.Background(), msg.ID)
+	if err != nil {
+		// Graceful: a worker built before MethodSnapshot answers "unknown
+		// method"; the observer stays unseeded rather than erroring loudly.
+		d.sendToClient(client, protocol.GetScreenSnapshotResultMessage{
+			Event:   protocol.EventGetScreenSnapshotResult,
+			ID:      msg.ID,
+			Success: false,
+			Error:   protocol.Ptr(err.Error()),
+		})
+		return
+	}
+
+	result := protocol.GetScreenSnapshotResultMessage{
+		Event:   protocol.EventGetScreenSnapshotResult,
+		ID:      msg.ID,
+		Success: true,
+		LastSeq: protocol.Ptr(int(info.LastSeq)),
+		Cols:    protocol.Ptr(int(info.Cols)),
+		Rows:    protocol.Ptr(int(info.Rows)),
+		Running: protocol.Ptr(info.Running),
+	}
+	if info.ScreenSnapshotFresh && len(info.ScreenSnapshot) > 0 {
+		result.ScreenSnapshot = protocol.Ptr(base64.StdEncoding.EncodeToString(info.ScreenSnapshot))
+		result.ScreenRows = protocol.Ptr(int(info.ScreenRows))
+		result.ScreenCols = protocol.Ptr(int(info.ScreenCols))
+		result.ScreenCursorX = protocol.Ptr(int(info.ScreenCursorX))
+		result.ScreenCursorY = protocol.Ptr(int(info.ScreenCursorY))
+		result.ScreenCursorVisible = protocol.Ptr(info.ScreenCursorVisible)
+		result.ScreenSnapshotFresh = protocol.Ptr(info.ScreenSnapshotFresh)
+	}
+	d.logf(
+		"PTY screen snapshot: id=%s running=%v last_seq=%d snapshot_bytes=%d screen=%dx%d fresh=%v",
+		msg.ID, info.Running, info.LastSeq, len(info.ScreenSnapshot),
+		info.ScreenCols, info.ScreenRows, info.ScreenSnapshotFresh,
+	)
+	d.sendToClient(client, result)
+}
+
 func (d *Daemon) handleDetachSessionWS(client *wsClient, msg *protocol.DetachSessionMessage) {
 	d.detachSession(client, msg.ID)
 }

@@ -894,6 +894,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleAttachSession(client, msg.(*protocol.AttachSessionMessage))
 	case protocol.CmdDetachSession:
 		d.handleDetachSessionWS(client, msg.(*protocol.DetachSessionMessage))
+	case protocol.CmdGetScreenSnapshot:
+		d.handleGetScreenSnapshot(client, msg.(*protocol.GetScreenSnapshotMessage))
 	case protocol.CmdPtyInput:
 		d.handlePtyInput(client, msg.(*protocol.PtyInputMessage))
 	case protocol.CmdPtyResize:

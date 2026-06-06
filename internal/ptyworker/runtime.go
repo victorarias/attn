@@ -646,6 +646,31 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			return
 		}
 		c.sendResult(req.ID, info)
+	case MethodSnapshot:
+		info, err := c.runtime.manager.Snapshot(c.runtime.cfg.SessionID)
+		if err != nil {
+			if errors.Is(err, pty.ErrSessionNotFound) {
+				c.sendError(req.ID, ErrSessionNotFound, err.Error())
+				return
+			}
+			c.sendError(req.ID, ErrInternal, err.Error())
+			return
+		}
+		// Screen + watermark only; scrollback/replay are intentionally omitted.
+		c.sendResult(req.ID, AttachResult{
+			LastSeq:             info.LastSeq,
+			Cols:                info.Cols,
+			Rows:                info.Rows,
+			PID:                 info.PID,
+			Running:             info.Running,
+			ScreenSnapshot:      info.ScreenSnapshot,
+			ScreenCols:          info.ScreenCols,
+			ScreenRows:          info.ScreenRows,
+			ScreenCursorX:       info.ScreenCursorX,
+			ScreenCursorY:       info.ScreenCursorY,
+			ScreenCursorVisible: info.ScreenCursorVisible,
+			ScreenSnapshotFresh: info.ScreenSnapshotFresh,
+		})
 	case MethodAttach:
 		var params AttachParams
 		if len(req.Params) > 0 {

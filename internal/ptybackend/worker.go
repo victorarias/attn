@@ -894,6 +894,31 @@ func (b *WorkerBackend) SessionInfo(ctx context.Context, sessionID string) (Sess
 	}, nil
 }
 
+func (b *WorkerBackend) Snapshot(ctx context.Context, sessionID string) (AttachInfo, error) {
+	session, err := b.getSession(sessionID)
+	if err != nil {
+		return AttachInfo{}, err
+	}
+	res, err := b.callSnapshot(ctx, session)
+	if err != nil {
+		return AttachInfo{}, err
+	}
+	return AttachInfo{
+		LastSeq:             res.LastSeq,
+		Cols:                res.Cols,
+		Rows:                res.Rows,
+		PID:                 res.PID,
+		Running:             res.Running,
+		ScreenSnapshot:      res.ScreenSnapshot,
+		ScreenCols:          res.ScreenCols,
+		ScreenRows:          res.ScreenRows,
+		ScreenCursorX:       res.ScreenCursorX,
+		ScreenCursorY:       res.ScreenCursorY,
+		ScreenCursorVisible: res.ScreenCursorVisible,
+		ScreenSnapshotFresh: res.ScreenSnapshotFresh,
+	}, nil
+}
+
 func (b *WorkerBackend) SessionLikelyAlive(ctx context.Context, sessionID string) (bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -1259,6 +1284,41 @@ func (b *WorkerBackend) callInfo(ctx context.Context, session *workerSession) (p
 			return ptyworker.InfoResult{}, err
 		}
 		return info, nil
+	}
+}
+
+func (b *WorkerBackend) callSnapshot(ctx context.Context, session *workerSession) (ptyworker.AttachResult, error) {
+	rpcCtx, cancel := withDefaultRPCTimeout(ctx)
+	defer cancel()
+	conn, enc, dec, err := b.connectAuthed(rpcCtx, session)
+	if err != nil {
+		return ptyworker.AttachResult{}, err
+	}
+	defer conn.Close()
+	if err := applyConnDeadline(conn, rpcCtx); err != nil {
+		return ptyworker.AttachResult{}, err
+	}
+
+	reqID := b.nextReqID("snapshot")
+	if err := writeRequest(enc, reqID, ptyworker.MethodSnapshot, map[string]any{}); err != nil {
+		return ptyworker.AttachResult{}, err
+	}
+	for {
+		frameType, res, _, err := readFrame(dec)
+		if err != nil {
+			return ptyworker.AttachResult{}, err
+		}
+		if frameType != "res" || res.ID != reqID {
+			continue
+		}
+		if !res.OK {
+			return ptyworker.AttachResult{}, b.rpcError(session.SessionID, res.Error)
+		}
+		var result ptyworker.AttachResult
+		if err := json.Unmarshal(res.Result, &result); err != nil {
+			return ptyworker.AttachResult{}, err
+		}
+		return result, nil
 	}
 }
 

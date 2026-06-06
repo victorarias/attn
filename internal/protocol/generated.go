@@ -821,6 +821,63 @@ type GetReviewStateResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type GetScreenSnapshotMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+}
+
+type GetScreenSnapshotResultMessage struct {
+	// Cols corresponds to the JSON schema field "cols".
+	Cols *int `json:"cols,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// LastSeq corresponds to the JSON schema field "last_seq".
+	LastSeq *int `json:"last_seq,omitempty,omitzero"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows *int `json:"rows,omitempty,omitzero"`
+
+	// Running corresponds to the JSON schema field "running".
+	Running *bool `json:"running,omitempty,omitzero"`
+
+	// ScreenCols corresponds to the JSON schema field "screen_cols".
+	ScreenCols *int `json:"screen_cols,omitempty,omitzero"`
+
+	// ScreenCursorVisible corresponds to the JSON schema field
+	// "screen_cursor_visible".
+	ScreenCursorVisible *bool `json:"screen_cursor_visible,omitempty,omitzero"`
+
+	// ScreenCursorX corresponds to the JSON schema field "screen_cursor_x".
+	ScreenCursorX *int `json:"screen_cursor_x,omitempty,omitzero"`
+
+	// ScreenCursorY corresponds to the JSON schema field "screen_cursor_y".
+	ScreenCursorY *int `json:"screen_cursor_y,omitempty,omitzero"`
+
+	// ScreenRows corresponds to the JSON schema field "screen_rows".
+	ScreenRows *int `json:"screen_rows,omitempty,omitzero"`
+
+	// ScreenSnapshot corresponds to the JSON schema field "screen_snapshot".
+	ScreenSnapshot *string `json:"screen_snapshot,omitempty,omitzero"`
+
+	// ScreenSnapshotFresh corresponds to the JSON schema field
+	// "screen_snapshot_fresh".
+	ScreenSnapshotFresh *bool `json:"screen_snapshot_fresh,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type GetSettingsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`

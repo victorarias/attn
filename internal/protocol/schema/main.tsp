@@ -775,6 +775,14 @@ model DetachSessionMessage {
   id: string;
 }
 
+// Read-only request for a session's current rendered screen. Unlike
+// attach_session it registers no subscriber and claims no PTY geometry; used to
+// seed observers (e.g. grid tiles) that then dedup live output against last_seq.
+model GetScreenSnapshotMessage {
+  cmd: "get_screen_snapshot";
+  id: string;
+}
+
 model PtyInputMessage {
   cmd: "pty_input";
   id: string;
@@ -1489,6 +1497,24 @@ model AttachResultMessage {
   error?: string;
 }
 
+model GetScreenSnapshotResultMessage {
+  event: "get_screen_snapshot_result";
+  id: string;
+  success: boolean;
+  screen_snapshot?: string; // base64 ANSI replay of the visible frame
+  screen_rows?: int32;
+  screen_cols?: int32;
+  screen_cursor_x?: int32; // 0-based
+  screen_cursor_y?: int32; // 0-based
+  screen_cursor_visible?: boolean;
+  screen_snapshot_fresh?: boolean;
+  last_seq?: int32;
+  cols?: int32;
+  rows?: int32;
+  running?: boolean;
+  error?: string;
+}
+
 model PtyOutputMessage {
   event: "pty_output";
   id: string;
@@ -1690,6 +1716,7 @@ alias DaemonEvent =
   | GetCommentsResultMessage
   | SpawnResultMessage
   | AttachResultMessage
+  | GetScreenSnapshotResultMessage
   | PtyOutputMessage
   | SessionExitedMessage
   | PtyDesyncMessage
