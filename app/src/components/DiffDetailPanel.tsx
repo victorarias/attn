@@ -7,8 +7,18 @@ import type { ReviewComment } from '../types/generated';
 import DiffView from './DiffView';
 import './DiffDetailPanel.css';
 import { updateReviewPerf } from '../utils/reviewPerf';
-import { hashContent } from '../utils/reviewHash';
+import { hashDiffContent } from '../utils/reviewHash';
+import { loadViewedDiffHashes, saveViewedDiffHashes } from '../utils/viewedDiffHashes';
 import { commentLineRef, isOriginalSideComment } from '../utils/reviewComment';
+
+// Every path git currently reports as changed (renames contribute both ends).
+function gitStatusChangedPaths(status: GitStatusUpdate): Set<string> {
+  return new Set(
+    [...status.staged, ...status.unstaged, ...status.untracked].flatMap((file) =>
+      file.old_path ? [file.path, file.old_path] : [file.path]
+    )
+  );
+}
 
 // Auto-skip patterns for lockfiles and generated files
 const AUTO_SKIP_PATTERNS = [
@@ -229,6 +239,12 @@ export function DiffDetailPanel({
 
   // Track diff hashes for "changed since viewed" detection
   const viewedDiffHashesRef = useRef<Map<string, string>>(new Map());
+  // Files already persisted as viewed on the backend, tracked separately from
+  // the local `viewedFiles` set. A diff fetch that resolves before `reviewId`
+  // arrives marks the file viewed locally but can't persist yet; this lets the
+  // effect persist once `reviewId` is available instead of skipping it as
+  // "already viewed". Seeded from restored review state (those are persisted).
+  const persistedViewedFilesRef = useRef<Set<string>>(new Set());
   const [changedSinceViewed, setChangedSinceViewed] = useState<Set<string>>(new Set());
   const previousSelectedPathRef = useRef<string | null>(null);
   const [backgroundChangeCheckCount, setBackgroundChangeCheckCount] = useState(0);
@@ -242,6 +258,8 @@ export function DiffDetailPanel({
   const contentVisibleRef = useRef(contentVisible);
   const baseRefRef = useRef(baseRef);
   const fetchDiffRef = useRef(fetchDiff);
+  const reviewIdRef = useRef<string | null>(reviewId);
+  const gitStatusRef = useRef<GitStatusUpdate | null>(gitStatus ?? null);
   const lastBackgroundGitStatusRef = useRef<GitStatusUpdate | null>(null);
 
   useEffect(() => {
@@ -249,7 +267,9 @@ export function DiffDetailPanel({
     contentVisibleRef.current = contentVisible;
     baseRefRef.current = baseRef;
     fetchDiffRef.current = fetchDiff;
-  }, [baseRef, contentVisible, fetchDiff, selectedFilePath]);
+    reviewIdRef.current = reviewId;
+    gitStatusRef.current = gitStatus ?? null;
+  }, [baseRef, contentVisible, fetchDiff, selectedFilePath, reviewId, gitStatus]);
 
   const syncBackgroundChangeCheckCount = useCallback(() => {
     const activePaths = new Set([
@@ -259,6 +279,28 @@ export function DiffDetailPanel({
     ]);
     setBackgroundChangeCheckCount(activePaths.size);
   }, []);
+
+  // Persist the in-memory diff hashes so "changed since viewed" survives a
+  // panel close/reopen. Cheap and idempotent; called after each hash update.
+  const persistViewedDiffHashes = useCallback(() => {
+    if (reviewIdRef.current) {
+      saveViewedDiffHashes(reviewIdRef.current, viewedDiffHashesRef.current);
+    }
+  }, []);
+
+  // Persist a file's viewed state to the backend exactly once. Keyed on
+  // `persistedViewedFilesRef` rather than local `viewedFiles` so a fetch that
+  // resolved before `reviewId` arrived still persists when the effect reruns
+  // with `reviewId` set (the viewed-state race).
+  const persistViewed = useCallback((filepath: string) => {
+    if (!reviewId || persistedViewedFilesRef.current.has(filepath)) return;
+    persistedViewedFilesRef.current.add(filepath);
+    markFileViewed(reviewId, filepath, true).catch((err) => {
+      console.error('Failed to persist viewed state:', err);
+      // Allow a later attempt to retry.
+      persistedViewedFilesRef.current.delete(filepath);
+    });
+  }, [reviewId, markFileViewed]);
 
   const clearSelectedDiffPendingTimer = useCallback(() => {
     if (selectedDiffPendingTimerRef.current !== null) {
@@ -327,11 +369,12 @@ export function DiffDetailPanel({
             return;
           }
 
-          const newHash = hashContent(result.original + result.modified);
+          const newHash = hashDiffContent(result.original, result.modified);
           const currentHash = viewedDiffHashesRef.current.get(viewedPath);
           if (currentHash && currentHash !== newHash) {
             setChangedSinceViewed(prev => new Set(prev).add(viewedPath));
             viewedDiffHashesRef.current.set(viewedPath, newHash);
+            persistViewedDiffHashes();
             diffContentCacheRef.current.set(viewedPath, {
               original: result.original,
               modified: result.modified,
@@ -361,7 +404,7 @@ export function DiffDetailPanel({
     }
 
     syncBackgroundChangeCheckCount();
-  }, [resetBackgroundChangeChecks, syncBackgroundChangeCheckCount]);
+  }, [resetBackgroundChangeChecks, syncBackgroundChangeCheckCount, persistViewedDiffHashes]);
 
   const scheduleBackgroundChangeChecks = useCallback((paths: string[]) => {
     let added = false;
@@ -589,15 +632,39 @@ export function DiffDetailPanel({
       getReviewState(repoPath, branch)
         .then((result) => {
           if (result.success && result.state) {
+            const restoredViewed = result.state.viewed_files || [];
             setReviewId(result.state.review_id);
-            setViewedFiles(new Set(result.state.viewed_files || []));
+            setViewedFiles(new Set(restoredViewed));
+            // These files are already persisted on the backend.
+            persistedViewedFilesRef.current = new Set(restoredViewed);
+            // Restore durable diff hashes so "changed since viewed" survives a
+            // close/reopen. Fill only missing entries so a fetch already in
+            // flight isn't clobbered by the stored baseline.
+            const storedHashes = loadViewedDiffHashes(result.state.review_id);
+            for (const [path, hash] of storedHashes) {
+              if (!viewedDiffHashesRef.current.has(path)) {
+                viewedDiffHashesRef.current.set(path, hash);
+              }
+            }
+            // Re-check restored viewed files that git currently reports as
+            // changed, so an edit made while the panel was closed surfaces on
+            // reopen. The gitStatus effect alone would dedupe the status it
+            // already consumed before this restore completed.
+            const status = gitStatusRef.current;
+            if (status) {
+              const changedPaths = gitStatusChangedPaths(status);
+              const candidates = restoredViewed.filter((path) => changedPaths.has(path));
+              if (candidates.length > 0) {
+                scheduleBackgroundChangeChecks(candidates);
+              }
+            }
           }
         })
         .catch((err) => {
           console.error('Failed to load review state:', err);
         });
     }
-  }, [isOpen, repoPath, branch, getReviewState]);
+  }, [isOpen, repoPath, branch, getReviewState, scheduleBackgroundChangeChecks]);
 
   // Fallback: when the panel opens without a selection, pick the first
   // reviewable file.
@@ -694,8 +761,10 @@ export function DiffDetailPanel({
       setIsSyncingRemotes(false);
       setRemotesSyncWarning(null);
       diffContentCacheRef.current.clear();
-      // Clear change detection state
+      // Clear change detection state (localStorage baseline is intentionally
+      // kept so reopening can restore it).
       viewedDiffHashesRef.current.clear();
+      persistedViewedFilesRef.current.clear();
       setChangedSinceViewed(new Set());
       resetBackgroundChangeChecks();
     }
@@ -718,6 +787,7 @@ export function DiffDetailPanel({
       setRemotesSyncWarning(null);
       diffContentCacheRef.current.clear();
       viewedDiffHashesRef.current.clear();
+      persistedViewedFilesRef.current.clear();
       setChangedSinceViewed(new Set());
       setViewedFiles(new Set());
       resetBackgroundChangeChecks();
@@ -745,7 +815,6 @@ export function DiffDetailPanel({
 
     // Store current path to check if we're still viewing the same file when fetch completes
     const fetchPath = selectedFile.path;
-    const isFirstView = !viewedFiles.has(fetchPath);
     const cachedContent = diffContentCacheRef.current.get(fetchPath) || null;
 
     setDiffContent(cachedContent);
@@ -767,7 +836,7 @@ export function DiffDetailPanel({
         if (selectedFilePathRef.current !== fetchPath) return;
 
         const newContent = { original: result.original, modified: result.modified };
-        const newHash = hashContent(result.original + result.modified);
+        const newHash = hashDiffContent(result.original, result.modified);
         const prevHash = viewedDiffHashesRef.current.get(fetchPath);
 
         diffContentCacheRef.current.set(fetchPath, newContent);
@@ -782,8 +851,9 @@ export function DiffDetailPanel({
           setChangedSinceViewed(prev => new Set(prev).add(fetchPath));
         }
 
-        // Update stored hash
+        // Update stored hash and its durable baseline
         viewedDiffHashesRef.current.set(fetchPath, newHash);
+        persistViewedDiffHashes();
 
         // Mark file as viewed (local state) - only create new Set if actually adding
         setViewedFiles(prev => {
@@ -791,12 +861,10 @@ export function DiffDetailPanel({
           return new Set(prev).add(fetchPath);
         });
 
-        // Persist to backend if we have a review ID (only on first view)
-        if (isFirstView && reviewId) {
-          markFileViewed(reviewId, fetchPath, true).catch((err) => {
-            console.error('Failed to persist viewed state:', err);
-          });
-        }
+        // Persist viewed state to the backend (no-op until reviewId is known;
+        // the effect reruns when reviewId arrives, so a fetch that won the race
+        // against getReviewState still persists then).
+        persistViewed(fetchPath);
       })
       .catch((err) => {
         if (selectedFilePathRef.current !== fetchPath) return;
@@ -808,8 +876,10 @@ export function DiffDetailPanel({
     return () => {
       clearSelectedDiffPendingTimer();
     };
-  // Note: viewedFiles intentionally excluded - we read it but don't want re-runs when it changes
-  }, [clearSelectedDiffPendingTimer, diffFetchKey, selectedFile, fetchDiff, baseRef, reviewId, markFileViewed]);
+  // Note: viewedFiles intentionally excluded - we read it but don't want re-runs when it changes.
+  // persistViewed changes identity when reviewId arrives, which reruns this effect so a
+  // first-file fetch that won the race against getReviewState still persists.
+  }, [clearSelectedDiffPendingTimer, diffFetchKey, selectedFile, fetchDiff, baseRef, persistViewed, persistViewedDiffHashes]);
 
   // Check for changes in viewed files when gitStatus updates (for files not currently selected)
   useEffect(() => {
@@ -817,11 +887,7 @@ export function DiffDetailPanel({
     if (lastBackgroundGitStatusRef.current === gitStatus) return;
     lastBackgroundGitStatusRef.current = gitStatus;
 
-    const changedPaths = new Set(
-      [...gitStatus.staged, ...gitStatus.unstaged, ...gitStatus.untracked].flatMap((file) => (
-        file.old_path ? [file.path, file.old_path] : [file.path]
-      ))
-    );
+    const changedPaths = gitStatusChangedPaths(gitStatus);
     const candidates = Array.from(viewedFiles).filter((viewedPath) => (
       viewedPath !== selectedFilePath &&
       changedPaths.has(viewedPath) &&
@@ -907,7 +973,6 @@ export function DiffDetailPanel({
     // Mark the current file viewed on its way out so `]` consistently
     // advances instead of re-selecting the same file.
     if (current) {
-      const wasFirstView = !viewedFiles.has(current);
       setViewedFiles(prev => {
         if (prev.has(current)) return prev;
         return new Set(prev).add(current);
@@ -918,11 +983,7 @@ export function DiffDetailPanel({
         next.delete(current);
         return next;
       });
-      if (wasFirstView && reviewId) {
-        markFileViewed(reviewId, current, true).catch(err => {
-          console.error('Failed to persist viewed state:', err);
-        });
-      }
+      persistViewed(current);
     }
 
     // Prefer files changed since last viewed, then any unviewed file,
@@ -940,7 +1001,7 @@ export function DiffDetailPanel({
     if (unreviewed) {
       onSelectFilePath(unreviewed.path);
     }
-  }, [needsReviewFiles, viewedFiles, changedSinceViewed, selectedFilePath, reviewId, markFileViewed]);
+  }, [needsReviewFiles, viewedFiles, changedSinceViewed, selectedFilePath, persistViewed]);
 
   const getFileIcon = useCallback((file: ReviewFile) => {
     if (file.isAutoSkip) return '⊘';

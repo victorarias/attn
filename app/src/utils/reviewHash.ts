@@ -15,3 +15,15 @@ export function hashContent(content: string): string {
   }
   return hash.toString(16);
 }
+
+/**
+ * Hash an (original, modified) diff pair into a single stable key.
+ *
+ * Frames the payload with the length of `original` so different ways of
+ * splitting the same concatenation can't collide: `("ab", "c")` and
+ * `("a", "bc")` both concatenate to `"abc"`, but the length prefix pins the
+ * boundary so their inputs differ. Plain `original + modified` is ambiguous.
+ */
+export function hashDiffContent(original: string, modified: string): string {
+  return hashContent(`${original.length}:${original}${modified}`);
+}

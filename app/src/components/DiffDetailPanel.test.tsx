@@ -8,11 +8,13 @@ import {
   createBranchDiffFilesResult,
   createReviewComment,
   createDeletedLineComment,
+  createReviewState,
   setupDefaultResponses,
   sleep,
   MockDaemon,
 } from '../test/utils';
 import { DiffDetailPanel } from './DiffDetailPanel';
+import { clearAllViewedDiffHashes } from '../utils/viewedDiffHashes';
 
 // Mock DiffView: it renders the @pierre/diffs custom element (shadow DOM +
 // Shiki), which jsdom/happy-dom cannot exercise. These tests cover the panel's
@@ -34,6 +36,9 @@ describe('DiffDetailPanel', () => {
     mockDaemon = createMockDaemon();
     setupDefaultResponses(mockDaemon);
     onClose = vi.fn();
+    // Durable diff hashes persist to localStorage keyed by review id; reset so
+    // one test's baseline can't leak into another (the mock review id is shared).
+    clearAllViewedDiffHashes();
   });
 
   function ControlledDiffDetailPanel(props: {
@@ -135,6 +140,39 @@ describe('DiffDetailPanel', () => {
       });
 
       expect(mockDaemon.getCalls('getReviewState')[0].args).toEqual(['/test/repo', 'main']);
+    });
+
+    it('persists the first file as viewed even when the diff fetch wins the race against getReviewState', async () => {
+      // Hold getReviewState pending so the diff fetch (and local "viewed"
+      // marking) happens before reviewId is known — the race that previously
+      // dropped the persist.
+      let releaseReviewState: (() => void) | null = null;
+      mockDaemon.setResponse(
+        'getReviewState',
+        () =>
+          new Promise((resolve) => {
+            releaseReviewState = () => resolve(createReviewState([]));
+          })
+      );
+
+      renderPanel();
+
+      // First file fetched and marked viewed locally, before reviewId exists.
+      await waitFor(() => {
+        const calls = mockDaemon.getCalls('fetchDiff').filter((c) => c.args[0] === 'src/App.tsx');
+        expect(calls.length).toBeGreaterThanOrEqual(1);
+      });
+      expect(mockDaemon.getCalls('markFileViewed')).toHaveLength(0);
+
+      // reviewId arrives; the effect reruns and must persist the already-viewed file.
+      releaseReviewState!();
+
+      await waitFor(() => {
+        const calls = mockDaemon.getCalls('markFileViewed').filter((c) => c.args[1] === 'src/App.tsx');
+        expect(calls).toHaveLength(1);
+      });
+      const persisted = mockDaemon.getCalls('markFileViewed').find((c) => c.args[1] === 'src/App.tsx');
+      expect(persisted?.args).toEqual(['test-review-id', 'src/App.tsx', true]);
     });
 
     it('fetches branch diff files on open', async () => {
