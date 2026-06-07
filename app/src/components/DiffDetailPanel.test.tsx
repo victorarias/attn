@@ -14,17 +14,16 @@ import {
 } from '../test/utils';
 import { DiffDetailPanel } from './DiffDetailPanel';
 
-// Mock UnifiedDiffEditor since it uses CodeMirror which requires DOM measurements
-vi.mock('./UnifiedDiffEditor', () => ({
+// Mock DiffView: it renders the @pierre/diffs custom element (shadow DOM +
+// Shiki), which jsdom/happy-dom cannot exercise. These tests cover the panel's
+// data flow (fetching, navigation, change detection), not diff rendering.
+vi.mock('./DiffView', () => ({
   default: vi.fn(({ original, modified }) => (
-    <div data-testid="unified-diff-editor">
+    <div data-testid="diff-view">
       <div className="original">{original?.substring(0, 50)}</div>
       <div className="modified">{modified?.substring(0, 50)}</div>
     </div>
   )),
-  buildUnifiedDocument: vi.fn(() => []),
-  resolveAnchor: vi.fn(() => ({ docLine: 1, isOutdated: false, isOrphaned: false })),
-  hashContent: vi.fn((content: string) => content),
 }));
 
 describe('DiffDetailPanel', () => {
@@ -1016,9 +1015,8 @@ describe('Deleted-Line Comment Fixtures', () => {
     });
   });
 
-  // Note: canAddCommentToDeletedLine tests and comment form state preservation tests
-  // were removed as part of UnifiedDiffEditor integration - that logic is now in
-  // UnifiedDiffEditor which has its own comprehensive tests in unified-diff-editor.spec.ts
+  // Note: comment-anchoring and comment-form behavior now live in DiffView (over
+  // the @pierre/diffs annotation slots) and are exercised by e2e/diff-view.spec.ts.
 
   describe('daemon mock comment operations', () => {
     let mockDaemon: MockDaemon;

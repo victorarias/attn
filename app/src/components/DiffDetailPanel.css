@@ -51,10 +51,6 @@
   color: #fbbf24;
 }
 
-.review-sync-status.background-checking {
-  color: #8ea3ba;
-}
-
 .review-sync-status.background-checking::before {
   content: '';
   display: inline-block;
@@ -463,7 +459,290 @@
   flex-shrink: 0;
 }
 
-/* Note: Inline comment styles are now handled by UnifiedDiffEditor component */
+/* ============================================================================
+   DiffView (@pierre/diffs) host + review comments
+
+   The diff renders inside a shadow-DOM custom element that ships its own
+   styles. Comment threads and the draft form are slotted (light-DOM) children,
+   so they are styled here with the app's theme variables.
+   ============================================================================ */
+
+.diff-view {
+  /* Drives the diff code font size; inherits across the shadow boundary.
+     Tied to the global UI scale; the explicit fontSize prop overrides it. */
+  --diffs-font-size: calc(13px * var(--ui-scale));
+}
+
+.diff-view-scroller {
+  min-height: 0;
+}
+
+/* Divider between the layout (Unified/Split) and context (Hunks/Full) toggles */
+.diff-actions-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 2px;
+  background: var(--color-border-hover);
+}
+
+/* --- Comment thread (one anchor = one thread) --- */
+.diff-comment-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 10px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.diff-comment {
+  background: var(--color-bg-button);
+  border-left: 3px solid #3b82f6;
+  border-radius: 0 4px 4px 0;
+  padding: 6px 10px;
+}
+
+.diff-comment.resolved {
+  border-left-color: #22c55e;
+  background: var(--color-bg-elevated);
+}
+
+.diff-comment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.diff-comment-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.diff-comment-author {
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: #ffffff;
+  background: #2563eb;
+}
+
+.diff-comment-resolved {
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.diff-comment-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.diff-comment-actions button {
+  background: transparent;
+  border: 1px solid var(--color-border-hover);
+  color: var(--color-text-secondary);
+  font-size: calc(11px * var(--ui-scale));
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.diff-comment-actions button:hover {
+  background: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+/* Colored action buttons share one border/color/hover pattern; only the accent
+   color varies, carried by --action-color. (edit-btn keeps the neutral base.) */
+.diff-comment-actions .resolve-btn { --action-color: #22c55e; }
+.diff-comment-actions .delete-btn { --action-color: #ef4444; }
+.diff-comment-actions .send-btn { --action-color: #d97706; }
+
+.diff-comment-actions .resolve-btn,
+.diff-comment-actions .delete-btn,
+.diff-comment-actions .send-btn {
+  border-color: var(--action-color);
+  color: var(--action-color);
+}
+
+.diff-comment-actions .resolve-btn:hover,
+.diff-comment-actions .delete-btn:hover,
+.diff-comment-actions .send-btn:hover {
+  background: var(--action-color);
+  color: #ffffff;
+}
+
+.diff-comment-content {
+  color: var(--color-text-primary);
+  font-size: calc(13px * var(--ui-scale));
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.diff-comment-content p {
+  margin: 0 0 8px 0;
+}
+
+.diff-comment-content p:last-child {
+  margin-bottom: 0;
+}
+
+.diff-comment-content code {
+  background: var(--color-border);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace;
+  font-size: calc(12px * var(--ui-scale));
+}
+
+.diff-comment-content pre {
+  background: var(--color-border);
+  padding: 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.diff-comment-content pre code {
+  background: none;
+  padding: 0;
+}
+
+.diff-comment-content ul,
+.diff-comment-content ol {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.diff-comment-content li {
+  margin: 4px 0;
+}
+
+.diff-comment-content a {
+  color: #3b82f6;
+  text-decoration: none;
+}
+
+.diff-comment-content a:hover {
+  text-decoration: underline;
+}
+
+.diff-comment-content blockquote {
+  border-left: 3px solid var(--color-border-hover);
+  margin: 8px 0;
+  padding-left: 12px;
+  color: var(--color-text-tertiary);
+}
+
+.diff-comment-content strong {
+  font-weight: 600;
+}
+
+/* --- New comment / edit form --- */
+.diff-comment-form {
+  background: var(--color-bg-button);
+  border-left: 3px solid #6366f1;
+  border-radius: 0 4px 4px 0;
+  padding: 6px 10px;
+}
+
+.diff-comment-textarea {
+  width: 100%;
+  min-height: 48px;
+  padding: 6px 8px;
+  background: var(--color-bg-editor);
+  border: 1px solid var(--color-border-hover);
+  border-radius: 4px;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: calc(13px * var(--ui-scale));
+  line-height: 1.4;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.diff-comment-textarea:focus {
+  outline: none;
+  border-color: #6366f1;
+}
+
+.diff-comment-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.diff-comment-form-actions button {
+  background: transparent;
+  border: 1px solid var(--color-border-hover);
+  color: var(--color-text-secondary);
+  font-size: calc(11px * var(--ui-scale));
+  padding: 2px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.diff-comment-form-actions button:hover {
+  background: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+.diff-comment-form-actions .save-btn {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #ffffff;
+}
+
+.diff-comment-form-actions .save-btn:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+/* --- Selection action popup (Send to Claude / Add comment) --- */
+.diff-selection-popup {
+  position: absolute;
+  z-index: 100;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-hover);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.diff-selection-popup-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.diff-selection-popup-btn:hover {
+  background: var(--color-border);
+}
+
+.diff-selection-popup-btn.send {
+  color: #d4a27f;
+}
+
+.diff-selection-popup-btn.comment {
+  color: #60a5fa;
+}
 
 /* ============================================================================
    Reviewer Agent UI
@@ -478,35 +757,6 @@
 
 .review-file-count {
   margin-left: 0; /* Override since we're now using flex gap */
-}
-
-.review-agent-btn {
-  background: #2563eb;
-  border: 1px solid #3b82f6;
-  color: white;
-  padding: 4px 10px;
-  font-size: calc(12px * var(--ui-scale));
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.review-agent-btn:hover {
-  background: #1d4ed8;
-  border-color: #2563eb;
-}
-
-.review-agent-btn.running {
-  background: #dc2626;
-  border-color: #ef4444;
-}
-
-.review-agent-btn.running:hover {
-  background: #b91c1c;
-  border-color: #dc2626;
 }
 
 .review-send-btn {
@@ -549,320 +799,4 @@
 .review-open-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-/* Reviewer output panel at bottom of diff area */
-.reviewer-output-panel {
-  background: var(--color-bg-elevated);
-  border-top: 1px solid var(--color-border-hover);
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  position: relative;
-}
-
-.reviewer-resize-handle {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 6px;
-  cursor: ns-resize;
-  background: transparent;
-  z-index: 10;
-}
-
-.reviewer-resize-handle:hover,
-.reviewer-resize-handle:active {
-  background: linear-gradient(to bottom, rgba(59, 130, 246, 0.5), transparent);
-}
-
-.reviewer-output-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background: var(--color-bg-button);
-  font-size: calc(12px * var(--ui-scale));
-  font-weight: 600;
-  color: var(--color-text-primary);
-  position: relative;
-  user-select: none;
-}
-
-.reviewer-output-header:hover {
-  background: var(--color-border);
-}
-
-.reviewer-collapse-icon {
-  font-size: calc(10px * var(--ui-scale));
-  opacity: 0.7;
-}
-
-.reviewer-output-panel.collapsed {
-  border-top: 1px solid var(--color-border-hover);
-}
-
-/* Animated progress line below header when running */
-.reviewer-progress-line {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: var(--color-border-hover);
-  overflow: hidden;
-}
-
-.reviewer-progress-line::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  width: 40%;
-  background: linear-gradient(90deg, transparent, #3b82f6, #60a5fa, #3b82f6, transparent);
-  animation: progress-slide 1.5s ease-in-out infinite;
-}
-
-@keyframes progress-slide {
-  0% {
-    left: -40%;
-  }
-  100% {
-    left: 100%;
-  }
-}
-
-.reviewer-error {
-  color: #f87171;
-  margin-left: auto;
-  font-weight: 400;
-}
-
-.reviewer-output-content {
-  padding: 12px 16px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-size: calc(13px * var(--ui-scale));
-  color: var(--color-text-secondary);
-  line-height: 1.6;
-  overflow-y: auto;
-  flex: 1;
-}
-
-/* Markdown styling */
-.reviewer-output-content h1,
-.reviewer-output-content h2,
-.reviewer-output-content h3 {
-  color: var(--color-text-primary);
-  margin: 16px 0 8px 0;
-  font-weight: 600;
-}
-
-.reviewer-output-content h1 { font-size: calc(18px * var(--ui-scale)); }
-.reviewer-output-content h2 { font-size: calc(16px * var(--ui-scale)); }
-.reviewer-output-content h3 { font-size: calc(14px * var(--ui-scale)); }
-
-.reviewer-output-content p {
-  margin: 8px 0;
-}
-
-.reviewer-output-content ul,
-.reviewer-output-content ol {
-  margin: 8px 0;
-  padding-left: 24px;
-}
-
-.reviewer-output-content li {
-  margin: 4px 0;
-}
-
-.reviewer-output-content code {
-  background: var(--color-border);
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: calc(12px * var(--ui-scale));
-}
-
-.reviewer-output-content pre {
-  background: var(--color-border);
-  padding: 12px;
-  border-radius: 6px;
-  overflow-x: auto;
-  margin: 8px 0;
-}
-
-.reviewer-output-content pre code {
-  background: none;
-  padding: 0;
-}
-
-.reviewer-output-content strong {
-  color: var(--color-text-primary);
-  font-weight: 600;
-}
-
-.reviewer-output-content a {
-  color: #3b82f6;
-  text-decoration: none;
-}
-
-.reviewer-output-content a:hover {
-  text-decoration: underline;
-}
-
-.reviewer-output-content blockquote {
-  border-left: 3px solid var(--color-border-hover);
-  margin: 8px 0;
-  padding-left: 12px;
-  color: var(--color-text-tertiary);
-}
-
-.reviewer-output-content table {
-  border-collapse: collapse;
-  margin: 12px 0;
-  width: 100%;
-  font-size: inherit;
-}
-
-.reviewer-output-content th,
-.reviewer-output-content td {
-  border: 1px solid var(--color-border-hover);
-  padding: 8px 12px;
-  text-align: left;
-}
-
-.reviewer-output-content th {
-  background: var(--color-bg-button);
-  color: var(--color-text-primary);
-  font-weight: 600;
-}
-
-.reviewer-output-content tr:nth-child(even) {
-  background: rgba(255, 255, 255, 0.02);
-}
-
-/* Tool calls styling - muted to not overwhelm agent text */
-.reviewer-tool-call {
-  margin: 6px 0;
-  padding: 4px 8px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: inherit;
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: 4px;
-  opacity: 0.7;
-}
-
-.reviewer-tool-call:hover {
-  opacity: 1;
-}
-
-.reviewer-tool-call.clickable {
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.reviewer-tool-call.clickable:hover {
-  background: rgba(59, 130, 246, 0.1);
-  opacity: 1;
-}
-
-/* Clickable file references in markdown output */
-.file-reference.clickable {
-  color: #3b82f6;
-  cursor: pointer;
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  text-underline-offset: 2px;
-}
-
-.file-reference.clickable:hover {
-  color: #60a5fa;
-  text-decoration-style: solid;
-}
-
-/* Loading state - centered spinner and text */
-.reviewer-loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 24px;
-  gap: 16px;
-  color: var(--color-text-tertiary);
-}
-
-.reviewer-loading-spinner {
-  width: 40px;
-  height: 40px;
-  color: #3b82f6;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.reviewer-loading-spinner svg {
-  width: 100%;
-  height: 100%;
-}
-
-.reviewer-loading-text {
-  font-size: calc(15px * var(--ui-scale));
-  font-weight: 500;
-  color: var(--color-text-tertiary);
-  letter-spacing: 0.01em;
-}
-
-.tool-call-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--color-text-tertiary);
-}
-
-.tool-call-icon {
-  color: var(--color-text-muted);
-}
-
-.tool-call-name {
-  color: var(--color-text-secondary);
-  font-weight: 500;
-}
-
-.tool-call-input {
-  color: var(--color-text-muted);
-  font-size: 0.85em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 400px;
-}
-
-.tool-call-output {
-  display: flex;
-  margin-top: 4px;
-  padding-left: 8px;
-  color: var(--color-text-muted);
-}
-
-.tool-call-output-icon {
-  color: var(--color-text-dimmed);
-  margin-right: 8px;
-  flex-shrink: 0;
-}
-
-.tool-call-output pre {
-  margin: 0;
-  padding: 0;
-  background: none;
-  font-size: 0.85em;
-  line-height: 1.4;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--color-text-muted);
-  overflow: hidden;
 }
