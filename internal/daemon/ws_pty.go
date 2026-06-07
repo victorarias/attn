@@ -670,6 +670,38 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 	d.sendToClient(client, result)
 }
 
+// snapshotSeedScreen resolves the visible frame to seed an observer with,
+// preferring a fresh worker-rendered screen and otherwise deriving one from the
+// session's buffered replay output. The derived path is what lets observers
+// seed sessions whose worker predates the snapshot RPC: those workers can't
+// render a screen on demand but still hand back their scrollback on attach.
+// The bool results are (derived, ok).
+func snapshotSeedScreen(info ptybackend.AttachInfo) (pty.ReplayScreenSnapshot, bool, bool) {
+	if info.ScreenSnapshotFresh && len(info.ScreenSnapshot) > 0 {
+		return pty.ReplayScreenSnapshot{
+			Payload:       info.ScreenSnapshot,
+			Cols:          info.ScreenCols,
+			Rows:          info.ScreenRows,
+			CursorX:       info.ScreenCursorX,
+			CursorY:       info.ScreenCursorY,
+			CursorVisible: info.ScreenCursorVisible,
+		}, false, true
+	}
+	// Prefer geometry-aware replay segments over flattened scrollback when both
+	// are present, mirroring the attach replay derivation.
+	if len(info.ReplaySegments) > 0 {
+		if snap, ok := pty.ScreenSnapshotFromReplaySegments(replaySegmentsToPTY(info.ReplaySegments)); ok {
+			return snap, true, true
+		}
+	}
+	if len(info.Scrollback) > 0 {
+		if snap, ok := pty.ScreenSnapshotFromReplay(info.Scrollback, info.Cols, info.Rows); ok {
+			return snap, true, true
+		}
+	}
+	return pty.ReplayScreenSnapshot{}, false, false
+}
+
 // handleGetScreenSnapshot serves a read-only snapshot of a session's current
 // screen. It registers no subscriber and starts no stream — purely a seed for
 // observers (grid tiles) that then dedup the live firehose against last_seq.
@@ -707,19 +739,24 @@ func (d *Daemon) handleGetScreenSnapshot(client *wsClient, msg *protocol.GetScre
 		Rows:    protocol.Ptr(int(info.Rows)),
 		Running: protocol.Ptr(info.Running),
 	}
-	if info.ScreenSnapshotFresh && len(info.ScreenSnapshot) > 0 {
-		result.ScreenSnapshot = protocol.Ptr(base64.StdEncoding.EncodeToString(info.ScreenSnapshot))
-		result.ScreenRows = protocol.Ptr(int(info.ScreenRows))
-		result.ScreenCols = protocol.Ptr(int(info.ScreenCols))
-		result.ScreenCursorX = protocol.Ptr(int(info.ScreenCursorX))
-		result.ScreenCursorY = protocol.Ptr(int(info.ScreenCursorY))
-		result.ScreenCursorVisible = protocol.Ptr(info.ScreenCursorVisible)
-		result.ScreenSnapshotFresh = protocol.Ptr(info.ScreenSnapshotFresh)
+	screen, derived, haveScreen := snapshotSeedScreen(info)
+	if haveScreen {
+		result.ScreenSnapshot = protocol.Ptr(base64.StdEncoding.EncodeToString(screen.Payload))
+		result.ScreenRows = protocol.Ptr(int(screen.Rows))
+		result.ScreenCols = protocol.Ptr(int(screen.Cols))
+		result.ScreenCursorX = protocol.Ptr(int(screen.CursorX))
+		result.ScreenCursorY = protocol.Ptr(int(screen.CursorY))
+		result.ScreenCursorVisible = protocol.Ptr(screen.CursorVisible)
+		// The frontend seeds only when this is set. A screen derived from buffered
+		// output is just as paintable as a worker-rendered one, so we present it as
+		// fresh — that is what lets observers seed sessions whose worker can't
+		// render a screen on demand (e.g. an old worker that survived an upgrade).
+		result.ScreenSnapshotFresh = protocol.Ptr(true)
 	}
 	d.logf(
-		"PTY screen snapshot: id=%s running=%v last_seq=%d snapshot_bytes=%d screen=%dx%d fresh=%v",
-		msg.ID, info.Running, info.LastSeq, len(info.ScreenSnapshot),
-		info.ScreenCols, info.ScreenRows, info.ScreenSnapshotFresh,
+		"PTY screen snapshot: id=%s running=%v last_seq=%d snapshot_bytes=%d screen=%dx%d have_screen=%v derived=%v",
+		msg.ID, info.Running, info.LastSeq, len(screen.Payload),
+		screen.Cols, screen.Rows, haveScreen, derived,
 	)
 	d.sendToClient(client, result)
 }
