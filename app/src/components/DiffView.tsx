@@ -83,6 +83,9 @@ export interface DiffViewProps {
   onSendToClaude?: (reference: string) => void;
 }
 
+/** Stable no-op for the stale-comment thread, which never hosts a draft form. */
+const noop = () => {};
+
 function normalizeRange(range: SelectedLineRange): { side: AnnotationSide; start: number; end: number } {
   const start = Math.min(range.start, range.end);
   const end = Math.max(range.start, range.end);
@@ -117,6 +120,8 @@ export function DiffView({
 
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [selectionPopup, setSelectionPopup] = useState<SelectionPopupState | null>(null);
+  // Stale comments (anchor line no longer in the diff) are collapsed by default.
+  const [staleExpanded, setStaleExpanded] = useState(false);
 
   const name = filePath ?? 'file.txt';
 
@@ -149,7 +154,27 @@ export function DiffView({
     setDraft(null);
     setSelectionPopup(null);
     setFrozen(null);
+    setStaleExpanded(false);
   }, [filePath]);
+
+  // A comment is "stale" when its anchor line is no longer in the file (the code
+  // shrank past it). Such a comment can't be slotted onto a line, so it would
+  // silently vanish — instead we surface it in a collapsed banner. Comments
+  // whose line still exists render inline as usual (even if the code drifted;
+  // we can't detect that without the original line text).
+  const lineCounts = useMemo(
+    () => ({ additions: shownModified.split('\n').length, deletions: shownOriginal.split('\n').length }),
+    [shownModified, shownOriginal]
+  );
+  const { anchoredComments, staleComments } = useMemo(() => {
+    const anchored: ReviewComment[] = [];
+    const stale: ReviewComment[] = [];
+    for (const c of comments) {
+      const max = isOriginalSideComment(c) ? lineCounts.deletions : lineCounts.additions;
+      (c.line_start >= 1 && c.line_start <= max ? anchored : stale).push(c);
+    }
+    return { anchoredComments: anchored, staleComments: stale };
+  }, [comments, lineCounts]);
 
   const oldFile = useMemo<FileContents>(() => ({ name, contents: shownOriginal }), [name, shownOriginal]);
   const newFile = useMemo<FileContents>(() => ({ name, contents: shownModified }), [name, shownModified]);
@@ -223,7 +248,7 @@ export function DiffView({
     const groups = new Map<string, AnnotationMeta>();
     const keyOf = (side: AnnotationSide, line: number) => `${side}:${line}`;
 
-    for (const comment of comments) {
+    for (const comment of anchoredComments) {
       const side: AnnotationSide = isOriginalSideComment(comment) ? 'deletions' : 'additions';
       const line = comment.line_start;
       const key = keyOf(side, line);
@@ -263,7 +288,7 @@ export function DiffView({
       lineNumber: meta.lineNumber,
       metadata: meta,
     }));
-  }, [comments, draft, editingCommentId]);
+  }, [anchoredComments, draft, editingCommentId]);
 
   const handleSaveDraft = useCallback(
     (content: string) => {
@@ -364,6 +389,8 @@ export function DiffView({
       ref={wrapperRef}
       style={{
         position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
         height: '100%',
         width: '100%',
         ...(fontSize ? { '--diffs-font-size': `${fontSize}px` } : {}),
@@ -371,7 +398,39 @@ export function DiffView({
       onPointerUpCapture={capturePointer}
       onPointerDownCapture={dismissPopupOnPointerDown}
     >
-      <Virtualizer className="diff-view-scroller" style={{ height: '100%', overflow: 'auto' }}>
+      {staleComments.length > 0 && (
+        <div className="diff-stale-comments">
+          <button
+            type="button"
+            className="diff-stale-comments-toggle"
+            data-testid="diff-stale-comments-toggle"
+            aria-expanded={staleExpanded}
+            onClick={() => setStaleExpanded((v) => !v)}
+          >
+            <span className="diff-stale-caret" aria-hidden="true">{staleExpanded ? '▾' : '▸'}</span>
+            {staleComments.length} comment{staleComments.length === 1 ? '' : 's'} no longer anchored to the current code
+          </button>
+          {staleExpanded && (
+            <div className="diff-stale-comments-body">
+              <DiffCommentThread
+                comments={staleComments}
+                draft={false}
+                editingCommentId={editingCommentId}
+                showSendToClaude={!!onSendToClaude && !!filePath}
+                onSaveDraft={noop}
+                onCancelDraft={noop}
+                onStartEdit={onStartEdit}
+                onEditComment={onEditComment}
+                onCancelEdit={onCancelEdit}
+                onResolveComment={onResolveComment}
+                onDeleteComment={onDeleteComment}
+                onSendComment={handleSendComment}
+              />
+            </div>
+          )}
+        </div>
+      )}
+      <Virtualizer className="diff-view-scroller" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         <MultiFileDiff<AnnotationMeta>
           key={diffKey}
           oldFile={oldFile}

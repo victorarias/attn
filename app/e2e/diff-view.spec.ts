@@ -291,6 +291,42 @@ test.describe('DiffView (@pierre/diffs)', () => {
     await expect(textarea).toBeFocused();
   });
 
+  test('collapses stale comments (anchor line gone) at the top, expandable on click', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+    // A comment whose anchor line no longer exists in the file.
+    await page.evaluate(() => window.__HARNESS__.seedStaleComment());
+
+    const toggle = page.getByTestId('diff-stale-comments-toggle');
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toContainText('1 comment no longer anchored');
+
+    // Collapsed by default, and never slotted into the diff as a normal annotation.
+    await expect(page.getByText('Stale: this code is gone')).toHaveCount(0);
+    await expect(page.locator('diffs-container > [slot^="annotation-"]')).toHaveCount(0);
+
+    // Click to expand → readable and actionable.
+    await toggle.click();
+    await expect(page.getByText('Stale: this code is gone')).toBeVisible();
+    await page.locator('.diff-stale-comments-body .delete-btn').click();
+    await expect.poll(() => calls(page, 'deleteComment')).toEqual([['stale-1']]);
+  });
+
+  test('moves a comment into the stale banner when the code shrinks past its line', async ({ page }) => {
+    await openHarness(page, SEEDED);
+    // Initially anchored inline; no stale banner.
+    await expect(page.getByTestId('diff-comment-thread')).toContainText('Seeded comment on an added line');
+    await expect(page.getByTestId('diff-stale-comments-toggle')).toHaveCount(0);
+
+    // The file shrinks below the comment's line — the comment is not lost.
+    await page.evaluate(() => window.__HARNESS__.shrinkContent());
+    const toggle = page.getByTestId('diff-stale-comments-toggle');
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toContainText('1 comment no longer anchored');
+
+    await toggle.click();
+    await expect(page.getByText('Seeded comment on an added line')).toBeVisible();
+  });
+
   test('toggles between unified and split layout', async ({ page }) => {
     await openHarness(page, UNSEEDED);
 

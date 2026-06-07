@@ -744,6 +744,46 @@
   color: #60a5fa;
 }
 
+/* Stale comments: anchored to a line that no longer exists in the current diff
+   (the code shrank past it). Collapsed at the top of the diff so they are never
+   silently lost when the file changes underneath; click to expand. */
+.diff-stale-comments {
+  flex: 0 0 auto;
+  max-height: 40%;
+  overflow-y: auto;
+  background: var(--color-bg-elevated);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.diff-stale-comments-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: #d9a441;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diff-stale-comments-toggle:hover {
+  background: var(--color-bg-button);
+}
+
+.diff-stale-caret {
+  display: inline-block;
+  width: 10px;
+  color: var(--color-text-secondary);
+}
+
+.diff-stale-comments-body {
+  border-top: 1px solid var(--color-border);
+}
+
 /* ============================================================================
    Reviewer Agent UI
    ============================================================================ */

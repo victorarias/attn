@@ -101,11 +101,14 @@ export function DiffViewHarness({ onReady }: HarnessProps) {
   const [useLargeDiff, setUseLargeDiff] = useState(false);
   const [filePath, setFilePath] = useState('fileA.ts');
   const [refreshCount, setRefreshCount] = useState(0);
+  const [shrunk, setShrunk] = useState(false);
 
   const baseOriginal = filePath === 'fileB.ts' ? FILE_B_ORIGINAL : useLargeDiff ? LARGE_ORIGINAL : SMALL_ORIGINAL;
   const baseModified = filePath === 'fileB.ts' ? FILE_B_MODIFIED : useLargeDiff ? LARGE_MODIFIED : SMALL_MODIFIED;
-  const original = refreshCount > 0 ? `${baseOriginal}\n// refresh-${refreshCount}` : baseOriginal;
-  const modified = refreshCount > 0 ? `${baseModified}\n// refresh-${refreshCount}` : baseModified;
+  // `shrunk` collapses the file to a single line so any comment on a higher line
+  // becomes stale (its anchor no longer exists) — mirrors the code changing a lot.
+  const original = shrunk ? 'shrunk();' : refreshCount > 0 ? `${baseOriginal}\n// refresh-${refreshCount}` : baseOriginal;
+  const modified = shrunk ? 'shrunk();' : refreshCount > 0 ? `${baseModified}\n// refresh-${refreshCount}` : baseModified;
 
   const onAddComment = useCallback((lineStart: number, lineEnd: number, content: string) => {
     window.__HARNESS__.recordCall('addComment', [lineStart, lineEnd, content]);
@@ -178,6 +181,14 @@ export function DiffViewHarness({ onReady }: HarnessProps) {
           content: `background comment ${prev.length + 1}`,
         }),
       ]);
+    // A comment whose anchor line is past the end of the file (already stale).
+    api.seedStaleComment = () =>
+      setComments((prev) => [
+        ...prev,
+        makeComment({ id: 'stale-1', line_start: 999, line_end: 999, content: 'Stale: this code is gone' }),
+      ]);
+    // Collapse the file so existing comments on higher lines go stale.
+    api.shrinkContent = () => setShrunk(true);
   }, []);
 
   const controlsStyle: React.CSSProperties = {
