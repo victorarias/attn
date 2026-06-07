@@ -10,6 +10,10 @@
 //! Keep the dev port in sync with `internal/config/config.go::WSPort`.
 
 use std::env;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::PathBuf;
 
 const BUILD_PROFILE: Option<&str> = option_env!("ATTN_BUILD_PROFILE");
 
@@ -56,6 +60,50 @@ pub fn apply_build_profile_env() {
         env::set_var("ATTN_PROFILE", profile);
         env::set_var("ATTN_WS_PORT", default_port_for_build_profile());
     }
+}
+
+fn data_dir() -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or_else(|| "home directory is unavailable".to_string())?;
+    let name = match build_profile() {
+        "" => ".attn".to_string(),
+        profile => format!(".attn-{profile}"),
+    };
+    Ok(home.join(name))
+}
+
+/// Returns the stable per-profile secret used to authenticate the trusted main
+/// webview as the daemon's browser host. The token is persisted with owner-only
+/// permissions so app restarts can reconnect to a daemon that stayed alive.
+pub fn ensure_browser_host_token() -> Result<String, String> {
+    let dir = data_dir()?;
+    let path = dir.join("browser-host-token");
+    if let Ok(token) = fs::read_to_string(&path) {
+        let token = token.trim().to_string();
+        if token.len() >= 64 {
+            return Ok(token);
+        }
+    }
+
+    fs::create_dir_all(&dir).map_err(|error| format!("create attn data directory: {error}"))?;
+    let mut random = [0_u8; 32];
+    getrandom::getrandom(&mut random)
+        .map_err(|error| format!("generate browser host token: {error}"))?;
+    let token = random
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let mut file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(|error| format!("open browser host token: {error}"))?;
+    file.write_all(token.as_bytes())
+        .map_err(|error| format!("write browser host token: {error}"))?;
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+        .map_err(|error| format!("secure browser host token: {error}"))?;
+    Ok(token)
 }
 
 /// macOS bundle identifier for the running build. Must stay in sync with

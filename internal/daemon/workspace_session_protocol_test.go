@@ -421,6 +421,47 @@ func TestWorkspaceLayoutDockTilePersistsAndMoves(t *testing.T) {
 		t.Fatalf("tile params after move = (%q, %v), want (%q, true)", params, ok, "/tmp/notes.md")
 	}
 
+	d.handleWorkspaceLayoutUpdateTile(client, &protocol.WorkspaceLayoutUpdateTileMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutUpdateTile,
+		WorkspaceID: workspaceID,
+		TileID:      "tile-md",
+		TileParams:  "/tmp/updated.md",
+		RequestID:   "request-reject-markdown-update",
+	})
+	expectWorkspaceLayoutActionResultIDsAndRequestID(t, client, protocol.CmdWorkspaceLayoutUpdateTile, workspaceID, "", "", "tile-md", "request-reject-markdown-update", false)
+	unchanged := d.store.GetWorkspaceLayout(workspaceID)
+	if params, ok := workspacelayout.TileParamsByID(unchanged.Layout, "tile-md"); !ok || params != "/tmp/notes.md" {
+		t.Fatalf("markdown tile params = (%q, %v), want (%q, true)", params, ok, "/tmp/notes.md")
+	}
+
+	if err := d.dockTile(workspaceID, "pane-2", "tile-browser", "browser", "https://example.com/", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+		t.Fatalf("dock browser tile: %v", err)
+	}
+	d.handleWorkspaceLayoutUpdateTile(client, &protocol.WorkspaceLayoutUpdateTileMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutUpdateTile,
+		WorkspaceID: workspaceID,
+		TileID:      "tile-browser",
+		TileParams:  "https://example.com/docs",
+		RequestID:   "request-update-browser",
+	})
+	expectWorkspaceLayoutActionResultIDsAndRequestID(t, client, protocol.CmdWorkspaceLayoutUpdateTile, workspaceID, "", "", "tile-browser", "request-update-browser", true)
+	updated := d.store.GetWorkspaceLayout(workspaceID)
+	if params, ok := workspacelayout.TileParamsByID(updated.Layout, "tile-browser"); !ok || params != "https://example.com/docs" {
+		t.Fatalf("browser tile params = (%q, %v), want (%q, true)", params, ok, "https://example.com/docs")
+	}
+	d.handleWorkspaceLayoutUpdateTile(client, &protocol.WorkspaceLayoutUpdateTileMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutUpdateTile,
+		WorkspaceID: workspaceID,
+		TileID:      "tile-browser",
+		TileParams:  "file:///tmp/private.txt",
+		RequestID:   "request-reject-browser-file-url",
+	})
+	expectWorkspaceLayoutActionResultIDsAndRequestID(t, client, protocol.CmdWorkspaceLayoutUpdateTile, workspaceID, "", "", "tile-browser", "request-reject-browser-file-url", false)
+	afterRejectedURL := d.store.GetWorkspaceLayout(workspaceID)
+	if params, ok := workspacelayout.TileParamsByID(afterRejectedURL.Layout, "tile-browser"); !ok || params != "https://example.com/docs" {
+		t.Fatalf("browser tile params after rejected URL = (%q, %v), want (%q, true)", params, ok, "https://example.com/docs")
+	}
+
 	// Undock removes the tile and collapses its split; the panes are untouched.
 	d.handleWorkspaceLayoutUndockTile(client, &protocol.WorkspaceLayoutUndockTileMessage{
 		Cmd:         protocol.CmdWorkspaceLayoutUndockTile,

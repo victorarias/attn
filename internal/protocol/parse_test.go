@@ -187,6 +187,24 @@ func TestParseWorkspaceLayoutUndockTile(t *testing.T) {
 	}
 }
 
+func TestParseWorkspaceLayoutUpdateTile(t *testing.T) {
+	input := `{"cmd":"workspace_layout_update_tile","workspace_id":"ws1","tile_id":"tile-browser","tile_params":"https://example.com/docs","request_id":"request-1"}`
+	cmd, data, err := ParseMessage([]byte(input))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if cmd != CmdWorkspaceLayoutUpdateTile {
+		t.Fatalf("cmd = %q, want %q", cmd, CmdWorkspaceLayoutUpdateTile)
+	}
+	msg, ok := data.(*WorkspaceLayoutUpdateTileMessage)
+	if !ok {
+		t.Fatalf("data type = %T, want *WorkspaceLayoutUpdateTileMessage", data)
+	}
+	if msg.WorkspaceID != "ws1" || msg.TileID != "tile-browser" || msg.TileParams != "https://example.com/docs" || msg.RequestID != "request-1" {
+		t.Errorf("unexpected fields: %+v", msg)
+	}
+}
+
 func TestParseWorkspaceLayoutMoveLeafToWorkspace(t *testing.T) {
 	input := `{"cmd":"workspace_layout_move_leaf_to_workspace","source_workspace_id":"ws1","target_workspace_id":"ws2","leaf_id":"pane-a","anchor_id":"pane-b","edge":"left","ratio":0.32}`
 	cmd, data, err := ParseMessage([]byte(input))
@@ -257,4 +275,34 @@ func TestParseOpenMarkdown(t *testing.T) {
 	if msg.Path != "/abs/file.md" || msg.SessionID == nil || *msg.SessionID != "sess-1" {
 		t.Errorf("fields = %q/%v, want /abs/file.md/sess-1", msg.Path, msg.SessionID)
 	}
+}
+
+func TestParseBrowserMessages(t *testing.T) {
+	t.Run("open browser", func(t *testing.T) {
+		cmd, data, err := ParseMessage([]byte(`{"cmd":"open_browser","url":"http://localhost:3000","session_id":"sess-1"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cmd != CmdOpenBrowser {
+			t.Fatalf("cmd = %q, want %q", cmd, CmdOpenBrowser)
+		}
+		msg, ok := data.(*OpenBrowserMessage)
+		if !ok || msg.URL != "http://localhost:3000" || Deref(msg.SessionID) != "sess-1" {
+			t.Fatalf("message = %#v, want open browser payload", data)
+		}
+	})
+
+	t.Run("browser control result", func(t *testing.T) {
+		cmd, data, err := ParseMessage([]byte(`{"cmd":"browser_control_result","request_id":"req-1","success":true,"data":"ok"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cmd != CmdBrowserControlResult {
+			t.Fatalf("cmd = %q, want %q", cmd, CmdBrowserControlResult)
+		}
+		msg, ok := data.(*BrowserControlResultMessage)
+		if !ok || msg.RequestID != "req-1" || !msg.Success || Deref(msg.Data) != "ok" {
+			t.Fatalf("message = %#v, want browser control result payload", data)
+		}
+	})
 }

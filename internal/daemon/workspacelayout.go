@@ -174,11 +174,21 @@ func (d *Daemon) sendWorkspaceLayoutSplitActionResult(client *wsClient, workspac
 }
 
 func (d *Daemon) sendWorkspaceLayoutTileActionResult(client *wsClient, action, workspaceID, tileID string, err error) {
+	d.sendWorkspaceLayoutTileActionResultWithRequest(client, action, workspaceID, tileID, nil, err)
+}
+
+func (d *Daemon) sendWorkspaceLayoutTileActionResultWithRequest(
+	client *wsClient,
+	action, workspaceID, tileID string,
+	requestID *string,
+	err error,
+) {
 	result := protocol.WorkspaceLayoutActionResultMessage{
 		Event:       protocol.EventWorkspaceLayoutActionResult,
 		Action:      action,
 		WorkspaceID: workspaceID,
 		TileID:      protocol.Ptr(strings.TrimSpace(tileID)),
+		RequestID:   requestID,
 		Success:     err == nil,
 	}
 	if err != nil {
@@ -286,11 +296,34 @@ func (d *Daemon) ensureAgentPaneInWorkspace(workspaceID, sessionID, title string
 	return d.store.SaveWorkspaceLayout(*snapshot)
 }
 
+func workspaceLayoutHasLeaf(layout workspacelayout.Node, leafID string) bool {
+	if strings.TrimSpace(leafID) == "" {
+		return false
+	}
+	for _, paneID := range workspacelayout.PaneIDs(layout) {
+		if paneID == leafID {
+			return true
+		}
+	}
+	for _, tileID := range workspacelayout.TileIDs(layout) {
+		if tileID == leafID {
+			return true
+		}
+	}
+	return false
+}
+
 func firstWorkspaceLayoutPaneID(snapshot workspacelayout.WorkspaceLayout) string {
+	if workspaceLayoutHasLeaf(snapshot.Layout, snapshot.ActivePaneID) {
+		return snapshot.ActivePaneID
+	}
 	for _, pane := range snapshot.Panes {
 		if strings.TrimSpace(pane.PaneID) != "" {
 			return pane.PaneID
 		}
+	}
+	if tileIDs := workspacelayout.TileIDs(snapshot.Layout); len(tileIDs) > 0 {
+		return tileIDs[0]
 	}
 	return ""
 }
@@ -410,8 +443,8 @@ func (d *Daemon) handleWorkspaceLayoutDockTile(client *wsClient, msg *protocol.W
 
 // dockTile docks (or moves) a tile into a workspace layout and persists it.
 // It is shared by the websocket dock command and the `attn open` unix command.
-// anchorPaneID may be empty — it falls back to the active pane, then the first
-// pane. tileParams is opaque layout data (the markdown file path, for markdown).
+// anchorPaneID may be empty — it falls back to the active leaf, then the first
+// pane or tile. tileParams is opaque layout data (the markdown file path, for markdown).
 func (d *Daemon) dockTile(workspaceID, anchorPaneID, tileID, tileKind, tileParams string, edge protocol.WorkspaceLayoutDockEdge, ratio *float64) error {
 	snapshot, err := d.ensureWorkspaceLayout(workspaceID)
 	if err != nil {
@@ -430,7 +463,7 @@ func (d *Daemon) dockTile(workspaceID, anchorPaneID, tileID, tileKind, tileParam
 	if anchorPaneID == "" {
 		anchorPaneID = snapshot.ActivePaneID
 	}
-	if !workspacelayout.HasPane(snapshot.Layout, anchorPaneID) {
+	if !workspaceLayoutHasLeaf(snapshot.Layout, anchorPaneID) {
 		anchorPaneID = firstWorkspaceLayoutPaneID(*snapshot)
 	}
 	if anchorPaneID == "" {
@@ -498,6 +531,89 @@ func (d *Daemon) handleWorkspaceLayoutUndockTile(client *wsClient, msg *protocol
 	}
 	d.broadcastWorkspaceLayoutUpdated(msg.WorkspaceID)
 	d.sendWorkspaceLayoutTileActionResult(client, protocol.CmdWorkspaceLayoutUndockTile, msg.WorkspaceID, tileID, nil)
+}
+
+func (d *Daemon) handleWorkspaceLayoutUpdateTile(client *wsClient, msg *protocol.WorkspaceLayoutUpdateTileMessage) {
+	requestID := protocol.Ptr(strings.TrimSpace(msg.RequestID))
+	snapshot, err := d.ensureWorkspaceLayout(msg.WorkspaceID)
+	if err != nil {
+		d.sendWorkspaceLayoutTileActionResultWithRequest(client, protocol.CmdWorkspaceLayoutUpdateTile, msg.WorkspaceID, msg.TileID, requestID, err)
+		return
+	}
+	tileID := strings.TrimSpace(msg.TileID)
+	tileParams := strings.TrimSpace(msg.TileParams)
+	if tileID == "" || tileParams == "" {
+		d.sendWorkspaceLayoutTileActionResultWithRequest(
+			client,
+			protocol.CmdWorkspaceLayoutUpdateTile,
+			msg.WorkspaceID,
+			tileID,
+			requestID,
+			fmt.Errorf("tile_id and tile_params are required"),
+		)
+		return
+	}
+	var tileKind string
+	for _, tile := range workspacelayout.TileLeaves(snapshot.Layout) {
+		if tile.TileID == tileID {
+			tileKind = tile.TileKind
+			break
+		}
+	}
+	if tileKind == "" {
+		d.sendWorkspaceLayoutTileActionResultWithRequest(
+			client,
+			protocol.CmdWorkspaceLayoutUpdateTile,
+			msg.WorkspaceID,
+			tileID,
+			requestID,
+			fmt.Errorf("tile not found: %s", tileID),
+		)
+		return
+	}
+	if tileKind != string(workspacelayout.TileKindBrowser) {
+		d.sendWorkspaceLayoutTileActionResultWithRequest(
+			client,
+			protocol.CmdWorkspaceLayoutUpdateTile,
+			msg.WorkspaceID,
+			tileID,
+			requestID,
+			fmt.Errorf("tile parameters cannot be updated for tile kind %q", tileKind),
+		)
+		return
+	}
+	tileParams, err = validateBrowserURL(tileParams)
+	if err != nil {
+		d.sendWorkspaceLayoutTileActionResultWithRequest(
+			client,
+			protocol.CmdWorkspaceLayoutUpdateTile,
+			msg.WorkspaceID,
+			tileID,
+			requestID,
+			err,
+		)
+		return
+	}
+	layout, ok := workspacelayout.UpdateTileParams(snapshot.Layout, tileID, tileParams)
+	if !ok {
+		d.sendWorkspaceLayoutTileActionResultWithRequest(
+			client,
+			protocol.CmdWorkspaceLayoutUpdateTile,
+			msg.WorkspaceID,
+			tileID,
+			requestID,
+			fmt.Errorf("tile not found: %s", tileID),
+		)
+		return
+	}
+	snapshot.Layout = layout
+	normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot)
+	if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
+		d.sendWorkspaceLayoutTileActionResultWithRequest(client, protocol.CmdWorkspaceLayoutUpdateTile, msg.WorkspaceID, tileID, requestID, err)
+		return
+	}
+	d.broadcastWorkspaceLayoutUpdated(msg.WorkspaceID)
+	d.sendWorkspaceLayoutTileActionResultWithRequest(client, protocol.CmdWorkspaceLayoutUpdateTile, msg.WorkspaceID, tileID, requestID, nil)
 }
 
 func (d *Daemon) handleWorkspaceLayoutMoveLeaf(client *wsClient, msg *protocol.WorkspaceLayoutMoveLeafMessage) {

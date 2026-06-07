@@ -14,7 +14,9 @@ import (
 	"nhooyr.io/websocket"
 )
 
-const remoteWSMessageReadLimit = 8 << 20
+// Browser screenshot and PDF results may approach the browser host's 24 MiB
+// serialized-result budget when relayed from an authenticated endpoint.
+const remoteWSMessageReadLimit = 32 << 20
 const remoteWSDialRetryDelay = 250 * time.Millisecond
 
 func connectViaSSH(ctx context.Context, sshTarget, authToken, profile string) (*websocket.Conn, *exec.Cmd, error) {

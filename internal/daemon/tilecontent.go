@@ -61,6 +61,11 @@ func (d *Daemon) setSelectedSession(sessionID string) {
 	}
 	d.selectedSessionMu.Lock()
 	d.selectedSessionID = sessionID
+	if workspaceID, _, ok := d.store.FindWorkspaceLayoutPaneBySessionID(sessionID); ok {
+		d.selectedWorkspaceID = workspaceID
+	} else {
+		d.selectedWorkspaceID = ""
+	}
 	d.selectedSessionMu.Unlock()
 }
 
@@ -68,6 +73,22 @@ func (d *Daemon) currentlySelectedSession() string {
 	d.selectedSessionMu.RLock()
 	defer d.selectedSessionMu.RUnlock()
 	return d.selectedSessionID
+}
+
+func (d *Daemon) setSelectedWorkspace(workspaceID string) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return
+	}
+	d.selectedSessionMu.Lock()
+	d.selectedWorkspaceID = workspaceID
+	d.selectedSessionMu.Unlock()
+}
+
+func (d *Daemon) currentlySelectedWorkspace() string {
+	d.selectedSessionMu.RLock()
+	defer d.selectedSessionMu.RUnlock()
+	return d.selectedWorkspaceID
 }
 
 // tileFilePath resolves a tile's persisted params into a kind + file path.
