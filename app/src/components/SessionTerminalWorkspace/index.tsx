@@ -36,10 +36,15 @@ import type { DockTarget } from './dockTarget';
 
 const ZOOM_PATH_RATIO = 0.76;
 const RESIZE_MOUSE_SUPPRESSION_MS = 1_500;
+// After a drag ends the active-resize token is cleared, so suppression no longer
+// rides on it; we only need to briefly swallow the trailing pointerup/synthetic
+// click from the release itself. Keep this short so a deliberate click, select,
+// or scroll right after resizing is not dropped.
+const RESIZE_MOUSE_RELEASE_GUARD_MS = 150;
 
-function suppressTerminalMouseDuringResize(): void {
+function suppressTerminalMouseDuringResize(durationMs = RESIZE_MOUSE_SUPPRESSION_MS): void {
   document.documentElement.dataset.attnWorkspaceMouseSuppressUntil = String(
-    Date.now() + RESIZE_MOUSE_SUPPRESSION_MS,
+    Date.now() + durationMs,
   );
 }
 
@@ -912,7 +917,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           delete document.documentElement.dataset.attnWorkspaceResizing;
           delete document.documentElement.dataset.attnWorkspaceResizeToken;
         }
-        suppressTerminalMouseDuringResize();
+        // Only a short trailing-event guard here — the long during-drag window
+        // would otherwise outlive the drag and swallow normal interaction.
+        suppressTerminalMouseDuringResize(RESIZE_MOUSE_RELEASE_GUARD_MS);
         releaseSelectionLock();
         setResizingSplit((current) => (current?.splitId === splitId ? null : current));
         dragCleanupRef.current = null;
