@@ -546,7 +546,7 @@ fn capture_native_window_screenshot<R: Runtime>(
     let app_for_window_id = app.clone();
     app.run_on_main_thread(move || {
         let result = app_for_window_id
-            .get_webview_window("main")
+            .get_window("main")
             .ok_or_else(|| "main window not found".to_string())
             .and_then(|window| {
                 window
@@ -826,7 +826,7 @@ fn chrono_like_now() -> String {
 
 fn window_bounds<R: Runtime>(app: &AppHandle<R>) -> Result<Value, String> {
     let window = app
-        .get_webview_window("main")
+        .get_window("main")
         .ok_or_else(|| "main window not found".to_string())?;
     let scale_factor = window
         .scale_factor()
@@ -890,7 +890,7 @@ fn set_window_bounds<R: Runtime>(app: &AppHandle<R>, payload: &Value) -> Result<
     }
 
     let window = app
-        .get_webview_window("main")
+        .get_window("main")
         .ok_or_else(|| "main window not found".to_string())?;
     window
         .set_position(LogicalPosition::new(x, y))

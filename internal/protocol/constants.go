@@ -10,11 +10,15 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "81"
+const ProtocolVersion = "88"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
 const CapabilityWorkspaceSessions = "workspace_sessions"
+
+// CapabilityBrowserHost identifies the local Tauri client that owns the
+// visible child webview used by docked browser tiles.
+const CapabilityBrowserHost = "browser_host"
 
 // SessionAgent labels in-tree and externally registered agent identifiers.
 type SessionAgent = string
@@ -41,6 +45,7 @@ const (
 	CmdHeartbeat                          = "heartbeat"
 	CmdSessionVisualized                  = "session_visualized"
 	CmdSessionSelected                    = "session_selected"
+	CmdWorkspaceSelected                  = "workspace_selected"
 	CmdMuteWorkspace                      = "mute_workspace"
 	CmdQueryPRs                           = "query_prs"
 	CmdMutePR                             = "mute_pr"
@@ -114,10 +119,14 @@ const (
 	CmdWorkspaceLayoutSetSplitRatio       = "workspace_layout_set_split_ratio"
 	CmdWorkspaceLayoutDockTile            = "workspace_layout_dock_tile"
 	CmdWorkspaceLayoutUndockTile          = "workspace_layout_undock_tile"
+	CmdWorkspaceLayoutUpdateTile          = "workspace_layout_update_tile"
 	CmdWorkspaceLayoutMoveLeaf            = "workspace_layout_move_leaf"
 	CmdWorkspaceLayoutMoveLeafToWorkspace = "workspace_layout_move_leaf_to_workspace"
 	CmdWorkspaceTileContentGet            = "workspace_tile_content_get"
 	CmdOpenMarkdown                       = "open_markdown"
+	CmdOpenBrowser                        = "open_browser"
+	CmdBrowserControl                     = "browser_control"
+	CmdBrowserControlResult               = "browser_control_result"
 	CmdRegisterWorkspace                  = "register_workspace"
 	CmdUnregisterWorkspace                = "unregister_workspace"
 	CmdRenameSession                      = "rename_session"
@@ -189,6 +198,8 @@ const (
 	EventWorkspaceLayoutUpdated      = "workspace_layout_updated"
 	EventWorkspaceLayoutActionResult = "workspace_layout_action_result"
 	EventWorkspaceTileContent        = "workspace_tile_content"
+	EventBrowserControlResponse      = "browser_control_response"
+	EventBrowserControlRequest       = "browser_control_request"
 	EventCommandError                = "command_error"
 )
 
@@ -336,6 +347,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdSessionSelected:
 		var msg SessionSelectedMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkspaceSelected:
+		var msg WorkspaceSelectedMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
@@ -852,6 +870,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
+	case CmdWorkspaceLayoutUpdateTile:
+		var msg WorkspaceLayoutUpdateTileMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workspace_layout_update_tile: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
 	case CmdWorkspaceLayoutMoveLeaf:
 		var msg WorkspaceLayoutMoveLeafMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
@@ -877,6 +902,27 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg OpenMarkdownMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal open_markdown: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdOpenBrowser:
+		var msg OpenBrowserMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal open_browser: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdBrowserControl:
+		var msg BrowserControlMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal browser_control: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdBrowserControlResult:
+		var msg BrowserControlResultMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal browser_control_result: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

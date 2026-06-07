@@ -13,6 +13,30 @@ import (
 	"github.com/victorarias/attn/internal/transcript"
 )
 
+func TestWritePrivateFileReplacesPublicFileWithOwnerOnlyPermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "capture.png")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePrivateFile(path, []byte("private")); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("capture permissions = %o, want 600", got)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "private" {
+		t.Fatalf("capture contents = %q, want private", data)
+	}
+}
+
 func writeCopilotSessionState(t *testing.T, homeDir, sessionID, cwd string, startTime time.Time, withStart, withAssistant bool, modTime time.Time) string {
 	t.Helper()
 

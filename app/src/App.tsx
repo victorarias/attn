@@ -43,6 +43,7 @@ import { useTheme } from './hooks/useTheme';
 import { useOpenPR, type OpenPRProgress } from './hooks/useOpenPR';
 import { useUiAutomationBridge } from './hooks/useUiAutomationBridge';
 import { ptySpawn } from './pty/bridge';
+import { clearBrowserHostFocus, controlBrowserHost, isBrowserHostOwnedTarget } from './browser/host';
 import {
   agentLabel,
   getAgentAvailability,
@@ -67,6 +68,12 @@ const CHANGES_BRANCH_DIFF_SLOW_COOLDOWN_MS = 30_000;
 const TERMINAL_AGENT: SessionAgent = 'shell';
 
 type LocationPickerPurpose = 'workspace' | 'session';
+
+function handleAppPointerDownCapture(event: { target: EventTarget | null }): void {
+  if (!isBrowserHostOwnedTarget(event.target)) {
+    clearBrowserHostFocus();
+  }
+}
 
 interface SplitSessionOptions {
   baseSessionId?: string;
@@ -412,11 +419,13 @@ function App() {
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
     sendSessionSelected,
+    sendWorkspaceSelected,
     sendSessionVisualized,
     sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
     sendWorkspaceSetSplitRatio,
     sendWorkspaceUndockTile,
+    sendWorkspaceUpdateTile,
     sendWorkspaceMoveLeaf,
     sendWorkspaceMoveLeafToWorkspace,
     tileContents,
@@ -537,11 +546,13 @@ function App() {
         sendSubscribeGitStatus={sendSubscribeGitStatus}
         sendUnsubscribeGitStatus={sendUnsubscribeGitStatus}
         sendSessionSelected={sendSessionSelected}
+        sendWorkspaceSelected={sendWorkspaceSelected}
         sendSessionVisualized={sendSessionVisualized}
         sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
         sendWorkspaceSetSplitRatio={sendWorkspaceSetSplitRatio}
         sendWorkspaceUndockTile={sendWorkspaceUndockTile}
+        sendWorkspaceUpdateTile={sendWorkspaceUpdateTile}
         sendWorkspaceMoveLeaf={sendWorkspaceMoveLeaf}
         sendWorkspaceMoveLeafToWorkspace={sendWorkspaceMoveLeafToWorkspace}
         tileContents={tileContents}
@@ -629,11 +640,13 @@ interface AppContentProps {
   sendSubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendSubscribeGitStatus'];
   sendUnsubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendUnsubscribeGitStatus'];
   sendSessionSelected: ReturnType<typeof useDaemonSocket>['sendSessionSelected'];
+  sendWorkspaceSelected: ReturnType<typeof useDaemonSocket>['sendWorkspaceSelected'];
   sendSessionVisualized: ReturnType<typeof useDaemonSocket>['sendSessionVisualized'];
   sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
   sendWorkspaceSetSplitRatio: ReturnType<typeof useDaemonSocket>['sendWorkspaceSetSplitRatio'];
   sendWorkspaceUndockTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceUndockTile'];
+  sendWorkspaceUpdateTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceUpdateTile'];
   sendWorkspaceMoveLeaf: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeaf'];
   sendWorkspaceMoveLeafToWorkspace: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeafToWorkspace'];
   tileContents: ReturnType<typeof useDaemonSocket>['tileContents'];
@@ -716,11 +729,13 @@ sendFetchPRDetails,
   sendSubscribeGitStatus,
   sendUnsubscribeGitStatus,
   sendSessionSelected,
+  sendWorkspaceSelected,
   sendSessionVisualized,
   sendWorkspaceAddSessionPane,
   sendWorkspaceClosePane,
   sendWorkspaceSetSplitRatio,
   sendWorkspaceUndockTile,
+  sendWorkspaceUpdateTile,
   sendWorkspaceMoveLeaf,
   sendWorkspaceMoveLeafToWorkspace,
   tileContents,
@@ -773,6 +788,7 @@ sendFetchPRDetails,
   // selected; the selection controller also ignores it once the workspace gains
   // sessions or disappears.
   const [selectedSessionlessWorkspaceId, setSelectedSessionlessWorkspaceId] = useState<string | null>(null);
+  const [selectedTile, setSelectedTile] = useState<{ workspaceId: string; tileId: string } | null>(null);
   // handleSelectWorkspace is defined far below (it depends on the workspace view
   // models); the automation bridge above it reaches the live handler through
   // this ref so test scenarios can select a workspace by id.
@@ -1416,6 +1432,15 @@ sendFetchPRDetails,
   const attentionPanelOpen = openDockPanels.attention;
   const diffDetailPanelOpen = openDockPanels.diffDetail;
   const changesPanelVisible = view === 'session' && diffPanelOpen && Boolean(activeRepoDaemonSession?.directory);
+  const blockingOverlayOpen = locationPickerOpen
+    || thumbsOpen
+    || whatsNew.isOpen
+    || settingsOpen
+    || shortcutsOpen
+    || closedWorktree !== null
+    || pendingSessionClose !== null
+    || sessionCreationJob !== null
+    || openPRLauncherJob !== null;
   const waitingReviewSessions = useMemo(
     () => sessions
       .map((session) => ({
@@ -1826,6 +1851,7 @@ sendFetchPRDetails,
 
   const handleSelectSession = useCallback(
     (id: string) => {
+      setSelectedTile(null);
       setSelectedSessionlessWorkspaceId(null);
       const session = sessions.find((entry) => entry.id === id);
       const sessionPane = session?.workspace.agents.find((pane) => pane.sessionId === id);
@@ -2093,6 +2119,11 @@ sendFetchPRDetails,
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId;
   }, [activeWorkspaceId]);
+  useEffect(() => {
+    if (view === 'session' && activeWorkspaceId) {
+      sendWorkspaceSelected(activeWorkspaceId);
+    }
+  }, [activeWorkspaceId, sendWorkspaceSelected, view]);
   const getActiveLeafDropSnapshot = useCallback(
     () => getWorkspaceLeafDropSnapshot(activeWorkspaceIdRef.current),
     [getWorkspaceLeafDropSnapshot],
@@ -2199,6 +2230,37 @@ sendFetchPRDetails,
     [handleSelectSession, setView, sidebarWorkspaceViews, workspaceViews],
   );
   selectWorkspaceRef.current = handleSelectWorkspace;
+
+  const handleSelectTile = useCallback((workspaceId: string, tileId: string) => {
+    handleSelectWorkspace(workspaceId);
+    setSelectedTile({ workspaceId, tileId });
+  }, [handleSelectWorkspace]);
+
+  const handleCloseTile = useCallback((workspaceId: string, tileId: string) => {
+    setSelectedTile((current) => (
+      current?.workspaceId === workspaceId && current.tileId === tileId ? null : current
+    ));
+    void sendWorkspaceUndockTile(workspaceId, tileId).catch(() => {});
+  }, [sendWorkspaceUndockTile]);
+
+  const handleReloadTile = useCallback((workspaceId: string, tileId: string) => {
+    void controlBrowserHost(workspaceId, tileId, 'reload').catch((error) => {
+      console.warn('[App] Failed to reload browser tile:', error);
+    });
+  }, []);
+
+  useEffect(() => {
+    setSelectedTile((current) => {
+      if (!current) {
+        return null;
+      }
+      const workspace = workspaceViews.find((entry) => entry.id === current.workspaceId);
+      const stillExists = workspace?.children.some(
+        (child) => child.kind === 'tile' && child.tile.tileId === current.tileId,
+      );
+      return stillExists ? current : null;
+    });
+  }, [workspaceViews]);
 
   const canMoveDraggedLeafToWorkspace = useCallback((workspace: { id: string; endpointId?: string }) => {
     const drag = leafWorkspaceDragRef.current;
@@ -2734,7 +2796,7 @@ sendFetchPRDetails,
 
   return (
     <DaemonProvider sendPRAction={sendPRAction} sendMutePR={sendMutePR} sendMuteRepo={sendMuteRepo} sendMuteAuthor={sendMuteAuthor} sendPRVisited={sendPRVisited}>
-    <div className="app">
+    <div className="app" onPointerDownCapture={handleAppPointerDownCapture}>
       {/* Error banner for version mismatch */}
       {connectionError && (
         <div className="connection-error-banner">
@@ -2811,6 +2873,8 @@ sendFetchPRDetails,
           visualIndexByWorkspaceId={visualIndexByWorkspaceId}
           selectedId={activeSessionId}
           selectedWorkspaceId={activeWorkspaceId}
+          selectedTile={selectedTile}
+          tileContents={tileContents}
           collapsed={sidebarCollapsed}
           headerActions={sidebarHeaderActions}
           footerShortcuts={sidebarFooterShortcuts}
@@ -2832,6 +2896,9 @@ sendFetchPRDetails,
           onWorkspaceDragDrop={handleWorkspaceDragDrop}
           onSelectSession={handleSelectSession}
           onSelectWorkspace={handleSelectWorkspace}
+          onSelectTile={handleSelectTile}
+          onCloseTile={handleCloseTile}
+          onReloadTile={handleReloadTile}
           onNewSession={() => handleNewSession('vertical')}
           onCloseSession={handleRequestCloseSession}
           onReloadSession={handleReloadSession}
@@ -2878,7 +2945,7 @@ sendFetchPRDetails,
                     fontSize={terminalFontSize}
                     resolvedTheme={resolvedTheme}
                     focusRequestToken={utilityFocusRequestToken}
-                    enabled={!locationPickerOpen}
+                    enabled={!blockingOverlayOpen}
                     isActiveSession={isActiveWorkspace}
                     isSessionViewVisible={view === 'session'}
                     eventRouter={paneRuntimeEventRouter}
@@ -2915,8 +2982,11 @@ sendFetchPRDetails,
                     }}
                     onNavigateOutOfSession={handleNavigateOutOfSession}
                     onUndockTile={(tileId) => {
-                      void sendWorkspaceUndockTile(workspace.id, tileId).catch(() => {});
+                      handleCloseTile(workspace.id, tileId);
                     }}
+                    onUpdateTile={(tileId, tileParams) => (
+                      sendWorkspaceUpdateTile(workspace.id, tileId, tileParams)
+                    )}
                     onMoveLeaf={(leafId, anchorId, edge, ratio) => {
                       const targetWorkspaceId = activeWorkspaceIdRef.current || workspace.id;
                       if (targetWorkspaceId !== workspace.id) {

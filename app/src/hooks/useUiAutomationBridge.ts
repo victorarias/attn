@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { emit, listen } from '@tauri-apps/api/event';
-import { isTauri } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Session } from '../store/sessions';
 import type { SessionAgent } from '../types/sessionAgent';
@@ -1492,6 +1492,10 @@ export function useUiAutomationBridge({
           tileBodyFocused,
         };
       }
+      case 'get_browser_focus_state':
+        return {
+          label: await invoke<string | null>('browser_host_focus_state'),
+        };
       case 'location_picker_get_state':
         return collectLocationPickerUiState();
       case 'location_picker_open': {

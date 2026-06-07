@@ -205,7 +205,12 @@ describe('shortcut registry', () => {
       expect(SHORTCUTS['terminal.collapse']).toEqual({ key: '~', shift: true });
       expect(SHORTCUTS['terminal.splitVertical']).toEqual({ key: 'd', meta: true });
       expect(SHORTCUTS['terminal.splitHorizontal']).toEqual({ key: 'd', meta: true, shift: true });
-      expect(SHORTCUTS['terminal.toggleZoom']).toEqual({ key: 'z', meta: true, shift: true });
+      expect(SHORTCUTS['terminal.toggleZoom']).toEqual({
+        key: 'z',
+        meta: true,
+        shift: true,
+        editableTarget: 'native',
+      });
       expect(SHORTCUTS['terminal.toggleMaximize']).toEqual({ key: 'Enter', meta: true, shift: true });
       expect(SHORTCUTS['terminal.close']).toEqual({ key: 'w', meta: true });
       expect(SHORTCUTS['terminal.focusLeft']).toEqual({ key: 'ArrowLeft', meta: true, alt: true });

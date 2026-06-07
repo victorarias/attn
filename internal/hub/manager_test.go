@@ -1,13 +1,17 @@
 package hub
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
+	"nhooyr.io/websocket"
 )
 
 func TestManagerRemoteSessionsTagAndSeparateEndpoints(t *testing.T) {
@@ -197,6 +201,14 @@ func TestManagerRemoteWorkspacesTrackAndClear(t *testing.T) {
 	}
 	if endpointID, ok := manager.EndpointIDForWorkspace("ws-a"); !ok || endpointID != first.ID {
 		t.Fatalf("EndpointIDForWorkspace(ws-a) = (%q, %v), want (%q, true)", endpointID, ok, first.ID)
+	}
+	workspace := manager.RemoteWorkspace("ws-a")
+	if workspace == nil || workspace.Layout == nil || workspace.Layout.WorkspaceID != "ws-a" {
+		t.Fatalf("RemoteWorkspace(ws-a) = %+v", workspace)
+	}
+	workspace.Layout.Panes[0].Title = "mutated copy"
+	if fresh := manager.RemoteWorkspace("ws-a"); fresh == nil || fresh.Layout.Panes[0].Title == "mutated copy" {
+		t.Fatal("RemoteWorkspace returned shared layout state")
 	}
 	if endpointID, ok := manager.EndpointIDForPTYTarget("sess-a"); !ok || endpointID != first.ID {
 		t.Fatalf("EndpointIDForPTYTarget(sess-a) = (%q, %v), want (%q, true)", endpointID, ok, first.ID)
@@ -619,5 +631,106 @@ func TestManagerObserveRemoteEventCachesReviewCommentAndLoopOwnership(t *testing
 	}
 	if endpointID, ok := manager.EndpointIDForReviewLoop("loop-1"); ok || endpointID != "" {
 		t.Fatalf("EndpointIDForReviewLoop(after stop) = (%q, %v), want ('', false)", endpointID, ok)
+	}
+}
+
+func TestManagerForwardBrowserControlReturnsOwningEndpointResult(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("Accept() error = %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		_, payload, err := conn.Read(r.Context())
+		if err != nil {
+			t.Errorf("Read() error = %v", err)
+			return
+		}
+		var request protocol.BrowserControlMessage
+		if err := json.Unmarshal(payload, &request); err != nil {
+			t.Errorf("Unmarshal() error = %v", err)
+			return
+		}
+		if protocol.Deref(request.WorkspaceID) != "remote-workspace" {
+			t.Errorf("workspace_id = %q, want remote-workspace", protocol.Deref(request.WorkspaceID))
+		}
+		response, err := json.Marshal(protocol.BrowserControlResponseMessage{
+			Event:     protocol.EventBrowserControlResponse,
+			RequestID: protocol.Deref(request.RequestID),
+			Success:   true,
+			Data:      protocol.Ptr(`{"title":"Remote"}`),
+		})
+		if err != nil {
+			t.Errorf("Marshal() error = %v", err)
+			return
+		}
+		if err := conn.Write(r.Context(), websocket.MessageText, response); err != nil {
+			t.Errorf("Write() error = %v", err)
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	manager := NewManager(store.New(), nil, nil, nil, nil)
+	manager.runtimes["endpoint-1"] = &endpointRuntime{conn: conn}
+	go func() {
+		_, _ = manager.consumeRemote(ctx, "endpoint-1", conn)
+	}()
+
+	data, err := manager.ForwardBrowserControl(ctx, "endpoint-1", protocol.BrowserControlMessage{
+		Cmd:         protocol.CmdBrowserControl,
+		Action:      "get_title",
+		RequestID:   protocol.Ptr("request-1"),
+		WorkspaceID: protocol.Ptr("remote-workspace"),
+	})
+	if err != nil {
+		t.Fatalf("ForwardBrowserControl() error = %v", err)
+	}
+	if data != `{"title":"Remote"}` {
+		t.Fatalf("ForwardBrowserControl() data = %q", data)
+	}
+}
+
+func TestManagerBrowserControlResponseMustComeFromOwningEndpoint(t *testing.T) {
+	manager := NewManager(store.New(), nil, nil, nil, nil)
+	done := make(chan browserControlResult, 1)
+	manager.browserControls["request-1"] = pendingBrowserControl{
+		endpointID: "endpoint-1",
+		done:       done,
+	}
+	payload, err := json.Marshal(protocol.BrowserControlResponseMessage{
+		Event:     protocol.EventBrowserControlResponse,
+		RequestID: "request-1",
+		Success:   true,
+		Data:      protocol.Ptr("result"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manager.resolveBrowserControl("endpoint-2", payload)
+	select {
+	case result := <-done:
+		t.Fatalf("accepted browser result from wrong endpoint: %+v", result)
+	default:
+	}
+
+	manager.resolveBrowserControl("endpoint-1", payload)
+	select {
+	case result := <-done:
+		if result.err != nil || result.data != "result" {
+			t.Fatalf("browser result = %+v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for owning endpoint result")
 	}
 }

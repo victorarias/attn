@@ -121,6 +121,7 @@ interface SessionTerminalWorkspaceProps {
     ghostPos: { x: number; y: number } | null;
   } | null;
   onUndockTile?: (tileId: string) => void;
+  onUpdateTile?: (tileId: string, tileParams: string) => Promise<unknown> | void;
   tileContents?: Record<string, TileContentState>;
   allowLocalTileTargets?: boolean;
   onRequestTileContent?: (workspaceId: string, tileId: string) => void;
@@ -154,6 +155,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onLeafDragEnd,
     leafDragPreview,
     onUndockTile,
+    onUpdateTile,
     tileContents,
     allowLocalTileTargets = true,
     onRequestTileContent,
@@ -707,7 +709,15 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
               content={tileContents?.[tileContentKey(workspaceId, tileLeaf.tileId)]}
               allowLocalTargets={allowLocalTileTargets}
               dragging={effectiveDraggingLeafId === tileLeaf.tileId}
+              visible={
+                isActiveSession
+                && isSessionViewVisible
+                && enabled
+                && renamePane === null
+                && effectiveDraggingLeafId === null
+              }
               onClose={() => onUndockTile?.(tileLeaf.tileId)}
+              onUpdateParams={(tileParams) => onUpdateTile?.(tileLeaf.tileId, tileParams)}
               onHeaderPointerDown={(event) => beginLeafDrag(tileLeaf.tileId, event)}
               onRequestContent={onRequestTileContent ?? (() => {})}
               bodyRef={tileLeaf.tileId === firstTileId ? firstTileBodyRef : undefined}
@@ -722,13 +732,18 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       beginLeafDrag,
       effectiveDraggingLeafId,
       onUndockTile,
+      onUpdateTile,
       tileLeafById,
       firstTileId,
       tileContents,
       allowLocalTileTargets,
       onRequestTileContent,
       workspaceId,
+      renamePane,
       fontSize,
+      isActiveSession,
+      isSessionViewVisible,
+      enabled,
       handleAgentPaneMouseDown,
       handleGhosttyTerminalReady,
       paneFrameStyle,

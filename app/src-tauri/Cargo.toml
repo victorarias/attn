@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "=2.11.2", features = ["unstable"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
@@ -31,9 +31,15 @@ regex = "1"
 libc = "0.2"
 base64 = "0.22"
 getrandom = "0.2"
+image = { version = "0.25", default-features = false, features = ["png", "tiff"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow"] }
+block2 = "0.6"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSTextField", "NSView", "NSWindow"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSError", "NSObject", "NSString"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "WKContentWorld", "WKFrameInfo", "WKPDFConfiguration", "WKScriptMessage", "WKScriptMessageHandler", "WKSnapshotConfiguration", "WKUIDelegate", "WKUserContentController", "WKUserScript", "WKWebView", "WKWebViewConfiguration"] }
 
 [dev-dependencies]
 anyhow = "1"

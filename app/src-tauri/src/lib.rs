@@ -1,3 +1,5 @@
+mod browser_alerts;
+mod browser_host;
 mod profile;
 mod thumbs;
 mod ui_automation;
@@ -473,6 +475,11 @@ fn get_build_profile() -> BuildProfileInfo {
 }
 
 #[tauri::command]
+fn get_browser_host_token(_caller: browser_host::TrustedMainWebview) -> Result<String, String> {
+    profile::ensure_browser_host_token()
+}
+
+#[tauri::command]
 fn ensure_daemon(_app: tauri::AppHandle) -> Result<(), String> {
     let _guard = ENSURE_DAEMON_LOCK
         .lock()
@@ -499,6 +506,98 @@ fn ensure_daemon(_app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
+}
+
+const CLOSE_ACTIVE_PANE_MENU_ID: &str = "attn-close-active-pane";
+const NATIVE_SHORTCUT_EVENT: &str = "attn:native-shortcut";
+const NATIVE_BROWSER_CLOSE_EVENT: &str = "attn:native-browser-close";
+
+fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, MenuItem, MenuItemKind};
+
+    let menu = Menu::default(app)?;
+    let close_active_pane = MenuItem::with_id(
+        app,
+        CLOSE_ACTIVE_PANE_MENU_ID,
+        "Close Pane",
+        true,
+        Some("CmdOrCtrl+W"),
+    )?;
+    let mut inserted_close_active_pane = false;
+
+    for item in menu.items()? {
+        let MenuItemKind::Submenu(submenu) = item else {
+            continue;
+        };
+        let is_file_menu = submenu.text()?.replace('&', "") == "File";
+        let mut removed_close_window = false;
+
+        for (position, item) in submenu.items()?.into_iter().enumerate().rev() {
+            let is_close_window = item
+                .as_predefined_menuitem()
+                .and_then(|item| item.text().ok())
+                .is_some_and(|text| text.replace('&', "") == "Close Window");
+            if !is_close_window {
+                continue;
+            }
+
+            submenu.remove_at(position)?;
+            removed_close_window = true;
+            if is_file_menu {
+                submenu.insert(&close_active_pane, position)?;
+                inserted_close_active_pane = true;
+            }
+        }
+
+        if removed_close_window && !is_file_menu {
+            let items = submenu.items()?;
+            let has_trailing_separator = items
+                .last()
+                .and_then(|item| item.as_predefined_menuitem())
+                .and_then(|item| item.text().ok())
+                .is_some_and(|text| text.is_empty());
+            if has_trailing_separator {
+                submenu.remove_at(items.len() - 1)?;
+            }
+        }
+
+        if is_file_menu && !inserted_close_active_pane {
+            submenu.append(&close_active_pane)?;
+            inserted_close_active_pane = true;
+        }
+    }
+
+    Ok(menu)
+}
+
+fn dispatch_native_shortcut(app: &tauri::AppHandle, shortcut_id: &str) {
+    use tauri::Manager;
+
+    let Some(main_webview) = app.get_webview("main") else {
+        return;
+    };
+    let Ok(shortcut_id) = serde_json::to_string(shortcut_id) else {
+        return;
+    };
+    let script = format!(
+        "window.dispatchEvent(new CustomEvent({NATIVE_SHORTCUT_EVENT:?}, {{ detail: {shortcut_id} }}));"
+    );
+    let _ = main_webview.eval(script);
+}
+
+fn dispatch_native_browser_close(app: &tauri::AppHandle, label: &str) {
+    use tauri::Manager;
+
+    let Some(main_webview) = app.get_webview("main") else {
+        return;
+    };
+    let Ok(label) = serde_json::to_string(label) else {
+        return;
+    };
+    let script = format!(
+        "window.dispatchEvent(new CustomEvent({NATIVE_BROWSER_CLOSE_EVENT:?}, {{ detail: {label} }}));"
+    );
+    let _ = main_webview.eval(script);
 }
 
 #[tauri::command]
@@ -862,14 +961,37 @@ pub fn run() {
         "window.__ATTN_AUTOMATION_ENABLED = {};",
         profile::automation_enabled()
     );
+    let native_dialog_capture_script = r#"
+Object.defineProperty(window, "__ATTN_NATIVE_DIALOGS", {
+  value: {
+    alert: window.alert.bind(window),
+    confirm: window.confirm.bind(window),
+    prompt: window.prompt.bind(window),
+  },
+  configurable: false,
+  enumerable: false,
+  writable: false,
+});
+"#;
 
     tauri::Builder::default()
         .append_invoke_initialization_script(automation_init_script)
+        .append_invoke_initialization_script(native_dialog_capture_script)
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .menu(app_menu)
+        .on_menu_event(|app, event| {
+            if event.id() == CLOSE_ACTIVE_PANE_MENU_ID {
+                if let Some(label) = browser_host::focused_browser_label() {
+                    dispatch_native_browser_close(app, &label);
+                } else {
+                    dispatch_native_shortcut(app, "session.close");
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             list_directory,
             ensure_daemon,
@@ -877,6 +999,14 @@ pub fn run() {
             open_in_editor,
             open_safe_markdown_target,
             get_build_profile,
+            get_browser_host_token,
+            browser_host::browser_host_mount,
+            browser_host::browser_host_update,
+            browser_host::browser_host_unmount,
+            browser_host::browser_host_control,
+            browser_host::browser_host_clear_focus,
+            browser_host::browser_host_claim_focus,
+            browser_host::browser_host_focus_state,
             thumbs::extract_patterns,
             thumbs::reveal_in_finder,
         ])
@@ -894,7 +1024,7 @@ pub fn run() {
                 .is_some_and(|v| v == "1")
             {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = app.get_window("main") {
                     let _ = window.set_always_on_top(true);
                     let _ = window.set_focusable(false);
                 }

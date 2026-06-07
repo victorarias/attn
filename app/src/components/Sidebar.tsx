@@ -5,6 +5,8 @@ import { RenamePopover } from './RenamePopover';
 import { StateIndicator } from './StateIndicator';
 import { formatShortcut } from '../shortcuts';
 import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
+import { tileContentKey, type TileContentState, type TileLeaf } from '../types/workspace';
+import { deriveTileTitle } from '../utils/tilePresentation';
 import type { WorkspaceWithSessions } from '../utils/workspaceViewModels';
 
 interface LocalSession {
@@ -23,6 +25,11 @@ interface LocalSession {
 }
 
 type SidebarWorkspace = WorkspaceWithSessions<LocalSession>;
+
+interface SelectedTile {
+  workspaceId: string;
+  tileId: string;
+}
 
 // A sessionless workspace only exists because the user left a docked tile
 // behind (the daemon tears down workspaces that hold no leaves at all). They're
@@ -49,12 +56,77 @@ function reviewLoopIndicator(status?: string): { glyph: string; label: string } 
   }
 }
 
+function TileSidebarRow({
+  workspaceId,
+  tile,
+  content,
+  selected,
+  muted = false,
+  onSelect,
+  onClose,
+  onReload,
+}: {
+  workspaceId: string;
+  tile: TileLeaf;
+  content?: TileContentState;
+  selected: boolean;
+  muted?: boolean;
+  onSelect: () => void;
+  onClose: () => void;
+  onReload: () => void;
+}) {
+  const title = deriveTileTitle(tile, content);
+  return (
+    <div
+      className={`session-item workspace-tile-item grouped ${selected ? 'selected' : ''} ${muted ? 'muted-session' : ''}`.trim()}
+      data-testid={`sidebar-tile-${workspaceId}-${tile.tileId}`}
+      data-tile-kind={tile.tileKind}
+      onClick={onSelect}
+    >
+      <span className={`workspace-tile-indicator workspace-tile-indicator--${tile.tileKind}`} aria-hidden="true" />
+      <span className="session-label">{title}</span>
+      {!muted && (
+        <div className="session-actions">
+          {tile.tileKind === 'browser' && (
+            <button
+              className="session-action-btn reload-session-btn"
+              data-testid={`reload-tile-${workspaceId}-${tile.tileId}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onReload();
+              }}
+              title="Reload browser"
+              aria-label={`Reload ${title}`}
+            >
+              ↻
+            </button>
+          )}
+          <button
+            className="session-action-btn close-session-btn"
+            data-testid={`close-tile-${workspaceId}-${tile.tileId}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClose();
+            }}
+            title="Close tile"
+            aria-label={`Close ${title}`}
+          >
+            ×
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface SidebarProps {
   workspaces: SidebarWorkspace[];
   visualOrder: SidebarWorkspace[];
   visualIndexByWorkspaceId: Map<string, number>;
   selectedId: string | null;
   selectedWorkspaceId: string | null;
+  selectedTile?: SelectedTile | null;
+  tileContents?: Record<string, TileContentState>;
   collapsed: boolean;
   headerActions: SidebarHeaderAction[];
   footerShortcuts?: FooterShortcut[];
@@ -73,6 +145,9 @@ interface SidebarProps {
   onWorkspaceDragDrop?: (workspace: SidebarWorkspace) => void;
   onSelectSession: (id: string) => void;
   onSelectWorkspace: (id: string) => void;
+  onSelectTile?: (workspaceId: string, tileId: string) => void;
+  onCloseTile?: (workspaceId: string, tileId: string) => void;
+  onReloadTile?: (workspaceId: string, tileId: string) => void;
   onNewSession: () => void;
   onCloseSession: (id: string) => void;
   onReloadSession: (id: string) => void;
@@ -195,6 +270,8 @@ export function Sidebar({
   visualIndexByWorkspaceId,
   selectedId,
   selectedWorkspaceId,
+  selectedTile = null,
+  tileContents = {},
   collapsed,
   headerActions,
   footerShortcuts,
@@ -213,6 +290,9 @@ export function Sidebar({
   onWorkspaceDragDrop,
   onSelectSession,
   onSelectWorkspace,
+  onSelectTile,
+  onCloseTile,
+  onReloadTile,
   onNewSession,
   onCloseSession,
   onReloadSession,
@@ -488,7 +568,22 @@ export function Sidebar({
                   </span>
                 )}
               </div>
-              {workspace.sessions.map((session) => {
+              {workspace.children.map((child) => {
+                if (child.kind === 'tile') {
+                  return (
+                    <TileSidebarRow
+                      key={child.id}
+                      workspaceId={workspace.id}
+                      tile={child.tile}
+                      content={tileContents[tileContentKey(workspace.id, child.tile.tileId)]}
+                      selected={selectedTile?.workspaceId === workspace.id && selectedTile.tileId === child.tile.tileId}
+                      onSelect={() => onSelectTile?.(workspace.id, child.tile.tileId)}
+                      onClose={() => onCloseTile?.(workspace.id, child.tile.tileId)}
+                      onReload={() => onReloadTile?.(workspace.id, child.tile.tileId)}
+                    />
+                  );
+                }
+                const session = child.session;
                 return (
                   <div
                     key={session.id}
@@ -628,23 +723,41 @@ export function Sidebar({
                     )}
                   </div>
                   <div className="muted-workspace-sessions">
-                    {workspace.sessions.map((session) => (
-                      <div
-                        key={session.id}
-                        className={`session-item grouped muted-session ${selectedId === session.id ? 'selected' : ''}`}
-                        data-testid={`sidebar-session-${session.id}`}
-                        data-state={session.state}
-                        onClick={() => onSelectSession(session.id)}
-                      >
-                        <StateIndicator state={session.state} size="md" seed={session.id} />
-                        <span className="session-label">{session.label}</span>
-                        {session.endpointName && (
-                          <span className={`session-endpoint-badge status-${session.endpointStatus || 'connected'}`}>
-                            {session.endpointName}
-                          </span>
-                        )}
-                      </div>
-                    ))}
+                    {workspace.children.map((child) => {
+                      if (child.kind === 'tile') {
+                        return (
+                          <TileSidebarRow
+                            key={child.id}
+                            workspaceId={workspace.id}
+                            tile={child.tile}
+                            content={tileContents[tileContentKey(workspace.id, child.tile.tileId)]}
+                            selected={selectedTile?.workspaceId === workspace.id && selectedTile.tileId === child.tile.tileId}
+                            muted
+                            onSelect={() => onSelectTile?.(workspace.id, child.tile.tileId)}
+                            onClose={() => onCloseTile?.(workspace.id, child.tile.tileId)}
+                            onReload={() => onReloadTile?.(workspace.id, child.tile.tileId)}
+                          />
+                        );
+                      }
+                      const session = child.session;
+                      return (
+                        <div
+                          key={session.id}
+                          className={`session-item grouped muted-session ${selectedId === session.id ? 'selected' : ''}`}
+                          data-testid={`sidebar-session-${session.id}`}
+                          data-state={session.state}
+                          onClick={() => onSelectSession(session.id)}
+                        >
+                          <StateIndicator state={session.state} size="md" seed={session.id} />
+                          <span className="session-label">{session.label}</span>
+                          {session.endpointName && (
+                            <span className={`session-endpoint-badge status-${session.endpointStatus || 'connected'}`}>
+                              {session.endpointName}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ))}

@@ -81,6 +81,7 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdWorkspaceLayoutSetSplitRatio,
 		protocol.CmdWorkspaceLayoutDockTile,
 		protocol.CmdWorkspaceLayoutUndockTile,
+		protocol.CmdWorkspaceLayoutUpdateTile,
 		protocol.CmdWorkspaceTileContentGet,
 		protocol.CmdRenameSession,
 		protocol.CmdRenameWorkspace,

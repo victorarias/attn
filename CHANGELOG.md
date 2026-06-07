@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-07]
+
+### Added
+- **Agents can open and control a persistent browser inside attn.** `attn browser open <url>` docks a real browser beside the current session, with an address bar, Reload and Close controls, sidebar presence, correct pane focus and dialog layering, and a durable cookie and local-storage profile so logins survive app restarts. Agents can navigate and inspect pages using semantic locators and stable element references; interact through forms, keyboard and pointer actions, frames, shadow DOM, cookies, alerts, and popups; wait for page state; and capture screenshots or PDFs without switching to a separate automation browser. Browser control is authenticated, isolated from page scripts, responsive while attn is in the background, and reports capture or transport failures without losing the session.
+
 ## Release Highlights — Workspaces
 
 attn is now organized around **workspaces**. The sidebar lists workspaces instead of loose sessions, and each workspace holds the sessions and terminals for one piece of work. This is the headline of the latest release; the dated entries below carry the full detail.

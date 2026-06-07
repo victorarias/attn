@@ -259,6 +259,42 @@ func TestDockTilePersistsTileParams(t *testing.T) {
 	}
 }
 
+func TestUpdateTileParamsPreservesLayout(t *testing.T) {
+	docked, ok := DockTile(
+		DefaultLayout("pane-root"),
+		"pane-root",
+		DirectionVertical,
+		false,
+		"split-browser",
+		"tile-browser",
+		"browser",
+		"https://first.example",
+		0.68,
+	)
+	if !ok {
+		t.Fatal("dock failed")
+	}
+
+	updated, ok := UpdateTileParams(docked, "tile-browser", " https://second.example/docs ")
+	if !ok {
+		t.Fatal("update failed")
+	}
+	if params, _ := TileParamsByID(updated, "tile-browser"); params != "https://second.example/docs" {
+		t.Fatalf("updated params = %q", params)
+	}
+	if updated.SplitID != docked.SplitID || updated.Ratio != docked.Ratio || updated.RatioLocked != docked.RatioLocked {
+		t.Fatalf("layout metadata changed: before=%+v after=%+v", docked, updated)
+	}
+
+	unchanged, ok := UpdateTileParams(updated, "missing", "https://missing.example")
+	if ok {
+		t.Fatal("missing tile update unexpectedly succeeded")
+	}
+	if params, _ := TileParamsByID(unchanged, "tile-browser"); params != "https://second.example/docs" {
+		t.Fatalf("missing update changed existing tile params: %q", params)
+	}
+}
+
 func TestUndockTileCollapsesSplit(t *testing.T) {
 	docked, ok := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "tile-md", "markdown", "", 0.68)
 	if !ok {

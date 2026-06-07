@@ -1,72 +1,20 @@
-import { createElement, isValidElement, useEffect } from 'react';
-import type { PointerEvent as ReactPointerEvent, ReactNode, Ref } from 'react';
+import { createElement, isValidElement, useEffect, useRef, useState } from 'react';
+import type {
+  FormEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  Ref,
+} from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { browserHostLabel, claimBrowserHostFocus, controlBrowserHost } from '../../browser/host';
 import type { TileContentState, TileLeaf } from '../../types/workspace';
+import { deriveTileTitle, tilePathBasename } from '../../utils/tilePresentation';
+import { BrowserTileBody } from './BrowserTileBody';
 import './WorkspaceDockTile.css';
-
-function basename(path: string): string {
-  const trimmed = path.replace(/\/+$/, '');
-  const segment = trimmed.split('/').pop();
-  return segment && segment.length > 0 ? segment : trimmed;
-}
-
-const MAX_TILE_TITLE_LENGTH = 80;
-
-// Reduce a single line of Markdown to readable plain text for a tile header:
-// drop link/image syntax (keep the label) and emphasis/code markers, collapse
-// whitespace. Intentionally shallow — this titles a header, it doesn't render.
-function stripInlineMarkdown(text: string): string {
-  return text
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[*_`~]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-// Title a markdown tile from its content: the first meaningful line, with a
-// leading ATX heading marker stripped. For the common `# Title` first line this
-// yields the H1 text; otherwise it yields the beginning of the text. Returns
-// null when the content carries no usable line (caller falls back to basename).
-function markdownTitle(markdown: string): string | null {
-  const lines = markdown.split('\n');
-  let i = 0;
-  // Skip a leading YAML frontmatter block, but only when it is actually closed
-  // (a bare leading `---` is otherwise a horizontal rule we should keep).
-  if (lines[0]?.trim() === '---') {
-    let close = 1;
-    while (close < lines.length && lines[close].trim() !== '---') close += 1;
-    if (close < lines.length) i = close + 1;
-  }
-  for (; i < lines.length; i += 1) {
-    const raw = lines[i].trim();
-    if (!raw) continue;
-    // Skip a thematic break (`---`, `***`, `___`) — a lone leading rule, or an
-    // unclosed frontmatter fence, should not become the title.
-    if (/^(-{3,}|\*{3,}|_{3,})$/.test(raw.replace(/\s/g, ''))) continue;
-    const withoutHeading = raw.replace(/^#{1,6}\s+/, '').replace(/\s+#*$/, '');
-    const cleaned = stripInlineMarkdown(withoutHeading);
-    if (!cleaned) continue;
-    return cleaned.length > MAX_TILE_TITLE_LENGTH
-      ? `${cleaned.slice(0, MAX_TILE_TITLE_LENGTH - 1).trimEnd()}…`
-      : cleaned;
-  }
-  return null;
-}
-
-// Display title for a tile header. Prefers a title derived from loaded markdown
-// content, falling back to the file basename and finally the tile kind.
-export function deriveTileTitle(tile: TileLeaf, content?: TileContentState): string {
-  if (tile.tileKind === 'markdown' && content && !content.error) {
-    const fromContent = markdownTitle(content.content);
-    if (fromContent) return fromContent;
-  }
-  const path = content?.path || tile.tileParams || '';
-  return path ? basename(path) : tile.tileKind;
-}
 
 type MarkdownTarget =
   | { kind: 'external'; value: string }
@@ -174,6 +122,13 @@ function openMarkdownTarget(target: MarkdownTarget): void {
   });
 }
 
+export function normalizeBrowserAddress(value: string): string {
+  const trimmed = value.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed;
+  const localHost = /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(trimmed);
+  return `${localHost ? 'http' : 'https'}://${trimmed}`;
+}
+
 function markdownText(node: ReactNode): string {
   if (typeof node === 'string' || typeof node === 'number') {
     return String(node);
@@ -253,7 +208,7 @@ function markdownComponents(documentPath: string, allowLocalTargets: boolean): C
           title={target.value}
           onClick={() => openMarkdownTarget(target)}
         >
-          Open image: {alt || basename(target.value)}
+          Open image: {alt || tilePathBasename(target.value)}
         </button>
       );
     },
@@ -266,7 +221,9 @@ interface WorkspaceDockTileProps {
   content?: TileContentState;
   allowLocalTargets?: boolean;
   dragging: boolean;
+  visible?: boolean;
   onClose: () => void;
+  onUpdateParams?: (tileParams: string) => Promise<unknown> | void;
   onHeaderPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onRequestContent: (workspaceId: string, tileId: string) => void;
   // Handle to the scrollable body. A tile-only workspace has no terminal to
@@ -281,7 +238,9 @@ export function WorkspaceDockTile({
   content,
   allowLocalTargets = true,
   dragging,
+  visible = true,
   onClose,
+  onUpdateParams,
   onHeaderPointerDown,
   onRequestContent,
   bodyRef,
@@ -289,34 +248,153 @@ export function WorkspaceDockTile({
   // Pull the current content on mount and whenever the tile retargets a new
   // file. Live-reload updates then arrive as broadcasts (no re-request needed).
   useEffect(() => {
-    onRequestContent(workspaceId, tile.tileId);
-  }, [workspaceId, tile.tileId, tile.tileParams, onRequestContent]);
+    if (tile.tileKind === 'markdown') {
+      onRequestContent(workspaceId, tile.tileId);
+    }
+  }, [workspaceId, tile.tileId, tile.tileKind, tile.tileParams, onRequestContent]);
 
   const path = content?.path || tile.tileParams || '';
   const title = deriveTileTitle(tile, content);
+  const browserLabel = browserHostLabel(workspaceId, tile.tileId);
+  const [browserAddress, setBrowserAddress] = useState(tile.tileParams || '');
+  const pendingBrowserParamsRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setBrowserAddress(tile.tileParams || '');
+    if (pendingBrowserParamsRef.current === tile.tileParams) {
+      pendingBrowserParamsRef.current = null;
+    }
+  }, [tile.tileParams]);
+
+  useEffect(() => {
+    if (tile.tileKind !== 'browser') {
+      return;
+    }
+    const handleLocation = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (
+        typeof detail === 'object'
+        && detail !== null
+        && 'label' in detail
+        && 'url' in detail
+        && detail.label === browserLabel
+        && typeof detail.url === 'string'
+      ) {
+        setBrowserAddress(detail.url);
+        if (
+          detail.url !== tile.tileParams
+          && detail.url !== pendingBrowserParamsRef.current
+        ) {
+          pendingBrowserParamsRef.current = detail.url;
+          void Promise.resolve(onUpdateParams?.(detail.url)).catch((error) => {
+            if (pendingBrowserParamsRef.current === detail.url) {
+              pendingBrowserParamsRef.current = null;
+            }
+            console.warn('[WorkspaceDockTile] Failed to persist browser location:', error);
+          });
+        }
+      }
+    };
+    window.addEventListener('attn:browser-location', handleLocation);
+    return () => {
+      window.removeEventListener('attn:browser-location', handleLocation);
+    };
+  }, [browserLabel, onUpdateParams, tile.tileKind, tile.tileParams]);
+
+  const reloadBrowser = () => {
+    void controlBrowserHost(workspaceId, tile.tileId, 'reload').catch((error) => {
+      console.warn('[WorkspaceDockTile] Failed to reload browser:', error);
+    });
+  };
+  const navigateBrowser = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmed = browserAddress.trim();
+    if (!trimmed) {
+      return;
+    }
+    const target = normalizeBrowserAddress(trimmed);
+    setBrowserAddress(target);
+    void controlBrowserHost(
+      workspaceId,
+      tile.tileId,
+      'navigate',
+      JSON.stringify({ url: target }),
+    ).catch((error) => {
+      console.warn('[WorkspaceDockTile] Failed to navigate browser:', error);
+    });
+  };
 
   return (
-    <div className={`workspace-dock-tile ${dragging ? 'workspace-dock-tile--dragging' : ''}`.trim()}>
+    <div
+      className={`workspace-dock-tile ${dragging ? 'workspace-dock-tile--dragging' : ''}`.trim()}
+      data-browser-host-owner={tile.tileKind === 'browser' ? true : undefined}
+      onPointerDownCapture={tile.tileKind === 'browser' ? () => claimBrowserHostFocus(browserLabel) : undefined}
+    >
       <div
         className="workspace-dock-tile-header"
         onPointerDown={onHeaderPointerDown}
         title={path || 'Drag to re-dock'}
       >
-        <span className="workspace-dock-tile-title">{title}</span>
-        <button
-          type="button"
-          className="workspace-dock-tile-close"
-          title="Close tile"
-          aria-label="Close tile"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={onClose}
-        >
-          ×
-        </button>
+        {tile.tileKind === 'browser' ? (
+          <form
+            className="workspace-dock-tile-address-form"
+            onSubmit={navigateBrowser}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <input
+              className="workspace-dock-tile-address"
+              type="text"
+              value={browserAddress}
+              aria-label="Browser address"
+              spellCheck={false}
+              onChange={(event) => setBrowserAddress(event.target.value)}
+              onFocus={(event) => event.currentTarget.select()}
+            />
+          </form>
+        ) : (
+          <span className="workspace-dock-tile-title">{title}</span>
+        )}
+        <div className="workspace-dock-tile-actions">
+          {tile.tileKind === 'browser' ? (
+            <button
+              type="button"
+              className="workspace-dock-tile-action"
+              title="Reload browser"
+              aria-label="Reload browser"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={reloadBrowser}
+            >
+              ↻
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="workspace-dock-tile-action"
+            title="Close tile"
+            aria-label="Close tile"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </div>
       </div>
-      <div className="workspace-dock-tile-body" ref={bodyRef} tabIndex={-1}>
+      <div
+        className={`workspace-dock-tile-body ${tile.tileKind === 'browser' ? 'workspace-dock-tile-body--browser' : ''}`.trim()}
+        ref={bodyRef}
+        tabIndex={-1}
+      >
         {tile.tileKind === 'markdown' ? (
           <MarkdownBody content={content} allowLocalTargets={allowLocalTargets} />
+        ) : tile.tileKind === 'browser' ? (
+          <BrowserTileBody
+            workspaceId={workspaceId}
+            tileId={tile.tileId}
+            url={tile.tileParams || ''}
+            dragging={dragging}
+            visible={visible}
+            onClose={onClose}
+          />
         ) : (
           <div className="workspace-dock-tile-message">Unsupported tile: {tile.tileKind}</div>
         )}
