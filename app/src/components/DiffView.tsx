@@ -34,6 +34,7 @@ import { useEscapeStack } from '../hooks/useEscapeStack';
 import type { ResolvedTheme } from '../hooks/useTheme';
 import type { ReviewComment } from '../types/generated';
 import { buildLineRef, commentLineRef, isOriginalSideComment } from '../utils/reviewComment';
+import { hashContent } from '../utils/reviewHash';
 import { ClaudeIcon } from './icons/ClaudeIcon';
 import { DiffCommentThread } from './DiffCommentThread';
 
@@ -126,6 +127,17 @@ export function DiffView({
   const name = filePath ?? 'file.txt';
   const oldFile = useMemo<FileContents>(() => ({ name, contents: original }), [name, original]);
   const newFile = useMemo<FileContents>(() => ({ name, contents: modified }), [name, modified]);
+
+  // @pierre/diffs binds a rendered instance to its first file and won't swap the
+  // target in place (VirtualizedFileDiff.render keeps `this.fileDiff` via `??=`).
+  // Remounting the diff whenever the target (path or content) changes is the
+  // library's intended way to switch files — without it, selecting a file whose
+  // diff was already rendered, or a file whose content changed underneath, keeps
+  // showing the stale diff.
+  const diffKey = useMemo(
+    () => `${name}:${hashContent(original)}:${hashContent(modified)}`,
+    [name, original, modified]
+  );
 
   // The library forces a full re-render whenever the options object changes by
   // value (function identities included), so keep callbacks stable and memoize
@@ -324,6 +336,7 @@ export function DiffView({
     >
       <Virtualizer className="diff-view-scroller" style={{ height: '100%', overflow: 'auto' }}>
         <MultiFileDiff<AnnotationMeta>
+          key={diffKey}
           oldFile={oldFile}
           newFile={newFile}
           options={options}

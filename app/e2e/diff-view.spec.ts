@@ -178,6 +178,37 @@ test.describe('DiffView (@pierre/diffs)', () => {
     expect(added[0][1]).toBeGreaterThan(0);
   });
 
+  test('switches back to a file already rendered earlier', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+    const container = page.locator('diffs-container');
+
+    // File A (function example) is shown first.
+    await expect(container).toContainText('function example');
+
+    // Switch to file B.
+    await page.evaluate(() => window.__HARNESS__.switchFile('fileB.ts'));
+    await expect(container).toContainText('class Calculator');
+    await expect(container).not.toContainText('function example');
+
+    // Switch back to file A — the previously rendered file must reappear.
+    await page.evaluate(() => window.__HARNESS__.switchFile('fileA.ts'));
+    await expect(container).toContainText('function example');
+    await expect(container).not.toContainText('class Calculator');
+  });
+
+  test("re-renders when the same file's content changes in place", async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+    const container = page.locator('diffs-container');
+    // Full file so the appended marker is rendered regardless of hunk collapsing.
+    await page.evaluate(() => window.__HARNESS__.setExpandUnchanged(true));
+    await expect(container).toContainText('function example');
+    await expect(container).not.toContainText('refresh-1');
+
+    // Same file path, new content (e.g. the file changed on disk while viewing).
+    await page.evaluate(() => window.__HARNESS__.refreshContent());
+    await expect(container).toContainText('refresh-1');
+  });
+
   test('toggles between unified and split layout', async ({ page }) => {
     await openHarness(page, UNSEEDED);
 
