@@ -6,12 +6,12 @@
 import type { HarnessProps } from '../types';
 import { DashboardPRsHarness } from './DashboardPRsHarness';
 import { DiffDetailPanelHarness } from './DiffDetailPanelHarness';
+import { DiffViewHarness } from './DiffViewHarness';
 import { SessionReviewLoopBarHarness } from './SessionReviewLoopBarHarness';
-import { UnifiedDiffEditorHarness } from './UnifiedDiffEditorHarness';
 
 export const harnesses: Record<string, React.ComponentType<HarnessProps>> = {
   DashboardPRs: DashboardPRsHarness,
   DiffDetailPanel: DiffDetailPanelHarness,
+  DiffView: DiffViewHarness,
   SessionReviewLoopBar: SessionReviewLoopBarHarness,
-  UnifiedDiffEditor: UnifiedDiffEditorHarness,
 };

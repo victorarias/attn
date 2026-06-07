@@ -31,6 +31,11 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 
 ---
 
+## [2026-06-06]
+
+### Changed
+- **Rebuilt the diff viewer.** The review panel now renders diffs with a faster syntax highlighter and a cleaner layout, and you can switch between **unified** and **split** views (unified stays the default). Everything you rely on while reviewing carries over: inline comments on added and deleted lines, edit/resolve/delete, per-file comment counts, sending a comment or a selection to the running session, and viewed / changed-since-viewed tracking. Add a comment by hovering a line and clicking the **+** in the gutter to jump straight to the comment box, or click anywhere on a line (or select a range of line numbers) and pick **Add comment** or **Send to Claude** from the popup. Comments hold up while the agent keeps working: a comment you're typing is never lost when the file changes underneath, and a saved comment that doesn't appear in the current diff — its line was removed, or it sits inside collapsed unchanged code — gathers into a banner at the top (click to expand) instead of silently disappearing.
+
 ## [2026-06-04]
 
 ### Fixed
