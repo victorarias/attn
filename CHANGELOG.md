@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-07]
+
+### Added
+- **Agents can open and control a persistent browser inside attn.** `attn browser open <url>` docks a real browser beside the current session, with an address bar, Reload and Close controls, sidebar presence, correct pane focus and dialog layering, and a durable cookie and local-storage profile so logins survive app restarts. Agents can navigate and inspect pages using semantic locators and stable element references; interact through forms, keyboard and pointer actions, frames, shadow DOM, cookies, alerts, and popups; wait for page state; and capture screenshots or PDFs without switching to a separate automation browser. Browser control is authenticated, isolated from page scripts, responsive while attn is in the background, and reports capture or transport failures without losing the session.
+
 ## Release Highlights — Workspaces
 
 attn is now organized around **workspaces**. The sidebar lists workspaces instead of loose sessions, and each workspace holds the sessions and terminals for one piece of work. This is the headline of the latest release; the dated entries below carry the full detail.
@@ -25,6 +30,11 @@ attn is now organized around **workspaces**. The sidebar lists workspaces instea
 The app shows a one-time "What's new" summary after this upgrade, and `⌘/` brings up the complete shortcut list any time.
 
 ---
+
+## [2026-06-06]
+
+### Changed
+- **Rebuilt the diff viewer.** The review panel now renders diffs with a faster syntax highlighter and a cleaner layout, and you can switch between **unified** and **split** views (unified stays the default). Everything you rely on while reviewing carries over: inline comments on added and deleted lines, edit/resolve/delete, per-file comment counts, sending a comment or a selection to the running session, and viewed / changed-since-viewed tracking. Add a comment by hovering a line and clicking the **+** in the gutter to jump straight to the comment box, or click anywhere on a line (or select a range of line numbers) and pick **Add comment** or **Send to Claude** from the popup. Comments hold up while the agent keeps working: a comment you're typing is never lost when the file changes underneath, and a saved comment that doesn't appear in the current diff — its line was removed, or it sits inside collapsed unchanged code — gathers into a banner at the top (click to expand) instead of silently disappearing.
 
 ## [2026-06-05]
 

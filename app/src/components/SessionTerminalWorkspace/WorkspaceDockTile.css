@@ -41,7 +41,38 @@
   text-overflow: ellipsis;
 }
 
-.workspace-dock-tile-close {
+.workspace-dock-tile-address-form {
+  flex: 1;
+  min-width: 0;
+}
+
+.workspace-dock-tile-address {
+  display: block;
+  width: 100%;
+  height: 24px;
+  box-sizing: border-box;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-bg-editor);
+  color: var(--color-text-primary);
+  font: 11px/1.2 'SF Mono', 'Monaco', 'Menlo', monospace;
+  outline: none;
+  user-select: text;
+}
+
+.workspace-dock-tile-address:focus {
+  border-color: var(--color-border-focus);
+}
+
+.workspace-dock-tile-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.workspace-dock-tile-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -57,7 +88,7 @@
   cursor: pointer;
 }
 
-.workspace-dock-tile-close:hover {
+.workspace-dock-tile-action:hover {
   background: var(--color-bg-button);
   color: var(--color-text-primary);
 }
@@ -69,6 +100,21 @@
   padding: 16px 18px;
   font-size: 13px;
   line-height: 1.55;
+}
+
+.workspace-dock-tile-body--browser {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+}
+
+.browser-tile-host {
+  width: 100%;
+  height: 100%;
+}
+
+.browser-tile-host > .workspace-dock-tile-message {
+  padding: 16px 18px;
 }
 
 /* The body is focused programmatically (tabIndex=-1) so a tile-only workspace

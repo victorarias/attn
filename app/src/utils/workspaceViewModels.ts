@@ -1,3 +1,9 @@
+import {
+  collectLayoutLeaves,
+  parseLayoutJSON,
+  type TileLeaf,
+} from '../types/workspace';
+
 export interface WorkspaceViewSession {
   id: string;
   label: string;
@@ -19,11 +25,25 @@ export interface WorkspaceViewWorkspace {
   endpointId?: string;
   endpoint_id?: string;
   layout?: {
+    layout_json?: string;
     panes?: Array<{
+      pane_id?: string;
       session_id?: string;
     }>;
   };
 }
+
+export type WorkspaceChild<TSession extends WorkspaceViewSession = WorkspaceViewSession> =
+  | {
+    kind: 'session';
+    id: string;
+    session: TSession;
+  }
+  | {
+    kind: 'tile';
+    id: string;
+    tile: TileLeaf;
+  };
 
 export interface WorkspaceWithSessions<TSession extends WorkspaceViewSession = WorkspaceViewSession> {
   id: string;
@@ -33,6 +53,7 @@ export interface WorkspaceWithSessions<TSession extends WorkspaceViewSession = W
   muted?: boolean;
   endpointId?: string;
   sessions: TSession[];
+  children: WorkspaceChild<TSession>[];
   firstSessionId: string | null;
   focusedSessionId: string | null;
 }
@@ -121,6 +142,7 @@ function toWorkspaceViewModel<TSession extends WorkspaceViewSession>(
   const focusedSessionId = requestedFocus && sessions.some((session) => session.id === requestedFocus)
     ? requestedFocus
     : firstSessionId;
+  const children = workspaceChildren(workspace, sessions);
 
   return {
     id: workspace.id,
@@ -130,9 +152,44 @@ function toWorkspaceViewModel<TSession extends WorkspaceViewSession>(
     muted: workspace.muted ?? false,
     endpointId: workspaceEndpointId(workspace) || (sessions[0] ? sessionEndpointId(sessions[0]) : undefined),
     sessions,
+    children,
     firstSessionId,
     focusedSessionId,
   };
+}
+
+function workspaceChildren<TSession extends WorkspaceViewSession>(
+  workspace: WorkspaceViewWorkspace,
+  sessions: TSession[],
+): WorkspaceChild<TSession>[] {
+  const sessionById = new Map(sessions.map((session) => [session.id, session]));
+  const sessionIdByPaneId = new Map(
+    (workspace.layout?.panes || [])
+      .filter((pane): pane is { pane_id: string; session_id: string } => Boolean(pane.pane_id && pane.session_id))
+      .map((pane) => [pane.pane_id, pane.session_id]),
+  );
+  const representedSessionIds = new Set<string>();
+  const children: WorkspaceChild<TSession>[] = [];
+
+  for (const leaf of collectLayoutLeaves(parseLayoutJSON(workspace.layout?.layout_json || ''))) {
+    if (leaf.type === 'tile') {
+      children.push({ kind: 'tile', id: leaf.tileId, tile: leaf });
+      continue;
+    }
+    const sessionId = sessionIdByPaneId.get(leaf.paneId);
+    const session = sessionId ? sessionById.get(sessionId) : undefined;
+    if (session && !representedSessionIds.has(session.id)) {
+      representedSessionIds.add(session.id);
+      children.push({ kind: 'session', id: session.id, session });
+    }
+  }
+
+  for (const session of sessions) {
+    if (!representedSessionIds.has(session.id)) {
+      children.push({ kind: 'session', id: session.id, session });
+    }
+  }
+  return children;
 }
 
 export function firstSessionIdForWorkspace<TSession extends WorkspaceViewSession>(

@@ -9,6 +9,7 @@ function sessionlessWorkspace(): WorkspaceWithSessions<TestSession> {
     title: 'docs',
     directory: '/repo/docs',
     sessions: [],
+    children: [],
     firstSessionId: null,
     focusedSessionId: null,
   };
@@ -55,6 +56,36 @@ function buildSidebarData(sessions: TestSession[]) {
     visualOrder: workspaces,
     visualIndexByWorkspaceId: new Map(workspaces.map((workspace, index) => [workspace.id, index])),
   };
+}
+
+function workspaceWithBrowserTile(): WorkspaceWithSessions<TestSession> {
+  const session: TestSession & { workspaceId: string } = {
+    id: 's1',
+    label: 'shell',
+    state: 'idle',
+    workspaceId: 'workspace-browser',
+  };
+  return buildWorkspaceViewModels(
+    [{
+      id: 'workspace-browser',
+      title: 'browser',
+      directory: '/repo/browser',
+      layout: {
+        layout_json: JSON.stringify({
+          type: 'split',
+          split_id: 'split-root',
+          direction: 'vertical',
+          ratio: 0.5,
+          children: [
+            { type: 'pane', pane_id: 'pane-s1' },
+            { type: 'tile', tile_id: 'tile-browser', tile_kind: 'browser', tile_params: 'https://www.google.com' },
+          ],
+        }),
+        panes: [{ pane_id: 'pane-s1', session_id: 's1' }],
+      },
+    }],
+    [session],
+  )[0];
 }
 
 const baseProps = {
@@ -149,6 +180,37 @@ describe('Sidebar', () => {
     expect(onCloseSession).toHaveBeenCalledWith('s1');
   });
 
+  it('renders browser tiles in layout order and exposes tile actions', () => {
+    const workspace = workspaceWithBrowserTile();
+    const onSelectTile = vi.fn();
+    const onCloseTile = vi.fn();
+    const onReloadTile = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        workspaces={[workspace]}
+        visualOrder={[workspace]}
+        visualIndexByWorkspaceId={new Map([[workspace.id, 0]])}
+        onSelectTile={onSelectTile}
+        onCloseTile={onCloseTile}
+        onReloadTile={onReloadTile}
+      />
+    );
+
+    const tile = screen.getByTestId('sidebar-tile-workspace-browser-tile-browser');
+    expect(tile).toHaveTextContent('www.google.com');
+    expect(screen.getByTestId('sidebar-session-s1').compareDocumentPosition(tile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(tile);
+    expect(onSelectTile).toHaveBeenCalledWith('workspace-browser', 'tile-browser');
+
+    fireEvent.click(screen.getByTestId('reload-tile-workspace-browser-tile-browser'));
+    expect(onReloadTile).toHaveBeenCalledWith('workspace-browser', 'tile-browser');
+
+    fireEvent.click(screen.getByTestId('close-tile-workspace-browser-tile-browser'));
+    expect(onCloseTile).toHaveBeenCalledWith('workspace-browser', 'tile-browser');
+  });
+
   it('marks same-endpoint workspace rows as leaf drag targets', () => {
     const sessions: TestSession[] = [
       { id: 's1', label: 'source', state: 'idle', cwd: '/repo/source' },
@@ -224,6 +286,7 @@ describe('Sidebar', () => {
       title: 'empty',
       directory: '/repo/empty',
       sessions: [],
+      children: [],
       firstSessionId: null,
       focusedSessionId: null,
     };

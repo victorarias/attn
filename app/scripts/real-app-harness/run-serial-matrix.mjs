@@ -60,6 +60,11 @@ const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-autoclose-on-exit'],
   },
   {
+    id: 'diff-review',
+    label: 'Diff review panel renders a real diff (@pierre/diffs)',
+    command: ['pnpm', 'run', 'real-app:scenario-diff-review'],
+  },
+  {
     id: 'tr205-codex',
     label: 'TR-205 remote codex',
     command: ['pnpm', 'run', 'real-app:scenario-tr205'],

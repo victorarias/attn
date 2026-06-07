@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { emit, listen } from '@tauri-apps/api/event';
-import { isTauri } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Session } from '../store/sessions';
 import type { SessionAgent } from '../types/sessionAgent';
@@ -1109,8 +1109,7 @@ async function capturePerfSnapshot(
       totalElements: document.querySelectorAll('*').length,
       terminalSurfaceCount: document.querySelectorAll('.ghostty-terminal').length,
       terminalContainerCount: document.querySelectorAll('.terminal-container').length,
-      codeMirrorCount: document.querySelectorAll('.cm-editor').length,
-      unifiedDiffEditorCount: document.querySelectorAll('.unified-diff-editor').length,
+      diffViewCount: document.querySelectorAll('.diff-view').length,
       diffDetailOpen: document.querySelectorAll('.dock-panel--diff-detail, .dock-panel--diffDetail').length > 0,
       diffPanelOpen: document.querySelectorAll('.dock-panel--diff').length > 0,
       reviewLoopOpen: document.querySelectorAll('.dock-panel--review-loop, .dock-panel--reviewLoop').length > 0,
@@ -1206,6 +1205,54 @@ function collectReviewLoopUiState(sessionId: string) {
     questionText: question?.textContent?.trim() || '',
     answerVisible: Boolean(drawer?.querySelector('.review-loop-answer-box')),
     files,
+  };
+}
+
+/**
+ * DOM introspection for the diff-detail review panel (DiffView over
+ * @pierre/diffs). Lets the real-app harness assert that a real diff actually
+ * rendered without relying on pixels — the diff lines live inside the
+ * `diffs-container` shadow DOM, which `document.querySelectorAll` cannot reach,
+ * so we pierce the shadow root explicitly for the rendered line count.
+ */
+function collectDiffReviewUiState() {
+  const panel = document.querySelector('.dock-panel--diff-detail, .dock-panel--diffDetail');
+  const fileItems = Array.from(document.querySelectorAll('.review-file-list .file-item')).map((el) => {
+    const statusEl = el.querySelector('.file-status');
+    return {
+      name: el.querySelector('.file-name')?.textContent?.trim() || '',
+      status: (statusEl?.className || '').replace('file-status', '').trim(),
+      statusLabel: statusEl?.textContent?.trim() || '',
+      selected: el.classList.contains('selected'),
+      viewed: el.classList.contains('viewed'),
+      changed: el.classList.contains('changed'),
+      commentCount: Number(el.querySelector('.file-comment-count')?.textContent?.trim() || '0'),
+    };
+  });
+  const activeLayoutButtons = Array.from(document.querySelectorAll('.diff-actions .expand-btn.active'))
+    .map((btn) => btn.textContent?.trim() || '')
+    .filter(Boolean);
+  const diffsContainer = document.querySelector('diffs-container');
+  const shadowRoot = diffsContainer
+    ? (diffsContainer as HTMLElement & { shadowRoot: ShadowRoot | null }).shadowRoot
+    : null;
+
+  return {
+    panelOpen: Boolean(panel),
+    fileCount: fileItems.length,
+    fileCountText: document.querySelector('.review-file-count')?.textContent?.trim() || '',
+    files: fileItems,
+    selectedFile: document.querySelector('.diff-filename')?.textContent?.trim() || '',
+    layout: activeLayoutButtons, // e.g. ['Unified', 'Hunks']
+    diffViewPresent: document.querySelectorAll('.diff-view').length > 0,
+    diffsContainerPresent: Boolean(diffsContainer),
+    renderedLineCount: shadowRoot ? shadowRoot.querySelectorAll('[data-line-number-content]').length : 0,
+    commentThreadCount: document.querySelectorAll('[data-testid="diff-comment-thread"]').length,
+    emptyMessage: document.querySelector('.file-list-empty')?.textContent?.trim() || '',
+    loadingText: document.querySelector('.diff-loading, .review-sync-status')?.textContent?.trim() || '',
+    errorText: document.querySelector('.diff-error')?.textContent?.trim() || '',
+    panelBounds: rectSnapshot(panel),
+    diffBounds: rectSnapshot(diffsContainer),
   };
 }
 
@@ -1474,6 +1521,10 @@ export function useUiAutomationBridge({
           tileBodyFocused,
         };
       }
+      case 'get_browser_focus_state':
+        return {
+          label: await invoke<string | null>('browser_host_focus_state'),
+        };
       case 'location_picker_get_state':
         return collectLocationPickerUiState();
       case 'location_picker_open': {
@@ -1993,6 +2044,8 @@ export function useUiAutomationBridge({
         }
         return collectReviewLoopUiState(sessionId);
       }
+      case 'diff_get_state':
+        return collectDiffReviewUiState();
       case 'capture_structured_snapshot':
         return collectVisualSnapshot(
           sessions,

@@ -49,6 +49,7 @@ import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import { recordPtyCommand, recordWsJsonParse } from '../utils/ptyPerf';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
 import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
+import { controlBrowserHost, serializeBrowserControlResultMessage } from '../browser/host';
 
 // Short names for daemon payloads used throughout the app.
 export type DaemonSession = GeneratedSession;
@@ -128,6 +129,7 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   priority?: number;
   endpoint_id?: string;
   request_id?: string;
+  selector?: string;
   home_path?: string;
   directory?: string;
   input_path?: string;
@@ -157,7 +159,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '82';
+const PROTOCOL_VERSION = '89';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -538,7 +540,7 @@ function pruneTileContentsForWorkspaces(
 function requestTileContentsForWorkspaces(ws: WebSocket, workspaces: DaemonWorkspace[]) {
   if (ws.readyState !== WebSocket.OPEN) return;
   for (const workspace of workspaces) {
-    for (const tileId of tileIdsFromLayoutJSON(workspace.layout?.layout_json || '')) {
+    for (const tileId of tileIdsFromLayoutJSON(workspace.layout?.layout_json || '', 'markdown')) {
       ws.send(JSON.stringify({ cmd: 'workspace_tile_content_get', workspace_id: workspace.id, tile_id: tileId }));
     }
   }
@@ -553,6 +555,7 @@ const GIT_NETWORK_TIMEOUT_MS = 30 * 60_000;
 const GIT_CLONE_TIMEOUT_MS = 90 * 60_000;
 const GITHUB_REFRESH_TIMEOUT_MS = 5 * 60_000;
 const WORKSPACE_SESSIONS_CAPABILITY = 'workspace_sessions';
+const BROWSER_HOST_CAPABILITY = 'browser_host';
 
 export function isTransientAttachError(error: unknown): boolean {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -682,6 +685,7 @@ export function useDaemonSocket({
   const ptyTransportRef = useRef(createPtyTransportState<AttachRequestContext>());
   const pendingSessionVisualizedRef = useRef<Set<string>>(new Set());
   const selectedSessionRef = useRef<string | null>(null);
+  const selectedWorkspaceRef = useRef<string | null>(null);
   const daemonInstanceIDRef = useRef<string>('');
   const hasReceivedInitialStateRef = useRef(false);
   // Once we detect a profile mismatch, we refuse to operate forever — the
@@ -782,6 +786,7 @@ export function useDaemonSocket({
       case 'workspace_layout_set_split_ratio':
       case 'workspace_layout_dock_tile':
       case 'workspace_layout_undock_tile':
+      case 'workspace_layout_update_tile':
         rejectPendingByPredicate((key) => key.startsWith(`workspace:${cmd}:`), error);
         return;
       case 'approve_pr':
@@ -908,6 +913,15 @@ export function useDaemonSocket({
       }
     }
 
+    let browserHostToken = '';
+    if (isTauri()) {
+      try {
+        browserHostToken = await invoke<string>('get_browser_host_token');
+      } catch (error) {
+        console.warn('[Daemon] Browser host authentication is unavailable:', error);
+      }
+    }
+
     const ws = new WebSocket(resolvedWsUrl);
 
     ws.onopen = () => {
@@ -929,7 +943,11 @@ export function useDaemonSocket({
           cmd: 'client_hello',
           client_kind: 'tauri-app',
           version: `protocol-${PROTOCOL_VERSION}`,
-          capabilities: [WORKSPACE_SESSIONS_CAPABILITY],
+          capabilities: [
+            WORKSPACE_SESSIONS_CAPABILITY,
+            ...(browserHostToken ? [BROWSER_HOST_CAPABILITY] : []),
+          ],
+          browser_host_token: browserHostToken || undefined,
         }),
       );
 
@@ -945,6 +963,9 @@ export function useDaemonSocket({
       }
       if (selectedSessionRef.current) {
         ws.send(JSON.stringify({ cmd: 'session_selected', id: selectedSessionRef.current }));
+      }
+      if (selectedWorkspaceRef.current) {
+        ws.send(JSON.stringify({ cmd: 'workspace_selected', workspace_id: selectedWorkspaceRef.current }));
       }
     };
 
@@ -1130,6 +1151,57 @@ export function useDaemonSocket({
                 },
               }));
             }
+            break;
+          }
+
+          case 'browser_control_request': {
+            if (
+              typeof data.request_id !== 'string'
+              || typeof data.workspace_id !== 'string'
+              || typeof data.tile_id !== 'string'
+              || typeof data.action !== 'string'
+            ) {
+              console.warn('[Daemon] Ignoring malformed browser control request:', data);
+              break;
+            }
+            const requestId = data.request_id;
+            void controlBrowserHost(
+              data.workspace_id,
+              data.tile_id,
+              data.action,
+              typeof data.params === 'string' ? data.params : undefined,
+              typeof data.selector === 'string' ? data.selector : undefined,
+              typeof data.text === 'string' ? data.text : undefined,
+            ).then((result) => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(serializeBrowserControlResultMessage({
+                  cmd: 'browser_control_result',
+                  request_id: requestId,
+                  success: true,
+                  data: result,
+                }));
+              }
+            }).catch((controlError) => {
+              if (ws.readyState === WebSocket.OPEN) {
+                let response: string;
+                try {
+                  response = serializeBrowserControlResultMessage({
+                    cmd: 'browser_control_result',
+                    request_id: requestId,
+                    success: false,
+                    error: String(controlError),
+                  });
+                } catch {
+                  response = serializeBrowserControlResultMessage({
+                    cmd: 'browser_control_result',
+                    request_id: requestId,
+                    success: false,
+                    error: 'browser control failed with an oversized error',
+                  });
+                }
+                ws.send(response);
+              }
+            });
             break;
           }
 
@@ -2330,6 +2402,23 @@ export function useDaemonSocket({
     );
   }, [sendWorkspaceCommand]);
 
+  const sendWorkspaceUpdateTile = useCallback((workspaceId: string, tileId: string, tileParams: string) => {
+    const requestId = nextRequestID('workspace_update_tile');
+    return sendWorkspaceCommand(
+      'workspace_layout_update_tile',
+      workspaceId,
+      {
+        cmd: 'workspace_layout_update_tile',
+        workspace_id: workspaceId,
+        tile_id: tileId,
+        tile_params: tileParams,
+        request_id: requestId,
+      },
+      tileId,
+      requestId,
+    );
+  }, [nextRequestID, sendWorkspaceCommand]);
+
   // Move an existing leaf (terminal pane or docked tile) beside an anchor leaf.
   // An empty anchorId docks the leaf against the whole workspace (the root). The
   // daemon broadcasts the authoritative layout, so this is effectively
@@ -3265,6 +3354,13 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'session_selected', id }));
   }, []);
 
+  const sendWorkspaceSelected = useCallback((workspaceId: string) => {
+    selectedWorkspaceRef.current = workspaceId;
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'workspace_selected', workspace_id: workspaceId }));
+  }, []);
+
   // Get file diff
   // Options: staged (deprecated), baseRef (for PR-like branch diffs)
   const sendGetFileDiff = useCallback((
@@ -3751,6 +3847,7 @@ export function useDaemonSocket({
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
     sendSessionSelected,
+    sendWorkspaceSelected,
     sendSessionVisualized,
     sendWorkspaceGet,
     sendWorkspaceAddSessionPane,
@@ -3759,6 +3856,7 @@ export function useDaemonSocket({
     sendWorkspaceRenamePane,
     sendWorkspaceSetSplitRatio,
     sendWorkspaceUndockTile,
+    sendWorkspaceUpdateTile,
     sendWorkspaceMoveLeaf,
     sendWorkspaceMoveLeafToWorkspace,
     tileContents,

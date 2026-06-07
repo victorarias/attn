@@ -9,6 +9,7 @@ export interface ShortcutDef {
   shift?: boolean;
   ctrl?: boolean;
   alt?: boolean;
+  editableTarget?: 'native';
 }
 
 const ALLOWED_CONFLICT_PAIRS = new Set([
@@ -24,7 +25,7 @@ export const SHORTCUTS = {
   'terminal.collapse': { key: '~', shift: true },  // Shift+` produces ~ on US keyboards
   'terminal.splitVertical': { key: 'd', meta: true },
   'terminal.splitHorizontal': { key: 'd', meta: true, shift: true },
-  'terminal.toggleZoom': { key: 'z', meta: true, shift: true },
+  'terminal.toggleZoom': { key: 'z', meta: true, shift: true, editableTarget: 'native' },
   'terminal.toggleMaximize': { key: 'Enter', meta: true, shift: true },
   'terminal.close': { key: 'w', meta: true },
   'terminal.focusLeft': { key: 'ArrowLeft', meta: true, alt: true },
@@ -40,8 +41,9 @@ export const SHORTCUTS = {
   'session.newHorizontal': { key: 'n', meta: true, shift: true },
   'session.newWorkspace': { key: 't', meta: true },
   'session.close': { key: 'w', meta: true },
-  'session.prev': { key: 'ArrowUp', meta: true },
-  'session.next': { key: 'ArrowDown', meta: true },
+  'session.prev': { key: 'ArrowUp', meta: true, editableTarget: 'native' },
+  'session.next': { key: 'ArrowDown', meta: true, editableTarget: 'native' },
+  // Grid view moved Home (go-to-dashboard) off ⌘G to ⌘⇧H so ⌘G can toggle the grid.
   'session.goToDashboard': { key: 'h', meta: true, shift: true },
   'view.toggleGrid': { key: 'g', meta: true },
   'session.jumpToWaiting': { key: 'j', meta: true },

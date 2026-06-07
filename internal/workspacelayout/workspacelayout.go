@@ -35,6 +35,7 @@ const (
 	// TileKindMarkdown is the first tile consumer. More kinds can be docked
 	// without touching this package.
 	TileKindMarkdown TileKind = "markdown"
+	TileKindBrowser  TileKind = "browser"
 )
 
 type PaneStatus string
@@ -537,6 +538,28 @@ func TileParamsByID(node Node, tileID string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// UpdateTileParams replaces the opaque params for an existing tile.
+func UpdateTileParams(node Node, tileID, tileParams string) (Node, bool) {
+	switch node.Type {
+	case "tile":
+		if node.TileID != tileID {
+			return node, false
+		}
+		node.TileParams = strings.TrimSpace(tileParams)
+		return node, true
+	case "split":
+		for index, child := range node.Children {
+			updated, ok := UpdateTileParams(child, tileID, tileParams)
+			if !ok {
+				continue
+			}
+			node.Children[index] = updated
+			return node, true
+		}
+	}
+	return node, false
 }
 
 // TileFractionByID returns the share of its immediate split occupied by a

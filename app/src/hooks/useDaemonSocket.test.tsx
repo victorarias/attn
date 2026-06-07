@@ -168,6 +168,57 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('advertises and handles in-app browser control', async () => {
+    vi.mocked(invoke).mockResolvedValue('{"title":"Fixture"}');
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    await waitFor(() => {
+      const hello = ws.sent.map((entry) => JSON.parse(entry)).find((entry) => entry.cmd === 'client_hello');
+      expect(hello?.capabilities).toContain('browser_host');
+      expect(hello?.browser_host_token).toBe('{"title":"Fixture"}');
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'browser_control_request',
+        request_id: 'browser-request-1',
+        workspace_id: 'workspace-1',
+        tile_id: 'tile-browser',
+        action: 'type',
+        selector: '#query',
+        text: 'browser text',
+      });
+    });
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith('browser_host_control', {
+        label: 'browser-workspace-1-tile-browser',
+        action: 'type',
+        selector: '#query',
+        text: 'browser text',
+      });
+      const result = ws.sent.map((entry) => JSON.parse(entry)).find((entry) => entry.cmd === 'browser_control_result');
+      expect(result).toEqual({
+        cmd: 'browser_control_result',
+        request_id: 'browser-request-1',
+        success: true,
+        data: '{"title":"Fixture"}',
+      });
+    });
+
+    unmount();
+  });
+
   it('resolves getReviewLoopRun from show result keyed by loop_id', async () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({
@@ -598,7 +649,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '82',
+        protocol_version: '89',
         sessions: [
           {
             id: 'agent-1',
@@ -684,7 +735,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '82',
+        protocol_version: '89',
         sessions: [],
         workspaces: [{
           id: 'workspace-1',
@@ -768,7 +819,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '82',
+        protocol_version: '89',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -853,7 +904,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '82',
+        protocol_version: '89',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -985,7 +1036,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '82',
+        protocol_version: '89',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -1044,13 +1095,14 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     );
     const ws = await waitForOpenSocket();
     result.current.sendSessionSelected('session-selected');
+    result.current.sendWorkspaceSelected('workspace-selected');
 
     const first = result.current.sendWorkspaceSetSplitRatio('workspace-1', 'split-a', 0.3);
     const second = result.current.sendWorkspaceSetSplitRatio('workspace-1', 'split-b', 0.7);
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '82',
+        protocol_version: '89',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -1062,6 +1114,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     await waitFor(() => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
       expect(sent).toContainEqual({ cmd: 'session_selected', id: 'session-selected' });
+      expect(sent).toContainEqual({ cmd: 'workspace_selected', workspace_id: 'workspace-selected' });
       expect(sent).toContainEqual(expect.objectContaining({ cmd: 'workspace_layout_set_split_ratio', workspace_id: 'workspace-1', split_id: 'split-a', ratio: 0.3 }));
       expect(sent).toContainEqual(expect.objectContaining({ cmd: 'workspace_layout_set_split_ratio', workspace_id: 'workspace-1', split_id: 'split-b', ratio: 0.7 }));
     });
@@ -1113,7 +1166,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '82',
+        protocol_version: '89',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -1158,6 +1211,68 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('correlates overlapping tile updates by request id', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+    const ws = await waitForOpenSocket();
+    const first = result.current.sendWorkspaceUpdateTile('workspace-1', 'tile-browser', 'https://first.example');
+    const second = result.current.sendWorkspaceUpdateTile('workspace-1', 'tile-browser', 'https://second.example');
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '89',
+        sessions: [],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent.filter((entry) => entry.cmd === 'workspace_layout_update_tile')).toHaveLength(2);
+    });
+    const [firstRequest, secondRequest] = ws.sent
+      .map((entry) => JSON.parse(entry))
+      .filter((entry) => entry.cmd === 'workspace_layout_update_tile');
+    expect(firstRequest.request_id).not.toBe(secondRequest.request_id);
+
+    act(() => {
+      ws.emit({
+        event: 'workspace_layout_action_result',
+        action: 'workspace_layout_update_tile',
+        workspace_id: 'workspace-1',
+        tile_id: 'tile-browser',
+        request_id: secondRequest.request_id,
+        success: true,
+      });
+    });
+    await expect(second).resolves.toEqual({ success: true });
+
+    act(() => {
+      ws.emit({
+        event: 'workspace_layout_action_result',
+        action: 'workspace_layout_update_tile',
+        workspace_id: 'workspace-1',
+        tile_id: 'tile-browser',
+        request_id: firstRequest.request_id,
+        success: false,
+        error: 'first persist failed',
+      });
+    });
+    await expect(first).rejects.toThrow('first persist failed');
+    unmount();
+  });
+
   it('prunes cached tile content when its layout leaf or workspace disappears', async () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({
@@ -1173,7 +1288,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '82',
+        protocol_version: '89',
         sessions: [],
         workspaces: [{
           id: 'workspace-1',
@@ -1273,7 +1388,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     };
     const initialState = {
       event: 'initial_state',
-      protocol_version: '82',
+      protocol_version: '89',
       sessions: [],
       workspaces: [workspace],
       prs: [],
@@ -1350,7 +1465,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '82',
+        protocol_version: '89',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1444,7 +1559,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '82',
+        protocol_version: '89',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1543,7 +1658,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '82',
+        protocol_version: '89',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1628,7 +1743,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '82',
+        protocol_version: '89',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -1707,7 +1822,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '82',
+        protocol_version: '89',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -1777,7 +1892,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '82',
+        protocol_version: '89',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',

@@ -294,6 +294,92 @@ type BrowseDirectoryResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type BrowserControlMessage struct {
+	// Action corresponds to the JSON schema field "action".
+	Action string `json:"action"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Params corresponds to the JSON schema field "params".
+	Params *string `json:"params,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Selector corresponds to the JSON schema field "selector".
+	Selector *string `json:"selector,omitempty,omitzero"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// Text corresponds to the JSON schema field "text".
+	Text *string `json:"text,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+}
+
+type BrowserControlRequestMessage struct {
+	// Action corresponds to the JSON schema field "action".
+	Action string `json:"action"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Params corresponds to the JSON schema field "params".
+	Params *string `json:"params,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Selector corresponds to the JSON schema field "selector".
+	Selector *string `json:"selector,omitempty,omitzero"`
+
+	// Text corresponds to the JSON schema field "text".
+	Text *string `json:"text,omitempty,omitzero"`
+
+	// TileID corresponds to the JSON schema field "tile_id".
+	TileID string `json:"tile_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type BrowserControlResponseMessage struct {
+	// Data corresponds to the JSON schema field "data".
+	Data *string `json:"data,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type BrowserControlResultMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Data corresponds to the JSON schema field "data".
+	Data *string `json:"data,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type ClearSessionsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -305,6 +391,9 @@ type ClearWarningsMessage struct {
 }
 
 type ClientHelloMessage struct {
+	// BrowserHostToken corresponds to the JSON schema field "browser_host_token".
+	BrowserHostToken *string `json:"browser_host_token,omitempty,omitzero"`
+
 	// Capabilities corresponds to the JSON schema field "capabilities".
 	Capabilities []string `json:"capabilities"`
 
@@ -1247,6 +1336,17 @@ type MuteWorkspaceMessage struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
+type OpenBrowserMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// URL corresponds to the JSON schema field "url".
+	URL string `json:"url"`
+}
+
 type OpenMarkdownMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1800,6 +1900,9 @@ type ResolveCommentResultMessage struct {
 type Response struct {
 	// Authors corresponds to the JSON schema field "authors".
 	Authors []AuthorState `json:"authors,omitempty,omitzero"`
+
+	// Data corresponds to the JSON schema field "data".
+	Data *string `json:"data,omitempty,omitzero"`
 
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
@@ -3051,6 +3154,23 @@ type WorkspaceLayoutUndockTileMessage struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
+type WorkspaceLayoutUpdateTileMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// TileID corresponds to the JSON schema field "tile_id".
+	TileID string `json:"tile_id"`
+
+	// TileParams corresponds to the JSON schema field "tile_params".
+	TileParams string `json:"tile_params"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
 type WorkspaceLayoutUpdatedMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
@@ -3065,6 +3185,14 @@ type WorkspaceRegisteredMessage struct {
 
 	// Workspace corresponds to the JSON schema field "workspace".
 	Workspace Workspace `json:"workspace"`
+}
+
+type WorkspaceSelectedMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
 }
 
 type WorkspaceStateChangedMessage struct {

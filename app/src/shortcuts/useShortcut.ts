@@ -1,8 +1,9 @@
 // app/src/shortcuts/useShortcut.ts
 import { useEffect, useRef } from 'react';
-import { SHORTCUTS, ShortcutId, matchesShortcut } from './registry';
+import { SHORTCUTS, ShortcutDef, ShortcutId, matchesShortcut } from './registry';
 
 type Handler = () => void;
+const NATIVE_SHORTCUT_EVENT = 'attn:native-shortcut';
 
 // Global registry of active handlers
 const handlers = new Map<ShortcutId, Set<Handler>>();
@@ -26,12 +27,16 @@ function installGlobalListener() {
   listenerInstalled = true;
 
   window.addEventListener('keydown', (e: KeyboardEvent) => {
+    const editableTarget = isNonTerminalEditableTarget(e.target);
     const terminalTarget = isTerminalTarget(e.target);
     for (const [id, def] of Object.entries(SHORTCUTS)) {
       if (id === 'terminal.close' && !terminalTarget) {
         continue;
       }
       if (matchesShortcut(e, def)) {
+        if (editableTarget && (def as ShortcutDef).editableTarget === 'native') {
+          continue;
+        }
         const shortcutHandlers = handlers.get(id as ShortcutId);
         if (shortcutHandlers && shortcutHandlers.size > 0) {
           if (id === 'session.refreshPRs' && terminalTarget) {
@@ -45,11 +50,28 @@ function installGlobalListener() {
       }
     }
   }, true); // Capture phase to get events before terminal input.
+
+  window.addEventListener(NATIVE_SHORTCUT_EVENT, (event) => {
+    const shortcutId = (event as CustomEvent<unknown>).detail;
+    if (
+      typeof shortcutId === 'string'
+      && Object.prototype.hasOwnProperty.call(SHORTCUTS, shortcutId)
+    ) {
+      triggerShortcut(shortcutId as ShortcutId);
+    }
+  });
 }
 
 function isTerminalTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return target.closest('.terminal-container, .session-terminal-workspace') !== null;
+}
+
+function isNonTerminalEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement) || target.closest('.terminal-container')) {
+    return false;
+  }
+  return target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])') !== null;
 }
 
 /**

@@ -4,16 +4,21 @@ import { useEscapeStack } from '../hooks/useEscapeStack';
 import type { GitStatusUpdate, FileDiffResult, ReviewState, BranchDiffFile, BranchDiffFilesResult } from '../hooks/useDaemonSocket';
 import type { ResolvedTheme } from '../hooks/useTheme';
 import type { ReviewComment } from '../types/generated';
-import UnifiedDiffEditor, {
-  buildUnifiedDocument,
-  resolveAnchor,
-  hashContent,
-  type DiffLine,
-  type CommentAnchor,
-  type InlineComment as EditorComment,
-} from './UnifiedDiffEditor';
+import DiffView from './DiffView';
 import './DiffDetailPanel.css';
 import { updateReviewPerf } from '../utils/reviewPerf';
+import { hashDiffContent } from '../utils/reviewHash';
+import { loadViewedDiffHashes, saveViewedDiffHashes } from '../utils/viewedDiffHashes';
+import { commentLineRef, isOriginalSideComment } from '../utils/reviewComment';
+
+// Every path git currently reports as changed (renames contribute both ends).
+function gitStatusChangedPaths(status: GitStatusUpdate): Set<string> {
+  return new Set(
+    [...status.staged, ...status.unstaged, ...status.untracked].flatMap((file) =>
+      file.old_path ? [file.path, file.old_path] : [file.path]
+    )
+  );
+}
 
 // Auto-skip patterns for lockfiles and generated files
 const AUTO_SKIP_PATTERNS = [
@@ -29,79 +34,6 @@ const AUTO_SKIP_PATTERNS = [
 
 const BACKGROUND_CHANGE_CHECK_CONCURRENCY = 2;
 const BACKGROUND_CHANGE_CHECK_DEBOUNCE_MS = 500;
-
-// ============================================================================
-// Comment Conversion Utilities (for UnifiedDiffEditor integration)
-// ============================================================================
-
-/**
- * Convert a ReviewComment (API format) to EditorComment format.
- * Uses resolveAnchor to find the docLine and detect outdated/orphaned state.
- *
- * Convention: negative line_end encodes 'original' side (deleted lines).
- */
-function toEditorComment(
-  comment: ReviewComment,
-  lines: DiffLine[]
-): EditorComment | null {
-  // Detect side from line_end convention: negative = original (deleted lines)
-  const isOriginalSide = comment.line_end < 0;
-  const endLine = Math.abs(comment.line_end);
-  const anchor: CommentAnchor = {
-    side: isOriginalSide ? 'original' : 'modified',
-    line: comment.line_start,
-    lineEnd: endLine !== comment.line_start ? endLine : undefined,
-    anchorContent: '',
-  };
-
-  // Try to resolve the anchor
-  const result = resolveAnchor(anchor, lines);
-
-  if ('isOrphaned' in result) {
-    // Line no longer exists - still show comment but mark as orphaned
-    // Place it at line 1 as fallback
-    return {
-      id: comment.id,
-      docLine: 1,
-      content: comment.content,
-      resolved: comment.resolved,
-      resolvedBy: comment.resolved_by as 'user' | 'agent' | undefined,
-      author: comment.author as 'user' | 'agent',
-      anchor,
-      isOrphaned: true,
-    };
-  }
-
-  return {
-    id: comment.id,
-    docLine: result.docLine,
-    content: comment.content,
-    resolved: comment.resolved,
-    resolvedBy: comment.resolved_by as 'user' | 'agent' | undefined,
-    author: comment.author as 'user' | 'agent',
-    anchor,
-    isOutdated: result.isOutdated,
-  };
-}
-
-/**
- * Extract API-compatible fields from a CommentAnchor.
- * Used when saving a new comment to the backend.
- *
- * Convention: negative line_end encodes 'original' side (deleted lines).
- * - side='modified': line_end = line_start (positive)
- * - side='original': line_end = -line_start (negative)
- */
-function fromEditorAnchor(anchor: CommentAnchor): {
-  line_start: number;
-  line_end: number;
-} {
-  const endLine = anchor.lineEnd ?? anchor.line;
-  return {
-    line_start: anchor.line,
-    line_end: anchor.side === 'original' ? -endLine : endLine,
-  };
-}
 
 // Abbreviate path for display
 function abbreviatePath(path: string): string {
@@ -217,7 +149,7 @@ interface DiffDetailPanelProps {
   onSelectFilePath: (path: string | null) => void;
   // Send a code reference to the active agent session
   onSendToClaude?: (reference: string) => void;
-  // Global UI scale; drives the CodeMirror editor font size.
+  // Global UI scale; drives the diff code font size (--diffs-font-size).
   scale?: number;
 }
 
@@ -251,9 +183,9 @@ export function DiffDetailPanel({
   const [showSelectedDiffPending, setShowSelectedDiffPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [diffContent, setDiffContent] = useState<DiffContent | null>(null);
-  const [expandedContext, setExpandedContext] = useState(0); // 0 = hunks mode (uses 3 lines context), -1 = full file
+  const [expandedContext, setExpandedContext] = useState(0); // 0 = hunks mode (collapse unchanged), -1 = full file
+  const [diffStyle, setDiffStyle] = useState<'unified' | 'split'>('unified');
   const fontSize = Math.round(13 * scale);
-  const [scrollToLine, setScrollToLine] = useState<number | undefined>(undefined);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const diffContentCacheRef = useRef<Map<string, DiffContent>>(new Map());
   const selectedDiffPendingTimerRef = useRef<number | null>(null);
@@ -270,7 +202,6 @@ export function DiffDetailPanel({
   const [allReviewComments, setAllReviewComments] = useState<ReviewComment[]>([]);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [commentError, setCommentError] = useState<string | null>(null);
-  const editorCommentBuildDurationMsRef = useRef(0);
 
   // Auto-clear comment errors after 3 seconds
   useEffect(() => {
@@ -308,6 +239,12 @@ export function DiffDetailPanel({
 
   // Track diff hashes for "changed since viewed" detection
   const viewedDiffHashesRef = useRef<Map<string, string>>(new Map());
+  // Files already persisted as viewed on the backend, tracked separately from
+  // the local `viewedFiles` set. A diff fetch that resolves before `reviewId`
+  // arrives marks the file viewed locally but can't persist yet; this lets the
+  // effect persist once `reviewId` is available instead of skipping it as
+  // "already viewed". Seeded from restored review state (those are persisted).
+  const persistedViewedFilesRef = useRef<Set<string>>(new Set());
   const [changedSinceViewed, setChangedSinceViewed] = useState<Set<string>>(new Set());
   const previousSelectedPathRef = useRef<string | null>(null);
   const [backgroundChangeCheckCount, setBackgroundChangeCheckCount] = useState(0);
@@ -321,6 +258,8 @@ export function DiffDetailPanel({
   const contentVisibleRef = useRef(contentVisible);
   const baseRefRef = useRef(baseRef);
   const fetchDiffRef = useRef(fetchDiff);
+  const reviewIdRef = useRef<string | null>(reviewId);
+  const gitStatusRef = useRef<GitStatusUpdate | null>(gitStatus ?? null);
   const lastBackgroundGitStatusRef = useRef<GitStatusUpdate | null>(null);
 
   useEffect(() => {
@@ -328,7 +267,9 @@ export function DiffDetailPanel({
     contentVisibleRef.current = contentVisible;
     baseRefRef.current = baseRef;
     fetchDiffRef.current = fetchDiff;
-  }, [baseRef, contentVisible, fetchDiff, selectedFilePath]);
+    reviewIdRef.current = reviewId;
+    gitStatusRef.current = gitStatus ?? null;
+  }, [baseRef, contentVisible, fetchDiff, selectedFilePath, reviewId, gitStatus]);
 
   const syncBackgroundChangeCheckCount = useCallback(() => {
     const activePaths = new Set([
@@ -338,6 +279,28 @@ export function DiffDetailPanel({
     ]);
     setBackgroundChangeCheckCount(activePaths.size);
   }, []);
+
+  // Persist the in-memory diff hashes so "changed since viewed" survives a
+  // panel close/reopen. Cheap and idempotent; called after each hash update.
+  const persistViewedDiffHashes = useCallback(() => {
+    if (reviewIdRef.current) {
+      saveViewedDiffHashes(reviewIdRef.current, viewedDiffHashesRef.current);
+    }
+  }, []);
+
+  // Persist a file's viewed state to the backend exactly once. Keyed on
+  // `persistedViewedFilesRef` rather than local `viewedFiles` so a fetch that
+  // resolved before `reviewId` arrived still persists when the effect reruns
+  // with `reviewId` set (the viewed-state race).
+  const persistViewed = useCallback((filepath: string) => {
+    if (!reviewId || persistedViewedFilesRef.current.has(filepath)) return;
+    persistedViewedFilesRef.current.add(filepath);
+    markFileViewed(reviewId, filepath, true).catch((err) => {
+      console.error('Failed to persist viewed state:', err);
+      // Allow a later attempt to retry.
+      persistedViewedFilesRef.current.delete(filepath);
+    });
+  }, [reviewId, markFileViewed]);
 
   const clearSelectedDiffPendingTimer = useCallback(() => {
     if (selectedDiffPendingTimerRef.current !== null) {
@@ -406,11 +369,12 @@ export function DiffDetailPanel({
             return;
           }
 
-          const newHash = hashContent(result.original + result.modified);
+          const newHash = hashDiffContent(result.original, result.modified);
           const currentHash = viewedDiffHashesRef.current.get(viewedPath);
           if (currentHash && currentHash !== newHash) {
             setChangedSinceViewed(prev => new Set(prev).add(viewedPath));
             viewedDiffHashesRef.current.set(viewedPath, newHash);
+            persistViewedDiffHashes();
             diffContentCacheRef.current.set(viewedPath, {
               original: result.original,
               modified: result.modified,
@@ -440,7 +404,7 @@ export function DiffDetailPanel({
     }
 
     syncBackgroundChangeCheckCount();
-  }, [resetBackgroundChangeChecks, syncBackgroundChangeCheckCount]);
+  }, [resetBackgroundChangeChecks, syncBackgroundChangeCheckCount, persistViewedDiffHashes]);
 
   const scheduleBackgroundChangeChecks = useCallback((paths: string[]) => {
     let added = false;
@@ -648,11 +612,8 @@ export function DiffDetailPanel({
     for (const [filepath, fileComments] of byFile.entries()) {
       lines.push(`\n${filepath}`);
       for (const comment of fileComments) {
-        const lineStart = comment.line_start;
-        const lineEnd = Math.abs(comment.line_end);
-        const side = comment.line_end < 0 ? 'original' : 'modified';
-        const lineRef = lineStart === lineEnd ? `L${lineStart}` : `L${lineStart}-L${lineEnd}`;
-        lines.push(`- @${filepath}:${lineRef} (${side}) ${comment.content}`);
+        const side = isOriginalSideComment(comment) ? 'original' : 'modified';
+        lines.push(`- @${filepath}:${commentLineRef(comment)} (${side}) ${comment.content}`);
       }
     }
 
@@ -671,15 +632,39 @@ export function DiffDetailPanel({
       getReviewState(repoPath, branch)
         .then((result) => {
           if (result.success && result.state) {
+            const restoredViewed = result.state.viewed_files || [];
             setReviewId(result.state.review_id);
-            setViewedFiles(new Set(result.state.viewed_files || []));
+            setViewedFiles(new Set(restoredViewed));
+            // These files are already persisted on the backend.
+            persistedViewedFilesRef.current = new Set(restoredViewed);
+            // Restore durable diff hashes so "changed since viewed" survives a
+            // close/reopen. Fill only missing entries so a fetch already in
+            // flight isn't clobbered by the stored baseline.
+            const storedHashes = loadViewedDiffHashes(result.state.review_id);
+            for (const [path, hash] of storedHashes) {
+              if (!viewedDiffHashesRef.current.has(path)) {
+                viewedDiffHashesRef.current.set(path, hash);
+              }
+            }
+            // Re-check restored viewed files that git currently reports as
+            // changed, so an edit made while the panel was closed surfaces on
+            // reopen. The gitStatus effect alone would dedupe the status it
+            // already consumed before this restore completed.
+            const status = gitStatusRef.current;
+            if (status) {
+              const changedPaths = gitStatusChangedPaths(status);
+              const candidates = restoredViewed.filter((path) => changedPaths.has(path));
+              if (candidates.length > 0) {
+                scheduleBackgroundChangeChecks(candidates);
+              }
+            }
           }
         })
         .catch((err) => {
           console.error('Failed to load review state:', err);
         });
     }
-  }, [isOpen, repoPath, branch, getReviewState]);
+  }, [isOpen, repoPath, branch, getReviewState, scheduleBackgroundChangeChecks]);
 
   // Fallback: when the panel opens without a selection, pick the first
   // reviewable file.
@@ -769,7 +754,6 @@ export function DiffDetailPanel({
       setDiffContent(null);
       setError(null);
       setExpandedContext(0);
-      setScrollToLine(undefined);
       setLoading(false);
       setShowSelectedDiffPending(false);
       clearSelectedDiffPendingTimer();
@@ -777,8 +761,10 @@ export function DiffDetailPanel({
       setIsSyncingRemotes(false);
       setRemotesSyncWarning(null);
       diffContentCacheRef.current.clear();
-      // Clear change detection state
+      // Clear change detection state (localStorage baseline is intentionally
+      // kept so reopening can restore it).
       viewedDiffHashesRef.current.clear();
+      persistedViewedFilesRef.current.clear();
       setChangedSinceViewed(new Set());
       resetBackgroundChangeChecks();
     }
@@ -796,12 +782,12 @@ export function DiffDetailPanel({
       setShowSelectedDiffPending(false);
       clearSelectedDiffPendingTimer();
       setExpandedContext(0);
-      setScrollToLine(undefined);
       setBranchDiffFiles([]);
       setBaseRef('');
       setRemotesSyncWarning(null);
       diffContentCacheRef.current.clear();
       viewedDiffHashesRef.current.clear();
+      persistedViewedFilesRef.current.clear();
       setChangedSinceViewed(new Set());
       setViewedFiles(new Set());
       resetBackgroundChangeChecks();
@@ -829,7 +815,6 @@ export function DiffDetailPanel({
 
     // Store current path to check if we're still viewing the same file when fetch completes
     const fetchPath = selectedFile.path;
-    const isFirstView = !viewedFiles.has(fetchPath);
     const cachedContent = diffContentCacheRef.current.get(fetchPath) || null;
 
     setDiffContent(cachedContent);
@@ -851,7 +836,7 @@ export function DiffDetailPanel({
         if (selectedFilePathRef.current !== fetchPath) return;
 
         const newContent = { original: result.original, modified: result.modified };
-        const newHash = hashContent(result.original + result.modified);
+        const newHash = hashDiffContent(result.original, result.modified);
         const prevHash = viewedDiffHashesRef.current.get(fetchPath);
 
         diffContentCacheRef.current.set(fetchPath, newContent);
@@ -866,8 +851,9 @@ export function DiffDetailPanel({
           setChangedSinceViewed(prev => new Set(prev).add(fetchPath));
         }
 
-        // Update stored hash
+        // Update stored hash and its durable baseline
         viewedDiffHashesRef.current.set(fetchPath, newHash);
+        persistViewedDiffHashes();
 
         // Mark file as viewed (local state) - only create new Set if actually adding
         setViewedFiles(prev => {
@@ -875,12 +861,10 @@ export function DiffDetailPanel({
           return new Set(prev).add(fetchPath);
         });
 
-        // Persist to backend if we have a review ID (only on first view)
-        if (isFirstView && reviewId) {
-          markFileViewed(reviewId, fetchPath, true).catch((err) => {
-            console.error('Failed to persist viewed state:', err);
-          });
-        }
+        // Persist viewed state to the backend (no-op until reviewId is known;
+        // the effect reruns when reviewId arrives, so a fetch that won the race
+        // against getReviewState still persists then).
+        persistViewed(fetchPath);
       })
       .catch((err) => {
         if (selectedFilePathRef.current !== fetchPath) return;
@@ -892,8 +876,10 @@ export function DiffDetailPanel({
     return () => {
       clearSelectedDiffPendingTimer();
     };
-  // Note: viewedFiles intentionally excluded - we read it but don't want re-runs when it changes
-  }, [clearSelectedDiffPendingTimer, diffFetchKey, selectedFile, fetchDiff, baseRef, reviewId, markFileViewed]);
+  // Note: viewedFiles intentionally excluded - we read it but don't want re-runs when it changes.
+  // persistViewed changes identity when reviewId arrives, which reruns this effect so a
+  // first-file fetch that won the race against getReviewState still persists.
+  }, [clearSelectedDiffPendingTimer, diffFetchKey, selectedFile, fetchDiff, baseRef, persistViewed, persistViewedDiffHashes]);
 
   // Check for changes in viewed files when gitStatus updates (for files not currently selected)
   useEffect(() => {
@@ -901,11 +887,7 @@ export function DiffDetailPanel({
     if (lastBackgroundGitStatusRef.current === gitStatus) return;
     lastBackgroundGitStatusRef.current = gitStatus;
 
-    const changedPaths = new Set(
-      [...gitStatus.staged, ...gitStatus.unstaged, ...gitStatus.untracked].flatMap((file) => (
-        file.old_path ? [file.path, file.old_path] : [file.path]
-      ))
-    );
+    const changedPaths = gitStatusChangedPaths(gitStatus);
     const candidates = Array.from(viewedFiles).filter((viewedPath) => (
       viewedPath !== selectedFilePath &&
       changedPaths.has(viewedPath) &&
@@ -921,7 +903,7 @@ export function DiffDetailPanel({
 
   useEscapeStack(onClose, isOpen);
 
-  // Keyboard navigation — capture phase to intercept before CodeMirror
+  // Keyboard navigation — capture phase to intercept before the diff view
   useEffect(() => {
     if (!isOpen) return;
 
@@ -991,7 +973,6 @@ export function DiffDetailPanel({
     // Mark the current file viewed on its way out so `]` consistently
     // advances instead of re-selecting the same file.
     if (current) {
-      const wasFirstView = !viewedFiles.has(current);
       setViewedFiles(prev => {
         if (prev.has(current)) return prev;
         return new Set(prev).add(current);
@@ -1002,11 +983,7 @@ export function DiffDetailPanel({
         next.delete(current);
         return next;
       });
-      if (wasFirstView && reviewId) {
-        markFileViewed(reviewId, current, true).catch(err => {
-          console.error('Failed to persist viewed state:', err);
-        });
-      }
+      persistViewed(current);
     }
 
     // Prefer files changed since last viewed, then any unviewed file,
@@ -1024,7 +1001,7 @@ export function DiffDetailPanel({
     if (unreviewed) {
       onSelectFilePath(unreviewed.path);
     }
-  }, [needsReviewFiles, viewedFiles, changedSinceViewed, selectedFilePath, reviewId, markFileViewed]);
+  }, [needsReviewFiles, viewedFiles, changedSinceViewed, selectedFilePath, persistViewed]);
 
   const getFileIcon = useCallback((file: ReviewFile) => {
     if (file.isAutoSkip) return '⊘';
@@ -1045,23 +1022,8 @@ export function DiffDetailPanel({
   }, []);
 
   // ============================================================================
-  // UnifiedDiffEditor Integration
+  // Diff rendering perf telemetry
   // ============================================================================
-
-  // Build unified document and convert comments
-  const editorComments = useMemo(() => {
-    if (!diffContent) {
-      editorCommentBuildDurationMsRef.current = 0;
-      return [] as EditorComment[];
-    }
-    const startedAt = performance.now();
-    const { lines } = buildUnifiedDocument(diffContent.original, diffContent.modified);
-    const mapped = comments
-      .map(c => toEditorComment(c, lines))
-      .filter((c): c is EditorComment => c !== null);
-    editorCommentBuildDurationMsRef.current = performance.now() - startedAt;
-    return mapped;
-  }, [diffContent, comments]);
 
   useEffect(() => {
     updateReviewPerf({
@@ -1072,8 +1034,6 @@ export function DiffDetailPanel({
         needsReviewFileCount: needsReviewFiles.length,
         autoSkipFileCount: autoSkipFiles.length,
         commentCount: comments.length,
-        editorCommentCount: editorComments.length,
-        commentBuildDurationMs: editorCommentBuildDurationMsRef.current,
         originalLength: diffContent?.original.length || 0,
         modifiedLength: diffContent?.modified.length || 0,
       },
@@ -1083,7 +1043,6 @@ export function DiffDetailPanel({
     autoSkipFiles.length,
     comments.length,
     diffContent,
-    editorComments.length,
     isOpen,
     needsReviewFiles.length,
     selectedFilePath,
@@ -1099,8 +1058,6 @@ export function DiffDetailPanel({
           needsReviewFileCount: 0,
           autoSkipFileCount: 0,
           commentCount: 0,
-          editorCommentCount: 0,
-          commentBuildDurationMs: 0,
           originalLength: 0,
           modifiedLength: 0,
         },
@@ -1108,49 +1065,30 @@ export function DiffDetailPanel({
     };
   }, []);
 
-  // Get language from file extension
-  const editorLanguage = useMemo(() => {
-    if (!selectedFilePath) return undefined;
-    const ext = selectedFilePath.split('.').pop()?.toLowerCase();
-    const langMap: Record<string, string> = {
-      js: 'javascript',
-      jsx: 'jsx',
-      ts: 'typescript',
-      tsx: 'tsx',
-      py: 'python',
-      md: 'markdown',
-      json: 'json',
-      css: 'css',
-      html: 'html',
-      go: 'go',
-      rs: 'rust',
-      sql: 'sql',
-      java: 'java',
-      kt: 'kotlin',
-      yaml: 'yaml',
-      yml: 'yaml',
-    };
-    return ext ? langMap[ext] : undefined;
-  }, [selectedFilePath]);
+  // ============================================================================
+  // DiffView comment callbacks
+  // ============================================================================
 
-  // UnifiedDiffEditor callbacks
+  // Add a comment. line_start/line_end already follow the protocol convention
+  // (negative line_end encodes the original/deleted side).
   const handleEditorAddComment = useCallback(async (
-    _docLine: number, // Not used - we get line info from anchor
+    line_start: number,
+    line_end: number,
     content: string,
-    anchor: CommentAnchor
   ) => {
     if (!reviewId || !selectedFilePath || !addComment) return;
     try {
-      const { line_start, line_end } = fromEditorAnchor(anchor);
       const result = await addComment(reviewId, selectedFilePath, line_start, line_end, content);
       if (result.success && result.comment) {
         setAllReviewComments(prev => [...prev, result.comment!]);
       } else {
         setCommentError('Failed to save comment');
+        throw new Error('Failed to save comment');
       }
     } catch (err) {
       setCommentError('Failed to save comment');
       console.error('Add comment error:', err);
+      throw err;
     }
   }, [reviewId, selectedFilePath, addComment]);
 
@@ -1359,6 +1297,21 @@ export function DiffDetailPanel({
               )}
               <div className="diff-actions">
                 <button
+                  className={`expand-btn ${diffStyle === 'unified' ? 'active' : ''}`}
+                  onClick={() => setDiffStyle('unified')}
+                  title="Unified layout"
+                >
+                  Unified
+                </button>
+                <button
+                  className={`expand-btn ${diffStyle === 'split' ? 'active' : ''}`}
+                  onClick={() => setDiffStyle('split')}
+                  title="Split layout"
+                >
+                  Split
+                </button>
+                <span className="diff-actions-divider" aria-hidden="true" />
+                <button
                   className={`expand-btn ${expandedContext === 0 ? 'active' : ''}`}
                   onClick={() => setExpandedContext(0)}
                   title="Hunks only"
@@ -1395,17 +1348,16 @@ export function DiffDetailPanel({
                 </div>
               ) : (
                 <div className={`diff-editor-shell ${selectedDiffIsPending ? 'refreshing' : ''}`}>
-                  <UnifiedDiffEditor
+                  <DiffView
                     original={diffContent.original}
                     modified={diffContent.modified}
-                    comments={editorComments}
+                    filePath={selectedFilePath || undefined}
+                    comments={comments}
                     editingCommentId={editingCommentId}
                     resolvedTheme={resolvedTheme}
                     fontSize={fontSize}
-                    language={editorLanguage}
-                    contextLines={expandedContext === -1 ? 0 : 3}
-                    scrollToLine={scrollToLine}
-                    filePath={selectedFilePath || undefined}
+                    diffStyle={diffStyle}
+                    expandUnchanged={expandedContext === -1}
                     onAddComment={handleEditorAddComment}
                     onEditComment={handleEditorEditComment}
                     onStartEdit={handleEditorStartEdit}

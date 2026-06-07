@@ -31,6 +31,12 @@ type wsClient struct {
 	sendClosed  bool
 	closeCode   websocket.StatusCode
 	closeReason string
+	connectedAt time.Time
+
+	// Browser-host eligibility requires both the expected Tauri origin and the
+	// per-profile secret delivered only to the trusted main webview.
+	trustedTauriOrigin       bool
+	browserHostAuthenticated bool
 
 	// PTY subscriptions keyed by session ID
 	attachedStreams map[string]ptybackend.Stream // session -> stream
@@ -66,6 +72,35 @@ func (c *wsClient) HasCapability(cap string) bool {
 	defer c.identityMu.RUnlock()
 	_, ok := c.capabilities[cap]
 	return ok
+}
+
+func (c *wsClient) IsBrowserHost() bool {
+	c.identityMu.RLock()
+	defer c.identityMu.RUnlock()
+	_, capable := c.capabilities[protocol.CapabilityBrowserHost]
+	return c.trustedTauriOrigin &&
+		c.browserHostAuthenticated &&
+		c.clientKind == "tauri-app" &&
+		capable
+}
+
+func (c *wsClient) setBrowserHostAuthenticated(authenticated bool) {
+	c.identityMu.Lock()
+	defer c.identityMu.Unlock()
+	c.browserHostAuthenticated = authenticated
+}
+
+func websocketReadLimit(client *wsClient) int64 {
+	if client.IsBrowserHost() {
+		return maxBrowserHostWebSocketReadBytes
+	}
+	return defaultWebSocketReadBytes
+}
+
+func (c *wsClient) updateReadLimit() {
+	if c.conn != nil {
+		c.conn.SetReadLimit(websocketReadLimit(c))
+	}
 }
 
 func (c *wsClient) speaksWorkspaceProtocol() bool {
@@ -302,9 +337,11 @@ type wsHub struct {
 }
 
 const (
-	maxSlowCount      = 3 // disconnect after this many consecutive failed sends
-	maxPTYDimValue    = 65535
-	ptyOutputSendWait = 1 * time.Second
+	maxSlowCount                     = 3 // disconnect after this many consecutive failed sends
+	maxPTYDimValue                   = 65535
+	defaultWebSocketReadBytes        = 1 << 20
+	maxBrowserHostWebSocketReadBytes = 32 << 20
+	ptyOutputSendWait                = 1 * time.Second
 )
 
 func newWSHub() *wsHub {
@@ -461,6 +498,24 @@ func (h *wsHub) AnyClientMatches(match func(*wsClient) bool) bool {
 	return false
 }
 
+func (h *wsHub) NewestClientMatching(match func(*wsClient) bool) *wsClient {
+	if match == nil {
+		return nil
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var newest *wsClient
+	for client := range h.clients {
+		if !match(client) {
+			continue
+		}
+		if newest == nil || client.connectedAt.After(newest.connectedAt) {
+			newest = client
+		}
+	}
+	return newest
+}
+
 func (h *wsHub) broadcastValue(message interface{}) {
 	data, err := json.Marshal(message)
 	if err != nil {
@@ -519,6 +574,22 @@ func isAllowedLocalOrigin(origin string) bool {
 	return false
 }
 
+func isTrustedTauriOrigin(origin string) bool {
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := normalizeWSHost(parsed.Host)
+	if (parsed.Scheme == "tauri" && host == "localhost") ||
+		(parsed.Scheme == "http" && host == "tauri.localhost") {
+		return true
+	}
+	return config.Profile() == "dev" &&
+		parsed.Scheme == "http" &&
+		strings.EqualFold(parsed.Hostname(), "localhost") &&
+		parsed.Port() == "1420"
+}
+
 func normalizeWSHost(value string) string {
 	trimmed := strings.TrimSpace(strings.ToLower(value))
 	if trimmed == "" {
@@ -572,14 +643,20 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 		d.logf("WebSocket accept error: %v", err)
 		return
 	}
+	// Keep unauthenticated and ordinary clients on a modest command-sized
+	// budget. The authenticated browser host receives its larger capture budget
+	// only after client_hello verifies the per-profile secret.
+	conn.SetReadLimit(defaultWebSocketReadBytes)
 
 	client := &wsClient{
-		conn:            conn,
-		send:            make(chan outboundMessage, 256),
-		recv:            make(chan []byte, 256), // buffer for incoming messages
-		attachedStreams: make(map[string]ptybackend.Stream),
-		attachedRemote:  make(map[string]struct{}),
-		pendingRemote:   make(map[string]struct{}),
+		conn:               conn,
+		send:               make(chan outboundMessage, 256),
+		recv:               make(chan []byte, 256), // buffer for incoming messages
+		connectedAt:        time.Now(),
+		trustedTauriOrigin: isTrustedTauriOrigin(origin),
+		attachedStreams:    make(map[string]ptybackend.Stream),
+		attachedRemote:     make(map[string]struct{}),
+		pendingRemote:      make(map[string]struct{}),
 	}
 
 	d.wsHub.register <- client
@@ -770,6 +847,9 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	if cmd == protocol.CmdSessionSelected {
 		d.setSelectedSession(msg.(*protocol.SessionSelectedMessage).ID)
 	}
+	if cmd == protocol.CmdWorkspaceSelected {
+		d.setSelectedWorkspace(msg.(*protocol.WorkspaceSelectedMessage).WorkspaceID)
+	}
 	if d.tryHandleRemoteWSCommand(client, cmd, msg, data) {
 		return
 	}
@@ -800,6 +880,7 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdSessionVisualized:
 		d.handleSessionVisualizedWS(msg.(*protocol.SessionVisualizedMessage))
 	case protocol.CmdSessionSelected:
+	case protocol.CmdWorkspaceSelected:
 	case protocol.CmdPRVisited:
 		d.handlePRVisitedWS(msg.(*protocol.PRVisitedMessage))
 	case protocol.CmdListWorktrees:
@@ -918,12 +999,18 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkspaceLayoutDockTile(client, msg.(*protocol.WorkspaceLayoutDockTileMessage))
 	case protocol.CmdWorkspaceLayoutUndockTile:
 		d.handleWorkspaceLayoutUndockTile(client, msg.(*protocol.WorkspaceLayoutUndockTileMessage))
+	case protocol.CmdWorkspaceLayoutUpdateTile:
+		d.handleWorkspaceLayoutUpdateTile(client, msg.(*protocol.WorkspaceLayoutUpdateTileMessage))
 	case protocol.CmdWorkspaceLayoutMoveLeaf:
 		d.handleWorkspaceLayoutMoveLeaf(client, msg.(*protocol.WorkspaceLayoutMoveLeafMessage))
 	case protocol.CmdWorkspaceLayoutMoveLeafToWorkspace:
 		d.handleWorkspaceLayoutMoveLeafToWorkspace(client, msg.(*protocol.WorkspaceLayoutMoveLeafToWorkspaceMessage))
 	case protocol.CmdWorkspaceTileContentGet:
 		d.handleWorkspaceTileContentGet(client, msg.(*protocol.WorkspaceTileContentGetMessage))
+	case protocol.CmdBrowserControl:
+		go d.handleRemoteBrowserControl(client, msg.(*protocol.BrowserControlMessage))
+	case protocol.CmdBrowserControlResult:
+		d.handleBrowserControlResult(client, msg.(*protocol.BrowserControlResultMessage))
 	case protocol.CmdRegisterWorkspace:
 		d.handleRegisterWorkspace(client, msg.(*protocol.RegisterWorkspaceMessage))
 	case protocol.CmdUnregisterWorkspace:
@@ -1110,6 +1197,10 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdWorkspaceLayoutUndockTile:
 		if typed, ok := msg.(*protocol.WorkspaceLayoutUndockTileMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdWorkspaceLayoutUpdateTile:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutUpdateTileMessage); ok {
 			return typed.WorkspaceID
 		}
 	case protocol.CmdWorkspaceLayoutMoveLeaf:

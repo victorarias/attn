@@ -21,7 +21,7 @@ pnpm run dev    # Starts tauri dev with hot reload
 - **NewSessionDialog/**: Session creation (PathInput, RepoOptions subcomponents)
 - **ChangesPanel.tsx**: Git changes display
 - **DiffDetailPanel.tsx**: Review/diff panel orchestration and file selection
-- **UnifiedDiffEditor.tsx**: CodeMirror-based unified diff viewing with inline comments
+- **DiffView.tsx**: `@pierre/diffs` (diffs.com) wrapper — unified/split diff rendering, Shiki highlighting, inline review-comment annotations
 - **AttentionDrawer.tsx**: Quick view of items needing attention
 
 ### State Management
@@ -95,7 +95,7 @@ pnpm run e2e -- --ui       # Run with Playwright UI
 ### Component Test Harness (Playwright)
 
 **When to use:** For components that need real browser APIs that jsdom can't simulate:
-- CodeMirror (requires DOM measurements, layout, ResizeObserver)
+- `@pierre/diffs` / DiffView (custom element + shadow DOM, Shiki highlighting, `adoptedStyleSheets`)
 - Complex DOM interactions (drag/drop, scroll-based behaviors)
 - Components with native browser features
 

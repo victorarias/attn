@@ -4,6 +4,10 @@ import { SessionTerminalWorkspace } from './index';
 import { createPaneRuntimeEventRouterController } from './paneRuntimeEventRouter';
 import { tileContentKey, type TerminalWorkspaceState } from '../../types/workspace';
 
+const browserTileProps = vi.hoisted(() => ({
+  current: null as null | { visible: boolean },
+}));
+
 // The terminal surface pulls in the Ghostty WASM model; a tile-only workspace
 // never mounts one, but stub it so the import graph stays light in jsdom.
 vi.mock('../GhosttyTerminal', async () => {
@@ -14,6 +18,13 @@ vi.mock('../GhosttyTerminal', async () => {
     }),
   };
 });
+
+vi.mock('./BrowserTileBody', () => ({
+  BrowserTileBody: (props: { visible: boolean }) => {
+    browserTileProps.current = props;
+    return <div data-testid="mock-browser-tile" />;
+  },
+}));
 
 function tileOnlyWorkspace(): TerminalWorkspaceState {
   return {
@@ -88,5 +99,38 @@ describe('SessionTerminalWorkspace tile-only (sessionless) rendering', () => {
     expect(body).not.toBeNull();
     expect(body).toHaveAttribute('tabindex', '-1');
     expect(document.activeElement).toBe(body);
+  });
+
+  it('hides a native browser tile while workspace interaction is disabled', () => {
+    const browserWorkspace: TerminalWorkspaceState = {
+      agents: [],
+      layoutTree: {
+        type: 'tile',
+        tileId: 'tile-browser',
+        tileKind: 'browser',
+        tileParams: 'https://backstage.spotify.net',
+      },
+    };
+    const commonProps = {
+      workspaceId: 'workspace-browser',
+      workspace: browserWorkspace,
+      activePaneId: '',
+      fontSize: 13,
+      isActiveSession: true,
+      eventRouter: createPaneRuntimeEventRouterController(),
+      onSplitPane: vi.fn(),
+      onClosePane: vi.fn(),
+      onFocusPane: vi.fn(),
+      onNavigateOutOfSession: vi.fn(),
+    };
+    const { rerender } = render(
+      <SessionTerminalWorkspace {...commonProps} enabled />,
+    );
+
+    expect(browserTileProps.current?.visible).toBe(true);
+
+    rerender(<SessionTerminalWorkspace {...commonProps} enabled={false} />);
+
+    expect(browserTileProps.current?.visible).toBe(false);
   });
 });
