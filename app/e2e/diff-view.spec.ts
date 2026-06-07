@@ -253,6 +253,44 @@ test.describe('DiffView (@pierre/diffs)', () => {
     await expect(textarea).toBeFocused();
   });
 
+  test('keeps an in-progress comment (text + focus) when the current file changes underneath', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+
+    // Start typing a brand-new comment.
+    const line = page.locator('diffs-container [data-line-index][data-column-number]').nth(6);
+    await line.hover();
+    const plus = page.locator('diffs-container [data-utility-button]');
+    await plus.waitFor({ state: 'visible' });
+    await plus.click();
+
+    const textarea = page.locator('.diff-comment-form textarea');
+    await expect(textarea).toBeVisible();
+    await textarea.fill('Mid-sentence when the file changed');
+    await expect(textarea).toBeFocused();
+
+    // The file under review changes in the background (the agent edits it).
+    await page.evaluate(() => window.__HARNESS__.refreshContent());
+
+    // The in-progress comment and its focus must survive the file change.
+    await expect(textarea).toHaveValue('Mid-sentence when the file changed');
+    await expect(textarea).toBeFocused();
+  });
+
+  test('keeps an in-progress edit (text + focus) when the current file changes underneath', async ({ page }) => {
+    await openHarness(page, SEEDED);
+    await page.locator('.diff-comment .edit-btn').click();
+
+    const textarea = page.locator('.diff-comment-form textarea');
+    await expect(textarea).toBeVisible();
+    await textarea.fill('Editing while the file changes');
+    await expect(textarea).toBeFocused();
+
+    await page.evaluate(() => window.__HARNESS__.refreshContent());
+
+    await expect(textarea).toHaveValue('Editing while the file changes');
+    await expect(textarea).toBeFocused();
+  });
+
   test('toggles between unified and split layout', async ({ page }) => {
     await openHarness(page, UNSEEDED);
 

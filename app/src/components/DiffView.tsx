@@ -118,25 +118,48 @@ export function DiffView({
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [selectionPopup, setSelectionPopup] = useState<SelectionPopupState | null>(null);
 
-  // A draft/selection belongs to one file; reset when the file changes.
+  const name = filePath ?? 'file.txt';
+
+  // Is the user actively typing a comment on THIS file — a new-comment draft, or
+  // an edit of one of this file's comments?
+  const editingHere = useMemo(
+    () => editingCommentId != null && comments.some((c) => c.id === editingCommentId),
+    [editingCommentId, comments]
+  );
+  const formOpen = draft !== null || editingHere;
+
+  // Freeze the diff content while a comment form is open. @pierre/diffs binds a
+  // rendered instance to its first file and won't swap the target in place
+  // (VirtualizedFileDiff.render keeps `this.fileDiff` via `??=`), so we remount
+  // the diff whenever its content changes (see `diffKey`). That remount discards
+  // any in-progress comment — and the file under review changes constantly while
+  // the agent edits it. Buffering the latest content while a form is open keeps
+  // the diff (and the form) steady; we adopt the newest content the moment the
+  // form closes or the user switches files.
+  const [frozen, setFrozen] = useState<{ original: string; modified: string } | null>(null);
+  useEffect(() => {
+    setFrozen((current) => (formOpen ? current ?? { original, modified } : null));
+  }, [formOpen, original, modified]);
+
+  const shownOriginal = frozen?.original ?? original;
+  const shownModified = frozen?.modified ?? modified;
+
+  // A draft/selection belongs to one file; reset (and drop any freeze) on switch.
   useEffect(() => {
     setDraft(null);
     setSelectionPopup(null);
+    setFrozen(null);
   }, [filePath]);
 
-  const name = filePath ?? 'file.txt';
-  const oldFile = useMemo<FileContents>(() => ({ name, contents: original }), [name, original]);
-  const newFile = useMemo<FileContents>(() => ({ name, contents: modified }), [name, modified]);
+  const oldFile = useMemo<FileContents>(() => ({ name, contents: shownOriginal }), [name, shownOriginal]);
+  const newFile = useMemo<FileContents>(() => ({ name, contents: shownModified }), [name, shownModified]);
 
-  // @pierre/diffs binds a rendered instance to its first file and won't swap the
-  // target in place (VirtualizedFileDiff.render keeps `this.fileDiff` via `??=`).
-  // Remounting the diff whenever the target (path or content) changes is the
-  // library's intended way to switch files — without it, selecting a file whose
-  // diff was already rendered, or a file whose content changed underneath, keeps
-  // showing the stale diff.
+  // Remount the diff whenever the shown target (path or content) changes — the
+  // library's intended way to switch files. While frozen, the shown content is
+  // held constant, so an incoming change to the current file can't remount it.
   const diffKey = useMemo(
-    () => `${name}:${hashContent(original)}:${hashContent(modified)}`,
-    [name, original, modified]
+    () => `${name}:${hashContent(shownOriginal)}:${hashContent(shownModified)}`,
+    [name, shownOriginal, shownModified]
   );
 
   // The library forces a full re-render whenever the options object changes by
