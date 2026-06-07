@@ -4,11 +4,10 @@ export type TerminalSplitDirection = 'vertical' | 'horizontal';
 export type TerminalNavigationDirection = 'left' | 'right' | 'up' | 'down';
 export type TerminalDockEdge = 'left' | 'right' | 'top' | 'bottom';
 
-// TileKind is the surface a docked tile renders. The daemon treats it as an
-// opaque token (it persists where a tile sits, not what it shows), so adding a
-// kind here is a frontend-only change. Kept open-ended for forward
-// compatibility with tiles a newer daemon might persist.
-export type TileKind = 'markdown' | (string & {});
+// TileKind is the surface a docked tile renders. The layout layer persists it
+// as an opaque token; individual kinds can still have daemon and native-host
+// behavior. Kept open-ended for forward compatibility with newer tile hosts.
+export type TileKind = 'markdown' | 'browser' | (string & {});
 
 export interface TerminalPaneLeaf {
   type: 'pane';
@@ -55,6 +54,19 @@ export interface TerminalSplitNode {
 }
 
 export type TerminalLayoutNode = TerminalPaneLeaf | TileLeaf | TerminalSplitNode;
+
+export function collectLayoutLeaves(node: TerminalLayoutNode | null): TerminalLeaf[] {
+  if (!node) {
+    return [];
+  }
+  if (node.type !== 'split') {
+    return [node];
+  }
+  return [
+    ...collectLayoutLeaves(node.children[0]),
+    ...collectLayoutLeaves(node.children[1]),
+  ];
+}
 
 // leafSlotId is the stable key a leaf occupies in bounds/path maps. Terminal
 // panes key by paneId; tiles key by tileId. The two id spaces are disjoint by
@@ -391,7 +403,7 @@ function parseLayoutNode(raw: unknown): TerminalLayoutNode | null {
   return null;
 }
 
-function parseLayoutJSON(layoutJSON: string): TerminalLayoutNode | null {
+export function parseLayoutJSON(layoutJSON: string): TerminalLayoutNode | null {
   if (!layoutJSON.trim()) {
     return null;
   }
@@ -403,23 +415,11 @@ function parseLayoutJSON(layoutJSON: string): TerminalLayoutNode | null {
   }
 }
 
-export function tileIdsFromLayoutJSON(layoutJSON: string): string[] {
-  const ids: string[] = [];
-  const collect = (node: TerminalLayoutNode | null) => {
-    if (!node) {
-      return;
-    }
-    if (node.type === 'tile') {
-      ids.push(node.tileId);
-      return;
-    }
-    if (node.type === 'split') {
-      collect(node.children[0]);
-      collect(node.children[1]);
-    }
-  };
-  collect(parseLayoutJSON(layoutJSON));
-  return ids;
+export function tileIdsFromLayoutJSON(layoutJSON: string, kind?: TileKind): string[] {
+  return collectLayoutLeaves(parseLayoutJSON(layoutJSON))
+    .filter((leaf): leaf is TileLeaf => leaf.type === 'tile')
+    .filter((tile) => !kind || tile.tileKind === kind)
+    .map((tile) => tile.tileId);
 }
 
 function agentTerminalsFromPanes(panes: PaneElement[]): AgentTerminal[] {

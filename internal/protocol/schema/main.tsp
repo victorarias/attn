@@ -339,6 +339,7 @@ model ClientHelloMessage {
   client_kind: string;          // e.g. "tauri-app", "remote-web"
   version: string;              // free-form, used for diagnostics
   capabilities: string[];       // see capability docstrings above
+  browser_host_token?: string;  // secret available only to the trusted Tauri main webview
 }
 
 model RegisterMessage {
@@ -397,6 +398,11 @@ model SessionVisualizedMessage {
 model SessionSelectedMessage {
   cmd: "session_selected";
   id: string;
+}
+
+model WorkspaceSelectedMessage {
+  cmd: "workspace_selected";
+  workspace_id: string;
 }
 
 model MuteWorkspaceMessage {
@@ -858,6 +864,14 @@ model WorkspaceLayoutUndockTileMessage {
   tile_id: string;
 }
 
+model WorkspaceLayoutUpdateTileMessage {
+  cmd: "workspace_layout_update_tile";
+  workspace_id: string;
+  tile_id: string;
+  tile_params: string;
+  request_id: string;
+}
+
 // Move an existing leaf (terminal pane or docked tile) so it sits beside an
 // anchor leaf on the given edge. An empty anchor_id docks the leaf against the
 // whole workspace (the root), spanning that edge. ratio is the moved leaf's
@@ -904,6 +918,46 @@ model OpenMarkdownMessage {
   cmd: "open_markdown";
   path: string;
   session_id?: string;
+}
+
+// Open or retarget the docked browser tile. Sent by `attn browser open`.
+// When session_id is empty the daemon targets the currently selected session.
+model OpenBrowserMessage {
+  cmd: "open_browser";
+  url: string;
+  session_id?: string;
+}
+
+// Ask the visible in-app browser host to perform an action. Sent by the CLI
+// over the unix socket; the daemon brokers it to a capable Tauri client.
+model BrowserControlMessage {
+  cmd: "browser_control";
+  action: string;
+  params?: string;
+  selector?: string;
+  text?: string;
+  session_id?: string;
+  workspace_id?: string;
+  request_id?: string;
+}
+
+// Return a browser-host action result from the Tauri client to the daemon.
+model BrowserControlResultMessage {
+  cmd: "browser_control_result";
+  request_id: string;
+  success: boolean;
+  data?: string;
+  error?: string;
+}
+
+// Return a remotely executed browser-control result to the hub daemon that
+// originated the request.
+model BrowserControlResponseMessage {
+  event: "browser_control_response";
+  request_id: string;
+  success: boolean;
+  data?: string;
+  error?: string;
 }
 
 model RegisterWorkspaceMessage {
@@ -1523,6 +1577,17 @@ model CommandErrorMessage {
   error: string;
 }
 
+model BrowserControlRequestMessage {
+  event: "browser_control_request";
+  request_id: string;
+  workspace_id: string;
+  tile_id: string;
+  action: string;
+  params?: string;
+  selector?: string;
+  text?: string;
+}
+
 // ============================================================================
 // Response Types
 // ============================================================================
@@ -1530,6 +1595,7 @@ model CommandErrorMessage {
 model Response {
   ok: boolean;
   error?: string;
+  data?: string;
   sessions?: Session[];
   prs?: PR[];
   repos?: RepoState[];
@@ -1650,6 +1716,7 @@ alias DaemonEvent =
   | WorkspaceLayoutActionResultMessage
   | RenameResultMessage
   | WorkspaceTileContentMessage
+  | BrowserControlResponseMessage
   | PRsUpdatedMessage
   | ReposUpdatedMessage
   | AuthorsUpdatedMessage
@@ -1694,4 +1761,5 @@ alias DaemonEvent =
   | SessionExitedMessage
   | PtyDesyncMessage
   | PtyResizedMessage
+  | BrowserControlRequestMessage
   | CommandErrorMessage;

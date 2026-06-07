@@ -190,6 +190,52 @@ func (c *Client) OpenMarkdown(path, sessionID string) error {
 	return err
 }
 
+// OpenBrowser docks or retargets the in-app browser tile.
+func (c *Client) OpenBrowser(url, sessionID string) error {
+	msg := protocol.OpenBrowserMessage{
+		Cmd: protocol.CmdOpenBrowser,
+		URL: url,
+	}
+	if sessionID != "" {
+		msg.SessionID = protocol.Ptr(sessionID)
+	}
+	_, err := c.send(msg)
+	return err
+}
+
+// BrowserControl asks the in-app browser to perform an action and
+// returns its textual result. Screenshot results are base64-encoded PNG bytes.
+func (c *Client) BrowserControl(action, selector, text, sessionID string) (string, error) {
+	return c.BrowserCommand(action, "", selector, text, sessionID)
+}
+
+// BrowserCommand sends a structured browser automation request. params is a
+// JSON object encoded as a string so the protocol can evolve without exposing
+// an unauthenticated WebDriver server.
+func (c *Client) BrowserCommand(action, params, selector, text, sessionID string) (string, error) {
+	msg := protocol.BrowserControlMessage{
+		Cmd:    protocol.CmdBrowserControl,
+		Action: action,
+	}
+	if params != "" {
+		msg.Params = protocol.Ptr(params)
+	}
+	if selector != "" {
+		msg.Selector = protocol.Ptr(selector)
+	}
+	if text != "" || action == "type" {
+		msg.Text = protocol.Ptr(text)
+	}
+	if sessionID != "" {
+		msg.SessionID = protocol.Ptr(sessionID)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return "", err
+	}
+	return protocol.Deref(resp.Data), nil
+}
+
 // QueryPRs returns PRs matching the filter
 func (c *Client) QueryPRs(filter string) ([]protocol.PR, error) {
 	var filterPtr *string

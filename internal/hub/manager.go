@@ -79,6 +79,16 @@ type pendingSessionRoute struct {
 	expiresAt  time.Time
 }
 
+type browserControlResult struct {
+	data string
+	err  error
+}
+
+type pendingBrowserControl struct {
+	endpointID string
+	done       chan browserControlResult
+}
+
 type Manager struct {
 	store        *store.Store
 	bootstrapper *Bootstrapper
@@ -87,15 +97,16 @@ type Manager struct {
 	onRawEvent   RawEventCallback
 	logf         func(format string, args ...interface{})
 
-	mu       sync.RWMutex
-	runtimes map[string]*endpointRuntime
-	pending  map[string]pendingSessionRoute
-	reviews  map[string]string
-	comments map[string]string
-	loops    map[string]string
-	ctx      context.Context
-	cancel   context.CancelFunc
-	started  bool
+	mu              sync.RWMutex
+	runtimes        map[string]*endpointRuntime
+	pending         map[string]pendingSessionRoute
+	reviews         map[string]string
+	comments        map[string]string
+	loops           map[string]string
+	browserControls map[string]pendingBrowserControl
+	ctx             context.Context
+	cancel          context.CancelFunc
+	started         bool
 }
 
 func NewManager(
@@ -109,17 +120,18 @@ func NewManager(
 		logf = func(string, ...interface{}) {}
 	}
 	m := &Manager{
-		store:        endpointStore,
-		bootstrapper: NewBootstrapper(logf),
-		onStatus:     onStatus,
-		onSessions:   onSessions,
-		onRawEvent:   onRawEvent,
-		logf:         logf,
-		runtimes:     make(map[string]*endpointRuntime),
-		pending:      make(map[string]pendingSessionRoute),
-		reviews:      make(map[string]string),
-		comments:     make(map[string]string),
-		loops:        make(map[string]string),
+		store:           endpointStore,
+		bootstrapper:    NewBootstrapper(logf),
+		onStatus:        onStatus,
+		onSessions:      onSessions,
+		onRawEvent:      onRawEvent,
+		logf:            logf,
+		runtimes:        make(map[string]*endpointRuntime),
+		pending:         make(map[string]pendingSessionRoute),
+		reviews:         make(map[string]string),
+		comments:        make(map[string]string),
+		loops:           make(map[string]string),
+		browserControls: make(map[string]pendingBrowserControl),
 	}
 	for _, record := range endpointStore.ListEndpoints() {
 		m.runtimes[record.ID] = &endpointRuntime{
@@ -666,6 +678,8 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 			}
 			m.removeRemoteWorkspace(id, msg.Workspace.ID)
 			m.publishRawEvent(data)
+		case protocol.EventBrowserControlResponse:
+			m.resolveBrowserControl(id, data)
 		default:
 			if forwardsRawEvent(peek.Event) {
 				m.observeRemoteEvent(id, peek.Event, data)
@@ -816,6 +830,23 @@ func (m *Manager) RemoteWorkspaces() []protocol.Workspace {
 		return out[i].ID < out[j].ID
 	})
 	return out
+}
+
+func (m *Manager) RemoteWorkspace(workspaceID string) *protocol.Workspace {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, runtime := range m.runtimes {
+		if workspace, ok := runtime.workspaces[workspaceID]; ok {
+			copy := workspace
+			if workspace.Layout != nil {
+				layoutCopy := *workspace.Layout
+				layoutCopy.Panes = append([]protocol.WorkspaceLayoutPane(nil), workspace.Layout.Panes...)
+				copy.Layout = &layoutCopy
+			}
+			return &copy
+		}
+	}
+	return nil
 }
 
 func (m *Manager) EndpointIDForSession(sessionID string) (string, bool) {
@@ -1013,6 +1044,83 @@ func (m *Manager) ForwardEndpointCommand(ctx context.Context, endpointID string,
 	runtime.writeMu.Lock()
 	defer runtime.writeMu.Unlock()
 	return conn.Write(ctx, websocket.MessageText, payload)
+}
+
+func (m *Manager) ForwardBrowserControl(
+	ctx context.Context,
+	endpointID string,
+	msg protocol.BrowserControlMessage,
+) (string, error) {
+	requestID := strings.TrimSpace(protocol.Deref(msg.RequestID))
+	if requestID == "" {
+		return "", fmt.Errorf("browser control request id is required")
+	}
+	msg.RequestID = protocol.Ptr(requestID)
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		return "", fmt.Errorf("marshal browser control request: %w", err)
+	}
+
+	pending := pendingBrowserControl{
+		endpointID: endpointID,
+		done:       make(chan browserControlResult, 1),
+	}
+	m.mu.Lock()
+	if _, exists := m.browserControls[requestID]; exists {
+		m.mu.Unlock()
+		return "", fmt.Errorf("browser control request already pending: %s", requestID)
+	}
+	m.browserControls[requestID] = pending
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		if current, ok := m.browserControls[requestID]; ok && current.done == pending.done {
+			delete(m.browserControls, requestID)
+		}
+		m.mu.Unlock()
+	}()
+
+	if err := m.ForwardEndpointCommand(ctx, endpointID, payload); err != nil {
+		return "", err
+	}
+
+	select {
+	case result := <-pending.done:
+		return result.data, result.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+func (m *Manager) resolveBrowserControl(endpointID string, payload []byte) {
+	var msg protocol.BrowserControlResponseMessage
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		return
+	}
+	requestID := strings.TrimSpace(msg.RequestID)
+	if requestID == "" {
+		return
+	}
+
+	m.mu.RLock()
+	pending, ok := m.browserControls[requestID]
+	m.mu.RUnlock()
+	if !ok || pending.endpointID != endpointID {
+		return
+	}
+
+	result := browserControlResult{data: protocol.Deref(msg.Data)}
+	if !msg.Success {
+		errMsg := strings.TrimSpace(protocol.Deref(msg.Error))
+		if errMsg == "" {
+			errMsg = "remote browser control failed"
+		}
+		result.err = errors.New(errMsg)
+	}
+	select {
+	case pending.done <- result:
+	default:
+	}
 }
 
 func (m *Manager) replaceRemoteSessions(id string, sessions []protocol.Session) bool {

@@ -147,15 +147,20 @@ type Daemon struct {
 	// geometry.
 	workspaces *workspaceRegistry
 
-	// selectedSessionID is the session the UI is currently showing, reported via
-	// session_visualized. `attn open` with no explicit session targets it.
-	selectedSessionMu sync.RWMutex
-	selectedSessionID string
+	// The UI reports its selected session and workspace independently because a
+	// tile-only workspace has no session id. CLI tile and browser commands use
+	// this context when no explicit target is provided.
+	selectedSessionMu   sync.RWMutex
+	selectedSessionID   string
+	selectedWorkspaceID string
 
 	// markdownSeen fingerprints open markdown files so the content watcher only
 	// broadcasts when a file actually changes on disk.
 	markdownSeenMu sync.Mutex
 	markdownSeen   map[string]tileContentSig
+
+	browserControlMu sync.Mutex
+	browserControl   map[string]browserControlPending
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -1667,6 +1672,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleInjectTestSession(conn, msg.(*protocol.InjectTestSessionMessage))
 	case protocol.CmdOpenMarkdown:
 		d.handleOpenMarkdown(conn, msg.(*protocol.OpenMarkdownMessage))
+	case protocol.CmdOpenBrowser:
+		d.handleOpenBrowser(conn, msg.(*protocol.OpenBrowserMessage))
+	case protocol.CmdBrowserControl:
+		d.handleBrowserControl(conn, msg.(*protocol.BrowserControlMessage))
 	case protocol.CmdListWorktrees:
 		d.handleListWorktrees(conn, msg.(*protocol.ListWorktreesMessage))
 	case protocol.CmdCreateWorktree:

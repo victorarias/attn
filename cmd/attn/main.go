@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -139,6 +140,9 @@ func main() {
 	case "open":
 		maybePrintProfileBanner()
 		runOpen()
+	case "browser":
+		maybePrintProfileBanner()
+		runBrowser()
 	case "help", "-h", "--help":
 		runHelp()
 	case "_hook-stop":
@@ -382,6 +386,7 @@ func writeHelp(w io.Writer) {
 commands:
   presence                          check whether the current shell runs inside attn
   open <file.md> [--session <id>]   show a markdown file in attn
+  browser <command>                 open and control the in-app browser
   review-loop <command>             manage an autonomous review loop
   list                              list sessions
   daemon <command>                  manage the daemon
@@ -452,6 +457,332 @@ func runOpen() {
 		os.Exit(1)
 	}
 	fmt.Printf("opened %s\n", absPath)
+}
+
+func parseInterspersedFlagArgs(fs *flag.FlagSet, args []string) ([]string, error) {
+	var positionals []string
+	rest := args
+	for {
+		if err := fs.Parse(rest); err != nil {
+			return nil, err
+		}
+		rest = fs.Args()
+		if len(rest) == 0 {
+			return positionals, nil
+		}
+		positionals = append(positionals, rest[0])
+		rest = rest[1:]
+	}
+}
+
+func browserSessionID(sessionFlag string) string {
+	if sessionID := strings.TrimSpace(sessionFlag); sessionID != "" {
+		return sessionID
+	}
+	return strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+}
+
+func printBrowserUsage(w io.Writer) {
+	fmt.Fprint(w, `usage: attn browser <command>
+
+commands:
+  open <url> [--session <id>]                 open or navigate the browser tile
+  snapshot [--session <id>]                   print a semantic page snapshot
+  find --using <strategy> --value <value>      find an element and return its reference
+  wait --using <strategy> --value <value>      wait for attached/visible/hidden/detached
+  click --selector <css>|--element <id>        click an element
+  type --selector <css>|--element <id> --text  replace an input's value
+  back | forward | reload                     navigate browser history
+  press --text <key>                          send a keyboard key
+  scroll [--x <px>] [--y <px>]                scroll the page
+  cookies                                     list cookies for the current page
+  command <action> [--params <json>]           call the WebDriver-shaped API directly
+  screenshot [path] [--session <id>]          save a PNG (default: attn-browser.png)
+  pdf [path] [--params <json>]                 save a PDF (default: attn-browser.pdf)
+`)
+}
+
+func encodeBrowserParams(params map[string]interface{}) string {
+	data, err := json.Marshal(params)
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
+}
+
+func writePrivateFile(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	file, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := file.Name()
+	defer os.Remove(tempPath)
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, path)
+}
+
+func runBrowser() {
+	warnIfDaemonVersionMismatch()
+	if len(os.Args) < 3 {
+		printBrowserUsage(os.Stderr)
+		os.Exit(1)
+	}
+
+	subcommand := os.Args[2]
+	fs := flag.NewFlagSet("browser "+subcommand, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	sessionFlag := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID, then the selected session)")
+	selector := fs.String("selector", "", "CSS selector")
+	text := fs.String("text", "", "text to enter")
+	paramsJSON := fs.String("params", "{}", "JSON object with action parameters")
+	using := fs.String("using", "", "locator strategy")
+	value := fs.String("value", "", "locator or form value")
+	name := fs.String("name", "", "accessible name or cookie name")
+	element := fs.String("element", "", "WebDriver element reference id")
+	state := fs.String("state", "attached", "wait state")
+	timeout := fs.Int("timeout", 5000, "timeout in milliseconds")
+	all := fs.Bool("all", false, "return all matching elements")
+	deltaX := fs.Int("x", 0, "horizontal scroll delta")
+	deltaY := fs.Int("y", 0, "vertical scroll delta")
+	positionals, err := parseInterspersedFlagArgs(fs, os.Args[3:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "attn browser %s: %v\n", subcommand, err)
+		printBrowserUsage(os.Stderr)
+		os.Exit(1)
+	}
+
+	sessionID := browserSessionID(*sessionFlag)
+	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
+	textSet := false
+	fs.Visit(func(flag *flag.Flag) {
+		if flag.Name == "text" {
+			textSet = true
+		}
+	})
+	switch subcommand {
+	case "open":
+		if len(positionals) != 1 {
+			fmt.Fprintln(os.Stderr, "attn browser open: expected exactly one <url>")
+			os.Exit(1)
+		}
+		if err := c.OpenBrowser(positionals[0], sessionID); err != nil {
+			fmt.Fprintf(os.Stderr, "browser open: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("opened %s\n", positionals[0])
+	case "snapshot":
+		if len(positionals) != 0 {
+			fmt.Fprintln(os.Stderr, "attn browser snapshot: unexpected arguments")
+			os.Exit(1)
+		}
+		data, err := c.BrowserControl("snapshot", "", "", sessionID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser snapshot: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(data)
+	case "find":
+		if len(positionals) != 0 || strings.TrimSpace(*using) == "" || strings.TrimSpace(*value) == "" {
+			fmt.Fprintln(os.Stderr, "attn browser find: --using and --value are required")
+			os.Exit(1)
+		}
+		params := map[string]interface{}{"using": *using, "value": *value}
+		if *name != "" {
+			params["name"] = *name
+		}
+		action := "find_element"
+		if *all {
+			action = "find_elements"
+		}
+		data, err := c.BrowserCommand(action, encodeBrowserParams(params), "", "", sessionID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser find: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(data)
+	case "wait":
+		if len(positionals) != 0 || strings.TrimSpace(*using) == "" || strings.TrimSpace(*value) == "" {
+			fmt.Fprintln(os.Stderr, "attn browser wait: --using and --value are required")
+			os.Exit(1)
+		}
+		params := map[string]interface{}{"using": *using, "value": *value, "state": *state, "timeout": *timeout}
+		if *name != "" {
+			params["name"] = *name
+		}
+		data, err := c.BrowserCommand("wait_for", encodeBrowserParams(params), "", "", sessionID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser wait: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(data)
+	case "click":
+		if len(positionals) != 0 || (strings.TrimSpace(*selector) == "" && strings.TrimSpace(*element) == "") {
+			fmt.Fprintln(os.Stderr, "attn browser click: --selector <css> or --element <id> is required")
+			os.Exit(1)
+		}
+		var data string
+		if strings.TrimSpace(*element) != "" {
+			data, err = c.BrowserCommand("click_element", encodeBrowserParams(map[string]interface{}{"element": *element}), "", "", sessionID)
+		} else {
+			data, err = c.BrowserControl("click", strings.TrimSpace(*selector), "", sessionID)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser click: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(data)
+	case "type":
+		if len(positionals) != 0 || (strings.TrimSpace(*selector) == "" && strings.TrimSpace(*element) == "") || !textSet {
+			fmt.Fprintln(os.Stderr, "attn browser type: --selector <css> or --element <id>, plus --text, are required")
+			os.Exit(1)
+		}
+		var data string
+		if strings.TrimSpace(*element) != "" {
+			params := encodeBrowserParams(map[string]interface{}{"element": *element})
+			if _, err = c.BrowserCommand("clear_element", params, "", "", sessionID); err == nil {
+				data, err = c.BrowserCommand("send_keys_to_element", encodeBrowserParams(map[string]interface{}{"element": *element, "text": *text}), "", "", sessionID)
+			}
+		} else {
+			data, err = c.BrowserControl("type", strings.TrimSpace(*selector), *text, sessionID)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser type: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(data)
+	case "reload", "back", "forward":
+		if len(positionals) != 0 {
+			fmt.Fprintln(os.Stderr, "attn browser reload: unexpected arguments")
+			os.Exit(1)
+		}
+		data, err := c.BrowserControl(subcommand, "", "", sessionID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser reload: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(data)
+	case "press":
+		if len(positionals) != 0 || !textSet || *text == "" {
+			fmt.Fprintln(os.Stderr, "attn browser press: --text <key> is required")
+			os.Exit(1)
+		}
+		actions := []map[string]interface{}{{"type": "key", "id": "keyboard", "actions": []map[string]interface{}{{"type": "keyDown", "value": *text}, {"type": "keyUp", "value": *text}}}}
+		data, err := c.BrowserCommand("perform_actions", encodeBrowserParams(map[string]interface{}{"actions": actions}), "", "", sessionID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser press: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(data)
+	case "scroll":
+		if len(positionals) != 0 {
+			fmt.Fprintln(os.Stderr, "attn browser scroll: unexpected arguments")
+			os.Exit(1)
+		}
+		actions := []map[string]interface{}{{"type": "wheel", "id": "wheel", "actions": []map[string]interface{}{{"type": "scroll", "deltaX": *deltaX, "deltaY": *deltaY}}}}
+		data, err := c.BrowserCommand("perform_actions", encodeBrowserParams(map[string]interface{}{"actions": actions}), "", "", sessionID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser scroll: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(data)
+	case "cookies":
+		data, err := c.BrowserCommand("get_all_cookies", "{}", "", "", sessionID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser cookies: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(data)
+	case "command":
+		if len(positionals) != 1 {
+			fmt.Fprintln(os.Stderr, "attn browser command: expected exactly one <action>")
+			os.Exit(1)
+		}
+		var params map[string]interface{}
+		if err := json.Unmarshal([]byte(*paramsJSON), &params); err != nil || params == nil {
+			fmt.Fprintln(os.Stderr, "attn browser command: --params must be a JSON object")
+			os.Exit(1)
+		}
+		data, err := c.BrowserCommand(positionals[0], *paramsJSON, "", "", sessionID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser command: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(data)
+	case "screenshot":
+		if len(positionals) > 1 {
+			fmt.Fprintln(os.Stderr, "attn browser screenshot: expected at most one [path]")
+			os.Exit(1)
+		}
+		path := "attn-browser.png"
+		if len(positionals) == 1 {
+			path = positionals[0]
+		}
+		data, err := c.BrowserControl("screenshot", "", "", sessionID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser screenshot: %v\n", err)
+			os.Exit(1)
+		}
+		png, err := base64.StdEncoding.DecodeString(data)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser screenshot: decode PNG: %v\n", err)
+			os.Exit(1)
+		}
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser screenshot: resolve path: %v\n", err)
+			os.Exit(1)
+		}
+		if err := writePrivateFile(absPath, png); err != nil {
+			fmt.Fprintf(os.Stderr, "browser screenshot: write %s: %v\n", absPath, err)
+			os.Exit(1)
+		}
+		fmt.Println(absPath)
+	case "pdf":
+		if len(positionals) > 1 {
+			fmt.Fprintln(os.Stderr, "attn browser pdf: expected at most one [path]")
+			os.Exit(1)
+		}
+		path := "attn-browser.pdf"
+		if len(positionals) == 1 {
+			path = positionals[0]
+		}
+		var params map[string]interface{}
+		if err := json.Unmarshal([]byte(*paramsJSON), &params); err != nil || params == nil {
+			fmt.Fprintln(os.Stderr, "attn browser pdf: --params must be a JSON object")
+			os.Exit(1)
+		}
+		data, err := c.BrowserCommand("print_page", *paramsJSON, "", "", sessionID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser pdf: %v\n", err)
+			os.Exit(1)
+		}
+		pdf, err := base64.StdEncoding.DecodeString(data)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser pdf: decode PDF: %v\n", err)
+			os.Exit(1)
+		}
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "browser pdf: resolve path: %v\n", err)
+			os.Exit(1)
+		}
+		if err := writePrivateFile(absPath, pdf); err != nil {
+			fmt.Fprintf(os.Stderr, "browser pdf: write %s: %v\n", absPath, err)
+			os.Exit(1)
+		}
+		fmt.Println(absPath)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown browser command: %s\n", subcommand)
+		printBrowserUsage(os.Stderr)
+		os.Exit(1)
+	}
 }
 
 func runReviewLoop() {

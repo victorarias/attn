@@ -5,7 +5,8 @@
   "app": {
     "windows": [
       {
-        "title": "attn-dev"
+        "title": "attn-dev",
+        "backgroundThrottling": "disabled"
       }
     ]
   },

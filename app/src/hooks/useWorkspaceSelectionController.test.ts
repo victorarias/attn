@@ -3,11 +3,13 @@ import { buildWorkspaceSelectionState } from './useWorkspaceSelectionController'
 import type { WorkspaceWithSessions } from '../utils/workspaceViewModels';
 
 function workspace(id: string, sessionIds: string[]): WorkspaceWithSessions<{ id: string; label: string; workspaceId: string }> {
+  const sessions = sessionIds.map((sessionId) => ({ id: sessionId, label: sessionId, workspaceId: id }));
   return {
     id,
     title: id,
     directory: `/tmp/${id}`,
-    sessions: sessionIds.map((sessionId) => ({ id: sessionId, label: sessionId, workspaceId: id })),
+    sessions,
+    children: sessions.map((session) => ({ kind: 'session' as const, id: session.id, session })),
     firstSessionId: sessionIds[0] ?? null,
     focusedSessionId: sessionIds[0] ?? null,
   };

@@ -51,6 +51,7 @@ describe('workspaceViewModels', () => {
         muted: false,
         endpointId: undefined,
         sessions: [],
+        children: [],
         firstSessionId: null,
         focusedSessionId: null,
       },
@@ -117,6 +118,51 @@ describe('workspaceViewModels', () => {
     );
 
     expect(workspace.focusedSessionId).toBe('a1');
+  });
+
+  it('builds ordered session and tile children from the authoritative layout', () => {
+    const [workspace] = buildWorkspaceViewModels(
+      [{
+        id: 'workspace-a',
+        title: 'A',
+        directory: '/repo/a',
+        layout: {
+          layout_json: JSON.stringify({
+            type: 'split',
+            split_id: 'split-root',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              { type: 'pane', pane_id: 'pane-a1' },
+              {
+                type: 'split',
+                split_id: 'split-right',
+                direction: 'horizontal',
+                ratio: 0.5,
+                children: [
+                  { type: 'tile', tile_id: 'tile-browser', tile_kind: 'browser', tile_params: 'https://google.com' },
+                  { type: 'pane', pane_id: 'pane-a2' },
+                ],
+              },
+            ],
+          }),
+          panes: [
+            { pane_id: 'pane-a1', session_id: 'a1' },
+            { pane_id: 'pane-a2', session_id: 'a2' },
+          ],
+        },
+      }],
+      [
+        { id: 'a1', label: 'A1', workspaceId: 'workspace-a' },
+        { id: 'a2', label: 'A2', workspaceId: 'workspace-a' },
+      ],
+    );
+
+    expect(workspace.children.map((child) => `${child.kind}:${child.id}`)).toEqual([
+      'session:a1',
+      'tile:tile-browser',
+      'session:a2',
+    ]);
   });
 
   it('filters sessions that are no longer represented in an authoritative workspace layout', () => {

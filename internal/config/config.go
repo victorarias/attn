@@ -387,6 +387,20 @@ func WSAuthToken() string {
 	return strings.TrimSpace(os.Getenv("ATTN_WS_AUTH_TOKEN"))
 }
 
+// BrowserHostToken returns the per-profile secret used to authenticate the
+// packaged app as the browser-control host. The Tauri shell creates this file
+// with owner-only permissions before it starts or connects to the daemon.
+func BrowserHostToken() string {
+	if token := strings.TrimSpace(os.Getenv("ATTN_BROWSER_HOST_TOKEN")); token != "" {
+		return token
+	}
+	data, err := os.ReadFile(filepath.Join(attnDir(), "browser-host-token"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
 // PIDPath returns the PID file path (same directory as socket)
 func PIDPath() string {
 	socketPath := SocketPath()

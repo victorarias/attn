@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { invoke } from '@tauri-apps/api/core';
-import { WorkspaceDockTile, deriveTileTitle, resolveMarkdownTarget } from './WorkspaceDockTile';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { invoke, isTauri } from '@tauri-apps/api/core';
+import { normalizeBrowserAddress, WorkspaceDockTile, resolveMarkdownTarget } from './WorkspaceDockTile';
+import { deriveTileTitle } from '../../utils/tilePresentation';
 import type { TileLeaf } from '../../types/workspace';
 
 const opener = vi.hoisted(() => ({
@@ -30,6 +31,7 @@ describe('WorkspaceDockTile Markdown rendering', () => {
   beforeEach(() => {
     invokeMock.mockReset();
     invokeMock.mockResolvedValue(undefined);
+    vi.mocked(isTauri).mockReturnValue(false);
     opener.openUrl.mockClear();
   });
 
@@ -159,5 +161,174 @@ describe('deriveTileTitle', () => {
   it('uses the basename before content loads, and tile kind without a path', () => {
     expect(deriveTileTitle(markdownTile, undefined)).toBe('notes.md');
     expect(deriveTileTitle({ type: 'tile', tileId: 'tile-x', tileKind: 'markdown' }, undefined)).toBe('markdown');
+  });
+
+  it('uses the host as the title for a browser tile', () => {
+    expect(deriveTileTitle({
+      type: 'tile',
+      tileId: 'tile-browser',
+      tileKind: 'browser',
+      tileParams: 'http://localhost:3000/dashboard',
+    })).toBe('localhost:3000');
+  });
+});
+
+describe('WorkspaceDockTile browser integration', () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+    globalThis.ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+  });
+
+  it('closes the exact browser tile targeted by the native close command', async () => {
+    const onClose = vi.fn();
+    render(
+      <WorkspaceDockTile
+        tile={{
+          type: 'tile',
+          tileId: 'tile-browser',
+          tileKind: 'browser',
+          tileParams: 'https://backstage.spotify.net',
+        }}
+        workspaceId="workspace-1"
+        dragging={false}
+        onClose={onClose}
+        onHeaderPointerDown={vi.fn()}
+        onRequestContent={vi.fn()}
+      />,
+    );
+
+    await screen.findByText('Error: In-app browser hosting requires the Tauri app');
+    act(() => {
+      window.dispatchEvent(new CustomEvent('attn:native-browser-close', {
+        detail: 'browser-workspace-1-tile-browser',
+      }));
+    });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads the browser from its tile header', async () => {
+    render(
+      <WorkspaceDockTile
+        tile={{
+          type: 'tile',
+          tileId: 'tile-browser',
+          tileKind: 'browser',
+          tileParams: 'https://backstage.spotify.net',
+        }}
+        workspaceId="workspace-1"
+        dragging={false}
+        onClose={vi.fn()}
+        onHeaderPointerDown={vi.fn()}
+        onRequestContent={vi.fn()}
+      />,
+    );
+
+    await screen.findByText('Error: In-app browser hosting requires the Tauri app');
+    fireEvent.click(screen.getByRole('button', { name: 'Reload browser' }));
+
+    expect(invokeMock).toHaveBeenCalledWith('browser_host_control', {
+      label: 'browser-workspace-1-tile-browser',
+      action: 'reload',
+      params: undefined,
+      selector: undefined,
+      text: undefined,
+    });
+  });
+
+  it('claims browser close ownership from header controls', async () => {
+    vi.mocked(isTauri).mockReturnValue(true);
+    render(
+      <WorkspaceDockTile
+        tile={{
+          type: 'tile',
+          tileId: 'tile-browser',
+          tileKind: 'browser',
+          tileParams: 'https://backstage.spotify.net',
+        }}
+        workspaceId="workspace-1"
+        dragging={false}
+        onClose={vi.fn()}
+        onHeaderPointerDown={vi.fn()}
+        onRequestContent={vi.fn()}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole('textbox', { name: 'Browser address' }));
+
+    expect(invokeMock).toHaveBeenCalledWith('browser_host_claim_focus', {
+      label: 'browser-workspace-1-tile-browser',
+    });
+  });
+
+  it('navigates from the address bar and tracks native location changes', async () => {
+    const onUpdateParams = vi.fn(async () => {});
+    render(
+      <WorkspaceDockTile
+        tile={{
+          type: 'tile',
+          tileId: 'tile-browser',
+          tileKind: 'browser',
+          tileParams: 'https://backstage.spotify.net',
+        }}
+        workspaceId="workspace-1"
+        dragging={false}
+        onClose={vi.fn()}
+        onUpdateParams={onUpdateParams}
+        onHeaderPointerDown={vi.fn()}
+        onRequestContent={vi.fn()}
+      />,
+    );
+    const address = screen.getByRole('textbox', { name: 'Browser address' });
+
+    fireEvent.change(address, { target: { value: 'example.com/docs' } });
+    fireEvent.submit(address.closest('form')!);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('browser_host_control', {
+        label: 'browser-workspace-1-tile-browser',
+        action: 'navigate',
+        params: JSON.stringify({ url: 'https://example.com/docs' }),
+        selector: undefined,
+        text: undefined,
+      });
+    });
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('attn:browser-location', {
+        detail: {
+          label: 'browser-workspace-1-tile-browser',
+          url: 'https://example.com/redirected',
+        },
+      }));
+    });
+
+    await waitFor(() => {
+      expect(address).toHaveValue('https://example.com/redirected');
+      expect(onUpdateParams).toHaveBeenCalledWith('https://example.com/redirected');
+    });
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('attn:browser-location', {
+        detail: {
+          label: 'browser-workspace-1-tile-browser',
+          url: 'https://example.com/redirected',
+        },
+      }));
+    });
+    expect(onUpdateParams).toHaveBeenCalledTimes(1);
+  });
+
+  it('normalizes host-and-port browser addresses', () => {
+    expect(normalizeBrowserAddress('localhost:3000')).toBe('http://localhost:3000');
+    expect(normalizeBrowserAddress('127.0.0.1:8080/path')).toBe('http://127.0.0.1:8080/path');
+    expect(normalizeBrowserAddress('example.com:8080')).toBe('https://example.com:8080');
+    expect(normalizeBrowserAddress('http://example.com:8080')).toBe('http://example.com:8080');
+    expect(normalizeBrowserAddress('ftp://example.com')).toBe('ftp://example.com');
   });
 });
