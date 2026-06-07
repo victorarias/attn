@@ -166,6 +166,23 @@
   height: 3px;
 }
 
+.workspace-resize-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: transparent;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.workspace-resize-shield--vertical {
+  cursor: col-resize;
+}
+
+.workspace-resize-shield--horizontal {
+  cursor: row-resize;
+}
+
 .workspace-split {
   display: grid;
   min-width: 0;

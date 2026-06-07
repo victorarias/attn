@@ -149,6 +149,9 @@ describe('SessionTerminalWorkspace', () => {
     mockPtyAttach.mockReset();
     mockPtyResize.mockReset();
     mockPtyWrite.mockReset();
+    delete document.documentElement.dataset.attnWorkspaceResizing;
+    delete document.documentElement.dataset.attnWorkspaceResizeToken;
+    delete document.documentElement.dataset.attnWorkspaceMouseSuppressUntil;
     vi.useRealTimers();
   });
 
@@ -416,7 +419,16 @@ describe('SessionTerminalWorkspace', () => {
     });
 
     fireEvent.pointerDown(screen.getByRole('separator'), { button: 0, clientX: 500, clientY: 250 });
+    const shield = container.querySelector('.workspace-resize-shield');
+    expect(shield).toHaveAttribute('data-resizing-split-id', 'root');
+    expect(shield).toHaveClass('workspace-resize-shield--vertical');
+    expect(panes).toHaveAttribute('data-resizing-split-id', 'root');
+    expect(document.documentElement).toHaveAttribute('data-attn-workspace-resizing', '1');
+    expect(Number(document.documentElement.dataset.attnWorkspaceMouseSuppressUntil)).toBeGreaterThan(Date.now());
     fireEvent.pointerUp(window, { clientX: 800, clientY: 250 });
+    expect(container.querySelector('.workspace-resize-shield')).toBeNull();
+    expect(panes).not.toHaveAttribute('data-resizing-split-id');
+    expect(document.documentElement).not.toHaveAttribute('data-attn-workspace-resizing');
     expect(container.querySelector('.workspace-layout-metadata [data-split-id="root"]')).toHaveAttribute('data-split-ratio', '0.800');
 
     await act(async () => {
@@ -510,8 +522,15 @@ describe('SessionTerminalWorkspace', () => {
 
     fireEvent.pointerDown(screen.getByRole('separator'), { button: 0, clientX: 500, clientY: 250 });
     expect(document.body.style.userSelect).toBe('none');
+    expect(container.querySelector('.workspace-resize-shield')).toHaveAttribute('data-resizing-split-id', 'root');
+    expect(panes).toHaveAttribute('data-resizing-split-id', 'root');
+    expect(document.documentElement).toHaveAttribute('data-attn-workspace-resizing', '1');
+    expect(Number(document.documentElement.dataset.attnWorkspaceMouseSuppressUntil)).toBeGreaterThan(Date.now());
     fireEvent.pointerCancel(window);
     expect(document.body.style.userSelect).toBe('');
+    expect(container.querySelector('.workspace-resize-shield')).toBeNull();
+    expect(panes).not.toHaveAttribute('data-resizing-split-id');
+    expect(document.documentElement).not.toHaveAttribute('data-attn-workspace-resizing');
 
     rerender(
       <SessionTerminalWorkspace

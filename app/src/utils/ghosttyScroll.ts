@@ -44,6 +44,35 @@ export function applicationWheelInput(
 
 export type ApplicationMouseAction = 'press' | 'move' | 'release';
 
+export interface ApplicationMouseMoveReportOptions {
+  anyEventMouseTracking: boolean;
+  dragMouseTracking: boolean;
+  activeButton: number | null;
+  buttons: number;
+}
+
+export function shouldReportApplicationMouseMove({
+  anyEventMouseTracking,
+  dragMouseTracking,
+  activeButton,
+  buttons,
+}: ApplicationMouseMoveReportOptions): boolean {
+  if (buttons === 0) {
+    // No physical button held: passive hover motion. Only DECSET 1003
+    // (any-event tracking) reports hover; drag tracking (1002) stays quiet, and
+    // a lingering activeButton with no button down is a stale drag we already
+    // released, so suppress that too.
+    return activeButton === null && anyEventMouseTracking;
+  }
+  // A physical button is down. Forward the drag only when the press that started
+  // it originated inside this terminal (activeButton set); this drops
+  // split-divider drags that began outside the pane.
+  if (activeButton === null) {
+    return false;
+  }
+  return anyEventMouseTracking || dragMouseTracking;
+}
+
 export function applicationMouseInput(
   action: ApplicationMouseAction,
   button: number,

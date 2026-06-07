@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { ptyAttach, ptyResize, ptyWrite, type PtyEventPayload } from '../../pty/bridge';
 import { isSuspiciousTerminalSize } from '../../utils/terminalDebug';
+import { recordFocus } from '../../utils/terminalDiagnosticsLog';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import type { GhosttyTerminalHandle } from '../GhosttyTerminal';
 import type { TerminalVisibleContentSnapshot } from '../../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot } from '../../utils/terminalStyleSummary';
+
+const DEFERRED_RESIZE_FLUSH_MS = 120;
+
+interface TerminalResizeOptions {
+  reason?: string;
+  deferPty?: boolean;
+}
 
 export interface PaneRuntimeSpec {
   paneId: string;
@@ -24,7 +32,7 @@ export interface GhosttyPaneRuntime {
   setTerminalHandle: (paneId: string, handle: GhosttyTerminalHandle | null) => void;
   handleTerminalReady: (paneId: string) => (terminal: GhosttyTerminalHandle) => void;
   handleTerminalInput: (paneId: string) => (data: string) => void;
-  handleTerminalResize: (paneId: string) => (cols: number, rows: number, options?: { reason?: string }) => void;
+  handleTerminalResize: (paneId: string) => (cols: number, rows: number, options?: TerminalResizeOptions) => void;
   focusPane: (paneId: string, retries?: number) => void;
   fitPane: (paneId: string) => void;
   fitActivePane: () => void;
@@ -51,6 +59,12 @@ export function useGhosttyPaneRuntime(
   const handlesRef = useRef(new Map<string, GhosttyTerminalHandle>());
   const readyRuntimesRef = useRef(new Set<string>());
   const connectingRef = useRef(new Set<string>());
+  const deferredResizeRef = useRef(new Map<string, {
+    cols: number;
+    rows: number;
+    reason: string;
+    timer: ReturnType<typeof window.setTimeout>;
+  }>());
   panesRef.current = panes;
 
   const paneFor = useCallback((paneId: string) => panesRef.current.find((pane) => pane.paneId === paneId), []);
@@ -102,7 +116,20 @@ export function useGhosttyPaneRuntime(
     for (const runtimeId of readyRuntimesRef.current) {
       if (!desiredRuntimeIds.has(runtimeId)) readyRuntimesRef.current.delete(runtimeId);
     }
+    for (const [runtimeId, pending] of deferredResizeRef.current) {
+      if (!desiredRuntimeIds.has(runtimeId)) {
+        window.clearTimeout(pending.timer);
+        deferredResizeRef.current.delete(runtimeId);
+      }
+    }
   }, [panes]);
+
+  useEffect(() => () => {
+    for (const pending of deferredResizeRef.current.values()) {
+      window.clearTimeout(pending.timer);
+    }
+    deferredResizeRef.current.clear();
+  }, []);
 
   const setTerminalHandle = useCallback((paneId: string, handle: GhosttyTerminalHandle | null) => {
     if (handle) handlesRef.current.set(paneId, handle);
@@ -158,13 +185,37 @@ export function useGhosttyPaneRuntime(
     void ptyWrite({ id: pane.runtimeId, data });
   }, [paneFor]);
 
-  const handleTerminalResize = useCallback((paneId: string) => (cols: number, rows: number, options?: { reason?: string }) => {
+  const sendResize = useCallback((runtimeId: string, cols: number, rows: number, reason: string) => {
+    void ptyResize({ id: runtimeId, cols, rows, reason });
+  }, []);
+
+  const clearDeferredResize = useCallback((runtimeId: string) => {
+    const pending = deferredResizeRef.current.get(runtimeId);
+    if (!pending) return;
+    window.clearTimeout(pending.timer);
+    deferredResizeRef.current.delete(runtimeId);
+  }, []);
+
+  const handleTerminalResize = useCallback((paneId: string) => (cols: number, rows: number, options?: TerminalResizeOptions) => {
     if (!isActiveSessionRef.current) return;
     const pane = paneFor(paneId);
     if (!pane || !readyRuntimesRef.current.has(pane.runtimeId)) return;
     if (isSuspiciousTerminalSize(cols, rows)) return;
-    void ptyResize({ id: pane.runtimeId, cols, rows, reason: options?.reason ?? 'ghostty_fit' });
-  }, [isActiveSessionRef, paneFor]);
+    const reason = options?.reason ?? 'ghostty_fit';
+    if (!options?.deferPty) {
+      clearDeferredResize(pane.runtimeId);
+      sendResize(pane.runtimeId, cols, rows, reason);
+      return;
+    }
+    clearDeferredResize(pane.runtimeId);
+    const timer = window.setTimeout(() => {
+      const pending = deferredResizeRef.current.get(pane.runtimeId);
+      if (!pending) return;
+      deferredResizeRef.current.delete(pane.runtimeId);
+      sendResize(pane.runtimeId, pending.cols, pending.rows, pending.reason);
+    }, DEFERRED_RESIZE_FLUSH_MS);
+    deferredResizeRef.current.set(pane.runtimeId, { cols, rows, reason, timer });
+  }, [clearDeferredResize, isActiveSessionRef, paneFor, sendResize]);
 
   const get = useCallback((paneId: string) => handlesRef.current.get(paneId), []);
   const emptyContent = useCallback((): TerminalVisibleContentSnapshot => ({
@@ -182,6 +233,7 @@ export function useGhosttyPaneRuntime(
     handleTerminalInput,
     handleTerminalResize,
     focusPane: (paneId: string, retries = 20) => {
+      recordFocus(paneId, retries);
       const focus = (remaining: number) => {
         if (get(paneId)?.focus() || remaining <= 0) return;
         window.setTimeout(() => focus(remaining - 1), 50);

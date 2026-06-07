@@ -35,6 +35,13 @@ import { startLeafDrag, type LeafDropSnapshot } from './leafDrag';
 import type { DockTarget } from './dockTarget';
 
 const ZOOM_PATH_RATIO = 0.76;
+const RESIZE_MOUSE_SUPPRESSION_MS = 1_500;
+
+function suppressTerminalMouseDuringResize(): void {
+  document.documentElement.dataset.attnWorkspaceMouseSuppressUntil = String(
+    Date.now() + RESIZE_MOUSE_SUPPRESSION_MS,
+  );
+}
 
 function zoomLayoutTowardPane(node: TerminalLayoutNode, paneId: string): TerminalLayoutNode {
   if (node.type !== 'split') {
@@ -170,6 +177,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     // Live, optimistic split ratios while dragging a divider. Reconciled against
     // the daemon layout once it echoes the persisted (locked) ratio back.
     const [ratioOverrides, setRatioOverrides] = useState<Map<string, number>>(() => new Map());
+    const [resizingSplit, setResizingSplit] = useState<{ splitId: string; direction: TerminalSplitDirection } | null>(null);
     // Drag-to-dock state. The tile stays docked in the daemon tree throughout
     // the drag — this is a transient preview (ghost + target highlight) that
     // resolves to a single dock command on drop.
@@ -821,17 +829,35 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         return;
       }
       event.preventDefault();
+      event.stopPropagation();
       const container = (event.target as HTMLElement).closest('.session-terminal-panes') as HTMLElement | null;
       if (!container) {
         return;
       }
+      const dividerElement = event.currentTarget;
+      const pointerId = event.pointerId;
+      if (typeof dividerElement.setPointerCapture === 'function') {
+        try {
+          dividerElement.setPointerCapture(pointerId);
+        } catch {
+          // The pointer can already be gone if the app loses focus mid-press.
+        }
+      }
       const rect = container.getBoundingClientRect();
       const { splitId, direction, left, top, right, bottom } = divider;
+      const resizeToken = `${splitId}:${pointerId}`;
+      suppressTerminalMouseDuringResize();
+      container.dataset.resizingSplitId = splitId;
+      container.dataset.resizingSplitDirection = direction;
+      container.dataset.resizingSplitToken = resizeToken;
+      document.documentElement.dataset.attnWorkspaceResizing = '1';
+      document.documentElement.dataset.attnWorkspaceResizeToken = resizeToken;
       const spanNorm = direction === 'vertical' ? right - left : bottom - top;
       const axisPx = direction === 'vertical' ? rect.width : rect.height;
       const spanPx = spanNorm * axisPx;
       const minRatio = spanPx > 0 ? Math.min(0.45, 120 / spanPx) : 0.1;
       draggingSplitRef.current = splitId;
+      setResizingSplit({ splitId, direction });
       const releaseSelectionLock = lockTextSelection(
         direction === 'vertical' ? 'col-resize' : 'row-resize',
       );
@@ -849,21 +875,46 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       };
 
       const onMove = (ev: PointerEvent) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        suppressTerminalMouseDuringResize();
         pendingRatioRef.current = { splitId, ratio: computeRatio(ev.clientX, ev.clientY) };
         if (ratioRafRef.current == null) {
           ratioRafRef.current = window.requestAnimationFrame(flushRatioOverride);
         }
       };
       const teardown = () => {
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onCancel);
+        window.removeEventListener('pointermove', onMove, true);
+        window.removeEventListener('pointerup', onUp, true);
+        window.removeEventListener('pointercancel', onCancel, true);
         window.removeEventListener('blur', onCancel);
+        if (
+          typeof dividerElement.hasPointerCapture === 'function'
+          && typeof dividerElement.releasePointerCapture === 'function'
+          && dividerElement.hasPointerCapture(pointerId)
+        ) {
+          try {
+            dividerElement.releasePointerCapture(pointerId);
+          } catch {
+            // Nothing to release if the browser already cancelled capture.
+          }
+        }
         if (ratioRafRef.current != null) {
           window.cancelAnimationFrame(ratioRafRef.current);
           ratioRafRef.current = null;
         }
+        if (container.dataset.resizingSplitToken === resizeToken) {
+          delete container.dataset.resizingSplitId;
+          delete container.dataset.resizingSplitDirection;
+          delete container.dataset.resizingSplitToken;
+        }
+        if (document.documentElement.dataset.attnWorkspaceResizeToken === resizeToken) {
+          delete document.documentElement.dataset.attnWorkspaceResizing;
+          delete document.documentElement.dataset.attnWorkspaceResizeToken;
+        }
+        suppressTerminalMouseDuringResize();
         releaseSelectionLock();
+        setResizingSplit((current) => (current?.splitId === splitId ? null : current));
         dragCleanupRef.current = null;
       };
       const onCancel = () => {
@@ -873,6 +924,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         clearRatioOverride(splitId);
       };
       const onUp = (ev: PointerEvent) => {
+        ev.preventDefault();
+        ev.stopPropagation();
         const ratio = computeRatio(ev.clientX, ev.clientY);
         teardown();
         pendingRatioRef.current = { splitId, ratio };
@@ -884,9 +937,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         }
       };
       dragCleanupRef.current = teardown;
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', onCancel);
+      window.addEventListener('pointermove', onMove, true);
+      window.addEventListener('pointerup', onUp, true);
+      window.addEventListener('pointercancel', onCancel, true);
       window.addEventListener('blur', onCancel);
     }, [clearRatioOverride, flushRatioOverride, onResizeSplit]);
 
@@ -942,17 +995,47 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           containerRef={panesContainerRef}
           dividers={splitDividers}
           onDividerPointerDown={handleDividerPointerDown}
-          overlay={effectiveDockTarget ? (
-            <div
-              className="workspace-dock-target"
-              style={{
-                left: `${effectiveDockTarget.rect.left * 100}%`,
-                top: `${effectiveDockTarget.rect.top * 100}%`,
-                width: `${effectiveDockTarget.rect.width * 100}%`,
-                height: `${effectiveDockTarget.rect.height * 100}%`,
-              }}
-            />
-          ) : null}
+          overlay={(
+            <>
+              {effectiveDockTarget ? (
+                <div
+                  className="workspace-dock-target"
+                  style={{
+                    left: `${effectiveDockTarget.rect.left * 100}%`,
+                    top: `${effectiveDockTarget.rect.top * 100}%`,
+                    width: `${effectiveDockTarget.rect.width * 100}%`,
+                    height: `${effectiveDockTarget.rect.height * 100}%`,
+                  }}
+                />
+              ) : null}
+              {resizingSplit ? (
+                <div
+                  className={`workspace-resize-shield workspace-resize-shield--${resizingSplit.direction}`}
+                  data-resizing-split-id={resizingSplit.splitId}
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onPointerMove={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onMouseMove={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onMouseUp={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                />
+              ) : null}
+            </>
+          )}
         />
         {effectiveGhostPos && effectiveDraggingLeafId && (
           <div

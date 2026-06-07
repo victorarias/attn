@@ -42,6 +42,12 @@ export interface WebGlRenderSample {
   cells: number;
   quads: number;
   glyphUploads: number;
+  // TEMP (blank-on-split): diagnostics to explain why drawn quads can fall
+  // below the model's printable-cell count after a resize. Remove with the
+  // render-trace instrumentation once the root cause is fixed.
+  cellsArrayLen: number;
+  printableSkippedNull: number;
+  printableSkippedZeroWidth: number;
 }
 
 export function graphemeAtViewportCell(
@@ -301,6 +307,10 @@ export class WebGlTerminalRenderer {
     const vertices: number[] = [];
     const glyphCountBefore = this.glyphs.size;
     const atlasGenerationBefore = this.atlasGeneration;
+    // TEMP (blank-on-split): count printable cells dropped by the width/null
+    // skip below, to distinguish "cells array too short" from "width===0".
+    let printableSkippedNull = 0;
+    let printableSkippedZeroWidth = 0;
 
     gl.clearColor(defaultBg.r / 255, defaultBg.g / 255, defaultBg.b / 255, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -309,6 +319,15 @@ export class WebGlTerminalRenderer {
       for (let col = 0; col < terminal.cols; col += 1) {
         const cell = cells[row * terminal.cols + col];
         if (!cell || cell.width === 0) {
+          if (cell && cell.codepoint > 32) {
+            printableSkippedZeroWidth += 1;
+          } else if (!cell) {
+            // Only count as a "printable" miss if this index is in-bounds for
+            // the model grid but absent from the cells array.
+            if (row * terminal.cols + col < terminal.cols * terminal.rows) {
+              printableSkippedNull += 1;
+            }
+          }
           continue;
         }
         const width = Math.max(cell.width, 1) * this.cellWidth * scale;
@@ -373,6 +392,9 @@ export class WebGlTerminalRenderer {
       cells: terminal.cols * terminal.rows,
       quads: vertices.length / FLOATS_PER_VERTEX / 6,
       glyphUploads: this.glyphs.size - glyphCountBefore,
+      cellsArrayLen: cells.length,
+      printableSkippedNull,
+      printableSkippedZeroWidth,
     };
   }
 

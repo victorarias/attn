@@ -44,8 +44,10 @@ import {
   spawnPtyRuntime,
 } from '../pty/runtimeLifecycle';
 import { createPtyTransportState } from '../pty/transportState';
-import { tileContentKey, tileIdsFromLayoutJSON, type TerminalDockEdge, type TileContentState } from '../types/workspace';
+import { parseLayoutJSON, tileContentKey, tileIdsFromLayoutJSON, type TerminalDockEdge, type TileContentState } from '../types/workspace';
 import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
+import { collectWorkspaceLayoutDiagnostics } from '../utils/workspaceDiagnostics';
+import { recordDiag, recordLayout } from '../utils/terminalDiagnosticsLog';
 import { recordPtyCommand, recordWsJsonParse } from '../utils/ptyPerf';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
 import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
@@ -1064,7 +1066,11 @@ export function useDaemonSocket({
             if (ws.readyState === WebSocket.OPEN) {
               // Re-attach PTY streams only after recovery barrier has lifted and
               // initial_state has arrived.
-              for (const sessionId of ptyTransportRef.current.listAttachedRuntimeIds()) {
+              const reattachIds = ptyTransportRef.current.listAttachedRuntimeIds();
+              if (reattachIds.length > 0) {
+                recordDiag({ kind: 'attach', reason: 'recovery_reattach', sessions: reattachIds });
+              }
+              for (const sessionId of reattachIds) {
                 ws.send(JSON.stringify({ cmd: 'attach_session', id: sessionId }));
               }
             }
@@ -1075,6 +1081,10 @@ export function useDaemonSocket({
             if (data.workspace_layout) {
               const workspaceLayout = data.workspace_layout;
               const workspaceID = workspaceLayout.workspace_id;
+              const layoutDiag = collectWorkspaceLayoutDiagnostics(
+                parseLayoutJSON(workspaceLayout.layout_json || ''),
+              );
+              recordLayout(workspaceID, layoutDiag.panes.map((pane) => pane.paneId), layoutDiag.splitCount);
               const nextWorkspaces = workspacesRef.current.map((workspace) => (
                 workspace.id === workspaceID
                   ? { ...workspace, layout: workspaceLayout }
@@ -1450,6 +1460,7 @@ export function useDaemonSocket({
 
           case 'pty_desync':
             if (data.id) {
+              recordDiag({ kind: 'desync', session: data.id, reason: data.reason || 'desync' });
               emitPtyEvent({ event: 'reset', id: data.id, reason: data.reason || 'desync' });
               ptyTransportRef.current.clearRuntimeStream(data.id);
               ws.send(JSON.stringify({ cmd: 'attach_session', id: data.id }));
@@ -1458,6 +1469,7 @@ export function useDaemonSocket({
 
           case 'pty_resized':
             if (data.id && data.cols && data.rows) {
+              recordDiag({ kind: 'resize', session: data.id, source: 'pty_resized', toCols: data.cols, toRows: data.rows });
               emitPtyEvent({ event: 'local_resize', id: data.id, cols: data.cols, rows: data.rows });
             }
             break;

@@ -8,6 +8,7 @@ import {
   cursorRowInViewport,
   offsetAfterWrite,
   relocateApplicationSelection,
+  shouldReportApplicationMouseMove,
   viewportRowFromBufferRow,
 } from './ghosttyScroll';
 
@@ -34,6 +35,55 @@ describe('applicationMouseInput', () => {
   it('encodes legacy mouse reports when SGR mode is disabled', () => {
     expect(applicationMouseInput('press', 0, 1, 1, false)).toBe('\x1b[M !!');
     expect(applicationMouseInput('release', 0, 1, 1, false)).toBe('\x1b[M#!!');
+  });
+});
+
+describe('shouldReportApplicationMouseMove', () => {
+  it('does not report a drag that did not start inside the terminal', () => {
+    expect(shouldReportApplicationMouseMove({
+      anyEventMouseTracking: true,
+      dragMouseTracking: true,
+      activeButton: null,
+      buttons: 1,
+    })).toBe(false);
+  });
+
+  it('reports passive hover under any-event tracking (DECSET 1003)', () => {
+    // Mode 1003 means "report all motion, including hover with no button".
+    expect(shouldReportApplicationMouseMove({
+      anyEventMouseTracking: true,
+      dragMouseTracking: false,
+      activeButton: null,
+      buttons: 0,
+    })).toBe(true);
+  });
+
+  it('does not report passive hover when only drag tracking (DECSET 1002) is on', () => {
+    // Mode 1002 reports motion only while a button is held, never plain hover.
+    expect(shouldReportApplicationMouseMove({
+      anyEventMouseTracking: false,
+      dragMouseTracking: true,
+      activeButton: null,
+      buttons: 0,
+    })).toBe(false);
+  });
+
+  it('allows terminal-owned drag tracking while the button is still down', () => {
+    expect(shouldReportApplicationMouseMove({
+      anyEventMouseTracking: false,
+      dragMouseTracking: true,
+      activeButton: 0,
+      buttons: 1,
+    })).toBe(true);
+  });
+
+  it('drops stale terminal-owned drags after the button is already released', () => {
+    expect(shouldReportApplicationMouseMove({
+      anyEventMouseTracking: true,
+      dragMouseTracking: true,
+      activeButton: 0,
+      buttons: 0,
+    })).toBe(false);
   });
 });
 

@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGhosttyPaneRuntime } from './useGhosttyPaneRuntime';
 import type { PaneRuntimeEventBinding, PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import type { GhosttyTerminalHandle } from '../GhosttyTerminal';
@@ -50,6 +50,10 @@ describe('useGhosttyPaneRuntime', () => {
         return () => {};
       }),
     };
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('attaches with measured geometry and forwards input directly', async () => {
@@ -153,6 +157,60 @@ describe('useGhosttyPaneRuntime', () => {
     });
 
     expect(mockPtyResize).toHaveBeenCalledWith({ id: 'runtime-1', cols: 130, rows: 45, reason: 'test' });
+  });
+
+  it('coalesces deferred split-drag resize updates before sending them to the PTY', async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useGhosttyPaneRuntime([
+      {
+        paneId: 'pane-session',
+        runtimeId: 'runtime-1',
+        paneKind: 'agent',
+      },
+    ], 'pane-session', router, { current: true }));
+    const terminal = createTerminal();
+    await act(async () => {
+      await result.current.handleTerminalReady('pane-session')(terminal);
+    });
+    mockPtyResize.mockClear();
+
+    act(() => {
+      result.current.handleTerminalResize('pane-session')(130, 45, { reason: 'ghostty_fit', deferPty: true });
+      result.current.handleTerminalResize('pane-session')(131, 45, { reason: 'ghostty_fit', deferPty: true });
+      vi.advanceTimersByTime(119);
+    });
+    expect(mockPtyResize).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(mockPtyResize).toHaveBeenCalledTimes(1);
+    expect(mockPtyResize).toHaveBeenCalledWith({ id: 'runtime-1', cols: 131, rows: 45, reason: 'ghostty_fit' });
+  });
+
+  it('cancels a deferred split-drag resize when a normal resize arrives', async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useGhosttyPaneRuntime([
+      {
+        paneId: 'pane-session',
+        runtimeId: 'runtime-1',
+        paneKind: 'agent',
+      },
+    ], 'pane-session', router, { current: true }));
+    const terminal = createTerminal();
+    await act(async () => {
+      await result.current.handleTerminalReady('pane-session')(terminal);
+    });
+    mockPtyResize.mockClear();
+
+    act(() => {
+      result.current.handleTerminalResize('pane-session')(130, 45, { reason: 'ghostty_fit', deferPty: true });
+      result.current.handleTerminalResize('pane-session')(132, 45, { reason: 'ghostty_fit' });
+      vi.advanceTimersByTime(120);
+    });
+
+    expect(mockPtyResize).toHaveBeenCalledTimes(1);
+    expect(mockPtyResize).toHaveBeenCalledWith({ id: 'runtime-1', cols: 132, rows: 45, reason: 'ghostty_fit' });
   });
 
   it('resizes daemon-attached runtimes after their first delivered PTY event', async () => {

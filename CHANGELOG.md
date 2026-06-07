@@ -31,6 +31,11 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 
 ---
 
+## [2026-06-07]
+
+### Fixed
+- **Resizing workspace splits is less likely to stall active agent panes.** Split drags still update the visible terminal layout live, but attn now coalesces the PTY resize sent to each running agent while the drag is in progress so Claude and Codex are not forced to repaint repeatedly mid-drag.
+
 ## [2026-06-06]
 
 ### Changed
