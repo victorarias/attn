@@ -209,6 +209,50 @@ test.describe('DiffView (@pierre/diffs)', () => {
     await expect(container).toContainText('refresh-1');
   });
 
+  test('keeps an in-progress comment (text + focus) and existing comments when a background change re-renders the diff', async ({ page }) => {
+    await openHarness(page, SEEDED);
+    // The seeded comment is already on screen.
+    await expect(page.getByTestId('diff-comment-thread')).toContainText('Seeded comment on an added line');
+
+    // Start typing a brand-new comment via the gutter "+".
+    const line = page.locator('diffs-container [data-line-index][data-column-number]').nth(6);
+    await line.hover();
+    const plus = page.locator('diffs-container [data-utility-button]');
+    await plus.waitFor({ state: 'visible' });
+    await plus.click();
+
+    const textarea = page.locator('.diff-comment-form textarea');
+    await expect(textarea).toBeVisible();
+    await textarea.fill('Half-written thought');
+    await expect(textarea).toBeFocused();
+
+    // A background change lands: a comment arrives on another line. This
+    // re-renders the diff (lineAnnotations change) without touching the file.
+    await page.evaluate(() => window.__HARNESS__.addBackgroundComment());
+    await expect(page.locator('.diff-comment[data-comment-id^="bg-"]')).toBeVisible();
+
+    // The half-written comment, its caret/focus, and the existing comment all survive.
+    await expect(textarea).toHaveValue('Half-written thought');
+    await expect(textarea).toBeFocused();
+    await expect(page.getByText('Seeded comment on an added line')).toBeVisible();
+  });
+
+  test('keeps an in-progress edit (text + focus) when a background change re-renders the diff', async ({ page }) => {
+    await openHarness(page, SEEDED);
+    await page.locator('.diff-comment .edit-btn').click();
+
+    const textarea = page.locator('.diff-comment-form textarea');
+    await expect(textarea).toBeVisible();
+    await textarea.fill('Edited but not yet saved');
+    await expect(textarea).toBeFocused();
+
+    await page.evaluate(() => window.__HARNESS__.addBackgroundComment());
+    await expect(page.locator('.diff-comment[data-comment-id^="bg-"]')).toBeVisible();
+
+    await expect(textarea).toHaveValue('Edited but not yet saved');
+    await expect(textarea).toBeFocused();
+  });
+
   test('toggles between unified and split layout', async ({ page }) => {
     await openHarness(page, UNSEEDED);
 

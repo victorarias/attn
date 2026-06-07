@@ -165,6 +165,19 @@ export function DiffViewHarness({ onReady }: HarnessProps) {
     api.setDiffStyle = (style: 'unified' | 'split') => setDiffStyle(style);
     api.setExpandUnchanged = (value: boolean) => setExpandUnchanged(value);
     api.setUseLargeDiff = (value: boolean) => setUseLargeDiff(value);
+    // Simulate a background change that re-renders the diff without touching the
+    // file content: a comment arrives on another line (as the agent or a poll
+    // would deliver). The selected file's original/modified are unchanged.
+    api.addBackgroundComment = () =>
+      setComments((prev) => [
+        ...prev,
+        makeComment({
+          id: `bg-${prev.length + 1}`,
+          line_start: 2,
+          line_end: 2,
+          content: `background comment ${prev.length + 1}`,
+        }),
+      ]);
   }, []);
 
   const controlsStyle: React.CSSProperties = {

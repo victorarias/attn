@@ -223,10 +223,24 @@ export function DiffView({
       }
     }
 
-    return Array.from(groups.values())
-      .sort((a, b) => (a.side === b.side ? a.lineNumber - b.lineNumber : a.side < b.side ? -1 : 1))
-      .map((meta) => ({ side: meta.side, lineNumber: meta.lineNumber, metadata: meta }));
-  }, [comments, draft]);
+    // The library keys annotation slots by array index (renderDiffChildren maps
+    // with the index as the React key), so an annotation's index must stay stable
+    // or React remounts its subtree — which would wipe an in-progress draft/edit
+    // form (its typed text and focus). Keep the annotation(s) with an open form at
+    // the front so that comments arriving or leaving in the background only ever
+    // shift the trailing, form-less threads. Visual placement is unaffected: the
+    // library positions each thread by its `slot` (side+line), not array order.
+    const all = Array.from(groups.values());
+    const hasOpenForm = (g: AnnotationMeta) =>
+      g.draft || g.comments.some((c) => c.id === editingCommentId);
+    const active = all.filter(hasOpenForm);
+    const rest = all.filter((g) => !hasOpenForm(g));
+    return [...active, ...rest].map((meta) => ({
+      side: meta.side,
+      lineNumber: meta.lineNumber,
+      metadata: meta,
+    }));
+  }, [comments, draft, editingCommentId]);
 
   const handleSaveDraft = useCallback(
     (content: string) => {
