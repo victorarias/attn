@@ -18,7 +18,7 @@
 // claims no geometry, so AGENTS.md #7 still holds: we never attach or resize).
 // We grab stage focus on open/zoom so input follows the zoom instead of leaking
 // to whichever pane held focus when the grid opened.
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Ghostty, InputHandler } from 'ghostty-web';
 import ghosttyWasmUrl from 'ghostty-web/ghostty-vt.wasm?url';
 import { listenPtyEvents, ptyWrite } from '../../pty/bridge';
@@ -27,6 +27,8 @@ import type { ScreenSnapshotResult } from '../../hooks/useDaemonSocket';
 import { getTerminalTheme, getTerminalAnsiPalette } from '../../utils/terminalSizing';
 import { UnifiedGridRenderer } from './UnifiedGridRenderer';
 import { GridCompositor, type GridTileSpec } from './GridCompositor';
+import type { Rect } from './GridRenderer';
+import { GridHiddenSessions, type HiddenGridSession } from './GridHiddenSessions';
 import { setGridAutomationHandle, INACTIVE_GRID_STATE } from './gridAutomation';
 import {
   FONT_FAMILY,
@@ -39,12 +41,28 @@ import './grid.css';
 
 export interface GridSessionTile {
   runtimeId: string;
+  // Stable session identity, used to remove/restore the tile from the grid (the
+  // runtimeId can change across restarts; the sessionId does not).
+  sessionId: string;
   title: string;
   attention: boolean;
 }
 
 interface GridViewProps {
   tiles: GridSessionTile[];
+  // Concrete grid shape, resolved upstream (App). The grid is layout-dumb: it
+  // simply lays `tiles` into this rows×cols. App slices `tiles` to fit, so
+  // tiles.length is always <= rows*cols.
+  layout: { rows: number; cols: number };
+  // How many live sessions did NOT fit the chosen fixed shape (off-board). Drives
+  // a "not shown" hint. 0 in Auto mode (Auto always fits).
+  offBoardCount?: number;
+  // Sessions the user removed from the grid (for the restore control), and the
+  // remove/restore handlers. Optional so the grid still runs without membership
+  // wiring (tests / no daemon socket).
+  hiddenSessions?: HiddenGridSession[];
+  onRemoveTile?: (sessionId: string) => void;
+  onRestoreTile?: (sessionId: string) => void;
   resolvedTheme: Parameters<typeof getTerminalTheme>[0];
   // Fetch a session's current screen to seed its tile. Optional so the grid
   // still runs (live-fill only) in contexts without a daemon socket (tests).
@@ -61,21 +79,40 @@ function b64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
-function autoGrid(n: number): { rows: number; cols: number } {
-  if (n <= 1) return { rows: 1, cols: 1 };
-  const cols = Math.ceil(Math.sqrt(n));
-  const rows = Math.ceil(n / cols);
-  return { rows, cols };
-}
-
 const toSpecs = (tiles: GridSessionTile[]): GridTileSpec[] =>
   tiles.map((t) => ({ id: t.runtimeId, attention: t.attention }));
 
-export function GridView({ tiles, resolvedTheme, getScreenSnapshot }: GridViewProps) {
+export function GridView({
+  tiles,
+  layout,
+  offBoardCount = 0,
+  hiddenSessions = [],
+  onRemoveTile,
+  onRestoreTile,
+  resolvedTheme,
+  getScreenSnapshot,
+}: GridViewProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const compRef = useRef<GridCompositor | null>(null);
   const tilesRef = useRef(tiles);
   tilesRef.current = tiles;
+
+  // runtimeId -> sessionId, so the hover-remove button (which knows the
+  // compositor's tile id == runtimeId) can report the stable session identity.
+  const sessionIdByRuntime = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of tiles) map.set(t.runtimeId, t.sessionId);
+    return map;
+  }, [tiles]);
+
+  // The tile currently offering a remove (×) button: the one under the pointer in
+  // the static overview. Cleared while zoomed/animating and when the pointer
+  // leaves the grid. rect is container-space (aligns with the canvas tiles).
+  const [removeTarget, setRemoveTarget] = useState<{ sessionId: string; rect: Rect } | null>(null);
+  // Read the live layout from a ref inside the mount/sync effects so they need
+  // not re-run when only the shape changes (a dedicated effect handles that).
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
 
   // Seeding bookkeeping. Each live runtime id maps to a generation number so we
   // seed it exactly once per appearance: an id already in the map is skipped;
@@ -158,8 +195,7 @@ export function GridView({ tiles, resolvedTheme, getScreenSnapshot }: GridViewPr
       compRef.current = comp;
       const current = tilesRef.current;
       comp.syncTiles(toSpecs(current));
-      const { rows, cols } = autoGrid(current.length);
-      comp.setLayout(rows, cols);
+      comp.setLayout(layoutRef.current.rows, layoutRef.current.cols);
       reconcileSeeding(comp);
       comp.start();
 
@@ -256,16 +292,24 @@ export function GridView({ tiles, resolvedTheme, getScreenSnapshot }: GridViewPr
     };
   }, [resolvedTheme, reconcileSeeding]);
 
-  // Reconcile the live tile set + grid dimensions whenever sessions change.
+  // Reconcile the live tile set whenever sessions change. Layout is applied by
+  // the dedicated effect below; setLayout here keeps the reflow snapshot aligned
+  // with the new tile set when a tile change also shifts the (Auto) shape.
   useEffect(() => {
     const comp = compRef.current;
     if (!comp) return;
     const current = tilesRef.current;
     comp.syncTiles(toSpecs(current));
-    const { rows, cols } = autoGrid(current.length);
-    comp.setLayout(rows, cols);
+    comp.setLayout(layoutRef.current.rows, layoutRef.current.cols);
     reconcileSeeding(comp);
   }, [signature, reconcileSeeding]);
+
+  // Apply the grid shape whenever it changes (manual pick, or an Auto recompute
+  // as the tile count crosses a near-square boundary). setLayout is idempotent on
+  // unchanged dims, so the overlap with the sync effect above is a safe no-op.
+  useEffect(() => {
+    compRef.current?.setLayout(layout.rows, layout.cols);
+  }, [layout.rows, layout.cols]);
 
   // Click toggles zoom; Esc exits zoom.
   useEffect(() => {
@@ -292,19 +336,73 @@ export function GridView({ tiles, resolvedTheme, getScreenSnapshot }: GridViewPr
     const id = comp.hitTest(e.clientX, e.clientY);
     if (id) {
       comp.zoomTo(id);
+      setRemoveTarget(null); // a zoomed tile shows no remove button
       // Ensure the stage owns focus so the zoomed tile receives keyboard input
       // (a background click that hits no tile leaves focus as-is).
       stageRef.current?.focus({ preventScroll: true });
     }
   };
 
+  // Offer a remove (×) button on the tile under the pointer, but only in the
+  // static overview — never while zoomed (the rect would be mid-morph). The
+  // handlers live on .grid-view (not the stage) so moving onto the × button,
+  // which is a .grid-view child, doesn't fire a stage mouseleave and flicker it.
+  const updateRemoveTarget = (e: React.MouseEvent) => {
+    const comp = compRef.current;
+    if (!comp || !onRemoveTile || comp.isZoomed()) {
+      if (removeTarget) setRemoveTarget(null);
+      return;
+    }
+    const hit = comp.tileAt(e.clientX, e.clientY);
+    const sessionId = hit ? sessionIdByRuntime.get(hit.id) : undefined;
+    if (!hit || !sessionId) {
+      if (removeTarget) setRemoveTarget(null);
+      return;
+    }
+    // The same overview tile keeps a stable rect, so skip a no-op re-render.
+    if (removeTarget && removeTarget.sessionId === sessionId) return;
+    setRemoveTarget({ sessionId, rect: hit.rect });
+  };
+
+  const clearRemoveTarget = () => {
+    if (removeTarget) setRemoveTarget(null);
+  };
+
   return (
-    <div className="grid-view">
+    <div className="grid-view" onMouseMove={updateRemoveTarget} onMouseLeave={clearRemoveTarget}>
       <div className="grid-view-stage" ref={stageRef} onClick={onStageClick} />
       {tiles.length === 0 && (
         <div className="grid-view-empty">No active sessions</div>
       )}
-      <div className="grid-view-hint">click a tile to zoom &amp; type · Esc to exit zoom · ⌘G closes grid</div>
+      {removeTarget && (
+        <button
+          type="button"
+          className="grid-tile-remove"
+          style={{
+            left: `${removeTarget.rect.x + removeTarget.rect.w - 28}px`,
+            top: `${removeTarget.rect.y + 8}px`,
+          }}
+          title="Remove from grid"
+          aria-label="Remove from grid"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemoveTile?.(removeTarget.sessionId);
+            setRemoveTarget(null);
+          }}
+        >
+          ×
+        </button>
+      )}
+      <GridHiddenSessions sessions={hiddenSessions} onRestore={(id) => onRestoreTile?.(id)} />
+      {offBoardCount > 0 && (
+        <div className="grid-view-offboard">
+          {offBoardCount} more {offBoardCount === 1 ? 'session' : 'sessions'} not shown · enlarge the grid or pick Auto
+        </div>
+      )}
+      <div className="grid-view-hint">
+        click a tile to zoom &amp; type{onRemoveTile ? ' · hover a tile to remove it' : ''} · Esc to exit zoom · ⌘G closes grid
+      </div>
     </div>
   );
 }

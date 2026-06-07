@@ -30,6 +30,8 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 
 ### Added
 - **Grid view (⌘G).** A global "mission control" that shows every active session at once as a live terminal tile, each outlined as its own panel. Every tile shows the session's current screen the moment the grid opens — no waiting for the next keystroke — and then stays live. Click a tile to zoom it full-screen and type straight into that session; the focused tile gets a highlighted border so it's clear where your keystrokes go, and switching tiles moves your input with it. Press Esc to leave the zoom, or ⌘G to close the grid. Sessions that need you pulse with an orange border so they're easy to spot across all your workspaces.
+- **Pick the grid's layout.** A grid button in the sidebar opens a small size picker — sweep across the squares to choose how many rows and columns the grid uses, or pick Auto to keep the automatic fit. Choosing a size also drops you straight into the grid. A fixed layout fills with the sessions that fit; if you have more sessions than slots, the grid tells you how many aren't shown so you can size up or switch back to Auto.
+- **Remove sessions from the grid.** Every session is on the grid by default; hover a tile and click the × in its corner to take that one off. A "N hidden" button in the top corner lists everything you've removed and puts any of them back with one click. Removals stick across restarts, so you can pare the grid down to just the agents you're actively watching.
 
 ### Changed
 - **Home is now ⌘⇧H.** Jumping to the dashboard moved off ⌘H — which macOS reserves for Hide — to ⌘⇧H, freeing ⌘G for the new grid view.

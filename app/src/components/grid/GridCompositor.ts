@@ -136,14 +136,21 @@ export class GridCompositor {
 
   setLayout(rows: number, cols: number): void {
     if (rows === this.layout.rows && cols === this.layout.cols) return;
-    const now = performance.now();
     // Snapshot current placement so tiles slide from where they are.
+    this.beginReflow();
+    this.layout = { rows, cols };
+  }
+
+  // Snapshot every tile's resting rect under the CURRENT layout and start the
+  // reflow clock, so the next layout/membership change animates from where tiles
+  // are and — critically — forces the render-on-demand loop to paint. Call this
+  // BEFORE mutating this.layout or this.tiles.
+  private beginReflow(): void {
     this.reflowFrom.clear();
     this.tiles.forEach((tile, i) => {
       this.reflowFrom.set(tile.id, this.baseRect(i, this.layout, tile.model.cols, tile.model.rows).rect);
     });
-    this.layout = { rows, cols };
-    this.reflowStart = now;
+    this.reflowStart = performance.now();
   }
 
   // Reconcile the live tile set against `specs` (in placement order). Existing
@@ -151,6 +158,18 @@ export class GridCompositor {
   // freed. Attention targets are refreshed every sync.
   syncTiles(specs: GridTileSpec[]): void {
     const nextIds = new Set(specs.map((s) => s.id));
+    // A change to the tile set (removal, restore, reorder) must animate the
+    // survivors into their new slots AND force at least one render: the rAF loop
+    // is render-on-demand and a pure membership change with an unchanged grid
+    // shape dirties nothing, so without this the removed tile's stale frame stays
+    // on screen until the next dirtying event (e.g. another removal). Snapshot
+    // from the current placement before we mutate the tile list. Skip the initial
+    // mount (no prior tiles to slide from).
+    const membershipChanged =
+      this.tiles.length > 0 &&
+      (specs.length !== this.tiles.length || specs.some((s, i) => this.tiles[i]?.id !== s.id));
+    if (membershipChanged) this.beginReflow();
+
     for (const tile of this.tiles) {
       if (!nextIds.has(tile.id)) {
         tile.model.free();
@@ -312,6 +331,26 @@ export class GridCompositor {
     const tile = this.tileIndex.get(id);
     if (!tile) return null;
     return this.modelText(tile.model);
+  }
+
+  // Pointer (client coords) -> the resting tile at that point, with its
+  // container-space rect. Unlike hitTest (which reads the last animated frame),
+  // this recomputes the static grid placement on demand, so it is correct for the
+  // non-animating overview — where hover affordances like the per-tile remove
+  // button live — and is deterministic without a running render loop.
+  tileAt(clientX: number, clientY: number): { id: string; rect: Rect } | null {
+    const box = this.container.getBoundingClientRect();
+    const x = clientX - box.left;
+    const y = clientY - box.top;
+    for (let i = 0; i < this.tiles.length; i += 1) {
+      const tile = this.tiles[i];
+      if (tile.hidden) continue;
+      const { rect } = this.baseRect(i, this.layout, tile.model.cols, tile.model.rows);
+      if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
+        return { id: tile.id, rect };
+      }
+    }
+    return null;
   }
 
   // Pointer (client coords) -> tile id, using the last rendered frame placement.

@@ -144,6 +144,36 @@ describe('GridCompositor', () => {
     expect(comp.hasTile('b')).toBe(false);
   });
 
+  it('forces a render when a tile is removed even if the grid shape is unchanged', () => {
+    // Regression: the rAF loop is render-on-demand (it paints only when a model
+    // is dirty or an animation is live). Fake models never report dirty, so this
+    // isolates the membership path: removing a tile while the resolved shape stays
+    // 2×2 must still trigger a render, or the removed tile's stale frame lingers
+    // until the next dirtying event ("only every other hide actually hides").
+    const { comp, renderer } = makeCompositor();
+    const spec = (id: string) => ({ id, attention: false });
+    comp.syncTiles(['a', 'b', 'c', 'd'].map(spec));
+    comp.setLayout(2, 2);
+
+    // Settle the mount/layout reflow so the renderer is idle, then confirm an idle
+    // tick draws nothing (the render-on-demand baseline this bug violated).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const internal = comp as any;
+    internal.reflowStart = -1;
+    const before = renderer.frames.length;
+    internal.tick();
+    expect(renderer.frames.length).toBe(before);
+
+    // Remove one tile; the resolved shape is still 2×2, so setLayout no-ops.
+    comp.syncTiles(['a', 'b', 'c'].map(spec));
+    comp.setLayout(2, 2);
+    internal.tick();
+
+    expect(renderer.frames.length).toBeGreaterThan(before);
+    const last = renderer.frames[renderer.frames.length - 1];
+    expect(last.map((f) => f.id)).toEqual(['a', 'b', 'c']);
+  });
+
   it('routes live bytes to the matching model and drains responses without echoing them', () => {
     const { comp, created } = makeCompositor();
     comp.syncTiles([{ id: 'a', attention: false }]);
@@ -212,6 +242,22 @@ describe('GridCompositor', () => {
     expect(comp.tileSummaries()[0].hidden).toBe(false);
     comp.toggleHide('a');
     expect(comp.tileSummaries()[0].hidden).toBe(true);
+  });
+
+  it('resolves the resting tile + rect under a pointer, on demand without a render loop', () => {
+    const { comp } = makeCompositor(); // container 800×600, cell 8×16, models 80×24
+    comp.syncTiles([{ id: 'a', attention: false }]);
+    comp.setLayout(1, 1);
+
+    // A single 80×24 tile fits 800×600 at scale 1.25 → 800×480, centred vertically
+    // (y inset (600-480)/2 = 60). Centre of the grid hits it.
+    const hit = comp.tileAt(400, 300);
+    expect(hit?.id).toBe('a');
+    expect(hit?.rect).toMatchObject({ x: 0, w: 800, h: 480 });
+    expect(hit?.rect.y).toBeCloseTo(60);
+
+    // Above the letterboxed tile (y < 60) is empty space.
+    expect(comp.tileAt(400, 30)).toBeNull();
   });
 
   it('frees every model on dispose', () => {

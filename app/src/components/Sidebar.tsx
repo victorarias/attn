@@ -2,6 +2,8 @@ import './Sidebar.css';
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { useState } from 'react';
 import { RenamePopover } from './RenamePopover';
+import { GridLayoutControl } from './grid/GridLayoutControl';
+import type { GridLayout } from './grid/gridLayout';
 import { StateIndicator } from './StateIndicator';
 import { formatShortcut } from '../shortcuts';
 import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
@@ -57,6 +59,10 @@ interface SidebarProps {
   selectedWorkspaceId: string | null;
   collapsed: boolean;
   headerActions: SidebarHeaderAction[];
+  // Current grid shape + a handler to choose a new one (also opens grid mode).
+  // Optional so existing Sidebar tests render without wiring the grid picker.
+  gridLayout?: GridLayout;
+  onSelectGridLayout?: (layout: GridLayout) => void;
   footerShortcuts?: FooterShortcut[];
   mutedWorkspaces?: SidebarWorkspace[];
   mutedExpanded?: boolean;
@@ -197,6 +203,8 @@ export function Sidebar({
   selectedWorkspaceId,
   collapsed,
   headerActions,
+  gridLayout,
+  onSelectGridLayout,
   footerShortcuts,
   mutedWorkspaces = [],
   mutedExpanded: mutedExpandedProp,
@@ -288,6 +296,9 @@ export function Sidebar({
             <HomeIcon />
           </button>
           <div className="icon-divider" />
+          {gridLayout && onSelectGridLayout && (
+            <GridLayoutControl layout={gridLayout} onSelect={onSelectGridLayout} />
+          )}
           {headerActions.map((action) => (
             <button
               key={action.id}
@@ -336,6 +347,9 @@ export function Sidebar({
           <button className="home-btn" onClick={onGoToDashboard} title="Dashboard (⌘G)" aria-label="Dashboard">
             <HomeIcon />
           </button>
+          {gridLayout && onSelectGridLayout && (
+            <GridLayoutControl layout={gridLayout} onSelect={onSelectGridLayout} />
+          )}
           {headerActions.map((action) => (
             <button
               key={action.id}
