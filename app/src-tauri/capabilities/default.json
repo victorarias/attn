@@ -15,6 +15,7 @@
     "fs:allow-read-text-file",
     "fs:allow-read-dir",
     "fs:allow-exists",
+    "fs:allow-stat",
     "fs:allow-mkdir",
     "clipboard-manager:allow-write-text",
     {

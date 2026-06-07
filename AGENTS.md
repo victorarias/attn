@@ -202,8 +202,9 @@ When updating it:
 
 - write for users, not maintainers
 - summarize behavior changes, not implementation details
+- scope entries to the PR as a whole: describe the net user-visible outcome the PR delivers, not each step, iteration, or dead end taken along the way. A PR usually warrants a single focused entry even if it spanned many commits.
 - group related work into a small number of bullets
-- update it after meaningful features, fixes, removals, or commits
+- update it for meaningful user-visible features, fixes, or removals; internal-only changes (refactors, instrumentation, tests) do not need an entry
 
 ## When Something Is Broken
 

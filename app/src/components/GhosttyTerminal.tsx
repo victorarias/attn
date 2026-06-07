@@ -31,6 +31,13 @@ import {
 import { buildTerminalQueryResponses } from '../utils/terminalQueryResponses';
 import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import { recordTerminalLinkHitTestEvent } from '../utils/terminalLinkHitTestLog';
+import {
+  recordDiag,
+  recordPaint,
+  noteResize,
+  registerRenderProbe,
+  disposePaneDiagnostics,
+} from '../utils/terminalDiagnosticsLog';
 import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
 import { analyzeTerminalVisibleLines } from '../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot, TerminalVisibleStyleLineSnapshot } from '../utils/terminalStyleSummary';
@@ -43,6 +50,7 @@ import {
   createApplicationSelectionAnchor,
   offsetAfterWrite,
   relocateApplicationSelection,
+  shouldReportApplicationMouseMove,
   viewportBufferStart,
   viewportRowFromBufferRow,
   type ApplicationSelectionAnchor,
@@ -69,7 +77,7 @@ interface GhosttyTerminalProps {
   };
   onInput: (data: string) => void;
   onReady: (terminal: GhosttyTerminalHandle) => void;
-  onResize: (cols: number, rows: number, options?: { reason?: string }) => void;
+  onResize: (cols: number, rows: number, options?: { reason?: string; deferPty?: boolean }) => void;
 }
 
 export interface GhosttyTerminalHandle {
@@ -101,6 +109,24 @@ const URL_RE = /\b(?:https?:\/\/|file:\/\/|mailto:|ftp:\/\/|ssh:\/\/|git:\/\/|te
 // Ghostty's native renderer resets synchronized-output mode after 1000ms so
 // one bad producer cannot freeze rendering indefinitely.
 const SYNCHRONIZED_OUTPUT_RENDER_TIMEOUT_MS = 1000;
+
+function isWorkspaceResizeActive(element: HTMLElement | null): boolean {
+  if (document.documentElement.dataset.attnWorkspaceResizing === '1') {
+    return true;
+  }
+  const suppressUntil = Number(document.documentElement.dataset.attnWorkspaceMouseSuppressUntil || 0);
+  if (Number.isFinite(suppressUntil) && suppressUntil > Date.now()) {
+    return true;
+  }
+  return Boolean(element?.closest('.session-terminal-panes[data-resizing-split-id]'));
+}
+
+function isWorkspaceResizeDragActive(element: HTMLElement | null): boolean {
+  if (document.documentElement.dataset.attnWorkspaceResizing === '1') {
+    return true;
+  }
+  return Boolean(element?.closest('.session-terminal-panes[data-resizing-split-id]'));
+}
 
 function literalUrlAtColumn(line: string, col: number): string | null {
   for (const match of line.matchAll(URL_RE)) {
@@ -160,6 +186,20 @@ function cellFromRect(
 
 function colorNumber(value: string): number {
   return Number.parseInt(value.slice(1), 16);
+}
+
+// Count printable cells in the live viewport window. getViewport() returns a
+// fixed-capacity buffer whose tail can hold stale cells from a larger pre-resize
+// grid, so only the first cols*rows entries are counted.
+function countModelPrintable(terminal: GhosttyModel): number {
+  const viewport = terminal.getViewport();
+  const windowLen = terminal.cols * terminal.rows;
+  let printable = 0;
+  for (let i = 0; i < windowLen && i < viewport.length; i += 1) {
+    const cell = viewport[i];
+    if (cell && cell.codepoint > 32) printable += 1;
+  }
+  return printable;
 }
 
 function emptyStartup(): TerminalPerfStartupSnapshot {
@@ -237,6 +277,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const synchronizedOutputRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const renderCountRef = useRef(0);
     const writeCountRef = useRef(0);
+    // Diagnostics: model instance (increments on rebuild) and last paint quads,
+    // used by the blank-on-split watchdog to tell a fresh empty model and an
+    // under-drawn surface apart.
+    const modelInstanceRef = useRef(0);
+    const lastPaintQuadsRef = useRef(0);
     const lastRenderAtRef = useRef(0);
     const lastWriteAtRef = useRef(0);
     const readyRef = useRef(false);
@@ -246,6 +291,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const onResizeRef = useRef(onResize);
     const runtimeMetaRef = useRef(runtimeLogMeta);
     const debugNameRef = useRef(debugName);
+    const diagKeyRef = useRef<string>(runtimeLogMeta?.paneId ?? runtimeLogMeta?.sessionId ?? debugName);
     const [error, setError] = useState<string | null>(null);
     const [linkCursorActive, setLinkCursorActive] = useState(false);
 
@@ -254,6 +300,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     onResizeRef.current = onResize;
     runtimeMetaRef.current = runtimeLogMeta;
     debugNameRef.current = debugName;
+    // Stable diagnostics key for the per-pane watchdog/probe registries. paneId
+    // is stable for a pane's life and correlates with daemon/workspace logs;
+    // debugName can change (its agent/title segment is reassigned on relabel).
+    // A ref keeps the key out of callback dependency arrays.
+    diagKeyRef.current = runtimeLogMeta?.paneId ?? runtimeLogMeta?.sessionId ?? debugName;
 
     const getViewportCells = useCallback((): GhosttyCell[] | undefined => {
       const terminal = terminalRef.current;
@@ -286,7 +337,21 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       if (sample) {
         renderCountRef.current += 1;
         lastRenderAtRef.current = Date.now();
+        lastPaintQuadsRef.current = sample.quads;
       }
+      recordPaint({
+        pane: diagKeyRef.current,
+        session: runtimeMetaRef.current?.sessionId ?? undefined,
+        cols: terminal.cols,
+        rows: terminal.rows,
+        force,
+        offset: viewportOffsetRef.current,
+        modelPrintable: countModelPrintable(terminal),
+        quads: sample ? sample.quads : null,
+        cellsArrayLen: sample ? sample.cellsArrayLen : null,
+        skipNull: sample ? sample.printableSkippedNull : null,
+        skipZeroWidth: sample ? sample.printableSkippedZeroWidth : null,
+      });
     }, [getViewportCells, resolvedTheme]);
 
     const clearSynchronizedOutputRenderTimer = useCallback(() => {
@@ -552,6 +617,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           searchableOutput,
         );
         synchronizedOutputStateRef.current = synchronizedOutput.state;
+        recordDiag({
+          kind: 'write',
+          pane: diagKeyRef.current,
+          session: runtimeMetaRef.current?.sessionId ?? undefined,
+          model: modelInstanceRef.current,
+          len: searchableOutput.length,
+          syncActive: synchronizedOutput.state.active,
+          shouldRender: synchronizedOutput.shouldRender,
+          cols: terminal.cols,
+          rows: terminal.rows,
+        });
         if (synchronizedOutput.shouldRender) {
           flushSynchronizedOutputRender();
         } else {
@@ -566,9 +642,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const terminal = terminalRef.current;
       const renderer = rendererRef.current;
       if (!terminal || !renderer) return;
+      const fromCols = terminal.cols;
+      const fromRows = terminal.rows;
       terminal.resize(cols, rows);
       modelSizeRef.current = { cols, rows };
       renderer.resize(cols, rows);
+      noteResize(diagKeyRef.current, {
+        session: runtimeMetaRef.current?.sessionId ?? undefined,
+        paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
+        source: 'resizeLocal', fromCols, fromRows, toCols: cols, toRows: rows,
+        noop: fromCols === cols && fromRows === rows,
+      });
       renderSurface(true);
     }), [enqueueOperation, renderSurface]);
 
@@ -580,17 +664,34 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       // Inactive session wrappers use display:none. Resizing the Ghostty
       // model from that hidden geometry discards an idle alternate-screen
       // frame before the session becomes visible again.
-      if (runtimeMetaRef.current && !runtimeMetaRef.current.isActiveSession) return;
-      const dims = renderer.fitDimensions(container.clientWidth, container.clientHeight);
-      if (runtimeMetaRef.current?.paneKind === 'agent' && isSuspiciousTerminalSize(dims.cols, dims.rows)) {
+      const paneKind = runtimeMetaRef.current?.paneKind ?? undefined;
+      const session = runtimeMetaRef.current?.sessionId ?? undefined;
+      if (runtimeMetaRef.current && !runtimeMetaRef.current.isActiveSession) {
+        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'inactiveSession' });
         return;
       }
-      if (dims.cols === terminal.cols && dims.rows === terminal.rows) return;
+      const dims = renderer.fitDimensions(container.clientWidth, container.clientHeight);
+      if (runtimeMetaRef.current?.paneKind === 'agent' && isSuspiciousTerminalSize(dims.cols, dims.rows)) {
+        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'suspiciousSize', toCols: dims.cols, toRows: dims.rows });
+        return;
+      }
+      if (dims.cols === terminal.cols && dims.rows === terminal.rows) {
+        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'sameSize', toCols: dims.cols, toRows: dims.rows });
+        return;
+      }
+      const fromCols = terminal.cols;
+      const fromRows = terminal.rows;
       terminal.resize(dims.cols, dims.rows);
       modelSizeRef.current = dims;
       renderer.resize(dims.cols, dims.rows);
+      noteResize(diagKeyRef.current, {
+        session, paneKind, source: 'fit', fromCols, fromRows, toCols: dims.cols, toRows: dims.rows,
+      });
       renderSurface(true);
-      onResizeRef.current(dims.cols, dims.rows, { reason: 'ghostty_fit' });
+      onResizeRef.current(dims.cols, dims.rows, {
+        reason: 'ghostty_fit',
+        deferPty: isWorkspaceResizeDragActive(container),
+      });
     }, [renderSurface]);
 
     useImperativeHandle(ref, () => ({
@@ -605,7 +706,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       isInputFocused: () => document.activeElement === containerRef.current,
       write,
       resizeLocal,
-      reset: () => { void write('\x1bc'); },
+      reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); void write('\x1bc'); },
       scrollToTop: () => {
         const terminal = terminalRef.current;
         if (!terminal) return false;
@@ -641,6 +742,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         });
         synchronizedOutputStateRef.current = { active: false, pending: '' };
         clearSynchronizedOutputRenderTimer();
+        modelInstanceRef.current += 1;
+        recordDiag({
+          kind: 'pane_mount',
+          pane: diagKeyRef.current,
+          label: debugNameRef.current,
+          session: runtimeMetaRef.current?.sessionId ?? undefined,
+          paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
+          model: modelInstanceRef.current,
+          cols: initialSize.cols,
+          rows: initialSize.rows,
+        });
         const renderer = new WebGlTerminalRenderer(canvas, fontSize, FONT_FAMILY, {
           background: theme.background,
           foreground: theme.foreground,
@@ -648,6 +760,19 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         });
         terminalRef.current = terminal;
         rendererRef.current = renderer;
+        // Live probe for the blank-on-resize watchdog: lets the diagnostics
+        // module read the current model fill vs the last paint's quad count.
+        registerRenderProbe(diagKeyRef.current, () => {
+          const model = terminalRef.current;
+          if (!model) return null;
+          return {
+            cols: model.cols,
+            rows: model.rows,
+            modelPrintable: countModelPrintable(model),
+            lastPaintAt: lastRenderAtRef.current,
+            lastPaintQuads: lastPaintQuadsRef.current,
+          };
+        });
         inputRef.current = new InputHandler(
           ghostty,
           container,
@@ -671,7 +796,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           isInputFocused: () => document.activeElement === container,
           write,
           resizeLocal,
-          reset: () => { void write('\x1bc'); },
+          reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); void write('\x1bc'); },
           scrollToTop: () => { viewportOffsetRef.current = terminal.getScrollbackLength(); wheelRemainderRowsRef.current = 0; renderSurface(true); return true; },
           getText,
           getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
@@ -724,6 +849,14 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       });
       return () => {
         active = false;
+        recordDiag({
+          kind: 'pane_unmount',
+          pane: diagKeyRef.current,
+          label: debugNameRef.current,
+          session: runtimeMetaRef.current?.sessionId ?? undefined,
+          model: modelInstanceRef.current,
+        });
+        disposePaneDiagnostics(diagKeyRef.current);
         observer?.disconnect();
         canvas.removeEventListener('webglcontextlost', handleContextLost);
         unregister();
@@ -910,12 +1043,22 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       action: 'press' | 'move' | 'release',
       event: React.MouseEvent,
     ): boolean => {
+      if (isWorkspaceResizeActive(containerRef.current)) return false;
       const terminal = terminalRef.current;
       const cell = cellFromPointer(event);
       if (!terminal || !cell || !terminal.hasMouseTracking()) return false;
       const activeButton = trackedMouseButtonRef.current;
       if (action === 'move') {
-        if (!terminal.getMode(1003) && !(activeButton !== null && terminal.getMode(1002))) {
+        const shouldReport = shouldReportApplicationMouseMove({
+          anyEventMouseTracking: terminal.getMode(1003),
+          dragMouseTracking: terminal.getMode(1002),
+          activeButton,
+          buttons: event.buttons,
+        });
+        if (!shouldReport) {
+          if (activeButton !== null && event.buttons === 0) {
+            trackedMouseButtonRef.current = null;
+          }
           return true;
         }
       } else if (action === 'release' && activeButton === null) {
@@ -1038,6 +1181,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           onInputRef.current('\x16');
         }}
         onWheel={(event) => {
+          if (isWorkspaceResizeActive(containerRef.current)) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
           if (event.defaultPrevented) return;
           const terminal = terminalRef.current;
           const renderer = rendererRef.current;
@@ -1087,6 +1235,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           renderSurface(true);
         }}
         onMouseDown={(event) => {
+          if (isWorkspaceResizeActive(containerRef.current)) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
           containerRef.current?.focus();
           const terminal = terminalRef.current;
           const cell = cellFromPointer(event);
@@ -1111,6 +1264,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           startSelectionDrag();
         }}
         onMouseMove={(event) => {
+          if (isWorkspaceResizeActive(containerRef.current)) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
           // While selecting, the drag is owned by the document listeners in
           // startSelectionDrag() so it survives crossing sibling overlays.
           if (selectingRef.current) return;
@@ -1134,6 +1292,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           setLinkCursorActive(false);
         }}
         onMouseUp={(event) => {
+          if (isWorkspaceResizeActive(containerRef.current)) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
           // A selection release is finalized by the document mouseup listener so
           // it fires even when the pointer ends over a sibling overlay.
           if (selectingRef.current) return;
