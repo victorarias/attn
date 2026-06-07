@@ -588,6 +588,7 @@
 
 .diff-comment-content p {
   margin: 0 0 8px 0;
+  white-space: pre-wrap;
 }
 
 .diff-comment-content p:last-child {
@@ -744,9 +745,9 @@
   color: #60a5fa;
 }
 
-/* Stale comments: anchored to a line that no longer exists in the current diff
-   (the code shrank past it). Collapsed at the top of the diff so they are never
-   silently lost when the file changes underneath; click to expand. */
+/* Comments that cannot render inline, either because their anchor no longer
+   exists or Hunks mode collapsed it. Keep them collapsed at the top so they are
+   never silently lost; click to expand. */
 .diff-stale-comments {
   flex: 0 0 auto;
   max-height: 40%;

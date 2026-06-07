@@ -5,7 +5,7 @@
  * callbacks. Exposes window.__HARNESS__ controls for switching files, toggling
  * layout, and seeding comments.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { DiffView } from '../../src/components/DiffView';
 import type { ReviewComment } from '../../src/types/generated';
 import type { HarnessProps } from '../types';
@@ -102,6 +102,7 @@ export function DiffViewHarness({ onReady }: HarnessProps) {
   const [filePath, setFilePath] = useState('fileA.ts');
   const [refreshCount, setRefreshCount] = useState(0);
   const [shrunk, setShrunk] = useState(false);
+  const failNextAddRef = useRef(false);
 
   const baseOriginal = filePath === 'fileB.ts' ? FILE_B_ORIGINAL : useLargeDiff ? LARGE_ORIGINAL : SMALL_ORIGINAL;
   const baseModified = filePath === 'fileB.ts' ? FILE_B_MODIFIED : useLargeDiff ? LARGE_MODIFIED : SMALL_MODIFIED;
@@ -112,6 +113,10 @@ export function DiffViewHarness({ onReady }: HarnessProps) {
 
   const onAddComment = useCallback((lineStart: number, lineEnd: number, content: string) => {
     window.__HARNESS__.recordCall('addComment', [lineStart, lineEnd, content]);
+    if (failNextAddRef.current) {
+      failNextAddRef.current = false;
+      throw new Error('Harness add comment failure');
+    }
     setComments((prev) => [
       ...prev,
       makeComment({
@@ -168,6 +173,9 @@ export function DiffViewHarness({ onReady }: HarnessProps) {
     api.setDiffStyle = (style: 'unified' | 'split') => setDiffStyle(style);
     api.setExpandUnchanged = (value: boolean) => setExpandUnchanged(value);
     api.setUseLargeDiff = (value: boolean) => setUseLargeDiff(value);
+    api.failNextAddComment = () => {
+      failNextAddRef.current = true;
+    };
     // Simulate a background change that re-renders the diff without touching the
     // file content: a comment arrives on another line (as the agent or a poll
     // would deliver). The selected file's original/modified are unchanged.
@@ -186,6 +194,32 @@ export function DiffViewHarness({ onReady }: HarnessProps) {
       setComments((prev) => [
         ...prev,
         makeComment({ id: 'stale-1', line_start: 999, line_end: 999, content: 'Stale: this code is gone' }),
+      ]);
+    // A comment on a valid unchanged line that Hunks mode collapses in LARGE_*.
+    api.seedCollapsedContextComment = () =>
+      setComments((prev) => [
+        ...prev,
+        makeComment({ id: 'collapsed-1', line_start: 30, line_end: 30, content: 'Collapsed context comment' }),
+      ]);
+    api.seedHtmlComment = () =>
+      setComments((prev) => [
+        ...prev,
+        makeComment({
+          id: 'html-1',
+          line_start: 4,
+          line_end: 4,
+          content: '<img src=x onerror=alert(1)> **safe markdown**',
+        }),
+      ]);
+    api.seedMultilineComment = () =>
+      setComments((prev) => [
+        ...prev,
+        makeComment({
+          id: 'multiline-1',
+          line_start: 4,
+          line_end: 4,
+          content: 'First line\nSecond line',
+        }),
       ]);
     // Collapse the file so existing comments on higher lines go stale.
     api.shrinkContent = () => setShrunk(true);

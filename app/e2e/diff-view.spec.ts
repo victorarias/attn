@@ -53,6 +53,26 @@ test.describe('DiffView (@pierre/diffs)', () => {
     await expect(wrapper).toHaveAttribute('slot', 'annotation-additions-4');
   });
 
+  test('escapes raw HTML in rendered comment markdown', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+    await page.evaluate(() => window.__HARNESS__.seedHtmlComment());
+
+    const thread = page.getByTestId('diff-comment-thread');
+    await expect(thread).toContainText('<img src=x onerror=alert(1)>');
+    await expect(thread.locator('img')).toHaveCount(0);
+    await expect(thread.locator('strong')).toContainText('safe markdown');
+  });
+
+  test('preserves soft line breaks in rendered comment markdown', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+    await page.evaluate(() => window.__HARNESS__.seedMultilineComment());
+
+    const paragraph = page.locator('.diff-comment-content p');
+    await expect(paragraph).toContainText('First line');
+    await expect(paragraph).toContainText('Second line');
+    await expect.poll(() => paragraph.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe('pre-wrap');
+  });
+
   test('resolves and unresolves a comment', async ({ page }) => {
     await openHarness(page, SEEDED);
     const comment = page.locator('.diff-comment');
@@ -129,6 +149,25 @@ test.describe('DiffView (@pierre/diffs)', () => {
     expect(added[0][1]).toBeGreaterThan(0);
   });
 
+  test('keeps draft text when saving a new comment fails', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+
+    const line = page.locator('diffs-container [data-line-index][data-column-number]').nth(4);
+    await line.hover();
+    const plus = page.locator('diffs-container [data-utility-button]');
+    await plus.waitFor({ state: 'visible' });
+    await plus.click();
+
+    const textarea = page.locator('.diff-comment-form textarea');
+    await textarea.fill('Retry this after failure');
+    await page.evaluate(() => window.__HARNESS__.failNextAddComment());
+    await page.locator('.diff-comment-form .save-btn').click();
+
+    await expect.poll(() => calls(page, 'addComment')).toHaveLength(1);
+    await expect(textarea).toBeVisible();
+    await expect(textarea).toHaveValue('Retry this after failure');
+  });
+
   test('opens the action popup when clicking the code area of a line', async ({ page }) => {
     await openHarness(page, UNSEEDED);
 
@@ -194,6 +233,28 @@ test.describe('DiffView (@pierre/diffs)', () => {
     await page.evaluate(() => window.__HARNESS__.switchFile('fileA.ts'));
     await expect(container).toContainText('function example');
     await expect(container).not.toContainText('class Calculator');
+  });
+
+  test('keeps an in-progress comment when switching away from a file and back', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+
+    const line = page.locator('diffs-container [data-line-index][data-column-number]').nth(4);
+    await line.hover();
+    const plus = page.locator('diffs-container [data-utility-button]');
+    await plus.waitFor({ state: 'visible' });
+    await plus.click();
+
+    const textarea = page.locator('.diff-comment-form textarea');
+    await expect(textarea).toBeVisible();
+    await textarea.fill('Draft before switching files');
+
+    await page.evaluate(() => window.__HARNESS__.switchFile('fileB.ts'));
+    await expect(page.locator('diffs-container')).toContainText('class Calculator');
+    await expect(page.locator('.diff-comment-form textarea')).toHaveCount(0);
+
+    await page.evaluate(() => window.__HARNESS__.switchFile('fileA.ts'));
+    await expect(page.locator('diffs-container')).toContainText('function example');
+    await expect(page.locator('.diff-comment-form textarea')).toHaveValue('Draft before switching files');
   });
 
   test("re-renders when the same file's content changes in place", async ({ page }) => {
@@ -298,7 +359,7 @@ test.describe('DiffView (@pierre/diffs)', () => {
 
     const toggle = page.getByTestId('diff-stale-comments-toggle');
     await expect(toggle).toBeVisible();
-    await expect(toggle).toContainText('1 comment no longer anchored');
+    await expect(toggle).toContainText('1 comment not visible');
 
     // Collapsed by default, and never slotted into the diff as a normal annotation.
     await expect(page.getByText('Stale: this code is gone')).toHaveCount(0);
@@ -321,10 +382,33 @@ test.describe('DiffView (@pierre/diffs)', () => {
     await page.evaluate(() => window.__HARNESS__.shrinkContent());
     const toggle = page.getByTestId('diff-stale-comments-toggle');
     await expect(toggle).toBeVisible();
-    await expect(toggle).toContainText('1 comment no longer anchored');
+    await expect(toggle).toContainText('1 comment not visible');
 
     await toggle.click();
     await expect(page.getByText('Seeded comment on an added line')).toBeVisible();
+  });
+
+  test('keeps comments on collapsed unchanged lines visible in the top banner', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+    const container = page.locator('diffs-container');
+
+    await page.evaluate(() => {
+      window.__HARNESS__.setUseLargeDiff(true);
+      window.__HARNESS__.setExpandUnchanged(true);
+      window.__HARNESS__.seedCollapsedContextComment();
+    });
+    await expect(container).toContainText('section2 15');
+    await expect(page.getByText('Collapsed context comment')).toBeVisible();
+    await expect(page.getByTestId('diff-stale-comments-toggle')).toHaveCount(0);
+
+    await page.evaluate(() => window.__HARNESS__.setExpandUnchanged(false));
+    const toggle = page.getByTestId('diff-stale-comments-toggle');
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toContainText('1 comment not visible');
+    await expect(page.getByText('Collapsed context comment')).toHaveCount(0);
+
+    await toggle.click();
+    await expect(page.getByText('Collapsed context comment')).toBeVisible();
   });
 
   test('toggles between unified and split layout', async ({ page }) => {

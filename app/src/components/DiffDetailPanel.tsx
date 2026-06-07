@@ -1022,10 +1022,12 @@ export function DiffDetailPanel({
         setAllReviewComments(prev => [...prev, result.comment!]);
       } else {
         setCommentError('Failed to save comment');
+        throw new Error('Failed to save comment');
       }
     } catch (err) {
       setCommentError('Failed to save comment');
       console.error('Add comment error:', err);
+      throw err;
     }
   }, [reviewId, selectedFilePath, addComment]);
 

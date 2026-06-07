@@ -10,28 +10,29 @@
  * optional in-progress draft form for a brand new comment on that anchor.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { marked } from 'marked';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { ReviewComment } from '../types/generated';
 
-/** Render markdown to HTML for comment display (GFM + soft breaks). */
-function renderMarkdown(text: string): string {
-  return marked.parse(text, { gfm: true, breaks: true }) as string;
-}
-
-/** Rendered comment body; memoizes the markdown parse on the raw content. */
+/** Rendered comment body; react-markdown escapes raw HTML by default. */
 function CommentBody({ content }: { content: string }) {
-  const html = useMemo(() => renderMarkdown(content), [content]);
-  return <div className="diff-comment-content" dangerouslySetInnerHTML={{ __html: html }} />;
+  const remarkPlugins = useMemo(() => [remarkGfm], []);
+  return (
+    <div className="diff-comment-content">
+      <ReactMarkdown remarkPlugins={remarkPlugins}>{content}</ReactMarkdown>
+    </div>
+  );
 }
 
 interface CommentFormProps {
   initialValue: string;
   saveLabel: string;
-  onSave: (content: string) => void;
+  onChange?: (content: string) => void;
+  onSave: (content: string) => Promise<void> | void;
   onCancel: () => void;
 }
 
-function CommentForm({ initialValue, saveLabel, onSave, onCancel }: CommentFormProps) {
+function CommentForm({ initialValue, saveLabel, onChange, onSave, onCancel }: CommentFormProps) {
   const [value, setValue] = useState(initialValue);
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -56,7 +57,10 @@ function CommentForm({ initialValue, saveLabel, onSave, onCancel }: CommentFormP
         rows={2}
         placeholder="Add a comment..."
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => {
+          setValue(e.target.value);
+          onChange?.(e.target.value);
+        }}
         // Keep keystrokes from reaching the panel's global shortcut handlers.
         // Escape is handled by the parent via the escape stack (capture phase),
         // so it never reaches here.
@@ -85,7 +89,9 @@ export interface DiffCommentThreadProps {
   editingCommentId: string | null;
   /** Whether the per-comment "Send to CC" action is available. */
   showSendToClaude: boolean;
-  onSaveDraft: (content: string) => void;
+  draftContent?: string;
+  onDraftContentChange?: (content: string) => void;
+  onSaveDraft: (content: string) => Promise<void> | void;
   onCancelDraft: () => void;
   onStartEdit: (id: string) => void;
   onEditComment: (id: string, content: string) => void;
@@ -100,6 +106,8 @@ export function DiffCommentThread({
   draft,
   editingCommentId,
   showSendToClaude,
+  draftContent = '',
+  onDraftContentChange,
   onSaveDraft,
   onCancelDraft,
   onStartEdit,
@@ -160,8 +168,9 @@ export function DiffCommentThread({
       })}
       {draft && (
         <CommentForm
-          initialValue=""
+          initialValue={draftContent}
           saveLabel="Save"
+          onChange={onDraftContentChange}
           onSave={onSaveDraft}
           onCancel={onCancelDraft}
         />

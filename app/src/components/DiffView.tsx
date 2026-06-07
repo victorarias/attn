@@ -29,7 +29,7 @@ import {
   type SelectedLineRange,
 } from '@pierre/diffs/react';
 // FileDiffOptions / OnDiffLineClickProps are exported from the package root, not the /react entry.
-import type { FileDiffOptions, OnDiffLineClickProps } from '@pierre/diffs';
+import { parseDiffFromFile, type FileDiffOptions, type OnDiffLineClickProps } from '@pierre/diffs';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import type { ResolvedTheme } from '../hooks/useTheme';
 import type { ReviewComment } from '../types/generated';
@@ -52,6 +52,7 @@ type DraftState = {
   side: AnnotationSide;
   start: number;
   end: number;
+  content: string;
 };
 
 type SelectionPopupState = {
@@ -83,14 +84,43 @@ export interface DiffViewProps {
   onSendToClaude?: (reference: string) => void;
 }
 
-/** Stable no-op for the stale-comment thread, which never hosts a draft form. */
+/** Stable no-op for the top-banner comment thread, which never hosts a draft form. */
 const noop = () => {};
 
-function normalizeRange(range: SelectedLineRange): { side: AnnotationSide; start: number; end: number } {
+type VisibleLineRanges = Record<AnnotationSide, Array<[number, number]>>;
+
+export function normalizeRange(range: SelectedLineRange): { side: AnnotationSide; start: number; end: number } | null {
+  const side = range.side ?? range.endSide ?? 'additions';
+  const endSide = range.endSide ?? side;
+  if (side !== endSide) return null;
   const start = Math.min(range.start, range.end);
   const end = Math.max(range.start, range.end);
-  const side = range.side ?? range.endSide ?? 'additions';
   return { side, start, end };
+}
+
+function isLineInRanges(line: number, ranges: Array<[number, number]>): boolean {
+  return ranges.some(([start, end]) => line >= start && line <= end);
+}
+
+function getVisibleLineRanges(
+  oldFile: FileContents,
+  newFile: FileContents,
+  expandUnchanged: boolean
+): VisibleLineRanges | null {
+  if (expandUnchanged) return null;
+  try {
+    const diff = parseDiffFromFile(oldFile, newFile);
+    return diff.hunks.reduce<VisibleLineRanges>(
+      (ranges, hunk) => {
+        ranges.deletions.push([hunk.deletionStart, hunk.deletionStart + hunk.deletionCount - 1]);
+        ranges.additions.push([hunk.additionStart, hunk.additionStart + hunk.additionCount - 1]);
+        return ranges;
+      },
+      { additions: [], deletions: [] }
+    );
+  } catch {
+    return null;
+  }
 }
 
 export function DiffView({
@@ -118,12 +148,24 @@ export function DiffView({
   // that one selection-end instead of letting it pop the action menu too.
   const suppressSelectionEndRef = useRef(false);
 
-  const [draft, setDraft] = useState<DraftState | null>(null);
+  const [draftsByFile, setDraftsByFile] = useState<Record<string, DraftState>>({});
   const [selectionPopup, setSelectionPopup] = useState<SelectionPopupState | null>(null);
-  // Stale comments (anchor line no longer in the diff) are collapsed by default.
+  // Comments that cannot render inline are collapsed by default.
   const [staleExpanded, setStaleExpanded] = useState(false);
 
   const name = filePath ?? 'file.txt';
+  const draft = draftsByFile[name] ?? null;
+
+  const setDraftForCurrentFile = useCallback(
+    (next: DraftState | null) => {
+      setDraftsByFile((current) => {
+        if (next) return { ...current, [name]: next };
+        const { [name]: _removed, ...rest } = current;
+        return rest;
+      });
+    },
+    [name]
+  );
 
   // Is the user actively typing a comment on THIS file — a new-comment draft, or
   // an edit of one of this file's comments?
@@ -149,19 +191,25 @@ export function DiffView({
   const shownOriginal = frozen?.original ?? original;
   const shownModified = frozen?.modified ?? modified;
 
-  // A draft/selection belongs to one file; reset (and drop any freeze) on switch.
+  // Selection/frozen content belong to one file; draft anchors and text are keyed
+  // by file so navigating away and back does not destroy an unsaved comment.
   useEffect(() => {
-    setDraft(null);
     setSelectionPopup(null);
     setFrozen(null);
     setStaleExpanded(false);
   }, [filePath]);
 
-  // A comment is "stale" when its anchor line is no longer in the file (the code
-  // shrank past it). Such a comment can't be slotted onto a line, so it would
-  // silently vanish — instead we surface it in a collapsed banner. Comments
-  // whose line still exists render inline as usual (even if the code drifted;
-  // we can't detect that without the original line text).
+  const oldFile = useMemo<FileContents>(() => ({ name, contents: shownOriginal }), [name, shownOriginal]);
+  const newFile = useMemo<FileContents>(() => ({ name, contents: shownModified }), [name, shownModified]);
+
+  const visibleLineRanges = useMemo(
+    () => getVisibleLineRanges(oldFile, newFile, expandUnchanged),
+    [oldFile, newFile, expandUnchanged]
+  );
+
+  // A comment cannot render inline when its anchor line no longer exists or when
+  // Hunks mode collapses that unchanged line. The diff library silently drops
+  // annotations for non-rendered lines, so surface them in a collapsed banner.
   const lineCounts = useMemo(
     () => ({ additions: shownModified.split('\n').length, deletions: shownOriginal.split('\n').length }),
     [shownModified, shownOriginal]
@@ -170,14 +218,14 @@ export function DiffView({
     const anchored: ReviewComment[] = [];
     const stale: ReviewComment[] = [];
     for (const c of comments) {
-      const max = isOriginalSideComment(c) ? lineCounts.deletions : lineCounts.additions;
-      (c.line_start >= 1 && c.line_start <= max ? anchored : stale).push(c);
+      const side: AnnotationSide = isOriginalSideComment(c) ? 'deletions' : 'additions';
+      const max = side === 'deletions' ? lineCounts.deletions : lineCounts.additions;
+      const lineExists = c.line_start >= 1 && c.line_start <= max;
+      const lineVisible = !visibleLineRanges || isLineInRanges(c.line_start, visibleLineRanges[side]);
+      (lineExists && lineVisible ? anchored : stale).push(c);
     }
     return { anchoredComments: anchored, staleComments: stale };
-  }, [comments, lineCounts]);
-
-  const oldFile = useMemo<FileContents>(() => ({ name, contents: shownOriginal }), [name, shownOriginal]);
-  const newFile = useMemo<FileContents>(() => ({ name, contents: shownModified }), [name, shownModified]);
+  }, [comments, lineCounts, visibleLineRanges]);
 
   // Remount the diff whenever the shown target (path or content) changes — the
   // library's intended way to switch files. While frozen, the shown content is
@@ -191,10 +239,12 @@ export function DiffView({
   // value (function identities included), so keep callbacks stable and memoize
   // the options object on the inputs that should actually retrigger a render.
   const handleGutterUtilityClick = useStableCallback((range: SelectedLineRange) => {
-    const { side, start, end } = normalizeRange(range);
+    const normalized = normalizeRange(range);
+    if (!normalized) return;
+    const { side, start, end } = normalized;
     suppressSelectionEndRef.current = true;
     setSelectionPopup(null);
-    setDraft({ side, start, end });
+    setDraftForCurrentFile({ side, start, end, content: '' });
   });
 
   const handleLineSelectionEnd = useStableCallback((range: SelectedLineRange | null) => {
@@ -206,7 +256,12 @@ export function DiffView({
       setSelectionPopup(null);
       return;
     }
-    const { side, start, end } = normalizeRange(range);
+    const normalized = normalizeRange(range);
+    if (!normalized) {
+      setSelectionPopup(null);
+      return;
+    }
+    const { side, start, end } = normalized;
     setSelectionPopup({ side, start, end, x: pointerRef.current.x, y: pointerRef.current.y });
   });
 
@@ -291,17 +346,29 @@ export function DiffView({
   }, [anchoredComments, draft, editingCommentId]);
 
   const handleSaveDraft = useCallback(
-    (content: string) => {
+    async (content: string) => {
       if (!draft) return;
       const lineStart = draft.start;
       const lineEnd = draft.side === 'deletions' ? -draft.end : draft.end;
-      void onAddComment(lineStart, lineEnd, content);
-      setDraft(null);
+      try {
+        await onAddComment(lineStart, lineEnd, content);
+        setDraftForCurrentFile(null);
+      } catch {
+        // The parent owns user-visible error reporting; keep the draft intact so
+        // the user can retry without losing typed text.
+      }
     },
-    [draft, onAddComment]
+    [draft, onAddComment, setDraftForCurrentFile]
   );
 
-  const handleCancelDraft = useCallback(() => setDraft(null), []);
+  const handleDraftContentChange = useCallback(
+    (content: string) => {
+      setDraftForCurrentFile(draft ? { ...draft, content } : null);
+    },
+    [draft, setDraftForCurrentFile]
+  );
+
+  const handleCancelDraft = useCallback(() => setDraftForCurrentFile(null), [setDraftForCurrentFile]);
 
   const handleSendComment = useCallback(
     (comment: ReviewComment) => {
@@ -320,6 +387,8 @@ export function DiffView({
           draft={meta.draft}
           editingCommentId={editingCommentId}
           showSendToClaude={!!onSendToClaude && !!filePath}
+          draftContent={meta.draft ? draft?.content : undefined}
+          onDraftContentChange={meta.draft ? handleDraftContentChange : undefined}
           onSaveDraft={handleSaveDraft}
           onCancelDraft={handleCancelDraft}
           onStartEdit={onStartEdit}
@@ -336,6 +405,7 @@ export function DiffView({
       onSendToClaude,
       filePath,
       handleSaveDraft,
+      handleDraftContentChange,
       handleCancelDraft,
       onStartEdit,
       onEditComment,
@@ -350,9 +420,9 @@ export function DiffView({
   const addCommentFromSelection = useCallback(() => {
     if (!selectionPopup) return;
     const { side, start, end } = selectionPopup;
-    setDraft({ side, start, end });
+    setDraftForCurrentFile({ side, start, end, content: '' });
     setSelectionPopup(null);
-  }, [selectionPopup]);
+  }, [selectionPopup, setDraftForCurrentFile]);
 
   const sendSelectionToClaude = useCallback(() => {
     if (!selectionPopup || !onSendToClaude || !filePath) return;
@@ -408,7 +478,7 @@ export function DiffView({
             onClick={() => setStaleExpanded((v) => !v)}
           >
             <span className="diff-stale-caret" aria-hidden="true">{staleExpanded ? '▾' : '▸'}</span>
-            {staleComments.length} comment{staleComments.length === 1 ? '' : 's'} no longer anchored to the current code
+            {staleComments.length} comment{staleComments.length === 1 ? '' : 's'} not visible in the current diff view
           </button>
           {staleExpanded && (
             <div className="diff-stale-comments-body">
