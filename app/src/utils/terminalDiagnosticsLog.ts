@@ -119,7 +119,19 @@ const watchdogTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
 
 let lifecycleBytes = 0;
 let incidentBytes = 0;
+// The byte counters must reflect the real on-disk file size so the cap holds
+// across app restarts. They reset to 0 each launch, so seed them from the
+// existing file the first time we touch it — otherwise a file already near the
+// cap would accept another full session's worth of writes before rotating, and
+// across many short sessions could grow far past the promised bound.
+let lifecycleSizeSeeded = false;
+let incidentSizeSeeded = false;
 let fileWriteChain: Promise<void> = Promise.resolve();
+
+const diagTextEncoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
+function byteLength(value: string): number {
+  return diagTextEncoder ? diagTextEncoder.encode(value).length : value.length;
+}
 
 function isEnabled(): boolean {
   if (typeof window === 'undefined') {
@@ -162,9 +174,22 @@ async function appendToFile(file: 'lifecycle' | 'incident', line: string) {
     return;
   }
   try {
-    const { mkdir, writeTextFile, BaseDirectory } = await import('@tauri-apps/plugin-fs');
+    const { mkdir, stat, writeTextFile, BaseDirectory } = await import('@tauri-apps/plugin-fs');
     await mkdir(DEBUG_DIR, { baseDir: BaseDirectory.AppLocalData, recursive: true });
     const path = file === 'lifecycle' ? LIFECYCLE_FILE : INCIDENT_FILE;
+    // First write this session: adopt the file's current on-disk size so the cap
+    // is measured against what is already there, not from zero.
+    const seeded = file === 'lifecycle' ? lifecycleSizeSeeded : incidentSizeSeeded;
+    if (!seeded) {
+      try {
+        const info = await stat(path, { baseDir: BaseDirectory.AppLocalData });
+        const existing = typeof info?.size === 'number' ? info.size : 0;
+        if (file === 'lifecycle') lifecycleBytes = existing; else incidentBytes = existing;
+      } catch {
+        // No file yet (or stat unavailable) — leave the counter at 0.
+      }
+      if (file === 'lifecycle') lifecycleSizeSeeded = true; else incidentSizeSeeded = true;
+    }
     // Truncate-and-restart when a file grows past the cap so prod usage over
     // days stays bounded. A rotate marker keeps the stream self-describing.
     const bytes = file === 'lifecycle' ? lifecycleBytes : incidentBytes;
@@ -175,7 +200,7 @@ async function appendToFile(file: 'lifecycle' | 'incident', line: string) {
       append: !willReset,
       create: true,
     });
-    const written = payload.length;
+    const written = byteLength(payload);
     if (file === 'lifecycle') {
       lifecycleBytes = willReset ? written : lifecycleBytes + written;
     } else {
