@@ -43,7 +43,9 @@ export const SHORTCUTS = {
   'session.close': { key: 'w', meta: true },
   'session.prev': { key: 'ArrowUp', meta: true, editableTarget: 'native' },
   'session.next': { key: 'ArrowDown', meta: true, editableTarget: 'native' },
-  'session.goToDashboard': { key: 'g', meta: true },
+  // Grid view moved Home (go-to-dashboard) off ⌘G to ⌘⇧H so ⌘G can toggle the grid.
+  'session.goToDashboard': { key: 'h', meta: true, shift: true },
+  'view.toggleGrid': { key: 'g', meta: true },
   'session.jumpToWaiting': { key: 'j', meta: true },
   'session.toggleSidebar': { key: 'b', meta: true, shift: true },
   'session.refreshPRs': { key: 'r', meta: true },

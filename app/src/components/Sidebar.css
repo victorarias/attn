@@ -763,6 +763,86 @@
   background: #fff;
 }
 
+/* Grid layout picker (sidebar tool row). Mirrors the settings popover, with a
+   Google-Docs-style square picker for choosing rows × cols. */
+.grid-layout-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.grid-layout-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-panel);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.34);
+}
+
+.grid-layout-auto {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.04em;
+  padding: 5px 0;
+}
+
+.grid-layout-auto:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--color-text-primary);
+}
+
+.grid-layout-auto.active {
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text-primary);
+}
+
+.grid-layout-grid {
+  display: grid;
+  gap: 4px;
+}
+
+.grid-layout-cell {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--color-border-focus);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  /* Fill is instant so sweeping across the picker feels snappy; only the hover
+     outline eases. */
+  transition: border-color 60ms ease;
+}
+
+.grid-layout-cell:hover {
+  border-color: var(--accent);
+}
+
+.grid-layout-cell.on {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.grid-layout-label {
+  text-align: center;
+  color: var(--color-text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.04em;
+}
+
 /* Sessionless (panel-only) workspaces carry content but no agent, so they get a
    neutral, hollow marker instead of a session state dot. */
 .workspace-neutral-indicator {

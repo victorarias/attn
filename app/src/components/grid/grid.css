@@ -1,0 +1,181 @@
+.grid-view {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: radial-gradient(1200px 600px at 50% -10%, #1c1c1c, #121212);
+}
+
+.grid-view-stage {
+  position: absolute;
+  inset: 0;
+  padding: 16px;
+  cursor: pointer;
+}
+
+.grid-view-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #6b6b6b;
+  pointer-events: none;
+}
+
+.grid-view-hint {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: #9a9a9a;
+  background: rgba(16, 16, 16, 0.7);
+  border: 1px solid #2c2c2c;
+  border-radius: 999px;
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+/* "N not shown" chip: live sessions that didn't fit the chosen fixed shape. Sits
+   just above the controls hint so both read as a stacked status line. */
+.grid-view-offboard {
+  position: absolute;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: #d8b673;
+  background: rgba(40, 32, 16, 0.7);
+  border: 1px solid #4a3c1c;
+  border-radius: 999px;
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+/* Per-tile remove (×) button. Shown only on the hovered tile in the overview,
+   positioned at its top-right corner (container-space coords from the
+   compositor). Above the canvas, and a sibling of the stage so a click never
+   reaches the stage's zoom handler. */
+.grid-tile-remove {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  color: #e6e6e6;
+  background: rgba(20, 20, 20, 0.82);
+  border: 1px solid #3a3a3a;
+  border-radius: 50%;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+
+.grid-tile-remove:hover {
+  color: #fff;
+  background: rgba(180, 40, 40, 0.92);
+  border-color: rgba(220, 80, 80, 0.9);
+}
+
+/* "N hidden" restore control, top-right of the grid. */
+.grid-hidden {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 5;
+}
+
+.grid-hidden-toggle {
+  padding: 5px 12px;
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: #9a9a9a;
+  background: rgba(16, 16, 16, 0.7);
+  border: 1px solid #2c2c2c;
+  border-radius: 999px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+
+.grid-hidden-toggle:hover,
+.grid-hidden-toggle.active {
+  color: #e6e6e6;
+  background: rgba(28, 28, 28, 0.85);
+  border-color: #3a3a3a;
+}
+
+.grid-hidden-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 200px;
+  max-width: 280px;
+  padding: 8px;
+  background: #161616;
+  border: 1px solid #2c2c2c;
+  border-radius: 8px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+}
+
+.grid-hidden-label {
+  display: block;
+  margin: 2px 4px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6b6b6b;
+}
+
+.grid-hidden-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.grid-hidden-restore {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: #cfcfcf;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.grid-hidden-restore:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.grid-hidden-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grid-hidden-action {
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6f8fd6;
+}

@@ -31,6 +31,15 @@ import { useSessionStore, type Session, type TerminalWorkspaceState } from './st
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState, SessionExitInfo } from './hooks/useDaemonSocket';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
+import { GridView, type GridSessionTile } from './components/grid/GridView';
+import {
+  type GridLayout,
+  persistGridLayout,
+  readGridLayout,
+  resolveGridLayout,
+} from './components/grid/gridLayout';
+import { persistExcludedGridSessions, readExcludedGridSessions } from './components/grid/gridMembership';
+import type { HiddenGridSession } from './components/grid/GridHiddenSessions';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
 import { hasPane, workspaceSnapshotFromDaemonWorkspace, type TerminalSplitDirection } from './types/workspace';
 import { useDaemonStore } from './store/daemonSessions';
@@ -386,6 +395,7 @@ function App() {
   // Connect to daemon WebSocket
   const {
     sendPRAction,
+    getScreenSnapshot,
     sendMutePR,
     sendMuteRepo,
     sendMuteAuthor,
@@ -513,6 +523,7 @@ function App() {
         clearSettingError={() => setSettingError(null)}
         // Daemon socket functions
         sendPRAction={sendPRAction}
+        getScreenSnapshot={getScreenSnapshot}
         sendMutePR={sendMutePR}
         sendMuteRepo={sendMuteRepo}
         sendMuteAuthor={sendMuteAuthor}
@@ -607,6 +618,7 @@ interface AppContentProps {
   clearSettingError: () => void;
   // All the daemon socket functions
   sendPRAction: ReturnType<typeof useDaemonSocket>['sendPRAction'];
+  getScreenSnapshot: ReturnType<typeof useDaemonSocket>['getScreenSnapshot'];
   sendMutePR: ReturnType<typeof useDaemonSocket>['sendMutePR'];
   sendMuteRepo: ReturnType<typeof useDaemonSocket>['sendMuteRepo'];
   sendMuteAuthor: ReturnType<typeof useDaemonSocket>['sendMuteAuthor'];
@@ -696,6 +708,7 @@ function AppContent({
   settingError,
   clearSettingError,
   sendPRAction,
+  getScreenSnapshot,
   sendMutePR,
   sendMuteRepo,
   sendMuteAuthor,
@@ -1106,7 +1119,7 @@ sendFetchPRDetails,
   const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
 
   // View state management
-  const [view, setView] = useState<'dashboard' | 'session'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'session' | 'grid'>('dashboard');
   const [dockState, setDockState] = useState<{
     openPanels: Record<DockPanelId, boolean>;
     stack: DockPanelId[];
@@ -1255,6 +1268,12 @@ sendFetchPRDetails,
     setActiveSession(null);
     setView('dashboard');
   }, [setActiveSession]);
+
+  // Cmd+G toggles the global grid view on/off; leaving grid returns to wherever
+  // the user was (a session if one is active, otherwise the dashboard).
+  const toggleGridMode = useCallback(() => {
+    setView((prev) => (prev === 'grid' ? (activeSessionId ? 'session' : 'dashboard') : 'grid'));
+  }, [activeSessionId]);
 
 
   const clearDockPanelCloseTimer = useCallback((panelId: DockPanelId) => {
@@ -2066,6 +2085,82 @@ sendFetchPRDetails,
     [unmutedWorkspaceViews],
   );
 
+  // Global grid tiles: one per live agent pane across all (unmuted) workspaces,
+  // keyed by the PTY runtimeId that grid mode feeds from / routes input to.
+  const gridSessionTiles = useMemo<GridSessionTile[]>(() => {
+    const result: GridSessionTile[] = [];
+    for (const s of unmutedEnrichedSessions) {
+      const pane = s.workspace.agents.find((agent) => agent.sessionId === s.id);
+      if (!pane) continue;
+      result.push({
+        runtimeId: pane.runtimeId,
+        sessionId: s.id,
+        title: pane.title,
+        attention: isAttentionSessionState(s.state)
+          || s.reviewLoopStatus === 'awaiting_user'
+          || s.reviewLoopStatus === 'error',
+      });
+    }
+    return result;
+  }, [unmutedEnrichedSessions]);
+
+  // Grid shape: a manual rows×cols picked from the sidebar square-picker, or Auto
+  // (a near-square that fits every tile — today's default). Persists across
+  // launches. Selecting a shape also opens grid mode (the picker is the launcher).
+  const [gridLayout, setGridLayout] = useState<GridLayout>(readGridLayout);
+  const handleSelectGridLayout = useCallback((layout: GridLayout) => {
+    setGridLayout(layout);
+    persistGridLayout(layout);
+    setView('grid');
+  }, []);
+
+  // Grid membership: every session is on the grid by default; removed (excluded)
+  // sessions persist across launches by stable sessionId. Members = all minus
+  // excluded; hidden = the excluded ones (surfaced for restore).
+  const [excludedGridSessions, setExcludedGridSessions] = useState<Set<string>>(readExcludedGridSessions);
+  const gridMembers = useMemo(
+    () => gridSessionTiles.filter((t) => !excludedGridSessions.has(t.sessionId)),
+    [gridSessionTiles, excludedGridSessions],
+  );
+  const hiddenGridSessions = useMemo<HiddenGridSession[]>(
+    () => gridSessionTiles
+      .filter((t) => excludedGridSessions.has(t.sessionId))
+      .map((t) => ({ sessionId: t.sessionId, title: t.title })),
+    [gridSessionTiles, excludedGridSessions],
+  );
+  const handleRemoveFromGrid = useCallback((sessionId: string) => {
+    setExcludedGridSessions((prev) => {
+      if (prev.has(sessionId)) return prev;
+      const next = new Set(prev);
+      next.add(sessionId);
+      persistExcludedGridSessions(next);
+      return next;
+    });
+  }, []);
+  const handleRestoreToGrid = useCallback((sessionId: string) => {
+    setExcludedGridSessions((prev) => {
+      if (!prev.has(sessionId)) return prev;
+      const next = new Set(prev);
+      next.delete(sessionId);
+      persistExcludedGridSessions(next);
+      return next;
+    });
+  }, []);
+
+  // Resolve the chosen layout against the member count: Auto fits everything; a
+  // fixed shape shows only the first rows×cols members (extras are off-board until
+  // removed or the grid is enlarged). GridView is handed a concrete shape plus the
+  // members that fit, so it stays layout-dumb.
+  const resolvedGridLayout = useMemo(
+    () => resolveGridLayout(gridMembers.length, gridLayout),
+    [gridMembers.length, gridLayout],
+  );
+  const visibleGridTiles = useMemo(
+    () => gridMembers.slice(0, resolvedGridLayout.capacity),
+    [gridMembers, resolvedGridLayout.capacity],
+  );
+  const gridOffBoardCount = gridMembers.length - visibleGridTiles.length;
+
   // Calculate attention count for drawer badge (muted workspaces excluded)
   const waitingLocalSessions = unmutedEnrichedSessions
     .filter((s) => isAttentionSessionState(s.state) || s.reviewLoopStatus === 'awaiting_user' || s.reviewLoopStatus === 'error')
@@ -2768,6 +2863,7 @@ sendFetchPRDetails,
     onCloseSession: handleCloseCurrentSessionShortcut,
     onToggleDrawer: () => toggleDockPanel('attention'),
     onGoToDashboard: goToDashboard,
+    onToggleGridMode: toggleGridMode,
     onJumpToWaiting: handleJumpToWaiting,
     onSelectWorkspaceByIndex: handleSelectWorkspaceByIndex,
     onPrevSession: handlePrevWorkspace,
@@ -2877,6 +2973,8 @@ sendFetchPRDetails,
           tileContents={tileContents}
           collapsed={sidebarCollapsed}
           headerActions={sidebarHeaderActions}
+          gridLayout={gridLayout}
+          onSelectGridLayout={handleSelectGridLayout}
           footerShortcuts={sidebarFooterShortcuts}
           mutedWorkspaces={mutedWorkspaceViews}
           mutedExpanded={sidebarMutedExpanded}
@@ -3110,6 +3208,23 @@ sendFetchPRDetails,
           ]}
         />
       </div>
+
+      {/* Grid view — global mission control. Mounted only while active so its
+          single WebGL context is released on exit (mirrors the pane path). */}
+      {view === 'grid' && (
+        <div className="view-container visible">
+          <GridView
+            tiles={visibleGridTiles}
+            layout={{ rows: resolvedGridLayout.rows, cols: resolvedGridLayout.cols }}
+            offBoardCount={gridOffBoardCount}
+            hiddenSessions={hiddenGridSessions}
+            onRemoveTile={handleRemoveFromGrid}
+            onRestoreTile={handleRestoreToGrid}
+            resolvedTheme={resolvedTheme}
+            getScreenSnapshot={getScreenSnapshot}
+          />
+        </div>
+      )}
 
       <LocationPicker
         isOpen={locationPickerOpen}

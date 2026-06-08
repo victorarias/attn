@@ -277,6 +277,18 @@ func (m *Manager) Attach(sessionID, subscriberID string, send func([]byte, uint3
 	return session.info(), nil
 }
 
+// Snapshot returns the current rendered screen and sequence watermark for a
+// session WITHOUT registering a subscriber or claiming geometry. It is the
+// read-only seed for observers (e.g. grid tiles) that then dedup the live
+// firehose against LastSeq.
+func (m *Manager) Snapshot(sessionID string) (AttachInfo, error) {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return AttachInfo{}, err
+	}
+	return session.screenSnapshot(), nil
+}
+
 func (m *Manager) Detach(sessionID, subscriberID string) {
 	session, err := m.getSession(sessionID)
 	if err != nil {

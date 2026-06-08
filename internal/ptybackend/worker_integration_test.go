@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptyworker"
 )
 
@@ -146,12 +147,146 @@ func TestWorkerBackend_SpawnAttachInputResizeRemove(t *testing.T) {
 	t.Fatalf("timed out waiting for worker output; got=%q", out.String())
 
 gotOutput:
+	// Read-only snapshot round-trips through MethodSnapshot -> callSnapshot and
+	// returns the current rendered screen, which must contain the marker we just
+	// printed. No subscriber is involved.
+	snap, err := backend.Snapshot(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("Snapshot() error: %v", err)
+	}
+	if !snap.Running {
+		t.Fatalf("snapshot running=false, expected true")
+	}
+	if len(snap.ScreenSnapshot) == 0 || !snap.ScreenSnapshotFresh {
+		t.Fatalf("expected a fresh screen snapshot, got %d bytes fresh=%v", len(snap.ScreenSnapshot), snap.ScreenSnapshotFresh)
+	}
+	if !bytes.Contains(snap.ScreenSnapshot, []byte("__ATTN_WORKER__")) {
+		t.Fatalf("snapshot missing printed marker; got %q", snap.ScreenSnapshot)
+	}
+	if snap.ScreenCols == 0 || snap.ScreenRows == 0 {
+		t.Fatalf("snapshot geometry = %dx%d, want non-zero", snap.ScreenCols, snap.ScreenRows)
+	}
+
 	if err := backend.Kill(context.Background(), sessionID, syscall.SIGTERM); err != nil {
 		t.Fatalf("Kill() error: %v", err)
 	}
 	if err := backend.Remove(context.Background(), sessionID); err != nil {
 		t.Fatalf("Remove() error: %v", err)
 	}
+}
+
+// TestWorkerBackend_SnapshotViaReplayReadsScrollbackReadOnly exercises the
+// fallback that lets observers (grid tiles) seed a session whose worker can't
+// render a screen on demand — e.g. an older worker that survived a daemon
+// upgrade and rejects the snapshot RPC. The daemon then derives the visible
+// frame from the worker's buffered output, fetched via a read-only attach that
+// must not leave a subscriber behind.
+func TestWorkerBackend_SnapshotViaReplayReadsScrollbackReadOnly(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping worker integration test in short mode")
+	}
+	if os.Getenv("ATTN_RUN_WORKER_INTEGRATION") != "1" {
+		t.Skip("set ATTN_RUN_WORKER_INTEGRATION=1 to run worker integration test")
+	}
+
+	binary := buildAttnBinary(t)
+	root, err := os.MkdirTemp("/tmp", "attn-worker-replay-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error: %v", err)
+	}
+	defer os.RemoveAll(root)
+
+	backend, err := NewWorker(WorkerBackendConfig{
+		DataRoot:         root,
+		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BinaryPath:       binary,
+	})
+	if err != nil {
+		t.Fatalf("NewWorker() error: %v", err)
+	}
+
+	sessionID := "worker-replay-1"
+	if err := backend.Spawn(context.Background(), SpawnOptions{
+		ID:    sessionID,
+		CWD:   t.TempDir(),
+		Agent: "shell",
+		Label: "worker-replay",
+		Cols:  80,
+		Rows:  24,
+	}); err != nil {
+		t.Skipf("worker spawn unavailable in this environment: %v", err)
+	}
+	defer func() {
+		_ = backend.Remove(context.Background(), sessionID)
+	}()
+
+	if err := backend.Input(context.Background(), sessionID, []byte("printf '__ATTN_REPLAY__\\n'\n")); err != nil {
+		t.Fatalf("Input() error: %v", err)
+	}
+
+	session, err := backend.getSession(sessionID)
+	if err != nil {
+		t.Fatalf("getSession() error: %v", err)
+	}
+
+	// snapshotViaReplay must fetch buffered output without a subscriber, so we
+	// can poll it repeatedly until the marker lands; if each call leaked a
+	// subscriber the worker would accumulate dead ones.
+	var info AttachInfo
+	deadline := time.Now().Add(8 * time.Second)
+	for {
+		info, err = backend.snapshotViaReplay(context.Background(), session)
+		if err != nil {
+			t.Fatalf("snapshotViaReplay() error: %v", err)
+		}
+		if derived, ok := pty.ScreenSnapshotFromReplay(info.Scrollback, info.Cols, info.Rows); ok &&
+			bytes.Contains(derived.Payload, []byte("__ATTN_REPLAY__")) {
+			break
+		}
+		if bytes.Contains(info.Scrollback, []byte("__ATTN_REPLAY__")) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for marker in read-only replay; scrollback=%q", info.Scrollback)
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+
+	if !info.Running {
+		t.Fatalf("snapshotViaReplay running=false, expected true")
+	}
+	if len(info.Scrollback) == 0 && len(info.ReplaySegments) == 0 {
+		t.Fatal("expected replay buffer content, got none")
+	}
+
+	// The session must stay fully usable after the read-only snapshots: a real
+	// attach still streams live output, proving no transient subscriber lingered.
+	_, stream, err := backend.Attach(context.Background(), sessionID, "after-replay-sub")
+	if err != nil {
+		t.Fatalf("Attach() after snapshotViaReplay error: %v", err)
+	}
+	defer stream.Close()
+	if err := backend.Input(context.Background(), sessionID, []byte("printf '__ATTN_AFTER__\\n'\n")); err != nil {
+		t.Fatalf("Input() after replay error: %v", err)
+	}
+	var out bytes.Buffer
+	streamDeadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(streamDeadline) {
+		select {
+		case evt, ok := <-stream.Events():
+			if !ok {
+				t.Fatal("stream closed before expected output")
+			}
+			if evt.Kind == OutputEventKindOutput {
+				out.Write(evt.Data)
+				if strings.Contains(out.String(), "__ATTN_AFTER__") {
+					return
+				}
+			}
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	t.Fatalf("timed out waiting for live output after read-only snapshot; got=%q", out.String())
 }
 
 func TestWorkerBackend_RecoverAfterBackendRestart(t *testing.T) {

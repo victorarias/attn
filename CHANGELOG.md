@@ -41,6 +41,14 @@ The app shows a one-time "What's new" summary after this upgrade, and `⌘/` bri
 ### Changed
 - **Rebuilt the diff viewer.** The review panel now renders diffs with a faster syntax highlighter and a cleaner layout, and you can switch between **unified** and **split** views (unified stays the default). Everything you rely on while reviewing carries over: inline comments on added and deleted lines, edit/resolve/delete, per-file comment counts, sending a comment or a selection to the running session, and viewed / changed-since-viewed tracking. Add a comment by hovering a line and clicking the **+** in the gutter to jump straight to the comment box, or click anywhere on a line (or select a range of line numbers) and pick **Add comment** or **Send to Claude** from the popup. Comments hold up while the agent keeps working: a comment you're typing is never lost when the file changes underneath, and a saved comment that doesn't appear in the current diff — its line was removed, or it sits inside collapsed unchanged code — gathers into a banner at the top (click to expand) instead of silently disappearing.
 
+## [2026-06-05]
+
+### Added
+- **Grid view (⌘G).** A global "mission control" that shows every active session at once as a live terminal tile, each outlined as its own panel. Every tile shows the session's current screen the moment the grid opens — no waiting for the next keystroke — and then stays live. Click a tile to zoom it full-screen and type straight into that session; the focused tile gets a highlighted border so it's clear where your keystrokes go, and switching tiles moves your input with it. Press Esc to leave the zoom, or ⌘G to close the grid. Sessions that need you pulse with an orange border so they're easy to spot across all your workspaces. Size the grid your way: a button in the sidebar opens a small picker — sweep across the squares to set rows and columns, or pick Auto to keep the automatic fit (and if a fixed size can't hold everything, the grid tells you how many sessions aren't shown). Every session is on the grid by default; hover a tile and click the × in its corner to take it off, and a "N hidden" button lists what you've removed so you can put any of it back. Removals stick across restarts, so you can pare mission control down to just the agents you're actively watching.
+
+### Changed
+- **Home is now ⌘⇧H.** Jumping to the dashboard moved off ⌘H — which macOS reserves for Hide — to ⌘⇧H, freeing ⌘G for the new grid view.
+
 ## [2026-06-04]
 
 ### Fixed

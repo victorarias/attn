@@ -224,7 +224,8 @@ describe('shortcut registry', () => {
       expect(SHORTCUTS['session.newHorizontal']).toEqual({ key: 'n', meta: true, shift: true });
       expect(SHORTCUTS['session.newWorkspace']).toEqual({ key: 't', meta: true });
       expect(SHORTCUTS['session.close']).toEqual({ key: 'w', meta: true });
-      expect(SHORTCUTS['session.goToDashboard']).toEqual({ key: 'g', meta: true });
+      expect(SHORTCUTS['session.goToDashboard']).toEqual({ key: 'h', meta: true, shift: true });
+      expect(SHORTCUTS['view.toggleGrid']).toEqual({ key: 'g', meta: true });
       expect(SHORTCUTS['dock.diff']).toEqual({ key: 'g', meta: true, shift: true });
     });
 

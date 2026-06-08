@@ -670,6 +670,97 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 	d.sendToClient(client, result)
 }
 
+// snapshotSeedScreen resolves the visible frame to seed an observer with,
+// preferring a fresh worker-rendered screen and otherwise deriving one from the
+// session's buffered replay output. The derived path is what lets observers
+// seed sessions whose worker predates the snapshot RPC: those workers can't
+// render a screen on demand but still hand back their scrollback on attach.
+// The bool results are (derived, ok).
+func snapshotSeedScreen(info ptybackend.AttachInfo) (pty.ReplayScreenSnapshot, bool, bool) {
+	if info.ScreenSnapshotFresh && len(info.ScreenSnapshot) > 0 {
+		return pty.ReplayScreenSnapshot{
+			Payload:       info.ScreenSnapshot,
+			Cols:          info.ScreenCols,
+			Rows:          info.ScreenRows,
+			CursorX:       info.ScreenCursorX,
+			CursorY:       info.ScreenCursorY,
+			CursorVisible: info.ScreenCursorVisible,
+		}, false, true
+	}
+	// Prefer geometry-aware replay segments over flattened scrollback when both
+	// are present, mirroring the attach replay derivation.
+	if len(info.ReplaySegments) > 0 {
+		if snap, ok := pty.ScreenSnapshotFromReplaySegments(replaySegmentsToPTY(info.ReplaySegments)); ok {
+			return snap, true, true
+		}
+	}
+	if len(info.Scrollback) > 0 {
+		if snap, ok := pty.ScreenSnapshotFromReplay(info.Scrollback, info.Cols, info.Rows); ok {
+			return snap, true, true
+		}
+	}
+	return pty.ReplayScreenSnapshot{}, false, false
+}
+
+// handleGetScreenSnapshot serves a read-only snapshot of a session's current
+// screen. It registers no subscriber and starts no stream — purely a seed for
+// observers (grid tiles) that then dedup the live firehose against last_seq.
+func (d *Daemon) handleGetScreenSnapshot(client *wsClient, msg *protocol.GetScreenSnapshotMessage) {
+	provider, ok := d.ptyBackend.(ptybackend.SnapshotProvider)
+	if !ok {
+		d.sendToClient(client, protocol.GetScreenSnapshotResultMessage{
+			Event:   protocol.EventGetScreenSnapshotResult,
+			ID:      msg.ID,
+			Success: false,
+			Error:   protocol.Ptr("screen snapshot not supported"),
+		})
+		return
+	}
+
+	info, err := provider.Snapshot(context.Background(), msg.ID)
+	if err != nil {
+		// Graceful: a worker built before MethodSnapshot answers "unknown
+		// method"; the observer stays unseeded rather than erroring loudly.
+		d.sendToClient(client, protocol.GetScreenSnapshotResultMessage{
+			Event:   protocol.EventGetScreenSnapshotResult,
+			ID:      msg.ID,
+			Success: false,
+			Error:   protocol.Ptr(err.Error()),
+		})
+		return
+	}
+
+	result := protocol.GetScreenSnapshotResultMessage{
+		Event:   protocol.EventGetScreenSnapshotResult,
+		ID:      msg.ID,
+		Success: true,
+		LastSeq: protocol.Ptr(int(info.LastSeq)),
+		Cols:    protocol.Ptr(int(info.Cols)),
+		Rows:    protocol.Ptr(int(info.Rows)),
+		Running: protocol.Ptr(info.Running),
+	}
+	screen, derived, haveScreen := snapshotSeedScreen(info)
+	if haveScreen {
+		result.ScreenSnapshot = protocol.Ptr(base64.StdEncoding.EncodeToString(screen.Payload))
+		result.ScreenRows = protocol.Ptr(int(screen.Rows))
+		result.ScreenCols = protocol.Ptr(int(screen.Cols))
+		result.ScreenCursorX = protocol.Ptr(int(screen.CursorX))
+		result.ScreenCursorY = protocol.Ptr(int(screen.CursorY))
+		result.ScreenCursorVisible = protocol.Ptr(screen.CursorVisible)
+		// The frontend seeds only when this is set. A screen derived from buffered
+		// output is just as paintable as a worker-rendered one, so we present it as
+		// fresh — that is what lets observers seed sessions whose worker can't
+		// render a screen on demand (e.g. an old worker that survived an upgrade).
+		result.ScreenSnapshotFresh = protocol.Ptr(true)
+	}
+	d.logf(
+		"PTY screen snapshot: id=%s running=%v last_seq=%d snapshot_bytes=%d screen=%dx%d have_screen=%v derived=%v",
+		msg.ID, info.Running, info.LastSeq, len(screen.Payload),
+		screen.Cols, screen.Rows, haveScreen, derived,
+	)
+	d.sendToClient(client, result)
+}
+
 func (d *Daemon) handleDetachSessionWS(client *wsClient, msg *protocol.DetachSessionMessage) {
 	d.detachSession(client, msg.ID)
 }

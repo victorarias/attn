@@ -161,7 +161,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '88';
+const PROTOCOL_VERSION = '89';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -202,6 +202,17 @@ interface PluginActionResult {
 export interface PluginListResult {
   plugins: DaemonPlugin[];
   issues: DaemonPluginIssue[];
+}
+
+// Read-only seed for an observer (grid tile): the session's current rendered
+// screen plus the sequence watermark to dedup the live firehose against.
+export interface ScreenSnapshotResult {
+  // base64 ANSI repaint of the visible frame, or undefined if no fresh frame
+  // exists yet (e.g. the session has produced no output).
+  screenSnapshot?: string;
+  screenCols?: number;
+  screenRows?: number;
+  lastSeq: number;
 }
 
 interface RecentLocationsResult {
@@ -1404,6 +1415,29 @@ export function useDaemonSocket({
             break;
           }
 
+          case 'get_screen_snapshot_result': {
+            if (data.id) {
+              const key = `screen_snapshot_${data.id}`;
+              const pending = pendingActionsRef.current.get(key);
+              if (pending) {
+                pendingActionsRef.current.delete(key);
+                if (data.success) {
+                  const result: ScreenSnapshotResult = {
+                    screenSnapshot: data.screen_snapshot_fresh ? data.screen_snapshot : undefined,
+                    screenCols: data.screen_cols,
+                    screenRows: data.screen_rows,
+                    lastSeq: typeof data.last_seq === 'number' ? data.last_seq : 0,
+                  };
+                  pending.resolve(result);
+                } else {
+                  // Unsupported / session gone: degrade to live-fill.
+                  pending.resolve(null);
+                }
+              }
+            }
+            break;
+          }
+
           case 'pty_output': {
             if (data.id && data.data) {
               const attachKey = `pty_attach_${data.id}`;
@@ -2543,6 +2577,30 @@ export function useDaemonSocket({
           reject(new Error('Timeout'));
         }
       }, 30000);
+    });
+  }, []);
+
+  // Fetch a session's current screen to seed a grid tile. Resolves null on any
+  // failure (disconnected, session gone, or a worker too old to answer) so the
+  // observer degrades to live-fill rather than surfacing an error.
+  const getScreenSnapshot = useCallback((runtimeId: string): Promise<ScreenSnapshotResult | null> => {
+    return new Promise((resolve) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN || !runtimeId) {
+        resolve(null);
+        return;
+      }
+      const key = `screen_snapshot_${runtimeId}`;
+      // A newer request supersedes any in-flight one for the same runtime.
+      pendingActionsRef.current.get(key)?.resolve(null);
+      pendingActionsRef.current.set(key, { resolve, reject: () => resolve(null) });
+      ws.send(JSON.stringify({ cmd: 'get_screen_snapshot', id: runtimeId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          resolve(null);
+        }
+      }, 10000);
     });
   }, []);
 
@@ -3764,6 +3822,7 @@ export function useDaemonSocket({
     clearWarnings,
     retryConnection,
     sendPRAction,
+    getScreenSnapshot,
     sendMutePR,
     sendMuteRepo,
     sendMuteAuthor,

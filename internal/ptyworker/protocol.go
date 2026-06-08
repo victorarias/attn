@@ -12,16 +12,21 @@ const (
 const MinCompatibleRPCMinor = 0
 
 const (
-	MethodHello  = "hello"
-	MethodInfo   = "info"
-	MethodAttach = "attach"
-	MethodWatch  = "watch"
-	MethodDetach = "detach"
-	MethodInput  = "input"
-	MethodResize = "resize"
-	MethodSignal = "signal"
-	MethodRemove = "remove"
-	MethodHealth = "health"
+	MethodHello = "hello"
+	MethodInfo  = "info"
+	// MethodSnapshot returns the current rendered screen + LastSeq without
+	// attaching. Added without an RPC version bump: older workers reject it
+	// with ErrBadRequest ("unknown method"), and the daemon degrades to an
+	// unseeded observer rather than failing.
+	MethodSnapshot = "snapshot"
+	MethodAttach   = "attach"
+	MethodWatch    = "watch"
+	MethodDetach   = "detach"
+	MethodInput    = "input"
+	MethodResize   = "resize"
+	MethodSignal   = "signal"
+	MethodRemove   = "remove"
+	MethodHealth   = "health"
 )
 
 const (

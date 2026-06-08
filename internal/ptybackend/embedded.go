@@ -114,6 +114,27 @@ func replaySegmentsFromPTY(segments []pty.ReplaySegment) []ReplaySegment {
 	})
 }
 
+func (b *EmbeddedBackend) Snapshot(_ context.Context, sessionID string) (AttachInfo, error) {
+	info, err := b.manager.Snapshot(sessionID)
+	if err != nil {
+		return AttachInfo{}, err
+	}
+	return AttachInfo{
+		LastSeq:             info.LastSeq,
+		Cols:                info.Cols,
+		Rows:                info.Rows,
+		PID:                 info.PID,
+		Running:             info.Running,
+		ScreenSnapshot:      info.ScreenSnapshot,
+		ScreenCols:          info.ScreenCols,
+		ScreenRows:          info.ScreenRows,
+		ScreenCursorX:       info.ScreenCursorX,
+		ScreenCursorY:       info.ScreenCursorY,
+		ScreenCursorVisible: info.ScreenCursorVisible,
+		ScreenSnapshotFresh: info.ScreenSnapshotFresh,
+	}, nil
+}
+
 func (b *EmbeddedBackend) Input(_ context.Context, sessionID string, data []byte) error {
 	return b.manager.Input(sessionID, data)
 }

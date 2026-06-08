@@ -894,6 +894,100 @@ func (b *WorkerBackend) SessionInfo(ctx context.Context, sessionID string) (Sess
 	}, nil
 }
 
+func (b *WorkerBackend) Snapshot(ctx context.Context, sessionID string) (AttachInfo, error) {
+	session, err := b.getSession(sessionID)
+	if err != nil {
+		return AttachInfo{}, err
+	}
+	res, snapErr := b.callSnapshot(ctx, session)
+	if snapErr == nil && res.ScreenSnapshotFresh && len(res.ScreenSnapshot) > 0 {
+		return attachInfoFromAttachResult(res), nil
+	}
+	// The worker couldn't render a fresh screen on demand. The dominant cause is
+	// a worker that predates the snapshot RPC but survived a daemon upgrade: it
+	// rejects MethodSnapshot outright, yet still returns its scrollback on
+	// attach. Fall back to a read-only attach so the daemon can derive the
+	// current screen from buffered output. The throwaway connection
+	// auto-detaches on close (see the worker conn cleanup), so no subscriber
+	// lingers and the PTY geometry authority is never touched.
+	info, replayErr := b.snapshotViaReplay(ctx, session)
+	if replayErr == nil {
+		return info, nil
+	}
+	if snapErr != nil {
+		return AttachInfo{}, snapErr
+	}
+	// MethodSnapshot answered but without a fresh screen, and we couldn't fetch
+	// replay either; hand back whatever the snapshot carried.
+	return attachInfoFromAttachResult(res), nil
+}
+
+func attachInfoFromAttachResult(res ptyworker.AttachResult) AttachInfo {
+	return AttachInfo{
+		Scrollback:          res.Scrollback,
+		ScrollbackTruncated: res.ScrollbackTruncated,
+		ReplaySegments:      replaySegmentsFromWorker(res.ReplaySegments),
+		ReplayTruncated:     res.ReplayTruncated,
+		LastSeq:             res.LastSeq,
+		Cols:                res.Cols,
+		Rows:                res.Rows,
+		PID:                 res.PID,
+		Running:             res.Running,
+		ExitCode:            res.ExitCode,
+		ExitSignal:          res.ExitSignal,
+		ScreenSnapshot:      res.ScreenSnapshot,
+		ScreenCols:          res.ScreenCols,
+		ScreenRows:          res.ScreenRows,
+		ScreenCursorX:       res.ScreenCursorX,
+		ScreenCursorY:       res.ScreenCursorY,
+		ScreenCursorVisible: res.ScreenCursorVisible,
+		ScreenSnapshotFresh: res.ScreenSnapshotFresh,
+	}
+}
+
+// snapshotViaReplay performs a read-only attach purely to fetch the session's
+// scrollback and replay segments, then closes the connection immediately. The
+// worker detaches the subscriber when the connection drops, so this installs no
+// lasting subscriber and issues no resize — the interactive client keeps PTY
+// geometry authority. It exists so observers (grid tiles) can seed from workers
+// that don't support the snapshot RPC; the daemon derives the visible screen
+// from the returned buffer.
+func (b *WorkerBackend) snapshotViaReplay(ctx context.Context, session *workerSession) (AttachInfo, error) {
+	rpcCtx, cancel := withDefaultRPCTimeout(ctx)
+	defer cancel()
+	conn, enc, dec, err := b.connectAuthed(rpcCtx, session)
+	if err != nil {
+		return AttachInfo{}, err
+	}
+	defer conn.Close()
+	if err := applyConnDeadline(conn, rpcCtx); err != nil {
+		return AttachInfo{}, err
+	}
+
+	subID := "snapshot-" + b.nextReqID("snapshot-sub")
+	attachReqID := b.nextReqID("snapshot-attach")
+	if err := writeRequest(enc, attachReqID, ptyworker.MethodAttach, ptyworker.AttachParams{SubscriberID: subID}); err != nil {
+		return AttachInfo{}, err
+	}
+	for {
+		frameType, res, _, err := readFrame(dec)
+		if err != nil {
+			return AttachInfo{}, err
+		}
+		if frameType != "res" || res.ID != attachReqID {
+			continue
+		}
+		if !res.OK {
+			return AttachInfo{}, b.rpcError(session.SessionID, res.Error)
+		}
+		var attachResult ptyworker.AttachResult
+		if err := json.Unmarshal(res.Result, &attachResult); err != nil {
+			return AttachInfo{}, fmt.Errorf("decode attach result: %w", err)
+		}
+		return attachInfoFromAttachResult(attachResult), nil
+	}
+}
+
 func (b *WorkerBackend) SessionLikelyAlive(ctx context.Context, sessionID string) (bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -1259,6 +1353,41 @@ func (b *WorkerBackend) callInfo(ctx context.Context, session *workerSession) (p
 			return ptyworker.InfoResult{}, err
 		}
 		return info, nil
+	}
+}
+
+func (b *WorkerBackend) callSnapshot(ctx context.Context, session *workerSession) (ptyworker.AttachResult, error) {
+	rpcCtx, cancel := withDefaultRPCTimeout(ctx)
+	defer cancel()
+	conn, enc, dec, err := b.connectAuthed(rpcCtx, session)
+	if err != nil {
+		return ptyworker.AttachResult{}, err
+	}
+	defer conn.Close()
+	if err := applyConnDeadline(conn, rpcCtx); err != nil {
+		return ptyworker.AttachResult{}, err
+	}
+
+	reqID := b.nextReqID("snapshot")
+	if err := writeRequest(enc, reqID, ptyworker.MethodSnapshot, map[string]any{}); err != nil {
+		return ptyworker.AttachResult{}, err
+	}
+	for {
+		frameType, res, _, err := readFrame(dec)
+		if err != nil {
+			return ptyworker.AttachResult{}, err
+		}
+		if frameType != "res" || res.ID != reqID {
+			continue
+		}
+		if !res.OK {
+			return ptyworker.AttachResult{}, b.rpcError(session.SessionID, res.Error)
+		}
+		var result ptyworker.AttachResult
+		if err := json.Unmarshal(res.Result, &result); err != nil {
+			return ptyworker.AttachResult{}, err
+		}
+		return result, nil
 	}
 }
 
