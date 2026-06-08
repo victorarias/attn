@@ -179,6 +179,86 @@ func TestClient_Query(t *testing.T) {
 	}
 }
 
+func TestClient_Delegate(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen error: %v", err)
+	}
+	defer listener.Close()
+
+	requests := make(chan *protocol.DelegateMessage, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		var raw json.RawMessage
+		if err := json.NewDecoder(conn).Decode(&raw); err != nil {
+			return
+		}
+		cmd, msg, err := protocol.ParseMessage(raw)
+		if err != nil || cmd != protocol.CmdDelegate {
+			return
+		}
+		requests <- msg.(*protocol.DelegateMessage)
+
+		json.NewEncoder(conn).Encode(protocol.Response{
+			Ok: true,
+			DelegateResult: &protocol.DelegateResult{
+				SessionID:   "delegated-session",
+				WorkspaceID: "workspace-1",
+				Directory:   "/tmp/project",
+				Placement:   "new_workspace",
+			},
+		})
+	}()
+
+	c := New(sockPath)
+	result, err := c.Delegate("source-session", "Investigate the parser", DelegateOptions{
+		Agent:        "codex",
+		Label:        "Parser task",
+		Yolo:         true,
+		Placement:    "new_workspace",
+		CWD:          "/tmp/project",
+		WorktreeRepo: "/tmp/repo",
+		Worktree:     "feat/parser",
+		WorktreePath: "/tmp/repo--feat-parser",
+		StartingFrom: "main",
+	})
+	if err != nil {
+		t.Fatalf("Delegate error: %v", err)
+	}
+	if result.SessionID != "delegated-session" || result.WorkspaceID != "workspace-1" {
+		t.Fatalf("Delegate result = %+v", result)
+	}
+
+	request := <-requests
+	if request.SourceSessionID != "source-session" || request.Brief != "Investigate the parser" {
+		t.Fatalf("Delegate request = %+v", request)
+	}
+	if protocol.Deref(request.Agent) != "codex" || protocol.Deref(request.Label) != "Parser task" {
+		t.Fatalf("Delegate request options = %+v", request)
+	}
+	if !protocol.Deref(request.YoloMode) {
+		t.Fatal("Delegate request did not enable yolo mode")
+	}
+	if protocol.Deref(request.Placement) != "new_workspace" || protocol.Deref(request.Cwd) != "/tmp/project" {
+		t.Fatalf("Delegate request placement = %+v", request)
+	}
+	if request.Worktree == nil ||
+		request.Worktree.Branch != "feat/parser" ||
+		protocol.Deref(request.Worktree.Repo) != "/tmp/repo" ||
+		protocol.Deref(request.Worktree.Path) != "/tmp/repo--feat-parser" ||
+		protocol.Deref(request.Worktree.StartingFrom) != "main" {
+		t.Fatalf("Delegate request worktree = %+v", request.Worktree)
+	}
+}
+
 func TestClient_NotRunning(t *testing.T) {
 	c := New("/nonexistent/socket.sock")
 	err := c.Register("id", "label", "/tmp")

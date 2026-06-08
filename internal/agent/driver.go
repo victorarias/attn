@@ -106,6 +106,10 @@ type Capabilities struct {
 
 	// HasYolo indicates the agent supports launching with approvals bypassed.
 	HasYolo bool
+
+	// HasInitialPrompt indicates the agent can start an interactive session and
+	// immediately submit a prompt supplied by attn.
+	HasInitialPrompt bool
 }
 
 var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
@@ -121,6 +125,7 @@ var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
 //   - ATTN_AGENT_<AGENT>_APPROVAL_RESOLVER=0|1
 //   - ATTN_AGENT_<AGENT>_RESUME=0|1
 //   - ATTN_AGENT_<AGENT>_YOLO=0|1
+//   - ATTN_AGENT_<AGENT>_INITIAL_PROMPT=0|1
 //
 // <AGENT> is uppercased with non-alphanumeric chars replaced by underscores
 // (e.g. "gemini-cli" -> "GEMINI_CLI").
@@ -154,6 +159,9 @@ func EffectiveCapabilities(d Driver) Capabilities {
 	}
 	if v, ok := boolEnv(prefix + "YOLO"); ok {
 		caps.HasYolo = v
+	}
+	if v, ok := boolEnv(prefix + "INITIAL_PROMPT"); ok {
+		caps.HasInitialPrompt = v
 	}
 
 	// Consistency: transcript watcher requires transcript support.
@@ -196,6 +204,7 @@ type SpawnOpts struct {
 	SessionID       string
 	CWD             string
 	Label           string
+	InitialPrompt   string
 	Cols            uint16
 	Rows            uint16
 	ResumeSessionID string

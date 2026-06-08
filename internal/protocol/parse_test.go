@@ -17,6 +17,11 @@ func TestParseCommand(t *testing.T) {
 			wantCmd: CmdRegister,
 		},
 		{
+			name:    "delegate message",
+			input:   `{"cmd":"delegate","source_session_id":"abc","brief":"Investigate this","agent":"codex"}`,
+			wantCmd: CmdDelegate,
+		},
+		{
 			name:    "state message",
 			input:   `{"cmd":"state","id":"abc","state":"waiting"}`,
 			wantCmd: CmdState,
@@ -121,6 +126,24 @@ func TestParseRegister(t *testing.T) {
 	}
 	if Deref(msg.Label) != "drumstick" {
 		t.Errorf("Label = %q, want %q", Deref(msg.Label), "drumstick")
+	}
+}
+
+func TestParseDelegatePlacementAndWorktree(t *testing.T) {
+	input := `{"cmd":"delegate","source_session_id":"source-1","brief":"Investigate this","agent":"codex","placement":"new_workspace","worktree":{"repo":"/repo","branch":"feat/delegated","starting_from":"main"}}`
+	cmd, data, err := ParseMessage([]byte(input))
+	if err != nil {
+		t.Fatalf("ParseMessage() error = %v", err)
+	}
+	if cmd != CmdDelegate {
+		t.Fatalf("cmd = %q, want %q", cmd, CmdDelegate)
+	}
+	msg := data.(*DelegateMessage)
+	if Deref(msg.Placement) != "new_workspace" || msg.Worktree == nil || msg.Worktree.Branch != "feat/delegated" {
+		t.Fatalf("delegate message = %+v", msg)
+	}
+	if Deref(msg.Worktree.Repo) != "/repo" || Deref(msg.Worktree.StartingFrom) != "main" {
+		t.Fatalf("delegate worktree = %+v", msg.Worktree)
 	}
 }
 

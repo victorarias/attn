@@ -52,3 +52,25 @@ func TestCodexBuildCommand_IncludesConfigOverridesBeforeResume(t *testing.T) {
 		t.Fatalf("args = %#v, want %#v", cmd.Args, wantArgs)
 	}
 }
+
+func TestBuildCommand_AppendsInitialPrompt(t *testing.T) {
+	for _, driver := range []Driver{&Claude{}, &Codex{}} {
+		t.Run(driver.Name(), func(t *testing.T) {
+			cmd := driver.BuildCommand(SpawnOpts{
+				SessionID:     "sess-1",
+				CWD:           "/tmp/project",
+				Executable:    driver.DefaultExecutable(),
+				InitialPrompt: "Investigate the delegated task.",
+			})
+			if got := cmd.Args[len(cmd.Args)-1]; got != "Investigate the delegated task." {
+				t.Fatalf("last arg = %q, want initial prompt; args=%#v", got, cmd.Args)
+			}
+		})
+	}
+}
+
+func TestCopilotDoesNotSupportInitialPrompt(t *testing.T) {
+	if (&Copilot{}).Capabilities().HasInitialPrompt {
+		t.Fatal("expected Copilot delegation support to remain disabled")
+	}
+}

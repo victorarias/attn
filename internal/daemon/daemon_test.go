@@ -4153,6 +4153,37 @@ func TestDaemon_SettingsWithClaudeAvailability_InstallsClaudeSkill(t *testing.T)
 	if _, err := os.Stat(skillPath); err != nil {
 		t.Fatalf("expected Claude attn skill at %s: %v", skillPath, err)
 	}
+	delegationPath := filepath.Join(home, ".claude", "skills", "attn", "references", "delegation.md")
+	if _, err := os.Stat(delegationPath); err != nil {
+		t.Fatalf("expected Claude attn delegation reference at %s: %v", delegationPath, err)
+	}
+}
+
+func TestDaemon_SettingsWithCodexAvailability_InstallsCodexSkill(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	binDir := t.TempDir()
+	codexPath := filepath.Join(binDir, "codex")
+	if err := os.WriteFile(codexPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake Codex executable: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+
+	d := &Daemon{store: store.New()}
+	settings := d.settingsWithAgentAvailability()
+	if got := settings[SettingCodexAvailable]; got != "true" {
+		t.Fatalf("settings[%s] = %v, want true", SettingCodexAvailable, got)
+	}
+
+	skillPath := filepath.Join(home, ".agents", "skills", "attn", "SKILL.md")
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Fatalf("expected Codex attn skill at %s: %v", skillPath, err)
+	}
+	delegationPath := filepath.Join(home, ".agents", "skills", "attn", "references", "delegation.md")
+	if _, err := os.Stat(delegationPath); err != nil {
+		t.Fatalf("expected Codex attn delegation reference at %s: %v", delegationPath, err)
+	}
 }
 
 func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {

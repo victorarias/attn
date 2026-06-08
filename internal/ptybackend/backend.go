@@ -20,9 +20,10 @@ type SpawnOptions struct {
 	Cols uint16
 	Rows uint16
 
-	ResumeSessionID string
-	ResumePicker    bool
-	YoloMode        bool
+	ResumeSessionID   string
+	ResumePicker      bool
+	YoloMode          bool
+	InitialPromptFile string
 
 	// Executable is the selected CLI path for opts.Agent.
 	Executable string

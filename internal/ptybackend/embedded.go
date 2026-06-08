@@ -44,6 +44,7 @@ func (b *EmbeddedBackend) Spawn(_ context.Context, opts SpawnOptions) error {
 		ResumeSessionID:   opts.ResumeSessionID,
 		ResumePicker:      opts.ResumePicker,
 		YoloMode:          opts.YoloMode,
+		InitialPromptFile: opts.InitialPromptFile,
 		Executable:        opts.Executable,
 		ClaudeExecutable:  opts.ClaudeExecutable,
 		CodexExecutable:   opts.CodexExecutable,

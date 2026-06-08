@@ -138,6 +138,68 @@ func (c *Client) UpdateTodos(id string, todos []string) error {
 	return err
 }
 
+type DelegateOptions struct {
+	Agent        string
+	Label        string
+	Yolo         bool
+	Placement    string
+	WorkspaceID  string
+	CWD          string
+	WorktreeRepo string
+	Worktree     string
+	WorktreePath string
+	StartingFrom string
+}
+
+// Delegate starts another agent with an initial brief and optional placement.
+func (c *Client) Delegate(sourceSessionID, brief string, opts DelegateOptions) (*protocol.DelegateResult, error) {
+	msg := protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           brief,
+	}
+	if value := strings.TrimSpace(opts.Agent); value != "" {
+		msg.Agent = protocol.Ptr(value)
+	}
+	if value := strings.TrimSpace(opts.Label); value != "" {
+		msg.Label = protocol.Ptr(value)
+	}
+	if opts.Yolo {
+		msg.YoloMode = protocol.Ptr(true)
+	}
+	if value := strings.TrimSpace(opts.Placement); value != "" {
+		msg.Placement = protocol.Ptr(value)
+	}
+	if value := strings.TrimSpace(opts.WorkspaceID); value != "" {
+		msg.WorkspaceID = protocol.Ptr(value)
+	}
+	if value := strings.TrimSpace(opts.CWD); value != "" {
+		msg.Cwd = protocol.Ptr(value)
+	}
+	if branch := strings.TrimSpace(opts.Worktree); branch != "" {
+		msg.Worktree = &protocol.DelegateWorktreeRequest{
+			Branch: branch,
+		}
+		if value := strings.TrimSpace(opts.WorktreeRepo); value != "" {
+			msg.Worktree.Repo = protocol.Ptr(value)
+		}
+		if value := strings.TrimSpace(opts.WorktreePath); value != "" {
+			msg.Worktree.Path = protocol.Ptr(value)
+		}
+		if value := strings.TrimSpace(opts.StartingFrom); value != "" {
+			msg.Worktree.StartingFrom = protocol.Ptr(value)
+		}
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.DelegateResult == nil {
+		return nil, errors.New("daemon returned no delegation result")
+	}
+	return resp.DelegateResult, nil
+}
+
 // Query returns sessions matching the filter
 func (c *Client) Query(filter string) ([]protocol.Session, error) {
 	var filterPtr *string

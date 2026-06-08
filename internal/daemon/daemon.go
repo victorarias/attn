@@ -1616,6 +1616,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	switch cmd {
 	case protocol.CmdRegister:
 		d.handleRegister(conn, msg.(*protocol.RegisterMessage))
+	case protocol.CmdDelegate:
+		d.handleDelegate(conn, msg.(*protocol.DelegateMessage))
 	case protocol.CmdUnregister:
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:

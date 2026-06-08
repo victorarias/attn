@@ -32,12 +32,13 @@ type pluginDriverRegisterResult struct {
 }
 
 type pluginDriverSpawnParams struct {
-	SessionID string          `json:"session_id"`
-	RunID     string          `json:"run_id"`
-	CWD       string          `json:"cwd"`
-	Label     string          `json:"label,omitempty"`
-	Yolo      bool            `json:"yolo,omitempty"`
-	Metadata  json.RawMessage `json:"metadata,omitempty"`
+	SessionID     string          `json:"session_id"`
+	RunID         string          `json:"run_id"`
+	CWD           string          `json:"cwd"`
+	Label         string          `json:"label,omitempty"`
+	Yolo          bool            `json:"yolo,omitempty"`
+	InitialPrompt string          `json:"initial_prompt,omitempty"`
+	Metadata      json.RawMessage `json:"metadata,omitempty"`
 }
 
 type pluginDriverSpawnResult struct {
@@ -155,6 +156,7 @@ func validatePluginDriverCapabilities(values map[string]bool) (map[string]bool, 
 	allowed := map[string]struct{}{
 		"resume":           {},
 		"yolo":             {},
+		"initial_prompt":   {},
 		"classifier":       {},
 		"state_reporting":  {},
 		"pending_approval": {},

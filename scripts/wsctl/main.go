@@ -11,14 +11,17 @@
 //
 //	go run ./scripts/wsctl add-workspace --title T --dir D [--id I]
 //	go run ./scripts/wsctl rm-workspace --id I
-//	go run ./scripts/wsctl add-session --workspace W --cwd D [--agent claude] [--label L] [--id I] [--cols 80] [--rows 24]
+//	go run ./scripts/wsctl add-session --workspace W --cwd D [--agent claude] [--label L] [--initial-prompt-file P] [--yolo] [--id I] [--cols 80] [--rows 24]
 //	go run ./scripts/wsctl rm-session --id I
+//	go run ./scripts/wsctl screen --id I
+//	go run ./scripts/wsctl input --id I --text T [--enter]
 //	go run ./scripts/wsctl list
 package main
 
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -27,6 +30,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/victorarias/attn/internal/protocol"
 	"nhooyr.io/websocket"
 )
 
@@ -50,6 +54,10 @@ func main() {
 		err = addSession(args)
 	case "rm-session":
 		err = rmSession(args)
+	case "screen":
+		err = screen(args)
+	case "input":
+		err = input(args)
 	case "list":
 		err = list(args)
 	case "-h", "--help", "help":
@@ -74,8 +82,10 @@ URL: %s (override with ATTN_WS_URL)
 Commands:
   add-workspace --title T --dir D [--id I]
   rm-workspace --id I
-  add-session --workspace W --cwd D [--agent claude] [--label L] [--id I] [--cols 80] [--rows 24]
+  add-session --workspace W --cwd D [--agent claude] [--label L] [--initial-prompt-file P] [--yolo] [--id I] [--cols 80] [--rows 24]
   rm-session --id I
+  screen --id I
+  input --id I --text T [--enter]
   list
 `, wsURL())
 }
@@ -144,6 +154,8 @@ func addSession(args []string) error {
 	cwd := fs.String("cwd", "", "session working directory (required)")
 	agent := fs.String("agent", "claude", "agent: claude | codex | copilot | shell")
 	label := fs.String("label", "", "session label (defaults to dir basename)")
+	initialPromptFile := fs.String("initial-prompt-file", "", "file containing the initial agent prompt")
+	yolo := fs.Bool("yolo", false, "launch with agent approval prompts bypassed")
 	id := fs.String("id", "", "session id (defaults to a generated one)")
 	cols := fs.Int("cols", 80, "initial PTY cols")
 	rows := fs.Int("rows", 24, "initial PTY rows")
@@ -175,6 +187,16 @@ func addSession(args []string) error {
 	}
 	if *label != "" {
 		msg["label"] = *label
+	}
+	if *initialPromptFile != "" {
+		content, err := os.ReadFile(*initialPromptFile)
+		if err != nil {
+			return fmt.Errorf("read initial prompt file: %w", err)
+		}
+		msg["initial_prompt"] = string(content)
+	}
+	if *yolo {
+		msg["yolo_mode"] = true
 	}
 
 	// Spawn replies with a SpawnResult — wait briefly for it so we
@@ -218,6 +240,60 @@ func rmSession(args []string) error {
 	return nil
 }
 
+func screen(args []string) error {
+	fs := flag.NewFlagSet("screen", flag.ExitOnError)
+	id := fs.String("id", "", "session id (required)")
+	fs.Parse(args)
+	if *id == "" {
+		return errors.New("--id is required")
+	}
+	resp, err := sendAndWait(map[string]any{
+		"cmd": "get_screen_snapshot",
+		"id":  *id,
+	}, "get_screen_snapshot_result", *id, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	if success, _ := resp["success"].(bool); !success {
+		errMsg, _ := resp["error"].(string)
+		return fmt.Errorf("snapshot failed: %s", errMsg)
+	}
+	encoded, _ := resp["screen_snapshot"].(string)
+	if encoded == "" {
+		return errors.New("snapshot contained no screen")
+	}
+	content, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return fmt.Errorf("decode screen snapshot: %w", err)
+	}
+	_, err = os.Stdout.Write(content)
+	return err
+}
+
+func input(args []string) error {
+	fs := flag.NewFlagSet("input", flag.ExitOnError)
+	id := fs.String("id", "", "session id (required)")
+	text := fs.String("text", "", "text to send")
+	enter := fs.Bool("enter", false, "append carriage return")
+	fs.Parse(args)
+	if *id == "" {
+		return errors.New("--id is required")
+	}
+	data := *text
+	if *enter {
+		data += "\r"
+	}
+	if data == "" {
+		return errors.New("--text or --enter is required")
+	}
+	return send(map[string]any{
+		"cmd":    "pty_input",
+		"id":     *id,
+		"data":   data,
+		"source": "wsctl",
+	})
+}
+
 func list(_ []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -238,6 +314,9 @@ func list(_ []string) error {
 	}
 	if ev, _ := event["event"].(string); ev != "initial_state" {
 		return fmt.Errorf("expected initial_state, got %q", ev)
+	}
+	if err := sendClientHello(ctx, conn); err != nil {
+		return err
 	}
 	pretty, _ := json.MarshalIndent(map[string]any{
 		"workspaces": event["workspaces"],
@@ -264,6 +343,9 @@ func send(payload map[string]any) error {
 	// so the socket buffer doesn't backlog.
 	if _, _, err := conn.Read(ctx); err != nil {
 		return fmt.Errorf("drain initial_state: %w", err)
+	}
+	if err := sendClientHello(ctx, conn); err != nil {
+		return err
 	}
 
 	body, err := json.Marshal(payload)
@@ -294,6 +376,9 @@ func sendAndWait(payload map[string]any, expectedEvent, expectedID string, timeo
 
 	if _, _, err := conn.Read(ctx); err != nil {
 		return nil, fmt.Errorf("drain initial_state: %w", err)
+	}
+	if err := sendClientHello(ctx, conn); err != nil {
+		return nil, err
 	}
 
 	body, err := json.Marshal(payload)
@@ -329,6 +414,22 @@ func sendAndWait(payload map[string]any, expectedEvent, expectedID string, timeo
 			}
 		}
 	}
+}
+
+func sendClientHello(ctx context.Context, conn *websocket.Conn) error {
+	body, err := json.Marshal(map[string]any{
+		"cmd":          "client_hello",
+		"client_kind":  "wsctl",
+		"version":      "protocol-" + protocol.ProtocolVersion,
+		"capabilities": []string{protocol.CapabilityWorkspaceSessions},
+	})
+	if err != nil {
+		return err
+	}
+	if err := conn.Write(ctx, websocket.MessageText, body); err != nil {
+		return fmt.Errorf("write client_hello: %w", err)
+	}
+	return nil
 }
 
 func newID(prefix string) string {

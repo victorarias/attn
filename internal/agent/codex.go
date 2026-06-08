@@ -21,6 +21,7 @@ var _ PTYStatePolicyProvider = (*Codex)(nil)
 var _ ExecutableClassifierProvider = (*Codex)(nil)
 var _ ConfigOverrideProvider = (*Codex)(nil)
 var _ ResumePolicyProvider = (*Codex)(nil)
+var _ LaunchPreparer = (*Codex)(nil)
 
 func init() {
 	Register(&Codex{})
@@ -45,6 +46,7 @@ func (c *Codex) Capabilities() Capabilities {
 		HasApprovalResolver: true,
 		HasResume:           true,
 		HasYolo:             true,
+		HasInitialPrompt:    true,
 	}
 }
 
@@ -67,6 +69,9 @@ func (c *Codex) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	if opts.YoloMode {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	}
+	if strings.TrimSpace(opts.InitialPrompt) != "" {
+		args = append(args, opts.InitialPrompt)
+	}
 
 	return exec.Command(opts.Executable, args...)
 }
@@ -83,6 +88,10 @@ func (c *Codex) BuildEnv(opts SpawnOpts) []string {
 		env = append(env, c.ExecutableEnvVar()+"="+opts.Executable)
 	}
 	return env
+}
+
+func (c *Codex) PrepareLaunch(opts SpawnOpts) error {
+	return ensureAttnCodexSkillInstalled()
 }
 
 // --- ConfigOverrideProvider ---
