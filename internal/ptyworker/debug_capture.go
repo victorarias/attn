@@ -80,7 +80,10 @@ func shouldEnableDebugCapture(agent string) bool {
 
 	raw := strings.TrimSpace(strings.ToLower(os.Getenv("ATTN_DEBUG_PTY_CAPTURE")))
 	switch raw {
-	case "0", "false", "off", "no", "disabled":
+	case "", "0", "false", "off", "no", "disabled":
+		// Off by default: capture retains up to debugCaptureMaxEvents base64
+		// chunks (~16-22 MiB) in every worker subprocess for its whole lifetime.
+		// It is a debugging aid and must be explicitly opted into.
 		return false
 	case "1", "true", "on", "yes", "all":
 		return true
@@ -88,12 +91,10 @@ func shouldEnableDebugCapture(agent string) bool {
 		return normalized == "codex"
 	case "copilot":
 		return normalized == "copilot"
-	case "":
-		// Temporary debugging default: capture the interactive agent runtimes we
-		// are actively debugging without extra environment setup.
-		return normalized == "codex" || normalized == "claude"
+	case "claude":
+		return normalized == "claude"
 	default:
-		return normalized == "codex" || normalized == "claude"
+		return false
 	}
 }
 
