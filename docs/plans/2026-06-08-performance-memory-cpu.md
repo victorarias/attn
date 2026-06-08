@@ -8,8 +8,8 @@ Produced 2026-06-08 by a multi-agent audit (8 subsystem finders → per-finding 
 
 - [x] **WS-2 step 1 — shrink PTY scrollback 8 MiB → 1 MiB** (`internal/pty/manager.go`). Measured **7 MiB/session idle, 14 MiB/session full**. Shipped 2026-06-08.
 - [x] **pty-2 — debug PTY capture off by default** (`internal/ptyworker/debug_capture.go`). Saves up to ~16–22 MiB per claude/codex worker. Shipped 2026-06-08.
-- [x] **WS-1 — virtualize off-screen terminal workspaces** (largest single lever, ~200+ MiB). Shipped 2026-06-08: keep active + N recent workspaces warm (default 3), tear down the rest, rehydrate via `same_app_remount` replay. Runtime-configurable via `window.attnSetWarmWorkspaces(n)` / localStorage. Unmount-only (frees WASM+WebGL); daemon-stream detach is a follow-up.
 - [ ] WS-7 — guarded loopback pprof + expvar (measurement enabler; do before WS-3)
+- [ ] WS-1 — virtualize off-screen terminal workspaces (largest single lever, ~200+ MiB; UX tradeoff: backgrounded panes rehydrate on focus)
 - [ ] WS-4 — kill per-PTY-chunk synchronous logging + preview allocs (biggest CPU lever)
 - [ ] WS-5 — gate idle background loops on client presence (branch monitor / markdown / PR poll)
 - [ ] WS-3 — daemon GOMEMLIMIT soft cap + GOGC + gated idle FreeOSMemory (after WS-7)
