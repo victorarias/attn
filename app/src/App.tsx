@@ -28,12 +28,6 @@ import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { useSessionStore, type Session, type TerminalWorkspaceState } from './store/sessions';
-import {
-  computeWarmWorkspaceIds,
-  DEFAULT_WARM_WORKSPACE_LIMIT,
-  readWarmWorkspaceLimit,
-  writeWarmWorkspaceLimit,
-} from './utils/terminalVirtualization';
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState, SessionExitInfo } from './hooks/useDaemonSocket';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
@@ -2225,44 +2219,6 @@ sendFetchPRDetails,
       sendWorkspaceSelected(activeWorkspaceId);
     }
   }, [activeWorkspaceId, sendWorkspaceSelected, view]);
-
-  // --- Off-screen terminal virtualization (memory) ---
-  // Keep only the active workspace + the N most-recently-used workspaces "warm"
-  // (terminals mounted). Other workspaces render a placeholder and rehydrate
-  // from daemon replay (same_app_remount) when next made visible. N is runtime-
-  // configurable (localStorage + window.attnSetWarmWorkspaces); see
-  // utils/terminalVirtualization.
-  const [warmWorkspaceLimit, setWarmWorkspaceLimit] = useState<number>(() => readWarmWorkspaceLimit());
-  useEffect(() => {
-    const w = window as Window & { attnSetWarmWorkspaces?: (n: number) => number };
-    w.attnSetWarmWorkspaces = (n: number) => {
-      const next = Number.isFinite(n) ? Math.trunc(n) : DEFAULT_WARM_WORKSPACE_LIMIT;
-      writeWarmWorkspaceLimit(next);
-      setWarmWorkspaceLimit(next);
-      console.log(
-        `[attn] warm workspace limit = ${next} `
-        + (next < 0 ? '(virtualization disabled; all workspaces live)' : `(active + ${next} recent kept live)`),
-      );
-      return next;
-    };
-    return () => { delete w.attnSetWarmWorkspaces; };
-  }, []);
-  // Most-recently-active workspace ids, most-recent-first. Drives the warm set.
-  const [recentWorkspaceIds, setRecentWorkspaceIds] = useState<string[]>([]);
-  useEffect(() => {
-    if (!activeWorkspaceId) return;
-    setRecentWorkspaceIds((prev) => (
-      prev[0] === activeWorkspaceId
-        ? prev
-        : [activeWorkspaceId, ...prev.filter((id) => id !== activeWorkspaceId)].slice(0, 32)
-    ));
-  }, [activeWorkspaceId]);
-  const allWorkspaceIds = useMemo(() => workspaceViews.map((w) => w.id), [workspaceViews]);
-  const warmWorkspaceIds = useMemo(
-    () => computeWarmWorkspaceIds(allWorkspaceIds, recentWorkspaceIds, activeWorkspaceId, warmWorkspaceLimit),
-    [allWorkspaceIds, recentWorkspaceIds, activeWorkspaceId, warmWorkspaceLimit],
-  );
-
   const getActiveLeafDropSnapshot = useCallback(
     () => getWorkspaceLeafDropSnapshot(activeWorkspaceIdRef.current),
     [getWorkspaceLeafDropSnapshot],
@@ -3067,11 +3023,6 @@ sendFetchPRDetails,
                 getActivePaneIdForSession,
               );
               const isActiveWorkspace = workspace.id === activeWorkspaceId;
-              // Mount this workspace's terminals only when it is active or in the
-              // warm set; otherwise it renders placeholders and rehydrates on return.
-              const terminalsLive = warmWorkspaceIds === null
-                || isActiveWorkspace
-                || warmWorkspaceIds.has(workspace.id);
               return (
                 <div
                   key={`${workspace.endpointId || 'local'}:${workspace.id}`}
@@ -3095,7 +3046,6 @@ sendFetchPRDetails,
                     enabled={!blockingOverlayOpen}
                     isActiveSession={isActiveWorkspace}
                     isSessionViewVisible={view === 'session'}
-                    terminalsLive={terminalsLive}
                     eventRouter={paneRuntimeEventRouter}
                     onSplitPane={(targetPaneId, direction) => {
                       void createSplitSession('shell', direction, targetPaneId);
