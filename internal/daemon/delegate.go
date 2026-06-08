@@ -139,6 +139,9 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 	if source == nil {
 		return nil, fmt.Errorf("source session not found: %s", sourceSessionID)
 	}
+	if endpointID := strings.TrimSpace(protocol.Deref(source.EndpointID)); endpointID != "" {
+		return nil, fmt.Errorf("delegation from remote session %s on endpoint %s is not supported", sourceSessionID, endpointID)
+	}
 	agent, err := d.resolveDelegationAgent(source.Agent, msg.Agent)
 	if err != nil {
 		return nil, err
@@ -311,4 +314,17 @@ func (d *Daemon) handleDelegate(conn net.Conn, msg *protocol.DelegateMessage) {
 		Ok:             true,
 		DelegateResult: result,
 	})
+}
+
+func (d *Daemon) handleDelegateWS(client *wsClient, msg *protocol.DelegateMessage) {
+	result, err := d.delegate(msg)
+	response := protocol.DelegateResultMessage{
+		Event:   protocol.EventDelegateResult,
+		Success: err == nil,
+		Result:  result,
+	}
+	if err != nil {
+		response.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, response)
 }

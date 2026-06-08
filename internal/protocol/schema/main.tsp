@@ -1660,6 +1660,13 @@ model DelegateResult {
   worktree_created?: boolean;
 }
 
+model DelegateResultMessage {
+  event: "delegate_result";
+  success: boolean;
+  error?: string;
+  result?: DelegateResult;
+}
+
 // Warning for non-critical issues (e.g., gh version too old)
 model DaemonWarning {
   code: string;    // e.g., "gh_version_too_old"

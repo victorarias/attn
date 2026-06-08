@@ -624,7 +624,22 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 				session.MainRepo = protocol.Ptr(branchInfo.MainRepo)
 			}
 		}
-		d.store.Add(session)
+		if err := d.store.AddChecked(session); err != nil {
+			if hasPluginDriver {
+				d.finishPluginSessionLaunch(msg.ID, false)
+			}
+			killErr := d.ptyBackend.Kill(context.Background(), msg.ID, syscall.SIGTERM)
+			removeErr := d.ptyBackend.Remove(context.Background(), msg.ID)
+			persistErr := fmt.Errorf("persist spawned session: %w", err)
+			if killErr != nil {
+				persistErr = fmt.Errorf("%w; kill spawned runtime: %v", persistErr, killErr)
+			}
+			if removeErr != nil {
+				persistErr = fmt.Errorf("%w; remove spawned runtime: %v", persistErr, removeErr)
+			}
+			d.sendSpawnFailure(client, msg.ID, persistErr)
+			return
+		}
 		if hasPluginDriver && !d.store.BeginAgentDriverRun(session.ID, pluginDriver.PluginName, pluginRunID) {
 			d.finishPluginSessionLaunch(msg.ID, false)
 			d.logf("failed to initialize plugin driver run cursor: session=%s", session.ID)

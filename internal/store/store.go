@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"sort"
@@ -117,8 +118,15 @@ func (s *Store) Close() error {
 	return nil
 }
 
-// Add adds a session to the store
+// Add adds a session to the store and logs persistence failures.
 func (s *Store) Add(session *protocol.Session) {
+	if err := s.AddChecked(session); err != nil {
+		log.Printf("[store] Add: failed to insert session %s: %v", session.ID, err)
+	}
+}
+
+// AddChecked adds a session to the store and returns persistence failures.
+func (s *Store) AddChecked(session *protocol.Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -127,12 +135,12 @@ func (s *Store) Add(session *protocol.Session) {
 			s.sessions = make(map[string]*protocol.Session)
 		}
 		s.sessions[session.ID] = cloneSession(session)
-		return
+		return nil
 	}
 
 	todosJSON, err := json.Marshal(session.Todos)
 	if err != nil {
-		log.Printf("[store] Add: failed to marshal todos for session %s: %v", session.ID, err)
+		return fmt.Errorf("marshal todos for session %s: %w", session.ID, err)
 	}
 	normalizedAgent := strings.TrimSpace(strings.ToLower(string(session.Agent)))
 	if normalizedAgent == "" {
@@ -175,8 +183,9 @@ func (s *Store) Add(session *protocol.Session) {
 		boolToInt(protocol.Deref(session.Recoverable)),
 	)
 	if err != nil {
-		log.Printf("[store] Add: failed to insert session %s: %v", session.ID, err)
+		return fmt.Errorf("insert session %s: %w", session.ID, err)
 	}
+	return nil
 }
 
 // Get retrieves a session by ID

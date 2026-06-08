@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -193,6 +194,23 @@ func TestStore_AddAndGet_PreservesEndpointID(t *testing.T) {
 	}
 	if protocol.Deref(got.EndpointID) != "local" {
 		t.Errorf("EndpointID = %q, want %q", protocol.Deref(got.EndpointID), "local")
+	}
+}
+
+func TestStoreAddCheckedReturnsPersistenceFailure(t *testing.T) {
+	s := New()
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	err := s.AddChecked(&protocol.Session{
+		ID:        "session-closed-db",
+		Label:     "closed",
+		Agent:     protocol.SessionAgentCodex,
+		Directory: "/tmp",
+	})
+	if err == nil || !strings.Contains(err.Error(), "insert session") {
+		t.Fatalf("AddChecked() error = %v, want insert failure", err)
 	}
 }
 

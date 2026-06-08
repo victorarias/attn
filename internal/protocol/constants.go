@@ -146,6 +146,7 @@ const (
 	EventSessionTodosUpdated         = "session_todos_updated"
 	EventSessionsUpdated             = "sessions_updated"
 	EventRenameResult                = "rename_result"
+	EventDelegateResult              = "delegate_result"
 	EventPRsUpdated                  = "prs_updated"
 	EventReposUpdated                = "repos_updated"
 	EventAuthorsUpdated              = "authors_updated"

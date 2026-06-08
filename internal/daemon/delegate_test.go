@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
@@ -156,6 +158,98 @@ func TestDelegateRejectsCopilotInitialPrompt(t *testing.T) {
 	layout := d.store.GetWorkspaceLayout("workspace-source")
 	if layout == nil || len(layout.Panes) != 1 || layout.Panes[0].SessionID != sourceSessionID {
 		t.Fatalf("workspace layout after rejection = %+v", layout)
+	}
+}
+
+func TestDelegateRejectsRemoteSourceSession(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	source := d.store.Get(sourceSessionID)
+	source.EndpointID = protocol.Ptr("endpoint-remote")
+	d.store.Add(source)
+
+	_, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Do not launch this locally.",
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "delegation from remote session") {
+		t.Fatalf("delegate() error = %v, want remote source rejection", err)
+	}
+	if len(backend.spawnOpts) != 1 {
+		t.Fatalf("spawn count = %d, want only source session", len(backend.spawnOpts))
+	}
+}
+
+func TestDelegateWebSocketCommandReturnsResult(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+	client := newWorkspaceProtocolTestClient()
+	client.setIdentity("test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
+
+	payload, err := json.Marshal(protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Handle this through the websocket dispatcher.",
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("marshal delegate message: %v", err)
+	}
+	d.handleClientMessage(client, payload)
+
+	select {
+	case outbound := <-client.send:
+		var result protocol.DelegateResultMessage
+		if err := json.Unmarshal(outbound.payload, &result); err != nil {
+			t.Fatalf("decode delegate result: %v", err)
+		}
+		if result.Event != protocol.EventDelegateResult || !result.Success || result.Result == nil {
+			t.Fatalf("delegate result = %+v", result)
+		}
+		if result.Result.WorkspaceID != "workspace-source" {
+			t.Fatalf("workspace = %q, want workspace-source", result.Result.WorkspaceID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for delegate_result")
+	}
+}
+
+func TestDelegateKillsSpawnedRuntimeWhenPersistenceFails(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	backend.onSpawn = func(opts ptybackend.SpawnOptions) {
+		if opts.ID == sourceSessionID {
+			return
+		}
+		if opts.InitialPromptFile != "" {
+			_ = os.Remove(opts.InitialPromptFile)
+		}
+		if err := d.store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	}
+
+	_, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Persistence will fail after this runtime starts.",
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "persist spawned session") {
+		t.Fatalf("delegate() error = %v, want persistence failure", err)
+	}
+	spawn, ok := backend.LastSpawn()
+	if !ok || spawn.ID == sourceSessionID {
+		t.Fatalf("last spawn = %+v, want delegated runtime", spawn)
+	}
+	if !backend.WasKilledAndRemoved(spawn.ID) {
+		t.Fatalf("delegated runtime %s was not killed and removed", spawn.ID)
 	}
 }
 

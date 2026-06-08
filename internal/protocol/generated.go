@@ -543,6 +543,20 @@ type DelegateResult struct {
 	WorktreeCreated *bool `json:"worktree_created,omitempty,omitzero"`
 }
 
+type DelegateResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Result corresponds to the JSON schema field "result".
+	Result *DelegateResult `json:"result,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type DelegateWorktreeRequest struct {
 	// Branch corresponds to the JSON schema field "branch".
 	Branch string `json:"branch"`

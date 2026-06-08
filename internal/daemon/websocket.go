@@ -857,6 +857,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	switch cmd {
 	case protocol.CmdClientHello:
 		d.handleClientHello(client, msg.(*protocol.ClientHelloMessage))
+	case protocol.CmdDelegate:
+		go d.handleDelegateWS(client, msg.(*protocol.DelegateMessage))
 	case protocol.CmdApprovePR:
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
 	case protocol.CmdMergePR:

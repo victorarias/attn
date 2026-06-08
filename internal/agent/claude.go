@@ -84,7 +84,7 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 		args = append(args, "--dangerously-skip-permissions")
 	}
 	if strings.TrimSpace(opts.InitialPrompt) != "" {
-		args = append(args, opts.InitialPrompt)
+		args = append(args, "--", opts.InitialPrompt)
 	}
 
 	return exec.Command(opts.Executable, args...)

@@ -70,7 +70,7 @@ func (c *Codex) BuildCommand(opts SpawnOpts) *exec.Cmd {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	}
 	if strings.TrimSpace(opts.InitialPrompt) != "" {
-		args = append(args, opts.InitialPrompt)
+		args = append(args, "--", opts.InitialPrompt)
 	}
 
 	return exec.Command(opts.Executable, args...)
