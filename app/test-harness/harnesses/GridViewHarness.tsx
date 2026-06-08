@@ -17,12 +17,18 @@ import { GridView, type GridSessionTile } from '../../src/components/grid/GridVi
 import type { HarnessProps } from '../types';
 
 const BASE_TILES: GridSessionTile[] = [
-  { runtimeId: 'rt-1', sessionId: 's1', title: 'api server', attention: false },
-  { runtimeId: 'rt-2', sessionId: 's2', title: 'web client', attention: true },
-  { runtimeId: 'rt-3', sessionId: 's3', title: 'worker', attention: false },
+  { runtimeId: 'rt-1', sessionId: 's1', title: 'api server', attention: false, state: 'working' },
+  { runtimeId: 'rt-2', sessionId: 's2', title: 'web client', attention: true, state: 'waiting_input' },
+  { runtimeId: 'rt-3', sessionId: 's3', title: 'worker', attention: false, state: 'idle' },
 ];
 
-const FIXED_EXTRA: GridSessionTile = { runtimeId: 'rt-4', sessionId: 's4', title: 'database', attention: false };
+const FIXED_EXTRA: GridSessionTile = {
+  runtimeId: 'rt-4',
+  sessionId: 's4',
+  title: 'database',
+  attention: true,
+  state: 'pending_approval',
+};
 
 const CONTENT: Record<string, string> = {
   'rt-1': '\x1b[2J\x1b[H$ api server listening on :8080\r\n',
