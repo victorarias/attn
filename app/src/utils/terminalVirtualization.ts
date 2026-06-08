@@ -38,19 +38,37 @@ export function writeWarmWorkspaceLimit(limit: number): void {
 }
 
 // Returns the set of workspace ids whose terminals should stay mounted, or
-// null meaning "all workspaces live" (virtualization disabled). The active
-// workspace is always included. `recentWorkspaceIds` is most-recent-first.
+// null meaning "all workspaces live" (no virtualization). `allWorkspaceIds` is
+// every currently-rendered workspace; `recentWorkspaceIds` is most-recent-first.
+//
+// Virtualization only engages when there are MORE workspaces than the warm
+// budget (active + `limit` recent). With no more workspaces than the budget
+// there is nothing to reclaim, so we keep them all live — this both matches the
+// pre-virtualization behavior for the common case (a handful of workspaces) and
+// avoids tearing terminals down before an active workspace is established (e.g.
+// first paint, when activeWorkspaceId is still null), which would otherwise drop
+// freshly-streamed PTY output across the remount.
 export function computeWarmWorkspaceIds(
+  allWorkspaceIds: string[],
   recentWorkspaceIds: string[],
   activeWorkspaceId: string | null,
   limit: number,
 ): Set<string> | null {
   if (limit < 0) return null;
+  const budget = limit + 1; // active + `limit` recent workspaces.
+  const present = new Set(allWorkspaceIds);
+  if (present.size <= budget) return null; // nothing to reclaim; keep all live.
   const warm = new Set<string>();
-  if (activeWorkspaceId) warm.add(activeWorkspaceId);
-  // active + up to `limit` other recent workspaces => at most limit + 1 total.
+  if (activeWorkspaceId && present.has(activeWorkspaceId)) warm.add(activeWorkspaceId);
   for (const id of recentWorkspaceIds) {
-    if (warm.size >= limit + 1) break;
+    if (warm.size >= budget) break;
+    if (present.has(id)) warm.add(id);
+  }
+  // Fill any remaining budget from the current workspaces so the warm set is
+  // never smaller than the budget while extra workspaces exist — before recency
+  // or an active workspace are established there can be unused slots.
+  for (const id of allWorkspaceIds) {
+    if (warm.size >= budget) break;
     warm.add(id);
   }
   return warm;

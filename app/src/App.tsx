@@ -2257,9 +2257,10 @@ sendFetchPRDetails,
         : [activeWorkspaceId, ...prev.filter((id) => id !== activeWorkspaceId)].slice(0, 32)
     ));
   }, [activeWorkspaceId]);
+  const allWorkspaceIds = useMemo(() => workspaceViews.map((w) => w.id), [workspaceViews]);
   const warmWorkspaceIds = useMemo(
-    () => computeWarmWorkspaceIds(recentWorkspaceIds, activeWorkspaceId, warmWorkspaceLimit),
-    [recentWorkspaceIds, activeWorkspaceId, warmWorkspaceLimit],
+    () => computeWarmWorkspaceIds(allWorkspaceIds, recentWorkspaceIds, activeWorkspaceId, warmWorkspaceLimit),
+    [allWorkspaceIds, recentWorkspaceIds, activeWorkspaceId, warmWorkspaceLimit],
   );
 
   const getActiveLeafDropSnapshot = useCallback(
