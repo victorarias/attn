@@ -39,7 +39,9 @@ export function writeWarmWorkspaceLimit(limit: number): void {
 
 // Returns the set of workspace ids whose terminals should stay mounted, or
 // null meaning "all workspaces live" (no virtualization). `allWorkspaceIds` is
-// every currently-rendered workspace; `recentWorkspaceIds` is most-recent-first.
+// every currently-rendered workspace; `recentWorkspaceIds` is most-recent-first;
+// `protectedWorkspaceIds` are workspaces whose PTYs can still be running and
+// therefore need a live terminal model to answer terminal queries.
 //
 // Virtualization only engages when there are MORE workspaces than the warm
 // budget (active + `limit` recent). With no more workspaces than the budget
@@ -53,12 +55,16 @@ export function computeWarmWorkspaceIds(
   recentWorkspaceIds: string[],
   activeWorkspaceId: string | null,
   limit: number,
+  protectedWorkspaceIds: string[] = [],
 ): Set<string> | null {
   if (limit < 0) return null;
   const budget = limit + 1; // active + `limit` recent workspaces.
   const present = new Set(allWorkspaceIds);
   if (present.size <= budget) return null; // nothing to reclaim; keep all live.
   const warm = new Set<string>();
+  for (const id of protectedWorkspaceIds) {
+    if (present.has(id)) warm.add(id);
+  }
   if (activeWorkspaceId && present.has(activeWorkspaceId)) warm.add(activeWorkspaceId);
   for (const id of recentWorkspaceIds) {
     if (warm.size >= budget) break;

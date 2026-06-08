@@ -2258,9 +2258,21 @@ sendFetchPRDetails,
     ));
   }, [activeWorkspaceId]);
   const allWorkspaceIds = useMemo(() => workspaceViews.map((w) => w.id), [workspaceViews]);
+  const liveRuntimeWorkspaceIds = useMemo(
+    () => workspaceViews
+      .filter((workspace) => workspace.sessions.some((session) => session.state !== 'idle'))
+      .map((workspace) => workspace.id),
+    [workspaceViews],
+  );
   const warmWorkspaceIds = useMemo(
-    () => computeWarmWorkspaceIds(allWorkspaceIds, recentWorkspaceIds, activeWorkspaceId, warmWorkspaceLimit),
-    [allWorkspaceIds, recentWorkspaceIds, activeWorkspaceId, warmWorkspaceLimit],
+    () => computeWarmWorkspaceIds(
+      allWorkspaceIds,
+      recentWorkspaceIds,
+      activeWorkspaceId,
+      warmWorkspaceLimit,
+      liveRuntimeWorkspaceIds,
+    ),
+    [allWorkspaceIds, recentWorkspaceIds, activeWorkspaceId, warmWorkspaceLimit, liveRuntimeWorkspaceIds],
   );
 
   const getActiveLeafDropSnapshot = useCallback(

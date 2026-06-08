@@ -69,4 +69,37 @@ describe('computeWarmWorkspaceIds', () => {
     expect(warm).toEqual(new Set(['b', 'a']));
     expect(warm?.size).toBe(2);
   });
+
+  it('keeps protected workspaces live even when they are cold', () => {
+    const warm = computeWarmWorkspaceIds(
+      ['a', 'b', 'c', 'd', 'e'],
+      ['a', 'b'],
+      'a',
+      1,
+      ['e'],
+    );
+    expect(warm).toEqual(new Set(['e', 'a']));
+  });
+
+  it('lets protected workspaces exceed the warm budget', () => {
+    const warm = computeWarmWorkspaceIds(
+      ['a', 'b', 'c', 'd', 'e'],
+      ['a', 'b'],
+      'a',
+      1,
+      ['d', 'e'],
+    );
+    expect(warm).toEqual(new Set(['d', 'e', 'a']));
+  });
+
+  it('ignores stale protected workspace ids', () => {
+    const warm = computeWarmWorkspaceIds(
+      ['a', 'b', 'c', 'd'],
+      ['a', 'b', 'c'],
+      'a',
+      1,
+      ['missing'],
+    );
+    expect(warm).toEqual(new Set(['a', 'b']));
+  });
 });
