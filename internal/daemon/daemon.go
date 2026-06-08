@@ -22,6 +22,7 @@ import (
 	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/diag"
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/hub"
@@ -96,6 +97,7 @@ type Daemon struct {
 	listener         net.Listener
 	httpServer       *http.Server
 	httpHandler      http.Handler
+	diagServer       *diag.Server // opt-in loopback pprof/expvar; nil unless ATTN_PPROF set
 	wsHub            *wsHub
 	done             chan struct{}
 	logger           *logging.Logger
@@ -610,6 +612,7 @@ func (d *Daemon) Start() error {
 	// Create HTTP server for WebSocket (must be created synchronously to avoid race with Stop())
 	d.initHTTPServer()
 	go d.runHTTPServer()
+	d.maybeStartDiagServer()
 	d.removeLegacyEmbeddedTailscaleState()
 	go d.ensureTailscaleServeFromSettingsAndBroadcast()
 	d.hubManager.Start(d.doneContext())
@@ -1145,6 +1148,9 @@ func (d *Daemon) Stop() {
 		defer cancel()
 		d.httpServer.Shutdown(ctx)
 	}
+	if d.diagServer != nil {
+		_ = d.diagServer.Close()
+	}
 	if d.listener != nil {
 		d.listener.Close()
 	}
@@ -1353,6 +1359,41 @@ func (d *Daemon) runHTTPServer() {
 	if err := d.httpServer.ListenAndServe(); err != http.ErrServerClosed {
 		d.logf("HTTP server error: %v", err)
 	}
+}
+
+// maybeStartDiagServer starts the opt-in loopback diagnostics endpoint (pprof +
+// /debug/vars) when ATTN_PPROF is set. It is off by default and binds 127.0.0.1
+// only. A bind failure is logged but never fatal — diagnostics must not take the
+// daemon down.
+func (d *Daemon) maybeStartDiagServer() {
+	addr, enabled := config.PprofAddr()
+	if !enabled {
+		return
+	}
+	srv, err := diag.Start(addr, d.diagStats)
+	if err != nil {
+		d.logf("diagnostics endpoint failed to start on %s: %v", addr, err)
+		return
+	}
+	d.diagServer = srv
+	d.logf("diagnostics endpoint listening on http://%s/ (pprof + /debug/vars)", srv.Addr())
+}
+
+// diagStats reports live PTY-session counts and worker subprocess PIDs for the
+// diagnostics /debug/vars snapshot. The worker PIDs are the per-session RSS
+// handles for the worker backend; the embedded backend reports none.
+func (d *Daemon) diagStats() diag.Stats {
+	stats := diag.Stats{PtyBackend: "embedded"}
+	if d.ptyBackend == nil {
+		return stats
+	}
+	ctx := context.Background()
+	stats.Sessions = len(d.ptyBackend.SessionIDs(ctx))
+	if wp, ok := d.ptyBackend.(ptybackend.WorkerProcessProvider); ok {
+		stats.PtyBackend = "worker"
+		stats.WorkerPIDs = wp.WorkerPIDs(ctx)
+	}
+	return stats
 }
 
 func (d *Daemon) log(msg string) {
