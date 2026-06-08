@@ -5,12 +5,14 @@
 // exposes read state, zoom control, and (since zoomed tiles are interactive)
 // keyboard input into the zoomed tile, exercising the real InputHandler path.
 import type { CompositorStats, GridTileSummary } from './GridCompositor';
+import type { GridStatePresentation } from './gridStatePresentation';
 
 export interface GridAutomationState {
   active: boolean;
   tileCount: number;
   zoomedId: string | null;
   layout: { rows: number; cols: number };
+  statePresentation: GridStatePresentation;
   stats: CompositorStats | null;
   tiles: GridTileSummary[];
 }
@@ -19,6 +21,7 @@ export interface GridAutomationHandle {
   getState(): GridAutomationState;
   getTileText(id: string): string | null;
   zoom(id: string | null): void;
+  setStatePresentation(presentation: GridStatePresentation): void;
   hitTest(x: number, y: number): string | null;
   // Type into the zoomed tile via the real keydown -> InputHandler -> PTY path.
   // Returns false if there is no stage to receive the keys.
@@ -41,6 +44,7 @@ export const INACTIVE_GRID_STATE: GridAutomationState = {
   tileCount: 0,
   zoomedId: null,
   layout: { rows: 0, cols: 0 },
+  statePresentation: 'border',
   stats: null,
   tiles: [],
 };

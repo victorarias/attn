@@ -2098,13 +2098,17 @@ sendFetchPRDetails,
     for (const s of unmutedEnrichedSessions) {
       const pane = s.workspace.agents.find((agent) => agent.sessionId === s.id);
       if (!pane) continue;
+      const state = s.reviewLoopStatus === 'error'
+        ? 'unknown'
+        : s.reviewLoopStatus === 'awaiting_user'
+          ? 'waiting_input'
+          : s.state;
       result.push({
         runtimeId: pane.runtimeId,
         sessionId: s.id,
         title: pane.title,
-        attention: isAttentionSessionState(s.state)
-          || s.reviewLoopStatus === 'awaiting_user'
-          || s.reviewLoopStatus === 'error',
+        state,
+        attention: isAttentionSessionState(state),
       });
     }
     return result;

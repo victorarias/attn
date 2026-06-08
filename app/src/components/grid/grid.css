@@ -23,6 +23,69 @@
   pointer-events: none;
 }
 
+.grid-state-presentation {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  color: #8d8d8d;
+  background: rgba(16, 16, 16, 0.78);
+  border: 1px solid #2c2c2c;
+  border-radius: 9px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(10px);
+}
+
+.grid-state-presentation-label {
+  padding: 0 6px 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.grid-state-presentation-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 8px;
+  color: #969696;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.grid-state-presentation-option::before {
+  width: 9px;
+  height: 7px;
+  border: 1px solid #f59e0b;
+  border-radius: 2px;
+  content: '';
+}
+
+.grid-state-presentation-option[data-presentation='background']::before {
+  background: rgba(245, 158, 11, 0.34);
+}
+
+.grid-state-presentation-option:hover {
+  color: #d7d7d7;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.grid-state-presentation-option.active {
+  color: #f1f1f1;
+  background: #292929;
+  border-color: #3b3b3b;
+}
+
 .grid-view-hint {
   position: absolute;
   bottom: 12px;

@@ -8,8 +8,10 @@
 // processes terminal responses but never echoes them back to the PTY (that would
 // inject phantom input into the user's session).
 import type { Ghostty, GhosttyTerminal } from 'ghostty-web';
+import type { UISessionState } from '../../types/sessionState';
 import type { GridRenderer, GridRenderStats, Rect, TileFrame } from './GridRenderer';
 import { TILE_COLS, TILE_ROWS, type CellMetrics } from './gridConfig';
+import type { GridStatePresentation } from './gridStatePresentation';
 
 const GAP = 12;
 const REFLOW_MS = 280;
@@ -31,6 +33,7 @@ type TerminalConfig = Parameters<Ghostty['createTerminal']>[2];
 export interface GridTileSpec {
   id: string;
   attention: boolean;
+  state: UISessionState;
 }
 
 export interface CompositorStats extends GridRenderStats {
@@ -57,6 +60,7 @@ export interface GridTileSummary {
 interface Tile {
   id: string;
   model: GhosttyTerminal;
+  state: UISessionState;
   attention: number;
   attentionTarget: number;
   hidden: boolean;
@@ -116,6 +120,8 @@ export class GridCompositor {
   private lastStats: GridRenderStats | null = null;
   private lastCompositorStats: CompositorStats | null = null;
   private statsEmitAt = 0;
+  private statePresentation: GridStatePresentation = 'border';
+  private presentationDirty = true;
 
   onStats: ((stats: CompositorStats) => void) | null = null;
 
@@ -139,6 +145,12 @@ export class GridCompositor {
     // Snapshot current placement so tiles slide from where they are.
     this.beginReflow();
     this.layout = { rows, cols };
+  }
+
+  setStatePresentation(presentation: GridStatePresentation): void {
+    if (presentation === this.statePresentation) return;
+    this.statePresentation = presentation;
+    this.presentationDirty = true;
   }
 
   // Snapshot every tile's resting rect under the CURRENT layout and start the
@@ -180,13 +192,19 @@ export class GridCompositor {
     const next: Tile[] = specs.map((spec) => {
       const existing = this.tileIndex.get(spec.id);
       if (existing) {
+        if (existing.state !== spec.state || existing.attentionTarget !== (spec.attention ? 1 : 0)) {
+          this.presentationDirty = true;
+        }
+        existing.state = spec.state;
         existing.attentionTarget = spec.attention ? 1 : 0;
         return existing;
       }
+      this.presentationDirty = true;
       const model = this.ghostty.createTerminal(TILE_COLS, TILE_ROWS, this.modelOptions);
       return {
         id: spec.id,
         model,
+        state: spec.state,
         attention: 0,
         attentionTarget: spec.attention ? 1 : 0,
         hidden: false,
@@ -453,6 +471,7 @@ export class GridCompositor {
       if (Math.abs(next - tile.attention) > 0.001) attentionAnimating = true;
       tile.attention = next;
       if (tile.attention > 0.01) attentionAnimating = true; // keep pulsing
+      if (!tile.hidden && tile.state === 'waiting_input') attentionAnimating = true;
     }
 
     // Advance zoom clock.
@@ -473,12 +492,13 @@ export class GridCompositor {
       if (!tile.hidden && tile.model.update() !== 0) anyDirty = true;
     }
 
-    const shouldRender = anyDirty || reflowActive || zoomActive || attentionAnimating;
+    const shouldRender = anyDirty || reflowActive || zoomActive || attentionAnimating || this.presentationDirty;
     let rendered = false;
     if (shouldRender) {
       const frames = this.computeFrames(now, reflowActive);
       this.lastFrames = frames;
       this.lastStats = this.renderer.frame(frames, now);
+      this.presentationDirty = false;
       rendered = true;
     }
 
@@ -533,6 +553,8 @@ export class GridCompositor {
         scale,
         alpha,
         attention: tile.id === this.zoomId ? 0 : tile.attention,
+        state: tile.state,
+        statePresentation: this.statePresentation,
         hidden: tile.hidden,
         focused,
       };
