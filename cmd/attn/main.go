@@ -280,6 +280,7 @@ func runPTYWorker() {
 		}
 		cfg.Rows = uint16(rows)
 	}
+	cfg.Debug = config.DebugLevel() >= config.LogDebug
 	cfg.Logf = func(format string, args ...interface{}) {
 		fmt.Fprintf(os.Stderr, "[pty-worker] "+format+"\n", args...)
 	}

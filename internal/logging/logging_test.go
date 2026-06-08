@@ -95,6 +95,40 @@ func TestLogger_DebugEnabled(t *testing.T) {
 	}
 }
 
+func TestLogger_DebugEnabledAccessor(t *testing.T) {
+	// The PTY hot-path gating (daemon + worker) reads this flag to decide
+	// whether to build log args at all, so it must track the DEBUG env exactly.
+	originalDebug := os.Getenv("DEBUG")
+	restore := func() {
+		if originalDebug != "" {
+			os.Setenv("DEBUG", originalDebug)
+		} else {
+			os.Unsetenv("DEBUG")
+		}
+	}
+	defer restore()
+
+	os.Unsetenv("DEBUG")
+	off, err := New(filepath.Join(t.TempDir(), "off.log"))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer off.Close()
+	if off.DebugEnabled() {
+		t.Errorf("DebugEnabled() = true with DEBUG unset, want false")
+	}
+
+	os.Setenv("DEBUG", "debug")
+	on, err := New(filepath.Join(t.TempDir(), "on.log"))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer on.Close()
+	if !on.DebugEnabled() {
+		t.Errorf("DebugEnabled() = false with DEBUG=debug, want true")
+	}
+}
+
 func TestLogger_Infof(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")

@@ -109,6 +109,14 @@ func (l *Logger) Debugf(format string, args ...interface{}) {
 	l.Debug(fmt.Sprintf(format, args...))
 }
 
+// DebugEnabled reports whether debug-level logging is on (DEBUG env >= debug).
+// Hot-path callers use this to skip building log arguments (e.g. byte previews)
+// entirely when debug logging is off, since Go evaluates call arguments eagerly
+// and Info-level writes are not level-gated.
+func (l *Logger) DebugEnabled() bool {
+	return l.debug
+}
+
 func DefaultLogPath() string {
 	return config.LogPath()
 }

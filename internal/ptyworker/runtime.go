@@ -96,6 +96,12 @@ type Config struct {
 	OwnerNonce     string
 
 	Logf func(format string, args ...interface{})
+
+	// Debug gates verbose per-output-chunk worker logging. When false the
+	// hot-path log call (and its byte-preview allocation) is skipped entirely;
+	// lifecycle and error logs are unaffected. The per-session worker .log only
+	// grows from these per-chunk lines, so gating them caps it for normal runs.
+	Debug bool
 }
 
 type Runtime struct {
@@ -692,15 +698,20 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			c.runtime.cfg.SessionID,
 			subID,
 			func(data []byte, seq uint32) bool {
-				c.runtime.logf(
-					"worker output event: session=%s conn=%s sub=%s seq=%d bytes=%d preview=%q",
-					c.runtime.cfg.SessionID,
-					c.connID,
-					subID,
-					seq,
-					len(data),
-					previewWorkerBytesForLog(data),
-				)
+				// Hot path: one call per output chunk. Gate the verbose log (and
+				// its preview allocation) so DEBUG-off runs don't write a line to
+				// the per-session worker .log for every chunk (an unbounded leak).
+				if c.runtime.cfg.Debug {
+					c.runtime.logf(
+						"worker output event: session=%s conn=%s sub=%s seq=%d bytes=%d preview=%q",
+						c.runtime.cfg.SessionID,
+						c.connID,
+						subID,
+						seq,
+						len(data),
+						previewWorkerBytesForLog(data),
+					)
+				}
 				encoded := base64.StdEncoding.EncodeToString(data)
 				ok := c.sendEvent(EventEnvelope{
 					Type:      "evt",
