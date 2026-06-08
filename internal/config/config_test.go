@@ -368,3 +368,49 @@ func TestValidateProfileName_PureFunction(t *testing.T) {
 		t.Error("ValidateProfileName(\"bad name\") should have errored")
 	}
 }
+
+func TestPprofAddr(t *testing.T) {
+	orig, had := os.LookupEnv("ATTN_PPROF")
+	t.Cleanup(func() {
+		if had {
+			os.Setenv("ATTN_PPROF", orig)
+		} else {
+			os.Unsetenv("ATTN_PPROF")
+		}
+	})
+
+	cases := []struct {
+		name        string
+		set         bool
+		val         string
+		wantAddr    string
+		wantEnabled bool
+	}{
+		{name: "unset", set: false},
+		{name: "empty", set: true, val: ""},
+		{name: "off", set: true, val: "off"},
+		{name: "zero", set: true, val: "0"},
+		{name: "false", set: true, val: "false"},
+		{name: "one_default_port", set: true, val: "1", wantAddr: "127.0.0.1:6060", wantEnabled: true},
+		{name: "on", set: true, val: "on", wantAddr: "127.0.0.1:6060", wantEnabled: true},
+		{name: "true", set: true, val: "true", wantAddr: "127.0.0.1:6060", wantEnabled: true},
+		{name: "bare_port", set: true, val: "6061", wantAddr: "127.0.0.1:6061", wantEnabled: true},
+		{name: "colon_port", set: true, val: ":7070", wantAddr: "127.0.0.1:7070", wantEnabled: true},
+		{name: "host_port_forced_loopback", set: true, val: "0.0.0.0:8080", wantAddr: "127.0.0.1:8080", wantEnabled: true},
+		{name: "garbage", set: true, val: "banana"},
+		{name: "out_of_range", set: true, val: "70000"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.set {
+				os.Setenv("ATTN_PPROF", tc.val)
+			} else {
+				os.Unsetenv("ATTN_PPROF")
+			}
+			addr, enabled := PprofAddr()
+			if enabled != tc.wantEnabled || addr != tc.wantAddr {
+				t.Fatalf("PprofAddr() = (%q, %v), want (%q, %v)", addr, enabled, tc.wantAddr, tc.wantEnabled)
+			}
+		})
+	}
+}

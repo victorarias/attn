@@ -719,6 +719,26 @@ func (b *WorkerBackend) SessionIDs(_ context.Context) []string {
 	return ids
 }
 
+// Compile-time guard: the daemon detects the worker backend via this interface
+// to report worker PIDs in diagnostics. If it drifts, the daemon would silently
+// fall back to reporting "embedded" instead of failing to build.
+var _ WorkerProcessProvider = (*WorkerBackend)(nil)
+
+// WorkerPIDs returns the live worker subprocess PID for each session that has
+// one, satisfying WorkerProcessProvider. Sessions whose worker has not been
+// spawned (or has been reaped) are omitted.
+func (b *WorkerBackend) WorkerPIDs(_ context.Context) map[string]int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	pids := make(map[string]int, len(b.sessions))
+	for id, session := range b.sessions {
+		if session.WorkerPID > 0 {
+			pids[id] = session.WorkerPID
+		}
+	}
+	return pids
+}
+
 func (b *WorkerBackend) Recover(ctx context.Context) (RecoveryReport, error) {
 	report := RecoveryReport{}
 	// Best-effort: restore registries that were quarantined due to historical

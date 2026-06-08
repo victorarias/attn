@@ -133,6 +133,15 @@ type SessionInfoProvider interface {
 	SessionInfo(ctx context.Context, sessionID string) (SessionInfo, error)
 }
 
+// WorkerProcessProvider is implemented by backends that run each session in its
+// own worker subprocess. It exposes those PIDs (sessionID -> worker pid) so
+// diagnostics can sum per-session RSS via ps/vmmap — the dominant memory locus
+// for the worker backend. Backends without subprocesses (e.g. embedded) do not
+// implement it.
+type WorkerProcessProvider interface {
+	WorkerPIDs(ctx context.Context) map[string]int
+}
+
 // SnapshotProvider returns the current rendered screen of a session without
 // attaching. Backends that cannot serve a snapshot (e.g. a worker built before
 // the capability existed) return an error; callers degrade gracefully.

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -432,4 +433,39 @@ func DebugLevel() int {
 	default:
 		return LogError
 	}
+}
+
+// DefaultPprofPort is the loopback port used when ATTN_PPROF is enabled without
+// an explicit port (e.g. ATTN_PPROF=1).
+const DefaultPprofPort = 6060
+
+// PprofAddr reports whether the opt-in diagnostics endpoint (pprof + expvar) is
+// enabled and, if so, the loopback address to bind. It is strictly off unless
+// ATTN_PPROF is set, and always binds 127.0.0.1 so it adds no remote attack
+// surface (any host in the value is ignored on purpose).
+//
+//	unset / "0" / "off" / "false" / "no" → disabled
+//	"1" / "on" / "true" / "yes"          → enabled on DefaultPprofPort
+//	"<port>" or ":<port>" or "host:port" → enabled on that port (loopback)
+func PprofAddr() (addr string, enabled bool) {
+	raw := strings.TrimSpace(os.Getenv("ATTN_PPROF"))
+	if raw == "" {
+		return "", false
+	}
+	switch strings.ToLower(raw) {
+	case "0", "off", "false", "no":
+		return "", false
+	case "1", "on", "true", "yes":
+		return fmt.Sprintf("127.0.0.1:%d", DefaultPprofPort), true
+	}
+	// Accept "host:port", ":port", or a bare port; ignore the host and force
+	// loopback so the endpoint can never be exposed off the machine.
+	portPart := raw
+	if i := strings.LastIndex(portPart, ":"); i >= 0 {
+		portPart = portPart[i+1:]
+	}
+	if p, err := strconv.Atoi(portPart); err == nil && p > 0 && p <= 65535 {
+		return fmt.Sprintf("127.0.0.1:%d", p), true
+	}
+	return "", false
 }
