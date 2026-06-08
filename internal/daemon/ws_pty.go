@@ -878,13 +878,18 @@ func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stre
 	for event := range stream.Events() {
 		switch event.Kind {
 		case ptybackend.OutputEventKindOutput:
-			d.logf(
-				"pty_output forward: id=%s seq=%d bytes=%d preview=%q",
-				sessionID,
-				event.Seq,
-				len(event.Data),
-				previewBinaryForLog(event.Data),
-			)
+			// Hot path: one event per output chunk per attached client. Gate the
+			// verbose log (and its preview allocation) on debug so DEBUG-off runs
+			// don't take the global log mutex + a synchronous disk write per chunk.
+			if d.debugLogging {
+				d.logf(
+					"pty_output forward: id=%s seq=%d bytes=%d preview=%q",
+					sessionID,
+					event.Seq,
+					len(event.Data),
+					previewBinaryForLog(event.Data),
+				)
+			}
 			encoded := base64.StdEncoding.EncodeToString(event.Data)
 			wsEvent := &protocol.WebSocketEvent{
 				Event: protocol.EventPtyOutput,
@@ -903,7 +908,9 @@ func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stre
 				return
 			}
 		case ptybackend.OutputEventKindDesync:
-			d.logf("pty_desync forward: id=%s reason=%s", sessionID, event.Reason)
+			if d.debugLogging {
+				d.logf("pty_desync forward: id=%s reason=%s", sessionID, event.Reason)
+			}
 			wsEvent := &protocol.WebSocketEvent{
 				Event:  protocol.EventPtyDesync,
 				ID:     protocol.Ptr(sessionID),
@@ -927,18 +934,20 @@ func (d *Daemon) handlePtyInput(client *wsClient, msg *protocol.PtyInputMessage)
 	if source := strings.TrimSpace(protocol.Deref(msg.Source)); source != "" {
 		d.setPendingInputSource(msg.ID, source)
 	}
-	d.logf(
-		"pty_input: id=%s bytes=%d preview=%q source=%s",
-		msg.ID,
-		len(msg.Data),
-		previewBinaryForLog([]byte(msg.Data)),
-		strings.TrimSpace(protocol.Deref(msg.Source)),
-	)
+	if d.debugLogging {
+		d.logf(
+			"pty_input: id=%s bytes=%d preview=%q source=%s",
+			msg.ID,
+			len(msg.Data),
+			previewBinaryForLog([]byte(msg.Data)),
+			strings.TrimSpace(protocol.Deref(msg.Source)),
+		)
+	}
 	if err := d.ptyBackend.Input(context.Background(), msg.ID, []byte(msg.Data)); err != nil {
 		if shouldLogPtyCommandError(err) {
 			d.logf("pty_input failed for %s: %v", msg.ID, err)
 		}
-	} else {
+	} else if d.debugLogging {
 		d.logf("pty_input ok: id=%s bytes=%d", msg.ID, len(msg.Data))
 	}
 }

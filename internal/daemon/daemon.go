@@ -99,6 +99,7 @@ type Daemon struct {
 	wsHub            *wsHub
 	done             chan struct{}
 	logger           *logging.Logger
+	debugLogging     bool // cached DEBUG>=debug; gates per-chunk PTY hot-path logs
 	ghRegistry       *github.ClientRegistry
 	hubManager       *hub.Manager
 	classifier       Classifier // Optional, uses package-level classifier.Classify if nil
@@ -351,6 +352,7 @@ func New(socketPath string) *Daemon {
 		wsHub:            newWSHub(),
 		done:             make(chan struct{}),
 		logger:           logger,
+		debugLogging:     logger != nil && logger.DebugEnabled(),
 		ghRegistry:       github.NewClientRegistry(),
 		hubManager:       nil,
 		reviewLoopExec:   reviewLoopExecutor,
