@@ -185,6 +185,101 @@ describe('SessionTerminalWorkspace', () => {
     expect(mockTerminalFocus).toHaveBeenCalledTimes(1);
   });
 
+  const virtualizationProps = {
+    workspaceId: 'workspace-session-1',
+    workspaceSessions: [{ id: 'session-1', label: 'Session 1', agent: 'claude', cwd: '/tmp/repo' }],
+    activePaneId: SESSION_PANE_ID,
+    fontSize: 14,
+    enabled: true,
+    eventRouter: mockEventRouter,
+    onSplitPane: vi.fn(),
+    onClosePane: vi.fn(),
+    onFocusPane: vi.fn(),
+    onNavigateOutOfSession: vi.fn(),
+  };
+
+  it('virtualizes panes: renders a placeholder and mounts no terminal when terminalsLive is false', () => {
+    render(
+      <SessionTerminalWorkspace
+        {...virtualizationProps}
+        workspace={createSingleAgentWorkspace()}
+        isActiveSession={false}
+        terminalsLive={false}
+      />,
+    );
+    expect(screen.queryByTestId('mock-terminal')).toBeNull();
+    expect(screen.getByTestId(`pane-virtualized-${SESSION_PANE_ID}`)).toBeTruthy();
+  });
+
+  it('virtualizes every pane of a split workspace, not just the active one', () => {
+    render(
+      <SessionTerminalWorkspace
+        {...virtualizationProps}
+        workspaceSessions={[
+          { id: 'session-1', label: 'Session 1', agent: 'claude', cwd: '/tmp/repo' },
+          { id: 'session-2', label: 'Session 2', agent: 'claude', cwd: '/tmp/repo' },
+        ]}
+        workspace={createSplitWorkspace()}
+        isActiveSession={false}
+        terminalsLive={false}
+      />,
+    );
+    expect(screen.queryAllByTestId('mock-terminal')).toHaveLength(0);
+    expect(screen.getByTestId(`pane-virtualized-${SESSION_PANE_ID}`)).toBeTruthy();
+    expect(screen.getByTestId('pane-virtualized-pane-session-2')).toBeTruthy();
+  });
+
+  it('mounts terminals when terminalsLive defaults true (warm/active workspace)', () => {
+    render(
+      <SessionTerminalWorkspace
+        {...virtualizationProps}
+        workspace={createSingleAgentWorkspace()}
+        isActiveSession
+      />,
+    );
+    expect(screen.getByTestId('mock-terminal')).toBeTruthy();
+    expect(screen.queryByTestId(`pane-virtualized-${SESSION_PANE_ID}`)).toBeNull();
+  });
+
+  it('tears down the terminal when a workspace leaves the warm set, and remounts it on return', () => {
+    const { rerender } = render(
+      <SessionTerminalWorkspace
+        {...virtualizationProps}
+        workspace={createSingleAgentWorkspace()}
+        isActiveSession
+        terminalsLive
+      />,
+    );
+    expect(screen.getByTestId('mock-terminal')).toBeTruthy();
+
+    // Falls out of the warm set -> terminal unmounts (frees WASM model + WebGL).
+    act(() => {
+      rerender(
+        <SessionTerminalWorkspace
+          {...virtualizationProps}
+          workspace={createSingleAgentWorkspace()}
+          isActiveSession={false}
+          terminalsLive={false}
+        />,
+      );
+    });
+    expect(screen.queryByTestId('mock-terminal')).toBeNull();
+    expect(screen.getByTestId(`pane-virtualized-${SESSION_PANE_ID}`)).toBeTruthy();
+
+    // Returns to view -> terminal remounts (rehydrates from daemon replay).
+    act(() => {
+      rerender(
+        <SessionTerminalWorkspace
+          {...virtualizationProps}
+          workspace={createSingleAgentWorkspace()}
+          isActiveSession
+          terminalsLive
+        />,
+      );
+    });
+    expect(screen.getByTestId('mock-terminal')).toBeTruthy();
+  });
+
   it('focuses the main Claude pane immediately on mouse down', () => {
     mockTerminalFocus.mockReset().mockReturnValue(true);
     const onFocusPane = vi.fn();
