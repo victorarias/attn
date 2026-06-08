@@ -205,6 +205,7 @@ check-types: generate-types
 define build_tauri_app
 	@mkdir -p app/src-tauri/binaries
 	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
+	cd app && pnpm install
 	cd app && $(1) pnpm tauri build --bundles app $(3)
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
 		mkdir -p app/src-tauri/target/release/bundle/macos/$(2).app/Contents/Resources; \
