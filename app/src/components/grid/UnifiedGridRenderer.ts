@@ -58,10 +58,6 @@ const STATE_COLORS: Record<UISessionState, Rgb> = {
   pending_approval: { r: 234, g: 179, b: 8 },
   unknown: { r: 168, g: 85, b: 247 },
 };
-// Idle tiles get a faint outline so they read as separate panels against the
-// shared canvas background (tiles only paint non-default cell backgrounds, so
-// without this they blend into the gaps).
-const IDLE_BORDER_ALPHA = 0.22;
 const FOCUS_BORDER_ALPHA = 0.95;
 const WAITING_INPUT_FLASH_PERIOD_MS = 1_600;
 
@@ -190,7 +186,6 @@ export class UnifiedGridRenderer implements GridRenderer {
   private readonly fontFamily: string;
   private readonly metrics: CellMetrics;
   private readonly theme: { background: string; foreground: string; cursor: string };
-  private readonly borderColor: Rgb;
   private readonly mipmaps: boolean;
 
   private container: HTMLElement | null = null;
@@ -232,7 +227,6 @@ export class UnifiedGridRenderer implements GridRenderer {
     this.fontFamily = fontFamily;
     this.metrics = metrics;
     this.theme = theme;
-    this.borderColor = parseColor(theme.foreground);
     this.mipmaps = options.mipmaps ?? false;
   }
 
@@ -404,21 +398,19 @@ export class UnifiedGridRenderer implements GridRenderer {
     const stateColor = STATE_COLORS[frame.state];
     const waitingFlash = frame.state === 'waiting_input' ? waitingInputFlash(now) : 0;
 
-    if (frame.statePresentation === 'background') {
-      const pulse = frame.state === 'waiting_input'
-        ? 0.02 + 0.14 * waitingFlash
-        : frame.attention > 0.001
-          ? frame.attention * (0.04 + 0.08 * (0.5 + 0.5 * Math.sin(now / 320)))
-          : 0;
-      this.pushSolid(
-        ox,
-        oy,
-        w,
-        h,
-        stateColor,
-        Math.min(0.24, this.stateBackgroundAlpha(frame.state) + pulse) * alpha,
-      );
-    }
+    const pulse = frame.state === 'waiting_input'
+      ? 0.02 + 0.14 * waitingFlash
+      : frame.attention > 0.001
+        ? frame.attention * (0.04 + 0.08 * (0.5 + 0.5 * Math.sin(now / 320)))
+        : 0;
+    this.pushSolid(
+      ox,
+      oy,
+      w,
+      h,
+      stateColor,
+      Math.min(0.24, this.stateBackgroundAlpha(frame.state) + pulse) * alpha,
+    );
 
     for (let row = 0; row < rows; row += 1) {
       for (let col = 0; col < cols; col += 1) {
@@ -462,7 +454,7 @@ export class UnifiedGridRenderer implements GridRenderer {
     // the frame alpha during a zoom morph.
     if (frame.focused) {
       this.pushBorder(ox, oy, w, h, FOCUS, FOCUS_BORDER_ALPHA * alpha, Math.max(2 * this.dpr, 2));
-    } else if (frame.statePresentation === 'border') {
+    } else {
       this.pushBorder(
         ox,
         oy,
@@ -476,12 +468,9 @@ export class UnifiedGridRenderer implements GridRenderer {
         ) * alpha,
         Math.max(2 * this.dpr, 1.5),
       );
-    } else {
-      this.pushBorder(ox, oy, w, h, this.borderColor, IDLE_BORDER_ALPHA * alpha, Math.max(this.dpr, 1));
     }
     if (
-      frame.statePresentation === 'border'
-      && frame.state !== 'waiting_input'
+      frame.state !== 'waiting_input'
       && frame.attention > 0.001
     ) {
       this.pushAttentionBorder(ox, oy, w, h, stateColor, frame.attention, now);
