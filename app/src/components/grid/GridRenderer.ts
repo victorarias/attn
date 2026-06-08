@@ -10,7 +10,6 @@
 // surface has to composite into a single context to scale.
 import type { GhosttyTerminal } from 'ghostty-web';
 import type { UISessionState } from '../../types/sessionState';
-import type { GridStatePresentation } from './gridStatePresentation';
 
 export interface TileModel {
   id: string;
@@ -34,7 +33,6 @@ export interface TileFrame {
   alpha: number; // 0..1 — fade non-focused tiles during a zoom morph
   attention: number; // 0..1 — pulsing state emphasis ("needs you")
   state: UISessionState;
-  statePresentation: GridStatePresentation;
   hidden: boolean; // excluded from the batch / surface
   focused: boolean;
 }

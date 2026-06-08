@@ -11,7 +11,6 @@ import type { Ghostty, GhosttyTerminal } from 'ghostty-web';
 import type { UISessionState } from '../../types/sessionState';
 import type { GridRenderer, GridRenderStats, Rect, TileFrame } from './GridRenderer';
 import { TILE_COLS, TILE_ROWS, type CellMetrics } from './gridConfig';
-import type { GridStatePresentation } from './gridStatePresentation';
 
 const GAP = 12;
 const REFLOW_MS = 280;
@@ -120,8 +119,7 @@ export class GridCompositor {
   private lastStats: GridRenderStats | null = null;
   private lastCompositorStats: CompositorStats | null = null;
   private statsEmitAt = 0;
-  private statePresentation: GridStatePresentation = 'border';
-  private presentationDirty = true;
+  private visualDirty = true;
 
   onStats: ((stats: CompositorStats) => void) | null = null;
 
@@ -145,12 +143,6 @@ export class GridCompositor {
     // Snapshot current placement so tiles slide from where they are.
     this.beginReflow();
     this.layout = { rows, cols };
-  }
-
-  setStatePresentation(presentation: GridStatePresentation): void {
-    if (presentation === this.statePresentation) return;
-    this.statePresentation = presentation;
-    this.presentationDirty = true;
   }
 
   // Snapshot every tile's resting rect under the CURRENT layout and start the
@@ -193,13 +185,13 @@ export class GridCompositor {
       const existing = this.tileIndex.get(spec.id);
       if (existing) {
         if (existing.state !== spec.state || existing.attentionTarget !== (spec.attention ? 1 : 0)) {
-          this.presentationDirty = true;
+          this.visualDirty = true;
         }
         existing.state = spec.state;
         existing.attentionTarget = spec.attention ? 1 : 0;
         return existing;
       }
-      this.presentationDirty = true;
+      this.visualDirty = true;
       const model = this.ghostty.createTerminal(TILE_COLS, TILE_ROWS, this.modelOptions);
       return {
         id: spec.id,
@@ -492,13 +484,13 @@ export class GridCompositor {
       if (!tile.hidden && tile.model.update() !== 0) anyDirty = true;
     }
 
-    const shouldRender = anyDirty || reflowActive || zoomActive || attentionAnimating || this.presentationDirty;
+    const shouldRender = anyDirty || reflowActive || zoomActive || attentionAnimating || this.visualDirty;
     let rendered = false;
     if (shouldRender) {
       const frames = this.computeFrames(now, reflowActive);
       this.lastFrames = frames;
       this.lastStats = this.renderer.frame(frames, now);
-      this.presentationDirty = false;
+      this.visualDirty = false;
       rendered = true;
     }
 
@@ -554,7 +546,6 @@ export class GridCompositor {
         alpha,
         attention: tile.id === this.zoomId ? 0 : tile.attention,
         state: tile.state,
-        statePresentation: this.statePresentation,
         hidden: tile.hidden,
         focused,
       };

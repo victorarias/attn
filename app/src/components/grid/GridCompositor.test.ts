@@ -196,23 +196,7 @@ describe('GridCompositor', () => {
     expect(renderer.frames.length).toBe(before + 1);
     expect(renderer.frames[renderer.frames.length - 1]?.[0]).toMatchObject({
       state: 'idle',
-      statePresentation: 'border',
     });
-  });
-
-  it('renders immediately when the state presentation changes', () => {
-    const { comp, renderer } = makeCompositor();
-    const internal = comp as any;
-    comp.syncTiles([tileSpec('a')]);
-    internal.reflowStart = -1;
-    internal.tick();
-    const before = renderer.frames.length;
-
-    comp.setStatePresentation('background');
-    internal.tick();
-
-    expect(renderer.frames.length).toBe(before + 1);
-    expect(renderer.frames[renderer.frames.length - 1]?.[0].statePresentation).toBe('background');
   });
 
   it('keeps rendering while a visible session is waiting for input', () => {

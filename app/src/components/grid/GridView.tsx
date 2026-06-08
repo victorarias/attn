@@ -18,7 +18,7 @@
 // claims no geometry, so AGENTS.md #7 still holds: we never attach or resize).
 // We grab stage focus on open/zoom so input follows the zoom instead of leaking
 // to whichever pane held focus when the grid opened.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Ghostty, InputHandler } from 'ghostty-web';
 import ghosttyWasmUrl from 'ghostty-web/ghostty-vt.wasm?url';
 import { listenPtyEvents, ptyWrite } from '../../pty/bridge';
@@ -38,11 +38,6 @@ import {
   colorNumber,
   measureCanonicalCell,
 } from './gridConfig';
-import {
-  persistGridStatePresentation,
-  readGridStatePresentation,
-  type GridStatePresentation,
-} from './gridStatePresentation';
 import './grid.css';
 
 export interface GridSessionTile {
@@ -103,18 +98,6 @@ export function GridView({
   const compRef = useRef<GridCompositor | null>(null);
   const tilesRef = useRef(tiles);
   tilesRef.current = tiles;
-  const [statePresentation, setStatePresentation] = useState<GridStatePresentation>(readGridStatePresentation);
-  const statePresentationRef = useRef(statePresentation);
-  statePresentationRef.current = statePresentation;
-  const selectStatePresentation = useCallback((presentation: GridStatePresentation) => {
-    setStatePresentation(presentation);
-    persistGridStatePresentation(presentation);
-    const comp = compRef.current;
-    comp?.setStatePresentation(presentation);
-    if (comp?.isZoomed()) {
-      stageRef.current?.focus({ preventScroll: true });
-    }
-  }, []);
 
   // runtimeId -> sessionId, so the hover-remove button (which knows the
   // compositor's tile id == runtimeId) can report the stable session identity.
@@ -213,7 +196,6 @@ export function GridView({
       });
       compRef.current = comp;
       const current = tilesRef.current;
-      comp.setStatePresentation(statePresentationRef.current);
       comp.syncTiles(toSpecs(current));
       comp.setLayout(layoutRef.current.rows, layoutRef.current.cols);
       reconcileSeeding(comp);
@@ -252,14 +234,12 @@ export function GridView({
             tileCount: tileStates.length,
             zoomedId: c.zoomedId(),
             layout: c.currentLayout(),
-            statePresentation: statePresentationRef.current,
             stats: c.getStats(),
             tiles: tileStates,
           };
         },
         getTileText: (id) => compRef.current?.getTileText(id) ?? null,
         zoom: (id) => compRef.current?.zoomTo(id),
-        setStatePresentation: selectStatePresentation,
         hitTest: (x, y) => compRef.current?.hitTest(x, y) ?? null,
         sendText: (text) => {
           const stageEl = stageRef.current;
@@ -312,7 +292,7 @@ export function GridView({
       if (comp) comp.dispose();
       else renderer.dispose();
     };
-  }, [resolvedTheme, reconcileSeeding, selectStatePresentation]);
+  }, [resolvedTheme, reconcileSeeding]);
 
   // Reconcile the live tile set whenever sessions change. Layout is applied by
   // the dedicated effect below; setLayout here keeps the reflow snapshot aligned
@@ -393,22 +373,6 @@ export function GridView({
   return (
     <div className="grid-view" onMouseMove={updateRemoveTarget} onMouseLeave={clearRemoveTarget}>
       <div className="grid-view-stage" ref={stageRef} onClick={onStageClick} />
-      <div className="grid-state-presentation" role="radiogroup" aria-label="Session state appearance">
-        <span className="grid-state-presentation-label">State</span>
-        {(['border', 'background'] as const).map((presentation) => (
-          <button
-            key={presentation}
-            type="button"
-            className={`grid-state-presentation-option ${statePresentation === presentation ? 'active' : ''}`}
-            data-presentation={presentation}
-            role="radio"
-            aria-checked={statePresentation === presentation}
-            onClick={() => selectStatePresentation(presentation)}
-          >
-            {presentation === 'border' ? 'Border' : 'Tint'}
-          </button>
-        ))}
-      </div>
       {tiles.length === 0 && (
         <div className="grid-view-empty">No active sessions</div>
       )}
