@@ -20,9 +20,15 @@ import (
 )
 
 const (
-	// Keep a deeper PTY history so session restore/re-attach can replay
-	// substantially more terminal output.
-	DefaultScrollbackSize = 8 * 1024 * 1024
+	// DefaultScrollbackSize bounds both the eager per-session ring buffer and
+	// the lazily-grown replay log. Attach/re-attach only ever serves the last
+	// maxAgentRawReplayBytes (256 KiB) of history (see daemon.buildAttachReplayPayload),
+	// so anything beyond that is committed RAM per session that is never sent to
+	// a client. 1 MiB keeps a comfortable 4x headroom over that clip while
+	// removing ~7 MiB of eager allocation from every PTY worker subprocess.
+	// Must stay >= maxAgentRawReplayBytes so clip/ScrollbackTruncated semantics
+	// and Codex startup-query replay are unchanged.
+	DefaultScrollbackSize = 1 * 1024 * 1024
 	defaultKillTimeout    = 10 * time.Second
 	shellEnvTimeout       = 2 * time.Second
 )
