@@ -109,7 +109,11 @@ export function GridView({
   const selectStatePresentation = useCallback((presentation: GridStatePresentation) => {
     setStatePresentation(presentation);
     persistGridStatePresentation(presentation);
-    compRef.current?.setStatePresentation(presentation);
+    const comp = compRef.current;
+    comp?.setStatePresentation(presentation);
+    if (comp?.isZoomed()) {
+      stageRef.current?.focus({ preventScroll: true });
+    }
   }, []);
 
   // runtimeId -> sessionId, so the hover-remove button (which knows the
