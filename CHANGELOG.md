@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-06-08]
 
 ### Changed
+- **Grid view can show session state with colored borders or tile tints.** Use the new State control in grid mode to compare the two treatments; waiting-for-input sessions flash amber, the choice persists across launches, and zoom focus remains clearly separated from session status.
 - **attn uses noticeably less memory per session.** Each running session's terminal backend used to reserve 8 MB of scrollback up front and grow a second 8 MB replay buffer, even though only the most recent 256 KB is ever replayed when you switch back to a session — both are now capped at 1 MB, freeing roughly 7–14 MB of RAM per session. Separately, diagnostic terminal capture (which quietly held up to ~20 MB of recent output in memory for every Claude and Codex session) is now off unless you explicitly turn it on with `ATTN_DEBUG_PTY_CAPTURE`. With several sessions open this reclaims hundreds of megabytes.
 
 ## [2026-06-07]

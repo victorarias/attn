@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { GridCompositor } from './GridCompositor';
+import { GridCompositor, type GridTileSpec } from './GridCompositor';
 import { EMPTY_STATS, type GridRenderer, type TileFrame, type TileModel } from './GridRenderer';
 
 // Minimal fakes: the compositor takes its renderer + ghostty + container as
@@ -120,10 +120,17 @@ function makeCompositor() {
   return { comp, renderer, created };
 }
 
+function tileSpec(
+  id: string,
+  overrides: Partial<Omit<GridTileSpec, 'id'>> = {},
+): GridTileSpec {
+  return { id, attention: false, state: 'working', ...overrides };
+}
+
 describe('GridCompositor', () => {
   it('creates one model per tile spec and registers them with the renderer', () => {
     const { comp, renderer, created } = makeCompositor();
-    comp.syncTiles([{ id: 'a', attention: false }, { id: 'b', attention: true }]);
+    comp.syncTiles([tileSpec('a'), tileSpec('b', { attention: true, state: 'waiting_input' })]);
 
     expect(created).toHaveLength(2);
     expect(renderer.tiles.map((t) => t.id)).toEqual(['a', 'b']);
@@ -133,10 +140,10 @@ describe('GridCompositor', () => {
 
   it('preserves existing models across syncs and frees only removed ones', () => {
     const { comp, created } = makeCompositor();
-    comp.syncTiles([{ id: 'a', attention: false }, { id: 'b', attention: false }]);
+    comp.syncTiles([tileSpec('a'), tileSpec('b')]);
     const [modelA, modelB] = created;
 
-    comp.syncTiles([{ id: 'a', attention: false }]); // drop b
+    comp.syncTiles([tileSpec('a')]); // drop b
 
     expect(created).toHaveLength(2); // no new model created for the kept tile
     expect(modelA.freed).toBe(false);
@@ -151,7 +158,7 @@ describe('GridCompositor', () => {
     // 2×2 must still trigger a render, or the removed tile's stale frame lingers
     // until the next dirtying event ("only every other hide actually hides").
     const { comp, renderer } = makeCompositor();
-    const spec = (id: string) => ({ id, attention: false });
+    const spec = (id: string) => tileSpec(id);
     comp.syncTiles(['a', 'b', 'c', 'd'].map(spec));
     comp.setLayout(2, 2);
 
@@ -160,6 +167,7 @@ describe('GridCompositor', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const internal = comp as any;
     internal.reflowStart = -1;
+    internal.tick();
     const before = renderer.frames.length;
     internal.tick();
     expect(renderer.frames.length).toBe(before);
@@ -174,9 +182,55 @@ describe('GridCompositor', () => {
     expect(last.map((f) => f.id)).toEqual(['a', 'b', 'c']);
   });
 
+  it('renders state-only changes even when the terminal model is clean', () => {
+    const { comp, renderer } = makeCompositor();
+    const internal = comp as any;
+    comp.syncTiles([tileSpec('a')]);
+    internal.reflowStart = -1;
+    internal.tick();
+    const before = renderer.frames.length;
+
+    comp.syncTiles([tileSpec('a', { state: 'idle' })]);
+    internal.tick();
+
+    expect(renderer.frames.length).toBe(before + 1);
+    expect(renderer.frames[renderer.frames.length - 1]?.[0]).toMatchObject({
+      state: 'idle',
+      statePresentation: 'border',
+    });
+  });
+
+  it('renders immediately when the state presentation changes', () => {
+    const { comp, renderer } = makeCompositor();
+    const internal = comp as any;
+    comp.syncTiles([tileSpec('a')]);
+    internal.reflowStart = -1;
+    internal.tick();
+    const before = renderer.frames.length;
+
+    comp.setStatePresentation('background');
+    internal.tick();
+
+    expect(renderer.frames.length).toBe(before + 1);
+    expect(renderer.frames[renderer.frames.length - 1]?.[0].statePresentation).toBe('background');
+  });
+
+  it('keeps rendering while a visible session is waiting for input', () => {
+    const { comp, renderer } = makeCompositor();
+    const internal = comp as any;
+    comp.syncTiles([tileSpec('a', { state: 'waiting_input', attention: false })]);
+    internal.reflowStart = -1;
+    internal.tick();
+    const before = renderer.frames.length;
+
+    internal.tick();
+
+    expect(renderer.frames.length).toBe(before + 1);
+  });
+
   it('routes live bytes to the matching model and drains responses without echoing them', () => {
     const { comp, created } = makeCompositor();
-    comp.syncTiles([{ id: 'a', attention: false }]);
+    comp.syncTiles([tileSpec('a')]);
     const model = created[0];
     model.responses = ['\x1b[0n', 'extra'];
 
@@ -193,7 +247,7 @@ describe('GridCompositor', () => {
 
   it('exposes a tile\'s visible screen text and reports emptiness', () => {
     const { comp, created } = makeCompositor();
-    comp.syncTiles([{ id: 'a', attention: false }]);
+    comp.syncTiles([tileSpec('a')]);
     const model = created[0];
 
     expect(comp.getTileText('a')).toBe('');
@@ -209,21 +263,21 @@ describe('GridCompositor', () => {
 
   it('tracks zoom state and cancels zoom when the zoomed tile disappears', () => {
     const { comp } = makeCompositor();
-    comp.syncTiles([{ id: 'a', attention: false }, { id: 'b', attention: false }]);
+    comp.syncTiles([tileSpec('a'), tileSpec('b')]);
 
     expect(comp.isZoomed()).toBe(false);
     comp.zoomTo('a');
     expect(comp.isZoomed()).toBe(true);
     expect(comp.zoomedId()).toBe('a');
 
-    comp.syncTiles([{ id: 'b', attention: false }]); // remove the zoomed tile
+    comp.syncTiles([tileSpec('b')]); // remove the zoomed tile
     expect(comp.zoomedId()).toBeNull();
     expect(comp.isZoomed()).toBe(false);
   });
 
   it('reports the zoomed tile\'s terminal mode for input encoding (off when nothing is zoomed)', () => {
     const { comp, created } = makeCompositor();
-    comp.syncTiles([{ id: 'a', attention: false }, { id: 'b', attention: false }]);
+    comp.syncTiles([tileSpec('a'), tileSpec('b')]);
     created[0].modes[1] = true; // tile a: application cursor keys on; tile b: off
 
     // Overview: no input target, so modes read off regardless of any model.
@@ -238,7 +292,7 @@ describe('GridCompositor', () => {
 
   it('toggles tile visibility', () => {
     const { comp } = makeCompositor();
-    comp.syncTiles([{ id: 'a', attention: false }]);
+    comp.syncTiles([tileSpec('a')]);
     expect(comp.tileSummaries()[0].hidden).toBe(false);
     comp.toggleHide('a');
     expect(comp.tileSummaries()[0].hidden).toBe(true);
@@ -246,7 +300,7 @@ describe('GridCompositor', () => {
 
   it('resolves the resting tile + rect under a pointer, on demand without a render loop', () => {
     const { comp } = makeCompositor(); // container 800×600, cell 8×16, models 80×24
-    comp.syncTiles([{ id: 'a', attention: false }]);
+    comp.syncTiles([tileSpec('a')]);
     comp.setLayout(1, 1);
 
     // A single 80×24 tile fits 800×600 at scale 1.25 → 800×480, centred vertically
@@ -262,7 +316,7 @@ describe('GridCompositor', () => {
 
   it('frees every model on dispose', () => {
     const { comp, renderer, created } = makeCompositor();
-    comp.syncTiles([{ id: 'a', attention: false }, { id: 'b', attention: false }]);
+    comp.syncTiles([tileSpec('a'), tileSpec('b')]);
     comp.dispose();
     expect(created.every((m) => m.freed)).toBe(true);
     expect(renderer.disposed).toBe(true);
@@ -275,7 +329,7 @@ describe('GridCompositor seeding + sequence dedup', () => {
 
   it('applies live bytes immediately and drops chunks at or below the watermark', () => {
     const { comp, created } = makeCompositor();
-    comp.syncTiles([{ id: 'a', attention: false }]);
+    comp.syncTiles([tileSpec('a')]);
     const model = created[0];
 
     comp.writeBytes('a', bytes(1), 5); // first seq sets the watermark
@@ -288,7 +342,7 @@ describe('GridCompositor seeding + sequence dedup', () => {
 
   it('buffers live bytes while seeding, then paints the snapshot before flushing newer ones', () => {
     const { comp, created } = makeCompositor();
-    comp.syncTiles([{ id: 'a', attention: false }]);
+    comp.syncTiles([tileSpec('a')]);
     const model = created[0];
 
     comp.beginSeeding('a');
@@ -304,7 +358,7 @@ describe('GridCompositor seeding + sequence dedup', () => {
 
   it('resizes the model to the snapshot geometry so an absolute repaint is not clamped', () => {
     const { comp, created } = makeCompositor();
-    comp.syncTiles([{ id: 'a', attention: false }]);
+    comp.syncTiles([tileSpec('a')]);
     const model = created[0];
     expect([model.cols, model.rows]).toEqual([80, 24]);
 
@@ -317,7 +371,7 @@ describe('GridCompositor seeding + sequence dedup', () => {
 
   it('flushes buffered bytes best-effort when seeding is cancelled (no snapshot)', () => {
     const { comp, created } = makeCompositor();
-    comp.syncTiles([{ id: 'a', attention: false }]);
+    comp.syncTiles([tileSpec('a')]);
     const model = created[0];
 
     comp.beginSeeding('a');
@@ -332,7 +386,7 @@ describe('GridCompositor seeding + sequence dedup', () => {
 
   it('ignores seedTile unless the tile is awaiting a seed', () => {
     const { comp, created } = makeCompositor();
-    comp.syncTiles([{ id: 'a', attention: false }]);
+    comp.syncTiles([tileSpec('a')]);
     const model = created[0];
 
     // Tiles default to live; a stray seed must not clobber live content.
@@ -342,7 +396,7 @@ describe('GridCompositor seeding + sequence dedup', () => {
 
   it('tracks live geometry via resizeTile and no-ops on unchanged or invalid sizes', () => {
     const { comp, created } = makeCompositor();
-    comp.syncTiles([{ id: 'a', attention: false }]);
+    comp.syncTiles([tileSpec('a')]);
     const model = created[0];
 
     comp.resizeTile('a', 100, 30);

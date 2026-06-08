@@ -12,6 +12,7 @@
 //      an index cursor — NOT `number[].push(...)` + `new Float32Array(...)`,
 //      which benchmarked at ~57ms/frame for 25 tiles (hard jank).
 import { CellFlags, type GhosttyCell, type GhosttyTerminal } from 'ghostty-web';
+import type { UISessionState } from '../../types/sessionState';
 import type {
   GridRenderer,
   GridRenderStats,
@@ -46,15 +47,28 @@ const ATLAS_SIZE = 2048;
 const FLOATS_PER_VERTEX = 8;
 const FLOATS_PER_QUAD = FLOATS_PER_VERTEX * 6;
 const SOLID_TEXEL_CENTER = 0.5 / ATLAS_SIZE;
-const ATTENTION: Rgb = { r: 245, g: 158, b: 11 };
 // Blue accent for the focused (zoomed/input-target) tile, so it is obvious which
-// tile keyboard input is going to. Distinct from the amber attention pulse.
+// tile keyboard input is going to. Distinct from the semantic session state.
 const FOCUS: Rgb = { r: 96, g: 165, b: 250 };
+const STATE_COLORS: Record<UISessionState, Rgb> = {
+  launching: { r: 96, g: 165, b: 250 },
+  working: { r: 34, g: 197, b: 94 },
+  waiting_input: { r: 245, g: 158, b: 11 },
+  idle: { r: 107, g: 114, b: 128 },
+  pending_approval: { r: 234, g: 179, b: 8 },
+  unknown: { r: 168, g: 85, b: 247 },
+};
 // Idle tiles get a faint outline so they read as separate panels against the
 // shared canvas background (tiles only paint non-default cell backgrounds, so
 // without this they blend into the gaps).
 const IDLE_BORDER_ALPHA = 0.22;
 const FOCUS_BORDER_ALPHA = 0.95;
+const WAITING_INPUT_FLASH_PERIOD_MS = 1_600;
+
+export function waitingInputFlash(now: number): number {
+  const wave = 0.5 + 0.5 * Math.sin((now / WAITING_INPUT_FLASH_PERIOD_MS) * Math.PI * 2);
+  return wave * wave;
+}
 
 const BLOCK_ELEMENT_RECTS: Readonly<Record<number, readonly BlockRect[]>> = {
   0x2580: [{ x: 0, y: 0, width: 1, height: 1 / 2 }],
@@ -385,6 +399,26 @@ export class UnifiedGridRenderer implements GridRenderer {
 
     const cellW = m.cellWidth * gs;
     const cellH = m.cellHeight * gs;
+    const w = cols * cellW;
+    const h = rows * cellH;
+    const stateColor = STATE_COLORS[frame.state];
+    const waitingFlash = frame.state === 'waiting_input' ? waitingInputFlash(now) : 0;
+
+    if (frame.statePresentation === 'background') {
+      const pulse = frame.state === 'waiting_input'
+        ? 0.02 + 0.14 * waitingFlash
+        : frame.attention > 0.001
+          ? frame.attention * (0.04 + 0.08 * (0.5 + 0.5 * Math.sin(now / 320)))
+          : 0;
+      this.pushSolid(
+        ox,
+        oy,
+        w,
+        h,
+        stateColor,
+        Math.min(0.24, this.stateBackgroundAlpha(frame.state) + pulse) * alpha,
+      );
+    }
 
     for (let row = 0; row < rows; row += 1) {
       for (let col = 0; col < cols; col += 1) {
@@ -423,24 +457,70 @@ export class UnifiedGridRenderer implements GridRenderer {
       }
     }
 
-    const w = cols * cellW;
-    const h = rows * cellH;
     // Always outline the tile so it reads as a panel; the focused tile gets a
     // brighter accent so the keyboard-input target is unambiguous. Both fade with
     // the frame alpha during a zoom morph.
     if (frame.focused) {
       this.pushBorder(ox, oy, w, h, FOCUS, FOCUS_BORDER_ALPHA * alpha, Math.max(2 * this.dpr, 2));
+    } else if (frame.statePresentation === 'border') {
+      this.pushBorder(
+        ox,
+        oy,
+        w,
+        h,
+        stateColor,
+        (
+          frame.state === 'waiting_input'
+            ? 0.28 + 0.72 * waitingFlash
+            : this.stateBorderAlpha(frame.state)
+        ) * alpha,
+        Math.max(2 * this.dpr, 1.5),
+      );
     } else {
       this.pushBorder(ox, oy, w, h, this.borderColor, IDLE_BORDER_ALPHA * alpha, Math.max(this.dpr, 1));
     }
-    if (frame.attention > 0.001) {
-      this.pushAttentionBorder(ox, oy, w, h, frame.attention, now);
+    if (
+      frame.statePresentation === 'border'
+      && frame.state !== 'waiting_input'
+      && frame.attention > 0.001
+    ) {
+      this.pushAttentionBorder(ox, oy, w, h, stateColor, frame.attention, now);
     }
   }
 
-  private pushAttentionBorder(x: number, y: number, w: number, h: number, intensity: number, now: number): void {
+  private stateBorderAlpha(state: UISessionState): number {
+    if (state === 'idle') return 0.5;
+    if (state === 'working') return 0.72;
+    return 0.82;
+  }
+
+  private stateBackgroundAlpha(state: UISessionState): number {
+    switch (state) {
+      case 'idle':
+        return 0.055;
+      case 'working':
+        return 0.07;
+      case 'launching':
+        return 0.085;
+      case 'waiting_input':
+      case 'pending_approval':
+        return 0.12;
+      case 'unknown':
+        return 0.1;
+    }
+  }
+
+  private pushAttentionBorder(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    color: Rgb,
+    intensity: number,
+    now: number,
+  ): void {
     const pulse = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(now / 320));
-    this.pushBorder(x, y, w, h, ATTENTION, Math.min(1, intensity) * pulse, Math.max(2 * this.dpr, 1.5));
+    this.pushBorder(x, y, w, h, color, Math.min(1, intensity) * pulse, Math.max(2 * this.dpr, 1.5));
   }
 
   // Draw a 1-quad-per-edge rectangular outline inset to sit on the content box.

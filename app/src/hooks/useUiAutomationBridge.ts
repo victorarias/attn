@@ -1330,6 +1330,14 @@ export function useUiAutomationBridge({
         handle.zoom(runtimeId);
         return { requested: runtimeId, zoomedId: handle.getState().zoomedId };
       }
+      case 'grid_set_state_presentation': {
+        const handle = getGridAutomationHandle();
+        if (!handle) throw new Error('grid is not active');
+        const presentation = payload.presentation === 'background' ? 'background' : 'border';
+        handle.setStatePresentation(presentation);
+        await settleUi();
+        return { statePresentation: handle.getState().statePresentation };
+      }
       case 'grid_send_text': {
         const handle = getGridAutomationHandle();
         if (!handle) throw new Error('grid is not active');
