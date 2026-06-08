@@ -110,6 +110,10 @@ interface SessionTerminalWorkspaceProps {
   enabled: boolean;
   isActiveSession: boolean;
   isSessionViewVisible?: boolean;
+  // When false, this workspace is virtualized: its terminals are not mounted
+  // (freeing the Ghostty WASM model + WebGL renderer) and a placeholder is shown
+  // instead. The terminal rehydrates from daemon replay when it remounts.
+  terminalsLive?: boolean;
   eventRouter: PaneRuntimeEventRouter;
   onSplitPane: (targetPaneId: string, direction: TerminalSplitDirection) => void;
   onClosePane: (paneId: string) => void;
@@ -151,6 +155,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     enabled,
     isActiveSession,
     isSessionViewVisible = true,
+    terminalsLive = true,
     eventRouter,
     onSplitPane,
     onClosePane,
@@ -687,6 +692,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   <span className="workspace-pane-status-spinner" aria-hidden="true" />
                   <span>{isPaneFailed ? (agentPane.error || 'Session failed to start') : `Starting ${paneTitle}...`}</span>
                 </div>
+              ) : !terminalsLive ? (
+                // Virtualized: terminal unmounted to free WASM model + WebGL
+                // renderer. Rehydrates from daemon replay when it remounts.
+                <div className="workspace-pane-virtualized" aria-hidden="true" data-testid={`pane-virtualized-${agentPane.id}`} />
               ) : (
                 <GhosttyTerminal
                   ref={(handle) => runtime.setTerminalHandle(agentPane.id, handle)}
