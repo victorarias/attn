@@ -859,6 +859,21 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleClientHello(client, msg.(*protocol.ClientHelloMessage))
 	case protocol.CmdDelegate:
 		go d.handleDelegateWS(client, msg.(*protocol.DelegateMessage))
+	case protocol.CmdWorkspaceContextCheckout:
+		go func() {
+			result, err := d.checkoutWorkspaceContext(msg.(*protocol.WorkspaceContextCheckoutMessage))
+			d.sendWorkspaceContextWSResult(client, "checkout", result, err)
+		}()
+	case protocol.CmdWorkspaceContextUpdate:
+		go func() {
+			result, _, err := d.updateWorkspaceContext(msg.(*protocol.WorkspaceContextUpdateMessage))
+			d.sendWorkspaceContextWSResult(client, "update", result, err)
+		}()
+	case protocol.CmdWorkspaceContextStatus:
+		go func() {
+			result, err := d.workspaceContextStatus(msg.(*protocol.WorkspaceContextStatusMessage))
+			d.sendWorkspaceContextWSResult(client, "status", result, err)
+		}()
 	case protocol.CmdApprovePR:
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
 	case protocol.CmdMergePR:

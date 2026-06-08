@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Added
 - **Agents can delegate a task without leaving their current work.** `attn delegate` starts Claude, Codex, or a plugin agent that explicitly supports delegated prompts with a focused brief from `--brief` or `--brief-file`. The delegated agent can join the current or another existing workspace, start in a new workspace at a chosen directory, or get an isolated branch in a newly created worktree. The bundled attn skill uses a concise capability index and loads separate delegation, review-loop, markdown, or browser guidance only when needed.
+- **Agents can maintain shared context for a workspace.** `attn workspace context show` returns a semi-persistent markdown file that an agent can edit in place, while `update` publishes revision-checked changes and `status` reports local edits or newer shared revisions. Context-bearing workspaces survive after their last session closes, and clients receive `workspace_context_changed` when another session publishes an update.
 
 ### Changed
 - **Grid view shows session state with colored borders and subtle tile tints.** Waiting-for-input sessions flash amber, while zoom focus remains clearly separated from session status.

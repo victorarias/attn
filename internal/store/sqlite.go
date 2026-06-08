@@ -328,6 +328,15 @@ var migrations = []migration{
 	{41, "move session mute state to workspaces", `
 		ALTER TABLE workspaces ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;
 	`},
+	{42, "create workspace contexts table", `
+		CREATE TABLE IF NOT EXISTS workspace_contexts (
+			workspace_id TEXT PRIMARY KEY,
+			content TEXT NOT NULL,
+			revision INTEGER NOT NULL,
+			updated_by_session_id TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

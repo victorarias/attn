@@ -445,10 +445,28 @@ func TestWriteHelpMentionsPresenceAndOpen(t *testing.T) {
 	writeHelp(&output)
 
 	text := output.String()
-	for _, expected := range []string{"presence", "delegate --brief-file <path>", "open <file.md> [--session <id>]", "review-loop <command>"} {
+	for _, expected := range []string{"presence", "delegate --brief-file <path>", "workspace context <command>", "open <file.md> [--session <id>]", "review-loop <command>"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("help output missing %q: %q", expected, text)
 		}
+	}
+}
+
+func TestWorkspaceContextSourceSessionDefaultsToEnvironment(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "session-1")
+	sessionID, force, err := workspaceContextSourceSession([]string{"--force"}, true)
+	if err != nil {
+		t.Fatalf("workspaceContextSourceSession error: %v", err)
+	}
+	if sessionID != "session-1" || !force {
+		t.Fatalf("workspaceContextSourceSession = (%q, %v)", sessionID, force)
+	}
+}
+
+func TestWorkspaceContextSourceSessionRejectsForceForStatus(t *testing.T) {
+	_, _, err := workspaceContextSourceSession([]string{"--session", "session-1", "--force"}, false)
+	if err == nil || !strings.Contains(err.Error(), "--force is only valid") {
+		t.Fatalf("workspaceContextSourceSession error = %v", err)
 	}
 }
 

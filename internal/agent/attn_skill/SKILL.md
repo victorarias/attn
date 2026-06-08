@@ -1,6 +1,6 @@
 ---
 name: attn
-description: Drive attn from an agent. Use to delegate work, run review loops, open markdown, or control attn's persistent in-app browser.
+description: Drive attn from an agent. Use to delegate work, maintain shared workspace context, run review loops, open markdown, or control attn's persistent in-app browser.
 ---
 
 # attn
@@ -24,6 +24,8 @@ If a command reports an unknown subcommand or shows another tool's help, check
 
 - **Delegate a side task to another agent:** read
   [references/delegation.md](references/delegation.md).
+- **Read or update shared workspace context:** read
+  [references/workspace-context.md](references/workspace-context.md).
 - **Start, monitor, or answer a review loop:** read
   [references/review-loops.md](references/review-loops.md).
 - **Show the user a markdown document:** read

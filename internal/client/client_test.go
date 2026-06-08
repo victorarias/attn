@@ -259,6 +259,58 @@ func TestClient_Delegate(t *testing.T) {
 	}
 }
 
+func TestClient_CheckoutWorkspaceContext(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("/tmp", "attn-wc-client-")
+	if err != nil {
+		t.Fatalf("MkdirTemp error: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmpDir) })
+	sockPath := filepath.Join(tmpDir, "test.sock")
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen error: %v", err)
+	}
+	defer listener.Close()
+
+	requests := make(chan *protocol.WorkspaceContextCheckoutMessage, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var raw json.RawMessage
+		if err := json.NewDecoder(conn).Decode(&raw); err != nil {
+			return
+		}
+		cmd, msg, err := protocol.ParseMessage(raw)
+		if err != nil || cmd != protocol.CmdWorkspaceContextCheckout {
+			return
+		}
+		requests <- msg.(*protocol.WorkspaceContextCheckoutMessage)
+		_ = json.NewEncoder(conn).Encode(protocol.Response{
+			Ok: true,
+			WorkspaceContextResult: &protocol.WorkspaceContextResult{
+				WorkspaceID: "workspace-1",
+				SessionID:   "session-1",
+				Path:        "/tmp/context.md",
+			},
+		})
+	}()
+
+	result, err := New(sockPath).CheckoutWorkspaceContext("session-1", true)
+	if err != nil {
+		t.Fatalf("CheckoutWorkspaceContext error: %v", err)
+	}
+	if result.Path != "/tmp/context.md" {
+		t.Fatalf("CheckoutWorkspaceContext result = %+v", result)
+	}
+	request := <-requests
+	if request.SourceSessionID != "session-1" || !protocol.Deref(request.Force) {
+		t.Fatalf("CheckoutWorkspaceContext request = %+v", request)
+	}
+}
+
 func TestClient_NotRunning(t *testing.T) {
 	c := New("/nonexistent/socket.sock")
 	err := c.Register("id", "label", "/tmp")
