@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import App from './App';
 import { WHATS_NEW_ID, WHATS_NEW_STORAGE_KEY } from './hooks/useWhatsNew';
 import type { TerminalLayoutNode } from './types/workspace';
+import { WARM_WORKSPACE_LIMIT_STORAGE_KEY } from './utils/terminalVirtualization';
 
 // Regression coverage for figgy's review on PR #257: a revealed tile-only
 // (sessionless) workspace must be selectable and must render its docked tile,
@@ -50,10 +51,12 @@ vi.mock('./components/Sidebar', () => ({
     visualOrder,
     selectedWorkspaceId,
     onSelectWorkspace,
+    onSelectGridLayout,
   }: {
     visualOrder: Array<{ id: string; sessions: unknown[] }>;
     selectedWorkspaceId: string | null;
     onSelectWorkspace: (id: string) => void;
+    onSelectGridLayout?: (layout: { mode: 'auto' }) => void;
   }) => (
     <div data-testid="sidebar" data-selected-workspace={selectedWorkspaceId ?? ''}>
       {visualOrder.map((workspace) => (
@@ -65,7 +68,20 @@ vi.mock('./components/Sidebar', () => ({
           {workspace.id}
         </button>
       ))}
+      <button
+        type="button"
+        data-testid="open-grid"
+        onClick={() => onSelectGridLayout?.({ mode: 'auto' })}
+      >
+        grid
+      </button>
     </div>
+  ),
+}));
+
+vi.mock('./components/grid/GridView', () => ({
+  GridView: ({ tiles }: { tiles: Array<{ runtimeId: string }> }) => (
+    <div data-testid="grid-view" data-runtime-ids={tiles.map((tile) => tile.runtimeId).join(',')} />
   ),
 }));
 
@@ -76,14 +92,17 @@ vi.mock('./components/SessionTerminalWorkspace', () => ({
     workspaceId,
     workspace,
     isActiveSession,
+    terminalsLive,
   }: {
     workspaceId: string;
     workspace: { agents: unknown[]; layoutTree: TerminalLayoutNode | null };
     isActiveSession: boolean;
+    terminalsLive?: boolean;
   }) => (
     <div
       data-testid={`workspace-${workspaceId}`}
       data-active={isActiveSession ? '1' : '0'}
+      data-live={terminalsLive === false ? '0' : '1'}
       data-agent-count={workspace.agents.length}
       data-tile-ids={collectTileIds(workspace.layoutTree).join(',')}
     />
@@ -286,5 +305,90 @@ describe('tile-only (sessionless) workspace selection and render', () => {
     expect(mockSendWorkspaceSelected).toHaveBeenLastCalledWith('ws-tiles');
     // Still rendering its docked tile.
     expect(screen.getByTestId('workspace-ws-tiles').getAttribute('data-tile-ids')).toBe('tile-readme');
+  });
+
+  it('keeps visible grid workspaces mounted even when they are cold and idle', async () => {
+    localStorage.setItem(WARM_WORKSPACE_LIMIT_STORAGE_KEY, '0');
+    mockDaemonWorkspaces = [
+      {
+        id: 'ws-one',
+        title: 'one',
+        directory: '/tmp/repo',
+        status: 'active',
+        layout: {
+          active_pane_id: 'pane-one',
+          layout_json: JSON.stringify({ type: 'pane', pane_id: 'pane-one' }),
+          panes: [{ workspace_id: 'ws-one', pane_id: 'pane-one', kind: 'agent', runtime_id: 's1', session_id: 's1', title: 'one' }],
+        },
+      },
+      {
+        id: 'ws-two',
+        title: 'two',
+        directory: '/tmp/repo',
+        status: 'active',
+        layout: {
+          active_pane_id: 'pane-two',
+          layout_json: JSON.stringify({ type: 'pane', pane_id: 'pane-two' }),
+          panes: [{ workspace_id: 'ws-two', pane_id: 'pane-two', kind: 'agent', runtime_id: 's2', session_id: 's2', title: 'two' }],
+        },
+      },
+      {
+        id: 'ws-three',
+        title: 'three',
+        directory: '/tmp/repo',
+        status: 'active',
+        layout: {
+          active_pane_id: 'pane-three',
+          layout_json: JSON.stringify({ type: 'pane', pane_id: 'pane-three' }),
+          panes: [{ workspace_id: 'ws-three', pane_id: 'pane-three', kind: 'agent', runtime_id: 's3', session_id: 's3', title: 'three' }],
+        },
+      },
+    ];
+    const sessions = ['one', 'two', 'three'].map((name, index) => {
+      const sessionId = `s${index + 1}`;
+      const paneId = `pane-${name}`;
+      const workspaceId = `ws-${name}`;
+      return {
+        id: sessionId,
+        label: name,
+        state: 'idle',
+        cwd: '/tmp/repo',
+        workspaceId,
+        agent: 'claude',
+        transcriptMatched: true,
+        daemonActivePaneId: paneId,
+        workspace: {
+          agents: [{ id: paneId, runtimeId: sessionId, sessionId, title: name }],
+          layoutTree: { type: 'pane' as const, paneId },
+        },
+      };
+    });
+    mockUseSessionStore.mockReturnValue({
+      ...mockUseSessionStore(),
+      sessions,
+      activeSessionId: 's1',
+    });
+    mockUseDaemonStore.mockReturnValue({
+      ...mockUseDaemonStore(),
+      daemonSessions: sessions.map((session) => ({
+        id: session.id,
+        label: session.label,
+        directory: session.cwd,
+        state: 'idle',
+      })),
+    });
+
+    render(<App />);
+
+    const coldWorkspace = await screen.findByTestId('workspace-ws-two');
+    expect(coldWorkspace.getAttribute('data-live')).toBe('0');
+
+    await userEvent.click(screen.getByTestId('open-grid'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('grid-view').getAttribute('data-runtime-ids')).toContain('s2');
+      expect(screen.getByTestId('workspace-ws-two').getAttribute('data-live')).toBe('1');
+      expect(screen.getByTestId('workspace-ws-three').getAttribute('data-live')).toBe('1');
+    });
   });
 });
