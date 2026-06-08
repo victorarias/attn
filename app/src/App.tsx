@@ -2264,15 +2264,27 @@ sendFetchPRDetails,
       .map((workspace) => workspace.id),
     [workspaceViews],
   );
+  const visibleGridSessionIds = useMemo(
+    () => new Set(visibleGridTiles.map((tile) => tile.sessionId)),
+    [visibleGridTiles],
+  );
+  const gridVisibleWorkspaceIds = useMemo(
+    () => view === 'grid'
+      ? workspaceViews
+        .filter((workspace) => workspace.sessions.some((session) => visibleGridSessionIds.has(session.id)))
+        .map((workspace) => workspace.id)
+      : [],
+    [view, visibleGridSessionIds, workspaceViews],
+  );
   const warmWorkspaceIds = useMemo(
     () => computeWarmWorkspaceIds(
       allWorkspaceIds,
       recentWorkspaceIds,
       activeWorkspaceId,
       warmWorkspaceLimit,
-      liveRuntimeWorkspaceIds,
+      [...liveRuntimeWorkspaceIds, ...gridVisibleWorkspaceIds],
     ),
-    [allWorkspaceIds, recentWorkspaceIds, activeWorkspaceId, warmWorkspaceLimit, liveRuntimeWorkspaceIds],
+    [allWorkspaceIds, recentWorkspaceIds, activeWorkspaceId, warmWorkspaceLimit, liveRuntimeWorkspaceIds, gridVisibleWorkspaceIds],
   );
 
   const getActiveLeafDropSnapshot = useCallback(
