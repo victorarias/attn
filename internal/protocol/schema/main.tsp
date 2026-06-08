@@ -380,6 +380,26 @@ model TodosMessage {
   todos: string[];
 }
 
+model DelegateMessage {
+  cmd: "delegate";
+  source_session_id: string;
+  brief: string;
+  agent?: string;
+  label?: string;
+  yolo_mode?: boolean;
+  placement?: string;
+  workspace_id?: string;
+  cwd?: string;
+  worktree?: DelegateWorktreeRequest;
+}
+
+model DelegateWorktreeRequest {
+  repo?: string;
+  branch: string;
+  path?: string;
+  starting_from?: string;
+}
+
 model QueryMessage {
   cmd: "query";
   filter?: string;
@@ -764,6 +784,7 @@ model SpawnSessionMessage {
   resume_session_id?: string;
   resume_picker?: boolean;
   yolo_mode?: boolean;
+  initial_prompt?: string;
   executable?: string;         // Generic executable override for selected agent
   claude_executable?: string;  // Backward compatibility
   codex_executable?: string;   // Backward compatibility
@@ -1622,11 +1643,28 @@ model Response {
   ok: boolean;
   error?: string;
   data?: string;
+  delegate_result?: DelegateResult;
   sessions?: Session[];
   prs?: PR[];
   repos?: RepoState[];
   authors?: AuthorState[];
   review_loop_run?: ReviewLoopRun;
+}
+
+model DelegateResult {
+  session_id: string;
+  workspace_id: string;
+  directory: string;
+  branch?: string;
+  placement: string;
+  worktree_created?: boolean;
+}
+
+model DelegateResultMessage {
+  event: "delegate_result";
+  success: boolean;
+  error?: string;
+  result?: DelegateResult;
 }
 
 // Warning for non-critical issues (e.g., gh version too old)

@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-06-08]
 
+### Added
+- **Agents can delegate a task without leaving their current work.** `attn delegate` starts Claude, Codex, or a plugin agent that explicitly supports delegated prompts with a focused brief from `--brief` or `--brief-file`. The delegated agent can join the current or another existing workspace, start in a new workspace at a chosen directory, or get an isolated branch in a newly created worktree. The bundled attn skill uses a concise capability index and loads separate delegation, review-loop, markdown, or browser guidance only when needed.
+
 ### Changed
 - **Grid view shows session state with colored borders and subtle tile tints.** Waiting-for-input sessions flash amber, while zoom focus remains clearly separated from session status.
 - **attn uses noticeably less memory per session.** Each running session's terminal backend used to reserve 8 MB of scrollback up front and grow a second 8 MB replay buffer, even though only the most recent 256 KB is ever replayed when you switch back to a session — both are now capped at 1 MB, freeing roughly 7–14 MB of RAM per session. Separately, diagnostic terminal capture (which quietly held up to ~20 MB of recent output in memory for every Claude and Codex session) is now off unless you explicitly turn it on with `ATTN_DEBUG_PTY_CAPTURE`. With several sessions open this reclaims hundreds of megabytes.

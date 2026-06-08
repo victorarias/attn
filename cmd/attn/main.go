@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -137,6 +138,9 @@ func main() {
 		runList()
 	case "presence":
 		runPresence()
+	case "delegate":
+		maybePrintProfileBanner()
+		runDelegate()
 	case "open":
 		maybePrintProfileBanner()
 		runOpen()
@@ -234,6 +238,7 @@ func runPTYWorker() {
 	fs.StringVar(&cfg.ResumeSessionID, "resume-session-id", "", "resume session id")
 	fs.BoolVar(&cfg.ResumePicker, "resume-picker", false, "resume picker")
 	fs.BoolVar(&cfg.YoloMode, "yolo-mode", false, "launch agent in yolo mode")
+	fs.StringVar(&cfg.InitialPromptFile, "initial-prompt-file", "", "file containing the initial agent prompt")
 	fs.StringVar(&cfg.Executable, "executable", "", "selected agent executable override")
 	fs.StringVar(&cfg.ClaudeExecutable, "claude-executable", "", "claude executable override")
 	fs.StringVar(&cfg.CodexExecutable, "codex-executable", "", "codex executable override")
@@ -385,6 +390,7 @@ func writeHelp(w io.Writer) {
 
 commands:
   presence                          check whether the current shell runs inside attn
+  delegate --brief-file <path>      start another agent with a delegated brief
   open <file.md> [--session <id>]   show a markdown file in attn
   browser <command>                 open and control the in-app browser
   review-loop <command>             manage an autonomous review loop
@@ -393,6 +399,139 @@ commands:
   profile-env <profile|--unset>     print shell commands for selecting a profile
   version                           print version information
 `)
+}
+
+func runDelegate() {
+	if len(os.Args) == 3 && (os.Args[2] == "-h" || os.Args[2] == "--help") {
+		writeDelegateHelp(os.Stdout)
+		return
+	}
+	warnIfDaemonVersionMismatch()
+	args, err := parseDelegateArgs(os.Args[2:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "delegate: %v\n", err)
+		os.Exit(2)
+	}
+	result, err := client.New("").Delegate(args.sourceSessionID, args.brief, args.options)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "delegate: %v\n", err)
+		os.Exit(1)
+	}
+	printJSON(result)
+}
+
+func writeDelegateHelp(w io.Writer) {
+	fmt.Fprint(w, `usage: attn delegate (--brief <text> | --brief-file <path>) [options]
+
+placement:
+  (no flags)                 add a pane to the source session's workspace
+  --new-workspace            create a workspace using the source directory
+  --workspace <id>           add a pane to an existing workspace
+  --cwd <path>               create a workspace at an existing directory
+  --worktree <branch>        create a worktree and workspace
+
+worktree options:
+  --repo <path>              main repository (defaults to the source repository)
+  --from <ref>               branch or ref to start from
+  --worktree-path <path>     override the generated sibling path
+
+session options:
+  --agent <name>             configured prompt-capable built-in or plugin agent
+  --label <text>             session label
+  --source-session <id>      source session (defaults to ATTN_SESSION_ID)
+  --yolo                     bypass agent approval prompts
+`)
+}
+
+type delegateCLIArgs struct {
+	sourceSessionID string
+	brief           string
+	options         client.DelegateOptions
+}
+
+func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
+	fs := flag.NewFlagSet("delegate", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	briefText := fs.String("brief", "", "delegated task brief")
+	briefFile := fs.String("brief-file", "", "file containing the delegated task brief")
+	agentName := fs.String("agent", "", "target agent (defaults to the source session agent)")
+	label := fs.String("label", "", "target session label")
+	sourceSessionID := fs.String("source-session", "", "source session id (defaults to ATTN_SESSION_ID)")
+	yolo := fs.Bool("yolo", false, "launch the target agent in yolo mode")
+	newWorkspace := fs.Bool("new-workspace", false, "create a new workspace for the delegated agent")
+	workspaceID := fs.String("workspace", "", "place the delegated agent in an existing workspace")
+	cwd := fs.String("cwd", "", "use an existing directory in a new workspace")
+	worktreeBranch := fs.String("worktree", "", "create a worktree with this branch in a new workspace")
+	worktreeRepo := fs.String("repo", "", "main repository for --worktree (defaults to source repository)")
+	worktreeStart := fs.String("from", "", "starting ref for --worktree")
+	worktreePath := fs.String("worktree-path", "", "custom path for --worktree")
+	if err := fs.Parse(args); err != nil {
+		return delegateCLIArgs{}, err
+	}
+	if fs.NArg() != 0 {
+		return delegateCLIArgs{}, fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	source := strings.TrimSpace(*sourceSessionID)
+	if source == "" {
+		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+	}
+	if source == "" {
+		return delegateCLIArgs{}, errors.New("no source session; run inside attn or pass --source-session")
+	}
+	if strings.TrimSpace(*briefText) != "" && strings.TrimSpace(*briefFile) != "" {
+		return delegateCLIArgs{}, errors.New("pass only one of --brief or --brief-file")
+	}
+	brief := strings.TrimSpace(*briefText)
+	if strings.TrimSpace(*briefFile) != "" {
+		content, err := os.ReadFile(*briefFile)
+		if err != nil {
+			return delegateCLIArgs{}, fmt.Errorf("read brief file: %w", err)
+		}
+		brief = strings.TrimSpace(string(content))
+	}
+	if brief == "" {
+		return delegateCLIArgs{}, errors.New("--brief or --brief-file is required")
+	}
+
+	explicitWorkspace := strings.TrimSpace(*workspaceID)
+	customCWD := strings.TrimSpace(*cwd)
+	branch := strings.TrimSpace(*worktreeBranch)
+	repo := strings.TrimSpace(*worktreeRepo)
+	startingFrom := strings.TrimSpace(*worktreeStart)
+	customWorktreePath := strings.TrimSpace(*worktreePath)
+	if explicitWorkspace != "" && (*newWorkspace || customCWD != "" || branch != "") {
+		return delegateCLIArgs{}, errors.New("--workspace cannot be combined with --new-workspace, --cwd, or --worktree")
+	}
+	if customCWD != "" && branch != "" {
+		return delegateCLIArgs{}, errors.New("--cwd cannot be combined with --worktree")
+	}
+	if branch == "" && (repo != "" || startingFrom != "" || customWorktreePath != "") {
+		return delegateCLIArgs{}, errors.New("--repo, --from, and --worktree-path require --worktree")
+	}
+
+	placement := "current_workspace"
+	if explicitWorkspace != "" {
+		placement = "existing_workspace"
+	} else if *newWorkspace || customCWD != "" || branch != "" {
+		placement = "new_workspace"
+	}
+
+	return delegateCLIArgs{
+		sourceSessionID: source,
+		brief:           brief,
+		options: client.DelegateOptions{
+			Agent:        strings.TrimSpace(*agentName),
+			Label:        strings.TrimSpace(*label),
+			Yolo:         *yolo,
+			Placement:    placement,
+			WorkspaceID:  explicitWorkspace,
+			CWD:          customCWD,
+			WorktreeRepo: repo,
+			Worktree:     branch,
+			WorktreePath: customWorktreePath,
+			StartingFrom: startingFrom,
+		},
+	}, nil
 }
 
 // parseOpenArgs parses the args for `attn open <file.md> [--session <id>]`.
@@ -950,15 +1089,25 @@ func runWrapper() {
 }
 
 type directLaunchArgs struct {
-	label        string
-	resumeID     string
-	resumePicker bool
-	yoloMode     bool
+	label             string
+	resumeID          string
+	resumePicker      bool
+	yoloMode          bool
+	initialPromptFile string
+}
+
+func readInitialPromptFile(path string) (string, error) {
+	content, err := os.ReadFile(path)
+	_ = os.Remove(path)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
 }
 
 // parseDirectLaunchArgs parses the wrapper launch flags. attn understands only
-// -s, --resume, and --yolo; any other argument is an error. We deliberately do
-// not forward unrecognized args to the underlying agent — that implicit
+// -s, --resume, --yolo, and the internal --initial-prompt-file flag; any other
+// argument is an error. We deliberately do not forward unrecognized args to the underlying agent — that implicit
 // passthrough was never used by attn itself and only created confusion (e.g.
 // `attn --help` printing the agent's help instead of attn's).
 func parseDirectLaunchArgs(args []string) (directLaunchArgs, error) {
@@ -982,6 +1131,12 @@ func parseDirectLaunchArgs(args []string) (directLaunchArgs, error) {
 			}
 		case "--yolo":
 			parsed.yoloMode = true
+		case "--initial-prompt-file":
+			if i+1 >= len(args) {
+				return directLaunchArgs{}, fmt.Errorf("flag --initial-prompt-file needs a value")
+			}
+			parsed.initialPromptFile = args[i+1]
+			i++
 		default:
 			return directLaunchArgs{}, fmt.Errorf("unknown flag %q", arg)
 		}
@@ -1047,6 +1202,15 @@ func runAgentDirectly(requestedAgent string) {
 		fmt.Fprintf(os.Stderr, "error getting cwd: %v\n", err)
 		os.Exit(1)
 	}
+	initialPrompt := ""
+	if parsed.initialPromptFile != "" {
+		content, readErr := readInitialPromptFile(parsed.initialPromptFile)
+		if readErr != nil {
+			fmt.Fprintf(os.Stderr, "error reading initial prompt: %v\n", readErr)
+			os.Exit(1)
+		}
+		initialPrompt = content
+	}
 
 	c := client.New("")
 	managedMode := os.Getenv("ATTN_DAEMON_MANAGED") == "1"
@@ -1070,6 +1234,7 @@ func runAgentDirectly(requestedAgent string) {
 		SessionID:       sessionID,
 		CWD:             cwd,
 		Label:           parsed.label,
+		InitialPrompt:   initialPrompt,
 		ResumeSessionID: parsed.resumeID,
 		ResumePicker:    parsed.resumePicker,
 		YoloMode:        parsed.yoloMode,

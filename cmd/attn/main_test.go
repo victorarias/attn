@@ -362,14 +362,104 @@ func TestDetectPresence(t *testing.T) {
 	})
 }
 
+func TestParseDirectLaunchArgs_InitialPromptFile(t *testing.T) {
+	parsed, err := parseDirectLaunchArgs([]string{"--initial-prompt-file", "/tmp/brief.md"})
+	if err != nil {
+		t.Fatalf("parseDirectLaunchArgs() error = %v", err)
+	}
+	if parsed.initialPromptFile != "/tmp/brief.md" {
+		t.Fatalf("initialPromptFile = %q, want /tmp/brief.md", parsed.initialPromptFile)
+	}
+}
+
+func TestReadInitialPromptFileRemovesFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prompt.md")
+	if err := os.WriteFile(path, []byte("delegated brief"), 0o600); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	prompt, err := readInitialPromptFile(path)
+	if err != nil {
+		t.Fatalf("readInitialPromptFile() error = %v", err)
+	}
+	if prompt != "delegated brief" {
+		t.Fatalf("prompt = %q", prompt)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("prompt file still exists: %v", err)
+	}
+}
+
+func TestParseDelegateArgsDefaultsToCurrentWorkspace(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "source-session")
+
+	parsed, err := parseDelegateArgs([]string{"--brief", "Investigate this"})
+	if err != nil {
+		t.Fatalf("parseDelegateArgs() error = %v", err)
+	}
+	if parsed.sourceSessionID != "source-session" || parsed.brief != "Investigate this" {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+	if parsed.options.Placement != "current_workspace" {
+		t.Fatalf("placement = %q", parsed.options.Placement)
+	}
+}
+
+func TestParseDelegateArgsWorktreeImpliesNewWorkspace(t *testing.T) {
+	parsed, err := parseDelegateArgs([]string{
+		"--source-session", "source-session",
+		"--brief", "Implement the parser",
+		"--agent", "codex",
+		"--worktree", "feat/parser",
+		"--repo", "/tmp/repo",
+		"--from", "main",
+		"--worktree-path", "/tmp/repo--feat-parser",
+	})
+	if err != nil {
+		t.Fatalf("parseDelegateArgs() error = %v", err)
+	}
+	if parsed.options.Placement != "new_workspace" ||
+		parsed.options.Agent != "codex" ||
+		parsed.options.Worktree != "feat/parser" ||
+		parsed.options.WorktreeRepo != "/tmp/repo" ||
+		parsed.options.StartingFrom != "main" ||
+		parsed.options.WorktreePath != "/tmp/repo--feat-parser" {
+		t.Fatalf("options = %+v", parsed.options)
+	}
+}
+
+func TestParseDelegateArgsRejectsAmbiguousPlacement(t *testing.T) {
+	_, err := parseDelegateArgs([]string{
+		"--source-session", "source-session",
+		"--brief", "Investigate this",
+		"--workspace", "workspace-target",
+		"--new-workspace",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--workspace cannot be combined") {
+		t.Fatalf("parseDelegateArgs() error = %v", err)
+	}
+}
+
 func TestWriteHelpMentionsPresenceAndOpen(t *testing.T) {
 	var output bytes.Buffer
 	writeHelp(&output)
 
 	text := output.String()
-	for _, expected := range []string{"presence", "open <file.md> [--session <id>]", "review-loop <command>"} {
+	for _, expected := range []string{"presence", "delegate --brief-file <path>", "open <file.md> [--session <id>]", "review-loop <command>"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("help output missing %q: %q", expected, text)
+		}
+	}
+}
+
+func TestWriteDelegateHelpMentionsPlacementOptions(t *testing.T) {
+	var output bytes.Buffer
+	writeDelegateHelp(&output)
+
+	text := output.String()
+	for _, expected := range []string{"--new-workspace", "--workspace <id>", "--cwd <path>", "--worktree <branch>", "--agent <name>"} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("delegate help missing %q: %q", expected, text)
 		}
 	}
 }

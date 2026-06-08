@@ -132,9 +132,16 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 		}
 		available := isAgentExecutableAvailable(configured, driver.DefaultExecutable())
 		settings[availabilitySettingKey(name)] = strconv.FormatBool(available)
-		if available && name == string(protocol.SessionAgentClaude) {
-			if err := agentdriver.EnsureClaudeSkillInstalled(); err != nil {
-				d.logf("failed to ensure Claude attn skill: %v", err)
+		if available {
+			switch name {
+			case string(protocol.SessionAgentClaude):
+				if err := agentdriver.EnsureClaudeSkillInstalled(); err != nil {
+					d.logf("failed to ensure Claude attn skill: %v", err)
+				}
+			case string(protocol.SessionAgentCodex):
+				if err := agentdriver.EnsureCodexSkillInstalled(); err != nil {
+					d.logf("failed to ensure Codex attn skill: %v", err)
+				}
 			}
 		}
 
@@ -143,6 +150,7 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 		settings[capabilitySettingKey(name, "transcript")] = strconv.FormatBool(caps.HasTranscript)
 		settings[capabilitySettingKey(name, "transcript_watcher")] = strconv.FormatBool(caps.HasTranscriptWatcher)
 		settings[capabilitySettingKey(name, "classifier")] = strconv.FormatBool(caps.HasClassifier)
+		settings[capabilitySettingKey(name, "initial_prompt")] = strconv.FormatBool(caps.HasInitialPrompt)
 		settings[capabilitySettingKey(name, "state_detector")] = strconv.FormatBool(caps.HasStateDetector)
 		settings[capabilitySettingKey(name, "resume")] = strconv.FormatBool(caps.HasResume)
 		settings[capabilitySettingKey(name, "yolo")] = strconv.FormatBool(caps.HasYolo)

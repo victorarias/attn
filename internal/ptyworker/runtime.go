@@ -74,9 +74,10 @@ type Config struct {
 	Rows             uint16
 	Label            string
 
-	ResumeSessionID string
-	ResumePicker    bool
-	YoloMode        bool
+	ResumeSessionID   string
+	ResumePicker      bool
+	YoloMode          bool
+	InitialPromptFile string
 
 	Executable string
 
@@ -244,6 +245,7 @@ func (r *Runtime) run(ctx context.Context) error {
 		ResumeSessionID:   r.cfg.ResumeSessionID,
 		ResumePicker:      r.cfg.ResumePicker,
 		YoloMode:          r.cfg.YoloMode,
+		InitialPromptFile: r.cfg.InitialPromptFile,
 		Executable:        r.cfg.Executable,
 		ClaudeExecutable:  r.cfg.ClaudeExecutable,
 		CodexExecutable:   r.cfg.CodexExecutable,

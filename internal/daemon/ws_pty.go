@@ -30,6 +30,46 @@ import (
 // stream of output.
 var wsSubscriberCounter atomic.Int64
 
+const maxInitialPromptBytes = 1 << 20
+
+func (d *Daemon) writeInitialPromptFile(sessionID, prompt string) (string, func(), error) {
+	if strings.TrimSpace(prompt) == "" {
+		return "", func() {}, nil
+	}
+	if len(prompt) > maxInitialPromptBytes {
+		return "", func() {}, fmt.Errorf("initial prompt exceeds %d bytes", maxInitialPromptBytes)
+	}
+	dataRoot := strings.TrimSpace(d.dataRoot)
+	if dataRoot == "" {
+		dataRoot = filepath.Dir(d.socketPath)
+	}
+	dir := filepath.Join(dataRoot, "runtime", "prompts")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", func() {}, fmt.Errorf("create initial prompt directory: %w", err)
+	}
+	file, err := os.CreateTemp(dir, sessionID+"-*.md")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create initial prompt file: %w", err)
+	}
+	path := file.Name()
+	cleanup := func() { _ = os.Remove(path) }
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		cleanup()
+		return "", func() {}, fmt.Errorf("secure initial prompt file: %w", err)
+	}
+	if _, err := file.WriteString(prompt); err != nil {
+		_ = file.Close()
+		cleanup()
+		return "", func() {}, fmt.Errorf("write initial prompt file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("close initial prompt file: %w", err)
+	}
+	return path, cleanup, nil
+}
+
 func wsSubscriberID(client *wsClient, sessionID string) string {
 	n := wsSubscriberCounter.Add(1)
 	return fmt.Sprintf("%p:%s:%d", client, sessionID, n)
@@ -383,6 +423,24 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		return
 	}
 	isShell := agent == protocol.AgentShellValue
+	initialPrompt := protocol.Deref(msg.InitialPrompt)
+	if isShell && strings.TrimSpace(initialPrompt) != "" {
+		d.sendSpawnFailure(client, msg.ID, errors.New("shell sessions do not accept an initial prompt"))
+		return
+	}
+	if strings.TrimSpace(initialPrompt) != "" {
+		if hasPluginDriver && !pluginDriver.Capabilities["initial_prompt"] {
+			d.sendSpawnFailure(client, msg.ID, fmt.Errorf("agent %q does not support initial prompts", requestedAgent))
+			return
+		}
+		if !hasPluginDriver {
+			driver := agentdriver.Get(agent)
+			if driver == nil || !agentdriver.EffectiveCapabilities(driver).HasInitialPrompt {
+				d.sendSpawnFailure(client, msg.ID, fmt.Errorf("agent %q does not support initial prompts", agent))
+				return
+			}
+		}
+	}
 	workspaceID := strings.TrimSpace(msg.WorkspaceID)
 	if workspaceID == "" {
 		d.sendCommandError(client, protocol.CmdSpawnSession, "missing workspace_id")
@@ -424,6 +482,23 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 	if configuredExecutable == "" {
 		configuredExecutable = legacyExecutableFromSpawnMessage(msg, agent)
 	}
+	initialPromptFile := ""
+	cleanupInitialPrompt := func() {}
+	cleanupInitialPromptOnReturn := false
+	if !hasPluginDriver {
+		var promptErr error
+		initialPromptFile, cleanupInitialPrompt, promptErr = d.writeInitialPromptFile(msg.ID, initialPrompt)
+		if promptErr != nil {
+			d.sendSpawnFailure(client, msg.ID, promptErr)
+			return
+		}
+		cleanupInitialPromptOnReturn = initialPromptFile != ""
+		defer func() {
+			if cleanupInitialPromptOnReturn {
+				cleanupInitialPrompt()
+			}
+		}()
+	}
 	spawnOpts := ptybackend.SpawnOptions{
 		ID:                msg.ID,
 		CWD:               cwd,
@@ -434,6 +509,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		ResumeSessionID:   resumeSessionID,
 		ResumePicker:      protocol.Deref(msg.ResumePicker),
 		YoloMode:          protocol.Deref(msg.YoloMode),
+		InitialPromptFile: initialPromptFile,
 		Executable:        strings.TrimSpace(configuredExecutable),
 		ClaudeExecutable:  protocol.Deref(msg.ClaudeExecutable),
 		CodexExecutable:   protocol.Deref(msg.CodexExecutable),
@@ -459,11 +535,12 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		spawnOpts.LifecycleID = pluginRunID
 		d.beginPluginSessionLaunch(msg.ID, pluginDriver.PluginName, pluginRunID)
 		params := pluginDriverSpawnParams{
-			SessionID: msg.ID,
-			RunID:     pluginRunID,
-			CWD:       cwd,
-			Label:     label,
-			Yolo:      protocol.Deref(msg.YoloMode),
+			SessionID:     msg.ID,
+			RunID:         pluginRunID,
+			CWD:           cwd,
+			Label:         label,
+			Yolo:          protocol.Deref(msg.YoloMode),
+			InitialPrompt: initialPrompt,
 		}
 		if metadata := strings.TrimSpace(d.store.GetAgentMetadata(msg.ID)); metadata != "" && json.Valid([]byte(metadata)) {
 			params.Metadata = json.RawMessage(metadata)
@@ -491,6 +568,12 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		}
 		d.sendSpawnFailure(client, msg.ID, err)
 		return
+	}
+	if initialPromptFile != "" {
+		// The spawned wrapper removes the file after reading it. Keep a fallback
+		// for failures between PTY spawn and wrapper startup.
+		cleanupInitialPromptOnReturn = false
+		time.AfterFunc(5*time.Minute, cleanupInitialPrompt)
 	}
 
 	{
@@ -541,7 +624,22 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 				session.MainRepo = protocol.Ptr(branchInfo.MainRepo)
 			}
 		}
-		d.store.Add(session)
+		if err := d.store.AddChecked(session); err != nil {
+			if hasPluginDriver {
+				d.finishPluginSessionLaunch(msg.ID, false)
+			}
+			killErr := d.ptyBackend.Kill(context.Background(), msg.ID, syscall.SIGTERM)
+			removeErr := d.ptyBackend.Remove(context.Background(), msg.ID)
+			persistErr := fmt.Errorf("persist spawned session: %w", err)
+			if killErr != nil {
+				persistErr = fmt.Errorf("%w; kill spawned runtime: %v", persistErr, killErr)
+			}
+			if removeErr != nil {
+				persistErr = fmt.Errorf("%w; remove spawned runtime: %v", persistErr, removeErr)
+			}
+			d.sendSpawnFailure(client, msg.ID, persistErr)
+			return
+		}
 		if hasPluginDriver && !d.store.BeginAgentDriverRun(session.ID, pluginDriver.PluginName, pluginRunID) {
 			d.finishPluginSessionLaunch(msg.ID, false)
 			d.logf("failed to initialize plugin driver run cursor: session=%s", session.ID)

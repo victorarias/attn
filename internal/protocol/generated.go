@@ -491,6 +491,86 @@ type DaemonWarning struct {
 	Message string `json:"message"`
 }
 
+type DelegateMessage struct {
+	// Agent corresponds to the JSON schema field "agent".
+	Agent *string `json:"agent,omitempty,omitzero"`
+
+	// Brief corresponds to the JSON schema field "brief".
+	Brief string `json:"brief"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Cwd corresponds to the JSON schema field "cwd".
+	Cwd *string `json:"cwd,omitempty,omitzero"`
+
+	// Label corresponds to the JSON schema field "label".
+	Label *string `json:"label,omitempty,omitzero"`
+
+	// Placement corresponds to the JSON schema field "placement".
+	Placement *string `json:"placement,omitempty,omitzero"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+
+	// Worktree corresponds to the JSON schema field "worktree".
+	Worktree *DelegateWorktreeRequest `json:"worktree,omitempty,omitzero"`
+
+	// YoloMode corresponds to the JSON schema field "yolo_mode".
+	YoloMode *bool `json:"yolo_mode,omitempty,omitzero"`
+}
+
+type DelegateResult struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch *string `json:"branch,omitempty,omitzero"`
+
+	// Directory corresponds to the JSON schema field "directory".
+	Directory string `json:"directory"`
+
+	// Placement corresponds to the JSON schema field "placement".
+	Placement string `json:"placement"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+
+	// WorktreeCreated corresponds to the JSON schema field "worktree_created".
+	WorktreeCreated *bool `json:"worktree_created,omitempty,omitzero"`
+}
+
+type DelegateResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Result corresponds to the JSON schema field "result".
+	Result *DelegateResult `json:"result,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type DelegateWorktreeRequest struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch string `json:"branch"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path *string `json:"path,omitempty,omitzero"`
+
+	// Repo corresponds to the JSON schema field "repo".
+	Repo *string `json:"repo,omitempty,omitzero"`
+
+	// StartingFrom corresponds to the JSON schema field "starting_from".
+	StartingFrom *string `json:"starting_from,omitempty,omitzero"`
+}
+
 type DeleteCommentMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1904,6 +1984,9 @@ type Response struct {
 	// Data corresponds to the JSON schema field "data".
 	Data *string `json:"data,omitempty,omitzero"`
 
+	// DelegateResult corresponds to the JSON schema field "delegate_result".
+	DelegateResult *DelegateResult `json:"delegate_result,omitempty,omitzero"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
 
@@ -2489,6 +2572,9 @@ type SpawnSessionMessage struct {
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+
+	// InitialPrompt corresponds to the JSON schema field "initial_prompt".
+	InitialPrompt *string `json:"initial_prompt,omitempty,omitzero"`
 
 	// Label corresponds to the JSON schema field "label".
 	Label *string `json:"label,omitempty,omitzero"`

@@ -1470,6 +1470,7 @@ func (b *fakeAttachBackend) SetAttachInfo(info ptybackend.AttachInfo) {
 type fakeSpawnBackend struct {
 	mu        sync.Mutex
 	spawnOpts []ptybackend.SpawnOptions
+	killed    []string
 	removed   []string
 	onSpawn   func(ptybackend.SpawnOptions)
 	onKill    func()
@@ -1491,7 +1492,10 @@ func (b *fakeSpawnBackend) Attach(context.Context, string, string) (ptybackend.A
 }
 func (b *fakeSpawnBackend) Input(context.Context, string, []byte) error          { return nil }
 func (b *fakeSpawnBackend) Resize(context.Context, string, uint16, uint16) error { return nil }
-func (b *fakeSpawnBackend) Kill(context.Context, string, syscall.Signal) error {
+func (b *fakeSpawnBackend) Kill(_ context.Context, id string, _ syscall.Signal) error {
+	b.mu.Lock()
+	b.killed = append(b.killed, id)
+	b.mu.Unlock()
 	if b.killErr == nil && b.onKill != nil {
 		b.onKill()
 	}
@@ -1516,6 +1520,20 @@ func (b *fakeSpawnBackend) LastSpawn() (ptybackend.SpawnOptions, bool) {
 		return ptybackend.SpawnOptions{}, false
 	}
 	return b.spawnOpts[len(b.spawnOpts)-1], true
+}
+
+func (b *fakeSpawnBackend) WasKilledAndRemoved(id string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	killed := false
+	removed := false
+	for _, candidate := range b.killed {
+		killed = killed || candidate == id
+	}
+	for _, candidate := range b.removed {
+		removed = removed || candidate == id
+	}
+	return killed && removed
 }
 
 func (b *fakeSpawnBackend) RemovedIDs() []string {
@@ -4152,6 +4170,37 @@ func TestDaemon_SettingsWithClaudeAvailability_InstallsClaudeSkill(t *testing.T)
 	skillPath := filepath.Join(home, ".claude", "skills", "attn", "SKILL.md")
 	if _, err := os.Stat(skillPath); err != nil {
 		t.Fatalf("expected Claude attn skill at %s: %v", skillPath, err)
+	}
+	delegationPath := filepath.Join(home, ".claude", "skills", "attn", "references", "delegation.md")
+	if _, err := os.Stat(delegationPath); err != nil {
+		t.Fatalf("expected Claude attn delegation reference at %s: %v", delegationPath, err)
+	}
+}
+
+func TestDaemon_SettingsWithCodexAvailability_InstallsCodexSkill(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	binDir := t.TempDir()
+	codexPath := filepath.Join(binDir, "codex")
+	if err := os.WriteFile(codexPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake Codex executable: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+
+	d := &Daemon{store: store.New()}
+	settings := d.settingsWithAgentAvailability()
+	if got := settings[SettingCodexAvailable]; got != "true" {
+		t.Fatalf("settings[%s] = %v, want true", SettingCodexAvailable, got)
+	}
+
+	skillPath := filepath.Join(home, ".agents", "skills", "attn", "SKILL.md")
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Fatalf("expected Codex attn skill at %s: %v", skillPath, err)
+	}
+	delegationPath := filepath.Join(home, ".agents", "skills", "attn", "references", "delegation.md")
+	if _, err := os.Stat(delegationPath); err != nil {
+		t.Fatalf("expected Codex attn delegation reference at %s: %v", delegationPath, err)
 	}
 }
 

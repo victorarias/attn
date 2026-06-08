@@ -425,6 +425,9 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 	if opts.YoloMode {
 		args = append(args, "--yolo-mode")
 	}
+	if opts.InitialPromptFile != "" {
+		args = append(args, "--initial-prompt-file", opts.InitialPromptFile)
+	}
 	if opts.Executable != "" {
 		args = append(args, "--executable", opts.Executable)
 	}

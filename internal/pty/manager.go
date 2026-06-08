@@ -46,9 +46,10 @@ type SpawnOptions struct {
 	Cols uint16
 	Rows uint16
 
-	ResumeSessionID string
-	ResumePicker    bool
-	YoloMode        bool
+	ResumeSessionID   string
+	ResumePicker      bool
+	YoloMode          bool
+	InitialPromptFile string
 
 	// Executable is the selected CLI path for the current agent.
 	Executable string
@@ -445,6 +446,9 @@ func buildSpawnCommand(opts SpawnOptions, agent, shellPath, attnPath string, env
 	}
 	if opts.YoloMode {
 		args = append(args, "--yolo")
+	}
+	if opts.InitialPromptFile != "" {
+		args = append(args, "--initial-prompt-file", opts.InitialPromptFile)
 	}
 
 	cmdline := "exec " + shellJoin(args)
