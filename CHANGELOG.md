@@ -6,10 +6,19 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-09]
+
+### Added
+- **Claude and Codex are taught to use workspace context when a session starts or resets.** attn checks out the live context file and injects concise instructions to read it, keep durable goals and decisions current, publish edits, and reconcile revision conflicts without copying the context itself into the prompt.
+
+### Changed
+- **Terminals use less graphics memory.** Every live terminal used to preallocate a large fixed GPU texture to cache rendered characters. It now starts small and grows only if a session actually displays many distinct characters (such as heavy CJK or emoji output). Text looks identical, and with several sessions open this frees roughly 90 MB of graphics memory.
+
 ## [2026-06-08]
 
 ### Added
 - **Agents can delegate a task without leaving their current work.** `attn delegate` starts Claude, Codex, or a plugin agent that explicitly supports delegated prompts with a focused brief from `--brief` or `--brief-file`. The delegated agent can join the current or another existing workspace, start in a new workspace at a chosen directory, or get an isolated branch in a newly created worktree. The bundled attn skill uses a concise capability index and loads separate delegation, review-loop, markdown, or browser guidance only when needed.
+- **Agents can maintain shared context for a workspace.** `attn workspace context show` returns a semi-persistent markdown file that an agent can edit in place, while `update` publishes revision-checked changes and `status` reports local edits or newer shared revisions. Context-bearing workspaces survive after their last session closes, and clients receive `workspace_context_changed` when another session publishes an update.
 
 ### Changed
 - **Grid view shows session state with colored borders and subtle tile tints.** Waiting-for-input sessions flash amber, while zoom focus remains clearly separated from session status.

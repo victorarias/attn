@@ -2004,6 +2004,10 @@ type Response struct {
 
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`
+
+	// WorkspaceContextResult corresponds to the JSON schema field
+	// "workspace_context_result".
+	WorkspaceContextResult *WorkspaceContextResult `json:"workspace_context_result,omitempty,omitzero"`
 }
 
 type ReviewComment struct {
@@ -2932,6 +2936,10 @@ type WebSocketEvent struct {
 	// Workspace corresponds to the JSON schema field "workspace".
 	Workspace *Workspace `json:"workspace,omitempty,omitzero"`
 
+	// WorkspaceContextResult corresponds to the JSON schema field
+	// "workspace_context_result".
+	WorkspaceContextResult *WorkspaceContextResult `json:"workspace_context_result,omitempty,omitzero"`
+
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 
@@ -2963,6 +2971,116 @@ type Workspace struct {
 
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title"`
+}
+
+type WorkspaceContext struct {
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// Revision corresponds to the JSON schema field "revision".
+	Revision int `json:"revision"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+
+	// UpdatedBySessionID corresponds to the JSON schema field
+	// "updated_by_session_id".
+	UpdatedBySessionID string `json:"updated_by_session_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspaceContextChangedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Revision corresponds to the JSON schema field "revision".
+	Revision int `json:"revision"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+
+	// UpdatedBySessionID corresponds to the JSON schema field
+	// "updated_by_session_id".
+	UpdatedBySessionID string `json:"updated_by_session_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspaceContextCheckoutMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Force corresponds to the JSON schema field "force".
+	Force *bool `json:"force,omitempty,omitzero"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+}
+
+type WorkspaceContextResult struct {
+	// CanonicalRevision corresponds to the JSON schema field "canonical_revision".
+	CanonicalRevision int `json:"canonical_revision"`
+
+	// Modified corresponds to the JSON schema field "modified".
+	Modified bool `json:"modified"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// Revision corresponds to the JSON schema field "revision".
+	Revision int `json:"revision"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// Stale corresponds to the JSON schema field "stale".
+	Stale bool `json:"stale"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt *string `json:"updated_at,omitempty,omitzero"`
+
+	// UpdatedBySessionID corresponds to the JSON schema field
+	// "updated_by_session_id".
+	UpdatedBySessionID *string `json:"updated_by_session_id,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspaceContextResultMessage struct {
+	// Action corresponds to the JSON schema field "action".
+	Action string `json:"action"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Result corresponds to the JSON schema field "result".
+	Result *WorkspaceContextResult `json:"result,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type WorkspaceContextStatusMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+}
+
+type WorkspaceContextUpdateMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
 }
 
 type WorkspaceLayout struct {

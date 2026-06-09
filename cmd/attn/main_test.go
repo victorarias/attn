@@ -10,8 +10,23 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/buildinfo"
+	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/transcript"
 )
+
+type fakeWorkspaceContextCheckoutClient struct {
+	failures int
+	calls    int
+	path     string
+}
+
+func (f *fakeWorkspaceContextCheckoutClient) CheckoutWorkspaceContext(string, bool) (*protocol.WorkspaceContextResult, error) {
+	f.calls++
+	if f.calls <= f.failures {
+		return nil, fmt.Errorf("source session not found")
+	}
+	return &protocol.WorkspaceContextResult{Path: f.path}, nil
+}
 
 func TestWritePrivateFileReplacesPublicFileWithOwnerOnlyPermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "capture.png")
@@ -390,6 +405,34 @@ func TestReadInitialPromptFileRemovesFile(t *testing.T) {
 	}
 }
 
+func TestWorkspaceContextSessionStartOutputRetriesUntilSessionIsRegistered(t *testing.T) {
+	c := &fakeWorkspaceContextCheckoutClient{
+		failures: 2,
+		path:     "/tmp/context.md",
+	}
+	output, err := workspaceContextSessionStartOutput(c, "session-1", 3, 0)
+	if err != nil {
+		t.Fatalf("workspaceContextSessionStartOutput error: %v", err)
+	}
+	if c.calls != 3 {
+		t.Fatalf("checkout calls = %d, want 3", c.calls)
+	}
+	if !strings.Contains(output, "/tmp/context.md") {
+		t.Fatalf("hook output = %q", output)
+	}
+}
+
+func TestWorkspaceContextSessionStartOutputReturnsLastCheckoutError(t *testing.T) {
+	c := &fakeWorkspaceContextCheckoutClient{failures: 2}
+	output, err := workspaceContextSessionStartOutput(c, "session-1", 2, 0)
+	if err == nil || !strings.Contains(err.Error(), "source session not found") {
+		t.Fatalf("workspaceContextSessionStartOutput error = %v", err)
+	}
+	if output != "" {
+		t.Fatalf("hook output = %q, want empty", output)
+	}
+}
+
 func TestParseDelegateArgsDefaultsToCurrentWorkspace(t *testing.T) {
 	t.Setenv("ATTN_SESSION_ID", "source-session")
 
@@ -445,10 +488,28 @@ func TestWriteHelpMentionsPresenceAndOpen(t *testing.T) {
 	writeHelp(&output)
 
 	text := output.String()
-	for _, expected := range []string{"presence", "delegate --brief-file <path>", "open <file.md> [--session <id>]", "review-loop <command>"} {
+	for _, expected := range []string{"presence", "delegate --brief-file <path>", "workspace context <command>", "open <file.md> [--session <id>]", "review-loop <command>"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("help output missing %q: %q", expected, text)
 		}
+	}
+}
+
+func TestWorkspaceContextSourceSessionDefaultsToEnvironment(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "session-1")
+	sessionID, force, err := workspaceContextSourceSession([]string{"--force"}, true)
+	if err != nil {
+		t.Fatalf("workspaceContextSourceSession error: %v", err)
+	}
+	if sessionID != "session-1" || !force {
+		t.Fatalf("workspaceContextSourceSession = (%q, %v)", sessionID, force)
+	}
+}
+
+func TestWorkspaceContextSourceSessionRejectsForceForStatus(t *testing.T) {
+	_, _, err := workspaceContextSourceSession([]string{"--session", "session-1", "--force"}, false)
+	if err == nil || !strings.Contains(err.Error(), "--force is only valid") {
+		t.Fatalf("workspaceContextSourceSession error = %v", err)
 	}
 }
 

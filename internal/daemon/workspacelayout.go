@@ -807,7 +807,9 @@ func (d *Daemon) unregisterWorkspaceIfEmptyAfterMove(workspaceID string) {
 	if d.workspaces == nil {
 		return
 	}
-	if len(d.workspaces.sessionIDs(workspaceID)) > 0 || d.workspaceLayoutHasTiles(workspaceID) {
+	if len(d.workspaces.sessionIDs(workspaceID)) > 0 ||
+		d.workspaceLayoutHasTiles(workspaceID) ||
+		d.store.HasWorkspaceContext(workspaceID) {
 		d.recomputeAndBroadcastWorkspace(workspaceID)
 		return
 	}

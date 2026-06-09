@@ -26,6 +26,7 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"delegate work",
 		"ATTN_WRAPPER_PATH",
 		"references/delegation.md",
+		"references/workspace-context.md",
 		"references/review-loops.md",
 		"references/markdown.md",
 		"references/browser.md",
@@ -56,6 +57,21 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 	} {
 		if !strings.Contains(delegation, expected) {
 			t.Fatalf("delegation reference missing %q: %q", expected, delegation)
+		}
+	}
+
+	workspaceContext := readSkillFile(t, skillDir, "references/workspace-context.md")
+	for _, expected := range []string{
+		"injects the editable file path",
+		"workspace context show",
+		"workspace context update",
+		"workspace context status",
+		"canonical_revision",
+		"show --force",
+		"workspace_context_changed",
+	} {
+		if !strings.Contains(workspaceContext, expected) {
+			t.Fatalf("workspace context reference missing %q: %q", expected, workspaceContext)
 		}
 	}
 
@@ -129,6 +145,7 @@ func TestAttnSkillInstallsAreIdentical(t *testing.T) {
 	for _, relative := range []string{
 		"SKILL.md",
 		"references/delegation.md",
+		"references/workspace-context.md",
 		"references/review-loops.md",
 		"references/markdown.md",
 		"references/browser.md",
