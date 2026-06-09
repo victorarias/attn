@@ -4,17 +4,64 @@ Produced 2026-06-08 by a multi-agent audit (8 subsystem finders → per-finding 
 
 **Live baseline (measured `ps`, prod app):** total attn ≈ **782 MB** — pty-workers **585 MB / ~75%** (avg 73 MB, peak 109 MB; idle ~14 MB), daemon ~77–111 MB, frontend ~85 MB. The prize is **per-session footprint**, not the daemon heap.
 
+## Measured baseline — 2026-06-09 (dev app, post WS-1/2/4/7, shell sessions)
+
+Captured with `app/scripts/real-app-harness/scenario-perf-baseline.mjs` (8 `shell`
+sessions; shells isolate attn's OWN footprint from external claude/codex agent
+memory) on commit `e9c61826`, via the WS-7 diag endpoint (`ATTN_PPROF`). Full
+process-tree RSS including the launchd-reparented WebKit processes.
+
+**IDLE @ 8 sessions = 805 MB.** attn-own (excludes the 8 shells = the user's
+workload, 115 MB):
+
+| class | RSS | note |
+| --- | --- | --- |
+| WebKit WebContent | **250 MB** | WASM terminal models + canvas + JS heap |
+| WebKit GPU | **181 MB** | GL textures incl. 2048² atlas per live renderer |
+| app (Tauri main) | 101 MB | |
+| pty-workers (×8) | 115 MB | **14.3 MB each = Go-runtime floor, NOT scrollback** |
+| daemon | **27 MB** | heap inuse only ~6 MB |
+| WebKit networking | 16 MB | |
+
+**Frontend (app + WebKit) = 548 MB ≈ 79% of attn-own RSS.** The per-session
+prize is the **frontend terminal**, not the worker/daemon — the prod "75% in
+pty-workers" figure was agent memory inside the worker PIDs, not attn structure.
+
+**Streaming spike (NEW, biggest single effect):** streaming high-throughput PTY
+output into 2 panes for 20 s drove **WebContent 250 → 1148 MB and it did NOT
+recover** (805 → 1604 MB total, retained post-stream). Mechanism: the Ghostty
+WASM scrollback heap grows and WASM linear memory never shrinks; only pane
+teardown (WS-1) reclaims it. **Daemon stayed ~28 MB; daemon CPU during the
+stream was 0.2 % (40 ms / 20 s) — WS-4 already flattened the daemon datapath.**
+
+### What the data changes
+
+- **WS-1 (frontend virtualization) is the whole memory game** and is already
+  shipped. The remaining high-value memory work is all frontend: bound the
+  streaming WASM-heap balloon, shrink the 2048² atlas (fe-term-2), and confirm
+  WS-1's win with a warm-set A/B.
+- **WS-3 (daemon GC cap): DROP for memory.** 27 MB RSS / 6 MB heap — nothing to
+  reclaim. (A high `GOMEMLIMIT` safety ceiling is fine but is not a win.)
+- **WS-2 step 2 (lazy ring buffer): DROP.** Worker RSS is the Go runtime floor;
+  scrollback is already <1 MiB. Not worth a PR.
+- **CPU (P2):** daemon streaming path already cheap post-WS-4. WS-5 (idle
+  fork/wakeup gating) stays valid as an idle-battery win; WS-6 (transcript
+  tail-read) is modest. The dominant streaming CPU is frontend rendering (out of
+  scope of the Go daemon workstreams).
+
 ## Status tracker
 
 - [x] **WS-2 step 1 — shrink PTY scrollback 8 MiB → 1 MiB** (`internal/pty/manager.go`). Measured **7 MiB/session idle, 14 MiB/session full**. Shipped 2026-06-08.
 - [x] **pty-2 — debug PTY capture off by default** (`internal/ptyworker/debug_capture.go`). Saves up to ~16–22 MiB per claude/codex worker. Shipped 2026-06-08.
 - [x] **WS-1 — virtualize off-screen terminal workspaces** (largest single lever, ~200+ MiB). Shipped 2026-06-08: keep active + N recent workspaces warm (default 3), tear down the rest, rehydrate via `same_app_remount` replay. Runtime-configurable via `window.attnSetWarmWorkspaces(n)` / localStorage. Unmount-only (frees WASM+WebGL); daemon-stream detach is a follow-up.
-- [ ] WS-7 — guarded loopback pprof + expvar (measurement enabler; do before WS-3)
-- [ ] WS-4 — kill per-PTY-chunk synchronous logging + preview allocs (biggest CPU lever)
-- [ ] WS-5 — gate idle background loops on client presence (branch monitor / markdown / PR poll)
-- [ ] WS-3 — daemon GOMEMLIMIT soft cap + GOGC + gated idle FreeOSMemory (after WS-7)
-- [ ] WS-6 — transcript tail-read instead of full-file scan
-- [ ] WS-2 step 2 + fe-term-2 (atlas shrink) + deferred riders — see below
+- [x] **WS-7 — guarded loopback pprof + expvar** (measurement enabler). Shipped 2026-06-08 (#283).
+- [x] **WS-4 — kill per-PTY-chunk synchronous logging + preview allocs.** Shipped 2026-06-08 (#281). Verified: daemon CPU 0.2% under 2-session stream.
+- [~] **NEW — bound the frontend streaming WASM-heap balloon** (biggest measured memory effect). **Cheap fix RULED OUT by experiment 2026-06-09:** lowering `TERMINAL_SCROLLBACK_LINES` 50000→1000 (50×) left the balloon essentially unchanged — `seq 1 20000000` into 2 panes still retained **1688 MB** (vs 1598 MB at 50000). Mechanism confirmed: ghostty-web 0.4.0 does **not** effectively trim/free WASM scrollback during ingestion (the daemon already paces output 1 s/chunk, yet it still balloons), and WASM linear memory is one-way. **Therefore the scrollback cap is not a lever, and teardown (WS-1) is the ONLY reclaim path.** This also means any long-lived pane grows unboundedly, not just runaway-output cases → elevates warm-set tuning. Remaining options: tighter warm set / reclaim inflated backgrounded panes (needs warm-set A/B), or a memory-pressure remount of inflated panes (high risk, #7).
+- [x] **fe-term-2 — shrink 2048² atlas. SHIPPED 2026-06-09 (PR #286), grow-on-demand.** The atlas was eagerly + fully allocated per renderer — 2048² backing canvas + 2048² RGBA GL texture = ~32 MB/renderer fixed, independent of glyph count. Now starts at 1024² (~8 MB) and doubles (capped 2048²) only when a glyph-heavy session overflows it; `resetAtlas` reuses once at the cap. **Measured (8 shell sessions, idle, warm-set 3): total RSS 825→724 MB, WebKit 457→355 MB, GPU 181→90 MB (−91 MB GPU / −101 MB total).** Verified rendering through a real grow (3000 distinct CJK glyphs → grow to 2048², all render correctly). Render-only; invariants #6/#7 untouched. Still TODO: confirm WS-1 win via warm-set A/B.
+- [ ] WS-5 — gate idle background loops on client presence (idle-battery win; not a throughput lever).
+- [ ] WS-6 — transcript tail-read instead of full-file scan (modest per-classification CPU).
+- [~] ~~WS-3 — daemon GC cap~~ **DROPPED for memory by 2026-06-09 data** (daemon 27 MB RSS / 6 MB heap).
+- [~] ~~WS-2 step 2 — lazy ring buffer~~ **DROPPED by data** (worker RSS is Go-runtime floor, not scrollback).
 
 ---
 
