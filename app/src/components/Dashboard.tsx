@@ -120,6 +120,7 @@ export function Dashboard({
     const target = dispatchSessions.find((session) => session.id === dispatch.session_id);
     const state = target?.state ?? normalizeSessionState(dispatch.status === 'closed' ? 'unknown' : dispatch.status);
     const summary = dispatch.latest_report || dispatch.brief;
+    const statusLabel = target ? state.replace('_', ' ') : 'closed';
     return (
       <button
         type="button"
@@ -132,15 +133,23 @@ export function Dashboard({
       >
         <StateIndicator state={state} size="sm" seed={dispatch.session_id} />
         <span className="dispatch-copy">
+          <span className="dispatch-meta">
+            <span>{dispatch.agent} agent</span>
+            <span aria-hidden="true">·</span>
+            <span>Agent status: {statusLabel}</span>
+          </span>
+          <span className="dispatch-summary-label">Task</span>
           <span className="dispatch-title">
             {target?.label || dispatch.label}
-            <span className="dispatch-agent">{dispatch.agent}</span>
+          </span>
+          <span className="dispatch-summary-label">
+            {dispatch.latest_report ? 'Latest update' : 'Assignment'}
           </span>
           <span className={`dispatch-summary ${dispatch.latest_report ? 'reported' : ''}`}>
             {summary}
           </span>
         </span>
-        <span className="dispatch-status">{target ? state.replace('_', ' ') : 'closed'}</span>
+        <span className="dispatch-open-hint" aria-hidden="true">›</span>
       </button>
     );
   };
@@ -479,10 +488,9 @@ export function Dashboard({
           </div>
         </div>
 
-        <div className="dashboard-card chief-dispatch-card">
+        <div className="dashboard-card chief-dispatch-card" data-testid="chief-of-staff-card">
           <div className="card-header">
             <h2>Chief of Staff</h2>
-            {chiefSession && <ChiefOfStaffBadge />}
           </div>
           <div className="card-body">
             {!chiefSession && chiefOfStaffDispatches.length === 0 ? (
@@ -490,25 +498,39 @@ export function Dashboard({
             ) : (
               <>
                 {chiefSession && (
-                  <div className="chief-session-summary" data-testid="chief-session-summary">
-                    <StateIndicator state={chiefSession.state} size="sm" seed={chiefSession.id} />
-                    <button type="button" onClick={() => onSelectSession(chiefSession.id)}>
-                      {chiefSession.label}
+                  <div className="chief-session-block" data-testid="chief-session-summary">
+                    <div className="chief-section-label">Chief session</div>
+                    <button
+                      type="button"
+                      className="chief-session-summary"
+                      onClick={() => onSelectSession(chiefSession.id)}
+                    >
+                      <StateIndicator state={chiefSession.state} size="sm" seed={chiefSession.id} />
+                      <span className="chief-session-name">{chiefSession.label}</span>
+                      <ChiefOfStaffBadge compact />
+                      <span className="chief-session-state">
+                        Session: {chiefSession.state.replace('_', ' ')}
+                      </span>
                     </button>
-                    <span>{activeChiefDispatches.length} dispatched</span>
                   </div>
                 )}
                 {activeChiefDispatches.length > 0 ? (
                   <div className="dispatch-group">
-                    <div className="group-label">Current chief</div>
+                    <div className="dispatch-group-header">
+                      <span>Delegated work</span>
+                      <span>{activeChiefDispatches.length}</span>
+                    </div>
                     {activeChiefDispatches.map(renderDispatch)}
                   </div>
                 ) : chiefSession ? (
-                  <div className="card-empty compact">No tracked dispatches yet.</div>
+                  <div className="card-empty compact">No delegated work yet.</div>
                 ) : null}
                 {historicalChiefDispatches.length > 0 && (
                   <div className="dispatch-group historical">
-                    <div className="group-label">Previous chiefs</div>
+                    <div className="dispatch-group-header">
+                      <span>Past chief dispatches</span>
+                      <span>{historicalChiefDispatches.length}</span>
+                    </div>
                     {historicalChiefDispatches.map(renderDispatch)}
                   </div>
                 )}

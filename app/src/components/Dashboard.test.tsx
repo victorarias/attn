@@ -148,6 +148,12 @@ describe('Dashboard sessions', () => {
 
     const dispatch = screen.getByTestId('chief-dispatch-dispatch-1');
     expect(dispatch).toHaveAttribute('data-state', 'waiting_input');
+    expect(screen.getByText('Chief session')).toBeInTheDocument();
+    expect(screen.getByText('Delegated work')).toBeInTheDocument();
+    expect(screen.getByText('codex agent')).toBeInTheDocument();
+    expect(screen.getByText('Agent status: waiting input')).toBeInTheDocument();
+    expect(screen.getByText('Task')).toBeInTheDocument();
+    expect(screen.getByText('Latest update')).toBeInTheDocument();
     expect(screen.getByText('Root cause found; implementing the fix.')).toBeInTheDocument();
     fireEvent.click(dispatch);
     expect(onSelectSession).toHaveBeenCalledWith('worker-1');
