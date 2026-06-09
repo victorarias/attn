@@ -163,6 +163,24 @@ model WorkspaceContext {
   updated_at: string;
 }
 
+model ChiefOfStaffDispatch {
+  id: string;
+  chief_session_id: string;
+  session_id: string;
+  workspace_id: string;
+  brief: string;
+  label: string;
+  agent: string;
+  directory: string;
+  branch?: string;
+  status: string;
+  status_since: string;
+  latest_report?: string;
+  reported_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 model PR {
   // Core identity - always present
   // ID format: "host:owner/repo#number" (e.g. github.com:acme/widget#42)
@@ -400,6 +418,17 @@ model DelegateMessage {
   workspace_id?: string;
   cwd?: string;
   worktree?: DelegateWorktreeRequest;
+}
+
+model ListDispatchesMessage {
+  cmd: "list_dispatches";
+  source_session_id: string;
+}
+
+model ReportDispatchMessage {
+  cmd: "report_dispatch";
+  source_session_id: string;
+  report: string;
 }
 
 model WorkspaceContextCheckoutMessage {
@@ -1069,6 +1098,7 @@ model InitialStateMessage {
   github_hosts?: string[];
   settings?: Record<string>;
   warnings?: DaemonWarning[];
+  chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
 }
 
 model EndpointStatusChangedMessage {
@@ -1166,6 +1196,11 @@ model ChiefOfStaffResultMessage {
   previous_session_id?: string;
   success: boolean;
   error?: string;
+}
+
+model ChiefOfStaffDispatchesUpdatedMessage {
+  event: "chief_of_staff_dispatches_updated";
+  dispatches: ChiefOfStaffDispatch[];
 }
 
 model WorkspaceLayoutActionResultMessage {
@@ -1695,6 +1730,8 @@ model Response {
   data?: string;
   delegate_result?: DelegateResult;
   workspace_context_result?: WorkspaceContextResult;
+  chief_of_staff_dispatch?: ChiefOfStaffDispatch;
+  chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
   sessions?: Session[];
   prs?: PR[];
   repos?: RepoState[];
@@ -1709,6 +1746,7 @@ model DelegateResult {
   branch?: string;
   placement: string;
   worktree_created?: boolean;
+  dispatch_id?: string;
 }
 
 model DelegateResultMessage {
@@ -1837,6 +1875,8 @@ model WebSocketEvent {
 
   review_loop_run?: ReviewLoopRun;
   workspace_context_result?: WorkspaceContextResult;
+  chief_of_staff_dispatch?: ChiefOfStaffDispatch;
+  chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
 }
 
 alias DaemonEvent =
@@ -1855,6 +1895,7 @@ alias DaemonEvent =
   | WorkspaceLayoutActionResultMessage
   | RenameResultMessage
   | ChiefOfStaffResultMessage
+  | ChiefOfStaffDispatchesUpdatedMessage
   | WorkspaceTileContentMessage
   | BrowserControlResponseMessage
   | PRsUpdatedMessage

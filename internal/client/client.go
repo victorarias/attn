@@ -200,6 +200,32 @@ func (c *Client) Delegate(sourceSessionID, brief string, opts DelegateOptions) (
 	return resp.DelegateResult, nil
 }
 
+func (c *Client) ListDispatches(sourceSessionID string) ([]protocol.ChiefOfStaffDispatch, error) {
+	resp, err := c.send(protocol.ListDispatchesMessage{
+		Cmd:             protocol.CmdListDispatches,
+		SourceSessionID: sourceSessionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.ChiefOfStaffDispatches, nil
+}
+
+func (c *Client) ReportDispatch(sourceSessionID, report string) (*protocol.ChiefOfStaffDispatch, error) {
+	resp, err := c.send(protocol.ReportDispatchMessage{
+		Cmd:             protocol.CmdReportDispatch,
+		SourceSessionID: sourceSessionID,
+		Report:          report,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.ChiefOfStaffDispatch == nil {
+		return nil, errors.New("daemon returned no dispatch")
+	}
+	return resp.ChiefOfStaffDispatch, nil
+}
+
 func (c *Client) CheckoutWorkspaceContext(sourceSessionID string, force bool) (*protocol.WorkspaceContextResult, error) {
 	msg := protocol.WorkspaceContextCheckoutMessage{
 		Cmd:             protocol.CmdWorkspaceContextCheckout,

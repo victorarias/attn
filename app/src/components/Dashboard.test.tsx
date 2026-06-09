@@ -1,6 +1,10 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Dashboard } from './Dashboard';
+
+const daemonStoreState = vi.hoisted(() => ({
+  chiefOfStaffDispatches: [] as Array<Record<string, unknown>>,
+}));
 
 vi.mock('../contexts/DaemonContext', () => ({
   useDaemonContext: () => ({
@@ -12,6 +16,7 @@ vi.mock('../contexts/DaemonContext', () => ({
 
 vi.mock('../store/daemonSessions', () => ({
   useDaemonStore: () => ({
+    chiefOfStaffDispatches: daemonStoreState.chiefOfStaffDispatches,
     repoStates: [],
     authorStates: [],
   }),
@@ -31,6 +36,10 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
 }));
 
 describe('Dashboard sessions', () => {
+  beforeEach(() => {
+    daemonStoreState.chiefOfStaffDispatches = [];
+  });
+
   it('shows pending approval sessions on home screen', () => {
     render(
       <Dashboard
@@ -102,6 +111,51 @@ describe('Dashboard sessions', () => {
       />
     );
 
-    expect(screen.getByLabelText('Chief of staff')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('Chief of staff')).toHaveLength(2);
+  });
+
+  it('shows tracked dispatch status and latest report with session navigation', () => {
+    daemonStoreState.chiefOfStaffDispatches = [{
+      id: 'dispatch-1',
+      chief_session_id: 'chief-1',
+      session_id: 'worker-1',
+      workspace_id: 'workspace-1',
+      brief: 'Investigate the parser.',
+      label: 'Parser investigation',
+      agent: 'codex',
+      directory: '/repo/a',
+      status: 'working',
+      status_since: '2026-06-09T10:00:00Z',
+      latest_report: 'Root cause found; implementing the fix.',
+      reported_at: '2026-06-09T10:10:00Z',
+      created_at: '2026-06-09T10:00:00Z',
+      updated_at: '2026-06-09T10:10:00Z',
+    }];
+    const onSelectSession = vi.fn();
+    render(
+      <Dashboard
+        sessions={[
+          { id: 'chief-1', label: 'planner', state: 'working', cwd: '/repo/a', chiefOfStaff: true },
+          { id: 'worker-1', label: 'parser-worker', state: 'waiting_input', cwd: '/repo/a' },
+        ]}
+        prs={[]}
+        isLoading={false}
+        onSelectSession={onSelectSession}
+        onNewSession={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const dispatch = screen.getByTestId('chief-dispatch-dispatch-1');
+    expect(dispatch).toHaveAttribute('data-state', 'waiting_input');
+    expect(screen.getByText('Chief session')).toBeInTheDocument();
+    expect(screen.getByText('Delegated work')).toBeInTheDocument();
+    expect(screen.getByText('codex agent')).toBeInTheDocument();
+    expect(screen.getByText('Agent status: waiting input')).toBeInTheDocument();
+    expect(screen.getByText('Task')).toBeInTheDocument();
+    expect(screen.getByText('Latest update')).toBeInTheDocument();
+    expect(screen.getByText('Root cause found; implementing the fix.')).toBeInTheDocument();
+    fireEvent.click(dispatch);
+    expect(onSelectSession).toHaveBeenCalledWith('worker-1');
   });
 });

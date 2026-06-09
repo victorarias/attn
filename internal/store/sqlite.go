@@ -343,6 +343,25 @@ var migrations = []migration{
 			session_id TEXT NOT NULL
 		);
 	`},
+	{44, "create chief of staff dispatches table", `
+		CREATE TABLE IF NOT EXISTS chief_of_staff_dispatches (
+			id TEXT PRIMARY KEY,
+			chief_session_id TEXT NOT NULL,
+			session_id TEXT NOT NULL UNIQUE,
+			workspace_id TEXT NOT NULL,
+			brief TEXT NOT NULL,
+			label TEXT NOT NULL,
+			agent TEXT NOT NULL,
+			directory TEXT NOT NULL,
+			branch TEXT NOT NULL DEFAULT '',
+			latest_report TEXT NOT NULL DEFAULT '',
+			reported_at TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_chief_dispatches_chief_created
+			ON chief_of_staff_dispatches(chief_session_id, created_at DESC);
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

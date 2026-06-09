@@ -649,7 +649,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [
           {
             id: 'agent-1',
@@ -735,7 +735,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [],
         workspaces: [{
           id: 'workspace-1',
@@ -819,7 +819,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -904,7 +904,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1036,7 +1036,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -1102,7 +1102,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -1166,7 +1166,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -1228,7 +1228,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -1288,7 +1288,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [],
         workspaces: [{
           id: 'workspace-1',
@@ -1388,7 +1388,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     };
     const initialState = {
       event: 'initial_state',
-      protocol_version: '92',
+      protocol_version: '93',
       sessions: [],
       workspaces: [workspace],
       prs: [],
@@ -1465,7 +1465,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1559,7 +1559,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1658,7 +1658,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1743,7 +1743,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -1822,7 +1822,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -1892,7 +1892,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',
@@ -2053,7 +2053,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '92',
+        protocol_version: '93',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -2092,6 +2092,67 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       });
     });
     await expect(updatePromise).resolves.toBeUndefined();
+
+    unmount();
+  });
+
+  it('publishes chief-of-staff dispatch snapshots from initial state and updates', async () => {
+    const onChiefOfStaffDispatchesUpdate = vi.fn();
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onChiefOfStaffDispatchesUpdate,
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    const dispatch = {
+      id: 'dispatch-1',
+      chief_session_id: 'chief-1',
+      session_id: 'worker-1',
+      workspace_id: 'workspace-1',
+      brief: 'Investigate.',
+      label: 'Investigate',
+      agent: 'codex',
+      directory: '/repo',
+      status: 'working',
+      status_since: '2026-06-09T10:00:00Z',
+      created_at: '2026-06-09T10:00:00Z',
+      updated_at: '2026-06-09T10:00:00Z',
+    };
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '93',
+        sessions: [],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+        chief_of_staff_dispatches: [dispatch],
+      });
+    });
+    await waitFor(() => {
+      expect(onChiefOfStaffDispatchesUpdate).toHaveBeenLastCalledWith([dispatch]);
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'chief_of_staff_dispatches_updated',
+        dispatches: [{ ...dispatch, latest_report: 'Done.' }],
+      });
+    });
+    await waitFor(() => {
+      expect(onChiefOfStaffDispatchesUpdate).toHaveBeenLastCalledWith([
+        { ...dispatch, latest_report: 'Done.' },
+      ]);
+    });
 
     unmount();
   });

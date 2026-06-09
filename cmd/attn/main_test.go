@@ -509,12 +509,38 @@ func TestParseDelegateArgsRejectsAmbiguousPlacement(t *testing.T) {
 	}
 }
 
+func TestParseDispatchReportArgsReadsFile(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "worker-1")
+	path := filepath.Join(t.TempDir(), "report.md")
+	if err := os.WriteFile(path, []byte("Implemented the fix.\nTests pass.\n"), 0o600); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+	sessionID, report, err := parseDispatchReportArgs([]string{"--file", path})
+	if err != nil {
+		t.Fatalf("parseDispatchReportArgs() error = %v", err)
+	}
+	if sessionID != "worker-1" || report != "Implemented the fix.\nTests pass." {
+		t.Fatalf("dispatch report = (%q, %q)", sessionID, report)
+	}
+}
+
+func TestParseDispatchReportArgsRejectsAmbiguousContent(t *testing.T) {
+	_, _, err := parseDispatchReportArgs([]string{
+		"--session", "worker-1",
+		"--message", "done",
+		"--file", "/tmp/report.md",
+	})
+	if err == nil || !strings.Contains(err.Error(), "only one of --message or --file") {
+		t.Fatalf("parseDispatchReportArgs() error = %v", err)
+	}
+}
+
 func TestWriteHelpMentionsPresenceAndOpen(t *testing.T) {
 	var output bytes.Buffer
 	writeHelp(&output)
 
 	text := output.String()
-	for _, expected := range []string{"presence", "delegate --brief-file <path>", "workspace context <command>", "open <file.md> [--session <id>]", "review-loop <command>"} {
+	for _, expected := range []string{"presence", "delegate --brief-file <path>", "dispatch <command>", "workspace context <command>", "open <file.md> [--session <id>]", "review-loop <command>"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("help output missing %q: %q", expected, text)
 		}

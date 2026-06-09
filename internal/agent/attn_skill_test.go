@@ -26,6 +26,7 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"delegate work",
 		"ATTN_WRAPPER_PATH",
 		"references/delegation.md",
+		"references/chief-of-staff.md",
 		"references/workspace-context.md",
 		"references/review-loops.md",
 		"references/markdown.md",
@@ -41,6 +42,20 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 	}
 	if strings.Contains(index, "browser command find_element") {
 		t.Fatalf("skill index contains capability details that belong in a reference: %q", index)
+	}
+
+	chiefOfStaff := readSkillFile(t, skillDir, "references/chief-of-staff.md")
+	for _, expected := range []string{
+		"dispatch list",
+		"dispatch report --message",
+		"dispatch report --file",
+		"latest report",
+		"not proof that the work is correct",
+		"Do not use dispatch reporting for ordinary",
+	} {
+		if !strings.Contains(chiefOfStaff, expected) {
+			t.Fatalf("chief of staff reference missing %q: %q", expected, chiefOfStaff)
+		}
 	}
 
 	delegation := readSkillFile(t, skillDir, "references/delegation.md")

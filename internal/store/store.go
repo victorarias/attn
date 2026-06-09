@@ -25,6 +25,7 @@ type Store struct {
 	agentDriverRuns map[string]AgentDriverReportCursor
 	agentMetadata   map[string]string
 	profileRoles    map[string]string
+	chiefDispatches map[string]*protocol.ChiefOfStaffDispatch
 	workspaces      map[string]workspacelayout.WorkspaceLayout
 	recentLocations map[string]*protocol.RecentLocation
 }
@@ -44,6 +45,7 @@ func New() *Store {
 			agentDriverRuns: make(map[string]AgentDriverReportCursor),
 			agentMetadata:   make(map[string]string),
 			profileRoles:    make(map[string]string),
+			chiefDispatches: make(map[string]*protocol.ChiefOfStaffDispatch),
 			workspaces:      make(map[string]workspacelayout.WorkspaceLayout),
 			recentLocations: make(map[string]*protocol.RecentLocation),
 		}

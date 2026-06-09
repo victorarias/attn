@@ -1,10 +1,13 @@
 import { create } from 'zustand';
-import { DaemonSession, DaemonPR, RepoState, AuthorState } from '../hooks/useDaemonSocket';
+import { ChiefOfStaffDispatch, DaemonSession, DaemonPR, RepoState, AuthorState } from '../hooks/useDaemonSocket';
 
 interface DaemonStore {
   // Sessions from daemon (attn-tracked sessions)
   daemonSessions: DaemonSession[];
   setDaemonSessions: (sessions: DaemonSession[]) => void;
+
+  chiefOfStaffDispatches: ChiefOfStaffDispatch[];
+  setChiefOfStaffDispatches: (dispatches: ChiefOfStaffDispatch[]) => void;
 
   // PRs from daemon
   prs: DaemonPR[];
@@ -32,6 +35,9 @@ interface DaemonStore {
 export const useDaemonStore = create<DaemonStore>((set, get) => ({
   daemonSessions: [],
   setDaemonSessions: (sessions) => set({ daemonSessions: sessions }),
+
+  chiefOfStaffDispatches: [],
+  setChiefOfStaffDispatches: (dispatches) => set({ chiefOfStaffDispatches: dispatches }),
 
   prs: [],
   setPRs: (prs) => set({ prs }),

@@ -29,6 +29,8 @@ func commandMetadata(scope CommandScope, blocksDuringRecovery bool, log bool) Co
 // The scope values are preparatory metadata for future endpoint-aware routing.
 var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdRegister:                           commandMetadata(ScopeSession, false, true),
+	protocol.CmdListDispatches:                     commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdReportDispatch:                     commandMetadata(ScopeSession, false, true),
 	protocol.CmdUnregister:                         commandMetadata(ScopeSession, true, true),
 	protocol.CmdState:                              commandMetadata(ScopeSession, false, true),
 	protocol.CmdSetSessionResumeID:                 commandMetadata(ScopeSession, false, true),

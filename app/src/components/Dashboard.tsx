@@ -6,9 +6,11 @@ import { PRActions } from './PRActions';
 import { StateIndicator } from './StateIndicator';
 import { ChiefOfStaffBadge } from './ChiefOfStaffBadge';
 import { useDaemonContext } from '../contexts/DaemonContext';
+import { useDaemonStore } from '../store/daemonSessions';
 import { getRepoName } from '../utils/repo';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { UISessionState } from '../types/sessionState';
+import { normalizeSessionState } from '../types/sessionState';
 import appIcon from '../assets/icon.png';
 import './Dashboard.css';
 
@@ -31,6 +33,7 @@ type DashboardWorkspace = {
 
 interface DashboardProps {
   sessions: DashboardSession[];
+  dispatchSessions?: DashboardSession[];
   mutedWorkspaces?: DashboardWorkspace[];
   prs: DaemonPR[];
   isLoading: boolean;
@@ -49,6 +52,7 @@ interface DashboardProps {
 
 export function Dashboard({
   sessions,
+  dispatchSessions = sessions,
   mutedWorkspaces = [],
   prs,
   isLoading,
@@ -98,11 +102,57 @@ export function Dashboard({
   const workingSessions = sessions.filter((s) => s.state === 'working');
   const idleSessions = sessions.filter((s) => s.state === 'idle');
   const unknownSessions = sessions.filter((s) => s.state === 'unknown');
+  const chiefSession = dispatchSessions.find((session) => session.chiefOfStaff);
 
   // Group PRs by repo
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(new Set());
   const [fadingPRs, setFadingPRs] = useState<Set<string>>(new Set());
   const { sendMuteRepo, sendPRVisited } = useDaemonContext();
+  const { chiefOfStaffDispatches } = useDaemonStore();
+  const activeChiefDispatches = chiefSession
+    ? chiefOfStaffDispatches.filter((dispatch) => dispatch.chief_session_id === chiefSession.id)
+    : [];
+  const historicalChiefDispatches = chiefOfStaffDispatches.filter(
+    (dispatch) => dispatch.chief_session_id !== chiefSession?.id,
+  );
+
+  const renderDispatch = (dispatch: typeof chiefOfStaffDispatches[number]) => {
+    const target = dispatchSessions.find((session) => session.id === dispatch.session_id);
+    const state = target?.state ?? normalizeSessionState(dispatch.status === 'closed' ? 'unknown' : dispatch.status);
+    const summary = dispatch.latest_report || dispatch.brief;
+    const statusLabel = target ? state.replace('_', ' ') : 'closed';
+    return (
+      <button
+        type="button"
+        key={dispatch.id}
+        className="dispatch-row"
+        data-testid={`chief-dispatch-${dispatch.id}`}
+        data-state={target ? state : 'closed'}
+        disabled={!target}
+        onClick={() => target && onSelectSession(target.id)}
+      >
+        <StateIndicator state={state} size="sm" seed={dispatch.session_id} />
+        <span className="dispatch-copy">
+          <span className="dispatch-meta">
+            <span>{dispatch.agent} agent</span>
+            <span aria-hidden="true">·</span>
+            <span>Agent status: {statusLabel}</span>
+          </span>
+          <span className="dispatch-summary-label">Task</span>
+          <span className="dispatch-title">
+            {target?.label || dispatch.label}
+          </span>
+          <span className="dispatch-summary-label">
+            {dispatch.latest_report ? 'Latest update' : 'Assignment'}
+          </span>
+          <span className={`dispatch-summary ${dispatch.latest_report ? 'reported' : ''}`}>
+            {summary}
+          </span>
+        </span>
+        <span className="dispatch-open-hint" aria-hidden="true">›</span>
+      </button>
+    );
+  };
 
   // PRs that are fully hidden (after fade animation)
   const [hiddenPRs, setHiddenPRs] = useState<Set<string>>(new Set());
@@ -431,6 +481,57 @@ export function Dashboard({
                     onClick={onMutedGroupClick}
                   >
                     <div className="group-label dim">Muted Workspaces ({mutedWorkspaces.length})</div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="dashboard-card chief-dispatch-card" data-testid="chief-of-staff-card">
+          <div className="card-header">
+            <h2>Chief of Staff</h2>
+          </div>
+          <div className="card-body">
+            {!chiefSession && chiefOfStaffDispatches.length === 0 ? (
+              <div className="card-empty">Assign a session as chief to track delegated work.</div>
+            ) : (
+              <>
+                {chiefSession && (
+                  <div className="chief-session-block" data-testid="chief-session-summary">
+                    <div className="chief-section-label">Chief session</div>
+                    <button
+                      type="button"
+                      className="chief-session-summary"
+                      onClick={() => onSelectSession(chiefSession.id)}
+                    >
+                      <StateIndicator state={chiefSession.state} size="sm" seed={chiefSession.id} />
+                      <span className="chief-session-name">{chiefSession.label}</span>
+                      <ChiefOfStaffBadge compact />
+                      <span className="chief-session-state">
+                        Session: {chiefSession.state.replace('_', ' ')}
+                      </span>
+                    </button>
+                  </div>
+                )}
+                {activeChiefDispatches.length > 0 ? (
+                  <div className="dispatch-group">
+                    <div className="dispatch-group-header">
+                      <span>Delegated work</span>
+                      <span>{activeChiefDispatches.length}</span>
+                    </div>
+                    {activeChiefDispatches.map(renderDispatch)}
+                  </div>
+                ) : chiefSession ? (
+                  <div className="card-empty compact">No delegated work yet.</div>
+                ) : null}
+                {historicalChiefDispatches.length > 0 && (
+                  <div className="dispatch-group historical">
+                    <div className="dispatch-group-header">
+                      <span>Past chief dispatches</span>
+                      <span>{historicalChiefDispatches.length}</span>
+                    </div>
+                    {historicalChiefDispatches.map(renderDispatch)}
                   </div>
                 )}
               </>
