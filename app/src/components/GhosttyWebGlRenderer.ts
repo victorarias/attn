@@ -462,7 +462,8 @@ export class WebGlTerminalRenderer {
 
     const context = this.atlasContext;
     const scale = this.dpr;
-    context.font = `${style}${this.fontSize * scale}px ${this.fontFamily}`;
+    const font = `${style}${this.fontSize * scale}px ${this.fontFamily}`;
+    context.font = font;
     const width = Math.max(Math.ceil(context.measureText(text).width) + 4, this.cellWidth * scale);
     const height = this.cellHeight * scale;
     if (this.atlasX + width >= this.atlasSize) {
@@ -478,6 +479,13 @@ export class WebGlTerminalRenderer {
       } else {
         this.resetAtlas();
       }
+      // growAtlas/resetAtlas resize the backing canvas, and resizing a canvas
+      // resets ALL 2D context state (font included) to defaults. Re-apply the
+      // font so THIS glyph -- the one that triggered the grow -- is rasterized
+      // with the intended font instead of the browser default. Without this the
+      // wrong bitmap is cached, and the render() retry reuses the cache so it
+      // never self-corrects.
+      context.font = font;
     }
 
     const x = this.atlasX;
@@ -521,9 +529,9 @@ export class WebGlTerminalRenderer {
   // the current atlas size, re-seeding the solid white texel at (0,0). Setting
   // the canvas dimensions also clears its bitmap, so this covers both same-size
   // resets and post-grow reallocations. Bumps the generation so an in-flight
-  // frame re-rasterizes against the fresh atlas (see render()'s retry). getGlyph
-  // re-establishes font/baseline on every call, so resetting the 2D context
-  // state here is safe.
+  // frame re-rasterizes against the fresh atlas (see render()'s retry). Resetting
+  // the 2D context state here is recovered by getGlyph, which re-applies the font
+  // both before measuring and again after a grow, before drawing.
   private reseedAtlas(): void {
     this.glyphs.clear();
     this.atlasX = 2;
