@@ -1424,6 +1424,24 @@ export function useUiAutomationBridge({
         await settleUi();
         return { key, value };
       }
+      case 'set_warm_workspace_limit': {
+        // Drives window.attnSetWarmWorkspaces (terminal virtualization warm-set
+        // size) so the perf harness can A/B retained RSS at different warm
+        // limits. Returns the applied limit plus the count of virtualized
+        // (torn-down) panes so the harness can verify virtualization engaged.
+        const setter = (window as Window & { attnSetWarmWorkspaces?: (n: number) => number }).attnSetWarmWorkspaces;
+        if (!setter) {
+          throw new Error('attnSetWarmWorkspaces is not available');
+        }
+        const requested = payload.limit;
+        if (typeof requested !== 'number' || !Number.isFinite(requested)) {
+          throw new Error('set_warm_workspace_limit requires a numeric limit');
+        }
+        const limit = setter(requested);
+        await settleUi();
+        const virtualizedPanes = document.querySelectorAll('[data-testid^="pane-virtualized-"]').length;
+        return { limit, virtualizedPanes };
+      }
       case 'reload_session': {
         if (!reloadSession) {
           throw new Error('reload_session is not configured');
