@@ -5,6 +5,7 @@ import {
   assertProductionRunAllowed,
   bundleIdentifierForAppPath,
   currentHarnessProfile,
+  daemonPidFilePathForProfile,
   defaultAppPathForProfile,
   defaultDaemonPortForProfile,
   hasRunAgainstProdFlag,
@@ -93,5 +94,13 @@ describe('real-app harness production safety', () => {
     await expect(getFrontWindowBounds('com.attn.manager')).rejects.toThrow(
       'Refusing to run the real-app harness against production',
     );
+  });
+});
+
+describe('daemon pid file resolution', () => {
+  it('maps the dev profile to ~/.attn-dev/attn.pid and prod to ~/.attn/attn.pid', () => {
+    expect(daemonPidFilePathForProfile('dev')).toBe(path.join(os.homedir(), '.attn-dev', 'attn.pid'));
+    // profileForAppPath() returns '' for the prod app; that resolves to ~/.attn.
+    expect(daemonPidFilePathForProfile('')).toBe(path.join(os.homedir(), '.attn', 'attn.pid'));
   });
 });

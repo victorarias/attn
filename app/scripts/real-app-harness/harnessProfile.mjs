@@ -55,6 +55,14 @@ export function socketPathForProfile(profile = currentHarnessProfile()) {
   return path.join(os.homedir(), dir, 'attn.sock');
 }
 
+// Pid file the daemon writes on startup for the active profile (same state dir
+// as the socket). Lets tools resolve the authoritative daemon pid -- and from it
+// the pty-worker children -- without the pprof diagnostics endpoint.
+export function daemonPidFilePathForProfile(profile = currentHarnessProfile()) {
+  const dir = profile === DEV_PROFILE ? '.attn-dev' : '.attn';
+  return path.join(os.homedir(), dir, 'attn.pid');
+}
+
 export function defaultWSURLForProfile(profile = currentHarnessProfile()) {
   return `ws://127.0.0.1:${defaultDaemonPortForProfile(profile)}/ws`;
 }

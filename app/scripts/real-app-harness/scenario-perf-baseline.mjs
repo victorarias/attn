@@ -14,9 +14,15 @@
 // captures the memory levers. Streaming (via benchmark_pty_transport) is only
 // used to drive a CPU profile, and is best-effort.
 //
-// When ATTN_PPROF is set in this process's environment, the scenario restarts
-// the dev daemon so the freshly spawned one inherits the flag, then pulls
-// /debug/vars (authoritative daemon pid + worker pids) and heap/CPU pprof
+// The daemon is detached from the app, so its pid (and therefore its pty-worker
+// children) is resolved from the profile pid file (~/.attn-dev/attn.pid for the
+// dev install). That happens on every run, including the default one, so daemon
+// + worker RSS is always part of the baseline; if the pid file is missing/stale
+// the run warns loudly rather than silently reporting daemon: 0.
+//
+// When ATTN_PPROF is set in this process's environment, the scenario also
+// restarts the dev daemon so the freshly spawned one inherits the flag, then
+// pulls /debug/vars (authoritative daemon pid + worker pids) and heap/CPU pprof
 // profiles from the loopback diagnostics endpoint.
 //
 // Usage:
@@ -24,7 +30,6 @@
 //   ATTN_PPROF=6060 pnpm run real-app:scenario-perf-baseline -- --sessions 8 --stream 2
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { execFile } from 'node:child_process';
@@ -32,6 +37,7 @@ import { promisify } from 'node:util';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createRunContext, createSessionAndWaitForInitialPane, parseCommonArgs, printCommonHelp } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
+import { daemonPidFilePathForProfile, profileForAppPath } from './harnessProfile.mjs';
 
 const execFileAsync = promisify(execFile);
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -237,12 +243,26 @@ async function sampleWindow(appPid, daemonPid, webkitBaseline, windowMs, interva
   return { peak, last: samples[samples.length - 1], count: samples.length };
 }
 
+// Read the authoritative daemon pid from the profile's pid file, returning it
+// only if that process is still alive. This is pprof-independent: it is how the
+// default (non-ATTN_PPROF) baseline still attributes daemon + pty-worker RSS,
+// since the detached daemon and its workers are not descendants of the app pid.
+function readLiveDaemonPid(profile) {
+  let pid = null;
+  try {
+    pid = Number(fs.readFileSync(daemonPidFilePathForProfile(profile), 'utf8').trim());
+  } catch {
+    return null;
+  }
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  try { process.kill(pid, 0); } catch { return null; } // stale pid file
+  return pid;
+}
+
 async function stopDevDaemon() {
   // Only ever touches the dev profile pid file (~/.attn-dev), never prod (~/.attn).
-  const pidFile = path.join(os.homedir(), '.attn-dev', 'attn.pid');
-  let pid = null;
-  try { pid = Number(fs.readFileSync(pidFile, 'utf8').trim()); } catch { return null; }
-  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const pid = readLiveDaemonPid('dev');
+  if (pid == null) return null;
   try { process.kill(pid, 'SIGTERM'); } catch { return null; }
   for (let i = 0; i < 50; i += 1) {
     try { process.kill(pid, 0); } catch { return pid; }
@@ -380,7 +400,22 @@ async function main() {
         console.warn(`[perf] diag endpoint not reachable on :${port}; continuing with ps-tree memory only`);
       }
     }
+
+    // Default path (and pprof fallback): resolve the daemon pid from the profile
+    // pid file so daemon + pty-worker RSS are always attributed -- not only when
+    // ATTN_PPROF is set. The daemon is detached/reparented, so its workers are
+    // NOT descendants of the app pid; without a daemon pid the headline silently
+    // reports daemon: 0 / ptyWorkers: 0 on the documented default run.
+    if (!daemonPid) {
+      daemonPid = readLiveDaemonPid(profileForAppPath(options.appPath));
+      if (daemonPid) {
+        console.log(`[perf] resolved daemon pid=${daemonPid} from pid file (daemon + pty-workers included)`);
+      } else {
+        console.warn('[perf] WARNING: no live daemon pid file found; daemon + pty-worker RSS are NOT included in this baseline (app-tree + WebKit numbers remain valid)');
+      }
+    }
     summary.daemonPid = daemonPid;
+    summary.daemonPidSource = daemonPid ? (summary.diagUp ? 'debug-vars' : 'pid-file') : 'none';
 
     summary.snapshots.empty = await snapshot(appPid, daemonPid, webkitBaseline);
     console.log(`[perf] empty snapshot: ${summary.snapshots.empty.totalRssMb} MB (${summary.snapshots.empty.procCount} procs)`);
