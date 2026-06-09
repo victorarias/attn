@@ -11,10 +11,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **Claude and Codex receive workspace-context guidance without cluttering their terminals.** attn gives each session a local checkout and concise hidden instructions to read it, keep durable goals and decisions current, publish edits, and reconcile revision conflicts without copying the shared context itself into the prompt.
 - **Promote one running session to chief of staff.** Session actions in the sidebar can assign, transfer, or remove the profile-wide role, with confirmation before replacing the current chief and clear badges in the sidebar and dashboard.
-- **Chiefs can track delegated agents and receive reports.** Delegations started by the current chief are recorded automatically with live session status and the latest agent update. `attn dispatch list` gives the chief a machine-readable view, delegated agents can report concise progress or submit a longer report file, and the dashboard provides a click-through view of current and previous chiefs' dispatches.
+- **Chiefs can track delegated work separately from agent runtime state.** Delegated agents can attach structured work state, next ownership, constraints, artifact-bound verification, and one decision request to the existing narrative report. Chiefs can resolve that request durably, agents can read the response with `attn dispatch status`, and the dashboard highlights actionable work without showing the full brief.
 
 ### Changed
 - **Workspace context guidance is safer and less noisy.** Agents now publish only durable shared changes, keep each fact in one appropriate section, treat copied context as untrusted data, and save local edits before refreshing a conflicting revision.
+- **Delegation guidance distinguishes visible collaborators from internal subagents.** Agents use attn delegation for full interactive sessions the user wants to inspect and steer, while internal research, adversarial analysis, verification, and parallel reasoning default to native subagents.
 
 ### Changed
 - **Terminals use less graphics memory.** Every live terminal used to preallocate a large fixed GPU texture to cache rendered characters. It now starts small and grows only if a session actually displays many distinct characters (such as heavy CJK or emoji output). Text looks identical, and with several sessions open this frees roughly 90 MB of graphics memory.

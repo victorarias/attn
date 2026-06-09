@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -23,7 +24,52 @@ func cloneChiefOfStaffDispatch(dispatch *protocol.ChiefOfStaffDispatch) *protoco
 	if dispatch.ReportedAt != nil {
 		cloned.ReportedAt = protocol.Ptr(protocol.Deref(dispatch.ReportedAt))
 	}
+	cloned.StructuredReport = cloneDispatchReport(dispatch.StructuredReport)
+	if dispatch.ConciseSummary != nil {
+		cloned.ConciseSummary = protocol.Ptr(protocol.Deref(dispatch.ConciseSummary))
+	}
+	if dispatch.Actionable != nil {
+		cloned.Actionable = protocol.Ptr(protocol.Deref(dispatch.Actionable))
+	}
 	return &cloned
+}
+
+func cloneDispatchReport(report *protocol.DispatchReport) *protocol.DispatchReport {
+	if report == nil {
+		return nil
+	}
+	data, err := json.Marshal(report)
+	if err != nil {
+		return nil
+	}
+	var cloned protocol.DispatchReport
+	if err := json.Unmarshal(data, &cloned); err != nil {
+		return nil
+	}
+	return &cloned
+}
+
+func encodeDispatchReport(report *protocol.DispatchReport) (string, error) {
+	if report == nil {
+		return "", nil
+	}
+	data, err := json.Marshal(report)
+	if err != nil {
+		return "", fmt.Errorf("encode structured dispatch report: %w", err)
+	}
+	return string(data), nil
+}
+
+func decodeDispatchReport(data string) *protocol.DispatchReport {
+	data = strings.TrimSpace(data)
+	if data == "" {
+		return nil
+	}
+	var report protocol.DispatchReport
+	if err := json.Unmarshal([]byte(data), &report); err != nil {
+		return nil
+	}
+	return &report
 }
 
 func (s *Store) AddChiefOfStaffDispatch(dispatch *protocol.ChiefOfStaffDispatch) error {
@@ -47,11 +93,16 @@ func (s *Store) AddChiefOfStaffDispatch(dispatch *protocol.ChiefOfStaffDispatch)
 		return nil
 	}
 
-	_, err := s.db.Exec(`
+	structuredReportJSON, err := encodeDispatchReport(dispatch.StructuredReport)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
 		INSERT INTO chief_of_staff_dispatches (
 			id, chief_session_id, session_id, workspace_id, brief, label, agent,
-			directory, branch, latest_report, reported_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			directory, branch, latest_report, structured_report_json, reported_at,
+			created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		dispatch.ID,
 		dispatch.ChiefSessionID,
 		dispatch.SessionID,
@@ -62,6 +113,7 @@ func (s *Store) AddChiefOfStaffDispatch(dispatch *protocol.ChiefOfStaffDispatch)
 		dispatch.Directory,
 		protocol.Deref(dispatch.Branch),
 		protocol.Deref(dispatch.LatestReport),
+		structuredReportJSON,
 		protocol.Deref(dispatch.ReportedAt),
 		dispatch.CreatedAt,
 		dispatch.UpdatedAt,
@@ -107,10 +159,33 @@ func (s *Store) GetChiefOfStaffDispatchBySession(sessionID string) *protocol.Chi
 
 	row := s.db.QueryRow(`
 		SELECT id, chief_session_id, session_id, workspace_id, brief, label, agent,
-			directory, branch, latest_report, reported_at, created_at, updated_at
+			directory, branch, latest_report, structured_report_json, reported_at,
+			created_at, updated_at
 		FROM chief_of_staff_dispatches
 		WHERE session_id = ?`,
 		sessionID,
+	)
+	return scanChiefOfStaffDispatch(row)
+}
+
+func (s *Store) GetChiefOfStaffDispatch(id string) *protocol.ChiefOfStaffDispatch {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	if s.db == nil {
+		return cloneChiefOfStaffDispatch(s.chiefDispatches[id])
+	}
+	row := s.db.QueryRow(`
+		SELECT id, chief_session_id, session_id, workspace_id, brief, label, agent,
+			directory, branch, latest_report, structured_report_json, reported_at,
+			created_at, updated_at
+		FROM chief_of_staff_dispatches
+		WHERE id = ?`,
+		id,
 	)
 	return scanChiefOfStaffDispatch(row)
 }
@@ -139,7 +214,8 @@ func (s *Store) ListChiefOfStaffDispatches(chiefSessionID string) []*protocol.Ch
 
 	query := `
 		SELECT id, chief_session_id, session_id, workspace_id, brief, label, agent,
-			directory, branch, latest_report, reported_at, created_at, updated_at
+			directory, branch, latest_report, structured_report_json, reported_at,
+			created_at, updated_at
 		FROM chief_of_staff_dispatches`
 	var (
 		rows *sql.Rows
@@ -165,6 +241,13 @@ func (s *Store) ListChiefOfStaffDispatches(chiefSessionID string) []*protocol.Ch
 }
 
 func (s *Store) UpdateChiefOfStaffDispatchReport(sessionID, report string) (*protocol.ChiefOfStaffDispatch, error) {
+	return s.UpdateChiefOfStaffDispatchReportEnvelope(sessionID, report, nil)
+}
+
+func (s *Store) UpdateChiefOfStaffDispatchReportEnvelope(
+	sessionID, report string,
+	structuredReport *protocol.DispatchReport,
+) (*protocol.ChiefOfStaffDispatch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -177,6 +260,23 @@ func (s *Store) UpdateChiefOfStaffDispatchReport(sessionID, report string) (*pro
 		return nil, fmt.Errorf("report cannot be empty")
 	}
 	now := string(protocol.TimestampNow())
+	structuredReport = cloneDispatchReport(structuredReport)
+	if structuredReport != nil {
+		structuredReport.ReportedAt = now
+		artifactIdentity := ""
+		if structuredReport.Artifact != nil {
+			artifactIdentity = strings.TrimSpace(structuredReport.Artifact.Identity)
+		}
+		for i := range structuredReport.Verification {
+			current := artifactIdentity != "" &&
+				strings.TrimSpace(structuredReport.Verification[i].ArtifactIdentity) == artifactIdentity
+			structuredReport.Verification[i].Current = protocol.Ptr(current)
+		}
+	}
+	structuredReportJSON, err := encodeDispatchReport(structuredReport)
+	if err != nil {
+		return nil, err
+	}
 	if s.db == nil {
 		for id, dispatch := range s.chiefDispatches {
 			if dispatch.SessionID != sessionID {
@@ -184,6 +284,7 @@ func (s *Store) UpdateChiefOfStaffDispatchReport(sessionID, report string) (*pro
 			}
 			updated := cloneChiefOfStaffDispatch(dispatch)
 			updated.LatestReport = protocol.Ptr(report)
+			updated.StructuredReport = structuredReport
 			updated.ReportedAt = protocol.Ptr(now)
 			updated.UpdatedAt = now
 			s.chiefDispatches[id] = updated
@@ -194,9 +295,10 @@ func (s *Store) UpdateChiefOfStaffDispatchReport(sessionID, report string) (*pro
 
 	result, err := s.db.Exec(`
 		UPDATE chief_of_staff_dispatches
-		SET latest_report = ?, reported_at = ?, updated_at = ?
+		SET latest_report = ?, structured_report_json = ?, reported_at = ?, updated_at = ?
 		WHERE session_id = ?`,
 		report,
+		structuredReportJSON,
 		now,
 		now,
 		sessionID,
@@ -214,7 +316,8 @@ func (s *Store) UpdateChiefOfStaffDispatchReport(sessionID, report string) (*pro
 
 	row := s.db.QueryRow(`
 		SELECT id, chief_session_id, session_id, workspace_id, brief, label, agent,
-			directory, branch, latest_report, reported_at, created_at, updated_at
+			directory, branch, latest_report, structured_report_json, reported_at,
+			created_at, updated_at
 		FROM chief_of_staff_dispatches
 		WHERE session_id = ?`,
 		sessionID,
@@ -226,14 +329,92 @@ func (s *Store) UpdateChiefOfStaffDispatchReport(sessionID, report string) (*pro
 	return dispatch, nil
 }
 
+func (s *Store) ResolveChiefOfStaffDispatchRequest(
+	dispatchID, chiefSessionID, response, resolutionLink string,
+) (*protocol.ChiefOfStaffDispatch, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dispatchID = strings.TrimSpace(dispatchID)
+	chiefSessionID = strings.TrimSpace(chiefSessionID)
+	response = strings.TrimSpace(response)
+	resolutionLink = strings.TrimSpace(resolutionLink)
+	if dispatchID == "" {
+		return nil, fmt.Errorf("dispatch id cannot be empty")
+	}
+	if chiefSessionID == "" {
+		return nil, fmt.Errorf("chief session id cannot be empty")
+	}
+	if response == "" {
+		return nil, fmt.Errorf("response cannot be empty")
+	}
+
+	var dispatch *protocol.ChiefOfStaffDispatch
+	if s.db == nil {
+		dispatch = cloneChiefOfStaffDispatch(s.chiefDispatches[dispatchID])
+	} else {
+		row := s.db.QueryRow(`
+			SELECT id, chief_session_id, session_id, workspace_id, brief, label, agent,
+				directory, branch, latest_report, structured_report_json, reported_at,
+				created_at, updated_at
+			FROM chief_of_staff_dispatches
+			WHERE id = ?`,
+			dispatchID,
+		)
+		dispatch = scanChiefOfStaffDispatch(row)
+	}
+	if dispatch == nil {
+		return nil, fmt.Errorf("dispatch %s not found", dispatchID)
+	}
+	if dispatch.ChiefSessionID != chiefSessionID {
+		return nil, fmt.Errorf("dispatch %s is not owned by chief session %s", dispatchID, chiefSessionID)
+	}
+	if dispatch.StructuredReport == nil || dispatch.StructuredReport.Request == nil {
+		return nil, fmt.Errorf("dispatch %s has no active decision request", dispatchID)
+	}
+	if dispatch.StructuredReport.Request.Status != protocol.DispatchRequestStatusPending {
+		return nil, fmt.Errorf("dispatch %s decision request is already resolved", dispatchID)
+	}
+
+	now := string(protocol.TimestampNow())
+	dispatch.StructuredReport.Request.Status = protocol.DispatchRequestStatusResolved
+	dispatch.StructuredReport.Request.Response = protocol.Ptr(response)
+	dispatch.StructuredReport.Request.RespondedBy = protocol.Ptr(chiefSessionID)
+	dispatch.StructuredReport.Request.RespondedAt = protocol.Ptr(now)
+	if resolutionLink != "" {
+		dispatch.StructuredReport.Request.ResolutionLink = protocol.Ptr(resolutionLink)
+	}
+	dispatch.UpdatedAt = now
+
+	if s.db == nil {
+		s.chiefDispatches[dispatchID] = cloneChiefOfStaffDispatch(dispatch)
+		return cloneChiefOfStaffDispatch(dispatch), nil
+	}
+	structuredReportJSON, err := encodeDispatchReport(dispatch.StructuredReport)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.db.Exec(`
+		UPDATE chief_of_staff_dispatches
+		SET structured_report_json = ?, updated_at = ?
+		WHERE id = ?`,
+		structuredReportJSON,
+		now,
+		dispatchID,
+	); err != nil {
+		return nil, fmt.Errorf("resolve dispatch request: %w", err)
+	}
+	return dispatch, nil
+}
+
 type dispatchScanner interface {
 	Scan(dest ...interface{}) error
 }
 
 func scanChiefOfStaffDispatch(scanner dispatchScanner) *protocol.ChiefOfStaffDispatch {
 	var (
-		dispatch                         protocol.ChiefOfStaffDispatch
-		branch, latestReport, reportedAt sql.NullString
+		dispatch                                               protocol.ChiefOfStaffDispatch
+		branch, latestReport, structuredReportJSON, reportedAt sql.NullString
 	)
 	if err := scanner.Scan(
 		&dispatch.ID,
@@ -246,6 +427,7 @@ func scanChiefOfStaffDispatch(scanner dispatchScanner) *protocol.ChiefOfStaffDis
 		&dispatch.Directory,
 		&branch,
 		&latestReport,
+		&structuredReportJSON,
 		&reportedAt,
 		&dispatch.CreatedAt,
 		&dispatch.UpdatedAt,
@@ -257,6 +439,9 @@ func scanChiefOfStaffDispatch(scanner dispatchScanner) *protocol.ChiefOfStaffDis
 	}
 	if latestReport.Valid && latestReport.String != "" {
 		dispatch.LatestReport = protocol.Ptr(latestReport.String)
+	}
+	if structuredReportJSON.Valid {
+		dispatch.StructuredReport = decodeDispatchReport(structuredReportJSON.String)
 	}
 	if reportedAt.Valid && reportedAt.String != "" {
 		dispatch.ReportedAt = protocol.Ptr(reportedAt.String)

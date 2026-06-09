@@ -1,8 +1,21 @@
 # Delegation
 
-Use delegation when a distinct task can proceed without interrupting your
-current work. Delegation starts another agent with a focused brief; it does not
-create durable parent-child lineage or require you to monitor the new agent.
+Attn delegation creates a visible, full interactive agent session for the user.
+Use it when the user wants another agent they can inspect, converse with, and
+steer directly while you continue coordinating the wider task.
+
+Do not use attn delegation as an internal parallel-reasoning mechanism. For
+research, adversarial analysis, verification, or other work that you alone will
+synthesize for the user, use your native subagent or multi-agent tools instead.
+Those workers are implementation details of your response; they should not
+create attn sessions or appear in the user's workspace.
+
+When the user's intent is unclear, default to native subagents. Use attn only
+when the user explicitly asks for delegation, an interactive agent, a separate
+workspace/session, or a collaborator they can steer themselves.
+
+Attn delegation starts another agent with a focused brief; it does not create
+durable parent-child lineage or require you to monitor the new agent.
 
 ## Brief Workflow
 

@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, OpenBrowserMessage, OpenMarkdownMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReportDispatchMessage, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, OpenBrowserMessage, OpenMarkdownMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReportDispatchMessage, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -46,6 +46,13 @@
 //   const deleteWorktreeResultMessage = Convert.toDeleteWorktreeResultMessage(json);
 //   const detachSessionMessage = Convert.toDetachSessionMessage(json);
 //   const directoryEntry = Convert.toDirectoryEntry(json);
+//   const dispatchArtifact = Convert.toDispatchArtifact(json);
+//   const dispatchDecisionRequest = Convert.toDispatchDecisionRequest(json);
+//   const dispatchReport = Convert.toDispatchReport(json);
+//   const dispatchReportType = Convert.toDispatchReportType(json);
+//   const dispatchRequestStatus = Convert.toDispatchRequestStatus(json);
+//   const dispatchVerification = Convert.toDispatchVerification(json);
+//   const dispatchWorkState = Convert.toDispatchWorkState(json);
 //   const endpointActionResultMessage = Convert.toEndpointActionResultMessage(json);
 //   const endpointCapabilities = Convert.toEndpointCapabilities(json);
 //   const endpointInfo = Convert.toEndpointInfo(json);
@@ -63,6 +70,7 @@
 //   const getCommentsResultMessage = Convert.toGetCommentsResultMessage(json);
 //   const getDefaultBranchMessage = Convert.toGetDefaultBranchMessage(json);
 //   const getDefaultBranchResultMessage = Convert.toGetDefaultBranchResultMessage(json);
+//   const getDispatchMessage = Convert.toGetDispatchMessage(json);
 //   const getFileDiffMessage = Convert.toGetFileDiffMessage(json);
 //   const getRecentLocationsMessage = Convert.toGetRecentLocationsMessage(json);
 //   const getRepoInfoMessage = Convert.toGetRepoInfoMessage(json);
@@ -145,6 +153,7 @@
 //   const reposUpdatedMessage = Convert.toReposUpdatedMessage(json);
 //   const resolveCommentMessage = Convert.toResolveCommentMessage(json);
 //   const resolveCommentResultMessage = Convert.toResolveCommentResultMessage(json);
+//   const resolveDispatchRequestMessage = Convert.toResolveDispatchRequestMessage(json);
 //   const response = Convert.toResponse(json);
 //   const reviewComment = Convert.toReviewComment(json);
 //   const reviewLoopDecision = Convert.toReviewLoopDecision(json);
@@ -588,22 +597,94 @@ export enum BrowserControlResultMessageCmd {
 }
 
 export interface ChiefOfStaffDispatch {
-    agent:            string;
-    branch?:          string;
-    brief:            string;
-    chief_session_id: string;
-    created_at:       string;
-    directory:        string;
-    id:               string;
-    label:            string;
-    latest_report?:   string;
-    reported_at?:     string;
-    session_id:       string;
-    status:           string;
-    status_since:     string;
-    updated_at:       string;
-    workspace_id:     string;
+    actionable?:        boolean;
+    agent:              string;
+    branch?:            string;
+    brief:              string;
+    chief_session_id:   string;
+    concise_summary?:   string;
+    created_at:         string;
+    directory:          string;
+    id:                 string;
+    label:              string;
+    latest_report?:     string;
+    reported_at?:       string;
+    session_id:         string;
+    status:             string;
+    status_since:       string;
+    structured_report?: Report;
+    updated_at:         string;
+    workspace_id:       string;
     [property: string]: any;
+}
+
+export interface Report {
+    artifact?:        Artifact;
+    constraints?:     string[];
+    next_action?:     string;
+    next_actor?:      string;
+    remaining_scope?: string[];
+    report_type:      DispatchReportType;
+    reported_at:      string;
+    request?:         Request;
+    summary:          string;
+    verification?:    VerificationElement[];
+    work_state:       DispatchWorkState;
+    [property: string]: any;
+}
+
+export interface Artifact {
+    branch?:       string;
+    description?:  string;
+    dirty?:        boolean;
+    identity:      string;
+    revision?:     string;
+    workspace_id?: string;
+    [property: string]: any;
+}
+
+export enum DispatchReportType {
+    Blocker = "blocker",
+    Completion = "completion",
+    Failure = "failure",
+    Handoff = "handoff",
+    Progress = "progress",
+}
+
+export interface Request {
+    consequence?:       string;
+    expected_responder: string;
+    question:           string;
+    recommendation?:    string;
+    resolution_link?:   string;
+    responded_at?:      string;
+    responded_by?:      string;
+    response?:          string;
+    status:             DispatchRequestStatus;
+    [property: string]: any;
+}
+
+export enum DispatchRequestStatus {
+    Pending = "pending",
+    Resolved = "resolved",
+}
+
+export interface VerificationElement {
+    actor:             string;
+    artifact_identity: string;
+    current?:          boolean;
+    result:            string;
+    target:            string;
+    timestamp:         string;
+    [property: string]: any;
+}
+
+export enum DispatchWorkState {
+    Completed = "completed",
+    Failed = "failed",
+    InProgress = "in_progress",
+    NeedsInput = "needs_input",
+    ReadyForReview = "ready_for_review",
 }
 
 export interface ChiefOfStaffDispatchesUpdatedMessage {
@@ -613,21 +694,24 @@ export interface ChiefOfStaffDispatchesUpdatedMessage {
 }
 
 export interface ChiefOfStaffDispatchElement {
-    agent:            string;
-    branch?:          string;
-    brief:            string;
-    chief_session_id: string;
-    created_at:       string;
-    directory:        string;
-    id:               string;
-    label:            string;
-    latest_report?:   string;
-    reported_at?:     string;
-    session_id:       string;
-    status:           string;
-    status_since:     string;
-    updated_at:       string;
-    workspace_id:     string;
+    actionable?:        boolean;
+    agent:              string;
+    branch?:            string;
+    brief:              string;
+    chief_session_id:   string;
+    concise_summary?:   string;
+    created_at:         string;
+    directory:          string;
+    id:                 string;
+    label:              string;
+    latest_report?:     string;
+    reported_at?:       string;
+    session_id:         string;
+    status:             string;
+    status_since:       string;
+    structured_report?: Report;
+    updated_at:         string;
+    workspace_id:       string;
     [property: string]: any;
 }
 
@@ -884,6 +968,54 @@ export enum DetachSessionMessageCmd {
 export interface DirectoryEntry {
     name: string;
     path: string;
+    [property: string]: any;
+}
+
+export interface DispatchArtifact {
+    branch?:       string;
+    description?:  string;
+    dirty?:        boolean;
+    identity:      string;
+    revision?:     string;
+    workspace_id?: string;
+    [property: string]: any;
+}
+
+export interface DispatchDecisionRequest {
+    consequence?:       string;
+    expected_responder: string;
+    question:           string;
+    recommendation?:    string;
+    resolution_link?:   string;
+    responded_at?:      string;
+    responded_by?:      string;
+    response?:          string;
+    status:             DispatchRequestStatus;
+    [property: string]: any;
+}
+
+export interface DispatchReport {
+    artifact?:        Artifact;
+    constraints?:     string[];
+    next_action?:     string;
+    next_actor?:      string;
+    remaining_scope?: string[];
+    report_type:      DispatchReportType;
+    reported_at:      string;
+    request?:         Request;
+    summary:          string;
+    verification?:    VerificationElement[];
+    work_state:       DispatchWorkState;
+    [property: string]: any;
+}
+
+export interface DispatchVerification {
+    actor:             string;
+    artifact_identity: string;
+    current?:          boolean;
+    result:            string;
+    target:            string;
+    timestamp:         string;
     [property: string]: any;
 }
 
@@ -1153,6 +1285,16 @@ export interface GetDefaultBranchResultMessage {
 
 export enum GetDefaultBranchResultMessageEvent {
     GetDefaultBranchResult = "get_default_branch_result",
+}
+
+export interface GetDispatchMessage {
+    cmd:               GetDispatchMessageCmd;
+    source_session_id: string;
+    [property: string]: any;
+}
+
+export enum GetDispatchMessageCmd {
+    GetDispatch = "get_dispatch",
 }
 
 export interface GetFileDiffMessage {
@@ -2162,9 +2304,10 @@ export interface RepoState {
 }
 
 export interface ReportDispatchMessage {
-    cmd:               ReportDispatchMessageCmd;
-    report:            string;
-    source_session_id: string;
+    cmd:                ReportDispatchMessageCmd;
+    report:             string;
+    source_session_id:  string;
+    structured_report?: Report;
     [property: string]: any;
 }
 
@@ -2202,6 +2345,19 @@ export interface ResolveCommentResultMessage {
 
 export enum ResolveCommentResultMessageEvent {
     ResolveCommentResult = "resolve_comment_result",
+}
+
+export interface ResolveDispatchRequestMessage {
+    cmd:               ResolveDispatchRequestMessageCmd;
+    dispatch_id:       string;
+    resolution_link?:  string;
+    response:          string;
+    source_session_id: string;
+    [property: string]: any;
+}
+
+export enum ResolveDispatchRequestMessageCmd {
+    ResolveDispatchRequest = "resolve_dispatch_request",
 }
 
 export interface Response {
@@ -3652,6 +3808,62 @@ export class Convert {
         return JSON.stringify(uncast(value, r("DirectoryEntry")), null, 2);
     }
 
+    public static toDispatchArtifact(json: string): DispatchArtifact {
+        return cast(JSON.parse(json), r("DispatchArtifact"));
+    }
+
+    public static dispatchArtifactToJson(value: DispatchArtifact): string {
+        return JSON.stringify(uncast(value, r("DispatchArtifact")), null, 2);
+    }
+
+    public static toDispatchDecisionRequest(json: string): DispatchDecisionRequest {
+        return cast(JSON.parse(json), r("DispatchDecisionRequest"));
+    }
+
+    public static dispatchDecisionRequestToJson(value: DispatchDecisionRequest): string {
+        return JSON.stringify(uncast(value, r("DispatchDecisionRequest")), null, 2);
+    }
+
+    public static toDispatchReport(json: string): DispatchReport {
+        return cast(JSON.parse(json), r("DispatchReport"));
+    }
+
+    public static dispatchReportToJson(value: DispatchReport): string {
+        return JSON.stringify(uncast(value, r("DispatchReport")), null, 2);
+    }
+
+    public static toDispatchReportType(json: string): DispatchReportType {
+        return cast(JSON.parse(json), r("DispatchReportType"));
+    }
+
+    public static dispatchReportTypeToJson(value: DispatchReportType): string {
+        return JSON.stringify(uncast(value, r("DispatchReportType")), null, 2);
+    }
+
+    public static toDispatchRequestStatus(json: string): DispatchRequestStatus {
+        return cast(JSON.parse(json), r("DispatchRequestStatus"));
+    }
+
+    public static dispatchRequestStatusToJson(value: DispatchRequestStatus): string {
+        return JSON.stringify(uncast(value, r("DispatchRequestStatus")), null, 2);
+    }
+
+    public static toDispatchVerification(json: string): DispatchVerification {
+        return cast(JSON.parse(json), r("DispatchVerification"));
+    }
+
+    public static dispatchVerificationToJson(value: DispatchVerification): string {
+        return JSON.stringify(uncast(value, r("DispatchVerification")), null, 2);
+    }
+
+    public static toDispatchWorkState(json: string): DispatchWorkState {
+        return cast(JSON.parse(json), r("DispatchWorkState"));
+    }
+
+    public static dispatchWorkStateToJson(value: DispatchWorkState): string {
+        return JSON.stringify(uncast(value, r("DispatchWorkState")), null, 2);
+    }
+
     public static toEndpointActionResultMessage(json: string): EndpointActionResultMessage {
         return cast(JSON.parse(json), r("EndpointActionResultMessage"));
     }
@@ -3786,6 +3998,14 @@ export class Convert {
 
     public static getDefaultBranchResultMessageToJson(value: GetDefaultBranchResultMessage): string {
         return JSON.stringify(uncast(value, r("GetDefaultBranchResultMessage")), null, 2);
+    }
+
+    public static toGetDispatchMessage(json: string): GetDispatchMessage {
+        return cast(JSON.parse(json), r("GetDispatchMessage"));
+    }
+
+    public static getDispatchMessageToJson(value: GetDispatchMessage): string {
+        return JSON.stringify(uncast(value, r("GetDispatchMessage")), null, 2);
     }
 
     public static toGetFileDiffMessage(json: string): GetFileDiffMessage {
@@ -4442,6 +4662,14 @@ export class Convert {
 
     public static resolveCommentResultMessageToJson(value: ResolveCommentResultMessage): string {
         return JSON.stringify(uncast(value, r("ResolveCommentResultMessage")), null, 2);
+    }
+
+    public static toResolveDispatchRequestMessage(json: string): ResolveDispatchRequestMessage {
+        return cast(JSON.parse(json), r("ResolveDispatchRequestMessage"));
+    }
+
+    public static resolveDispatchRequestMessageToJson(value: ResolveDispatchRequestMessage): string {
+        return JSON.stringify(uncast(value, r("ResolveDispatchRequestMessage")), null, 2);
     }
 
     public static toResponse(json: string): Response {
@@ -5489,10 +5717,12 @@ const typeMap: any = {
         { json: "success", js: "success", typ: true },
     ], "any"),
     "ChiefOfStaffDispatch": o([
+        { json: "actionable", js: "actionable", typ: u(undefined, true) },
         { json: "agent", js: "agent", typ: "" },
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "brief", js: "brief", typ: "" },
         { json: "chief_session_id", js: "chief_session_id", typ: "" },
+        { json: "concise_summary", js: "concise_summary", typ: u(undefined, "") },
         { json: "created_at", js: "created_at", typ: "" },
         { json: "directory", js: "directory", typ: "" },
         { json: "id", js: "id", typ: "" },
@@ -5502,18 +5732,61 @@ const typeMap: any = {
         { json: "session_id", js: "session_id", typ: "" },
         { json: "status", js: "status", typ: "" },
         { json: "status_since", js: "status_since", typ: "" },
+        { json: "structured_report", js: "structured_report", typ: u(undefined, r("Report")) },
         { json: "updated_at", js: "updated_at", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
+    "Report": o([
+        { json: "artifact", js: "artifact", typ: u(undefined, r("Artifact")) },
+        { json: "constraints", js: "constraints", typ: u(undefined, a("")) },
+        { json: "next_action", js: "next_action", typ: u(undefined, "") },
+        { json: "next_actor", js: "next_actor", typ: u(undefined, "") },
+        { json: "remaining_scope", js: "remaining_scope", typ: u(undefined, a("")) },
+        { json: "report_type", js: "report_type", typ: r("DispatchReportType") },
+        { json: "reported_at", js: "reported_at", typ: "" },
+        { json: "request", js: "request", typ: u(undefined, r("Request")) },
+        { json: "summary", js: "summary", typ: "" },
+        { json: "verification", js: "verification", typ: u(undefined, a(r("VerificationElement"))) },
+        { json: "work_state", js: "work_state", typ: r("DispatchWorkState") },
+    ], "any"),
+    "Artifact": o([
+        { json: "branch", js: "branch", typ: u(undefined, "") },
+        { json: "description", js: "description", typ: u(undefined, "") },
+        { json: "dirty", js: "dirty", typ: u(undefined, true) },
+        { json: "identity", js: "identity", typ: "" },
+        { json: "revision", js: "revision", typ: u(undefined, "") },
+        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+    ], "any"),
+    "Request": o([
+        { json: "consequence", js: "consequence", typ: u(undefined, "") },
+        { json: "expected_responder", js: "expected_responder", typ: "" },
+        { json: "question", js: "question", typ: "" },
+        { json: "recommendation", js: "recommendation", typ: u(undefined, "") },
+        { json: "resolution_link", js: "resolution_link", typ: u(undefined, "") },
+        { json: "responded_at", js: "responded_at", typ: u(undefined, "") },
+        { json: "responded_by", js: "responded_by", typ: u(undefined, "") },
+        { json: "response", js: "response", typ: u(undefined, "") },
+        { json: "status", js: "status", typ: r("DispatchRequestStatus") },
+    ], "any"),
+    "VerificationElement": o([
+        { json: "actor", js: "actor", typ: "" },
+        { json: "artifact_identity", js: "artifact_identity", typ: "" },
+        { json: "current", js: "current", typ: u(undefined, true) },
+        { json: "result", js: "result", typ: "" },
+        { json: "target", js: "target", typ: "" },
+        { json: "timestamp", js: "timestamp", typ: "" },
     ], "any"),
     "ChiefOfStaffDispatchesUpdatedMessage": o([
         { json: "dispatches", js: "dispatches", typ: a(r("ChiefOfStaffDispatchElement")) },
         { json: "event", js: "event", typ: r("ChiefOfStaffDispatchesUpdatedMessageEvent") },
     ], "any"),
     "ChiefOfStaffDispatchElement": o([
+        { json: "actionable", js: "actionable", typ: u(undefined, true) },
         { json: "agent", js: "agent", typ: "" },
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "brief", js: "brief", typ: "" },
         { json: "chief_session_id", js: "chief_session_id", typ: "" },
+        { json: "concise_summary", js: "concise_summary", typ: u(undefined, "") },
         { json: "created_at", js: "created_at", typ: "" },
         { json: "directory", js: "directory", typ: "" },
         { json: "id", js: "id", typ: "" },
@@ -5523,6 +5796,7 @@ const typeMap: any = {
         { json: "session_id", js: "session_id", typ: "" },
         { json: "status", js: "status", typ: "" },
         { json: "status_since", js: "status_since", typ: "" },
+        { json: "structured_report", js: "structured_report", typ: u(undefined, r("Report")) },
         { json: "updated_at", js: "updated_at", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
@@ -5662,6 +5936,46 @@ const typeMap: any = {
     "DirectoryEntry": o([
         { json: "name", js: "name", typ: "" },
         { json: "path", js: "path", typ: "" },
+    ], "any"),
+    "DispatchArtifact": o([
+        { json: "branch", js: "branch", typ: u(undefined, "") },
+        { json: "description", js: "description", typ: u(undefined, "") },
+        { json: "dirty", js: "dirty", typ: u(undefined, true) },
+        { json: "identity", js: "identity", typ: "" },
+        { json: "revision", js: "revision", typ: u(undefined, "") },
+        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+    ], "any"),
+    "DispatchDecisionRequest": o([
+        { json: "consequence", js: "consequence", typ: u(undefined, "") },
+        { json: "expected_responder", js: "expected_responder", typ: "" },
+        { json: "question", js: "question", typ: "" },
+        { json: "recommendation", js: "recommendation", typ: u(undefined, "") },
+        { json: "resolution_link", js: "resolution_link", typ: u(undefined, "") },
+        { json: "responded_at", js: "responded_at", typ: u(undefined, "") },
+        { json: "responded_by", js: "responded_by", typ: u(undefined, "") },
+        { json: "response", js: "response", typ: u(undefined, "") },
+        { json: "status", js: "status", typ: r("DispatchRequestStatus") },
+    ], "any"),
+    "DispatchReport": o([
+        { json: "artifact", js: "artifact", typ: u(undefined, r("Artifact")) },
+        { json: "constraints", js: "constraints", typ: u(undefined, a("")) },
+        { json: "next_action", js: "next_action", typ: u(undefined, "") },
+        { json: "next_actor", js: "next_actor", typ: u(undefined, "") },
+        { json: "remaining_scope", js: "remaining_scope", typ: u(undefined, a("")) },
+        { json: "report_type", js: "report_type", typ: r("DispatchReportType") },
+        { json: "reported_at", js: "reported_at", typ: "" },
+        { json: "request", js: "request", typ: u(undefined, r("Request")) },
+        { json: "summary", js: "summary", typ: "" },
+        { json: "verification", js: "verification", typ: u(undefined, a(r("VerificationElement"))) },
+        { json: "work_state", js: "work_state", typ: r("DispatchWorkState") },
+    ], "any"),
+    "DispatchVerification": o([
+        { json: "actor", js: "actor", typ: "" },
+        { json: "artifact_identity", js: "artifact_identity", typ: "" },
+        { json: "current", js: "current", typ: u(undefined, true) },
+        { json: "result", js: "result", typ: "" },
+        { json: "target", js: "target", typ: "" },
+        { json: "timestamp", js: "timestamp", typ: "" },
     ], "any"),
     "EndpointActionResultMessage": o([
         { json: "action", js: "action", typ: "" },
@@ -5819,6 +6133,10 @@ const typeMap: any = {
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("GetDefaultBranchResultMessageEvent") },
         { json: "success", js: "success", typ: true },
+    ], "any"),
+    "GetDispatchMessage": o([
+        { json: "cmd", js: "cmd", typ: r("GetDispatchMessageCmd") },
+        { json: "source_session_id", js: "source_session_id", typ: "" },
     ], "any"),
     "GetFileDiffMessage": o([
         { json: "base_ref", js: "base_ref", typ: u(undefined, "") },
@@ -6374,6 +6692,7 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("ReportDispatchMessageCmd") },
         { json: "report", js: "report", typ: "" },
         { json: "source_session_id", js: "source_session_id", typ: "" },
+        { json: "structured_report", js: "structured_report", typ: u(undefined, r("Report")) },
     ], "any"),
     "ReposUpdatedMessage": o([
         { json: "event", js: "event", typ: r("ReposUpdatedMessageEvent") },
@@ -6388,6 +6707,13 @@ const typeMap: any = {
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("ResolveCommentResultMessageEvent") },
         { json: "success", js: "success", typ: true },
+    ], "any"),
+    "ResolveDispatchRequestMessage": o([
+        { json: "cmd", js: "cmd", typ: r("ResolveDispatchRequestMessageCmd") },
+        { json: "dispatch_id", js: "dispatch_id", typ: "" },
+        { json: "resolution_link", js: "resolution_link", typ: u(undefined, "") },
+        { json: "response", js: "response", typ: "" },
+        { json: "source_session_id", js: "source_session_id", typ: "" },
     ], "any"),
     "Response": o([
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
@@ -7107,6 +7433,24 @@ const typeMap: any = {
     "BrowserControlResultMessageCmd": [
         "browser_control_result",
     ],
+    "DispatchReportType": [
+        "blocker",
+        "completion",
+        "failure",
+        "handoff",
+        "progress",
+    ],
+    "DispatchRequestStatus": [
+        "pending",
+        "resolved",
+    ],
+    "DispatchWorkState": [
+        "completed",
+        "failed",
+        "in_progress",
+        "needs_input",
+        "ready_for_review",
+    ],
     "ChiefOfStaffDispatchesUpdatedMessageEvent": [
         "chief_of_staff_dispatches_updated",
     ],
@@ -7217,6 +7561,9 @@ const typeMap: any = {
     ],
     "GetDefaultBranchResultMessageEvent": [
         "get_default_branch_result",
+    ],
+    "GetDispatchMessageCmd": [
+        "get_dispatch",
     ],
     "GetFileDiffMessageCmd": [
         "get_file_diff",
@@ -7441,6 +7788,9 @@ const typeMap: any = {
     ],
     "ResolveCommentResultMessageEvent": [
         "resolve_comment_result",
+    ],
+    "ResolveDispatchRequestMessageCmd": [
+        "resolve_dispatch_request",
     ],
     "ReviewLoopDecision": [
         "continue",

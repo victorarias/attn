@@ -105,6 +105,15 @@ ChiefOfStaffDispatch {
   independently of workspace context.
 - Dispatch status is projected from the target session. The dispatch store owns
   relationship metadata and reports, not a second session-state machine.
+- Structured coordination is intentionally latest-report state, not a report
+  history or customizable workflow engine.
+- Chief responses are delivered through dispatch persistence and
+  `attn dispatch status`; attn does not type arbitrary text into a live agent
+  PTY because that is not a safe prompt-delivery primitive.
+- Attn delegation is reserved for visible, full interactive agents the user
+  wants to inspect and steer. Chiefs use native subagents for internal
+  research, adversarial analysis, verification, and parallel reasoning, and
+  default to native subagents when intent is unclear.
 
 ## Implementation Steps
 
@@ -133,6 +142,12 @@ ChiefOfStaffDispatch {
 - [x] Broadcast dispatch snapshots and visualize them on the dashboard with
       status, latest report, and session navigation.
 - [x] Teach chief and delegated agents when and how to list/report dispatches.
+- [x] Separate projected runtime status from a narrow delegated-work state.
+- [x] Persist one structured latest-report envelope alongside the narrative.
+- [x] Support one durable decision request and chief resolution per dispatch.
+- [x] Derive actionable summaries and artifact-current verification for CLI/API/UI.
+- [x] Clarify the boundary between user-visible attn delegation and internal
+      native subagents in the bundled skill and protect it with focused tests.
 
 ## Verification
 

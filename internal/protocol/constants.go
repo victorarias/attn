@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "93"
+const ProtocolVersion = "94"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -39,6 +39,8 @@ const (
 	CmdDelegate                           = "delegate"
 	CmdListDispatches                     = "list_dispatches"
 	CmdReportDispatch                     = "report_dispatch"
+	CmdGetDispatch                        = "get_dispatch"
+	CmdResolveDispatchRequest             = "resolve_dispatch_request"
 	CmdWorkspaceContextCheckout           = "workspace_context_checkout"
 	CmdWorkspaceContextUpdate             = "workspace_context_update"
 	CmdWorkspaceContextStatus             = "workspace_context_status"
@@ -319,6 +321,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdReportDispatch:
 		var msg ReportDispatchMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdGetDispatch:
+		var msg GetDispatchMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdResolveDispatchRequest:
+		var msg ResolveDispatchRequestMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
