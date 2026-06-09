@@ -1873,7 +1873,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('removes a workspace only after workspace_unregistered', async () => {
+  it('invalidates a closed session layout but retains the workspace until workspace_unregistered', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
     const { unmount } = renderHook(() =>
@@ -1915,8 +1915,10 @@ describe('useDaemonSocket PTY kill sequencing', () => {
               workspace_id: 'workspace-sess-removed',
               pane_id: 'pane-session',
               kind: 'agent',
+              runtime_id: 'sess-removed',
               title: 'Agent',
               session_id: 'sess-removed',
+              status: 'spawning',
             }],
           },
         }],
@@ -1941,7 +1943,32 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await waitFor(() => {
       expect(onWorkspacesUpdate).toHaveBeenLastCalledWith([
-        expect.objectContaining({ id: 'workspace-sess-removed' }),
+        expect.objectContaining({
+          id: 'workspace-sess-removed',
+          layout: undefined,
+        }),
+      ]);
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'workspace_state_changed',
+        workspace: {
+          id: 'workspace-sess-removed',
+          title: 'removed',
+          directory: '/tmp/repo',
+          status: 'idle',
+          muted: false,
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(onWorkspacesUpdate).toHaveBeenLastCalledWith([
+        expect.objectContaining({
+          id: 'workspace-sess-removed',
+          layout: undefined,
+        }),
       ]);
     });
 

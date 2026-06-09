@@ -422,14 +422,12 @@ func (d *Daemon) loadWorkspacesFromStore() {
 			// removing its workspace. Preserve workspaces waiting for their
 			// first spawn: the layout pane is persisted before spawn_session
 			// creates the session row, and load can run after a daemon restart
-			// in that gap. Also preserve sessionless, tile-only workspaces —
-			// a docked tile keeps a workspace alive across restarts with no
-			// session of its own.
+			// in that gap. Also preserve workspaces with durable sessionless
+			// content such as docked tiles or shared context.
 			_, registered := d.workspaces.snapshot(ws.ID)
 			if !registered &&
 				!d.workspaceHasPendingSpawn(ws.ID) &&
-				!d.workspaceLayoutHasTiles(ws.ID) &&
-				!d.store.HasWorkspaceContext(ws.ID) {
+				!d.workspaceHasSessionlessContent(ws.ID) {
 				d.store.RemoveWorkspace(ws.ID)
 				continue
 			}
@@ -462,6 +460,13 @@ func (d *Daemon) workspaceHasPendingSpawn(workspaceID string) bool {
 		}
 	}
 	return false
+}
+
+// workspaceHasSessionlessContent is the single retention rule for a workspace
+// after its final session leaves. Tiles remain visible UI content, while shared
+// context remains durable agent state; either one keeps the workspace alive.
+func (d *Daemon) workspaceHasSessionlessContent(workspaceID string) bool {
+	return d.workspaceLayoutHasTiles(workspaceID) || d.store.HasWorkspaceContext(workspaceID)
 }
 
 // listWorkspaces returns a snapshot of the current workspaces for InitialState.
@@ -519,11 +524,10 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 		return
 	}
 	if remaining == 0 {
-		// A workspace whose last session leaves normally tears down. But if the
-		// user left a docked tile behind, the workspace lives on as a
-		// sessionless, tile-only workspace. We run before the layout's session
-		// pane is removed, so the stored layout still reflects those tiles.
-		if d.workspaceLayoutHasTiles(workspaceID) || d.store.HasWorkspaceContext(workspaceID) {
+		// A workspace whose last session leaves normally tears down. Durable
+		// sessionless content keeps it alive. This runs before the session pane
+		// is removed, so a retained tile is still visible in the stored layout.
+		if d.workspaceHasSessionlessContent(workspaceID) {
 			updated, changed := d.recomputeWorkspaceStatus(workspaceID)
 			if !changed {
 				updated, _ = d.workspaces.snapshot(workspaceID)

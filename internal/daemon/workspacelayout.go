@@ -220,6 +220,14 @@ func (d *Daemon) broadcastWorkspaceLayoutUpdated(workspaceID string) {
 		d.logf("workspace layout update failed for workspace %s: %v", workspaceID, err)
 		return
 	}
+	d.broadcastWorkspaceLayoutSnapshotUpdated(snapshot)
+}
+
+func (d *Daemon) broadcastWorkspaceLayoutSnapshotUpdated(snapshot *protocol.WorkspaceLayout) {
+	if snapshot == nil {
+		return
+	}
+	workspaceID := snapshot.WorkspaceID
 	d.pruneTileContentSubscriptionsForWorkspace(workspaceID)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:           protocol.EventWorkspaceLayoutUpdated,
@@ -808,8 +816,7 @@ func (d *Daemon) unregisterWorkspaceIfEmptyAfterMove(workspaceID string) {
 		return
 	}
 	if len(d.workspaces.sessionIDs(workspaceID)) > 0 ||
-		d.workspaceLayoutHasTiles(workspaceID) ||
-		d.store.HasWorkspaceContext(workspaceID) {
+		d.workspaceHasSessionlessContent(workspaceID) {
 		d.recomputeAndBroadcastWorkspace(workspaceID)
 		return
 	}
@@ -988,7 +995,18 @@ func (d *Daemon) handleWorkspaceLayoutClosePane(client *wsClient, msg *protocol.
 	}
 	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutClosePane, msg.WorkspaceID, protocol.Ptr(msg.PaneID), nil)
 
-	if !layoutEmpty {
+	if layoutEmpty {
+		// A context-bearing workspace can survive with no layout. Publish that
+		// empty state so clients cannot retain and replay the removed pane.
+		if d.store.GetWorkspace(msg.WorkspaceID) != nil {
+			emptyLayout, err := protocolWorkspaceLayout(normalized)
+			if err != nil {
+				d.logf("workspace empty layout update failed for workspace %s: %v", msg.WorkspaceID, err)
+				return
+			}
+			d.broadcastWorkspaceLayoutSnapshotUpdated(emptyLayout)
+		}
+	} else {
 		d.broadcastWorkspaceLayoutUpdated(msg.WorkspaceID)
 	}
 }
