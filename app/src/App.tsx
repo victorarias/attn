@@ -3132,7 +3132,11 @@ sendFetchPRDetails,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
     onQuit: handleQuitApp,
-    enabled: !locationPickerOpen && !thumbsOpen && !whatsNew.isOpen,
+    enabled: !locationPickerOpen
+      && !thumbsOpen
+      && !whatsNew.isOpen
+      && !actionMenuOpen
+      && !workspaceContextsOpen,
   });
 
   return (

@@ -252,8 +252,15 @@ test.describe('Keyboard Shortcuts', () => {
       await expect(page.getByRole('dialog', { name: 'Action menu' })).toBeVisible();
       await expect(page.getByText('Browse workspace contexts')).toBeVisible();
 
+      await page.keyboard.press('Meta+n');
+      await expect(page.locator('.location-picker-overlay')).not.toBeVisible();
+
       await page.getByText('Browse workspace contexts').click();
       const contextNavigator = page.getByRole('dialog', { name: 'Workspace contexts on this Mac' });
+      await expect(contextNavigator).toBeVisible();
+
+      await page.keyboard.press('Meta+n');
+      await expect(page.locator('.location-picker-overlay')).not.toBeVisible();
       await expect(contextNavigator).toBeVisible();
 
       await page.keyboard.press('Meta+k');
