@@ -38,6 +38,8 @@ make install-daemon-dev  # faster: only rebuild the Go sidecar inside attn-dev.a
 
 The dev install is fully isolated: its own bundle identifier (`com.attn.manager.dev`), its own data dir (`~/.attn-dev/`), its own socket, its own port. Once a fix is verified, run `make` to install the production app so the user receives the fix immediately. The production install closes and reopens the app and restarts its daemon; attn is designed to recover persisted session state gracefully. `make install` and `make install-daemon` refuse at parse time if `ATTN_PROFILE` is set in the environment — if you hit that error during iteration, you meant `make dev`.
 
+Run full app builds and installs via `make` or `make dev` outside the sandbox. These commands need access to the user's macOS keychain so `security find-identity` can select the stable code-signing identity. Inside the sandbox, identity discovery can incorrectly return nothing, causing certificate creation or ad-hoc signing and breaking the app's persistent macOS permissions.
+
 To make CLI commands (`attn`, `attn list`, etc.) target the dev daemon in your shell, run `eval "$(./attn profile-env dev)"` (bash/zsh) or `./attn profile-env --fish dev | source` (fish). Any `attn` subcommand then prints a one-line `[attn profile=dev ...]` banner so you can always see which daemon you're talking to. Unset with `eval "$(attn profile-env --unset)"`.
 
 Frontend-only shortcuts:

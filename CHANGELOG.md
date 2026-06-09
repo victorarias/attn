@@ -21,6 +21,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Closed delegated sessions no longer remain on the Chief of Staff dashboard.** Closing a delegated session now removes it from the active home view while retaining its dispatch report as history.
+- **Returning to a resized workspace no longer lets busy split terminals freeze the app.** Hidden workspaces keep their terminal state current without continuously repainting WebGL surfaces, live output paints at most once per animation frame, and duplicate same-size PTY resize acknowledgements no longer trigger full redraws.
 - **Closed sessions no longer flicker back into the sidebar as launching.** The daemon now publishes an authoritative empty layout when shared context keeps a workspace alive after its final pane closes, and the app also discards cached layouts that still reference an explicitly closed session.
 
 ## [2026-06-08]

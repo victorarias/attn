@@ -54,7 +54,11 @@ async function readTrace(
   sessionId: string,
 ): Promise<RenderTraceEntry[]> {
   return page.evaluate((sid) => {
-    const all = (window as Window & { __ATTN_RENDER_TRACE?: RenderTraceEntry[] }).__ATTN_RENDER_TRACE ?? [];
+    const diagnostics = window as Window & {
+      __ATTN_RENDER_TRACE?: RenderTraceEntry[];
+      __ATTN_TERMINAL_DIAG_DUMP?: () => RenderTraceEntry[];
+    };
+    const all = diagnostics.__ATTN_TERMINAL_DIAG_DUMP?.() ?? diagnostics.__ATTN_RENDER_TRACE ?? [];
     return all.filter((entry) =>
       entry.kind === 'paint'
       && (entry.session === sid || (typeof entry.pane === 'string' && entry.pane.includes(sid))));
@@ -274,4 +278,62 @@ test('agent stays painted when split lands while scrolled up', async ({ page, da
   await terminal.screenshot({ path: 'test-results/split-blank-scrolled.png' }).catch(() => {});
   // Diagnostic only: report whether a stale scrollback slice was painted.
   console.log('offset on last paint:', last?.offset, 'force:', last?.force, 'quads:', last?.quads);
+});
+
+test('hidden split workspace defers paints until return after a window resize', async ({ page, daemon }) => {
+  await daemon.start();
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto('/');
+  await page.waitForSelector('.dashboard');
+
+  const agentId = 's-agent-home-resize';
+  const terminal = await setupAgent(page, daemon, agentId);
+  await emit(page, agentId, fullFrame('BASELINE'));
+  await expect
+    .poll(async () => page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_TEXT?.(sid) ?? '', agentId))
+    .toContain('BASELINE line 0');
+
+  const sizeBeforeSplit = await page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_SIZE?.(sid) ?? null, agentId);
+  await terminal.click({ position: { x: 80, y: 8 } });
+  await page.keyboard.press('Meta+d');
+  await expect
+    .poll(async () => {
+      const size = await page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_SIZE?.(sid) ?? null, agentId);
+      if (!size || !sizeBeforeSplit) return 'no-size';
+      return size.rows !== sizeBeforeSplit.rows || size.cols !== sizeBeforeSplit.cols ? 'resized' : 'same';
+    })
+    .toBe('resized');
+  await page.waitForTimeout(100);
+
+  await page.keyboard.press('Meta+Shift+h');
+  await expect(page.locator('.dashboard')).toBeVisible();
+  await page.setViewportSize({ width: 900, height: 650 });
+  await page.waitForTimeout(100);
+
+  const paintsBeforeBurst = (await readTrace(page, agentId)).length;
+  const hiddenFrame = fullFrame('HIDDEN', 35, 90);
+  await page.evaluate(({ id, payloads }) => {
+    for (const payload of payloads) {
+      window.__TEST_EMIT_PTY_DATA?.(id, payload);
+    }
+  }, { id: agentId, payloads: chunks(hiddenFrame, 32) });
+  await expect
+    .poll(async () => page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_TEXT?.(sid) ?? '', agentId))
+    .toContain('HIDDEN line 0');
+  await page.waitForTimeout(100);
+  expect((await readTrace(page, agentId)).length).toBe(paintsBeforeBurst);
+
+  await page.locator(`[data-testid="session-${agentId}"]`).click();
+  await expect(terminal).toBeVisible();
+  await expect
+    .poll(async () => (await readTrace(page, agentId)).length)
+    .toBeGreaterThan(paintsBeforeBurst);
+
+  const trace = await readTrace(page, agentId);
+  const postReturnPaints = trace
+    .slice(paintsBeforeBurst)
+    .filter((entry) => (entry.quads ?? 0) > 0);
+  const substantivePaint = postReturnPaints[postReturnPaints.length - 1];
+  expect(substantivePaint?.cols).toBeLessThan(100);
+  expect(substantivePaint?.quads ?? 0).toBeGreaterThan(50);
 });

@@ -113,6 +113,8 @@ declare global {
 }
 
 const ring: DiagEvent[] = [];
+let ringNextIndex = 0;
+let ringWrapped = false;
 const paneHealth = new Map<string, PaneHealth>();
 const renderProbes = new Map<string, () => RenderProbe | null>();
 const watchdogTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
@@ -156,7 +158,7 @@ function ensureGlobals() {
     incidents: `$APPLOCALDATA/${INCIDENT_FILE}`,
   };
   if (!window.__ATTN_TERMINAL_DIAG_DUMP) {
-    window.__ATTN_TERMINAL_DIAG_DUMP = () => [...ring];
+    window.__ATTN_TERMINAL_DIAG_DUMP = ringSnapshot;
   }
   if (!window.__ATTN_TERMINAL_DIAG_ENABLE) {
     window.__ATTN_TERMINAL_DIAG_ENABLE = (enabled: boolean) => {
@@ -216,10 +218,20 @@ function enqueueWrite(file: 'lifecycle' | 'incident', line: string) {
 }
 
 function pushRing(event: DiagEvent) {
-  ring.push(event);
-  if (ring.length > RING_LIMIT) {
-    ring.splice(0, ring.length - RING_LIMIT);
+  if (ring.length < RING_LIMIT) {
+    ring.push(event);
+    return;
   }
+  ring[ringNextIndex] = event;
+  ringNextIndex = (ringNextIndex + 1) % RING_LIMIT;
+  ringWrapped = true;
+}
+
+function ringSnapshot(): DiagEvent[] {
+  if (!ringWrapped) {
+    return [...ring];
+  }
+  return [...ring.slice(ringNextIndex), ...ring.slice(0, ringNextIndex)];
 }
 
 export function recordDiag(event: Omit<DiagEvent, 'at'>): void {
@@ -436,7 +448,7 @@ function maybeFlushIncident(pane: string, reason: string, detail: Record<string,
     session: health?.session,
     reason,
     detail,
-    context: ring.slice(-INCIDENT_CONTEXT_EVENTS),
+    context: ringSnapshot().slice(-INCIDENT_CONTEXT_EVENTS),
   };
   enqueueWrite('incident', `${JSON.stringify(record)}\n`);
 }
