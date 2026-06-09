@@ -78,6 +78,20 @@ func TestGenerateHooks_HasStopHook(t *testing.T) {
 	}
 }
 
+func TestGenerateHooks_HasSessionStartHook(t *testing.T) {
+	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn")
+
+	for _, expected := range []string{
+		"SessionStart",
+		"startup|resume|clear|compact",
+		"_hook-session-start",
+	} {
+		if !strings.Contains(hooks, expected) {
+			t.Fatalf("Claude hooks should include %q", expected)
+		}
+	}
+}
+
 func TestGenerateHooks_HasUserPromptSubmitHook(t *testing.T) {
 	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn")
 
@@ -112,6 +126,9 @@ func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {
 	if !strings.Contains(joined, "_hook-session-start") {
 		t.Fatal("codex overrides should sync session id on start")
 	}
+	if !strings.Contains(joined, "startup|resume|clear|compact") {
+		t.Fatal("codex SessionStart hook should run after context resets")
+	}
 	if strings.Contains(joined, "session-1") {
 		t.Fatal("codex hook commands should not embed per-session attn ids")
 	}
@@ -133,6 +150,32 @@ func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {
 	if !strings.Contains(joined, `hooks.state={`) ||
 		!strings.Contains(joined, `"/<session-flags>/config.toml:session_start:0:0" = { trusted_hash =`) {
 		t.Fatal("codex overrides should trust attn-managed session flag hooks")
+	}
+}
+
+func TestWorkspaceContextSessionStartOutput(t *testing.T) {
+	raw := WorkspaceContextSessionStartOutput("/tmp/context.md")
+	var output sessionStartHookOutput
+	if err := json.Unmarshal([]byte(raw), &output); err != nil {
+		t.Fatalf("WorkspaceContextSessionStartOutput returned invalid JSON: %v", err)
+	}
+	if output.HookSpecificOutput.HookEventName != "SessionStart" {
+		t.Fatalf("hook event = %q", output.HookSpecificOutput.HookEventName)
+	}
+	guidance := output.HookSpecificOutput.AdditionalContext
+	for _, expected := range []string{
+		"/tmp/context.md",
+		"workspace context update",
+		"workspace context status",
+		"show --force",
+		"Do not use it as a transcript or scratchpad",
+	} {
+		if !strings.Contains(guidance, expected) {
+			t.Fatalf("guidance missing %q: %q", expected, guidance)
+		}
+	}
+	if strings.Contains(guidance, "# Shared goal") {
+		t.Fatal("guidance should not embed workspace context content")
 	}
 }
 

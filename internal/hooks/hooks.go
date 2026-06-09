@@ -23,6 +23,39 @@ type SettingsConfig struct {
 	Hooks map[string][]HookEntry `json:"hooks"`
 }
 
+type sessionStartHookSpecificOutput struct {
+	HookEventName     string `json:"hookEventName"`
+	AdditionalContext string `json:"additionalContext"`
+}
+
+type sessionStartHookOutput struct {
+	HookSpecificOutput sessionStartHookSpecificOutput `json:"hookSpecificOutput"`
+}
+
+// WorkspaceContextSessionStartOutput returns Claude/Codex-compatible hook
+// output that teaches the agent to use the live workspace context checkout.
+func WorkspaceContextSessionStartOutput(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	guidance := fmt.Sprintf(`attn provides a shared workspace context for this session.
+
+- Before substantive work, read the live checkout at %s.
+- Keep it concise and durable: goals, decisions, constraints, current progress, and handoff information. Do not use it as a transcript or scratchpad.
+- When that durable context changes, edit the file in place and run "$ATTN_WRAPPER_PATH" workspace context update.
+- Use "$ATTN_WRAPPER_PATH" workspace context status to check local edits or a newer shared revision.
+- If an update conflicts, preserve your local edits, refresh with "$ATTN_WRAPPER_PATH" workspace context show --force, merge the saved edits into the refreshed file, and retry the update.`, path)
+	output := sessionStartHookOutput{
+		HookSpecificOutput: sessionStartHookSpecificOutput{
+			HookEventName:     "SessionStart",
+			AdditionalContext: guidance,
+		},
+	}
+	data, _ := json.Marshal(output)
+	return string(data)
+}
+
 // Generate generates settings configuration with hooks for a session
 func Generate(sessionID, socketPath, wrapperPath string) string {
 	wrapper := strings.TrimSpace(wrapperPath)
@@ -34,6 +67,17 @@ func Generate(sessionID, socketPath, wrapperPath string) string {
 
 	config := SettingsConfig{
 		Hooks: map[string][]HookEntry{
+			"SessionStart": {
+				{
+					Matcher: "startup|resume|clear|compact",
+					Hooks: []Hook{
+						{
+							Type:    "command",
+							Command: fmt.Sprintf(`ATTN_SOCKET_PATH=%s %s _hook-session-start "%s"`, socketCmd, wrapperCmd, sessionID),
+						},
+					},
+				},
+			},
 			"Stop": {
 				{
 					Matcher: "*",

@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-09]
+
+### Added
+- **Claude and Codex are taught to use workspace context when a session starts or resets.** attn checks out the live context file and injects concise instructions to read it, keep durable goals and decisions current, publish edits, and reconcile revision conflicts without copying the context itself into the prompt.
+
 ## [2026-06-08]
 
 ### Added

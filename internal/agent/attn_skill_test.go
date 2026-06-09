@@ -62,6 +62,7 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 
 	workspaceContext := readSkillFile(t, skillDir, "references/workspace-context.md")
 	for _, expected := range []string{
+		"injects the editable file path",
 		"workspace context show",
 		"workspace context update",
 		"workspace context status",

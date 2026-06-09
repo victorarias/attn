@@ -24,6 +24,7 @@ import (
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/daemonctl"
+	"github.com/victorarias/attn/internal/hooks"
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptyworker"
@@ -1521,6 +1522,41 @@ func runHookSessionStart() {
 
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
 	syncSessionResumeID(c, sessionID, input.SessionID)
+	output, err := workspaceContextSessionStartOutput(c, sessionID, 40, 25*time.Millisecond)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not load workspace context guidance: %v\n", err)
+		return
+	}
+	if output != "" {
+		fmt.Fprintln(os.Stdout, output)
+	}
+}
+
+type workspaceContextCheckoutClient interface {
+	CheckoutWorkspaceContext(sourceSessionID string, force bool) (*protocol.WorkspaceContextResult, error)
+}
+
+func workspaceContextSessionStartOutput(
+	c workspaceContextCheckoutClient,
+	sessionID string,
+	attempts int,
+	retryDelay time.Duration,
+) (string, error) {
+	if attempts < 1 {
+		attempts = 1
+	}
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		result, err := c.CheckoutWorkspaceContext(sessionID, false)
+		if err == nil {
+			return hooks.WorkspaceContextSessionStartOutput(result.Path), nil
+		}
+		lastErr = err
+		if attempt+1 < attempts && retryDelay > 0 {
+			time.Sleep(retryDelay)
+		}
+	}
+	return "", lastErr
 }
 
 func runHookState() {

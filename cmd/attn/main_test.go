@@ -10,8 +10,23 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/buildinfo"
+	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/transcript"
 )
+
+type fakeWorkspaceContextCheckoutClient struct {
+	failures int
+	calls    int
+	path     string
+}
+
+func (f *fakeWorkspaceContextCheckoutClient) CheckoutWorkspaceContext(string, bool) (*protocol.WorkspaceContextResult, error) {
+	f.calls++
+	if f.calls <= f.failures {
+		return nil, fmt.Errorf("source session not found")
+	}
+	return &protocol.WorkspaceContextResult{Path: f.path}, nil
+}
 
 func TestWritePrivateFileReplacesPublicFileWithOwnerOnlyPermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "capture.png")
@@ -387,6 +402,34 @@ func TestReadInitialPromptFileRemovesFile(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("prompt file still exists: %v", err)
+	}
+}
+
+func TestWorkspaceContextSessionStartOutputRetriesUntilSessionIsRegistered(t *testing.T) {
+	c := &fakeWorkspaceContextCheckoutClient{
+		failures: 2,
+		path:     "/tmp/context.md",
+	}
+	output, err := workspaceContextSessionStartOutput(c, "session-1", 3, 0)
+	if err != nil {
+		t.Fatalf("workspaceContextSessionStartOutput error: %v", err)
+	}
+	if c.calls != 3 {
+		t.Fatalf("checkout calls = %d, want 3", c.calls)
+	}
+	if !strings.Contains(output, "/tmp/context.md") {
+		t.Fatalf("hook output = %q", output)
+	}
+}
+
+func TestWorkspaceContextSessionStartOutputReturnsLastCheckoutError(t *testing.T) {
+	c := &fakeWorkspaceContextCheckoutClient{failures: 2}
+	output, err := workspaceContextSessionStartOutput(c, "session-1", 2, 0)
+	if err == nil || !strings.Contains(err.Error(), "source session not found") {
+		t.Fatalf("workspaceContextSessionStartOutput error = %v", err)
+	}
+	if output != "" {
+		t.Fatalf("hook output = %q, want empty", output)
 	}
 }
 
