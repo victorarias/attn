@@ -426,7 +426,10 @@ func (d *Daemon) loadWorkspacesFromStore() {
 			// a docked tile keeps a workspace alive across restarts with no
 			// session of its own.
 			_, registered := d.workspaces.snapshot(ws.ID)
-			if !registered && !d.workspaceHasPendingSpawn(ws.ID) && !d.workspaceLayoutHasTiles(ws.ID) {
+			if !registered &&
+				!d.workspaceHasPendingSpawn(ws.ID) &&
+				!d.workspaceLayoutHasTiles(ws.ID) &&
+				!d.store.HasWorkspaceContext(ws.ID) {
 				d.store.RemoveWorkspace(ws.ID)
 				continue
 			}
@@ -520,7 +523,7 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 		// user left a docked tile behind, the workspace lives on as a
 		// sessionless, tile-only workspace. We run before the layout's session
 		// pane is removed, so the stored layout still reflects those tiles.
-		if d.workspaceLayoutHasTiles(workspaceID) {
+		if d.workspaceLayoutHasTiles(workspaceID) || d.store.HasWorkspaceContext(workspaceID) {
 			updated, changed := d.recomputeWorkspaceStatus(workspaceID)
 			if !changed {
 				updated, _ = d.workspaces.snapshot(workspaceID)

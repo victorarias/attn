@@ -200,6 +200,42 @@ func (c *Client) Delegate(sourceSessionID, brief string, opts DelegateOptions) (
 	return resp.DelegateResult, nil
 }
 
+func (c *Client) CheckoutWorkspaceContext(sourceSessionID string, force bool) (*protocol.WorkspaceContextResult, error) {
+	msg := protocol.WorkspaceContextCheckoutMessage{
+		Cmd:             protocol.CmdWorkspaceContextCheckout,
+		SourceSessionID: sourceSessionID,
+	}
+	if force {
+		msg.Force = protocol.Ptr(true)
+	}
+	return c.workspaceContextResult(msg)
+}
+
+func (c *Client) UpdateWorkspaceContext(sourceSessionID string) (*protocol.WorkspaceContextResult, error) {
+	return c.workspaceContextResult(protocol.WorkspaceContextUpdateMessage{
+		Cmd:             protocol.CmdWorkspaceContextUpdate,
+		SourceSessionID: sourceSessionID,
+	})
+}
+
+func (c *Client) WorkspaceContextStatus(sourceSessionID string) (*protocol.WorkspaceContextResult, error) {
+	return c.workspaceContextResult(protocol.WorkspaceContextStatusMessage{
+		Cmd:             protocol.CmdWorkspaceContextStatus,
+		SourceSessionID: sourceSessionID,
+	})
+}
+
+func (c *Client) workspaceContextResult(msg interface{}) (*protocol.WorkspaceContextResult, error) {
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.WorkspaceContextResult == nil {
+		return nil, errors.New("daemon returned no workspace context result")
+	}
+	return resp.WorkspaceContextResult, nil
+}
+
 // Query returns sessions matching the filter
 func (c *Client) Query(filter string) ([]protocol.Session, error) {
 	var filterPtr *string

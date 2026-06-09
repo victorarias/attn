@@ -161,7 +161,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '90';
+const PROTOCOL_VERSION = '91';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -1225,6 +1225,10 @@ export function useDaemonSocket({
               workspacesRef.current = nextWorkspaces;
               onWorkspacesUpdate(nextWorkspaces);
             }
+            break;
+
+          case 'workspace_context_changed':
+          case 'workspace_context_result':
             break;
 
           case 'workspace_unregistered':

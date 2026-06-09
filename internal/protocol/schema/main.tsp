@@ -154,6 +154,14 @@ model Workspace {
   layout?: WorkspaceLayout;
 }
 
+model WorkspaceContext {
+  workspace_id: string;
+  content: string;
+  revision: int32;
+  updated_by_session_id: string;
+  updated_at: string;
+}
+
 model PR {
   // Core identity - always present
   // ID format: "host:owner/repo#number" (e.g. github.com:acme/widget#42)
@@ -391,6 +399,22 @@ model DelegateMessage {
   workspace_id?: string;
   cwd?: string;
   worktree?: DelegateWorktreeRequest;
+}
+
+model WorkspaceContextCheckoutMessage {
+  cmd: "workspace_context_checkout";
+  source_session_id: string;
+  force?: boolean;
+}
+
+model WorkspaceContextUpdateMessage {
+  cmd: "workspace_context_update";
+  source_session_id: string;
+}
+
+model WorkspaceContextStatusMessage {
+  cmd: "workspace_context_status";
+  source_session_id: string;
 }
 
 model DelegateWorktreeRequest {
@@ -1086,6 +1110,14 @@ model WorkspaceStateChangedMessage {
   workspace: Workspace;
 }
 
+model WorkspaceContextChangedMessage {
+  event: "workspace_context_changed";
+  workspace_id: string;
+  revision: int32;
+  updated_by_session_id: string;
+  updated_at: string;
+}
+
 model SessionTodosUpdatedMessage {
   event: "session_todos_updated";
   session: Session;
@@ -1644,6 +1676,7 @@ model Response {
   error?: string;
   data?: string;
   delegate_result?: DelegateResult;
+  workspace_context_result?: WorkspaceContextResult;
   sessions?: Session[];
   prs?: PR[];
   repos?: RepoState[];
@@ -1665,6 +1698,26 @@ model DelegateResultMessage {
   success: boolean;
   error?: string;
   result?: DelegateResult;
+}
+
+model WorkspaceContextResult {
+  workspace_id: string;
+  session_id: string;
+  path: string;
+  revision: int32;
+  canonical_revision: int32;
+  modified: boolean;
+  stale: boolean;
+  updated_by_session_id?: string;
+  updated_at?: string;
+}
+
+model WorkspaceContextResultMessage {
+  event: "workspace_context_result";
+  action: string;
+  success: boolean;
+  error?: string;
+  result?: WorkspaceContextResult;
 }
 
 // Warning for non-critical issues (e.g., gh version too old)
@@ -1763,6 +1816,7 @@ model WebSocketEvent {
   signal?: string;
 
   review_loop_run?: ReviewLoopRun;
+  workspace_context_result?: WorkspaceContextResult;
 }
 
 alias DaemonEvent =
@@ -1773,6 +1827,7 @@ alias DaemonEvent =
   | WorkspaceRegisteredMessage
   | WorkspaceUnregisteredMessage
   | WorkspaceStateChangedMessage
+  | WorkspaceContextChangedMessage
   | SessionTodosUpdatedMessage
   | SessionsUpdatedMessage
   | WorkspaceLayoutMessage
@@ -1813,6 +1868,7 @@ alias DaemonEvent =
   | GetReviewStateResultMessage
   | ReviewLoopResultMessage
   | ReviewLoopUpdatedMessage
+  | WorkspaceContextResultMessage
   | MarkFileViewedResultMessage
   | AddCommentResultMessage
   | UpdateCommentResultMessage

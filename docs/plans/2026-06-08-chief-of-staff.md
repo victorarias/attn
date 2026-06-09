@@ -100,8 +100,8 @@ ChiefOfStaff {
       directory and explicit worktree path.
 - [ ] Reuse the daemon operation from the Tauri app to remove duplicate React
       orchestration.
-- [ ] Add workspace-context checkout/update/status with revision conflicts.
-- [ ] Emit `workspace_context_changed` and keep context-bearing workspaces alive.
+- [x] Add workspace-context checkout/update/status with revision conflicts.
+- [x] Emit `workspace_context_changed` and keep context-bearing workspaces alive.
 - [ ] Add the unique profile-scoped chief-of-staff session role.
 - [ ] Add tracked dispatch status/reporting and UI visualization.
 

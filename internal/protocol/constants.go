@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "90"
+const ProtocolVersion = "91"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -37,6 +37,9 @@ const (
 	CmdClientHello                        = "client_hello"
 	CmdRegister                           = "register"
 	CmdDelegate                           = "delegate"
+	CmdWorkspaceContextCheckout           = "workspace_context_checkout"
+	CmdWorkspaceContextUpdate             = "workspace_context_update"
+	CmdWorkspaceContextStatus             = "workspace_context_status"
 	CmdUnregister                         = "unregister"
 	CmdState                              = "state"
 	CmdSetSessionResumeID                 = "set_session_resume_id"
@@ -143,10 +146,12 @@ const (
 	EventWorkspaceRegistered         = "workspace_registered"
 	EventWorkspaceUnregistered       = "workspace_unregistered"
 	EventWorkspaceStateChanged       = "workspace_state_changed"
+	EventWorkspaceContextChanged     = "workspace_context_changed"
 	EventSessionTodosUpdated         = "session_todos_updated"
 	EventSessionsUpdated             = "sessions_updated"
 	EventRenameResult                = "rename_result"
 	EventDelegateResult              = "delegate_result"
+	EventWorkspaceContextResult      = "workspace_context_result"
 	EventPRsUpdated                  = "prs_updated"
 	EventReposUpdated                = "repos_updated"
 	EventAuthorsUpdated              = "authors_updated"
@@ -295,6 +300,27 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdDelegate:
 		var msg DelegateMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkspaceContextCheckout:
+		var msg WorkspaceContextCheckoutMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkspaceContextUpdate:
+		var msg WorkspaceContextUpdateMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkspaceContextStatus:
+		var msg WorkspaceContextStatusMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
