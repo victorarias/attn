@@ -47,6 +47,8 @@ function parseArgs(argv) {
     settleMs: 4000,
     restartDaemon: true,
     cpuSeconds: 20,
+    realCmd: null,
+    realWindowMs: 25000,
   };
   for (let index = 0; index < filtered.length; index += 1) {
     const arg = filtered[index];
@@ -56,6 +58,8 @@ function parseArgs(argv) {
     else if (arg === '--chunk-count') extras.chunkCount = Number(filtered[++index]);
     else if (arg === '--settle-ms') extras.settleMs = Number(filtered[++index]);
     else if (arg === '--cpu-seconds') extras.cpuSeconds = Number(filtered[++index]);
+    else if (arg === '--real-cmd') extras.realCmd = filtered[++index];
+    else if (arg === '--real-window-ms') extras.realWindowMs = Number(filtered[++index]);
     else if (arg === '--no-restart-daemon') extras.restartDaemon = false;
     else passthrough.push(arg);
   }
@@ -219,6 +223,20 @@ function classRssMb(snap, label) {
   return snap?.byClass?.[label]?.rssMb ?? 0;
 }
 
+// Sample RSS repeatedly over a window and return the peak (by total RSS) and the
+// last sample. Used to catch the transient/retained spike from heavy output.
+async function sampleWindow(appPid, daemonPid, webkitBaseline, windowMs, intervalMs = 1000) {
+  const samples = [];
+  const deadline = Date.now() + windowMs;
+  while (Date.now() < deadline) {
+    samples.push(await snapshot(appPid, daemonPid, webkitBaseline));
+    await delay(intervalMs);
+  }
+  if (samples.length === 0) samples.push(await snapshot(appPid, daemonPid, webkitBaseline));
+  const peak = samples.reduce((best, current) => (current.totalRssMb > best.totalRssMb ? current : best), samples[0]);
+  return { peak, last: samples[samples.length - 1], count: samples.length };
+}
+
 async function stopDevDaemon() {
   // Only ever touches the dev profile pid file (~/.attn-dev), never prod (~/.attn).
   const pidFile = path.join(os.homedir(), '.attn-dev', 'attn.pid');
@@ -278,6 +296,10 @@ async function main() {
     console.log('  --chunk-count <n>   Stream chunks per burst (default: 256)');
     console.log('  --settle-ms <n>     Settle time before the idle snapshot (default: 4000)');
     console.log('  --cpu-seconds <n>   CPU profile duration when ATTN_PPROF set (default: 20)');
+    console.log('  --real-cmd <cmd>    Run a heavy shell command in each stream target via the normal');
+    console.log('                      pty path (real-output repro), e.g. "seq 1 5000000". Skips the');
+    console.log('                      synthetic benchmark/CPU profile and samples peak + post RSS.');
+    console.log('  --real-window-ms <n>  Sampling window for --real-cmd (default: 25000)');
     console.log('  --no-restart-daemon Do not restart the dev daemon for ATTN_PPROF');
     console.log('');
     console.log('Set ATTN_PPROF=<port> to also capture /debug/vars + heap/CPU pprof.');
@@ -389,9 +411,30 @@ async function main() {
     const workerCount = summary.vars.idle ? Object.keys(summary.vars.idle.worker_pids || {}).length : null;
     console.log(`[perf] IDLE @ ${options.sessions} sessions: ${summary.snapshots.idle.totalRssMb} MB total; workers=${workerCount ?? 'n/a'}`);
 
-    // Best-effort streaming + CPU profile. Never fails the memory measurement.
     const streamN = Math.min(options.stream, sessionIds.length);
-    if (summary.diagUp && streamN > 0) {
+    if (options.realCmd && streamN > 0) {
+      // Realistic high-output repro through the NORMAL pty path (not the
+      // synthetic benchmark_pty_transport): run a heavy command in each stream
+      // target and sample peak + post-settle RSS. This is the before/after used
+      // to measure frontend-memory fixes.
+      const targets = [];
+      for (let i = 0; i < streamN; i += 1) {
+        const sid = sessionIds[i];
+        const paneId = await paneIdForSession(client, sid);
+        if (!paneId) continue;
+        targets.push({ sid, paneId });
+        await client.request('write_pane', { sessionId: sid, paneId, text: options.realCmd }, { timeoutMs: 15_000 })
+          .catch((error) => console.warn(`[perf] write_pane ${sid} failed: ${error.message}`));
+      }
+      console.log(`[perf] ran "${options.realCmd}" in ${targets.length} pane(s); sampling ${options.realWindowMs}ms`);
+      const win = await sampleWindow(appPid, daemonPid, webkitBaseline, options.realWindowMs);
+      summary.snapshots.realPeak = win.peak;
+      await delay(3000);
+      summary.snapshots.realPost = await snapshot(appPid, daemonPid, webkitBaseline);
+      if (summary.diagUp) summary.vars.realPost = await httpGetJson(port, '/debug/vars').catch(() => null);
+      console.log(`[perf] REAL-OUTPUT peak=${win.peak.totalRssMb} MB  post-settle=${summary.snapshots.realPost.totalRssMb} MB  (idle was ${summary.snapshots.idle.totalRssMb} MB)`);
+    } else if (summary.diagUp && streamN > 0) {
+      // Best-effort synthetic streaming + CPU profile. Never fails the measurement.
       try {
         const targets = [];
         for (let i = 0; i < streamN; i += 1) {
@@ -436,6 +479,19 @@ async function main() {
       ptyWorkerCount: idle.byClass.pty_worker?.count ?? 0,
       perWorkerAvgMb: idle.byClass.pty_worker?.count ? Number((classRssMb(idle, 'pty_worker') / idle.byClass.pty_worker.count).toFixed(1)) : 0,
     };
+    if (summary.snapshots.realPeak) {
+      const peak = summary.snapshots.realPeak;
+      const post = summary.snapshots.realPost;
+      summary.headline.realOutput = {
+        cmd: options.realCmd,
+        idleWebContentMb: classRssMb(idle, 'webkit_webcontent'),
+        peakTotalMb: peak.totalRssMb,
+        peakWebContentMb: classRssMb(peak, 'webkit_webcontent'),
+        postTotalMb: post?.totalRssMb ?? null,
+        postWebContentMb: post ? classRssMb(post, 'webkit_webcontent') : null,
+        retainedMb: post ? Number((post.totalRssMb - idle.totalRssMb).toFixed(1)) : null,
+      };
+    }
   } finally {
     // Close every session we created so they don't persist into the next run.
     await closeSessions(client, sessionIds);
