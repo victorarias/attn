@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/google/uuid"
 	agentdriver "github.com/victorarias/attn/internal/agent"
@@ -151,6 +152,8 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 		label = delegationLabel(brief)
 	}
 	sessionID := uuid.NewString()
+	chiefSessionID := d.chiefOfStaffSessionID()
+	trackedByChief := chiefSessionID == sourceSessionID
 	paneID := "pane-" + sessionID
 	placement := delegationPlacement(msg)
 	workspaceID := ""
@@ -267,6 +270,10 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 	}
 
 	spawnClient := newInternalWSClient()
+	initialPrompt := brief
+	if trackedByChief {
+		initialPrompt = chiefOfStaffDispatchPrompt(brief)
+	}
 	d.handleSpawnSession(spawnClient, &protocol.SpawnSessionMessage{
 		Cmd:           protocol.CmdSpawnSession,
 		ID:            sessionID,
@@ -277,7 +284,7 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 		Rows:          24,
 		Label:         protocol.Ptr(label),
 		YoloMode:      msg.YoloMode,
-		InitialPrompt: protocol.Ptr(brief),
+		InitialPrompt: protocol.Ptr(initialPrompt),
 	})
 	if _, err := readInternalActionResult(spawnClient); err != nil {
 		d.removeWorkspaceLayoutPaneForSession(sessionID)
@@ -288,6 +295,19 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 	if session == nil {
 		d.removeWorkspaceLayoutPaneForSession(sessionID)
 		return nil, d.rollbackDelegation(createdWorkspaceID, createdWorktreePath, fmt.Errorf("delegated session was not persisted"))
+	}
+	var dispatch *protocol.ChiefOfStaffDispatch
+	if trackedByChief {
+		dispatch = d.newChiefOfStaffDispatch(chiefSessionID, session, workspaceID, brief, label, agent)
+		if err := d.store.AddChiefOfStaffDispatch(dispatch); err != nil {
+			d.unregisterSession(sessionID, syscall.SIGTERM)
+			d.removeWorkspaceLayoutPaneForSession(sessionID)
+			return nil, d.rollbackDelegation(
+				createdWorkspaceID,
+				createdWorktreePath,
+				fmt.Errorf("persist chief of staff dispatch: %w", err),
+			)
+		}
 	}
 	result := &protocol.DelegateResult{
 		SessionID:   session.ID,
@@ -300,6 +320,10 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 	}
 	if session.Branch != nil && strings.TrimSpace(*session.Branch) != "" {
 		result.Branch = protocol.Ptr(strings.TrimSpace(*session.Branch))
+	}
+	if dispatch != nil {
+		result.DispatchID = protocol.Ptr(dispatch.ID)
+		d.broadcastChiefOfStaffDispatchesUpdated()
 	}
 	return result, nil
 }

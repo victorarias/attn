@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, OpenBrowserMessage, OpenMarkdownMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, OpenBrowserMessage, OpenMarkdownMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReportDispatchMessage, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -24,6 +24,8 @@
 //   const browserControlRequestMessage = Convert.toBrowserControlRequestMessage(json);
 //   const browserControlResponseMessage = Convert.toBrowserControlResponseMessage(json);
 //   const browserControlResultMessage = Convert.toBrowserControlResultMessage(json);
+//   const chiefOfStaffDispatch = Convert.toChiefOfStaffDispatch(json);
+//   const chiefOfStaffDispatchesUpdatedMessage = Convert.toChiefOfStaffDispatchesUpdatedMessage(json);
 //   const chiefOfStaffResultMessage = Convert.toChiefOfStaffResultMessage(json);
 //   const clearSessionsMessage = Convert.toClearSessionsMessage(json);
 //   const clearWarningsMessage = Convert.toClearWarningsMessage(json);
@@ -90,6 +92,7 @@
 //   const installPluginMessage = Convert.toInstallPluginMessage(json);
 //   const killSessionMessage = Convert.toKillSessionMessage(json);
 //   const listBranchesMessage = Convert.toListBranchesMessage(json);
+//   const listDispatchesMessage = Convert.toListDispatchesMessage(json);
 //   const listEndpointsMessage = Convert.toListEndpointsMessage(json);
 //   const listPluginsMessage = Convert.toListPluginsMessage(json);
 //   const listRemoteBranchesMessage = Convert.toListRemoteBranchesMessage(json);
@@ -138,6 +141,7 @@
 //   const replaySegment = Convert.toReplaySegment(json);
 //   const repoInfo = Convert.toRepoInfo(json);
 //   const repoState = Convert.toRepoState(json);
+//   const reportDispatchMessage = Convert.toReportDispatchMessage(json);
 //   const reposUpdatedMessage = Convert.toReposUpdatedMessage(json);
 //   const resolveCommentMessage = Convert.toResolveCommentMessage(json);
 //   const resolveCommentResultMessage = Convert.toResolveCommentResultMessage(json);
@@ -583,6 +587,54 @@ export enum BrowserControlResultMessageCmd {
     BrowserControlResult = "browser_control_result",
 }
 
+export interface ChiefOfStaffDispatch {
+    agent:            string;
+    branch?:          string;
+    brief:            string;
+    chief_session_id: string;
+    created_at:       string;
+    directory:        string;
+    id:               string;
+    label:            string;
+    latest_report?:   string;
+    reported_at?:     string;
+    session_id:       string;
+    status:           string;
+    status_since:     string;
+    updated_at:       string;
+    workspace_id:     string;
+    [property: string]: any;
+}
+
+export interface ChiefOfStaffDispatchesUpdatedMessage {
+    dispatches: ChiefOfStaffDispatchElement[];
+    event:      ChiefOfStaffDispatchesUpdatedMessageEvent;
+    [property: string]: any;
+}
+
+export interface ChiefOfStaffDispatchElement {
+    agent:            string;
+    branch?:          string;
+    brief:            string;
+    chief_session_id: string;
+    created_at:       string;
+    directory:        string;
+    id:               string;
+    label:            string;
+    latest_report?:   string;
+    reported_at?:     string;
+    session_id:       string;
+    status:           string;
+    status_since:     string;
+    updated_at:       string;
+    workspace_id:     string;
+    [property: string]: any;
+}
+
+export enum ChiefOfStaffDispatchesUpdatedMessageEvent {
+    ChiefOfStaffDispatchesUpdated = "chief_of_staff_dispatches_updated",
+}
+
 export interface ChiefOfStaffResultMessage {
     chief_of_staff:       boolean;
     error?:               string;
@@ -725,6 +777,7 @@ export interface DelegateMessageWorktree {
 export interface DelegateResult {
     branch?:           string;
     directory:         string;
+    dispatch_id?:      string;
     placement:         string;
     session_id:        string;
     workspace_id:      string;
@@ -747,6 +800,7 @@ export enum DelegateResultMessageEvent {
 export interface DelegateResultObject {
     branch?:           string;
     directory:         string;
+    dispatch_id?:      string;
     placement:         string;
     session_id:        string;
     workspace_id:      string;
@@ -1372,19 +1426,20 @@ export enum HeartbeatMessageCmd {
 }
 
 export interface InitialStateMessage {
-    authors?:            AuthorElement[];
-    daemon_instance_id?: string;
-    endpoints?:          Endpoint[];
-    event:               InitialStateMessageEvent;
-    github_hosts?:       string[];
-    protocol_version?:   string;
-    prs?:                PRElement[];
-    repos?:              RepoElement[];
-    sessions?:           SessionElement[];
-    settings?:           { [key: string]: any };
-    source_fingerprint?: string;
-    warnings?:           WarningElement[];
-    workspaces?:         WorkspaceElement[];
+    authors?:                   AuthorElement[];
+    chief_of_staff_dispatches?: ChiefOfStaffDispatchElement[];
+    daemon_instance_id?:        string;
+    endpoints?:                 Endpoint[];
+    event:                      InitialStateMessageEvent;
+    github_hosts?:              string[];
+    protocol_version?:          string;
+    prs?:                       PRElement[];
+    repos?:                     RepoElement[];
+    sessions?:                  SessionElement[];
+    settings?:                  { [key: string]: any };
+    source_fingerprint?:        string;
+    warnings?:                  WarningElement[];
+    workspaces?:                WorkspaceElement[];
     [property: string]: any;
 }
 
@@ -1539,6 +1594,16 @@ export interface ListBranchesMessage {
 
 export enum ListBranchesMessageCmd {
     ListBranches = "list_branches",
+}
+
+export interface ListDispatchesMessage {
+    cmd:               ListDispatchesMessageCmd;
+    source_session_id: string;
+    [property: string]: any;
+}
+
+export enum ListDispatchesMessageCmd {
+    ListDispatches = "list_dispatches",
 }
 
 export interface ListEndpointsMessage {
@@ -2096,6 +2161,17 @@ export interface RepoState {
     [property: string]: any;
 }
 
+export interface ReportDispatchMessage {
+    cmd:               ReportDispatchMessageCmd;
+    report:            string;
+    source_session_id: string;
+    [property: string]: any;
+}
+
+export enum ReportDispatchMessageCmd {
+    ReportDispatch = "report_dispatch",
+}
+
 export interface ReposUpdatedMessage {
     event:  ReposUpdatedMessageEvent;
     repos?: RepoElement[];
@@ -2129,16 +2205,18 @@ export enum ResolveCommentResultMessageEvent {
 }
 
 export interface Response {
-    authors?:                  AuthorElement[];
-    data?:                     string;
-    delegate_result?:          DelegateResultObject;
-    error?:                    string;
-    ok:                        boolean;
-    prs?:                      PRElement[];
-    repos?:                    RepoElement[];
-    review_loop_run?:          ReviewLoopRunObject;
-    sessions?:                 SessionElement[];
-    workspace_context_result?: WorkspaceContextResultObject;
+    authors?:                   AuthorElement[];
+    chief_of_staff_dispatch?:   ChiefOfStaffDispatchElement;
+    chief_of_staff_dispatches?: ChiefOfStaffDispatchElement[];
+    data?:                      string;
+    delegate_result?:           DelegateResultObject;
+    error?:                     string;
+    ok:                         boolean;
+    prs?:                       PRElement[];
+    repos?:                     RepoElement[];
+    review_loop_run?:           ReviewLoopRunObject;
+    sessions?:                  SessionElement[];
+    workspace_context_result?:  WorkspaceContextResultObject;
     [property: string]: any;
 }
 
@@ -2733,80 +2811,82 @@ export enum UpdateEndpointMessageCmd {
 }
 
 export interface WebSocketEvent {
-    action?:                   string;
-    authors?:                  AuthorElement[];
-    base_ref?:                 string;
-    branch?:                   string;
-    branches?:                 BranchElement[];
-    chief_of_staff?:           boolean;
-    cloned?:                   boolean;
-    cmd?:                      string;
-    cols?:                     number;
-    conflict?:                 boolean;
-    content?:                  string;
-    data?:                     string;
-    directory?:                string;
-    dirty?:                    boolean;
-    error?:                    string;
-    event:                     string;
-    exit_code?:                number;
-    files?:                    FileElement[];
-    found?:                    boolean;
-    id?:                       string;
-    last_seq?:                 number;
-    modified?:                 string;
-    name?:                     string;
-    operation?:                Operation;
-    original?:                 string;
-    pane_id?:                  string;
-    path?:                     string;
-    pid?:                      number;
-    plugin_issues?:            IssueElement[];
-    plugins?:                  PluginElement[];
-    previous_session_id?:      string;
-    priority?:                 number;
-    protocol_version?:         string;
-    prs?:                      PRElement[];
-    rate_limit_reset_at?:      string;
-    rate_limit_resource?:      string;
-    reason?:                   string;
-    recent_locations?:         RecentLocationElement[];
-    repos?:                    RepoElement[];
-    review_loop_run?:          ReviewLoopRunObject;
-    rows?:                     number;
-    running?:                  boolean;
-    runtime_id?:               string;
-    screen_cols?:              number;
-    screen_cursor_visible?:    boolean;
-    screen_cursor_x?:          number;
-    screen_cursor_y?:          number;
-    screen_rows?:              number;
-    screen_snapshot?:          string;
-    screen_snapshot_fresh?:    boolean;
-    scrollback?:               string;
-    scrollback_truncated?:     boolean;
-    seq?:                      number;
-    session?:                  SessionElement;
-    session_id?:               string;
-    sessions?:                 SessionElement[];
-    settings?:                 { [key: string]: any };
-    signal?:                   string;
-    split_id?:                 string;
-    staged?:                   StagedElement[];
-    stash_ref?:                string;
-    success?:                  boolean;
-    target_path?:              string;
-    tile_id?:                  string;
-    tile_kind?:                string;
-    unstaged?:                 StagedElement[];
-    untracked?:                StagedElement[];
-    warnings?:                 WarningElement[];
-    workspace?:                WorkspaceElement;
-    workspace_context_result?: WorkspaceContextResultObject;
-    workspace_id?:             string;
-    workspace_layout?:         Layout;
-    workspaces?:               WorkspaceElement[];
-    worktrees?:                WorktreeElement[];
+    action?:                    string;
+    authors?:                   AuthorElement[];
+    base_ref?:                  string;
+    branch?:                    string;
+    branches?:                  BranchElement[];
+    chief_of_staff?:            boolean;
+    chief_of_staff_dispatch?:   ChiefOfStaffDispatchElement;
+    chief_of_staff_dispatches?: ChiefOfStaffDispatchElement[];
+    cloned?:                    boolean;
+    cmd?:                       string;
+    cols?:                      number;
+    conflict?:                  boolean;
+    content?:                   string;
+    data?:                      string;
+    directory?:                 string;
+    dirty?:                     boolean;
+    error?:                     string;
+    event:                      string;
+    exit_code?:                 number;
+    files?:                     FileElement[];
+    found?:                     boolean;
+    id?:                        string;
+    last_seq?:                  number;
+    modified?:                  string;
+    name?:                      string;
+    operation?:                 Operation;
+    original?:                  string;
+    pane_id?:                   string;
+    path?:                      string;
+    pid?:                       number;
+    plugin_issues?:             IssueElement[];
+    plugins?:                   PluginElement[];
+    previous_session_id?:       string;
+    priority?:                  number;
+    protocol_version?:          string;
+    prs?:                       PRElement[];
+    rate_limit_reset_at?:       string;
+    rate_limit_resource?:       string;
+    reason?:                    string;
+    recent_locations?:          RecentLocationElement[];
+    repos?:                     RepoElement[];
+    review_loop_run?:           ReviewLoopRunObject;
+    rows?:                      number;
+    running?:                   boolean;
+    runtime_id?:                string;
+    screen_cols?:               number;
+    screen_cursor_visible?:     boolean;
+    screen_cursor_x?:           number;
+    screen_cursor_y?:           number;
+    screen_rows?:               number;
+    screen_snapshot?:           string;
+    screen_snapshot_fresh?:     boolean;
+    scrollback?:                string;
+    scrollback_truncated?:      boolean;
+    seq?:                       number;
+    session?:                   SessionElement;
+    session_id?:                string;
+    sessions?:                  SessionElement[];
+    settings?:                  { [key: string]: any };
+    signal?:                    string;
+    split_id?:                  string;
+    staged?:                    StagedElement[];
+    stash_ref?:                 string;
+    success?:                   boolean;
+    target_path?:               string;
+    tile_id?:                   string;
+    tile_kind?:                 string;
+    unstaged?:                  StagedElement[];
+    untracked?:                 StagedElement[];
+    warnings?:                  WarningElement[];
+    workspace?:                 WorkspaceElement;
+    workspace_context_result?:  WorkspaceContextResultObject;
+    workspace_id?:              string;
+    workspace_layout?:          Layout;
+    workspaces?:                WorkspaceElement[];
+    worktrees?:                 WorktreeElement[];
     [property: string]: any;
 }
 
@@ -3396,6 +3476,22 @@ export class Convert {
         return JSON.stringify(uncast(value, r("BrowserControlResultMessage")), null, 2);
     }
 
+    public static toChiefOfStaffDispatch(json: string): ChiefOfStaffDispatch {
+        return cast(JSON.parse(json), r("ChiefOfStaffDispatch"));
+    }
+
+    public static chiefOfStaffDispatchToJson(value: ChiefOfStaffDispatch): string {
+        return JSON.stringify(uncast(value, r("ChiefOfStaffDispatch")), null, 2);
+    }
+
+    public static toChiefOfStaffDispatchesUpdatedMessage(json: string): ChiefOfStaffDispatchesUpdatedMessage {
+        return cast(JSON.parse(json), r("ChiefOfStaffDispatchesUpdatedMessage"));
+    }
+
+    public static chiefOfStaffDispatchesUpdatedMessageToJson(value: ChiefOfStaffDispatchesUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("ChiefOfStaffDispatchesUpdatedMessage")), null, 2);
+    }
+
     public static toChiefOfStaffResultMessage(json: string): ChiefOfStaffResultMessage {
         return cast(JSON.parse(json), r("ChiefOfStaffResultMessage"));
     }
@@ -3924,6 +4020,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("ListBranchesMessage")), null, 2);
     }
 
+    public static toListDispatchesMessage(json: string): ListDispatchesMessage {
+        return cast(JSON.parse(json), r("ListDispatchesMessage"));
+    }
+
+    public static listDispatchesMessageToJson(value: ListDispatchesMessage): string {
+        return JSON.stringify(uncast(value, r("ListDispatchesMessage")), null, 2);
+    }
+
     public static toListEndpointsMessage(json: string): ListEndpointsMessage {
         return cast(JSON.parse(json), r("ListEndpointsMessage"));
     }
@@ -4306,6 +4410,14 @@ export class Convert {
 
     public static repoStateToJson(value: RepoState): string {
         return JSON.stringify(uncast(value, r("RepoState")), null, 2);
+    }
+
+    public static toReportDispatchMessage(json: string): ReportDispatchMessage {
+        return cast(JSON.parse(json), r("ReportDispatchMessage"));
+    }
+
+    public static reportDispatchMessageToJson(value: ReportDispatchMessage): string {
+        return JSON.stringify(uncast(value, r("ReportDispatchMessage")), null, 2);
     }
 
     public static toReposUpdatedMessage(json: string): ReposUpdatedMessage {
@@ -5376,6 +5488,44 @@ const typeMap: any = {
         { json: "request_id", js: "request_id", typ: "" },
         { json: "success", js: "success", typ: true },
     ], "any"),
+    "ChiefOfStaffDispatch": o([
+        { json: "agent", js: "agent", typ: "" },
+        { json: "branch", js: "branch", typ: u(undefined, "") },
+        { json: "brief", js: "brief", typ: "" },
+        { json: "chief_session_id", js: "chief_session_id", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "directory", js: "directory", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "label", js: "label", typ: "" },
+        { json: "latest_report", js: "latest_report", typ: u(undefined, "") },
+        { json: "reported_at", js: "reported_at", typ: u(undefined, "") },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "status", js: "status", typ: "" },
+        { json: "status_since", js: "status_since", typ: "" },
+        { json: "updated_at", js: "updated_at", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
+    "ChiefOfStaffDispatchesUpdatedMessage": o([
+        { json: "dispatches", js: "dispatches", typ: a(r("ChiefOfStaffDispatchElement")) },
+        { json: "event", js: "event", typ: r("ChiefOfStaffDispatchesUpdatedMessageEvent") },
+    ], "any"),
+    "ChiefOfStaffDispatchElement": o([
+        { json: "agent", js: "agent", typ: "" },
+        { json: "branch", js: "branch", typ: u(undefined, "") },
+        { json: "brief", js: "brief", typ: "" },
+        { json: "chief_session_id", js: "chief_session_id", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "directory", js: "directory", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "label", js: "label", typ: "" },
+        { json: "latest_report", js: "latest_report", typ: u(undefined, "") },
+        { json: "reported_at", js: "reported_at", typ: u(undefined, "") },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "status", js: "status", typ: "" },
+        { json: "status_since", js: "status_since", typ: "" },
+        { json: "updated_at", js: "updated_at", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
     "ChiefOfStaffResultMessage": o([
         { json: "chief_of_staff", js: "chief_of_staff", typ: true },
         { json: "error", js: "error", typ: u(undefined, "") },
@@ -5454,6 +5604,7 @@ const typeMap: any = {
     "DelegateResult": o([
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "directory", js: "directory", typ: "" },
+        { json: "dispatch_id", js: "dispatch_id", typ: u(undefined, "") },
         { json: "placement", js: "placement", typ: "" },
         { json: "session_id", js: "session_id", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: "" },
@@ -5468,6 +5619,7 @@ const typeMap: any = {
     "DelegateResultObject": o([
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "directory", js: "directory", typ: "" },
+        { json: "dispatch_id", js: "dispatch_id", typ: u(undefined, "") },
         { json: "placement", js: "placement", typ: "" },
         { json: "session_id", js: "session_id", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: "" },
@@ -5824,6 +5976,7 @@ const typeMap: any = {
     ], "any"),
     "InitialStateMessage": o([
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
+        { json: "chief_of_staff_dispatches", js: "chief_of_staff_dispatches", typ: u(undefined, a(r("ChiefOfStaffDispatchElement"))) },
         { json: "daemon_instance_id", js: "daemon_instance_id", typ: u(undefined, "") },
         { json: "endpoints", js: "endpoints", typ: u(undefined, a(r("Endpoint"))) },
         { json: "event", js: "event", typ: r("InitialStateMessageEvent") },
@@ -5913,6 +6066,10 @@ const typeMap: any = {
     "ListBranchesMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListBranchesMessageCmd") },
         { json: "main_repo", js: "main_repo", typ: "" },
+    ], "any"),
+    "ListDispatchesMessage": o([
+        { json: "cmd", js: "cmd", typ: r("ListDispatchesMessageCmd") },
+        { json: "source_session_id", js: "source_session_id", typ: "" },
     ], "any"),
     "ListEndpointsMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListEndpointsMessageCmd") },
@@ -6213,6 +6370,11 @@ const typeMap: any = {
         { json: "muted", js: "muted", typ: true },
         { json: "repo", js: "repo", typ: "" },
     ], "any"),
+    "ReportDispatchMessage": o([
+        { json: "cmd", js: "cmd", typ: r("ReportDispatchMessageCmd") },
+        { json: "report", js: "report", typ: "" },
+        { json: "source_session_id", js: "source_session_id", typ: "" },
+    ], "any"),
     "ReposUpdatedMessage": o([
         { json: "event", js: "event", typ: r("ReposUpdatedMessageEvent") },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
@@ -6229,6 +6391,8 @@ const typeMap: any = {
     ], "any"),
     "Response": o([
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
+        { json: "chief_of_staff_dispatch", js: "chief_of_staff_dispatch", typ: u(undefined, r("ChiefOfStaffDispatchElement")) },
+        { json: "chief_of_staff_dispatches", js: "chief_of_staff_dispatches", typ: u(undefined, a(r("ChiefOfStaffDispatchElement"))) },
         { json: "data", js: "data", typ: u(undefined, "") },
         { json: "delegate_result", js: "delegate_result", typ: u(undefined, r("DelegateResultObject")) },
         { json: "error", js: "error", typ: u(undefined, "") },
@@ -6590,6 +6754,8 @@ const typeMap: any = {
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "branches", js: "branches", typ: u(undefined, a(r("BranchElement"))) },
         { json: "chief_of_staff", js: "chief_of_staff", typ: u(undefined, true) },
+        { json: "chief_of_staff_dispatch", js: "chief_of_staff_dispatch", typ: u(undefined, r("ChiefOfStaffDispatchElement")) },
+        { json: "chief_of_staff_dispatches", js: "chief_of_staff_dispatches", typ: u(undefined, a(r("ChiefOfStaffDispatchElement"))) },
         { json: "cloned", js: "cloned", typ: u(undefined, true) },
         { json: "cmd", js: "cmd", typ: u(undefined, "") },
         { json: "cols", js: "cols", typ: u(undefined, 0) },
@@ -6941,6 +7107,9 @@ const typeMap: any = {
     "BrowserControlResultMessageCmd": [
         "browser_control_result",
     ],
+    "ChiefOfStaffDispatchesUpdatedMessageEvent": [
+        "chief_of_staff_dispatches_updated",
+    ],
     "ChiefOfStaffResultMessageEvent": [
         "chief_of_staff_result",
     ],
@@ -7141,6 +7310,9 @@ const typeMap: any = {
     "ListBranchesMessageCmd": [
         "list_branches",
     ],
+    "ListDispatchesMessageCmd": [
+        "list_dispatches",
+    ],
     "ListEndpointsMessageCmd": [
         "list_endpoints",
     ],
@@ -7257,6 +7429,9 @@ const typeMap: any = {
     ],
     "RenameWorkspaceMessageCmd": [
         "rename_workspace",
+    ],
+    "ReportDispatchMessageCmd": [
+        "report_dispatch",
     ],
     "ReposUpdatedMessageEvent": [
         "repos_updated",

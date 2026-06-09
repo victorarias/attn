@@ -323,6 +323,125 @@
   padding: 20px;
 }
 
+.card-empty.compact {
+  padding: 12px 8px;
+  text-align: left;
+}
+
+.chief-session-summary {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  gap: 9px;
+  margin: 0 4px 14px;
+  padding: 2px 4px 12px;
+}
+
+.chief-session-summary button {
+  background: none;
+  border: 0;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  flex: 1;
+  font: inherit;
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chief-session-summary button:hover {
+  color: #ff8b61;
+}
+
+.chief-session-summary > span:last-child {
+  color: var(--color-text-dimmed);
+  font-size: var(--font-size-xs);
+}
+
+.dispatch-group {
+  margin-bottom: 14px;
+}
+
+.dispatch-group.historical {
+  border-top: 1px solid var(--color-border);
+  padding-top: 14px;
+}
+
+.dispatch-row {
+  align-items: flex-start;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 9px;
+  padding: 9px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.dispatch-row:hover:not(:disabled) {
+  background: var(--color-bg-elevated);
+}
+
+.dispatch-row:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.dispatch-row .state-indicator {
+  margin-top: 5px;
+}
+
+.dispatch-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dispatch-title {
+  align-items: center;
+  display: flex;
+  font-size: var(--font-size-md);
+  gap: 7px;
+  min-width: 0;
+}
+
+.dispatch-agent {
+  color: var(--color-text-dimmed);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+}
+
+.dispatch-summary {
+  color: var(--color-text-dimmed);
+  display: -webkit-box;
+  font-size: var(--font-size-sm);
+  line-height: 1.35;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.dispatch-summary.reported {
+  color: var(--color-text-tertiary);
+}
+
+.dispatch-status {
+  color: var(--color-text-dimmed);
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+  margin-top: 3px;
+  text-transform: lowercase;
+}
+
 .session-group {
   margin-bottom: 16px;
 }

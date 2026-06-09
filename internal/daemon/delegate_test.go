@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,6 +119,107 @@ func TestDelegateSpawnsAgentInSourceWorkspaceWithBrief(t *testing.T) {
 	layout := d.store.GetWorkspaceLayout(workspaceID)
 	if layout == nil || len(layout.Panes) != 2 {
 		t.Fatalf("workspace layout = %+v, want two panes", layout)
+	}
+}
+
+func TestChiefOfStaffDelegateCreatesTrackedDispatch(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	workspaceID, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, sourceSessionID); err != nil {
+		t.Fatalf("set chief role: %v", err)
+	}
+
+	var prompt string
+	backend.onSpawn = func(opts ptybackend.SpawnOptions) {
+		if opts.ID == sourceSessionID || opts.InitialPromptFile == "" {
+			return
+		}
+		content, err := os.ReadFile(opts.InitialPromptFile)
+		if err != nil {
+			t.Fatalf("read initial prompt: %v", err)
+		}
+		prompt = string(content)
+		if err := os.Remove(opts.InitialPromptFile); err != nil {
+			t.Fatalf("remove initial prompt: %v", err)
+		}
+	}
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Investigate the tracked task.",
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	if result.DispatchID == nil || protocol.Deref(result.DispatchID) == "" {
+		t.Fatalf("delegate result = %+v, want dispatch id", result)
+	}
+	if !strings.Contains(prompt, "Investigate the tracked task.") ||
+		!strings.Contains(prompt, "dispatch report --message") {
+		t.Fatalf("tracked initial prompt = %q", prompt)
+	}
+
+	dispatches := d.chiefOfStaffDispatches(sourceSessionID)
+	if len(dispatches) != 1 {
+		t.Fatalf("dispatches = %+v", dispatches)
+	}
+	dispatch := dispatches[0]
+	if dispatch.ID != protocol.Deref(result.DispatchID) ||
+		dispatch.ChiefSessionID != sourceSessionID ||
+		dispatch.SessionID != result.SessionID ||
+		dispatch.WorkspaceID != workspaceID ||
+		dispatch.Brief != "Investigate the tracked task." {
+		t.Fatalf("dispatch = %+v", dispatch)
+	}
+
+	d.store.UpdateState(result.SessionID, string(protocol.SessionStateWaitingInput))
+	dispatches = d.chiefOfStaffDispatches(sourceSessionID)
+	if len(dispatches) != 1 || dispatches[0].Status != string(protocol.SessionStateWaitingInput) {
+		t.Fatalf("updated dispatches = %+v", dispatches)
+	}
+}
+
+func TestDispatchReportUpdatesTrackedRecord(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, sourceSessionID); err != nil {
+		t.Fatalf("set chief role: %v", err)
+	}
+	consumeDelegatedPrompt(t, backend)
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Produce a tracked report.",
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+
+	server, client := net.Pipe()
+	defer client.Close()
+	go func() {
+		d.handleReportDispatch(server, &protocol.ReportDispatchMessage{
+			Cmd:             protocol.CmdReportDispatch,
+			SourceSessionID: result.SessionID,
+			Report:          "Implementation complete; focused tests pass.",
+		})
+		_ = server.Close()
+	}()
+
+	var response protocol.Response
+	if err := json.NewDecoder(client).Decode(&response); err != nil {
+		t.Fatalf("decode report response: %v", err)
+	}
+	if !response.Ok || response.ChiefOfStaffDispatch == nil {
+		t.Fatalf("report response = %+v", response)
+	}
+	if protocol.Deref(response.ChiefOfStaffDispatch.LatestReport) != "Implementation complete; focused tests pass." {
+		t.Fatalf("reported dispatch = %+v", response.ChiefOfStaffDispatch)
 	}
 }
 

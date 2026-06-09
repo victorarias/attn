@@ -147,6 +147,25 @@ func TestParseDelegatePlacementAndWorktree(t *testing.T) {
 	}
 }
 
+func TestParseDispatchCommands(t *testing.T) {
+	cmd, data, err := ParseMessage([]byte(`{"cmd":"list_dispatches","source_session_id":"chief-1"}`))
+	if err != nil {
+		t.Fatalf("ParseMessage(list_dispatches) error = %v", err)
+	}
+	if cmd != CmdListDispatches || data.(*ListDispatchesMessage).SourceSessionID != "chief-1" {
+		t.Fatalf("list dispatches = %q %+v", cmd, data)
+	}
+
+	cmd, data, err = ParseMessage([]byte(`{"cmd":"report_dispatch","source_session_id":"worker-1","report":"done"}`))
+	if err != nil {
+		t.Fatalf("ParseMessage(report_dispatch) error = %v", err)
+	}
+	report := data.(*ReportDispatchMessage)
+	if cmd != CmdReportDispatch || report.SourceSessionID != "worker-1" || report.Report != "done" {
+		t.Fatalf("report dispatch = %q %+v", cmd, report)
+	}
+}
+
 func TestParseWorkspaceContextCommands(t *testing.T) {
 	tests := []struct {
 		input string

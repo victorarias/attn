@@ -1663,6 +1663,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleRegister(conn, msg.(*protocol.RegisterMessage))
 	case protocol.CmdDelegate:
 		d.handleDelegate(conn, msg.(*protocol.DelegateMessage))
+	case protocol.CmdListDispatches:
+		d.handleListDispatches(conn, msg.(*protocol.ListDispatchesMessage))
+	case protocol.CmdReportDispatch:
+		d.handleReportDispatch(conn, msg.(*protocol.ReportDispatchMessage))
 	case protocol.CmdWorkspaceContextCheckout:
 		d.handleWorkspaceContextCheckout(conn, msg.(*protocol.WorkspaceContextCheckoutMessage))
 	case protocol.CmdWorkspaceContextUpdate:

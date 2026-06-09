@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '@tauri-apps/api/core';
 import type {
   Session as GeneratedSession,
+  ChiefOfStaffDispatch as GeneratedChiefOfStaffDispatch,
   Workspace as GeneratedWorkspaceSnapshot,
   PR as GeneratedPR,
   Worktree as GeneratedWorktree,
@@ -55,6 +56,7 @@ import { controlBrowserHost, serializeBrowserControlResultMessage } from '../bro
 
 // Short names for daemon payloads used throughout the app.
 export type DaemonSession = GeneratedSession;
+export type ChiefOfStaffDispatch = GeneratedChiefOfStaffDispatch;
 export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
@@ -139,6 +141,7 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   inspection?: PathInspection;
   plugins?: DaemonPlugin[];
   issues?: DaemonPluginIssue[];
+  dispatches?: ChiefOfStaffDispatch[];
   github_hosts?: string[];
   // Legacy review event fields
   review_id?: string;
@@ -161,7 +164,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '92';
+const PROTOCOL_VERSION = '93';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -388,6 +391,7 @@ export interface SessionExitInfo {
 
 interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
+  onChiefOfStaffDispatchesUpdate?: (dispatches: ChiefOfStaffDispatch[]) => void;
   onWorkspacesUpdate: (workspaces: DaemonWorkspace[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
   onEndpointsUpdate?: (endpoints: DaemonEndpoint[]) => void;
@@ -666,6 +670,7 @@ export async function retryTransientAttachRequest<T>(
 
 export function useDaemonSocket({
   onSessionsUpdate,
+  onChiefOfStaffDispatchesUpdate,
   onWorkspacesUpdate,
   onPRsUpdate,
   onEndpointsUpdate,
@@ -1057,6 +1062,7 @@ export function useDaemonSocket({
             const nextSessions = dedupeSessionsByID(data.sessions || []);
             sessionsRef.current = nextSessions;
             onSessionsUpdate(nextSessions);
+            onChiefOfStaffDispatchesUpdate?.(data.chief_of_staff_dispatches || []);
             const nextWorkspaces = data.workspaces || [];
             workspacesRef.current = nextWorkspaces;
             onWorkspacesUpdate(nextWorkspaces);
@@ -1182,6 +1188,10 @@ export function useDaemonSocket({
             }
             break;
           }
+
+          case 'chief_of_staff_dispatches_updated':
+            onChiefOfStaffDispatchesUpdate?.(data.dispatches || []);
+            break;
 
           case 'workspace_tile_content': {
             if (typeof data.workspace_id === 'string' && typeof data.tile_id === 'string') {
@@ -2105,7 +2115,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [resolvedWsUrl, onSessionsUpdate, onWorkspacesUpdate, onPRsUpdate, onEndpointsUpdate, onPluginsUpdate, onGitHubHostsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand, flushQueuedCommands, pruneAttachedPtySessions]);
+  }, [resolvedWsUrl, onSessionsUpdate, onChiefOfStaffDispatchesUpdate, onWorkspacesUpdate, onPRsUpdate, onEndpointsUpdate, onPluginsUpdate, onGitHubHostsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand, flushQueuedCommands, pruneAttachedPtySessions]);
 
   useEffect(() => {
     void connect();

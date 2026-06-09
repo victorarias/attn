@@ -24,6 +24,8 @@ If a command reports an unknown subcommand or shows another tool's help, check
 
 - **Delegate a side task to another agent:** read
   [references/delegation.md](references/delegation.md).
+- **Coordinate or report chief-of-staff dispatches:** read
+  [references/chief-of-staff.md](references/chief-of-staff.md).
 - **Read or update shared workspace context:** read
   [references/workspace-context.md](references/workspace-context.md).
 - **Start, monitor, or answer a review loop:** read

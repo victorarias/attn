@@ -277,6 +277,7 @@ function App() {
   const {
     daemonSessions,
     setDaemonSessions,
+    setChiefOfStaffDispatches,
     prs,
     setPRs,
     setRepoStates,
@@ -473,6 +474,7 @@ function App() {
     clearWarnings,
   } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
+    onChiefOfStaffDispatchesUpdate: setChiefOfStaffDispatches,
     onWorkspacesUpdate: setDaemonWorkspaces,
     onPRsUpdate: setPRs,
     onEndpointsUpdate: setDaemonEndpoints,
@@ -3069,6 +3071,7 @@ sendFetchPRDetails,
       <div className={`view-container ${view === 'dashboard' ? 'visible' : 'hidden'}`}>
         <Dashboard
           sessions={unmutedEnrichedSessions}
+          dispatchSessions={visibleEnrichedSessions}
           mutedWorkspaces={mutedWorkspaceViews}
           prs={prs}
           isLoading={!hasReceivedInitialState}

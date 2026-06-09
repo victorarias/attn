@@ -680,19 +680,20 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 
 func (d *Daemon) sendInitialState(client *wsClient) {
 	event := &protocol.InitialStateMessage{
-		Event:             protocol.EventInitialState,
-		ProtocolVersion:   protocol.Ptr(protocol.ProtocolVersion),
-		SourceFingerprint: protocol.Ptr(buildinfo.SourceFingerprint),
-		DaemonInstanceID:  protocol.Ptr(d.daemonInstanceID),
-		Sessions:          d.mergedSessionsForBroadcast(),
-		Endpoints:         d.listEndpointInfos(),
-		Workspaces:        d.listWorkspaces(),
-		Prs:               protocol.PRsToValues(d.store.ListPRs("")),
-		Repos:             protocol.RepoStatesToValues(d.store.ListRepoStates()),
-		Authors:           protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
-		GithubHosts:       d.gitHubHosts(),
-		Settings:          d.settingsWithAgentAvailability(),
-		Warnings:          d.getWarnings(),
+		Event:                  protocol.EventInitialState,
+		ProtocolVersion:        protocol.Ptr(protocol.ProtocolVersion),
+		SourceFingerprint:      protocol.Ptr(buildinfo.SourceFingerprint),
+		DaemonInstanceID:       protocol.Ptr(d.daemonInstanceID),
+		Sessions:               d.mergedSessionsForBroadcast(),
+		Endpoints:              d.listEndpointInfos(),
+		Workspaces:             d.listWorkspaces(),
+		Prs:                    protocol.PRsToValues(d.store.ListPRs("")),
+		Repos:                  protocol.RepoStatesToValues(d.store.ListRepoStates()),
+		Authors:                protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
+		GithubHosts:            d.gitHubHosts(),
+		Settings:               d.settingsWithAgentAvailability(),
+		Warnings:               d.getWarnings(),
+		ChiefOfStaffDispatches: d.chiefOfStaffDispatches(""),
 	}
 	data, err := json.Marshal(event)
 	if err != nil {

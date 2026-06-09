@@ -72,6 +72,26 @@ WorkspaceContext {
 ChiefOfStaff {
   session_id // unique per attn profile
 }
+
+ChiefOfStaffDispatch {
+  id
+  chief_session_id
+  session_id
+  workspace_id
+  brief
+  label
+  agent
+  directory
+  branch?
+  latest_report?
+  reported_at?
+  created_at
+  updated_at
+
+  // projected from the target session when read
+  status
+  status_since
+}
 ```
 
 ## Boundaries
@@ -83,6 +103,8 @@ ChiefOfStaff {
 - Workspace context belongs to the workspace and is independent of delegation.
 - The chief-of-staff role belongs to a session; its dispatch records survive
   independently of workspace context.
+- Dispatch status is projected from the target session. The dispatch store owns
+  relationship metadata and reports, not a second session-state machine.
 
 ## Implementation Steps
 
@@ -105,7 +127,21 @@ ChiefOfStaff {
 - [x] Inject workspace-context management guidance through supported agent
       session-start hooks without embedding a stale context snapshot.
 - [x] Add the unique profile-scoped chief-of-staff session role.
-- [ ] Add tracked dispatch status/reporting and UI visualization.
+- [x] Persist delegations initiated by the current chief as tracked dispatches.
+- [x] Add `attn dispatch list` for coordinators and `attn dispatch report` for
+      delegated agents.
+- [x] Broadcast dispatch snapshots and visualize them on the dashboard with
+      status, latest report, and session navigation.
+- [x] Teach chief and delegated agents when and how to list/report dispatches.
+
+## Verification
+
+- A packaged `attn-dev` Codex chief delegated a changelog inspection to Claude
+  in a new workspace without a worktree.
+- The Claude worker submitted `LIVE_DISPATCH_OK` through `attn dispatch report`;
+  `attn dispatch list` returned the report and projected `idle` session state.
+- The dashboard showed the current chief, target agent, live state, and report,
+  with navigation to the delegated session.
 
 ## Decisions
 
@@ -115,6 +151,8 @@ ChiefOfStaff {
   directory; SQLite remains canonical.
 - Context updates require the checked-out revision to prevent lost updates.
 - At most one session per attn profile can hold the chief-of-staff role.
+- Chief-role transfer does not rewrite dispatch ownership; records remain
+  attached to the agent that created them and remain visible as history.
 - Placement defaults to the current workspace. `--new-workspace`, `--cwd`, and
   `--worktree` opt into a new workspace; `--workspace` targets an existing one.
 - Copilot is excluded from delegation for now; ordinary Copilot sessions remain

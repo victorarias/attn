@@ -142,6 +142,9 @@ func main() {
 	case "delegate":
 		maybePrintProfileBanner()
 		runDelegate()
+	case "dispatch":
+		maybePrintProfileBanner()
+		runDispatch()
 	case "workspace":
 		maybePrintProfileBanner()
 		runWorkspace()
@@ -396,6 +399,7 @@ func writeHelp(w io.Writer) {
 commands:
   presence                          check whether the current shell runs inside attn
   delegate --brief-file <path>      start another agent with a delegated brief
+  dispatch <command>                 list or report chief-of-staff dispatches
   workspace context <command>       edit shared workspace context
   open <file.md> [--session <id>]   show a markdown file in attn
   browser <command>                 open and control the in-app browser
@@ -447,6 +451,111 @@ session options:
   --source-session <id>      source session (defaults to ATTN_SESSION_ID)
   --yolo                     bypass agent approval prompts
 `)
+}
+
+func runDispatch() {
+	if len(os.Args) < 3 || os.Args[2] == "-h" || os.Args[2] == "--help" {
+		writeDispatchHelp(os.Stdout)
+		return
+	}
+	warnIfDaemonVersionMismatch()
+	switch os.Args[2] {
+	case "list":
+		sourceSessionID, err := parseDispatchSourceSession(os.Args[3:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch list: %v\n", err)
+			os.Exit(2)
+		}
+		dispatches, err := client.New("").ListDispatches(sourceSessionID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch list: %v\n", err)
+			os.Exit(1)
+		}
+		printJSON(dispatches)
+	case "report":
+		sourceSessionID, report, err := parseDispatchReportArgs(os.Args[3:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch report: %v\n", err)
+			os.Exit(2)
+		}
+		dispatch, err := client.New("").ReportDispatch(sourceSessionID, report)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch report: %v\n", err)
+			os.Exit(1)
+		}
+		printJSON(dispatch)
+	default:
+		fmt.Fprintf(os.Stderr, "dispatch: unknown command %q\n\n", os.Args[2])
+		writeDispatchHelp(os.Stderr)
+		os.Exit(2)
+	}
+}
+
+func writeDispatchHelp(w io.Writer) {
+	fmt.Fprint(w, `usage: attn dispatch <command>
+
+commands:
+  list [--session <id>]                          list work dispatched by this chief
+  report (--message <text> | --file <path>)     report progress from a dispatched agent
+
+The session defaults to ATTN_SESSION_ID.
+`)
+}
+
+func parseDispatchSourceSession(args []string) (string, error) {
+	fs := flag.NewFlagSet("dispatch", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	if err := fs.Parse(args); err != nil {
+		return "", err
+	}
+	if fs.NArg() != 0 {
+		return "", fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	source := strings.TrimSpace(*sessionID)
+	if source == "" {
+		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+	}
+	if source == "" {
+		return "", errors.New("no session; run inside attn or pass --session")
+	}
+	return source, nil
+}
+
+func parseDispatchReportArgs(args []string) (string, string, error) {
+	fs := flag.NewFlagSet("dispatch report", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	message := fs.String("message", "", "concise progress or completion update")
+	reportFile := fs.String("file", "", "file containing a progress or completion update")
+	if err := fs.Parse(args); err != nil {
+		return "", "", err
+	}
+	if fs.NArg() != 0 {
+		return "", "", fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	source := strings.TrimSpace(*sessionID)
+	if source == "" {
+		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+	}
+	if source == "" {
+		return "", "", errors.New("no session; run inside attn or pass --session")
+	}
+	if strings.TrimSpace(*message) != "" && strings.TrimSpace(*reportFile) != "" {
+		return "", "", errors.New("pass only one of --message or --file")
+	}
+	report := strings.TrimSpace(*message)
+	if path := strings.TrimSpace(*reportFile); path != "" {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return "", "", fmt.Errorf("read report file: %w", err)
+		}
+		report = strings.TrimSpace(string(content))
+	}
+	if report == "" {
+		return "", "", errors.New("--message or --file is required")
+	}
+	return source, report, nil
 }
 
 func runWorkspace() {
