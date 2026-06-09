@@ -104,7 +104,7 @@ ChiefOfStaff {
 - [x] Emit `workspace_context_changed` and keep context-bearing workspaces alive.
 - [x] Inject workspace-context management guidance through supported agent
       session-start hooks without embedding a stale context snapshot.
-- [ ] Add the unique profile-scoped chief-of-staff session role.
+- [x] Add the unique profile-scoped chief-of-staff session role.
 - [ ] Add tracked dispatch status/reporting and UI visualization.
 
 ## Decisions

@@ -1,0 +1,25 @@
+.chief-of-staff-badge {
+  align-items: center;
+  background: rgba(255, 107, 53, 0.1);
+  border: 1px solid rgba(255, 107, 53, 0.32);
+  border-radius: 4px;
+  color: #ff8b61;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  gap: 3px;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 3px 5px;
+  text-transform: uppercase;
+}
+
+.chief-of-staff-badge.compact {
+  border-radius: 999px;
+  height: 18px;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 5px;
+}

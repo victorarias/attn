@@ -87,4 +87,21 @@ describe('Dashboard sessions', () => {
 
     expect(screen.getByText('gpu-box')).toBeInTheDocument();
   });
+
+  it('marks the chief-of-staff session', () => {
+    render(
+      <Dashboard
+        sessions={[
+          { id: 's1', label: 'planner', state: 'working', cwd: '/repo/a', chiefOfStaff: true },
+        ]}
+        prs={[]}
+        isLoading={false}
+        onSelectSession={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.getByLabelText('Chief of staff')).toBeInTheDocument();
+  });
 });

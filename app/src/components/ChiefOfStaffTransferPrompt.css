@@ -1,0 +1,78 @@
+.chief-transfer-prompt {
+  align-items: center;
+  background: var(--color-bg-overlay);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: fixed;
+  z-index: 320;
+}
+
+.chief-transfer-content {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.42);
+  max-width: min(92vw, 460px);
+  min-width: 380px;
+  padding: 20px 22px;
+  text-align: center;
+}
+
+.chief-transfer-title {
+  color: var(--color-text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  margin-bottom: 11px;
+  text-transform: uppercase;
+}
+
+.chief-transfer-message {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  line-height: 1.55;
+  margin-bottom: 18px;
+}
+
+.chief-transfer-message span {
+  color: #ff9b76;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.chief-transfer-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.chief-transfer-actions button {
+  border: 1px solid var(--color-border-hover);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  padding: 8px 16px;
+}
+
+.chief-transfer-actions button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.chief-transfer-actions .cancel {
+  background: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+.chief-transfer-actions .confirm {
+  background: rgba(255, 107, 53, 0.14);
+  border-color: rgba(255, 107, 53, 0.35);
+  color: #ff8b61;
+}
+
+.chief-transfer-actions button:focus-visible {
+  outline: 2px solid rgba(255, 107, 53, 0.6);
+  outline-offset: 2px;
+}

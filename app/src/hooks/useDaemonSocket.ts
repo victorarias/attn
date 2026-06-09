@@ -161,7 +161,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '91';
+const PROTOCOL_VERSION = '92';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -1161,6 +1161,22 @@ export function useDaemonSocket({
                   pending.resolve(undefined);
                 } else {
                   pending.reject(new Error(data.error || 'Rename failed'));
+                }
+              }
+            }
+            break;
+          }
+
+          case 'chief_of_staff_result': {
+            if (typeof data.session_id === 'string') {
+              const key = `chief_of_staff:${data.session_id}`;
+              const pending = pendingActionsRef.current.get(key);
+              if (pending) {
+                pendingActionsRef.current.delete(key);
+                if (data.success) {
+                  pending.resolve(undefined);
+                } else {
+                  pending.reject(new Error(data.error || 'Chief of staff update failed'));
                 }
               }
             }
@@ -2846,6 +2862,34 @@ export function useDaemonSocket({
     });
   }, [sendOrQueueCommand]);
 
+  const sendSetChiefOfStaff = useCallback((sessionId: string, chiefOfStaff: boolean): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if (!sessionId) {
+        reject(new Error('Session is required'));
+        return;
+      }
+      const ws = wsRef.current;
+      if (!hasReceivedInitialStateRef.current || !ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = `chief_of_staff:${sessionId}`;
+      pendingActionsRef.current.set(key, { resolve: () => resolve(), reject });
+      ws.send(JSON.stringify({
+        cmd: 'set_chief_of_staff',
+        session_id: sessionId,
+        chief_of_staff: chiefOfStaff,
+      }));
+      window.setTimeout(() => {
+        if (!pendingActionsRef.current.has(key)) {
+          return;
+        }
+        pendingActionsRef.current.delete(key);
+        reject(new Error(`Chief of staff update timed out for session ${sessionId}`));
+      }, 10_000);
+    });
+  }, []);
+
   // Unregister a single session from daemon
   const sendUnregisterSession = useCallback((sessionId: string): Promise<void> => {
     return new Promise((resolve, reject) => {
@@ -3861,6 +3905,7 @@ export function useDaemonSocket({
     sendUnregisterWorkspace,
     sendRenameSession,
     sendRenameWorkspace,
+    sendSetChiefOfStaff,
     sendPRVisited,
     sendListWorktrees,
     sendCreateWorktree,

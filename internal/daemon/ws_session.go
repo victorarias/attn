@@ -104,5 +104,6 @@ func (d *Daemon) clearAllSessions() {
 		d.clearLongRunTracking(sessionID)
 	}
 	d.store.ClearSessions()
+	d.clearChiefOfStaffIfSession(d.chiefOfStaffSessionID())
 	d.broadcastSessionsUpdated()
 }

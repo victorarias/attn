@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "91"
+const ProtocolVersion = "92"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -136,6 +136,7 @@ const (
 	CmdUnregisterWorkspace                = "unregister_workspace"
 	CmdRenameSession                      = "rename_session"
 	CmdRenameWorkspace                    = "rename_workspace"
+	CmdSetChiefOfStaff                    = "set_chief_of_staff"
 )
 
 // WebSocket Events (daemon -> client)
@@ -150,6 +151,7 @@ const (
 	EventSessionTodosUpdated         = "session_todos_updated"
 	EventSessionsUpdated             = "sessions_updated"
 	EventRenameResult                = "rename_result"
+	EventChiefOfStaffResult          = "chief_of_staff_result"
 	EventDelegateResult              = "delegate_result"
 	EventWorkspaceContextResult      = "workspace_context_result"
 	EventPRsUpdated                  = "prs_updated"
@@ -995,6 +997,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg RenameWorkspaceMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal rename_workspace: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSetChiefOfStaff:
+		var msg SetChiefOfStaffMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal set_chief_of_staff: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

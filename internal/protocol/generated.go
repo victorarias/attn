@@ -380,6 +380,26 @@ type BrowserControlResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type ChiefOfStaffResultMessage struct {
+	// ChiefOfStaff corresponds to the JSON schema field "chief_of_staff".
+	ChiefOfStaff bool `json:"chief_of_staff"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// PreviousSessionID corresponds to the JSON schema field "previous_session_id".
+	PreviousSessionID *string `json:"previous_session_id,omitempty,omitzero"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type ClearSessionsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2337,6 +2357,9 @@ type Session struct {
 	// Branch corresponds to the JSON schema field "branch".
 	Branch *string `json:"branch,omitempty,omitzero"`
 
+	// ChiefOfStaff corresponds to the JSON schema field "chief_of_staff".
+	ChiefOfStaff *bool `json:"chief_of_staff,omitempty,omitzero"`
+
 	// Directory corresponds to the JSON schema field "directory".
 	Directory string `json:"directory"`
 
@@ -2458,6 +2481,17 @@ type SessionsUpdatedMessage struct {
 
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`
+}
+
+type SetChiefOfStaffMessage struct {
+	// ChiefOfStaff corresponds to the JSON schema field "chief_of_staff".
+	ChiefOfStaff bool `json:"chief_of_staff"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
 }
 
 type SetEndpointRemoteWebMessage struct {
@@ -2747,6 +2781,9 @@ type WebSocketEvent struct {
 	// Branches corresponds to the JSON schema field "branches".
 	Branches []Branch `json:"branches,omitempty,omitzero"`
 
+	// ChiefOfStaff corresponds to the JSON schema field "chief_of_staff".
+	ChiefOfStaff *bool `json:"chief_of_staff,omitempty,omitzero"`
+
 	// Cloned corresponds to the JSON schema field "cloned".
 	Cloned *bool `json:"cloned,omitempty,omitzero"`
 
@@ -2818,6 +2855,9 @@ type WebSocketEvent struct {
 
 	// Plugins corresponds to the JSON schema field "plugins".
 	Plugins []PluginInfo `json:"plugins,omitempty,omitzero"`
+
+	// PreviousSessionID corresponds to the JSON schema field "previous_session_id".
+	PreviousSessionID *string `json:"previous_session_id,omitempty,omitzero"`
 
 	// Priority corresponds to the JSON schema field "priority".
 	Priority *int `json:"priority,omitempty,omitzero"`

@@ -11,6 +11,7 @@ import { LocationPicker } from './components/LocationPicker';
 import { UndoToast } from './components/UndoToast';
 import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { CloseSessionPrompt } from './components/CloseSessionPrompt';
+import { ChiefOfStaffTransferPrompt } from './components/ChiefOfStaffTransferPrompt';
 import { ChangesPanel } from './components/ChangesPanel';
 import { DiffDetailPanel } from './components/DiffDetailPanel';
 import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
@@ -412,6 +413,7 @@ function App() {
     sendUnregisterWorkspace,
     sendRenameSession,
     sendRenameWorkspace,
+    sendSetChiefOfStaff,
     sendUnregisterSession,
     sendSetSetting,
     sendCreateWorktree,
@@ -540,6 +542,7 @@ function App() {
         sendUnregisterWorkspace={sendUnregisterWorkspace}
         sendRenameSession={sendRenameSession}
         sendRenameWorkspace={sendRenameWorkspace}
+        sendSetChiefOfStaff={sendSetChiefOfStaff}
         sendUnregisterSession={sendUnregisterSession}
         sendSetSetting={sendSetSetting}
         sendCreateWorktree={sendCreateWorktree}
@@ -635,6 +638,7 @@ interface AppContentProps {
   sendUnregisterWorkspace: ReturnType<typeof useDaemonSocket>['sendUnregisterWorkspace'];
   sendRenameSession: ReturnType<typeof useDaemonSocket>['sendRenameSession'];
   sendRenameWorkspace: ReturnType<typeof useDaemonSocket>['sendRenameWorkspace'];
+  sendSetChiefOfStaff: ReturnType<typeof useDaemonSocket>['sendSetChiefOfStaff'];
   sendUnregisterSession: ReturnType<typeof useDaemonSocket>['sendUnregisterSession'];
   sendSetSetting: ReturnType<typeof useDaemonSocket>['sendSetSetting'];
   sendCreateWorktree: ReturnType<typeof useDaemonSocket>['sendCreateWorktree'];
@@ -725,6 +729,7 @@ function AppContent({
   sendUnregisterWorkspace,
   sendRenameSession,
   sendRenameWorkspace,
+  sendSetChiefOfStaff,
   sendUnregisterSession,
   sendSetSetting,
   sendCreateWorktree,
@@ -1086,6 +1091,7 @@ sendFetchPRDetails,
       isWorktree: daemonSession?.is_worktree ?? s.isWorktree,
       recoverable: daemonSession?.recoverable ?? false,
       reviewLoopStatus: reviewLoop?.status,
+      chiefOfStaff: daemonSession?.chief_of_staff ?? false,
     };
   });
 
@@ -1408,6 +1414,12 @@ sendFetchPRDetails,
   const [zoomModeBySessionId, setZoomModeBySessionId] = useState<Record<string, boolean>>({});
   const { message: copyMessage, showToast: showCopyToast, clearToast: clearCopyToast } = useCopyToast();
   const { message: errorMessage, showError, clearError } = useErrorToast();
+  const [chiefTransferTarget, setChiefTransferTarget] = useState<{
+    sessionId: string;
+    targetLabel: string;
+    currentLabel: string;
+  } | null>(null);
+  const [chiefTransferSaving, setChiefTransferSaving] = useState(false);
 
   const handleRebootstrapEndpoint = useCallback(async (endpointId: string) => {
     try {
@@ -1416,6 +1428,50 @@ sendFetchPRDetails,
       showError(err instanceof Error ? err.message : 'Sync failed.');
     }
   }, [sendBootstrapEndpoint, showError]);
+
+  const applyChiefOfStaffChange = useCallback(async (sessionId: string, enabled: boolean) => {
+    try {
+      await sendSetChiefOfStaff(sessionId, enabled);
+    } catch (err) {
+      showError(err instanceof Error ? err.message : 'Chief of staff update failed.');
+      throw err;
+    }
+  }, [sendSetChiefOfStaff, showError]);
+
+  const handleChangeChiefOfStaff = useCallback((sessionId: string, enabled: boolean) => {
+    const target = enrichedLocalSessions.find((session) => session.id === sessionId);
+    if (!target) {
+      showError('Session not found.');
+      return;
+    }
+    if (!enabled) {
+      void applyChiefOfStaffChange(sessionId, false).catch(() => {});
+      return;
+    }
+    const current = enrichedLocalSessions.find((session) => session.chiefOfStaff);
+    if (current && current.id !== sessionId) {
+      setChiefTransferTarget({
+        sessionId,
+        targetLabel: target.label,
+        currentLabel: current.label,
+      });
+      return;
+    }
+    void applyChiefOfStaffChange(sessionId, true).catch(() => {});
+  }, [applyChiefOfStaffChange, enrichedLocalSessions, showError]);
+
+  const handleConfirmChiefTransfer = useCallback(async () => {
+    if (!chiefTransferTarget || chiefTransferSaving) return;
+    setChiefTransferSaving(true);
+    try {
+      await applyChiefOfStaffChange(chiefTransferTarget.sessionId, true);
+      setChiefTransferTarget(null);
+    } catch {
+      // The shared error toast already contains the daemon error.
+    } finally {
+      setChiefTransferSaving(false);
+    }
+  }, [applyChiefOfStaffChange, chiefTransferSaving, chiefTransferTarget]);
 
   const activeReviewLoopState = useMemo(
     () => (activeSessionId ? reviewLoopsBySessionId[activeSessionId] ?? null : null),
@@ -1462,6 +1518,7 @@ sendFetchPRDetails,
     || whatsNew.isOpen
     || settingsOpen
     || shortcutsOpen
+    || chiefTransferTarget !== null
     || closedWorktree !== null
     || pendingSessionClose !== null
     || sessionCreationJob !== null
@@ -3054,6 +3111,7 @@ sendFetchPRDetails,
           onMuteWorkspace={sendMuteWorkspace}
           onRenameSession={sendRenameSession}
           onRenameWorkspace={sendRenameWorkspace}
+          onChangeChiefOfStaff={handleChangeChiefOfStaff}
           showSessionless={showSessionlessWorkspaces}
           onToggleShowSessionless={handleToggleShowSessionlessWorkspaces}
           leafDrag={leafWorkspaceDrag ? {
@@ -3347,6 +3405,18 @@ sendFetchPRDetails,
         splitCount={pendingSessionClose?.splitCount || 0}
         onConfirm={handleConfirmSessionClose}
         onCancel={handleCancelSessionClose}
+      />
+      <ChiefOfStaffTransferPrompt
+        isVisible={chiefTransferTarget !== null}
+        currentLabel={chiefTransferTarget?.currentLabel ?? ''}
+        targetLabel={chiefTransferTarget?.targetLabel ?? ''}
+        isSaving={chiefTransferSaving}
+        onConfirm={() => void handleConfirmChiefTransfer()}
+        onCancel={() => {
+          if (!chiefTransferSaving) {
+            setChiefTransferTarget(null);
+          }
+        }}
       />
       <ThumbsModal
         isOpen={thumbsOpen}
