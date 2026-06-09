@@ -57,6 +57,7 @@ func (c *Claude) Capabilities() Capabilities {
 		HasResume:            true,
 		HasYolo:              true,
 		HasInitialPrompt:     true,
+		HasWorkspaceContext:  true,
 	}
 }
 
@@ -73,6 +74,9 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 
 	if strings.TrimSpace(opts.SettingsPath) != "" {
 		args = append(args, "--settings", opts.SettingsPath)
+	}
+	if guidance := hooks.WorkspaceContextGuidance(opts.WorkspaceContextPath); guidance != "" {
+		args = append(args, "--append-system-prompt", guidance)
 	}
 
 	if opts.ResumeSessionID != "" {
@@ -92,6 +96,9 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 
 func (c *Claude) BuildEnv(opts SpawnOpts) []string {
 	var env []string
+	if strings.TrimSpace(opts.WorkspaceContextPath) != "" {
+		env = append(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=append_system_prompt")
+	}
 	if opts.Executable != "" && opts.Executable != c.DefaultExecutable() {
 		env = append(env, c.ExecutableEnvVar()+"="+opts.Executable)
 	}

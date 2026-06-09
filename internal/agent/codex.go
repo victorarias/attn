@@ -47,6 +47,7 @@ func (c *Codex) Capabilities() Capabilities {
 		HasResume:           true,
 		HasYolo:             true,
 		HasInitialPrompt:    true,
+		HasWorkspaceContext: true,
 	}
 }
 

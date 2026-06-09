@@ -1354,13 +1354,15 @@ func runAgentDirectly(requestedAgent string) {
 	}
 
 	hasHooks := false
-	if cp, ok := agentdriver.GetConfigOverrideProvider(driver); ok {
+	if agentdriver.EffectiveCapabilities(driver).HasWorkspaceContext {
 		contextPath, checkoutErr := workspaceContextCheckoutPath(c, sessionID, 40, 25*time.Millisecond)
 		if checkoutErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not prepare workspace context guidance: %v\n", checkoutErr)
 		} else {
 			opts.WorkspaceContextPath = contextPath
 		}
+	}
+	if cp, ok := agentdriver.GetConfigOverrideProvider(driver); ok {
 		opts.ConfigOverrides = cp.GenerateConfigOverrides(opts)
 	}
 	if hp, ok := agentdriver.GetHookProvider(driver); ok {
@@ -1533,14 +1535,13 @@ func runHookSessionStart() {
 		fmt.Fprintf(os.Stderr, "warning: could not load workspace context guidance: %v\n", err)
 		return
 	}
-	if output != "" && !workspaceContextGuidanceProvidedByConfig() {
+	if output != "" && !workspaceContextGuidanceProvidedAtLaunch() {
 		fmt.Fprintln(os.Stdout, output)
 	}
 }
 
-func workspaceContextGuidanceProvidedByConfig() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv("ATTN_AGENT")), "codex") &&
-		strings.TrimSpace(os.Getenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE")) == "developer_instructions"
+func workspaceContextGuidanceProvidedAtLaunch() bool {
+	return strings.TrimSpace(os.Getenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE")) != ""
 }
 
 type workspaceContextCheckoutClient interface {

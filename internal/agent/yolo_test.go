@@ -64,6 +64,30 @@ func TestCodexBuildEnvMarksDeveloperInstructionGuidance(t *testing.T) {
 	}
 }
 
+func TestClaudeBuildCommand_AppendsWorkspaceContextSystemPrompt(t *testing.T) {
+	cmd := (&Claude{}).BuildCommand(SpawnOpts{
+		SessionID:            "sess-1",
+		Executable:           "claude",
+		WorkspaceContextPath: "/tmp/context.md",
+	})
+	flagIndex := slices.Index(cmd.Args, "--append-system-prompt")
+	if flagIndex == -1 || flagIndex+1 >= len(cmd.Args) {
+		t.Fatalf("args = %#v, want --append-system-prompt with guidance", cmd.Args)
+	}
+	if !strings.Contains(cmd.Args[flagIndex+1], "/tmp/context.md") {
+		t.Fatalf("system prompt = %q, want workspace context path", cmd.Args[flagIndex+1])
+	}
+}
+
+func TestClaudeBuildEnvMarksAppendSystemPromptGuidance(t *testing.T) {
+	env := (&Claude{}).BuildEnv(SpawnOpts{
+		WorkspaceContextPath: "/tmp/context.md",
+	})
+	if !slices.Contains(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=append_system_prompt") {
+		t.Fatalf("env = %#v, want append system prompt guidance marker", env)
+	}
+}
+
 func TestBuildCommand_AppendsInitialPromptAfterOptionTerminator(t *testing.T) {
 	for _, driver := range []Driver{&Claude{}, &Codex{}} {
 		t.Run(driver.Name(), func(t *testing.T) {

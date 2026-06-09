@@ -49,8 +49,8 @@ func WorkspaceContextGuidance(path string) string {
 - Use only this session's checkout. Do not pass --session unless the user explicitly asks you to operate on another session.`, strconv.Quote(path))
 }
 
-// WorkspaceContextSessionStartOutput returns hook output that adds workspace
-// context guidance to Claude sessions and as a Codex launch fallback.
+// WorkspaceContextSessionStartOutput returns hook output used when an agent
+// could not receive workspace context guidance at launch.
 func WorkspaceContextSessionStartOutput(path string) string {
 	guidance := WorkspaceContextGuidance(path)
 	if guidance == "" {

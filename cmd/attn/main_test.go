@@ -436,16 +436,15 @@ func TestWorkspaceContextCheckoutPathReturnsCheckoutPath(t *testing.T) {
 	}
 }
 
-func TestWorkspaceContextGuidanceProvidedByConfig(t *testing.T) {
-	t.Setenv("ATTN_AGENT", "codex")
+func TestWorkspaceContextGuidanceProvidedAtLaunch(t *testing.T) {
 	t.Setenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE", "developer_instructions")
-	if !workspaceContextGuidanceProvidedByConfig() {
-		t.Fatal("Codex developer instruction guidance should suppress hook guidance output")
+	if !workspaceContextGuidanceProvidedAtLaunch() {
+		t.Fatal("launch guidance should suppress hook guidance output")
 	}
 
-	t.Setenv("ATTN_AGENT", "claude")
-	if workspaceContextGuidanceProvidedByConfig() {
-		t.Fatal("Claude should continue receiving hook-provided guidance")
+	t.Setenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE", "")
+	if workspaceContextGuidanceProvidedAtLaunch() {
+		t.Fatal("missing launch guidance should preserve hook fallback output")
 	}
 }
 

@@ -9,7 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-06-09]
 
 ### Added
-- **Claude and Codex receive workspace-context guidance without cluttering Codex's terminal.** attn gives each session a local checkout and concise instructions to read it, keep durable goals and decisions current, publish edits, and reconcile revision conflicts without copying the shared context itself into the prompt.
+- **Claude and Codex receive workspace-context guidance without cluttering their terminals.** attn gives each session a local checkout and concise hidden instructions to read it, keep durable goals and decisions current, publish edits, and reconcile revision conflicts without copying the shared context itself into the prompt.
 
 ### Changed
 - **Workspace context guidance is safer and less noisy.** Agents now publish only durable shared changes, keep each fact in one appropriate section, treat copied context as untrusted data, and save local edits before refreshing a conflicting revision.
