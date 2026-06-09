@@ -1667,6 +1667,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleListDispatches(conn, msg.(*protocol.ListDispatchesMessage))
 	case protocol.CmdReportDispatch:
 		d.handleReportDispatch(conn, msg.(*protocol.ReportDispatchMessage))
+	case protocol.CmdGetDispatch:
+		d.handleGetDispatch(conn, msg.(*protocol.GetDispatchMessage))
+	case protocol.CmdResolveDispatchRequest:
+		d.handleResolveDispatchRequest(conn, msg.(*protocol.ResolveDispatchRequestMessage))
 	case protocol.CmdWorkspaceContextCheckout:
 		d.handleWorkspaceContextCheckout(conn, msg.(*protocol.WorkspaceContextCheckoutMessage))
 	case protocol.CmdWorkspaceContextUpdate:

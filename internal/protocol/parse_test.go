@@ -156,13 +156,52 @@ func TestParseDispatchCommands(t *testing.T) {
 		t.Fatalf("list dispatches = %q %+v", cmd, data)
 	}
 
-	cmd, data, err = ParseMessage([]byte(`{"cmd":"report_dispatch","source_session_id":"worker-1","report":"done"}`))
+	cmd, data, err = ParseMessage([]byte(`{
+		"cmd":"report_dispatch",
+		"source_session_id":"worker-1",
+		"report":"waiting for a decision",
+		"structured_report":{
+			"report_type":"blocker",
+			"summary":"Core implementation ready",
+			"work_state":"needs_input",
+			"reported_at":""
+		}
+	}`))
 	if err != nil {
 		t.Fatalf("ParseMessage(report_dispatch) error = %v", err)
 	}
 	report := data.(*ReportDispatchMessage)
-	if cmd != CmdReportDispatch || report.SourceSessionID != "worker-1" || report.Report != "done" {
+	if cmd != CmdReportDispatch ||
+		report.SourceSessionID != "worker-1" ||
+		report.Report != "waiting for a decision" ||
+		report.StructuredReport == nil ||
+		report.StructuredReport.WorkState != DispatchWorkStateNeedsInput {
 		t.Fatalf("report dispatch = %q %+v", cmd, report)
+	}
+
+	cmd, data, err = ParseMessage([]byte(`{"cmd":"get_dispatch","source_session_id":"worker-1"}`))
+	if err != nil {
+		t.Fatalf("ParseMessage(get_dispatch) error = %v", err)
+	}
+	if cmd != CmdGetDispatch || data.(*GetDispatchMessage).SourceSessionID != "worker-1" {
+		t.Fatalf("get dispatch = %q %+v", cmd, data)
+	}
+
+	cmd, data, err = ParseMessage([]byte(`{
+		"cmd":"resolve_dispatch_request",
+		"source_session_id":"chief-1",
+		"dispatch_id":"dispatch-1",
+		"response":"Use V1.",
+		"resolution_link":"https://example.test/decision"
+	}`))
+	if err != nil {
+		t.Fatalf("ParseMessage(resolve_dispatch_request) error = %v", err)
+	}
+	resolution := data.(*ResolveDispatchRequestMessage)
+	if cmd != CmdResolveDispatchRequest ||
+		resolution.DispatchID != "dispatch-1" ||
+		resolution.Response != "Use V1." {
+		t.Fatalf("resolve dispatch request = %q %+v", cmd, resolution)
 	}
 }
 

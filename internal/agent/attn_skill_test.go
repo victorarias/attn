@@ -24,6 +24,7 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 	for _, expected := range []string{
 		"name: attn",
 		"delegate work",
+		"visible interactive agent",
 		"ATTN_WRAPPER_PATH",
 		"references/delegation.md",
 		"references/chief-of-staff.md",
@@ -50,6 +51,8 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"dispatch report --message",
 		"dispatch report --file",
 		"latest report",
+		"visible, full interactive",
+		"default to native subagents",
 		"not proof that the work is correct",
 		"Do not use dispatch reporting for ordinary",
 	} {
@@ -60,6 +63,10 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 
 	delegation := readSkillFile(t, skillDir, "references/delegation.md")
 	for _, expected := range []string{
+		"visible, full interactive agent session",
+		"native subagent or multi-agent tools",
+		"default to native subagents",
+		"user explicitly asks for delegation",
 		"delegate --brief-file",
 		"--new-workspace",
 		"--workspace <workspace-id>",

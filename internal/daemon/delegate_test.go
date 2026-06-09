@@ -223,6 +223,155 @@ func TestDispatchReportUpdatesTrackedRecord(t *testing.T) {
 	}
 }
 
+func TestStructuredDispatchReportSeparatesRuntimeAndSupportsResolution(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, chiefSessionID, _ := setupDelegationSource(t, d, backend)
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefSessionID); err != nil {
+		t.Fatalf("set chief role: %v", err)
+	}
+	consumeDelegatedPrompt(t, backend)
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: chiefSessionID,
+		Brief:           "Produce a structured tracked report.",
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	d.store.UpdateState(result.SessionID, string(protocol.SessionStateIdle))
+
+	report := &protocol.DispatchReport{
+		ReportType: protocol.DispatchReportTypeBlocker,
+		Summary:    "Core implementation ready locally",
+		WorkState:  protocol.DispatchWorkStateNeedsInput,
+		NextActor:  protocol.Ptr("team"),
+		NextAction: protocol.Ptr("Decide the event contract"),
+		Request: &protocol.DispatchDecisionRequest{
+			Question:          "Which event contract should be used?",
+			Recommendation:    protocol.Ptr("Use AisNoOperationV1"),
+			Consequence:       protocol.Ptr("Event emission remains blocked"),
+			ExpectedResponder: "team",
+		},
+		Artifact: &protocol.DispatchArtifact{
+			Identity: "dirty:abc123",
+		},
+		Verification: []protocol.DispatchVerification{
+			{
+				Actor:            "agent",
+				Target:           "go test ./internal/feature",
+				Result:           "passed",
+				Timestamp:        string(protocol.TimestampNow()),
+				ArtifactIdentity: "commit:old",
+			},
+		},
+	}
+	server, client := net.Pipe()
+	reportDone := make(chan struct{})
+	go func() {
+		d.handleReportDispatch(server, &protocol.ReportDispatchMessage{
+			Cmd:              protocol.CmdReportDispatch,
+			SourceSessionID:  result.SessionID,
+			Report:           "Core implementation ready; decision required.",
+			StructuredReport: report,
+		})
+		_ = server.Close()
+		close(reportDone)
+	}()
+	var reportResponse protocol.Response
+	if err := json.NewDecoder(client).Decode(&reportResponse); err != nil {
+		t.Fatalf("decode report response: %v", err)
+	}
+	_ = client.Close()
+	<-reportDone
+	dispatch := reportResponse.ChiefOfStaffDispatch
+	if !reportResponse.Ok || dispatch == nil || dispatch.StructuredReport == nil {
+		t.Fatalf("report response = %+v", reportResponse)
+	}
+	if dispatch.Status != string(protocol.SessionStateIdle) ||
+		dispatch.StructuredReport.WorkState != protocol.DispatchWorkStateNeedsInput {
+		t.Fatalf("runtime/work state = (%q, %q)", dispatch.Status, dispatch.StructuredReport.WorkState)
+	}
+	if !protocol.Deref(dispatch.Actionable) ||
+		protocol.Deref(dispatch.ConciseSummary) != "Core implementation ready locally" {
+		t.Fatalf("actionable dispatch = %+v", dispatch)
+	}
+	if protocol.Deref(dispatch.StructuredReport.Verification[0].Current) {
+		t.Fatalf("stale verification shown current: %+v", dispatch.StructuredReport.Verification)
+	}
+
+	server, client = net.Pipe()
+	resolveServer := server
+	resolveDone := make(chan struct{})
+	go func() {
+		d.handleResolveDispatchRequest(resolveServer, &protocol.ResolveDispatchRequestMessage{
+			Cmd:             protocol.CmdResolveDispatchRequest,
+			SourceSessionID: chiefSessionID,
+			DispatchID:      protocol.Deref(result.DispatchID),
+			Response:        "Use AisNoOperationV1.",
+			ResolutionLink:  protocol.Ptr("https://example.test/decision"),
+		})
+		_ = resolveServer.Close()
+		close(resolveDone)
+	}()
+	var resolveResponse protocol.Response
+	if err := json.NewDecoder(client).Decode(&resolveResponse); err != nil {
+		t.Fatalf("decode resolve response: %v", err)
+	}
+	_ = client.Close()
+	<-resolveDone
+	resolved := resolveResponse.ChiefOfStaffDispatch
+	if !resolveResponse.Ok || resolved == nil || resolved.StructuredReport == nil {
+		t.Fatalf("resolve response = %+v", resolveResponse)
+	}
+	if resolved.StructuredReport.Request.Status != protocol.DispatchRequestStatusResolved ||
+		protocol.Deref(resolved.StructuredReport.Request.Response) != "Use AisNoOperationV1." ||
+		protocol.Deref(resolved.Actionable) {
+		t.Fatalf("resolved dispatch = %+v", resolved)
+	}
+	persisted := d.store.GetChiefOfStaffDispatchBySession(result.SessionID)
+	if persisted == nil {
+		t.Fatal("resolved dispatch was not persisted")
+	}
+	if _, err := json.Marshal(d.decorateChiefOfStaffDispatch(persisted)); err != nil {
+		t.Fatalf("marshal persisted dispatch: %v", err)
+	}
+
+	server, client = net.Pipe()
+	statusServer := server
+	go func() {
+		d.handleGetDispatch(statusServer, &protocol.GetDispatchMessage{
+			Cmd:             protocol.CmdGetDispatch,
+			SourceSessionID: result.SessionID,
+		})
+		_ = statusServer.Close()
+	}()
+	var statusResponse protocol.Response
+	if err := json.NewDecoder(client).Decode(&statusResponse); err != nil {
+		t.Fatalf("decode status response: %v", err)
+	}
+	_ = client.Close()
+	if !statusResponse.Ok ||
+		statusResponse.ChiefOfStaffDispatch == nil ||
+		protocol.Deref(statusResponse.ChiefOfStaffDispatch.StructuredReport.Request.Response) != "Use AisNoOperationV1." {
+		t.Fatalf("delegated status response = %+v", statusResponse)
+	}
+}
+
+func TestReadyForReviewDispatchIsActionable(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	dispatch := d.decorateChiefOfStaffDispatch(&protocol.ChiefOfStaffDispatch{
+		StructuredReport: &protocol.DispatchReport{
+			Summary:   "Implementation ready",
+			WorkState: protocol.DispatchWorkStateReadyForReview,
+		},
+	})
+	if dispatch == nil || !protocol.Deref(dispatch.Actionable) {
+		t.Fatalf("ready-for-review dispatch = %+v, want actionable", dispatch)
+	}
+}
+
 func TestDelegateRollsBackPaneWhenSpawnFails(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}

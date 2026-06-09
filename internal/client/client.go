@@ -212,11 +212,55 @@ func (c *Client) ListDispatches(sourceSessionID string) ([]protocol.ChiefOfStaff
 }
 
 func (c *Client) ReportDispatch(sourceSessionID, report string) (*protocol.ChiefOfStaffDispatch, error) {
+	return c.ReportDispatchEnvelope(sourceSessionID, report, nil)
+}
+
+func (c *Client) ReportDispatchEnvelope(
+	sourceSessionID, report string,
+	structuredReport *protocol.DispatchReport,
+) (*protocol.ChiefOfStaffDispatch, error) {
 	resp, err := c.send(protocol.ReportDispatchMessage{
-		Cmd:             protocol.CmdReportDispatch,
-		SourceSessionID: sourceSessionID,
-		Report:          report,
+		Cmd:              protocol.CmdReportDispatch,
+		SourceSessionID:  sourceSessionID,
+		Report:           report,
+		StructuredReport: structuredReport,
 	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.ChiefOfStaffDispatch == nil {
+		return nil, errors.New("daemon returned no dispatch")
+	}
+	return resp.ChiefOfStaffDispatch, nil
+}
+
+func (c *Client) GetDispatch(sourceSessionID string) (*protocol.ChiefOfStaffDispatch, error) {
+	resp, err := c.send(protocol.GetDispatchMessage{
+		Cmd:             protocol.CmdGetDispatch,
+		SourceSessionID: sourceSessionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.ChiefOfStaffDispatch == nil {
+		return nil, errors.New("daemon returned no dispatch")
+	}
+	return resp.ChiefOfStaffDispatch, nil
+}
+
+func (c *Client) ResolveDispatchRequest(
+	sourceSessionID, dispatchID, response, resolutionLink string,
+) (*protocol.ChiefOfStaffDispatch, error) {
+	msg := protocol.ResolveDispatchRequestMessage{
+		Cmd:             protocol.CmdResolveDispatchRequest,
+		SourceSessionID: sourceSessionID,
+		DispatchID:      dispatchID,
+		Response:        response,
+	}
+	if value := strings.TrimSpace(resolutionLink); value != "" {
+		msg.ResolutionLink = protocol.Ptr(value)
+	}
+	resp, err := c.send(msg)
 	if err != nil {
 		return nil, err
 	}

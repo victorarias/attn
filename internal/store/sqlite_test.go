@@ -162,6 +162,7 @@ func TestMigrations_MigratedColumnsExist(t *testing.T) {
 		{"sessions", "agent_driver_plugin_name"},
 		{"sessions", "agent_driver_run_id"},
 		{"sessions", "agent_driver_report_seq"},
+		{"chief_of_staff_dispatches", "structured_report_json"},
 	}
 
 	for _, tc := range migratedColumns {

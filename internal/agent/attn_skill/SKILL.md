@@ -22,7 +22,7 @@ If a command reports an unknown subcommand or shows another tool's help, check
 
 ## Capability Index
 
-- **Delegate a side task to another agent:** read
+- **Create a visible interactive agent the user can steer:** read
   [references/delegation.md](references/delegation.md).
 - **Coordinate or report chief-of-staff dispatches:** read
   [references/chief-of-staff.md](references/chief-of-staff.md).

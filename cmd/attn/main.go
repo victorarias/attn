@@ -473,14 +473,43 @@ func runDispatch() {
 		}
 		printJSON(dispatches)
 	case "report":
-		sourceSessionID, report, err := parseDispatchReportArgs(os.Args[3:])
+		sourceSessionID, report, structuredReport, err := parseDispatchReportArgs(os.Args[3:])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "dispatch report: %v\n", err)
 			os.Exit(2)
 		}
-		dispatch, err := client.New("").ReportDispatch(sourceSessionID, report)
+		dispatch, err := client.New("").ReportDispatchEnvelope(sourceSessionID, report, structuredReport)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "dispatch report: %v\n", err)
+			os.Exit(1)
+		}
+		printJSON(dispatch)
+	case "status":
+		sourceSessionID, err := parseDispatchSourceSession(os.Args[3:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch status: %v\n", err)
+			os.Exit(2)
+		}
+		dispatch, err := client.New("").GetDispatch(sourceSessionID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch status: %v\n", err)
+			os.Exit(1)
+		}
+		printJSON(dispatch)
+	case "resolve":
+		sourceSessionID, dispatchID, response, resolutionLink, err := parseDispatchResolveArgs(os.Args[3:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch resolve: %v\n", err)
+			os.Exit(2)
+		}
+		dispatch, err := client.New("").ResolveDispatchRequest(
+			sourceSessionID,
+			dispatchID,
+			response,
+			resolutionLink,
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch resolve: %v\n", err)
 			os.Exit(1)
 		}
 		printJSON(dispatch)
@@ -497,6 +526,10 @@ func writeDispatchHelp(w io.Writer) {
 commands:
   list [--session <id>]                          list work dispatched by this chief
   report (--message <text> | --file <path>)     report progress from a dispatched agent
+         [--coordination-file <json>]
+  status [--session <id>]                        show this delegated session's report and response
+  resolve --dispatch <id>                        answer the active decision request
+          (--response <text> | --file <path>) [--link <url>] [--session <id>]
 
 The session defaults to ATTN_SESSION_ID.
 `)
@@ -522,40 +555,94 @@ func parseDispatchSourceSession(args []string) (string, error) {
 	return source, nil
 }
 
-func parseDispatchReportArgs(args []string) (string, string, error) {
+func parseDispatchReportArgs(args []string) (string, string, *protocol.DispatchReport, error) {
 	fs := flag.NewFlagSet("dispatch report", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
 	message := fs.String("message", "", "concise progress or completion update")
 	reportFile := fs.String("file", "", "file containing a progress or completion update")
+	coordinationFile := fs.String("coordination-file", "", "JSON file containing structured coordination fields")
 	if err := fs.Parse(args); err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	if fs.NArg() != 0 {
-		return "", "", fmt.Errorf("unexpected arguments: %v", fs.Args())
+		return "", "", nil, fmt.Errorf("unexpected arguments: %v", fs.Args())
 	}
 	source := strings.TrimSpace(*sessionID)
 	if source == "" {
 		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
 	}
 	if source == "" {
-		return "", "", errors.New("no session; run inside attn or pass --session")
+		return "", "", nil, errors.New("no session; run inside attn or pass --session")
 	}
 	if strings.TrimSpace(*message) != "" && strings.TrimSpace(*reportFile) != "" {
-		return "", "", errors.New("pass only one of --message or --file")
+		return "", "", nil, errors.New("pass only one of --message or --file")
 	}
 	report := strings.TrimSpace(*message)
 	if path := strings.TrimSpace(*reportFile); path != "" {
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return "", "", fmt.Errorf("read report file: %w", err)
+			return "", "", nil, fmt.Errorf("read report file: %w", err)
 		}
 		report = strings.TrimSpace(string(content))
 	}
 	if report == "" {
-		return "", "", errors.New("--message or --file is required")
+		return "", "", nil, errors.New("--message or --file is required")
 	}
-	return source, report, nil
+	var structuredReport *protocol.DispatchReport
+	if path := strings.TrimSpace(*coordinationFile); path != "" {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return "", "", nil, fmt.Errorf("read coordination file: %w", err)
+		}
+		var parsed protocol.DispatchReport
+		if err := json.Unmarshal(content, &parsed); err != nil {
+			return "", "", nil, fmt.Errorf("parse coordination file: %w", err)
+		}
+		structuredReport = &parsed
+	}
+	return source, report, structuredReport, nil
+}
+
+func parseDispatchResolveArgs(args []string) (string, string, string, string, error) {
+	fs := flag.NewFlagSet("dispatch resolve", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	sessionID := fs.String("session", "", "chief session id (defaults to ATTN_SESSION_ID)")
+	dispatchID := fs.String("dispatch", "", "dispatch id")
+	response := fs.String("response", "", "decision response")
+	responseFile := fs.String("file", "", "file containing the decision response")
+	resolutionLink := fs.String("link", "", "optional external decision URL")
+	if err := fs.Parse(args); err != nil {
+		return "", "", "", "", err
+	}
+	if fs.NArg() != 0 {
+		return "", "", "", "", fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	source := strings.TrimSpace(*sessionID)
+	if source == "" {
+		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+	}
+	if source == "" {
+		return "", "", "", "", errors.New("no session; run inside attn or pass --session")
+	}
+	if strings.TrimSpace(*dispatchID) == "" {
+		return "", "", "", "", errors.New("--dispatch is required")
+	}
+	if strings.TrimSpace(*response) != "" && strings.TrimSpace(*responseFile) != "" {
+		return "", "", "", "", errors.New("pass only one of --response or --file")
+	}
+	resolvedResponse := strings.TrimSpace(*response)
+	if path := strings.TrimSpace(*responseFile); path != "" {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return "", "", "", "", fmt.Errorf("read response file: %w", err)
+		}
+		resolvedResponse = strings.TrimSpace(string(content))
+	}
+	if resolvedResponse == "" {
+		return "", "", "", "", errors.New("--response or --file is required")
+	}
+	return source, strings.TrimSpace(*dispatchID), resolvedResponse, strings.TrimSpace(*resolutionLink), nil
 }
 
 func runWorkspace() {

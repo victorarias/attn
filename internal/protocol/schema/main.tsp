@@ -163,6 +163,71 @@ model WorkspaceContext {
   updated_at: string;
 }
 
+enum DispatchReportType {
+  progress,
+  blocker,
+  handoff,
+  completion,
+  failure,
+}
+
+enum DispatchWorkState {
+  in_progress,
+  needs_input,
+  ready_for_review,
+  completed,
+  failed,
+}
+
+enum DispatchRequestStatus {
+  pending,
+  resolved,
+}
+
+model DispatchDecisionRequest {
+  question: string;
+  recommendation?: string;
+  consequence?: string;
+  expected_responder: string;
+  status: DispatchRequestStatus;
+  response?: string;
+  resolution_link?: string;
+  responded_by?: string;
+  responded_at?: string;
+}
+
+model DispatchArtifact {
+  identity: string;
+  workspace_id?: string;
+  branch?: string;
+  revision?: string;
+  dirty?: boolean;
+  description?: string;
+}
+
+model DispatchVerification {
+  actor: string;
+  target: string;
+  result: string;
+  timestamp: string;
+  artifact_identity: string;
+  current?: boolean;
+}
+
+model DispatchReport {
+  report_type: DispatchReportType;
+  summary: string;
+  work_state: DispatchWorkState;
+  next_actor?: string;
+  next_action?: string;
+  remaining_scope?: string[];
+  constraints?: string[];
+  request?: DispatchDecisionRequest;
+  artifact?: DispatchArtifact;
+  verification?: DispatchVerification[];
+  reported_at: string;
+}
+
 model ChiefOfStaffDispatch {
   id: string;
   chief_session_id: string;
@@ -176,6 +241,9 @@ model ChiefOfStaffDispatch {
   status: string;
   status_since: string;
   latest_report?: string;
+  structured_report?: DispatchReport;
+  concise_summary?: string;
+  actionable?: boolean;
   reported_at?: string;
   created_at: string;
   updated_at: string;
@@ -429,6 +497,20 @@ model ReportDispatchMessage {
   cmd: "report_dispatch";
   source_session_id: string;
   report: string;
+  structured_report?: DispatchReport;
+}
+
+model GetDispatchMessage {
+  cmd: "get_dispatch";
+  source_session_id: string;
+}
+
+model ResolveDispatchRequestMessage {
+  cmd: "resolve_dispatch_request";
+  source_session_id: string;
+  dispatch_id: string;
+  response: string;
+  resolution_link?: string;
 }
 
 model WorkspaceContextCheckoutMessage {

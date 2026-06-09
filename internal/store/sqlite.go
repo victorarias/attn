@@ -362,6 +362,10 @@ var migrations = []migration{
 		CREATE INDEX IF NOT EXISTS idx_chief_dispatches_chief_created
 			ON chief_of_staff_dispatches(chief_session_id, created_at DESC);
 	`},
+	{45, "add structured coordination report to chief dispatches", `
+		ALTER TABLE chief_of_staff_dispatches
+			ADD COLUMN structured_report_json TEXT NOT NULL DEFAULT '';
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -500,6 +504,11 @@ func migrateDB(db *sql.DB) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
+		} else if m.version == 45 {
+			if err := applyMigration45(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		} else {
 			if _, err := tx.Exec(m.sql); err != nil {
 				tx.Rollback()
@@ -587,6 +596,21 @@ func applyMigration23(tx *sql.Tx) error {
 		return err
 	}
 	return nil
+}
+
+func applyMigration45(tx *sql.Tx) error {
+	hasStructuredReport, err := columnExists(tx, "chief_of_staff_dispatches", "structured_report_json")
+	if err != nil {
+		return err
+	}
+	if hasStructuredReport {
+		return nil
+	}
+	_, err = tx.Exec(`
+		ALTER TABLE chief_of_staff_dispatches
+			ADD COLUMN structured_report_json TEXT NOT NULL DEFAULT ''
+	`)
+	return err
 }
 
 func applyMigration28(tx *sql.Tx) error {

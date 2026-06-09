@@ -208,4 +208,63 @@ describe('Dashboard sessions', () => {
     expect(screen.queryByTestId('chief-dispatch-dispatch-closed')).not.toBeInTheDocument();
     expect(screen.getByText('No delegated work yet.')).toBeInTheDocument();
   });
+
+  it('renders actionable structured coordination without showing the full brief', () => {
+    daemonStoreState.chiefOfStaffDispatches = [{
+      id: 'dispatch-structured',
+      chief_session_id: 'chief-1',
+      session_id: 'worker-1',
+      workspace_id: 'workspace-1',
+      brief: 'Long delegation brief that should not appear in the concise structured view.',
+      label: 'Freshness gate',
+      agent: 'codex',
+      directory: '/repo/a',
+      status: 'idle',
+      status_since: '2026-06-09T10:00:00Z',
+      latest_report: 'Human narrative with additional implementation detail.',
+      reported_at: new Date(Date.now() - 120_000).toISOString(),
+      concise_summary: 'Core freshness gate implemented locally',
+      actionable: true,
+      structured_report: {
+        report_type: 'blocker',
+        summary: 'Core freshness gate implemented locally',
+        work_state: 'needs_input',
+        next_actor: 'team',
+        next_action: 'Decide the AisNoOperationV1 event contract',
+        request: {
+          question: 'Should the worker emit AisNoOperationV1?',
+          expected_responder: 'team',
+          status: 'pending',
+        },
+        reported_at: '2026-06-09T10:02:00Z',
+      },
+      created_at: '2026-06-09T10:00:00Z',
+      updated_at: '2026-06-09T10:02:00Z',
+    }];
+    render(
+      <Dashboard
+        sessions={[
+          { id: 'chief-1', label: 'planner', state: 'working', cwd: '/repo/a', chiefOfStaff: true },
+          { id: 'worker-1', label: 'freshness-worker', state: 'idle', cwd: '/repo/a' },
+        ]}
+        prs={[]}
+        isLoading={false}
+        onSelectSession={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const dispatch = screen.getByTestId('chief-dispatch-dispatch-structured');
+    expect(dispatch).toHaveAttribute('data-state', 'idle');
+    expect(dispatch).toHaveAttribute('data-actionable', 'true');
+    expect(screen.getByText('Core freshness gate implemented locally')).toBeInTheDocument();
+    expect(screen.getByText('Work: needs input')).toBeInTheDocument();
+    expect(screen.getByText('Action needed')).toBeInTheDocument();
+    expect(screen.getByText('Next: team')).toBeInTheDocument();
+    expect(screen.getByText('Decide the AisNoOperationV1 event contract')).toBeInTheDocument();
+    expect(screen.getByText('Should the worker emit AisNoOperationV1?')).toBeInTheDocument();
+    expect(screen.getByText(/Reported .* ago/)).toBeInTheDocument();
+    expect(screen.queryByText(/Long delegation brief/)).not.toBeInTheDocument();
+  });
 });

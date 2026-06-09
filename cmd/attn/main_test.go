@@ -515,23 +515,79 @@ func TestParseDispatchReportArgsReadsFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("Implemented the fix.\nTests pass.\n"), 0o600); err != nil {
 		t.Fatalf("write report: %v", err)
 	}
-	sessionID, report, err := parseDispatchReportArgs([]string{"--file", path})
+	sessionID, report, structuredReport, err := parseDispatchReportArgs([]string{"--file", path})
 	if err != nil {
 		t.Fatalf("parseDispatchReportArgs() error = %v", err)
 	}
-	if sessionID != "worker-1" || report != "Implemented the fix.\nTests pass." {
-		t.Fatalf("dispatch report = (%q, %q)", sessionID, report)
+	if sessionID != "worker-1" || report != "Implemented the fix.\nTests pass." || structuredReport != nil {
+		t.Fatalf("dispatch report = (%q, %q, %+v)", sessionID, report, structuredReport)
 	}
 }
 
 func TestParseDispatchReportArgsRejectsAmbiguousContent(t *testing.T) {
-	_, _, err := parseDispatchReportArgs([]string{
+	_, _, _, err := parseDispatchReportArgs([]string{
 		"--session", "worker-1",
 		"--message", "done",
 		"--file", "/tmp/report.md",
 	})
 	if err == nil || !strings.Contains(err.Error(), "only one of --message or --file") {
 		t.Fatalf("parseDispatchReportArgs() error = %v", err)
+	}
+}
+
+func TestParseDispatchReportArgsReadsCoordinationFile(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "worker-1")
+	path := filepath.Join(t.TempDir(), "coordination.json")
+	if err := os.WriteFile(path, []byte(`{
+		"report_type": "blocker",
+		"summary": "Core implementation ready locally",
+		"work_state": "needs_input",
+		"next_actor": "team",
+		"request": {
+			"question": "Which event contract should be used?",
+			"expected_responder": "team",
+			"status": "pending"
+		}
+	}`), 0o600); err != nil {
+		t.Fatalf("write coordination file: %v", err)
+	}
+	sessionID, report, structured, err := parseDispatchReportArgs([]string{
+		"--message", "Waiting for the event contract decision.",
+		"--coordination-file", path,
+	})
+	if err != nil {
+		t.Fatalf("parseDispatchReportArgs() error = %v", err)
+	}
+	if sessionID != "worker-1" || report != "Waiting for the event contract decision." {
+		t.Fatalf("dispatch report = (%q, %q)", sessionID, report)
+	}
+	if structured == nil ||
+		structured.ReportType != protocol.DispatchReportTypeBlocker ||
+		structured.WorkState != protocol.DispatchWorkStateNeedsInput ||
+		structured.Request == nil {
+		t.Fatalf("structured report = %+v", structured)
+	}
+}
+
+func TestParseDispatchResolveArgsReadsResponseFile(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "chief-1")
+	path := filepath.Join(t.TempDir(), "response.md")
+	if err := os.WriteFile(path, []byte("Use AisNoOperationV1.\n"), 0o600); err != nil {
+		t.Fatalf("write response file: %v", err)
+	}
+	sessionID, dispatchID, response, link, err := parseDispatchResolveArgs([]string{
+		"--dispatch", "dispatch-1",
+		"--file", path,
+		"--link", "https://example.test/decision",
+	})
+	if err != nil {
+		t.Fatalf("parseDispatchResolveArgs() error = %v", err)
+	}
+	if sessionID != "chief-1" ||
+		dispatchID != "dispatch-1" ||
+		response != "Use AisNoOperationV1." ||
+		link != "https://example.test/decision" {
+		t.Fatalf("dispatch resolve = (%q, %q, %q, %q)", sessionID, dispatchID, response, link)
 	}
 }
 

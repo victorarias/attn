@@ -50,6 +50,19 @@ interface DashboardProps {
   onMutedGroupClick?: () => void;
 }
 
+function formatDispatchAge(reportedAt?: string): string | null {
+  if (!reportedAt) return null;
+  const timestamp = Date.parse(reportedAt);
+  if (Number.isNaN(timestamp)) return null;
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 export function Dashboard({
   sessions,
   dispatchSessions = sessions,
@@ -122,8 +135,12 @@ export function Dashboard({
   const renderDispatch = (dispatch: typeof chiefOfStaffDispatches[number]) => {
     const target = dispatchSessions.find((session) => session.id === dispatch.session_id);
     const state = target?.state ?? normalizeSessionState(dispatch.status === 'closed' ? 'unknown' : dispatch.status);
-    const summary = dispatch.latest_report || dispatch.brief;
+    const structured = dispatch.structured_report;
+    const summary = dispatch.concise_summary || structured?.summary || dispatch.latest_report || dispatch.brief;
     const statusLabel = target ? state.replace('_', ' ') : 'closed';
+    const workState = structured?.work_state.replace(/_/g, ' ');
+    const reportAge = formatDispatchAge(dispatch.reported_at);
+    const request = structured?.request;
     return (
       <button
         type="button"
@@ -131,6 +148,7 @@ export function Dashboard({
         className="dispatch-row"
         data-testid={`chief-dispatch-${dispatch.id}`}
         data-state={target ? state : 'closed'}
+        data-actionable={dispatch.actionable ? 'true' : 'false'}
         disabled={!target}
         onClick={() => target && onSelectSession(target.id)}
       >
@@ -140,6 +158,12 @@ export function Dashboard({
             <span>{dispatch.agent} agent</span>
             <span aria-hidden="true">·</span>
             <span>Agent status: {statusLabel}</span>
+            {reportAge && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>Reported {reportAge}</span>
+              </>
+            )}
           </span>
           <span className="dispatch-summary-label">Task</span>
           <span className="dispatch-title">
@@ -151,6 +175,29 @@ export function Dashboard({
           <span className={`dispatch-summary ${dispatch.latest_report ? 'reported' : ''}`}>
             {summary}
           </span>
+          {structured && (
+            <span className="dispatch-coordination">
+              <span className="dispatch-work-state">Work: {workState}</span>
+              {dispatch.actionable && <span className="dispatch-actionable">Action needed</span>}
+              {structured.next_actor && <span>Next: {structured.next_actor}</span>}
+            </span>
+          )}
+          {structured?.next_action && (
+            <>
+              <span className="dispatch-summary-label">Next action</span>
+              <span className="dispatch-summary">{structured.next_action}</span>
+            </>
+          )}
+          {request && (
+            <>
+              <span className="dispatch-summary-label">
+                {request.status === 'pending' ? 'Decision needed' : 'Decision resolved'}
+              </span>
+              <span className="dispatch-summary">
+                {request.status === 'pending' ? request.question : request.response || request.question}
+              </span>
+            </>
+          )}
         </span>
         <span className="dispatch-open-hint" aria-hidden="true">›</span>
       </button>
