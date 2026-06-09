@@ -63,7 +63,7 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 	workspaceContext := readSkillFile(t, skillDir, "references/workspace-context.md")
 	for _, expected := range []string{
 		"durable coordination state",
-		"Publish only when durable shared state changed",
+		"Publish only when durable shared state has changed",
 		"Do not pass `--session`",
 		"**Handoff**: only the next actions or unresolved questions",
 		"workspace context show",

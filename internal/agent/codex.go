@@ -81,6 +81,9 @@ func (c *Codex) BuildEnv(opts SpawnOpts) []string {
 		"ATTN_SESSION_ID=" + opts.SessionID,
 		"ATTN_AGENT=codex",
 	}
+	if strings.TrimSpace(opts.WorkspaceContextPath) != "" {
+		env = append(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=developer_instructions")
+	}
 	if opts.SocketPath != "" {
 		env = append(env, "ATTN_SOCKET_PATH="+opts.SocketPath)
 	}
@@ -96,8 +99,13 @@ func (c *Codex) PrepareLaunch(opts SpawnOpts) error {
 
 // --- ConfigOverrideProvider ---
 
-func (c *Codex) GenerateConfigOverrides(sessionID, socketPath, wrapperPath string) []string {
-	return hooks.GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath)
+func (c *Codex) GenerateConfigOverrides(opts SpawnOpts) []string {
+	return hooks.GenerateCodexConfigOverrides(
+		opts.SessionID,
+		opts.SocketPath,
+		opts.WrapperPath,
+		opts.WorkspaceContextPath,
+	)
 }
 
 // --- TranscriptFinder ---

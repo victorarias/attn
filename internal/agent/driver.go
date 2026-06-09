@@ -224,6 +224,10 @@ type SpawnOpts struct {
 	// support it (e.g. Claude's --settings <path>).
 	SettingsPath string
 
+	// WorkspaceContextPath is this session's local checkout of the workspace's
+	// shared context. It may become stale after launch.
+	WorkspaceContextPath string
+
 	// ConfigOverrides are agent CLI config overrides generated for this launch.
 	ConfigOverrides []string
 }
@@ -240,7 +244,7 @@ type HookProvider interface {
 
 // ConfigOverrideProvider generates per-launch CLI config overrides.
 type ConfigOverrideProvider interface {
-	GenerateConfigOverrides(sessionID, socketPath, wrapperPath string) []string
+	GenerateConfigOverrides(opts SpawnOpts) []string
 }
 
 // TranscriptFinder locates transcript files written by the agent.

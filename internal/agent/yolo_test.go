@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -50,6 +51,16 @@ func TestCodexBuildCommand_IncludesConfigOverridesBeforeResume(t *testing.T) {
 	want := strings.Join(wantArgs, "\x00")
 	if args != want {
 		t.Fatalf("args = %#v, want %#v", cmd.Args, wantArgs)
+	}
+}
+
+func TestCodexBuildEnvMarksDeveloperInstructionGuidance(t *testing.T) {
+	env := (&Codex{}).BuildEnv(SpawnOpts{
+		SessionID:            "sess-1",
+		WorkspaceContextPath: "/tmp/context.md",
+	})
+	if !slices.Contains(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=developer_instructions") {
+		t.Fatalf("env = %#v, want developer instruction guidance marker", env)
 	}
 }
 
