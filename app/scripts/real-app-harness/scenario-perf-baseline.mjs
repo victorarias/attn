@@ -32,12 +32,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createRunContext, createSessionAndWaitForInitialPane, parseCommonArgs, printCommonHelp } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
-import { daemonPidFilePathForProfile, profileForAppPath } from './harnessProfile.mjs';
+import { daemonPidFilePathForProfile, profileForAppPath, socketPathForProfile } from './harnessProfile.mjs';
 
 const execFileAsync = promisify(execFile);
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -55,6 +55,11 @@ function parseArgs(argv) {
     cpuSeconds: 20,
     realCmd: null,
     realWindowMs: 25000,
+    warm: null,
+    fillCmd: null,
+    fillSettleMs: 3000,
+    reclaimHoldMs: 0,
+    reclaimHoldIntervalMs: 15000,
   };
   for (let index = 0; index < filtered.length; index += 1) {
     const arg = filtered[index];
@@ -67,6 +72,11 @@ function parseArgs(argv) {
     else if (arg === '--real-cmd') extras.realCmd = filtered[++index];
     else if (arg === '--real-window-ms') extras.realWindowMs = Number(filtered[++index]);
     else if (arg === '--no-restart-daemon') extras.restartDaemon = false;
+    else if (arg === '--warm') extras.warm = filtered[++index];
+    else if (arg === '--fill-cmd') extras.fillCmd = filtered[++index];
+    else if (arg === '--fill-settle-ms') extras.fillSettleMs = Number(filtered[++index]);
+    else if (arg === '--reclaim-hold-ms') extras.reclaimHoldMs = Number(filtered[++index]);
+    else if (arg === '--reclaim-hold-interval-ms') extras.reclaimHoldIntervalMs = Number(filtered[++index]);
     else passthrough.push(arg);
   }
   const options = parseCommonArgs(passthrough);
@@ -306,6 +316,81 @@ async function streamBurst(client, sessionId, paneId, options) {
   }, { timeoutMs: 120_000 });
 }
 
+// Parse the --warm value (comma-separated ints, e.g. "-1,3,2,1,0") into the list
+// of warm-workspace limits to sweep. Returns null when --warm was not passed.
+function parseWarmLevels(raw) {
+  if (raw == null) return null;
+  const levels = String(raw)
+    .split(',')
+    .map((part) => Number(part.trim()))
+    .filter((value) => Number.isInteger(value));
+  return levels.length > 0 ? levels : null;
+}
+
+// Live (mounted) panes for a warm limit: active + `limit` recent, or all `n` when
+// the limit is negative (virtualization disabled). Used to order the sweep so it
+// only ever tears panes down.
+function warmLiveCount(limit, sessions) {
+  return limit < 0 ? sessions : Math.min(sessions, limit + 1);
+}
+
+// Drive each session to `idle` through the real state-report path so the warm-set
+// can reclaim its (now cold) workspace. `attn _hook-state <id> idle` is exactly
+// what an agent's hook emits; the daemon broadcasts the state change and the
+// frontend drops the live-runtime protection. stdin is /dev/null so the binary's
+// optional hook-input JSON read hits EOF immediately instead of blocking.
+function reportSessionState(bin, socketPath, sessionId, state) {
+  return new Promise((resolve) => {
+    const child = spawn(bin, ['_hook-state', sessionId, state], {
+      env: { ...process.env, ATTN_SOCKET_PATH: socketPath },
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    child.on('close', () => resolve());
+    child.on('error', () => resolve());
+  });
+}
+
+// Run `cmd` in every pane, one at a time, to grow each Ghostty WASM heap + atlas
+// so the warm-set sweep measures realistic (used) idle panes rather than the
+// empty floor. Sequential with a per-pane settle to avoid overrunning the
+// websocket's 256-message buffer (see AGENTS.md) by flooding all panes at once.
+async function fillAllPanes(client, sessionIds, cmd, perPaneSettleMs) {
+  let filled = 0;
+  for (const sessionId of sessionIds) {
+    const paneId = await paneIdForSession(client, sessionId);
+    if (!paneId) {
+      console.warn(`[perf] fill: no pane for session ${sessionId}`);
+      continue;
+    }
+    await client.request('write_pane', { sessionId, paneId, text: cmd }, { timeoutMs: 30_000 })
+      .catch((error) => console.warn(`[perf] fill write_pane ${sessionId} failed: ${error.message}`));
+    filled += 1;
+    await delay(perPaneSettleMs);
+  }
+  console.log(`[perf] filled ${filled}/${sessionIds.length} panes with \`${cmd}\``);
+}
+
+async function markSessionsIdle(client, options, sessionIds) {
+  const profile = profileForAppPath(options.appPath);
+  const bin = path.join(options.appPath, 'Contents', 'MacOS', 'attn');
+  const socketPath = socketPathForProfile(profile);
+  for (const sessionId of sessionIds) {
+    await reportSessionState(bin, socketPath, sessionId, 'idle');
+  }
+  const target = new Set(sessionIds);
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    const state = await client.request('get_state', {}, { timeoutMs: 10_000 }).catch(() => null);
+    const ours = (state?.sessions ?? []).filter((session) => target.has(session.id));
+    if (ours.length === sessionIds.length && ours.every((session) => session.state === 'idle')) {
+      console.log(`[perf] marked ${sessionIds.length} sessions idle (warm-set can now reclaim cold panes)`);
+      return;
+    }
+    await delay(300);
+  }
+  console.warn('[perf] WARNING: not all sessions reached idle within 15s; warm-set virtualization may not engage');
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -321,6 +406,20 @@ async function main() {
     console.log('                      synthetic benchmark/CPU profile and samples peak + post RSS.');
     console.log('  --real-window-ms <n>  Sampling window for --real-cmd (default: 25000)');
     console.log('  --no-restart-daemon Do not restart the dev daemon for ATTN_PPROF');
+    console.log('  --warm <list>       Warm-workspace A/B (terminal virtualization). Drives every');
+    console.log('                      session to idle (the real `attn _hook-state idle` path), then');
+    console.log('                      sweeps each comma-separated limit, snapshotting retained RSS at');
+    console.log('                      each. active + limit recent panes stay live, the rest tear down.');
+    console.log('                      -1 keeps all live (ceiling). e.g. --warm -1,3,2,1,0');
+    console.log('  --fill-cmd <cmd>    Before the warm sweep, run this command in every pane (one at a');
+    console.log('                      time) to grow each Ghostty WASM heap / atlas, simulating idle');
+    console.log('                      panes that have rendered real output. e.g. "seq 1 60000"');
+    console.log('  --fill-settle-ms <n>  Per-pane settle after the fill command (default: 3000)');
+    console.log('  --reclaim-hold-ms <n> After the warm sweep, hold the torn-down state and sample RSS');
+    console.log('                      over this window (no pressure) to capture the reclaim decay');
+    console.log('                      curve -- distinguishes soft-but-delayed from hard. Pair with');
+    console.log('                      --fill-cmd + --warm <low>.');
+    console.log('  --reclaim-hold-interval-ms <n>  Sample interval during the hold (default: 15000)');
     console.log('');
     console.log('Set ATTN_PPROF=<port> to also capture /debug/vars + heap/CPU pprof.');
     return;
@@ -332,12 +431,18 @@ async function main() {
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   const isPerfBaselineLabel = (session) => typeof session.label === 'string' && session.label.startsWith('perf-baseline-');
   const sessionIds = [];
+  // Warm-workspace limit captured before the sweep perturbs it, restored in the
+  // finally so this run does not leak its last swept value into localStorage.
+  let initialWarmLimit = null;
 
   const summary = {
     ok: false,
     runId,
     runDir,
     sessions: options.sessions,
+    warm: options.warm,
+    warmSweep: null,
+    reclaimHold: null,
     requestedStream: options.stream,
     chunkBytes: options.chunkBytes,
     chunkCount: options.chunkCount,
@@ -441,6 +546,131 @@ async function main() {
     }
 
     await delay(options.settleMs);
+
+    // Optionally grow each pane's WASM heap/atlas with real output before the
+    // sweep, so retained-RSS reflects used idle panes (an agent that produced
+    // output then went idle) instead of the empty-pane floor. Force all panes
+    // LIVE first (the warm limit persists in localStorage across runs, so a fresh
+    // app can launch already-virtualized) -- otherwise cold panes would only
+    // ingest the daemon's capped replay on rehydrate, not the full live output,
+    // and the sweep would compare unequal panes.
+    // Capture the warm limit before fill (which forces all panes live) or the
+    // sweep cycles through limits. It persists in localStorage, so leaving it
+    // changed would bleed into the next run and the user's app; restored in the
+    // finally.
+    const warmLevels = parseWarmLevels(options.warm);
+    if (options.fillCmd || warmLevels) {
+      initialWarmLimit = await client
+        .request('get_warm_workspace_limit', {}, { timeoutMs: 15_000 })
+        .then((result) => (typeof result?.limit === 'number' ? result.limit : null))
+        .catch((error) => {
+          console.warn(`[perf] get_warm_workspace_limit failed: ${error.message}`);
+          return null;
+        });
+    }
+
+    if (options.fillCmd) {
+      await client.request('set_warm_workspace_limit', { limit: -1 }, { timeoutMs: 15_000 })
+        .catch((error) => console.warn(`[perf] pre-fill all-live failed: ${error.message}`));
+      await delay(options.settleMs);
+      await fillAllPanes(client, sessionIds, options.fillCmd, options.fillSettleMs);
+      await delay(options.settleMs);
+    }
+
+    // Warm-set A/B sweep. The warm-workspace limit (terminal virtualization) only
+    // reclaims IDLE workspaces: any workspace with a non-idle session is pinned
+    // live so its PTY model can still answer terminal queries. Freshly created
+    // shell sessions report `working`, so we first drive every session to `idle`
+    // via the real state-report path (`attn _hook-state <id> idle`, exactly what an
+    // agent's Stop/state hook does) -- otherwise the warm-set has nothing to tear
+    // down. Then sweep the requested limits most-live-first so each step only frees
+    // panes (monotonic teardown, never a rehydrate/regrow), giving clean
+    // within-app retained-RSS deltas for the per-pane cost.
+    if (warmLevels) {
+      await markSessionsIdle(client, options, sessionIds);
+      summary.warmSweep = [];
+      const ordered = [...warmLevels].sort(
+        (a, b) => warmLiveCount(b, options.sessions) - warmLiveCount(a, options.sessions),
+      );
+      for (const limit of ordered) {
+        let warmState = null;
+        try {
+          warmState = await client.request('set_warm_workspace_limit', { limit }, { timeoutMs: 15_000 });
+        } catch (error) {
+          console.warn(`[perf] set_warm_workspace_limit(${limit}) failed: ${error.message}`);
+        }
+        await delay(options.settleMs);
+        const snap = await snapshot(appPid, daemonPid, webkitBaseline);
+        const expectedVirtualized = limit < 0 ? 0 : Math.max(0, options.sessions - (limit + 1));
+        const entry = {
+          warm: limit,
+          livePanes: options.sessions - expectedVirtualized,
+          virtualizedPanes: warmState?.virtualizedPanes ?? null,
+          expectedVirtualized,
+          totalRssMb: snap.totalRssMb,
+          webContentRssMb: classRssMb(snap, 'webkit_webcontent'),
+          gpuRssMb: classRssMb(snap, 'webkit_gpu'),
+          appRssMb: classRssMb(snap, 'app'),
+        };
+        summary.warmSweep.push(entry);
+        console.log(
+          `[perf] warm=${limit}: live=${entry.livePanes}/${options.sessions} `
+          + `virtualized=${entry.virtualizedPanes} (expected ${expectedVirtualized}) | `
+          + `total=${entry.totalRssMb}MB webContent=${entry.webContentRssMb}MB gpu=${entry.gpuRssMb}MB`,
+        );
+        // The per-pane RSS slope is only meaningful if the warm-set actually
+        // reached the intended live/virtual split. A mismatch means
+        // virtualization did not engage as expected (e.g. a session never went
+        // idle), so the retained-RSS deltas would be garbage — fail loudly
+        // rather than report invalid perf numbers.
+        if (entry.virtualizedPanes !== expectedVirtualized) {
+          throw new Error(
+            `[perf] warm=${limit}: virtualized ${entry.virtualizedPanes} != expected `
+            + `${expectedVirtualized} — warm-set did not reach the intended live/virtual `
+            + 'split; retained-RSS deltas would be invalid',
+          );
+        }
+      }
+    }
+
+    // Reclaim decay sampler (no pressure, no GC nudge). Hold the torn-down
+    // (most-virtualized) state and sample retained RSS over time. WebKit's
+    // scavenger / periodic memory monitor reclaims freed WASM + heap on a delay
+    // that is LONGER than a normal settle window, so a single short-settle
+    // snapshot can read "teardown reclaimed nothing" when the memory does come
+    // back given ~30-120s of quiet. This records the decay curve so we can tell
+    // soft-but-delayed (declines on its own) from hard (flat forever). Sessions
+    // stay open + idle so this measures warm-set teardown specifically.
+    if (options.reclaimHoldMs > 0) {
+      summary.reclaimHold = [];
+      const holdStart = Date.now();
+      let elapsed = 0;
+      for (;;) {
+        const snap = await snapshot(appPid, daemonPid, webkitBaseline);
+        const entry = {
+          tMs: elapsed,
+          totalRssMb: snap.totalRssMb,
+          webContentRssMb: classRssMb(snap, 'webkit_webcontent'),
+          gpuRssMb: classRssMb(snap, 'webkit_gpu'),
+        };
+        summary.reclaimHold.push(entry);
+        console.log(
+          `[perf] HOLD t=${Math.round(elapsed / 1000)}s: webContent=${entry.webContentRssMb}MB `
+          + `gpu=${entry.gpuRssMb}MB total=${entry.totalRssMb}MB`,
+        );
+        if (elapsed >= options.reclaimHoldMs) break;
+        await delay(Math.min(options.reclaimHoldIntervalMs, options.reclaimHoldMs - elapsed));
+        elapsed = Date.now() - holdStart;
+      }
+      const first = summary.reclaimHold[0];
+      const last = summary.reclaimHold[summary.reclaimHold.length - 1];
+      console.log(
+        `[perf] HOLD DECAY over ${Math.round(last.tMs / 1000)}s: webContent ${first.webContentRssMb}->${last.webContentRssMb}MB `
+        + `(${Number((last.webContentRssMb - first.webContentRssMb).toFixed(1))}MB), `
+        + `total ${first.totalRssMb}->${last.totalRssMb}MB (${Number((last.totalRssMb - first.totalRssMb).toFixed(1))}MB)`,
+      );
+    }
+
     if (summary.diagUp) summary.vars.idle = await httpGetJson(port, '/debug/vars').catch(() => null);
     summary.snapshots.idle = await snapshot(appPid, daemonPid, webkitBaseline);
     const workerCount = summary.vars.idle ? Object.keys(summary.vars.idle.worker_pids || {}).length : null;
@@ -527,14 +757,59 @@ async function main() {
         retainedMb: post ? Number((post.totalRssMb - idle.totalRssMb).toFixed(1)) : null,
       };
     }
+    if (summary.warmSweep && summary.warmSweep.length > 0) {
+      // Per-pane cost = how much retained RSS each extra live (warm) pane holds,
+      // derived from the slope across the swept levels (max-live minus min-live,
+      // divided by the difference in live panes). This is the lever for the warm
+      // default: it is the marginal memory each warm slot costs.
+      const sweep = summary.warmSweep;
+      const most = sweep[0];
+      const least = sweep[sweep.length - 1];
+      const paneSpan = most.livePanes - least.livePanes;
+      summary.headline.warmSweep = {
+        levels: sweep.map((entry) => ({
+          warm: entry.warm,
+          livePanes: entry.livePanes,
+          virtualizedPanes: entry.virtualizedPanes,
+          totalRssMb: entry.totalRssMb,
+          webContentRssMb: entry.webContentRssMb,
+          gpuRssMb: entry.gpuRssMb,
+        })),
+        perLivePaneTotalMb: paneSpan > 0 ? Number(((most.totalRssMb - least.totalRssMb) / paneSpan).toFixed(1)) : null,
+        perLivePaneWebContentMb: paneSpan > 0 ? Number(((most.webContentRssMb - least.webContentRssMb) / paneSpan).toFixed(1)) : null,
+      };
+    }
   } finally {
     // Close every session we created so they don't persist into the next run.
     await closeSessions(client, sessionIds);
+    // Restore the warm limit captured before the sweep so we don't leak this
+    // run's last swept value into localStorage (next run / the user's app).
+    if (initialWarmLimit !== null) {
+      await client
+        .request('set_warm_workspace_limit', { limit: initialWarmLimit }, { timeoutMs: 15_000 })
+        .catch((error) => console.warn(`[perf] restore warm limit failed: ${error.message}`));
+    }
     fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
     await observer.close();
   }
 
-  console.log(JSON.stringify({ headline: summary.headline, idleByClass: summary.snapshots.idle?.byClass, profiles: summary.profiles, runDir }, null, 2));
+  if (summary.headline?.warmSweep) {
+    const { levels, perLivePaneTotalMb, perLivePaneWebContentMb } = summary.headline.warmSweep;
+    console.log(`\n[perf] WARM-SET A/B (${options.sessions} idle sessions)`);
+    console.log('  warm  live  virt  total(MB)  webContent(MB)  gpu(MB)');
+    for (const lvl of levels) {
+      const warmCol = String(lvl.warm).padStart(4);
+      const liveCol = String(lvl.livePanes).padStart(4);
+      const virtCol = String(lvl.virtualizedPanes).padStart(4);
+      const totalCol = String(lvl.totalRssMb).padStart(9);
+      const wcCol = String(lvl.webContentRssMb).padStart(14);
+      const gpuCol = String(lvl.gpuRssMb).padStart(7);
+      console.log(`  ${warmCol}  ${liveCol}  ${virtCol}  ${totalCol}  ${wcCol}  ${gpuCol}`);
+    }
+    console.log(`  per-live-pane: total ${perLivePaneTotalMb ?? 'n/a'} MB, webContent ${perLivePaneWebContentMb ?? 'n/a'} MB`);
+  }
+
+  console.log(JSON.stringify({ headline: summary.headline, reclaimHold: summary.reclaimHold, idleByClass: summary.snapshots.idle?.byClass, profiles: summary.profiles, runDir }, null, 2));
 }
 
 main().catch((error) => {

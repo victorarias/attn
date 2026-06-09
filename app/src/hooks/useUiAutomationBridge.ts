@@ -8,6 +8,7 @@ import type { TerminalSplitDirection } from '../types/workspace';
 import { SHORTCUTS, type ShortcutId } from '../shortcuts';
 import { getGridAutomationHandle, INACTIVE_GRID_STATE } from '../components/grid/gridAutomation';
 import { getTerminalPerfSnapshot } from '../utils/terminalPerf';
+import { readWarmWorkspaceLimit } from '../utils/terminalVirtualization';
 import { getReviewPerfSnapshot } from '../utils/reviewPerf';
 import { clearPtyPerfSnapshot, getPtyPerfSnapshot, recordPtyDecode, recordWsJsonParse } from '../utils/ptyPerf';
 import { buildSessionRenderHealth } from '../utils/renderHealth';
@@ -1478,6 +1479,33 @@ export function useUiAutomationBridge({
         setSetting(key, value);
         await settleUi();
         return { key, value };
+      }
+      case 'set_warm_workspace_limit': {
+        // Drives window.attnSetWarmWorkspaces (terminal virtualization warm-set
+        // size) so the perf harness can A/B retained RSS at different warm
+        // limits. Returns the applied limit plus the count of virtualized
+        // (torn-down) panes so the harness can verify virtualization engaged.
+        const setter = (window as Window & { attnSetWarmWorkspaces?: (n: number) => number }).attnSetWarmWorkspaces;
+        if (!setter) {
+          throw new Error('attnSetWarmWorkspaces is not available');
+        }
+        const requested = payload.limit;
+        if (typeof requested !== 'number' || !Number.isFinite(requested)) {
+          throw new Error('set_warm_workspace_limit requires a numeric limit');
+        }
+        const limit = setter(requested);
+        await settleUi();
+        const virtualizedPanes = document.querySelectorAll('[data-testid^="pane-virtualized-"]').length;
+        return { limit, virtualizedPanes };
+      }
+      case 'get_warm_workspace_limit': {
+        // Read-only companion to set_warm_workspace_limit: returns the current
+        // warm-workspace limit (default-aware, read from localStorage) so the
+        // perf harness can capture it before a sweep and restore it afterward
+        // instead of leaking the last swept value into the next run.
+        const limit = readWarmWorkspaceLimit();
+        const virtualizedPanes = document.querySelectorAll('[data-testid^="pane-virtualized-"]').length;
+        return { limit, virtualizedPanes };
       }
       case 'reload_session': {
         if (!reloadSession) {
