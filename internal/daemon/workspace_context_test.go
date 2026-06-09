@@ -93,6 +93,42 @@ func TestWorkspaceContextCheckoutEditUpdateAndStatus(t *testing.T) {
 	}
 }
 
+func TestWorkspaceContextUntouchedInitialUpdateIsNoOp(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
+
+	checkout, err := d.checkoutWorkspaceContext(&protocol.WorkspaceContextCheckoutMessage{
+		SourceSessionID: "session-1",
+	})
+	if err != nil {
+		t.Fatalf("checkoutWorkspaceContext error: %v", err)
+	}
+	if checkout.Revision != 0 || checkout.Modified || checkout.Stale {
+		t.Fatalf("initial checkout = %+v", checkout)
+	}
+
+	updated, changed, err := d.updateWorkspaceContext(&protocol.WorkspaceContextUpdateMessage{
+		SourceSessionID: "session-1",
+	})
+	if err != nil {
+		t.Fatalf("updateWorkspaceContext error: %v", err)
+	}
+	if changed || updated.Revision != 0 || updated.Modified || updated.Stale {
+		t.Fatalf("updated result = %+v, changed=%v", updated, changed)
+	}
+	if d.store.HasWorkspaceContext("workspace-1") {
+		t.Fatal("untouched initial update created a workspace context row")
+	}
+	if queued := len(d.wsHub.broadcast); queued != 0 {
+		t.Fatalf("untouched initial update queued %d broadcast messages", queued)
+	}
+
+	d.dissociateSessionFromWorkspace("session-1")
+	if d.store.GetWorkspace("workspace-1") != nil {
+		t.Fatal("empty-context workspace survived after its last session left")
+	}
+}
+
 func TestWorkspaceContextConflictPreservesLocalEdits(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")

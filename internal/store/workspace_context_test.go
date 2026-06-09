@@ -23,6 +23,17 @@ func TestWorkspaceContextRevisionCheckedUpdate(t *testing.T) {
 		t.Fatalf("initial context = %+v", initial)
 	}
 
+	unchanged, changed, err := s.UpdateWorkspaceContext("workspace-1", "", "session-1", 0)
+	if err != nil {
+		t.Fatalf("initial empty UpdateWorkspaceContext error: %v", err)
+	}
+	if changed || unchanged.Revision != 0 || unchanged.Content != "" {
+		t.Fatalf("initial unchanged context = %+v, changed=%v", unchanged, changed)
+	}
+	if s.HasWorkspaceContext("workspace-1") {
+		t.Fatal("initial empty update created a workspace context row")
+	}
+
 	updated, changed, err := s.UpdateWorkspaceContext("workspace-1", "# Goal\n", "session-1", 0)
 	if err != nil {
 		t.Fatalf("UpdateWorkspaceContext error: %v", err)
@@ -34,7 +45,7 @@ func TestWorkspaceContextRevisionCheckedUpdate(t *testing.T) {
 		t.Fatal("HasWorkspaceContext returned false")
 	}
 
-	unchanged, changed, err := s.UpdateWorkspaceContext("workspace-1", "# Goal\n", "session-1", 1)
+	unchanged, changed, err = s.UpdateWorkspaceContext("workspace-1", "# Goal\n", "session-1", 1)
 	if err != nil {
 		t.Fatalf("identical UpdateWorkspaceContext error: %v", err)
 	}

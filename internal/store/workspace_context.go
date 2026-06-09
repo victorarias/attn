@@ -78,7 +78,7 @@ func (s *Store) UpdateWorkspaceContext(workspaceID, content, updatedBySessionID 
 	if current.Revision != expectedRevision {
 		return nil, false, fmt.Errorf("%w: expected revision %d, current revision %d", ErrWorkspaceContextConflict, expectedRevision, current.Revision)
 	}
-	if current.Content == content && current.Revision > 0 {
+	if current.Content == content {
 		if err := tx.Commit(); err != nil {
 			return nil, false, fmt.Errorf("commit unchanged workspace context: %w", err)
 		}
