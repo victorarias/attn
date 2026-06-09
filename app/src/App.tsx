@@ -1558,7 +1558,11 @@ sendFetchPRDetails,
     || openPRLauncherJob !== null;
 
   const workspaceContextViews = useMemo<WorkspaceContextView[]>(() => {
-    const workspacesById = new Map(daemonWorkspaces.map((workspace) => [workspace.id, workspace]));
+    const workspacesById = new Map(
+      daemonWorkspaces
+        .filter((workspace) => !workspace.endpoint_id)
+        .map((workspace) => [workspace.id, workspace]),
+    );
     const sessionsById = new Map(daemonSessions.map((session) => [session.id, session]));
     return workspaceContexts.map((context) => {
       const workspace = workspacesById.get(context.workspace_id);
@@ -1593,7 +1597,7 @@ sendFetchPRDetails,
     {
       id: 'workspace-contexts',
       title: 'Browse workspace contexts',
-      description: 'Navigate the shared context published for each workspace',
+      description: 'Navigate shared contexts stored on this Mac',
       keywords: ['memory', 'shared', 'agents', 'context'],
       icon: <ContextActionIcon />,
       run: openWorkspaceContextNavigator,

@@ -82,8 +82,8 @@ export function WorkspaceContextNavigator({
             <div className="workspace-context-heading">
               <ContextIcon />
               <div>
-                <span className="workspace-context-eyebrow">Shared memory</span>
-                <h1 id="workspace-context-title">Workspace contexts</h1>
+                <span className="workspace-context-eyebrow">Local shared memory</span>
+                <h1 id="workspace-context-title">Workspace contexts on this Mac</h1>
               </div>
             </div>
             <div className="workspace-context-search">

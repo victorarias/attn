@@ -9,7 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-06-09]
 
 ### Added
-- **⌘K opens a searchable action menu.** The first action opens a fullscreen workspace-context browser with search, keyboard navigation, revision metadata, and rendered Markdown. The existing attention drawer remains available from the menu and its dedicated ⌘⇧P shortcut.
+- **⌘K opens a searchable action menu.** The first action opens a fullscreen browser for workspace contexts stored on this Mac, with search, keyboard navigation, revision metadata, and rendered Markdown. The existing attention drawer remains available from the menu and its dedicated ⌘⇧P shortcut.
 - **Claude and Codex receive workspace-context guidance without cluttering their terminals.** attn gives each session a local checkout and concise hidden instructions to read it, keep durable goals and decisions current, publish edits, and reconcile revision conflicts without copying the shared context itself into the prompt.
 - **Promote one running session to chief of staff.** Session actions in the sidebar can assign, transfer, or remove the profile-wide role, with confirmation before replacing the current chief and clear badges in the sidebar and dashboard.
 - **Chiefs can track delegated work separately from agent runtime state.** Delegated agents can attach structured work state, next ownership, constraints, artifact-bound verification, and one decision request to the existing narrative report. Chiefs can resolve that request durably, agents can read the response with `attn dispatch status`, and the dashboard highlights actionable work without showing the full brief.
