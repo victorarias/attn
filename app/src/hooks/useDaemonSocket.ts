@@ -449,6 +449,24 @@ function pruneWorkspacesBySessions(
   return workspaces;
 }
 
+function invalidateWorkspaceLayoutsForSession(
+  workspaces: DaemonWorkspace[],
+  sessionID: string,
+): DaemonWorkspace[] {
+  let changed = false;
+  const nextWorkspaces = workspaces.map((workspace) => {
+    const referencesSession = (workspace.layout?.panes || []).some(
+      (pane) => pane.session_id === sessionID || pane.runtime_id === sessionID,
+    );
+    if (!referencesSession) {
+      return workspace;
+    }
+    changed = true;
+    return { ...workspace, layout: undefined };
+  });
+  return changed ? nextWorkspaces : workspaces;
+}
+
 function workspacesIncludeRuntimeID(workspaces: DaemonWorkspace[], runtimeID: string): boolean {
   for (const workspace of workspaces) {
     for (const pane of workspace.layout?.panes || []) {
@@ -1532,9 +1550,13 @@ export function useDaemonSocket({
                 (s) => s.id !== data.session!.id
               );
               onSessionsUpdate(sessionsRef.current);
+              const layoutsInvalidated = invalidateWorkspaceLayoutsForSession(
+                workspacesRef.current,
+                data.session.id,
+              );
               const nextWorkspaces = pruneWorkspacesBySessions(
                 sessionsRef.current,
-                workspacesRef.current,
+                layoutsInvalidated,
               );
               if (nextWorkspaces !== workspacesRef.current) {
                 workspacesRef.current = nextWorkspaces;

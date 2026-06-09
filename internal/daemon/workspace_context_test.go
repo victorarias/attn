@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
 func setupWorkspaceContextSession(t *testing.T, d *Daemon, sessionID, workspaceID string) {
@@ -214,5 +215,63 @@ func TestWorkspaceContextKeepsSessionlessWorkspaceAlive(t *testing.T) {
 	}
 	if _, ok := d.workspaces.snapshot("workspace-1"); !ok {
 		t.Fatal("context-bearing workspace was removed from the registry")
+	}
+}
+
+func TestClosingFinalPanePublishesEmptyLayoutForContextWorkspace(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &fakeSpawnBackend{}
+	client := newWorkspaceProtocolTestClient()
+	workspaceID := "workspace-context-close"
+	sessionID := "session-context-close"
+	paneID := "pane-context-close"
+	cwd := t.TempDir()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: workspaceID, Title: "Context", Directory: cwd,
+	})
+	d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
+		Cmd: protocol.CmdWorkspaceLayoutAddSessionPane, WorkspaceID: workspaceID,
+		PaneID: protocol.Ptr(paneID), SessionID: sessionID, Title: protocol.Ptr("codex"),
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, paneID, true)
+	d.handleSpawnSession(client, &protocol.SpawnSessionMessage{
+		Cmd: protocol.CmdSpawnSession, ID: sessionID, Label: protocol.Ptr("codex"),
+		Cwd: cwd, Agent: string(protocol.SessionAgentCodex), WorkspaceID: workspaceID, Cols: 80, Rows: 24,
+	})
+	expectSpawnResult(t, client, sessionID, true)
+	if _, _, err := d.store.UpdateWorkspaceContext(workspaceID, "shared", sessionID, 0); err != nil {
+		t.Fatalf("seed workspace context: %v", err)
+	}
+
+	cap := captureBroadcasts(d)
+	d.handleWorkspaceLayoutClosePane(client, &protocol.WorkspaceLayoutClosePaneMessage{
+		Cmd: protocol.CmdWorkspaceLayoutClosePane, WorkspaceID: workspaceID, PaneID: paneID,
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutClosePane, workspaceID, paneID, true)
+
+	if d.store.GetWorkspace(workspaceID) == nil {
+		t.Fatal("context-bearing workspace was removed")
+	}
+	if layout := d.store.GetWorkspaceLayout(workspaceID); layout != nil {
+		t.Fatalf("empty workspace layout remained persisted: %+v", layout)
+	}
+
+	events := cap.snapshot()
+	if len(events) != 3 {
+		t.Fatalf("close broadcasts = %d, want 3: %+v", len(events), events)
+	}
+	if events[0].Event != protocol.EventSessionUnregistered ||
+		events[1].Event != protocol.EventWorkspaceStateChanged ||
+		events[2].Event != protocol.EventWorkspaceLayoutUpdated {
+		t.Fatalf("close broadcast order = [%s, %s, %s]", events[0].Event, events[1].Event, events[2].Event)
+	}
+	layout := events[2].WorkspaceLayout
+	if layout == nil || layout.WorkspaceID != workspaceID || len(layout.Panes) != 0 {
+		t.Fatalf("empty layout broadcast = %+v", layout)
+	}
+	layoutNode, err := workspacelayout.DecodeLayout(layout.LayoutJson)
+	if err != nil || !workspacelayout.LayoutEmpty(layoutNode) {
+		t.Fatalf("empty layout JSON = %q, err=%v", layout.LayoutJson, err)
 	}
 }

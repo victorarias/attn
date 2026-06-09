@@ -11,6 +11,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **Claude and Codex are taught to use workspace context when a session starts or resets.** attn checks out the live context file and injects concise instructions to read it, keep durable goals and decisions current, publish edits, and reconcile revision conflicts without copying the context itself into the prompt.
 
+### Fixed
+- **Closed sessions no longer flicker back into the sidebar as launching.** The daemon now publishes an authoritative empty layout when shared context keeps a workspace alive after its final pane closes, and the app also discards cached layouts that still reference an explicitly closed session.
+
 ## [2026-06-08]
 
 ### Added
