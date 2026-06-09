@@ -200,6 +200,12 @@
   box-shadow: 0 0 0 1px rgba(255, 107, 53, 0.08), 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
+@media (min-width: 680px) and (max-width: 1050px) {
+  .chief-dispatch-card {
+    grid-row: span 2;
+  }
+}
+
 .card-header {
   display: flex;
   justify-content: space-between;
