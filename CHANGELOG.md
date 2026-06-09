@@ -20,6 +20,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Terminals use less graphics memory.** Every live terminal used to preallocate a large fixed GPU texture to cache rendered characters. It now starts small and grows only if a session actually displays many distinct characters (such as heavy CJK or emoji output). Text looks identical, and with several sessions open this frees roughly 90 MB of graphics memory.
 
 ### Fixed
+- **Closed delegated sessions no longer remain on the Chief of Staff dashboard.** Closing a delegated session now removes it from the active home view while retaining its dispatch report as history.
 - **Closed sessions no longer flicker back into the sidebar as launching.** The daemon now publishes an authoritative empty layout when shared context keeps a workspace alive after its final pane closes, and the app also discards cached layouts that still reference an explicitly closed session.
 
 ## [2026-06-08]
