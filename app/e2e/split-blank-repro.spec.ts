@@ -72,27 +72,7 @@ test('agent pane stays painted after opening a shell split', async ({ page, daem
   await page.waitForSelector('.dashboard');
 
   const agentId = 's-agent-split';
-  const workspaceId = `workspace-${agentId}`;
-  await page.evaluate(({ sessionId, workspaceId }) => {
-    window.__TEST_INJECT_SESSION?.({
-      id: sessionId,
-      label: 'Agent Split',
-      state: 'working',
-      cwd: '/tmp/test/agent-split',
-      workspaceId,
-    });
-  }, { sessionId: agentId, workspaceId });
-  await daemon.injectSession({
-    id: agentId,
-    label: 'Agent Split',
-    state: 'working',
-    directory: '/tmp/test/agent-split',
-    workspace_id: workspaceId,
-  });
-
-  await page.locator(`[data-testid="session-${agentId}"]`).click();
-  const terminal = page.locator(`[data-pane-session-id="${agentId}"][data-pane-kind="agent"] .terminal-container`);
-  await expect(terminal).toBeVisible({ timeout: 5000 });
+  const terminal = await setupAgent(page, daemon, agentId);
 
   // 1) Paint a full frame and confirm it actually rendered (high quad count).
   await emit(page, agentId, fullFrame('OLD'));
@@ -175,7 +155,31 @@ async function setupAgent(
   await page.locator(`[data-testid="session-${agentId}"]`).click();
   const terminal = page.locator(`[data-pane-session-id="${agentId}"][data-pane-kind="agent"] .terminal-container`);
   await expect(terminal).toBeVisible({ timeout: 5000 });
+  await waitForPaneReady(page, agentId);
   return terminal;
+}
+
+// The terminal CONTAINER becoming visible is not the same as the pane being
+// ready to receive PTY data. `__TEST_EMIT_PTY_DATA` delivers to the live
+// terminal handle and silently DROPS the event when no handle is registered yet
+// (useGhosttyPaneRuntime.deliverEvent: `if (!terminal) return`). The handle is
+// only registered once the Ghostty WASM model has finished loading
+// (handleTerminalReady), which lands strictly after the DOM container is
+// visible. Emitting in that window loses the bytes and the model never updates,
+// so the downstream `toContain('… line 0')` poll times out — the flake. In prod
+// this race cannot happen: data only arrives in response to attach, which is
+// itself fired from handleTerminalReady (after the handle exists). `getPaneSize`
+// returns a size only once the handle is registered, so it is the precise
+// "emit will be delivered" signal to gate on.
+async function waitForPaneReady(
+  page: import('@playwright/test').Page,
+  sessionId: string,
+) {
+  await expect
+    .poll(async () => page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_SIZE?.(sid) ?? null, sessionId), {
+      timeout: 10000,
+    })
+    .not.toBeNull();
 }
 
 function chunks(value: string, size: number): string[] {
