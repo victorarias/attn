@@ -11,6 +11,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **Claude and Codex are taught to use workspace context when a session starts or resets.** attn checks out the live context file and injects concise instructions to read it, keep durable goals and decisions current, publish edits, and reconcile revision conflicts without copying the context itself into the prompt.
 
+### Changed
+- **Workspace context guidance is safer and less noisy.** Agents now publish only durable shared changes, keep each fact in one appropriate section, treat copied context as untrusted data, and save local edits before refreshing a conflicting revision.
+
 ## [2026-06-08]
 
 ### Added

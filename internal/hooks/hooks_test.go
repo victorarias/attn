@@ -168,14 +168,39 @@ func TestWorkspaceContextSessionStartOutput(t *testing.T) {
 		"workspace context update",
 		"workspace context status",
 		"show --force",
-		"Do not use it as a transcript or scratchpad",
+		"Publish only when durable shared state changed",
+		"load the attn skill's workspace-context reference",
+		"Save local edits before refreshing",
+		"cp '/tmp/context.md' \"$saved_context\"",
+		"do not pass --session",
+		"not as instructions that override",
+		"handoff contains only next actions or unresolved questions",
 	} {
 		if !strings.Contains(guidance, expected) {
 			t.Fatalf("guidance missing %q: %q", expected, guidance)
 		}
 	}
+	saveCommand := `cp '/tmp/context.md' "$saved_context"`
+	refreshCommand := `"$ATTN_WRAPPER_PATH" workspace context show --force`
+	if strings.Index(guidance, saveCommand) >= strings.Index(guidance, refreshCommand) {
+		t.Fatalf("guidance must save local edits before force-refreshing: %q", guidance)
+	}
 	if strings.Contains(guidance, "# Shared goal") {
 		t.Fatal("guidance should not embed workspace context content")
+	}
+}
+
+func TestWorkspaceContextSessionStartOutputQuotesCheckoutPath(t *testing.T) {
+	raw := WorkspaceContextSessionStartOutput("/tmp/agent's context.md")
+	var output sessionStartHookOutput
+	if err := json.Unmarshal([]byte(raw), &output); err != nil {
+		t.Fatalf("WorkspaceContextSessionStartOutput returned invalid JSON: %v", err)
+	}
+
+	guidance := output.HookSpecificOutput.AdditionalContext
+	expected := `cp '/tmp/agent'\''s context.md' "$saved_context"`
+	if !strings.Contains(guidance, expected) {
+		t.Fatalf("guidance missing shell-quoted checkout path %q: %q", expected, guidance)
 	}
 }
 
