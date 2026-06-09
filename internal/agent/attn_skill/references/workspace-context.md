@@ -6,7 +6,11 @@ and handoff information that should survive individual sessions.
 
 ## Edit And Publish
 
-Check out the current revision and capture the editable file path:
+For Claude and Codex sessions, attn checks out the current revision at session
+start and injects the editable file path. Read that file before substantive
+work.
+
+To refresh the checkout manually or recover the path, run:
 
 ```sh
 context_file="$("$ATTN_WRAPPER_PATH" workspace context show)"

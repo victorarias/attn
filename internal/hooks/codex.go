@@ -52,14 +52,14 @@ func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath string) []s
 		// reflow prevents resized inline UIs from leaving stale headers.
 		"features.terminal_resize_reflow=true",
 		trustedHashOverrides([]codexHookTrustEntry{
-			{eventKey: "session_start", matcher: "startup|resume", command: sessionStart},
+			{eventKey: "session_start", matcher: "startup|resume|clear|compact", command: sessionStart},
 			{eventKey: "user_prompt_submit", command: userPromptSubmit},
 			{eventKey: "permission_request", matcher: "*", command: permissionRequest},
 			{eventKey: "pre_tool_use", matcher: "*", command: preToolUse},
 			{eventKey: "post_tool_use", matcher: "*", command: postToolUse},
 			{eventKey: "stop", command: stop},
 		}),
-		"hooks.SessionStart=" + group("startup|resume", sessionStart),
+		"hooks.SessionStart=" + group("startup|resume|clear|compact", sessionStart),
 		"hooks.UserPromptSubmit=" + group("", userPromptSubmit),
 		"hooks.PermissionRequest=" + group("*", permissionRequest),
 		"hooks.PreToolUse=" + group("*", preToolUse),
