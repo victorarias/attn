@@ -275,6 +275,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const osc52StateRef = useRef<Osc52State>({ pending: '' });
     const synchronizedOutputStateRef = useRef<SynchronizedOutputState>({ active: false, pending: '' });
     const synchronizedOutputRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const scheduledOutputRenderRef = useRef<number | null>(null);
     const renderCountRef = useRef(0);
     const writeCountRef = useRef(0);
     // Diagnostics: model instance (increments on rebuild) and last paint quads,
@@ -324,6 +325,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const terminal = terminalRef.current;
       const renderer = rendererRef.current;
       if (!terminal || !renderer) return;
+      if (runtimeMetaRef.current && !runtimeMetaRef.current.isActiveSession) return;
       const range = selectionRef.current ? normalizeSelection(selectionRef.current) : null;
       const scrollbackLength = terminal.getScrollbackLength();
       const overlay: WebGlSelection | null = range ? {
@@ -360,19 +362,33 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       synchronizedOutputRenderTimerRef.current = null;
     }, []);
 
+    const cancelScheduledOutputRender = useCallback(() => {
+      if (scheduledOutputRenderRef.current === null) return;
+      cancelAnimationFrame(scheduledOutputRenderRef.current);
+      scheduledOutputRenderRef.current = null;
+    }, []);
+
+    const scheduleOutputRender = useCallback(() => {
+      if (scheduledOutputRenderRef.current !== null) return;
+      scheduledOutputRenderRef.current = requestAnimationFrame(() => {
+        scheduledOutputRenderRef.current = null;
+        renderSurface(true);
+      });
+    }, [renderSurface]);
+
     const flushSynchronizedOutputRender = useCallback(() => {
       clearSynchronizedOutputRenderTimer();
-      renderSurface(true);
-    }, [clearSynchronizedOutputRenderTimer, renderSurface]);
+      scheduleOutputRender();
+    }, [clearSynchronizedOutputRenderTimer, scheduleOutputRender]);
 
     const scheduleSynchronizedOutputRenderFallback = useCallback(() => {
       if (synchronizedOutputRenderTimerRef.current) return;
       synchronizedOutputRenderTimerRef.current = setTimeout(() => {
         synchronizedOutputRenderTimerRef.current = null;
         synchronizedOutputStateRef.current = { active: false, pending: '' };
-        renderSurface(true);
+        scheduleOutputRender();
       }, SYNCHRONIZED_OUTPUT_RENDER_TIMEOUT_MS);
-    }, [renderSurface]);
+    }, [scheduleOutputRender]);
 
     const lineAtVisibleRow = useCallback((row: number): string => {
       const terminal = terminalRef.current;
@@ -644,6 +660,16 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       if (!terminal || !renderer) return;
       const fromCols = terminal.cols;
       const fromRows = terminal.rows;
+      if (fromCols === cols && fromRows === rows) {
+        modelSizeRef.current = { cols, rows };
+        noteResize(diagKeyRef.current, {
+          session: runtimeMetaRef.current?.sessionId ?? undefined,
+          paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
+          source: 'resizeLocal', fromCols, fromRows, toCols: cols, toRows: rows,
+          noop: true,
+        });
+        return;
+      }
       terminal.resize(cols, rows);
       modelSizeRef.current = { cols, rows };
       renderer.resize(cols, rows);
@@ -651,7 +677,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         session: runtimeMetaRef.current?.sessionId ?? undefined,
         paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
         source: 'resizeLocal', fromCols, fromRows, toCols: cols, toRows: rows,
-        noop: fromCols === cols && fromRows === rows,
+        noop: false,
       });
       renderSurface(true);
     }), [enqueueOperation, renderSurface]);
@@ -677,6 +703,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       }
       if (dims.cols === terminal.cols && dims.rows === terminal.rows) {
         noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'sameSize', toCols: dims.cols, toRows: dims.rows });
+        renderSurface(false);
         return;
       }
       const fromCols = terminal.cols;
@@ -861,6 +888,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         canvas.removeEventListener('webglcontextlost', handleContextLost);
         unregister();
         clearSynchronizedOutputRenderTimer();
+        cancelScheduledOutputRender();
         inputRef.current?.dispose();
         rendererRef.current?.dispose();
         terminalRef.current?.free();
@@ -871,7 +899,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // Ghostty cells contain their resolved default RGB values, so theme
     // changes require a fresh model. The pane runtime rehydrates this model
     // from verified replay without sending historical replies to the live PTY.
-    }, [clearSynchronizedOutputRenderTimer, fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, resizeLocal, resolvedTheme, write]);
+    }, [cancelScheduledOutputRender, clearSynchronizedOutputRenderTimer, fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, resizeLocal, resolvedTheme, write]);
 
     // Release this pane's WebGL2 context when the pane unmounts. Browsers cap the
     // number of simultaneously-live WebGL contexts (WKWebView's cap is low), and
