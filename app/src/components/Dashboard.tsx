@@ -109,10 +109,13 @@ export function Dashboard({
   const [fadingPRs, setFadingPRs] = useState<Set<string>>(new Set());
   const { sendMuteRepo, sendPRVisited } = useDaemonContext();
   const { chiefOfStaffDispatches } = useDaemonStore();
+  const visibleDispatches = chiefOfStaffDispatches.filter((dispatch) =>
+    dispatchSessions.some((session) => session.id === dispatch.session_id)
+  );
   const activeChiefDispatches = chiefSession
-    ? chiefOfStaffDispatches.filter((dispatch) => dispatch.chief_session_id === chiefSession.id)
+    ? visibleDispatches.filter((dispatch) => dispatch.chief_session_id === chiefSession.id)
     : [];
-  const historicalChiefDispatches = chiefOfStaffDispatches.filter(
+  const historicalChiefDispatches = visibleDispatches.filter(
     (dispatch) => dispatch.chief_session_id !== chiefSession?.id,
   );
 
@@ -493,7 +496,7 @@ export function Dashboard({
             <h2>Chief of Staff</h2>
           </div>
           <div className="card-body">
-            {!chiefSession && chiefOfStaffDispatches.length === 0 ? (
+            {!chiefSession && visibleDispatches.length === 0 ? (
               <div className="card-empty">Assign a session as chief to track delegated work.</div>
             ) : (
               <>

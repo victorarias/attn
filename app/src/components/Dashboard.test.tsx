@@ -158,4 +158,54 @@ describe('Dashboard sessions', () => {
     fireEvent.click(dispatch);
     expect(onSelectSession).toHaveBeenCalledWith('worker-1');
   });
+
+  it('hides a dispatch after its delegated session is closed', () => {
+    daemonStoreState.chiefOfStaffDispatches = [{
+      id: 'dispatch-closed',
+      chief_session_id: 'chief-1',
+      session_id: 'worker-closed',
+      workspace_id: 'workspace-1',
+      brief: 'Investigate the parser.',
+      label: 'Parser investigation',
+      agent: 'codex',
+      directory: '/repo/a',
+      status: 'closed',
+      status_since: '',
+      latest_report: 'Investigation complete.',
+      reported_at: '2026-06-09T10:10:00Z',
+      created_at: '2026-06-09T10:00:00Z',
+      updated_at: '2026-06-09T10:10:00Z',
+    }];
+
+    const props = {
+      prs: [],
+      isLoading: false,
+      onSelectSession: vi.fn(),
+      onNewSession: vi.fn(),
+      onOpenSettings: vi.fn(),
+    };
+    const { rerender } = render(
+      <Dashboard
+        sessions={[
+          { id: 'chief-1', label: 'planner', state: 'working', cwd: '/repo/a', chiefOfStaff: true },
+          { id: 'worker-closed', label: 'parser-worker', state: 'idle', cwd: '/repo/a' },
+        ]}
+        {...props}
+      />
+    );
+
+    expect(screen.getByTestId('chief-dispatch-dispatch-closed')).toBeInTheDocument();
+
+    rerender(
+      <Dashboard
+        sessions={[
+          { id: 'chief-1', label: 'planner', state: 'working', cwd: '/repo/a', chiefOfStaff: true },
+        ]}
+        {...props}
+      />
+    );
+
+    expect(screen.queryByTestId('chief-dispatch-dispatch-closed')).not.toBeInTheDocument();
+    expect(screen.getByText('No delegated work yet.')).toBeInTheDocument();
+  });
 });
