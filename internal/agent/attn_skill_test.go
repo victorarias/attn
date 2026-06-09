@@ -62,17 +62,28 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 
 	workspaceContext := readSkillFile(t, skillDir, "references/workspace-context.md")
 	for _, expected := range []string{
-		"injects the editable file path",
+		"durable coordination state",
+		"Publish only when durable shared state has changed",
+		"Do not pass `--session`",
+		"**Handoff**: only the next actions or unresolved questions",
 		"workspace context show",
 		"workspace context update",
 		"workspace context status",
 		"canonical_revision",
 		"show --force",
-		"workspace_context_changed",
+		"cp \"$context_file\" \"$saved_context\"",
 	} {
 		if !strings.Contains(workspaceContext, expected) {
 			t.Fatalf("workspace context reference missing %q: %q", expected, workspaceContext)
 		}
+	}
+	saveCommand := `cp "$context_file" "$saved_context"`
+	refreshCommand := `"$ATTN_WRAPPER_PATH" workspace context show --force`
+	if strings.Index(workspaceContext, saveCommand) >= strings.Index(workspaceContext, refreshCommand) {
+		t.Fatalf("workspace context reference must save local edits before force-refreshing: %q", workspaceContext)
+	}
+	if strings.Contains(workspaceContext, "workspace context show --session") {
+		t.Fatalf("workspace context reference should default to the current session: %q", workspaceContext)
 	}
 
 	reviewLoops := readSkillFile(t, skillDir, "references/review-loops.md")

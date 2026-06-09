@@ -1354,8 +1354,16 @@ func runAgentDirectly(requestedAgent string) {
 	}
 
 	hasHooks := false
+	if agentdriver.EffectiveCapabilities(driver).HasWorkspaceContext {
+		contextPath, checkoutErr := workspaceContextCheckoutPath(c, sessionID, 40, 25*time.Millisecond)
+		if checkoutErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not prepare workspace context guidance: %v\n", checkoutErr)
+		} else {
+			opts.WorkspaceContextPath = contextPath
+		}
+	}
 	if cp, ok := agentdriver.GetConfigOverrideProvider(driver); ok {
-		opts.ConfigOverrides = cp.GenerateConfigOverrides(sessionID, opts.SocketPath, opts.WrapperPath)
+		opts.ConfigOverrides = cp.GenerateConfigOverrides(opts)
 	}
 	if hp, ok := agentdriver.GetHookProvider(driver); ok {
 		content := hp.GenerateHooksConfig(sessionID, opts.SocketPath, opts.WrapperPath)
@@ -1527,9 +1535,13 @@ func runHookSessionStart() {
 		fmt.Fprintf(os.Stderr, "warning: could not load workspace context guidance: %v\n", err)
 		return
 	}
-	if output != "" {
+	if output != "" && !workspaceContextGuidanceProvidedAtLaunch() {
 		fmt.Fprintln(os.Stdout, output)
 	}
+}
+
+func workspaceContextGuidanceProvidedAtLaunch() bool {
+	return strings.TrimSpace(os.Getenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE")) != ""
 }
 
 type workspaceContextCheckoutClient interface {
@@ -1542,6 +1554,19 @@ func workspaceContextSessionStartOutput(
 	attempts int,
 	retryDelay time.Duration,
 ) (string, error) {
+	path, err := workspaceContextCheckoutPath(c, sessionID, attempts, retryDelay)
+	if err != nil {
+		return "", err
+	}
+	return hooks.WorkspaceContextSessionStartOutput(path), nil
+}
+
+func workspaceContextCheckoutPath(
+	c workspaceContextCheckoutClient,
+	sessionID string,
+	attempts int,
+	retryDelay time.Duration,
+) (string, error) {
 	if attempts < 1 {
 		attempts = 1
 	}
@@ -1549,7 +1574,7 @@ func workspaceContextSessionStartOutput(
 	for attempt := 0; attempt < attempts; attempt++ {
 		result, err := c.CheckoutWorkspaceContext(sessionID, false)
 		if err == nil {
-			return hooks.WorkspaceContextSessionStartOutput(result.Path), nil
+			return result.Path, nil
 		}
 		lastErr = err
 		if attempt+1 < attempts && retryDelay > 0 {

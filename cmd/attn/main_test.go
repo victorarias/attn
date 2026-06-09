@@ -422,6 +422,32 @@ func TestWorkspaceContextSessionStartOutputRetriesUntilSessionIsRegistered(t *te
 	}
 }
 
+func TestWorkspaceContextCheckoutPathReturnsCheckoutPath(t *testing.T) {
+	c := &fakeWorkspaceContextCheckoutClient{
+		failures: 1,
+		path:     "/tmp/context.md",
+	}
+	path, err := workspaceContextCheckoutPath(c, "session-1", 2, 0)
+	if err != nil {
+		t.Fatalf("workspaceContextCheckoutPath error: %v", err)
+	}
+	if path != "/tmp/context.md" {
+		t.Fatalf("path = %q, want /tmp/context.md", path)
+	}
+}
+
+func TestWorkspaceContextGuidanceProvidedAtLaunch(t *testing.T) {
+	t.Setenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE", "developer_instructions")
+	if !workspaceContextGuidanceProvidedAtLaunch() {
+		t.Fatal("launch guidance should suppress hook guidance output")
+	}
+
+	t.Setenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE", "")
+	if workspaceContextGuidanceProvidedAtLaunch() {
+		t.Fatal("missing launch guidance should preserve hook fallback output")
+	}
+}
+
 func TestWorkspaceContextSessionStartOutputReturnsLastCheckoutError(t *testing.T) {
 	c := &fakeWorkspaceContextCheckoutClient{failures: 2}
 	output, err := workspaceContextSessionStartOutput(c, "session-1", 2, 0)

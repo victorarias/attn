@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -50,6 +51,40 @@ func TestCodexBuildCommand_IncludesConfigOverridesBeforeResume(t *testing.T) {
 	want := strings.Join(wantArgs, "\x00")
 	if args != want {
 		t.Fatalf("args = %#v, want %#v", cmd.Args, wantArgs)
+	}
+}
+
+func TestCodexBuildEnvMarksDeveloperInstructionGuidance(t *testing.T) {
+	env := (&Codex{}).BuildEnv(SpawnOpts{
+		SessionID:            "sess-1",
+		WorkspaceContextPath: "/tmp/context.md",
+	})
+	if !slices.Contains(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=developer_instructions") {
+		t.Fatalf("env = %#v, want developer instruction guidance marker", env)
+	}
+}
+
+func TestClaudeBuildCommand_AppendsWorkspaceContextSystemPrompt(t *testing.T) {
+	cmd := (&Claude{}).BuildCommand(SpawnOpts{
+		SessionID:            "sess-1",
+		Executable:           "claude",
+		WorkspaceContextPath: "/tmp/context.md",
+	})
+	flagIndex := slices.Index(cmd.Args, "--append-system-prompt")
+	if flagIndex == -1 || flagIndex+1 >= len(cmd.Args) {
+		t.Fatalf("args = %#v, want --append-system-prompt with guidance", cmd.Args)
+	}
+	if !strings.Contains(cmd.Args[flagIndex+1], "/tmp/context.md") {
+		t.Fatalf("system prompt = %q, want workspace context path", cmd.Args[flagIndex+1])
+	}
+}
+
+func TestClaudeBuildEnvMarksAppendSystemPromptGuidance(t *testing.T) {
+	env := (&Claude{}).BuildEnv(SpawnOpts{
+		WorkspaceContextPath: "/tmp/context.md",
+	})
+	if !slices.Contains(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=append_system_prompt") {
+		t.Fatalf("env = %#v, want append system prompt guidance marker", env)
 	}
 }
 

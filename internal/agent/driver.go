@@ -110,6 +110,10 @@ type Capabilities struct {
 	// HasInitialPrompt indicates the agent can start an interactive session and
 	// immediately submit a prompt supplied by attn.
 	HasInitialPrompt bool
+
+	// HasWorkspaceContext indicates attn can give the agent hidden launch
+	// instructions for using a workspace context checkout.
+	HasWorkspaceContext bool
 }
 
 var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
@@ -126,6 +130,7 @@ var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
 //   - ATTN_AGENT_<AGENT>_RESUME=0|1
 //   - ATTN_AGENT_<AGENT>_YOLO=0|1
 //   - ATTN_AGENT_<AGENT>_INITIAL_PROMPT=0|1
+//   - ATTN_AGENT_<AGENT>_WORKSPACE_CONTEXT=0|1
 //
 // <AGENT> is uppercased with non-alphanumeric chars replaced by underscores
 // (e.g. "gemini-cli" -> "GEMINI_CLI").
@@ -162,6 +167,9 @@ func EffectiveCapabilities(d Driver) Capabilities {
 	}
 	if v, ok := boolEnv(prefix + "INITIAL_PROMPT"); ok {
 		caps.HasInitialPrompt = v
+	}
+	if v, ok := boolEnv(prefix + "WORKSPACE_CONTEXT"); ok {
+		caps.HasWorkspaceContext = v
 	}
 
 	// Consistency: transcript watcher requires transcript support.
@@ -224,6 +232,10 @@ type SpawnOpts struct {
 	// support it (e.g. Claude's --settings <path>).
 	SettingsPath string
 
+	// WorkspaceContextPath is this session's local checkout of the workspace's
+	// shared context. It may become stale after launch.
+	WorkspaceContextPath string
+
 	// ConfigOverrides are agent CLI config overrides generated for this launch.
 	ConfigOverrides []string
 }
@@ -240,7 +252,7 @@ type HookProvider interface {
 
 // ConfigOverrideProvider generates per-launch CLI config overrides.
 type ConfigOverrideProvider interface {
-	GenerateConfigOverrides(sessionID, socketPath, wrapperPath string) []string
+	GenerateConfigOverrides(opts SpawnOpts) []string
 }
 
 // TranscriptFinder locates transcript files written by the agent.
