@@ -63,9 +63,25 @@ export function graphemeAtViewportCell(
     : terminal.getGraphemeString(bufferRow - history, col);
 }
 
-const ATLAS_SIZE = 2048;
+// The glyph atlas is allocated eagerly and in full (a backing 2D canvas plus a
+// GPU texture of the same dimensions), so its size is a fixed per-renderer
+// memory cost paid up front regardless of how many glyphs a session actually
+// uses. A terminal renders a small, mostly-fixed glyph set (ASCII + styles +
+// box-drawing + the occasional Unicode/emoji), so most panes fit comfortably in
+// 1024². We therefore start small and grow on demand up to the previous fixed
+// size only when a glyph-heavy session (e.g. CJK/emoji) actually overflows the
+// atlas — keeping the common case cheap (≈8 MB/renderer vs ≈32 MB at 2048²)
+// without risking glyph-atlas thrash on heavy content. See growAtlas/resetAtlas.
+export const INITIAL_ATLAS_SIZE = 1024;
+export const MAX_ATLAS_SIZE = 2048;
 const FLOATS_PER_VERTEX = 8;
-const SOLID_TEXEL_CENTER = 0.5 / ATLAS_SIZE;
+
+// Next atlas size when the current one fills: double it, but never exceed the
+// cap. Idempotent at the cap, so repeated growth always converges to
+// MAX_ATLAS_SIZE and can never grow unbounded.
+export function nextAtlasSize(current: number, max: number = MAX_ATLAS_SIZE): number {
+  return Math.min(current * 2, max);
+}
 const BLOCK_ELEMENT_RECTS: Readonly<Record<number, readonly BlockRect[]>> = {
   0x2580: [{ x: 0, y: 0, width: 1, height: 1 / 2 }],
   0x2581: [{ x: 0, y: 7 / 8, width: 1, height: 1 / 8 }],
@@ -202,10 +218,17 @@ export class WebGlTerminalRenderer {
   private readonly fontSize: number;
   private readonly fontFamily: string;
   private readonly theme: RendererTheme;
+  private atlasSize = INITIAL_ATLAS_SIZE;
   private atlasX = 2;
   private atlasY = 1;
   private atlasRowHeight = 0;
   private atlasGeneration = 0;
+
+  // UV of the center of the 1×1 solid white texel at atlas pixel (0,0). Depends
+  // on the current atlas size, so it is recomputed rather than precomputed.
+  private get solidTexelCenter(): number {
+    return 0.5 / this.atlasSize;
+  }
   private retryingAtlasFrame = false;
   private cols = 0;
   private rows = 0;
@@ -237,8 +260,8 @@ export class WebGlTerminalRenderer {
     this.buffer = gl.createBuffer() ?? (() => { throw new Error('Unable to allocate WebGL buffer'); })();
     this.texture = gl.createTexture() ?? (() => { throw new Error('Unable to allocate glyph texture'); })();
     this.atlas = document.createElement('canvas');
-    this.atlas.width = ATLAS_SIZE;
-    this.atlas.height = ATLAS_SIZE;
+    this.atlas.width = this.atlasSize;
+    this.atlas.height = this.atlasSize;
     this.atlasContext = this.atlas.getContext('2d') ?? (() => { throw new Error('Unable to allocate glyph atlas'); })();
     this.atlasContext.fillStyle = '#ffffff';
     this.atlasContext.fillRect(0, 0, 1, 1);
@@ -248,7 +271,7 @@ export class WebGlTerminalRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, ATLAS_SIZE, ATLAS_SIZE, 0, gl.RGBA, gl.UNSIGNED_BYTE, this.atlas);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.atlasSize, this.atlasSize, 0, gl.RGBA, gl.UNSIGNED_BYTE, this.atlas);
 
     gl.useProgram(this.program);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
@@ -442,13 +465,19 @@ export class WebGlTerminalRenderer {
     context.font = `${style}${this.fontSize * scale}px ${this.fontFamily}`;
     const width = Math.max(Math.ceil(context.measureText(text).width) + 4, this.cellWidth * scale);
     const height = this.cellHeight * scale;
-    if (this.atlasX + width >= ATLAS_SIZE) {
+    if (this.atlasX + width >= this.atlasSize) {
       this.atlasX = 2;
       this.atlasY += this.atlasRowHeight + 1;
       this.atlasRowHeight = 0;
     }
-    if (this.atlasY + height >= ATLAS_SIZE) {
-      this.resetAtlas();
+    if (this.atlasY + height >= this.atlasSize) {
+      // Atlas is full: grow it (doubling, up to the cap) so glyph-heavy sessions
+      // get more room instead of thrashing; only clear-and-reuse once at the cap.
+      if (this.atlasSize < MAX_ATLAS_SIZE) {
+        this.growAtlas();
+      } else {
+        this.resetAtlas();
+      }
     }
 
     const x = this.atlasX;
@@ -461,10 +490,10 @@ export class WebGlTerminalRenderer {
     this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, x, y, width, height, this.gl.RGBA, this.gl.UNSIGNED_BYTE, context.getImageData(x, y, width, height));
 
     const glyph = {
-      u0: x / ATLAS_SIZE,
-      v0: y / ATLAS_SIZE,
-      u1: (x + width) / ATLAS_SIZE,
-      v1: (y + height) / ATLAS_SIZE,
+      u0: x / this.atlasSize,
+      v0: y / this.atlasSize,
+      u1: (x + width) / this.atlasSize,
+      v1: (y + height) / this.atlasSize,
       width,
       height,
     };
@@ -474,13 +503,35 @@ export class WebGlTerminalRenderer {
     return glyph;
   }
 
+  // Double the atlas (up to the cap) when a glyph-heavy session fills it, then
+  // re-seed at the new size. Glyph-light sessions never call this and stay at
+  // INITIAL_ATLAS_SIZE.
+  private growAtlas(): void {
+    this.atlasSize = nextAtlasSize(this.atlasSize, MAX_ATLAS_SIZE);
+    this.reseedAtlas();
+  }
+
+  // Clear the glyph cache and reuse the atlas at its current size. Only reached
+  // once the atlas has already grown to the cap.
   private resetAtlas(): void {
+    this.reseedAtlas();
+  }
+
+  // Clear the glyph cache and (re)initialize the backing canvas + GPU texture at
+  // the current atlas size, re-seeding the solid white texel at (0,0). Setting
+  // the canvas dimensions also clears its bitmap, so this covers both same-size
+  // resets and post-grow reallocations. Bumps the generation so an in-flight
+  // frame re-rasterizes against the fresh atlas (see render()'s retry). getGlyph
+  // re-establishes font/baseline on every call, so resetting the 2D context
+  // state here is safe.
+  private reseedAtlas(): void {
     this.glyphs.clear();
     this.atlasX = 2;
     this.atlasY = 1;
     this.atlasRowHeight = 0;
     this.atlasGeneration += 1;
-    this.atlasContext.clearRect(0, 0, ATLAS_SIZE, ATLAS_SIZE);
+    this.atlas.width = this.atlasSize;
+    this.atlas.height = this.atlasSize;
     this.atlasContext.fillStyle = '#ffffff';
     this.atlasContext.fillRect(0, 0, 1, 1);
     this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture);
@@ -488,8 +539,8 @@ export class WebGlTerminalRenderer {
       this.gl.TEXTURE_2D,
       0,
       this.gl.RGBA,
-      ATLAS_SIZE,
-      ATLAS_SIZE,
+      this.atlasSize,
+      this.atlasSize,
       0,
       this.gl.RGBA,
       this.gl.UNSIGNED_BYTE,
@@ -500,7 +551,7 @@ export class WebGlTerminalRenderer {
   private pushSolidQuad(vertices: number[], x: number, y: number, width: number, height: number, color: Rgb, alpha: number): void {
     // Keep all samples within the white texel. Sampling its edges with LINEAR
     // filtering blends into transparent atlas neighbours and leaves seams.
-    this.pushQuad(vertices, x, y, width, height, SOLID_TEXEL_CENTER, SOLID_TEXEL_CENTER, SOLID_TEXEL_CENTER, SOLID_TEXEL_CENTER, color, alpha);
+    this.pushQuad(vertices, x, y, width, height, this.solidTexelCenter, this.solidTexelCenter, this.solidTexelCenter, this.solidTexelCenter, color, alpha);
   }
 
   private pushBlockElement(vertices: number[], codepoint: number, x: number, y: number, width: number, height: number, color: Rgb, alpha: number): boolean {
