@@ -42,6 +42,45 @@ func (s *Store) GetWorkspaceContext(workspaceID string) (*protocol.WorkspaceCont
 	return &context, nil
 }
 
+// ListWorkspaceContexts returns canonical contexts in workspace creation order.
+func (s *Store) ListWorkspaceContexts() ([]protocol.WorkspaceContext, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT context.workspace_id, context.content, context.revision,
+			context.updated_by_session_id, context.updated_at
+		FROM workspace_contexts AS context
+		JOIN workspaces AS workspace ON workspace.id = context.workspace_id
+		ORDER BY workspace.created_at, context.workspace_id`)
+	if err != nil {
+		return nil, fmt.Errorf("list workspace contexts: %w", err)
+	}
+	defer rows.Close()
+
+	var contexts []protocol.WorkspaceContext
+	for rows.Next() {
+		var context protocol.WorkspaceContext
+		if err := rows.Scan(
+			&context.WorkspaceID,
+			&context.Content,
+			&context.Revision,
+			&context.UpdatedBySessionID,
+			&context.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan workspace context: %w", err)
+		}
+		contexts = append(contexts, context)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate workspace contexts: %w", err)
+	}
+	return contexts, nil
+}
+
 // UpdateWorkspaceContext replaces the canonical content when expectedRevision
 // still matches. It returns changed=false for an identical update.
 func (s *Store) UpdateWorkspaceContext(workspaceID, content, updatedBySessionID string, expectedRevision int) (*protocol.WorkspaceContext, bool, error) {

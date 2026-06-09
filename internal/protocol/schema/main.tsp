@@ -529,6 +529,11 @@ model WorkspaceContextStatusMessage {
   source_session_id: string;
 }
 
+model WorkspaceContextListMessage {
+  cmd: "workspace_context_list";
+  request_id: string;
+}
+
 model DelegateWorktreeRequest {
   repo?: string;
   branch: string;
@@ -1812,6 +1817,7 @@ model Response {
   data?: string;
   delegate_result?: DelegateResult;
   workspace_context_result?: WorkspaceContextResult;
+  workspace_contexts?: WorkspaceContext[];
   chief_of_staff_dispatch?: ChiefOfStaffDispatch;
   chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
   sessions?: Session[];
@@ -1856,6 +1862,14 @@ model WorkspaceContextResultMessage {
   success: boolean;
   error?: string;
   result?: WorkspaceContextResult;
+}
+
+model WorkspaceContextListResultMessage {
+  event: "workspace_context_list_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  contexts?: WorkspaceContext[];
 }
 
 // Warning for non-critical issues (e.g., gh version too old)
@@ -1959,6 +1973,7 @@ model WebSocketEvent {
   workspace_context_result?: WorkspaceContextResult;
   chief_of_staff_dispatch?: ChiefOfStaffDispatch;
   chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
+  workspace_contexts?: WorkspaceContext[];
 }
 
 alias DaemonEvent =
@@ -2013,6 +2028,7 @@ alias DaemonEvent =
   | ReviewLoopResultMessage
   | ReviewLoopUpdatedMessage
   | WorkspaceContextResultMessage
+  | WorkspaceContextListResultMessage
   | MarkFileViewedResultMessage
   | AddCommentResultMessage
   | UpdateCommentResultMessage

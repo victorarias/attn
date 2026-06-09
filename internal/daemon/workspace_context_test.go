@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
 func setupWorkspaceContextSession(t *testing.T, d *Daemon, sessionID, workspaceID string) {
@@ -201,7 +200,7 @@ func TestWorkspaceContextCheckoutDoesNotOverwriteIncompleteLocalState(t *testing
 	}
 }
 
-func TestWorkspaceContextKeepsSessionlessWorkspaceAlive(t *testing.T) {
+func TestWorkspaceContextIsRemovedWhenLastSessionLeaves(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
 	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", "shared", "session-1", 0); err != nil {
@@ -210,15 +209,18 @@ func TestWorkspaceContextKeepsSessionlessWorkspaceAlive(t *testing.T) {
 
 	d.dissociateSessionFromWorkspace("session-1")
 
-	if d.store.GetWorkspace("workspace-1") == nil {
-		t.Fatal("context-bearing workspace was removed after its last session left")
+	if d.store.GetWorkspace("workspace-1") != nil {
+		t.Fatal("context-only workspace survived after its last session left")
 	}
-	if _, ok := d.workspaces.snapshot("workspace-1"); !ok {
-		t.Fatal("context-bearing workspace was removed from the registry")
+	if _, ok := d.workspaces.snapshot("workspace-1"); ok {
+		t.Fatal("context-only workspace remained in the registry")
+	}
+	if d.store.HasWorkspaceContext("workspace-1") {
+		t.Fatal("workspace context survived workspace teardown")
 	}
 }
 
-func TestClosingFinalPanePublishesEmptyLayoutForContextWorkspace(t *testing.T) {
+func TestClosingFinalPaneRemovesContextWorkspace(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.ptyBackend = &fakeSpawnBackend{}
 	client := newWorkspaceProtocolTestClient()
@@ -250,28 +252,22 @@ func TestClosingFinalPanePublishesEmptyLayoutForContextWorkspace(t *testing.T) {
 	})
 	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutClosePane, workspaceID, paneID, true)
 
-	if d.store.GetWorkspace(workspaceID) == nil {
-		t.Fatal("context-bearing workspace was removed")
+	if d.store.GetWorkspace(workspaceID) != nil {
+		t.Fatal("context-only workspace survived final pane close")
+	}
+	if d.store.HasWorkspaceContext(workspaceID) {
+		t.Fatal("workspace context survived final pane close")
 	}
 	if layout := d.store.GetWorkspaceLayout(workspaceID); layout != nil {
 		t.Fatalf("empty workspace layout remained persisted: %+v", layout)
 	}
 
 	events := cap.snapshot()
-	if len(events) != 3 {
-		t.Fatalf("close broadcasts = %d, want 3: %+v", len(events), events)
+	if len(events) != 2 {
+		t.Fatalf("close broadcasts = %d, want 2: %+v", len(events), events)
 	}
 	if events[0].Event != protocol.EventSessionUnregistered ||
-		events[1].Event != protocol.EventWorkspaceStateChanged ||
-		events[2].Event != protocol.EventWorkspaceLayoutUpdated {
-		t.Fatalf("close broadcast order = [%s, %s, %s]", events[0].Event, events[1].Event, events[2].Event)
-	}
-	layout := events[2].WorkspaceLayout
-	if layout == nil || layout.WorkspaceID != workspaceID || len(layout.Panes) != 0 {
-		t.Fatalf("empty layout broadcast = %+v", layout)
-	}
-	layoutNode, err := workspacelayout.DecodeLayout(layout.LayoutJson)
-	if err != nil || !workspacelayout.LayoutEmpty(layoutNode) {
-		t.Fatalf("empty layout JSON = %q, err=%v", layout.LayoutJson, err)
+		events[1].Event != protocol.EventWorkspaceUnregistered {
+		t.Fatalf("close broadcast order = [%s, %s]", events[0].Event, events[1].Event)
 	}
 }

@@ -875,6 +875,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 			result, err := d.workspaceContextStatus(msg.(*protocol.WorkspaceContextStatusMessage))
 			d.sendWorkspaceContextWSResult(client, "status", result, err)
 		}()
+	case protocol.CmdWorkspaceContextList:
+		go d.sendWorkspaceContextListWSResult(client, msg.(*protocol.WorkspaceContextListMessage).RequestID)
 	case protocol.CmdApprovePR:
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
 	case protocol.CmdMergePR:

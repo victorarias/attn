@@ -422,8 +422,8 @@ func (d *Daemon) loadWorkspacesFromStore() {
 			// removing its workspace. Preserve workspaces waiting for their
 			// first spawn: the layout pane is persisted before spawn_session
 			// creates the session row, and load can run after a daemon restart
-			// in that gap. Also preserve workspaces with durable sessionless
-			// content such as docked tiles or shared context.
+			// in that gap. Also preserve workspaces with visible sessionless
+			// content such as docked tiles.
 			_, registered := d.workspaces.snapshot(ws.ID)
 			if !registered &&
 				!d.workspaceHasPendingSpawn(ws.ID) &&
@@ -463,10 +463,10 @@ func (d *Daemon) workspaceHasPendingSpawn(workspaceID string) bool {
 }
 
 // workspaceHasSessionlessContent is the single retention rule for a workspace
-// after its final session leaves. Tiles remain visible UI content, while shared
-// context remains durable agent state; either one keeps the workspace alive.
+// after its final session leaves. Only visible docked tiles keep it alive;
+// workspace context is deleted with the workspace.
 func (d *Daemon) workspaceHasSessionlessContent(workspaceID string) bool {
-	return d.workspaceLayoutHasTiles(workspaceID) || d.store.HasWorkspaceContext(workspaceID)
+	return d.workspaceLayoutHasTiles(workspaceID)
 }
 
 // listWorkspaces returns a snapshot of the current workspaces for InitialState.
@@ -524,7 +524,7 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 		return
 	}
 	if remaining == 0 {
-		// A workspace whose last session leaves normally tears down. Durable
+		// A workspace whose last session leaves normally tears down. Visible
 		// sessionless content keeps it alive. This runs before the session pane
 		// is removed, so a retained tile is still visible in the stored layout.
 		if d.workspaceHasSessionlessContent(workspaceID) {

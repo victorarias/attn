@@ -76,7 +76,7 @@ export function buildCheatsheet(): CheatsheetCategory[] {
       title: 'App',
       rows: [
         { label: 'Quick Find', combos: [fromId('terminal.quickFind')] },
-        { label: 'Attention drawer', combos: [fromId('drawer.toggle')] },
+        { label: 'Action menu', combos: [fromId('ui.actionMenu')] },
         { label: 'Settings', combos: [fromId('ui.openSettings')] },
         {
           label: 'Font size up / down / reset',

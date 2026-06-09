@@ -242,25 +242,19 @@ test.describe('Keyboard Shortcuts', () => {
     });
   });
 
-  test.describe('Attention Drawer', () => {
-    test('⌘K toggles attention drawer', async ({ page, daemon }) => {
+  test.describe('Action Menu', () => {
+    test('⌘K opens the action menu and preserves attention drawer access', async ({ page, daemon }) => {
       await daemon.start();
       await page.goto('/');
       await page.waitForSelector('.dashboard');
 
-      // Drawer should be closed initially
-      await expect(page.locator('.side-panel-shell.is-open .attention-drawer .attention-drawer-panel')).toHaveCount(0);
-
-      // Open with ⌘K
       await page.keyboard.press('Meta+k');
+      await expect(page.getByRole('dialog', { name: 'Action menu' })).toBeVisible();
+      await expect(page.getByText('Browse workspace contexts')).toBeVisible();
+
+      await page.getByText('Open attention drawer').click();
       await expect(page.locator('.side-panel-shell.is-open .attention-drawer .attention-drawer-panel')).toBeVisible({ timeout: 2000 });
-
-      // Close with ⌘K
-      await page.keyboard.press('Meta+k');
-      await expect(page.locator('.side-panel-shell.is-open .attention-drawer .attention-drawer-panel')).toHaveCount(0, { timeout: 2000 });
     });
-
-    // Removed ⌘. test - this shortcut was never implemented. Use ⌘K to toggle drawer.
   });
 
   test.describe('Dashboard Navigation', () => {

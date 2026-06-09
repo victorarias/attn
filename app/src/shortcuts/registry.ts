@@ -67,8 +67,8 @@ export const SHORTCUTS = {
   'dock.diffDetail': { key: 'e', meta: true, shift: true },
   'dock.attention': { key: 'p', meta: true, shift: true },
 
-  // Drawer
-  'drawer.toggle': { key: 'k', meta: true },
+  // Action menu
+  'ui.actionMenu': { key: 'k', meta: true },
 
   // Settings
   'ui.openSettings': { key: ',', meta: true },

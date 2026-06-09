@@ -8,7 +8,7 @@ interface KeyboardShortcutsConfig {
   onNewSessionHorizontal?: () => void;
   onNewWorkspace?: () => void;
   onCloseSession: () => void;
-  onToggleDrawer: () => void;
+  onToggleActionMenu: () => void;
   onGoToDashboard: () => void;
   onToggleGridMode?: () => void;
   onJumpToWaiting: () => void;
@@ -36,7 +36,7 @@ export function useKeyboardShortcuts({
   onNewSessionHorizontal,
   onNewWorkspace,
   onCloseSession,
-  onToggleDrawer,
+  onToggleActionMenu,
   onGoToDashboard,
   onToggleGridMode,
   onJumpToWaiting,
@@ -89,8 +89,8 @@ export function useKeyboardShortcuts({
   // Quick Find (thumbs)
   useShortcut('terminal.quickFind', onQuickFind ?? (() => {}), enabled && !!onQuickFind);
 
-  // Drawer
-  useShortcut('drawer.toggle', onToggleDrawer, enabled);
+  // Action menu remains available while its own input is focused.
+  useShortcut('ui.actionMenu', onToggleActionMenu, true);
 
   // Settings (always enabled)
   useShortcut('ui.openSettings', onOpenSettings ?? (() => {}), !!onOpenSettings);
