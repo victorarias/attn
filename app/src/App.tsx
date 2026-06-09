@@ -1619,6 +1619,7 @@ sendFetchPRDetails,
       return;
     }
     if (settingsOpen || shortcutsOpen || locationPickerOpen || thumbsOpen || whatsNew.isOpen
+      || workspaceContextsOpen
       || chiefTransferTarget !== null || closedWorktree !== null || pendingSessionClose !== null
       || sessionCreationJob !== null || openPRLauncherJob !== null) {
       return;
@@ -1636,6 +1637,7 @@ sendFetchPRDetails,
     shortcutsOpen,
     thumbsOpen,
     whatsNew.isOpen,
+    workspaceContextsOpen,
   ]);
   const waitingReviewSessions = useMemo(
     () => sessions
