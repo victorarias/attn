@@ -1036,6 +1036,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleRenameSession(client, msg.(*protocol.RenameSessionMessage))
 	case protocol.CmdRenameWorkspace:
 		d.handleRenameWorkspace(client, msg.(*protocol.RenameWorkspaceMessage))
+	case protocol.CmdSetChiefOfStaff:
+		d.handleSetChiefOfStaff(client, msg.(*protocol.SetChiefOfStaffMessage))
 	default:
 		d.sendCommandError(client, cmd, "unsupported command")
 	}

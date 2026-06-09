@@ -2,6 +2,8 @@ import './Sidebar.css';
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { useState } from 'react';
 import { RenamePopover } from './RenamePopover';
+import { ChiefOfStaffBadge } from './ChiefOfStaffBadge';
+import { SessionActionsPopover } from './SessionActionsPopover';
 import { GridLayoutControl } from './grid/GridLayoutControl';
 import type { GridLayout } from './grid/gridLayout';
 import { StateIndicator } from './StateIndicator';
@@ -24,6 +26,7 @@ interface LocalSession {
   endpointStatus?: string;
   recoverable?: boolean;
   reviewLoopStatus?: string;
+  chiefOfStaff?: boolean;
 }
 
 type SidebarWorkspace = WorkspaceWithSessions<LocalSession>;
@@ -142,6 +145,7 @@ interface SidebarProps {
   onMuteWorkspace?: (workspaceId: string, endpointId?: string) => void;
   onRenameSession?: (sessionId: string, label: string) => Promise<void>;
   onRenameWorkspace?: (workspaceId: string, title: string) => Promise<void>;
+  onChangeChiefOfStaff?: (sessionId: string, enabled: boolean) => void;
   showSessionless?: boolean;
   onToggleShowSessionless?: () => void;
   leafDrag?: { sourceWorkspaceId: string; endpointId?: string } | null;
@@ -289,6 +293,7 @@ export function Sidebar({
   onMuteWorkspace,
   onRenameSession,
   onRenameWorkspace,
+  onChangeChiefOfStaff,
   showSessionless = false,
   onToggleShowSessionless,
   leafDrag = null,
@@ -316,6 +321,12 @@ export function Sidebar({
     name: string;
     anchor: { top: number; left: number };
   } | null>(null);
+  const [sessionActionsTarget, setSessionActionsTarget] = useState<{
+    id: string;
+    label: string;
+    chiefOfStaff: boolean;
+    anchor: { top: number; left: number };
+  } | null>(null);
 
   const openRename = (
     kind: 'session' | 'workspace',
@@ -326,6 +337,19 @@ export function Sidebar({
     event.stopPropagation();
     const rect = event.currentTarget.getBoundingClientRect();
     setRenameTarget({ kind, id, name, anchor: { top: rect.bottom + 4, left: rect.left } });
+  };
+  const openSessionActions = (
+    session: LocalSession,
+    event: ReactMouseEvent,
+  ) => {
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setSessionActionsTarget({
+      id: session.id,
+      label: session.label,
+      chiefOfStaff: Boolean(session.chiefOfStaff),
+      anchor: { top: rect.bottom + 4, left: rect.right - 190 },
+    });
   };
   const mutedExpanded = mutedExpandedProp ?? mutedExpandedLocal;
   const setMutedExpanded = (v: boolean) => {
@@ -617,6 +641,7 @@ export function Sidebar({
                     {session.recoverable && (
                       <span className="session-recoverable">recoverable</span>
                     )}
+                    {session.chiefOfStaff && <ChiefOfStaffBadge />}
                     {reviewLoopIndicator(session.reviewLoopStatus) && (
                       <span
                         className={`session-loop-indicator session-loop-indicator--${session.reviewLoopStatus}`}
@@ -628,40 +653,14 @@ export function Sidebar({
                     )}
                     {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                     <div className="session-actions">
-                      {onRenameSession && (
-                        <button
-                          className="session-action-btn rename-session-btn"
-                          data-testid={`rename-session-${session.id}`}
-                          onClick={(e) => openRename('session', session.id, session.label, e)}
-                          title="Rename session"
-                          aria-label={`Rename session ${session.label}`}
-                        >
-                          ✎
-                        </button>
-                      )}
                       <button
-                        className="session-action-btn close-session-btn"
-                        data-testid={`close-session-${session.id}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onCloseSession(session.id);
-                        }}
-                        title={`Close session (${formatShortcut('session.close')})`}
-                        aria-label={`Close session ${session.label}`}
+                        className="session-action-btn session-more-btn"
+                        data-testid={`session-actions-${session.id}`}
+                        onClick={(event) => openSessionActions(session, event)}
+                        title={`Session actions (${formatShortcut('session.close')} closes)`}
+                        aria-label={`Actions for ${session.label}`}
                       >
-                        ×
-                      </button>
-                      <button
-                        className="session-action-btn reload-session-btn"
-                        data-testid={`reload-session-${session.id}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onReloadSession(session.id);
-                        }}
-                        title="Reload session"
-                        aria-label={`Reload session ${session.label}`}
-                      >
-                        ↻
+                        •••
                       </button>
                     </div>
                   </div>
@@ -764,6 +763,7 @@ export function Sidebar({
                         >
                           <StateIndicator state={session.state} size="md" seed={session.id} />
                           <span className="session-label">{session.label}</span>
+                          {session.chiefOfStaff && <ChiefOfStaffBadge />}
                           {session.endpointName && (
                             <span className={`session-endpoint-badge status-${session.endpointStatus || 'connected'}`}>
                               {session.endpointName}
@@ -808,6 +808,26 @@ export function Sidebar({
             }
           }}
           onClose={() => setRenameTarget(null)}
+        />
+      )}
+      {sessionActionsTarget && (
+        <SessionActionsPopover
+          sessionLabel={sessionActionsTarget.label}
+          chiefOfStaff={sessionActionsTarget.chiefOfStaff}
+          anchor={sessionActionsTarget.anchor}
+          canRename={Boolean(onRenameSession)}
+          onRename={() => {
+            setRenameTarget({
+              kind: 'session',
+              id: sessionActionsTarget.id,
+              name: sessionActionsTarget.label,
+              anchor: sessionActionsTarget.anchor,
+            });
+          }}
+          onChangeChiefOfStaff={(enabled) => onChangeChiefOfStaff?.(sessionActionsTarget.id, enabled)}
+          onCloseSession={() => onCloseSession(sessionActionsTarget.id)}
+          onReloadSession={() => onReloadSession(sessionActionsTarget.id)}
+          onClose={() => setSessionActionsTarget(null)}
         />
       )}
     </div>

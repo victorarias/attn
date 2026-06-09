@@ -118,6 +118,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdBrowserControlResult:               commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdRenameSession:                      commandMetadata(ScopeSession, false, true),
 	protocol.CmdRenameWorkspace:                    commandMetadata(ScopeEndpoint, false, true),
+	protocol.CmdSetChiefOfStaff:                    commandMetadata(ScopeHubLocal, false, true),
 }
 
 func shouldLogWSCommand(cmd string) bool {

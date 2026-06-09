@@ -1285,6 +1285,7 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 	d.handleReviewLoopSourceSessionExit(sessionID)
 	d.setPendingInputSource(sessionID, "")
 	d.store.Remove(sessionID)
+	d.clearChiefOfStaffIfSession(sessionID)
 	if d.hubManager != nil {
 		d.hubManager.ForgetSession(sessionID)
 	}
@@ -1296,6 +1297,7 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 
 func (d *Daemon) removeReapedSession(sessionID string) {
 	d.store.Remove(sessionID)
+	d.clearChiefOfStaffIfSession(sessionID)
 	d.dissociateSessionFromWorkspace(sessionID)
 	d.removeWorkspaceLayoutPaneForSession(sessionID)
 }
@@ -2350,6 +2352,13 @@ func cloneSession(session *protocol.Session) *protocol.Session {
 }
 
 func (d *Daemon) sessionForBroadcast(session *protocol.Session) *protocol.Session {
+	return d.sessionForBroadcastWithChiefOfStaff(session, d.chiefOfStaffSessionID())
+}
+
+func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
+	session *protocol.Session,
+	chiefOfStaffSessionID string,
+) *protocol.Session {
 	clone := cloneSession(session)
 	if clone == nil {
 		return nil
@@ -2359,6 +2368,7 @@ func (d *Daemon) sessionForBroadcast(session *protocol.Session) *protocol.Sessio
 	} else {
 		clone.NeedsReviewAfterLongRun = nil
 	}
+	d.decorateChiefOfStaffWithSessionID(clone, chiefOfStaffSessionID)
 	d.decorateSessionWithWorkspace(clone)
 	return clone
 }
@@ -2367,9 +2377,10 @@ func (d *Daemon) sessionsForBroadcast(sessions []*protocol.Session) []protocol.S
 	if len(sessions) == 0 {
 		return nil
 	}
+	chiefOfStaffSessionID := d.chiefOfStaffSessionID()
 	out := make([]protocol.Session, 0, len(sessions))
 	for _, session := range sessions {
-		if decorated := d.sessionForBroadcast(session); decorated != nil {
+		if decorated := d.sessionForBroadcastWithChiefOfStaff(session, chiefOfStaffSessionID); decorated != nil {
 			out = append(out, *decorated)
 		}
 	}
@@ -2395,7 +2406,12 @@ func (d *Daemon) remoteSessionsForBroadcast() []protocol.Session {
 	if d.hubManager == nil {
 		return nil
 	}
-	return d.hubManager.RemoteSessions()
+	sessions := d.hubManager.RemoteSessions()
+	chiefOfStaffSessionID := d.chiefOfStaffSessionID()
+	for i := range sessions {
+		d.decorateChiefOfStaffWithSessionID(&sessions[i], chiefOfStaffSessionID)
+	}
+	return sessions
 }
 
 func (d *Daemon) broadcastSessionStateChanged(sessionID string) {

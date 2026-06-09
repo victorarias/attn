@@ -349,3 +349,17 @@ func TestParseBrowserMessages(t *testing.T) {
 		}
 	})
 }
+
+func TestParseSetChiefOfStaff(t *testing.T) {
+	cmd, data, err := ParseMessage([]byte(`{"cmd":"set_chief_of_staff","session_id":"session-1","chief_of_staff":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd != CmdSetChiefOfStaff {
+		t.Fatalf("cmd = %q, want %q", cmd, CmdSetChiefOfStaff)
+	}
+	msg, ok := data.(*SetChiefOfStaffMessage)
+	if !ok || msg.SessionID != "session-1" || !msg.ChiefOfStaff {
+		t.Fatalf("message = %#v, want chief-of-staff assignment", data)
+	}
+}

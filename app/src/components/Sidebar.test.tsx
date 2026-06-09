@@ -28,6 +28,7 @@ interface TestSession {
   endpointStatus?: string;
   recoverable?: boolean;
   reviewLoopStatus?: string;
+  chiefOfStaff?: boolean;
 }
 
 function buildSidebarData(sessions: TestSession[]) {
@@ -156,7 +157,8 @@ describe('Sidebar', () => {
       />
     );
 
-    fireEvent.click(screen.getByTestId('reload-session-s1'));
+    fireEvent.click(screen.getByTestId('session-actions-s1'));
+    fireEvent.click(screen.getByTestId('reload-session-action'));
     expect(onReloadSession).toHaveBeenCalledWith('s1');
   });
 
@@ -176,7 +178,8 @@ describe('Sidebar', () => {
       />
     );
 
-    fireEvent.click(screen.getByTestId('close-session-s1'));
+    fireEvent.click(screen.getByTestId('session-actions-s1'));
+    fireEvent.click(screen.getByTestId('close-session-action'));
     expect(onCloseSession).toHaveBeenCalledWith('s1');
   });
 
@@ -421,8 +424,9 @@ describe('Sidebar', () => {
     );
 
     expect(screen.getAllByText('gpu-box')).toHaveLength(2);
-    expect(screen.getByTestId('close-session-remote-1')).toBeInTheDocument();
-    expect(screen.getByTestId('reload-session-remote-1')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('session-actions-remote-1'));
+    expect(screen.getByTestId('close-session-action')).toBeInTheDocument();
+    expect(screen.getByTestId('reload-session-action')).toBeInTheDocument();
   });
 
   it('mutes workspaces instead of individual sessions', () => {
@@ -470,7 +474,8 @@ describe('Sidebar', () => {
       />
     );
 
-    fireEvent.click(screen.getByTestId('rename-session-s1'));
+    fireEvent.click(screen.getByTestId('session-actions-s1'));
+    fireEvent.click(screen.getByTestId('rename-session-action'));
     const input = screen.getByRole('textbox') as HTMLInputElement;
     expect(input.value).toBe('claude');
     fireEvent.change(input, { target: { value: 'renamed-session' } });
@@ -496,5 +501,45 @@ describe('Sidebar', () => {
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Enter' });
 
     await waitFor(() => expect(onRenameWorkspace).toHaveBeenCalledWith('workspace-s1', 'renamed-workspace'));
+  });
+
+  it('shows the chief role and requests removal from the session menu', () => {
+    const sessions: TestSession[] = [{
+      id: 's1',
+      label: 'coordinator',
+      state: 'working',
+      chiefOfStaff: true,
+    }];
+    const onChangeChiefOfStaff = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        onChangeChiefOfStaff={onChangeChiefOfStaff}
+        {...buildSidebarData(sessions)}
+      />
+    );
+
+    expect(screen.getByLabelText('Chief of staff')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('session-actions-s1'));
+    fireEvent.click(screen.getByTestId('chief-of-staff-session-action'));
+
+    expect(onChangeChiefOfStaff).toHaveBeenCalledWith('s1', false);
+  });
+
+  it('requests promotion from the session menu', () => {
+    const sessions: TestSession[] = [{ id: 's1', label: 'worker', state: 'idle' }];
+    const onChangeChiefOfStaff = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        onChangeChiefOfStaff={onChangeChiefOfStaff}
+        {...buildSidebarData(sessions)}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('session-actions-s1'));
+    fireEvent.click(screen.getByTestId('chief-of-staff-session-action'));
+
+    expect(onChangeChiefOfStaff).toHaveBeenCalledWith('s1', true);
   });
 });

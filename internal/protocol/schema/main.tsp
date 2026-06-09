@@ -140,6 +140,7 @@ model Session {
   state_updated_at: string;     // ISO timestamp, always set
   needs_review_after_long_run?: boolean; // True when a 5m+ run finished and awaits user visualization
   recoverable?: boolean;        // True when session can be recovered after daemon restart (agent has resumable conversation)
+  chief_of_staff?: boolean;     // True when this session holds the profile-wide coordinator role
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
 }
@@ -1042,6 +1043,14 @@ model RenameWorkspaceMessage {
   title: string;
 }
 
+// Assign or remove the profile-wide chief-of-staff role. Assigning a new
+// session transfers the singleton role from the previous holder.
+model SetChiefOfStaffMessage {
+  cmd: "set_chief_of_staff";
+  session_id: string;
+  chief_of_staff: boolean;
+}
+
 // ============================================================================
 // Result/Event Messages (Daemon → Client)
 // ============================================================================
@@ -1146,6 +1155,15 @@ model RenameResultMessage {
   event: "rename_result";
   cmd: string;
   id: string;
+  success: boolean;
+  error?: string;
+}
+
+model ChiefOfStaffResultMessage {
+  event: "chief_of_staff_result";
+  session_id: string;
+  chief_of_staff: boolean;
+  previous_session_id?: string;
   success: boolean;
   error?: string;
 }
@@ -1741,6 +1759,8 @@ model WebSocketEvent {
   content?: string;
   runtime_id?: string;
   session_id?: string;
+  chief_of_staff?: boolean;
+  previous_session_id?: string;
   workspace_id?: string;
   session?: Session;
   sessions?: Session[];
@@ -1834,6 +1854,7 @@ alias DaemonEvent =
   | WorkspaceLayoutUpdatedMessage
   | WorkspaceLayoutActionResultMessage
   | RenameResultMessage
+  | ChiefOfStaffResultMessage
   | WorkspaceTileContentMessage
   | BrowserControlResponseMessage
   | PRsUpdatedMessage

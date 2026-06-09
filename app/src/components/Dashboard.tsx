@@ -4,6 +4,7 @@ import { DaemonEndpoint, DaemonPR, RateLimitState } from '../hooks/useDaemonSock
 import { usePRsNeedingAttention } from '../hooks/usePRsNeedingAttention';
 import { PRActions } from './PRActions';
 import { StateIndicator } from './StateIndicator';
+import { ChiefOfStaffBadge } from './ChiefOfStaffBadge';
 import { useDaemonContext } from '../contexts/DaemonContext';
 import { getRepoName } from '../utils/repo';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -19,6 +20,7 @@ type DashboardSession = {
   endpointName?: string;
   endpointStatus?: string;
   reviewLoopStatus?: string;
+  chiefOfStaff?: boolean;
 };
 
 type DashboardWorkspace = {
@@ -287,6 +289,7 @@ export function Dashboard({
                       >
                         <StateIndicator state="waiting_input" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
                         {renderEndpointBadge(s)}
                         {reviewLoopIndicator(s.reviewLoopStatus) && (
                           <span
@@ -314,6 +317,7 @@ export function Dashboard({
                       >
                         <StateIndicator state="pending_approval" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
                         {renderEndpointBadge(s)}
                         {reviewLoopIndicator(s.reviewLoopStatus) && (
                           <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
@@ -337,6 +341,7 @@ export function Dashboard({
                       >
                         <StateIndicator state="launching" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
                         {renderEndpointBadge(s)}
                         {reviewLoopIndicator(s.reviewLoopStatus) && (
                           <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
@@ -360,6 +365,7 @@ export function Dashboard({
                       >
                         <StateIndicator state="working" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
                         {renderEndpointBadge(s)}
                         {reviewLoopIndicator(s.reviewLoopStatus) && (
                           <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
@@ -383,6 +389,7 @@ export function Dashboard({
                       >
                         <StateIndicator state="idle" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
                         {renderEndpointBadge(s)}
                         {reviewLoopIndicator(s.reviewLoopStatus) && (
                           <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
@@ -406,6 +413,7 @@ export function Dashboard({
                       >
                         <StateIndicator state="unknown" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
                         {renderEndpointBadge(s)}
                         {reviewLoopIndicator(s.reviewLoopStatus) && (
                           <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>

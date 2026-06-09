@@ -24,6 +24,7 @@ type Store struct {
 	sessions        map[string]*protocol.Session
 	agentDriverRuns map[string]AgentDriverReportCursor
 	agentMetadata   map[string]string
+	profileRoles    map[string]string
 	workspaces      map[string]workspacelayout.WorkspaceLayout
 	recentLocations map[string]*protocol.RecentLocation
 }
@@ -42,6 +43,7 @@ func New() *Store {
 			sessions:        make(map[string]*protocol.Session),
 			agentDriverRuns: make(map[string]AgentDriverReportCursor),
 			agentMetadata:   make(map[string]string),
+			profileRoles:    make(map[string]string),
 			workspaces:      make(map[string]workspacelayout.WorkspaceLayout),
 			recentLocations: make(map[string]*protocol.RecentLocation),
 		}
@@ -1565,6 +1567,85 @@ func (s *Store) GetAllSettings() map[string]string {
 		}
 	}
 	return result
+}
+
+// GetProfileRole returns the session assigned to a profile-wide role.
+func (s *Store) GetProfileRole(role string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return ""
+	}
+	if s.db == nil {
+		return strings.TrimSpace(s.profileRoles[role])
+	}
+
+	var sessionID string
+	if err := s.db.QueryRow(
+		"SELECT session_id FROM profile_roles WHERE role = ?",
+		role,
+	).Scan(&sessionID); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(sessionID)
+}
+
+// SetProfileRole atomically assigns a profile-wide role to one session.
+func (s *Store) SetProfileRole(role, sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	role = strings.TrimSpace(role)
+	sessionID = strings.TrimSpace(sessionID)
+	if role == "" {
+		return fmt.Errorf("role cannot be empty")
+	}
+	if sessionID == "" {
+		return fmt.Errorf("session id cannot be empty")
+	}
+	if s.db == nil {
+		if s.profileRoles == nil {
+			s.profileRoles = make(map[string]string)
+		}
+		s.profileRoles[role] = sessionID
+		return nil
+	}
+
+	_, err := s.db.Exec(`
+		INSERT INTO profile_roles (role, session_id) VALUES (?, ?)
+		ON CONFLICT(role) DO UPDATE SET session_id = excluded.session_id`,
+		role,
+		sessionID,
+	)
+	return err
+}
+
+// ClearProfileRole removes a role only when the expected session still holds
+// it, so a stale client cannot clear a role that has since been transferred.
+func (s *Store) ClearProfileRole(role, sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	role = strings.TrimSpace(role)
+	sessionID = strings.TrimSpace(sessionID)
+	if role == "" {
+		return fmt.Errorf("role cannot be empty")
+	}
+	if s.db == nil {
+		if strings.TrimSpace(s.profileRoles[role]) == sessionID {
+			delete(s.profileRoles, role)
+		}
+		return nil
+	}
+
+	_, err := s.db.Exec(
+		"DELETE FROM profile_roles WHERE role = ? AND session_id = ?",
+		role,
+		sessionID,
+	)
+	return err
 }
 
 // Recent Locations methods

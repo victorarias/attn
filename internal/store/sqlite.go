@@ -337,6 +337,12 @@ var migrations = []migration{
 			updated_at TEXT NOT NULL
 		);
 	`},
+	{43, "create profile roles table", `
+		CREATE TABLE IF NOT EXISTS profile_roles (
+			role TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL
+		);
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

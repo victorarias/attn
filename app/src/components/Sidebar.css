@@ -521,7 +521,7 @@
   gap: 2px;
   flex-shrink: 0;
   margin-left: auto;
-  min-width: 48px;
+  min-width: 24px;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.1s;
@@ -584,6 +584,12 @@
   overflow: hidden;
 }
 
+.session-more-btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: -1px;
+  width: 24px;
+}
 
 .session-action-btn:hover {
   color: var(--color-text-primary);
