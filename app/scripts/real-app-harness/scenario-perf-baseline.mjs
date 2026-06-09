@@ -431,6 +431,9 @@ async function main() {
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   const isPerfBaselineLabel = (session) => typeof session.label === 'string' && session.label.startsWith('perf-baseline-');
   const sessionIds = [];
+  // Warm-workspace limit captured before the sweep perturbs it, restored in the
+  // finally so this run does not leak its last swept value into localStorage.
+  let initialWarmLimit = null;
 
   const summary = {
     ok: false,
@@ -551,6 +554,21 @@ async function main() {
     // app can launch already-virtualized) -- otherwise cold panes would only
     // ingest the daemon's capped replay on rehydrate, not the full live output,
     // and the sweep would compare unequal panes.
+    // Capture the warm limit before fill (which forces all panes live) or the
+    // sweep cycles through limits. It persists in localStorage, so leaving it
+    // changed would bleed into the next run and the user's app; restored in the
+    // finally.
+    const warmLevels = parseWarmLevels(options.warm);
+    if (options.fillCmd || warmLevels) {
+      initialWarmLimit = await client
+        .request('get_warm_workspace_limit', {}, { timeoutMs: 15_000 })
+        .then((result) => (typeof result?.limit === 'number' ? result.limit : null))
+        .catch((error) => {
+          console.warn(`[perf] get_warm_workspace_limit failed: ${error.message}`);
+          return null;
+        });
+    }
+
     if (options.fillCmd) {
       await client.request('set_warm_workspace_limit', { limit: -1 }, { timeoutMs: 15_000 })
         .catch((error) => console.warn(`[perf] pre-fill all-live failed: ${error.message}`));
@@ -568,7 +586,6 @@ async function main() {
     // down. Then sweep the requested limits most-live-first so each step only frees
     // panes (monotonic teardown, never a rehydrate/regrow), giving clean
     // within-app retained-RSS deltas for the per-pane cost.
-    const warmLevels = parseWarmLevels(options.warm);
     if (warmLevels) {
       await markSessionsIdle(client, options, sessionIds);
       summary.warmSweep = [];
@@ -601,6 +618,18 @@ async function main() {
           + `virtualized=${entry.virtualizedPanes} (expected ${expectedVirtualized}) | `
           + `total=${entry.totalRssMb}MB webContent=${entry.webContentRssMb}MB gpu=${entry.gpuRssMb}MB`,
         );
+        // The per-pane RSS slope is only meaningful if the warm-set actually
+        // reached the intended live/virtual split. A mismatch means
+        // virtualization did not engage as expected (e.g. a session never went
+        // idle), so the retained-RSS deltas would be garbage — fail loudly
+        // rather than report invalid perf numbers.
+        if (entry.virtualizedPanes !== expectedVirtualized) {
+          throw new Error(
+            `[perf] warm=${limit}: virtualized ${entry.virtualizedPanes} != expected `
+            + `${expectedVirtualized} — warm-set did not reach the intended live/virtual `
+            + 'split; retained-RSS deltas would be invalid',
+          );
+        }
       }
     }
 
@@ -753,6 +782,13 @@ async function main() {
   } finally {
     // Close every session we created so they don't persist into the next run.
     await closeSessions(client, sessionIds);
+    // Restore the warm limit captured before the sweep so we don't leak this
+    // run's last swept value into localStorage (next run / the user's app).
+    if (initialWarmLimit !== null) {
+      await client
+        .request('set_warm_workspace_limit', { limit: initialWarmLimit }, { timeoutMs: 15_000 })
+        .catch((error) => console.warn(`[perf] restore warm limit failed: ${error.message}`));
+    }
     fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
     await observer.close();
   }

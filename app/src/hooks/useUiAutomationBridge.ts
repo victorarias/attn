@@ -8,6 +8,7 @@ import type { TerminalSplitDirection } from '../types/workspace';
 import { SHORTCUTS, type ShortcutId } from '../shortcuts';
 import { getGridAutomationHandle, INACTIVE_GRID_STATE } from '../components/grid/gridAutomation';
 import { getTerminalPerfSnapshot } from '../utils/terminalPerf';
+import { readWarmWorkspaceLimit } from '../utils/terminalVirtualization';
 import { getReviewPerfSnapshot } from '../utils/reviewPerf';
 import { clearPtyPerfSnapshot, getPtyPerfSnapshot, recordPtyDecode, recordWsJsonParse } from '../utils/ptyPerf';
 import { buildSessionRenderHealth } from '../utils/renderHealth';
@@ -1439,6 +1440,15 @@ export function useUiAutomationBridge({
         }
         const limit = setter(requested);
         await settleUi();
+        const virtualizedPanes = document.querySelectorAll('[data-testid^="pane-virtualized-"]').length;
+        return { limit, virtualizedPanes };
+      }
+      case 'get_warm_workspace_limit': {
+        // Read-only companion to set_warm_workspace_limit: returns the current
+        // warm-workspace limit (default-aware, read from localStorage) so the
+        // perf harness can capture it before a sweep and restore it afterward
+        // instead of leaking the last swept value into the next run.
+        const limit = readWarmWorkspaceLimit();
         const virtualizedPanes = document.querySelectorAll('[data-testid^="pane-virtualized-"]').length;
         return { limit, virtualizedPanes };
       }
