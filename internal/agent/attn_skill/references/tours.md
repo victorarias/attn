@@ -99,8 +99,24 @@ tour_log="$(mktemp "${TMPDIR:-/tmp}/attn-tour.XXXXXX")"
 tour_listener_pid=$!
 ```
 
-Wait for `TOUR_READY`, then continue polling new log lines while the tour is
+Wait for `TOUR_READY` and keep the listener process alive while the tour is
 active. The ready payload contains the `tour_id`.
+
+Questions and review feedback automatically wake an idle listening agent. The
+wake prompt contains a command like:
+
+```sh
+"$ATTN_WRAPPER_PATH" tour event \
+  --tour "<tour-id>" \
+  --event "<event-id>"
+```
+
+Run that command immediately to fetch the exact durable event, then handle it
+according to its `kind`. The wake prompt intentionally contains no question or
+feedback body. While already active, also consume new listener log lines; the
+log remains the durable fallback if a wake cannot interrupt the current turn.
+Handle each event ID only once: the wake command and listener log may surface
+the same durable event.
 
 - `QUESTION_READY` contains an event ID plus file, line, and code context.
   Answer the actual question, then send:

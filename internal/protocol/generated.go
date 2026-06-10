@@ -1332,6 +1332,17 @@ type GetSettingsMessage struct {
 	Cmd string `json:"cmd"`
 }
 
+type GetTourEventMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// EventID corresponds to the JSON schema field "event_id".
+	EventID string `json:"event_id"`
+
+	// TourID corresponds to the JSON schema field "tour_id".
+	TourID string `json:"tour_id"`
+}
+
 type GetTourStateMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`

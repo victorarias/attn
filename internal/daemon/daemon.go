@@ -128,6 +128,14 @@ type Daemon struct {
 	reviewLoopCancel map[string]context.CancelFunc
 	inputSourceMu    sync.Mutex
 	pendingInputSrc  map[string]string
+	ptyInputLocksMu  sync.Mutex
+	ptyInputLocks    map[string]*sync.Mutex
+	lastPTYInputAt   map[string]time.Time
+	tourWakeInFlight map[string]tourWakeCommit
+	tourEventMu      sync.Mutex
+	tourWakeQueueMu  sync.Mutex
+	tourWakeQueue    map[string][]tourWakeRequest
+	tourWakeWorkers  map[string]bool
 	recoveryMu       sync.RWMutex
 	recovering       bool
 	pendingInitialWS map[*wsClient]struct{}
@@ -705,7 +713,7 @@ func (d *Daemon) pruneSessionsWithoutPTY() int {
 			continue
 		}
 		if d.recoverOnMissingPTY(session) {
-			d.store.UpdateState(session.ID, protocol.StateIdle)
+			d.updateStateWithPTYLock(session.ID, protocol.StateIdle)
 			d.store.SetRecoverable(session.ID, true)
 			recoverable++
 			continue
@@ -967,7 +975,7 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			}
 			nextState := sessionStateFromRecoveredInfo(info)
 			if existing.State != nextState {
-				d.store.UpdateState(sessionID, string(nextState))
+				d.updateStateWithPTYLock(sessionID, string(nextState))
 				report.StateUpdated++
 				report.Changed = true
 			}
@@ -978,7 +986,7 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			// Preserve interactive waiting/approval states during recovery.
 		default:
 			if existing.State != protocol.SessionStateLaunching {
-				d.store.UpdateState(sessionID, protocol.StateLaunching)
+				d.updateStateWithPTYLock(sessionID, protocol.StateLaunching)
 				report.StateUpdated++
 				report.Changed = true
 			}
@@ -1013,7 +1021,7 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			continue
 		}
 		if d.recoverOnMissingPTY(session) {
-			d.store.UpdateState(session.ID, protocol.StateIdle)
+			d.updateStateWithPTYLock(session.ID, protocol.StateIdle)
 			d.store.SetRecoverable(session.ID, true)
 			report.StateUpdated++
 			report.MarkedRecoverable++
@@ -1225,7 +1233,7 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 
 	if session := d.store.Get(info.ID); session != nil {
 		d.store.Touch(info.ID)
-		d.store.UpdateState(info.ID, protocol.StateIdle)
+		d.updateStateWithPTYLock(info.ID, protocol.StateIdle)
 		updated := d.sessionForBroadcast(d.store.Get(info.ID))
 		if updated != nil {
 			d.wsHub.Broadcast(&protocol.WebSocketEvent{
@@ -1338,13 +1346,13 @@ func (d *Daemon) handlePTYState(sessionID, state string) {
 	}
 
 	d.logf("pty state update: session=%s agent=%s state=%s", sessionID, agent, state)
+	d.updateStateWithPTYLock(sessionID, state)
 	switch state {
 	case protocol.StateWorking:
 		d.markRunStartedIfNeeded(sessionID)
 	case protocol.StateIdle:
 		d.clearLongRunTracking(sessionID)
 	}
-	d.store.UpdateState(sessionID, state)
 	d.store.Touch(sessionID)
 	updated := d.sessionForBroadcast(d.store.Get(sessionID))
 	if updated == nil {
@@ -1715,6 +1723,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleOpenTour(conn, msg.(*protocol.OpenTourMessage))
 	case protocol.CmdGetTourState:
 		d.handleGetTourState(conn, msg.(*protocol.GetTourStateMessage))
+	case protocol.CmdGetTourEvent:
+		d.handleGetTourEvent(conn, msg.(*protocol.GetTourEventMessage))
 	case protocol.CmdRefreshTour:
 		d.handleRefreshTour(conn, msg.(*protocol.RefreshTourMessage))
 	case protocol.CmdSaveTourDraft:
@@ -1894,6 +1904,7 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 
 func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	d.logf("state update: id=%s state=%s", msg.ID, msg.State)
+	d.updateStateWithPTYLock(msg.ID, msg.State)
 	switch msg.State {
 	case protocol.StateWorking:
 		d.markRunStartedIfNeeded(msg.ID)
@@ -1901,7 +1912,6 @@ func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	case protocol.StateIdle:
 		d.clearLongRunTracking(msg.ID)
 	}
-	d.store.UpdateState(msg.ID, msg.State)
 	d.store.Touch(msg.ID)
 	d.sendOK(conn)
 
@@ -2486,13 +2496,13 @@ func (d *Daemon) broadcastSessionStateChanged(sessionID string) {
 }
 
 func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
+	d.updateStateWithPTYLock(sessionID, state)
 	switch state {
 	case protocol.StateWorking:
 		d.markRunStartedIfNeeded(sessionID)
 	case protocol.StateIdle:
 		d.clearLongRunTracking(sessionID)
 	}
-	d.store.UpdateState(sessionID, state)
 	// Broadcast to WebSocket clients
 	session := d.sessionForBroadcast(d.store.Get(sessionID))
 	if session != nil {
@@ -2509,7 +2519,7 @@ func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
 // than the current state. Used by classifier to prevent stale results from overwriting
 // newer state updates that arrived during classification.
 func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, updatedAt time.Time) bool {
-	if d.store.UpdateStateWithTimestamp(sessionID, state, updatedAt) {
+	if d.updateStateWithTimestampAndPTYLock(sessionID, state, updatedAt) {
 		switch state {
 		case protocol.StateWorking:
 			d.markRunStartedIfNeeded(sessionID)
@@ -2559,6 +2569,38 @@ func (d *Daemon) handleTodos(conn net.Conn, msg *protocol.TodosMessage) {
 			break
 		}
 	}
+}
+
+func (d *Daemon) updateStateWithPTYLock(sessionID, state string) {
+	observedAt := time.Now()
+	inputLock := d.ptyInputLock(sessionID)
+	inputLock.Lock()
+	defer inputLock.Unlock()
+	d.store.UpdateState(sessionID, state)
+	d.observeTourWakeState(sessionID, state, observedAt)
+}
+
+func (d *Daemon) updateStateWithTimestampAndPTYLock(sessionID, state string, updatedAt time.Time) bool {
+	inputLock := d.ptyInputLock(sessionID)
+	inputLock.Lock()
+	defer inputLock.Unlock()
+	updated := d.store.UpdateStateWithTimestamp(sessionID, state, updatedAt)
+	if updated {
+		d.observeTourWakeState(sessionID, state, updatedAt)
+	}
+	return updated
+}
+
+func (d *Daemon) applyAgentDriverStateWithPTYLock(sessionID, runID string, seq uint64, state string) bool {
+	observedAt := time.Now()
+	inputLock := d.ptyInputLock(sessionID)
+	inputLock.Lock()
+	defer inputLock.Unlock()
+	updated := d.store.ApplyAgentDriverState(sessionID, runID, seq, state)
+	if updated {
+		d.observeTourWakeState(sessionID, state, observedAt)
+	}
+	return updated
 }
 
 func (d *Daemon) handleQuery(conn net.Conn, msg *protocol.QueryMessage) {

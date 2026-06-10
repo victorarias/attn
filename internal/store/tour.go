@@ -26,8 +26,9 @@ func (s *Store) CreateOrOpenTour(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	now := time.Now().UTC()
-	existing, err := s.getActiveTourBySession(sessionID, now)
+	wallNow := time.Now().UTC()
+	mutationTime := wallNow
+	existing, err := s.getActiveTourBySession(sessionID, wallNow)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -35,43 +36,52 @@ func (s *Store) CreateOrOpenTour(
 		if existing.GuidePath != guidePath {
 			return nil, fmt.Errorf("session already has an active tour")
 		}
-		if err := s.updateTourSnapshot(existing.TourID, name, repoPath, guidePath, baseRef, snapshot, now); err != nil {
+		mutationTime = nextTourMutationTime(existing.UpdatedAt)
+		if err := s.updateTourSnapshot(existing.TourID, name, repoPath, guidePath, baseRef, snapshot, wallNow, mutationTime); err != nil {
 			return nil, err
 		}
-		return s.getTourByID(existing.TourID, now)
+		return s.getTourByID(existing.TourID, wallNow)
 	}
 
+	latestUpdatedAt, ok, err := s.latestTourUpdatedAt(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		mutationTime = nextTourMutationTime(latestUpdatedAt.Format(time.RFC3339Nano))
+	}
 	warningsJSON, filesJSON, err := encodeTourSnapshot(snapshot)
 	if err != nil {
 		return nil, err
 	}
 	id := uuid.NewString()
-	ts := now.Format(time.RFC3339Nano)
+	mutationTS := mutationTime.Format(time.RFC3339Nano)
 	_, err = s.db.Exec(`
 		INSERT INTO tour_runs (
 			id, session_id, name, repo_path, guide_path, base_ref, status,
 			summary, warnings_json, files_json, listener_last_seen, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, id, sessionID, name, repoPath, guidePath, baseRef, string(protocol.TourStatusActive),
-		snapshot.Summary, warningsJSON, filesJSON, ts, ts, ts)
+		snapshot.Summary, warningsJSON, filesJSON, wallNow.Format(time.RFC3339Nano), mutationTS, mutationTS)
 	if err != nil {
 		return nil, fmt.Errorf("create tour: %w", err)
 	}
-	return s.getTourByID(id, now)
+	return s.getTourByID(id, wallNow)
 }
 
 func (s *Store) UpdateTourSnapshot(tourID string, snapshot TourSnapshot) (*protocol.TourRun, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	now := time.Now().UTC()
-	current, err := s.getTourByID(tourID, now)
+	wallNow := time.Now().UTC()
+	current, err := s.getTourByID(tourID, wallNow)
 	if err != nil {
 		return nil, err
 	}
 	if current.Status != protocol.TourStatusActive {
 		return nil, fmt.Errorf("tour has ended")
 	}
+	mutationTime := nextTourMutationTime(current.UpdatedAt)
 	if err := s.updateTourSnapshot(
 		tourID,
 		current.Name,
@@ -79,11 +89,12 @@ func (s *Store) UpdateTourSnapshot(tourID string, snapshot TourSnapshot) (*proto
 		current.GuidePath,
 		current.BaseRef,
 		snapshot,
-		now,
+		wallNow,
+		mutationTime,
 	); err != nil {
 		return nil, err
 	}
-	return s.getTourByID(tourID, now)
+	return s.getTourByID(tourID, wallNow)
 }
 
 func (s *Store) GetActiveTourBySession(sessionID string) (*protocol.TourRun, error) {
@@ -103,6 +114,22 @@ func (s *Store) GetTourByID(tourID string) (*protocol.TourRun, error) {
 	return s.getTourByID(tourID, time.Now().UTC())
 }
 
+func (s *Store) GetTourEvent(tourID, eventID string) (*protocol.TourEvent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	row := s.db.QueryRow(`
+		SELECT id, seq, kind, markdown, finish, context_json, created_at
+		FROM tour_events
+		WHERE tour_id = ? AND id = ?
+	`, tourID, eventID)
+	event, err := scanTourEvent(tourID, row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("tour event not found")
+	}
+	return event, err
+}
+
 func (s *Store) TouchTourListener(tourID string, deliveredSeq int) (*protocol.TourRun, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -110,21 +137,26 @@ func (s *Store) TouchTourListener(tourID string, deliveredSeq int) (*protocol.To
 	if deliveredSeq < 0 {
 		deliveredSeq = 0
 	}
-	now := time.Now().UTC()
+	wallNow := time.Now().UTC()
+	tour, err := s.getTourByID(tourID, wallNow)
+	if err != nil {
+		return nil, err
+	}
+	mutationTime := nextTourMutationTime(tour.UpdatedAt)
 	result, err := s.db.Exec(`
 		UPDATE tour_runs
 		SET listener_last_seen = ?,
 			listener_event_seq = MAX(listener_event_seq, ?),
 			updated_at = ?
 		WHERE id = ? AND status = ?
-	`, now.Format(time.RFC3339Nano), deliveredSeq, now.Format(time.RFC3339Nano), tourID, string(protocol.TourStatusActive))
+	`, wallNow.Format(time.RFC3339Nano), deliveredSeq, mutationTime.Format(time.RFC3339Nano), tourID, string(protocol.TourStatusActive))
 	if err != nil {
 		return nil, fmt.Errorf("touch tour listener: %w", err)
 	}
 	if count, _ := result.RowsAffected(); count == 0 {
 		return nil, fmt.Errorf("active tour not found")
 	}
-	return s.getTourByID(tourID, now)
+	return s.getTourByID(tourID, wallNow)
 }
 
 func (s *Store) SaveTourDraft(
@@ -137,6 +169,11 @@ func (s *Store) SaveTourDraft(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	wallNow := time.Now().UTC()
+	tour, err := s.getTourByID(tourID, wallNow)
+	if err != nil {
+		return nil, err
+	}
 	repliesJSON, err := json.Marshal(annotationReplies)
 	if err != nil {
 		return nil, fmt.Errorf("encode annotation replies: %w", err)
@@ -162,12 +199,12 @@ func (s *Store) SaveTourDraft(
 	if err != nil {
 		return nil, fmt.Errorf("save tour draft: %w", err)
 	}
-	now := time.Now().UTC()
+	mutationTime := nextTourMutationTime(tour.UpdatedAt)
 	if _, err := s.db.Exec(`UPDATE tour_runs SET current_file = ?, updated_at = ? WHERE id = ?`,
-		path, now.Format(time.RFC3339Nano), tourID); err != nil {
+		path, mutationTime.Format(time.RFC3339Nano), tourID); err != nil {
 		return nil, fmt.Errorf("update tour position: %w", err)
 	}
-	return s.getTourByID(tourID, now)
+	return s.getTourByID(tourID, wallNow)
 }
 
 func (s *Store) AddTourEvent(
@@ -178,7 +215,8 @@ func (s *Store) AddTourEvent(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	tour, err := s.getTourByID(tourID, time.Now().UTC())
+	wallNow := time.Now().UTC()
+	tour, err := s.getTourByID(tourID, wallNow)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -193,7 +231,7 @@ func (s *Store) AddTourEvent(
 	if err != nil {
 		return nil, nil, err
 	}
-	now := time.Now().UTC()
+	mutationTime := nextTourMutationTime(tour.UpdatedAt)
 	id := uuid.NewString()
 	finishInt := 0
 	if finish {
@@ -202,7 +240,7 @@ func (s *Store) AddTourEvent(
 	_, err = s.db.Exec(`
 		INSERT INTO tour_events (id, tour_id, seq, kind, markdown, finish, context_json, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, id, tourID, nextSeq, kind, markdown, finishInt, contextJSON, now.Format(time.RFC3339Nano))
+	`, id, tourID, nextSeq, kind, markdown, finishInt, contextJSON, mutationTime.Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, nil, fmt.Errorf("add tour event: %w", err)
 	}
@@ -214,16 +252,20 @@ func (s *Store) AddTourEvent(
 		Markdown:  markdown,
 		Finish:    finish,
 		Context:   context,
-		CreatedAt: now.Format(time.RFC3339Nano),
+		CreatedAt: mutationTime.Format(time.RFC3339Nano),
 	}
 	if finish {
 		if _, err := s.db.Exec(`
 			UPDATE tour_runs SET status = ?, ended_at = ?, updated_at = ? WHERE id = ?
-		`, string(protocol.TourStatusEnded), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), tourID); err != nil {
+		`, string(protocol.TourStatusEnded), mutationTime.Format(time.RFC3339Nano), mutationTime.Format(time.RFC3339Nano), tourID); err != nil {
 			return nil, nil, fmt.Errorf("end tour: %w", err)
 		}
+	} else if _, err := s.db.Exec(`
+		UPDATE tour_runs SET updated_at = ? WHERE id = ?
+	`, mutationTime.Format(time.RFC3339Nano), tourID); err != nil {
+		return nil, nil, fmt.Errorf("update tour event timestamp: %w", err)
 	}
-	updated, err := s.getTourByID(tourID, now)
+	updated, err := s.getTourByID(tourID, wallNow)
 	return event, updated, err
 }
 
@@ -253,25 +295,73 @@ func (s *Store) AddTourTranscript(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	wallNow := time.Now().UTC()
+	tour, err := s.getTourByID(tourID, wallNow)
+	if err != nil {
+		return nil, err
+	}
 	contextJSON, err := encodeTourQuestionContext(context)
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now().UTC()
+	mutationTime := nextTourMutationTime(tour.UpdatedAt)
 	_, err = s.db.Exec(`
 		INSERT INTO tour_transcript (id, tour_id, role, body, event_id, context_json, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, uuid.NewString(), tourID, role, body, eventID, contextJSON, now.Format(time.RFC3339Nano))
+	`, uuid.NewString(), tourID, role, body, eventID, contextJSON, mutationTime.Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, fmt.Errorf("add tour transcript: %w", err)
 	}
-	return s.getTourByID(tourID, now)
+	if _, err := s.db.Exec(`
+		UPDATE tour_runs SET updated_at = ? WHERE id = ?
+	`, mutationTime.Format(time.RFC3339Nano), tourID); err != nil {
+		return nil, fmt.Errorf("update tour transcript timestamp: %w", err)
+	}
+	return s.getTourByID(tourID, wallNow)
+}
+
+func nextTourMutationTime(previous string) time.Time {
+	now := time.Now().UTC()
+	previousTime, err := time.Parse(time.RFC3339Nano, previous)
+	if err == nil && !now.After(previousTime) {
+		return previousTime.Add(time.Nanosecond)
+	}
+	return now
+}
+
+func (s *Store) latestTourUpdatedAt(sessionID string) (time.Time, bool, error) {
+	rows, err := s.db.Query(`SELECT updated_at FROM tour_runs WHERE session_id = ?`, sessionID)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("get tour timestamps: %w", err)
+	}
+	defer rows.Close()
+
+	var latest time.Time
+	found := false
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return time.Time{}, false, fmt.Errorf("scan tour timestamp: %w", err)
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			return time.Time{}, false, fmt.Errorf("parse tour timestamp %q: %w", value, err)
+		}
+		if !found || parsed.After(latest) {
+			latest = parsed
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return time.Time{}, false, fmt.Errorf("read tour timestamps: %w", err)
+	}
+	return latest, found, nil
 }
 
 func (s *Store) updateTourSnapshot(
 	tourID, name, repoPath, guidePath, baseRef string,
 	snapshot TourSnapshot,
-	now time.Time,
+	wallNow, mutationTime time.Time,
 ) error {
 	warningsJSON, filesJSON, err := encodeTourSnapshot(snapshot)
 	if err != nil {
@@ -284,7 +374,7 @@ func (s *Store) updateTourSnapshot(
 			listener_last_seen = ?, updated_at = ?
 		WHERE id = ?
 	`, name, repoPath, guidePath, baseRef, snapshot.Summary, warningsJSON, filesJSON,
-		now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), tourID)
+		wallNow.Format(time.RFC3339Nano), mutationTime.Format(time.RFC3339Nano), tourID)
 	if err != nil {
 		return fmt.Errorf("update tour snapshot: %w", err)
 	}
@@ -371,8 +461,11 @@ func (s *Store) scanTourRun(row tourRow, now time.Time) (*protocol.TourRun, erro
 	run.Status = protocol.TourStatus(status)
 	run.ConnectionState = protocol.TourConnectionStateDisconnected
 	if listenerLastSeen.Valid {
-		if seen, err := time.Parse(time.RFC3339Nano, listenerLastSeen.String); err == nil && now.Sub(seen) <= tourListenerLease {
-			run.ConnectionState = protocol.TourConnectionStateConnected
+		if seen, err := time.Parse(time.RFC3339Nano, listenerLastSeen.String); err == nil {
+			age := now.Sub(seen)
+			if age >= 0 && age <= tourListenerLease {
+				run.ConnectionState = protocol.TourConnectionStateConnected
+			}
 		}
 	}
 	if currentFile.Valid {

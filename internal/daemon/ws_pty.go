@@ -965,6 +965,11 @@ func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stre
 }
 
 func (d *Daemon) handlePtyInput(client *wsClient, msg *protocol.PtyInputMessage) {
+	d.markPTYInput(msg.ID)
+	inputLock := d.ptyInputLock(msg.ID)
+	inputLock.Lock()
+	defer inputLock.Unlock()
+
 	if source := strings.TrimSpace(protocol.Deref(msg.Source)); source != "" {
 		d.setPendingInputSource(msg.ID, source)
 	}

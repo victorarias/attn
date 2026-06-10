@@ -142,8 +142,10 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"QUESTION_READY",
 		"FEEDBACK_READY",
 		"TOUR_ENDED",
+		"tour event",
 		"tour reply",
 		"tour refresh",
+		"Handle each event ID only once",
 		"Do not ask whether you should listen",
 		"Never submit comments, reviews, or approvals to GitHub",
 	} {

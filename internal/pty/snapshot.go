@@ -130,6 +130,16 @@ func ScreenSnapshotFromReplaySegments(segments []ReplaySegment) (ReplayScreenSna
 	}, true
 }
 
+func RenderedTextFromSnapshot(data []byte, cols, rows uint16) (string, bool) {
+	if len(data) == 0 || cols == 0 || rows == 0 {
+		return "", false
+	}
+	screen := newVirtualScreen(cols, rows)
+	screen.Observe(data)
+	text := screen.renderedText()
+	return text, text != ""
+}
+
 func (v *virtualScreen) Observe(data []byte) {
 	if v == nil || len(data) == 0 {
 		return

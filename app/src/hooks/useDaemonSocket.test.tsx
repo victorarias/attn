@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { ptyAttach, ptyKill, ptySpawn } from '../pty/bridge';
 import {
+  mergeDaemonTourPollResult,
+  mergeDaemonTourUpdate,
   normalizeDaemonTour,
   PROTOCOL_VERSION,
   retryTransientAttachRequest,
@@ -45,6 +47,74 @@ describe('normalizeDaemonTour', () => {
     expect(tour.files[0].annotations).toEqual([]);
     expect(tour.drafts).toEqual([]);
     expect(tour.transcript).toEqual([]);
+  });
+});
+
+describe('mergeDaemonTourUpdate', () => {
+  const tour = normalizeDaemonTour({
+    tour_id: 'tour-1',
+    session_id: 'session-1',
+    name: 'Tour',
+    repo_path: '/repo',
+    guide_path: '/system/guide.yml',
+    base_ref: 'main',
+    status: 'active',
+    connection_state: 'connected',
+    summary: '',
+    warnings: [],
+    files: [],
+    drafts: [],
+    transcript: [],
+    listener_event_seq: 0,
+    created_at: '2026-06-10T00:00:00Z',
+    updated_at: '2026-06-10T00:00:00.100000000Z',
+  } as Parameters<typeof normalizeDaemonTour>[0]);
+
+  it('rejects an older snapshot for the same Tour', () => {
+    expect(mergeDaemonTourUpdate(tour, {
+      ...tour,
+      updated_at: '2026-06-10T00:00:00.099999999Z',
+    })).toBe(tour);
+    expect(mergeDaemonTourUpdate(tour, { ...tour })).toBe(tour);
+  });
+
+  it('accepts a newer ended snapshot and only newer Tour generations', () => {
+    const ended = {
+      ...tour,
+      status: 'ended' as typeof tour.status,
+      updated_at: '2026-06-10T00:00:00.100000001Z',
+    };
+    expect(mergeDaemonTourUpdate(tour, ended)).toBe(ended);
+    const olderTour = {
+      ...tour,
+      tour_id: 'tour-2',
+      created_at: '2026-06-09T00:00:00Z',
+    };
+    expect(mergeDaemonTourUpdate(tour, olderTour)).toBe(tour);
+    const newerTour = {
+      ...tour,
+      tour_id: 'tour-3',
+      created_at: '2026-06-11T00:00:00Z',
+    };
+    expect(mergeDaemonTourUpdate(tour, newerTour)).toBe(newerTour);
+  });
+
+  it('refreshes only derived connection state at the same timestamp', () => {
+    const incoming = {
+      ...tour,
+      connection_state: 'disconnected' as typeof tour.connection_state,
+      transcript: [{ id: 'stale', role: 'user', body: 'Stale', created_at: tour.created_at }],
+    };
+    expect(mergeDaemonTourUpdate(tour, incoming)).toEqual({
+      ...tour,
+      connection_state: incoming.connection_state,
+    });
+    expect(mergeDaemonTourUpdate(incoming, tour)).toBe(incoming);
+  });
+
+  it('does not let a delayed null poll erase a newer Tour generation', () => {
+    expect(mergeDaemonTourPollResult(tour, null, null)).toBe(tour);
+    expect(mergeDaemonTourPollResult(tour, null, tour.tour_id)).toBeUndefined();
   });
 });
 

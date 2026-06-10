@@ -271,7 +271,7 @@ func validatePluginReportCursor(runID string, seq uint64) error {
 
 func (d *Daemon) applyPluginReportedState(params pluginReportStateParams) bool {
 	state := strings.TrimSpace(params.State)
-	if !d.store.ApplyAgentDriverState(params.SessionID, params.RunID, params.Seq, state) {
+	if !d.applyAgentDriverStateWithPTYLock(params.SessionID, params.RunID, params.Seq, state) {
 		d.logf("plugin state report discarded: session=%s run=%s seq=%d state=%s", params.SessionID, params.RunID, params.Seq, state)
 		return false
 	}

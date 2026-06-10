@@ -166,6 +166,20 @@ func TestScreenSnapshotFromReplay(t *testing.T) {
 	}
 }
 
+func TestRenderedTextFromSnapshot(t *testing.T) {
+	snap, ok := ScreenSnapshotFromReplay([]byte("All done.\r\n› drafted response"), 40, 6)
+	if !ok {
+		t.Fatal("expected replay-derived snapshot")
+	}
+	text, ok := RenderedTextFromSnapshot(snap.Payload, snap.Cols, snap.Rows)
+	if !ok {
+		t.Fatal("expected rendered text")
+	}
+	if !strings.Contains(text, "› drafted response") {
+		t.Fatalf("rendered text = %q", text)
+	}
+}
+
 func TestSessionInfo_IncludesScreenSnapshotWhenAvailable(t *testing.T) {
 	session := &Session{
 		id:         "codex-1",

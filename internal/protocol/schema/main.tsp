@@ -921,6 +921,12 @@ model GetTourStateMessage {
   session_id: string;
 }
 
+model GetTourEventMessage {
+  cmd: "get_tour_event";
+  tour_id: string;
+  event_id: string;
+}
+
 model RefreshTourMessage {
   cmd: "refresh_tour";
   tour_id: string;

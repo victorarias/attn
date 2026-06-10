@@ -38,7 +38,7 @@ import {
   readWarmWorkspaceLimit,
   writeWarmWorkspaceLimit,
 } from './utils/terminalVirtualization';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState, SessionExitInfo, DaemonTour } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState, SessionExitInfo, DaemonTour, mergeDaemonTourPollResult, mergeDaemonTourUpdate } from './hooks/useDaemonSocket';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { GridView, type GridSessionTile } from './components/grid/GridView';
@@ -547,7 +547,12 @@ function App() {
     },
     onTourUpdate: (tour) => {
       if (!tour) return;
-      setToursBySessionId(prev => ({ ...prev, [tour.session_id]: tour }));
+      setToursBySessionId(prev => {
+        const merged = mergeDaemonTourUpdate(prev[tour.session_id], tour);
+        return merged === prev[tour.session_id]
+          ? prev
+          : { ...prev, [tour.session_id]: merged };
+      });
     },
     onSessionExited: handleSessionExited,
   });
@@ -563,14 +568,22 @@ function App() {
     });
   }, []);
 
-  const setTourStateForSession = useCallback((sessionId: string, tour: DaemonTour | null) => {
+  const setTourStateForSession = useCallback((
+    sessionId: string,
+    tour: DaemonTour | null,
+    requestedTourID: string | null,
+  ) => {
     setToursBySessionId(prev => {
-      if (!tour) {
+      const merged = mergeDaemonTourPollResult(prev[sessionId], tour, requestedTourID);
+      if (!merged) {
+        if (!prev[sessionId]) return prev;
         const next = { ...prev };
         delete next[sessionId];
         return next;
       }
-      return { ...prev, [sessionId]: tour };
+      return merged === prev[sessionId]
+        ? prev
+        : { ...prev, [sessionId]: merged };
     });
   }, []);
 
@@ -781,7 +794,7 @@ interface AppContentProps {
   saveTourDraft: ReturnType<typeof useDaemonSocket>['saveTourDraft'];
   askTour: ReturnType<typeof useDaemonSocket>['askTour'];
   submitTour: ReturnType<typeof useDaemonSocket>['submitTour'];
-  setTourStateForSession: (sessionId: string, tour: DaemonTour | null) => void;
+  setTourStateForSession: (sessionId: string, tour: DaemonTour | null, requestedTourID: string | null) => void;
   clearGitStatus: () => void;
   registerSessionExitHandler: (handler: ((info: SessionExitInfo) => void) | null) => void;
 }
@@ -912,6 +925,8 @@ sendFetchPRDetails,
   // sessions or disappears.
   const [selectedSessionlessWorkspaceId, setSelectedSessionlessWorkspaceId] = useState<string | null>(null);
   const [selectedTile, setSelectedTile] = useState<{ workspaceId: string; tileId: string } | null>(null);
+  const toursBySessionIdRef = useRef(toursBySessionId);
+  toursBySessionIdRef.current = toursBySessionId;
   // handleSelectWorkspace is defined far below (it depends on the workspace view
   // models); the automation bridge above it reaches the live handler through
   // this ref so test scenarios can select a workspace by id.
@@ -1477,14 +1492,29 @@ sendFetchPRDetails,
     if (!activeSessionId || typeof getTourState !== 'function') return;
     const selected = daemonSessions.find((session) => session.id === activeSessionId);
     if (!selected || selected.endpoint_id) return;
+    let inFlight = false;
+    let disposed = false;
     const refresh = () => {
+      if (inFlight) return;
+      inFlight = true;
+      const requestedTourID = toursBySessionIdRef.current[activeSessionId]?.tour_id ?? null;
       void getTourState(activeSessionId)
-        .then((tour) => setTourStateForSession(activeSessionId, tour))
-        .catch(() => {});
+        .then((tour) => {
+          if (!disposed) {
+            setTourStateForSession(activeSessionId, tour, requestedTourID);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          inFlight = false;
+        });
     };
     refresh();
     const intervalID = window.setInterval(refresh, 5_000);
-    return () => window.clearInterval(intervalID);
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalID);
+    };
   }, [activeSessionId, daemonSessions, getTourState, setTourStateForSession]);
 
   useEffect(() => {

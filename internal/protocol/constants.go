@@ -157,6 +157,7 @@ const (
 	CmdSetChiefOfStaff                    = "set_chief_of_staff"
 	CmdOpenTour                           = "open_tour"
 	CmdGetTourState                       = "get_tour_state"
+	CmdGetTourEvent                       = "get_tour_event"
 	CmdRefreshTour                        = "refresh_tour"
 	CmdSaveTourDraft                      = "save_tour_draft"
 	CmdAskTour                            = "ask_tour"
@@ -853,6 +854,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg GetTourStateMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal get_tour_state: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdGetTourEvent:
+		var msg GetTourEventMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal get_tour_event: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

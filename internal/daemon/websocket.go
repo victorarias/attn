@@ -888,6 +888,11 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 			run, err := d.getTourState(msg.(*protocol.GetTourStateMessage).SessionID)
 			d.sendTourWSResult(client, "get", run, nil, err)
 		}()
+	case protocol.CmdGetTourEvent:
+		go func() {
+			event, run, err := d.getTourEvent(msg.(*protocol.GetTourEventMessage))
+			d.sendTourWSResult(client, "get_event", run, event, err)
+		}()
 	case protocol.CmdRefreshTour:
 		go func() {
 			run, err := d.refreshTour(msg.(*protocol.RefreshTourMessage).TourID)

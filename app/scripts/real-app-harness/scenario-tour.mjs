@@ -348,6 +348,20 @@ skip:
       feedbackEvent.markdown.includes(pendingNote),
       `listener receives the pending file note (got ${JSON.stringify(feedbackEvent.markdown)})`,
     );
+    const { stdout: fetchedEventOutput } = await execFileAsync(binaryPath, [
+      'tour',
+      'event',
+      '--tour',
+      ready.tour_id,
+      '--event',
+      feedbackEvent.id,
+    ], { env: cliEnv });
+    const fetchedEvent = JSON.parse(fetchedEventOutput);
+    assert(fetchedEvent.id === feedbackEvent.id, 'stored Tour event can be fetched by id');
+    assert(
+      fetchedEvent.markdown === feedbackEvent.markdown,
+      'stored Tour event preserves the submitted review feedback',
+    );
     const submittedState = await client.request('tour_get_state', {}, { timeoutMs: 5_000 });
     assert(submittedState.reviewSubmitText === 'Review sent', `review reaches the listener (got ${JSON.stringify(submittedState.reviewSubmitText)})`);
 

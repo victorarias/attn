@@ -707,6 +707,21 @@ func (c *Client) GetTourState(sessionID string) (*protocol.TourRun, error) {
 	return resp.Tour, nil
 }
 
+func (c *Client) GetTourEvent(tourID, eventID string) (*protocol.TourEvent, error) {
+	resp, err := c.send(protocol.GetTourEventMessage{
+		Cmd:     protocol.CmdGetTourEvent,
+		TourID:  tourID,
+		EventID: eventID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.TourEvent == nil {
+		return nil, errors.New("daemon returned no tour event")
+	}
+	return resp.TourEvent, nil
+}
+
 func (c *Client) RefreshTour(tourID string) (*protocol.TourRun, error) {
 	resp, err := c.send(protocol.RefreshTourMessage{
 		Cmd:    protocol.CmdRefreshTour,

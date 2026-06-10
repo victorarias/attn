@@ -456,6 +456,8 @@ func runTour() {
 		runTourStart()
 	case "status":
 		runTourStatus()
+	case "event":
+		runTourEvent()
 	case "refresh":
 		runTourRefresh()
 	case "reply":
@@ -476,6 +478,7 @@ commands:
   create  create a guide in the active attn profile directory
   start   open a guide and listen for questions and feedback until End tour
   status  show the current session's active tour
+  event   fetch one stored question or feedback event
   refresh reload the guide and current working-tree changes
   reply   answer a question from the tour
 `)
@@ -599,6 +602,23 @@ func runTourStatus() {
 		os.Exit(1)
 	}
 	printJSON(run)
+}
+
+func runTourEvent() {
+	fs := flag.NewFlagSet("tour event", flag.ExitOnError)
+	tourID := fs.String("tour", "", "tour id")
+	eventID := fs.String("event", "", "event id")
+	_ = fs.Parse(os.Args[3:])
+	if strings.TrimSpace(*tourID) == "" || strings.TrimSpace(*eventID) == "" {
+		fmt.Fprintln(os.Stderr, "tour event: --tour and --event are required")
+		os.Exit(2)
+	}
+	event, err := client.New("").GetTourEvent(*tourID, *eventID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tour event: %v\n", err)
+		os.Exit(1)
+	}
+	printJSON(event)
 }
 
 func runTourRefresh() {

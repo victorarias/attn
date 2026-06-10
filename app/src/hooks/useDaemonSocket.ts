@@ -117,6 +117,54 @@ export function normalizeDaemonTour(tour: DaemonTour): DaemonTour {
   };
 }
 
+function daemonTourTimestampKey(value: string): string | null {
+  const match = value.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/);
+  if (!match) return null;
+  return `${match[1]}.${(match[2] ?? '').padEnd(9, '0')}Z`;
+}
+
+function compareDaemonTourTimestamps(left: string, right: string): number | null {
+  const leftKey = daemonTourTimestampKey(left);
+  const rightKey = daemonTourTimestampKey(right);
+  if (leftKey && rightKey) return leftKey.localeCompare(rightKey);
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) {
+    return Math.sign(leftTime - rightTime);
+  }
+  return null;
+}
+
+export function mergeDaemonTourUpdate(
+  current: DaemonTour | undefined,
+  incoming: DaemonTour,
+): DaemonTour {
+  if (!current) return incoming;
+  if (current.tour_id !== incoming.tour_id) {
+    const generationOrder = compareDaemonTourTimestamps(incoming.created_at, current.created_at);
+    return generationOrder === null || generationOrder > 0 ? incoming : current;
+  }
+  const updateOrder = compareDaemonTourTimestamps(incoming.updated_at, current.updated_at);
+  if (updateOrder !== null) {
+    if (updateOrder > 0) return incoming;
+    if (updateOrder < 0) return current;
+    if (current.connection_state === 'disconnected') return current;
+    return incoming.connection_state === 'disconnected'
+      ? { ...current, connection_state: incoming.connection_state }
+      : current;
+  }
+  return incoming;
+}
+
+export function mergeDaemonTourPollResult(
+  current: DaemonTour | undefined,
+  incoming: DaemonTour | null,
+  requestedTourID: string | null,
+): DaemonTour | undefined {
+  if (incoming) return mergeDaemonTourUpdate(current, incoming);
+  return (current?.tour_id ?? null) === requestedTourID ? undefined : current;
+}
+
 // Extended WebSocketEvent with action result fields (generated allows extra properties)
 type WebSocketEvent = GeneratedWebSocketEvent & {
   id?: string;
