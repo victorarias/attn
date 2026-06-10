@@ -38,6 +38,7 @@ export interface GhosttyPaneRuntime {
   focusPane: (paneId: string, retries?: number) => void;
   fitPane: (paneId: string) => void;
   fitActivePane: () => void;
+  openFindInActivePane: () => void;
   typeTextViaPaneInput: (paneId: string, text: string) => boolean;
   isPaneInputFocused: (paneId: string) => boolean;
   scrollPaneToTop: (paneId: string) => boolean;
@@ -334,6 +335,7 @@ export function useGhosttyPaneRuntime(
     },
     fitPane: (paneId: string) => get(paneId)?.fit(),
     fitActivePane: () => get(activePaneId)?.fit(),
+    openFindInActivePane: () => get(activePaneId)?.openFind(),
     typeTextViaPaneInput: (paneId: string, text: string) => get(paneId)?.typeTextViaInput(text) ?? false,
     isPaneInputFocused: (paneId: string) => get(paneId)?.isInputFocused() ?? false,
     scrollPaneToTop: (paneId: string) => get(paneId)?.scrollToTop() ?? false,

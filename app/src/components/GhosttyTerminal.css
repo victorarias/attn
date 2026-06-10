@@ -1,3 +1,11 @@
+.ghostty-terminal-frame {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
 .ghostty-terminal {
   width: 100%;
   height: 100%;
@@ -7,6 +15,61 @@
   background: var(--color-bg-editor);
   cursor: text;
   caret-color: transparent;
+}
+
+/* Find bar floats above the terminal as a sibling of the contentEditable
+   container so its keystrokes never reach the PTY input handler. */
+.ghostty-find-bar {
+  position: absolute;
+  top: 6px;
+  right: 14px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, rgba(127, 127, 127, 0.35));
+  background: var(--color-bg-secondary, rgba(30, 30, 30, 0.95));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  font: 12px var(--font-ui, sans-serif);
+}
+
+.ghostty-find-input {
+  width: 160px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-text-primary, #ddd);
+  font: 12px var(--font-mono, monospace);
+}
+
+.ghostty-find-count {
+  color: var(--color-text-secondary, #999);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding: 0 2px;
+}
+
+.ghostty-find-button {
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary, #999);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.ghostty-find-button:hover {
+  color: var(--color-text-primary, #ddd);
+  background: rgba(127, 127, 127, 0.2);
+}
+
+.ghostty-find-case-active {
+  color: var(--color-text-primary, #ddd);
+  background: rgba(127, 127, 127, 0.3);
 }
 
 .ghostty-terminal canvas {

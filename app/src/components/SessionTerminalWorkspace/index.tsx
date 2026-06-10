@@ -592,6 +592,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     }, [focusPaneIfCurrentlyActive, runtime]);
 
     useShortcut('terminal.open', focusActivePane, sessionVisible);
+    useShortcut('terminal.find', () => { runtime.openFindInActivePane(); }, sessionVisible);
     useShortcut('terminal.splitVertical', () => { handleSplit('vertical'); }, sessionVisible);
     useShortcut('terminal.splitHorizontal', () => { handleSplit('horizontal'); }, sessionVisible);
     useShortcut('terminal.toggleZoom', toggleZoomActivePane, sessionVisible);

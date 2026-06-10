@@ -21,6 +21,7 @@ vi.mock('../../pty/bridge', () => ({
 function createTerminal(): GhosttyTerminalHandle {
   return {
     fit: vi.fn(),
+    openFind: vi.fn(),
     focus: vi.fn(() => true),
     typeTextViaInput: vi.fn(() => true),
     isInputFocused: vi.fn(() => true),

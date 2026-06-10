@@ -19,6 +19,13 @@ import {
   type DetectedTerminalLink,
 } from '../utils/terminalLinks';
 import {
+  initialFocusedMatch,
+  startFindScan,
+  visibleMatches,
+  type FindMatch,
+  type FindScanHandle,
+} from '../utils/terminalFind';
+import {
   cleanTerminalLines,
   terminalStyledSelectionToMarkdown,
   type TerminalMarkdownLine,
@@ -99,6 +106,7 @@ interface GhosttyTerminalProps {
 
 export interface GhosttyTerminalHandle {
   fit: () => void;
+  openFind: () => void;
   focus: () => boolean;
   typeTextViaInput: (text: string) => boolean;
   isInputFocused: () => boolean;
@@ -316,6 +324,15 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // undefined = not fetched yet; null = unavailable (non-Tauri host).
     const homeDirRef = useRef<string | null | undefined>(undefined);
     const pathExistsCacheRef = useRef(new Map<string, boolean | Promise<boolean>>());
+    const findOpenRef = useRef(false);
+    const findQueryRef = useRef('');
+    const findCaseSensitiveRef = useRef(false);
+    const findMatchesRef = useRef<FindMatch[]>([]);
+    const findFocusedIndexRef = useRef(-1);
+    const findScanRef = useRef<FindScanHandle | null>(null);
+    const findRescanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const findInputRef = useRef<HTMLInputElement>(null);
+    const runFindScanRef = useRef<(() => void) | null>(null);
     const writeChainRef = useRef(Promise.resolve());
     const historicalReplayGenerationRef = useRef(0);
     const fitResizeCoalescerRef = useRef<ResizeCoalescer | null>(null);
@@ -343,6 +360,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const diagKeyRef = useRef<string>(runtimeLogMeta?.paneId ?? runtimeLogMeta?.sessionId ?? debugName);
     const [error, setError] = useState<string | null>(null);
     const [linkCursorActive, setLinkCursorActive] = useState(false);
+    const [findUi, setFindUi] = useState({ open: false, matchCount: 0, focusedIndex: -1, scanning: false, caseSensitive: false });
 
     onInputRef.current = onInput;
     onReadyRef.current = onReady;
@@ -399,6 +417,23 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           alpha: 0.8,
           kind: 'underline',
         });
+      }
+      if (findOpenRef.current && findMatchesRef.current.length > 0) {
+        const firstRow = viewportBufferStart(scrollbackLength, viewportOffsetRef.current);
+        const focused = findFocusedIndexRef.current >= 0
+          ? findMatchesRef.current[findFocusedIndexRef.current]
+          : null;
+        for (const match of visibleMatches(findMatchesRef.current, firstRow, terminal.rows)) {
+          overlays.push({
+            startRow: match.bufferRow - firstRow,
+            startCol: match.startCol,
+            endRow: match.bufferRow - firstRow,
+            endCol: match.endCol,
+            color: '#f5c542',
+            alpha: match === focused ? 0.6 : 0.28,
+            kind: 'background',
+          });
+        }
       }
       const sample = renderer.render(terminal, force, getViewportCells(), overlays, viewportOffsetRef.current);
       if (sample) {
@@ -625,6 +660,101 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return { cols: terminal.cols, rows: terminal.rows, viewportY: viewportOffsetRef.current, lineCount: lines.length, lines, summary };
     }, [getViewportCells, lineAtVisibleRow]);
 
+    const scrollToFindMatch = useCallback((match: FindMatch) => {
+      const terminal = terminalRef.current;
+      if (!terminal) return;
+      const history = terminal.getScrollbackLength();
+      const firstVisible = viewportBufferStart(history, viewportOffsetRef.current);
+      if (match.bufferRow >= firstVisible && match.bufferRow < firstVisible + terminal.rows) return;
+      viewportOffsetRef.current = Math.max(0, Math.min(history, history - match.bufferRow));
+      wheelRemainderRowsRef.current = 0;
+      hoverGenerationRef.current += 1;
+    }, []);
+
+    const runFindScan = useCallback(() => {
+      findScanRef.current?.cancel();
+      findScanRef.current = null;
+      const terminal = terminalRef.current;
+      if (!terminal || !findOpenRef.current) return;
+      const query = findQueryRef.current;
+      if (!query) {
+        findMatchesRef.current = [];
+        findFocusedIndexRef.current = -1;
+        setFindUi((ui) => ({ ...ui, matchCount: 0, focusedIndex: -1, scanning: false }));
+        renderSurface(true);
+        return;
+      }
+      setFindUi((ui) => ({ ...ui, scanning: true }));
+      const access = {
+        totalRows: () => {
+          const model = terminalRef.current;
+          return model ? model.getScrollbackLength() + model.rows : 0;
+        },
+        rowText: (bufferRow: number) => {
+          const model = terminalRef.current;
+          return model ? selectionLineAtBufferRow(bufferRow, 0, model.cols) : '';
+        },
+      };
+      findScanRef.current = startFindScan(
+        access,
+        query,
+        { caseSensitive: findCaseSensitiveRef.current },
+        (progress) => {
+          findMatchesRef.current = progress;
+          setFindUi((ui) => ({ ...ui, matchCount: progress.length }));
+          renderSurface(true);
+        },
+        (matches) => {
+          findScanRef.current = null;
+          findMatchesRef.current = matches;
+          const focused = initialFocusedMatch(matches);
+          findFocusedIndexRef.current = focused;
+          setFindUi((ui) => ({ ...ui, scanning: false, matchCount: matches.length, focusedIndex: focused }));
+          if (focused >= 0) scrollToFindMatch(matches[focused]);
+          renderSurface(true);
+        },
+      );
+    }, [renderSurface, scrollToFindMatch, selectionLineAtBufferRow]);
+    runFindScanRef.current = runFindScan;
+
+    const findNavigate = useCallback((direction: 1 | -1) => {
+      const matches = findMatchesRef.current;
+      if (matches.length === 0) return;
+      const current = findFocusedIndexRef.current;
+      const next = current < 0
+        ? matches.length - 1
+        : (current + direction + matches.length) % matches.length;
+      findFocusedIndexRef.current = next;
+      setFindUi((ui) => ({ ...ui, focusedIndex: next }));
+      scrollToFindMatch(matches[next]);
+      renderSurface(true);
+    }, [renderSurface, scrollToFindMatch]);
+
+    const openFind = useCallback(() => {
+      findOpenRef.current = true;
+      setFindUi((ui) => ({ ...ui, open: true }));
+      requestAnimationFrame(() => {
+        findInputRef.current?.focus();
+        findInputRef.current?.select();
+      });
+      if (findQueryRef.current) runFindScan();
+    }, [runFindScan]);
+
+    const closeFind = useCallback(() => {
+      findOpenRef.current = false;
+      findScanRef.current?.cancel();
+      findScanRef.current = null;
+      if (findRescanTimerRef.current) {
+        clearTimeout(findRescanTimerRef.current);
+        findRescanTimerRef.current = null;
+      }
+      findMatchesRef.current = [];
+      findFocusedIndexRef.current = -1;
+      setFindUi((ui) => ({ ...ui, open: false, matchCount: 0, focusedIndex: -1, scanning: false }));
+      renderSurface(true);
+      containerRef.current?.focus();
+    }, [renderSurface]);
+
     const enqueueOperation = useCallback((operation: () => void | Promise<void>) => {
       writeChainRef.current = writeChainRef.current
         .catch(() => undefined)
@@ -708,6 +838,14 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         );
         // Content changed under the pointer: drop the hover-link fragment cache.
         hoverGenerationRef.current += 1;
+        if (findOpenRef.current && findQueryRef.current) {
+          // New output while find is open: refresh matches once writes settle.
+          if (findRescanTimerRef.current) clearTimeout(findRescanTimerRef.current);
+          findRescanTimerRef.current = setTimeout(() => {
+            findRescanTimerRef.current = null;
+            runFindScanRef.current?.();
+          }, 300);
+        }
         if (viewportOffsetRef.current === 0) {
           wheelRemainderRowsRef.current = 0;
         }
@@ -873,6 +1011,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
     useImperativeHandle(ref, () => ({
       fit,
+      openFind,
       focus: () => {
         const container = containerRef.current;
         if (!container) return false;
@@ -898,7 +1037,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       getVisibleContent,
       getVisibleStyleSummary,
       drain: () => writeChainRef.current,
-    }), [fit, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, resizeLocal, write]);
+    }), [fit, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, write]);
 
     useEffect(() => {
       let active = true;
@@ -921,6 +1060,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         synchronizedOutputStateRef.current = { active: false, pending: '' };
         clearSynchronizedOutputRenderTimer();
         modelInstanceRef.current += 1;
+        // Fresh model: buffer rows from any previous find are meaningless.
+        findScanRef.current?.cancel();
+        findScanRef.current = null;
+        findOpenRef.current = false;
+        findMatchesRef.current = [];
+        findFocusedIndexRef.current = -1;
+        setFindUi((ui) => ({ ...ui, open: false, matchCount: 0, focusedIndex: -1, scanning: false }));
         recordDiag({
           kind: 'pane_mount',
           pane: diagKeyRef.current,
@@ -969,6 +1115,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         observer.observe(container);
         onReadyRef.current({
           fit,
+          openFind,
           focus: () => { container.focus(); return document.activeElement === container; },
           typeTextViaInput: (text) => { onInputRef.current(text.replace(/\n/g, '\r')); return true; },
           isInputFocused: () => document.activeElement === container,
@@ -1052,7 +1199,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // Ghostty cells contain their resolved default RGB values, so theme
     // changes require a fresh model. The pane runtime rehydrates this model
     // from verified replay without sending historical replies to the live PTY.
-    }, [cancelScheduledOutputRender, clearSynchronizedOutputRenderTimer, fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, resizeLocal, resolvedTheme, write]);
+    }, [cancelScheduledOutputRender, clearSynchronizedOutputRenderTimer, fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, resolvedTheme, write]);
 
     // Release this pane's WebGL2 context when the pane unmounts. Browsers cap the
     // number of simultaneously-live WebGL contexts (WKWebView's cap is low), and
@@ -1484,6 +1631,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     };
 
     return (
+      <div className="ghostty-terminal-frame">
       <div
         ref={containerRef}
         className={`terminal-container ghostty-terminal${linkCursorActive ? ' ghostty-terminal-link-hover' : ''}`}
@@ -1672,6 +1820,84 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       >
         <canvas ref={canvasRef} />
         {error && <div className="ghostty-terminal-error">{error}</div>}
+      </div>
+      {findUi.open && (
+        <div className="ghostty-find-bar" data-testid="ghostty-find-bar">
+          <input
+            ref={findInputRef}
+            className="ghostty-find-input"
+            data-testid="ghostty-find-input"
+            type="text"
+            placeholder="Find"
+            spellCheck={false}
+            autoComplete="off"
+            defaultValue={findQueryRef.current}
+            onChange={(event) => {
+              findQueryRef.current = event.target.value;
+              if (findRescanTimerRef.current) clearTimeout(findRescanTimerRef.current);
+              findRescanTimerRef.current = setTimeout(() => {
+                findRescanTimerRef.current = null;
+                runFindScan();
+              }, 150);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                closeFind();
+              } else if (event.key === 'Enter') {
+                event.preventDefault();
+                findNavigate(event.shiftKey ? 1 : -1);
+              }
+              event.stopPropagation();
+            }}
+          />
+          <button
+            type="button"
+            className={`ghostty-find-button ghostty-find-case${findUi.caseSensitive ? ' ghostty-find-case-active' : ''}`}
+            aria-label="Match case"
+            aria-pressed={findUi.caseSensitive}
+            title="Match case"
+            onClick={() => {
+              findCaseSensitiveRef.current = !findCaseSensitiveRef.current;
+              setFindUi((ui) => ({ ...ui, caseSensitive: findCaseSensitiveRef.current }));
+              runFindScan();
+              findInputRef.current?.focus();
+            }}
+          >
+            Aa
+          </button>
+          <span className="ghostty-find-count" data-testid="ghostty-find-count">
+            {findUi.matchCount > 0 ? `${findUi.focusedIndex + 1}/${findUi.matchCount}` : '0/0'}
+          </span>
+          <button
+            type="button"
+            className="ghostty-find-button"
+            aria-label="Previous match"
+            title="Previous match (Enter)"
+            onClick={() => { findNavigate(-1); findInputRef.current?.focus(); }}
+          >
+            ▲
+          </button>
+          <button
+            type="button"
+            className="ghostty-find-button"
+            aria-label="Next match"
+            title="Next match (Shift+Enter)"
+            onClick={() => { findNavigate(1); findInputRef.current?.focus(); }}
+          >
+            ▼
+          </button>
+          <button
+            type="button"
+            className="ghostty-find-button"
+            aria-label="Close find"
+            title="Close (Esc)"
+            onClick={closeFind}
+          >
+            ✕
+          </button>
+        </div>
+      )}
       </div>
     );
   },

@@ -33,8 +33,12 @@ export const SHORTCUTS = {
   'terminal.focusUp': { key: 'ArrowUp', meta: true, alt: true },
   'terminal.focusDown': { key: 'ArrowDown', meta: true, alt: true },
 
-  // Quick Find (thumbs)
-  'terminal.quickFind': { key: 'f', meta: true },
+  // Find in terminal scrollback
+  'terminal.find': { key: 'f', meta: true },
+
+  // Quick Find (thumbs) — moved off ⌘F so find-in-terminal gets the
+  // conventional binding.
+  'terminal.quickFind': { key: 'f', meta: true, shift: true },
 
   // Session management
   'session.new': { key: 'n', meta: true },
