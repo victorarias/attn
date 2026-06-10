@@ -199,6 +199,83 @@ test.describe('Ghostty terminal interactions', () => {
       .toContain('/tmp/test/terminal-links/src/main.go');
   });
 
+  test('cmd+click opens a path embedded in an agent tool-call line', async ({ page, daemon }) => {
+    // Regression: Claude Code prints `⏺ Read(/abs/path · lines 1-2)` — the
+    // hover fragment is `Read(/abs/path` and the path starts mid-fragment.
+    await installFileLinkProbe(page, ['/tmp/test/terminal-links/src/main.go']);
+    const terminal = await openTerminalSession(page, daemon, 's-file-link-tool');
+    await writeTerminalOutput(
+      page,
+      's-file-link-tool',
+      '[2J[H* Read(/tmp/test/terminal-links/src/main.go · lines 1-20)',
+    );
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-tool') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('Read(/tmp/test/terminal-links/src/main.go');
+
+    // Hover inside the path portion (col ~14 at the e2e cell width).
+    await terminal.hover({ position: { x: 120, y: 8 } });
+    await page.keyboard.down('Meta');
+    await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
+    await terminal.click({ position: { x: 120, y: 8 } });
+    await page.keyboard.up('Meta');
+
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
+        ),
+        { timeout: 3000 },
+      )
+      .toContain('/tmp/test/terminal-links/src/main.go');
+  });
+
+  test('hovered file link survives unrelated terminal writes (streaming TUI redraws)', async ({ page, daemon }) => {
+    await installFileLinkProbe(page, ['/tmp/test/terminal-links/src/main.go']);
+    const terminal = await openTerminalSession(page, daemon, 's-file-link-stream');
+    await writeTerminalOutput(page, 's-file-link-stream', '[2J[Hsrc/main.go:12:3 compiled');
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-stream') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('src/main.go:12:3');
+
+    await terminal.hover({ position: { x: 55, y: 8 } });
+    await page.keyboard.down('Meta');
+    await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
+
+    // An agent TUI repaints constantly (spinner frames, status line). The
+    // pointer does not move while unrelated writes land on another row; the
+    // hovered link must stay resolved and clickable.
+    for (let i = 0; i < 5; i += 1) {
+      await writeTerminalOutput(
+        page,
+        's-file-link-stream',
+        `[s[3;1Hspinner-frame-${i}[u`,
+      );
+      await page.waitForTimeout(120);
+    }
+
+    await expect(terminal).toHaveCSS('cursor', 'pointer');
+    await terminal.click({ position: { x: 55, y: 8 } });
+    await page.keyboard.up('Meta');
+
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
+        ),
+        { timeout: 3000 },
+      )
+      .toContain('/tmp/test/terminal-links/src/main.go');
+  });
+
   test('does not mark non-existing path-like words as links', async ({ page, daemon }) => {
     await installFileLinkProbe(page, []);
     const terminal = await openTerminalSession(page, daemon, 's-file-link-miss');

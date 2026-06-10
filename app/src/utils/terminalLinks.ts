@@ -52,6 +52,9 @@ const LINE_COL_RE = /:(\d{1,7})(?:[:.](\d{1,7}))?:?$/;
 
 function looksLikePath(text: string): boolean {
   if (!text || text.includes('://')) return false;
+  // `//host/...` is a URL remainder (scheme stripped at a mid-fragment start),
+  // not a filesystem path.
+  if (text.startsWith('//')) return false;
   if (text.includes('/')) return true;
   if (text.startsWith('~')) return true;
   return /\.[A-Za-z0-9_]{1,8}$/.test(text);
@@ -61,29 +64,42 @@ function looksLikePath(text: string): boolean {
 // "(src/a.go:12:3)" yields src/a.go with line 12 / column 3; the column range
 // covers the visible path text (including the :line:col suffix) for underlining.
 export function pathCandidatesForFragment(fragment: string, fragmentStartCol: number): PathCandidate[] {
+  const candidates: PathCandidate[] = [];
+  const pushFrom = (offset: number) => {
+    let core = fragment.slice(offset);
+    const noise = core.match(TRAILING_NOISE_RE);
+    if (noise) core = core.slice(0, core.length - noise[0].length);
+    // A trailing period is far more often sentence punctuation than a path char.
+    while (core.endsWith('.')) core = core.slice(0, -1);
+    if (!core) return;
+    const startCol = fragmentStartCol + offset;
+    const endCol = startCol + core.length;
+    const lineCol = core.match(LINE_COL_RE);
+    if (lineCol && lineCol.index !== undefined && lineCol.index > 0) {
+      candidates.push({
+        path: core.slice(0, lineCol.index),
+        line: Number.parseInt(lineCol[1], 10),
+        column: lineCol[2] ? Number.parseInt(lineCol[2], 10) : undefined,
+        startCol,
+        endCol,
+      });
+    }
+    candidates.push({ path: core, startCol, endCol });
+  };
+
   let lead = 0;
   while (lead < fragment.length - 1 && LEADING_WRAPPERS.includes(fragment[lead])) lead += 1;
-  let core = fragment.slice(lead);
-  const noise = core.match(TRAILING_NOISE_RE);
-  if (noise) core = core.slice(0, core.length - noise[0].length);
-  // A trailing period is far more often sentence punctuation than a path char.
-  while (core.endsWith('.')) core = core.slice(0, -1);
-  if (!core) return [];
-
-  const candidates: PathCandidate[] = [];
-  const startCol = fragmentStartCol + lead;
-  const endCol = startCol + core.length;
-  const lineCol = core.match(LINE_COL_RE);
-  if (lineCol && lineCol.index !== undefined && lineCol.index > 0) {
-    candidates.push({
-      path: core.slice(0, lineCol.index),
-      line: Number.parseInt(lineCol[1], 10),
-      column: lineCol[2] ? Number.parseInt(lineCol[2], 10) : undefined,
-      startCol,
-      endCol,
-    });
+  pushFrom(lead);
+  // Paths often start mid-fragment after a non-path character — `Read(/abs/x`,
+  // `--file=/etc/x`, `path=~/y` — where the prefix is not a strippable wrapper.
+  // Add the first such start as a fallback candidate.
+  for (let i = lead + 1; i < fragment.length; i += 1) {
+    const character = fragment[i];
+    if ((character === '/' || character === '~') && !/[A-Za-z0-9._~-]/.test(fragment[i - 1])) {
+      pushFrom(i);
+      break;
+    }
   }
-  candidates.push({ path: core, startCol, endCol });
   return candidates.filter((candidate) => looksLikePath(candidate.path)).slice(0, 4);
 }
 

@@ -69,6 +69,26 @@ describe('pathCandidatesForFragment', () => {
     const candidates = pathCandidatesForFragment('a/b:9', 0);
     expect(candidates.map((candidate) => candidate.path)).toEqual(['a/b', 'a/b:9']);
   });
+
+  it('finds a path starting mid-fragment after a non-path prefix (agent TUI tool lines)', () => {
+    // Claude Code prints tool calls as `Read(/abs/path` — the fragment under
+    // the pointer carries the call-name prefix.
+    const candidates = pathCandidatesForFragment('Read(/Users/victor/projects/attn/AGENTS.md', 2);
+    expect(candidates.map((candidate) => candidate.path)).toContain('/Users/victor/projects/attn/AGENTS.md');
+    const mid = candidates.find((candidate) => candidate.path.startsWith('/Users'));
+    expect(mid?.startCol).toBe(2 + 'Read('.length);
+  });
+
+  it('finds a tilde path after an equals sign', () => {
+    const candidates = pathCandidatesForFragment('--file=~/notes/todo.md', 0);
+    expect(candidates.map((candidate) => candidate.path)).toContain('~/notes/todo.md');
+  });
+
+  it('does not split ordinary relative paths at interior slashes', () => {
+    const candidates = pathCandidatesForFragment('src/main.go', 0);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].path).toBe('src/main.go');
+  });
 });
 
 describe('resolveDetectedPath', () => {

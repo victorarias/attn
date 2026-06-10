@@ -824,6 +824,32 @@ function clickPaneCell(
   }));
 }
 
+function hoverPaneCell(
+  sessionId: string,
+  paneId: string,
+  size: { cols: number; rows: number },
+  cell: { col: number; row: number },
+  meta: boolean,
+): string {
+  const paneElement = document.querySelector(
+    `[data-pane-session-id="${sessionId}"][data-pane-id="${paneId}"]`
+  );
+  const terminal = paneElement?.querySelector('.terminal-container');
+  if (!(terminal instanceof HTMLElement)) {
+    throw new Error(`Terminal element not found for ${sessionId}:${paneId}`);
+  }
+  const rect = terminal.getBoundingClientRect();
+  terminal.dispatchEvent(new MouseEvent('mousemove', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    metaKey: meta,
+    clientX: rect.left + ((cell.col + 0.5) / Math.max(1, size.cols)) * rect.width,
+    clientY: rect.top + ((cell.row + 0.5) / Math.max(1, size.rows)) * rect.height,
+  }));
+  return getComputedStyle(terminal).cursor;
+}
+
 function dragPaneSelection(
   sessionId: string,
   paneId: string,
@@ -1963,6 +1989,31 @@ export function useUiAutomationBridge({
         clickPaneCell(viewSessionId, paneId, size, { col: cell.col, row: cell.row });
         await settleUi(2);
         return { sessionId, paneId, viewSessionId };
+      }
+      case 'hover_pane_cell': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const session = sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+        const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
+        const size = getPaneSize(viewSessionId, paneId);
+        const cell = payload.cell as { col?: unknown; row?: unknown } | undefined;
+        if (!size || typeof cell?.col !== 'number' || typeof cell?.row !== 'number') {
+          throw new Error('hover_pane_cell requires pane size and a numeric cell');
+        }
+        selectSession(sessionId);
+        await settleUi(1);
+        const cursor = hoverPaneCell(
+          viewSessionId,
+          paneId,
+          size,
+          { col: cell.col, row: cell.row },
+          payload.meta === true,
+        );
+        await settleUi(2);
+        return { sessionId, paneId, viewSessionId, cursor };
       }
       case 'drag_pane_selection': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
