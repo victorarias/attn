@@ -50,6 +50,14 @@ async function sendWSCommand(
         };
 
         ws.onopen = () => {
+          // The daemon rejects every command from clients that have not
+          // identified themselves (see speaksWorkspaceProtocol).
+          ws.send(JSON.stringify({
+            cmd: 'client_hello',
+            client_kind: 'e2e-test',
+            version: 'e2e',
+            capabilities: ['workspace_sessions'],
+          }));
           ws.send(JSON.stringify(payload));
         };
       }),
@@ -81,12 +89,27 @@ test.describe('Review Loop Real PTY', () => {
       directory: cwd,
     });
 
+    // Spawn requires a registered owning workspace (same flow as the app).
+    await sendWSCommand(
+      page,
+      daemonInfo.wsUrl,
+      {
+        cmd: 'register_workspace',
+        id: `workspace-${sessionId}`,
+        title: 'Loop Real',
+        directory: cwd,
+      },
+      (data) => (data.event === 'workspace_registered' || data.event === 'workspace_state_changed')
+        && data.workspace?.id === 'workspace-loop-real-1'
+    );
+
     const spawnResult = await sendWSCommand(
       page,
       daemonInfo.wsUrl,
       {
         cmd: 'spawn_session',
         id: sessionId,
+        workspace_id: `workspace-${sessionId}`,
         cwd,
         agent: 'shell',
         cols: 80,

@@ -43,7 +43,8 @@ export interface AttachRuntimeRequest {
 }
 
 export interface PendingAttachOutputChunk {
-  data: string;
+  /** Base64 (JSON pty_output event) or raw bytes (binary frame). */
+  data: string | Uint8Array;
   seq?: number;
 }
 

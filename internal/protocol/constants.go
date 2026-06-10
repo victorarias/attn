@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "94"
+const ProtocolVersion = "95"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -19,6 +19,12 @@ const CapabilityWorkspaceSessions = "workspace_sessions"
 // CapabilityBrowserHost identifies the local Tauri client that owns the
 // visible child webview used by docked browser tiles.
 const CapabilityBrowserHost = "browser_host"
+
+// CapabilityBinaryPtyOutput opts a client into receiving live PTY output as
+// binary websocket frames (see binaryframe.go) instead of base64-in-JSON
+// pty_output events. Clients without it keep the JSON event, which is what
+// keeps daemon-to-daemon relays and older automation clients working.
+const CapabilityBinaryPtyOutput = "binary_pty_output"
 
 // SessionAgent labels in-tree and externally registered agent identifiers.
 type SessionAgent = string

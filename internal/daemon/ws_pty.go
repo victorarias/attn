@@ -863,6 +863,33 @@ func (d *Daemon) handleDetachSessionWS(client *wsClient, msg *protocol.DetachSes
 	d.detachSession(client, msg.ID)
 }
 
+// encodePtyOutputMessage builds the outbound frame for one PTY output chunk.
+// Clients that advertised CapabilityBinaryPtyOutput get a compact binary
+// frame; everyone else (daemon-to-daemon relays, automation clients) keeps the
+// base64-in-JSON pty_output event. The capability is re-read per chunk so a
+// re-sent client_hello takes effect immediately.
+func encodePtyOutputMessage(client *wsClient, sessionID string, event ptybackend.OutputEvent) (outboundMessage, error) {
+	if client.HasCapability(protocol.CapabilityBinaryPtyOutput) {
+		frame, err := protocol.EncodePtyOutputFrame(sessionID, event.Seq, event.Data)
+		if err != nil {
+			return outboundMessage{}, err
+		}
+		return outboundMessage{kind: messageKindBinary, payload: frame}, nil
+	}
+	encoded := base64.StdEncoding.EncodeToString(event.Data)
+	wsEvent := &protocol.WebSocketEvent{
+		Event: protocol.EventPtyOutput,
+		ID:    protocol.Ptr(sessionID),
+		Data:  protocol.Ptr(encoded),
+		Seq:   protocol.Ptr(int(event.Seq)),
+	}
+	payload, err := json.Marshal(wsEvent)
+	if err != nil {
+		return outboundMessage{}, err
+	}
+	return outboundMessage{kind: messageKindText, payload: payload}, nil
+}
+
 func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stream ptybackend.Stream) {
 	d.logf("pty stream forward start: id=%s", sessionID)
 	defer func() {
@@ -890,19 +917,12 @@ func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stre
 					previewBinaryForLog(event.Data),
 				)
 			}
-			encoded := base64.StdEncoding.EncodeToString(event.Data)
-			wsEvent := &protocol.WebSocketEvent{
-				Event: protocol.EventPtyOutput,
-				ID:    protocol.Ptr(sessionID),
-				Data:  protocol.Ptr(encoded),
-				Seq:   protocol.Ptr(int(event.Seq)),
-			}
-			payload, err := json.Marshal(wsEvent)
+			outbound, err := encodePtyOutputMessage(client, sessionID, event)
 			if err != nil {
 				d.logf("pty_output marshal failed: id=%s seq=%d err=%v", sessionID, event.Seq, err)
 				continue
 			}
-			if !d.sendOutboundBlocking(client, outboundMessage{kind: messageKindText, payload: payload}, ptyOutputSendWait) {
+			if !d.sendOutboundBlocking(client, outbound, ptyOutputSendWait) {
 				d.logf("pty_output send failed, closing stream: id=%s seq=%d", sessionID, event.Seq)
 				_ = stream.Close()
 				return

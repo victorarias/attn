@@ -49,7 +49,8 @@ import { parseLayoutJSON, tileContentKey, tileIdsFromLayoutJSON, type TerminalDo
 import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import { collectWorkspaceLayoutDiagnostics } from '../utils/workspaceDiagnostics';
 import { recordDiag, recordLayout } from '../utils/terminalDiagnosticsLog';
-import { recordPtyCommand, recordWsJsonParse } from '../utils/ptyPerf';
+import { recordPtyCommand, recordWsBinaryPtyOutput, recordWsJsonParse } from '../utils/ptyPerf';
+import { decodeBinaryPtyFrame } from '../pty/binaryPtyFrame';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
 import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
 import { controlBrowserHost, serializeBrowserControlResultMessage } from '../browser/host';
@@ -164,7 +165,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '94';
+export const PROTOCOL_VERSION = '95';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -580,6 +581,7 @@ const GIT_CLONE_TIMEOUT_MS = 90 * 60_000;
 const GITHUB_REFRESH_TIMEOUT_MS = 5 * 60_000;
 const WORKSPACE_SESSIONS_CAPABILITY = 'workspace_sessions';
 const BROWSER_HOST_CAPABILITY = 'browser_host';
+const BINARY_PTY_OUTPUT_CAPABILITY = 'binary_pty_output';
 
 export function isTransientAttachError(error: unknown): boolean {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -948,6 +950,37 @@ export function useDaemonSocket({
     }
 
     const ws = new WebSocket(resolvedWsUrl);
+    // Live PTY output arrives as binary frames (see BINARY_PTY_OUTPUT_CAPABILITY).
+    ws.binaryType = 'arraybuffer';
+
+    // Shared by the JSON pty_output event and the binary frame path: queue
+    // while an attach for the session is in flight, otherwise dedup by seq and
+    // emit to the pane runtime.
+    const handleLivePtyOutput = (id: string, seq: number | undefined, payload: string | Uint8Array) => {
+      const attachKey = `pty_attach_${id}`;
+      if (pendingActionsRef.current.has(attachKey)) {
+        // Attach replay is emitted before this queue is drained.
+        // Ghostty then serializes those emitted writes in order.
+        const queued = enqueuePendingAttachOutput(
+          ptyTransportRef.current.getQueuedAttachOutputs(id) || [],
+          { data: payload, seq },
+          MAX_PENDING_ATTACH_OUTPUTS,
+        );
+        ptyTransportRef.current.setQueuedAttachOutputs(id, queued);
+        return;
+      }
+      const outputPlan = planLivePtyOutput({
+        incomingSeq: typeof seq === 'number' ? seq : undefined,
+        lastSeq: ptyTransportRef.current.getLastSeq(id),
+      });
+      if (outputPlan.shouldDropAsStale) {
+        return;
+      }
+      if (typeof outputPlan.nextSeq === 'number') {
+        ptyTransportRef.current.setLastSeq(id, outputPlan.nextSeq);
+      }
+      emitPtyEvent({ event: 'data', id, data: payload, seq });
+    };
 
     ws.onopen = () => {
       console.log('[Daemon] WebSocket connected');
@@ -970,6 +1003,7 @@ export function useDaemonSocket({
           version: `protocol-${PROTOCOL_VERSION}`,
           capabilities: [
             WORKSPACE_SESSIONS_CAPABILITY,
+            BINARY_PTY_OUTPUT_CAPABILITY,
             ...(browserHostToken ? [BROWSER_HOST_CAPABILITY] : []),
           ],
           browser_host_token: browserHostToken || undefined,
@@ -996,6 +1030,22 @@ export function useDaemonSocket({
 
     ws.onmessage = (event) => {
       try {
+        if (event.data instanceof ArrayBuffer) {
+          const decodeStartedAt = performance.now();
+          const frame = decodeBinaryPtyFrame(event.data);
+          if (!frame) {
+            console.error('[Daemon] Dropping undecodable binary frame', event.data.byteLength);
+            return;
+          }
+          recordWsBinaryPtyOutput(
+            event.data.byteLength,
+            frame.data.byteLength,
+            performance.now() - decodeStartedAt,
+            { runtimeId: frame.id, seq: frame.seq },
+          );
+          handleLivePtyOutput(frame.id, frame.seq, frame.data);
+          return;
+        }
         const rawText = typeof event.data === 'string' ? event.data : '';
         const parseStartedAt = performance.now();
         const data: WebSocketEvent = JSON.parse(event.data);
@@ -1487,30 +1537,11 @@ export function useDaemonSocket({
           }
 
           case 'pty_output': {
+            // Local sessions arrive as binary frames instead (the daemon honors
+            // our binary_pty_output capability); this JSON event remains for
+            // relayed remote-endpoint sessions.
             if (data.id && data.data) {
-              const attachKey = `pty_attach_${data.id}`;
-              if (pendingActionsRef.current.has(attachKey)) {
-                // Attach replay is emitted before this queue is drained.
-                // Ghostty then serializes those emitted writes in order.
-                const queued = enqueuePendingAttachOutput(
-                  ptyTransportRef.current.getQueuedAttachOutputs(data.id) || [],
-                  { data: data.data, seq: data.seq },
-                  MAX_PENDING_ATTACH_OUTPUTS,
-                );
-                ptyTransportRef.current.setQueuedAttachOutputs(data.id, queued);
-                break;
-              }
-              const outputPlan = planLivePtyOutput({
-                incomingSeq: typeof data.seq === 'number' ? data.seq : undefined,
-                lastSeq: ptyTransportRef.current.getLastSeq(data.id),
-              });
-              if (outputPlan.shouldDropAsStale) {
-                break;
-              }
-              if (typeof outputPlan.nextSeq === 'number') {
-                ptyTransportRef.current.setLastSeq(data.id, outputPlan.nextSeq);
-              }
-              emitPtyEvent({ event: 'data', id: data.id, data: data.data, seq: data.seq });
+              handleLivePtyOutput(data.id, data.seq, data.data);
             }
             break;
           }

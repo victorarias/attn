@@ -136,6 +136,43 @@ export function recordWsJsonParse(
   touch();
 }
 
+// Binary pty_output frames skip JSON.parse entirely; durationMs is the frame
+// decode cost so the parse-time counters stay comparable across both paths.
+export function recordWsBinaryPtyOutput(
+  frameBytes: number,
+  dataBytes: number,
+  durationMs: number,
+  metadata?: { runtimeId?: string | null; seq?: number | null },
+) {
+  snapshot.wsMessageCount += 1;
+  snapshot.wsMessageBytes += frameBytes;
+  snapshot.wsJsonParseMs += durationMs;
+  snapshot.lastEventAt = new Date().toISOString();
+  snapshot.lastEventName = 'pty_output';
+  snapshot.lastEventRuntimeId = metadata?.runtimeId ?? null;
+  snapshot.lastEventSeq = typeof metadata?.seq === 'number' ? metadata.seq : null;
+  snapshot.ptyOutputCount += 1;
+  snapshot.ptyJsonParseMs += durationMs;
+  snapshot.lastPtyOutputAt = snapshot.lastEventAt;
+  snapshot.lastPtyOutputRuntimeId = snapshot.lastEventRuntimeId;
+  snapshot.lastPtyOutputSeq = snapshot.lastEventSeq;
+  snapshot.recentEvents.push({
+    at: snapshot.lastEventAt,
+    kind: 'ws_event',
+    event: 'pty_output',
+    command: null,
+    source: 'binary',
+    runtimeId: snapshot.lastEventRuntimeId,
+    seq: snapshot.lastEventSeq,
+    base64Chars: 0,
+    dataBytes,
+  });
+  if (snapshot.recentEvents.length > MAX_RECENT_PTY_EVENTS) {
+    snapshot.recentEvents.splice(0, snapshot.recentEvents.length - MAX_RECENT_PTY_EVENTS);
+  }
+  touch();
+}
+
 export function recordPtyCommand(
   command: string,
   runtimeId?: string | null,
