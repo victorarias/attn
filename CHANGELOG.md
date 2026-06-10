@@ -17,6 +17,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Heavy terminal output uses much less memory.** Sustained output (long builds, tests, log floods) is now batched into far fewer, larger messages on its way to the app, cutting the app's memory growth during heavy streaming by roughly 40% and reducing CPU overhead. Typing and interactive prompts are unaffected — keystroke echo still arrives immediately.
 - **Streaming terminal output is cheaper.** Live terminal output now travels from the daemon to the app as compact binary messages instead of base64-encoded JSON, cutting per-chunk encode/decode work and message size by a third. This lowers CPU and bandwidth during sustained heavy output (busy agents, long builds) and modestly reduces the app's memory high-water.
 
+### Fixed
+- **Provider-managed worktree creation has more time to finish.** Worktree providers now get up to two minutes to create and bootstrap worktrees in large repositories, avoiding false timeout failures after the provider has already created the worktree. Hooks and worktree deletion keep their existing 30-second deadline.
+
 ---
 
 ## [2026-06-09]
