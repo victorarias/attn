@@ -72,6 +72,77 @@
   background: rgba(127, 127, 127, 0.3);
 }
 
+/* Block-output filter: bar + matching-lines panel, floats like the find bar.
+   The grid cannot hide rows in place, so the panel IS the filtered view. */
+.ghostty-filter-panel {
+  position: absolute;
+  top: 6px;
+  right: 14px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: min(640px, calc(100% - 28px));
+}
+
+.ghostty-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, rgba(127, 127, 127, 0.35));
+  background: var(--color-bg-secondary, rgba(30, 30, 30, 0.95));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  font: 12px var(--font-ui, sans-serif);
+}
+
+.ghostty-filter-input {
+  width: 200px;
+}
+
+.ghostty-filter-results {
+  max-height: 40vh;
+  overflow-y: auto;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, rgba(127, 127, 127, 0.35));
+  background: var(--color-bg-secondary, rgba(30, 30, 30, 0.95));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  padding: 4px;
+}
+
+.ghostty-filter-line {
+  display: block;
+  width: 100%;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-primary, #ddd);
+  font: 12px var(--font-mono, monospace);
+  text-align: left;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.ghostty-filter-line:hover {
+  background: rgba(127, 127, 127, 0.2);
+}
+
+.ghostty-filter-match {
+  background: rgba(245, 197, 66, 0.45);
+  color: inherit;
+  border-radius: 2px;
+}
+
+.ghostty-filter-empty {
+  padding: 6px 8px;
+  color: var(--color-text-secondary, #999);
+  font: 12px var(--font-ui, sans-serif);
+}
+
 .ghostty-terminal canvas {
   display: block;
 }

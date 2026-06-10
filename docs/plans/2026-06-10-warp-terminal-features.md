@@ -248,10 +248,13 @@ ranges from matchesInRowText. Esc closes; block selection outline stays while fi
 
 ### Phase 2 steps
 
-- [ ] cross-wrap: logicalLineAt/logicalIndexForCell/spanFromLogicalRange + hover rewrite
+- [x] cross-wrap: logicalLineAt/logicalIndexForCell/spanFromLogicalRange + hover rewrite
       + unit tests + e2e (wrapped path hover+click across rows)
-- [ ] context menu: TerminalContextMenu component + wiring + e2e
-- [ ] filter: terminalBlockFilter helper + bar/panel UI + e2e
+- [x] context menu: TerminalContextMenu component + wiring + e2e (also granted
+      `clipboard-manager:allow-read-text` — Paste would have been silently denied
+      in the packaged app with only allow-write-text)
+- [x] filter: terminalBlockFilter helper + bar/panel UI + e2e (filter input joins the
+      find input in the pane-focus ownership rule so focusPane retries can't steal it)
 - [ ] changelog, full verification, prod install
 
 ## Open Questions

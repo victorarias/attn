@@ -26,6 +26,7 @@
     "fs:allow-stat",
     "fs:allow-mkdir",
     "clipboard-manager:allow-write-text",
+    "clipboard-manager:allow-read-text",
     {
       "identifier": "fs:scope",
       "allow": [

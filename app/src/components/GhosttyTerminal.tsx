@@ -33,17 +33,24 @@ import {
 import { emptyOsc133State, parseOsc133, type Osc133State } from '../utils/terminalOsc133';
 import {
   extractBlock,
+  reanchorDelta,
   TerminalBlockStore,
   type BlockRowAccess,
   type TerminalBlock,
 } from '../utils/terminalBlocks';
+import {
+  filterBlockOutputLines,
+  lineSegments,
+  type FilteredBlockLine,
+} from '../utils/terminalBlockFilter';
+import { TerminalContextMenu, type TerminalContextMenuItem } from './TerminalContextMenu';
 import {
   cleanTerminalLines,
   terminalStyledSelectionToMarkdown,
   type TerminalMarkdownLine,
   type TerminalMarkdownRun,
 } from '../utils/terminalMarkdown';
-import { writeClipboardText } from '../utils/clipboardBridge';
+import { readClipboardText, writeClipboardText } from '../utils/clipboardBridge';
 import { parseOsc52Writes, type Osc52State } from '../utils/terminalOsc';
 import {
   parseSynchronizedOutput,
@@ -384,6 +391,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const [error, setError] = useState<string | null>(null);
     const [linkCursorActive, setLinkCursorActive] = useState(false);
     const [findUi, setFindUi] = useState({ open: false, matchCount: 0, focusedIndex: -1, scanning: false, caseSensitive: false });
+    const [contextMenu, setContextMenu] = useState<{ x: number; y: number; blockId: number | null } | null>(null);
+    const [filterUi, setFilterUi] = useState<{ open: boolean; blockId: number | null; caseSensitive: boolean }>({ open: false, blockId: null, caseSensitive: false });
+    const [filterMatches, setFilterMatches] = useState<FilteredBlockLine[]>([]);
+    const filterQueryRef = useRef('');
+    const filterInputRef = useRef<HTMLInputElement>(null);
+    const filterRescanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     onInputRef.current = onInput;
     onReadyRef.current = onReady;
@@ -823,6 +836,74 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return true;
     }, [selectedBlockCopyText]);
 
+    const blockOutputText = useCallback((blockId: number): string | null => {
+      const block = blockStoreRef.current.blockById(blockId);
+      const access = blockRowAccess();
+      if (!block || !access) return null;
+      return extractBlock(block, access)?.output ?? null;
+    }, [blockRowAccess]);
+
+    const scrollToBufferRow = useCallback((bufferRow: number) => {
+      const terminal = terminalRef.current;
+      if (!terminal) return;
+      const history = terminal.getScrollbackLength();
+      viewportOffsetRef.current = Math.max(0, Math.min(history, history - bufferRow));
+      wheelRemainderRowsRef.current = 0;
+      hoverGenerationRef.current += 1;
+      renderSurface(true);
+    }, [renderSurface]);
+
+    const scrollToBlockEdge = useCallback((blockId: number, edge: 'top' | 'bottom') => {
+      const terminal = terminalRef.current;
+      const block = blockStoreRef.current.blockById(blockId);
+      if (!terminal || !block || block.endRow === undefined) return;
+      const access = blockRowAccess();
+      const delta = access ? reanchorDelta(block, access) ?? 0 : 0;
+      const target = edge === 'top'
+        ? block.promptRow + delta
+        // Last block row at the bottom of the viewport (endRow is exclusive).
+        : Math.max(block.promptRow + delta, block.endRow + delta - terminal.rows);
+      scrollToBufferRow(target);
+    }, [blockRowAccess, scrollToBufferRow]);
+
+    const pasteFromClipboard = useCallback(async () => {
+      let text = '';
+      try {
+        text = await readClipboardText();
+      } catch {
+        return;
+      }
+      if (!text) return;
+      const normalized = text.replace(/\r\n/g, '\r').replace(/\n/g, '\r');
+      onInputRef.current(terminalRef.current?.hasBracketedPaste()
+        ? `\x1b[200~${normalized}\x1b[201~`
+        : normalized);
+    }, []);
+
+    const runBlockFilter = useCallback((blockId: number | null, caseSensitive: boolean) => {
+      const query = filterQueryRef.current;
+      const output = blockId !== null && query ? blockOutputText(blockId) : null;
+      setFilterMatches(output ? filterBlockOutputLines(output, query, caseSensitive) : []);
+    }, [blockOutputText]);
+
+    const openBlockFilter = useCallback((blockId: number) => {
+      filterQueryRef.current = '';
+      setFilterMatches([]);
+      setFilterUi({ open: true, blockId, caseSensitive: false });
+      requestAnimationFrame(() => filterInputRef.current?.focus());
+    }, []);
+
+    const closeBlockFilter = useCallback(() => {
+      if (filterRescanTimerRef.current) {
+        clearTimeout(filterRescanTimerRef.current);
+        filterRescanTimerRef.current = null;
+      }
+      filterQueryRef.current = '';
+      setFilterMatches([]);
+      setFilterUi({ open: false, blockId: null, caseSensitive: false });
+      containerRef.current?.focus();
+    }, []);
+
     const closeFind = useCallback(() => {
       findOpenRef.current = false;
       findScanRef.current?.cancel();
@@ -1113,9 +1194,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       fit,
       openFind,
       focus: () => {
-        // The find bar owns keyboard focus while it is open: a deferred pane
-        // focus (e.g. focusPane's retry loop after a session switch) must not
-        // steal it and leak the user's search keystrokes into the PTY.
+        // The find bar / block filter own keyboard focus while open: a
+        // deferred pane focus (e.g. focusPane's retry loop after a session
+        // switch) must not steal it and leak keystrokes into the PTY.
+        if (filterInputRef.current) {
+          if (document.activeElement !== filterInputRef.current) filterInputRef.current.focus();
+          return true;
+        }
         if (findOpenRef.current && findInputRef.current) {
           if (document.activeElement !== findInputRef.current) findInputRef.current.focus();
           return true;
@@ -1228,7 +1313,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           fit,
           openFind,
           focus: () => {
-            // Same find-bar focus ownership rule as the imperative handle.
+            // Same find-bar/filter focus ownership rule as the imperative handle.
+            if (filterInputRef.current) {
+              if (document.activeElement !== filterInputRef.current) filterInputRef.current.focus();
+              return true;
+            }
             if (findOpenRef.current && findInputRef.current) {
               if (document.activeElement !== findInputRef.current) findInputRef.current.focus();
               return true;
@@ -1797,6 +1886,80 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       };
     };
 
+    const contextMenuBlock = contextMenu?.blockId != null
+      ? blockStoreRef.current.blockById(contextMenu.blockId)
+      : null;
+    const contextMenuItems: TerminalContextMenuItem[] = contextMenu ? [
+      { id: 'copy', label: 'Copy', shortcut: '⌘C', disabled: !selectedTextRef.current && !contextMenuBlock },
+      { id: 'copy-command', label: 'Copy command', shortcut: '⇧⌘C', disabled: !contextMenuBlock?.command },
+      { id: 'copy-output', label: 'Copy output', disabled: !contextMenuBlock },
+      { id: 'paste', label: 'Paste', shortcut: '⌘V', separatorBefore: true },
+      { id: 'filter-block', label: 'Filter block output', separatorBefore: true, disabled: !contextMenuBlock },
+      { id: 'find', label: 'Find', shortcut: '⌘F' },
+      { id: 'scroll-block-top', label: 'Scroll to top of block', separatorBefore: true, disabled: !contextMenuBlock },
+      { id: 'scroll-block-bottom', label: 'Scroll to bottom of block', disabled: !contextMenuBlock },
+    ] : [];
+
+    const handleContextMenuSelect = (id: string) => {
+      const blockId = contextMenu?.blockId ?? null;
+      setContextMenu(null);
+      const refocusTerminal = () => containerRef.current?.focus();
+      switch (id) {
+        case 'copy': {
+          const text = selectedTextRef.current ?? selectedBlockCopyText(true);
+          if (text) void writeClipboardText(text);
+          refocusTerminal();
+          break;
+        }
+        case 'copy-command': {
+          copySelectedBlock(false);
+          refocusTerminal();
+          break;
+        }
+        case 'copy-output': {
+          const output = blockId !== null ? blockOutputText(blockId) : null;
+          if (output) void writeClipboardText(output);
+          refocusTerminal();
+          break;
+        }
+        case 'paste': {
+          void pasteFromClipboard();
+          refocusTerminal();
+          break;
+        }
+        case 'filter-block': {
+          if (blockId !== null) openBlockFilter(blockId);
+          break;
+        }
+        case 'find': {
+          openFind();
+          break;
+        }
+        case 'scroll-block-top': {
+          if (blockId !== null) scrollToBlockEdge(blockId, 'top');
+          refocusTerminal();
+          break;
+        }
+        case 'scroll-block-bottom': {
+          if (blockId !== null) scrollToBlockEdge(blockId, 'bottom');
+          refocusTerminal();
+          break;
+        }
+        default:
+          break;
+      }
+    };
+
+    const scrollToFilteredLine = (lineOffset: number) => {
+      const blockId = filterUi.blockId;
+      const block = blockId !== null ? blockStoreRef.current.blockById(blockId) : null;
+      const access = blockRowAccess();
+      if (!block || block.outputStartRow === undefined || !access) return;
+      const delta = reanchorDelta(block, access);
+      if (delta === null) return;
+      scrollToBufferRow(block.outputStartRow + delta + lineOffset);
+    };
+
     return (
       <div className="ghostty-terminal-frame">
       <div
@@ -1889,6 +2052,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           const terminal = terminalRef.current;
           const cell = cellFromPointer(event);
           if (!terminal || !cell) return;
+          if (event.button === 2) {
+            // Right-click belongs to onContextMenu (or to a mouse-tracking
+            // TUI): it must not clear the selection or start a drag.
+            sendTrackedMouse('press', event);
+            return;
+          }
           const link = linkAtCell(cell);
           const opensUri = Boolean(link && (event.metaKey || event.ctrlKey));
           recordPointerHitTest('mousedown', event, {
@@ -1950,6 +2119,32 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           hoveredCellRef.current = null;
           detectHoverLink(null);
           setLinkCursorActive(false);
+        }}
+        onContextMenu={(event) => {
+          // Always suppress the webview's own menu inside the terminal.
+          event.preventDefault();
+          const terminal = terminalRef.current;
+          if (!terminal) return;
+          // TUI apps that track the mouse own right-click.
+          if (terminal.hasMouseTracking()) return;
+          const cell = cellFromPointer(event);
+          let blockId: number | null = null;
+          if (cell && blockStoreRef.current.hasBlocks()) {
+            const bufferRow = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
+            blockId = blockStoreRef.current.blockAt(bufferRow)?.id ?? null;
+          }
+          // Right-clicking a block selects it (outline + arms ⌘C/⇧⌘C), same
+          // as a plain click, but without clearing an existing text selection.
+          if (blockId !== null && selectedBlockIdRef.current !== blockId) {
+            selectedBlockIdRef.current = blockId;
+            renderSurface(true);
+          }
+          const frameRect = containerRef.current?.parentElement?.getBoundingClientRect();
+          setContextMenu({
+            x: event.clientX - (frameRect?.left ?? 0),
+            y: event.clientY - (frameRect?.top ?? 0),
+            blockId,
+          });
         }}
         onMouseUp={(event) => {
           if (isWorkspaceResizeActive(containerRef.current)) {
@@ -2106,6 +2301,95 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             ✕
           </button>
         </div>
+      )}
+      {filterUi.open && (
+        <div className="ghostty-filter-panel" data-testid="ghostty-filter-panel">
+          <div className="ghostty-filter-bar">
+            <input
+              ref={filterInputRef}
+              className="ghostty-find-input ghostty-filter-input"
+              data-testid="ghostty-filter-input"
+              type="text"
+              placeholder="Filter block output"
+              spellCheck={false}
+              autoComplete="off"
+              defaultValue=""
+              onChange={(event) => {
+                filterQueryRef.current = event.target.value;
+                if (filterRescanTimerRef.current) clearTimeout(filterRescanTimerRef.current);
+                filterRescanTimerRef.current = setTimeout(() => {
+                  filterRescanTimerRef.current = null;
+                  runBlockFilter(filterUi.blockId, filterUi.caseSensitive);
+                }, 150);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  closeBlockFilter();
+                }
+                event.stopPropagation();
+              }}
+            />
+            <button
+              type="button"
+              className={`ghostty-find-button ghostty-find-case${filterUi.caseSensitive ? ' ghostty-find-case-active' : ''}`}
+              aria-label="Match case"
+              aria-pressed={filterUi.caseSensitive}
+              title="Match case"
+              onClick={() => {
+                const caseSensitive = !filterUi.caseSensitive;
+                setFilterUi((ui) => ({ ...ui, caseSensitive }));
+                runBlockFilter(filterUi.blockId, caseSensitive);
+                filterInputRef.current?.focus();
+              }}
+            >
+              Aa
+            </button>
+            <span className="ghostty-find-count" data-testid="ghostty-filter-count">
+              {filterMatches.length} {filterMatches.length === 1 ? 'line' : 'lines'}
+            </span>
+            <button
+              type="button"
+              className="ghostty-find-button"
+              aria-label="Close filter"
+              title="Close (Esc)"
+              onClick={closeBlockFilter}
+            >
+              ✕
+            </button>
+          </div>
+          {filterQueryRef.current && (
+            <div className="ghostty-filter-results" data-testid="ghostty-filter-results">
+              {filterMatches.length === 0 ? (
+                <div className="ghostty-filter-empty">No matching lines</div>
+              ) : (
+                filterMatches.map((line) => (
+                  <button
+                    key={line.lineOffset}
+                    type="button"
+                    className="ghostty-filter-line"
+                    title="Scroll to line"
+                    onClick={() => scrollToFilteredLine(line.lineOffset)}
+                  >
+                    {lineSegments(line).map((segment, index) => (
+                      segment.match
+                        ? <mark key={index} className="ghostty-filter-match">{segment.text}</mark>
+                        : <span key={index}>{segment.text}</span>
+                    ))}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {contextMenu && (
+        <TerminalContextMenu
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          items={contextMenuItems}
+          onSelect={handleContextMenuSelect}
+          onClose={() => setContextMenu(null)}
+        />
       )}
       </div>
     );

@@ -132,6 +132,93 @@ test.describe('Ghostty terminal command blocks', () => {
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('clipboard-sentinel');
   });
 
+  test('right-click on a block opens a context menu that copies command and output', async ({ page, context, daemon }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const terminal = await openTerminalSession(page, daemon, 's-block-menu');
+    const rows = await writeBlockStream(page, terminal, 's-block-menu');
+    await page.evaluate(() => navigator.clipboard.writeText('clipboard-sentinel'));
+
+    await terminal.click({ button: 'right', position: { x: 30, y: rows.outputRowY } });
+    const menu = page.locator('[data-testid="terminal-context-menu"]');
+    await expect(menu).toBeVisible();
+
+    await page.locator('[data-testid="terminal-context-menu-copy-output"]').click();
+    await expect(menu).not.toBeVisible();
+    await expect
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .toBe('hello\nworld');
+
+    await terminal.click({ button: 'right', position: { x: 30, y: rows.outputRowY } });
+    await page.locator('[data-testid="terminal-context-menu-copy-command"]').click();
+    await expect
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .toBe('echo hello');
+
+    await terminal.click({ button: 'right', position: { x: 30, y: rows.outputRowY } });
+    await page.locator('[data-testid="terminal-context-menu-copy"]').click();
+    await expect
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .toBe('echo hello\nhello\nworld');
+  });
+
+  test('right-click outside any block disables block items and paste sends clipboard to the pty', async ({ page, context, daemon }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const terminal = await openTerminalSession(page, daemon, 's-block-menu-out');
+    const rows = await writeBlockStream(page, terminal, 's-block-menu-out');
+    await page.evaluate(() => navigator.clipboard.writeText('pasted-text'));
+
+    const bounds = await terminal.boundingBox();
+    expect(bounds).not.toBeNull();
+    await terminal.click({
+      button: 'right',
+      position: { x: 30, y: rows.outputRowY + bounds!.height / 2 },
+    });
+    await expect(page.locator('[data-testid="terminal-context-menu"]')).toBeVisible();
+    await expect(page.locator('[data-testid="terminal-context-menu-copy-command"]')).toBeDisabled();
+    await expect(page.locator('[data-testid="terminal-context-menu-copy-output"]')).toBeDisabled();
+    await expect(page.locator('[data-testid="terminal-context-menu-filter-block"]')).toBeDisabled();
+
+    await page.locator('[data-testid="terminal-context-menu-paste"]').click();
+    await expect
+      .poll(
+        async () => page.evaluate(
+          (id) => (window.__TEST_GET_SESSION_INPUT_EVENTS?.(id) ?? [])
+            .filter((event) => event.event === 'send_to_pty' && event.data === 'pasted-text').length,
+          's-block-menu-out',
+        ),
+        { timeout: 3000 },
+      )
+      .toBe(1);
+  });
+
+  test('filter block output lists matching lines and highlights matches', async ({ page, context, daemon }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const terminal = await openTerminalSession(page, daemon, 's-block-filter');
+    const rows = await writeBlockStream(page, terminal, 's-block-filter');
+
+    await terminal.click({ button: 'right', position: { x: 30, y: rows.outputRowY } });
+    await page.locator('[data-testid="terminal-context-menu-filter-block"]').click();
+
+    const filterInput = page.locator('[data-testid="ghostty-filter-input"]');
+    await expect(filterInput).toBeVisible();
+    await expect(filterInput).toBeFocused();
+    await filterInput.fill('wor');
+
+    const results = page.locator('[data-testid="ghostty-filter-results"]');
+    await expect(results.locator('.ghostty-filter-line')).toHaveCount(1, { timeout: 3000 });
+    await expect(results.locator('.ghostty-filter-line mark')).toHaveText('wor');
+    await expect(page.locator('[data-testid="ghostty-filter-count"]')).toHaveText('1 line');
+
+    // A query matching nothing shows the empty state, not stale lines.
+    await filterInput.fill('absent-needle');
+    await expect(results.locator('.ghostty-filter-line')).toHaveCount(0, { timeout: 3000 });
+    await expect(results.locator('.ghostty-filter-empty')).toBeVisible();
+
+    // Esc closes the filter and returns focus to the terminal.
+    await filterInput.press('Escape');
+    await expect(page.locator('[data-testid="ghostty-filter-panel"]')).not.toBeVisible();
+  });
+
   test('triple click selects and copies the whole row', async ({ page, context, daemon }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const terminal = await openTerminalSession(page, daemon, 's-block-triple');
