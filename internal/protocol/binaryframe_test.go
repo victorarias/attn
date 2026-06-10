@@ -58,12 +58,12 @@ func TestDecodePtyOutputFrameRejectsMalformed(t *testing.T) {
 	}
 
 	cases := map[string][]byte{
-		"empty":              {},
-		"short":              valid[:5],
-		"wrong type":         append([]byte{0x7f}, valid[1:]...),
-		"id overruns frame":  {BinaryFrameTypePtyOutput, 200, 'a', 'b', 0, 0, 0, 1},
-		"zero id length":     {BinaryFrameTypePtyOutput, 0, 0, 0, 0, 1, 'x'},
-		"truncated post-id":  valid[:7],
+		"empty":             {},
+		"short":             valid[:5],
+		"wrong type":        append([]byte{0x7f}, valid[1:]...),
+		"id overruns frame": {BinaryFrameTypePtyOutput, 200, 'a', 'b', 0, 0, 0, 1},
+		"zero id length":    {BinaryFrameTypePtyOutput, 0, 0, 0, 0, 1, 'x'},
+		"truncated post-id": valid[:7],
 	}
 	for name, frame := range cases {
 		if _, _, _, err := DecodePtyOutputFrame(frame); err == nil {
