@@ -127,8 +127,9 @@ test.describe('Session State Changes', () => {
     // Wait for sessions to load
     await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
 
-    // Open attention drawer (Cmd+K)
+    // Open attention drawer through the action menu.
     await page.keyboard.press('Meta+k');
+    await page.getByText('Open attention drawer').click();
 
     // Wait for drawer to open
     await expect(page.locator('.side-panel-shell.is-open .attention-drawer .attention-drawer-panel')).toBeVisible({ timeout: 2000 });

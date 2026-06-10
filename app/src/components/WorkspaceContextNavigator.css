@@ -1,0 +1,478 @@
+.workspace-context-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  padding: 12px;
+  background: var(--color-bg-app);
+  animation: workspace-context-reveal 170ms ease-out;
+}
+
+.workspace-context-navigator {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  background:
+    radial-gradient(circle at 80% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 32%),
+    var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+}
+
+.workspace-context-header {
+  min-height: 72px;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, 520px) minmax(220px, 1fr);
+  align-items: center;
+  gap: 24px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.workspace-context-heading {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.workspace-context-heading > svg {
+  width: 25px;
+  height: 25px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.45;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.workspace-context-eyebrow {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--accent);
+  font: 700 9px/1.1 ui-monospace, 'SFMono-Regular', monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.workspace-context-heading h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.workspace-context-search {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.workspace-context-search:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--color-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.workspace-context-search svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--color-text-tertiary);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.workspace-context-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 12px;
+}
+
+.workspace-context-close {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 11px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.workspace-context-close:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
+  border-color: var(--color-border);
+}
+
+.workspace-context-close kbd {
+  padding: 2px 5px;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-app);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font: 600 9px/1.2 ui-monospace, monospace;
+}
+
+.workspace-context-body {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(230px, 300px) minmax(0, 1fr);
+}
+
+.workspace-context-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 10px;
+  background: color-mix(in srgb, var(--color-bg-app) 58%, transparent);
+  border-right: 1px solid var(--color-border-subtle);
+}
+
+.workspace-context-list-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 9px;
+  color: var(--color-text-muted);
+  font: 700 9px/1 ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.workspace-context-list-label strong {
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+}
+
+.workspace-context-list-item {
+  position: relative;
+  width: 100%;
+  min-height: 60px;
+  display: grid;
+  grid-template-columns: 3px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 9px 8px 5px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.workspace-context-list-item:hover {
+  background: color-mix(in srgb, var(--color-bg-elevated) 60%, transparent);
+}
+
+.workspace-context-list-item.is-selected {
+  background: var(--color-bg-elevated);
+  border-color: var(--color-border);
+}
+
+.workspace-context-list-marker {
+  width: 3px;
+  height: 28px;
+  background: transparent;
+  border-radius: 4px;
+}
+
+.workspace-context-list-item.is-selected .workspace-context-list-marker {
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.workspace-context-list-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workspace-context-list-copy strong,
+.workspace-context-list-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-context-list-copy strong {
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.workspace-context-list-copy span {
+  color: var(--color-text-muted);
+  font: 10px/1.2 ui-monospace, 'SFMono-Regular', monospace;
+}
+
+.workspace-context-revision {
+  color: var(--color-text-muted);
+  font: 10px/1 ui-monospace, monospace;
+}
+
+.workspace-context-list-state,
+.workspace-context-document-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.workspace-context-list-state {
+  min-height: 160px;
+  gap: 12px;
+  font-size: 11px;
+}
+
+.workspace-context-list-state button {
+  padding: 6px 9px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.workspace-context-document {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.workspace-context-document-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 30px;
+  padding: 28px clamp(28px, 6vw, 90px) 20px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.workspace-context-document-meta > div > span,
+.workspace-context-document-meta dt {
+  color: var(--color-text-muted);
+  font: 700 9px/1 ui-monospace, monospace;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.workspace-context-document-meta h2 {
+  margin: 6px 0 4px;
+  font-size: 24px;
+  font-weight: 680;
+  letter-spacing: -0.035em;
+}
+
+.workspace-context-document-meta p {
+  color: var(--color-text-tertiary);
+  font: 11px/1.4 ui-monospace, 'SFMono-Regular', monospace;
+}
+
+.workspace-context-document-meta dl {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+  margin: 0;
+}
+
+.workspace-context-document-meta dl > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workspace-context-document-meta dd {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workspace-context-markdown {
+  max-width: 900px;
+  padding: 34px clamp(28px, 6vw, 90px) 80px;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.workspace-context-markdown h1,
+.workspace-context-markdown h2,
+.workspace-context-markdown h3 {
+  color: var(--color-text-primary);
+  letter-spacing: -0.02em;
+}
+
+.workspace-context-markdown h1 {
+  margin: 0 0 24px;
+  font-size: 28px;
+}
+
+.workspace-context-markdown h2 {
+  margin: 34px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  font-size: 18px;
+}
+
+.workspace-context-markdown h3 {
+  margin: 24px 0 8px;
+  font-size: 15px;
+}
+
+.workspace-context-markdown p,
+.workspace-context-markdown ul,
+.workspace-context-markdown ol,
+.workspace-context-markdown pre,
+.workspace-context-markdown blockquote {
+  margin: 0 0 16px;
+}
+
+.workspace-context-markdown ul,
+.workspace-context-markdown ol {
+  padding-left: 22px;
+}
+
+.workspace-context-markdown code {
+  padding: 2px 5px;
+  color: color-mix(in srgb, var(--accent) 75%, var(--color-text-primary));
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 4px;
+  font: 0.9em/1.4 ui-monospace, 'SFMono-Regular', monospace;
+}
+
+.workspace-context-markdown pre {
+  overflow-x: auto;
+  padding: 14px;
+  background: var(--color-bg-app);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.workspace-context-markdown pre code {
+  padding: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 0;
+}
+
+.workspace-context-markdown blockquote {
+  padding-left: 14px;
+  color: var(--color-text-tertiary);
+  border-left: 3px solid var(--accent);
+}
+
+.workspace-context-markdown a {
+  color: var(--accent);
+}
+
+.workspace-context-document-state {
+  height: 100%;
+  min-height: 360px;
+}
+
+.workspace-context-document-state svg {
+  width: 34px;
+  height: 34px;
+  margin-bottom: 18px;
+  fill: none;
+  stroke: var(--color-text-dimmed);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.workspace-context-document-state h2 {
+  margin-bottom: 7px;
+  color: var(--color-text-secondary);
+  font-size: 15px;
+}
+
+.workspace-context-document-state p {
+  max-width: 360px;
+  font-size: 12px;
+}
+
+.workspace-context-skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workspace-context-skeleton-list span,
+.workspace-context-skeleton-document span {
+  display: block;
+  background: linear-gradient(90deg, var(--color-bg-elevated), var(--color-border-subtle), var(--color-bg-elevated));
+  background-size: 220% 100%;
+  border-radius: 7px;
+  animation: workspace-context-shimmer 1.4s linear infinite;
+}
+
+.workspace-context-skeleton-list span {
+  height: 56px;
+}
+
+.workspace-context-skeleton-document {
+  padding: 80px clamp(28px, 6vw, 90px);
+}
+
+.workspace-context-skeleton-document span {
+  height: 14px;
+  margin-bottom: 16px;
+}
+
+.workspace-context-skeleton-document span:first-child {
+  width: 42%;
+  height: 30px;
+  margin-bottom: 34px;
+}
+
+.workspace-context-skeleton-document span:nth-child(3) {
+  width: 82%;
+}
+
+.workspace-context-skeleton-document span:nth-child(4) {
+  width: 63%;
+}
+
+@keyframes workspace-context-reveal {
+  from { opacity: 0; transform: scale(0.995); }
+}
+
+@keyframes workspace-context-shimmer {
+  to { background-position: -220% 0; }
+}
+
+@media (max-width: 760px) {
+  .workspace-context-shell { padding: 0; }
+  .workspace-context-navigator { border: 0; border-radius: 0; }
+  .workspace-context-header {
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+  }
+  .workspace-context-search { grid-column: 1 / -1; grid-row: 2; }
+  .workspace-context-body { grid-template-columns: 210px minmax(0, 1fr); }
+  .workspace-context-document-meta { flex-direction: column; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-context-shell,
+  .workspace-context-skeleton-list span,
+  .workspace-context-skeleton-document span {
+    animation: none;
+  }
+}

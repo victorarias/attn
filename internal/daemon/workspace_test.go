@@ -571,6 +571,9 @@ func TestLoadWorkspacesFromStore_RemovesPersistedOrphans(t *testing.T) {
 	if err := d.store.SaveWorkspaceLayout(workspacelayout.DefaultWorkspaceLayout("ws-orphan", "pane-orphan", "s-orphan")); err != nil {
 		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
 	}
+	if _, _, err := d.store.UpdateWorkspaceContext("ws-orphan", "# Old context", "s-orphan", 0); err != nil {
+		t.Fatalf("UpdateWorkspaceContext() error = %v", err)
+	}
 	d.store.AddWorkspace(&protocol.Workspace{ID: "ws-live", Title: "live", Directory: "/repo/live"})
 	d.store.Add(&protocol.Session{
 		ID: "s-live", Label: "live", Agent: protocol.SessionAgentCodex, Directory: "/repo/live",
@@ -590,6 +593,9 @@ func TestLoadWorkspacesFromStore_RemovesPersistedOrphans(t *testing.T) {
 	}
 	if layout := d.store.GetWorkspaceLayout("ws-orphan"); layout != nil {
 		t.Fatalf("orphan workspace layout still persisted after load: %+v", layout)
+	}
+	if d.store.HasWorkspaceContext("ws-orphan") {
+		t.Fatal("orphan workspace context survived startup cleanup")
 	}
 	if workspace := d.store.GetWorkspace("ws-live"); workspace == nil {
 		t.Fatal("live workspace was removed during load")

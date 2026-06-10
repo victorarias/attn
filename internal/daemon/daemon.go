@@ -1677,6 +1677,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleWorkspaceContextUpdate(conn, msg.(*protocol.WorkspaceContextUpdateMessage))
 	case protocol.CmdWorkspaceContextStatus:
 		d.handleWorkspaceContextStatus(conn, msg.(*protocol.WorkspaceContextStatusMessage))
+	case protocol.CmdWorkspaceContextList:
+		d.handleWorkspaceContextList(conn)
 	case protocol.CmdUnregister:
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:

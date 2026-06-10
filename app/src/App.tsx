@@ -24,6 +24,8 @@ import { ThumbsModal } from './components/ThumbsModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { WhatsNewModal } from './components/WhatsNewModal';
+import { ActionMenu, type ActionMenuItem } from './components/ActionMenu';
+import { WorkspaceContextNavigator, type WorkspaceContextView } from './components/WorkspaceContextNavigator';
 import { CopyToast, useCopyToast } from './components/CopyToast';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
@@ -53,7 +55,7 @@ import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useWhatsNew } from './hooks/useWhatsNew';
-import { formatShortcut, modifierTokens } from './shortcuts';
+import { formatShortcut, modifierTokens, shortcutTokens } from './shortcuts';
 import { useUIScale } from './hooks/useUIScale';
 import { useTheme } from './hooks/useTheme';
 import { useOpenPR, type OpenPRProgress } from './hooks/useOpenPR';
@@ -89,6 +91,24 @@ function handleAppPointerDownCapture(event: { target: EventTarget | null }): voi
   if (!isBrowserHostOwnedTarget(event.target)) {
     clearBrowserHostFocus();
   }
+}
+
+function ContextActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 3.5h9l3 3V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" />
+      <path d="M15 3.5V7h3M8 11h7M8 14.5h7M8 18h4" />
+    </svg>
+  );
+}
+
+function AttentionActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3.5a6 6 0 0 0-6 6v3.2L4.5 16h15L18 12.7V9.5a6 6 0 0 0-6-6Z" />
+      <path d="M9.5 19a2.8 2.8 0 0 0 5 0" />
+    </svg>
+  );
 }
 
 interface SplitSessionOptions {
@@ -428,6 +448,7 @@ function App() {
     sendRemoveEndpoint,
     sendSetEndpointRemoteWeb,
     sendBootstrapEndpoint,
+    sendListWorkspaceContexts,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,
@@ -558,6 +579,7 @@ function App() {
         sendRemoveEndpoint={sendRemoveEndpoint}
         sendSetEndpointRemoteWeb={sendSetEndpointRemoteWeb}
         sendBootstrapEndpoint={sendBootstrapEndpoint}
+        sendListWorkspaceContexts={sendListWorkspaceContexts}
         sendGetRecentLocations={sendGetRecentLocations}
         sendBrowseDirectory={sendBrowseDirectory}
         sendInspectPath={sendInspectPath}
@@ -654,6 +676,7 @@ interface AppContentProps {
   sendRemoveEndpoint: ReturnType<typeof useDaemonSocket>['sendRemoveEndpoint'];
   sendSetEndpointRemoteWeb: ReturnType<typeof useDaemonSocket>['sendSetEndpointRemoteWeb'];
   sendBootstrapEndpoint: ReturnType<typeof useDaemonSocket>['sendBootstrapEndpoint'];
+  sendListWorkspaceContexts: ReturnType<typeof useDaemonSocket>['sendListWorkspaceContexts'];
   sendGetRecentLocations: ReturnType<typeof useDaemonSocket>['sendGetRecentLocations'];
   sendBrowseDirectory: ReturnType<typeof useDaemonSocket>['sendBrowseDirectory'];
   sendInspectPath: ReturnType<typeof useDaemonSocket>['sendInspectPath'];
@@ -745,6 +768,7 @@ function AppContent({
   sendRemoveEndpoint,
   sendSetEndpointRemoteWeb,
   sendBootstrapEndpoint,
+  sendListWorkspaceContexts,
   sendGetRecentLocations,
   sendBrowseDirectory,
 sendInspectPath,
@@ -921,6 +945,11 @@ sendFetchPRDetails,
   // Settings modal (lifted from Dashboard for Cmd+, access)
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [workspaceContextsOpen, setWorkspaceContextsOpen] = useState(false);
+  const [workspaceContextsLoading, setWorkspaceContextsLoading] = useState(false);
+  const [workspaceContextsError, setWorkspaceContextsError] = useState<string | null>(null);
+  const [workspaceContexts, setWorkspaceContexts] = useState<Awaited<ReturnType<typeof sendListWorkspaceContexts>>>([]);
   const whatsNew = useWhatsNew();
   const { repoStates, authorStates } = useDaemonStore();
   const mutedRepos = useMemo(() =>
@@ -1520,11 +1549,96 @@ sendFetchPRDetails,
     || whatsNew.isOpen
     || settingsOpen
     || shortcutsOpen
+    || actionMenuOpen
+    || workspaceContextsOpen
     || chiefTransferTarget !== null
     || closedWorktree !== null
     || pendingSessionClose !== null
     || sessionCreationJob !== null
     || openPRLauncherJob !== null;
+
+  const workspaceContextViews = useMemo<WorkspaceContextView[]>(() => {
+    const workspacesById = new Map(
+      daemonWorkspaces
+        .filter((workspace) => !workspace.endpoint_id)
+        .map((workspace) => [workspace.id, workspace]),
+    );
+    const sessionsById = new Map(daemonSessions.map((session) => [session.id, session]));
+    return workspaceContexts.map((context) => {
+      const workspace = workspacesById.get(context.workspace_id);
+      const updatedBy = sessionsById.get(context.updated_by_session_id);
+      return {
+        context,
+        title: workspace?.title || context.workspace_id,
+        directory: workspace?.directory || 'Workspace no longer registered',
+        updatedByLabel: updatedBy?.label,
+      };
+    });
+  }, [daemonSessions, daemonWorkspaces, workspaceContexts]);
+
+  const loadWorkspaceContexts = useCallback(async () => {
+    setWorkspaceContextsLoading(true);
+    setWorkspaceContextsError(null);
+    try {
+      setWorkspaceContexts(await sendListWorkspaceContexts());
+    } catch (error) {
+      setWorkspaceContextsError(error instanceof Error ? error.message : 'Failed to load workspace contexts');
+    } finally {
+      setWorkspaceContextsLoading(false);
+    }
+  }, [sendListWorkspaceContexts]);
+
+  const openWorkspaceContextNavigator = useCallback(() => {
+    setWorkspaceContextsOpen(true);
+    void loadWorkspaceContexts();
+  }, [loadWorkspaceContexts]);
+
+  const actionMenuItems = useMemo<ActionMenuItem[]>(() => [
+    {
+      id: 'workspace-contexts',
+      title: 'Browse workspace contexts',
+      description: 'Navigate shared contexts stored on this Mac',
+      keywords: ['memory', 'shared', 'agents', 'context'],
+      icon: <ContextActionIcon />,
+      run: openWorkspaceContextNavigator,
+    },
+    {
+      id: 'attention',
+      title: 'Open attention drawer',
+      description: 'Show sessions and pull requests that need a response',
+      keywords: ['waiting', 'pull requests', 'prs', 'notifications'],
+      icon: <AttentionActionIcon />,
+      shortcut: [shortcutTokens('dock.attention')],
+      run: () => openDockPanel('attention'),
+    },
+  ], [openDockPanel, openWorkspaceContextNavigator]);
+
+  const handleToggleActionMenu = useCallback(() => {
+    if (actionMenuOpen) {
+      setActionMenuOpen(false);
+      return;
+    }
+    if (settingsOpen || shortcutsOpen || locationPickerOpen || thumbsOpen || whatsNew.isOpen
+      || workspaceContextsOpen
+      || chiefTransferTarget !== null || closedWorktree !== null || pendingSessionClose !== null
+      || sessionCreationJob !== null || openPRLauncherJob !== null) {
+      return;
+    }
+    setActionMenuOpen(true);
+  }, [
+    actionMenuOpen,
+    chiefTransferTarget,
+    closedWorktree,
+    locationPickerOpen,
+    openPRLauncherJob,
+    pendingSessionClose,
+    sessionCreationJob,
+    settingsOpen,
+    shortcutsOpen,
+    thumbsOpen,
+    whatsNew.isOpen,
+    workspaceContextsOpen,
+  ]);
   const waitingReviewSessions = useMemo(
     () => sessions
       .map((session) => ({
@@ -2992,7 +3106,7 @@ sendFetchPRDetails,
     onNewSessionHorizontal: () => handleNewSession('horizontal'),
     onNewWorkspace: handleNewWorkspace,
     onCloseSession: handleCloseCurrentSessionShortcut,
-    onToggleDrawer: () => toggleDockPanel('attention'),
+    onToggleActionMenu: handleToggleActionMenu,
     onGoToDashboard: goToDashboard,
     onToggleGridMode: toggleGridMode,
     onJumpToWaiting: handleJumpToWaiting,
@@ -3018,7 +3132,11 @@ sendFetchPRDetails,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
     onQuit: handleQuitApp,
-    enabled: !locationPickerOpen && !thumbsOpen && !whatsNew.isOpen,
+    enabled: !locationPickerOpen
+      && !thumbsOpen
+      && !whatsNew.isOpen
+      && !actionMenuOpen
+      && !workspaceContextsOpen,
   });
 
   return (
@@ -3429,6 +3547,19 @@ sendFetchPRDetails,
       />
       <CopyToast message={copyMessage} onDone={clearCopyToast} />
       <ErrorToast message={errorMessage} onDone={clearError} />
+      <WorkspaceContextNavigator
+        isOpen={workspaceContextsOpen}
+        contexts={workspaceContextViews}
+        isLoading={workspaceContextsLoading}
+        error={workspaceContextsError}
+        onClose={() => setWorkspaceContextsOpen(false)}
+        onRetry={() => void loadWorkspaceContexts()}
+      />
+      <ActionMenu
+        isOpen={actionMenuOpen}
+        actions={actionMenuItems}
+        onClose={() => setActionMenuOpen(false)}
+      />
       <ShortcutsModal
         isOpen={shortcutsOpen}
         onClose={() => setShortcutsOpen(false)}

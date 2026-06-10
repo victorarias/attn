@@ -66,6 +66,59 @@ func TestWorkspaceContextRevisionCheckedUpdate(t *testing.T) {
 	}
 }
 
+func TestListWorkspaceContextsUsesWorkspaceCreationOrder(t *testing.T) {
+	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewWithDB error: %v", err)
+	}
+	defer s.Close()
+	s.AddWorkspace(&protocol.Workspace{ID: "workspace-b", Title: "B", Directory: "/tmp/b"})
+	s.AddWorkspace(&protocol.Workspace{ID: "workspace-a", Title: "A", Directory: "/tmp/a"})
+
+	if _, _, err := s.UpdateWorkspaceContext("workspace-a", "# A", "session-a", 0); err != nil {
+		t.Fatalf("UpdateWorkspaceContext workspace-a error: %v", err)
+	}
+	if _, _, err := s.UpdateWorkspaceContext("workspace-b", "# B", "session-b", 0); err != nil {
+		t.Fatalf("UpdateWorkspaceContext workspace-b error: %v", err)
+	}
+
+	contexts, err := s.ListWorkspaceContexts()
+	if err != nil {
+		t.Fatalf("ListWorkspaceContexts error: %v", err)
+	}
+	if len(contexts) != 2 {
+		t.Fatalf("ListWorkspaceContexts len = %d, want 2", len(contexts))
+	}
+	if contexts[0].WorkspaceID != "workspace-b" || contexts[1].WorkspaceID != "workspace-a" {
+		t.Fatalf("ListWorkspaceContexts order = [%s, %s], want [workspace-b, workspace-a]",
+			contexts[0].WorkspaceID, contexts[1].WorkspaceID)
+	}
+}
+
+func TestListWorkspaceContextsExcludesOrphans(t *testing.T) {
+	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewWithDB error: %v", err)
+	}
+	defer s.Close()
+
+	s.AddWorkspace(&protocol.Workspace{ID: "workspace-live", Title: "Live", Directory: "/tmp/live"})
+	if _, _, err := s.UpdateWorkspaceContext("workspace-live", "# Live", "session-live", 0); err != nil {
+		t.Fatalf("UpdateWorkspaceContext live error: %v", err)
+	}
+	if _, _, err := s.UpdateWorkspaceContext("workspace-orphan", "# Orphan", "session-old", 0); err != nil {
+		t.Fatalf("UpdateWorkspaceContext orphan error: %v", err)
+	}
+
+	contexts, err := s.ListWorkspaceContexts()
+	if err != nil {
+		t.Fatalf("ListWorkspaceContexts error: %v", err)
+	}
+	if len(contexts) != 1 || contexts[0].WorkspaceID != "workspace-live" {
+		t.Fatalf("ListWorkspaceContexts = %+v, want only workspace-live", contexts)
+	}
+}
+
 func TestRemoveWorkspaceRemovesContext(t *testing.T) {
 	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

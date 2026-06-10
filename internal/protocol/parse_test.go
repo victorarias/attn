@@ -213,6 +213,7 @@ func TestParseWorkspaceContextCommands(t *testing.T) {
 		{`{"cmd":"workspace_context_checkout","source_session_id":"session-1","force":true}`, CmdWorkspaceContextCheckout},
 		{`{"cmd":"workspace_context_update","source_session_id":"session-1"}`, CmdWorkspaceContextUpdate},
 		{`{"cmd":"workspace_context_status","source_session_id":"session-1"}`, CmdWorkspaceContextStatus},
+		{`{"cmd":"workspace_context_list","request_id":"request-1"}`, CmdWorkspaceContextList},
 	}
 	for _, test := range tests {
 		cmd, _, err := ParseMessage([]byte(test.input))
