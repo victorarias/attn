@@ -49,6 +49,42 @@ async function installOpenerProbe(page: import('@playwright/test').Page) {
   });
 }
 
+async function installFileLinkProbe(
+  page: import('@playwright/test').Page,
+  existingPaths: string[],
+) {
+  await page.addInitScript((paths: string[]) => {
+    const probeWindow = window as Window & {
+      __OPENED_TERMINAL_PATHS?: string[];
+      __OPENED_TERMINAL_URLS?: string[];
+      __FS_EXISTING_PATHS?: string[];
+      __TAURI_INTERNALS__?: { invoke: (command: string, args?: { url?: string; path?: string }) => Promise<unknown> };
+    };
+    probeWindow.__OPENED_TERMINAL_PATHS = [];
+    probeWindow.__OPENED_TERMINAL_URLS = [];
+    probeWindow.__FS_EXISTING_PATHS = paths;
+    probeWindow.__TAURI_INTERNALS__ = {
+      invoke: async (command, args) => {
+        if (command === 'plugin:opener|open_url' && args?.url) {
+          probeWindow.__OPENED_TERMINAL_URLS?.push(args.url);
+          return undefined;
+        }
+        if (command === 'plugin:opener|open_path' && args?.path) {
+          probeWindow.__OPENED_TERMINAL_PATHS?.push(args.path);
+          return undefined;
+        }
+        if (command === 'plugin:fs|exists') {
+          return (probeWindow.__FS_EXISTING_PATHS ?? []).includes(args?.path ?? '');
+        }
+        if (command === 'plugin:path|resolve_directory') {
+          return '/home/test-user';
+        }
+        return undefined;
+      },
+    };
+  }, existingPaths);
+}
+
 async function expectOpenedUrl(page: import('@playwright/test').Page, url: string) {
   await expect
     .poll(
@@ -131,6 +167,66 @@ test.describe('Ghostty terminal interactions', () => {
     await page.keyboard.up('Meta');
 
     await expectOpenedUrl(page, url);
+  });
+
+  test('cmd+click opens an existing file path resolved against the session cwd', async ({ page, daemon }) => {
+    await installFileLinkProbe(page, ['/tmp/test/terminal-links/src/main.go']);
+    const terminal = await openTerminalSession(page, daemon, 's-file-link');
+    await writeTerminalOutput(page, 's-file-link', '[2J[Hsrc/main.go:12:3 compiled');
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('src/main.go:12:3');
+
+    // Hover starts async path validation (through the fs shim); the link
+    // cursor appears once the candidate resolves and the accelerator is held.
+    await terminal.hover({ position: { x: 55, y: 8 } });
+    await page.keyboard.down('Meta');
+    await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
+    await terminal.click({ position: { x: 55, y: 8 } });
+    await page.keyboard.up('Meta');
+
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
+        ),
+        { timeout: 3000 },
+      )
+      .toContain('/tmp/test/terminal-links/src/main.go');
+  });
+
+  test('does not mark non-existing path-like words as links', async ({ page, daemon }) => {
+    await installFileLinkProbe(page, []);
+    const terminal = await openTerminalSession(page, daemon, 's-file-link-miss');
+    await writeTerminalOutput(page, 's-file-link-miss', '[2J[Hmissing/file.go broken');
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-miss') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('missing/file.go');
+
+    await terminal.hover({ position: { x: 55, y: 8 } });
+    await page.keyboard.down('Meta');
+    // Give async validation time to (not) resolve, then confirm no link cursor.
+    await page.waitForTimeout(400);
+    await expect(terminal).toHaveCSS('cursor', 'text');
+    await terminal.click({ position: { x: 55, y: 8 } });
+    await page.keyboard.up('Meta');
+
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
+        ),
+        { timeout: 500 },
+      )
+      .toEqual([]);
   });
 
   test('hit-tests URL clicks against the rendered canvas when it is vertically offset', async ({ page, daemon }) => {

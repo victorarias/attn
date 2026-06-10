@@ -729,6 +729,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   ref={terminalRefForPane(agentPane.id)}
                   fontSize={fontSize}
                   resolvedTheme={resolvedTheme}
+                  cwd={paneSession?.cwd}
                   debugName={`agent:${paneTitle}:${paneSession?.agent ?? 'shell'}:${agentPane.sessionId}`}
                   runtimeLogMeta={{ sessionId: agentPane.sessionId, paneId: agentPane.id, runtimeId: agentPane.runtimeId, paneKind: 'agent', isActivePane: activePaneId === agentPane.id, isActiveSession, paneCount: paneIds.length }}
                   onInput={runtime.handleTerminalInput(agentPane.id)}

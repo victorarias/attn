@@ -8,6 +8,14 @@
   "permissions": [
     "core:default",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        {
+          "path": "$HOME/**"
+        }
+      ]
+    },
     "dialog:default",
     "deep-link:default",
     "fs:default",
@@ -21,10 +29,18 @@
     {
       "identifier": "fs:scope",
       "allow": [
-        { "path": "$HOME/**" },
-        { "path": "$DESKTOP/*" },
-        { "path": "$APPDATA/*" },
-        { "path": "$APPDATA" }
+        {
+          "path": "$HOME/**"
+        },
+        {
+          "path": "$DESKTOP/*"
+        },
+        {
+          "path": "$APPDATA/*"
+        },
+        {
+          "path": "$APPDATA"
+        }
       ]
     }
   ]

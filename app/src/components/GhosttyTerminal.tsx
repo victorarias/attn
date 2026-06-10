@@ -8,7 +8,16 @@ import {
 } from 'react';
 import { Ghostty, InputHandler, CellFlags, type GhosttyCell, type GhosttyTerminal as GhosttyModel } from 'ghostty-web';
 import { ghosttyWasmUrl } from '../ghostty/wasm';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openPath, openUrl } from '@tauri-apps/plugin-opener';
+import { exists } from '@tauri-apps/plugin-fs';
+import { homeDir } from '@tauri-apps/api/path';
+import {
+  fragmentAtColumn,
+  pathCandidatesForFragment,
+  resolveDetectedPath,
+  urlAtColumn,
+  type DetectedTerminalLink,
+} from '../utils/terminalLinks';
 import {
   cleanTerminalLines,
   terminalStyledSelectionToMarkdown,
@@ -64,7 +73,7 @@ import {
 import { installTerminalKeyHandler } from './SessionTerminalWorkspace/terminalKeyHandler';
 import {
   WebGlTerminalRenderer,
-  type WebGlSelection,
+  type WebGlOverlay,
 } from './GhosttyWebGlRenderer';
 import './GhosttyTerminal.css';
 
@@ -72,6 +81,8 @@ interface GhosttyTerminalProps {
   fontSize: number;
   resolvedTheme?: ResolvedTheme;
   debugName: string;
+  // Working directory used to resolve relative file paths detected in output.
+  cwd?: string;
   runtimeLogMeta?: {
     sessionId: string;
     paneId: string;
@@ -123,10 +134,21 @@ interface SelectionRange {
 
 // ghostty-web's low-level model exposes hyperlink IDs but currently returns
 // null for hyperlink URIs, so OSC 8 labels cannot be opened without API work.
-const URL_RE = /\b(?:https?:\/\/|file:\/\/|mailto:|ftp:\/\/|ssh:\/\/|git:\/\/|tel:|magnet:|gemini:\/\/|gopher:\/\/|news:)[^\s<>()]+/g;
 // Ghostty's native renderer resets synchronized-output mode after 1000ms so
 // one bad producer cannot freeze rendering indefinitely.
 const SYNCHRONIZED_OUTPUT_RENDER_TIMEOUT_MS = 1000;
+
+// Hover-time link detection state (Warp's fragment-boundary model): the word
+// fragment under the pointer is analyzed once and cached; pointer movement
+// inside the fragment costs nothing. The generation counter invalidates the
+// cache when content or the viewport shifts under the pointer.
+interface HoverLinkState {
+  generation: number;
+  viewportRow: number;
+  startCol: number;
+  endCol: number;
+  link: DetectedTerminalLink | null;
+}
 
 function isWorkspaceResizeActive(element: HTMLElement | null): boolean {
   if (document.documentElement.dataset.attnWorkspaceResizing === '1') {
@@ -153,14 +175,6 @@ export function fitRequiresTerminalResize(
   return current.cols !== next.cols || current.rows !== next.rows;
 }
 
-function literalUrlAtColumn(line: string, col: number): string | null {
-  for (const match of line.matchAll(URL_RE)) {
-    const start = match.index ?? -1;
-    const uri = match[0].replace(/[.,;:!?]+$/, '');
-    if (col >= start && col < start + uri.length) return uri;
-  }
-  return null;
-}
 
 function wordRangeAtColumn(line: string, col: number): { startCol: number; endCol: number } | null {
   const isWordCharacter = (character: string | undefined) => Boolean(character && /[\w-]/.test(character));
@@ -277,7 +291,7 @@ function cellText(
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
-  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, runtimeLogMeta, onInput, onReady, onResize }, ref) {
+  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, cwd, runtimeLogMeta, onInput, onReady, onResize }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const terminalRef = useRef<GhosttyModel | null>(null);
@@ -296,6 +310,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const trackedMouseButtonRef = useRef<number | null>(null);
     const hoveredCellRef = useRef<{ row: number; col: number } | null>(null);
     const acceleratorHeldRef = useRef(false);
+    const cwdRef = useRef(cwd);
+    const hoverGenerationRef = useRef(0);
+    const hoverLinkRef = useRef<HoverLinkState | null>(null);
+    // undefined = not fetched yet; null = unavailable (non-Tauri host).
+    const homeDirRef = useRef<string | null | undefined>(undefined);
+    const pathExistsCacheRef = useRef(new Map<string, boolean | Promise<boolean>>());
     const writeChainRef = useRef(Promise.resolve());
     const historicalReplayGenerationRef = useRef(0);
     const fitResizeCoalescerRef = useRef<ResizeCoalescer | null>(null);
@@ -329,6 +349,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     onResizeRef.current = onResize;
     runtimeMetaRef.current = runtimeLogMeta;
     debugNameRef.current = debugName;
+    cwdRef.current = cwd;
     // Stable diagnostics key for the per-pane watchdog/probe registries. paneId
     // is stable for a pane's life and correlates with daemon/workspace logs;
     // debugName can change (its agent/title segment is reassigned on relabel).
@@ -356,14 +377,30 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       if (runtimeMetaRef.current && !runtimeMetaRef.current.isActiveSession) return;
       const range = selectionRef.current ? normalizeSelection(selectionRef.current) : null;
       const scrollbackLength = terminal.getScrollbackLength();
-      const overlay: WebGlSelection | null = range ? {
-        startRow: viewportRowFromBufferRow(range.startRow, scrollbackLength, viewportOffsetRef.current),
-        startCol: range.startCol,
-        endRow: viewportRowFromBufferRow(range.endRow, scrollbackLength, viewportOffsetRef.current),
-        endCol: range.endCol,
-        color: getTerminalTheme(resolvedTheme).selectionBackground,
-      } : null;
-      const sample = renderer.render(terminal, force, getViewportCells(), overlay, viewportOffsetRef.current);
+      const overlays: WebGlOverlay[] = [];
+      if (range) {
+        overlays.push({
+          startRow: viewportRowFromBufferRow(range.startRow, scrollbackLength, viewportOffsetRef.current),
+          startCol: range.startCol,
+          endRow: viewportRowFromBufferRow(range.endRow, scrollbackLength, viewportOffsetRef.current),
+          endCol: range.endCol,
+          color: getTerminalTheme(resolvedTheme).selectionBackground,
+          kind: 'background',
+        });
+      }
+      const hover = hoverLinkRef.current;
+      if (hover?.link && hover.generation === hoverGenerationRef.current) {
+        overlays.push({
+          startRow: hover.viewportRow,
+          startCol: hover.link.startCol,
+          endRow: hover.viewportRow,
+          endCol: hover.link.endCol,
+          color: getTerminalTheme(resolvedTheme).foreground,
+          alpha: 0.8,
+          kind: 'underline',
+        });
+      }
+      const sample = renderer.render(terminal, force, getViewportCells(), overlays, viewportOffsetRef.current);
       if (sample) {
         renderCountRef.current += 1;
         lastRenderAtRef.current = Date.now();
@@ -669,6 +706,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           scrollbackBefore,
           terminal.getScrollbackLength(),
         );
+        // Content changed under the pointer: drop the hover-link fragment cache.
+        hoverGenerationRef.current += 1;
         if (viewportOffsetRef.current === 0) {
           wheelRemainderRowsRef.current = 0;
         }
@@ -759,6 +798,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }
         modelSizeRef.current = { cols, rows };
         renderer.resize(cols, rows);
+        hoverGenerationRef.current += 1;
         noteResize(diagKeyRef.current, {
           session: runtimeMetaRef.current?.sessionId ?? undefined,
           paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
@@ -798,6 +838,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       resizeGhosttyWithoutReflow(terminal, dims.cols, dims.rows);
       modelSizeRef.current = dims;
       renderer.resize(dims.cols, dims.rows);
+      hoverGenerationRef.current += 1;
       noteResize(diagKeyRef.current, {
         session, paneKind, source: 'fit', fromCols, fromRows, toCols: dims.cols, toRows: dims.rows,
       });
@@ -848,6 +889,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         if (!terminal) return false;
         viewportOffsetRef.current = terminal.getScrollbackLength();
         wheelRemainderRowsRef.current = 0;
+        hoverGenerationRef.current += 1;
         renderSurface(true);
         return true;
       },
@@ -933,7 +975,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           write,
           resizeLocal,
           reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); void write('\x1bc'); },
-          scrollToTop: () => { viewportOffsetRef.current = terminal.getScrollbackLength(); wheelRemainderRowsRef.current = 0; renderSurface(true); return true; },
+          scrollToTop: () => { viewportOffsetRef.current = terminal.getScrollbackLength(); wheelRemainderRowsRef.current = 0; hoverGenerationRef.current += 1; renderSurface(true); return true; },
           getText,
           getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
           getVisibleContent,
@@ -1069,8 +1111,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const selection = selectionRef.current;
       const containerLine = containerCell ? lineAtVisibleRow(containerCell.row) : '';
       const canvasLine = canvasCell ? lineAtVisibleRow(canvasCell.row) : '';
-      const containerUri = containerCell ? literalUrlAtColumn(containerLine, containerCell.col) : null;
-      const canvasUri = canvasCell ? literalUrlAtColumn(canvasLine, canvasCell.col) : null;
+      const containerUri = containerCell ? urlAtColumn(containerLine, containerCell.col)?.uri ?? null : null;
+      const canvasUri = canvasCell ? urlAtColumn(canvasLine, canvasCell.col)?.uri ?? null : null;
       recordTerminalLinkHitTestEvent({
         event: eventName,
         debugName: debugNameRef.current,
@@ -1154,10 +1196,156 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return 0;
     };
 
+    const hoverLinkAtCell = useCallback((cell: { row: number; col: number } | null): DetectedTerminalLink | null => {
+      const hover = hoverLinkRef.current;
+      if (
+        cell
+        && hover?.link
+        && hover.generation === hoverGenerationRef.current
+        && hover.viewportRow === cell.row
+        && cell.col >= hover.link.startCol
+        && cell.col < hover.link.endCol
+      ) {
+        return hover.link;
+      }
+      return null;
+    }, []);
+
     const updateLinkCursor = useCallback((cell: { row: number; col: number } | null, acceleratorHeld: boolean) => {
-      const uri = cell ? literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col) : null;
-      setLinkCursorActive(Boolean(uri && acceleratorHeld));
-    }, [lineAtVisibleRow]);
+      setLinkCursorActive(Boolean(hoverLinkAtCell(cell) && acceleratorHeld));
+    }, [hoverLinkAtCell]);
+
+    const cachedPathExists = useCallback((absolutePath: string): Promise<boolean> => {
+      const cache = pathExistsCacheRef.current;
+      const cached = cache.get(absolutePath);
+      if (cached !== undefined) return Promise.resolve(cached);
+      if (cache.size > 512) cache.clear();
+      const pending = exists(absolutePath)
+        .catch(() => false)
+        .then((result) => {
+          cache.set(absolutePath, result);
+          return result;
+        });
+      cache.set(absolutePath, pending);
+      return pending;
+    }, []);
+
+    const ensureHomeDir = useCallback(async (): Promise<string | null> => {
+      if (homeDirRef.current === undefined) {
+        try {
+          homeDirRef.current = await homeDir();
+        } catch {
+          homeDirRef.current = null;
+        }
+      }
+      return homeDirRef.current;
+    }, []);
+
+    // Analyze the word fragment under the pointer. Movement inside the cached
+    // fragment exits immediately; URLs resolve synchronously; file paths are
+    // validated asynchronously against the filesystem (results cached).
+    const detectHoverLink = useCallback((cell: { row: number; col: number } | null) => {
+      const generation = hoverGenerationRef.current;
+      const current = hoverLinkRef.current;
+      if (
+        cell
+        && current
+        && current.generation === generation
+        && current.viewportRow === cell.row
+        && cell.col >= current.startCol
+        && cell.col < current.endCol
+      ) {
+        return;
+      }
+      const hadUnderline = Boolean(current?.link && current.generation === generation);
+      const clearHover = () => {
+        hoverLinkRef.current = null;
+        if (hadUnderline) {
+          renderSurface(true);
+          setLinkCursorActive(false);
+        }
+      };
+      if (!cell) {
+        clearHover();
+        return;
+      }
+      const line = lineAtVisibleRow(cell.row);
+      const url = urlAtColumn(line, cell.col);
+      if (url) {
+        hoverLinkRef.current = {
+          generation,
+          viewportRow: cell.row,
+          startCol: url.startCol,
+          endCol: url.endCol,
+          link: { kind: 'url', uri: url.uri, startCol: url.startCol, endCol: url.endCol },
+        };
+        renderSurface(true);
+        updateLinkCursor(cell, acceleratorHeldRef.current);
+        return;
+      }
+      const fragment = fragmentAtColumn(line, cell.col);
+      if (!fragment) {
+        clearHover();
+        return;
+      }
+      const entry: HoverLinkState = {
+        generation,
+        viewportRow: cell.row,
+        startCol: fragment.startCol,
+        endCol: fragment.endCol,
+        link: null,
+      };
+      hoverLinkRef.current = entry;
+      if (hadUnderline) {
+        renderSurface(true);
+        setLinkCursorActive(false);
+      }
+      const candidates = pathCandidatesForFragment(
+        line.slice(fragment.startCol, fragment.endCol),
+        fragment.startCol,
+      );
+      if (candidates.length === 0) return;
+      void (async () => {
+        const home = await ensureHomeDir();
+        for (const candidate of candidates) {
+          const absolutePath = resolveDetectedPath(candidate.path, cwdRef.current, home ?? undefined);
+          if (!absolutePath) continue;
+          if (!(await cachedPathExists(absolutePath))) continue;
+          if (hoverLinkRef.current !== entry || hoverGenerationRef.current !== generation) return;
+          entry.link = {
+            kind: 'path',
+            absolutePath,
+            line: candidate.line,
+            column: candidate.column,
+            startCol: candidate.startCol,
+            endCol: candidate.endCol,
+          };
+          renderSurface(true);
+          updateLinkCursor(hoveredCellRef.current, acceleratorHeldRef.current);
+          return;
+        }
+      })();
+    }, [cachedPathExists, ensureHomeDir, lineAtVisibleRow, renderSurface, updateLinkCursor]);
+
+    // Link under a cell for click handling: prefer the resolved hover state
+    // (paths require it — existence was already validated), fall back to a
+    // synchronous URL scan for clicks that arrive before any hover.
+    const linkAtCell = useCallback((cell: { row: number; col: number } | null): DetectedTerminalLink | null => {
+      const hovered = hoverLinkAtCell(cell);
+      if (hovered) return hovered;
+      if (!cell) return null;
+      const url = urlAtColumn(lineAtVisibleRow(cell.row), cell.col);
+      return url ? { kind: 'url', uri: url.uri, startCol: url.startCol, endCol: url.endCol } : null;
+    }, [hoverLinkAtCell, lineAtVisibleRow]);
+
+    const openLink = useCallback((link: DetectedTerminalLink) => {
+      if (link.kind === 'url' && link.uri) {
+        void openUrl(link.uri);
+      } else if (link.kind === 'path' && link.absolutePath) {
+        void openPath(link.absolutePath);
+      }
+    }, []);
+
 
     useEffect(() => {
       const handleModifierChange = (event: KeyboardEvent) => {
@@ -1236,16 +1424,16 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       selectedTextRef.current = text || null;
       if (text) await writeClipboardText(text);
       const cell = cellFromPointer(event);
-      const uri = cell ? literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col) : null;
+      const link = linkAtCell(cell);
       recordPointerHitTest('mouseup', event, {
         activeCell: cell,
-        activeUri: uri,
-        opensUri: Boolean(uri && !text && (event.metaKey || event.ctrlKey)),
+        activeUri: link ? link.uri ?? link.absolutePath ?? null : null,
+        opensUri: Boolean(link && !text && (event.metaKey || event.ctrlKey)),
         copiedTextLength: text.length,
         phase: 'after-selection',
       });
-      if (uri && !text && (event.metaKey || event.ctrlKey)) {
-        void openUrl(uri);
+      if (link && !text && (event.metaKey || event.ctrlKey)) {
+        openLink(link);
       }
     };
 
@@ -1367,6 +1555,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             scrollbackLength,
             viewportOffsetRef.current - wheel.lines,
           ));
+          if (nextOffset !== viewportOffsetRef.current) {
+            hoverGenerationRef.current += 1;
+          }
           viewportOffsetRef.current = nextOffset;
           if ((nextOffset === 0 && wheel.lines > 0) || (nextOffset === scrollbackLength && wheel.lines < 0)) {
             wheelRemainderRowsRef.current = 0;
@@ -1383,11 +1574,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           const terminal = terminalRef.current;
           const cell = cellFromPointer(event);
           if (!terminal || !cell) return;
-          const uri = literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col);
-          const opensUri = Boolean(uri && (event.metaKey || event.ctrlKey));
+          const link = linkAtCell(cell);
+          const opensUri = Boolean(link && (event.metaKey || event.ctrlKey));
           recordPointerHitTest('mousedown', event, {
             activeCell: cell,
-            activeUri: uri,
+            activeUri: link ? link.uri ?? link.absolutePath ?? null : null,
             opensUri,
             phase: 'before-selection',
           });
@@ -1414,9 +1605,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           const hoveredCell = cellFromPointer(event);
           hoveredCellRef.current = hoveredCell;
           acceleratorHeldRef.current = event.metaKey || event.ctrlKey;
+          detectHoverLink(hoveredCell);
           updateLinkCursor(hoveredCell, acceleratorHeldRef.current);
-          const hoveredLine = hoveredCell ? lineAtVisibleRow(hoveredCell.row) : '';
-          const hoveredUri = hoveredCell ? literalUrlAtColumn(hoveredLine, hoveredCell.col) : null;
+          const hoveredLink = hoverLinkAtCell(hoveredCell);
+          const hoveredUri = hoveredLink ? hoveredLink.uri ?? hoveredLink.absolutePath ?? null : null;
           if (acceleratorHeldRef.current || hoveredUri) {
             recordPointerHitTest('mousemove', event, {
               activeCell: hoveredCell,
@@ -1428,6 +1620,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }}
         onMouseLeave={() => {
           hoveredCellRef.current = null;
+          detectHoverLink(null);
           setLinkCursorActive(false);
         }}
         onMouseUp={(event) => {
