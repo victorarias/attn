@@ -142,6 +142,9 @@ type Daemon struct {
 	pluginExits      map[string]ptybackend.ExitInfo
 	pluginDir        string
 
+	worktreePluginCallTimeout         time.Duration
+	worktreeCreateProviderCallTimeout time.Duration
+
 	loginShellEnvMu sync.RWMutex
 	loginShellEnv   []string
 

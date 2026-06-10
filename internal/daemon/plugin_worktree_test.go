@@ -185,6 +185,52 @@ func TestDoCreateWorktree_ProviderDeclineFallsBackToBuiltInGit(t *testing.T) {
 	}
 }
 
+func TestDispatchWorktreeCreateProvider_UsesCreateProviderTimeout(t *testing.T) {
+	_, mainDir := initProviderTestRepo(t)
+	d := NewForTesting(filepath.Join(t.TempDir(), "attn.sock"))
+
+	if got := d.worktreePluginCallTimeoutDuration(worktreeCreateProviderSurface); got != 2*time.Minute {
+		t.Fatalf("default create provider timeout=%v, want 2m", got)
+	}
+	if got := d.worktreePluginCallTimeoutDuration(worktreeDeleteProviderSurface); got != 30*time.Second {
+		t.Fatalf("default delete provider timeout=%v, want 30s", got)
+	}
+
+	d.worktreePluginCallTimeout = 10 * time.Millisecond
+	d.worktreeCreateProviderCallTimeout = 250 * time.Millisecond
+
+	if got := d.worktreePluginCallTimeoutDuration(worktreeCreateProviderSurface); got != 250*time.Millisecond {
+		t.Fatalf("create provider timeout=%v, want 250ms", got)
+	}
+	if got := d.worktreePluginCallTimeoutDuration(worktreeDeleteProviderSurface); got != 10*time.Millisecond {
+		t.Fatalf("delete provider timeout=%v, want 10ms", got)
+	}
+
+	client, done := startPluginPipe(t, d, "slow-declining-create-provider", []string{worktreeCreateProviderSurface})
+	defer client.Close()
+
+	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
+		time.Sleep(50 * time.Millisecond)
+		return worktreeCreateProviderResult{Status: providerStatusDecline}
+	})
+
+	_, _, handled, err := d.dispatchWorktreeCreateProvider(mainDir, "feat/slow-provider", "", "")
+	if err != nil {
+		t.Fatalf("dispatchWorktreeCreateProvider failed: %v", err)
+	}
+	if handled {
+		t.Fatal("dispatchWorktreeCreateProvider handled=true, want declined provider")
+	}
+	waitForProviderResponse(t, responseDone)
+
+	_ = client.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("slow create provider connection did not close")
+	}
+}
+
 func TestDoCreateWorktree_ProviderHandledPathMustBeRealExpectedWorktree(t *testing.T) {
 	tmpDir, mainDir := initProviderTestRepo(t)
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
