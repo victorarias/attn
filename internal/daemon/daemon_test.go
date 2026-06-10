@@ -2135,7 +2135,109 @@ func TestDaemon_HandleAttachSession_PrefersSegmentedRawReplayForStoredAgentSessi
 	}
 }
 
-func TestDaemon_HandleAttachSession_FallsBackToFreshSnapshotWhenSegmentedCodexReplayExceedsBudget(t *testing.T) {
+func TestDaemon_HandleAttachSession_OverfilledReplayLogRestoresWholeBoundarySafeSegments(t *testing.T) {
+	// Regression for the review finding on #301: ReplayLog used to slice its
+	// oldest retained segment at an arbitrary byte offset when overfilled, so
+	// raw restore could open mid-escape-sequence even though the attach-side
+	// budget pass kept whole segments. Overfill a real log with escape-framed
+	// writes and prove everything served through attach is a whole write.
+	writes := [][]byte{
+		[]byte("\x1b[H\x1b[2J\x1b[31mframe-one: oldest, will be evicted\x1b[0m\r\n"),
+		[]byte("\x1b[H\x1b[2J\x1b[32mframe-two: also history\x1b[0m\r\n"),
+		[]byte("\x1b[H\x1b[2J\x1b[33mframe-three: newest repaint\x1b[0m\r\n"),
+	}
+	logSize := len(writes[1]) + len(writes[2]) + 4 // forces eviction of writes[0]
+	replayLog := pty.NewReplayLog(logSize)
+	for _, w := range writes {
+		replayLog.Write(w, 58, 46)
+	}
+	logSegments, truncated := replayLog.Snapshot()
+	if !truncated {
+		t.Fatal("expected overfilled replay log to report truncation")
+	}
+	for i, segment := range logSegments {
+		if segment.Data[0] != 0x1b {
+			t.Fatalf("retained segment[%d] = %q does not start at a write boundary", i, segment.Data)
+		}
+	}
+
+	segments := make([]ptybackend.ReplaySegment, 0, len(logSegments))
+	for _, segment := range logSegments {
+		segments = append(segments, ptybackend.ReplaySegment{
+			Cols: segment.Cols,
+			Rows: segment.Rows,
+			Data: append([]byte(nil), segment.Data...),
+		})
+	}
+	snapshot, ok := pty.ScreenSnapshotFromReplaySegments(logSegments)
+	if !ok {
+		t.Fatal("expected retained segments to derive a snapshot")
+	}
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeAttachBackend{}
+	backend.SetAttachInfo(ptybackend.AttachInfo{
+		Running:             true,
+		ReplaySegments:      segments,
+		ReplayTruncated:     truncated,
+		Cols:                58,
+		Rows:                46,
+		ScreenSnapshot:      snapshot.Payload,
+		ScreenSnapshotFresh: true,
+		ScreenCols:          snapshot.Cols,
+		ScreenRows:          snapshot.Rows,
+		ScreenCursorX:       snapshot.CursorX,
+		ScreenCursorY:       snapshot.CursorY,
+		ScreenCursorVisible: snapshot.CursorVisible,
+	})
+	d.ptyBackend = backend
+	d.store.Add(&protocol.Session{
+		ID:             "sess-1",
+		Label:          "attn",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      t.TempDir(),
+		State:          protocol.SessionStateIdle,
+		StateSince:     time.Now().UTC().Format(time.RFC3339),
+		StateUpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		LastSeen:       time.Now().UTC().Format(time.RFC3339),
+	})
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
+
+	select {
+	case outbound := <-client.send:
+		var result protocol.AttachResultMessage
+		if err := json.Unmarshal(outbound.payload, &result); err != nil {
+			t.Fatalf("decode attach_result: %v", err)
+		}
+		if !result.Success {
+			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
+		}
+		if len(result.ReplaySegments) != len(writes)-1 {
+			t.Fatalf("replay_segments = %d, want %d", len(result.ReplaySegments), len(writes)-1)
+		}
+		for i, segment := range result.ReplaySegments {
+			decoded, err := base64.StdEncoding.DecodeString(segment.Data)
+			if err != nil {
+				t.Fatalf("decode replay segment %d: %v", i, err)
+			}
+			if !bytes.Equal(decoded, writes[i+1]) {
+				t.Fatalf("served segment[%d] = %q is not the whole original write %q", i, decoded, writes[i+1])
+			}
+		}
+		if !protocol.Deref(result.ScrollbackTruncated) {
+			t.Fatal("expected truncated replay log to surface scrollback_truncated")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for attach_result")
+	}
+}
+
+func TestDaemon_HandleAttachSession_ServesVerifiedClippedSegmentedCodexReplay(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeAttachBackend{}
 
@@ -2180,16 +2282,8 @@ func TestDaemon_HandleAttachSession_FallsBackToFreshSnapshotWhenSegmentedCodexRe
 	if !clipped {
 		t.Fatal("expected segmented replay to exceed the transport budget")
 	}
-	boundedBackend := make([]ptybackend.ReplaySegment, 0, len(bounded))
-	for _, segment := range bounded {
-		boundedBackend = append(boundedBackend, ptybackend.ReplaySegment{
-			Cols: segment.Cols,
-			Rows: segment.Rows,
-			Data: append([]byte(nil), segment.Data...),
-		})
-	}
-	if matches, reason := rawReplaySegmentsMatchFreshSnapshot(boundedBackend, info); !matches {
-		t.Fatalf("expected bounded segmented tail to still match the fresh snapshot, got reason=%s", reason)
+	if len(bounded) != 1 || !bytes.Equal(bounded[0].Data, segments[1].Data) {
+		t.Fatalf("expected whole-segment tail to keep only the newest segment, got %d segments", len(bounded))
 	}
 
 	backend.SetAttachInfo(info)
@@ -2221,21 +2315,24 @@ func TestDaemon_HandleAttachSession_FallsBackToFreshSnapshotWhenSegmentedCodexRe
 		if !result.Success {
 			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
 		}
-		if len(result.ReplaySegments) != 0 {
-			t.Fatalf("replay_segments = %d, want 0", len(result.ReplaySegments))
+		// The clipped tail reproduces the live screen (Codex repaints in full
+		// frames), so it must be served as deep scrollback instead of
+		// degrading the restore to a bare screen snapshot.
+		if len(result.ReplaySegments) != 1 {
+			t.Fatalf("replay_segments = %d, want 1", len(result.ReplaySegments))
 		}
-		if result.Scrollback != nil {
-			t.Fatal("expected clipped segmented Codex replay to omit flat raw replay")
-		}
-		if protocol.Deref(result.ScreenSnapshot) == "" {
-			t.Fatal("expected fresh screen snapshot to remain when segmented replay exceeds budget")
-		}
-		decoded, err := base64.StdEncoding.DecodeString(protocol.Deref(result.ScreenSnapshot))
+		decoded, err := base64.StdEncoding.DecodeString(result.ReplaySegments[0].Data)
 		if err != nil {
-			t.Fatalf("decode screen snapshot: %v", err)
+			t.Fatalf("decode replay segment: %v", err)
 		}
-		if !bytes.Equal(decoded, snapshot.Payload) {
-			t.Fatal("expected attach_result to keep the fresh live snapshot")
+		if !bytes.Equal(decoded, segments[1].Data) {
+			t.Fatal("expected the clipped tail to preserve the newest segment bytes")
+		}
+		if result.ScreenSnapshot != nil {
+			t.Fatal("expected screen snapshot to be omitted when the clipped tail is served")
+		}
+		if !protocol.Deref(result.ScrollbackTruncated) {
+			t.Fatal("expected clipped replay to be marked truncated")
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for attach_result")

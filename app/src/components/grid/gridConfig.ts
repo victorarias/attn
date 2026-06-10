@@ -4,10 +4,10 @@
 // shrinks it per-tile via the baked vertex transform.
 import {
   FONT_FAMILY,
-  TERMINAL_SCROLLBACK_LINES,
+  TERMINAL_SCROLLBACK_BYTES,
 } from '../../utils/terminalSizing';
 
-export { FONT_FAMILY, TERMINAL_SCROLLBACK_LINES };
+export { FONT_FAMILY, TERMINAL_SCROLLBACK_BYTES };
 
 export const FONT_SIZE = 13;
 

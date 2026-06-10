@@ -8,11 +8,17 @@ type ReplaySegment struct {
 	Data []byte
 }
 
+// ReplayLog retains the newest PTY output as whole write segments. Segments
+// are never sliced: every write enters at a safe parse boundary (the read
+// loop only emits boundary-safe chunks), and attach replays the retained
+// segments verbatim, so a partially-kept segment could open the restored
+// terminal mid-escape-sequence or mid-rune.
 type ReplayLog struct {
-	mu    sync.RWMutex
-	size  int
-	total int
-	items []ReplaySegment
+	mu        sync.RWMutex
+	size      int
+	total     int
+	truncated bool
+	items     []ReplaySegment
 }
 
 func NewReplayLog(size int) *ReplayLog {
@@ -31,12 +37,14 @@ func (r *ReplayLog) Write(data []byte, cols, rows uint16) {
 	defer r.mu.Unlock()
 
 	if len(data) >= r.size {
-		r.items = []ReplaySegment{{
-			Cols: cols,
-			Rows: rows,
-			Data: append([]byte(nil), data[len(data)-r.size:]...),
-		}}
-		r.total = r.size
+		// A single write larger than the whole log cannot be retained without
+		// slicing it mid-stream, so drop history rather than keep a segment
+		// with an unsafe start. Attach then derives a screen snapshot instead
+		// of trusting raw replay. The PTY read loop bounds writes far below
+		// any realistic log size, so this is a degenerate-input guard.
+		r.items = nil
+		r.total = 0
+		r.truncated = true
 		return
 	}
 
@@ -55,7 +63,7 @@ func (r *ReplayLog) Snapshot() ([]ReplaySegment, bool) {
 	defer r.mu.RUnlock()
 
 	if len(r.items) == 0 {
-		return nil, false
+		return nil, r.truncated
 	}
 
 	out := make([]ReplaySegment, 0, len(r.items))
@@ -67,25 +75,24 @@ func (r *ReplayLog) Snapshot() ([]ReplaySegment, bool) {
 		})
 	}
 
-	truncated := r.total >= r.size
-	return out, truncated
+	return out, r.truncated
 }
 
+// trimLocked drops whole oldest segments until the log fits its capacity.
+// It never slices a segment (see the ReplayLog doc comment).
 func (r *ReplayLog) trimLocked() {
 	for len(r.items) > 0 && r.total > r.size {
-		excess := r.total - r.size
-		headLen := len(r.items[0].Data)
-		if headLen <= excess {
-			r.total -= headLen
-			r.items = r.items[1:]
-			continue
-		}
-		r.items[0].Data = append([]byte(nil), r.items[0].Data[excess:]...)
-		r.total -= excess
-		break
+		r.total -= len(r.items[0].Data)
+		r.items = r.items[1:]
+		r.truncated = true
 	}
 }
 
+// LimitReplaySegmentsTail keeps the newest whole segments that fit the byte
+// limit. A partially-fitting oldest segment is dropped rather than sliced:
+// every segment starts at a safe parse boundary (the read loop only emits
+// boundary-safe writes), so whole-segment trimming guarantees the replayed
+// tail never opens mid-escape-sequence or mid-rune.
 func LimitReplaySegmentsTail(segments []ReplaySegment, limit int) ([]ReplaySegment, bool) {
 	if len(segments) == 0 {
 		return nil, false
@@ -102,18 +109,12 @@ func LimitReplaySegmentsTail(segments []ReplaySegment, limit int) ([]ReplaySegme
 		return cloneReplaySegments(segments), false
 	}
 
-	remainingTrim := total - limit
+	remaining := total
 	startIndex := 0
 	cloned := cloneReplaySegments(segments)
-	for startIndex < len(cloned) && remainingTrim > 0 {
-		headLen := len(cloned[startIndex].Data)
-		if headLen <= remainingTrim {
-			remainingTrim -= headLen
-			startIndex += 1
-			continue
-		}
-		cloned[startIndex].Data = append([]byte(nil), cloned[startIndex].Data[remainingTrim:]...)
-		remainingTrim = 0
+	for startIndex < len(cloned) && remaining > limit {
+		remaining -= len(cloned[startIndex].Data)
+		startIndex += 1
 	}
 	if startIndex >= len(cloned) {
 		return nil, true
