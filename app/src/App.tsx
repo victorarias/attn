@@ -1571,11 +1571,14 @@ sendFetchPRDetails,
     return workspaceContexts.map((context) => {
       const workspace = workspacesById.get(context.workspace_id);
       const updatedBy = sessionsById.get(context.updated_by_session_id);
+      const updatedByLabel = context.updated_by_session_id === 'attn-janitor'
+        ? 'Attn Janitor'
+        : updatedBy?.label;
       return {
         context,
         title: workspace?.title || context.workspace_id,
         directory: workspace?.directory || 'Workspace no longer registered',
-        updatedByLabel: updatedBy?.label,
+        updatedByLabel,
       };
     });
   }, [daemonSessions, daemonWorkspaces, workspaceContexts]);

@@ -384,6 +384,17 @@ var migrations = []migration{
 		CREATE INDEX IF NOT EXISTS idx_chief_dispatch_messages_target_unread
 			ON chief_of_staff_dispatch_messages(target_session_id, read_at, created_at);
 	`},
+	{47, "create workspace context janitor backups table", `
+		CREATE TABLE IF NOT EXISTS workspace_context_janitor_backups (
+			workspace_id TEXT PRIMARY KEY,
+			source_revision INTEGER NOT NULL,
+			source_content TEXT NOT NULL,
+			result_revision INTEGER NOT NULL,
+			agent TEXT NOT NULL,
+			model TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		);
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

@@ -10,6 +10,17 @@ import (
 )
 
 var ErrWorkspaceContextConflict = errors.New("workspace context revision conflict")
+var ErrWorkspaceContextJanitorBackupNotFound = errors.New("workspace context janitor backup not found")
+
+type WorkspaceContextJanitorBackup struct {
+	WorkspaceID    string
+	SourceRevision int
+	SourceContent  string
+	ResultRevision int
+	Agent          string
+	Model          string
+	CreatedAt      string
+}
 
 // GetWorkspaceContext returns the canonical context. A workspace without
 // context has revision zero and empty content.
@@ -164,11 +175,231 @@ func (s *Store) HasWorkspaceContext(workspaceID string) bool {
 	return s.db.QueryRow(`SELECT 1 FROM workspace_contexts WHERE workspace_id = ?`, workspaceID).Scan(&exists) == nil
 }
 
+// ApplyWorkspaceContextJanitorResult atomically stores the compacted context
+// and the source snapshot needed for direct rollback.
+func (s *Store) ApplyWorkspaceContextJanitorResult(
+	workspaceID string,
+	content string,
+	updatedBySessionID string,
+	expectedRevision int,
+	agent string,
+	model string,
+) (*protocol.WorkspaceContext, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return nil, false, errors.New("workspace context persistence unavailable")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, false, fmt.Errorf("begin workspace context janitor update: %w", err)
+	}
+	defer tx.Rollback()
+
+	var workspaceExists int
+	if err := tx.QueryRow(`SELECT 1 FROM workspaces WHERE id = ?`, workspaceID).Scan(&workspaceExists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, false, fmt.Errorf("workspace not found: %s", workspaceID)
+		}
+		return nil, false, fmt.Errorf("check workspace %s: %w", workspaceID, err)
+	}
+
+	current, err := readWorkspaceContextTx(tx, workspaceID)
+	if err != nil {
+		return nil, false, err
+	}
+	if current.Revision != expectedRevision {
+		return nil, false, fmt.Errorf("%w: expected revision %d, current revision %d", ErrWorkspaceContextConflict, expectedRevision, current.Revision)
+	}
+	if current.Content == content {
+		if err := tx.Commit(); err != nil {
+			return nil, false, fmt.Errorf("commit unchanged workspace context janitor update: %w", err)
+		}
+		return current, false, nil
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	updated := &protocol.WorkspaceContext{
+		WorkspaceID:        workspaceID,
+		Content:            content,
+		Revision:           current.Revision + 1,
+		UpdatedBySessionID: updatedBySessionID,
+		UpdatedAt:          now,
+	}
+	if err := writeWorkspaceContextTx(tx, updated); err != nil {
+		return nil, false, err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO workspace_context_janitor_backups
+			(workspace_id, source_revision, source_content, result_revision, agent, model, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(workspace_id) DO UPDATE SET
+			source_revision = excluded.source_revision,
+			source_content = excluded.source_content,
+			result_revision = excluded.result_revision,
+			agent = excluded.agent,
+			model = excluded.model,
+			created_at = excluded.created_at`,
+		workspaceID,
+		current.Revision,
+		current.Content,
+		updated.Revision,
+		agent,
+		model,
+		now,
+	); err != nil {
+		return nil, false, fmt.Errorf("store workspace context janitor backup %s: %w", workspaceID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, fmt.Errorf("commit workspace context janitor update: %w", err)
+	}
+	return updated, true, nil
+}
+
+func (s *Store) GetWorkspaceContextJanitorBackup(workspaceID string) (*WorkspaceContextJanitorBackup, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, ErrWorkspaceContextJanitorBackupNotFound
+	}
+	var backup WorkspaceContextJanitorBackup
+	err := s.db.QueryRow(`
+		SELECT workspace_id, source_revision, source_content, result_revision,
+			agent, model, created_at
+		FROM workspace_context_janitor_backups
+		WHERE workspace_id = ?`,
+		workspaceID,
+	).Scan(
+		&backup.WorkspaceID,
+		&backup.SourceRevision,
+		&backup.SourceContent,
+		&backup.ResultRevision,
+		&backup.Agent,
+		&backup.Model,
+		&backup.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrWorkspaceContextJanitorBackupNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get workspace context janitor backup %s: %w", workspaceID, err)
+	}
+	return &backup, nil
+}
+
+// RestoreWorkspaceContextJanitorBackup restores only when the compacted
+// revision is still canonical, so later user edits are never overwritten.
+func (s *Store) RestoreWorkspaceContextJanitorBackup(
+	workspaceID string,
+	updatedBySessionID string,
+) (*protocol.WorkspaceContext, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return nil, errors.New("workspace context persistence unavailable")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin workspace context janitor rollback: %w", err)
+	}
+	defer tx.Rollback()
+
+	var backup WorkspaceContextJanitorBackup
+	err = tx.QueryRow(`
+		SELECT workspace_id, source_revision, source_content, result_revision,
+			agent, model, created_at
+		FROM workspace_context_janitor_backups
+		WHERE workspace_id = ?`,
+		workspaceID,
+	).Scan(
+		&backup.WorkspaceID,
+		&backup.SourceRevision,
+		&backup.SourceContent,
+		&backup.ResultRevision,
+		&backup.Agent,
+		&backup.Model,
+		&backup.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrWorkspaceContextJanitorBackupNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read workspace context janitor backup %s: %w", workspaceID, err)
+	}
+	current, err := readWorkspaceContextTx(tx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if current.Revision != backup.ResultRevision {
+		return nil, fmt.Errorf("%w: backup result revision %d, current revision %d", ErrWorkspaceContextConflict, backup.ResultRevision, current.Revision)
+	}
+	updated := &protocol.WorkspaceContext{
+		WorkspaceID:        workspaceID,
+		Content:            backup.SourceContent,
+		Revision:           current.Revision + 1,
+		UpdatedBySessionID: updatedBySessionID,
+		UpdatedAt:          time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if err := writeWorkspaceContextTx(tx, updated); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit workspace context janitor rollback: %w", err)
+	}
+	return updated, nil
+}
+
+func readWorkspaceContextTx(tx *sql.Tx, workspaceID string) (*protocol.WorkspaceContext, error) {
+	var current protocol.WorkspaceContext
+	err := tx.QueryRow(`
+		SELECT workspace_id, content, revision, updated_by_session_id, updated_at
+		FROM workspace_contexts
+		WHERE workspace_id = ?`,
+		workspaceID,
+	).Scan(
+		&current.WorkspaceID,
+		&current.Content,
+		&current.Revision,
+		&current.UpdatedBySessionID,
+		&current.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &protocol.WorkspaceContext{WorkspaceID: workspaceID}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read workspace context %s: %w", workspaceID, err)
+	}
+	return &current, nil
+}
+
+func writeWorkspaceContextTx(tx *sql.Tx, updated *protocol.WorkspaceContext) error {
+	if _, err := tx.Exec(`
+		INSERT INTO workspace_contexts
+			(workspace_id, content, revision, updated_by_session_id, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(workspace_id) DO UPDATE SET
+			content = excluded.content,
+			revision = excluded.revision,
+			updated_by_session_id = excluded.updated_by_session_id,
+			updated_at = excluded.updated_at`,
+		updated.WorkspaceID,
+		updated.Content,
+		updated.Revision,
+		updated.UpdatedBySessionID,
+		updated.UpdatedAt,
+	); err != nil {
+		return fmt.Errorf("write workspace context %s: %w", updated.WorkspaceID, err)
+	}
+	return nil
+}
+
 func (s *Store) RemoveWorkspaceContext(workspaceID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
 		return
 	}
+	_, _ = s.db.Exec(`DELETE FROM workspace_context_janitor_backups WHERE workspace_id = ?`, workspaceID)
 	_, _ = s.db.Exec(`DELETE FROM workspace_contexts WHERE workspace_id = ?`, workspaceID)
 }

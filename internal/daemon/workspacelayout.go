@@ -824,6 +824,7 @@ func (d *Daemon) unregisterWorkspaceIfEmptyAfterMove(workspaceID string) {
 	if !removed {
 		return
 	}
+	d.cancelWorkspaceContextJanitor(workspaceID)
 	d.store.RemoveWorkspace(workspaceID)
 	d.pruneTileContentSubscriptionsForLayout(workspaceID, nil)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{

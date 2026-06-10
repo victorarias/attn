@@ -14,7 +14,9 @@ const (
 	worktreeCreateProviderSurface = "worktree.create"
 	worktreeAfterCreateSurface    = "worktree.after_create"
 	worktreeDeleteProviderSurface = "worktree.delete"
-	worktreePluginCallTimeout     = 30 * time.Second
+
+	defaultWorktreePluginCallTimeout         = 30 * time.Second
+	defaultWorktreeCreateProviderCallTimeout = 2 * time.Minute
 
 	providerStatusHandled = "handled"
 	providerStatusDecline = "decline"
@@ -76,7 +78,7 @@ func (d *Daemon) dispatchWorktreeAfterCreateHooks(mainRepo, path, branch string)
 func (d *Daemon) dispatchWorktreeHooks(surface string, params interface{}) error {
 	handlers := d.ensurePluginRegistry().handlersForSurface(surface)
 	for _, handler := range handlers {
-		ctx, cancel := context.WithTimeout(context.Background(), worktreePluginCallTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), d.worktreePluginCallTimeoutDuration(surface))
 		err := d.callPlugin(ctx, handler.PluginName, surface, params, nil)
 		cancel()
 		if err != nil {
@@ -109,7 +111,7 @@ func (d *Daemon) dispatchWorktreeCreateProvider(mainRepo, branch, startingFrom, 
 
 	for _, provider := range providers {
 		var result worktreeCreateProviderResult
-		ctx, cancel := context.WithTimeout(context.Background(), worktreePluginCallTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), d.worktreePluginCallTimeoutDuration(worktreeCreateProviderSurface))
 		err := d.callPlugin(ctx, provider.PluginName, worktreeCreateProviderSurface, params, &result)
 		cancel()
 		if err != nil {
@@ -156,7 +158,7 @@ func (d *Daemon) dispatchWorktreeDeleteProvider(mainRepo, path, branch string, f
 	}
 	for _, provider := range providers {
 		var result worktreeDeleteProviderResult
-		ctx, cancel := context.WithTimeout(context.Background(), worktreePluginCallTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), d.worktreePluginCallTimeoutDuration(worktreeDeleteProviderSurface))
 		err := d.callPlugin(ctx, provider.PluginName, worktreeDeleteProviderSurface, params, &result)
 		cancel()
 		if err != nil {
@@ -186,6 +188,19 @@ func (d *Daemon) dispatchWorktreeDeleteProvider(mainRepo, path, branch string, f
 
 	d.logf("worktree provider surface=%s status=fallback main_repo=%s path=%s branch=%s", worktreeDeleteProviderSurface, mainRepo, path, branch)
 	return false, nil
+}
+
+func (d *Daemon) worktreePluginCallTimeoutDuration(surface string) time.Duration {
+	if surface == worktreeCreateProviderSurface {
+		if d.worktreeCreateProviderCallTimeout > 0 {
+			return d.worktreeCreateProviderCallTimeout
+		}
+		return defaultWorktreeCreateProviderCallTimeout
+	}
+	if d.worktreePluginCallTimeout > 0 {
+		return d.worktreePluginCallTimeout
+	}
+	return defaultWorktreePluginCallTimeout
 }
 
 func providerOperationError(pluginName, surface, message string) error {

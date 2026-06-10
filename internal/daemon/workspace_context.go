@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -42,30 +43,41 @@ func workspaceContextCheckoutPaths(dataRoot, sessionID string) (string, string) 
 }
 
 func writeWorkspaceContextFile(path string, content []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create workspace context directory: %w", err)
-	}
-	temp, err := os.CreateTemp(filepath.Dir(path), ".context-*.tmp")
+	tempPath, err := stageWorkspaceContextFile(path, content)
 	if err != nil {
-		return fmt.Errorf("create temporary workspace context: %w", err)
+		return err
 	}
-	tempPath := temp.Name()
 	defer os.Remove(tempPath)
-	if err := temp.Chmod(0o600); err != nil {
-		temp.Close()
-		return fmt.Errorf("set workspace context permissions: %w", err)
-	}
-	if _, err := temp.Write(content); err != nil {
-		temp.Close()
-		return fmt.Errorf("write workspace context: %w", err)
-	}
-	if err := temp.Close(); err != nil {
-		return fmt.Errorf("close workspace context: %w", err)
-	}
 	if err := os.Rename(tempPath, path); err != nil {
 		return fmt.Errorf("replace workspace context: %w", err)
 	}
 	return nil
+}
+
+func stageWorkspaceContextFile(path string, content []byte) (string, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", fmt.Errorf("create workspace context directory: %w", err)
+	}
+	temp, err := os.CreateTemp(filepath.Dir(path), ".context-*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("create temporary workspace context: %w", err)
+	}
+	tempPath := temp.Name()
+	if err := temp.Chmod(0o600); err != nil {
+		temp.Close()
+		os.Remove(tempPath)
+		return "", fmt.Errorf("set workspace context permissions: %w", err)
+	}
+	if _, err := temp.Write(content); err != nil {
+		temp.Close()
+		os.Remove(tempPath)
+		return "", fmt.Errorf("write workspace context: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		os.Remove(tempPath)
+		return "", fmt.Errorf("close workspace context: %w", err)
+	}
+	return tempPath, nil
 }
 
 func writeWorkspaceContextMetadata(path string, metadata workspaceContextCheckoutMetadata) error {
@@ -136,6 +148,8 @@ func (d *Daemon) checkoutWorkspaceContext(msg *protocol.WorkspaceContextCheckout
 	if err != nil {
 		return nil, err
 	}
+	d.workspaceContextCheckoutMu.Lock()
+	defer d.workspaceContextCheckoutMu.Unlock()
 	contextPath, metadataPath := workspaceContextCheckoutPaths(d.dataRoot, session.ID)
 	localContent, contentErr := os.ReadFile(contextPath)
 	metadata, metadataErr := readWorkspaceContextMetadata(metadataPath)
@@ -191,6 +205,8 @@ func (d *Daemon) workspaceContextStatus(msg *protocol.WorkspaceContextStatusMess
 	if err != nil {
 		return nil, err
 	}
+	d.workspaceContextCheckoutMu.Lock()
+	defer d.workspaceContextCheckoutMu.Unlock()
 	contextPath, metadataPath := workspaceContextCheckoutPaths(d.dataRoot, session.ID)
 	content, err := os.ReadFile(contextPath)
 	if err != nil {
@@ -214,6 +230,8 @@ func (d *Daemon) updateWorkspaceContext(msg *protocol.WorkspaceContextUpdateMess
 	if err != nil {
 		return nil, false, err
 	}
+	d.workspaceContextCheckoutMu.Lock()
+	defer d.workspaceContextCheckoutMu.Unlock()
 	contextPath, metadataPath := workspaceContextCheckoutPaths(d.dataRoot, session.ID)
 	content, err := os.ReadFile(contextPath)
 	if err != nil {
@@ -249,13 +267,8 @@ func (d *Daemon) updateWorkspaceContext(msg *protocol.WorkspaceContextUpdateMess
 	}
 	result := workspaceContextResult(session, canonical, contextPath, metadata, content)
 	if changed {
-		d.broadcastMessage(protocol.WorkspaceContextChangedMessage{
-			Event:              protocol.EventWorkspaceContextChanged,
-			WorkspaceID:        canonical.WorkspaceID,
-			Revision:           canonical.Revision,
-			UpdatedBySessionID: canonical.UpdatedBySessionID,
-			UpdatedAt:          canonical.UpdatedAt,
-		})
+		d.broadcastWorkspaceContextChanged(canonical)
+		d.scheduleWorkspaceContextJanitor(canonical)
 	}
 	return result, changed, nil
 }
@@ -287,6 +300,16 @@ func (d *Daemon) handleWorkspaceContextList(conn net.Conn) {
 	})
 }
 
+func (d *Daemon) handleWorkspaceContextCompact(conn net.Conn, msg *protocol.WorkspaceContextCompactMessage) {
+	result, err := d.compactWorkspaceContextForSession(context.Background(), msg.SourceSessionID)
+	d.sendWorkspaceContextMaintenanceResponse(conn, result, err)
+}
+
+func (d *Daemon) handleWorkspaceContextRollback(conn net.Conn, msg *protocol.WorkspaceContextRollbackMessage) {
+	result, err := d.rollbackWorkspaceContextForSession(msg.SourceSessionID)
+	d.sendWorkspaceContextMaintenanceResponse(conn, result, err)
+}
+
 func (d *Daemon) sendWorkspaceContextResponse(conn net.Conn, result *protocol.WorkspaceContextResult, err error) {
 	if err != nil {
 		d.sendError(conn, "workspace context: "+err.Error())
@@ -295,6 +318,21 @@ func (d *Daemon) sendWorkspaceContextResponse(conn net.Conn, result *protocol.Wo
 	_ = json.NewEncoder(conn).Encode(protocol.Response{
 		Ok:                     true,
 		WorkspaceContextResult: result,
+	})
+}
+
+func (d *Daemon) sendWorkspaceContextMaintenanceResponse(
+	conn net.Conn,
+	result *protocol.WorkspaceContextMaintenanceResult,
+	err error,
+) {
+	if err != nil {
+		d.sendError(conn, "workspace context: "+err.Error())
+		return
+	}
+	_ = json.NewEncoder(conn).Encode(protocol.Response{
+		Ok:                                true,
+		WorkspaceContextMaintenanceResult: result,
 	})
 }
 

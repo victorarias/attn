@@ -8,13 +8,18 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-06-10]
 
+### Added
+- **Large workspace contexts can compact themselves.** Choose Codex or Claude and a recommended model preset in Settings, or enter a custom model, to let attn occasionally summarize contexts above 12 KiB after a quiet period. Claude can use normal OAuth, keychain, or organization-managed authentication without loading user or project customizations. Compaction runs without an interactive session, leaves existing working copies stale for the normal refresh/conflict workflow, publishes only against the revision it read, and keeps the latest pre-compaction version available through `attn workspace context rollback`. Use `attn workspace context compact` to run it immediately.
+
 ### Changed
 - **Terminals keep much more scrollback.** Live panes now hold roughly 8× more history, and switching back to a workspace (or restarting the app) restores up to 8 MB of terminal history instead of just the visible screen. This especially helps Codex sessions, which rely on the terminal's own scrollback and previously came back from a restart with no history at all.
+- **Workspace context now describes an area of work instead of one goal.** New agents orient from a required Area and Current Picture, optional semantic Threads, and a small sourced Timeline of turning points, so related goals and the story connecting them can coexist without treating sessions as tasks.
 - **Heavy terminal output uses much less memory.** Sustained output (long builds, tests, log floods) is now batched into far fewer, larger messages on its way to the app, cutting the app's memory growth during heavy streaming by roughly 40% and reducing CPU overhead. Typing and interactive prompts are unaffected — keystroke echo still arrives immediately.
 - **Streaming terminal output is cheaper.** Live terminal output now travels from the daemon to the app as compact binary messages instead of base64-encoded JSON, cutting per-chunk encode/decode work and message size by a third. This lowers CPU and bandwidth during sustained heavy output (busy agents, long builds) and modestly reduces the app's memory high-water.
 
 ### Fixed
 - **Delegated worktrees stay in the current workspace by default.** `attn delegate --worktree` now controls branch isolation independently from workspace placement; add `--new-workspace` when the delegated session should also get a separate workspace.
+- **Provider-managed worktree creation has more time to finish.** Worktree providers now get up to two minutes to create and bootstrap worktrees in large repositories, avoiding false timeout failures after the provider has already created the worktree. Hooks and worktree deletion keep their existing 30-second deadline.
 
 ---
 
