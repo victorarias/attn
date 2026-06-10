@@ -19,7 +19,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Streaming terminal output is cheaper.** Live terminal output now travels from the daemon to the app as compact binary messages instead of base64-encoded JSON, cutting per-chunk encode/decode work and message size by a third. This lowers CPU and bandwidth during sustained heavy output (busy agents, long builds) and modestly reduces the app's memory high-water.
 
 ### Fixed
-- **Tour briefings and reviews are easier to use.** Briefing text now uses a larger reading size, Mermaid diagrams get a roomy scrollable canvas with zoom controls, typing or receiving updates no longer knocks the diff back to another position, and the primary Tour header now exposes review submission without requiring the conversation drawer to be open.
+- **Tour briefings and reviews are easier to use.** Briefing text now uses a larger reading size, Mermaid diagrams get a roomy scrollable canvas with zoom controls, the Tour uses one stable diff viewport so typing or receiving updates cannot knock the code back to another position, and the primary Tour header exposes review submission without requiring the conversation drawer to be open.
 - **Provider-managed worktree creation has more time to finish.** Worktree providers now get up to two minutes to create and bootstrap worktrees in large repositories, avoiding false timeout failures after the provider has already created the worktree. Hooks and worktree deletion keep their existing 30-second deadline.
 
 ---

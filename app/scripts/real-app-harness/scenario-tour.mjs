@@ -141,6 +141,21 @@ async function main() {
 
   const { runId, runDir, sessionDir } = createRunContext(options, 'tour');
   const { repoDir } = buildDiffFixtureRepo(sessionDir);
+  fs.writeFileSync(
+    path.join(repoDir, 'src/app.ts'),
+    [
+      'export function main(name: string): string {',
+      '  return `Hello, ${name}!`;',
+      '}',
+      '',
+      ...Array.from(
+        { length: 180 },
+        (_, index) => `export const tour_value_${String(index).padStart(3, '0')} = ${index};`,
+      ),
+      '',
+    ].join('\n'),
+    'utf8',
+  );
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   const profile = profileForAppPath(options.appPath);
@@ -298,6 +313,14 @@ skip:
       'Tour briefing to close onto the reading workspace',
     );
     assert(readingState.selectedFile === 'src/app.ts', 'reading workspace keeps the selected file');
+    assert(
+      readingState.diffScrollRange > 500,
+      `Tour diff owns a substantial scroll range (got ${readingState.diffScrollRange})`,
+    );
+    assert(
+      readingState.mainScrollRange <= 1,
+      `outer reading column does not compete for diff scrolling (got ${readingState.mainScrollRange})`,
+    );
 
     await client.request('tour_toggle_conversation');
     const conversationState = await pollFor(
@@ -310,7 +333,13 @@ skip:
     assert(conversationState.conversationText.includes('No questions yet.'), 'empty conversation state rendered on demand');
 
     const pendingNote = 'Please verify the packaged pending-note path.';
-    await client.request('tour_set_file_note', { note: pendingNote });
+    const scrolledState = await client.request('tour_scroll_diff', { top: 900 });
+    assert(scrolledState.diffScrollTop > 500, `Tour diff can scroll deeply (got ${scrolledState.diffScrollTop})`);
+    const typedState = await client.request('tour_type_file_note', { note: pendingNote });
+    assert(
+      typedState.scrollSamples.every((top) => Math.abs(top - scrolledState.diffScrollTop) <= 1),
+      `typing feedback keeps the packaged diff anchored (got ${JSON.stringify(typedState.scrollSamples)})`,
+    );
     const feedbackReady = waitForTourEvent(listener, 'FEEDBACK_READY ');
     await client.request('tour_send_review');
     const feedbackLine = await feedbackReady;

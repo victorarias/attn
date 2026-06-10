@@ -47,6 +47,7 @@ const MERMAID_ZOOM_STEP = 0.25;
 const MERMAID_ZOOM_MIN = 0.75;
 const MERMAID_ZOOM_MAX = 3;
 let mermaidRenderQueue = Promise.resolve();
+const noop = () => {};
 
 function briefingWasSeen(tourId: string): boolean {
   try {
@@ -497,6 +498,14 @@ export function TourPanel({
     void persistDraft({ ...draft, annotation_replies: replies });
   };
 
+  const addLineComment = useCallback((lineStart: number, _lineEnd: number, content: string) => {
+    const currentDraft = draftRef.current;
+    return persistDraft({
+      ...currentDraft,
+      line_comments: [...currentDraft.line_comments, { line: lineStart, body: content }],
+    });
+  }, [persistDraft]);
+
   const draftWithPendingInputs = useCallback((): DaemonTourDraft => {
     const currentDraft = draftRef.current;
     if (!selectedFile) return currentDraft;
@@ -786,7 +795,7 @@ export function TourPanel({
 
               <section className="tour-panel__lens">
                 <div className="tour-panel__lens-mark" aria-hidden="true">L</div>
-                <div>
+                <div className="tour-panel__lens-content">
                   <div className="tour-panel__section-kicker">Reading lens</div>
                   {selectedFile.note ? (
                     <TourMarkdown resolvedTheme={resolvedTheme} uiScale={uiScale}>
@@ -825,15 +834,12 @@ export function TourPanel({
                     fontSize={13 * uiScale}
                     diffStyle="unified"
                     expandUnchanged={false}
-                    onAddComment={(lineStart, _lineEnd, content) => persistDraft({
-                      ...draft,
-                      line_comments: [...draft.line_comments, { line: lineStart, body: content }],
-                    })}
-                    onEditComment={() => {}}
-                    onStartEdit={() => {}}
-                    onCancelEdit={() => {}}
-                    onResolveComment={() => {}}
-                    onDeleteComment={() => {}}
+                    onAddComment={addLineComment}
+                    onEditComment={noop}
+                    onStartEdit={noop}
+                    onCancelEdit={noop}
+                    onResolveComment={noop}
+                    onDeleteComment={noop}
                   />
                 )}
               </div>

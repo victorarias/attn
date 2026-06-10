@@ -1271,6 +1271,8 @@ function collectDiffReviewUiState() {
 
 function collectTourUiState() {
   const tour = document.querySelector('.tour-panel');
+  const main = tour?.querySelector('.tour-panel__main');
+  const diffScroller = tour?.querySelector('.diff-view-scroller');
   const briefingMarkdown = tour?.querySelector('.tour-panel__briefing-content .tour-markdown');
   const diagramViewport = tour?.querySelector('.tour-panel__mermaid-viewport');
   const reviewButton = tour?.querySelector<HTMLButtonElement>(
@@ -1316,6 +1318,10 @@ function collectTourUiState() {
     conversationText: tour?.querySelector('.tour-panel__transcript')?.textContent?.trim() || '',
     errorText: tour?.querySelector('.tour-panel__error')?.textContent?.trim() || '',
     panelBounds: rectSnapshot(tour),
+    mainScrollTop: main?.scrollTop || 0,
+    mainScrollRange: main ? main.scrollHeight - main.clientHeight : 0,
+    diffScrollTop: diffScroller?.scrollTop || 0,
+    diffScrollRange: diffScroller ? diffScroller.scrollHeight - diffScroller.clientHeight : 0,
     viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
   };
@@ -2215,6 +2221,34 @@ export function useUiAutomationBridge({
           throw new Error('Tour file feedback textarea is not open');
         }
         setTextAreaValue(textarea, note);
+        await settleUi(2);
+        return collectTourUiState();
+      }
+      case 'tour_type_file_note': {
+        const note = typeof payload.note === 'string' ? payload.note : '';
+        const textarea = document.querySelector<HTMLTextAreaElement>(
+          '.tour-panel__notes textarea[placeholder="Feedback on this file"]',
+        );
+        if (!textarea) {
+          throw new Error('Tour file feedback textarea is not open');
+        }
+        textarea.focus();
+        const scrollSamples: number[] = [];
+        for (const character of note) {
+          setTextAreaValue(textarea, `${textarea.value}${character}`);
+          await settleUi(1);
+          scrollSamples.push(collectTourUiState().diffScrollTop);
+        }
+        return { ...collectTourUiState(), scrollSamples };
+      }
+      case 'tour_scroll_diff': {
+        const scroller = document.querySelector<HTMLElement>('.tour-panel .diff-view-scroller');
+        if (!scroller) {
+          throw new Error('Tour diff scroller is not available');
+        }
+        const requestedTop = typeof payload.top === 'number' ? payload.top : 0;
+        scroller.scrollTop = Math.max(0, Math.min(requestedTop, scroller.scrollHeight - scroller.clientHeight));
+        scroller.dispatchEvent(new Event('scroll'));
         await settleUi(2);
         return collectTourUiState();
       }

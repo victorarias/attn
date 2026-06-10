@@ -10,6 +10,7 @@ import { DiffViewHarness } from './DiffViewHarness';
 import { GridLayoutControlHarness } from './GridLayoutControlHarness';
 import { GridViewHarness } from './GridViewHarness';
 import { SessionReviewLoopBarHarness } from './SessionReviewLoopBarHarness';
+import { TourPanelHarness } from './TourPanelHarness';
 
 export const harnesses: Record<string, React.ComponentType<HarnessProps>> = {
   DashboardPRs: DashboardPRsHarness,
@@ -18,4 +19,5 @@ export const harnesses: Record<string, React.ComponentType<HarnessProps>> = {
   GridLayoutControl: GridLayoutControlHarness,
   GridView: GridViewHarness,
   SessionReviewLoopBar: SessionReviewLoopBarHarness,
+  TourPanel: TourPanelHarness,
 };
