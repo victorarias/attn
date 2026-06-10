@@ -164,6 +164,22 @@ type Daemon struct {
 
 	browserControlMu sync.Mutex
 	browserControl   map[string]browserControlPending
+
+	workspaceContextCheckoutMu sync.Mutex
+
+	workspaceContextJanitorMu              sync.Mutex
+	workspaceContextJanitorTimers          map[string]*workspaceContextJanitorTimer
+	workspaceContextJanitorRunning         bool
+	workspaceContextJanitorActiveWorkspace string
+	workspaceContextJanitorCancel          context.CancelFunc
+	workspaceContextJanitorDone            chan struct{}
+	workspaceContextJanitorCanceled        bool
+	workspaceContextJanitorCommitting      bool
+	workspaceContextJanitorExecutor        workspaceContextJanitorExecutor
+	workspaceContextJanitorThreshold       int
+	workspaceContextJanitorDebounce        time.Duration
+	workspaceContextJanitorTimeout         time.Duration
+	workspaceContextBeforeJanitorApply     func()
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -1137,6 +1153,7 @@ func sessionStateFromRecoveredInfo(info ptybackend.SessionInfo) protocol.Session
 func (d *Daemon) Stop() {
 	d.log("daemon stopping")
 	close(d.done)
+	d.stopWorkspaceContextJanitor()
 	if d.hubManager != nil {
 		d.hubManager.Stop()
 	}
@@ -1687,6 +1704,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleWorkspaceContextStatus(conn, msg.(*protocol.WorkspaceContextStatusMessage))
 	case protocol.CmdWorkspaceContextList:
 		d.handleWorkspaceContextList(conn)
+	case protocol.CmdWorkspaceContextCompact:
+		d.handleWorkspaceContextCompact(conn, msg.(*protocol.WorkspaceContextCompactMessage))
+	case protocol.CmdWorkspaceContextRollback:
+		d.handleWorkspaceContextRollback(conn, msg.(*protocol.WorkspaceContextRollbackMessage))
 	case protocol.CmdUnregister:
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:

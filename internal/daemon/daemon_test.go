@@ -4089,6 +4089,9 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"custom review_loop_model", "review_loop_model", "claude-opus-4-6", false},
 		{"empty reviewer_model", "reviewer_model", "", false},
 		{"custom reviewer_model", "reviewer_model", "claude-sonnet-4-6", false},
+		{"empty workspace context janitor", "workspace_context_janitor", "", false},
+		{"invalid workspace context janitor json", "workspace_context_janitor", "{", true},
+		{"incomplete workspace context janitor", "workspace_context_janitor", `{"agent":"codex"}`, true},
 		{"valid tailscale_enabled true", "tailscale_enabled", "true", false},
 		{"valid tailscale_enabled false", "tailscale_enabled", "false", false},
 		{"invalid claude_executable", "claude_executable", "not-a-real-binary-123", true},
@@ -4106,6 +4109,32 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 				t.Errorf("validateSetting(%q, %q) error = %v, wantErr %v", tt.key, tt.value, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestDaemon_ValidatesWorkspaceContextJanitorAgentAndExecutable(t *testing.T) {
+	tempDir := t.TempDir()
+	executable := filepath.Join(tempDir, "custom-codex")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", tempDir)
+
+	d := &Daemon{store: store.New()}
+	d.store.SetSetting(SettingCodexExecutable, "custom-codex")
+	if err := d.validateSetting(
+		SettingWorkspaceContextJanitor,
+		`{"agent":"codex","model":"gpt-test"}`,
+	); err != nil {
+		t.Fatalf("valid janitor setting rejected: %v", err)
+	}
+
+	d.store.SetSetting(SettingCodexExecutable, "missing-codex")
+	if err := d.validateSetting(
+		SettingWorkspaceContextJanitor,
+		`{"agent":"codex","model":"gpt-test"}`,
+	); err == nil {
+		t.Fatal("janitor setting accepted a missing configured executable")
 	}
 }
 
@@ -4135,6 +4164,12 @@ func TestDaemon_SettingsWithAgentAvailability(t *testing.T) {
 	}
 	if got := settings["codex_cap_transcript"]; got != "true" {
 		t.Fatalf("settings[codex_cap_transcript] = %v, want true", got)
+	}
+	if got := settings["codex_cap_headless_task"]; got != "true" {
+		t.Fatalf("settings[codex_cap_headless_task] = %v, want true", got)
+	}
+	if got := settings["copilot_cap_headless_task"]; got != "false" {
+		t.Fatalf("settings[copilot_cap_headless_task] = %v, want false", got)
 	}
 	if got := settings[SettingPTYBackendMode]; got != "unknown" {
 		t.Fatalf("settings[%s] = %v, want unknown", SettingPTYBackendMode, got)

@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchMessagesMessage, ListDispatchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, OpenBrowserMessage, OpenMarkdownMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReportDispatchMessage, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchMessagesMessage, ListDispatchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, OpenBrowserMessage, OpenMarkdownMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReportDispatchMessage, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockPanelMessage, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockPanelMessage, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspacePanelContentGetMessage, WorkspacePanelContentMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const acknowledgeDispatchMessage = Convert.toAcknowledgeDispatchMessage(json);
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
@@ -211,10 +211,14 @@
 //   const workspaceContext = Convert.toWorkspaceContext(json);
 //   const workspaceContextChangedMessage = Convert.toWorkspaceContextChangedMessage(json);
 //   const workspaceContextCheckoutMessage = Convert.toWorkspaceContextCheckoutMessage(json);
+//   const workspaceContextCompactMessage = Convert.toWorkspaceContextCompactMessage(json);
 //   const workspaceContextListMessage = Convert.toWorkspaceContextListMessage(json);
 //   const workspaceContextListResultMessage = Convert.toWorkspaceContextListResultMessage(json);
+//   const workspaceContextMaintenanceAction = Convert.toWorkspaceContextMaintenanceAction(json);
+//   const workspaceContextMaintenanceResult = Convert.toWorkspaceContextMaintenanceResult(json);
 //   const workspaceContextResult = Convert.toWorkspaceContextResult(json);
 //   const workspaceContextResultMessage = Convert.toWorkspaceContextResultMessage(json);
+//   const workspaceContextRollbackMessage = Convert.toWorkspaceContextRollbackMessage(json);
 //   const workspaceContextStatusMessage = Convert.toWorkspaceContextStatusMessage(json);
 //   const workspaceContextUpdateMessage = Convert.toWorkspaceContextUpdateMessage(json);
 //   const workspaceLayout = Convert.toWorkspaceLayout(json);
@@ -222,6 +226,7 @@
 //   const workspaceLayoutAddSessionPaneMessage = Convert.toWorkspaceLayoutAddSessionPaneMessage(json);
 //   const workspaceLayoutClosePaneMessage = Convert.toWorkspaceLayoutClosePaneMessage(json);
 //   const workspaceLayoutDockEdge = Convert.toWorkspaceLayoutDockEdge(json);
+//   const workspaceLayoutDockPanelMessage = Convert.toWorkspaceLayoutDockPanelMessage(json);
 //   const workspaceLayoutDockTileMessage = Convert.toWorkspaceLayoutDockTileMessage(json);
 //   const workspaceLayoutFocusPaneMessage = Convert.toWorkspaceLayoutFocusPaneMessage(json);
 //   const workspaceLayoutGetMessage = Convert.toWorkspaceLayoutGetMessage(json);
@@ -234,9 +239,12 @@
 //   const workspaceLayoutRenamePaneMessage = Convert.toWorkspaceLayoutRenamePaneMessage(json);
 //   const workspaceLayoutSetSplitRatioMessage = Convert.toWorkspaceLayoutSetSplitRatioMessage(json);
 //   const workspaceLayoutSplitDirection = Convert.toWorkspaceLayoutSplitDirection(json);
+//   const workspaceLayoutUndockPanelMessage = Convert.toWorkspaceLayoutUndockPanelMessage(json);
 //   const workspaceLayoutUndockTileMessage = Convert.toWorkspaceLayoutUndockTileMessage(json);
 //   const workspaceLayoutUpdateTileMessage = Convert.toWorkspaceLayoutUpdateTileMessage(json);
 //   const workspaceLayoutUpdatedMessage = Convert.toWorkspaceLayoutUpdatedMessage(json);
+//   const workspacePanelContentGetMessage = Convert.toWorkspacePanelContentGetMessage(json);
+//   const workspacePanelContentMessage = Convert.toWorkspacePanelContentMessage(json);
 //   const workspaceRegisteredMessage = Convert.toWorkspaceRegisteredMessage(json);
 //   const workspaceSelectedMessage = Convert.toWorkspaceSelectedMessage(json);
 //   const workspaceStateChangedMessage = Convert.toWorkspaceStateChangedMessage(json);
@@ -2420,21 +2428,22 @@ export enum ResolveDispatchRequestMessageCmd {
 }
 
 export interface Response {
-    authors?:                   AuthorElement[];
-    chief_of_staff_dispatch?:   ChiefOfStaffDispatchElement;
-    chief_of_staff_dispatches?: ChiefOfStaffDispatchElement[];
-    data?:                      string;
-    delegate_result?:           DelegateResultObject;
-    dispatch_message?:          DispatchMessageObject;
-    dispatch_messages?:         DispatchMessageObject[];
-    error?:                     string;
-    ok:                         boolean;
-    prs?:                       PRElement[];
-    repos?:                     RepoElement[];
-    review_loop_run?:           ReviewLoopRunObject;
-    sessions?:                  SessionElement[];
-    workspace_context_result?:  WorkspaceContextResultObject;
-    workspace_contexts?:        WorkspaceContextElement[];
+    authors?:                              AuthorElement[];
+    chief_of_staff_dispatch?:              ChiefOfStaffDispatchElement;
+    chief_of_staff_dispatches?:            ChiefOfStaffDispatchElement[];
+    data?:                                 string;
+    delegate_result?:                      DelegateResultObject;
+    dispatch_message?:                     DispatchMessageObject;
+    dispatch_messages?:                    DispatchMessageObject[];
+    error?:                                string;
+    ok:                                    boolean;
+    prs?:                                  PRElement[];
+    repos?:                                RepoElement[];
+    review_loop_run?:                      ReviewLoopRunObject;
+    sessions?:                             SessionElement[];
+    workspace_context_maintenance_result?: WorkspaceContextMaintenanceResultObject;
+    workspace_context_result?:             WorkspaceContextResultObject;
+    workspace_contexts?:                   WorkspaceContextElement[];
     [property: string]: any;
 }
 
@@ -2538,6 +2547,22 @@ export enum ReviewLoopRunStatus {
     Error = "error",
     Running = "running",
     Stopped = "stopped",
+}
+
+export interface WorkspaceContextMaintenanceResultObject {
+    action:          WorkspaceContextMaintenanceAction;
+    agent?:          string;
+    agent_model?:    string;
+    changed:         boolean;
+    result_revision: number;
+    source_revision: number;
+    workspace_id:    string;
+    [property: string]: any;
+}
+
+export enum WorkspaceContextMaintenanceAction {
+    Compact = "compact",
+    Rollback = "rollback",
 }
 
 export interface WorkspaceContextResultObject {
@@ -3213,6 +3238,16 @@ export enum WorkspaceContextCheckoutMessageCmd {
     WorkspaceContextCheckout = "workspace_context_checkout",
 }
 
+export interface WorkspaceContextCompactMessage {
+    cmd:               WorkspaceContextCompactMessageCmd;
+    source_session_id: string;
+    [property: string]: any;
+}
+
+export enum WorkspaceContextCompactMessageCmd {
+    WorkspaceContextCompact = "workspace_context_compact",
+}
+
 export interface WorkspaceContextListMessage {
     cmd:        WorkspaceContextListMessageCmd;
     request_id: string;
@@ -3234,6 +3269,17 @@ export interface WorkspaceContextListResultMessage {
 
 export enum WorkspaceContextListResultMessageEvent {
     WorkspaceContextListResult = "workspace_context_list_result",
+}
+
+export interface WorkspaceContextMaintenanceResult {
+    action:          WorkspaceContextMaintenanceAction;
+    agent?:          string;
+    agent_model?:    string;
+    changed:         boolean;
+    result_revision: number;
+    source_revision: number;
+    workspace_id:    string;
+    [property: string]: any;
 }
 
 export interface WorkspaceContextResult {
@@ -3260,6 +3306,16 @@ export interface WorkspaceContextResultMessage {
 
 export enum WorkspaceContextResultMessageEvent {
     WorkspaceContextResult = "workspace_context_result",
+}
+
+export interface WorkspaceContextRollbackMessage {
+    cmd:               WorkspaceContextRollbackMessageCmd;
+    source_session_id: string;
+    [property: string]: any;
+}
+
+export enum WorkspaceContextRollbackMessageCmd {
+    WorkspaceContextRollback = "workspace_context_rollback",
 }
 
 export interface WorkspaceContextStatusMessage {
@@ -3343,6 +3399,28 @@ export enum WorkspaceLayoutClosePaneMessageCmd {
     WorkspaceLayoutClosePane = "workspace_layout_close_pane",
 }
 
+export interface WorkspaceLayoutDockPanelMessage {
+    anchor_pane_id: string;
+    cmd:            WorkspaceLayoutDockPanelMessageCmd;
+    edge:           WorkspaceLayoutDockEdge;
+    panel_id:       string;
+    panel_kind:     string;
+    ratio?:         number;
+    workspace_id:   string;
+    [property: string]: any;
+}
+
+export enum WorkspaceLayoutDockPanelMessageCmd {
+    WorkspaceLayoutDockPanel = "workspace_layout_dock_panel",
+}
+
+export enum WorkspaceLayoutDockEdge {
+    Bottom = "bottom",
+    Left = "left",
+    Right = "right",
+    Top = "top",
+}
+
 export interface WorkspaceLayoutDockTileMessage {
     anchor_pane_id: string;
     cmd:            WorkspaceLayoutDockTileMessageCmd;
@@ -3356,13 +3434,6 @@ export interface WorkspaceLayoutDockTileMessage {
 
 export enum WorkspaceLayoutDockTileMessageCmd {
     WorkspaceLayoutDockTile = "workspace_layout_dock_tile",
-}
-
-export enum WorkspaceLayoutDockEdge {
-    Bottom = "bottom",
-    Left = "left",
-    Right = "right",
-    Top = "top",
 }
 
 export interface WorkspaceLayoutFocusPaneMessage {
@@ -3462,6 +3533,17 @@ export enum WorkspaceLayoutSetSplitRatioMessageCmd {
     WorkspaceLayoutSetSplitRatio = "workspace_layout_set_split_ratio",
 }
 
+export interface WorkspaceLayoutUndockPanelMessage {
+    cmd:          WorkspaceLayoutUndockPanelMessageCmd;
+    panel_id:     string;
+    workspace_id: string;
+    [property: string]: any;
+}
+
+export enum WorkspaceLayoutUndockPanelMessageCmd {
+    WorkspaceLayoutUndockPanel = "workspace_layout_undock_panel",
+}
+
 export interface WorkspaceLayoutUndockTileMessage {
     cmd:          WorkspaceLayoutUndockTileMessageCmd;
     tile_id:      string;
@@ -3494,6 +3576,32 @@ export interface WorkspaceLayoutUpdatedMessage {
 
 export enum WorkspaceLayoutUpdatedMessageEvent {
     WorkspaceLayoutUpdated = "workspace_layout_updated",
+}
+
+export interface WorkspacePanelContentGetMessage {
+    cmd:          WorkspacePanelContentGetMessageCmd;
+    panel_id:     string;
+    workspace_id: string;
+    [property: string]: any;
+}
+
+export enum WorkspacePanelContentGetMessageCmd {
+    WorkspacePanelContentGet = "workspace_panel_content_get",
+}
+
+export interface WorkspacePanelContentMessage {
+    content:      string;
+    error?:       string;
+    event:        WorkspacePanelContentMessageEvent;
+    panel_id:     string;
+    panel_kind:   string;
+    path:         string;
+    workspace_id: string;
+    [property: string]: any;
+}
+
+export enum WorkspacePanelContentMessageEvent {
+    WorkspacePanelContent = "workspace_panel_content",
 }
 
 export interface WorkspaceRegisteredMessage {
@@ -5275,6 +5383,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("WorkspaceContextCheckoutMessage")), null, 2);
     }
 
+    public static toWorkspaceContextCompactMessage(json: string): WorkspaceContextCompactMessage {
+        return cast(JSON.parse(json), r("WorkspaceContextCompactMessage"));
+    }
+
+    public static workspaceContextCompactMessageToJson(value: WorkspaceContextCompactMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceContextCompactMessage")), null, 2);
+    }
+
     public static toWorkspaceContextListMessage(json: string): WorkspaceContextListMessage {
         return cast(JSON.parse(json), r("WorkspaceContextListMessage"));
     }
@@ -5291,6 +5407,22 @@ export class Convert {
         return JSON.stringify(uncast(value, r("WorkspaceContextListResultMessage")), null, 2);
     }
 
+    public static toWorkspaceContextMaintenanceAction(json: string): WorkspaceContextMaintenanceAction {
+        return cast(JSON.parse(json), r("WorkspaceContextMaintenanceAction"));
+    }
+
+    public static workspaceContextMaintenanceActionToJson(value: WorkspaceContextMaintenanceAction): string {
+        return JSON.stringify(uncast(value, r("WorkspaceContextMaintenanceAction")), null, 2);
+    }
+
+    public static toWorkspaceContextMaintenanceResult(json: string): WorkspaceContextMaintenanceResult {
+        return cast(JSON.parse(json), r("WorkspaceContextMaintenanceResult"));
+    }
+
+    public static workspaceContextMaintenanceResultToJson(value: WorkspaceContextMaintenanceResult): string {
+        return JSON.stringify(uncast(value, r("WorkspaceContextMaintenanceResult")), null, 2);
+    }
+
     public static toWorkspaceContextResult(json: string): WorkspaceContextResult {
         return cast(JSON.parse(json), r("WorkspaceContextResult"));
     }
@@ -5305,6 +5437,14 @@ export class Convert {
 
     public static workspaceContextResultMessageToJson(value: WorkspaceContextResultMessage): string {
         return JSON.stringify(uncast(value, r("WorkspaceContextResultMessage")), null, 2);
+    }
+
+    public static toWorkspaceContextRollbackMessage(json: string): WorkspaceContextRollbackMessage {
+        return cast(JSON.parse(json), r("WorkspaceContextRollbackMessage"));
+    }
+
+    public static workspaceContextRollbackMessageToJson(value: WorkspaceContextRollbackMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceContextRollbackMessage")), null, 2);
     }
 
     public static toWorkspaceContextStatusMessage(json: string): WorkspaceContextStatusMessage {
@@ -5361,6 +5501,14 @@ export class Convert {
 
     public static workspaceLayoutDockEdgeToJson(value: WorkspaceLayoutDockEdge): string {
         return JSON.stringify(uncast(value, r("WorkspaceLayoutDockEdge")), null, 2);
+    }
+
+    public static toWorkspaceLayoutDockPanelMessage(json: string): WorkspaceLayoutDockPanelMessage {
+        return cast(JSON.parse(json), r("WorkspaceLayoutDockPanelMessage"));
+    }
+
+    public static workspaceLayoutDockPanelMessageToJson(value: WorkspaceLayoutDockPanelMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceLayoutDockPanelMessage")), null, 2);
     }
 
     public static toWorkspaceLayoutDockTileMessage(json: string): WorkspaceLayoutDockTileMessage {
@@ -5459,6 +5607,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("WorkspaceLayoutSplitDirection")), null, 2);
     }
 
+    public static toWorkspaceLayoutUndockPanelMessage(json: string): WorkspaceLayoutUndockPanelMessage {
+        return cast(JSON.parse(json), r("WorkspaceLayoutUndockPanelMessage"));
+    }
+
+    public static workspaceLayoutUndockPanelMessageToJson(value: WorkspaceLayoutUndockPanelMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceLayoutUndockPanelMessage")), null, 2);
+    }
+
     public static toWorkspaceLayoutUndockTileMessage(json: string): WorkspaceLayoutUndockTileMessage {
         return cast(JSON.parse(json), r("WorkspaceLayoutUndockTileMessage"));
     }
@@ -5481,6 +5637,22 @@ export class Convert {
 
     public static workspaceLayoutUpdatedMessageToJson(value: WorkspaceLayoutUpdatedMessage): string {
         return JSON.stringify(uncast(value, r("WorkspaceLayoutUpdatedMessage")), null, 2);
+    }
+
+    public static toWorkspacePanelContentGetMessage(json: string): WorkspacePanelContentGetMessage {
+        return cast(JSON.parse(json), r("WorkspacePanelContentGetMessage"));
+    }
+
+    public static workspacePanelContentGetMessageToJson(value: WorkspacePanelContentGetMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspacePanelContentGetMessage")), null, 2);
+    }
+
+    public static toWorkspacePanelContentMessage(json: string): WorkspacePanelContentMessage {
+        return cast(JSON.parse(json), r("WorkspacePanelContentMessage"));
+    }
+
+    public static workspacePanelContentMessageToJson(value: WorkspacePanelContentMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspacePanelContentMessage")), null, 2);
     }
 
     public static toWorkspaceRegisteredMessage(json: string): WorkspaceRegisteredMessage {
@@ -6978,6 +7150,7 @@ const typeMap: any = {
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
         { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
+        { json: "workspace_context_maintenance_result", js: "workspace_context_maintenance_result", typ: u(undefined, r("WorkspaceContextMaintenanceResultObject")) },
         { json: "workspace_context_result", js: "workspace_context_result", typ: u(undefined, r("WorkspaceContextResultObject")) },
         { json: "workspace_contexts", js: "workspace_contexts", typ: u(undefined, a(r("WorkspaceContextElement"))) },
     ], "any"),
@@ -7045,6 +7218,15 @@ const typeMap: any = {
         { json: "loop_id", js: "loop_id", typ: "" },
         { json: "question", js: "question", typ: "" },
         { json: "status", js: "status", typ: r("ReviewLoopInteractionStatus") },
+    ], "any"),
+    "WorkspaceContextMaintenanceResultObject": o([
+        { json: "action", js: "action", typ: r("WorkspaceContextMaintenanceAction") },
+        { json: "agent", js: "agent", typ: u(undefined, "") },
+        { json: "agent_model", js: "agent_model", typ: u(undefined, "") },
+        { json: "changed", js: "changed", typ: true },
+        { json: "result_revision", js: "result_revision", typ: 0 },
+        { json: "source_revision", js: "source_revision", typ: 0 },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "WorkspaceContextResultObject": o([
         { json: "canonical_revision", js: "canonical_revision", typ: 0 },
@@ -7470,6 +7652,10 @@ const typeMap: any = {
         { json: "force", js: "force", typ: u(undefined, true) },
         { json: "source_session_id", js: "source_session_id", typ: "" },
     ], "any"),
+    "WorkspaceContextCompactMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorkspaceContextCompactMessageCmd") },
+        { json: "source_session_id", js: "source_session_id", typ: "" },
+    ], "any"),
     "WorkspaceContextListMessage": o([
         { json: "cmd", js: "cmd", typ: r("WorkspaceContextListMessageCmd") },
         { json: "request_id", js: "request_id", typ: "" },
@@ -7480,6 +7666,15 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("WorkspaceContextListResultMessageEvent") },
         { json: "request_id", js: "request_id", typ: "" },
         { json: "success", js: "success", typ: true },
+    ], "any"),
+    "WorkspaceContextMaintenanceResult": o([
+        { json: "action", js: "action", typ: r("WorkspaceContextMaintenanceAction") },
+        { json: "agent", js: "agent", typ: u(undefined, "") },
+        { json: "agent_model", js: "agent_model", typ: u(undefined, "") },
+        { json: "changed", js: "changed", typ: true },
+        { json: "result_revision", js: "result_revision", typ: 0 },
+        { json: "source_revision", js: "source_revision", typ: 0 },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "WorkspaceContextResult": o([
         { json: "canonical_revision", js: "canonical_revision", typ: 0 },
@@ -7498,6 +7693,10 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("WorkspaceContextResultMessageEvent") },
         { json: "result", js: "result", typ: u(undefined, r("WorkspaceContextResultObject")) },
         { json: "success", js: "success", typ: true },
+    ], "any"),
+    "WorkspaceContextRollbackMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorkspaceContextRollbackMessageCmd") },
+        { json: "source_session_id", js: "source_session_id", typ: "" },
     ], "any"),
     "WorkspaceContextStatusMessage": o([
         { json: "cmd", js: "cmd", typ: r("WorkspaceContextStatusMessageCmd") },
@@ -7541,6 +7740,15 @@ const typeMap: any = {
     "WorkspaceLayoutClosePaneMessage": o([
         { json: "cmd", js: "cmd", typ: r("WorkspaceLayoutClosePaneMessageCmd") },
         { json: "pane_id", js: "pane_id", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
+    "WorkspaceLayoutDockPanelMessage": o([
+        { json: "anchor_pane_id", js: "anchor_pane_id", typ: "" },
+        { json: "cmd", js: "cmd", typ: r("WorkspaceLayoutDockPanelMessageCmd") },
+        { json: "edge", js: "edge", typ: r("WorkspaceLayoutDockEdge") },
+        { json: "panel_id", js: "panel_id", typ: "" },
+        { json: "panel_kind", js: "panel_kind", typ: "" },
+        { json: "ratio", js: "ratio", typ: u(undefined, 3.14) },
         { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "WorkspaceLayoutDockTileMessage": o([
@@ -7605,6 +7813,11 @@ const typeMap: any = {
         { json: "split_id", js: "split_id", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
+    "WorkspaceLayoutUndockPanelMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorkspaceLayoutUndockPanelMessageCmd") },
+        { json: "panel_id", js: "panel_id", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
     "WorkspaceLayoutUndockTileMessage": o([
         { json: "cmd", js: "cmd", typ: r("WorkspaceLayoutUndockTileMessageCmd") },
         { json: "tile_id", js: "tile_id", typ: "" },
@@ -7620,6 +7833,20 @@ const typeMap: any = {
     "WorkspaceLayoutUpdatedMessage": o([
         { json: "event", js: "event", typ: r("WorkspaceLayoutUpdatedMessageEvent") },
         { json: "workspace_layout", js: "workspace_layout", typ: r("Layout") },
+    ], "any"),
+    "WorkspacePanelContentGetMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorkspacePanelContentGetMessageCmd") },
+        { json: "panel_id", js: "panel_id", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
+    "WorkspacePanelContentMessage": o([
+        { json: "content", js: "content", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("WorkspacePanelContentMessageEvent") },
+        { json: "panel_id", js: "panel_id", typ: "" },
+        { json: "panel_kind", js: "panel_kind", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "WorkspaceRegisteredMessage": o([
         { json: "event", js: "event", typ: r("WorkspaceRegisteredMessageEvent") },
@@ -8129,6 +8356,10 @@ const typeMap: any = {
         "running",
         "stopped",
     ],
+    "WorkspaceContextMaintenanceAction": [
+        "compact",
+        "rollback",
+    ],
     "ReviewLoopResultMessageEvent": [
         "review_loop_result",
     ],
@@ -8245,6 +8476,9 @@ const typeMap: any = {
     "WorkspaceContextCheckoutMessageCmd": [
         "workspace_context_checkout",
     ],
+    "WorkspaceContextCompactMessageCmd": [
+        "workspace_context_compact",
+    ],
     "WorkspaceContextListMessageCmd": [
         "workspace_context_list",
     ],
@@ -8253,6 +8487,9 @@ const typeMap: any = {
     ],
     "WorkspaceContextResultMessageEvent": [
         "workspace_context_result",
+    ],
+    "WorkspaceContextRollbackMessageCmd": [
+        "workspace_context_rollback",
     ],
     "WorkspaceContextStatusMessageCmd": [
         "workspace_context_status",
@@ -8273,14 +8510,17 @@ const typeMap: any = {
     "WorkspaceLayoutClosePaneMessageCmd": [
         "workspace_layout_close_pane",
     ],
-    "WorkspaceLayoutDockTileMessageCmd": [
-        "workspace_layout_dock_tile",
+    "WorkspaceLayoutDockPanelMessageCmd": [
+        "workspace_layout_dock_panel",
     ],
     "WorkspaceLayoutDockEdge": [
         "bottom",
         "left",
         "right",
         "top",
+    ],
+    "WorkspaceLayoutDockTileMessageCmd": [
+        "workspace_layout_dock_tile",
     ],
     "WorkspaceLayoutFocusPaneMessageCmd": [
         "workspace_layout_focus_pane",
@@ -8303,6 +8543,9 @@ const typeMap: any = {
     "WorkspaceLayoutSetSplitRatioMessageCmd": [
         "workspace_layout_set_split_ratio",
     ],
+    "WorkspaceLayoutUndockPanelMessageCmd": [
+        "workspace_layout_undock_panel",
+    ],
     "WorkspaceLayoutUndockTileMessageCmd": [
         "workspace_layout_undock_tile",
     ],
@@ -8311,6 +8554,12 @@ const typeMap: any = {
     ],
     "WorkspaceLayoutUpdatedMessageEvent": [
         "workspace_layout_updated",
+    ],
+    "WorkspacePanelContentGetMessageCmd": [
+        "workspace_panel_content_get",
+    ],
+    "WorkspacePanelContentMessageEvent": [
+        "workspace_panel_content",
     ],
     "WorkspaceRegisteredMessageEvent": [
         "workspace_registered",

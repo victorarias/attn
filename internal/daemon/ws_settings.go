@@ -32,6 +32,7 @@ const (
 	SettingReviewLoopLastIterations = "review_loop_last_iterations"
 	SettingReviewLoopModel          = "review_loop_model"
 	SettingReviewerModel            = "reviewer_model"
+	SettingWorkspaceContextJanitor  = "workspace_context_janitor"
 	SettingTailscaleEnabled         = "tailscale_enabled"
 	SettingNewSessionYoloPrefix     = "new_session_yolo_"
 )
@@ -154,6 +155,8 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 		settings[capabilitySettingKey(name, "state_detector")] = strconv.FormatBool(caps.HasStateDetector)
 		settings[capabilitySettingKey(name, "resume")] = strconv.FormatBool(caps.HasResume)
 		settings[capabilitySettingKey(name, "yolo")] = strconv.FormatBool(caps.HasYolo)
+		hasHeadlessTask, _ := agentdriver.HeadlessTaskAvailability(driver)
+		settings[capabilitySettingKey(name, "headless_task")] = strconv.FormatBool(hasHeadlessTask)
 	}
 	for _, driver := range d.ensurePluginRegistry().registeredDrivers() {
 		settings[availabilitySettingKey(driver.Agent)] = "true"
@@ -227,6 +230,8 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateTheme(value)
 	case SettingTailscaleEnabled:
 		return validateBooleanSetting(value)
+	case SettingWorkspaceContextJanitor:
+		return d.validateWorkspaceContextJanitorSetting(value)
 	case SettingReviewLoopPresets, SettingReviewLoopLastPreset, SettingReviewLoopLastPrompt, SettingReviewLoopLastIterations, SettingReviewLoopModel, SettingReviewerModel:
 		return nil
 	default:

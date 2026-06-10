@@ -139,6 +139,96 @@ func TestClient_UpdateState(t *testing.T) {
 	}
 }
 
+func TestClient_WorkspaceContextMaintenance(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantCmd string
+		action  protocol.WorkspaceContextMaintenanceAction
+		call    func(*Client) (*protocol.WorkspaceContextMaintenanceResult, error)
+	}{
+		{
+			name:    "compact",
+			wantCmd: protocol.CmdWorkspaceContextCompact,
+			action:  protocol.WorkspaceContextMaintenanceActionCompact,
+			call: func(c *Client) (*protocol.WorkspaceContextMaintenanceResult, error) {
+				return c.CompactWorkspaceContext("session-1")
+			},
+		},
+		{
+			name:    "rollback",
+			wantCmd: protocol.CmdWorkspaceContextRollback,
+			action:  protocol.WorkspaceContextMaintenanceActionRollback,
+			call: func(c *Client) (*protocol.WorkspaceContextMaintenanceResult, error) {
+				return c.RollbackWorkspaceContext("session-1")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tempDir, err := os.MkdirTemp("/tmp", "attn-client-")
+			if err != nil {
+				t.Fatalf("create short temp dir: %v", err)
+			}
+			defer os.RemoveAll(tempDir)
+			sockPath := filepath.Join(tempDir, "test.sock")
+			listener, err := net.Listen("unix", sockPath)
+			if err != nil {
+				t.Fatalf("listen error: %v", err)
+			}
+			defer listener.Close()
+
+			requests := make(chan string, 1)
+			go func() {
+				conn, acceptErr := listener.Accept()
+				if acceptErr != nil {
+					return
+				}
+				defer conn.Close()
+
+				var raw json.RawMessage
+				if decodeErr := json.NewDecoder(conn).Decode(&raw); decodeErr != nil {
+					return
+				}
+				cmd, msg, parseErr := protocol.ParseMessage(raw)
+				if parseErr != nil {
+					return
+				}
+				var sourceSessionID string
+				switch parsed := msg.(type) {
+				case *protocol.WorkspaceContextCompactMessage:
+					sourceSessionID = parsed.SourceSessionID
+				case *protocol.WorkspaceContextRollbackMessage:
+					sourceSessionID = parsed.SourceSessionID
+				}
+				requests <- cmd + ":" + sourceSessionID
+
+				_ = json.NewEncoder(conn).Encode(protocol.Response{
+					Ok: true,
+					WorkspaceContextMaintenanceResult: &protocol.WorkspaceContextMaintenanceResult{
+						Action:         tt.action,
+						WorkspaceID:    "workspace-1",
+						SourceRevision: 1,
+						ResultRevision: 2,
+						Changed:        true,
+					},
+				})
+			}()
+
+			result, err := tt.call(New(sockPath))
+			if err != nil {
+				t.Fatalf("%s error: %v", tt.name, err)
+			}
+			if result.Action != tt.action || result.WorkspaceID != "workspace-1" || !result.Changed {
+				t.Fatalf("result = %+v", result)
+			}
+			if request := <-requests; request != tt.wantCmd+":session-1" {
+				t.Fatalf("request = %q", request)
+			}
+		})
+	}
+}
+
 func TestClient_Query(t *testing.T) {
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")

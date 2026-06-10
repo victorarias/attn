@@ -396,6 +396,7 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 	if !removed {
 		return
 	}
+	d.cancelWorkspaceContextJanitor(id)
 	d.store.RemoveWorkspace(id)
 	d.pruneTileContentSubscriptionsForLayout(id, nil)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
@@ -542,6 +543,7 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 		if !removed {
 			return
 		}
+		d.cancelWorkspaceContextJanitor(workspaceID)
 		d.store.RemoveWorkspace(workspaceID)
 		d.pruneTileContentSubscriptionsForLayout(workspaceID, nil)
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{

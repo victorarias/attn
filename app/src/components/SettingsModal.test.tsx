@@ -485,4 +485,71 @@ describe('SettingsModal review loop prompts', () => {
     expect(screen.getByText('Resume: on')).toBeInTheDocument();
     expect(document.getElementById('settings-snipe-exec')).toBeNull();
   });
+
+  it('saves the workspace context janitor agent and model atomically', async () => {
+    const onSetSetting = vi.fn();
+    render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        githubHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{
+          codex_available: 'true',
+          codex_cap_headless_task: 'true',
+          claude_available: 'true',
+          claude_cap_headless_task: 'true',
+          snipe_available: 'true',
+          snipe_cap_headless_task: 'true',
+        }}
+        endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={onSetSetting}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+    expect(screen.queryByRole('option', { name: 'Snipe' })).not.toBeInTheDocument();
+    fireEvent.change(await screen.findByTestId('settings-context-janitor-agent'), {
+      target: { value: 'codex' },
+    });
+    fireEvent.change(screen.getByTestId('settings-context-janitor-model'), {
+      target: { value: 'gpt-test' },
+    });
+    fireEvent.click(screen.getByTestId('settings-context-janitor-save'));
+
+    expect(onSetSetting).toHaveBeenCalledWith(
+      'workspace_context_janitor',
+      '{"agent":"codex","model":"gpt-test"}',
+    );
+
+    fireEvent.change(screen.getByTestId('settings-context-janitor-agent'), {
+      target: { value: 'claude' },
+    });
+    expect(screen.getByTestId('settings-context-janitor-model')).toHaveValue('');
+    expect(screen.getByTestId('settings-context-janitor-save')).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId('settings-context-janitor-model'), {
+      target: { value: 'claude-test' },
+    });
+    fireEvent.change(screen.getByTestId('settings-context-janitor-agent'), {
+      target: { value: 'codex' },
+    });
+    expect(screen.getByTestId('settings-context-janitor-model')).toHaveValue('');
+    expect(screen.getByTestId('settings-context-janitor-save')).toBeDisabled();
+  });
 });
