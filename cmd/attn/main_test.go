@@ -591,6 +591,60 @@ func TestParseDispatchResolveArgsReadsResponseFile(t *testing.T) {
 	}
 }
 
+func TestParseDispatchMessageArgsReadsFile(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "chief-1")
+	path := filepath.Join(t.TempDir(), "message.md")
+	if err := os.WriteFile(path, []byte("Re-check the current branch.\n"), 0o600); err != nil {
+		t.Fatalf("write message: %v", err)
+	}
+	sessionID, dispatchID, message, err := parseDispatchMessageArgs([]string{
+		"--dispatch", "dispatch-1",
+		"--file", path,
+	})
+	if err != nil {
+		t.Fatalf("parseDispatchMessageArgs() error = %v", err)
+	}
+	if sessionID != "chief-1" || dispatchID != "dispatch-1" || message != "Re-check the current branch." {
+		t.Fatalf("dispatch message = (%q, %q, %q)", sessionID, dispatchID, message)
+	}
+}
+
+func TestParseDispatchInboxArgsDefaultsToCurrentSession(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "worker-1")
+	sessionID, unreadOnly, err := parseDispatchInboxArgs([]string{"--unread"})
+	if err != nil {
+		t.Fatalf("parseDispatchInboxArgs() error = %v", err)
+	}
+	if sessionID != "worker-1" || !unreadOnly {
+		t.Fatalf("dispatch inbox = (%q, %t)", sessionID, unreadOnly)
+	}
+}
+
+func TestParseDispatchMessagesArgsRequiresDispatch(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "chief-1")
+	sessionID, dispatchID, err := parseDispatchMessagesArgs([]string{"--dispatch", "dispatch-1"})
+	if err != nil {
+		t.Fatalf("parseDispatchMessagesArgs() error = %v", err)
+	}
+	if sessionID != "chief-1" || dispatchID != "dispatch-1" {
+		t.Fatalf("dispatch messages = (%q, %q)", sessionID, dispatchID)
+	}
+}
+
+func TestParseDispatchAckArgsReadsAcknowledgement(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "worker-1")
+	sessionID, messageID, acknowledgement, err := parseDispatchAckArgs([]string{
+		"--message-id", "message-1",
+		"--message", "Re-check complete.",
+	})
+	if err != nil {
+		t.Fatalf("parseDispatchAckArgs() error = %v", err)
+	}
+	if sessionID != "worker-1" || messageID != "message-1" || acknowledgement != "Re-check complete." {
+		t.Fatalf("dispatch ack = (%q, %q, %q)", sessionID, messageID, acknowledgement)
+	}
+}
+
 func TestWriteHelpMentionsPresenceAndOpen(t *testing.T) {
 	var output bytes.Buffer
 	writeHelp(&output)

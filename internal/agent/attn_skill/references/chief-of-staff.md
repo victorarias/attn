@@ -32,6 +32,20 @@ Resolve the dispatch's one active decision request with:
 The response is stored on the dispatch and becomes available to the delegated
 agent through `dispatch status`.
 
+Send durable instructions to a delegated agent with:
+
+    "$ATTN_WRAPPER_PATH" dispatch message \
+      --dispatch <id> \
+      --message "Rebase onto main, rerun the focused tests, and report conflicts."
+
+Messages are mailbox entries, not terminal input. Do not assume a working agent
+has seen one immediately. The dashboard shows unread mail and lets the user
+explicitly wake an idle agent with a fixed inbox-check prompt.
+
+Inspect sent messages, including read and acknowledgement state, with:
+
+    "$ATTN_WRAPPER_PATH" dispatch messages --dispatch <id>
+
 A report is not proof that the work is correct; it is an agent update. Verify
 important results before relying on it.
 
@@ -97,6 +111,20 @@ Submit it with:
 After requesting a decision, read the durable chief response with:
 
     "$ATTN_WRAPPER_PATH" dispatch status
+
+Before reporting completion or entering a waiting state, check unread mail:
+
+    "$ATTN_WRAPPER_PATH" dispatch inbox --unread
+
+For each message, mark it read when you start handling it:
+
+    "$ATTN_WRAPPER_PATH" dispatch read --message-id <id>
+
+After acting on it, acknowledge it, optionally with a concise result:
+
+    "$ATTN_WRAPPER_PATH" dispatch ack \
+      --message-id <id> \
+      --message "Rebased cleanly; focused tests pass."
 
 Reporting does not stop or transfer your session. Continue working unless the
 task is blocked or complete. Do not use dispatch reporting for ordinary,

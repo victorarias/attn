@@ -167,7 +167,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '95';
+const PROTOCOL_VERSION = '96';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -807,6 +807,9 @@ export function useDaemonSocket({
       case 'unregister_workspace':
         rejectPendingByPredicate((key) => key.startsWith('unregister_workspace:'), error);
         return;
+      case 'wake_dispatch_agent':
+        rejectPendingByPredicate((key) => key.startsWith('wake_dispatch_agent:'), error);
+        return;
       case 'workspace_layout_add_session_pane':
       case 'workspace_layout_close_pane':
       case 'workspace_layout_focus_pane':
@@ -1195,6 +1198,22 @@ export function useDaemonSocket({
           case 'chief_of_staff_dispatches_updated':
             onChiefOfStaffDispatchesUpdate?.(data.dispatches || []);
             break;
+
+          case 'wake_dispatch_agent_result': {
+            if (typeof data.dispatch_id === 'string' && typeof data.request_id === 'string') {
+              const key = `wake_dispatch_agent:${data.dispatch_id}:${data.request_id}`;
+              const pending = pendingActionsRef.current.get(key);
+              if (pending) {
+                pendingActionsRef.current.delete(key);
+                if (data.success) {
+                  pending.resolve(undefined);
+                } else {
+                  pending.reject(new Error(data.error || 'Wake agent failed'));
+                }
+              }
+            }
+            break;
+          }
 
           case 'workspace_tile_content': {
             if (typeof data.workspace_id === 'string' && typeof data.tile_id === 'string') {
@@ -2922,6 +2941,42 @@ export function useDaemonSocket({
     });
   }, []);
 
+  const sendWakeDispatchAgent = useCallback((sourceSessionId: string, dispatchId: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if (!sourceSessionId || !dispatchId) {
+        reject(new Error('Chief session and dispatch are required'));
+        return;
+      }
+      const ws = wsRef.current;
+      if (!hasReceivedInitialStateRef.current || !ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const keyPrefix = `wake_dispatch_agent:${dispatchId}:`;
+      if (Array.from(pendingActionsRef.current.keys()).some((key) => key.startsWith(keyPrefix))) {
+        reject(new Error(`Wake agent is already pending for dispatch ${dispatchId}`));
+        return;
+      }
+      const requestId = nextRequestID('wake_dispatch_agent');
+      const key = `${keyPrefix}${requestId}`;
+      const pending = { resolve: () => resolve(), reject };
+      pendingActionsRef.current.set(key, pending);
+      ws.send(JSON.stringify({
+        cmd: 'wake_dispatch_agent',
+        source_session_id: sourceSessionId,
+        dispatch_id: dispatchId,
+        request_id: requestId,
+      }));
+      window.setTimeout(() => {
+        if (pendingActionsRef.current.get(key) !== pending) {
+          return;
+        }
+        pendingActionsRef.current.delete(key);
+        reject(new Error(`Wake agent timed out for dispatch ${dispatchId}`));
+      }, 10_000);
+    });
+  }, [nextRequestID]);
+
   // Unregister a single session from daemon
   const sendUnregisterSession = useCallback((sessionId: string): Promise<void> => {
     return new Promise((resolve, reject) => {
@@ -3958,6 +4013,7 @@ export function useDaemonSocket({
     sendRenameSession,
     sendRenameWorkspace,
     sendSetChiefOfStaff,
+    sendWakeDispatchAgent,
     sendPRVisited,
     sendListWorktrees,
     sendCreateWorktree,

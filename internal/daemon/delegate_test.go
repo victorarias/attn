@@ -223,6 +223,223 @@ func TestDispatchReportUpdatesTrackedRecord(t *testing.T) {
 	}
 }
 
+func TestDispatchMailboxAuthorizesChiefAndWorker(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, chiefSessionID, _ := setupDelegationSource(t, d, backend)
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefSessionID); err != nil {
+		t.Fatalf("set chief role: %v", err)
+	}
+	consumeDelegatedPrompt(t, backend)
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: chiefSessionID,
+		Brief:           "Investigate mailbox behavior.",
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	dispatchID := protocol.Deref(result.DispatchID)
+
+	server, client := net.Pipe()
+	sendServer := server
+	go func() {
+		d.handleSendDispatchMessage(sendServer, &protocol.SendDispatchMessage{
+			Cmd:             protocol.CmdSendDispatchMessage,
+			SourceSessionID: chiefSessionID,
+			DispatchID:      dispatchID,
+			Content:         "Re-check the current branch.",
+		})
+		_ = sendServer.Close()
+	}()
+	var sent protocol.Response
+	if err := json.NewDecoder(client).Decode(&sent); err != nil {
+		t.Fatalf("decode send response: %v", err)
+	}
+	_ = client.Close()
+	if !sent.Ok || sent.DispatchMessage == nil || sent.DispatchMessage.TargetSessionID != result.SessionID {
+		t.Fatalf("send response = %+v", sent)
+	}
+	if got := protocol.Deref(d.decorateChiefOfStaffDispatch(
+		d.store.GetChiefOfStaffDispatch(dispatchID),
+	).UnreadMessageCount); got != 1 {
+		t.Fatalf("unread count = %d, want 1", got)
+	}
+
+	server, client = net.Pipe()
+	inboxServer := server
+	go func() {
+		d.handleListDispatchMessages(inboxServer, &protocol.ListDispatchMessagesMessage{
+			Cmd:             protocol.CmdListDispatchMessages,
+			SourceSessionID: result.SessionID,
+			UnreadOnly:      protocol.Ptr(true),
+		})
+		_ = inboxServer.Close()
+	}()
+	var inbox protocol.Response
+	if err := json.NewDecoder(client).Decode(&inbox); err != nil {
+		t.Fatalf("decode inbox response: %v", err)
+	}
+	_ = client.Close()
+	if !inbox.Ok || len(inbox.DispatchMessages) != 1 ||
+		inbox.DispatchMessages[0].Content != "Re-check the current branch." {
+		t.Fatalf("inbox response = %+v", inbox)
+	}
+
+	server, client = net.Pipe()
+	ackServer := server
+	go func() {
+		d.handleAcknowledgeDispatchMessage(ackServer, &protocol.AcknowledgeDispatchMessage{
+			Cmd:             protocol.CmdAcknowledgeDispatchMessage,
+			SourceSessionID: result.SessionID,
+			MessageID:       sent.DispatchMessage.ID,
+			Acknowledgement: protocol.Ptr("Re-check complete."),
+		})
+		_ = ackServer.Close()
+	}()
+	var acknowledged protocol.Response
+	if err := json.NewDecoder(client).Decode(&acknowledged); err != nil {
+		t.Fatalf("decode acknowledge response: %v", err)
+	}
+	_ = client.Close()
+	unreadCount, unreadErr := d.store.CountUnreadDispatchMessages(dispatchID)
+	if !acknowledged.Ok || acknowledged.DispatchMessage == nil ||
+		protocol.Deref(acknowledged.DispatchMessage.Acknowledgement) != "Re-check complete." ||
+		unreadErr != nil || unreadCount != 0 {
+		t.Fatalf("acknowledge response = %+v", acknowledged)
+	}
+
+	server, client = net.Pipe()
+	sentMessagesServer := server
+	go func() {
+		d.handleListDispatchMessages(sentMessagesServer, &protocol.ListDispatchMessagesMessage{
+			Cmd:             protocol.CmdListDispatchMessages,
+			SourceSessionID: chiefSessionID,
+			DispatchID:      protocol.Ptr(dispatchID),
+		})
+		_ = sentMessagesServer.Close()
+	}()
+	var sentMessages protocol.Response
+	if err := json.NewDecoder(client).Decode(&sentMessages); err != nil {
+		t.Fatalf("decode sent messages response: %v", err)
+	}
+	_ = client.Close()
+	if !sentMessages.Ok || len(sentMessages.DispatchMessages) != 1 ||
+		protocol.Deref(sentMessages.DispatchMessages[0].Acknowledgement) != "Re-check complete." ||
+		sentMessages.DispatchMessages[0].AcknowledgedAt == nil {
+		t.Fatalf("sent messages response = %+v", sentMessages)
+	}
+
+	server, client = net.Pipe()
+	unauthorizedServer := server
+	go func() {
+		d.handleSendDispatchMessage(unauthorizedServer, &protocol.SendDispatchMessage{
+			Cmd:             protocol.CmdSendDispatchMessage,
+			SourceSessionID: "other-session",
+			DispatchID:      dispatchID,
+			Content:         "Unauthorized.",
+		})
+		_ = unauthorizedServer.Close()
+	}()
+	var unauthorized protocol.Response
+	if err := json.NewDecoder(client).Decode(&unauthorized); err != nil {
+		t.Fatalf("decode unauthorized response: %v", err)
+	}
+	_ = client.Close()
+	if unauthorized.Ok {
+		t.Fatalf("unauthorized send response = %+v", unauthorized)
+	}
+
+	d.store.Remove(result.SessionID)
+	server, client = net.Pipe()
+	closedServer := server
+	go func() {
+		d.handleSendDispatchMessage(closedServer, &protocol.SendDispatchMessage{
+			Cmd:             protocol.CmdSendDispatchMessage,
+			SourceSessionID: chiefSessionID,
+			DispatchID:      dispatchID,
+			Content:         "This worker is closed.",
+		})
+		_ = closedServer.Close()
+	}()
+	var closed protocol.Response
+	if err := json.NewDecoder(client).Decode(&closed); err != nil {
+		t.Fatalf("decode closed worker response: %v", err)
+	}
+	_ = client.Close()
+	if closed.Ok || !strings.Contains(protocol.Deref(closed.Error), "is closed") {
+		t.Fatalf("closed worker response = %+v", closed)
+	}
+}
+
+func TestWakeDispatchAgentInjectsOnlyInboxPrompt(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, chiefSessionID, _ := setupDelegationSource(t, d, backend)
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefSessionID); err != nil {
+		t.Fatalf("set chief role: %v", err)
+	}
+	consumeDelegatedPrompt(t, backend)
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: chiefSessionID,
+		Brief:           "Investigate wake behavior.",
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	dispatchID := protocol.Deref(result.DispatchID)
+	if err := d.store.AddDispatchMessage(&protocol.DispatchMessage{
+		ID:              "message-secret",
+		DispatchID:      dispatchID,
+		SenderSessionID: chiefSessionID,
+		TargetSessionID: result.SessionID,
+		Content:         "Mailbox content must not reach the PTY.",
+		CreatedAt:       string(protocol.TimestampNow()),
+	}); err != nil {
+		t.Fatalf("add dispatch message: %v", err)
+	}
+	d.store.UpdateState(result.SessionID, string(protocol.SessionStateWaitingInput))
+
+	var inputSessionIDs []string
+	var inputs []string
+	backend.onInput = func(sessionID string, data []byte) {
+		inputSessionIDs = append(inputSessionIDs, sessionID)
+		inputs = append(inputs, string(data))
+	}
+	wsClient := newWorkspaceProtocolTestClient()
+	d.handleWakeDispatchAgent(wsClient, &protocol.WakeDispatchAgentMessage{
+		Cmd:             protocol.CmdWakeDispatchAgent,
+		SourceSessionID: chiefSessionID,
+		DispatchID:      dispatchID,
+		RequestID:       "wake-request-1",
+	})
+	select {
+	case outbound := <-wsClient.send:
+		var response protocol.WakeDispatchAgentResultMessage
+		if err := json.Unmarshal(outbound.payload, &response); err != nil {
+			t.Fatalf("decode wake response: %v", err)
+		}
+		if !response.Success || response.RequestID != "wake-request-1" {
+			t.Fatalf("wake response = %+v", response)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for wake response")
+	}
+	if len(inputs) != 2 ||
+		inputSessionIDs[0] != result.SessionID ||
+		inputSessionIDs[1] != result.SessionID ||
+		inputs[0] != dispatchWakePrompt ||
+		inputs[1] != "\r" {
+		t.Fatalf("PTY inputs = (%q, %q)", inputSessionIDs, inputs)
+	}
+	if strings.Contains(strings.Join(inputs, ""), "Mailbox content") {
+		t.Fatalf("PTY input included mailbox content: %q", inputs)
+	}
+}
+
 func TestStructuredDispatchReportSeparatesRuntimeAndSupportsResolution(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
