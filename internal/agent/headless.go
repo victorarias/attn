@@ -105,6 +105,9 @@ func headlessEnvironment(provider string) []string {
 			env = append(env, entry)
 		}
 	}
+	if provider == "claude" {
+		env = append(env, "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1")
+	}
 	return env
 }
 

@@ -73,7 +73,15 @@ func TestCodexRunHeadlessTaskScopesToolsAndConfiguration(t *testing.T) {
 	}
 }
 
-func TestClaudeRunHeadlessTaskScopesToolsAndConfiguration(t *testing.T) {
+func TestClaudeRunHeadlessTaskUsesSafeModeWithoutExplicitAuthentication(t *testing.T) {
+	for _, name := range []string{
+		"ANTHROPIC_API_KEY",
+		"CLAUDE_CODE_USE_BEDROCK",
+		"CLAUDE_CODE_USE_VERTEX",
+		"CLAUDE_CODE_USE_FOUNDRY",
+	} {
+		t.Setenv(name, "")
+	}
 	executable, logPath := writeHeadlessArgsRecorder(t)
 	_, err := (&Claude{}).RunHeadlessTask(context.Background(), HeadlessTaskRequest{
 		Executable:       executable,
@@ -94,7 +102,7 @@ func TestClaudeRunHeadlessTaskScopesToolsAndConfiguration(t *testing.T) {
 	got := string(args)
 	for _, want := range []string{
 		"--print",
-		"--bare",
+		"--safe-mode",
 		"--no-session-persistence",
 		"--strict-mcp-config",
 		"--disable-slash-commands",
@@ -109,6 +117,37 @@ func TestClaudeRunHeadlessTaskScopesToolsAndConfiguration(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Claude args missing %q:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "--bare") {
+		t.Fatalf("Claude safe-mode args unexpectedly contained --bare:\n%s", got)
+	}
+}
+
+func TestClaudeRunHeadlessTaskUsesBareModeWithExplicitAuthentication(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	executable, logPath := writeHeadlessArgsRecorder(t)
+	_, err := (&Claude{}).RunHeadlessTask(context.Background(), HeadlessTaskRequest{
+		Executable:       executable,
+		Model:            "claude-test",
+		Prompt:           "compact",
+		WorkDir:          t.TempDir(),
+		MCPServerName:    "attn_context",
+		MCPServerCommand: "/tmp/attn",
+		MCPServerArgs:    []string{"_workspace-context-janitor-mcp"},
+	})
+	if err != nil {
+		t.Fatalf("RunHeadlessTask error: %v", err)
+	}
+	args, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	got := string(args)
+	if !strings.Contains(got, "--bare") {
+		t.Fatalf("Claude explicit-auth args missing --bare:\n%s", got)
+	}
+	if strings.Contains(got, "--safe-mode") {
+		t.Fatalf("Claude explicit-auth args unexpectedly contained --safe-mode:\n%s", got)
 	}
 }
 
@@ -146,6 +185,9 @@ func TestRunHeadlessCommandUsesMinimalEnvironmentAndDiscardsOutput(t *testing.T)
 	if !strings.Contains(env, "ANTHROPIC_API_KEY=auth-kept") {
 		t.Fatalf("headless environment dropped provider authentication:\n%s", env)
 	}
+	if !strings.Contains(env, "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1") {
+		t.Fatalf("Claude environment did not disable auto-memory:\n%s", env)
+	}
 	if strings.Contains(env, "OPENAI_API_KEY=") {
 		t.Fatalf("Claude environment retained Codex provider authentication:\n%s", env)
 	}
@@ -170,7 +212,7 @@ func TestRunHeadlessCommandClassifiesFailureWithoutLeakingOutput(t *testing.T) {
 	}
 }
 
-func TestClaudeHeadlessTaskAvailabilityRequiresBareModeAuthentication(t *testing.T) {
+func TestClaudeHeadlessTaskAvailabilitySupportsSafeModeAuthentication(t *testing.T) {
 	for _, name := range []string{
 		"ANTHROPIC_API_KEY",
 		"CLAUDE_CODE_USE_BEDROCK",
@@ -179,11 +221,14 @@ func TestClaudeHeadlessTaskAvailabilityRequiresBareModeAuthentication(t *testing
 	} {
 		t.Setenv(name, "")
 	}
-	if available, reason := (&Claude{}).HeadlessTaskAvailability(); available || reason == "" {
-		t.Fatalf("availability = %t, reason = %q", available, reason)
-	}
-	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	if available, reason := (&Claude{}).HeadlessTaskAvailability(); !available || reason != "" {
 		t.Fatalf("availability = %t, reason = %q", available, reason)
+	}
+	if got := claudeHeadlessIsolationFlag(); got != "--safe-mode" {
+		t.Fatalf("isolation flag = %q, want --safe-mode", got)
+	}
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	if got := claudeHeadlessIsolationFlag(); got != "--bare" {
+		t.Fatalf("isolation flag = %q, want --bare", got)
 	}
 }

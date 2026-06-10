@@ -130,7 +130,7 @@ func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskReques
 	tools := toolPrefix + "read_context," + toolPrefix + "replace_context"
 	args := []string{
 		"--print",
-		"--bare",
+		claudeHeadlessIsolationFlag(),
 		"--model", strings.TrimSpace(request.Model),
 		"--no-session-persistence",
 		"--strict-mcp-config",
@@ -147,6 +147,17 @@ func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskReques
 }
 
 func (c *Claude) HeadlessTaskAvailability() (bool, string) {
+	return true, ""
+}
+
+func claudeHeadlessIsolationFlag() string {
+	if claudeHasBareModeAuthentication() {
+		return "--bare"
+	}
+	return "--safe-mode"
+}
+
+func claudeHasBareModeAuthentication() bool {
 	for _, name := range []string{
 		"ANTHROPIC_API_KEY",
 		"CLAUDE_CODE_USE_BEDROCK",
@@ -154,10 +165,10 @@ func (c *Claude) HeadlessTaskAvailability() (bool, string) {
 		"CLAUDE_CODE_USE_FOUNDRY",
 	} {
 		if strings.TrimSpace(os.Getenv(name)) != "" {
-			return true, ""
+			return true
 		}
 	}
-	return false, "Claude bare mode requires ANTHROPIC_API_KEY or Bedrock, Vertex, or Foundry authentication"
+	return false
 }
 
 // PrepareLaunch copies resume transcripts into the target project folder so

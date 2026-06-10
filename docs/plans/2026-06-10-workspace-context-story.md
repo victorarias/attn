@@ -163,14 +163,18 @@ Execution:
   other MCP access.
 - Codex uses `codex exec` with the selected model, an ephemeral session, ignored
   user configuration and rules, and only the janitor tool endpoint.
-- Claude uses bare print mode with the selected model, no session persistence,
-  strict MCP configuration, and only the janitor tools. It is eligible only
-  when API-key, Bedrock, Vertex, or Foundry authentication works without the
-  managed settings and hooks that bare mode intentionally skips.
+- Claude uses bare print mode when explicit API-key or cloud-provider
+  authentication is available. Otherwise it uses safe mode so normal OAuth,
+  keychain, or organization-managed authentication can run while user and
+  project customizations remain disabled. Both paths disable auto-memory and
+  session persistence, enforce strict MCP configuration, and expose only the
+  janitor tools.
 - Implement built-in Codex and Claude adapters first. Plugin agents remain
   ineligible until their driver protocol supports the same scoped headless task.
-- Run without an attn session, PTY, transcript watcher, hooks, resume state, or
-  workspace checkout. This is a daemon-owned background invocation.
+- Run without an attn session, PTY, transcript watcher, user/project hooks,
+  resume state, or workspace checkout. Organization-managed authentication
+  hooks may run in Claude safe mode. This is a daemon-owned background
+  invocation.
 - The tool server owns the candidate. Do not parse Markdown from the agent's
   final prose response.
 - Record the configured agent, model, and resolved executable used for each run.

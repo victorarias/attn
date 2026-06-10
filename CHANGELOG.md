@@ -9,7 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-06-10]
 
 ### Added
-- **Large workspace contexts can compact themselves.** Choose a supported agent and a recommended model preset in Settings, or enter a custom model, to let attn occasionally summarize contexts above 12 KiB after a quiet period. Compaction runs without an interactive session, leaves existing working copies stale for the normal refresh/conflict workflow, publishes only against the revision it read, and keeps the latest pre-compaction version available through `attn workspace context rollback`. Use `attn workspace context compact` to run it immediately.
+- **Large workspace contexts can compact themselves.** Choose Codex or Claude and a recommended model preset in Settings, or enter a custom model, to let attn occasionally summarize contexts above 12 KiB after a quiet period. Claude can use normal OAuth, keychain, or organization-managed authentication without loading user or project customizations. Compaction runs without an interactive session, leaves existing working copies stale for the normal refresh/conflict workflow, publishes only against the revision it read, and keeps the latest pre-compaction version available through `attn workspace context rollback`. Use `attn workspace context compact` to run it immediately.
 
 ### Changed
 - **Terminals keep much more scrollback.** Live panes now hold roughly 8× more history, and switching back to a workspace (or restarting the app) restores up to 8 MB of terminal history instead of just the visible screen. This especially helps Codex sessions, which rely on the terminal's own scrollback and previously came back from a restart with no history at all.
