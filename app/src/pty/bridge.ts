@@ -47,7 +47,7 @@ export interface PtyReplaySegment {
 }
 
 export type PtyEventPayload =
-  | { event: 'data'; id: string; data: string; seq?: number; source?: PtyDataEventSource; suppressResponses?: boolean }
+  | { event: 'data'; id: string; data: string | Uint8Array; seq?: number; source?: PtyDataEventSource; suppressResponses?: boolean }
   | { event: 'local_resize'; id: string; cols: number; rows: number; source?: PtyDataEventSource }
   | { event: 'exit'; id: string; code: number; signal?: string }
   | { event: 'error'; id: string; error: string }

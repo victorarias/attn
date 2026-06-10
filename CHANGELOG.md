@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-10]
+
+### Changed
+- **Streaming terminal output is cheaper.** Live terminal output now travels from the daemon to the app as compact binary messages instead of base64-encoded JSON, cutting per-chunk encode/decode work and message size by a third. This lowers CPU and bandwidth during sustained heavy output (busy agents, long builds) and modestly reduces the app's memory high-water.
+
+---
+
 ## [2026-06-09]
 
 ### Added

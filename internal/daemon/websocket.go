@@ -318,6 +318,7 @@ type messageKind int
 
 const (
 	messageKindText messageKind = iota
+	messageKindBinary
 )
 
 type outboundMessage struct {

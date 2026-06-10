@@ -175,10 +175,17 @@ function createFakeAgentStubs(): { binDir: string; cleanup: () => void } {
   };
 }
 
+// Daemon temp dirs must stay SHORT: the worker PTY backend creates unix
+// sockets under <tempDir>/workers/<daemon-instance-id>/, and macOS caps
+// sun_path at 104 bytes. os.tmpdir() (/var/folders/...) is already too long.
+function makeDaemonTempDir(prefix: string): string {
+  return fs.mkdtempSync(path.join('/tmp', prefix));
+}
+
 // Daemon launcher - creates isolated temp directory for DB and socket
 async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketPath: string; tempDir: string; stop: () => void }> {
   // Create temp directory for test isolation
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'attn-e2e-'));
+  const tempDir = makeDaemonTempDir('attn-e2e-');
   const socketPath = path.join(tempDir, 'attn.sock');
   const dbPath = path.join(tempDir, 'attn.db');
   const attnPath = resolveAttnBinaryPath();
@@ -308,7 +315,7 @@ interface ManagedDaemon {
 }
 
 function createManagedDaemon(ghUrl: string): ManagedDaemon {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'attn-e2e-managed-'));
+  const tempDir = makeDaemonTempDir('attn-e2e-managed-');
   const socketPath = path.join(tempDir, 'attn.sock');
   const dbPath = path.join(tempDir, 'attn.db');
   const attnPath = resolveAttnBinaryPath();

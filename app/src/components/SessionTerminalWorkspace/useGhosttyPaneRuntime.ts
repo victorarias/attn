@@ -23,7 +23,10 @@ export interface PaneRuntimeSpec {
   testSessionId?: string;
 }
 
-function decodePtyBytes(payload: string): Uint8Array {
+function decodePtyBytes(payload: string | Uint8Array): Uint8Array {
+  if (typeof payload !== 'string') {
+    return payload;
+  }
   const binary = atob(payload);
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }

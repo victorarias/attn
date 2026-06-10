@@ -266,7 +266,9 @@ export function GridView({
       if (!comp) return;
       const p = evt.payload;
       if (p.event === 'data') {
-        if (comp.hasTile(p.id)) comp.writeBytes(p.id, b64ToBytes(p.data), p.seq);
+        if (comp.hasTile(p.id)) {
+          comp.writeBytes(p.id, typeof p.data === 'string' ? b64ToBytes(p.data) : p.data, p.seq);
+        }
       } else if (p.event === 'local_resize') {
         // Keep the tile model matching the session's live geometry so the
         // (geometry-dependent) snapshot and subsequent output render correctly.
