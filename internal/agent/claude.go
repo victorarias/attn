@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -26,6 +28,8 @@ var _ LaunchPreparer = (*Claude)(nil)
 var _ SessionRecoveryPolicyProvider = (*Claude)(nil)
 var _ ResumePolicyProvider = (*Claude)(nil)
 var _ TranscriptClassificationExtractor = (*Claude)(nil)
+var _ HeadlessTaskProvider = (*Claude)(nil)
+var _ HeadlessTaskAvailabilityProvider = (*Claude)(nil)
 
 const (
 	claudeTranscriptRetryWindow   = 2 * time.Second
@@ -103,6 +107,68 @@ func (c *Claude) BuildEnv(opts SpawnOpts) []string {
 		env = append(env, c.ExecutableEnvVar()+"="+opts.Executable)
 	}
 	return env
+}
+
+func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest) (HeadlessTaskResult, error) {
+	serverName := strings.TrimSpace(request.MCPServerName)
+	if serverName == "" {
+		serverName = "attn_context"
+	}
+	config, err := json.Marshal(map[string]any{
+		"mcpServers": map[string]any{
+			serverName: map[string]any{
+				"type":    "stdio",
+				"command": request.MCPServerCommand,
+				"args":    request.MCPServerArgs,
+			},
+		},
+	})
+	if err != nil {
+		return HeadlessTaskResult{}, fmt.Errorf("encode MCP config: %w", err)
+	}
+	toolPrefix := "mcp__" + serverName + "__"
+	tools := toolPrefix + "read_context," + toolPrefix + "replace_context"
+	args := []string{"--print"}
+	args = append(args, claudeHeadlessIsolationArgs()...)
+	args = append(args,
+		"--model", strings.TrimSpace(request.Model),
+		"--no-session-persistence",
+		"--strict-mcp-config",
+		"--mcp-config", string(config),
+		"--disable-slash-commands",
+		"--no-chrome",
+		"--tools", tools,
+		"--allowedTools", tools,
+		"--permission-mode", "dontAsk",
+		"--output-format", "json",
+		request.Prompt,
+	)
+	return runHeadlessCommand(ctx, request.Executable, args, request.WorkDir, "claude")
+}
+
+func (c *Claude) HeadlessTaskAvailability() (bool, string) {
+	return true, ""
+}
+
+func claudeHeadlessIsolationArgs() []string {
+	if claudeHasBareModeAuthentication() {
+		return []string{"--bare"}
+	}
+	return []string{"--setting-sources", ""}
+}
+
+func claudeHasBareModeAuthentication() bool {
+	for _, name := range []string{
+		"ANTHROPIC_API_KEY",
+		"CLAUDE_CODE_USE_BEDROCK",
+		"CLAUDE_CODE_USE_VERTEX",
+		"CLAUDE_CODE_USE_FOUNDRY",
+	} {
+		if strings.TrimSpace(os.Getenv(name)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // PrepareLaunch copies resume transcripts into the target project folder so

@@ -22,6 +22,7 @@ import (
 	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/contextjanitor"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/daemonctl"
 	"github.com/victorarias/attn/internal/hooks"
@@ -83,6 +84,11 @@ func applyLegacyBuildInfoOverrides() {
 }
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "_workspace-context-janitor-mcp" {
+		runWorkspaceContextJanitorMCP(os.Args[2:])
+		return
+	}
+
 	if isProtocolVersionCommand(os.Args) {
 		runProtocolVersion()
 		return
@@ -174,6 +180,28 @@ func main() {
 			writeHelp(os.Stderr)
 			os.Exit(1)
 		}
+	}
+}
+
+func runWorkspaceContextJanitorMCP(args []string) {
+	fs := flag.NewFlagSet("_workspace-context-janitor-mcp", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	sourcePath := fs.String("source-file", "", "captured context file")
+	candidatePath := fs.String("candidate-file", "", "candidate output file")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 ||
+		strings.TrimSpace(*sourcePath) == "" || strings.TrimSpace(*candidatePath) == "" {
+		fmt.Fprintln(os.Stderr, "invalid workspace context janitor MCP arguments")
+		os.Exit(2)
+	}
+	if err := contextjanitor.ServeToolServer(
+		context.Background(),
+		*sourcePath,
+		*candidatePath,
+		os.Stdin,
+		os.Stdout,
+	); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }
 
@@ -874,6 +902,8 @@ commands:
   checkout                         alias for show
   update [--session <id>]          publish local edits if the revision matches
   status [--session <id>]          show local and canonical revision state
+  compact [--session <id>]         compact now with the configured janitor
+  rollback [--session <id>]        restore the latest pre-compaction snapshot
 `)
 }
 
@@ -909,7 +939,7 @@ func runWorkspaceContext(args []string) {
 	warnIfDaemonVersionMismatch()
 	action := args[0]
 	switch action {
-	case "show", "checkout", "update", "status":
+	case "show", "checkout", "update", "status", "compact", "rollback":
 	default:
 		fmt.Fprintf(os.Stderr, "workspace context: unknown command %q\n\n", action)
 		writeWorkspaceHelp(os.Stderr)
@@ -922,6 +952,7 @@ func runWorkspaceContext(args []string) {
 	}
 	c := client.New("")
 	var result *protocol.WorkspaceContextResult
+	var maintenanceResult *protocol.WorkspaceContextMaintenanceResult
 	switch action {
 	case "show", "checkout":
 		result, err = c.CheckoutWorkspaceContext(sourceSessionID, force)
@@ -933,10 +964,18 @@ func runWorkspaceContext(args []string) {
 		result, err = c.UpdateWorkspaceContext(sourceSessionID)
 	case "status":
 		result, err = c.WorkspaceContextStatus(sourceSessionID)
+	case "compact":
+		maintenanceResult, err = c.CompactWorkspaceContext(sourceSessionID)
+	case "rollback":
+		maintenanceResult, err = c.RollbackWorkspaceContext(sourceSessionID)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "workspace context %s: %v\n", action, err)
 		os.Exit(1)
+	}
+	if maintenanceResult != nil {
+		printJSON(maintenanceResult)
+		return
 	}
 	printJSON(result)
 }

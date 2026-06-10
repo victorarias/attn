@@ -13,6 +13,7 @@ export const AGENT_CAPABILITY_ORDER = [
   'transcript_watcher',
   'classifier',
   'state_detector',
+  'headless_task',
 ] as const;
 
 const AGENT_CAPABILITY_LABELS: Record<string, string> = {
@@ -23,6 +24,7 @@ const AGENT_CAPABILITY_LABELS: Record<string, string> = {
   transcript_watcher: 'Transcript watch',
   classifier: 'Classifier',
   state_detector: 'State detect',
+  headless_task: 'Headless task',
 };
 
 function parseAvailability(value?: string): boolean | null {

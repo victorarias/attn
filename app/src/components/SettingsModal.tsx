@@ -31,6 +31,13 @@ import {
   serializeSavedReviewLoopPresets,
 } from '../utils/reviewLoopPresets';
 import { BUILD_PROFILE } from '../utils/buildProfile';
+import {
+  defaultWorkspaceContextJanitorModel,
+  isWorkspaceContextJanitorModelPreset,
+  parseWorkspaceContextJanitorConfig,
+  serializeWorkspaceContextJanitorConfig,
+  workspaceContextJanitorModelPresets,
+} from '../utils/workspaceContextJanitor';
 import './SettingsModal.css';
 
 interface SettingsModalProps {
@@ -109,6 +116,8 @@ export function SettingsModal({
   const [selectedReviewLoopPresetID, setSelectedReviewLoopPresetID] = useState('');
   const [reviewLoopModel, setReviewLoopModel] = useState(settings.review_loop_model || '');
   const [reviewerModel, setReviewerModel] = useState(settings.reviewer_model || '');
+  const [workspaceContextJanitorAgent, setWorkspaceContextJanitorAgent] = useState<SessionAgent | ''>('');
+  const [workspaceContextJanitorModel, setWorkspaceContextJanitorModel] = useState('');
   const [newEndpointName, setNewEndpointName] = useState('');
   const [newEndpointTarget, setNewEndpointTarget] = useState('');
   const [newEndpointProfile, setNewEndpointProfile] = useState(BUILD_PROFILE);
@@ -155,6 +164,10 @@ export function SettingsModal({
   );
   const actualReviewLoopModel = settings.review_loop_model || '';
   const actualReviewerModel = settings.reviewer_model || '';
+  const actualWorkspaceContextJanitor = useMemo(
+    () => parseWorkspaceContextJanitorConfig(settings.workspace_context_janitor),
+    [settings.workspace_context_janitor],
+  );
   const resolvedDefaultAgent = resolvePreferredAgent(actualDefaultAgent, agentAvailability, 'codex');
   const orderedAgentList = useMemo(
     () => orderedAgents(agentAvailability, resolvedDefaultAgent, 'codex'),
@@ -164,6 +177,30 @@ export function SettingsModal({
     () => orderedAgentList.filter((agent) => ['codex', 'claude', 'copilot'].includes(agent)),
     [orderedAgentList],
   );
+  const workspaceContextJanitorAgents = useMemo(() => {
+    const eligible = orderedAgentList.filter((agent) => (
+      ['codex', 'claude'].includes(agent)
+      && isAgentAvailable(agentAvailability, agent)
+      && actualAgentCapabilities[agent]?.headless_task === true
+    ));
+    const configured = actualWorkspaceContextJanitor?.agent;
+    if (configured && ['codex', 'claude'].includes(configured) && !eligible.includes(configured)) {
+      eligible.push(configured);
+    }
+    return eligible;
+  }, [actualAgentCapabilities, actualWorkspaceContextJanitor?.agent, agentAvailability, orderedAgentList]);
+  const workspaceContextJanitorModelPresetsForAgent = useMemo(
+    () => workspaceContextJanitorModelPresets(workspaceContextJanitorAgent),
+    [workspaceContextJanitorAgent],
+  );
+  const workspaceContextJanitorModelSelection = !workspaceContextJanitorAgent
+    ? ''
+    : isWorkspaceContextJanitorModelPreset(
+      workspaceContextJanitorAgent,
+      workspaceContextJanitorModel,
+    )
+      ? workspaceContextJanitorModel
+      : 'custom';
   const agentCapabilityOrder = useMemo(
     () => AGENT_CAPABILITY_ORDER.map((cap) => cap as string),
     [],
@@ -199,6 +236,8 @@ export function SettingsModal({
     setReviewLoopIterations(actualReviewLoopPresets[0]?.iterationLimit || 3);
     setReviewLoopModel(actualReviewLoopModel);
     setReviewerModel(actualReviewerModel);
+    setWorkspaceContextJanitorAgent(actualWorkspaceContextJanitor?.agent || '');
+    setWorkspaceContextJanitorModel(actualWorkspaceContextJanitor?.model || '');
     setNewEndpointName('');
     setNewEndpointTarget('');
     setEditingEndpointID(null);
@@ -209,7 +248,7 @@ export function SettingsModal({
     setPluginSourcePath('');
     setPluginError(null);
     setPluginActionName(null);
-  }, [isOpen, actualProjectsDir, actualAgentExecutables, actualEditorExecutable, resolvedDefaultAgent, actualReviewLoopPresets, actualReviewLoopModel, actualReviewerModel]);
+  }, [isOpen, actualProjectsDir, actualAgentExecutables, actualEditorExecutable, resolvedDefaultAgent, actualReviewLoopPresets, actualReviewLoopModel, actualReviewerModel, actualWorkspaceContextJanitor]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -302,6 +341,33 @@ export function SettingsModal({
       onSetSetting('new_session_agent', agent);
     }
   }, [actualDefaultAgent, agentAvailability, onSetSetting]);
+
+  const handleWorkspaceContextJanitorAgentChange = useCallback((agent: SessionAgent | '') => {
+    setWorkspaceContextJanitorAgent(agent);
+    setWorkspaceContextJanitorModel(defaultWorkspaceContextJanitorModel(agent));
+  }, []);
+
+  const handleWorkspaceContextJanitorModelSelection = useCallback((model: string) => {
+    setWorkspaceContextJanitorModel(model === 'custom' ? '' : model);
+  }, []);
+
+  const saveWorkspaceContextJanitor = useCallback(() => {
+    const model = workspaceContextJanitorModel.trim();
+    if (!workspaceContextJanitorAgent || !model) return;
+    onSetSetting(
+      'workspace_context_janitor',
+      serializeWorkspaceContextJanitorConfig({
+        agent: workspaceContextJanitorAgent,
+        model,
+      }),
+    );
+  }, [onSetSetting, workspaceContextJanitorAgent, workspaceContextJanitorModel]);
+
+  const disableWorkspaceContextJanitor = useCallback(() => {
+    setWorkspaceContextJanitorAgent('');
+    setWorkspaceContextJanitorModel('');
+    onSetSetting('workspace_context_janitor', '');
+  }, [onSetSetting]);
 
   const persistReviewLoopPresets = useCallback((nextPresets: ReviewLoopPreset[]) => {
     setReviewLoopPresets(nextPresets);
@@ -624,9 +690,9 @@ export function SettingsModal({
           id: 'agents',
           label: 'Executables and defaults',
           title: 'Agent runtime',
-          description: 'Agent executable paths, the default session agent, capability reporting, and PTY runtime mode.',
-          count: orderedAgentList.length + 3,
-          keywords: 'agents executables claude codex cursor default capabilities pty backend editor',
+          description: 'Agent executable paths, defaults, context maintenance, capabilities, and PTY runtime mode.',
+          count: orderedAgentList.length + 4,
+          keywords: 'agents executables claude codex cursor default capabilities pty backend editor context janitor compact model',
         },
       ],
     },
@@ -714,7 +780,9 @@ export function SettingsModal({
             <span className={`settings-pill ${hasAvailableAgents ? 'good' : 'bad'}`}>
               {availableAgentCount}/{orderedAgentList.length} available
             </span>
-            <span className="settings-pill">{ptyBackendMode}</span>
+            <span className="settings-pill">
+              {actualWorkspaceContextJanitor ? `${agentLabel(actualWorkspaceContextJanitor.agent)} janitor` : 'janitor off'}
+            </span>
           </>
         );
       case 'review':
@@ -1331,6 +1399,99 @@ export function SettingsModal({
                 </button>
               );
             })}
+          </div>
+        </div>
+      </section>
+
+      <section className="settings-block">
+        <div className="settings-block-intro">
+          <div className="settings-kicker">Context</div>
+          <h3>Workspace Context Janitor</h3>
+          <p className="settings-description">
+            Compacts large shared contexts in the background with one non-interactive agent and model.
+            Empty configuration disables it.
+          </p>
+        </div>
+        <div className="settings-block-body">
+          {workspaceContextJanitorAgents.length === 0 && (
+            <div className="settings-warning">No installed agent supports scoped headless tasks.</div>
+          )}
+          <div className="settings-field-grid two-column">
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-context-janitor-agent">Agent</label>
+              <select
+                id="settings-context-janitor-agent"
+                data-testid="settings-context-janitor-agent"
+                className="settings-input"
+                value={workspaceContextJanitorAgent}
+                onChange={(event) => handleWorkspaceContextJanitorAgentChange(event.target.value as SessionAgent | '')}
+              >
+                <option value="">Disabled</option>
+                {workspaceContextJanitorAgents.map((agent) => (
+                  <option key={agent} value={agent}>{agentLabel(agent)}</option>
+                ))}
+              </select>
+            </div>
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-context-janitor-model">Model</label>
+              <select
+                id="settings-context-janitor-model"
+                data-testid="settings-context-janitor-model"
+                value={workspaceContextJanitorModelSelection}
+                onChange={(event) => handleWorkspaceContextJanitorModelSelection(event.target.value)}
+                className="settings-input"
+                disabled={!workspaceContextJanitorAgent}
+              >
+                {!workspaceContextJanitorAgent && <option value="">Select an agent</option>}
+                {workspaceContextJanitorModelPresetsForAgent.map((preset) => (
+                  <option key={preset.value} value={preset.value}>{preset.label}</option>
+                ))}
+                <option value="custom">Custom...</option>
+              </select>
+            </div>
+          </div>
+          {workspaceContextJanitorAgent && workspaceContextJanitorModelSelection === 'custom' && (
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-context-janitor-model-custom">
+                Custom model
+              </label>
+              <input
+                id="settings-context-janitor-model-custom"
+                data-testid="settings-context-janitor-model-custom"
+                type="text"
+                value={workspaceContextJanitorModel}
+                onChange={(event) => setWorkspaceContextJanitorModel(event.target.value)}
+                placeholder={workspaceContextJanitorAgent === 'claude' ? 'claude-opus-4-6' : 'model ID'}
+                className="settings-input"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            </div>
+          )}
+          <div className="settings-row-inline">
+            <button
+              type="button"
+              className="settings-action"
+              data-testid="settings-context-janitor-save"
+              onClick={saveWorkspaceContextJanitor}
+              disabled={!workspaceContextJanitorAgent || !workspaceContextJanitorModel.trim()}
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              className="settings-action"
+              onClick={disableWorkspaceContextJanitor}
+              disabled={!actualWorkspaceContextJanitor}
+            >
+              Disable
+            </button>
+          </div>
+          <div className="settings-hint">
+            Runs after a 10-minute debounce when canonical context exceeds 12 KiB.
+            Recommended models mirror the agents' memory-management behavior. Use
+            `attn workspace context compact` to run it immediately.
           </div>
         </div>
       </section>

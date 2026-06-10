@@ -372,6 +372,20 @@ func (c *Client) WorkspaceContextStatus(sourceSessionID string) (*protocol.Works
 	})
 }
 
+func (c *Client) CompactWorkspaceContext(sourceSessionID string) (*protocol.WorkspaceContextMaintenanceResult, error) {
+	return c.workspaceContextMaintenanceResult(protocol.WorkspaceContextCompactMessage{
+		Cmd:             protocol.CmdWorkspaceContextCompact,
+		SourceSessionID: sourceSessionID,
+	})
+}
+
+func (c *Client) RollbackWorkspaceContext(sourceSessionID string) (*protocol.WorkspaceContextMaintenanceResult, error) {
+	return c.workspaceContextMaintenanceResult(protocol.WorkspaceContextRollbackMessage{
+		Cmd:             protocol.CmdWorkspaceContextRollback,
+		SourceSessionID: sourceSessionID,
+	})
+}
+
 func (c *Client) workspaceContextResult(msg interface{}) (*protocol.WorkspaceContextResult, error) {
 	resp, err := c.send(msg)
 	if err != nil {
@@ -381,6 +395,17 @@ func (c *Client) workspaceContextResult(msg interface{}) (*protocol.WorkspaceCon
 		return nil, errors.New("daemon returned no workspace context result")
 	}
 	return resp.WorkspaceContextResult, nil
+}
+
+func (c *Client) workspaceContextMaintenanceResult(msg interface{}) (*protocol.WorkspaceContextMaintenanceResult, error) {
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.WorkspaceContextMaintenanceResult == nil {
+		return nil, errors.New("daemon returned no workspace context maintenance result")
+	}
+	return resp.WorkspaceContextMaintenanceResult, nil
 }
 
 // Query returns sessions matching the filter

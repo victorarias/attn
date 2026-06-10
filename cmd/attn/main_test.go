@@ -675,6 +675,21 @@ func TestWorkspaceContextSourceSessionRejectsForceForStatus(t *testing.T) {
 	}
 }
 
+func TestWriteWorkspaceHelpMentionsMaintenanceCommands(t *testing.T) {
+	var output bytes.Buffer
+	writeWorkspaceHelp(&output)
+
+	text := output.String()
+	for _, expected := range []string{
+		"compact [--session <id>]",
+		"rollback [--session <id>]",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("workspace help missing %q: %q", expected, text)
+		}
+	}
+}
+
 func TestWriteDelegateHelpMentionsPlacementOptions(t *testing.T) {
 	var output bytes.Buffer
 	writeDelegateHelp(&output)

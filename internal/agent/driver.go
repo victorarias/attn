@@ -18,6 +18,7 @@
 //	ResumePolicyProvider            — resume ID lifecycle policy
 //	TranscriptClassificationExtractor — stop-time transcript extraction policy
 //	ExecutableClassifierProvider    — classifier hook with explicit executable path
+//	HeadlessTaskProvider            — scoped non-interactive agent execution
 //
 // Agents that don't implement an optional interface get sensible defaults:
 //   - No hooks: no hook-driven state updates
@@ -26,6 +27,7 @@
 package agent
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"regexp"
@@ -253,6 +255,47 @@ type HookProvider interface {
 // ConfigOverrideProvider generates per-launch CLI config overrides.
 type ConfigOverrideProvider interface {
 	GenerateConfigOverrides(opts SpawnOpts) []string
+}
+
+// HeadlessTaskRequest describes a daemon-owned non-interactive task. The
+// provider must expose only the supplied MCP server and must not create an
+// interactive attn session.
+type HeadlessTaskRequest struct {
+	Executable       string
+	Model            string
+	Prompt           string
+	WorkDir          string
+	MCPServerName    string
+	MCPServerCommand string
+	MCPServerArgs    []string
+}
+
+type HeadlessTaskResult struct {
+	Diagnostics string
+}
+
+// HeadlessTaskProvider runs a bounded non-interactive agent task.
+type HeadlessTaskProvider interface {
+	RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest) (HeadlessTaskResult, error)
+}
+
+// HeadlessTaskAvailabilityProvider reports whether the current process
+// environment can run the driver's isolated headless mode.
+type HeadlessTaskAvailabilityProvider interface {
+	HeadlessTaskAvailability() (bool, string)
+}
+
+func HeadlessTaskAvailability(driver Driver) (bool, string) {
+	if driver == nil {
+		return false, "agent is not installed"
+	}
+	if _, ok := driver.(HeadlessTaskProvider); !ok {
+		return false, "agent does not support headless tasks"
+	}
+	if provider, ok := driver.(HeadlessTaskAvailabilityProvider); ok {
+		return provider.HeadlessTaskAvailability()
+	}
+	return true, ""
 }
 
 // TranscriptFinder locates transcript files written by the agent.

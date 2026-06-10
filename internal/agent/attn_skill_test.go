@@ -85,9 +85,16 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 	workspaceContext := readSkillFile(t, skillDir, "references/workspace-context.md")
 	for _, expected := range []string{
 		"durable coordination state",
+		"area map, not a single-task brief",
+		"## Area",
+		"## Current Picture",
+		"## Threads",
+		"## Timeline",
+		"Threads are optional semantic slices",
+		"Never infer dates, order, causality, ownership",
+		"Attn owns occasional broad compaction",
 		"Publish only when durable shared state has changed",
 		"Do not pass `--session`",
-		"**Handoff**: only the next actions or unresolved questions",
 		"workspace context show",
 		"workspace context update",
 		"workspace context status",
@@ -106,6 +113,11 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 	}
 	if strings.Contains(workspaceContext, "workspace context show --session") {
 		t.Fatalf("workspace context reference should default to the current session: %q", workspaceContext)
+	}
+	for _, obsolete := range []string{"**Goal**", "**Progress**", "**Handoff**"} {
+		if strings.Contains(workspaceContext, obsolete) {
+			t.Fatalf("workspace context reference still documents obsolete heading %q: %q", obsolete, workspaceContext)
+		}
 	}
 
 	reviewLoops := readSkillFile(t, skillDir, "references/review-loops.md")

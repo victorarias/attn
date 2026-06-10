@@ -1,7 +1,10 @@
 package agent
 
 import (
+	"context"
+	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +25,7 @@ var _ ExecutableClassifierProvider = (*Codex)(nil)
 var _ ConfigOverrideProvider = (*Codex)(nil)
 var _ ResumePolicyProvider = (*Codex)(nil)
 var _ LaunchPreparer = (*Codex)(nil)
+var _ HeadlessTaskProvider = (*Codex)(nil)
 
 func init() {
 	Register(&Codex{})
@@ -96,6 +100,56 @@ func (c *Codex) BuildEnv(opts SpawnOpts) []string {
 
 func (c *Codex) PrepareLaunch(opts SpawnOpts) error {
 	return ensureAttnCodexSkillInstalled()
+}
+
+func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest) (HeadlessTaskResult, error) {
+	serverName := strings.TrimSpace(request.MCPServerName)
+	if serverName == "" {
+		serverName = "attn_context"
+	}
+	args := []string{
+		"exec",
+		"--json",
+		"--ephemeral",
+		"--ignore-user-config",
+		"--ignore-rules",
+		"--strict-config",
+		"--skip-git-repo-check",
+		"--sandbox", "read-only",
+		"-m", strings.TrimSpace(request.Model),
+		"-c", `approval_policy="never"`,
+		"-c", "features.shell_tool=false",
+		"-c", "features.unified_exec=false",
+		"-c", "features.apps=false",
+		"-c", "features.hooks=false",
+		"-c", "features.plugins=false",
+		"-c", "features.browser_use=false",
+		"-c", "features.in_app_browser=false",
+		"-c", "features.computer_use=false",
+		"-c", "features.image_generation=false",
+		"-c", "features.memories=false",
+		"-c", "features.multi_agent=false",
+		"-c", "features.goals=false",
+		"-c", "features.shell_snapshot=false",
+		"-c", "features.standalone_web_search=false",
+		"-c", "features.tool_suggest=false",
+		"-c", "features.workspace_dependencies=false",
+		"-c", fmt.Sprintf("mcp_servers.%s.command=%s", serverName, strconv.Quote(request.MCPServerCommand)),
+		"-c", fmt.Sprintf("mcp_servers.%s.args=%s", serverName, tomlStringArray(request.MCPServerArgs)),
+		"-c", fmt.Sprintf("mcp_servers.%s.required=true", serverName),
+		"-c", fmt.Sprintf("mcp_servers.%s.enabled_tools=%s", serverName, tomlStringArray([]string{"read_context", "replace_context"})),
+		"-c", fmt.Sprintf(`mcp_servers.%s.default_tools_approval_mode="approve"`, serverName),
+		request.Prompt,
+	}
+	return runHeadlessCommand(ctx, request.Executable, args, request.WorkDir, "codex")
+}
+
+func tomlStringArray(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, strconv.Quote(value))
+	}
+	return "[" + strings.Join(quoted, ",") + "]"
 }
 
 // --- ConfigOverrideProvider ---

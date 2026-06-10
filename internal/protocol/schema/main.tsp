@@ -73,6 +73,11 @@ enum AttachPolicy {
   same_app_remount,
 }
 
+enum WorkspaceContextMaintenanceAction {
+  compact,
+  rollback,
+}
+
 enum ReviewLoopStatus {
   running,
   waiting_for_agent_advance,
@@ -579,6 +584,16 @@ model WorkspaceContextStatusMessage {
 model WorkspaceContextListMessage {
   cmd: "workspace_context_list";
   request_id: string;
+}
+
+model WorkspaceContextCompactMessage {
+  cmd: "workspace_context_compact";
+  source_session_id: string;
+}
+
+model WorkspaceContextRollbackMessage {
+  cmd: "workspace_context_rollback";
+  source_session_id: string;
 }
 
 model DelegateWorktreeRequest {
@@ -1872,6 +1887,7 @@ model Response {
   data?: string;
   delegate_result?: DelegateResult;
   workspace_context_result?: WorkspaceContextResult;
+  workspace_context_maintenance_result?: WorkspaceContextMaintenanceResult;
   workspace_contexts?: WorkspaceContext[];
   chief_of_staff_dispatch?: ChiefOfStaffDispatch;
   chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
@@ -1911,6 +1927,16 @@ model WorkspaceContextResult {
   stale: boolean;
   updated_by_session_id?: string;
   updated_at?: string;
+}
+
+model WorkspaceContextMaintenanceResult {
+  action: WorkspaceContextMaintenanceAction;
+  workspace_id: string;
+  source_revision: int32;
+  result_revision: int32;
+  changed: boolean;
+  agent?: string;
+  agent_model?: string;
 }
 
 model WorkspaceContextResultMessage {
