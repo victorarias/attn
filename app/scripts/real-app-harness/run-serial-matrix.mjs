@@ -65,6 +65,11 @@ const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-diff-review'],
   },
   {
+    id: 'tour',
+    label: 'Interactive Tour renders a real guide and diff',
+    command: ['pnpm', 'run', 'real-app:scenario-tour'],
+  },
+  {
     id: 'tr205-codex',
     label: 'TR-205 remote codex',
     command: ['pnpm', 'run', 'real-app:scenario-tr205'],

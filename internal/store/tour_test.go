@@ -1,12 +1,55 @@
 package store
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 )
+
+func TestTourEmptyCollectionsMarshalAsArrays(t *testing.T) {
+	s := New()
+	defer s.Close()
+	s.Add(&protocol.Session{
+		ID:             "session-1",
+		Label:          "session",
+		Agent:          "codex",
+		Directory:      t.TempDir(),
+		State:          protocol.SessionStateIdle,
+		StateSince:     string(protocol.TimestampNow()),
+		StateUpdatedAt: string(protocol.TimestampNow()),
+		LastSeen:       string(protocol.TimestampNow()),
+	})
+
+	run, err := s.CreateOrOpenTour("session-1", "Tour", "/repo", "/system/guide.yml", "main", TourSnapshot{
+		Files: []protocol.TourFile{{
+			Path:   "main.go",
+			Group:  "tour",
+			View:   "diff",
+			Status: "modified",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(payload)
+	for _, field := range []string{
+		`"warnings":[]`,
+		`"drafts":[]`,
+		`"transcript":[]`,
+		`"annotations":[]`,
+	} {
+		if !strings.Contains(encoded, field) {
+			t.Fatalf("tour payload missing %s: %s", field, encoded)
+		}
+	}
+}
 
 func TestTourPersistsDraftTranscriptAndEvents(t *testing.T) {
 	s := New()

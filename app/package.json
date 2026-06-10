@@ -49,6 +49,7 @@
     "real-app:scenario-tile-only-workspace-select": "node scripts/real-app-harness/scenario-tile-only-workspace-select.mjs",
     "real-app:scenario-autoclose-on-exit": "node scripts/real-app-harness/scenario-autoclose-on-exit.mjs",
     "real-app:scenario-diff-review": "node scripts/real-app-harness/scenario-diff-review.mjs",
+    "real-app:scenario-tour": "node scripts/real-app-harness/scenario-tour.mjs",
     "real-app:serial-matrix": "node scripts/real-app-harness/run-serial-matrix.mjs",
     "e2e": "playwright test",
     "e2e:settings-visual": "playwright test e2e/settings-visual.spec.ts",

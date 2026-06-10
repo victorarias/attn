@@ -97,6 +97,26 @@ export type { DaemonEndpointProfile };
 // Re-export enums and useful types
 export { SessionState, PRRole, HeatState };
 
+export function normalizeDaemonTour(tour: DaemonTour): DaemonTour {
+  return {
+    ...tour,
+    warnings: Array.isArray(tour.warnings) ? tour.warnings : [],
+    files: (Array.isArray(tour.files) ? tour.files : []).map((file) => ({
+      ...file,
+      annotations: (Array.isArray(file.annotations) ? file.annotations : []).map((annotation) => ({
+        ...annotation,
+        comments: Array.isArray(annotation.comments) ? annotation.comments : [],
+      })),
+    })),
+    drafts: (Array.isArray(tour.drafts) ? tour.drafts : []).map((draft) => ({
+      ...draft,
+      annotation_replies: Array.isArray(draft.annotation_replies) ? draft.annotation_replies : [],
+      line_comments: Array.isArray(draft.line_comments) ? draft.line_comments : [],
+    })),
+    transcript: Array.isArray(tour.transcript) ? tour.transcript : [],
+  };
+}
+
 // Extended WebSocketEvent with action result fields (generated allows extra properties)
 type WebSocketEvent = GeneratedWebSocketEvent & {
   id?: string;
@@ -2079,20 +2099,21 @@ export function useDaemonSocket({
 
           case 'tour_result': {
             const action = data.action || 'unknown';
-            const sessionId = data.session_id || data.tour?.session_id || '';
-            const tourId = data.tour_id || data.tour?.tour_id || '';
+            const tour = data.tour ? normalizeDaemonTour(data.tour) : null;
+            const sessionId = data.session_id || tour?.session_id || '';
+            const tourId = data.tour_id || tour?.tour_id || '';
             const key = action === 'get'
               ? `tour_${action}_${sessionId}`
               : `tour_${action}_${tourId}`;
             const pending = pendingActionsRef.current.get(key);
-            if (data.tour && onTourUpdate) {
-              onTourUpdate(data.tour);
+            if (tour && onTourUpdate) {
+              onTourUpdate(tour);
             }
             if (pending) {
               pendingActionsRef.current.delete(key);
               if (data.success) {
                 pending.resolve({
-                  tour: data.tour ?? null,
+                  tour,
                   event: data.tour_event ?? null,
                 });
               } else {
@@ -2104,7 +2125,7 @@ export function useDaemonSocket({
 
           case 'tour_updated':
             if (onTourUpdate) {
-              onTourUpdate(data.tour ?? null);
+              onTourUpdate(data.tour ? normalizeDaemonTour(data.tour) : null);
             }
             break;
 

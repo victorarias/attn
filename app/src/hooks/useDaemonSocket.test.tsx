@@ -2,7 +2,51 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { ptyAttach, ptyKill, ptySpawn } from '../pty/bridge';
-import { PROTOCOL_VERSION, retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
+import {
+  normalizeDaemonTour,
+  PROTOCOL_VERSION,
+  retryTransientAttachRequest,
+  useDaemonSocket,
+} from './useDaemonSocket';
+
+describe('normalizeDaemonTour', () => {
+  it('turns null daemon collections into arrays at the socket boundary', () => {
+    const tour = normalizeDaemonTour({
+      tour_id: 'tour-1',
+      session_id: 'session-1',
+      name: 'Tour',
+      repo_path: '/repo',
+      guide_path: '/system/guide.yml',
+      base_ref: 'main',
+      status: 'active',
+      connection_state: 'connected',
+      summary: '',
+      warnings: null,
+      files: [{
+        path: 'main.go',
+        group: 'tour',
+        view: 'diff',
+        status: 'modified',
+        additions: 1,
+        deletions: 0,
+        original: '',
+        modified: 'package main',
+        note: '',
+        annotations: null,
+      }],
+      drafts: null,
+      transcript: null,
+      listener_event_seq: 0,
+      created_at: '2026-06-10T00:00:00Z',
+      updated_at: '2026-06-10T00:00:00Z',
+    } as unknown as Parameters<typeof normalizeDaemonTour>[0]);
+
+    expect(tour.warnings).toEqual([]);
+    expect(tour.files[0].annotations).toEqual([]);
+    expect(tour.drafts).toEqual([]);
+    expect(tour.transcript).toEqual([]);
+  });
+});
 
 class FakeWebSocket {
   static readonly CONNECTING = 0;

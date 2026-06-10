@@ -292,6 +292,10 @@ func (s *Store) updateTourSnapshot(
 }
 
 func encodeTourSnapshot(snapshot TourSnapshot) (string, string, error) {
+	if snapshot.Warnings == nil {
+		snapshot.Warnings = []string{}
+	}
+	snapshot.Files = normalizeTourFiles(snapshot.Files)
 	warningsJSON, err := json.Marshal(snapshot.Warnings)
 	if err != nil {
 		return "", "", fmt.Errorf("encode tour warnings: %w", err)
@@ -383,6 +387,10 @@ func (s *Store) scanTourRun(row tourRow, now time.Time) (*protocol.TourRun, erro
 	if err := json.Unmarshal([]byte(filesJSON), &run.Files); err != nil {
 		return nil, fmt.Errorf("decode tour files: %w", err)
 	}
+	if run.Warnings == nil {
+		run.Warnings = []string{}
+	}
+	run.Files = normalizeTourFiles(run.Files)
 	drafts, err := s.loadTourDrafts(run.TourID)
 	if err != nil {
 		return nil, err
@@ -396,6 +404,23 @@ func (s *Store) scanTourRun(row tourRow, now time.Time) (*protocol.TourRun, erro
 	return &run, nil
 }
 
+func normalizeTourFiles(files []protocol.TourFile) []protocol.TourFile {
+	if files == nil {
+		files = []protocol.TourFile{}
+	}
+	for fileIndex := range files {
+		if files[fileIndex].Annotations == nil {
+			files[fileIndex].Annotations = []protocol.TourAnnotation{}
+		}
+		for annotationIndex := range files[fileIndex].Annotations {
+			if files[fileIndex].Annotations[annotationIndex].Comments == nil {
+				files[fileIndex].Annotations[annotationIndex].Comments = []protocol.TourComment{}
+			}
+		}
+	}
+	return files
+}
+
 func (s *Store) loadTourDrafts(tourID string) ([]protocol.TourFileDraft, error) {
 	rows, err := s.db.Query(`
 		SELECT path, reviewed, note, annotation_replies_json, line_comments_json
@@ -406,7 +431,7 @@ func (s *Store) loadTourDrafts(tourID string) ([]protocol.TourFileDraft, error) 
 	}
 	defer rows.Close()
 
-	var drafts []protocol.TourFileDraft
+	drafts := []protocol.TourFileDraft{}
 	for rows.Next() {
 		var draft protocol.TourFileDraft
 		var reviewed int
@@ -420,6 +445,12 @@ func (s *Store) loadTourDrafts(tourID string) ([]protocol.TourFileDraft, error) 
 		}
 		if err := json.Unmarshal([]byte(commentsJSON), &draft.LineComments); err != nil {
 			return nil, fmt.Errorf("decode line comments: %w", err)
+		}
+		if draft.AnnotationReplies == nil {
+			draft.AnnotationReplies = []protocol.TourDraftText{}
+		}
+		if draft.LineComments == nil {
+			draft.LineComments = []protocol.TourLineComment{}
 		}
 		drafts = append(drafts, draft)
 	}
@@ -436,7 +467,7 @@ func (s *Store) loadTourTranscript(tourID string) ([]protocol.TourTranscriptEntr
 	}
 	defer rows.Close()
 
-	var entries []protocol.TourTranscriptEntry
+	entries := []protocol.TourTranscriptEntry{}
 	for rows.Next() {
 		var entry protocol.TourTranscriptEntry
 		var eventID, contextJSON sql.NullString

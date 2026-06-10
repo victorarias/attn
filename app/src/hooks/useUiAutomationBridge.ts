@@ -1257,6 +1257,36 @@ function collectDiffReviewUiState() {
   };
 }
 
+function collectTourUiState() {
+  const panel = document.querySelector('.dock-panel--tour');
+  const tour = panel?.querySelector('.tour-panel');
+  const fileButtons = Array.from(tour?.querySelectorAll('.tour-panel__group button') || [])
+    .map((button) => ({
+      path: button.querySelector('small')?.textContent?.trim() || '',
+      selected: button.classList.contains('is-active'),
+      reviewed: Boolean(button.querySelector('em')),
+    }));
+  const diffsContainer = tour?.querySelector('diffs-container');
+  const shadowRoot = diffsContainer
+    ? (diffsContainer as HTMLElement & { shadowRoot: ShadowRoot | null }).shadowRoot
+    : null;
+
+  return {
+    panelOpen: Boolean(panel && tour),
+    title: tour?.querySelector('.tour-panel__header h2')?.textContent?.trim() || '',
+    connectionText: tour?.querySelector('.tour-panel__connection')?.textContent?.trim() || '',
+    summaryText: tour?.querySelector('.tour-panel__summary')?.textContent?.trim() || '',
+    fileCount: fileButtons.length,
+    files: fileButtons,
+    selectedFile: tour?.querySelector('.tour-panel__file-heading h3')?.textContent?.trim() || '',
+    diffViewPresent: Boolean(tour?.querySelector('.diff-view')),
+    renderedLineCount: shadowRoot ? shadowRoot.querySelectorAll('[data-line-number-content]').length : 0,
+    conversationText: tour?.querySelector('.tour-panel__transcript')?.textContent?.trim() || '',
+    errorText: tour?.querySelector('.tour-panel__error')?.textContent?.trim() || '',
+    panelBounds: rectSnapshot(panel),
+  };
+}
+
 export function useUiAutomationBridge({
   sessions,
   activeSessionId,
@@ -2129,6 +2159,8 @@ export function useUiAutomationBridge({
       }
       case 'diff_get_state':
         return collectDiffReviewUiState();
+      case 'tour_get_state':
+        return collectTourUiState();
       case 'capture_structured_snapshot':
         return collectVisualSnapshot(
           sessions,
