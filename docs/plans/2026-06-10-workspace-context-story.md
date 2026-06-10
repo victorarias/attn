@@ -140,8 +140,9 @@ Configuration:
   Empty disables the janitor.
 - The agent selector lists only installed drivers that implement a headless task
   capability. Reuse that agent's existing executable setting.
-- Keep model selection as agent-specific free text initially, matching the
-  existing review model settings. Do not build model discovery yet.
+- Offer agent-specific recommended model presets, plus a Custom option that
+  reveals a free-text model override. Keep the preset list local and explicit;
+  do not build model discovery yet.
 - Validate the agent/model pair together so changing agent cannot accidentally
   retain a model chosen for another provider.
 - Do not silently fall back to another agent or model. A bad configuration

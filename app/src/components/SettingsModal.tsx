@@ -32,8 +32,11 @@ import {
 } from '../utils/reviewLoopPresets';
 import { BUILD_PROFILE } from '../utils/buildProfile';
 import {
+  defaultWorkspaceContextJanitorModel,
+  isWorkspaceContextJanitorModelPreset,
   parseWorkspaceContextJanitorConfig,
   serializeWorkspaceContextJanitorConfig,
+  workspaceContextJanitorModelPresets,
 } from '../utils/workspaceContextJanitor';
 import './SettingsModal.css';
 
@@ -186,6 +189,18 @@ export function SettingsModal({
     }
     return eligible;
   }, [actualAgentCapabilities, actualWorkspaceContextJanitor?.agent, agentAvailability, orderedAgentList]);
+  const workspaceContextJanitorModelPresetsForAgent = useMemo(
+    () => workspaceContextJanitorModelPresets(workspaceContextJanitorAgent),
+    [workspaceContextJanitorAgent],
+  );
+  const workspaceContextJanitorModelSelection = !workspaceContextJanitorAgent
+    ? ''
+    : isWorkspaceContextJanitorModelPreset(
+      workspaceContextJanitorAgent,
+      workspaceContextJanitorModel,
+    )
+      ? workspaceContextJanitorModel
+      : 'custom';
   const agentCapabilityOrder = useMemo(
     () => AGENT_CAPABILITY_ORDER.map((cap) => cap as string),
     [],
@@ -328,11 +343,13 @@ export function SettingsModal({
   }, [actualDefaultAgent, agentAvailability, onSetSetting]);
 
   const handleWorkspaceContextJanitorAgentChange = useCallback((agent: SessionAgent | '') => {
-    if (agent !== workspaceContextJanitorAgent) {
-      setWorkspaceContextJanitorModel('');
-    }
     setWorkspaceContextJanitorAgent(agent);
-  }, [workspaceContextJanitorAgent]);
+    setWorkspaceContextJanitorModel(defaultWorkspaceContextJanitorModel(agent));
+  }, []);
+
+  const handleWorkspaceContextJanitorModelSelection = useCallback((model: string) => {
+    setWorkspaceContextJanitorModel(model === 'custom' ? '' : model);
+  }, []);
 
   const saveWorkspaceContextJanitor = useCallback(() => {
     const model = workspaceContextJanitorModel.trim();
@@ -1417,21 +1434,41 @@ export function SettingsModal({
             </div>
             <div className="settings-field">
               <label className="settings-label" htmlFor="settings-context-janitor-model">Model</label>
-              <input
+              <select
                 id="settings-context-janitor-model"
                 data-testid="settings-context-janitor-model"
+                value={workspaceContextJanitorModelSelection}
+                onChange={(event) => handleWorkspaceContextJanitorModelSelection(event.target.value)}
+                className="settings-input"
+                disabled={!workspaceContextJanitorAgent}
+              >
+                {!workspaceContextJanitorAgent && <option value="">Select an agent</option>}
+                {workspaceContextJanitorModelPresetsForAgent.map((preset) => (
+                  <option key={preset.value} value={preset.value}>{preset.label}</option>
+                ))}
+                <option value="custom">Custom...</option>
+              </select>
+            </div>
+          </div>
+          {workspaceContextJanitorAgent && workspaceContextJanitorModelSelection === 'custom' && (
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-context-janitor-model-custom">
+                Custom model
+              </label>
+              <input
+                id="settings-context-janitor-model-custom"
+                data-testid="settings-context-janitor-model-custom"
                 type="text"
                 value={workspaceContextJanitorModel}
                 onChange={(event) => setWorkspaceContextJanitorModel(event.target.value)}
-                placeholder={workspaceContextJanitorAgent === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4-mini'}
+                placeholder={workspaceContextJanitorAgent === 'claude' ? 'claude-opus-4-6' : 'model ID'}
                 className="settings-input"
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
-                disabled={!workspaceContextJanitorAgent}
               />
             </div>
-          </div>
+          )}
           <div className="settings-row-inline">
             <button
               type="button"
@@ -1453,7 +1490,8 @@ export function SettingsModal({
           </div>
           <div className="settings-hint">
             Runs after a 10-minute debounce when canonical context exceeds 12 KiB.
-            Use `attn workspace context compact` to run it immediately.
+            Recommended models mirror the agents' memory-management behavior. Use
+            `attn workspace context compact` to run it immediately.
           </div>
         </div>
       </section>
