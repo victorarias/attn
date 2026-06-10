@@ -905,6 +905,18 @@ function setInputValue(element: HTMLInputElement, value: string) {
   element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
 }
 
+function setTextAreaValue(element: HTMLTextAreaElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLTextAreaElement.prototype,
+    'value',
+  )?.set;
+  if (!setter) {
+    throw new Error('Unable to resolve textarea value setter');
+  }
+  setter.call(element, value);
+  element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+}
+
 function getLocationPickerRoot() {
   const root = document.querySelector('[data-testid="location-picker"]');
   return root instanceof HTMLElement ? root : null;
@@ -1259,6 +1271,11 @@ function collectDiffReviewUiState() {
 
 function collectTourUiState() {
   const tour = document.querySelector('.tour-panel');
+  const briefingMarkdown = tour?.querySelector('.tour-panel__briefing-content .tour-markdown');
+  const diagramViewport = tour?.querySelector('.tour-panel__mermaid-viewport');
+  const reviewButton = tour?.querySelector<HTMLButtonElement>(
+    '.tour-panel__header-actions button[aria-label="Send review to agent"]',
+  );
   const fileButtons = Array.from(tour?.querySelectorAll('.tour-panel__file-row') || [])
     .map((button) => ({
       path: button.getAttribute('data-file-path') || '',
@@ -1291,6 +1308,11 @@ function collectTourUiState() {
     diffViewPresent: Boolean(tour?.querySelector('.diff-view')),
     renderedLineCount: shadowRoot ? shadowRoot.querySelectorAll('[data-line-number-content]').length : 0,
     mermaidCount: tour?.querySelectorAll('.tour-panel__mermaid.is-ready svg').length || 0,
+    briefingFontSize: briefingMarkdown ? Number.parseFloat(getComputedStyle(briefingMarkdown).fontSize) : 0,
+    diagramViewportBounds: rectSnapshot(diagramViewport || null),
+    diagramZoomText: tour?.querySelector('.tour-panel__mermaid-reset')?.textContent?.trim() || '',
+    reviewSubmitVisible: Boolean(reviewButton),
+    reviewSubmitText: reviewButton?.textContent?.trim() || '',
     conversationText: tour?.querySelector('.tour-panel__transcript')?.textContent?.trim() || '',
     errorText: tour?.querySelector('.tour-panel__error')?.textContent?.trim() || '',
     panelBounds: rectSnapshot(tour),
@@ -2182,6 +2204,34 @@ export function useUiAutomationBridge({
         const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.tour-panel__header-actions button'))
           .find((entry) => entry.textContent?.trim().startsWith('Conversation'));
         button?.click();
+        return collectTourUiState();
+      }
+      case 'tour_set_file_note': {
+        const note = typeof payload.note === 'string' ? payload.note : '';
+        const textarea = document.querySelector<HTMLTextAreaElement>(
+          '.tour-panel__notes textarea[placeholder="Feedback on this file"]',
+        );
+        if (!textarea) {
+          throw new Error('Tour file feedback textarea is not open');
+        }
+        setTextAreaValue(textarea, note);
+        await settleUi(2);
+        return collectTourUiState();
+      }
+      case 'tour_zoom_diagram': {
+        const button = document.querySelector<HTMLButtonElement>(
+          '.tour-panel__mermaid-toolbar button[aria-label="Zoom in diagram"]',
+        );
+        button?.click();
+        await settleUi(2);
+        return collectTourUiState();
+      }
+      case 'tour_send_review': {
+        const button = document.querySelector<HTMLButtonElement>(
+          '.tour-panel__header-actions button[aria-label="Send review to agent"]',
+        );
+        button?.click();
+        await settleUi(2);
         return collectTourUiState();
       }
       case 'tour_press_escape': {

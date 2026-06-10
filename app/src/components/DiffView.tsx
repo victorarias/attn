@@ -18,7 +18,7 @@
  * `line_end < 0` encodes the original/deleted side; `line_start` is the anchor
  * line on that side; `abs(line_end)` is the range end.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   MultiFileDiff,
   Virtualizer,
@@ -52,7 +52,6 @@ type DraftState = {
   side: AnnotationSide;
   start: number;
   end: number;
-  content: string;
 };
 
 type SelectionPopupState = {
@@ -143,6 +142,9 @@ export function DiffView({
 }: DiffViewProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const pointerRef = useRef({ x: 0, y: 0 });
+  const draftContentByFileRef = useRef<Record<string, string>>({});
+  const scrollPositionsByFileRef = useRef<Record<string, { top: number; left: number }>>({});
+  const activeFileNameRef = useRef(filePath ?? 'file.txt');
   // The library commits a trailing line-selection on the same pointerup that
   // fires onGutterUtilityClick. The "+" should open only the draft, so swallow
   // that one selection-end instead of letting it pop the action menu too.
@@ -154,12 +156,21 @@ export function DiffView({
   const [staleExpanded, setStaleExpanded] = useState(false);
 
   const name = filePath ?? 'file.txt';
+  activeFileNameRef.current = name;
   const draft = draftsByFile[name] ?? null;
 
-  const setDraftForCurrentFile = useCallback(
-    (next: DraftState | null) => {
+  const openDraftForCurrentFile = useCallback(
+    (next: DraftState) => {
+      draftContentByFileRef.current[name] = '';
+      setDraftsByFile((current) => ({ ...current, [name]: next }));
+    },
+    [name]
+  );
+
+  const clearDraftForCurrentFile = useCallback(
+    () => {
+      delete draftContentByFileRef.current[name];
       setDraftsByFile((current) => {
-        if (next) return { ...current, [name]: next };
         const { [name]: _removed, ...rest } = current;
         return rest;
       });
@@ -235,6 +246,22 @@ export function DiffView({
     [name, shownOriginal, shownModified]
   );
 
+  useLayoutEffect(() => {
+    const scroller = wrapperRef.current?.querySelector<HTMLElement>('.diff-view-scroller');
+    if (!scroller) return;
+    const rememberScroll = () => {
+      scrollPositionsByFileRef.current[activeFileNameRef.current] = {
+        top: scroller.scrollTop,
+        left: scroller.scrollLeft,
+      };
+    };
+    scroller.addEventListener('scroll', rememberScroll, { passive: true });
+    return () => {
+      rememberScroll();
+      scroller.removeEventListener('scroll', rememberScroll);
+    };
+  }, []);
+
   // The library forces a full re-render whenever the options object changes by
   // value (function identities included), so keep callbacks stable and memoize
   // the options object on the inputs that should actually retrigger a render.
@@ -244,7 +271,7 @@ export function DiffView({
     const { side, start, end } = normalized;
     suppressSelectionEndRef.current = true;
     setSelectionPopup(null);
-    setDraftForCurrentFile({ side, start, end, content: '' });
+    openDraftForCurrentFile({ side, start, end });
   });
 
   const handleLineSelectionEnd = useStableCallback((range: SelectedLineRange | null) => {
@@ -275,6 +302,15 @@ export function DiffView({
     setSelectionPopup({ side: props.annotationSide, start: props.lineNumber, end: props.lineNumber, x, y });
   });
 
+  const restoreScrollPosition = useStableCallback(() => {
+    const position = scrollPositionsByFileRef.current[name];
+    if (!position) return;
+    const scroller = wrapperRef.current?.querySelector<HTMLElement>('.diff-view-scroller');
+    if (!scroller) return;
+    scroller.scrollTop = position.top;
+    scroller.scrollLeft = position.left;
+  });
+
   const options = useMemo<FileDiffOptions<AnnotationMeta>>(() => ({
     diffStyle,
     expandUnchanged,
@@ -294,7 +330,18 @@ export function DiffView({
     // (the library gates the button behind enableGutterUtility, default false).
     enableGutterUtility: true,
     onGutterUtilityClick: handleGutterUtilityClick,
-  }), [diffStyle, expandUnchanged, resolvedTheme, handleLineSelectionEnd, handleLineClick, handleGutterUtilityClick]);
+    onPostRender: (_node, _instance, phase) => {
+      if (phase !== 'unmount') restoreScrollPosition();
+    },
+  }), [
+    diffStyle,
+    expandUnchanged,
+    resolvedTheme,
+    handleLineSelectionEnd,
+    handleLineClick,
+    handleGutterUtilityClick,
+    restoreScrollPosition,
+  ]);
 
   // Group saved comments + the optional draft into one annotation per
   // (side, anchor line). The library slots annotations by `side`+`lineNumber`,
@@ -352,23 +399,23 @@ export function DiffView({
       const lineEnd = draft.side === 'deletions' ? -draft.end : draft.end;
       try {
         await onAddComment(lineStart, lineEnd, content);
-        setDraftForCurrentFile(null);
+        clearDraftForCurrentFile();
       } catch {
         // The parent owns user-visible error reporting; keep the draft intact so
         // the user can retry without losing typed text.
       }
     },
-    [draft, onAddComment, setDraftForCurrentFile]
+    [clearDraftForCurrentFile, draft, onAddComment]
   );
 
   const handleDraftContentChange = useCallback(
     (content: string) => {
-      setDraftForCurrentFile(draft ? { ...draft, content } : null);
+      draftContentByFileRef.current[name] = content;
     },
-    [draft, setDraftForCurrentFile]
+    [name]
   );
 
-  const handleCancelDraft = useCallback(() => setDraftForCurrentFile(null), [setDraftForCurrentFile]);
+  const handleCancelDraft = clearDraftForCurrentFile;
 
   const handleSendComment = useCallback(
     (comment: ReviewComment) => {
@@ -387,7 +434,7 @@ export function DiffView({
           draft={meta.draft}
           editingCommentId={editingCommentId}
           showSendToClaude={!!onSendToClaude && !!filePath}
-          draftContent={meta.draft ? draft?.content : undefined}
+          draftContent={meta.draft ? draftContentByFileRef.current[name] : undefined}
           onDraftContentChange={meta.draft ? handleDraftContentChange : undefined}
           onSaveDraft={handleSaveDraft}
           onCancelDraft={handleCancelDraft}
@@ -406,6 +453,7 @@ export function DiffView({
       filePath,
       handleSaveDraft,
       handleDraftContentChange,
+      name,
       handleCancelDraft,
       onStartEdit,
       onEditComment,
@@ -420,9 +468,9 @@ export function DiffView({
   const addCommentFromSelection = useCallback(() => {
     if (!selectionPopup) return;
     const { side, start, end } = selectionPopup;
-    setDraftForCurrentFile({ side, start, end, content: '' });
+    openDraftForCurrentFile({ side, start, end });
     setSelectionPopup(null);
-  }, [selectionPopup, setDraftForCurrentFile]);
+  }, [selectionPopup, openDraftForCurrentFile]);
 
   const sendSelectionToClaude = useCallback(() => {
     if (!selectionPopup || !onSendToClaude || !filePath) return;

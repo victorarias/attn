@@ -81,6 +81,40 @@ function waitForTourReady(child, timeoutMs = 30_000) {
   });
 }
 
+function waitForTourEvent(child, prefix, timeoutMs = 30_000) {
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for ${prefix}. stdout=${stdout} stderr=${stderr}`));
+    }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timeout);
+      child.stdout?.off('data', onStdout);
+      child.stderr?.off('data', onStderr);
+      child.off('exit', onExit);
+    };
+    const onStdout = (chunk) => {
+      stdout += chunk.toString();
+      const line = stdout.split('\n').find((entry) => entry.startsWith(prefix));
+      if (!line) return;
+      cleanup();
+      resolve(line);
+    };
+    const onStderr = (chunk) => {
+      stderr += chunk.toString();
+    };
+    const onExit = (code, signal) => {
+      cleanup();
+      reject(new Error(`Tour listener exited before ${prefix}: code=${code} signal=${signal} stderr=${stderr}`));
+    };
+    child.stdout?.on('data', onStdout);
+    child.stderr?.on('data', onStderr);
+    child.on('exit', onExit);
+  });
+}
+
 async function captureTourScreenshot(client, screenshotPath) {
   try {
     await client.request('capture_native_window_screenshot', { path: screenshotPath });
@@ -228,6 +262,13 @@ skip:
     assert(state.connectionText === 'Agent listening', `listener state rendered (got ${JSON.stringify(state.connectionText)})`);
     assert(state.summaryText.includes('Packaged-app Tour'), 'guide summary rendered');
     assert(state.mermaidCount === 1, `Mermaid diagram rendered once (got ${state.mermaidCount})`);
+    assert(state.briefingFontSize >= 16, `briefing uses a readable font size (got ${state.briefingFontSize}px)`);
+    assert(
+      state.diagramViewportBounds?.height >= 350,
+      `diagram has a substantial zoom viewport (got ${state.diagramViewportBounds?.height}px)`,
+    );
+    assert(state.diagramZoomText === '100%', `diagram starts at 100% zoom (got ${JSON.stringify(state.diagramZoomText)})`);
+    assert(state.reviewSubmitVisible, 'review submission is visible while conversation is closed');
     assert(state.files.some((file) => file.path === 'src/app.ts' && file.selected), 'curated file is selected');
     assert(
       state.totalFileCount === expectedChangedFileCount,
@@ -243,6 +284,10 @@ skip:
       state.panelBounds?.width >= state.viewportWidth - 1 && state.panelBounds?.height >= state.viewportHeight - 1,
       `Tour fills the viewport (got ${state.panelBounds?.width}x${state.panelBounds?.height}/${state.viewportWidth}x${state.viewportHeight})`,
     );
+
+    const briefingScreenshotPath = await captureTourScreenshot(client, path.join(runDir, 'tour-briefing.png'));
+    const zoomedState = await client.request('tour_zoom_diagram');
+    assert(zoomedState.diagramZoomText === '125%', `diagram zoom control works (got ${JSON.stringify(zoomedState.diagramZoomText)})`);
 
     await client.request('tour_close_briefing');
     const readingState = await pollFor(
@@ -263,6 +308,20 @@ skip:
       'Tour conversation drawer to open on demand',
     );
     assert(conversationState.conversationText.includes('No questions yet.'), 'empty conversation state rendered on demand');
+
+    const pendingNote = 'Please verify the packaged pending-note path.';
+    await client.request('tour_set_file_note', { note: pendingNote });
+    const feedbackReady = waitForTourEvent(listener, 'FEEDBACK_READY ');
+    await client.request('tour_send_review');
+    const feedbackLine = await feedbackReady;
+    const feedbackEvent = JSON.parse(feedbackLine.slice('FEEDBACK_READY '.length));
+    assert(
+      feedbackEvent.markdown.includes(pendingNote),
+      `listener receives the pending file note (got ${JSON.stringify(feedbackEvent.markdown)})`,
+    );
+    const submittedState = await client.request('tour_get_state', {}, { timeoutMs: 5_000 });
+    assert(submittedState.reviewSubmitText === 'Review sent', `review reaches the listener (got ${JSON.stringify(submittedState.reviewSubmitText)})`);
+
     await client.request('tour_press_escape');
     const escapedConversation = await client.request('tour_get_state', {}, { timeoutMs: 5_000 });
     assert(escapedConversation.panelOpen && !escapedConversation.conversationOpen, 'Escape closes conversation before the Tour');
@@ -302,6 +361,7 @@ skip:
       fileCount: state.fileCount,
       selectedFile: state.selectedFile,
       renderedLineCount: state.renderedLineCount,
+      briefingScreenshot: briefingScreenshotPath,
       screenshot: screenshotPath,
     };
     fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');

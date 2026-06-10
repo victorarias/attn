@@ -4,6 +4,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -42,6 +43,9 @@ interface TourSection {
 }
 
 const BRIEFING_STORAGE_PREFIX = 'attn.tour.briefing.';
+const MERMAID_ZOOM_STEP = 0.25;
+const MERMAID_ZOOM_MIN = 0.75;
+const MERMAID_ZOOM_MAX = 3;
 let mermaidRenderQueue = Promise.resolve();
 
 function briefingWasSeen(tourId: string): boolean {
@@ -72,6 +76,7 @@ const MermaidBlock = memo(function MermaidBlock({
   const reactID = useId();
   const [svg, setSVG] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,7 +91,7 @@ const MermaidBlock = memo(function MermaidBlock({
             theme: resolvedTheme === 'dark' ? 'dark' : 'default',
             themeVariables: {
               fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-              fontSize: `${Math.round(13 * uiScale)}px`,
+              fontSize: `${Math.round(16 * uiScale)}px`,
             },
           });
           const id = `tour-mermaid-${reactID.replace(/[^a-zA-Z0-9]/g, '')}`;
@@ -117,15 +122,53 @@ const MermaidBlock = memo(function MermaidBlock({
   }
   return (
     <figure className={`tour-panel__mermaid ${svg ? 'is-ready' : 'is-loading'}`}>
-      {svg ? (
-        <div dangerouslySetInnerHTML={{ __html: svg }} />
-      ) : (
-        <div className="tour-panel__mermaid-placeholder" aria-label="Rendering diagram">
-          <span />
-          <span />
-          <span />
+      <div className="tour-panel__mermaid-toolbar" aria-label="Diagram zoom controls">
+        <span>Diagram</span>
+        <div>
+          <button
+            type="button"
+            aria-label="Zoom out diagram"
+            onClick={() => setZoom((current) => Math.max(MERMAID_ZOOM_MIN, current - MERMAID_ZOOM_STEP))}
+            disabled={zoom <= MERMAID_ZOOM_MIN}
+          >
+            -
+          </button>
+          <button
+            type="button"
+            className="tour-panel__mermaid-reset"
+            aria-label="Reset diagram zoom"
+            onClick={() => setZoom(1)}
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            type="button"
+            aria-label="Zoom in diagram"
+            onClick={() => setZoom((current) => Math.min(MERMAID_ZOOM_MAX, current + MERMAID_ZOOM_STEP))}
+            disabled={zoom >= MERMAID_ZOOM_MAX}
+          >
+            +
+          </button>
         </div>
-      )}
+      </div>
+      <div className="tour-panel__mermaid-viewport">
+        {svg ? (
+          <div
+            className="tour-panel__mermaid-canvas"
+            style={{
+              width: `${zoom * 100}%`,
+              minWidth: `${Math.round(720 * uiScale * zoom)}px`,
+            }}
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        ) : (
+          <div className="tour-panel__mermaid-placeholder" aria-label="Rendering diagram">
+            <span />
+            <span />
+            <span />
+          </div>
+        )}
+      </div>
     </figure>
   );
 });
@@ -201,6 +244,20 @@ function feedbackMarkdown(tour: DaemonTour): string {
   return sections.length > 0
     ? `## Tour feedback\n\n${sections.join('\n\n')}`
     : '## Tour feedback\n\nNo additional notes.';
+}
+
+function tourWithDraft(tour: DaemonTour, nextDraft: DaemonTourDraft): DaemonTour {
+  return {
+    ...tour,
+    drafts: [
+      ...tour.drafts.filter((draft) => draft.path !== nextDraft.path),
+      nextDraft,
+    ],
+  };
+}
+
+function draftsMatch(left: DaemonTourDraft, right: DaemonTourDraft): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function commentsForFile(file: TourFile, draft: DaemonTourDraft): ReviewComment[] {
@@ -324,6 +381,9 @@ export function TourPanel({
   const [questionEnd, setQuestionEnd] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reviewSent, setReviewSent] = useState(false);
+  const [noteInputs, setNoteInputs] = useState<Record<string, string>>({});
+  const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
 
   const sections = useMemo(() => buildSections(tour.files), [tour.files]);
   const selectedFile = tour.files.find((file) => file.path === selectedPath) ?? firstTourFile;
@@ -334,6 +394,8 @@ export function TourPanel({
   );
   const storedDraft = tour.drafts.find((draft) => draft.path === selectedFile?.path);
   const draft = storedDraft ?? emptyDraft(selectedFile?.path || '');
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const diffComments = useMemo(
     () => selectedFile ? commentsForFile(selectedFile, draft) : [],
     [draft, selectedFile],
@@ -401,6 +463,7 @@ export function TourPanel({
   const persistDraft = useCallback(async (nextDraft: DaemonTourDraft) => {
     setBusy('save');
     setError(null);
+    setReviewSent(false);
     try {
       await saveTourDraft(tour.tour_id, nextDraft);
     } catch (err) {
@@ -434,6 +497,26 @@ export function TourPanel({
     void persistDraft({ ...draft, annotation_replies: replies });
   };
 
+  const draftWithPendingInputs = useCallback((): DaemonTourDraft => {
+    const currentDraft = draftRef.current;
+    if (!selectedFile) return currentDraft;
+    const replies = currentDraft.annotation_replies.filter(
+      (reply) => !selectedFile.annotations.some((annotation) => annotation.id === reply.id),
+    );
+    for (const annotation of selectedFile.annotations) {
+      const key = `${selectedFile.path}:${annotation.id}`;
+      const body = replyInputs[key]
+        ?? currentDraft.annotation_replies.find((reply) => reply.id === annotation.id)?.body
+        ?? '';
+      if (body.trim()) replies.push({ id: annotation.id, body: body.trim() });
+    }
+    return {
+      ...currentDraft,
+      note: noteInputs[selectedFile.path] ?? currentDraft.note,
+      annotation_replies: replies,
+    };
+  }, [noteInputs, replyInputs, selectedFile]);
+
   const handleAsk = async () => {
     if (!selectedFile || !question.trim()) return;
     const start = Number.parseInt(questionStart, 10);
@@ -463,7 +546,14 @@ export function TourPanel({
     setBusy(finish ? 'finish' : 'submit');
     setError(null);
     try {
-      await submitTour(tour.tour_id, feedbackMarkdown(tour), finish);
+      const submissionDraft = draftWithPendingInputs();
+      let feedbackTour = tour;
+      if (submissionDraft.path && !draftsMatch(submissionDraft, draft)) {
+        await saveTourDraft(tour.tour_id, submissionDraft);
+        feedbackTour = tourWithDraft(tour, submissionDraft);
+      }
+      await submitTour(tour.tour_id, feedbackMarkdown(feedbackTour), finish);
+      if (!finish) setReviewSent(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -506,6 +596,16 @@ export function TourPanel({
             onClick={() => setConversationOpen((open) => !open)}
           >
             Conversation{tour.transcript.length > 0 ? ` ${tour.transcript.length}` : ''}
+          </button>
+          <button
+            type="button"
+            className="tour-panel__send-review"
+            data-tour-submit
+            aria-label="Send review to agent"
+            onClick={() => void handleSubmit(false)}
+            disabled={busy !== null || tour.status === 'ended'}
+          >
+            {busy === 'submit' ? 'Sending...' : reviewSent ? 'Review sent' : 'Send review'}
           </button>
           <button
             type="button"
@@ -759,10 +859,16 @@ export function TourPanel({
             <section className="tour-panel__notes">
               <h4>File feedback</h4>
               <textarea
-                defaultValue={draft.note}
-                key={`${draft.path}:${draft.note}`}
+                value={noteInputs[draft.path] ?? draft.note}
                 placeholder="Feedback on this file"
-                onBlur={(event) => void persistDraft({ ...draft, note: event.target.value })}
+                onChange={(event) => {
+                  setReviewSent(false);
+                  setNoteInputs((current) => ({ ...current, [draft.path]: event.target.value }));
+                }}
+                onBlur={(event) => {
+                  if ((event.relatedTarget as HTMLElement | null)?.closest('[data-tour-submit]')) return;
+                  void persistDraft({ ...draft, note: event.target.value });
+                }}
               />
             </section>
 
@@ -780,10 +886,17 @@ export function TourPanel({
                     </div>
                   ))}
                   <textarea
-                    defaultValue={reply}
-                    key={`${annotation.id}:${reply}`}
+                    value={replyInputs[`${draft.path}:${annotation.id}`] ?? reply}
                     placeholder="Reply to this annotation"
-                    onBlur={(event) => updateAnnotationReply(annotation.id, event.target.value)}
+                    onChange={(event) => {
+                      setReviewSent(false);
+                      const key = `${draft.path}:${annotation.id}`;
+                      setReplyInputs((current) => ({ ...current, [key]: event.target.value }));
+                    }}
+                    onBlur={(event) => {
+                      if ((event.relatedTarget as HTMLElement | null)?.closest('[data-tour-submit]')) return;
+                      updateAnnotationReply(annotation.id, event.target.value);
+                    }}
                   />
                 </section>
               );
@@ -819,10 +932,10 @@ export function TourPanel({
           </div>
 
           <footer className="tour-panel__submit">
-            <button type="button" onClick={() => void handleSubmit(false)} disabled={busy !== null || tour.status === 'ended'}>
-              {busy === 'submit' ? 'Sending...' : 'Send feedback'}
+            <button type="button" data-tour-submit onClick={() => void handleSubmit(false)} disabled={busy !== null || tour.status === 'ended'}>
+              {busy === 'submit' ? 'Sending...' : reviewSent ? 'Review sent' : 'Send review to agent'}
             </button>
-            <button type="button" className="tour-panel__end" onClick={() => void handleSubmit(true)} disabled={busy !== null || tour.status === 'ended'}>
+            <button type="button" data-tour-submit className="tour-panel__end" onClick={() => void handleSubmit(true)} disabled={busy !== null || tour.status === 'ended'}>
               {tour.status === 'ended' ? 'Tour ended' : busy === 'finish' ? 'Ending...' : 'End tour'}
             </button>
             <small>Feedback stays local to attn. Nothing is submitted to GitHub.</small>

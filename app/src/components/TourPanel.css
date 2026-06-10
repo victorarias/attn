@@ -184,6 +184,18 @@
   color: var(--text-primary);
 }
 
+.tour-panel__header-actions .tour-panel__send-review {
+  color: var(--bg-primary);
+  border-color: var(--tour-accent);
+  background: var(--tour-accent);
+}
+
+.tour-panel__header-actions .tour-panel__send-review:hover:not(:disabled) {
+  color: var(--bg-primary);
+  border-color: color-mix(in srgb, var(--tour-accent) 78%, white);
+  background: color-mix(in srgb, var(--tour-accent) 88%, white);
+}
+
 .tour-panel__connection {
   display: inline-flex;
   align-items: center;
@@ -900,8 +912,8 @@
 
 .tour-panel__briefing {
   display: grid;
-  width: min(calc(900px * var(--ui-scale)), 88vw);
-  max-height: min(calc(760px * var(--ui-scale)), 86vh);
+  width: min(calc(1120px * var(--ui-scale)), 94vw);
+  max-height: min(calc(920px * var(--ui-scale)), 92vh);
   grid-template-rows: auto minmax(0, 1fr) auto;
   border: 1px solid color-mix(in srgb, var(--tour-accent) 45%, var(--tour-rule));
   background:
@@ -938,7 +950,14 @@
 
 .tour-panel__briefing-content {
   overflow: auto;
-  padding: calc(24px * var(--ui-scale)) clamp(calc(24px * var(--ui-scale)), 5vw, calc(62px * var(--ui-scale)));
+  padding: calc(30px * var(--ui-scale)) clamp(calc(28px * var(--ui-scale)), 5vw, calc(72px * var(--ui-scale)));
+}
+
+.tour-panel__briefing-content .tour-markdown {
+  width: min(100%, 82ch);
+  margin: 0 auto;
+  font-size: calc(17px * var(--ui-scale));
+  line-height: 1.76;
 }
 
 .tour-panel__briefing > footer {
@@ -1102,11 +1121,10 @@
 }
 
 .tour-panel__mermaid {
-  min-height: calc(210px * var(--ui-scale));
   margin: calc(22px * var(--ui-scale)) 0;
-  overflow: auto;
   border: 1px solid var(--tour-rule);
   border-radius: calc(8px * var(--ui-scale));
+  overflow: hidden;
   background:
     linear-gradient(var(--tour-rule) 1px, transparent 1px),
     linear-gradient(90deg, var(--tour-rule) 1px, transparent 1px),
@@ -1114,24 +1132,77 @@
   background-size: calc(28px * var(--ui-scale)) calc(28px * var(--ui-scale));
 }
 
-.tour-panel__mermaid > div {
-  min-height: inherit;
-  padding: calc(20px * var(--ui-scale));
+.tour-panel__mermaid-toolbar {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  min-height: calc(42px * var(--ui-scale));
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(6px * var(--ui-scale)) calc(8px * var(--ui-scale)) calc(6px * var(--ui-scale)) calc(12px * var(--ui-scale));
+  border-bottom: 1px solid var(--tour-rule);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--tour-surface-raised) 96%, transparent);
+  font-family: "Avenir Next", Avenir, "Helvetica Neue", sans-serif;
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tour-panel__mermaid-toolbar > div {
+  display: flex;
+  align-items: center;
+}
+
+.tour-panel__mermaid-toolbar button {
+  min-width: calc(34px * var(--ui-scale));
+  min-height: calc(30px * var(--ui-scale));
+  padding: 0 calc(8px * var(--ui-scale));
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-size: calc(14px * var(--ui-scale));
+  font-weight: 760;
+}
+
+.tour-panel__mermaid-toolbar button + button {
+  margin-left: -1px;
+}
+
+.tour-panel__mermaid-toolbar .tour-panel__mermaid-reset {
+  min-width: calc(68px * var(--ui-scale));
+  font-size: calc(11px * var(--ui-scale));
+}
+
+.tour-panel__mermaid-viewport {
+  height: clamp(calc(360px * var(--ui-scale)), 52vh, calc(640px * var(--ui-scale)));
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.tour-panel__mermaid-canvas,
+.tour-panel__mermaid-placeholder {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  padding: calc(32px * var(--ui-scale));
+}
+
+.tour-panel__mermaid-canvas {
+  transition: width 150ms ease, min-width 150ms ease;
 }
 
 .tour-panel__mermaid svg {
   display: block;
   width: 100%;
-  max-width: 100%;
   height: auto;
-  min-height: calc(170px * var(--ui-scale));
+  min-height: calc(260px * var(--ui-scale));
   margin: 0 auto;
 }
 
 .tour-panel__mermaid-placeholder {
   display: flex;
-  align-items: center;
-  justify-content: center;
   gap: calc(12px * var(--ui-scale));
 }
 

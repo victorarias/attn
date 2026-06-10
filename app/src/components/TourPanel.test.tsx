@@ -51,6 +51,7 @@ const tour: DaemonTour = {
 function renderPanel() {
   const askTour = vi.fn(async () => tour);
   const submitTour = vi.fn(async () => tour);
+  const saveTourDraft = vi.fn(async () => tour);
   const onClose = vi.fn();
   render(
     <TourPanel
@@ -59,12 +60,12 @@ function renderPanel() {
       uiScale={1}
       onClose={onClose}
       refreshTour={vi.fn(async () => tour)}
-      saveTourDraft={vi.fn(async () => tour)}
+      saveTourDraft={saveTourDraft}
       askTour={askTour}
       submitTour={submitTour}
     />,
   );
-  return { askTour, onClose, submitTour };
+  return { askTour, onClose, saveTourDraft, submitTour };
 }
 
 describe('TourPanel', () => {
@@ -112,6 +113,46 @@ describe('TourPanel', () => {
     });
   });
 
+  it('keeps review submission visible while the conversation drawer is closed', async () => {
+    const { submitTour } = renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Start reading' }));
+
+    expect(screen.queryByLabelText('Tour conversation')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Send review to agent' }));
+
+    await waitFor(() => {
+      expect(submitTour).toHaveBeenCalledWith(
+        'tour-1',
+        '## Tour feedback\n\nNo additional notes.',
+        false,
+      );
+    });
+    expect(screen.getByRole('button', { name: 'Send review to agent' })).toHaveTextContent('Review sent');
+  });
+
+  it('flushes the current file note before sending the review', async () => {
+    const { saveTourDraft, submitTour } = renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Start reading' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
+    fireEvent.change(screen.getByPlaceholderText('Feedback on this file'), {
+      target: { value: 'Please revisit this edge case.' },
+    });
+    const sendButtons = screen.getAllByRole('button', { name: 'Send review to agent' });
+    fireEvent.click(sendButtons[sendButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(saveTourDraft).toHaveBeenCalledWith(
+        'tour-1',
+        expect.objectContaining({ path: 'main.go', note: 'Please revisit this edge case.' }),
+      );
+      expect(submitTour).toHaveBeenCalledWith(
+        'tour-1',
+        expect.stringContaining('Please revisit this edge case.'),
+        false,
+      );
+    });
+  });
+
   it('shows the briefing on first open and avoids rerendering stable diagrams', async () => {
     const mermaid = (await import('mermaid')).default;
     vi.mocked(mermaid.render).mockClear();
@@ -131,6 +172,9 @@ describe('TourPanel', () => {
     expect(document.querySelector('.tour-panel__briefing')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'How to read this change' })).toBeInTheDocument();
     await waitFor(() => expect(mermaid.render).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: 'Reset diagram zoom' })).toHaveTextContent('100%');
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in diagram' }));
+    expect(screen.getByRole('button', { name: 'Reset diagram zoom' })).toHaveTextContent('125%');
 
     rerender(
       <TourPanel
@@ -233,7 +277,7 @@ describe('TourPanel', () => {
     expect(screen.getByTestId('tour-diff')).toHaveAttribute('data-font-size', '19.5');
     await waitFor(() => {
       expect(mermaid.initialize).toHaveBeenCalledWith(expect.objectContaining({
-        themeVariables: expect.objectContaining({ fontSize: '20px' }),
+        themeVariables: expect.objectContaining({ fontSize: '24px' }),
       }));
     });
   });

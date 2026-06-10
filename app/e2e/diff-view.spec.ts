@@ -235,6 +235,33 @@ test.describe('DiffView (@pierre/diffs)', () => {
     await expect(container).not.toContainText('class Calculator');
   });
 
+  test('restores each file scroll position after switching away and back', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+    await page.evaluate(() => {
+      window.__HARNESS__.setUseLargeDiff(true);
+      window.__HARNESS__.setExpandUnchanged(true);
+    });
+    await expect(page.locator('diffs-container')).toContainText('section3 20');
+
+    const scroller = page.locator('.diff-view-scroller');
+    await scroller.evaluate((element) => {
+      element.scrollTop = Math.min(480, element.scrollHeight - element.clientHeight);
+      element.dispatchEvent(new Event('scroll'));
+    });
+    const fileAScrollTop = await scroller.evaluate((element) => element.scrollTop);
+    expect(fileAScrollTop).toBeGreaterThan(100);
+
+    await page.evaluate(() => window.__HARNESS__.switchFile('fileB.ts'));
+    await expect(page.locator('diffs-container')).toContainText('class Calculator');
+    await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBe(0);
+
+    await page.evaluate(() => window.__HARNESS__.switchFile('fileA.ts'));
+    await expect(page.locator('diffs-container')).toContainText('section3 20');
+    await expect.poll(
+      () => scroller.evaluate((element) => element.scrollTop),
+    ).toBeCloseTo(fileAScrollTop, 0);
+  });
+
   test('keeps an in-progress comment when switching away from a file and back', async ({ page }) => {
     await openHarness(page, UNSEEDED);
 
@@ -296,6 +323,52 @@ test.describe('DiffView (@pierre/diffs)', () => {
     await expect(textarea).toHaveValue('Half-written thought');
     await expect(textarea).toBeFocused();
     await expect(page.getByText('Seeded comment on an added line')).toBeVisible();
+  });
+
+  test('keeps the diff viewport steady while typing and receiving comment updates', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+    await page.evaluate(() => {
+      window.__HARNESS__.setUseLargeDiff(true);
+      window.__HARNESS__.setExpandUnchanged(true);
+    });
+    await expect(page.locator('diffs-container')).toContainText('section3 20');
+
+    const scroller = page.locator('.diff-view-scroller');
+    await scroller.evaluate((element) => {
+      element.scrollTop = Math.min(480, element.scrollHeight - element.clientHeight);
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(100);
+
+    const lineNumbers = page.locator('diffs-container [data-line-index][data-column-number]');
+    const visibleLineIndex = await lineNumbers.evaluateAll((elements) => {
+      const viewport = document.querySelector('.diff-view-scroller')?.getBoundingClientRect();
+      if (!viewport) return -1;
+      return elements.findIndex((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.top > viewport.top + 60 && rect.bottom < viewport.bottom - 140;
+      });
+    });
+    expect(visibleLineIndex).toBeGreaterThanOrEqual(0);
+
+    await lineNumbers.nth(visibleLineIndex).hover();
+    await page.locator('diffs-container [data-utility-button]:visible').click();
+
+    const textarea = page.locator('.diff-comment-form textarea');
+    await expect(textarea).toBeVisible();
+    const anchoredScrollTop = await scroller.evaluate((element) => element.scrollTop);
+
+    await textarea.pressSequentially('The viewport should stay anchored.', { delay: 10 });
+    await expect.poll(
+      () => scroller.evaluate((element) => element.scrollTop),
+    ).toBeCloseTo(anchoredScrollTop, 0);
+
+    await page.evaluate(() => window.__HARNESS__.addBackgroundComment());
+    await expect(page.locator('.diff-comment[data-comment-id^="bg-"]')).toBeVisible();
+    await expect.poll(
+      () => scroller.evaluate((element) => element.scrollTop),
+    ).toBeCloseTo(anchoredScrollTop, 0);
+    await expect(textarea).toHaveValue('The viewport should stay anchored.');
   });
 
   test('keeps an in-progress edit (text + focus) when a background change re-renders the diff', async ({ page }) => {
