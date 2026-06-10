@@ -34,7 +34,7 @@ import { setGridAutomationHandle, INACTIVE_GRID_STATE } from './gridAutomation';
 import {
   FONT_FAMILY,
   FONT_SIZE,
-  TERMINAL_SCROLLBACK_LINES,
+  TERMINAL_SCROLLBACK_BYTES,
   colorNumber,
   measureCanonicalCell,
 } from './gridConfig';
@@ -188,7 +188,7 @@ export function GridView({
     void Ghostty.load(ghosttyWasmUrl).then((ghostty) => {
       if (disposed) return;
       const comp = new GridCompositor(renderer, ghostty, stage, metrics, {
-        scrollbackLimit: TERMINAL_SCROLLBACK_LINES,
+        scrollbackLimit: TERMINAL_SCROLLBACK_BYTES,
         fgColor: colorNumber(theme.foreground),
         bgColor: colorNumber(theme.background),
         cursorColor: colorNumber(theme.cursor),

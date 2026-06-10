@@ -91,7 +91,12 @@ type attachReplayPayload struct {
 	rawReplayReason     string
 }
 
-const maxAgentRawReplayBytes = 256 * 1024
+// maxAgentRawReplayBytes bounds how much raw terminal history an attach
+// replays into a remounted pane. It matches pty.DefaultReplayLogSize so a
+// restored pane gets everything the worker retained; replay delivery is cheap
+// (a handful of websocket messages) and the parse cost is a one-time burst at
+// remount.
+const maxAgentRawReplayBytes = 8 * 1024 * 1024
 
 func shouldPreferAgentRawReplay(session *protocol.Session) bool {
 	if session == nil {
@@ -232,6 +237,11 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Sess
 	if (shouldPreferAgentRawReplay(session) || shouldRestoreTerminalModelHistory(policy)) &&
 		(len(info.Scrollback) > 0 || len(info.ReplaySegments) > 0) {
 		if len(info.ReplaySegments) > 0 {
+			// A clipped tail is still served as long as it reproduces the live
+			// screen: segments are whole boundary-safe writes, so the tail never
+			// opens mid-escape-sequence, and the snapshot match below proves the
+			// kept history is self-sufficient. Restored panes keep deep
+			// scrollback instead of degrading to a bare screen snapshot.
 			segments, clipped := pty.LimitReplaySegmentsTail(replaySegmentsToPTY(info.ReplaySegments), maxAgentRawReplayBytes)
 			backendSegments := make([]ptybackend.ReplaySegment, 0, len(segments))
 			for _, segment := range segments {
@@ -241,10 +251,10 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Sess
 					Data: append([]byte(nil), segment.Data...),
 				})
 			}
-			if !clipped {
+			if len(backendSegments) > 0 {
 				if matches, reason := rawReplaySegmentsMatchFreshSnapshot(backendSegments, info); matches {
 					payload.replaySegments = backendSegments
-					payload.scrollbackTruncated = info.ReplayTruncated
+					payload.scrollbackTruncated = info.ReplayTruncated || clipped
 					payload.screenSnapshot = nil
 					payload.screenCols = 0
 					payload.screenRows = 0
@@ -253,7 +263,11 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Sess
 					payload.screenCursorVisible = false
 					payload.screenSnapshotFresh = false
 					payload.rawReplayDecision = "use_segmented_raw_replay"
-					payload.rawReplayReason = "full_segmented_raw_replay_matches_fresh_snapshot"
+					if clipped {
+						payload.rawReplayReason = "clipped_segmented_tail_matches_fresh_snapshot"
+					} else {
+						payload.rawReplayReason = "full_segmented_raw_replay_matches_fresh_snapshot"
+					}
 					return payload
 				} else {
 					payload.rawReplayDecision = "use_fresh_snapshot"

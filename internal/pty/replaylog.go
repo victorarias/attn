@@ -86,6 +86,11 @@ func (r *ReplayLog) trimLocked() {
 	}
 }
 
+// LimitReplaySegmentsTail keeps the newest whole segments that fit the byte
+// limit. A partially-fitting oldest segment is dropped rather than sliced:
+// every segment starts at a safe parse boundary (the read loop only emits
+// boundary-safe writes), so whole-segment trimming guarantees the replayed
+// tail never opens mid-escape-sequence or mid-rune.
 func LimitReplaySegmentsTail(segments []ReplaySegment, limit int) ([]ReplaySegment, bool) {
 	if len(segments) == 0 {
 		return nil, false
@@ -102,18 +107,12 @@ func LimitReplaySegmentsTail(segments []ReplaySegment, limit int) ([]ReplaySegme
 		return cloneReplaySegments(segments), false
 	}
 
-	remainingTrim := total - limit
+	remaining := total
 	startIndex := 0
 	cloned := cloneReplaySegments(segments)
-	for startIndex < len(cloned) && remainingTrim > 0 {
-		headLen := len(cloned[startIndex].Data)
-		if headLen <= remainingTrim {
-			remainingTrim -= headLen
-			startIndex += 1
-			continue
-		}
-		cloned[startIndex].Data = append([]byte(nil), cloned[startIndex].Data[remainingTrim:]...)
-		remainingTrim = 0
+	for startIndex < len(cloned) && remaining > limit {
+		remaining -= len(cloned[startIndex].Data)
+		startIndex += 1
 	}
 	if startIndex >= len(cloned) {
 		return nil, true

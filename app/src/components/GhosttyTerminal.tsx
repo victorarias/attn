@@ -23,7 +23,7 @@ import {
 } from '../utils/terminalSynchronizedOutput';
 import {
   FONT_FAMILY,
-  TERMINAL_SCROLLBACK_LINES,
+  TERMINAL_SCROLLBACK_BYTES,
   getTerminalAnsiPalette,
   getTerminalTheme,
   type ResolvedTheme,
@@ -761,7 +761,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         const theme = getTerminalTheme(resolvedTheme);
         const initialSize = modelSizeRef.current;
         const terminal = ghostty.createTerminal(initialSize.cols, initialSize.rows, {
-          scrollbackLimit: TERMINAL_SCROLLBACK_LINES,
+          scrollbackLimit: TERMINAL_SCROLLBACK_BYTES,
           fgColor: colorNumber(theme.foreground),
           bgColor: colorNumber(theme.background),
           cursorColor: colorNumber(theme.cursor),
@@ -856,7 +856,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           bufferLength: terminal.rows + terminal.getScrollbackLength(),
           baseY: terminal.getScrollbackLength(),
           viewportY: viewportOffsetRef.current,
-          scrollbackLimit: TERMINAL_SCROLLBACK_LINES,
+          scrollbackLimit: TERMINAL_SCROLLBACK_BYTES,
           alternateScreen: terminal.isAlternateScreen(),
           mouseTracking: terminal.hasMouseTracking(),
           renderer: 'ghostty-webgl',

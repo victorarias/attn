@@ -20,17 +20,20 @@ import (
 )
 
 const (
-	// DefaultScrollbackSize bounds both the eager per-session ring buffer and
-	// the lazily-grown replay log. Attach/re-attach only ever serves the last
-	// maxAgentRawReplayBytes (256 KiB) of history (see daemon.buildAttachReplayPayload),
-	// so anything beyond that is committed RAM per session that is never sent to
-	// a client. 1 MiB keeps a comfortable 4x headroom over that clip while
-	// removing ~7 MiB of eager allocation from every PTY worker subprocess.
-	// Must stay >= maxAgentRawReplayBytes so clip/ScrollbackTruncated semantics
-	// and Codex startup-query replay are unchanged.
+	// DefaultScrollbackSize bounds the eager per-session ring buffer (flat
+	// scrollback, used for snapshot derivation and legacy flat replay). It is
+	// allocated up front in every PTY worker subprocess, so it stays small.
 	DefaultScrollbackSize = 1 * 1024 * 1024
-	defaultKillTimeout    = 10 * time.Second
-	shellEnvTimeout       = 2 * time.Second
+	// DefaultReplayLogSize bounds the lazily-grown segmented replay log — the
+	// source of terminal history restored on remount/relaunch (see
+	// daemon.buildAttachReplayPayload). Unlike the ring it only costs memory
+	// proportional to what a session actually emitted, so it can afford real
+	// scrollback depth: agents that rely on terminal-native history (Codex)
+	// get this much restored after an app restart or warm-set rehydrate.
+	// Must stay >= daemon.maxAgentRawReplayBytes or attach replay is starved.
+	DefaultReplayLogSize = 8 * 1024 * 1024
+	defaultKillTimeout   = 10 * time.Second
+	shellEnvTimeout      = 2 * time.Second
 )
 
 var ErrSessionNotFound = errors.New("session not found")
@@ -220,7 +223,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		ptmx:        ptmx,
 		cmd:         cmd,
 		scrollback:  NewRingBuffer(m.scrollbackSize),
-		replayLog:   NewReplayLog(m.scrollbackSize),
+		replayLog:   NewReplayLog(DefaultReplayLogSize),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),
