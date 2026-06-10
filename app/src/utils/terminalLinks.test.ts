@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   fragmentAtColumn,
+  logicalIndexForCell,
+  logicalLineAt,
+  MAX_WRAP_JOIN_ROWS,
   pathCandidatesForFragment,
   resolveDetectedPath,
+  spanFromLogicalRange,
   urlAtColumn,
 } from './terminalLinks';
 
@@ -88,6 +92,83 @@ describe('pathCandidatesForFragment', () => {
     const candidates = pathCandidatesForFragment('src/main.go', 0);
     expect(candidates).toHaveLength(1);
     expect(candidates[0].path).toBe('src/main.go');
+  });
+});
+
+describe('logicalLineAt', () => {
+  const COLS = 10;
+  const access = (rows: string[], continuations: boolean[]) => ({
+    rowTextAt: (row: number) => rows[row] ?? '',
+    isContinuationRow: (row: number) => continuations[row] ?? false,
+  });
+
+  it('returns a single row when nothing wraps', () => {
+    const { rowTextAt, isContinuationRow } = access(['hello', 'world'], [false, false]);
+    const line = logicalLineAt(rowTextAt, isContinuationRow, 1, COLS, 2);
+    expect(line).toEqual({ text: 'world', firstRow: 1, rowCount: 1, cols: COLS });
+  });
+
+  it('joins a wrapped group around the hovered row, padding interior rows to cols', () => {
+    // "Read(/tmp/abc/def.md)" wrapped at 10 cols over 3 rows.
+    const rows = ['Read(/tmp/', 'abc/def.md', ')'];
+    const { rowTextAt, isContinuationRow } = access(rows, [false, true, true]);
+    for (const hovered of [0, 1, 2]) {
+      const line = logicalLineAt(rowTextAt, isContinuationRow, hovered, COLS, 3);
+      expect(line.text).toBe('Read(/tmp/abc/def.md)');
+      expect(line.firstRow).toBe(0);
+      expect(line.rowCount).toBe(3);
+    }
+  });
+
+  it('pads short interior rows so index math stays exact', () => {
+    const rows = ['ab', 'cd'];
+    const { rowTextAt, isContinuationRow } = access(rows, [false, true]);
+    const line = logicalLineAt(rowTextAt, isContinuationRow, 0, COLS, 2);
+    expect(line.text).toBe('ab'.padEnd(COLS, ' ') + 'cd');
+  });
+
+  it('caps the joined group and keeps rows nearest the line start', () => {
+    const rows = Array.from({ length: 12 }, (_, i) => String(i).padEnd(COLS, 'x'));
+    const continuations = rows.map((_, i) => i > 0);
+    const { rowTextAt, isContinuationRow } = access(rows, continuations);
+    const line = logicalLineAt(rowTextAt, isContinuationRow, 11, COLS, 12);
+    expect(line.rowCount).toBe(MAX_WRAP_JOIN_ROWS);
+    expect(line.firstRow).toBe(11 - (MAX_WRAP_JOIN_ROWS - 1));
+  });
+
+  it('never walks outside the viewport', () => {
+    const { rowTextAt, isContinuationRow } = access(['a', 'b'], [true, true]);
+    const line = logicalLineAt(rowTextAt, isContinuationRow, 0, COLS, 1);
+    expect(line.firstRow).toBe(0);
+    expect(line.rowCount).toBe(1);
+  });
+});
+
+describe('logicalIndexForCell / spanFromLogicalRange', () => {
+  const line = { text: 'x'.repeat(25), firstRow: 3, rowCount: 3, cols: 10 };
+
+  it('maps cells to logical indexes and rejects cells outside the group', () => {
+    expect(logicalIndexForCell(line, 3, 0)).toBe(0);
+    expect(logicalIndexForCell(line, 4, 2)).toBe(12);
+    expect(logicalIndexForCell(line, 5, 9)).toBe(29);
+    expect(logicalIndexForCell(line, 2, 0)).toBeNull();
+    expect(logicalIndexForCell(line, 6, 0)).toBeNull();
+    expect(logicalIndexForCell(line, 4, 10)).toBeNull();
+  });
+
+  it('maps a logical range back to a selection-semantics row span', () => {
+    expect(spanFromLogicalRange(line, 5, 25)).toEqual({
+      startRow: 3,
+      startCol: 5,
+      endRow: 5,
+      endCol: 5,
+    });
+    expect(spanFromLogicalRange(line, 12, 18)).toEqual({
+      startRow: 4,
+      startCol: 2,
+      endRow: 4,
+      endCol: 8,
+    });
   });
 });
 

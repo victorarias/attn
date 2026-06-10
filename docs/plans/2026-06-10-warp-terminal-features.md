@@ -191,6 +191,69 @@ type DetectedLink =
   packaged-app scenario did); keydown still handles Cmd+C in browsers and Cmd+Shift+C
   everywhere.
 
+## Phase 2: cross-wrap links, block context menu, block output filter
+
+Requested 2026-06-10 after phase 1 shipped: (a) links wrapped across visual rows must
+detect, (b) Warp-style right-click context menu on blocks, (c) Warp's "filter block
+output" (show only output lines matching a query).
+
+### Cross-wrap link detection
+
+```text
+mousemove (fragment cache miss)
+  -> logicalLineAt(rowTextAt, isContinuationRow, hoveredRow)   // terminalLinks.ts, pure
+       walk up/down joining soft-wrapped rows (cap 6), pad each row to cols
+       logical index i <-> (firstRow + i/cols, i%cols) — exact, because padded
+  -> urlAtColumn / fragmentAtColumn / pathCandidatesForFragment on the joined text
+  -> link span mapped back to a multi-row overlay (selection semantics)
+```
+
+- `isRowWrapped(activeRow)` means "this row is a continuation of the previous row"
+  (xterm semantics, verified empirically against the wasm: 25 chars in 10 cols flags
+  rows 1 and 2, not 0). The markdown-copy join already relied on this correctly.
+- ghostty-web exposes no wrap flag for scrollback rows (hardcodes isWrapped=false).
+  Scrollback heuristic: previous row's trimmed text length === cols ⇒ treat as wrapped.
+  False joins are filtered by the existence check (paths); URLs accept the small risk.
+- HoverLinkState stores the joined LogicalLine + fragment/link spans as logical indexes;
+  membership tests and underline overlays derive from index math, no extra row reads.
+
+### Block context menu (right-click)
+
+```text
+contextmenu on terminal container (preventDefault always)
+  -> cell -> blockAt(bufferRow)? select block (same as click-select)
+  -> <TerminalContextMenu> (new component, DOM overlay in ghostty-terminal-frame)
+       Copy            ⌘C   selection text, else block command+output
+       Copy command    ⇧⌘C  block only
+       Copy output          block only
+       Paste                clipboard read -> bracketed-paste aware PTY write
+       Filter block output  block only -> opens filter bar
+       Find            ⌘F   openFind()
+       Scroll to top / bottom of block -> viewportOffset math + render
+```
+
+- Dropped from Warp's menu: Share/session, Save as workflow, Copy prompt, bookmark
+  (cloud features), Copy working directory (no per-block cwd without OSC 7 tracking).
+- Paste replicates ghostty-web's Terminal.paste: wrap in \x1b[200~/201~ when mode 2004
+  is set; newlines normalized to \r. Clipboard read via plugin-clipboard-manager with
+  navigator.clipboard fallback (browser e2e).
+
+### Block output filter
+
+Grid rows can't be hidden in-place (PTY grid is authoritative), so the filtered view is
+a DOM panel: filter bar (input, match count, Aa toggle, close) + list of matching block
+output lines with match substrings highlighted. Clicking a line scrolls the terminal to
+that buffer row. Lines come from extractBlock (re-anchored, correct-or-absent); match
+ranges from matchesInRowText. Esc closes; block selection outline stays while filtering.
+
+### Phase 2 steps
+
+- [ ] cross-wrap: logicalLineAt/logicalIndexForCell/spanFromLogicalRange + hover rewrite
+      + unit tests + e2e (wrapped path hover+click across rows)
+- [ ] context menu: TerminalContextMenu component + wiring + e2e
+- [ ] filter: terminalBlockFilter helper + bar/panel UI + e2e
+- [ ] changelog, full verification, prod install
+
 ## Open Questions
 
 - Open-path target: v1 uses `plugin-opener` openPath (default app). Editor integration
@@ -201,4 +264,5 @@ type DetectedLink =
 - Shell-integration snippets for zsh/bash (ghostty's own scripts are a good base) so
   non-fish users get blocks.
 - Block gutter UI affordances (hover chip with copy buttons, exit-code badge).
-- Cross-wrap link detection; OSC 8 hyperlink URIs (needs ghostty-web API work upstream).
+- OSC 8 hyperlink URIs (needs ghostty-web API work upstream).
+- OSC 7 cwd tracking for a per-block "Copy working directory" menu item.

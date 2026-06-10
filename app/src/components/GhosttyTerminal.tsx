@@ -13,10 +13,15 @@ import { exists } from '@tauri-apps/plugin-fs';
 import { homeDir } from '@tauri-apps/api/path';
 import {
   fragmentAtColumn,
+  logicalIndexForCell,
+  logicalLineAt,
   pathCandidatesForFragment,
   resolveDetectedPath,
+  spanFromLogicalRange,
   urlAtColumn,
   type DetectedTerminalLink,
+  type LogicalLine,
+  type LogicalSpan,
 } from '../utils/terminalLinks';
 import {
   initialFocusedMatch,
@@ -156,13 +161,19 @@ const SYNCHRONIZED_OUTPUT_RENDER_TIMEOUT_MS = 1000;
 // Hover-time link detection state (Warp's fragment-boundary model): the word
 // fragment under the pointer is analyzed once and cached; pointer movement
 // inside the fragment costs nothing. The generation counter invalidates the
-// cache when content or the viewport shifts under the pointer.
+// cache when content or the viewport shifts under the pointer. The fragment
+// lives on a logical line — the hovered row joined with its soft-wrapped
+// neighbors — so links spanning visual rows detect and underline whole.
 interface HoverLinkState {
   generation: number;
-  viewportRow: number;
-  startCol: number;
-  endCol: number;
+  line: LogicalLine;
+  // Fragment span as logical indexes into line.text.
+  startIndex: number;
+  endIndex: number;
+  // link.startCol/endCol are logical indexes; linkSpan is the same range
+  // mapped to viewport rows for the underline overlay.
   link: DetectedTerminalLink | null;
+  linkSpan: LogicalSpan | null;
 }
 
 const utf8Encoder = new TextEncoder();
@@ -419,12 +430,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         });
       }
       const hover = hoverLinkRef.current;
-      if (hover?.link && hover.generation === hoverGenerationRef.current) {
+      if (hover?.link && hover.linkSpan && hover.generation === hoverGenerationRef.current) {
         overlays.push({
-          startRow: hover.viewportRow,
-          startCol: hover.link.startCol,
-          endRow: hover.viewportRow,
-          endCol: hover.link.endCol,
+          startRow: hover.linkSpan.startRow,
+          startCol: hover.linkSpan.startCol,
+          endRow: hover.linkSpan.endRow,
+          endCol: hover.linkSpan.endCol,
           color: getTerminalTheme(resolvedTheme).foreground,
           alpha: 0.8,
           kind: 'underline',
@@ -1453,14 +1464,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
     const hoverLinkAtCell = useCallback((cell: { row: number; col: number } | null): DetectedTerminalLink | null => {
       const hover = hoverLinkRef.current;
-      if (
-        cell
-        && hover?.link
-        && hover.generation === hoverGenerationRef.current
-        && hover.viewportRow === cell.row
-        && cell.col >= hover.link.startCol
-        && cell.col < hover.link.endCol
-      ) {
+      if (!cell || !hover?.link || hover.generation !== hoverGenerationRef.current) return null;
+      const index = logicalIndexForCell(hover.line, cell.row, cell.col);
+      if (index !== null && index >= hover.link.startCol && index < hover.link.endCol) {
         return hover.link;
       }
       return null;
@@ -1496,21 +1502,33 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return homeDirRef.current;
     }, []);
 
-    // Analyze the word fragment under the pointer. Movement inside the cached
-    // fragment exits immediately; URLs resolve synchronously; file paths are
-    // validated asynchronously against the filesystem (results cached).
+    // Does this viewport row continue the line started on the row above it?
+    // Active-screen rows have an authoritative wrap flag; ghostty-web exposes
+    // no flag for scrollback rows, so a completely full previous row is
+    // treated as wrapping. False joins are filtered downstream: path
+    // candidates must pass the existence check before anything links.
+    const isContinuationRow = useCallback((viewportRow: number): boolean => {
+      const terminal = terminalRef.current;
+      if (!terminal) return false;
+      const history = terminal.getScrollbackLength();
+      const bufferRow = bufferRowFromViewportRow(viewportRow, history, viewportOffsetRef.current);
+      if (bufferRow <= 0) return false;
+      if (bufferRow >= history) return terminal.isRowWrapped(bufferRow - history);
+      return selectionLineAtBufferRow(bufferRow - 1, 0, terminal.cols).length === terminal.cols;
+    }, [selectionLineAtBufferRow]);
+
+    // Analyze the word fragment under the pointer on its logical line (the
+    // hovered row joined with its soft-wrapped neighbors). Movement inside the
+    // cached fragment exits immediately; URLs resolve synchronously; file
+    // paths are validated asynchronously against the filesystem (cached).
     const detectHoverLink = useCallback((cell: { row: number; col: number } | null) => {
       const generation = hoverGenerationRef.current;
       const current = hoverLinkRef.current;
-      if (
-        cell
-        && current
-        && current.generation === generation
-        && current.viewportRow === cell.row
-        && cell.col >= current.startCol
-        && cell.col < current.endCol
-      ) {
-        return;
+      if (cell && current && current.generation === generation) {
+        const cachedIndex = logicalIndexForCell(current.line, cell.row, cell.col);
+        if (cachedIndex !== null && cachedIndex >= current.startIndex && cachedIndex < current.endIndex) {
+          return;
+        }
       }
       const hadUnderline = Boolean(current?.link && current.generation === generation);
       const clearHover = () => {
@@ -1520,35 +1538,43 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           setLinkCursorActive(false);
         }
       };
-      if (!cell) {
+      const terminal = terminalRef.current;
+      if (!cell || !terminal) {
         clearHover();
         return;
       }
-      const line = lineAtVisibleRow(cell.row);
-      const url = urlAtColumn(line, cell.col);
+      const logical = logicalLineAt(lineAtVisibleRow, isContinuationRow, cell.row, terminal.cols, terminal.rows);
+      const index = logicalIndexForCell(logical, cell.row, cell.col);
+      if (index === null) {
+        clearHover();
+        return;
+      }
+      const url = urlAtColumn(logical.text, index);
       if (url) {
         hoverLinkRef.current = {
           generation,
-          viewportRow: cell.row,
-          startCol: url.startCol,
-          endCol: url.endCol,
+          line: logical,
+          startIndex: url.startCol,
+          endIndex: url.endCol,
           link: { kind: 'url', uri: url.uri, startCol: url.startCol, endCol: url.endCol },
+          linkSpan: spanFromLogicalRange(logical, url.startCol, url.endCol),
         };
         renderSurface(true);
         updateLinkCursor(cell, acceleratorHeldRef.current);
         return;
       }
-      const fragment = fragmentAtColumn(line, cell.col);
+      const fragment = fragmentAtColumn(logical.text, index);
       if (!fragment) {
         clearHover();
         return;
       }
       const entry: HoverLinkState = {
         generation,
-        viewportRow: cell.row,
-        startCol: fragment.startCol,
-        endCol: fragment.endCol,
+        line: logical,
+        startIndex: fragment.startCol,
+        endIndex: fragment.endCol,
         link: null,
+        linkSpan: null,
       };
       hoverLinkRef.current = entry;
       if (hadUnderline) {
@@ -1556,7 +1582,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         setLinkCursorActive(false);
       }
       const candidates = pathCandidatesForFragment(
-        line.slice(fragment.startCol, fragment.endCol),
+        logical.text.slice(fragment.startCol, fragment.endCol),
         fragment.startCol,
       );
       if (candidates.length === 0) return;
@@ -1575,12 +1601,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             startCol: candidate.startCol,
             endCol: candidate.endCol,
           };
+          entry.linkSpan = spanFromLogicalRange(logical, candidate.startCol, candidate.endCol);
           renderSurface(true);
           updateLinkCursor(hoveredCellRef.current, acceleratorHeldRef.current);
           return;
         }
       })();
-    }, [cachedPathExists, ensureHomeDir, lineAtVisibleRow, renderSurface, updateLinkCursor]);
+    }, [cachedPathExists, ensureHomeDir, isContinuationRow, lineAtVisibleRow, renderSurface, updateLinkCursor]);
 
     // Link under a cell for click handling: prefer the resolved hover state
     // (paths require it — existence was already validated), fall back to a

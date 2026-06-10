@@ -234,6 +234,50 @@ test.describe('Ghostty terminal interactions', () => {
       .toContain('/tmp/test/terminal-links/src/main.go');
   });
 
+  test('cmd+click opens a path that soft-wraps across rows', async ({ page, daemon }) => {
+    // A long absolute path wraps across visual rows; hovering the SECOND row
+    // must detect the whole path (logical-line join) and open it.
+    const wrappedPath = `/tmp/test/terminal-links/${'deeply-nested-segment/'.repeat(12)}wrapped-target.go`;
+    await installFileLinkProbe(page, [wrappedPath]);
+    const terminal = await openTerminalSession(page, daemon, 's-file-link-wrap');
+    await writeTerminalOutput(page, 's-file-link-wrap', `[2J[H${wrappedPath}`);
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-wrap') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('wrapped-target.go');
+
+    const size = await page.evaluate(() => window.__TEST_GET_SESSION_PANE_SIZE?.('s-file-link-wrap') ?? null);
+    expect(size).not.toBeNull();
+    expect(wrappedPath.length).toBeGreaterThan(size!.cols);
+
+    // The canvas is sized exactly cols*cellWidth x rows*cellHeight, so cell
+    // centers are derivable from its bounding box.
+    const canvas = terminal.locator('canvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    const cellWidth = box!.width / size!.cols;
+    const cellHeight = box!.height / size!.rows;
+    const hoverAt = { x: (5 + 0.5) * cellWidth, y: (1 + 0.5) * cellHeight };
+
+    await terminal.hover({ position: hoverAt });
+    await page.keyboard.down('Meta');
+    await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
+    await terminal.click({ position: hoverAt });
+    await page.keyboard.up('Meta');
+
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
+        ),
+        { timeout: 3000 },
+      )
+      .toContain(wrappedPath);
+  });
+
   test('hovered file link survives unrelated terminal writes (streaming TUI redraws)', async ({ page, daemon }) => {
     await installFileLinkProbe(page, ['/tmp/test/terminal-links/src/main.go']);
     const terminal = await openTerminalSession(page, daemon, 's-file-link-stream');

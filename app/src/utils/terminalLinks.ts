@@ -142,3 +142,72 @@ export interface DetectedTerminalLink extends ColumnRange {
   line?: number;
   column?: number;
 }
+
+// --- Cross-wrap logical lines ---
+//
+// A path or URL can soft-wrap across visual rows. Joining the rows of a
+// wrapped group into one logical line lets the single-line detectors above
+// work unchanged: every row is padded to the grid width, so logical index i
+// maps exactly to (firstRow + floor(i / cols), i % cols) and back.
+
+export interface LogicalLine {
+  // Joined text; every row but the last padded with spaces to `cols`.
+  text: string;
+  // First joined viewport row.
+  firstRow: number;
+  rowCount: number;
+  cols: number;
+}
+
+// A path spanning more rows than this would be hundreds of characters long;
+// the cap bounds hover work, not correctness for realistic content.
+export const MAX_WRAP_JOIN_ROWS = 6;
+
+// Join the soft-wrapped row group containing `row` into a logical line.
+// isContinuationRow(r) answers "does row r continue the line started on row
+// r-1" (ghostty's isRowWrapped semantics). Rows outside [0, rowCount) are
+// never touched; groups larger than the cap keep the rows nearest the start
+// of the budget (paths begin above the hovered row more often than below).
+export function logicalLineAt(
+  rowTextAt: (viewportRow: number) => string,
+  isContinuationRow: (viewportRow: number) => boolean,
+  row: number,
+  cols: number,
+  rowCount: number,
+): LogicalLine {
+  let first = row;
+  while (first > 0 && row - first < MAX_WRAP_JOIN_ROWS - 1 && isContinuationRow(first)) first -= 1;
+  let last = row;
+  while (last + 1 < rowCount && last - first < MAX_WRAP_JOIN_ROWS - 1 && isContinuationRow(last + 1)) last += 1;
+  const parts: string[] = [];
+  for (let current = first; current <= last; current += 1) {
+    const text = rowTextAt(current);
+    parts.push(current < last ? text.padEnd(cols, ' ') : text);
+  }
+  return { text: parts.join(''), firstRow: first, rowCount: last - first + 1, cols };
+}
+
+export function logicalIndexForCell(line: LogicalLine, row: number, col: number): number | null {
+  if (row < line.firstRow || row >= line.firstRow + line.rowCount) return null;
+  if (col < 0 || col >= line.cols) return null;
+  return (row - line.firstRow) * line.cols + col;
+}
+
+// Selection-semantics span over viewport rows: rows strictly between startRow
+// and endRow cover the full grid width (matches WebGlOverlay).
+export interface LogicalSpan {
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+}
+
+export function spanFromLogicalRange(line: LogicalLine, startIndex: number, endIndex: number): LogicalSpan {
+  const lastIndex = Math.max(startIndex, endIndex - 1);
+  return {
+    startRow: line.firstRow + Math.floor(startIndex / line.cols),
+    startCol: startIndex % line.cols,
+    endRow: line.firstRow + Math.floor(lastIndex / line.cols),
+    endCol: (lastIndex % line.cols) + 1,
+  };
+}
