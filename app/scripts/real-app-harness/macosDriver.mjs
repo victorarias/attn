@@ -144,6 +144,18 @@ export class MacOSDriver {
     await delay(this.actionDelayMs);
   }
 
+  async rightClickWindow(relativeX, relativeY) {
+    await this.runInputDriver([
+      'right_click',
+      '--relative-x',
+      String(relativeX),
+      '--relative-y',
+      String(relativeY),
+      '--prompt-accessibility',
+    ]);
+    await delay(this.actionDelayMs);
+  }
+
   async parkWindow(visiblePx) {
     const stdout = await this.runInputDriverCapture([
       'window_park',

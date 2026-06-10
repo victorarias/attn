@@ -70,6 +70,11 @@ const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-terminal-block-copy'],
   },
   {
+    id: 'terminal-context-menu',
+    label: 'Terminal context menu via native right-click + clipboard',
+    command: ['pnpm', 'run', 'real-app:scenario-terminal-context-menu'],
+  },
+  {
     id: 'tr205-codex',
     label: 'TR-205 remote codex',
     command: ['pnpm', 'run', 'real-app:scenario-tr205'],

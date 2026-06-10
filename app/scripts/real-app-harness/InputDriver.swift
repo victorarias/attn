@@ -47,7 +47,7 @@ func parseOptions() throws -> Options {
     while index < args.count {
         let arg = args[index]
         switch arg {
-        case "activate", "activate_background", "frontmost", "windowid", "text", "key", "keycode", "click", "menu", "window_park":
+        case "activate", "activate_background", "frontmost", "windowid", "text", "key", "keycode", "click", "right_click", "menu", "window_park":
             options.command = arg
         case "--visible-px":
             index += 1
@@ -545,7 +545,7 @@ func windowPark(bundleId: String, visiblePx: Int) throws {
     print("screen=\(Int(screenFrame.width))x\(Int(screenFrame.height)) win=\(Int(size.width))x\(Int(size.height)) from=\(Int(curPos.x)),\(Int(curPos.y)) to=\(Int(newX)),\(Int(newY))")
 }
 
-func clickWindow(bundleId: String, relativeX: Double, relativeY: Double) throws {
+func clickWindow(bundleId: String, relativeX: Double, relativeY: Double, right: Bool = false) throws {
     let bounds = try mainWindowBounds(bundleId: bundleId)
     let clampedX = min(max(relativeX, 0), 1)
     let clampedY = min(max(relativeY, 0), 1)
@@ -554,9 +554,12 @@ func clickWindow(bundleId: String, relativeX: Double, relativeY: Double) throws 
         y: bounds.origin.y + bounds.height * clampedY
     )
 
-    guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left),
-          let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
-          let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else {
+    let button: CGMouseButton = right ? .right : .left
+    let downType: CGEventType = right ? .rightMouseDown : .leftMouseDown
+    let upType: CGEventType = right ? .rightMouseUp : .leftMouseUp
+    guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: button),
+          let down = CGEvent(mouseEventSource: nil, mouseType: downType, mouseCursorPosition: point, mouseButton: button),
+          let up = CGEvent(mouseEventSource: nil, mouseType: upType, mouseCursorPosition: point, mouseButton: button) else {
         throw DriverError.eventCreationFailed("Failed to create mouse events.")
     }
 
@@ -573,7 +576,7 @@ do {
     // HID-based commands must run against a frontmost app; AX-based and
     // observation-only commands must NOT activate (that is the whole point).
     switch options.command {
-    case "activate", "text", "key", "keycode", "click":
+    case "activate", "text", "key", "keycode", "click", "right_click":
         try activateApp(bundleId: options.bundleId)
     default:
         break
@@ -618,6 +621,12 @@ do {
             throw DriverError.invalidArgument("Missing --relative-x/--relative-y for click")
         }
         try clickWindow(bundleId: options.bundleId, relativeX: relativeX, relativeY: relativeY)
+    case "right_click":
+        try ensureAccessibility(prompt: options.promptAccessibility)
+        guard let relativeX = options.relativeX, let relativeY = options.relativeY else {
+            throw DriverError.invalidArgument("Missing --relative-x/--relative-y for right_click")
+        }
+        try clickWindow(bundleId: options.bundleId, relativeX: relativeX, relativeY: relativeY, right: true)
     case "window_park":
         try ensureAccessibility(prompt: options.promptAccessibility)
         guard let visiblePx = options.visiblePx else {

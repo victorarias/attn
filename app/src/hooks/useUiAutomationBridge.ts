@@ -824,6 +824,47 @@ function clickPaneCell(
   }));
 }
 
+// Page-coordinate center of a terminal cell plus the window inner size, so
+// native (HID) drivers can convert to window-relative click positions.
+function paneCellRect(
+  sessionId: string,
+  paneId: string,
+  size: { cols: number; rows: number },
+  cell: { col: number; row: number },
+) {
+  const paneElement = document.querySelector(
+    `[data-pane-session-id="${sessionId}"][data-pane-id="${paneId}"]`
+  );
+  const terminal = paneElement?.querySelector('.terminal-container');
+  if (!(terminal instanceof HTMLElement)) {
+    throw new Error(`Terminal element not found for ${sessionId}:${paneId}`);
+  }
+  const rect = terminal.getBoundingClientRect();
+  return {
+    centerX: rect.left + ((cell.col + 0.5) / Math.max(1, size.cols)) * rect.width,
+    centerY: rect.top + ((cell.row + 0.5) / Math.max(1, size.rows)) * rect.height,
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+  };
+}
+
+function terminalContextMenuState() {
+  const menu = document.querySelector('[data-testid="terminal-context-menu"]');
+  if (!menu) {
+    return { open: false, items: [], innerWidth: window.innerWidth, innerHeight: window.innerHeight };
+  }
+  const items = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).map((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      id: element.getAttribute('data-testid')?.replace('terminal-context-menu-', '') ?? '',
+      disabled: element.disabled,
+      centerX: rect.left + rect.width / 2,
+      centerY: rect.top + rect.height / 2,
+    };
+  });
+  return { open: true, items, innerWidth: window.innerWidth, innerHeight: window.innerHeight };
+}
+
 function hoverPaneCell(
   sessionId: string,
   paneId: string,
@@ -2014,6 +2055,29 @@ export function useUiAutomationBridge({
         );
         await settleUi(2);
         return { sessionId, paneId, viewSessionId, cursor };
+      }
+      case 'get_pane_cell_rect': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const session = sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+        const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
+        const size = getPaneSize(viewSessionId, paneId);
+        const cell = payload.cell as { col?: unknown; row?: unknown } | undefined;
+        if (!size || typeof cell?.col !== 'number' || typeof cell?.row !== 'number') {
+          throw new Error('get_pane_cell_rect requires pane size and a numeric cell');
+        }
+        return {
+          sessionId,
+          paneId,
+          viewSessionId,
+          ...paneCellRect(viewSessionId, paneId, size, { col: cell.col, row: cell.row }),
+        };
+      }
+      case 'get_terminal_context_menu_state': {
+        return terminalContextMenuState();
       }
       case 'drag_pane_selection': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
