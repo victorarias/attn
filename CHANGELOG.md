@@ -17,6 +17,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-06-10]
 
 ### Added
+- **File paths and URLs in terminal output are clickable.** Hovering a path or URL underlines it; Cmd+click opens URLs in the browser and existing files in their default app. Paths with `:line:col` suffixes, `~/` prefixes, and paths relative to the session's directory all resolve, and detection only runs for the text under the pointer so heavy output streams stay as fast as before.
+- **Cmd+F finds text in the terminal.** Search covers the full scrollback with live match highlighting, a match counter, Enter / Shift+Enter navigation that scrolls matches into view, and an optional case-sensitive mode. The previous quick-find shortcut moved to Cmd+Shift+F.
+- **Commands and their output are copyable as blocks (fish).** When the shell announces command boundaries (fish does this out of the box), clicking anywhere in a command's output selects the whole block: Cmd+C copies the command together with its output, Cmd+Shift+C copies just the command — exactly as typed, with no prompt decoration. Clicking the command line itself highlights just the command, and triple-click selects a whole row.
 - **Large workspace contexts can compact themselves.** Choose Codex or Claude and a recommended model preset in Settings, or enter a custom model, to let attn occasionally summarize contexts above 12 KiB after a quiet period. Claude can use normal OAuth, keychain, or organization-managed authentication without loading user or project customizations. Compaction runs without an interactive session, leaves existing working copies stale for the normal refresh/conflict workflow, publishes only against the revision it read, and keeps the latest pre-compaction version available through `attn workspace context rollback`. Use `attn workspace context compact` to run it immediately.
 
 ### Changed

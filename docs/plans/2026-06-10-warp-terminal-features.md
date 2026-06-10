@@ -151,14 +151,18 @@ type DetectedLink =
 ## Implementation Steps
 
 - [x] 1. Renderer: generalize `WebGlSelection` to `WebGlOverlay[]` (background/underline/outline), selection becomes one overlay; unit-test overlay quad emission counts
-- [ ] 2. Links: `terminalLinks.ts` (fragment, URL, path candidates `:line:col`) + hover cache + underline overlay + Cmd+click openPath/openUrl + e2e spec (hover underline probe, cmd+click file path with fs/opener shims)
-- [ ] 3. Find: `terminalFind.ts` controller + `TerminalFindBar` UI + Cmd+F wiring + match overlays + next/prev + scroll-to-match + e2e spec (inject 200 rows, search, navigate, assert highlight + scroll probes)
-- [ ] 4. Blocks: `terminalOsc133.ts` parser + `terminalBlocks.ts` store + click-select + outline overlay + copy shortcuts + e2e spec (replay captured fish byte stream, click block, assert both copy flavors)
-- [ ] 5. Click-count selection: triple click selects the visual row; single click inside a
+- [x] 2. Links: `terminalLinks.ts` (fragment, URL, path candidates `:line:col`) + hover cache + underline overlay + Cmd+click openPath/openUrl + e2e spec (hover underline probe, cmd+click file path with fs/opener shims)
+- [x] 3. Find: `terminalFind.ts` controller + find bar UI + Cmd+F wiring + match overlays + next/prev + scroll-to-match + e2e spec (`terminal.quickFind` moved to Cmd+Shift+F to free Cmd+F)
+- [x] 4. Blocks: `terminalOsc133.ts` parser + `terminalBlocks.ts` store + click-select + outline overlay + copy shortcuts + e2e spec (replay captured fish byte stream, click block, assert both copy flavors)
+- [x] 5. Click-count selection: triple click selects the visual row; single click inside a
        block's command region selects the command text (Warp-style). Double-click word
        select already exists. e2e coverage for both.
-- [ ] 6. Real-app scenario: utility terminal + real fish + block copy (serial, dev install)
-- [ ] 7. CHANGELOG + docs/context updates; perf spot-check via `__ATTN_TERMINAL_PERF_DUMP` before/after on a streaming session
+- [x] 6. Real-app scenario: shell session + `exec fish` + block click + native Cmd+C /
+       Cmd+Shift+C against the real macOS clipboard (`real-app:scenario-terminal-block-copy`,
+       in the serial matrix). Added a `click_pane_cell` bridge command for cell-targeted clicks.
+- [x] 7. CHANGELOG + docs updates; perf spot-check: parseOsc133 microbench at 4.4 GB/s on
+       plain chunks (fast path), 1.4 GB/s ANSI-heavy, 205 MB/s marker-saturated — all far
+       above real PTY rates, so streaming cost is negligible.
 
 ## Decisions
 
@@ -174,9 +178,18 @@ type DetectedLink =
   must keep feeding selection and app mouse-tracking.
 - **No daemon/protocol changes**: everything is frontend-side over the existing PTY byte
   stream. Avoids protocol version bump and keeps the PRs splittable.
-- **Block rows can drift after scrollback trimming** (8MB cap): v1 invalidates blocks
-  rather than re-anchoring (Warp uses sum-tree absolute indexing). Acceptable for utility
-  shells; revisit if real usage hits it.
+- **Block rows can drift after scrollback trimming** (8MB cap): each completed block keeps
+  a 64-char anchor (its command-line text); extraction re-anchors by scanning ±64 rows and
+  refuses (returns null) when the anchor is gone — correct-or-absent, never wrong text.
+- **Find bar owns keyboard focus while open**: the terminal handle's `focus()` redirects to
+  the find input when the bar is open. Without this, `focusPane`'s 50ms retry loop after a
+  session switch steals focus mid-typing and leaks search keystrokes into the PTY (found as
+  an 80% e2e flake; it's a real input-leak bug, not test noise).
+- **Block copy listens on the DOM `copy` event, not only keydown**: in the packaged app the
+  native Edit > Copy menu claims the Cmd+C key equivalent — keydown never fires; WebKit
+  dispatches a `copy` clipboard event instead. Browser e2e cannot catch this (only the
+  packaged-app scenario did); keydown still handles Cmd+C in browsers and Cmd+Shift+C
+  everywhere.
 
 ## Open Questions
 

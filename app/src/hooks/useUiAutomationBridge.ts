@@ -779,6 +779,51 @@ function wheelPaneElement(sessionId: string, paneId: string, deltaY: number, del
   }));
 }
 
+function clickPaneCell(
+  sessionId: string,
+  paneId: string,
+  size: { cols: number; rows: number },
+  cell: { col: number; row: number },
+) {
+  const paneElement = document.querySelector(
+    `[data-pane-session-id="${sessionId}"][data-pane-id="${paneId}"]`
+  );
+  const terminal = paneElement?.querySelector('.terminal-container');
+  if (!(terminal instanceof HTMLElement)) {
+    throw new Error(`Terminal element not found for ${sessionId}:${paneId}`);
+  }
+  const rect = terminal.getBoundingClientRect();
+  const point = {
+    clientX: rect.left + ((cell.col + 0.5) / Math.max(1, size.cols)) * rect.width,
+    clientY: rect.top + ((cell.row + 0.5) / Math.max(1, size.rows)) * rect.height,
+  };
+  terminal.dispatchEvent(new MouseEvent('mousedown', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    button: 0,
+    buttons: 1,
+    detail: 1,
+    ...point,
+  }));
+  terminal.dispatchEvent(new MouseEvent('mouseup', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    button: 0,
+    detail: 1,
+    ...point,
+  }));
+  terminal.dispatchEvent(new MouseEvent('click', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    button: 0,
+    detail: 1,
+    ...point,
+  }));
+}
+
 function dragPaneSelection(
   sessionId: string,
   paneId: string,
@@ -1899,6 +1944,25 @@ export function useUiAutomationBridge({
         wheelPaneElement(ownerSessionId, paneId, deltaY, deltaMode);
         await settleUi(2);
         return { sessionId, paneId, ownerSessionId, viewSessionId, deltaY, deltaMode };
+      }
+      case 'click_pane_cell': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const session = sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+        const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
+        const size = getPaneSize(viewSessionId, paneId);
+        const cell = payload.cell as { col?: unknown; row?: unknown } | undefined;
+        if (!size || typeof cell?.col !== 'number' || typeof cell?.row !== 'number') {
+          throw new Error('click_pane_cell requires pane size and a numeric cell');
+        }
+        selectSession(sessionId);
+        await settleUi(1);
+        clickPaneCell(viewSessionId, paneId, size, { col: cell.col, row: cell.row });
+        await settleUi(2);
+        return { sessionId, paneId, viewSessionId };
       }
       case 'drag_pane_selection': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';

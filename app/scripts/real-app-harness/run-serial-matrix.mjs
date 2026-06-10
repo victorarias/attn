@@ -65,6 +65,11 @@ const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-diff-review'],
   },
   {
+    id: 'terminal-block-copy',
+    label: 'OSC 133 block copy via real fish + native Cmd+C',
+    command: ['pnpm', 'run', 'real-app:scenario-terminal-block-copy'],
+  },
+  {
     id: 'tr205-codex',
     label: 'TR-205 remote codex',
     command: ['pnpm', 'run', 'real-app:scenario-tr205'],

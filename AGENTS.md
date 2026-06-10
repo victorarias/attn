@@ -191,6 +191,14 @@ Before changing PTY attach/replay, terminal resize, mobile keyboard viewport han
 - do not let replayed historical terminal queries produce fresh live PTY input
 - for mobile or viewport bugs, keep structured instrumentation and prefer transition evidence over screenshots alone
 
+### 8. macOS Menu Intercepts Cmd+C
+
+In the packaged app, plain Cmd+C never reaches DOM keydown: the native Edit > Copy menu
+claims the key equivalent and WebKit fires a DOM `copy` clipboard event instead. Handle
+copy behavior in an `onCopy` handler (see `GhosttyTerminal`), not only keydown. Browser
+e2e cannot catch this — Playwright delivers Cmd+C as a normal keydown — so copy-shortcut
+changes need packaged-app verification (`real-app:scenario-terminal-block-copy`).
+
 ## Communication
 
 - unix socket IPC: `~/.attn/attn.sock`

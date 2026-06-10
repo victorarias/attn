@@ -795,20 +795,22 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // Copy a selected block: whole = command + output, otherwise command only.
     // Extraction re-anchors against the live buffer and refuses (returns
     // false) when the block's content has been trimmed away.
-    const copySelectedBlock = useCallback((whole: boolean): boolean => {
+    const selectedBlockCopyText = useCallback((whole: boolean): string | null => {
       const block = selectedBlock();
       const access = blockRowAccess();
-      if (!block || !access) return false;
-      if (!whole) {
-        if (!block.command) return false;
-        void writeClipboardText(block.command);
-        return true;
-      }
+      if (!block || !access) return null;
+      if (!whole) return block.command || null;
       const extracted = extractBlock(block, access);
-      if (!extracted) return false;
-      void writeClipboardText(extracted.output ? `${extracted.command}\n${extracted.output}` : extracted.command);
-      return true;
+      if (!extracted) return null;
+      return extracted.output ? `${extracted.command}\n${extracted.output}` : extracted.command;
     }, [blockRowAccess, selectedBlock]);
+
+    const copySelectedBlock = useCallback((whole: boolean): boolean => {
+      const text = selectedBlockCopyText(whole);
+      if (!text) return false;
+      void writeClipboardText(text);
+      return true;
+    }, [selectedBlockCopyText]);
 
     const closeFind = useCallback(() => {
       findOpenRef.current = false;
@@ -1959,6 +1961,20 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           selectedTextRef.current = text || null;
           renderSurface(true);
           if (text) await writeClipboardText(text);
+        }}
+        onCopy={(event) => {
+          // In the packaged app plain Cmd+C never reaches keydown: the native
+          // Edit > Copy menu intercepts the key equivalent and WebKit fires
+          // this clipboard event instead. Serve terminal selections and
+          // selected blocks from here so both the shortcut and the menu work.
+          const text = selectedTextRef.current ?? selectedBlockCopyText(true);
+          if (!text) return;
+          event.preventDefault();
+          if (event.clipboardData) {
+            event.clipboardData.setData('text/plain', text);
+          } else {
+            void writeClipboardText(text);
+          }
         }}
         onKeyDown={(event) => {
           if (!event.metaKey || event.key.toLowerCase() !== 'c') return;
