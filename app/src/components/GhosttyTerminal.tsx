@@ -25,6 +25,13 @@ import {
   type FindMatch,
   type FindScanHandle,
 } from '../utils/terminalFind';
+import { emptyOsc133State, parseOsc133, type Osc133State } from '../utils/terminalOsc133';
+import {
+  extractBlock,
+  TerminalBlockStore,
+  type BlockRowAccess,
+  type TerminalBlock,
+} from '../utils/terminalBlocks';
 import {
   cleanTerminalLines,
   terminalStyledSelectionToMarkdown,
@@ -157,6 +164,8 @@ interface HoverLinkState {
   endCol: number;
   link: DetectedTerminalLink | null;
 }
+
+const utf8Encoder = new TextEncoder();
 
 function isWorkspaceResizeActive(element: HTMLElement | null): boolean {
   if (document.documentElement.dataset.attnWorkspaceResizing === '1') {
@@ -333,6 +342,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const findRescanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const findInputRef = useRef<HTMLInputElement>(null);
     const runFindScanRef = useRef<(() => void) | null>(null);
+    const osc133StateRef = useRef<Osc133State>(emptyOsc133State());
+    const blockStoreRef = useRef(new TerminalBlockStore());
+    const selectedBlockIdRef = useRef<number | null>(null);
     const writeChainRef = useRef(Promise.resolve());
     const historicalReplayGenerationRef = useRef(0);
     const fitResizeCoalescerRef = useRef<ResizeCoalescer | null>(null);
@@ -417,6 +429,27 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           alpha: 0.8,
           kind: 'underline',
         });
+      }
+      if (selectedBlockIdRef.current !== null) {
+        const block = blockStoreRef.current.blockById(selectedBlockIdRef.current);
+        if (block && block.endRow !== undefined) {
+          const firstRow = viewportBufferStart(scrollbackLength, viewportOffsetRef.current);
+          const startRow = block.promptRow - firstRow;
+          const endRow = block.endRow - 1 - firstRow;
+          if (endRow >= 0 && startRow < terminal.rows) {
+            overlays.push({
+              startRow,
+              startCol: 0,
+              endRow,
+              endCol: terminal.cols,
+              color: '#4d9de0',
+              alpha: 0.9,
+              kind: 'outline',
+            });
+          }
+        } else {
+          selectedBlockIdRef.current = null;
+        }
       }
       if (findOpenRef.current && findMatchesRef.current.length > 0) {
         const firstRow = viewportBufferStart(scrollbackLength, viewportOffsetRef.current);
@@ -734,11 +767,48 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       findOpenRef.current = true;
       setFindUi((ui) => ({ ...ui, open: true }));
       requestAnimationFrame(() => {
-        findInputRef.current?.focus();
-        findInputRef.current?.select();
+        const input = findInputRef.current;
+        // If the user already started typing into the input before this frame
+        // fired, leave their caret alone — select() would make the next
+        // keystroke replace what they typed.
+        if (!input || document.activeElement === input) return;
+        input.focus();
+        input.select();
       });
       if (findQueryRef.current) runFindScan();
     }, [runFindScan]);
+
+    const blockRowAccess = useCallback((): BlockRowAccess | null => {
+      const terminal = terminalRef.current;
+      if (!terminal) return null;
+      return {
+        totalRows: () => terminal.getScrollbackLength() + terminal.rows,
+        rowText: (row) => selectionLineAtBufferRow(row, 0, terminal.cols),
+      };
+    }, [selectionLineAtBufferRow]);
+
+    const selectedBlock = useCallback((): TerminalBlock | null => {
+      if (selectedBlockIdRef.current === null) return null;
+      return blockStoreRef.current.blockById(selectedBlockIdRef.current);
+    }, []);
+
+    // Copy a selected block: whole = command + output, otherwise command only.
+    // Extraction re-anchors against the live buffer and refuses (returns
+    // false) when the block's content has been trimmed away.
+    const copySelectedBlock = useCallback((whole: boolean): boolean => {
+      const block = selectedBlock();
+      const access = blockRowAccess();
+      if (!block || !access) return false;
+      if (!whole) {
+        if (!block.command) return false;
+        void writeClipboardText(block.command);
+        return true;
+      }
+      const extracted = extractBlock(block, access);
+      if (!extracted) return false;
+      void writeClipboardText(extracted.output ? `${extracted.command}\n${extracted.output}` : extracted.command);
+      return true;
+    }, [blockRowAccess, selectedBlock]);
 
     const closeFind = useCallback(() => {
       findOpenRef.current = false;
@@ -817,7 +887,24 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }
         const scrollbackBefore = terminal.getScrollbackLength();
         const viewportOffsetBefore = viewportOffsetRef.current;
-        terminal.write(data);
+        // Segment the stream at OSC 133 markers so each marker's buffer
+        // position can be read from the model cursor right after the bytes
+        // preceding it are applied. Without markers this degenerates to a
+        // single write of the original bytes.
+        const chunkBytes = typeof data === 'string' ? utf8Encoder.encode(data) : data;
+        const osc133 = parseOsc133(osc133StateRef.current, chunkBytes);
+        osc133StateRef.current = osc133.state;
+        for (const segment of osc133.segments) {
+          if (segment.bytes.length > 0) terminal.write(segment.bytes);
+          if (segment.marker) {
+            const cursor = terminal.getCursor();
+            blockStoreRef.current.applyMarker(
+              segment.marker,
+              { row: terminal.getScrollbackLength() + cursor.y, col: cursor.x },
+              (row) => selectionLineAtBufferRow(row, 0, terminal.cols),
+            );
+          }
+        }
         const responses: string[] = [];
         while (terminal.hasResponse()) {
           const response = terminal.readResponse();
@@ -886,7 +973,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           scheduleSynchronizedOutputRenderFallback();
         }
       });
-    }, [enqueueOperation, flushSynchronizedOutputRender, lineAtVisibleRow, scheduleSynchronizedOutputRenderFallback]);
+    }, [enqueueOperation, flushSynchronizedOutputRender, lineAtVisibleRow, scheduleSynchronizedOutputRenderFallback, selectionLineAtBufferRow]);
 
     // Replay segments alternate resize and bytes; both must be applied on one
     // chain or all historical bytes are parsed at the final geometry.
@@ -1013,6 +1100,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       fit,
       openFind,
       focus: () => {
+        // The find bar owns keyboard focus while it is open: a deferred pane
+        // focus (e.g. focusPane's retry loop after a session switch) must not
+        // steal it and leak the user's search keystrokes into the PTY.
+        if (findOpenRef.current && findInputRef.current) {
+          if (document.activeElement !== findInputRef.current) findInputRef.current.focus();
+          return true;
+        }
         const container = containerRef.current;
         if (!container) return false;
         container.focus();
@@ -1022,7 +1116,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       isInputFocused: () => document.activeElement === containerRef.current,
       write,
       resizeLocal,
-      reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); void write('\x1bc'); },
+      reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); blockStoreRef.current.clear(); selectedBlockIdRef.current = null; void write('\x1bc'); },
       scrollToTop: () => {
         const terminal = terminalRef.current;
         if (!terminal) return false;
@@ -1060,7 +1154,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         synchronizedOutputStateRef.current = { active: false, pending: '' };
         clearSynchronizedOutputRenderTimer();
         modelInstanceRef.current += 1;
-        // Fresh model: buffer rows from any previous find are meaningless.
+        // Fresh model: buffer rows from any previous find or command blocks
+        // are meaningless.
+        osc133StateRef.current = emptyOsc133State();
+        blockStoreRef.current.clear();
+        selectedBlockIdRef.current = null;
         findScanRef.current?.cancel();
         findScanRef.current = null;
         findOpenRef.current = false;
@@ -1116,12 +1214,20 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         onReadyRef.current({
           fit,
           openFind,
-          focus: () => { container.focus(); return document.activeElement === container; },
+          focus: () => {
+            // Same find-bar focus ownership rule as the imperative handle.
+            if (findOpenRef.current && findInputRef.current) {
+              if (document.activeElement !== findInputRef.current) findInputRef.current.focus();
+              return true;
+            }
+            container.focus();
+            return document.activeElement === container;
+          },
           typeTextViaInput: (text) => { onInputRef.current(text.replace(/\n/g, '\r')); return true; },
           isInputFocused: () => document.activeElement === container,
           write,
           resizeLocal,
-          reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); void write('\x1bc'); },
+          reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); blockStoreRef.current.clear(); selectedBlockIdRef.current = null; void write('\x1bc'); },
           scrollToTop: () => { viewportOffsetRef.current = terminal.getScrollbackLength(); wheelRemainderRowsRef.current = 0; hoverGenerationRef.current += 1; renderSurface(true); return true; },
           getText,
           getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
@@ -1563,7 +1669,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       if (!selectingRef.current) return;
       selectingRef.current = false;
       selectionPointerStartRef.current = null;
-      if (!selectionDragThresholdMetRef.current) {
+      const wasClick = !selectionDragThresholdMetRef.current;
+      if (wasClick) {
         selectionRef.current = null;
         renderSurface(true);
       }
@@ -1581,6 +1688,37 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       });
       if (link && !text && (event.metaKey || event.ctrlKey)) {
         openLink(link);
+        return;
+      }
+      // A plain click inside a completed command block selects the block;
+      // clicking its command line additionally highlights the command and
+      // arms Cmd+C with the exact command text from the pre-exec marker.
+      if (wasClick && !text && !(event.metaKey || event.ctrlKey)) {
+        const terminal = terminalRef.current;
+        // mousedown already cleared any previous block selection.
+        let nextBlockId: number | null = null;
+        if (terminal && cell && blockStoreRef.current.hasBlocks()) {
+          const bufferRow = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
+          const block = blockStoreRef.current.blockAt(bufferRow);
+          if (block) {
+            nextBlockId = block.id;
+            if (block.outputStartRow !== undefined && bufferRow < block.outputStartRow && block.inputStart) {
+              const lastCommandRow = block.outputStartRow - 1;
+              const lineLength = selectionLineAtBufferRow(lastCommandRow, 0, terminal.cols).trimEnd().length;
+              selectionRef.current = {
+                startRow: block.inputStart.row,
+                startCol: block.inputStart.col,
+                endRow: lastCommandRow,
+                endCol: Math.max(lineLength, block.inputStart.col + 1),
+              };
+              selectedTextRef.current = block.command || null;
+            }
+          }
+        }
+        if (nextBlockId !== null || selectionRef.current) {
+          selectedBlockIdRef.current = nextBlockId;
+          renderSurface(true);
+        }
       }
     };
 
@@ -1732,8 +1870,21 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           });
           if (!opensUri && !event.altKey && sendTrackedMouse('press', event)) return;
           const row = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
+          if (event.detail === 3) {
+            // Triple click selects the visual row.
+            selectionRef.current = { startRow: row, startCol: 0, endRow: row, endCol: terminal.cols };
+            applicationSelectionAnchorRef.current = null;
+            selectedBlockIdRef.current = null;
+            selectingRef.current = false;
+            const rowText = textForSelectionRange(selectionRef.current);
+            selectedTextRef.current = rowText || null;
+            renderSurface(true);
+            if (rowText) void writeClipboardText(rowText);
+            return;
+          }
           selectedTextRef.current = null;
           applicationSelectionAnchorRef.current = null;
+          selectedBlockIdRef.current = null;
           selectingRef.current = true;
           selectionPointerStartRef.current = { clientX: event.clientX, clientY: event.clientY };
           selectionDragThresholdMetRef.current = false;
@@ -1803,18 +1954,33 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             endCol: range.endCol,
           };
           applicationSelectionAnchorRef.current = null;
+          selectedBlockIdRef.current = null;
           const text = textForSelectionRange(selectionRef.current);
           selectedTextRef.current = text || null;
           renderSurface(true);
           if (text) await writeClipboardText(text);
         }}
         onKeyDown={(event) => {
-          if (event.metaKey && event.shiftKey && event.key.toLowerCase() === 'c') {
+          if (!event.metaKey || event.key.toLowerCase() !== 'c') return;
+          if (event.shiftKey) {
+            // Styled-markdown copy of a text selection keeps priority; with a
+            // block selected and no text selection, copy just the command.
             const text = selectedMarkdown();
             if (text) {
               void writeClipboardText(text);
               event.preventDefault();
+            } else if (copySelectedBlock(false)) {
+              event.preventDefault();
             }
+            return;
+          }
+          // Cmd+C: a text selection (e.g. a clicked command) wins; otherwise a
+          // selected block copies command + output.
+          if (selectedTextRef.current) {
+            void writeClipboardText(selectedTextRef.current);
+            event.preventDefault();
+          } else if (copySelectedBlock(true)) {
+            event.preventDefault();
           }
         }}
       >
