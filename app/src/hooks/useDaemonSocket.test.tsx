@@ -632,6 +632,50 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('lists canonical workspace contexts by request id', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    const request = result.current.sendListWorkspaceContexts();
+    const command = ws.sent
+      .map((entry) => JSON.parse(entry))
+      .find((entry) => entry.cmd === 'workspace_context_list');
+    expect(command.request_id).toMatch(/^workspace_context_list:/);
+
+    act(() => {
+      ws.emit({
+        event: 'workspace_context_list_result',
+        request_id: command.request_id,
+        success: true,
+        contexts: [{
+          workspace_id: 'workspace-1',
+          content: '# Goal',
+          revision: 2,
+          updated_by_session_id: 'session-1',
+          updated_at: '2026-06-09T10:00:00Z',
+        }],
+      });
+    });
+
+    await expect(request).resolves.toEqual([{
+      workspace_id: 'workspace-1',
+      content: '# Goal',
+      revision: 2,
+      updated_by_session_id: 'session-1',
+      updated_at: '2026-06-09T10:00:00Z',
+    }]);
+    unmount();
+  });
+
   it('keeps shell sessions in daemon session updates', async () => {
     const onSessionsUpdate = vi.fn();
     const { unmount } = renderHook(() =>
@@ -2093,6 +2137,161 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     });
     await expect(updatePromise).resolves.toBeUndefined();
 
+    unmount();
+  });
+
+  it('wakes a delegated agent through an explicit daemon result', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: PROTOCOL_VERSION,
+        sessions: [],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+    await waitFor(() => {
+      expect(result.current.hasReceivedInitialState).toBe(true);
+    });
+
+    let wakePromise!: Promise<void>;
+    act(() => {
+      wakePromise = result.current.sendWakeDispatchAgent('chief-1', 'dispatch-1');
+    });
+    await waitFor(() => {
+      expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual(expect.objectContaining({
+        cmd: 'wake_dispatch_agent',
+        source_session_id: 'chief-1',
+        dispatch_id: 'dispatch-1',
+        request_id: expect.any(String),
+      }));
+    });
+    const wakeCommand = ws.sent.map((entry) => JSON.parse(entry))
+      .find((entry) => entry.cmd === 'wake_dispatch_agent');
+
+    act(() => {
+      ws.emit({
+        event: 'wake_dispatch_agent_result',
+        dispatch_id: 'dispatch-1',
+        request_id: wakeCommand.request_id,
+        success: true,
+      });
+    });
+    await expect(wakePromise).resolves.toBeUndefined();
+
+    unmount();
+  });
+
+  it('correlates wake retries, duplicates, and command errors', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: PROTOCOL_VERSION,
+        sessions: [],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+    await waitFor(() => {
+      expect(result.current.hasReceivedInitialState).toBe(true);
+    });
+
+    const scheduledTimeouts: TimerHandler[] = [];
+    const originalWindowSetTimeout = window.setTimeout;
+    window.setTimeout = ((handler: TimerHandler) => {
+      scheduledTimeouts.push(handler);
+      return 1;
+    }) as typeof window.setTimeout;
+
+    const firstWake = result.current.sendWakeDispatchAgent('chief-1', 'dispatch-1');
+    const firstCommand = JSON.parse(ws.sent[ws.sent.length - 1]);
+    const duplicateWake = result.current.sendWakeDispatchAgent('chief-1', 'dispatch-1');
+    await expect(duplicateWake).rejects.toThrow('already pending');
+    act(() => {
+      ws.emit({
+        event: 'wake_dispatch_agent_result',
+        dispatch_id: 'dispatch-1',
+        request_id: firstCommand.request_id,
+        success: true,
+      });
+    });
+    await expect(firstWake).resolves.toBeUndefined();
+
+    const retryWake = result.current.sendWakeDispatchAgent('chief-1', 'dispatch-1');
+    const retryCommand = JSON.parse(ws.sent[ws.sent.length - 1]);
+    act(() => {
+      const staleTimeout = scheduledTimeouts[0];
+      if (typeof staleTimeout === 'function') {
+        staleTimeout();
+      }
+      ws.emit({
+        event: 'wake_dispatch_agent_result',
+        dispatch_id: 'dispatch-1',
+        request_id: firstCommand.request_id,
+        success: true,
+      });
+      ws.emit({
+        event: 'wake_dispatch_agent_result',
+        dispatch_id: 'dispatch-1',
+        request_id: retryCommand.request_id,
+        success: false,
+        error: 'retry failed',
+      });
+    });
+    await expect(retryWake).rejects.toThrow('retry failed');
+
+    const failedWake = result.current.sendWakeDispatchAgent('chief-1', 'dispatch-1');
+    act(() => {
+      ws.emit({
+        event: 'command_error',
+        cmd: 'wake_dispatch_agent',
+        success: false,
+        error: 'wake rejected',
+      });
+    });
+    await expect(failedWake).rejects.toThrow('wake rejected');
+
+    window.setTimeout = originalWindowSetTimeout;
     unmount();
   });
 

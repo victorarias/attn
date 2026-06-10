@@ -21,13 +21,14 @@ type Store struct {
 	mu sync.RWMutex
 	db *sql.DB
 
-	sessions        map[string]*protocol.Session
-	agentDriverRuns map[string]AgentDriverReportCursor
-	agentMetadata   map[string]string
-	profileRoles    map[string]string
-	chiefDispatches map[string]*protocol.ChiefOfStaffDispatch
-	workspaces      map[string]workspacelayout.WorkspaceLayout
-	recentLocations map[string]*protocol.RecentLocation
+	sessions         map[string]*protocol.Session
+	agentDriverRuns  map[string]AgentDriverReportCursor
+	agentMetadata    map[string]string
+	profileRoles     map[string]string
+	chiefDispatches  map[string]*protocol.ChiefOfStaffDispatch
+	dispatchMessages map[string]*protocol.DispatchMessage
+	workspaces       map[string]workspacelayout.WorkspaceLayout
+	recentLocations  map[string]*protocol.RecentLocation
 }
 
 type AgentDriverReportCursor struct {
@@ -41,13 +42,14 @@ func New() *Store {
 	db, err := OpenDB(":memory:")
 	if err != nil {
 		return &Store{
-			sessions:        make(map[string]*protocol.Session),
-			agentDriverRuns: make(map[string]AgentDriverReportCursor),
-			agentMetadata:   make(map[string]string),
-			profileRoles:    make(map[string]string),
-			chiefDispatches: make(map[string]*protocol.ChiefOfStaffDispatch),
-			workspaces:      make(map[string]workspacelayout.WorkspaceLayout),
-			recentLocations: make(map[string]*protocol.RecentLocation),
+			sessions:         make(map[string]*protocol.Session),
+			agentDriverRuns:  make(map[string]AgentDriverReportCursor),
+			agentMetadata:    make(map[string]string),
+			profileRoles:     make(map[string]string),
+			chiefDispatches:  make(map[string]*protocol.ChiefOfStaffDispatch),
+			dispatchMessages: make(map[string]*protocol.DispatchMessage),
+			workspaces:       make(map[string]workspacelayout.WorkspaceLayout),
+			recentLocations:  make(map[string]*protocol.RecentLocation),
 		}
 	}
 	return &Store{db: db}

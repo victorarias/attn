@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Dashboard } from './Dashboard';
 
@@ -155,8 +155,82 @@ describe('Dashboard sessions', () => {
     expect(screen.getByText('Task')).toBeInTheDocument();
     expect(screen.getByText('Latest update')).toBeInTheDocument();
     expect(screen.getByText('Root cause found; implementing the fix.')).toBeInTheDocument();
-    fireEvent.click(dispatch);
+    fireEvent.click(screen.getByRole('button', { name: /parser-worker/i }));
     expect(onSelectSession).toHaveBeenCalledWith('worker-1');
+  });
+
+  it('shows unread delegated messages and explicitly wakes an idle worker', async () => {
+    daemonStoreState.chiefOfStaffDispatches = [{
+      id: 'dispatch-mail',
+      chief_session_id: 'chief-1',
+      session_id: 'worker-1',
+      workspace_id: 'workspace-1',
+      brief: 'Investigate the parser.',
+      label: 'Parser investigation',
+      agent: 'codex',
+      directory: '/repo/a',
+      status: 'idle',
+      status_since: '2026-06-09T10:00:00Z',
+      unread_message_count: 2,
+      created_at: '2026-06-09T10:00:00Z',
+      updated_at: '2026-06-09T10:00:00Z',
+    }];
+    const onWakeDispatch = vi.fn().mockResolvedValue(undefined);
+    render(
+      <Dashboard
+        sessions={[
+          { id: 'chief-1', label: 'planner', state: 'working', cwd: '/repo/a', chiefOfStaff: true },
+          { id: 'worker-1', label: 'parser-worker', state: 'idle', cwd: '/repo/a' },
+        ]}
+        prs={[]}
+        isLoading={false}
+        onSelectSession={vi.fn()}
+        onWakeDispatch={onWakeDispatch}
+        onNewSession={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('2 unread')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Wake agent' }));
+    await waitFor(() => {
+      expect(onWakeDispatch).toHaveBeenCalledWith('chief-1', 'dispatch-mail');
+    });
+  });
+
+  it('does not offer wake while a delegated worker is active', () => {
+    daemonStoreState.chiefOfStaffDispatches = [{
+      id: 'dispatch-working-mail',
+      chief_session_id: 'chief-1',
+      session_id: 'worker-1',
+      workspace_id: 'workspace-1',
+      brief: 'Investigate the parser.',
+      label: 'Parser investigation',
+      agent: 'codex',
+      directory: '/repo/a',
+      status: 'working',
+      status_since: '2026-06-09T10:00:00Z',
+      unread_message_count: 1,
+      created_at: '2026-06-09T10:00:00Z',
+      updated_at: '2026-06-09T10:00:00Z',
+    }];
+    render(
+      <Dashboard
+        sessions={[
+          { id: 'chief-1', label: 'planner', state: 'working', cwd: '/repo/a', chiefOfStaff: true },
+          { id: 'worker-1', label: 'parser-worker', state: 'working', cwd: '/repo/a' },
+        ]}
+        prs={[]}
+        isLoading={false}
+        onSelectSession={vi.fn()}
+        onWakeDispatch={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('1 unread')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Wake agent' })).not.toBeInTheDocument();
   });
 
   it('hides a dispatch after its delegated session is closed', () => {

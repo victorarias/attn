@@ -876,6 +876,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 			result, err := d.workspaceContextStatus(msg.(*protocol.WorkspaceContextStatusMessage))
 			d.sendWorkspaceContextWSResult(client, "status", result, err)
 		}()
+	case protocol.CmdWorkspaceContextList:
+		go d.sendWorkspaceContextListWSResult(client, msg.(*protocol.WorkspaceContextListMessage).RequestID)
 	case protocol.CmdApprovePR:
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
 	case protocol.CmdMergePR:
@@ -1040,6 +1042,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleRenameWorkspace(client, msg.(*protocol.RenameWorkspaceMessage))
 	case protocol.CmdSetChiefOfStaff:
 		d.handleSetChiefOfStaff(client, msg.(*protocol.SetChiefOfStaffMessage))
+	case protocol.CmdWakeDispatchAgent:
+		d.handleWakeDispatchAgent(client, msg.(*protocol.WakeDispatchAgentMessage))
 	default:
 		d.sendCommandError(client, cmd, "unsupported command")
 	}

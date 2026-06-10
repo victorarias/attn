@@ -270,6 +270,83 @@ func (c *Client) ResolveDispatchRequest(
 	return resp.ChiefOfStaffDispatch, nil
 }
 
+func (c *Client) SendDispatchMessage(
+	sourceSessionID, dispatchID, content string,
+) (*protocol.DispatchMessage, error) {
+	resp, err := c.send(protocol.SendDispatchMessage{
+		Cmd:             protocol.CmdSendDispatchMessage,
+		SourceSessionID: sourceSessionID,
+		DispatchID:      dispatchID,
+		Content:         content,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.DispatchMessage == nil {
+		return nil, errors.New("daemon returned no dispatch message")
+	}
+	return resp.DispatchMessage, nil
+}
+
+func (c *Client) ListDispatchMessages(
+	sourceSessionID, dispatchID string,
+	unreadOnly bool,
+) ([]protocol.DispatchMessage, error) {
+	msg := protocol.ListDispatchMessagesMessage{
+		Cmd:             protocol.CmdListDispatchMessages,
+		SourceSessionID: sourceSessionID,
+	}
+	if value := strings.TrimSpace(dispatchID); value != "" {
+		msg.DispatchID = protocol.Ptr(value)
+	}
+	if unreadOnly {
+		msg.UnreadOnly = protocol.Ptr(true)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	return resp.DispatchMessages, nil
+}
+
+func (c *Client) ReadDispatchMessage(
+	sourceSessionID, messageID string,
+) (*protocol.DispatchMessage, error) {
+	resp, err := c.send(protocol.ReadDispatchMessage{
+		Cmd:             protocol.CmdReadDispatchMessage,
+		SourceSessionID: sourceSessionID,
+		MessageID:       messageID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.DispatchMessage == nil {
+		return nil, errors.New("daemon returned no dispatch message")
+	}
+	return resp.DispatchMessage, nil
+}
+
+func (c *Client) AcknowledgeDispatchMessage(
+	sourceSessionID, messageID, acknowledgement string,
+) (*protocol.DispatchMessage, error) {
+	msg := protocol.AcknowledgeDispatchMessage{
+		Cmd:             protocol.CmdAcknowledgeDispatchMessage,
+		SourceSessionID: sourceSessionID,
+		MessageID:       messageID,
+	}
+	if value := strings.TrimSpace(acknowledgement); value != "" {
+		msg.Acknowledgement = protocol.Ptr(value)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.DispatchMessage == nil {
+		return nil, errors.New("daemon returned no dispatch message")
+	}
+	return resp.DispatchMessage, nil
+}
+
 func (c *Client) CheckoutWorkspaceContext(sourceSessionID string, force bool) (*protocol.WorkspaceContextResult, error) {
 	msg := protocol.WorkspaceContextCheckoutMessage{
 		Cmd:             protocol.CmdWorkspaceContextCheckout,

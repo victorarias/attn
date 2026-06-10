@@ -2,6 +2,20 @@
 
 package protocol
 
+type AcknowledgeDispatchMessage struct {
+	// Acknowledgement corresponds to the JSON schema field "acknowledgement".
+	Acknowledgement *string `json:"acknowledgement,omitempty,omitzero"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// MessageID corresponds to the JSON schema field "message_id".
+	MessageID string `json:"message_id"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+}
+
 type AddCommentMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -429,6 +443,9 @@ type ChiefOfStaffDispatch struct {
 	// StructuredReport corresponds to the JSON schema field "structured_report".
 	StructuredReport *DispatchReport `json:"structured_report,omitempty,omitzero"`
 
+	// UnreadMessageCount corresponds to the JSON schema field "unread_message_count".
+	UnreadMessageCount *int `json:"unread_message_count,omitempty,omitzero"`
+
 	// UpdatedAt corresponds to the JSON schema field "updated_at".
 	UpdatedAt string `json:"updated_at"`
 
@@ -777,6 +794,35 @@ type DispatchDecisionRequest struct {
 
 	// Status corresponds to the JSON schema field "status".
 	Status DispatchRequestStatus `json:"status"`
+}
+
+type DispatchMessage struct {
+	// AcknowledgedAt corresponds to the JSON schema field "acknowledged_at".
+	AcknowledgedAt *string `json:"acknowledged_at,omitempty,omitzero"`
+
+	// Acknowledgement corresponds to the JSON schema field "acknowledgement".
+	Acknowledgement *string `json:"acknowledgement,omitempty,omitzero"`
+
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// DispatchID corresponds to the JSON schema field "dispatch_id".
+	DispatchID string `json:"dispatch_id"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// ReadAt corresponds to the JSON schema field "read_at".
+	ReadAt *string `json:"read_at,omitempty,omitzero"`
+
+	// SenderSessionID corresponds to the JSON schema field "sender_session_id".
+	SenderSessionID string `json:"sender_session_id"`
+
+	// TargetSessionID corresponds to the JSON schema field "target_session_id".
+	TargetSessionID string `json:"target_session_id"`
 }
 
 type DispatchReport struct {
@@ -1520,6 +1566,20 @@ type ListBranchesMessage struct {
 	MainRepo string `json:"main_repo"`
 }
 
+type ListDispatchMessagesMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// DispatchID corresponds to the JSON schema field "dispatch_id".
+	DispatchID *string `json:"dispatch_id,omitempty,omitzero"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+
+	// UnreadOnly corresponds to the JSON schema field "unread_only".
+	UnreadOnly *bool `json:"unread_only,omitempty,omitzero"`
+}
+
 type ListDispatchesMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1984,6 +2044,17 @@ type RateLimitedMessage struct {
 	RateLimitResource string `json:"rate_limit_resource"`
 }
 
+type ReadDispatchMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// MessageID corresponds to the JSON schema field "message_id".
+	MessageID string `json:"message_id"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+}
+
 type RecentLocation struct {
 	// Label corresponds to the JSON schema field "label".
 	Label string `json:"label"`
@@ -2258,6 +2329,12 @@ type Response struct {
 	// DelegateResult corresponds to the JSON schema field "delegate_result".
 	DelegateResult *DelegateResult `json:"delegate_result,omitempty,omitzero"`
 
+	// DispatchMessage corresponds to the JSON schema field "dispatch_message".
+	DispatchMessage *DispatchMessage `json:"dispatch_message,omitempty,omitzero"`
+
+	// DispatchMessages corresponds to the JSON schema field "dispatch_messages".
+	DispatchMessages []DispatchMessage `json:"dispatch_messages,omitempty,omitzero"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
 
@@ -2279,6 +2356,9 @@ type Response struct {
 	// WorkspaceContextResult corresponds to the JSON schema field
 	// "workspace_context_result".
 	WorkspaceContextResult *WorkspaceContextResult `json:"workspace_context_result,omitempty,omitzero"`
+
+	// WorkspaceContexts corresponds to the JSON schema field "workspace_contexts".
+	WorkspaceContexts []WorkspaceContext `json:"workspace_contexts,omitempty,omitzero"`
 }
 
 type ReviewComment struct {
@@ -2599,6 +2679,20 @@ type ReviewState struct {
 
 	// ViewedFiles corresponds to the JSON schema field "viewed_files".
 	ViewedFiles []string `json:"viewed_files"`
+}
+
+type SendDispatchMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// DispatchID corresponds to the JSON schema field "dispatch_id".
+	DispatchID string `json:"dispatch_id"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
 }
 
 type Session struct {
@@ -3016,6 +3110,37 @@ type UpdateEndpointMessage struct {
 	SshTarget *string `json:"ssh_target,omitempty,omitzero"`
 }
 
+type WakeDispatchAgentMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// DispatchID corresponds to the JSON schema field "dispatch_id".
+	DispatchID string `json:"dispatch_id"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+}
+
+type WakeDispatchAgentResultMessage struct {
+	// DispatchID corresponds to the JSON schema field "dispatch_id".
+	DispatchID string `json:"dispatch_id"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type WebSocketEvent struct {
 	// Action corresponds to the JSON schema field "action".
 	Action *string `json:"action,omitempty,omitzero"`
@@ -3066,6 +3191,12 @@ type WebSocketEvent struct {
 
 	// Dirty corresponds to the JSON schema field "dirty".
 	Dirty *bool `json:"dirty,omitempty,omitzero"`
+
+	// DispatchMessage corresponds to the JSON schema field "dispatch_message".
+	DispatchMessage *DispatchMessage `json:"dispatch_message,omitempty,omitzero"`
+
+	// DispatchMessages corresponds to the JSON schema field "dispatch_messages".
+	DispatchMessages []DispatchMessage `json:"dispatch_messages,omitempty,omitzero"`
 
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
@@ -3239,6 +3370,9 @@ type WebSocketEvent struct {
 	// "workspace_context_result".
 	WorkspaceContextResult *WorkspaceContextResult `json:"workspace_context_result,omitempty,omitzero"`
 
+	// WorkspaceContexts corresponds to the JSON schema field "workspace_contexts".
+	WorkspaceContexts []WorkspaceContext `json:"workspace_contexts,omitempty,omitzero"`
+
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 
@@ -3317,6 +3451,31 @@ type WorkspaceContextCheckoutMessage struct {
 
 	// SourceSessionID corresponds to the JSON schema field "source_session_id".
 	SourceSessionID string `json:"source_session_id"`
+}
+
+type WorkspaceContextListMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+}
+
+type WorkspaceContextListResultMessage struct {
+	// Contexts corresponds to the JSON schema field "contexts".
+	Contexts []WorkspaceContext `json:"contexts,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type WorkspaceContextResult struct {

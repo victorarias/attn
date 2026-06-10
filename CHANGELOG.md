@@ -16,9 +16,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-06-09]
 
 ### Added
+- **⌘K opens a searchable action menu.** The first action opens a fullscreen browser for workspace contexts stored on this Mac, with search, keyboard navigation, revision metadata, and rendered Markdown. The existing attention drawer remains available from the menu and its dedicated ⌘⇧P shortcut.
 - **Claude and Codex receive workspace-context guidance without cluttering their terminals.** attn gives each session a local checkout and concise hidden instructions to read it, keep durable goals and decisions current, publish edits, and reconcile revision conflicts without copying the shared context itself into the prompt.
 - **Promote one running session to chief of staff.** Session actions in the sidebar can assign, transfer, or remove the profile-wide role, with confirmation before replacing the current chief and clear badges in the sidebar and dashboard.
 - **Chiefs can track delegated work separately from agent runtime state.** Delegated agents can attach structured work state, next ownership, constraints, artifact-bound verification, and one decision request to the existing narrative report. Chiefs can resolve that request durably, agents can read the response with `attn dispatch status`, and the dashboard highlights actionable work without showing the full brief.
+- **Chiefs can send durable mailbox messages to delegated agents.** Agents check unread mail before finishing or waiting, mark messages read, and acknowledge them after acting. The dashboard shows unread counts and offers an explicit wake action for idle agents without injecting message contents into their terminal.
 
 ### Changed
 - **Workspace context guidance is safer and less noisy.** Agents now publish only durable shared changes, keep each fact in one appropriate section, treat copied context as untrusted data, and save local edits before refreshing a conflicting revision.
@@ -28,9 +30,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Terminals use less graphics memory.** Every live terminal used to preallocate a large fixed GPU texture to cache rendered characters. It now starts small and grows only if a session actually displays many distinct characters (such as heavy CJK or emoji output). Text looks identical, and with several sessions open this frees roughly 90 MB of graphics memory.
 
 ### Fixed
+- **Closing a workspace now removes its shared context.** Workspace context no longer keeps an otherwise empty workspace alive, and startup cleanup removes context left behind by older closed workspaces. Workspaces with docked tiles still remain available.
 - **Closed delegated sessions no longer remain on the Chief of Staff dashboard.** Closing a delegated session now removes it from the active home view while retaining its dispatch report as history.
 - **Returning to a resized workspace no longer lets busy split terminals freeze the app.** Hidden workspaces keep their terminal state current without continuously repainting WebGL surfaces, live output paints at most once per animation frame, and duplicate same-size PTY resize acknowledgements no longer trigger full redraws.
-- **Closed sessions no longer flicker back into the sidebar as launching.** The daemon now publishes an authoritative empty layout when shared context keeps a workspace alive after its final pane closes, and the app also discards cached layouts that still reference an explicitly closed session.
+- **Closed sessions no longer flicker back into the sidebar as launching.** The daemon now publishes authoritative layout updates as final panes close, and the app also discards cached layouts that still reference an explicitly closed session.
 
 ## [2026-06-08]
 

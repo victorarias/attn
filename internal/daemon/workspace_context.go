@@ -275,6 +275,18 @@ func (d *Daemon) handleWorkspaceContextStatus(conn net.Conn, msg *protocol.Works
 	d.sendWorkspaceContextResponse(conn, result, err)
 }
 
+func (d *Daemon) handleWorkspaceContextList(conn net.Conn) {
+	contexts, err := d.store.ListWorkspaceContexts()
+	if err != nil {
+		d.sendError(conn, "workspace context: "+err.Error())
+		return
+	}
+	_ = json.NewEncoder(conn).Encode(protocol.Response{
+		Ok:                true,
+		WorkspaceContexts: contexts,
+	})
+}
+
 func (d *Daemon) sendWorkspaceContextResponse(conn net.Conn, result *protocol.WorkspaceContextResult, err error) {
 	if err != nil {
 		d.sendError(conn, "workspace context: "+err.Error())
@@ -292,6 +304,20 @@ func (d *Daemon) sendWorkspaceContextWSResult(client *wsClient, action string, r
 		Action:  action,
 		Success: err == nil,
 		Result:  result,
+	}
+	if err != nil {
+		response.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, response)
+}
+
+func (d *Daemon) sendWorkspaceContextListWSResult(client *wsClient, requestID string) {
+	contexts, err := d.store.ListWorkspaceContexts()
+	response := protocol.WorkspaceContextListResultMessage{
+		Event:     protocol.EventWorkspaceContextListResult,
+		RequestID: requestID,
+		Success:   err == nil,
+		Contexts:  contexts,
 	}
 	if err != nil {
 		response.Error = protocol.Ptr(err.Error())

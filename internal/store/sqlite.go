@@ -366,6 +366,24 @@ var migrations = []migration{
 		ALTER TABLE chief_of_staff_dispatches
 			ADD COLUMN structured_report_json TEXT NOT NULL DEFAULT '';
 	`},
+	{46, "create chief of staff dispatch messages table", `
+		CREATE TABLE IF NOT EXISTS chief_of_staff_dispatch_messages (
+			id TEXT PRIMARY KEY,
+			dispatch_id TEXT NOT NULL,
+			sender_session_id TEXT NOT NULL,
+			target_session_id TEXT NOT NULL,
+			content TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			read_at TEXT NOT NULL DEFAULT '',
+			acknowledged_at TEXT NOT NULL DEFAULT '',
+			acknowledgement TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY(dispatch_id) REFERENCES chief_of_staff_dispatches(id) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS idx_chief_dispatch_messages_dispatch_created
+			ON chief_of_staff_dispatch_messages(dispatch_id, created_at, id);
+		CREATE INDEX IF NOT EXISTS idx_chief_dispatch_messages_target_unread
+			ON chief_of_staff_dispatch_messages(target_session_id, read_at, created_at);
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
