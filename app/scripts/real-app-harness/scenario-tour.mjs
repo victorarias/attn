@@ -2,7 +2,7 @@
 
 /**
  * Real-app scenario: start an interactive Tour through the packaged CLI and
- * verify the native Tour dock renders a real guide and branch diff.
+ * verify the native fullscreen Tour renders a real guide and branch diff.
  */
 import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -86,8 +86,15 @@ async function captureTourScreenshot(client, screenshotPath) {
     await client.request('capture_native_window_screenshot', { path: screenshotPath });
     return screenshotPath;
   } catch (error) {
-    console.warn(`[RealAppHarness] Screenshot skipped: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
+    console.warn(`[RealAppHarness] Native screenshot unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    try {
+      const screenshot = await client.request('capture_screenshot_data');
+      fs.writeFileSync(screenshotPath, Buffer.from(screenshot.pngBase64, 'base64'));
+      return screenshotPath;
+    } catch (fallbackError) {
+      console.warn(`[RealAppHarness] DOM screenshot skipped: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+      return null;
+    }
   }
 }
 
@@ -110,6 +117,7 @@ async function main() {
     ATTN_SOCKET_PATH: socketPathForProfile(profile),
   };
   let sessionId = null;
+  let otherSessionId = null;
   let listener = null;
 
   console.log(`[RealAppHarness] runDir=${runDir}`);
@@ -163,14 +171,20 @@ summary: |
     Questions --> Agent
   \`\`\`
 
-files:
-  - path: src/app.ts
-    view: diff
-    note: |
-      Start with the application entry point.
-    annotations:
-      - anchor: "export function main("
-        note: "This is the behavior under review."
+chapters:
+  - title: Entry point
+    summary: |
+      Establish the user-visible flow before reading support code.
+    files:
+      - path: src/app.ts
+        view: diff
+        note: |
+          Start with the application entry point.
+        risk: |
+          Verify the new call remains compatible with the existing startup path.
+        annotations:
+          - anchor: "export function main("
+            note: "This is the behavior under review."
 
 skip:
   - data/table.ts
@@ -192,13 +206,21 @@ skip:
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const ready = await waitForTourReady(listener);
+    const { stdout: changedFilesOutput } = await execFileAsync('git', [
+      '-C',
+      repoDir,
+      'diff',
+      '--name-only',
+      'origin/main',
+    ]);
+    const expectedChangedFileCount = changedFilesOutput.trim().split('\n').filter(Boolean).length;
 
     const state = await pollFor(
       async () => {
         const current = await client.request('tour_get_state', {}, { timeoutMs: 5_000 });
-        return current.panelOpen && current.renderedLineCount > 0 && current.mermaidCount > 0 ? current : null;
+        return current.panelOpen && current.briefingOpen && current.renderedLineCount > 0 && current.mermaidCount > 0 ? current : null;
       },
-      'Tour dock to render rich guide content, Mermaid, and the real diff',
+      'fullscreen Tour to render the first-open briefing and real diff',
     );
 
     assert(ready.connection_state === 'connected', `listener connected (got ${ready.connection_state})`);
@@ -207,18 +229,69 @@ skip:
     assert(state.summaryText.includes('Packaged-app Tour'), 'guide summary rendered');
     assert(state.mermaidCount === 1, `Mermaid diagram rendered once (got ${state.mermaidCount})`);
     assert(state.files.some((file) => file.path === 'src/app.ts' && file.selected), 'curated file is selected');
-    assert(state.files.some((file) => file.path === 'data/table.ts'), 'skipped file is present');
+    assert(
+      state.totalFileCount === expectedChangedFileCount,
+      `coverage ledger counts all ${expectedChangedFileCount} changed files (got ${state.totalFileCount})`,
+    );
+    assert(state.skippedFileCount === 1, `coverage ledger counts the skipped file (got ${state.skippedFileCount})`);
     assert(state.selectedFile === 'src/app.ts', `selected file is src/app.ts (got ${JSON.stringify(state.selectedFile)})`);
     assert(state.diffViewPresent, 'Tour DiffView mounted');
     assert(state.renderedLineCount > 0, `rendered diff lines present (got ${state.renderedLineCount})`);
-    assert(state.conversationText.includes('No questions yet.'), 'empty conversation state rendered');
+    assert(!state.conversationOpen, 'conversation is hidden by default');
     assert(state.errorText === '', `no Tour panel error (got ${JSON.stringify(state.errorText)})`);
     assert(
-      state.panelBounds?.width >= state.viewportWidth * 0.9,
-      `Tour dock uses at least 90% of the viewport (got ${state.panelBounds?.width}/${state.viewportWidth})`,
+      state.panelBounds?.width >= state.viewportWidth - 1 && state.panelBounds?.height >= state.viewportHeight - 1,
+      `Tour fills the viewport (got ${state.panelBounds?.width}x${state.panelBounds?.height}/${state.viewportWidth}x${state.viewportHeight})`,
     );
 
+    await client.request('tour_close_briefing');
+    const readingState = await pollFor(
+      async () => {
+        const current = await client.request('tour_get_state', {}, { timeoutMs: 5_000 });
+        return !current.briefingOpen && current.renderedLineCount > 0 ? current : null;
+      },
+      'Tour briefing to close onto the reading workspace',
+    );
+    assert(readingState.selectedFile === 'src/app.ts', 'reading workspace keeps the selected file');
+
+    await client.request('tour_toggle_conversation');
+    const conversationState = await pollFor(
+      async () => {
+        const current = await client.request('tour_get_state', {}, { timeoutMs: 5_000 });
+        return current.conversationOpen ? current : null;
+      },
+      'Tour conversation drawer to open on demand',
+    );
+    assert(conversationState.conversationText.includes('No questions yet.'), 'empty conversation state rendered on demand');
+    await client.request('tour_press_escape');
+    const escapedConversation = await client.request('tour_get_state', {}, { timeoutMs: 5_000 });
+    assert(escapedConversation.panelOpen && !escapedConversation.conversationOpen, 'Escape closes conversation before the Tour');
+
     const screenshotPath = await captureTourScreenshot(client, path.join(runDir, 'tour.png'));
+
+    await client.request('tour_press_escape');
+    await pollFor(
+      async () => {
+        const current = await client.request('tour_get_state', {}, { timeoutMs: 5_000 });
+        return !current.panelOpen ? current : null;
+      },
+      'Escape to dismiss the fullscreen Tour',
+    );
+
+    otherSessionId = await createSessionAndWaitForInitialPane({
+      client,
+      observer,
+      cwd: repoDir,
+      label: `tour-switch-${runId}`,
+      agent: 'shell',
+      waitForInitialPaneVisible: false,
+      sessionWaitMs: 30_000,
+    });
+    await client.request('select_session', { sessionId: otherSessionId });
+    await client.request('select_session', { sessionId });
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const reopenedState = await client.request('tour_get_state', {}, { timeoutMs: 5_000 });
+    assert(!reopenedState.panelOpen, 'returning to the workspace does not reopen a dismissed Tour');
 
     const summary = {
       ok: true,
@@ -240,6 +313,9 @@ skip:
     }
     if (sessionId) {
       await client.request('close_session', { sessionId }).catch(() => {});
+    }
+    if (otherSessionId) {
+      await client.request('close_session', { sessionId: otherSessionId }).catch(() => {});
     }
     await client.quitApp().catch(() => {});
     await observer.close();

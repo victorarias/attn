@@ -1258,13 +1258,12 @@ function collectDiffReviewUiState() {
 }
 
 function collectTourUiState() {
-  const panel = document.querySelector('.dock-panel--tour');
-  const tour = panel?.querySelector('.tour-panel');
-  const fileButtons = Array.from(tour?.querySelectorAll('.tour-panel__group button') || [])
+  const tour = document.querySelector('.tour-panel');
+  const fileButtons = Array.from(tour?.querySelectorAll('.tour-panel__file-row') || [])
     .map((button) => ({
       path: button.getAttribute('data-file-path') || '',
       selected: button.classList.contains('is-active'),
-      reviewed: Boolean(button.querySelector('em')),
+      reviewed: button.classList.contains('is-reviewed'),
     }));
   const diffsContainer = tour?.querySelector('diffs-container');
   const shadowRoot = diffsContainer
@@ -1272,20 +1271,31 @@ function collectTourUiState() {
     : null;
 
   return {
-    panelOpen: Boolean(panel && tour),
+    panelOpen: Boolean(tour),
+    briefingOpen: Boolean(tour?.querySelector('.tour-panel__briefing')),
+    conversationOpen: Boolean(tour?.querySelector('.tour-panel__conversation')),
     title: tour?.querySelector('.tour-panel__header h2')?.textContent?.trim() || '',
     connectionText: tour?.querySelector('.tour-panel__connection')?.textContent?.trim() || '',
-    summaryText: tour?.querySelector('.tour-panel__summary')?.textContent?.trim() || '',
+    summaryText: tour?.querySelector('.tour-panel__briefing-content')?.textContent?.trim() || '',
     fileCount: fileButtons.length,
     files: fileButtons,
+    totalFileCount: Number.parseInt(
+      tour?.querySelector('.tour-panel__coverage-grid > div:first-child strong')?.textContent || '0',
+      10,
+    ),
+    skippedFileCount: Number.parseInt(
+      tour?.querySelector('.tour-panel__coverage-grid > .is-skipped strong')?.textContent || '0',
+      10,
+    ),
     selectedFile: tour?.querySelector('.tour-panel__file-heading h3')?.textContent?.trim() || '',
     diffViewPresent: Boolean(tour?.querySelector('.diff-view')),
     renderedLineCount: shadowRoot ? shadowRoot.querySelectorAll('[data-line-number-content]').length : 0,
     mermaidCount: tour?.querySelectorAll('.tour-panel__mermaid.is-ready svg').length || 0,
     conversationText: tour?.querySelector('.tour-panel__transcript')?.textContent?.trim() || '',
     errorText: tour?.querySelector('.tour-panel__error')?.textContent?.trim() || '',
-    panelBounds: rectSnapshot(panel),
+    panelBounds: rectSnapshot(tour),
     viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
   };
 }
 
@@ -2163,6 +2173,21 @@ export function useUiAutomationBridge({
         return collectDiffReviewUiState();
       case 'tour_get_state':
         return collectTourUiState();
+      case 'tour_close_briefing': {
+        const closeButton = document.querySelector<HTMLButtonElement>('.tour-panel__briefing button[aria-label="Close briefing"]');
+        closeButton?.click();
+        return collectTourUiState();
+      }
+      case 'tour_toggle_conversation': {
+        const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.tour-panel__header-actions button'))
+          .find((entry) => entry.textContent?.trim().startsWith('Conversation'));
+        button?.click();
+        return collectTourUiState();
+      }
+      case 'tour_press_escape': {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        return collectTourUiState();
+      }
       case 'capture_structured_snapshot':
         return collectVisualSnapshot(
           sessions,

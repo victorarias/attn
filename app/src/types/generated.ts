@@ -2684,17 +2684,21 @@ export interface LineCommentElement {
 }
 
 export interface FileObject {
-    additions:   number;
-    annotations: AnnotationElement[];
-    deletions:   number;
-    group:       string;
-    modified:    string;
-    note:        string;
-    old_path?:   string;
-    original:    string;
-    path:        string;
-    status:      string;
-    view:        string;
+    additions:        number;
+    annotations:      AnnotationElement[];
+    chapter_id?:      string;
+    chapter_summary?: string;
+    chapter_title?:   string;
+    deletions:        number;
+    group:            string;
+    modified:         string;
+    note:             string;
+    old_path?:        string;
+    original:         string;
+    path:             string;
+    risk_note?:       string;
+    status:           string;
+    view:             string;
     [property: string]: any;
 }
 
@@ -3269,17 +3273,21 @@ export interface TourEvent {
 }
 
 export interface TourFile {
-    additions:   number;
-    annotations: AnnotationElement[];
-    deletions:   number;
-    group:       string;
-    modified:    string;
-    note:        string;
-    old_path?:   string;
-    original:    string;
-    path:        string;
-    status:      string;
-    view:        string;
+    additions:        number;
+    annotations:      AnnotationElement[];
+    chapter_id?:      string;
+    chapter_summary?: string;
+    chapter_title?:   string;
+    deletions:        number;
+    group:            string;
+    modified:         string;
+    note:             string;
+    old_path?:        string;
+    original:         string;
+    path:             string;
+    risk_note?:       string;
+    status:           string;
+    view:             string;
     [property: string]: any;
 }
 
@@ -7742,6 +7750,9 @@ const typeMap: any = {
     "FileObject": o([
         { json: "additions", js: "additions", typ: 0 },
         { json: "annotations", js: "annotations", typ: a(r("AnnotationElement")) },
+        { json: "chapter_id", js: "chapter_id", typ: u(undefined, "") },
+        { json: "chapter_summary", js: "chapter_summary", typ: u(undefined, "") },
+        { json: "chapter_title", js: "chapter_title", typ: u(undefined, "") },
         { json: "deletions", js: "deletions", typ: 0 },
         { json: "group", js: "group", typ: "" },
         { json: "modified", js: "modified", typ: "" },
@@ -7749,6 +7760,7 @@ const typeMap: any = {
         { json: "old_path", js: "old_path", typ: u(undefined, "") },
         { json: "original", js: "original", typ: "" },
         { json: "path", js: "path", typ: "" },
+        { json: "risk_note", js: "risk_note", typ: u(undefined, "") },
         { json: "status", js: "status", typ: "" },
         { json: "view", js: "view", typ: "" },
     ], "any"),
@@ -8102,6 +8114,9 @@ const typeMap: any = {
     "TourFile": o([
         { json: "additions", js: "additions", typ: 0 },
         { json: "annotations", js: "annotations", typ: a(r("AnnotationElement")) },
+        { json: "chapter_id", js: "chapter_id", typ: u(undefined, "") },
+        { json: "chapter_summary", js: "chapter_summary", typ: u(undefined, "") },
+        { json: "chapter_title", js: "chapter_title", typ: u(undefined, "") },
         { json: "deletions", js: "deletions", typ: 0 },
         { json: "group", js: "group", typ: "" },
         { json: "modified", js: "modified", typ: "" },
@@ -8109,6 +8124,7 @@ const typeMap: any = {
         { json: "old_path", js: "old_path", typ: u(undefined, "") },
         { json: "original", js: "original", typ: "" },
         { json: "path", js: "path", typ: "" },
+        { json: "risk_note", js: "risk_note", typ: u(undefined, "") },
         { json: "status", js: "status", typ: "" },
         { json: "view", js: "view", typ: "" },
     ], "any"),

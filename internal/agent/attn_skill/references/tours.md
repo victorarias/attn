@@ -24,13 +24,18 @@ base ref and understand the intent. Then design the tour:
    any architectural shape the reader should hold in mind.
 2. Order files by understanding, usually entry point or contract first,
    implementation next, integration and persistence after that, then tests.
+   For large changes, divide that path into a small number of semantic
+   `chapters` so the reader can see progress and resume without navigating one
+   flat file list.
 3. Give every included file a note that explains why it appears at that point
    in the tour and what the reader should learn from it.
 4. Use annotations sparingly for decisions, invariants, non-obvious mechanics,
    and important control flow. Do not annotate syntax that is self-explanatory.
-5. Put generated, mechanical, or low-value files in `skip`. Leave genuinely
+5. Add `risk` only when a file contains a concrete review hotspot. State the
+   failure mode or invariant to verify rather than assigning a vague severity.
+6. Put generated, mechanical, or low-value files in `skip`. Leave genuinely
    relevant but untoured changes for the native Other section.
-6. Use `view: content` when the whole file is the useful artifact; otherwise
+7. Use `view: content` when the whole file is the useful artifact; otherwise
    use `view: diff`.
 
 Guide format:
@@ -41,21 +46,30 @@ version: 1
 summary: |
   Markdown overview. Mermaid diagrams are supported when they clarify flow.
 
-files:
-  - path: internal/example.go
-    view: diff
-    note: |
-      Why this file matters and what to notice before continuing.
-    annotations:
-      - anchor: "func importantPath("
-        note: "Why this decision or invariant matters."
-      - start: 40
-        end: 55
-        thread:
-          - author: agent
-            body: "Initial explanation."
-          - author: reviewer
-            body: "Useful prior context."
+chapters:
+  - title: Contract and entry point
+    summary: |
+      What this chapter establishes before the implementation details.
+    files:
+      - path: internal/example.go
+        view: diff
+        note: |
+          Why this file matters and what to notice before continuing.
+        risk: |
+          The compatibility invariant a reviewer should verify here.
+        annotations:
+          - anchor: "func importantPath("
+            note: "Why this decision or invariant matters."
+          - start: 40
+            end: 55
+            thread:
+              - author: agent
+                body: "Initial explanation."
+              - author: reviewer
+                body: "Useful prior context."
+
+# `files` remains supported for short tours that do not need chapters.
+files: []
 
 skip:
   - app/src/types/generated.ts
@@ -64,7 +78,8 @@ skip:
 Each annotation uses exactly one locator: `anchor`, `line`, or `start` plus
 `end`. Each annotation uses exactly one content form: `note` or `thread`.
 Anchors should be distinctive and stable. Markdown and supported Mermaid
-blocks work in summaries, file notes, and annotation comments.
+blocks work in tour summaries, chapter summaries, file notes, risk notes, and
+annotation comments.
 
 ## Start And Stay Attached
 

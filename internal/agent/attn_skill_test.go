@@ -137,6 +137,8 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 	for _, expected := range []string{
 		"tour create",
 		"~/.attn/tours",
+		"chapters",
+		"risk",
 		"QUESTION_READY",
 		"FEEDBACK_READY",
 		"TOUR_ENDED",

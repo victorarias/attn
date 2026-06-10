@@ -266,17 +266,21 @@ func tourSnapshotToStore(snapshot *tour.Snapshot) store.TourSnapshot {
 			oldPath = protocol.Ptr(file.OldPath)
 		}
 		files[i] = protocol.TourFile{
-			Path:        file.Path,
-			OldPath:     oldPath,
-			Status:      file.Status,
-			Additions:   file.Additions,
-			Deletions:   file.Deletions,
-			Group:       file.Group,
-			View:        file.View,
-			Note:        file.Note,
-			Original:    file.Original,
-			Modified:    file.Modified,
-			Annotations: annotations,
+			Path:           file.Path,
+			OldPath:        oldPath,
+			Status:         file.Status,
+			Additions:      file.Additions,
+			Deletions:      file.Deletions,
+			Group:          file.Group,
+			ChapterID:      optionalTourString(file.ChapterID),
+			ChapterTitle:   optionalTourString(file.ChapterTitle),
+			ChapterSummary: optionalTourString(file.ChapterSummary),
+			RiskNote:       optionalTourString(file.RiskNote),
+			View:           file.View,
+			Note:           file.Note,
+			Original:       file.Original,
+			Modified:       file.Modified,
+			Annotations:    annotations,
 		}
 	}
 	return store.TourSnapshot{
@@ -284,6 +288,13 @@ func tourSnapshotToStore(snapshot *tour.Snapshot) store.TourSnapshot {
 		Warnings: append([]string(nil), snapshot.Warnings...),
 		Files:    files,
 	}
+}
+
+func optionalTourString(value string) *string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return protocol.Ptr(value)
 }
 
 func formatTourQuestion(body string, context protocol.TourQuestionContext) string {

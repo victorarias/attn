@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '../test/utils';
 import type { DaemonTour } from '../hooks/useDaemonSocket';
+import { _resetEscapeStackForTest } from '../hooks/useEscapeStack';
 import { TourConnectionState, TourStatus } from '../types/generated';
 import { TourPanel } from './TourPanel';
 
@@ -50,24 +51,32 @@ const tour: DaemonTour = {
 function renderPanel() {
   const askTour = vi.fn(async () => tour);
   const submitTour = vi.fn(async () => tour);
+  const onClose = vi.fn();
   render(
     <TourPanel
       tour={tour}
       resolvedTheme="dark"
       uiScale={1}
-      onClose={vi.fn()}
+      onClose={onClose}
       refreshTour={vi.fn(async () => tour)}
       saveTourDraft={vi.fn(async () => tour)}
       askTour={askTour}
       submitTour={submitTour}
     />,
   );
-  return { askTour, submitTour };
+  return { askTour, onClose, submitTour };
 }
 
 describe('TourPanel', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    _resetEscapeStackForTest();
+  });
+
   it('sends a contextual question without adding it to feedback', async () => {
     const { askTour, submitTour } = renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Start reading' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
     fireEvent.change(screen.getByPlaceholderText('Ask about the selected file'), {
       target: { value: 'Why does this call change?' },
     });
@@ -90,6 +99,8 @@ describe('TourPanel', () => {
 
   it('ends explicitly and states that feedback stays off GitHub', async () => {
     const { submitTour } = renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Start reading' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
     expect(screen.getByText(/Nothing is submitted to GitHub/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'End tour' }));
     await waitFor(() => {
@@ -101,7 +112,7 @@ describe('TourPanel', () => {
     });
   });
 
-  it('keeps the briefing in the main reading area and avoids rerendering stable diagrams', async () => {
+  it('shows the briefing on first open and avoids rerendering stable diagrams', async () => {
     const mermaid = (await import('mermaid')).default;
     vi.mocked(mermaid.render).mockClear();
     const { rerender } = render(
@@ -117,8 +128,8 @@ describe('TourPanel', () => {
       />,
     );
 
-    expect(document.querySelector('.tour-panel__main .tour-panel__summary')).toBeInTheDocument();
-    expect(document.querySelector('.tour-panel__rail .tour-panel__summary')).not.toBeInTheDocument();
+    expect(document.querySelector('.tour-panel__briefing')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'How to read this change' })).toBeInTheDocument();
     await waitFor(() => expect(mermaid.render).toHaveBeenCalledTimes(1));
 
     rerender(
@@ -136,6 +147,71 @@ describe('TourPanel', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mermaid.render).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the topmost Tour layer with Escape before dismissing fullscreen', () => {
+    const { onClose } = renderPanel();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('heading', { name: 'How to read this change' })).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
+    expect(screen.getByLabelText('Tour conversation')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByLabelText('Tour conversation')).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not repeat a briefing already seen for the same Tour', () => {
+    window.localStorage.setItem('attn.tour.briefing.tour-1', '1');
+    renderPanel();
+    expect(screen.queryByRole('heading', { name: 'How to read this change' })).not.toBeInTheDocument();
+  });
+
+  it('groups large Tours into chapters and filters authored hotspots', () => {
+    const largeTour: DaemonTour = {
+      ...tour,
+      files: [
+        {
+          ...tour.files[0],
+          chapter_id: 'protocol',
+          chapter_title: 'Protocol and persistence',
+          chapter_summary: 'Establish the durable contract.',
+          risk_note: 'Verify old clients reject this protocol shape.',
+        },
+        {
+          ...tour.files[0],
+          path: 'app/src/Tour.tsx',
+          chapter_id: 'experience',
+          chapter_title: 'Reader experience',
+          chapter_summary: 'Follow the fullscreen review flow.',
+          note: 'Read the interaction model.',
+        },
+      ],
+    };
+    window.localStorage.setItem('attn.tour.briefing.tour-1', '1');
+    render(
+      <TourPanel
+        tour={largeTour}
+        resolvedTheme="dark"
+        uiScale={1}
+        onClose={vi.fn()}
+        refreshTour={vi.fn(async () => largeTour)}
+        saveTourDraft={vi.fn(async () => largeTour)}
+        askTour={vi.fn(async () => largeTour)}
+        submitTour={vi.fn(async () => largeTour)}
+      />,
+    );
+
+    expect(screen.getByText('Protocol and persistence')).toBeInTheDocument();
+    expect(screen.getByText('Reader experience')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Hotspots' }));
+    expect(screen.getAllByText('main.go').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Tour.tsx')).not.toBeInTheDocument();
   });
 
   it('passes the custom UI scale through to diagrams and diff content', async () => {

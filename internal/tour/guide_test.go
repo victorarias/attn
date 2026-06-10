@@ -89,3 +89,34 @@ func TestBuildSnapshotRejectsMissingTourFile(t *testing.T) {
 		t.Fatalf("BuildSnapshot() error = %v", err)
 	}
 }
+
+func TestBuildSnapshotPreservesChaptersAndRiskNotes(t *testing.T) {
+	guide := &Guide{
+		Version: GuideVersion,
+		Chapters: []GuideChapter{{
+			Title:   "Protocol and persistence",
+			Summary: "Understand the durable contract first.",
+			Files: []GuideFile{{
+				Path: "internal/protocol.go",
+				View: "diff",
+				Note: "Read the contract.",
+				Risk: "Old clients must reject the new shape.",
+			}},
+		}},
+	}
+	changed := []attngit.DiffFileInfo{{Path: "internal/protocol.go", Status: "modified"}}
+
+	snapshot, err := BuildSnapshot(guide, changed, func(path, _ string) (string, string, error) {
+		return "", "package internal\n", nil
+	})
+	if err != nil {
+		t.Fatalf("BuildSnapshot() error = %v", err)
+	}
+	file := snapshot.Files[0]
+	if file.ChapterTitle != "Protocol and persistence" || file.ChapterSummary != "Understand the durable contract first." {
+		t.Fatalf("chapter metadata = %+v", file)
+	}
+	if file.ChapterID == "" || file.RiskNote != "Old clients must reject the new shape." {
+		t.Fatalf("chapter id/risk metadata = %+v", file)
+	}
+}

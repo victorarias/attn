@@ -3214,6 +3214,15 @@ type TourFile struct {
 	// Annotations corresponds to the JSON schema field "annotations".
 	Annotations []TourAnnotation `json:"annotations"`
 
+	// ChapterID corresponds to the JSON schema field "chapter_id".
+	ChapterID *string `json:"chapter_id,omitempty,omitzero"`
+
+	// ChapterSummary corresponds to the JSON schema field "chapter_summary".
+	ChapterSummary *string `json:"chapter_summary,omitempty,omitzero"`
+
+	// ChapterTitle corresponds to the JSON schema field "chapter_title".
+	ChapterTitle *string `json:"chapter_title,omitempty,omitzero"`
+
 	// Deletions corresponds to the JSON schema field "deletions".
 	Deletions int `json:"deletions"`
 
@@ -3234,6 +3243,9 @@ type TourFile struct {
 
 	// Path corresponds to the JSON schema field "path".
 	Path string `json:"path"`
+
+	// RiskNote corresponds to the JSON schema field "risk_note".
+	RiskNote *string `json:"risk_note,omitempty,omitzero"`
 
 	// Status corresponds to the JSON schema field "status".
 	Status string `json:"status"`

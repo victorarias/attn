@@ -18,16 +18,24 @@ import (
 const GuideVersion = 1
 
 type Guide struct {
-	Version int         `yaml:"version"`
+	Version  int            `yaml:"version"`
+	Summary  string         `yaml:"summary"`
+	Chapters []GuideChapter `yaml:"chapters"`
+	Files    []GuideFile    `yaml:"files"`
+	Skip     []string       `yaml:"skip"`
+}
+
+type GuideChapter struct {
+	Title   string      `yaml:"title"`
 	Summary string      `yaml:"summary"`
 	Files   []GuideFile `yaml:"files"`
-	Skip    []string    `yaml:"skip"`
 }
 
 type GuideFile struct {
 	Path        string            `yaml:"path"`
 	View        string            `yaml:"view"`
 	Note        string            `yaml:"note"`
+	Risk        string            `yaml:"risk"`
 	Annotations []GuideAnnotation `yaml:"annotations"`
 }
 
@@ -85,17 +93,21 @@ type Annotation struct {
 }
 
 type File struct {
-	Path        string
-	OldPath     string
-	Status      string
-	Additions   int
-	Deletions   int
-	Group       string
-	View        string
-	Note        string
-	Original    string
-	Modified    string
-	Annotations []Annotation
+	Path           string
+	OldPath        string
+	Status         string
+	Additions      int
+	Deletions      int
+	Group          string
+	ChapterID      string
+	ChapterTitle   string
+	ChapterSummary string
+	RiskNote       string
+	View           string
+	Note           string
+	Original       string
+	Modified       string
+	Annotations    []Annotation
 }
 
 type Snapshot struct {
@@ -118,13 +130,25 @@ func Load(path string) (*Guide, error) {
 	if guide.Version == 0 {
 		guide.Version = GuideVersion
 	}
-	for i := range guide.Files {
-		guide.Files[i].Path = cleanGuidePath(guide.Files[i].Path)
-		guide.Files[i].View = strings.TrimSpace(guide.Files[i].View)
-		if guide.Files[i].View == "" {
-			guide.Files[i].View = "diff"
+	normalizeFile := func(file *GuideFile) {
+		file.Path = cleanGuidePath(file.Path)
+		file.View = strings.TrimSpace(file.View)
+		if file.View == "" {
+			file.View = "diff"
 		}
-		guide.Files[i].Note = strings.TrimSpace(guide.Files[i].Note)
+		file.Note = strings.TrimSpace(file.Note)
+		file.Risk = strings.TrimSpace(file.Risk)
+	}
+	for i := range guide.Files {
+		normalizeFile(&guide.Files[i])
+	}
+	for chapterIndex := range guide.Chapters {
+		chapter := &guide.Chapters[chapterIndex]
+		chapter.Title = strings.TrimSpace(chapter.Title)
+		chapter.Summary = strings.TrimSpace(chapter.Summary)
+		for fileIndex := range chapter.Files {
+			normalizeFile(&chapter.Files[fileIndex])
+		}
 	}
 	for i := range guide.Skip {
 		guide.Skip[i] = cleanGuidePath(guide.Skip[i])
@@ -154,38 +178,70 @@ func BuildSnapshot(guide *Guide, changed []attngit.DiffFileInfo, load FileConten
 
 	seen := make(map[string]string)
 	files := make([]File, 0, len(changed))
-	for _, entry := range guide.Files {
+	appendTourFile := func(entry GuideFile, chapterID, chapterTitle, chapterSummary string) {
 		if entry.Path == "" {
 			errs = append(errs, "tour file path is empty")
-			continue
+			return
 		}
 		if previous, exists := seen[entry.Path]; exists {
 			errs = append(errs, fmt.Sprintf("%q appears in both %s and tour files", entry.Path, previous))
-			continue
+			return
 		}
 		seen[entry.Path] = "tour files"
 		info, ok := changedByPath[entry.Path]
 		if !ok {
 			errs = append(errs, fmt.Sprintf("%q is not in the current changeset", entry.Path))
-			continue
+			return
 		}
 		if entry.View != "diff" && entry.View != "content" {
 			errs = append(errs, fmt.Sprintf("%q view must be diff or content", entry.Path))
-			continue
+			return
 		}
 		if err := validateMermaid(entry.Note); err != nil {
 			errs = append(errs, fmt.Sprintf("%s note: %v", entry.Path, err))
+		}
+		if err := validateMermaid(entry.Risk); err != nil {
+			errs = append(errs, fmt.Sprintf("%s risk: %v", entry.Path, err))
 		}
 
 		original, modified, err := load(entry.Path, info.OldPath)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", entry.Path, err))
-			continue
+			return
 		}
 		annotations, annotationWarnings, annotationErrs := resolveAnnotations(entry, modified)
 		warnings = append(warnings, annotationWarnings...)
 		errs = append(errs, annotationErrs...)
-		files = append(files, fileFromInfo(info, "tour", entry.View, entry.Note, original, modified, annotations))
+		files = append(files, fileFromInfo(
+			info,
+			"tour",
+			chapterID,
+			chapterTitle,
+			chapterSummary,
+			entry.Risk,
+			entry.View,
+			entry.Note,
+			original,
+			modified,
+			annotations,
+		))
+	}
+
+	for _, entry := range guide.Files {
+		appendTourFile(entry, "", "", "")
+	}
+	for chapterIndex, chapter := range guide.Chapters {
+		if chapter.Title == "" {
+			errs = append(errs, fmt.Sprintf("chapter %d title is empty", chapterIndex+1))
+			continue
+		}
+		if err := validateMermaid(chapter.Summary); err != nil {
+			errs = append(errs, fmt.Sprintf("chapter %q summary: %v", chapter.Title, err))
+		}
+		chapterID := fmt.Sprintf("chapter-%d-%s", chapterIndex+1, shortHash(chapter.Title))
+		for _, entry := range chapter.Files {
+			appendTourFile(entry, chapterID, chapter.Title, chapter.Summary)
+		}
 	}
 
 	for _, path := range guide.Skip {
@@ -207,7 +263,7 @@ func BuildSnapshot(guide *Guide, changed []attngit.DiffFileInfo, load FileConten
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s: %v", path, err))
 		}
-		files = append(files, fileFromInfo(info, "skip", "diff", "", original, modified, nil))
+		files = append(files, fileFromInfo(info, "skip", "", "", "", "", "diff", "", original, modified, nil))
 	}
 
 	otherPaths := make([]string, 0, len(changed))
@@ -223,7 +279,7 @@ func BuildSnapshot(guide *Guide, changed []attngit.DiffFileInfo, load FileConten
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s: %v", path, err))
 		}
-		files = append(files, fileFromInfo(info, "other", "diff", "", original, modified, nil))
+		files = append(files, fileFromInfo(info, "other", "", "", "", "", "diff", "", original, modified, nil))
 	}
 
 	if len(errs) > 0 {
@@ -252,7 +308,7 @@ func CreateGuidePath(repoPath, sessionID, name string) (string, error) {
 	}
 	path := filepath.Join(dir, "guide.yml")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		skeleton := []byte("version: 1\n\nsummary: >\n  Explain the change and how to read it.\n\nfiles: []\n\nskip: []\n")
+		skeleton := []byte("version: 1\n\nsummary: >\n  Explain the change and how to read it.\n\nchapters: []\n\nfiles: []\n\nskip: []\n")
 		if err := os.WriteFile(path, skeleton, 0o600); err != nil {
 			return "", fmt.Errorf("create guide: %w", err)
 		}
@@ -366,19 +422,27 @@ func annotationComments(source GuideAnnotation) ([]Comment, error) {
 	return comments, nil
 }
 
-func fileFromInfo(info attngit.DiffFileInfo, group, view, note, original, modified string, annotations []Annotation) File {
+func fileFromInfo(
+	info attngit.DiffFileInfo,
+	group, chapterID, chapterTitle, chapterSummary, riskNote, view, note, original, modified string,
+	annotations []Annotation,
+) File {
 	return File{
-		Path:        info.Path,
-		OldPath:     info.OldPath,
-		Status:      info.Status,
-		Additions:   info.Additions,
-		Deletions:   info.Deletions,
-		Group:       group,
-		View:        view,
-		Note:        note,
-		Original:    original,
-		Modified:    modified,
-		Annotations: annotations,
+		Path:           info.Path,
+		OldPath:        info.OldPath,
+		Status:         info.Status,
+		Additions:      info.Additions,
+		Deletions:      info.Deletions,
+		Group:          group,
+		ChapterID:      chapterID,
+		ChapterTitle:   chapterTitle,
+		ChapterSummary: chapterSummary,
+		RiskNote:       riskNote,
+		View:           view,
+		Note:           note,
+		Original:       original,
+		Modified:       modified,
+		Annotations:    annotations,
 	}
 }
 

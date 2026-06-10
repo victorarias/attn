@@ -79,6 +79,7 @@ const RELEASES_LATEST_API = 'https://api.github.com/repos/victorarias/attn/relea
 const RELEASES_LATEST_WEB = 'https://github.com/victorarias/attn/releases/latest';
 const RELEASE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_BANNER_DISMISSED_STORAGE_KEY = 'attn.update_banner.dismissed_version';
+const TOUR_OPENED_STORAGE_KEY_PREFIX = 'attn.tour.opened.';
 const DOCK_PANEL_EXIT_MS = 260;
 const CHANGES_BRANCH_DIFF_INTERVAL_MS = 30_000;
 const CHANGES_BRANCH_DIFF_STATUS_DEBOUNCE_MS = 750;
@@ -226,6 +227,22 @@ function persistDismissedUpdateVersion(version: string): void {
     window.localStorage.setItem(UPDATE_BANNER_DISMISSED_STORAGE_KEY, version);
   } catch (err) {
     console.warn('[App] Failed to persist dismissed update version:', err);
+  }
+}
+
+function hasOpenedTour(tourId: string): boolean {
+  try {
+    return window.localStorage.getItem(`${TOUR_OPENED_STORAGE_KEY_PREFIX}${tourId}`) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markTourOpened(tourId: string): void {
+  try {
+    window.localStorage.setItem(`${TOUR_OPENED_STORAGE_KEY_PREFIX}${tourId}`, '1');
+  } catch (err) {
+    console.warn('[App] Failed to persist Tour open state:', err);
   }
 }
 
@@ -1233,6 +1250,7 @@ sendFetchPRDetails,
     stack: ['diff'],
   });
   const dockPanelCloseTimersRef = useRef<Partial<Record<DockPanelId, number>>>({});
+  const openedTourIdsRef = useRef(new Set<string>());
   const gitStatusSubscribedDirRef = useRef<string | null>(null);
   const activeSessionVisibleSinceRef = useRef<{ id: string; at: number } | null>(null);
   const pendingSessionVisualizedRef = useRef<{ key: string | null; timeoutId: number | null }>({
@@ -1620,9 +1638,13 @@ sendFetchPRDetails,
   const attentionPanelOpen = openDockPanels.attention;
   const diffDetailPanelOpen = openDockPanels.diffDetail;
   useEffect(() => {
-    if (activeTour?.status === 'active') {
-      openDockPanel('tour');
+    if (activeTour?.status !== 'active') return;
+    if (openedTourIdsRef.current.has(activeTour.tour_id) || hasOpenedTour(activeTour.tour_id)) {
+      return;
     }
+    openedTourIdsRef.current.add(activeTour.tour_id);
+    markTourOpened(activeTour.tour_id);
+    openDockPanel('tour');
   }, [activeTour?.status, activeTour?.tour_id, openDockPanel]);
   const changesPanelVisible = view === 'session' && diffPanelOpen && Boolean(activeRepoDaemonSession?.directory);
   const blockingOverlayOpen = locationPickerOpen
@@ -1632,6 +1654,7 @@ sendFetchPRDetails,
     || shortcutsOpen
     || actionMenuOpen
     || workspaceContextsOpen
+    || tourPanelOpen
     || chiefTransferTarget !== null
     || closedWorktree !== null
     || pendingSessionClose !== null
@@ -3492,25 +3515,6 @@ sendFetchPRDetails,
               ),
             },
             {
-              id: 'tour',
-              isOpen: tourPanelOpen && Boolean(activeTour),
-              width: 'clamp(1140px, 95vw, 1920px)',
-              tone: activeTour?.connection_state === 'disconnected' ? 'error' : 'default',
-              className: 'dock-panel dock-panel--tour',
-              children: activeTour ? (
-                <TourPanel
-                  tour={activeTour}
-                  resolvedTheme={resolvedTheme}
-                  uiScale={scale}
-                  onClose={() => closeDockPanel('tour')}
-                  refreshTour={refreshTour}
-                  saveTourDraft={saveTourDraft}
-                  askTour={askTour}
-                  submitTour={submitTour}
-                />
-              ) : null,
-            },
-            {
               id: 'reviewLoop',
               isOpen: reviewLoopPanelOpen && Boolean(activeSessionId && activeReviewLoopAvailable && activeLocalSession),
               width: 'clamp(420px, 50vw, 680px)',
@@ -3580,6 +3584,19 @@ sendFetchPRDetails,
           ]}
         />
       </div>
+
+      {tourPanelOpen && activeTour ? (
+        <TourPanel
+          tour={activeTour}
+          resolvedTheme={resolvedTheme}
+          uiScale={scale}
+          onClose={() => closeDockPanel('tour')}
+          refreshTour={refreshTour}
+          saveTourDraft={saveTourDraft}
+          askTour={askTour}
+          submitTour={submitTour}
+        />
+      ) : null}
 
       {/* Grid view — global mission control. Mounted only while active so its
           single WebGL context is released on exit (mirrors the pane path). */}

@@ -1801,6 +1801,10 @@ model TourFile {
   additions: int32;
   deletions: int32;
   group: string;
+  chapter_id?: string;
+  chapter_title?: string;
+  chapter_summary?: string;
+  risk_note?: string;
   view: string;
   note: string;
   original: string;
