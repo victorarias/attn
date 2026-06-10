@@ -4225,7 +4225,7 @@ func TestDaemon_SettingsWithAgentAvailability(t *testing.T) {
 	}
 }
 
-func TestDaemon_AdvertisesClaudeHeadlessTaskWithSafeModeAuthentication(t *testing.T) {
+func TestDaemon_AdvertisesClaudeHeadlessTaskWithManagedAuthentication(t *testing.T) {
 	tempDir := t.TempDir()
 	executable := filepath.Join(tempDir, "claude")
 	if err := os.WriteFile(executable, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {

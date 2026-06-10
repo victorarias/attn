@@ -128,9 +128,9 @@ func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskReques
 	}
 	toolPrefix := "mcp__" + serverName + "__"
 	tools := toolPrefix + "read_context," + toolPrefix + "replace_context"
-	args := []string{
-		"--print",
-		claudeHeadlessIsolationFlag(),
+	args := []string{"--print"}
+	args = append(args, claudeHeadlessIsolationArgs()...)
+	args = append(args,
 		"--model", strings.TrimSpace(request.Model),
 		"--no-session-persistence",
 		"--strict-mcp-config",
@@ -142,7 +142,7 @@ func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskReques
 		"--permission-mode", "dontAsk",
 		"--output-format", "json",
 		request.Prompt,
-	}
+	)
 	return runHeadlessCommand(ctx, request.Executable, args, request.WorkDir, "claude")
 }
 
@@ -150,11 +150,11 @@ func (c *Claude) HeadlessTaskAvailability() (bool, string) {
 	return true, ""
 }
 
-func claudeHeadlessIsolationFlag() string {
+func claudeHeadlessIsolationArgs() []string {
 	if claudeHasBareModeAuthentication() {
-		return "--bare"
+		return []string{"--bare"}
 	}
-	return "--safe-mode"
+	return []string{"--setting-sources", ""}
 }
 
 func claudeHasBareModeAuthentication() bool {

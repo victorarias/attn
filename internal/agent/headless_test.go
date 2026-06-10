@@ -73,7 +73,7 @@ func TestCodexRunHeadlessTaskScopesToolsAndConfiguration(t *testing.T) {
 	}
 }
 
-func TestClaudeRunHeadlessTaskUsesSafeModeWithoutExplicitAuthentication(t *testing.T) {
+func TestClaudeRunHeadlessTaskExcludesNonManagedSettingsWithoutExplicitAuthentication(t *testing.T) {
 	for _, name := range []string{
 		"ANTHROPIC_API_KEY",
 		"CLAUDE_CODE_USE_BEDROCK",
@@ -102,7 +102,7 @@ func TestClaudeRunHeadlessTaskUsesSafeModeWithoutExplicitAuthentication(t *testi
 	got := string(args)
 	for _, want := range []string{
 		"--print",
-		"--safe-mode",
+		"--setting-sources",
 		"--no-session-persistence",
 		"--strict-mcp-config",
 		"--disable-slash-commands",
@@ -118,8 +118,14 @@ func TestClaudeRunHeadlessTaskUsesSafeModeWithoutExplicitAuthentication(t *testi
 			t.Fatalf("Claude args missing %q:\n%s", want, got)
 		}
 	}
+	if !strings.Contains(got, "--setting-sources\n\n--model") {
+		t.Fatalf("Claude args did not pass an empty setting source list:\n%s", got)
+	}
+	if strings.Contains(got, "--safe-mode") {
+		t.Fatalf("Claude args unexpectedly contained --safe-mode, which disables explicit MCP servers:\n%s", got)
+	}
 	if strings.Contains(got, "--bare") {
-		t.Fatalf("Claude safe-mode args unexpectedly contained --bare:\n%s", got)
+		t.Fatalf("Claude managed-auth args unexpectedly contained --bare:\n%s", got)
 	}
 }
 
@@ -212,7 +218,7 @@ func TestRunHeadlessCommandClassifiesFailureWithoutLeakingOutput(t *testing.T) {
 	}
 }
 
-func TestClaudeHeadlessTaskAvailabilitySupportsSafeModeAuthentication(t *testing.T) {
+func TestClaudeHeadlessTaskAvailabilitySupportsManagedAuthentication(t *testing.T) {
 	for _, name := range []string{
 		"ANTHROPIC_API_KEY",
 		"CLAUDE_CODE_USE_BEDROCK",
@@ -224,11 +230,11 @@ func TestClaudeHeadlessTaskAvailabilitySupportsSafeModeAuthentication(t *testing
 	if available, reason := (&Claude{}).HeadlessTaskAvailability(); !available || reason != "" {
 		t.Fatalf("availability = %t, reason = %q", available, reason)
 	}
-	if got := claudeHeadlessIsolationFlag(); got != "--safe-mode" {
-		t.Fatalf("isolation flag = %q, want --safe-mode", got)
+	if got := claudeHeadlessIsolationArgs(); len(got) != 2 || got[0] != "--setting-sources" || got[1] != "" {
+		t.Fatalf("isolation args = %#v, want empty --setting-sources", got)
 	}
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
-	if got := claudeHeadlessIsolationFlag(); got != "--bare" {
-		t.Fatalf("isolation flag = %q, want --bare", got)
+	if got := claudeHeadlessIsolationArgs(); len(got) != 1 || got[0] != "--bare" {
+		t.Fatalf("isolation args = %#v, want --bare", got)
 	}
 }
