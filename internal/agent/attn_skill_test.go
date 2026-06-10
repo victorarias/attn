@@ -72,6 +72,8 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"--workspace <workspace-id>",
 		"--cwd /path/to/project",
 		"--worktree feat/delegated-task",
+		"isolated worktree in the current workspace",
+		"--new-workspace --worktree feat/delegated-task",
 		"--worktree-path <path>",
 		"--source-session <session-id>",
 		"Copilot delegation is currently unsupported",

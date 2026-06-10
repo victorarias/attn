@@ -438,9 +438,10 @@ placement:
   --new-workspace            create a workspace using the source directory
   --workspace <id>           add a pane to an existing workspace
   --cwd <path>               create a workspace at an existing directory
-  --worktree <branch>        create a worktree and workspace
+  --worktree <branch>        create a worktree for the delegated session
 
 worktree options:
+  combine with --new-workspace to place the worktree in a new workspace
   --repo <path>              main repository (defaults to the source repository)
   --from <ref>               branch or ref to start from
   --worktree-path <path>     override the generated sibling path
@@ -959,7 +960,7 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	newWorkspace := fs.Bool("new-workspace", false, "create a new workspace for the delegated agent")
 	workspaceID := fs.String("workspace", "", "place the delegated agent in an existing workspace")
 	cwd := fs.String("cwd", "", "use an existing directory in a new workspace")
-	worktreeBranch := fs.String("worktree", "", "create a worktree with this branch in a new workspace")
+	worktreeBranch := fs.String("worktree", "", "create a worktree with this branch for the delegated session")
 	worktreeRepo := fs.String("repo", "", "main repository for --worktree (defaults to source repository)")
 	worktreeStart := fs.String("from", "", "starting ref for --worktree")
 	worktreePath := fs.String("worktree-path", "", "custom path for --worktree")
@@ -1010,7 +1011,7 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	placement := "current_workspace"
 	if explicitWorkspace != "" {
 		placement = "existing_workspace"
-	} else if *newWorkspace || customCWD != "" || branch != "" {
+	} else if *newWorkspace || customCWD != "" {
 		placement = "new_workspace"
 	}
 
