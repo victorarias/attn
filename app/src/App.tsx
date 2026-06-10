@@ -435,6 +435,7 @@ function App() {
     sendRenameSession,
     sendRenameWorkspace,
     sendSetChiefOfStaff,
+    sendWakeDispatchAgent,
     sendUnregisterSession,
     sendSetSetting,
     sendCreateWorktree,
@@ -566,6 +567,7 @@ function App() {
         sendRenameSession={sendRenameSession}
         sendRenameWorkspace={sendRenameWorkspace}
         sendSetChiefOfStaff={sendSetChiefOfStaff}
+        sendWakeDispatchAgent={sendWakeDispatchAgent}
         sendUnregisterSession={sendUnregisterSession}
         sendSetSetting={sendSetSetting}
         sendCreateWorktree={sendCreateWorktree}
@@ -663,6 +665,7 @@ interface AppContentProps {
   sendRenameSession: ReturnType<typeof useDaemonSocket>['sendRenameSession'];
   sendRenameWorkspace: ReturnType<typeof useDaemonSocket>['sendRenameWorkspace'];
   sendSetChiefOfStaff: ReturnType<typeof useDaemonSocket>['sendSetChiefOfStaff'];
+  sendWakeDispatchAgent: ReturnType<typeof useDaemonSocket>['sendWakeDispatchAgent'];
   sendUnregisterSession: ReturnType<typeof useDaemonSocket>['sendUnregisterSession'];
   sendSetSetting: ReturnType<typeof useDaemonSocket>['sendSetSetting'];
   sendCreateWorktree: ReturnType<typeof useDaemonSocket>['sendCreateWorktree'];
@@ -755,6 +758,7 @@ function AppContent({
   sendRenameSession,
   sendRenameWorkspace,
   sendSetChiefOfStaff,
+  sendWakeDispatchAgent,
   sendUnregisterSession,
   sendSetSetting,
   sendCreateWorktree,
@@ -3199,6 +3203,7 @@ sendFetchPRDetails,
           endpoints={daemonEndpoints}
           onRebootstrapEndpoint={handleRebootstrapEndpoint}
           onSelectSession={handleSelectSession}
+          onWakeDispatch={sendWakeDispatchAgent}
           onNewSession={() => handleNewSession('vertical')}
           onRefreshPRs={handleRefreshPRs}
           onOpenPR={handleOpenPR}

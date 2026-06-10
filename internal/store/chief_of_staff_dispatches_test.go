@@ -52,6 +52,96 @@ func TestChiefOfStaffDispatchLifecycle(t *testing.T) {
 	}
 }
 
+func TestChiefOfStaffDispatchMessageLifecycle(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "attn.db")
+	s, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	now := string(protocol.TimestampNow())
+	dispatch := &protocol.ChiefOfStaffDispatch{
+		ID:             "dispatch-mail",
+		ChiefSessionID: "chief-1",
+		SessionID:      "worker-1",
+		WorkspaceID:    "workspace-1",
+		Brief:          "Investigate the failure.",
+		Label:          "Investigate failure",
+		Agent:          "codex",
+		Directory:      "/tmp/project",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := s.AddChiefOfStaffDispatch(dispatch); err != nil {
+		t.Fatalf("add dispatch: %v", err)
+	}
+	message := &protocol.DispatchMessage{
+		ID:              "message-1",
+		DispatchID:      dispatch.ID,
+		SenderSessionID: dispatch.ChiefSessionID,
+		TargetSessionID: dispatch.SessionID,
+		Content:         "Re-check the failure on the current branch.",
+		CreatedAt:       now,
+	}
+	if err := s.AddDispatchMessage(message); err != nil {
+		t.Fatalf("add message: %v", err)
+	}
+	if got, err := s.CountUnreadDispatchMessages(dispatch.ID); err != nil || got != 1 {
+		t.Fatalf("unread count = %d, want 1", got)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	s, err = NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	messages, err := s.ListDispatchMessages(dispatch.ID, true)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 1 || messages[0].Content != message.Content {
+		t.Fatalf("persisted messages = %+v", messages)
+	}
+	if _, err := s.MarkDispatchMessageRead(message.ID, "other-dispatch", dispatch.SessionID); err == nil {
+		t.Fatal("wrong dispatch read succeeded")
+	}
+	if got, err := s.CountUnreadDispatchMessages(dispatch.ID); err != nil || got != 1 {
+		t.Fatalf("wrong dispatch read changed unread count to %d: %v", got, err)
+	}
+	read, err := s.MarkDispatchMessageRead(message.ID, dispatch.ID, dispatch.SessionID)
+	if err != nil {
+		t.Fatalf("mark read: %v", err)
+	}
+	unreadCount, err := s.CountUnreadDispatchMessages(dispatch.ID)
+	if err != nil {
+		t.Fatalf("count unread messages: %v", err)
+	}
+	if read.ReadAt == nil || unreadCount != 0 {
+		t.Fatalf("read message = %+v", read)
+	}
+	acknowledged, err := s.AcknowledgeDispatchMessage(message.ID, dispatch.ID, dispatch.SessionID, "Re-check complete.")
+	if err != nil {
+		t.Fatalf("acknowledge: %v", err)
+	}
+	if acknowledged.AcknowledgedAt == nil ||
+		protocol.Deref(acknowledged.Acknowledgement) != "Re-check complete." {
+		t.Fatalf("acknowledged message = %+v", acknowledged)
+	}
+	acknowledged, err = s.AcknowledgeDispatchMessage(message.ID, dispatch.ID, dispatch.SessionID, "")
+	if err != nil {
+		t.Fatalf("acknowledge without text: %v", err)
+	}
+	if acknowledged.Acknowledgement != nil {
+		t.Fatalf("empty acknowledgement retained stale text: %+v", acknowledged)
+	}
+	if _, err := s.MarkDispatchMessageRead(message.ID, dispatch.ID, "other-worker"); err == nil {
+		t.Fatal("wrong worker read succeeded")
+	}
+}
+
 func TestChiefOfStaffStructuredReportPersistsAndResolves(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "attn.db")
 	s, err := NewWithDB(dbPath)

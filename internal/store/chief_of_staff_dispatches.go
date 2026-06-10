@@ -134,7 +134,15 @@ func (s *Store) DeleteChiefOfStaffDispatch(id string) error {
 	}
 	if s.db == nil {
 		delete(s.chiefDispatches, id)
+		for messageID, message := range s.dispatchMessages {
+			if message.DispatchID == id {
+				delete(s.dispatchMessages, messageID)
+			}
+		}
 		return nil
+	}
+	if _, err := s.db.Exec("DELETE FROM chief_of_staff_dispatch_messages WHERE dispatch_id = ?", id); err != nil {
+		return err
 	}
 	_, err := s.db.Exec("DELETE FROM chief_of_staff_dispatches WHERE id = ?", id)
 	return err

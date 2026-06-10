@@ -693,7 +693,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [
           {
             id: 'agent-1',
@@ -779,7 +779,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [],
         workspaces: [{
           id: 'workspace-1',
@@ -863,7 +863,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -948,7 +948,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1080,7 +1080,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -1146,7 +1146,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -1210,7 +1210,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -1272,7 +1272,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -1332,7 +1332,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [],
         workspaces: [{
           id: 'workspace-1',
@@ -1432,7 +1432,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     };
     const initialState = {
       event: 'initial_state',
-      protocol_version: '95',
+      protocol_version: '96',
       sessions: [],
       workspaces: [workspace],
       prs: [],
@@ -1509,7 +1509,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1603,7 +1603,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1702,7 +1702,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1787,7 +1787,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [],
         workspaces: [{
           id: 'workspace-sess-remote',
@@ -1866,7 +1866,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -1936,7 +1936,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',
@@ -2097,7 +2097,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [],
         workspaces: [],
         prs: [],
@@ -2140,6 +2140,161 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('wakes a delegated agent through an explicit daemon result', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '96',
+        sessions: [],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+    await waitFor(() => {
+      expect(result.current.hasReceivedInitialState).toBe(true);
+    });
+
+    let wakePromise!: Promise<void>;
+    act(() => {
+      wakePromise = result.current.sendWakeDispatchAgent('chief-1', 'dispatch-1');
+    });
+    await waitFor(() => {
+      expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual(expect.objectContaining({
+        cmd: 'wake_dispatch_agent',
+        source_session_id: 'chief-1',
+        dispatch_id: 'dispatch-1',
+        request_id: expect.any(String),
+      }));
+    });
+    const wakeCommand = ws.sent.map((entry) => JSON.parse(entry))
+      .find((entry) => entry.cmd === 'wake_dispatch_agent');
+
+    act(() => {
+      ws.emit({
+        event: 'wake_dispatch_agent_result',
+        dispatch_id: 'dispatch-1',
+        request_id: wakeCommand.request_id,
+        success: true,
+      });
+    });
+    await expect(wakePromise).resolves.toBeUndefined();
+
+    unmount();
+  });
+
+  it('correlates wake retries, duplicates, and command errors', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '96',
+        sessions: [],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+    await waitFor(() => {
+      expect(result.current.hasReceivedInitialState).toBe(true);
+    });
+
+    const scheduledTimeouts: TimerHandler[] = [];
+    const originalWindowSetTimeout = window.setTimeout;
+    window.setTimeout = ((handler: TimerHandler) => {
+      scheduledTimeouts.push(handler);
+      return 1;
+    }) as typeof window.setTimeout;
+
+    const firstWake = result.current.sendWakeDispatchAgent('chief-1', 'dispatch-1');
+    const firstCommand = JSON.parse(ws.sent[ws.sent.length - 1]);
+    const duplicateWake = result.current.sendWakeDispatchAgent('chief-1', 'dispatch-1');
+    await expect(duplicateWake).rejects.toThrow('already pending');
+    act(() => {
+      ws.emit({
+        event: 'wake_dispatch_agent_result',
+        dispatch_id: 'dispatch-1',
+        request_id: firstCommand.request_id,
+        success: true,
+      });
+    });
+    await expect(firstWake).resolves.toBeUndefined();
+
+    const retryWake = result.current.sendWakeDispatchAgent('chief-1', 'dispatch-1');
+    const retryCommand = JSON.parse(ws.sent[ws.sent.length - 1]);
+    act(() => {
+      const staleTimeout = scheduledTimeouts[0];
+      if (typeof staleTimeout === 'function') {
+        staleTimeout();
+      }
+      ws.emit({
+        event: 'wake_dispatch_agent_result',
+        dispatch_id: 'dispatch-1',
+        request_id: firstCommand.request_id,
+        success: true,
+      });
+      ws.emit({
+        event: 'wake_dispatch_agent_result',
+        dispatch_id: 'dispatch-1',
+        request_id: retryCommand.request_id,
+        success: false,
+        error: 'retry failed',
+      });
+    });
+    await expect(retryWake).rejects.toThrow('retry failed');
+
+    const failedWake = result.current.sendWakeDispatchAgent('chief-1', 'dispatch-1');
+    act(() => {
+      ws.emit({
+        event: 'command_error',
+        cmd: 'wake_dispatch_agent',
+        success: false,
+        error: 'wake rejected',
+      });
+    });
+    await expect(failedWake).rejects.toThrow('wake rejected');
+
+    window.setTimeout = originalWindowSetTimeout;
+    unmount();
+  });
+
   it('publishes chief-of-staff dispatch snapshots from initial state and updates', async () => {
     const onChiefOfStaffDispatchesUpdate = vi.fn();
     const { unmount } = renderHook(() =>
@@ -2172,7 +2327,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '95',
+        protocol_version: '96',
         sessions: [],
         workspaces: [],
         prs: [],

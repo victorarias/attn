@@ -513,6 +513,66 @@ func runDispatch() {
 			os.Exit(1)
 		}
 		printJSON(dispatch)
+	case "message":
+		sourceSessionID, dispatchID, content, err := parseDispatchMessageArgs(os.Args[3:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch message: %v\n", err)
+			os.Exit(2)
+		}
+		message, err := client.New("").SendDispatchMessage(sourceSessionID, dispatchID, content)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch message: %v\n", err)
+			os.Exit(1)
+		}
+		printJSON(message)
+	case "inbox":
+		sourceSessionID, unreadOnly, err := parseDispatchInboxArgs(os.Args[3:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch inbox: %v\n", err)
+			os.Exit(2)
+		}
+		messages, err := client.New("").ListDispatchMessages(sourceSessionID, "", unreadOnly)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch inbox: %v\n", err)
+			os.Exit(1)
+		}
+		printJSON(messages)
+	case "messages":
+		sourceSessionID, dispatchID, err := parseDispatchMessagesArgs(os.Args[3:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch messages: %v\n", err)
+			os.Exit(2)
+		}
+		messages, err := client.New("").ListDispatchMessages(sourceSessionID, dispatchID, false)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch messages: %v\n", err)
+			os.Exit(1)
+		}
+		printJSON(messages)
+	case "read":
+		sourceSessionID, messageID, err := parseDispatchMessageIDArgs("dispatch read", os.Args[3:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch read: %v\n", err)
+			os.Exit(2)
+		}
+		message, err := client.New("").ReadDispatchMessage(sourceSessionID, messageID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch read: %v\n", err)
+			os.Exit(1)
+		}
+		printJSON(message)
+	case "ack":
+		sourceSessionID, messageID, acknowledgement, err := parseDispatchAckArgs(os.Args[3:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch ack: %v\n", err)
+			os.Exit(2)
+		}
+		message, err := client.New("").AcknowledgeDispatchMessage(sourceSessionID, messageID, acknowledgement)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch ack: %v\n", err)
+			os.Exit(1)
+		}
+		printJSON(message)
 	default:
 		fmt.Fprintf(os.Stderr, "dispatch: unknown command %q\n\n", os.Args[2])
 		writeDispatchHelp(os.Stderr)
@@ -530,6 +590,13 @@ commands:
   status [--session <id>]                        show this delegated session's report and response
   resolve --dispatch <id>                        answer the active decision request
           (--response <text> | --file <path>) [--link <url>] [--session <id>]
+	  message --dispatch <id>                        send durable mail to a delegated agent
+	          (--message <text> | --file <path>) [--session <id>]
+	  messages --dispatch <id> [--session <id>]      list sent mail and acknowledgement state
+	  inbox [--unread] [--session <id>]              list this delegated agent's mail
+  read --message-id <id> [--session <id>]        mark one message read
+  ack --message-id <id>                          acknowledge one message
+      [--message <text> | --file <path>] [--session <id>]
 
 The session defaults to ATTN_SESSION_ID.
 `)
@@ -643,6 +710,147 @@ func parseDispatchResolveArgs(args []string) (string, string, string, string, er
 		return "", "", "", "", errors.New("--response or --file is required")
 	}
 	return source, strings.TrimSpace(*dispatchID), resolvedResponse, strings.TrimSpace(*resolutionLink), nil
+}
+
+func parseDispatchMessageArgs(args []string) (string, string, string, error) {
+	fs := flag.NewFlagSet("dispatch message", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	sessionID := fs.String("session", "", "chief session id (defaults to ATTN_SESSION_ID)")
+	dispatchID := fs.String("dispatch", "", "dispatch id")
+	message := fs.String("message", "", "message content")
+	messageFile := fs.String("file", "", "file containing the message")
+	if err := fs.Parse(args); err != nil {
+		return "", "", "", err
+	}
+	if fs.NArg() != 0 {
+		return "", "", "", fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	source, err := resolveDispatchSession(*sessionID)
+	if err != nil {
+		return "", "", "", err
+	}
+	if strings.TrimSpace(*dispatchID) == "" {
+		return "", "", "", errors.New("--dispatch is required")
+	}
+	content, err := readOptionalFlagContent(*message, *messageFile, true)
+	if err != nil {
+		return "", "", "", err
+	}
+	return source, strings.TrimSpace(*dispatchID), content, nil
+}
+
+func parseDispatchInboxArgs(args []string) (string, bool, error) {
+	fs := flag.NewFlagSet("dispatch inbox", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	unreadOnly := fs.Bool("unread", false, "show only unread messages")
+	if err := fs.Parse(args); err != nil {
+		return "", false, err
+	}
+	if fs.NArg() != 0 {
+		return "", false, fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	source, err := resolveDispatchSession(*sessionID)
+	return source, *unreadOnly, err
+}
+
+func parseDispatchMessagesArgs(args []string) (string, string, error) {
+	fs := flag.NewFlagSet("dispatch messages", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	sessionID := fs.String("session", "", "chief session id (defaults to ATTN_SESSION_ID)")
+	dispatchID := fs.String("dispatch", "", "dispatch id")
+	if err := fs.Parse(args); err != nil {
+		return "", "", err
+	}
+	if fs.NArg() != 0 {
+		return "", "", fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	source, err := resolveDispatchSession(*sessionID)
+	if err != nil {
+		return "", "", err
+	}
+	if strings.TrimSpace(*dispatchID) == "" {
+		return "", "", errors.New("--dispatch is required")
+	}
+	return source, strings.TrimSpace(*dispatchID), nil
+}
+
+func parseDispatchMessageIDArgs(name string, args []string) (string, string, error) {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	messageID := fs.String("message-id", "", "dispatch message id")
+	if err := fs.Parse(args); err != nil {
+		return "", "", err
+	}
+	if fs.NArg() != 0 {
+		return "", "", fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	source, err := resolveDispatchSession(*sessionID)
+	if err != nil {
+		return "", "", err
+	}
+	if strings.TrimSpace(*messageID) == "" {
+		return "", "", errors.New("--message-id is required")
+	}
+	return source, strings.TrimSpace(*messageID), nil
+}
+
+func parseDispatchAckArgs(args []string) (string, string, string, error) {
+	fs := flag.NewFlagSet("dispatch ack", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	messageID := fs.String("message-id", "", "dispatch message id")
+	message := fs.String("message", "", "optional acknowledgement")
+	messageFile := fs.String("file", "", "file containing the acknowledgement")
+	if err := fs.Parse(args); err != nil {
+		return "", "", "", err
+	}
+	if fs.NArg() != 0 {
+		return "", "", "", fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	source, err := resolveDispatchSession(*sessionID)
+	if err != nil {
+		return "", "", "", err
+	}
+	if strings.TrimSpace(*messageID) == "" {
+		return "", "", "", errors.New("--message-id is required")
+	}
+	acknowledgement, err := readOptionalFlagContent(*message, *messageFile, false)
+	if err != nil {
+		return "", "", "", err
+	}
+	return source, strings.TrimSpace(*messageID), acknowledgement, nil
+}
+
+func resolveDispatchSession(value string) (string, error) {
+	source := strings.TrimSpace(value)
+	if source == "" {
+		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+	}
+	if source == "" {
+		return "", errors.New("no session; run inside attn or pass --session")
+	}
+	return source, nil
+}
+
+func readOptionalFlagContent(message, path string, required bool) (string, error) {
+	message = strings.TrimSpace(message)
+	path = strings.TrimSpace(path)
+	if message != "" && path != "" {
+		return "", errors.New("pass only one of --message or --file")
+	}
+	if path != "" {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("read file: %w", err)
+		}
+		message = strings.TrimSpace(string(content))
+	}
+	if required && message == "" {
+		return "", errors.New("--message or --file is required")
+	}
+	return message, nil
 }
 
 func runWorkspace() {

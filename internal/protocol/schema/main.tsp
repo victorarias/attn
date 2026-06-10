@@ -228,6 +228,18 @@ model DispatchReport {
   reported_at: string;
 }
 
+model DispatchMessage {
+  id: string;
+  dispatch_id: string;
+  sender_session_id: string;
+  target_session_id: string;
+  content: string;
+  created_at: string;
+  read_at?: string;
+  acknowledged_at?: string;
+  acknowledgement?: string;
+}
+
 model ChiefOfStaffDispatch {
   id: string;
   chief_session_id: string;
@@ -244,6 +256,7 @@ model ChiefOfStaffDispatch {
   structured_report?: DispatchReport;
   concise_summary?: string;
   actionable?: boolean;
+  unread_message_count?: int32;
   reported_at?: string;
   created_at: string;
   updated_at: string;
@@ -511,6 +524,40 @@ model ResolveDispatchRequestMessage {
   dispatch_id: string;
   response: string;
   resolution_link?: string;
+}
+
+model SendDispatchMessage {
+  cmd: "send_dispatch_message";
+  source_session_id: string;
+  dispatch_id: string;
+  content: string;
+}
+
+model ListDispatchMessagesMessage {
+  cmd: "list_dispatch_messages";
+  source_session_id: string;
+  dispatch_id?: string;
+  unread_only?: boolean;
+}
+
+model ReadDispatchMessage {
+  cmd: "read_dispatch_message";
+  source_session_id: string;
+  message_id: string;
+}
+
+model AcknowledgeDispatchMessage {
+  cmd: "acknowledge_dispatch_message";
+  source_session_id: string;
+  message_id: string;
+  acknowledgement?: string;
+}
+
+model WakeDispatchAgentMessage {
+  cmd: "wake_dispatch_agent";
+  source_session_id: string;
+  dispatch_id: string;
+  request_id: string;
 }
 
 model WorkspaceContextCheckoutMessage {
@@ -1290,6 +1337,14 @@ model ChiefOfStaffDispatchesUpdatedMessage {
   dispatches: ChiefOfStaffDispatch[];
 }
 
+model WakeDispatchAgentResultMessage {
+  event: "wake_dispatch_agent_result";
+  dispatch_id: string;
+  request_id: string;
+  success: boolean;
+  error?: string;
+}
+
 model WorkspaceLayoutActionResultMessage {
   event: "workspace_layout_action_result";
   action: string;
@@ -1820,6 +1875,8 @@ model Response {
   workspace_contexts?: WorkspaceContext[];
   chief_of_staff_dispatch?: ChiefOfStaffDispatch;
   chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
+  dispatch_message?: DispatchMessage;
+  dispatch_messages?: DispatchMessage[];
   sessions?: Session[];
   prs?: PR[];
   repos?: RepoState[];
@@ -1974,6 +2031,8 @@ model WebSocketEvent {
   chief_of_staff_dispatch?: ChiefOfStaffDispatch;
   chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
   workspace_contexts?: WorkspaceContext[];
+  dispatch_message?: DispatchMessage;
+  dispatch_messages?: DispatchMessage[];
 }
 
 alias DaemonEvent =
@@ -1993,6 +2052,7 @@ alias DaemonEvent =
   | RenameResultMessage
   | ChiefOfStaffResultMessage
   | ChiefOfStaffDispatchesUpdatedMessage
+  | WakeDispatchAgentResultMessage
   | WorkspaceTileContentMessage
   | BrowserControlResponseMessage
   | PRsUpdatedMessage

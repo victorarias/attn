@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "95"
+const ProtocolVersion = "96"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -41,6 +41,11 @@ const (
 	CmdReportDispatch                     = "report_dispatch"
 	CmdGetDispatch                        = "get_dispatch"
 	CmdResolveDispatchRequest             = "resolve_dispatch_request"
+	CmdSendDispatchMessage                = "send_dispatch_message"
+	CmdListDispatchMessages               = "list_dispatch_messages"
+	CmdReadDispatchMessage                = "read_dispatch_message"
+	CmdAcknowledgeDispatchMessage         = "acknowledge_dispatch_message"
+	CmdWakeDispatchAgent                  = "wake_dispatch_agent"
 	CmdWorkspaceContextCheckout           = "workspace_context_checkout"
 	CmdWorkspaceContextUpdate             = "workspace_context_update"
 	CmdWorkspaceContextStatus             = "workspace_context_status"
@@ -158,6 +163,7 @@ const (
 	EventRenameResult                  = "rename_result"
 	EventChiefOfStaffResult            = "chief_of_staff_result"
 	EventChiefOfStaffDispatchesUpdated = "chief_of_staff_dispatches_updated"
+	EventWakeDispatchAgentResult       = "wake_dispatch_agent_result"
 	EventDelegateResult                = "delegate_result"
 	EventWorkspaceContextResult        = "workspace_context_result"
 	EventWorkspaceContextListResult    = "workspace_context_list_result"
@@ -337,6 +343,41 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdResolveDispatchRequest:
 		var msg ResolveDispatchRequestMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSendDispatchMessage:
+		var msg SendDispatchMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdListDispatchMessages:
+		var msg ListDispatchMessagesMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdReadDispatchMessage:
+		var msg ReadDispatchMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAcknowledgeDispatchMessage:
+		var msg AcknowledgeDispatchMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWakeDispatchAgent:
+		var msg WakeDispatchAgentMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

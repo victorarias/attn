@@ -1473,6 +1473,7 @@ type fakeSpawnBackend struct {
 	killed    []string
 	removed   []string
 	onSpawn   func(ptybackend.SpawnOptions)
+	onInput   func(string, []byte)
 	onKill    func()
 	killErr   error
 }
@@ -1490,7 +1491,15 @@ func (b *fakeSpawnBackend) Spawn(_ context.Context, opts ptybackend.SpawnOptions
 func (b *fakeSpawnBackend) Attach(context.Context, string, string) (ptybackend.AttachInfo, ptybackend.Stream, error) {
 	return ptybackend.AttachInfo{Running: true}, newFakeOutputStream(), nil
 }
-func (b *fakeSpawnBackend) Input(context.Context, string, []byte) error          { return nil }
+func (b *fakeSpawnBackend) Input(_ context.Context, id string, data []byte) error {
+	b.mu.Lock()
+	onInput := b.onInput
+	b.mu.Unlock()
+	if onInput != nil {
+		onInput(id, data)
+	}
+	return nil
+}
 func (b *fakeSpawnBackend) Resize(context.Context, string, uint16, uint16) error { return nil }
 func (b *fakeSpawnBackend) Kill(_ context.Context, id string, _ syscall.Signal) error {
 	b.mu.Lock()
