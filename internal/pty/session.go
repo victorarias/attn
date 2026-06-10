@@ -160,20 +160,90 @@ func (s *Session) fanOut(data []byte, seq uint32) {
 	}
 }
 
+// PTY reads are coalesced before fan-out so sustained output (builds, logs,
+// `seq`-style floods) produces few large downstream messages instead of one
+// per read. macOS pty reads return tiny chunks under load (~100 bytes, the
+// tty queue's pacing), and every message costs real memory in the WebKit
+// frontend regardless of size — message count, not byte volume, is what
+// balloons the app during heavy output. Interactive traffic must not pay for
+// this: a read with nothing queued behind it is emitted immediately, so echo
+// latency is unchanged, and a flood batch is bounded by ptyCoalesceWindow.
+const (
+	ptyReadBufBytes     = 16 * 1024
+	ptyCoalesceMaxBytes = 256 * 1024
+	ptyCoalesceWindow   = 5 * time.Millisecond
+)
+
+type ptyRead struct {
+	data []byte
+	err  error
+}
+
+// nextCoalescedRead returns the next batch of PTY output, blocking for the
+// first read. If no further read is already queued the first one is returned
+// as-is — the interactive path adds zero latency. A queued read means the
+// producer is outpacing the pipeline, so reads are folded in until the batch
+// reaches maxBytes or the window elapses. The returned error belongs to the
+// last read folded into the batch; callers must not receive again after it.
+func nextCoalescedRead(reads <-chan ptyRead, maxBytes int, window time.Duration) ([]byte, error) {
+	first := <-reads
+	if first.err != nil {
+		return first.data, first.err
+	}
+
+	var batch []byte
+	select {
+	case r := <-reads:
+		batch = append(make([]byte, 0, maxBytes+ptyReadBufBytes), first.data...)
+		batch = append(batch, r.data...)
+		if r.err != nil {
+			return batch, r.err
+		}
+	default:
+		return first.data, nil
+	}
+
+	timer := time.NewTimer(window)
+	defer timer.Stop()
+	for len(batch) < maxBytes {
+		select {
+		case r := <-reads:
+			batch = append(batch, r.data...)
+			if r.err != nil {
+				return batch, r.err
+			}
+		case <-timer.C:
+			return batch, nil
+		}
+	}
+	return batch, nil
+}
+
 func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(string, ...interface{})) {
 	defer func() {
 		_ = s.ptmx.Close()
 	}()
 
-	buf := make([]byte, 16*1024)
+	reads := make(chan ptyRead, 4)
+	go func() {
+		for {
+			buf := make([]byte, ptyReadBufBytes)
+			n, err := s.ptmx.Read(buf)
+			reads <- ptyRead{data: buf[:n], err: err}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
 	carryover := make([]byte, 0, 64)
 
 	for {
-		n, err := s.ptmx.Read(buf)
-		if n > 0 {
-			chunk := make([]byte, len(carryover)+n)
+		batch, err := nextCoalescedRead(reads, ptyCoalesceMaxBytes, ptyCoalesceWindow)
+		if len(batch) > 0 {
+			chunk := make([]byte, len(carryover)+len(batch))
 			copy(chunk, carryover)
-			copy(chunk[len(carryover):], buf[:n])
+			copy(chunk[len(carryover):], batch)
 
 			boundary := findSafeBoundary(chunk)
 			if boundary < len(chunk) {
