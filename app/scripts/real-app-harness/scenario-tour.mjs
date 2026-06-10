@@ -81,6 +81,16 @@ function waitForTourReady(child, timeoutMs = 30_000) {
   });
 }
 
+async function captureTourScreenshot(client, screenshotPath) {
+  try {
+    await client.request('capture_native_window_screenshot', { path: screenshotPath });
+    return screenshotPath;
+  } catch (error) {
+    console.warn(`[RealAppHarness] Screenshot skipped: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
 async function main() {
   const { options, help } = parseArgs(process.argv.slice(2));
   if (help) {
@@ -132,7 +142,26 @@ async function main() {
     fs.writeFileSync(guidePath, `version: 1
 
 summary: |
-  Packaged-app Tour regression coverage.
+  # Packaged-app Tour
+
+  This briefing verifies **rich Markdown**, stable diagrams, and the native diff reader.
+
+  > Read the system from intent to implementation.
+
+  1. Start with the application entry point.
+  2. Follow the data into the table module.
+
+  | Surface | Purpose |
+  | --- | --- |
+  | Guide | Explain the change |
+  | Diff | Review the implementation |
+
+  \`\`\`mermaid
+  flowchart LR
+    Guide --> Reader
+    Reader --> Questions
+    Questions --> Agent
+  \`\`\`
 
 files:
   - path: src/app.ts
@@ -167,15 +196,16 @@ skip:
     const state = await pollFor(
       async () => {
         const current = await client.request('tour_get_state', {}, { timeoutMs: 5_000 });
-        return current.panelOpen && current.renderedLineCount > 0 ? current : null;
+        return current.panelOpen && current.renderedLineCount > 0 && current.mermaidCount > 0 ? current : null;
       },
-      'Tour dock to render the guide and real diff',
+      'Tour dock to render rich guide content, Mermaid, and the real diff',
     );
 
     assert(ready.connection_state === 'connected', `listener connected (got ${ready.connection_state})`);
     assert(state.title === 'Real App Tour', `Tour title rendered (got ${JSON.stringify(state.title)})`);
     assert(state.connectionText === 'Agent listening', `listener state rendered (got ${JSON.stringify(state.connectionText)})`);
-    assert(state.summaryText.includes('Packaged-app Tour regression coverage'), 'guide summary rendered');
+    assert(state.summaryText.includes('Packaged-app Tour'), 'guide summary rendered');
+    assert(state.mermaidCount === 1, `Mermaid diagram rendered once (got ${state.mermaidCount})`);
     assert(state.files.some((file) => file.path === 'src/app.ts' && file.selected), 'curated file is selected');
     assert(state.files.some((file) => file.path === 'data/table.ts'), 'skipped file is present');
     assert(state.selectedFile === 'src/app.ts', `selected file is src/app.ts (got ${JSON.stringify(state.selectedFile)})`);
@@ -183,15 +213,12 @@ skip:
     assert(state.renderedLineCount > 0, `rendered diff lines present (got ${state.renderedLineCount})`);
     assert(state.conversationText.includes('No questions yet.'), 'empty conversation state rendered');
     assert(state.errorText === '', `no Tour panel error (got ${JSON.stringify(state.errorText)})`);
+    assert(
+      state.panelBounds?.width >= state.viewportWidth * 0.9,
+      `Tour dock uses at least 90% of the viewport (got ${state.panelBounds?.width}/${state.viewportWidth})`,
+    );
 
-    const screenshotPath = path.join(runDir, 'tour.png');
-    let screenshotCaptured = false;
-    try {
-      await client.request('capture_native_window_screenshot', { path: screenshotPath });
-      screenshotCaptured = true;
-    } catch (error) {
-      console.warn(`[RealAppHarness] Screenshot skipped: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    const screenshotPath = await captureTourScreenshot(client, path.join(runDir, 'tour.png'));
 
     const summary = {
       ok: true,
@@ -202,7 +229,7 @@ skip:
       fileCount: state.fileCount,
       selectedFile: state.selectedFile,
       renderedLineCount: state.renderedLineCount,
-      screenshot: screenshotCaptured ? screenshotPath : null,
+      screenshot: screenshotPath,
     };
     fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
     console.log('[RealAppHarness] Tour scenario passed.');

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
+import { memo, useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type {
@@ -16,6 +16,7 @@ type TourFile = DaemonTour['files'][number];
 interface TourPanelProps {
   tour: DaemonTour;
   resolvedTheme: ResolvedTheme;
+  uiScale: number;
   onClose: () => void;
   refreshTour: (tourId: string) => Promise<DaemonTour>;
   saveTourDraft: (tourId: string, draft: DaemonTourDraft) => Promise<DaemonTour>;
@@ -23,68 +24,138 @@ interface TourPanelProps {
   submitTour: (tourId: string, body: string, finish: boolean) => Promise<DaemonTour>;
 }
 
-function MermaidBlock({ source, resolvedTheme }: { source: string; resolvedTheme: ResolvedTheme }) {
+let mermaidRenderQueue = Promise.resolve();
+
+const MermaidBlock = memo(function MermaidBlock({
+  source,
+  resolvedTheme,
+  uiScale,
+}: {
+  source: string;
+  resolvedTheme: ResolvedTheme;
+  uiScale: number;
+}) {
   const reactID = useId();
   const [svg, setSVG] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const render = async () => {
-      try {
-        const { default: mermaid } = await import('mermaid');
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: 'strict',
-          theme: resolvedTheme === 'dark' ? 'dark' : 'default',
+    const render = () => {
+      const job = mermaidRenderQueue
+        .catch(() => {})
+        .then(async () => {
+          const { default: mermaid } = await import('mermaid');
+          mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: 'strict',
+            theme: resolvedTheme === 'dark' ? 'dark' : 'default',
+            themeVariables: {
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+              fontSize: `${Math.round(13 * uiScale)}px`,
+            },
+          });
+          const id = `tour-mermaid-${reactID.replace(/[^a-zA-Z0-9]/g, '')}`;
+          return mermaid.render(id, source);
         });
-        const id = `tour-mermaid-${reactID.replace(/[^a-zA-Z0-9]/g, '')}`;
-        const result = await mermaid.render(id, source);
-        if (!cancelled) {
-          setSVG(result.svg);
-          setError(null);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-          setSVG('');
-        }
-      }
+      mermaidRenderQueue = job.then(() => undefined, () => undefined);
+      return job;
     };
-    void render();
+    void render().then((result) => {
+      if (!cancelled) {
+        setSVG(result.svg);
+        setError(null);
+      }
+    }).catch((err) => {
+      if (!cancelled) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    });
     return () => {
       cancelled = true;
     };
-  }, [reactID, resolvedTheme, source]);
+  }, [reactID, resolvedTheme, source, uiScale]);
 
-  if (error) {
+  if (error && !svg) {
     return <pre className="tour-panel__mermaid-error"><code>{source}</code></pre>;
   }
-  return <div className="tour-panel__mermaid" dangerouslySetInnerHTML={{ __html: svg }} />;
-}
+  return (
+    <figure className={`tour-panel__mermaid ${svg ? 'is-ready' : 'is-loading'}`}>
+      {svg ? (
+        <div dangerouslySetInnerHTML={{ __html: svg }} />
+      ) : (
+        <div className="tour-panel__mermaid-placeholder" aria-label="Rendering diagram">
+          <span />
+          <span />
+          <span />
+        </div>
+      )}
+    </figure>
+  );
+});
 
-function TourMarkdown({
+const TourMarkdown = memo(function TourMarkdown({
   children,
   resolvedTheme,
+  uiScale,
+  className = '',
 }: {
   children: string;
   resolvedTheme: ResolvedTheme;
+  uiScale: number;
+  className?: string;
 }) {
+  const components = useMemo(() => ({
+    code({ className: codeClassName, children: codeChildren, ...props }: {
+      className?: string;
+      children?: ReactNode;
+    }) {
+      const source = String(codeChildren).replace(/\n$/, '');
+      if (codeClassName === 'language-mermaid') {
+        return <MermaidBlock source={source} resolvedTheme={resolvedTheme} uiScale={uiScale} />;
+      }
+      return <code className={codeClassName} {...props}>{codeChildren}</code>;
+    },
+  }), [resolvedTheme, uiScale]);
+
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        code({ className, children: codeChildren, ...props }) {
-          const source = String(codeChildren).replace(/\n$/, '');
-          if (className === 'language-mermaid') {
-            return <MermaidBlock source={source} resolvedTheme={resolvedTheme} />;
-          }
-          return <code className={className} {...props}>{codeChildren as ReactNode}</code>;
-        },
-      }}
-    >
-      {children}
-    </ReactMarkdown>
+    <div className={`tour-markdown ${className}`.trim()}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        {children}
+      </ReactMarkdown>
+    </div>
+  );
+});
+
+function groupDescription(groupId: string): string {
+  switch (groupId) {
+    case 'tour':
+      return 'Curated reading order';
+    case 'other':
+      return 'Changed outside the guide';
+    case 'skip':
+      return 'Intentionally omitted';
+    default:
+      return '';
+  }
+}
+
+function fileName(path: string): string {
+  return path.split('/').pop() || path;
+}
+
+function fileDirectory(path: string): string {
+  const parts = path.split('/');
+  return parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+}
+
+function FileStats({ file }: { file: TourFile }) {
+  if (file.additions === 0 && file.deletions === 0) return null;
+  return (
+    <span className="tour-panel__file-stats" aria-label={`${file.additions} additions, ${file.deletions} deletions`}>
+      <span className="tour-panel__additions">+{file.additions}</span>
+      <span className="tour-panel__deletions">-{file.deletions}</span>
+    </span>
   );
 }
 
@@ -175,6 +246,7 @@ function codeContext(file: TourFile, start?: number, end?: number): string | und
 export function TourPanel({
   tour,
   resolvedTheme,
+  uiScale,
   onClose,
   refreshTour,
   saveTourDraft,
@@ -267,14 +339,19 @@ export function TourPanel({
   return (
     <section className="tour-panel">
       <header className="tour-panel__header">
-        <div>
+        <div className="tour-panel__identity">
           <div className="tour-panel__eyebrow">Interactive code tour</div>
-          <h2>{tour.name}</h2>
-          <div className="tour-panel__meta">
-            <span>{tour.base_ref}</span>
+          <div className="tour-panel__title-row">
+            <h2>{tour.name}</h2>
             <span className={`tour-panel__connection tour-panel__connection--${tour.connection_state}`}>
+              <span className="tour-panel__connection-dot" aria-hidden="true" />
               {tour.connection_state === 'connected' ? 'Agent listening' : 'Agent disconnected'}
             </span>
+          </div>
+          <div className="tour-panel__meta">
+            Comparing against <code>{tour.base_ref}</code>
+            <span aria-hidden="true">/</span>
+            <span>{tour.files.length} changed {tour.files.length === 1 ? 'file' : 'files'}</span>
           </div>
         </div>
         <div className="tour-panel__header-actions">
@@ -307,21 +384,25 @@ export function TourPanel({
 
       <div className="tour-panel__layout">
         <nav className="tour-panel__rail" aria-label="Tour files">
-          <article className="tour-panel__summary">
-            <TourMarkdown resolvedTheme={resolvedTheme}>{tour.summary}</TourMarkdown>
-          </article>
           {groups.map((group) => {
             const files = tour.files.filter((file) => file.group === group.id);
             if (files.length === 0) return null;
             return (
               <div className="tour-panel__group" key={group.id}>
-                <h3>{group.label}</h3>
+                <div className="tour-panel__group-heading">
+                  <div>
+                    <h3>{group.label}</h3>
+                    <p>{groupDescription(group.id)}</p>
+                  </div>
+                  <span>{files.length}</span>
+                </div>
                 {files.map((file, index) => {
                   const fileDraft = tour.drafts.find((entry) => entry.path === file.path);
                   return (
                     <button
                       type="button"
                       key={file.path}
+                      data-file-path={file.path}
                       className={file.path === selectedFile?.path ? 'is-active' : ''}
                       onClick={() => {
                         setSelectedPath(file.path);
@@ -329,10 +410,17 @@ export function TourPanel({
                         void persistDraft(nextDraft);
                       }}
                     >
-                      <span>{group.id === 'tour' ? `${index + 1}.` : ''}</span>
-                      <strong>{file.path.split('/').pop()}</strong>
-                      <small>{file.path}</small>
-                      {fileDraft?.reviewed ? <em>Reviewed</em> : null}
+                      <span className="tour-panel__step">
+                        {group.id === 'tour' ? String(index + 1).padStart(2, '0') : ''}
+                      </span>
+                      <span className="tour-panel__file-copy">
+                        <span className="tour-panel__file-name">
+                          <strong>{fileName(file.path)}</strong>
+                          {fileDraft?.reviewed ? <em>Done</em> : null}
+                        </span>
+                        <small>{fileDirectory(file.path) || file.path}</small>
+                        <FileStats file={file} />
+                      </span>
                     </button>
                   );
                 })}
@@ -342,12 +430,19 @@ export function TourPanel({
         </nav>
 
         <main className="tour-panel__main">
+          <article className="tour-panel__summary">
+            <div className="tour-panel__section-kicker">Tour briefing</div>
+            <TourMarkdown resolvedTheme={resolvedTheme} uiScale={uiScale}>
+              {tour.summary}
+            </TourMarkdown>
+          </article>
           {selectedFile ? (
-            <>
+            <section className="tour-panel__file">
               <div className="tour-panel__file-heading">
                 <div>
-                  <span>{selectedFile.status}</span>
+                  <span className="tour-panel__file-status">{selectedFile.status}</span>
                   <h3>{selectedFile.path}</h3>
+                  <FileStats file={selectedFile} />
                 </div>
                 <label>
                   <input
@@ -360,7 +455,10 @@ export function TourPanel({
               </div>
               {selectedFile.note ? (
                 <article className="tour-panel__file-note">
-                  <TourMarkdown resolvedTheme={resolvedTheme}>{selectedFile.note}</TourMarkdown>
+                  <div className="tour-panel__section-kicker">Why this file matters</div>
+                  <TourMarkdown resolvedTheme={resolvedTheme} uiScale={uiScale}>
+                    {selectedFile.note}
+                  </TourMarkdown>
                 </article>
               ) : null}
 
@@ -375,6 +473,7 @@ export function TourPanel({
                     comments={diffComments}
                     editingCommentId={null}
                     resolvedTheme={resolvedTheme}
+                    fontSize={13 * uiScale}
                     diffStyle="unified"
                     expandUnchanged={false}
                     onAddComment={(lineStart, _lineEnd, content) => persistDraft({
@@ -389,13 +488,18 @@ export function TourPanel({
                   />
                 )}
               </div>
-            </>
+            </section>
           ) : <div className="tour-panel__empty">No changed files in this tour.</div>}
         </main>
 
         <aside className="tour-panel__conversation">
-          <section>
-            <h3>Notes</h3>
+          <div className="tour-panel__conversation-heading">
+            <div className="tour-panel__section-kicker">Review desk</div>
+            <h3>Questions and notes</h3>
+            <p>Your agent is listening while you read.</p>
+          </div>
+          <section className="tour-panel__notes">
+            <h4>File notes</h4>
             <textarea
               defaultValue={draft.note}
               key={`${draft.path}:${draft.note}`}
@@ -408,11 +512,13 @@ export function TourPanel({
             const reply = draft.annotation_replies.find((entry) => entry.id === annotation.id)?.body || '';
             return (
               <section className="tour-panel__annotation" key={annotation.id}>
-                <h3>Lines {annotation.line_start}{annotation.line_end !== annotation.line_start ? `-${annotation.line_end}` : ''}</h3>
+                <h4>Lines {annotation.line_start}{annotation.line_end !== annotation.line_start ? `-${annotation.line_end}` : ''}</h4>
                 {annotation.comments.map((comment, index) => (
                   <div className="tour-panel__annotation-comment" key={`${annotation.id}:${index}`}>
                     <strong>{comment.author}</strong>
-                    <TourMarkdown resolvedTheme={resolvedTheme}>{comment.body}</TourMarkdown>
+                    <TourMarkdown resolvedTheme={resolvedTheme} uiScale={uiScale}>
+                      {comment.body}
+                    </TourMarkdown>
                   </div>
                 ))}
                 <textarea
@@ -426,7 +532,7 @@ export function TourPanel({
           })}
 
           <section className="tour-panel__question">
-            <h3>Ask the agent</h3>
+            <h4>Ask the agent</h4>
             <textarea
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
@@ -442,11 +548,13 @@ export function TourPanel({
           </section>
 
           <section className="tour-panel__transcript">
-            <h3>Conversation</h3>
+            <h4>Conversation</h4>
             {tour.transcript.length === 0 ? <p>No questions yet.</p> : tour.transcript.map((entry) => (
               <div className={`tour-panel__message tour-panel__message--${entry.role}`} key={entry.id}>
                 <strong>{entry.role === 'agent' ? 'Agent' : 'You'}</strong>
-                <TourMarkdown resolvedTheme={resolvedTheme}>{entry.body}</TourMarkdown>
+                <TourMarkdown resolvedTheme={resolvedTheme} uiScale={uiScale}>
+                  {entry.body}
+                </TourMarkdown>
               </div>
             ))}
           </section>

@@ -1262,7 +1262,7 @@ function collectTourUiState() {
   const tour = panel?.querySelector('.tour-panel');
   const fileButtons = Array.from(tour?.querySelectorAll('.tour-panel__group button') || [])
     .map((button) => ({
-      path: button.querySelector('small')?.textContent?.trim() || '',
+      path: button.getAttribute('data-file-path') || '',
       selected: button.classList.contains('is-active'),
       reviewed: Boolean(button.querySelector('em')),
     }));
@@ -1281,9 +1281,11 @@ function collectTourUiState() {
     selectedFile: tour?.querySelector('.tour-panel__file-heading h3')?.textContent?.trim() || '',
     diffViewPresent: Boolean(tour?.querySelector('.diff-view')),
     renderedLineCount: shadowRoot ? shadowRoot.querySelectorAll('[data-line-number-content]').length : 0,
+    mermaidCount: tour?.querySelectorAll('.tour-panel__mermaid.is-ready svg').length || 0,
     conversationText: tour?.querySelector('.tour-panel__transcript')?.textContent?.trim() || '',
     errorText: tour?.querySelector('.tour-panel__error')?.textContent?.trim() || '',
     panelBounds: rectSnapshot(panel),
+    viewportWidth: window.innerWidth,
   };
 }
 

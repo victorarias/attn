@@ -3494,13 +3494,14 @@ sendFetchPRDetails,
             {
               id: 'tour',
               isOpen: tourPanelOpen && Boolean(activeTour),
-              width: 'clamp(760px, 76vw, 1280px)',
+              width: 'clamp(1140px, 95vw, 1920px)',
               tone: activeTour?.connection_state === 'disconnected' ? 'error' : 'default',
               className: 'dock-panel dock-panel--tour',
               children: activeTour ? (
                 <TourPanel
                   tour={activeTour}
                   resolvedTheme={resolvedTheme}
+                  uiScale={scale}
                   onClose={() => closeDockPanel('tour')}
                   refreshTour={refreshTour}
                   saveTourDraft={saveTourDraft}

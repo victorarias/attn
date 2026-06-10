@@ -12,7 +12,9 @@ vi.mock('mermaid', () => ({
 }));
 
 vi.mock('./DiffView', () => ({
-  DiffView: () => <div data-testid="tour-diff">diff</div>,
+  DiffView: ({ fontSize }: { fontSize?: number }) => (
+    <div data-testid="tour-diff" data-font-size={fontSize}>diff</div>
+  ),
 }));
 
 const tour: DaemonTour = {
@@ -52,6 +54,7 @@ function renderPanel() {
     <TourPanel
       tour={tour}
       resolvedTheme="dark"
+      uiScale={1}
       onClose={vi.fn()}
       refreshTour={vi.fn(async () => tour)}
       saveTourDraft={vi.fn(async () => tour)}
@@ -95,6 +98,67 @@ describe('TourPanel', () => {
         '## Tour feedback\n\nNo additional notes.',
         true,
       );
+    });
+  });
+
+  it('keeps the briefing in the main reading area and avoids rerendering stable diagrams', async () => {
+    const mermaid = (await import('mermaid')).default;
+    vi.mocked(mermaid.render).mockClear();
+    const { rerender } = render(
+      <TourPanel
+        tour={tour}
+        resolvedTheme="dark"
+        uiScale={1}
+        onClose={vi.fn()}
+        refreshTour={vi.fn(async () => tour)}
+        saveTourDraft={vi.fn(async () => tour)}
+        askTour={vi.fn(async () => tour)}
+        submitTour={vi.fn(async () => tour)}
+      />,
+    );
+
+    expect(document.querySelector('.tour-panel__main .tour-panel__summary')).toBeInTheDocument();
+    expect(document.querySelector('.tour-panel__rail .tour-panel__summary')).not.toBeInTheDocument();
+    await waitFor(() => expect(mermaid.render).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <TourPanel
+        tour={{ ...tour, drafts: [{ path: 'main.go', reviewed: true, note: '', annotation_replies: [], line_comments: [] }] }}
+        resolvedTheme="dark"
+        uiScale={1}
+        onClose={vi.fn()}
+        refreshTour={vi.fn(async () => tour)}
+        saveTourDraft={vi.fn(async () => tour)}
+        askTour={vi.fn(async () => tour)}
+        submitTour={vi.fn(async () => tour)}
+      />,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mermaid.render).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes the custom UI scale through to diagrams and diff content', async () => {
+    const mermaid = (await import('mermaid')).default;
+    vi.mocked(mermaid.initialize).mockClear();
+    render(
+      <TourPanel
+        tour={tour}
+        resolvedTheme="dark"
+        uiScale={1.5}
+        onClose={vi.fn()}
+        refreshTour={vi.fn(async () => tour)}
+        saveTourDraft={vi.fn(async () => tour)}
+        askTour={vi.fn(async () => tour)}
+        submitTour={vi.fn(async () => tour)}
+      />,
+    );
+
+    expect(screen.getByTestId('tour-diff')).toHaveAttribute('data-font-size', '19.5');
+    await waitFor(() => {
+      expect(mermaid.initialize).toHaveBeenCalledWith(expect.objectContaining({
+        themeVariables: expect.objectContaining({ fontSize: '20px' }),
+      }));
     });
   });
 });
