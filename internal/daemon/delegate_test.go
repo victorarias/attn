@@ -803,6 +803,77 @@ func TestDelegateTargetsExistingWorkspace(t *testing.T) {
 	}
 }
 
+func TestDelegateRejectsWorktreeInExistingWorkspace(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+
+	_, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Do not create this unsupported worktree.",
+		Placement:       protocol.Ptr(delegationPlacementExisting),
+		WorkspaceID:     protocol.Ptr("workspace-source"),
+		Worktree: &protocol.DelegateWorktreeRequest{
+			Branch: "feat/unsupported",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "existing_workspace placement does not accept cwd or worktree") {
+		t.Fatalf("delegate() error = %v", err)
+	}
+}
+
+func TestDelegateCreatesWorktreeInSourceWorkspace(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	runGitDaemon(t, mainRepo, "init")
+	runGitDaemon(t, mainRepo, "commit", "--allow-empty", "-m", "init")
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	sourceWorkspaceID, sourceSessionID, _ := setupDelegationSourceAt(t, d, backend, mainRepo)
+	consumeDelegatedPrompt(t, backend)
+	worktreePath := filepath.Join(root, "repo--feat-delegated-current")
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Implement this in an isolated branch in this workspace.",
+		Worktree: &protocol.DelegateWorktreeRequest{
+			Repo:   protocol.Ptr(mainRepo),
+			Branch: "feat/delegated-current",
+			Path:   protocol.Ptr(worktreePath),
+		},
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	worktreePath = git.CanonicalizePath(worktreePath)
+	if result.Placement != delegationPlacementCurrent ||
+		result.WorkspaceID != sourceWorkspaceID ||
+		result.Directory != worktreePath ||
+		!protocol.Deref(result.WorktreeCreated) {
+		t.Fatalf("result = %+v", result)
+	}
+	if workspaces := d.store.ListWorkspaces(); len(workspaces) != 1 {
+		t.Fatalf("workspaces = %+v, want only source workspace", workspaces)
+	}
+	session := d.store.Get(result.SessionID)
+	if session == nil ||
+		session.WorkspaceID != sourceWorkspaceID ||
+		session.Directory != worktreePath ||
+		protocol.Deref(session.Branch) != "feat/delegated-current" {
+		t.Fatalf("delegated worktree session = %+v", session)
+	}
+	layout := d.store.GetWorkspaceLayout(sourceWorkspaceID)
+	if layout == nil || len(layout.Panes) != 2 {
+		t.Fatalf("source workspace layout = %+v, want two panes", layout)
+	}
+}
+
 func TestDelegateCreatesWorktreeAndNewWorkspace(t *testing.T) {
 	root := t.TempDir()
 	mainRepo := filepath.Join(root, "repo")
@@ -814,7 +885,7 @@ func TestDelegateCreatesWorktreeAndNewWorkspace(t *testing.T) {
 
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
-	_, sourceSessionID, _ := setupDelegationSourceAt(t, d, backend, mainRepo)
+	sourceWorkspaceID, sourceSessionID, _ := setupDelegationSourceAt(t, d, backend, mainRepo)
 	consumeDelegatedPrompt(t, backend)
 	worktreePath := filepath.Join(root, "repo--feat-delegated")
 
@@ -833,8 +904,14 @@ func TestDelegateCreatesWorktreeAndNewWorkspace(t *testing.T) {
 		t.Fatalf("delegate() error = %v", err)
 	}
 	worktreePath = git.CanonicalizePath(worktreePath)
-	if result.Directory != worktreePath || !protocol.Deref(result.WorktreeCreated) {
+	if result.Placement != delegationPlacementNew ||
+		result.WorkspaceID == sourceWorkspaceID ||
+		result.Directory != worktreePath ||
+		!protocol.Deref(result.WorktreeCreated) {
 		t.Fatalf("result = %+v", result)
+	}
+	if workspaces := d.store.ListWorkspaces(); len(workspaces) != 2 {
+		t.Fatalf("workspaces = %+v, want source and delegated workspaces", workspaces)
 	}
 	if info, err := os.Stat(worktreePath); err != nil || !info.IsDir() {
 		t.Fatalf("worktree path stat = %v, info = %+v", err, info)
@@ -842,6 +919,45 @@ func TestDelegateCreatesWorktreeAndNewWorkspace(t *testing.T) {
 	session := d.store.Get(result.SessionID)
 	if session == nil || protocol.Deref(session.Branch) != "feat/delegated" {
 		t.Fatalf("delegated worktree session = %+v", session)
+	}
+}
+
+func TestDelegateRollsBackCurrentWorkspaceWorktreeWhenSpawnFails(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	runGitDaemon(t, mainRepo, "init")
+	runGitDaemon(t, mainRepo, "commit", "--allow-empty", "-m", "init")
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	setupBackend := &fakeSpawnBackend{}
+	sourceWorkspaceID, sourceSessionID, _ := setupDelegationSourceAt(t, d, setupBackend, mainRepo)
+	d.ptyBackend = &failingSpawnBackend{err: os.ErrPermission}
+	worktreePath := filepath.Join(root, "repo--feat-current-rollback")
+
+	if _, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "This spawn should roll back in the source workspace.",
+		Worktree: &protocol.DelegateWorktreeRequest{
+			Repo:   protocol.Ptr(mainRepo),
+			Branch: "feat/current-rollback",
+			Path:   protocol.Ptr(worktreePath),
+		},
+	}); err == nil {
+		t.Fatal("delegate() succeeded, want spawn failure")
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("worktree still exists after rollback: %v", err)
+	}
+	if workspaces := d.store.ListWorkspaces(); len(workspaces) != 1 || workspaces[0].ID != sourceWorkspaceID {
+		t.Fatalf("workspaces after rollback = %+v, want only source workspace", workspaces)
+	}
+	layout := d.store.GetWorkspaceLayout(sourceWorkspaceID)
+	if layout == nil || len(layout.Panes) != 1 || layout.Panes[0].SessionID != sourceSessionID {
+		t.Fatalf("source workspace layout after rollback = %+v", layout)
 	}
 }
 

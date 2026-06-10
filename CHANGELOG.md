@@ -18,6 +18,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Streaming terminal output is cheaper.** Live terminal output now travels from the daemon to the app as compact binary messages instead of base64-encoded JSON, cutting per-chunk encode/decode work and message size by a third. This lowers CPU and bandwidth during sustained heavy output (busy agents, long builds) and modestly reduces the app's memory high-water.
 
 ### Fixed
+- **Delegated worktrees stay in the current workspace by default.** `attn delegate --worktree` now controls branch isolation independently from workspace placement; add `--new-workspace` when the delegated session should also get a separate workspace.
 - **Provider-managed worktree creation has more time to finish.** Worktree providers now get up to two minutes to create and bootstrap worktrees in large repositories, avoiding false timeout failures after the provider has already created the worktree. Hooks and worktree deletion keep their existing 30-second deadline.
 
 ---

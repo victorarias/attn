@@ -474,7 +474,7 @@ func TestParseDelegateArgsDefaultsToCurrentWorkspace(t *testing.T) {
 	}
 }
 
-func TestParseDelegateArgsWorktreeImpliesNewWorkspace(t *testing.T) {
+func TestParseDelegateArgsWorktreeUsesCurrentWorkspace(t *testing.T) {
 	parsed, err := parseDelegateArgs([]string{
 		"--source-session", "source-session",
 		"--brief", "Implement the parser",
@@ -487,7 +487,7 @@ func TestParseDelegateArgsWorktreeImpliesNewWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseDelegateArgs() error = %v", err)
 	}
-	if parsed.options.Placement != "new_workspace" ||
+	if parsed.options.Placement != "current_workspace" ||
 		parsed.options.Agent != "codex" ||
 		parsed.options.Worktree != "feat/parser" ||
 		parsed.options.WorktreeRepo != "/tmp/repo" ||
@@ -497,15 +497,34 @@ func TestParseDelegateArgsWorktreeImpliesNewWorkspace(t *testing.T) {
 	}
 }
 
-func TestParseDelegateArgsRejectsAmbiguousPlacement(t *testing.T) {
-	_, err := parseDelegateArgs([]string{
+func TestParseDelegateArgsWorktreeUsesExplicitNewWorkspace(t *testing.T) {
+	parsed, err := parseDelegateArgs([]string{
 		"--source-session", "source-session",
-		"--brief", "Investigate this",
-		"--workspace", "workspace-target",
+		"--brief", "Implement the parser",
 		"--new-workspace",
+		"--worktree", "feat/parser",
 	})
-	if err == nil || !strings.Contains(err.Error(), "--workspace cannot be combined") {
+	if err != nil {
 		t.Fatalf("parseDelegateArgs() error = %v", err)
+	}
+	if parsed.options.Placement != "new_workspace" ||
+		parsed.options.Worktree != "feat/parser" {
+		t.Fatalf("options = %+v", parsed.options)
+	}
+}
+
+func TestParseDelegateArgsRejectsAmbiguousPlacement(t *testing.T) {
+	for _, args := range [][]string{
+		{"--workspace", "workspace-target", "--new-workspace"},
+		{"--workspace", "workspace-target", "--worktree", "feat/parser"},
+	} {
+		_, err := parseDelegateArgs(append([]string{
+			"--source-session", "source-session",
+			"--brief", "Investigate this",
+		}, args...))
+		if err == nil || !strings.Contains(err.Error(), "--workspace cannot be combined") {
+			t.Fatalf("parseDelegateArgs(%v) error = %v", args, err)
+		}
 	}
 }
 
@@ -695,7 +714,14 @@ func TestWriteDelegateHelpMentionsPlacementOptions(t *testing.T) {
 	writeDelegateHelp(&output)
 
 	text := output.String()
-	for _, expected := range []string{"--new-workspace", "--workspace <id>", "--cwd <path>", "--worktree <branch>", "--agent <name>"} {
+	for _, expected := range []string{
+		"--new-workspace",
+		"--workspace <id>",
+		"--cwd <path>",
+		"--worktree <branch>",
+		"combine with --new-workspace to place the worktree in a new workspace",
+		"--agent <name>",
+	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("delegate help missing %q: %q", expected, text)
 		}

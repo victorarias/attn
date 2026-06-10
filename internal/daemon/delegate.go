@@ -93,7 +93,7 @@ func delegationPlacement(msg *protocol.DelegateMessage) string {
 	if strings.TrimSpace(protocol.Deref(msg.WorkspaceID)) != "" {
 		return delegationPlacementExisting
 	}
-	if strings.TrimSpace(protocol.Deref(msg.Cwd)) != "" || msg.Worktree != nil {
+	if strings.TrimSpace(protocol.Deref(msg.Cwd)) != "" {
 		return delegationPlacementNew
 	}
 	return delegationPlacementCurrent
@@ -125,6 +125,47 @@ func (d *Daemon) rollbackDelegation(createdWorkspaceID, createdWorktreePath stri
 		return fmt.Errorf("%w; rollback worktree %s: %v", cause, createdWorktreePath, err)
 	}
 	return cause
+}
+
+func (d *Daemon) createDelegationWorktree(sourceDirectory string, request *protocol.DelegateWorktreeRequest) (string, error) {
+	branch := strings.TrimSpace(request.Branch)
+	if branch == "" {
+		return "", fmt.Errorf("worktree branch is required")
+	}
+	repo := strings.TrimSpace(protocol.Deref(request.Repo))
+	if repo == "" {
+		repoRoot, err := git.GetRepoRoot(sourceDirectory)
+		if err != nil {
+			return "", fmt.Errorf("source directory is not in a git repository; pass --repo")
+		}
+		repo = git.ResolveMainRepoPath(repoRoot)
+	}
+	startingFrom := request.StartingFrom
+	if strings.TrimSpace(protocol.Deref(startingFrom)) == "" {
+		sourceRoot, sourceRootErr := git.GetRepoRoot(sourceDirectory)
+		sourceBranch, sourceBranchErr := git.GetBranchInfo(sourceDirectory)
+		if sourceRootErr == nil &&
+			sourceBranchErr == nil &&
+			sourceBranch != nil &&
+			strings.TrimSpace(sourceBranch.Branch) != "" &&
+			git.ResolveMainRepoPath(sourceRoot) == git.ResolveMainRepoPath(repo) {
+			startingFrom = protocol.Ptr(strings.TrimSpace(sourceBranch.Branch))
+		}
+	}
+	worktreePath, err := d.doCreateWorktree(&protocol.CreateWorktreeMessage{
+		Cmd:          protocol.CmdCreateWorktree,
+		MainRepo:     repo,
+		Branch:       branch,
+		Path:         request.Path,
+		StartingFrom: startingFrom,
+	})
+	if err != nil {
+		if worktreePath != "" {
+			return "", d.rollbackDelegation("", worktreePath, fmt.Errorf("create delegated worktree: %w", err))
+		}
+		return "", fmt.Errorf("create delegated worktree: %w", err)
+	}
+	return worktreePath, nil
 }
 
 func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResult, error) {
@@ -163,8 +204,8 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 
 	switch placement {
 	case delegationPlacementCurrent:
-		if msg.Worktree != nil || strings.TrimSpace(protocol.Deref(msg.WorkspaceID)) != "" || strings.TrimSpace(protocol.Deref(msg.Cwd)) != "" {
-			return nil, fmt.Errorf("current_workspace placement does not accept workspace_id, cwd, or worktree")
+		if strings.TrimSpace(protocol.Deref(msg.WorkspaceID)) != "" || strings.TrimSpace(protocol.Deref(msg.Cwd)) != "" {
+			return nil, fmt.Errorf("current_workspace placement does not accept workspace_id or cwd")
 		}
 		workspaceID = strings.TrimSpace(source.WorkspaceID)
 		if workspaceID == "" || d.store.GetWorkspace(workspaceID) == nil {
@@ -190,49 +231,28 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 			if directory != "" {
 				return nil, fmt.Errorf("new_workspace placement cannot combine cwd and worktree")
 			}
-			branch := strings.TrimSpace(msg.Worktree.Branch)
-			if branch == "" {
-				return nil, fmt.Errorf("worktree branch is required")
-			}
-			repo := strings.TrimSpace(protocol.Deref(msg.Worktree.Repo))
-			if repo == "" {
-				repoRoot, repoErr := git.GetRepoRoot(source.Directory)
-				if repoErr != nil {
-					return nil, fmt.Errorf("source directory is not in a git repository; pass --repo")
-				}
-				repo = git.ResolveMainRepoPath(repoRoot)
-			}
-			startingFrom := msg.Worktree.StartingFrom
-			if strings.TrimSpace(protocol.Deref(startingFrom)) == "" {
-				sourceRoot, sourceRootErr := git.GetRepoRoot(source.Directory)
-				sourceBranch, sourceBranchErr := git.GetBranchInfo(source.Directory)
-				if sourceRootErr == nil &&
-					sourceBranchErr == nil &&
-					sourceBranch != nil &&
-					strings.TrimSpace(sourceBranch.Branch) != "" &&
-					git.ResolveMainRepoPath(sourceRoot) == git.ResolveMainRepoPath(repo) {
-					startingFrom = protocol.Ptr(strings.TrimSpace(sourceBranch.Branch))
-				}
-			}
-			worktreePath, createErr := d.doCreateWorktree(&protocol.CreateWorktreeMessage{
-				Cmd:          protocol.CmdCreateWorktree,
-				MainRepo:     repo,
-				Branch:       branch,
-				Path:         msg.Worktree.Path,
-				StartingFrom: startingFrom,
-			})
-			if createErr != nil {
-				if worktreePath != "" {
-					return nil, d.rollbackDelegation("", worktreePath, fmt.Errorf("create delegated worktree: %w", createErr))
-				}
-				return nil, fmt.Errorf("create delegated worktree: %w", createErr)
-			}
-			createdWorktreePath = worktreePath
-			directory = worktreePath
 		}
 		if directory == "" {
 			directory = source.Directory
 		}
+	default:
+		return nil, fmt.Errorf("unsupported placement %q", placement)
+	}
+
+	if msg.Worktree != nil {
+		worktreePath, createErr := d.createDelegationWorktree(source.Directory, msg.Worktree)
+		if createErr != nil {
+			return nil, createErr
+		}
+		createdWorktreePath = worktreePath
+		validatedDirectory, directoryErr := validateDelegationDirectory(worktreePath)
+		if directoryErr != nil {
+			return nil, d.rollbackDelegation("", createdWorktreePath, directoryErr)
+		}
+		directory = validatedDirectory
+	}
+
+	if placement == delegationPlacementNew {
 		validatedDirectory, directoryErr := validateDelegationDirectory(directory)
 		if directoryErr != nil {
 			return nil, d.rollbackDelegation("", createdWorktreePath, directoryErr)
@@ -253,8 +273,6 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 			return nil, d.rollbackDelegation("", createdWorktreePath, fmt.Errorf("create delegated workspace"))
 		}
 		createdWorkspaceID = workspaceID
-	default:
-		return nil, fmt.Errorf("unsupported placement %q", placement)
 	}
 
 	paneClient := newInternalWSClient()

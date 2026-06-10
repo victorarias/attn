@@ -62,10 +62,15 @@ Join an existing workspace:
 
     "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" --workspace <workspace-id>
 
-Create an isolated worktree and workspace:
+Create an isolated worktree in the current workspace:
 
     "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" \
       --worktree feat/delegated-task
+
+Place the isolated worktree in a separate new workspace:
+
+    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" \
+      --new-workspace --worktree feat/delegated-task
 
 Worktree options:
 
