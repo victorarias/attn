@@ -1,6 +1,7 @@
 package pty
 
 import (
+	"errors"
 	"io"
 	"os"
 	"testing"
@@ -296,5 +297,102 @@ func TestWriteTerminalQueryResponsesAllowResend(t *testing.T) {
 	want := wantOnce + wantOnce
 	if string(got) != want {
 		t.Fatalf("writeTerminalQueryResponses() wrote %q, want %q", string(got), want)
+	}
+}
+
+func readOf(b byte, n int) ptyRead {
+	data := make([]byte, n)
+	for i := range data {
+		data[i] = b
+	}
+	return ptyRead{data: data}
+}
+
+func TestNextCoalescedReadLoneReadReturnsImmediately(t *testing.T) {
+	t.Parallel()
+
+	reads := make(chan ptyRead, 1)
+	reads <- ptyRead{data: []byte("x")}
+
+	// A huge window proves no timer wait happens on the interactive path:
+	// the test would time out if a lone read were held for coalescing.
+	data, err := nextCoalescedRead(reads, 100, time.Minute)
+	if err != nil {
+		t.Fatalf("nextCoalescedRead() error = %v", err)
+	}
+	if string(data) != "x" {
+		t.Fatalf("nextCoalescedRead() = %q, want %q", data, "x")
+	}
+}
+
+func TestNextCoalescedReadBatchesQueuedReadsUpToMax(t *testing.T) {
+	t.Parallel()
+
+	reads := make(chan ptyRead, 4)
+	reads <- readOf('a', 4)
+	reads <- readOf('b', 4)
+	reads <- readOf('c', 4)
+	reads <- readOf('d', 4)
+
+	data, err := nextCoalescedRead(reads, 12, time.Minute)
+	if err != nil {
+		t.Fatalf("nextCoalescedRead() error = %v", err)
+	}
+	if string(data) != "aaaabbbbcccc" {
+		t.Fatalf("nextCoalescedRead() = %q, want %q", data, "aaaabbbbcccc")
+	}
+	if got := len(reads); got != 1 {
+		t.Fatalf("reads left in channel = %d, want 1", got)
+	}
+}
+
+func TestNextCoalescedReadReturnsErrorWithBatchedData(t *testing.T) {
+	t.Parallel()
+
+	reads := make(chan ptyRead, 2)
+	reads <- readOf('a', 4)
+	reads <- ptyRead{err: io.EOF}
+
+	data, err := nextCoalescedRead(reads, 100, time.Minute)
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("nextCoalescedRead() error = %v, want io.EOF", err)
+	}
+	if string(data) != "aaaa" {
+		t.Fatalf("nextCoalescedRead() = %q, want %q", data, "aaaa")
+	}
+}
+
+func TestNextCoalescedReadFirstReadErrorReturnsImmediately(t *testing.T) {
+	t.Parallel()
+
+	reads := make(chan ptyRead, 1)
+	reads <- ptyRead{data: []byte("tail"), err: io.EOF}
+
+	data, err := nextCoalescedRead(reads, 100, time.Minute)
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("nextCoalescedRead() error = %v, want io.EOF", err)
+	}
+	if string(data) != "tail" {
+		t.Fatalf("nextCoalescedRead() = %q, want %q", data, "tail")
+	}
+}
+
+func TestNextCoalescedReadWindowBoundsLatency(t *testing.T) {
+	t.Parallel()
+
+	reads := make(chan ptyRead, 2)
+	reads <- readOf('a', 4)
+	reads <- readOf('b', 4)
+
+	start := time.Now()
+	data, err := nextCoalescedRead(reads, 100, 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("nextCoalescedRead() error = %v", err)
+	}
+	if string(data) != "aaaabbbb" {
+		t.Fatalf("nextCoalescedRead() = %q, want %q", data, "aaaabbbb")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("nextCoalescedRead() blocked %v, want ~10ms window", elapsed)
 	}
 }
