@@ -116,6 +116,16 @@ enum ReviewLoopInteractionStatus {
   consumed,
 }
 
+enum TourStatus {
+  active,
+  ended,
+}
+
+enum TourConnectionState {
+  connected,
+  disconnected,
+}
+
 enum GitOperationKind {
   delete_worktree,
 }
@@ -896,6 +906,58 @@ model GetReviewStateMessage {
   cmd: "get_review_state";
   repo_path: string;
   branch: string;
+}
+
+model OpenTourMessage {
+  cmd: "open_tour";
+  session_id: string;
+  guide_path: string;
+  base_ref?: string;
+  name?: string;
+}
+
+model GetTourStateMessage {
+  cmd: "get_tour_state";
+  session_id: string;
+}
+
+model RefreshTourMessage {
+  cmd: "refresh_tour";
+  tour_id: string;
+}
+
+model SaveTourDraftMessage {
+  cmd: "save_tour_draft";
+  tour_id: string;
+  draft: TourFileDraft;
+  current_file?: string;
+}
+
+model AskTourMessage {
+  cmd: "ask_tour";
+  tour_id: string;
+  body: string;
+  context: TourQuestionContext;
+}
+
+model ReplyTourMessage {
+  cmd: "reply_tour";
+  tour_id: string;
+  event_id: string;
+  body: string;
+}
+
+model SubmitTourMessage {
+  cmd: "submit_tour";
+  tour_id: string;
+  body: string;
+  finish: boolean;
+}
+
+model WaitTourEventMessage {
+  cmd: "wait_tour_event";
+  tour_id: string;
+  after_seq: int32;
 }
 
 model StartReviewLoopMessage {
@@ -1720,11 +1782,121 @@ model ReviewComment {
   created_at: string;    // ISO timestamp
 }
 
+model TourComment {
+  author: string;
+  body: string;
+}
+
+model TourAnnotation {
+  id: string;
+  line_start: int32;
+  line_end: int32;
+  comments: TourComment[];
+}
+
+model TourFile {
+  path: string;
+  old_path?: string;
+  status: string;
+  additions: int32;
+  deletions: int32;
+  group: string;
+  view: string;
+  note: string;
+  original: string;
+  modified: string;
+  annotations: TourAnnotation[];
+}
+
+model TourDraftText {
+  id: string;
+  body: string;
+}
+
+model TourLineComment {
+  line: int32;
+  body: string;
+}
+
+model TourFileDraft {
+  path: string;
+  reviewed: boolean;
+  note: string;
+  annotation_replies: TourDraftText[];
+  line_comments: TourLineComment[];
+}
+
+model TourQuestionContext {
+  path: string;
+  line_start?: int32;
+  line_end?: int32;
+  code?: string;
+  source: string;
+}
+
+model TourTranscriptEntry {
+  id: string;
+  role: string;
+  body: string;
+  event_id?: string;
+  context?: TourQuestionContext;
+  created_at: string;
+}
+
+model TourEvent {
+  id: string;
+  tour_id: string;
+  seq: int32;
+  kind: string;
+  markdown: string;
+  finish: boolean;
+  context?: TourQuestionContext;
+  created_at: string;
+}
+
+model TourRun {
+  tour_id: string;
+  session_id: string;
+  name: string;
+  repo_path: string;
+  guide_path: string;
+  base_ref: string;
+  status: TourStatus;
+  connection_state: TourConnectionState;
+  summary: string;
+  warnings: string[];
+  files: TourFile[];
+  drafts: TourFileDraft[];
+  transcript: TourTranscriptEntry[];
+  current_file?: string;
+  listener_event_seq: int32;
+  created_at: string;
+  updated_at: string;
+  ended_at?: string;
+}
+
 model GetReviewStateResultMessage {
   event: "get_review_state_result";
   state?: ReviewState;
   success: boolean;
   error?: string;
+}
+
+model TourResultMessage {
+  event: "tour_result";
+  action: string;
+  session_id?: string;
+  tour_id?: string;
+  tour?: TourRun;
+  tour_event?: TourEvent;
+  success: boolean;
+  error?: string;
+}
+
+model TourUpdatedMessage {
+  event: "tour_updated";
+  session_id: string;
+  tour?: TourRun;
 }
 
 model ReviewLoopResultMessage {
@@ -1898,6 +2070,8 @@ model Response {
   repos?: RepoState[];
   authors?: AuthorState[];
   review_loop_run?: ReviewLoopRun;
+  tour?: TourRun;
+  tour_event?: TourEvent;
 }
 
 model DelegateResult {
@@ -2053,6 +2227,8 @@ model WebSocketEvent {
   signal?: string;
 
   review_loop_run?: ReviewLoopRun;
+  tour?: TourRun;
+  tour_event?: TourEvent;
   workspace_context_result?: WorkspaceContextResult;
   chief_of_staff_dispatch?: ChiefOfStaffDispatch;
   chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
@@ -2111,6 +2287,8 @@ alias DaemonEvent =
   | BranchDiffFilesResultMessage
   | GetRepoInfoResultMessage
   | GetReviewStateResultMessage
+  | TourResultMessage
+  | TourUpdatedMessage
   | ReviewLoopResultMessage
   | ReviewLoopUpdatedMessage
   | WorkspaceContextResultMessage

@@ -29,6 +29,7 @@ import (
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptyworker"
+	"github.com/victorarias/attn/internal/tour"
 	"github.com/victorarias/attn/internal/wrapper"
 )
 
@@ -137,6 +138,9 @@ func main() {
 		runPTYWorker()
 	case "review-loop":
 		runReviewLoop()
+	case "tour":
+		maybePrintProfileBanner()
+		runTour()
 	case "plugin":
 		maybePrintProfileBanner()
 		runPluginCommand()
@@ -432,11 +436,232 @@ commands:
   open <file.md> [--session <id>]   show a markdown file in attn
   browser <command>                 open and control the in-app browser
   review-loop <command>             manage an autonomous review loop
+  tour <command>                    create and run an interactive code tour
   list                              list sessions
   daemon <command>                  manage the daemon
   profile-env <profile|--unset>     print shell commands for selecting a profile
   version                           print version information
 `)
+}
+
+func runTour() {
+	if len(os.Args) < 3 {
+		writeTourHelp(os.Stderr)
+		os.Exit(2)
+	}
+	switch os.Args[2] {
+	case "create":
+		runTourCreate()
+	case "start":
+		runTourStart()
+	case "status":
+		runTourStatus()
+	case "refresh":
+		runTourRefresh()
+	case "reply":
+		runTourReply()
+	case "help", "-h", "--help":
+		writeTourHelp(os.Stdout)
+	default:
+		fmt.Fprintf(os.Stderr, "tour: unknown command %q\n\n", os.Args[2])
+		writeTourHelp(os.Stderr)
+		os.Exit(2)
+	}
+}
+
+func writeTourHelp(w io.Writer) {
+	fmt.Fprint(w, `usage: attn tour <command>
+
+commands:
+  create  create a guide in the active attn profile directory
+  start   open a guide and listen for questions and feedback until End tour
+  status  show the current session's active tour
+  refresh reload the guide and current working-tree changes
+  reply   answer a question from the tour
+`)
+}
+
+type tourReadyPayload struct {
+	TourID           string                       `json:"tour_id"`
+	SessionID        string                       `json:"session_id"`
+	Name             string                       `json:"name"`
+	Status           protocol.TourStatus          `json:"status"`
+	ConnectionState  protocol.TourConnectionState `json:"connection_state"`
+	BaseRef          string                       `json:"base_ref"`
+	GuidePath        string                       `json:"guide_path"`
+	ListenerEventSeq int                          `json:"listener_event_seq"`
+}
+
+func newTourReadyPayload(run *protocol.TourRun) tourReadyPayload {
+	return tourReadyPayload{
+		TourID:           run.TourID,
+		SessionID:        run.SessionID,
+		Name:             run.Name,
+		Status:           run.Status,
+		ConnectionState:  run.ConnectionState,
+		BaseRef:          run.BaseRef,
+		GuidePath:        run.GuidePath,
+		ListenerEventSeq: run.ListenerEventSeq,
+	}
+}
+
+func runTourCreate() {
+	fs := flag.NewFlagSet("tour create", flag.ExitOnError)
+	name := fs.String("name", "tour", "tour name")
+	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	repoPath := fs.String("repo", "", "repository path (defaults to current directory)")
+	_ = fs.Parse(os.Args[3:])
+	session := tourSessionID(*sessionID)
+	if session == "" {
+		fmt.Fprintln(os.Stderr, "tour create: no session; run inside attn or pass --session")
+		os.Exit(2)
+	}
+	repo := strings.TrimSpace(*repoPath)
+	if repo == "" {
+		var err error
+		repo, err = os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "tour create: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	path, err := tour.CreateGuidePath(repo, session, *name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tour create: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(path)
+}
+
+func runTourStart() {
+	fs := flag.NewFlagSet("tour start", flag.ExitOnError)
+	guidePath := fs.String("guide", "", "system tour guide path")
+	name := fs.String("name", "", "tour name")
+	baseRef := fs.String("base", "", "base branch or ref")
+	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	_ = fs.Parse(os.Args[3:])
+	session := tourSessionID(*sessionID)
+	if session == "" || strings.TrimSpace(*guidePath) == "" {
+		fmt.Fprintln(os.Stderr, "tour start: --guide and a session are required")
+		os.Exit(2)
+	}
+	absoluteGuide, err := filepath.Abs(*guidePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tour start: resolve guide: %v\n", err)
+		os.Exit(1)
+	}
+	c := client.New("")
+	run, err := c.OpenTour(session, absoluteGuide, *name, *baseRef)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tour start: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("TOUR_READY %s\n", mustJSON(newTourReadyPayload(run)))
+	afterSeq := run.ListenerEventSeq
+	for run.Status == protocol.TourStatusActive {
+		event, nextRun, err := c.WaitTourEvent(run.TourID, afterSeq)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "tour listener: %v\n", err)
+			os.Exit(1)
+		}
+		if nextRun != nil {
+			run = nextRun
+		}
+		if event == nil {
+			continue
+		}
+		afterSeq = event.Seq
+		switch event.Kind {
+		case "question":
+			fmt.Printf("QUESTION_READY %s\n", mustJSON(event))
+		case "feedback":
+			fmt.Printf("FEEDBACK_READY %s\n", mustJSON(event))
+		case "finish":
+			fmt.Printf("TOUR_ENDED %s\n", mustJSON(event))
+		default:
+			fmt.Printf("TOUR_EVENT %s\n", mustJSON(event))
+		}
+	}
+}
+
+func runTourStatus() {
+	fs := flag.NewFlagSet("tour status", flag.ExitOnError)
+	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	_ = fs.Parse(os.Args[3:])
+	session := tourSessionID(*sessionID)
+	if session == "" {
+		fmt.Fprintln(os.Stderr, "tour status: no session; run inside attn or pass --session")
+		os.Exit(2)
+	}
+	run, err := client.New("").GetTourState(session)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tour status: %v\n", err)
+		os.Exit(1)
+	}
+	printJSON(run)
+}
+
+func runTourRefresh() {
+	fs := flag.NewFlagSet("tour refresh", flag.ExitOnError)
+	tourID := fs.String("tour", "", "tour id")
+	_ = fs.Parse(os.Args[3:])
+	if strings.TrimSpace(*tourID) == "" {
+		fmt.Fprintln(os.Stderr, "tour refresh: --tour is required")
+		os.Exit(2)
+	}
+	run, err := client.New("").RefreshTour(*tourID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tour refresh: %v\n", err)
+		os.Exit(1)
+	}
+	printJSON(run)
+}
+
+func runTourReply() {
+	fs := flag.NewFlagSet("tour reply", flag.ExitOnError)
+	tourID := fs.String("tour", "", "tour id")
+	eventID := fs.String("event", "", "question event id")
+	body := fs.String("body", "", "answer text")
+	bodyFile := fs.String("body-file", "", "file containing the answer")
+	_ = fs.Parse(os.Args[3:])
+	answer := strings.TrimSpace(*body)
+	if strings.TrimSpace(*bodyFile) != "" {
+		if answer != "" {
+			fmt.Fprintln(os.Stderr, "tour reply: pass only one of --body or --body-file")
+			os.Exit(2)
+		}
+		content, err := os.ReadFile(*bodyFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "tour reply: %v\n", err)
+			os.Exit(1)
+		}
+		answer = strings.TrimSpace(string(content))
+	}
+	if strings.TrimSpace(*tourID) == "" || strings.TrimSpace(*eventID) == "" || answer == "" {
+		fmt.Fprintln(os.Stderr, "tour reply: --tour, --event, and --body or --body-file are required")
+		os.Exit(2)
+	}
+	run, err := client.New("").ReplyTour(*tourID, *eventID, answer)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tour reply: %v\n", err)
+		os.Exit(1)
+	}
+	printJSON(run)
+}
+
+func tourSessionID(value string) string {
+	if session := strings.TrimSpace(value); session != "" {
+		return session
+	}
+	return strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+}
+
+func mustJSON(value interface{}) string {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
 }
 
 func runDelegate() {

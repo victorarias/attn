@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchMessagesMessage, ListDispatchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, OpenBrowserMessage, OpenMarkdownMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReportDispatchMessage, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockPanelMessage, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockPanelMessage, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspacePanelContentGetMessage, WorkspacePanelContentMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AskTourMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTourStateMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchMessagesMessage, ListDispatchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenTourMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RefreshTourMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, ReplyTourMessage, RepoInfo, RepoState, ReportDispatchMessage, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SaveTourDraftMessage, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubmitTourMessage, SubscribeGitStatusMessage, TodosMessage, TourAnnotation, TourComment, TourConnectionState, TourDraftText, TourEvent, TourFile, TourFileDraft, TourLineComment, TourQuestionContext, TourResultMessage, TourRun, TourStatus, TourTranscriptEntry, TourUpdatedMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WaitTourEventMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const acknowledgeDispatchMessage = Convert.toAcknowledgeDispatchMessage(json);
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
@@ -8,6 +8,7 @@
 //   const addEndpointMessage = Convert.toAddEndpointMessage(json);
 //   const answerReviewLoopMessage = Convert.toAnswerReviewLoopMessage(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
+//   const askTourMessage = Convert.toAskTourMessage(json);
 //   const attachPolicy = Convert.toAttachPolicy(json);
 //   const attachResultMessage = Convert.toAttachResultMessage(json);
 //   const attachSessionMessage = Convert.toAttachSessionMessage(json);
@@ -84,6 +85,7 @@
 //   const getScreenSnapshotMessage = Convert.toGetScreenSnapshotMessage(json);
 //   const getScreenSnapshotResultMessage = Convert.toGetScreenSnapshotResultMessage(json);
 //   const getSettingsMessage = Convert.toGetSettingsMessage(json);
+//   const getTourStateMessage = Convert.toGetTourStateMessage(json);
 //   const gitFileChange = Convert.toGitFileChange(json);
 //   const gitHubHostsUpdatedMessage = Convert.toGitHubHostsUpdatedMessage(json);
 //   const gitOperation = Convert.toGitOperation(json);
@@ -118,6 +120,7 @@
 //   const muteWorkspaceMessage = Convert.toMuteWorkspaceMessage(json);
 //   const openBrowserMessage = Convert.toOpenBrowserMessage(json);
 //   const openMarkdownMessage = Convert.toOpenMarkdownMessage(json);
+//   const openTourMessage = Convert.toOpenTourMessage(json);
 //   const pR = Convert.toPR(json);
 //   const pRActionResultMessage = Convert.toPRActionResultMessage(json);
 //   const pRRole = Convert.toPRRole(json);
@@ -143,6 +146,7 @@
 //   const recentLocationsResultMessage = Convert.toRecentLocationsResultMessage(json);
 //   const refreshPRsMessage = Convert.toRefreshPRsMessage(json);
 //   const refreshPRsResultMessage = Convert.toRefreshPRsResultMessage(json);
+//   const refreshTourMessage = Convert.toRefreshTourMessage(json);
 //   const registerMessage = Convert.toRegisterMessage(json);
 //   const registerWorkspaceMessage = Convert.toRegisterWorkspaceMessage(json);
 //   const removeEndpointMessage = Convert.toRemoveEndpointMessage(json);
@@ -151,6 +155,7 @@
 //   const renameSessionMessage = Convert.toRenameSessionMessage(json);
 //   const renameWorkspaceMessage = Convert.toRenameWorkspaceMessage(json);
 //   const replaySegment = Convert.toReplaySegment(json);
+//   const replyTourMessage = Convert.toReplyTourMessage(json);
 //   const repoInfo = Convert.toRepoInfo(json);
 //   const repoState = Convert.toRepoState(json);
 //   const reportDispatchMessage = Convert.toReportDispatchMessage(json);
@@ -172,6 +177,7 @@
 //   const reviewLoopStatus = Convert.toReviewLoopStatus(json);
 //   const reviewLoopUpdatedMessage = Convert.toReviewLoopUpdatedMessage(json);
 //   const reviewState = Convert.toReviewState(json);
+//   const saveTourDraftMessage = Convert.toSaveTourDraftMessage(json);
 //   const sendDispatchMessage = Convert.toSendDispatchMessage(json);
 //   const session = Convert.toSession(json);
 //   const sessionExitedMessage = Convert.toSessionExitedMessage(json);
@@ -196,14 +202,30 @@
 //   const stateMessage = Convert.toStateMessage(json);
 //   const stopMessage = Convert.toStopMessage(json);
 //   const stopReviewLoopMessage = Convert.toStopReviewLoopMessage(json);
+//   const submitTourMessage = Convert.toSubmitTourMessage(json);
 //   const subscribeGitStatusMessage = Convert.toSubscribeGitStatusMessage(json);
 //   const todosMessage = Convert.toTodosMessage(json);
+//   const tourAnnotation = Convert.toTourAnnotation(json);
+//   const tourComment = Convert.toTourComment(json);
+//   const tourConnectionState = Convert.toTourConnectionState(json);
+//   const tourDraftText = Convert.toTourDraftText(json);
+//   const tourEvent = Convert.toTourEvent(json);
+//   const tourFile = Convert.toTourFile(json);
+//   const tourFileDraft = Convert.toTourFileDraft(json);
+//   const tourLineComment = Convert.toTourLineComment(json);
+//   const tourQuestionContext = Convert.toTourQuestionContext(json);
+//   const tourResultMessage = Convert.toTourResultMessage(json);
+//   const tourRun = Convert.toTourRun(json);
+//   const tourStatus = Convert.toTourStatus(json);
+//   const tourTranscriptEntry = Convert.toTourTranscriptEntry(json);
+//   const tourUpdatedMessage = Convert.toTourUpdatedMessage(json);
 //   const unregisterMessage = Convert.toUnregisterMessage(json);
 //   const unregisterWorkspaceMessage = Convert.toUnregisterWorkspaceMessage(json);
 //   const unsubscribeGitStatusMessage = Convert.toUnsubscribeGitStatusMessage(json);
 //   const updateCommentMessage = Convert.toUpdateCommentMessage(json);
 //   const updateCommentResultMessage = Convert.toUpdateCommentResultMessage(json);
 //   const updateEndpointMessage = Convert.toUpdateEndpointMessage(json);
+//   const waitTourEventMessage = Convert.toWaitTourEventMessage(json);
 //   const wakeDispatchAgentMessage = Convert.toWakeDispatchAgentMessage(json);
 //   const wakeDispatchAgentResultMessage = Convert.toWakeDispatchAgentResultMessage(json);
 //   const webSocketEvent = Convert.toWebSocketEvent(json);
@@ -226,7 +248,6 @@
 //   const workspaceLayoutAddSessionPaneMessage = Convert.toWorkspaceLayoutAddSessionPaneMessage(json);
 //   const workspaceLayoutClosePaneMessage = Convert.toWorkspaceLayoutClosePaneMessage(json);
 //   const workspaceLayoutDockEdge = Convert.toWorkspaceLayoutDockEdge(json);
-//   const workspaceLayoutDockPanelMessage = Convert.toWorkspaceLayoutDockPanelMessage(json);
 //   const workspaceLayoutDockTileMessage = Convert.toWorkspaceLayoutDockTileMessage(json);
 //   const workspaceLayoutFocusPaneMessage = Convert.toWorkspaceLayoutFocusPaneMessage(json);
 //   const workspaceLayoutGetMessage = Convert.toWorkspaceLayoutGetMessage(json);
@@ -239,12 +260,9 @@
 //   const workspaceLayoutRenamePaneMessage = Convert.toWorkspaceLayoutRenamePaneMessage(json);
 //   const workspaceLayoutSetSplitRatioMessage = Convert.toWorkspaceLayoutSetSplitRatioMessage(json);
 //   const workspaceLayoutSplitDirection = Convert.toWorkspaceLayoutSplitDirection(json);
-//   const workspaceLayoutUndockPanelMessage = Convert.toWorkspaceLayoutUndockPanelMessage(json);
 //   const workspaceLayoutUndockTileMessage = Convert.toWorkspaceLayoutUndockTileMessage(json);
 //   const workspaceLayoutUpdateTileMessage = Convert.toWorkspaceLayoutUpdateTileMessage(json);
 //   const workspaceLayoutUpdatedMessage = Convert.toWorkspaceLayoutUpdatedMessage(json);
-//   const workspacePanelContentGetMessage = Convert.toWorkspacePanelContentGetMessage(json);
-//   const workspacePanelContentMessage = Convert.toWorkspacePanelContentMessage(json);
 //   const workspaceRegisteredMessage = Convert.toWorkspaceRegisteredMessage(json);
 //   const workspaceSelectedMessage = Convert.toWorkspaceSelectedMessage(json);
 //   const workspaceStateChangedMessage = Convert.toWorkspaceStateChangedMessage(json);
@@ -345,6 +363,27 @@ export interface ApprovePRMessage {
 
 export enum ApprovePRMessageCmd {
     ApprovePR = "approve_pr",
+}
+
+export interface AskTourMessage {
+    body:    string;
+    cmd:     AskTourMessageCmd;
+    context: Context;
+    tour_id: string;
+    [property: string]: any;
+}
+
+export enum AskTourMessageCmd {
+    AskTour = "ask_tour",
+}
+
+export interface Context {
+    code?:       string;
+    line_end?:   number;
+    line_start?: number;
+    path:        string;
+    source:      string;
+    [property: string]: any;
 }
 
 export interface AttachResultMessage {
@@ -1503,6 +1542,16 @@ export enum GetSettingsMessageCmd {
     GetSettings = "get_settings",
 }
 
+export interface GetTourStateMessage {
+    cmd:        GetTourStateMessageCmd;
+    session_id: string;
+    [property: string]: any;
+}
+
+export enum GetTourStateMessageCmd {
+    GetTourState = "get_tour_state",
+}
+
 export interface GitFileChange {
     additions?: number;
     deletions?: number;
@@ -1954,6 +2003,19 @@ export enum OpenMarkdownMessageCmd {
     OpenMarkdown = "open_markdown",
 }
 
+export interface OpenTourMessage {
+    base_ref?:  string;
+    cmd:        OpenTourMessageCmd;
+    guide_path: string;
+    name?:      string;
+    session_id: string;
+    [property: string]: any;
+}
+
+export enum OpenTourMessageCmd {
+    OpenTour = "open_tour",
+}
+
 export interface PR {
     approved_by_me:         boolean;
     author:                 string;
@@ -2262,6 +2324,16 @@ export enum RefreshPRsResultMessageEvent {
     RefreshPrsResult = "refresh_prs_result",
 }
 
+export interface RefreshTourMessage {
+    cmd:     RefreshTourMessageCmd;
+    tour_id: string;
+    [property: string]: any;
+}
+
+export enum RefreshTourMessageCmd {
+    RefreshTour = "refresh_tour",
+}
+
 export interface RegisterMessage {
     agent?:       string;
     cmd:          RegisterMessageCmd;
@@ -2349,6 +2421,18 @@ export interface ReplaySegment {
     data: string;
     rows: number;
     [property: string]: any;
+}
+
+export interface ReplyTourMessage {
+    body:     string;
+    cmd:      ReplyTourMessageCmd;
+    event_id: string;
+    tour_id:  string;
+    [property: string]: any;
+}
+
+export enum ReplyTourMessageCmd {
+    ReplyTour = "reply_tour",
 }
 
 export interface RepoInfo {
@@ -2441,6 +2525,8 @@ export interface Response {
     repos?:                                RepoElement[];
     review_loop_run?:                      ReviewLoopRunObject;
     sessions?:                             SessionElement[];
+    tour?:                                 Tour;
+    tour_event?:                           TourEventObject;
     workspace_context_maintenance_result?: WorkspaceContextMaintenanceResultObject;
     workspace_context_result?:             WorkspaceContextResultObject;
     workspace_contexts?:                   WorkspaceContextElement[];
@@ -2547,6 +2633,110 @@ export enum ReviewLoopRunStatus {
     Error = "error",
     Running = "running",
     Stopped = "stopped",
+}
+
+export interface Tour {
+    base_ref:           string;
+    connection_state:   TourConnectionState;
+    created_at:         string;
+    current_file?:      string;
+    drafts:             Draft[];
+    ended_at?:          string;
+    files:              FileObject[];
+    guide_path:         string;
+    listener_event_seq: number;
+    name:               string;
+    repo_path:          string;
+    session_id:         string;
+    status:             TourStatus;
+    summary:            string;
+    tour_id:            string;
+    transcript:         TranscriptElement[];
+    updated_at:         string;
+    warnings:           string[];
+    [property: string]: any;
+}
+
+export enum TourConnectionState {
+    Connected = "connected",
+    Disconnected = "disconnected",
+}
+
+export interface Draft {
+    annotation_replies: AnnotationReplyElement[];
+    line_comments:      LineCommentElement[];
+    note:               string;
+    path:               string;
+    reviewed:           boolean;
+    [property: string]: any;
+}
+
+export interface AnnotationReplyElement {
+    body: string;
+    id:   string;
+    [property: string]: any;
+}
+
+export interface LineCommentElement {
+    body: string;
+    line: number;
+    [property: string]: any;
+}
+
+export interface FileObject {
+    additions:   number;
+    annotations: AnnotationElement[];
+    deletions:   number;
+    group:       string;
+    modified:    string;
+    note:        string;
+    old_path?:   string;
+    original:    string;
+    path:        string;
+    status:      string;
+    view:        string;
+    [property: string]: any;
+}
+
+export interface AnnotationElement {
+    comments:   CommentElement[];
+    id:         string;
+    line_end:   number;
+    line_start: number;
+    [property: string]: any;
+}
+
+export interface CommentElement {
+    author: string;
+    body:   string;
+    [property: string]: any;
+}
+
+export enum TourStatus {
+    Active = "active",
+    Ended = "ended",
+}
+
+export interface TranscriptElement {
+    body:       string;
+    context?:   Context;
+    created_at: string;
+    event_id?:  string;
+    id:         string;
+    role:       string;
+    [property: string]: any;
+}
+
+export interface TourEventObject {
+    context?:   Context;
+    created_at: string;
+    finish:     boolean;
+    id:         string;
+    kind:       string;
+    markdown:   string;
+    seq:        number;
+    tour_id:    string;
+    [property: string]: any;
 }
 
 export interface WorkspaceContextMaintenanceResultObject {
@@ -2722,6 +2912,18 @@ export interface ReviewState {
     review_id:    string;
     viewed_files: string[];
     [property: string]: any;
+}
+
+export interface SaveTourDraftMessage {
+    cmd:           SaveTourDraftMessageCmd;
+    current_file?: string;
+    draft:         Draft;
+    tour_id:       string;
+    [property: string]: any;
+}
+
+export enum SaveTourDraftMessageCmd {
+    SaveTourDraft = "save_tour_draft",
 }
 
 export interface SendDispatchMessage {
@@ -3001,6 +3203,18 @@ export enum StopReviewLoopMessageCmd {
     StopReviewLoop = "stop_review_loop",
 }
 
+export interface SubmitTourMessage {
+    body:    string;
+    cmd:     SubmitTourMessageCmd;
+    finish:  boolean;
+    tour_id: string;
+    [property: string]: any;
+}
+
+export enum SubmitTourMessageCmd {
+    SubmitTour = "submit_tour",
+}
+
 export interface SubscribeGitStatusMessage {
     cmd:       SubscribeGitStatusMessageCmd;
     directory: string;
@@ -3020,6 +3234,136 @@ export interface TodosMessage {
 
 export enum TodosMessageCmd {
     Todos = "todos",
+}
+
+export interface TourAnnotation {
+    comments:   CommentElement[];
+    id:         string;
+    line_end:   number;
+    line_start: number;
+    [property: string]: any;
+}
+
+export interface TourComment {
+    author: string;
+    body:   string;
+    [property: string]: any;
+}
+
+export interface TourDraftText {
+    body: string;
+    id:   string;
+    [property: string]: any;
+}
+
+export interface TourEvent {
+    context?:   Context;
+    created_at: string;
+    finish:     boolean;
+    id:         string;
+    kind:       string;
+    markdown:   string;
+    seq:        number;
+    tour_id:    string;
+    [property: string]: any;
+}
+
+export interface TourFile {
+    additions:   number;
+    annotations: AnnotationElement[];
+    deletions:   number;
+    group:       string;
+    modified:    string;
+    note:        string;
+    old_path?:   string;
+    original:    string;
+    path:        string;
+    status:      string;
+    view:        string;
+    [property: string]: any;
+}
+
+export interface TourFileDraft {
+    annotation_replies: AnnotationReplyElement[];
+    line_comments:      LineCommentElement[];
+    note:               string;
+    path:               string;
+    reviewed:           boolean;
+    [property: string]: any;
+}
+
+export interface TourLineComment {
+    body: string;
+    line: number;
+    [property: string]: any;
+}
+
+export interface TourQuestionContext {
+    code?:       string;
+    line_end?:   number;
+    line_start?: number;
+    path:        string;
+    source:      string;
+    [property: string]: any;
+}
+
+export interface TourResultMessage {
+    action:      string;
+    error?:      string;
+    event:       TourResultMessageEvent;
+    session_id?: string;
+    success:     boolean;
+    tour?:       Tour;
+    tour_event?: TourEventObject;
+    tour_id?:    string;
+    [property: string]: any;
+}
+
+export enum TourResultMessageEvent {
+    TourResult = "tour_result",
+}
+
+export interface TourRun {
+    base_ref:           string;
+    connection_state:   TourConnectionState;
+    created_at:         string;
+    current_file?:      string;
+    drafts:             Draft[];
+    ended_at?:          string;
+    files:              FileObject[];
+    guide_path:         string;
+    listener_event_seq: number;
+    name:               string;
+    repo_path:          string;
+    session_id:         string;
+    status:             TourStatus;
+    summary:            string;
+    tour_id:            string;
+    transcript:         TranscriptElement[];
+    updated_at:         string;
+    warnings:           string[];
+    [property: string]: any;
+}
+
+export interface TourTranscriptEntry {
+    body:       string;
+    context?:   Context;
+    created_at: string;
+    event_id?:  string;
+    id:         string;
+    role:       string;
+    [property: string]: any;
+}
+
+export interface TourUpdatedMessage {
+    event:      TourUpdatedMessageEvent;
+    session_id: string;
+    tour?:      Tour;
+    [property: string]: any;
+}
+
+export enum TourUpdatedMessageEvent {
+    TourUpdated = "tour_updated",
 }
 
 export interface UnregisterMessage {
@@ -3085,6 +3429,17 @@ export interface UpdateEndpointMessage {
 
 export enum UpdateEndpointMessageCmd {
     UpdateEndpoint = "update_endpoint",
+}
+
+export interface WaitTourEventMessage {
+    after_seq: number;
+    cmd:       WaitTourEventMessageCmd;
+    tour_id:   string;
+    [property: string]: any;
+}
+
+export enum WaitTourEventMessageCmd {
+    WaitTourEvent = "wait_tour_event",
 }
 
 export interface WakeDispatchAgentMessage {
@@ -3182,6 +3537,8 @@ export interface WebSocketEvent {
     target_path?:               string;
     tile_id?:                   string;
     tile_kind?:                 string;
+    tour?:                      Tour;
+    tour_event?:                TourEventObject;
     unstaged?:                  StagedElement[];
     untracked?:                 StagedElement[];
     warnings?:                  WarningElement[];
@@ -3399,28 +3756,6 @@ export enum WorkspaceLayoutClosePaneMessageCmd {
     WorkspaceLayoutClosePane = "workspace_layout_close_pane",
 }
 
-export interface WorkspaceLayoutDockPanelMessage {
-    anchor_pane_id: string;
-    cmd:            WorkspaceLayoutDockPanelMessageCmd;
-    edge:           WorkspaceLayoutDockEdge;
-    panel_id:       string;
-    panel_kind:     string;
-    ratio?:         number;
-    workspace_id:   string;
-    [property: string]: any;
-}
-
-export enum WorkspaceLayoutDockPanelMessageCmd {
-    WorkspaceLayoutDockPanel = "workspace_layout_dock_panel",
-}
-
-export enum WorkspaceLayoutDockEdge {
-    Bottom = "bottom",
-    Left = "left",
-    Right = "right",
-    Top = "top",
-}
-
 export interface WorkspaceLayoutDockTileMessage {
     anchor_pane_id: string;
     cmd:            WorkspaceLayoutDockTileMessageCmd;
@@ -3434,6 +3769,13 @@ export interface WorkspaceLayoutDockTileMessage {
 
 export enum WorkspaceLayoutDockTileMessageCmd {
     WorkspaceLayoutDockTile = "workspace_layout_dock_tile",
+}
+
+export enum WorkspaceLayoutDockEdge {
+    Bottom = "bottom",
+    Left = "left",
+    Right = "right",
+    Top = "top",
 }
 
 export interface WorkspaceLayoutFocusPaneMessage {
@@ -3533,17 +3875,6 @@ export enum WorkspaceLayoutSetSplitRatioMessageCmd {
     WorkspaceLayoutSetSplitRatio = "workspace_layout_set_split_ratio",
 }
 
-export interface WorkspaceLayoutUndockPanelMessage {
-    cmd:          WorkspaceLayoutUndockPanelMessageCmd;
-    panel_id:     string;
-    workspace_id: string;
-    [property: string]: any;
-}
-
-export enum WorkspaceLayoutUndockPanelMessageCmd {
-    WorkspaceLayoutUndockPanel = "workspace_layout_undock_panel",
-}
-
 export interface WorkspaceLayoutUndockTileMessage {
     cmd:          WorkspaceLayoutUndockTileMessageCmd;
     tile_id:      string;
@@ -3576,32 +3907,6 @@ export interface WorkspaceLayoutUpdatedMessage {
 
 export enum WorkspaceLayoutUpdatedMessageEvent {
     WorkspaceLayoutUpdated = "workspace_layout_updated",
-}
-
-export interface WorkspacePanelContentGetMessage {
-    cmd:          WorkspacePanelContentGetMessageCmd;
-    panel_id:     string;
-    workspace_id: string;
-    [property: string]: any;
-}
-
-export enum WorkspacePanelContentGetMessageCmd {
-    WorkspacePanelContentGet = "workspace_panel_content_get",
-}
-
-export interface WorkspacePanelContentMessage {
-    content:      string;
-    error?:       string;
-    event:        WorkspacePanelContentMessageEvent;
-    panel_id:     string;
-    panel_kind:   string;
-    path:         string;
-    workspace_id: string;
-    [property: string]: any;
-}
-
-export enum WorkspacePanelContentMessageEvent {
-    WorkspacePanelContent = "workspace_panel_content",
 }
 
 export interface WorkspaceRegisteredMessage {
@@ -3757,6 +4062,14 @@ export class Convert {
 
     public static approvePRMessageToJson(value: ApprovePRMessage): string {
         return JSON.stringify(uncast(value, r("ApprovePRMessage")), null, 2);
+    }
+
+    public static toAskTourMessage(json: string): AskTourMessage {
+        return cast(JSON.parse(json), r("AskTourMessage"));
+    }
+
+    public static askTourMessageToJson(value: AskTourMessage): string {
+        return JSON.stringify(uncast(value, r("AskTourMessage")), null, 2);
     }
 
     public static toAttachPolicy(json: string): AttachPolicy {
@@ -4367,6 +4680,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("GetSettingsMessage")), null, 2);
     }
 
+    public static toGetTourStateMessage(json: string): GetTourStateMessage {
+        return cast(JSON.parse(json), r("GetTourStateMessage"));
+    }
+
+    public static getTourStateMessageToJson(value: GetTourStateMessage): string {
+        return JSON.stringify(uncast(value, r("GetTourStateMessage")), null, 2);
+    }
+
     public static toGitFileChange(json: string): GitFileChange {
         return cast(JSON.parse(json), r("GitFileChange"));
     }
@@ -4639,6 +4960,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("OpenMarkdownMessage")), null, 2);
     }
 
+    public static toOpenTourMessage(json: string): OpenTourMessage {
+        return cast(JSON.parse(json), r("OpenTourMessage"));
+    }
+
+    public static openTourMessageToJson(value: OpenTourMessage): string {
+        return JSON.stringify(uncast(value, r("OpenTourMessage")), null, 2);
+    }
+
     public static toPR(json: string): PR {
         return cast(JSON.parse(json), r("PR"));
     }
@@ -4839,6 +5168,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("RefreshPRsResultMessage")), null, 2);
     }
 
+    public static toRefreshTourMessage(json: string): RefreshTourMessage {
+        return cast(JSON.parse(json), r("RefreshTourMessage"));
+    }
+
+    public static refreshTourMessageToJson(value: RefreshTourMessage): string {
+        return JSON.stringify(uncast(value, r("RefreshTourMessage")), null, 2);
+    }
+
     public static toRegisterMessage(json: string): RegisterMessage {
         return cast(JSON.parse(json), r("RegisterMessage"));
     }
@@ -4901,6 +5238,14 @@ export class Convert {
 
     public static replaySegmentToJson(value: ReplaySegment): string {
         return JSON.stringify(uncast(value, r("ReplaySegment")), null, 2);
+    }
+
+    public static toReplyTourMessage(json: string): ReplyTourMessage {
+        return cast(JSON.parse(json), r("ReplyTourMessage"));
+    }
+
+    public static replyTourMessageToJson(value: ReplyTourMessage): string {
+        return JSON.stringify(uncast(value, r("ReplyTourMessage")), null, 2);
     }
 
     public static toRepoInfo(json: string): RepoInfo {
@@ -5069,6 +5414,14 @@ export class Convert {
 
     public static reviewStateToJson(value: ReviewState): string {
         return JSON.stringify(uncast(value, r("ReviewState")), null, 2);
+    }
+
+    public static toSaveTourDraftMessage(json: string): SaveTourDraftMessage {
+        return cast(JSON.parse(json), r("SaveTourDraftMessage"));
+    }
+
+    public static saveTourDraftMessageToJson(value: SaveTourDraftMessage): string {
+        return JSON.stringify(uncast(value, r("SaveTourDraftMessage")), null, 2);
     }
 
     public static toSendDispatchMessage(json: string): SendDispatchMessage {
@@ -5263,6 +5616,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("StopReviewLoopMessage")), null, 2);
     }
 
+    public static toSubmitTourMessage(json: string): SubmitTourMessage {
+        return cast(JSON.parse(json), r("SubmitTourMessage"));
+    }
+
+    public static submitTourMessageToJson(value: SubmitTourMessage): string {
+        return JSON.stringify(uncast(value, r("SubmitTourMessage")), null, 2);
+    }
+
     public static toSubscribeGitStatusMessage(json: string): SubscribeGitStatusMessage {
         return cast(JSON.parse(json), r("SubscribeGitStatusMessage"));
     }
@@ -5277,6 +5638,118 @@ export class Convert {
 
     public static todosMessageToJson(value: TodosMessage): string {
         return JSON.stringify(uncast(value, r("TodosMessage")), null, 2);
+    }
+
+    public static toTourAnnotation(json: string): TourAnnotation {
+        return cast(JSON.parse(json), r("TourAnnotation"));
+    }
+
+    public static tourAnnotationToJson(value: TourAnnotation): string {
+        return JSON.stringify(uncast(value, r("TourAnnotation")), null, 2);
+    }
+
+    public static toTourComment(json: string): TourComment {
+        return cast(JSON.parse(json), r("TourComment"));
+    }
+
+    public static tourCommentToJson(value: TourComment): string {
+        return JSON.stringify(uncast(value, r("TourComment")), null, 2);
+    }
+
+    public static toTourConnectionState(json: string): TourConnectionState {
+        return cast(JSON.parse(json), r("TourConnectionState"));
+    }
+
+    public static tourConnectionStateToJson(value: TourConnectionState): string {
+        return JSON.stringify(uncast(value, r("TourConnectionState")), null, 2);
+    }
+
+    public static toTourDraftText(json: string): TourDraftText {
+        return cast(JSON.parse(json), r("TourDraftText"));
+    }
+
+    public static tourDraftTextToJson(value: TourDraftText): string {
+        return JSON.stringify(uncast(value, r("TourDraftText")), null, 2);
+    }
+
+    public static toTourEvent(json: string): TourEvent {
+        return cast(JSON.parse(json), r("TourEvent"));
+    }
+
+    public static tourEventToJson(value: TourEvent): string {
+        return JSON.stringify(uncast(value, r("TourEvent")), null, 2);
+    }
+
+    public static toTourFile(json: string): TourFile {
+        return cast(JSON.parse(json), r("TourFile"));
+    }
+
+    public static tourFileToJson(value: TourFile): string {
+        return JSON.stringify(uncast(value, r("TourFile")), null, 2);
+    }
+
+    public static toTourFileDraft(json: string): TourFileDraft {
+        return cast(JSON.parse(json), r("TourFileDraft"));
+    }
+
+    public static tourFileDraftToJson(value: TourFileDraft): string {
+        return JSON.stringify(uncast(value, r("TourFileDraft")), null, 2);
+    }
+
+    public static toTourLineComment(json: string): TourLineComment {
+        return cast(JSON.parse(json), r("TourLineComment"));
+    }
+
+    public static tourLineCommentToJson(value: TourLineComment): string {
+        return JSON.stringify(uncast(value, r("TourLineComment")), null, 2);
+    }
+
+    public static toTourQuestionContext(json: string): TourQuestionContext {
+        return cast(JSON.parse(json), r("TourQuestionContext"));
+    }
+
+    public static tourQuestionContextToJson(value: TourQuestionContext): string {
+        return JSON.stringify(uncast(value, r("TourQuestionContext")), null, 2);
+    }
+
+    public static toTourResultMessage(json: string): TourResultMessage {
+        return cast(JSON.parse(json), r("TourResultMessage"));
+    }
+
+    public static tourResultMessageToJson(value: TourResultMessage): string {
+        return JSON.stringify(uncast(value, r("TourResultMessage")), null, 2);
+    }
+
+    public static toTourRun(json: string): TourRun {
+        return cast(JSON.parse(json), r("TourRun"));
+    }
+
+    public static tourRunToJson(value: TourRun): string {
+        return JSON.stringify(uncast(value, r("TourRun")), null, 2);
+    }
+
+    public static toTourStatus(json: string): TourStatus {
+        return cast(JSON.parse(json), r("TourStatus"));
+    }
+
+    public static tourStatusToJson(value: TourStatus): string {
+        return JSON.stringify(uncast(value, r("TourStatus")), null, 2);
+    }
+
+    public static toTourTranscriptEntry(json: string): TourTranscriptEntry {
+        return cast(JSON.parse(json), r("TourTranscriptEntry"));
+    }
+
+    public static tourTranscriptEntryToJson(value: TourTranscriptEntry): string {
+        return JSON.stringify(uncast(value, r("TourTranscriptEntry")), null, 2);
+    }
+
+    public static toTourUpdatedMessage(json: string): TourUpdatedMessage {
+        return cast(JSON.parse(json), r("TourUpdatedMessage"));
+    }
+
+    public static tourUpdatedMessageToJson(value: TourUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("TourUpdatedMessage")), null, 2);
     }
 
     public static toUnregisterMessage(json: string): UnregisterMessage {
@@ -5325,6 +5798,14 @@ export class Convert {
 
     public static updateEndpointMessageToJson(value: UpdateEndpointMessage): string {
         return JSON.stringify(uncast(value, r("UpdateEndpointMessage")), null, 2);
+    }
+
+    public static toWaitTourEventMessage(json: string): WaitTourEventMessage {
+        return cast(JSON.parse(json), r("WaitTourEventMessage"));
+    }
+
+    public static waitTourEventMessageToJson(value: WaitTourEventMessage): string {
+        return JSON.stringify(uncast(value, r("WaitTourEventMessage")), null, 2);
     }
 
     public static toWakeDispatchAgentMessage(json: string): WakeDispatchAgentMessage {
@@ -5503,14 +5984,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("WorkspaceLayoutDockEdge")), null, 2);
     }
 
-    public static toWorkspaceLayoutDockPanelMessage(json: string): WorkspaceLayoutDockPanelMessage {
-        return cast(JSON.parse(json), r("WorkspaceLayoutDockPanelMessage"));
-    }
-
-    public static workspaceLayoutDockPanelMessageToJson(value: WorkspaceLayoutDockPanelMessage): string {
-        return JSON.stringify(uncast(value, r("WorkspaceLayoutDockPanelMessage")), null, 2);
-    }
-
     public static toWorkspaceLayoutDockTileMessage(json: string): WorkspaceLayoutDockTileMessage {
         return cast(JSON.parse(json), r("WorkspaceLayoutDockTileMessage"));
     }
@@ -5607,14 +6080,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("WorkspaceLayoutSplitDirection")), null, 2);
     }
 
-    public static toWorkspaceLayoutUndockPanelMessage(json: string): WorkspaceLayoutUndockPanelMessage {
-        return cast(JSON.parse(json), r("WorkspaceLayoutUndockPanelMessage"));
-    }
-
-    public static workspaceLayoutUndockPanelMessageToJson(value: WorkspaceLayoutUndockPanelMessage): string {
-        return JSON.stringify(uncast(value, r("WorkspaceLayoutUndockPanelMessage")), null, 2);
-    }
-
     public static toWorkspaceLayoutUndockTileMessage(json: string): WorkspaceLayoutUndockTileMessage {
         return cast(JSON.parse(json), r("WorkspaceLayoutUndockTileMessage"));
     }
@@ -5637,22 +6102,6 @@ export class Convert {
 
     public static workspaceLayoutUpdatedMessageToJson(value: WorkspaceLayoutUpdatedMessage): string {
         return JSON.stringify(uncast(value, r("WorkspaceLayoutUpdatedMessage")), null, 2);
-    }
-
-    public static toWorkspacePanelContentGetMessage(json: string): WorkspacePanelContentGetMessage {
-        return cast(JSON.parse(json), r("WorkspacePanelContentGetMessage"));
-    }
-
-    public static workspacePanelContentGetMessageToJson(value: WorkspacePanelContentGetMessage): string {
-        return JSON.stringify(uncast(value, r("WorkspacePanelContentGetMessage")), null, 2);
-    }
-
-    public static toWorkspacePanelContentMessage(json: string): WorkspacePanelContentMessage {
-        return cast(JSON.parse(json), r("WorkspacePanelContentMessage"));
-    }
-
-    public static workspacePanelContentMessageToJson(value: WorkspacePanelContentMessage): string {
-        return JSON.stringify(uncast(value, r("WorkspacePanelContentMessage")), null, 2);
     }
 
     public static toWorkspaceRegisteredMessage(json: string): WorkspaceRegisteredMessage {
@@ -5945,6 +6394,19 @@ const typeMap: any = {
     "ApprovePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("ApprovePRMessageCmd") },
         { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "AskTourMessage": o([
+        { json: "body", js: "body", typ: "" },
+        { json: "cmd", js: "cmd", typ: r("AskTourMessageCmd") },
+        { json: "context", js: "context", typ: r("Context") },
+        { json: "tour_id", js: "tour_id", typ: "" },
+    ], "any"),
+    "Context": o([
+        { json: "code", js: "code", typ: u(undefined, "") },
+        { json: "line_end", js: "line_end", typ: u(undefined, 0) },
+        { json: "line_start", js: "line_start", typ: u(undefined, 0) },
+        { json: "path", js: "path", typ: "" },
+        { json: "source", js: "source", typ: "" },
     ], "any"),
     "AttachResultMessage": o([
         { json: "cols", js: "cols", typ: u(undefined, 0) },
@@ -6638,6 +7100,10 @@ const typeMap: any = {
     "GetSettingsMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetSettingsMessageCmd") },
     ], "any"),
+    "GetTourStateMessage": o([
+        { json: "cmd", js: "cmd", typ: r("GetTourStateMessageCmd") },
+        { json: "session_id", js: "session_id", typ: "" },
+    ], "any"),
     "GitFileChange": o([
         { json: "additions", js: "additions", typ: u(undefined, 0) },
         { json: "deletions", js: "deletions", typ: u(undefined, 0) },
@@ -6871,6 +7337,13 @@ const typeMap: any = {
         { json: "path", js: "path", typ: "" },
         { json: "session_id", js: "session_id", typ: u(undefined, "") },
     ], "any"),
+    "OpenTourMessage": o([
+        { json: "base_ref", js: "base_ref", typ: u(undefined, "") },
+        { json: "cmd", js: "cmd", typ: r("OpenTourMessageCmd") },
+        { json: "guide_path", js: "guide_path", typ: "" },
+        { json: "name", js: "name", typ: u(undefined, "") },
+        { json: "session_id", js: "session_id", typ: "" },
+    ], "any"),
     "PR": o([
         { json: "approved_by_me", js: "approved_by_me", typ: true },
         { json: "author", js: "author", typ: "" },
@@ -7049,6 +7522,10 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("RefreshPRsResultMessageEvent") },
         { json: "success", js: "success", typ: true },
     ], "any"),
+    "RefreshTourMessage": o([
+        { json: "cmd", js: "cmd", typ: r("RefreshTourMessageCmd") },
+        { json: "tour_id", js: "tour_id", typ: "" },
+    ], "any"),
     "RegisterMessage": o([
         { json: "agent", js: "agent", typ: u(undefined, "") },
         { json: "cmd", js: "cmd", typ: r("RegisterMessageCmd") },
@@ -7093,6 +7570,12 @@ const typeMap: any = {
         { json: "cols", js: "cols", typ: 0 },
         { json: "data", js: "data", typ: "" },
         { json: "rows", js: "rows", typ: 0 },
+    ], "any"),
+    "ReplyTourMessage": o([
+        { json: "body", js: "body", typ: "" },
+        { json: "cmd", js: "cmd", typ: r("ReplyTourMessageCmd") },
+        { json: "event_id", js: "event_id", typ: "" },
+        { json: "tour_id", js: "tour_id", typ: "" },
     ], "any"),
     "RepoInfo": o([
         { json: "branches", js: "branches", typ: a(r("BranchElement")) },
@@ -7150,6 +7633,8 @@ const typeMap: any = {
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
         { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
+        { json: "tour", js: "tour", typ: u(undefined, r("Tour")) },
+        { json: "tour_event", js: "tour_event", typ: u(undefined, r("TourEventObject")) },
         { json: "workspace_context_maintenance_result", js: "workspace_context_maintenance_result", typ: u(undefined, r("WorkspaceContextMaintenanceResultObject")) },
         { json: "workspace_context_result", js: "workspace_context_result", typ: u(undefined, r("WorkspaceContextResultObject")) },
         { json: "workspace_contexts", js: "workspace_contexts", typ: u(undefined, a(r("WorkspaceContextElement"))) },
@@ -7218,6 +7703,82 @@ const typeMap: any = {
         { json: "loop_id", js: "loop_id", typ: "" },
         { json: "question", js: "question", typ: "" },
         { json: "status", js: "status", typ: r("ReviewLoopInteractionStatus") },
+    ], "any"),
+    "Tour": o([
+        { json: "base_ref", js: "base_ref", typ: "" },
+        { json: "connection_state", js: "connection_state", typ: r("TourConnectionState") },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "current_file", js: "current_file", typ: u(undefined, "") },
+        { json: "drafts", js: "drafts", typ: a(r("Draft")) },
+        { json: "ended_at", js: "ended_at", typ: u(undefined, "") },
+        { json: "files", js: "files", typ: a(r("FileObject")) },
+        { json: "guide_path", js: "guide_path", typ: "" },
+        { json: "listener_event_seq", js: "listener_event_seq", typ: 0 },
+        { json: "name", js: "name", typ: "" },
+        { json: "repo_path", js: "repo_path", typ: "" },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "status", js: "status", typ: r("TourStatus") },
+        { json: "summary", js: "summary", typ: "" },
+        { json: "tour_id", js: "tour_id", typ: "" },
+        { json: "transcript", js: "transcript", typ: a(r("TranscriptElement")) },
+        { json: "updated_at", js: "updated_at", typ: "" },
+        { json: "warnings", js: "warnings", typ: a("") },
+    ], "any"),
+    "Draft": o([
+        { json: "annotation_replies", js: "annotation_replies", typ: a(r("AnnotationReplyElement")) },
+        { json: "line_comments", js: "line_comments", typ: a(r("LineCommentElement")) },
+        { json: "note", js: "note", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "reviewed", js: "reviewed", typ: true },
+    ], "any"),
+    "AnnotationReplyElement": o([
+        { json: "body", js: "body", typ: "" },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "LineCommentElement": o([
+        { json: "body", js: "body", typ: "" },
+        { json: "line", js: "line", typ: 0 },
+    ], "any"),
+    "FileObject": o([
+        { json: "additions", js: "additions", typ: 0 },
+        { json: "annotations", js: "annotations", typ: a(r("AnnotationElement")) },
+        { json: "deletions", js: "deletions", typ: 0 },
+        { json: "group", js: "group", typ: "" },
+        { json: "modified", js: "modified", typ: "" },
+        { json: "note", js: "note", typ: "" },
+        { json: "old_path", js: "old_path", typ: u(undefined, "") },
+        { json: "original", js: "original", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "status", js: "status", typ: "" },
+        { json: "view", js: "view", typ: "" },
+    ], "any"),
+    "AnnotationElement": o([
+        { json: "comments", js: "comments", typ: a(r("CommentElement")) },
+        { json: "id", js: "id", typ: "" },
+        { json: "line_end", js: "line_end", typ: 0 },
+        { json: "line_start", js: "line_start", typ: 0 },
+    ], "any"),
+    "CommentElement": o([
+        { json: "author", js: "author", typ: "" },
+        { json: "body", js: "body", typ: "" },
+    ], "any"),
+    "TranscriptElement": o([
+        { json: "body", js: "body", typ: "" },
+        { json: "context", js: "context", typ: u(undefined, r("Context")) },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "event_id", js: "event_id", typ: u(undefined, "") },
+        { json: "id", js: "id", typ: "" },
+        { json: "role", js: "role", typ: "" },
+    ], "any"),
+    "TourEventObject": o([
+        { json: "context", js: "context", typ: u(undefined, r("Context")) },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "finish", js: "finish", typ: true },
+        { json: "id", js: "id", typ: "" },
+        { json: "kind", js: "kind", typ: "" },
+        { json: "markdown", js: "markdown", typ: "" },
+        { json: "seq", js: "seq", typ: 0 },
+        { json: "tour_id", js: "tour_id", typ: "" },
     ], "any"),
     "WorkspaceContextMaintenanceResultObject": o([
         { json: "action", js: "action", typ: r("WorkspaceContextMaintenanceAction") },
@@ -7349,6 +7910,12 @@ const typeMap: any = {
         { json: "repo_path", js: "repo_path", typ: "" },
         { json: "review_id", js: "review_id", typ: "" },
         { json: "viewed_files", js: "viewed_files", typ: a("") },
+    ], "any"),
+    "SaveTourDraftMessage": o([
+        { json: "cmd", js: "cmd", typ: r("SaveTourDraftMessageCmd") },
+        { json: "current_file", js: "current_file", typ: u(undefined, "") },
+        { json: "draft", js: "draft", typ: r("Draft") },
+        { json: "tour_id", js: "tour_id", typ: "" },
     ], "any"),
     "SendDispatchMessage": o([
         { json: "cmd", js: "cmd", typ: r("SendDispatchMessageCmd") },
@@ -7493,6 +8060,12 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("StopReviewLoopMessageCmd") },
         { json: "session_id", js: "session_id", typ: "" },
     ], "any"),
+    "SubmitTourMessage": o([
+        { json: "body", js: "body", typ: "" },
+        { json: "cmd", js: "cmd", typ: r("SubmitTourMessageCmd") },
+        { json: "finish", js: "finish", typ: true },
+        { json: "tour_id", js: "tour_id", typ: "" },
+    ], "any"),
     "SubscribeGitStatusMessage": o([
         { json: "cmd", js: "cmd", typ: r("SubscribeGitStatusMessageCmd") },
         { json: "directory", js: "directory", typ: "" },
@@ -7501,6 +8074,104 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("TodosMessageCmd") },
         { json: "id", js: "id", typ: "" },
         { json: "todos", js: "todos", typ: a("") },
+    ], "any"),
+    "TourAnnotation": o([
+        { json: "comments", js: "comments", typ: a(r("CommentElement")) },
+        { json: "id", js: "id", typ: "" },
+        { json: "line_end", js: "line_end", typ: 0 },
+        { json: "line_start", js: "line_start", typ: 0 },
+    ], "any"),
+    "TourComment": o([
+        { json: "author", js: "author", typ: "" },
+        { json: "body", js: "body", typ: "" },
+    ], "any"),
+    "TourDraftText": o([
+        { json: "body", js: "body", typ: "" },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "TourEvent": o([
+        { json: "context", js: "context", typ: u(undefined, r("Context")) },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "finish", js: "finish", typ: true },
+        { json: "id", js: "id", typ: "" },
+        { json: "kind", js: "kind", typ: "" },
+        { json: "markdown", js: "markdown", typ: "" },
+        { json: "seq", js: "seq", typ: 0 },
+        { json: "tour_id", js: "tour_id", typ: "" },
+    ], "any"),
+    "TourFile": o([
+        { json: "additions", js: "additions", typ: 0 },
+        { json: "annotations", js: "annotations", typ: a(r("AnnotationElement")) },
+        { json: "deletions", js: "deletions", typ: 0 },
+        { json: "group", js: "group", typ: "" },
+        { json: "modified", js: "modified", typ: "" },
+        { json: "note", js: "note", typ: "" },
+        { json: "old_path", js: "old_path", typ: u(undefined, "") },
+        { json: "original", js: "original", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "status", js: "status", typ: "" },
+        { json: "view", js: "view", typ: "" },
+    ], "any"),
+    "TourFileDraft": o([
+        { json: "annotation_replies", js: "annotation_replies", typ: a(r("AnnotationReplyElement")) },
+        { json: "line_comments", js: "line_comments", typ: a(r("LineCommentElement")) },
+        { json: "note", js: "note", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "reviewed", js: "reviewed", typ: true },
+    ], "any"),
+    "TourLineComment": o([
+        { json: "body", js: "body", typ: "" },
+        { json: "line", js: "line", typ: 0 },
+    ], "any"),
+    "TourQuestionContext": o([
+        { json: "code", js: "code", typ: u(undefined, "") },
+        { json: "line_end", js: "line_end", typ: u(undefined, 0) },
+        { json: "line_start", js: "line_start", typ: u(undefined, 0) },
+        { json: "path", js: "path", typ: "" },
+        { json: "source", js: "source", typ: "" },
+    ], "any"),
+    "TourResultMessage": o([
+        { json: "action", js: "action", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("TourResultMessageEvent") },
+        { json: "session_id", js: "session_id", typ: u(undefined, "") },
+        { json: "success", js: "success", typ: true },
+        { json: "tour", js: "tour", typ: u(undefined, r("Tour")) },
+        { json: "tour_event", js: "tour_event", typ: u(undefined, r("TourEventObject")) },
+        { json: "tour_id", js: "tour_id", typ: u(undefined, "") },
+    ], "any"),
+    "TourRun": o([
+        { json: "base_ref", js: "base_ref", typ: "" },
+        { json: "connection_state", js: "connection_state", typ: r("TourConnectionState") },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "current_file", js: "current_file", typ: u(undefined, "") },
+        { json: "drafts", js: "drafts", typ: a(r("Draft")) },
+        { json: "ended_at", js: "ended_at", typ: u(undefined, "") },
+        { json: "files", js: "files", typ: a(r("FileObject")) },
+        { json: "guide_path", js: "guide_path", typ: "" },
+        { json: "listener_event_seq", js: "listener_event_seq", typ: 0 },
+        { json: "name", js: "name", typ: "" },
+        { json: "repo_path", js: "repo_path", typ: "" },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "status", js: "status", typ: r("TourStatus") },
+        { json: "summary", js: "summary", typ: "" },
+        { json: "tour_id", js: "tour_id", typ: "" },
+        { json: "transcript", js: "transcript", typ: a(r("TranscriptElement")) },
+        { json: "updated_at", js: "updated_at", typ: "" },
+        { json: "warnings", js: "warnings", typ: a("") },
+    ], "any"),
+    "TourTranscriptEntry": o([
+        { json: "body", js: "body", typ: "" },
+        { json: "context", js: "context", typ: u(undefined, r("Context")) },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "event_id", js: "event_id", typ: u(undefined, "") },
+        { json: "id", js: "id", typ: "" },
+        { json: "role", js: "role", typ: "" },
+    ], "any"),
+    "TourUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("TourUpdatedMessageEvent") },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "tour", js: "tour", typ: u(undefined, r("Tour")) },
     ], "any"),
     "UnregisterMessage": o([
         { json: "cmd", js: "cmd", typ: r("UnregisterMessageCmd") },
@@ -7530,6 +8201,11 @@ const typeMap: any = {
         { json: "name", js: "name", typ: u(undefined, "") },
         { json: "profile", js: "profile", typ: u(undefined, "") },
         { json: "ssh_target", js: "ssh_target", typ: u(undefined, "") },
+    ], "any"),
+    "WaitTourEventMessage": o([
+        { json: "after_seq", js: "after_seq", typ: 0 },
+        { json: "cmd", js: "cmd", typ: r("WaitTourEventMessageCmd") },
+        { json: "tour_id", js: "tour_id", typ: "" },
     ], "any"),
     "WakeDispatchAgentMessage": o([
         { json: "cmd", js: "cmd", typ: r("WakeDispatchAgentMessageCmd") },
@@ -7614,6 +8290,8 @@ const typeMap: any = {
         { json: "target_path", js: "target_path", typ: u(undefined, "") },
         { json: "tile_id", js: "tile_id", typ: u(undefined, "") },
         { json: "tile_kind", js: "tile_kind", typ: u(undefined, "") },
+        { json: "tour", js: "tour", typ: u(undefined, r("Tour")) },
+        { json: "tour_event", js: "tour_event", typ: u(undefined, r("TourEventObject")) },
         { json: "unstaged", js: "unstaged", typ: u(undefined, a(r("StagedElement"))) },
         { json: "untracked", js: "untracked", typ: u(undefined, a(r("StagedElement"))) },
         { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
@@ -7742,15 +8420,6 @@ const typeMap: any = {
         { json: "pane_id", js: "pane_id", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
-    "WorkspaceLayoutDockPanelMessage": o([
-        { json: "anchor_pane_id", js: "anchor_pane_id", typ: "" },
-        { json: "cmd", js: "cmd", typ: r("WorkspaceLayoutDockPanelMessageCmd") },
-        { json: "edge", js: "edge", typ: r("WorkspaceLayoutDockEdge") },
-        { json: "panel_id", js: "panel_id", typ: "" },
-        { json: "panel_kind", js: "panel_kind", typ: "" },
-        { json: "ratio", js: "ratio", typ: u(undefined, 3.14) },
-        { json: "workspace_id", js: "workspace_id", typ: "" },
-    ], "any"),
     "WorkspaceLayoutDockTileMessage": o([
         { json: "anchor_pane_id", js: "anchor_pane_id", typ: "" },
         { json: "cmd", js: "cmd", typ: r("WorkspaceLayoutDockTileMessageCmd") },
@@ -7813,11 +8482,6 @@ const typeMap: any = {
         { json: "split_id", js: "split_id", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
-    "WorkspaceLayoutUndockPanelMessage": o([
-        { json: "cmd", js: "cmd", typ: r("WorkspaceLayoutUndockPanelMessageCmd") },
-        { json: "panel_id", js: "panel_id", typ: "" },
-        { json: "workspace_id", js: "workspace_id", typ: "" },
-    ], "any"),
     "WorkspaceLayoutUndockTileMessage": o([
         { json: "cmd", js: "cmd", typ: r("WorkspaceLayoutUndockTileMessageCmd") },
         { json: "tile_id", js: "tile_id", typ: "" },
@@ -7833,20 +8497,6 @@ const typeMap: any = {
     "WorkspaceLayoutUpdatedMessage": o([
         { json: "event", js: "event", typ: r("WorkspaceLayoutUpdatedMessageEvent") },
         { json: "workspace_layout", js: "workspace_layout", typ: r("Layout") },
-    ], "any"),
-    "WorkspacePanelContentGetMessage": o([
-        { json: "cmd", js: "cmd", typ: r("WorkspacePanelContentGetMessageCmd") },
-        { json: "panel_id", js: "panel_id", typ: "" },
-        { json: "workspace_id", js: "workspace_id", typ: "" },
-    ], "any"),
-    "WorkspacePanelContentMessage": o([
-        { json: "content", js: "content", typ: "" },
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("WorkspacePanelContentMessageEvent") },
-        { json: "panel_id", js: "panel_id", typ: "" },
-        { json: "panel_kind", js: "panel_kind", typ: "" },
-        { json: "path", js: "path", typ: "" },
-        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "WorkspaceRegisteredMessage": o([
         { json: "event", js: "event", typ: r("WorkspaceRegisteredMessageEvent") },
@@ -7913,6 +8563,9 @@ const typeMap: any = {
     ],
     "ApprovePRMessageCmd": [
         "approve_pr",
+    ],
+    "AskTourMessageCmd": [
+        "ask_tour",
     ],
     "AttachResultMessageEvent": [
         "attach_result",
@@ -8131,6 +8784,9 @@ const typeMap: any = {
     "GetSettingsMessageCmd": [
         "get_settings",
     ],
+    "GetTourStateMessageCmd": [
+        "get_tour_state",
+    ],
     "GitHubHostsUpdatedMessageEvent": [
         "github_hosts_updated",
     ],
@@ -8238,6 +8894,9 @@ const typeMap: any = {
     "OpenMarkdownMessageCmd": [
         "open_markdown",
     ],
+    "OpenTourMessageCmd": [
+        "open_tour",
+    ],
     "PRActionResultMessageEvent": [
         "pr_action_result",
     ],
@@ -8295,6 +8954,9 @@ const typeMap: any = {
     "RefreshPRsResultMessageEvent": [
         "refresh_prs_result",
     ],
+    "RefreshTourMessageCmd": [
+        "refresh_tour",
+    ],
     "RegisterMessageCmd": [
         "register",
     ],
@@ -8315,6 +8977,9 @@ const typeMap: any = {
     ],
     "RenameWorkspaceMessageCmd": [
         "rename_workspace",
+    ],
+    "ReplyTourMessageCmd": [
+        "reply_tour",
     ],
     "ReportDispatchMessageCmd": [
         "report_dispatch",
@@ -8356,6 +9021,14 @@ const typeMap: any = {
         "running",
         "stopped",
     ],
+    "TourConnectionState": [
+        "connected",
+        "disconnected",
+    ],
+    "TourStatus": [
+        "active",
+        "ended",
+    ],
     "WorkspaceContextMaintenanceAction": [
         "compact",
         "rollback",
@@ -8373,6 +9046,9 @@ const typeMap: any = {
     ],
     "ReviewLoopUpdatedMessageEvent": [
         "review_loop_updated",
+    ],
+    "SaveTourDraftMessageCmd": [
+        "save_tour_draft",
     ],
     "SendDispatchMessageCmd": [
         "send_dispatch_message",
@@ -8440,11 +9116,20 @@ const typeMap: any = {
     "StopReviewLoopMessageCmd": [
         "stop_review_loop",
     ],
+    "SubmitTourMessageCmd": [
+        "submit_tour",
+    ],
     "SubscribeGitStatusMessageCmd": [
         "subscribe_git_status",
     ],
     "TodosMessageCmd": [
         "todos",
+    ],
+    "TourResultMessageEvent": [
+        "tour_result",
+    ],
+    "TourUpdatedMessageEvent": [
+        "tour_updated",
     ],
     "UnregisterMessageCmd": [
         "unregister",
@@ -8463,6 +9148,9 @@ const typeMap: any = {
     ],
     "UpdateEndpointMessageCmd": [
         "update_endpoint",
+    ],
+    "WaitTourEventMessageCmd": [
+        "wait_tour_event",
     ],
     "WakeDispatchAgentMessageCmd": [
         "wake_dispatch_agent",
@@ -8510,17 +9198,14 @@ const typeMap: any = {
     "WorkspaceLayoutClosePaneMessageCmd": [
         "workspace_layout_close_pane",
     ],
-    "WorkspaceLayoutDockPanelMessageCmd": [
-        "workspace_layout_dock_panel",
+    "WorkspaceLayoutDockTileMessageCmd": [
+        "workspace_layout_dock_tile",
     ],
     "WorkspaceLayoutDockEdge": [
         "bottom",
         "left",
         "right",
         "top",
-    ],
-    "WorkspaceLayoutDockTileMessageCmd": [
-        "workspace_layout_dock_tile",
     ],
     "WorkspaceLayoutFocusPaneMessageCmd": [
         "workspace_layout_focus_pane",
@@ -8543,9 +9228,6 @@ const typeMap: any = {
     "WorkspaceLayoutSetSplitRatioMessageCmd": [
         "workspace_layout_set_split_ratio",
     ],
-    "WorkspaceLayoutUndockPanelMessageCmd": [
-        "workspace_layout_undock_panel",
-    ],
     "WorkspaceLayoutUndockTileMessageCmd": [
         "workspace_layout_undock_tile",
     ],
@@ -8554,12 +9236,6 @@ const typeMap: any = {
     ],
     "WorkspaceLayoutUpdatedMessageEvent": [
         "workspace_layout_updated",
-    ],
-    "WorkspacePanelContentGetMessageCmd": [
-        "workspace_panel_content_get",
-    ],
-    "WorkspacePanelContentMessageEvent": [
-        "workspace_panel_content",
     ],
     "WorkspaceRegisteredMessageEvent": [
         "workspace_registered",

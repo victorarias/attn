@@ -126,6 +126,14 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdRenameSession:                      commandMetadata(ScopeSession, false, true),
 	protocol.CmdRenameWorkspace:                    commandMetadata(ScopeEndpoint, false, true),
 	protocol.CmdSetChiefOfStaff:                    commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdOpenTour:                           commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdGetTourState:                       commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdRefreshTour:                        commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdSaveTourDraft:                      commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAskTour:                            commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdReplyTour:                          commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdSubmitTour:                         commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdWaitTourEvent:                      commandMetadata(ScopeHubLocal, false, false),
 }
 
 func shouldLogWSCommand(cmd string) bool {

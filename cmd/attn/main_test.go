@@ -377,6 +377,36 @@ func TestDetectPresence(t *testing.T) {
 	})
 }
 
+func TestTourReadyPayloadExcludesTourContents(t *testing.T) {
+	run := &protocol.TourRun{
+		TourID:           "tour-1",
+		SessionID:        "session-1",
+		Name:             "Review tour",
+		Status:           protocol.TourStatusActive,
+		ConnectionState:  protocol.TourConnectionStateConnected,
+		BaseRef:          "main",
+		GuidePath:        "/Users/test/.attn/tours/repo/session/guide.yml",
+		ListenerEventSeq: 7,
+		Summary:          "large summary that should not enter agent output",
+		Files: []protocol.TourFile{{
+			Path:     "internal/large.go",
+			Modified: strings.Repeat("large file contents", 1000),
+		}},
+	}
+
+	encoded := mustJSON(newTourReadyPayload(run))
+	for _, expected := range []string{`"tour_id":"tour-1"`, `"listener_event_seq":7`} {
+		if !strings.Contains(encoded, expected) {
+			t.Fatalf("ready payload %q does not contain %q", encoded, expected)
+		}
+	}
+	for _, excluded := range []string{`"files"`, run.Summary, "large file contents"} {
+		if strings.Contains(encoded, excluded) {
+			t.Fatalf("ready payload unexpectedly contains %q: %s", excluded, encoded)
+		}
+	}
+}
+
 func TestParseDirectLaunchArgs_InitialPromptFile(t *testing.T) {
 	parsed, err := parseDirectLaunchArgs([]string{"--initial-prompt-file", "/tmp/brief.md"})
 	if err != nil {
@@ -650,7 +680,7 @@ func TestWriteHelpMentionsPresenceAndOpen(t *testing.T) {
 	writeHelp(&output)
 
 	text := output.String()
-	for _, expected := range []string{"presence", "delegate --brief-file <path>", "dispatch <command>", "workspace context <command>", "open <file.md> [--session <id>]", "review-loop <command>"} {
+	for _, expected := range []string{"presence", "delegate --brief-file <path>", "dispatch <command>", "workspace context <command>", "open <file.md> [--session <id>]", "review-loop <command>", "tour <command>"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("help output missing %q: %q", expected, text)
 		}

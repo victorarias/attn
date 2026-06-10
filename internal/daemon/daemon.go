@@ -1711,6 +1711,22 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleWorkspaceContextCompact(conn, msg.(*protocol.WorkspaceContextCompactMessage))
 	case protocol.CmdWorkspaceContextRollback:
 		d.handleWorkspaceContextRollback(conn, msg.(*protocol.WorkspaceContextRollbackMessage))
+	case protocol.CmdOpenTour:
+		d.handleOpenTour(conn, msg.(*protocol.OpenTourMessage))
+	case protocol.CmdGetTourState:
+		d.handleGetTourState(conn, msg.(*protocol.GetTourStateMessage))
+	case protocol.CmdRefreshTour:
+		d.handleRefreshTour(conn, msg.(*protocol.RefreshTourMessage))
+	case protocol.CmdSaveTourDraft:
+		d.handleSaveTourDraft(conn, msg.(*protocol.SaveTourDraftMessage))
+	case protocol.CmdAskTour:
+		d.handleAskTour(conn, msg.(*protocol.AskTourMessage))
+	case protocol.CmdReplyTour:
+		d.handleReplyTour(conn, msg.(*protocol.ReplyTourMessage))
+	case protocol.CmdSubmitTour:
+		d.handleSubmitTour(conn, msg.(*protocol.SubmitTourMessage))
+	case protocol.CmdWaitTourEvent:
+		d.handleWaitTourEvent(conn, msg.(*protocol.WaitTourEventMessage))
 	case protocol.CmdUnregister:
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:

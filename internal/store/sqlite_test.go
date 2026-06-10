@@ -128,6 +128,46 @@ func TestMigrations_Idempotent(t *testing.T) {
 	}
 }
 
+func TestMigrations_CreateTourTablesAfterExistingVersion47(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() setup error = %v", err)
+	}
+	if _, err := db.Exec(`
+		DROP TABLE tour_transcript;
+		DROP TABLE tour_events;
+		DROP TABLE tour_drafts;
+		DROP TABLE tour_runs;
+		DELETE FROM schema_migrations WHERE version >= 48;
+	`); err != nil {
+		db.Close()
+		t.Fatalf("seed version 47 database: %v", err)
+	}
+	db.Close()
+
+	migrated, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() migrate error = %v", err)
+	}
+	defer migrated.Close()
+
+	for _, table := range []string{"tour_runs", "tour_drafts", "tour_events", "tour_transcript"} {
+		var count int
+		if err := migrated.QueryRow(
+			"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
+			table,
+		).Scan(&count); err != nil {
+			t.Fatalf("query table %s: %v", table, err)
+		}
+		if count != 1 {
+			t.Fatalf("table %s count = %d, want 1", table, count)
+		}
+	}
+}
+
 func TestMigrations_MigratedColumnsExist(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")

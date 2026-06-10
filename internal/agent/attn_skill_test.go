@@ -133,6 +133,23 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		}
 	}
 
+	tours := readSkillFile(t, skillDir, "references/tours.md")
+	for _, expected := range []string{
+		"tour create",
+		"~/.attn/tours",
+		"QUESTION_READY",
+		"FEEDBACK_READY",
+		"TOUR_ENDED",
+		"tour reply",
+		"tour refresh",
+		"Do not ask whether you should listen",
+		"Never submit comments, reviews, or approvals to GitHub",
+	} {
+		if !strings.Contains(tours, expected) {
+			t.Fatalf("tours reference missing %q: %q", expected, tours)
+		}
+	}
+
 	markdown := readSkillFile(t, skillDir, "references/markdown.md")
 	if !strings.Contains(markdown, "open <path/to/file.md>") || !strings.Contains(markdown, "live-reloading") {
 		t.Fatalf("markdown reference is incomplete: %q", markdown)

@@ -20,6 +20,9 @@ import type {
   ReviewLoopInteraction as GeneratedReviewLoopInteraction,
   WarningElement as GeneratedWarning,
   WorkspaceContext as GeneratedWorkspaceContext,
+  Tour as GeneratedTour,
+  Draft as GeneratedTourDraft,
+  Context as GeneratedTourQuestionContext,
   SessionState,
   PRRole,
   HeatState,
@@ -74,6 +77,9 @@ export type ReviewLoopInteraction = GeneratedReviewLoopInteraction;
 export type DaemonSettings = Record<string, string>;
 export type DaemonWarning = GeneratedWarning;
 export type DaemonWorkspaceContext = GeneratedWorkspaceContext;
+export type DaemonTour = GeneratedTour;
+export type DaemonTourDraft = GeneratedTourDraft;
+export type DaemonTourQuestionContext = GeneratedTourQuestionContext;
 export interface DirectoryEntry {
   name: string;
   path: string;
@@ -153,6 +159,17 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   loop_id?: string;
   content?: string;
   review_loop_run?: ReviewLoopState;
+  tour?: DaemonTour;
+  tour_event?: {
+    id: string;
+    tour_id: string;
+    seq: number;
+    kind: string;
+    markdown: string;
+    finish: boolean;
+    context?: DaemonTourQuestionContext;
+    created_at: string;
+  };
   comment_id?: string;
   tool_use?: {
     name: string;
@@ -168,7 +185,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '98';
+export const PROTOCOL_VERSION = '99';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -408,6 +425,7 @@ interface UseDaemonSocketOptions {
   onSettingError?: (message: string) => void;
   onGitStatusUpdate?: (status: GitStatusUpdate) => void;
   onReviewLoopUpdate?: (state: ReviewLoopState | null) => void;
+  onTourUpdate?: (tour: DaemonTour | null) => void;
   onSessionExited?: (info: SessionExitInfo) => void;
   endpoint?: DaemonEndpointProfile;
   wsUrl?: string;
@@ -688,6 +706,7 @@ export function useDaemonSocket({
   onSettingError,
   onGitStatusUpdate,
   onReviewLoopUpdate,
+  onTourUpdate,
   onSessionExited,
   endpoint,
   wsUrl,
@@ -2055,6 +2074,37 @@ export function useDaemonSocket({
           case 'review_loop_updated':
             if (onReviewLoopUpdate) {
               onReviewLoopUpdate((data as any).review_loop_run ?? null);
+            }
+            break;
+
+          case 'tour_result': {
+            const action = data.action || 'unknown';
+            const sessionId = data.session_id || data.tour?.session_id || '';
+            const tourId = data.tour_id || data.tour?.tour_id || '';
+            const key = action === 'get'
+              ? `tour_${action}_${sessionId}`
+              : `tour_${action}_${tourId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (data.tour && onTourUpdate) {
+              onTourUpdate(data.tour);
+            }
+            if (pending) {
+              pendingActionsRef.current.delete(key);
+              if (data.success) {
+                pending.resolve({
+                  tour: data.tour ?? null,
+                  event: data.tour_event ?? null,
+                });
+              } else {
+                pending.reject(new Error(data.error || 'Tour command failed'));
+              }
+            }
+            break;
+          }
+
+          case 'tour_updated':
+            if (onTourUpdate) {
+              onTourUpdate(data.tour ?? null);
             }
             break;
 
@@ -4019,6 +4069,84 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'clear_warnings' }));
   }, []);
 
+  const sendTourCommand = useCallback(<T,>(
+    key: string,
+    payload: Record<string, unknown>,
+  ): Promise<T> => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('WebSocket not connected'));
+    }
+    return new Promise<T>((resolve, reject) => {
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify(payload));
+      window.setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Tour command timed out'));
+        }
+      }, 30_000);
+    });
+  }, []);
+
+  const getTourState = useCallback((sessionId: string): Promise<DaemonTour | null> => (
+    sendTourCommand<{ tour: DaemonTour | null }>(
+      `tour_get_${sessionId}`,
+      { cmd: 'get_tour_state', session_id: sessionId },
+    ).then((result) => result.tour)
+  ), [sendTourCommand]);
+
+  const refreshTour = useCallback((tourId: string): Promise<DaemonTour> => (
+    sendTourCommand<{ tour: DaemonTour | null }>(
+      `tour_refresh_${tourId}`,
+      { cmd: 'refresh_tour', tour_id: tourId },
+    ).then((result) => {
+      if (!result.tour) throw new Error('Daemon returned no tour');
+      return result.tour;
+    })
+  ), [sendTourCommand]);
+
+  const saveTourDraft = useCallback((
+    tourId: string,
+    draft: DaemonTourDraft,
+  ): Promise<DaemonTour> => (
+    sendTourCommand<{ tour: DaemonTour | null }>(
+      `tour_save_draft_${tourId}`,
+      { cmd: 'save_tour_draft', tour_id: tourId, current_file: draft.path, draft },
+    ).then((result) => {
+      if (!result.tour) throw new Error('Daemon returned no tour');
+      return result.tour;
+    })
+  ), [sendTourCommand]);
+
+  const askTour = useCallback((
+    tourId: string,
+    body: string,
+    context: DaemonTourQuestionContext,
+  ): Promise<DaemonTour> => (
+    sendTourCommand<{ tour: DaemonTour | null }>(
+      `tour_ask_${tourId}`,
+      { cmd: 'ask_tour', tour_id: tourId, body, context },
+    ).then((result) => {
+      if (!result.tour) throw new Error('Daemon returned no tour');
+      return result.tour;
+    })
+  ), [sendTourCommand]);
+
+  const submitTour = useCallback((
+    tourId: string,
+    body: string,
+    finish: boolean,
+  ): Promise<DaemonTour> => (
+    sendTourCommand<{ tour: DaemonTour | null }>(
+      `tour_submit_${tourId}`,
+      { cmd: 'submit_tour', tour_id: tourId, body, finish },
+    ).then((result) => {
+      if (!result.tour) throw new Error('Daemon returned no tour');
+      return result.tour;
+    })
+  ), [sendTourCommand]);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
@@ -4102,5 +4230,10 @@ export function useDaemonSocket({
     sendStopReviewLoop,
     answerReviewLoop,
     setReviewLoopIterationLimit,
+    getTourState,
+    refreshTour,
+    saveTourDraft,
+    askTour,
+    submitTour,
   };
 }

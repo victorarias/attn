@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "98"
+const ProtocolVersion = "99"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -155,6 +155,14 @@ const (
 	CmdRenameSession                      = "rename_session"
 	CmdRenameWorkspace                    = "rename_workspace"
 	CmdSetChiefOfStaff                    = "set_chief_of_staff"
+	CmdOpenTour                           = "open_tour"
+	CmdGetTourState                       = "get_tour_state"
+	CmdRefreshTour                        = "refresh_tour"
+	CmdSaveTourDraft                      = "save_tour_draft"
+	CmdAskTour                            = "ask_tour"
+	CmdReplyTour                          = "reply_tour"
+	CmdSubmitTour                         = "submit_tour"
+	CmdWaitTourEvent                      = "wait_tour_event"
 )
 
 // WebSocket Events (daemon -> client)
@@ -233,6 +241,8 @@ const (
 	EventBrowserControlResponse        = "browser_control_response"
 	EventBrowserControlRequest         = "browser_control_request"
 	EventCommandError                  = "command_error"
+	EventTourResult                    = "tour_result"
+	EventTourUpdated                   = "tour_updated"
 )
 
 // Session states (values for SessionState enum)
@@ -829,6 +839,62 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg GetReviewStateMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdOpenTour:
+		var msg OpenTourMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal open_tour: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdGetTourState:
+		var msg GetTourStateMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal get_tour_state: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdRefreshTour:
+		var msg RefreshTourMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal refresh_tour: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSaveTourDraft:
+		var msg SaveTourDraftMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal save_tour_draft: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAskTour:
+		var msg AskTourMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal ask_tour: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdReplyTour:
+		var msg ReplyTourMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal reply_tour: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSubmitTour:
+		var msg SubmitTourMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal submit_tour: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWaitTourEvent:
+		var msg WaitTourEventMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal wait_tour_event: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

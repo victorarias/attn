@@ -878,6 +878,46 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		}()
 	case protocol.CmdWorkspaceContextList:
 		go d.sendWorkspaceContextListWSResult(client, msg.(*protocol.WorkspaceContextListMessage).RequestID)
+	case protocol.CmdOpenTour:
+		go func() {
+			run, err := d.openTour(msg.(*protocol.OpenTourMessage))
+			d.sendTourWSResult(client, "open", run, nil, err)
+		}()
+	case protocol.CmdGetTourState:
+		go func() {
+			run, err := d.getTourState(msg.(*protocol.GetTourStateMessage).SessionID)
+			d.sendTourWSResult(client, "get", run, nil, err)
+		}()
+	case protocol.CmdRefreshTour:
+		go func() {
+			run, err := d.refreshTour(msg.(*protocol.RefreshTourMessage).TourID)
+			d.sendTourWSResult(client, "refresh", run, nil, err)
+		}()
+	case protocol.CmdSaveTourDraft:
+		go func() {
+			run, err := d.saveTourDraft(msg.(*protocol.SaveTourDraftMessage))
+			d.sendTourWSResult(client, "save_draft", run, nil, err)
+		}()
+	case protocol.CmdAskTour:
+		go func() {
+			event, run, err := d.askTour(msg.(*protocol.AskTourMessage))
+			d.sendTourWSResult(client, "ask", run, event, err)
+		}()
+	case protocol.CmdReplyTour:
+		go func() {
+			run, err := d.replyTour(msg.(*protocol.ReplyTourMessage))
+			d.sendTourWSResult(client, "reply", run, nil, err)
+		}()
+	case protocol.CmdSubmitTour:
+		go func() {
+			event, run, err := d.submitTour(msg.(*protocol.SubmitTourMessage))
+			d.sendTourWSResult(client, "submit", run, event, err)
+		}()
+	case protocol.CmdWaitTourEvent:
+		go func() {
+			event, run, err := d.waitTourEvent(msg.(*protocol.WaitTourEventMessage))
+			d.sendTourWSResult(client, "wait", run, event, err)
+		}()
 	case protocol.CmdApprovePR:
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
 	case protocol.CmdMergePR:

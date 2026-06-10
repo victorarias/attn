@@ -15,6 +15,7 @@ import { ChiefOfStaffTransferPrompt } from './components/ChiefOfStaffTransferPro
 import { ChangesPanel } from './components/ChangesPanel';
 import { DiffDetailPanel } from './components/DiffDetailPanel';
 import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
+import { TourPanel } from './components/TourPanel';
 import { OpenPRLauncherProgress } from './components/OpenPRLauncherProgress';
 import { SessionCreationProgress, type SessionCreationPhase } from './components/SessionCreationProgress';
 import { RightDock } from './components/RightDock';
@@ -37,7 +38,7 @@ import {
   readWarmWorkspaceLimit,
   writeWarmWorkspaceLimit,
 } from './utils/terminalVirtualization';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState, SessionExitInfo } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState, SessionExitInfo, DaemonTour } from './hooks/useDaemonSocket';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { GridView, type GridSessionTile } from './components/grid/GridView';
@@ -107,6 +108,15 @@ function AttentionActionIcon() {
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12 3.5a6 6 0 0 0-6 6v3.2L4.5 16h15L18 12.7V9.5a6 6 0 0 0-6-6Z" />
       <path d="M9.5 19a2.8 2.8 0 0 0 5 0" />
+    </svg>
+  );
+}
+
+function TourActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 4.5h10.5A2.5 2.5 0 0 1 18 7v12.5H7.5A2.5 2.5 0 0 1 5 17V4.5Z" />
+      <path d="M7.5 19.5A2.5 2.5 0 0 1 10 17h8M9 8h5M9 11.5h6" />
     </svg>
   );
 }
@@ -282,6 +292,7 @@ function App() {
   }, []);
 
   const [reviewLoopsBySessionId, setReviewLoopsBySessionId] = useState<Record<string, ReviewLoopState>>({});
+  const [toursBySessionId, setToursBySessionId] = useState<Record<string, DaemonTour>>({});
   const [daemonWorkspaces, setDaemonWorkspaces] = useState<DaemonWorkspace[]>([]);
 
   // Worktrees state (used by WorktreeCleanupPrompt)
@@ -489,6 +500,11 @@ function App() {
     sendStopReviewLoop,
     answerReviewLoop,
     setReviewLoopIterationLimit,
+    getTourState,
+    refreshTour,
+    saveTourDraft,
+    askTour,
+    submitTour,
     connectionError,
     hasReceivedInitialState,
     rateLimit,
@@ -512,6 +528,10 @@ function App() {
       if (!state) return;
       setReviewLoopsBySessionId(prev => ({ ...prev, [state.source_session_id]: state }));
     },
+    onTourUpdate: (tour) => {
+      if (!tour) return;
+      setToursBySessionId(prev => ({ ...prev, [tour.session_id]: tour }));
+    },
     onSessionExited: handleSessionExited,
   });
 
@@ -523,6 +543,17 @@ function App() {
         return next;
       }
       return { ...prev, [sessionId]: state };
+    });
+  }, []);
+
+  const setTourStateForSession = useCallback((sessionId: string, tour: DaemonTour | null) => {
+    setToursBySessionId(prev => {
+      if (!tour) {
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
+      }
+      return { ...prev, [sessionId]: tour };
     });
   }, []);
 
@@ -543,6 +574,7 @@ function App() {
         settings={settings}
         gitStatus={gitStatus}
         reviewLoopsBySessionId={reviewLoopsBySessionId}
+        toursBySessionId={toursBySessionId}
         connectionError={connectionError}
         hasReceivedInitialState={hasReceivedInitialState}
         rateLimit={rateLimit}
@@ -622,6 +654,12 @@ function App() {
         answerReviewLoop={answerReviewLoop}
         setReviewLoopIterationLimit={setReviewLoopIterationLimit}
         setReviewLoopStateForSession={setReviewLoopStateForSession}
+        getTourState={getTourState}
+        refreshTour={refreshTour}
+        saveTourDraft={saveTourDraft}
+        askTour={askTour}
+        submitTour={submitTour}
+        setTourStateForSession={setTourStateForSession}
         clearGitStatus={clearGitStatus}
         registerSessionExitHandler={registerSessionExitHandler}
       />
@@ -641,6 +679,7 @@ interface AppContentProps {
   settings: Record<string, string>;
   gitStatus: GitStatusUpdate | null;
   reviewLoopsBySessionId: Record<string, ReviewLoopState>;
+  toursBySessionId: Record<string, DaemonTour>;
   connectionError: string | null;
   hasReceivedInitialState: boolean;
   rateLimit: import('./hooks/useDaemonSocket').RateLimitState | null;
@@ -720,6 +759,12 @@ interface AppContentProps {
   answerReviewLoop: ReturnType<typeof useDaemonSocket>['answerReviewLoop'];
   setReviewLoopIterationLimit: ReturnType<typeof useDaemonSocket>['setReviewLoopIterationLimit'];
   setReviewLoopStateForSession: (sessionId: string, state: ReviewLoopState | null) => void;
+  getTourState: ReturnType<typeof useDaemonSocket>['getTourState'];
+  refreshTour: ReturnType<typeof useDaemonSocket>['refreshTour'];
+  saveTourDraft: ReturnType<typeof useDaemonSocket>['saveTourDraft'];
+  askTour: ReturnType<typeof useDaemonSocket>['askTour'];
+  submitTour: ReturnType<typeof useDaemonSocket>['submitTour'];
+  setTourStateForSession: (sessionId: string, tour: DaemonTour | null) => void;
   clearGitStatus: () => void;
   registerSessionExitHandler: (handler: ((info: SessionExitInfo) => void) | null) => void;
 }
@@ -735,6 +780,7 @@ function AppContent({
   settings,
   gitStatus,
   reviewLoopsBySessionId,
+  toursBySessionId,
   connectionError,
   hasReceivedInitialState,
   rateLimit,
@@ -813,6 +859,12 @@ sendFetchPRDetails,
   answerReviewLoop,
   setReviewLoopIterationLimit,
   setReviewLoopStateForSession,
+  getTourState,
+  refreshTour,
+  saveTourDraft,
+  askTour,
+  submitTour,
+  setTourStateForSession,
   clearGitStatus,
   registerSessionExitHandler,
 }: AppContentProps) {
@@ -1160,7 +1212,7 @@ sendFetchPRDetails,
     void connect();
   }, [connect]);
 
-  type DockPanelId = 'diff' | 'reviewLoop' | 'attention' | 'diffDetail';
+  type DockPanelId = 'diff' | 'reviewLoop' | 'tour' | 'attention' | 'diffDetail';
 
   // Muted section expansion (controlled by Dashboard click)
   const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
@@ -1174,6 +1226,7 @@ sendFetchPRDetails,
     openPanels: {
         diff: false,
         reviewLoop: false,
+        tour: false,
         attention: false,
         diffDetail: false,
     },
@@ -1403,6 +1456,20 @@ sendFetchPRDetails,
   }, [clearDockPanelCloseTimer, scheduleDockPanelStackRemoval]);
 
   useEffect(() => {
+    if (!activeSessionId || typeof getTourState !== 'function') return;
+    const selected = daemonSessions.find((session) => session.id === activeSessionId);
+    if (!selected || selected.endpoint_id) return;
+    const refresh = () => {
+      void getTourState(activeSessionId)
+        .then((tour) => setTourStateForSession(activeSessionId, tour))
+        .catch(() => {});
+    };
+    refresh();
+    const intervalID = window.setInterval(refresh, 5_000);
+    return () => window.clearInterval(intervalID);
+  }, [activeSessionId, daemonSessions, getTourState, setTourStateForSession]);
+
+  useEffect(() => {
     return () => {
       Object.values(dockPanelCloseTimersRef.current).forEach((timerId) => {
         if (timerId) {
@@ -1541,12 +1608,22 @@ sendFetchPRDetails,
     () => Boolean(activeLocalSession && activeDaemonSession),
     [activeDaemonSession, activeLocalSession],
   );
+  const activeTour = useMemo(
+    () => (activeSessionId ? toursBySessionId[activeSessionId] ?? null : null),
+    [activeSessionId, toursBySessionId],
+  );
   const openDockPanels = dockState.openPanels;
   const dockPanelStack = dockState.stack;
   const diffPanelOpen = openDockPanels.diff;
   const reviewLoopPanelOpen = openDockPanels.reviewLoop;
+  const tourPanelOpen = openDockPanels.tour;
   const attentionPanelOpen = openDockPanels.attention;
   const diffDetailPanelOpen = openDockPanels.diffDetail;
+  useEffect(() => {
+    if (activeTour?.status === 'active') {
+      openDockPanel('tour');
+    }
+  }, [activeTour?.status, activeTour?.tour_id, openDockPanel]);
   const changesPanelVisible = view === 'session' && diffPanelOpen && Boolean(activeRepoDaemonSession?.directory);
   const blockingOverlayOpen = locationPickerOpen
     || thumbsOpen
@@ -3000,6 +3077,15 @@ sendFetchPRDetails,
       onClick: handleOpenEditorForSession,
     },
     {
+      id: 'tour',
+      title: activeTour ? 'Code Tour' : 'Code Tour (No active tour)',
+      icon: <TourActionIcon />,
+      active: tourPanelOpen,
+      disabled: !activeTour,
+      toneClassName: activeTour?.connection_state === 'disconnected' ? 'sidebar-tool-btn--loop-error' : undefined,
+      onClick: () => toggleDockPanel('tour'),
+    },
+    {
       id: 'reviewLoop',
       title: activeReviewLoopAvailable ? 'Review Loop' : 'Review Loop (No active session)',
       icon: <ReviewLoopIcon />,
@@ -3028,6 +3114,7 @@ sendFetchPRDetails,
       onClick: () => toggleDockPanel('attention'),
     },
   ]), [
+    activeTour,
     activeReviewLoopAvailable,
     activeReviewLoopState?.status,
     activeSessionId,
@@ -3037,6 +3124,7 @@ sendFetchPRDetails,
     diffPanelOpen,
     handleOpenEditorForSession,
     reviewLoopPanelOpen,
+    tourPanelOpen,
     toggleDockPanel,
   ]);
 
@@ -3402,6 +3490,24 @@ sendFetchPRDetails,
                   onOpenDiffClick={handleOpenDiffDetailPanel}
                 />
               ),
+            },
+            {
+              id: 'tour',
+              isOpen: tourPanelOpen && Boolean(activeTour),
+              width: 'clamp(760px, 76vw, 1280px)',
+              tone: activeTour?.connection_state === 'disconnected' ? 'error' : 'default',
+              className: 'dock-panel dock-panel--tour',
+              children: activeTour ? (
+                <TourPanel
+                  tour={activeTour}
+                  resolvedTheme={resolvedTheme}
+                  onClose={() => closeDockPanel('tour')}
+                  refreshTour={refreshTour}
+                  saveTourDraft={saveTourDraft}
+                  askTour={askTour}
+                  submitTour={submitTour}
+                />
+              ) : null,
             },
             {
               id: 'reviewLoop',

@@ -674,6 +674,81 @@ func (c *Client) AnswerReviewLoop(loopID, interactionID, answer string) (*protoc
 	return resp.ReviewLoopRun, nil
 }
 
+func (c *Client) OpenTour(sessionID, guidePath, name, baseRef string) (*protocol.TourRun, error) {
+	msg := protocol.OpenTourMessage{
+		Cmd:       protocol.CmdOpenTour,
+		SessionID: sessionID,
+		GuidePath: guidePath,
+	}
+	if value := strings.TrimSpace(name); value != "" {
+		msg.Name = protocol.Ptr(value)
+	}
+	if value := strings.TrimSpace(baseRef); value != "" {
+		msg.BaseRef = protocol.Ptr(value)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Tour == nil {
+		return nil, errors.New("daemon returned no tour")
+	}
+	return resp.Tour, nil
+}
+
+func (c *Client) GetTourState(sessionID string) (*protocol.TourRun, error) {
+	resp, err := c.send(protocol.GetTourStateMessage{
+		Cmd:       protocol.CmdGetTourState,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Tour, nil
+}
+
+func (c *Client) RefreshTour(tourID string) (*protocol.TourRun, error) {
+	resp, err := c.send(protocol.RefreshTourMessage{
+		Cmd:    protocol.CmdRefreshTour,
+		TourID: tourID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.Tour == nil {
+		return nil, errors.New("daemon returned no tour")
+	}
+	return resp.Tour, nil
+}
+
+func (c *Client) ReplyTour(tourID, eventID, body string) (*protocol.TourRun, error) {
+	resp, err := c.send(protocol.ReplyTourMessage{
+		Cmd:     protocol.CmdReplyTour,
+		TourID:  tourID,
+		EventID: eventID,
+		Body:    body,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.Tour == nil {
+		return nil, errors.New("daemon returned no tour")
+	}
+	return resp.Tour, nil
+}
+
+func (c *Client) WaitTourEvent(tourID string, afterSeq int) (*protocol.TourEvent, *protocol.TourRun, error) {
+	resp, err := c.send(protocol.WaitTourEventMessage{
+		Cmd:      protocol.CmdWaitTourEvent,
+		TourID:   tourID,
+		AfterSeq: afterSeq,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return resp.TourEvent, resp.Tour, nil
+}
+
 // FetchPRDetails requests the daemon to fetch PR details for a PR ID
 func (c *Client) FetchPRDetails(id string) ([]protocol.PR, error) {
 	msg := protocol.FetchPRDetailsMessage{

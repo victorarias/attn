@@ -86,6 +86,20 @@ type ApprovePRMessage struct {
 	ID string `json:"id"`
 }
 
+type AskTourMessage struct {
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Context corresponds to the JSON schema field "context".
+	Context TourQuestionContext `json:"context"`
+
+	// TourID corresponds to the JSON schema field "tour_id".
+	TourID string `json:"tour_id"`
+}
+
 type AttachPolicy string
 
 const AttachPolicyFreshSpawn AttachPolicy = "fresh_spawn"
@@ -1318,6 +1332,14 @@ type GetSettingsMessage struct {
 	Cmd string `json:"cmd"`
 }
 
+type GetTourStateMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+}
+
 type GitFileChange struct {
 	// Additions corresponds to the JSON schema field "additions".
 	Additions *int `json:"additions,omitempty,omitzero"`
@@ -1730,6 +1752,23 @@ type OpenMarkdownMessage struct {
 	SessionID *string `json:"session_id,omitempty,omitzero"`
 }
 
+type OpenTourMessage struct {
+	// BaseRef corresponds to the JSON schema field "base_ref".
+	BaseRef *string `json:"base_ref,omitempty,omitzero"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// GuidePath corresponds to the JSON schema field "guide_path".
+	GuidePath string `json:"guide_path"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name *string `json:"name,omitempty,omitzero"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+}
+
 type PR struct {
 	// ApprovedByMe corresponds to the JSON schema field "approved_by_me".
 	ApprovedByMe bool `json:"approved_by_me"`
@@ -2110,6 +2149,14 @@ type RefreshPRsResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type RefreshTourMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// TourID corresponds to the JSON schema field "tour_id".
+	TourID string `json:"tour_id"`
+}
+
 type RegisterMessage struct {
 	// Agent corresponds to the JSON schema field "agent".
 	Agent *string `json:"agent,omitempty,omitzero"`
@@ -2211,6 +2258,20 @@ type ReplaySegment struct {
 
 	// Rows corresponds to the JSON schema field "rows".
 	Rows int `json:"rows"`
+}
+
+type ReplyTourMessage struct {
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// EventID corresponds to the JSON schema field "event_id".
+	EventID string `json:"event_id"`
+
+	// TourID corresponds to the JSON schema field "tour_id".
+	TourID string `json:"tour_id"`
 }
 
 type RepoInfo struct {
@@ -2352,6 +2413,12 @@ type Response struct {
 
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`
+
+	// Tour corresponds to the JSON schema field "tour".
+	Tour *TourRun `json:"tour,omitempty,omitzero"`
+
+	// TourEvent corresponds to the JSON schema field "tour_event".
+	TourEvent *TourEvent `json:"tour_event,omitempty,omitzero"`
 
 	// WorkspaceContextMaintenanceResult corresponds to the JSON schema field
 	// "workspace_context_maintenance_result".
@@ -2683,6 +2750,20 @@ type ReviewState struct {
 
 	// ViewedFiles corresponds to the JSON schema field "viewed_files".
 	ViewedFiles []string `json:"viewed_files"`
+}
+
+type SaveTourDraftMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// CurrentFile corresponds to the JSON schema field "current_file".
+	CurrentFile *string `json:"current_file,omitempty,omitzero"`
+
+	// Draft corresponds to the JSON schema field "draft".
+	Draft TourFileDraft `json:"draft"`
+
+	// TourID corresponds to the JSON schema field "tour_id".
+	TourID string `json:"tour_id"`
 }
 
 type SendDispatchMessage struct {
@@ -3032,6 +3113,20 @@ type StopReviewLoopMessage struct {
 	SessionID string `json:"session_id"`
 }
 
+type SubmitTourMessage struct {
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Finish corresponds to the JSON schema field "finish".
+	Finish bool `json:"finish"`
+
+	// TourID corresponds to the JSON schema field "tour_id".
+	TourID string `json:"tour_id"`
+}
+
 type SubscribeGitStatusMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -3049,6 +3144,262 @@ type TodosMessage struct {
 
 	// Todos corresponds to the JSON schema field "todos".
 	Todos []string `json:"todos"`
+}
+
+type TourAnnotation struct {
+	// Comments corresponds to the JSON schema field "comments".
+	Comments []TourComment `json:"comments"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// LineEnd corresponds to the JSON schema field "line_end".
+	LineEnd int `json:"line_end"`
+
+	// LineStart corresponds to the JSON schema field "line_start".
+	LineStart int `json:"line_start"`
+}
+
+type TourComment struct {
+	// Author corresponds to the JSON schema field "author".
+	Author string `json:"author"`
+
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+}
+
+type TourConnectionState string
+
+const TourConnectionStateConnected TourConnectionState = "connected"
+const TourConnectionStateDisconnected TourConnectionState = "disconnected"
+
+type TourDraftText struct {
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+}
+
+type TourEvent struct {
+	// Context corresponds to the JSON schema field "context".
+	Context *TourQuestionContext `json:"context,omitempty,omitzero"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// Finish corresponds to the JSON schema field "finish".
+	Finish bool `json:"finish"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// Markdown corresponds to the JSON schema field "markdown".
+	Markdown string `json:"markdown"`
+
+	// Seq corresponds to the JSON schema field "seq".
+	Seq int `json:"seq"`
+
+	// TourID corresponds to the JSON schema field "tour_id".
+	TourID string `json:"tour_id"`
+}
+
+type TourFile struct {
+	// Additions corresponds to the JSON schema field "additions".
+	Additions int `json:"additions"`
+
+	// Annotations corresponds to the JSON schema field "annotations".
+	Annotations []TourAnnotation `json:"annotations"`
+
+	// Deletions corresponds to the JSON schema field "deletions".
+	Deletions int `json:"deletions"`
+
+	// Group corresponds to the JSON schema field "group".
+	Group string `json:"group"`
+
+	// Modified corresponds to the JSON schema field "modified".
+	Modified string `json:"modified"`
+
+	// Note corresponds to the JSON schema field "note".
+	Note string `json:"note"`
+
+	// OldPath corresponds to the JSON schema field "old_path".
+	OldPath *string `json:"old_path,omitempty,omitzero"`
+
+	// Original corresponds to the JSON schema field "original".
+	Original string `json:"original"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status string `json:"status"`
+
+	// View corresponds to the JSON schema field "view".
+	View string `json:"view"`
+}
+
+type TourFileDraft struct {
+	// AnnotationReplies corresponds to the JSON schema field "annotation_replies".
+	AnnotationReplies []TourDraftText `json:"annotation_replies"`
+
+	// LineComments corresponds to the JSON schema field "line_comments".
+	LineComments []TourLineComment `json:"line_comments"`
+
+	// Note corresponds to the JSON schema field "note".
+	Note string `json:"note"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// Reviewed corresponds to the JSON schema field "reviewed".
+	Reviewed bool `json:"reviewed"`
+}
+
+type TourLineComment struct {
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// Line corresponds to the JSON schema field "line".
+	Line int `json:"line"`
+}
+
+type TourQuestionContext struct {
+	// Code corresponds to the JSON schema field "code".
+	Code *string `json:"code,omitempty,omitzero"`
+
+	// LineEnd corresponds to the JSON schema field "line_end".
+	LineEnd *int `json:"line_end,omitempty,omitzero"`
+
+	// LineStart corresponds to the JSON schema field "line_start".
+	LineStart *int `json:"line_start,omitempty,omitzero"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// Source corresponds to the JSON schema field "source".
+	Source string `json:"source"`
+}
+
+type TourResultMessage struct {
+	// Action corresponds to the JSON schema field "action".
+	Action string `json:"action"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// Tour corresponds to the JSON schema field "tour".
+	Tour *TourRun `json:"tour,omitempty,omitzero"`
+
+	// TourEvent corresponds to the JSON schema field "tour_event".
+	TourEvent *TourEvent `json:"tour_event,omitempty,omitzero"`
+
+	// TourID corresponds to the JSON schema field "tour_id".
+	TourID *string `json:"tour_id,omitempty,omitzero"`
+}
+
+type TourRun struct {
+	// BaseRef corresponds to the JSON schema field "base_ref".
+	BaseRef string `json:"base_ref"`
+
+	// ConnectionState corresponds to the JSON schema field "connection_state".
+	ConnectionState TourConnectionState `json:"connection_state"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// CurrentFile corresponds to the JSON schema field "current_file".
+	CurrentFile *string `json:"current_file,omitempty,omitzero"`
+
+	// Drafts corresponds to the JSON schema field "drafts".
+	Drafts []TourFileDraft `json:"drafts"`
+
+	// EndedAt corresponds to the JSON schema field "ended_at".
+	EndedAt *string `json:"ended_at,omitempty,omitzero"`
+
+	// Files corresponds to the JSON schema field "files".
+	Files []TourFile `json:"files"`
+
+	// GuidePath corresponds to the JSON schema field "guide_path".
+	GuidePath string `json:"guide_path"`
+
+	// ListenerEventSeq corresponds to the JSON schema field "listener_event_seq".
+	ListenerEventSeq int `json:"listener_event_seq"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// RepoPath corresponds to the JSON schema field "repo_path".
+	RepoPath string `json:"repo_path"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status TourStatus `json:"status"`
+
+	// Summary corresponds to the JSON schema field "summary".
+	Summary string `json:"summary"`
+
+	// TourID corresponds to the JSON schema field "tour_id".
+	TourID string `json:"tour_id"`
+
+	// Transcript corresponds to the JSON schema field "transcript".
+	Transcript []TourTranscriptEntry `json:"transcript"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+
+	// Warnings corresponds to the JSON schema field "warnings".
+	Warnings []string `json:"warnings"`
+}
+
+type TourStatus string
+
+const TourStatusActive TourStatus = "active"
+const TourStatusEnded TourStatus = "ended"
+
+type TourTranscriptEntry struct {
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// Context corresponds to the JSON schema field "context".
+	Context *TourQuestionContext `json:"context,omitempty,omitzero"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// EventID corresponds to the JSON schema field "event_id".
+	EventID *string `json:"event_id,omitempty,omitzero"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Role corresponds to the JSON schema field "role".
+	Role string `json:"role"`
+}
+
+type TourUpdatedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// Tour corresponds to the JSON schema field "tour".
+	Tour *TourRun `json:"tour,omitempty,omitzero"`
 }
 
 type UnregisterMessage struct {
@@ -3112,6 +3463,17 @@ type UpdateEndpointMessage struct {
 
 	// SshTarget corresponds to the JSON schema field "ssh_target".
 	SshTarget *string `json:"ssh_target,omitempty,omitzero"`
+}
+
+type WaitTourEventMessage struct {
+	// AfterSeq corresponds to the JSON schema field "after_seq".
+	AfterSeq int `json:"after_seq"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// TourID corresponds to the JSON schema field "tour_id".
+	TourID string `json:"tour_id"`
 }
 
 type WakeDispatchAgentMessage struct {
@@ -3357,6 +3719,12 @@ type WebSocketEvent struct {
 
 	// TileKind corresponds to the JSON schema field "tile_kind".
 	TileKind *string `json:"tile_kind,omitempty,omitzero"`
+
+	// Tour corresponds to the JSON schema field "tour".
+	Tour *TourRun `json:"tour,omitempty,omitzero"`
+
+	// TourEvent corresponds to the JSON schema field "tour_event".
+	TourEvent *TourEvent `json:"tour_event,omitempty,omitzero"`
 
 	// Unstaged corresponds to the JSON schema field "unstaged".
 	Unstaged []GitFileChange `json:"unstaged,omitempty,omitzero"`
@@ -3688,29 +4056,6 @@ const WorkspaceLayoutDockEdgeLeft WorkspaceLayoutDockEdge = "left"
 const WorkspaceLayoutDockEdgeRight WorkspaceLayoutDockEdge = "right"
 const WorkspaceLayoutDockEdgeTop WorkspaceLayoutDockEdge = "top"
 
-type WorkspaceLayoutDockPanelMessage struct {
-	// AnchorPaneID corresponds to the JSON schema field "anchor_pane_id".
-	AnchorPaneID string `json:"anchor_pane_id"`
-
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Edge corresponds to the JSON schema field "edge".
-	Edge WorkspaceLayoutDockEdge `json:"edge"`
-
-	// PanelID corresponds to the JSON schema field "panel_id".
-	PanelID string `json:"panel_id"`
-
-	// PanelKind corresponds to the JSON schema field "panel_kind".
-	PanelKind string `json:"panel_kind"`
-
-	// Ratio corresponds to the JSON schema field "ratio".
-	Ratio *float64 `json:"ratio,omitempty,omitzero"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
-}
-
 type WorkspaceLayoutDockTileMessage struct {
 	// AnchorPaneID corresponds to the JSON schema field "anchor_pane_id".
 	AnchorPaneID string `json:"anchor_pane_id"`
@@ -3876,17 +4221,6 @@ type WorkspaceLayoutSplitDirection string
 const WorkspaceLayoutSplitDirectionHorizontal WorkspaceLayoutSplitDirection = "horizontal"
 const WorkspaceLayoutSplitDirectionVertical WorkspaceLayoutSplitDirection = "vertical"
 
-type WorkspaceLayoutUndockPanelMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// PanelID corresponds to the JSON schema field "panel_id".
-	PanelID string `json:"panel_id"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
-}
-
 type WorkspaceLayoutUndockTileMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -3921,40 +4255,6 @@ type WorkspaceLayoutUpdatedMessage struct {
 
 	// WorkspaceLayout corresponds to the JSON schema field "workspace_layout".
 	WorkspaceLayout WorkspaceLayout `json:"workspace_layout"`
-}
-
-type WorkspacePanelContentGetMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// PanelID corresponds to the JSON schema field "panel_id".
-	PanelID string `json:"panel_id"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
-}
-
-type WorkspacePanelContentMessage struct {
-	// Content corresponds to the JSON schema field "content".
-	Content string `json:"content"`
-
-	// Error corresponds to the JSON schema field "error".
-	Error *string `json:"error,omitempty,omitzero"`
-
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// PanelID corresponds to the JSON schema field "panel_id".
-	PanelID string `json:"panel_id"`
-
-	// PanelKind corresponds to the JSON schema field "panel_kind".
-	PanelKind string `json:"panel_kind"`
-
-	// Path corresponds to the JSON schema field "path".
-	Path string `json:"path"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
 }
 
 type WorkspaceRegisteredMessage struct {

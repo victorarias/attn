@@ -395,6 +395,68 @@ var migrations = []migration{
 			created_at TEXT NOT NULL
 		);
 	`},
+	{48, "create tour tables", `
+		CREATE TABLE IF NOT EXISTS tour_runs (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			repo_path TEXT NOT NULL,
+			guide_path TEXT NOT NULL,
+			base_ref TEXT NOT NULL,
+			status TEXT NOT NULL,
+			summary TEXT NOT NULL DEFAULT '',
+			warnings_json TEXT NOT NULL DEFAULT '[]',
+			files_json TEXT NOT NULL DEFAULT '[]',
+			current_file TEXT,
+			listener_last_seen TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			ended_at TEXT,
+			FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_tour_runs_active_session
+			ON tour_runs(session_id)
+			WHERE status = 'active';
+
+		CREATE TABLE IF NOT EXISTS tour_drafts (
+			tour_id TEXT NOT NULL,
+			path TEXT NOT NULL,
+			reviewed INTEGER NOT NULL DEFAULT 0,
+			note TEXT NOT NULL DEFAULT '',
+			annotation_replies_json TEXT NOT NULL DEFAULT '[]',
+			line_comments_json TEXT NOT NULL DEFAULT '[]',
+			PRIMARY KEY (tour_id, path),
+			FOREIGN KEY(tour_id) REFERENCES tour_runs(id) ON DELETE CASCADE
+		);
+
+		CREATE TABLE IF NOT EXISTS tour_events (
+			id TEXT PRIMARY KEY,
+			tour_id TEXT NOT NULL,
+			seq INTEGER NOT NULL,
+			kind TEXT NOT NULL,
+			markdown TEXT NOT NULL,
+			finish INTEGER NOT NULL DEFAULT 0,
+			context_json TEXT,
+			created_at TEXT NOT NULL,
+			UNIQUE (tour_id, seq),
+			FOREIGN KEY(tour_id) REFERENCES tour_runs(id) ON DELETE CASCADE
+		);
+
+		CREATE TABLE IF NOT EXISTS tour_transcript (
+			id TEXT PRIMARY KEY,
+			tour_id TEXT NOT NULL,
+			role TEXT NOT NULL,
+			body TEXT NOT NULL,
+			event_id TEXT,
+			context_json TEXT,
+			created_at TEXT NOT NULL,
+			FOREIGN KEY(tour_id) REFERENCES tour_runs(id) ON DELETE CASCADE
+		);
+	`},
+	{49, "add tour listener event cursor", `
+		ALTER TABLE tour_runs
+			ADD COLUMN listener_event_seq INTEGER NOT NULL DEFAULT 0;
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -538,6 +600,11 @@ func migrateDB(db *sql.DB) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
+		} else if m.version == 49 {
+			if err := applyMigration49(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		} else {
 			if _, err := tx.Exec(m.sql); err != nil {
 				tx.Rollback()
@@ -638,6 +705,21 @@ func applyMigration45(tx *sql.Tx) error {
 	_, err = tx.Exec(`
 		ALTER TABLE chief_of_staff_dispatches
 			ADD COLUMN structured_report_json TEXT NOT NULL DEFAULT ''
+	`)
+	return err
+}
+
+func applyMigration49(tx *sql.Tx) error {
+	hasListenerEventSeq, err := columnExists(tx, "tour_runs", "listener_event_seq")
+	if err != nil {
+		return err
+	}
+	if hasListenerEventSeq {
+		return nil
+	}
+	_, err = tx.Exec(`
+		ALTER TABLE tour_runs
+			ADD COLUMN listener_event_seq INTEGER NOT NULL DEFAULT 0
 	`)
 	return err
 }
