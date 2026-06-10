@@ -173,9 +173,10 @@ Implementation rule:
 - in `app/src/App.tsx`, selection should `fit()` main terminal but only `focus()` it when utility is not open or active
 - in `app/src/components/SessionTerminalWorkspace/index.tsx`, prefer the active `GhosttyTerminal` handle's `focus()` before any fallback retry
 
-Verification:
+Verification (manual — the dedicated realpty spec was removed together with the
+legacy non-session workspace panes, and no automated focus-ownership spec
+replaced it):
 
-- run `app/e2e/utility-terminal-realpty.spec.ts` with `VITE_MOCK_PTY=0 VITE_FORCE_REAL_PTY=1`
 - confirm `Cmd+T` typing works without extra click
 - confirm switch-away and switch-back still types into utility without extra click
 
