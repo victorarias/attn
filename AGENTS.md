@@ -78,6 +78,8 @@ DEBUG=debug attn -s test
 ```
 
 - daemon log: `~/.attn/daemon.log`
+- worker PTY logs (production backend): `~/.attn/workers/<daemon-instance>/log/<session>.log` — `pty.Session` `logf` lines land HERE, not in `daemon.log` (which only shows `pty_output forward`/`pty_resize`). Swap the data dir for dev (`~/.attn-dev/...`).
+- the app auto-respawns the daemon WITHOUT `DEBUG` when its socket drops; to capture debug logs, quit the app first, then start the daemon manually (`DEBUG=debug ... attn daemon ensure`)
 - use `d.logf(...)` in daemon code and pass `LogFunc` into subpackages when needed
 - do not use `log.Printf()` for daemon logging because stderr is discarded in background mode
 - use prefixed `console.log/warn/error` in frontend code and inspect via Tauri DevTools
@@ -91,6 +93,9 @@ For hard-to-reproduce UI bugs, prefer disk-based JSONL logs over `console.log` �
 - `cmd/attn`: CLI wrapper that launches agents, registers sessions, and wires hooks/settings
 - `internal/hooks`: Claude hook generation and state/todo reporting
 - `internal/daemon`: session lifecycle, PTY management, git/github operations, websocket updates
+- `internal/pty`: PTY session, read loop, scrollback/replay, terminal-query (CPR/DA1/OSC) responses
+- `internal/ptybackend`: PTY backend selector — `embedded` (in-daemon) vs `worker` (default, set by `ATTN_PTY_BACKEND`)
+- `internal/ptyworker`: per-session worker process. Production runs the **worker** backend: a separate `attn` process per session. Both backends spawn PTYs through `internal/pty`, so read-loop changes live in one place but RUN in the worker process, not the daemon.
 - `internal/store`: SQLite-backed state with in-memory cache
 - `internal/classifier`: stop-time WAITING/DONE classification
 - `internal/transcript`: last-assistant-message extraction from JSONL transcripts
@@ -189,6 +194,7 @@ Before changing PTY attach/replay, terminal resize, mobile keyboard viewport han
 - do not use replay as a generic redraw repair tool
 - do not treat local `fit()` or viewport churn as proof the PTY is correct
 - do not let replayed historical terminal queries produce fresh live PTY input
+- the daemon (inside the worker) is the sole responder for CPR and DA1 — answered every time from the read loop; the frontend strips both and must not answer them. Theme-dependent OSC10/11/12 color queries stay frontend-owned. Breaking this split reintroduces the ~10–30s reattach prompt-hang.
 - for mobile or viewport bugs, keep structured instrumentation and prefer transition evidence over screenshots alone
 
 ### 8. macOS Menu Intercepts Cmd+C
