@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +19,27 @@ type fakeWorkspaceContextCheckoutClient struct {
 	failures int
 	calls    int
 	path     string
+}
+
+type fakeTourEventWaitResponse struct {
+	event *protocol.TourEvent
+	run   *protocol.TourRun
+	err   error
+}
+
+type fakeTourEventWaiter struct {
+	responses []fakeTourEventWaitResponse
+	afterSeqs []int
+}
+
+func (f *fakeTourEventWaiter) WaitTourEvent(_ string, afterSeq int) (*protocol.TourEvent, *protocol.TourRun, error) {
+	f.afterSeqs = append(f.afterSeqs, afterSeq)
+	if len(f.responses) == 0 {
+		return nil, nil, errors.New("unexpected WaitTourEvent call")
+	}
+	response := f.responses[0]
+	f.responses = f.responses[1:]
+	return response.event, response.run, response.err
 }
 
 func (f *fakeWorkspaceContextCheckoutClient) CheckoutWorkspaceContext(string, bool) (*protocol.WorkspaceContextResult, error) {
@@ -404,6 +426,43 @@ func TestTourReadyPayloadExcludesTourContents(t *testing.T) {
 		if strings.Contains(encoded, excluded) {
 			t.Fatalf("ready payload unexpectedly contains %q: %s", excluded, encoded)
 		}
+	}
+}
+
+func TestWaitForNextTourEventKeepsCursorAcrossHeartbeatTimeouts(t *testing.T) {
+	event := &protocol.TourEvent{
+		ID:     "event-4",
+		TourID: "tour-1",
+		Seq:    4,
+		Kind:   "question",
+	}
+	waiter := &fakeTourEventWaiter{responses: []fakeTourEventWaitResponse{
+		{run: &protocol.TourRun{TourID: "tour-1", Status: protocol.TourStatusActive}},
+		{event: event, run: &protocol.TourRun{TourID: "tour-1", Status: protocol.TourStatusActive}},
+	}}
+
+	gotEvent, gotRun, err := waitForNextTourEvent(waiter, "tour-1", 3)
+	if err != nil {
+		t.Fatalf("waitForNextTourEvent() error = %v", err)
+	}
+	if gotEvent != event || gotRun == nil || gotRun.Status != protocol.TourStatusActive {
+		t.Fatalf("waitForNextTourEvent() = (%+v, %+v), want event and active run", gotEvent, gotRun)
+	}
+	if got := fmt.Sprint(waiter.afterSeqs); got != "[3 3]" {
+		t.Fatalf("after sequences = %s, want [3 3]", got)
+	}
+}
+
+func TestWaitForNextTourEventReturnsWhenTourEnds(t *testing.T) {
+	ended := &protocol.TourRun{TourID: "tour-1", Status: protocol.TourStatusEnded}
+	waiter := &fakeTourEventWaiter{responses: []fakeTourEventWaitResponse{{run: ended}}}
+
+	event, run, err := waitForNextTourEvent(waiter, "tour-1", 9)
+	if err != nil {
+		t.Fatalf("waitForNextTourEvent() error = %v", err)
+	}
+	if event != nil || run != ended {
+		t.Fatalf("waitForNextTourEvent() = (%+v, %+v), want nil event and ended run", event, run)
 	}
 }
 

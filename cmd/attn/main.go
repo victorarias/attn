@@ -454,6 +454,8 @@ func runTour() {
 		runTourCreate()
 	case "start":
 		runTourStart()
+	case "wait":
+		runTourWait()
 	case "status":
 		runTourStatus()
 	case "event":
@@ -477,6 +479,7 @@ func writeTourHelp(w io.Writer) {
 commands:
   create  create a guide in the active attn profile directory
   start   open a guide and listen for questions and feedback until End tour
+  wait    wait for one event after a durable sequence cursor, then exit
   status  show the current session's active tour
   event   fetch one stored question or feedback event
   refresh reload the guide and current working-tree changes
@@ -542,6 +545,7 @@ func runTourStart() {
 	name := fs.String("name", "", "tour name")
 	baseRef := fs.String("base", "", "base branch or ref")
 	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	once := fs.Bool("once", false, "return after the next question, feedback, or End tour event")
 	_ = fs.Parse(os.Args[3:])
 	session := tourSessionID(*sessionID)
 	if session == "" || strings.TrimSpace(*guidePath) == "" {
@@ -562,7 +566,7 @@ func runTourStart() {
 	fmt.Printf("TOUR_READY %s\n", mustJSON(newTourReadyPayload(run)))
 	afterSeq := run.ListenerEventSeq
 	for run.Status == protocol.TourStatusActive {
-		event, nextRun, err := c.WaitTourEvent(run.TourID, afterSeq)
+		event, nextRun, err := waitForNextTourEvent(c, run.TourID, afterSeq)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "tour listener: %v\n", err)
 			os.Exit(1)
@@ -571,20 +575,82 @@ func runTourStart() {
 			run = nextRun
 		}
 		if event == nil {
-			continue
+			printTourEnded(run, afterSeq)
+			return
 		}
 		afterSeq = event.Seq
-		switch event.Kind {
-		case "question":
-			fmt.Printf("QUESTION_READY %s\n", mustJSON(event))
-		case "feedback":
-			fmt.Printf("FEEDBACK_READY %s\n", mustJSON(event))
-		case "finish":
-			fmt.Printf("TOUR_ENDED %s\n", mustJSON(event))
-		default:
-			fmt.Printf("TOUR_EVENT %s\n", mustJSON(event))
+		printTourEvent(event)
+		if *once {
+			return
 		}
 	}
+}
+
+type tourEventWaiter interface {
+	WaitTourEvent(tourID string, afterSeq int) (*protocol.TourEvent, *protocol.TourRun, error)
+}
+
+func waitForNextTourEvent(waiter tourEventWaiter, tourID string, afterSeq int) (*protocol.TourEvent, *protocol.TourRun, error) {
+	for {
+		event, run, err := waiter.WaitTourEvent(tourID, afterSeq)
+		if err != nil {
+			return nil, nil, err
+		}
+		if event != nil || (run != nil && run.Status != protocol.TourStatusActive) {
+			return event, run, nil
+		}
+	}
+}
+
+func printTourEvent(event *protocol.TourEvent) {
+	label := "TOUR_EVENT"
+	switch event.Kind {
+	case "question":
+		label = "QUESTION_READY"
+	case "feedback":
+		label = "FEEDBACK_READY"
+	case "finish":
+		label = "TOUR_ENDED"
+	}
+	fmt.Printf("%s %s\n", label, mustJSON(event))
+}
+
+func printTourEnded(run *protocol.TourRun, afterSeq int) {
+	payload := struct {
+		TourID   string              `json:"tour_id"`
+		Status   protocol.TourStatus `json:"status"`
+		AfterSeq int                 `json:"after_seq"`
+	}{
+		Status:   protocol.TourStatusEnded,
+		AfterSeq: afterSeq,
+	}
+	if run != nil {
+		payload.TourID = run.TourID
+		payload.Status = run.Status
+	}
+	fmt.Printf("TOUR_ENDED %s\n", mustJSON(payload))
+}
+
+func runTourWait() {
+	fs := flag.NewFlagSet("tour wait", flag.ExitOnError)
+	tourID := fs.String("tour", "", "tour id")
+	afterSeq := fs.Int("after", -1, "last event sequence already handled")
+	_ = fs.Parse(os.Args[3:])
+	if strings.TrimSpace(*tourID) == "" || *afterSeq < 0 {
+		fmt.Fprintln(os.Stderr, "tour wait: --tour and a non-negative --after sequence are required")
+		os.Exit(2)
+	}
+
+	event, run, err := waitForNextTourEvent(client.New(""), *tourID, *afterSeq)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tour wait: %v\n", err)
+		os.Exit(1)
+	}
+	if event == nil {
+		printTourEnded(run, *afterSeq)
+		return
+	}
+	printTourEvent(event)
 }
 
 func runTourStatus() {

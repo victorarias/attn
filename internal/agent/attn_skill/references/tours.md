@@ -87,9 +87,13 @@ Starting a tour always means listening for the user's questions and feedback.
 Do not ask whether you should listen, and do not hand off immediately after
 opening it.
 
-`tour start` intentionally blocks while it listens. The agent owns that
-long-running process and must keep it alive until the Tour ends. Start it as a
-background command through the agent harness:
+`tour start` intentionally blocks while it listens. Choose the mode that
+matches the agent harness.
+
+### Streaming monitor mode
+
+Use the default streaming listener when the harness can awaken the agent as
+new process output arrives:
 
 ```bash
 "$ATTN_WRAPPER_PATH" tour start \
@@ -98,10 +102,37 @@ background command through the agent harness:
   --base "<chosen-base-ref>"
 ```
 
-Configure the harness call itself for background or long-running execution.
-Retain the process or execution-session handle it returns and consume output
-through that handle. Wait for `TOUR_READY` and keep the harness-owned process
-alive while the Tour is active. The ready payload contains the `tour_id`.
+Keep that harness-owned process alive until `TOUR_ENDED`. React to each
+`QUESTION_READY` or `FEEDBACK_READY` line as it appears.
+
+### One-event mode
+
+Use one-event mode when the harness resumes the agent only after a command
+exits. Start the Tour and wait for one input:
+
+```bash
+"$ATTN_WRAPPER_PATH" tour start \
+  --guide "$guide" \
+  --name "<human-readable name>" \
+  --base "<chosen-base-ref>" \
+  --once
+```
+
+The command prints `TOUR_READY`, waits for the next question, feedback, or End
+tour event, prints that event, and exits. Handle the returned event. Its `seq`
+is the durable cursor for the next wait:
+
+```bash
+"$ATTN_WRAPPER_PATH" tour wait \
+  --tour "<tour-id>" \
+  --after "<handled-event-seq>"
+```
+
+`tour wait` remains blocked across internal listener-heartbeat timeouts. It
+returns only when the next event arrives, the Tour ends, or an error occurs.
+After handling each returned event, invoke it again using that event's `seq`.
+Starting the next wait acknowledges events through `--after`; if handling is
+interrupted, reuse the previous cursor so the event is delivered again.
 
 Before handing control back to the user, verify both that the owned listener
 process is still alive and that `tour status` reports
@@ -122,10 +153,12 @@ wake prompt contains a command like:
 
 Run that command immediately to fetch the exact durable event, then handle it
 according to its `kind`. The wake prompt intentionally contains no question or
-feedback body. While already active, also consume new listener log lines; the
-log remains the durable fallback if a wake cannot interrupt the current turn.
-Handle each event ID only once: the wake command and listener log may surface
-the same durable event.
+feedback body. In streaming monitor mode, also consume new listener output;
+that output remains the fallback if a wake cannot interrupt the current turn.
+One-event mode returns the complete durable event directly.
+
+Handle each event ID only once. Wake delivery and listener delivery may
+surface the same event.
 
 - `QUESTION_READY` contains an event ID plus file, line, and code context.
   Answer the actual question, then send:
@@ -150,7 +183,8 @@ the same durable event.
 
 Questions must not leak into the final feedback payload. Answer them through
 `tour reply`; leave the listener running afterward. If the listener process
-dies or disconnects, restart `tour start` with the same guide and session to
-reattach to the active tour.
+dies or disconnects, streaming mode restarts `tour start` with the same guide
+and session. One-event mode reruns `tour wait` with the last successfully
+handled sequence.
 
 The tour is local to attn. Never submit comments, reviews, or approvals to GitHub.
