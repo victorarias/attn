@@ -147,10 +147,24 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"tour refresh",
 		"Handle each event ID only once",
 		"Do not ask whether you should listen",
+		"`tour start` intentionally blocks",
+		"background command through the agent harness",
+		"Configure the harness call itself",
+		"harness-owned process",
+		"daemon restart breaks the",
+		"guide anchors no longer resolve",
 		"Never submit comments, reviews, or approvals to GitHub",
 	} {
 		if !strings.Contains(tours, expected) {
 			t.Fatalf("tours reference missing %q: %q", expected, tours)
+		}
+	}
+	for _, misleading := range []string{
+		`2>&1 &`,
+		"tour_listener_pid=$!",
+	} {
+		if strings.Contains(tours, misleading) {
+			t.Fatalf("tours reference still teaches shell-owned backgrounding %q: %q", misleading, tours)
 		}
 	}
 

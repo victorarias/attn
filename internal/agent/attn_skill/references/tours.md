@@ -87,20 +87,29 @@ Starting a tour always means listening for the user's questions and feedback.
 Do not ask whether you should listen, and do not hand off immediately after
 opening it.
 
-Run the listener in the background and keep its log:
+`tour start` intentionally blocks while it listens. The agent owns that
+long-running process and must keep it alive until the Tour ends. Start it as a
+background command through the agent harness:
 
-```sh
-tour_log="$(mktemp "${TMPDIR:-/tmp}/attn-tour.XXXXXX")"
+```bash
 "$ATTN_WRAPPER_PATH" tour start \
   --guide "$guide" \
   --name "<human-readable name>" \
-  --base "<chosen-base-ref>" \
-  >"$tour_log" 2>&1 &
-tour_listener_pid=$!
+  --base "<chosen-base-ref>"
 ```
 
-Wait for `TOUR_READY` and keep the listener process alive while the tour is
-active. The ready payload contains the `tour_id`.
+Configure the harness call itself for background or long-running execution.
+Retain the process or execution-session handle it returns and consume output
+through that handle. Wait for `TOUR_READY` and keep the harness-owned process
+alive while the Tour is active. The ready payload contains the `tour_id`.
+
+Before handing control back to the user, verify both that the owned listener
+process is still alive and that `tour status` reports
+`"connection_state": "connected"`. An app install or daemon restart breaks the
+blocking wait and makes `tour start` exit; once the daemon is healthy, restart
+the listener and verify it again. If guide anchors no longer resolve after code
+changes, reopening fails. Update those system-guide anchors to the current
+source and retry.
 
 Questions and review feedback automatically wake an idle listening agent. The
 wake prompt contains a command like:
