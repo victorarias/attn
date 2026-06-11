@@ -69,7 +69,7 @@ import {
   type ResizeCoalescer,
   type TerminalDimensions,
 } from '../utils/ghosttyResize';
-import { buildTerminalQueryResponses } from '../utils/terminalQueryResponses';
+import { buildTerminalQueryResponses, stripDaemonOwnedResponses } from '../utils/terminalQueryResponses';
 import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import { recordTerminalLinkHitTestEvent } from '../utils/terminalLinkHitTestLog';
 import {
@@ -1018,7 +1018,15 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }
         if (!options?.suppressResponses) {
           for (const response of responses) {
-            onInputRef.current(response);
+            // CPR (cursor position) and DA1 (device attributes) replies are
+            // owned by the daemon, the geometry/capability authority. Answering
+            // here too would double-reply and the shell reads the extra
+            // ESC[r;cR / ESC[?...c as stray input — and after a reattach the
+            // frontend can miss them entirely, stalling fish's prompt. Strip
+            // both; forward everything else (DSR, OSC color, etc.) the model
+            // produced.
+            const forwarded = stripDaemonOwnedResponses(response);
+            if (forwarded) onInputRef.current(forwarded);
           }
           for (const response of buildTerminalQueryResponses(data, resolvedTheme, responses)) {
             onInputRef.current(response);

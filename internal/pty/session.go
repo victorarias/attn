@@ -271,23 +271,33 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				data := chunk[:boundary]
 				queries := detectTerminalQueries(data)
 
-				// Respond to DA1 (Primary Device Attributes) queries when no
-				// frontend subscriber is attached. The daemon can spawn shell
-				// PTYs before the interactive terminal is ready, while non-interactive
-				// worker subscribers like debug capture are already attached.
-				// Fish waits about 2 s for these terminal queries before the prompt
-				// becomes truly interactive. A virtualized running TUI can issue
-				// queries repeatedly while no frontend parser is attached, so the
-				// daemon must answer every occurrence until an interactive
-				// subscriber takes ownership again.
-				noInteractiveSubs := false
-				if queries.any() {
+				// CPR and DA1 are answered directly by the daemon below — it owns
+				// terminal geometry/capabilities (AGENTS.md pattern #7) and replies
+				// always, race-free, regardless of frontend attach/replay timing.
+				// fish blocks its prompt redraw on the resize-triggered CPR+DA1
+				// until both are answered; after a reattach the frontend can be
+				// mid-remount/replay and miss them, stalling the prompt for fish's
+				// ~10 s query timeout. Only the theme-dependent OSC color queries
+				// remain a startup/unattached fallback: the daemon can spawn shell
+				// PTYs before the interactive terminal is ready (only non-interactive
+				// worker subscribers like debug capture are attached), and fish waits
+				// for these replies before its prompt becomes interactive; shell
+				// prompts can re-issue them shortly after the first attach/resize, so
+				// resends are allowed during the startup window — and a virtualized
+				// running TUI can re-issue them repeatedly while no frontend parser
+				// is attached, so unattached resends are always answered. Once a real
+				// terminal is attached it owns the OSC color replies (they depend on
+				// its theme).
+				oscQueries := queries
+				oscQueries.cpr = false
+				oscQueries.da1 = false
+				if oscQueries.any() {
 					s.subMu.RLock()
-					noInteractiveSubs = !hasInteractiveSubscribers(s.subscribers)
+					noInteractiveSubs := !hasInteractiveSubscribers(s.subscribers)
 					s.subMu.RUnlock()
-				}
-				if enabled, allowResend, source := s.terminalQueryFallbackMode(time.Now(), noInteractiveSubs); enabled {
-					s.writeTerminalQueryResponses(queries, source, allowResend, logf)
+					if enabled, allowResend, source := s.terminalQueryFallbackMode(time.Now(), noInteractiveSubs); enabled {
+						s.writeTerminalQueryResponses(oscQueries, source, allowResend, logf)
+					}
 				}
 
 				seq := s.seqCounter.Add(1)
@@ -305,6 +315,21 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				}
 				s.lastReplaySeq = seq
 				s.replayMu.Unlock()
+				// The daemon is the single authority for CPR (cursor position)
+				// and DA1 (device attributes) replies. Answer after the chunk is
+				// applied so the reported cursor is current, and reply in query
+				// order (CPR before DA1, matching fish's ESC[6n ESC[0c). fish
+				// blocks its prompt redraw on the resize-triggered CPR+DA1 until it
+				// gets both; routing them through the daemon makes the replies
+				// race-free regardless of frontend attach/replay timing (the
+				// frontend no longer answers either). See writeCursorPositionResponse
+				// and writeDeviceAttributesResponse.
+				if queries.cpr {
+					s.writeCursorPositionResponse(logf)
+				}
+				if queries.da1 {
+					s.writeDeviceAttributesResponse(logf)
+				}
 				s.fanOut(data, seq)
 				if s.detector != nil && s.onState != nil {
 					if state, changed := s.detector.Observe(data); changed {
@@ -788,43 +813,58 @@ func (s *Session) writeTerminalQueryResponses(queries terminalQueries, source st
 		return
 	}
 
-	cprRow := 0
-	cprCol := 0
 	if responses.osc10 {
 		_, _ = s.ptmx.Write([]byte(fallbackOSC10Response))
 	}
 	if responses.osc11 {
 		_, _ = s.ptmx.Write([]byte(fallbackOSC11Response))
 	}
-	if responses.da1 {
-		// DA1 response: VT100 with Advanced Video Option.
-		_, _ = s.ptmx.Write([]byte("\x1b[?1;2c"))
-	}
-	if responses.cpr {
-		row, col := 1, 1
-		if s.screen != nil {
-			if snapshot, ok := s.screen.Snapshot(); ok {
-				row = int(snapshot.cursorY) + 1
-				col = int(snapshot.cursorX) + 1
-			}
-		}
-		cprRow = row
-		cprCol = col
-		_, _ = s.ptmx.Write([]byte(fmt.Sprintf("\x1b[%d;%dR", row, col)))
-	}
 
 	if logf != nil {
 		logf(
-			"pty terminal-query fallback: session=%s source=%s da1=%v cpr=%v osc10=%v osc11=%v cpr_row=%d cpr_col=%d",
+			"pty terminal-query fallback: session=%s source=%s osc10=%v osc11=%v",
 			s.id,
 			source,
-			responses.da1,
-			responses.cpr,
 			responses.osc10,
 			responses.osc11,
-			cprRow,
-			cprCol,
 		)
+	}
+}
+
+// writeCursorPositionResponse answers a CPR (cursor position report) query from
+// the authoritative screen model. The daemon is the single CPR responder for a
+// session: fish blocks its prompt redraw on the resize-triggered CPR until it
+// gets a reply, and routing every CPR through the daemon (which owns geometry,
+// AGENTS.md pattern #7) makes the reply race-free regardless of frontend
+// attach/replay timing. The frontend deliberately does not answer CPR, so there
+// is no double-reply to confuse the shell.
+func (s *Session) writeCursorPositionResponse(logf func(string, ...any)) {
+	row, col := 1, 1
+	if s.screen != nil {
+		if snapshot, ok := s.screen.Snapshot(); ok {
+			row = int(snapshot.cursorY) + 1
+			col = int(snapshot.cursorX) + 1
+		}
+	}
+	_, _ = fmt.Fprintf(s.ptmx, "\x1b[%d;%dR", row, col)
+	if logf != nil {
+		logf("pty cpr reply: session=%s row=%d col=%d", s.id, row, col)
+	}
+}
+
+// writeDeviceAttributesResponse answers a DA1 (primary device attributes) query.
+// Like CPR, the daemon is the single DA1 responder for a session: fish blocks its
+// prompt redraw on the resize-triggered DA1 until it gets a reply, and after a
+// reattach the frontend can be mid-remount/replay and miss it (fish then stalls
+// for its ~10 s query timeout). The reply is a static capability string identical
+// to the one the frontend would send, so routing every DA1 through the daemon
+// (which owns geometry/capabilities, AGENTS.md pattern #7) is safe and race-free.
+// The frontend deliberately does not answer DA1, so there is no double-reply.
+func (s *Session) writeDeviceAttributesResponse(logf func(string, ...any)) {
+	// DA1 response: VT100 with Advanced Video Option.
+	_, _ = s.ptmx.Write([]byte("\x1b[?1;2c"))
+	if logf != nil {
+		logf("pty da1 reply: session=%s", s.id)
 	}
 }
 
