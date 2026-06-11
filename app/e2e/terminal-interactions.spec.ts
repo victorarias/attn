@@ -91,6 +91,12 @@ async function openTerminalSession(
   await page.locator(`[data-testid="session-${sessionId}"]`).click();
   const terminal = page.locator(`[data-pane-session-id="${sessionId}"][data-pane-kind="agent"] .terminal-container`);
   await expect(terminal).toBeVisible({ timeout: 5000 });
+  await expect
+    .poll(
+      async () => page.evaluate((id) => window.__TEST_GET_SESSION_PANE_SIZE?.(id) ?? null, sessionId),
+      { timeout: 10000 },
+    )
+    .not.toBeNull();
   return terminal;
 }
 
