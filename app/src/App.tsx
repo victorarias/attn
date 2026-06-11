@@ -2442,12 +2442,6 @@ sendFetchPRDetails,
     ));
   }, [activeWorkspaceId]);
   const allWorkspaceIds = useMemo(() => workspaceViews.map((w) => w.id), [workspaceViews]);
-  const liveRuntimeWorkspaceIds = useMemo(
-    () => workspaceViews
-      .filter((workspace) => workspace.sessions.some((session) => session.state !== 'idle'))
-      .map((workspace) => workspace.id),
-    [workspaceViews],
-  );
   const visibleGridSessionIds = useMemo(
     () => new Set(visibleGridTiles.map((tile) => tile.sessionId)),
     [visibleGridTiles],
@@ -2466,9 +2460,9 @@ sendFetchPRDetails,
       recentWorkspaceIds,
       activeWorkspaceId,
       warmWorkspaceLimit,
-      [...liveRuntimeWorkspaceIds, ...gridVisibleWorkspaceIds],
+      gridVisibleWorkspaceIds,
     ),
-    [allWorkspaceIds, recentWorkspaceIds, activeWorkspaceId, warmWorkspaceLimit, liveRuntimeWorkspaceIds, gridVisibleWorkspaceIds],
+    [allWorkspaceIds, recentWorkspaceIds, activeWorkspaceId, warmWorkspaceLimit, gridVisibleWorkspaceIds],
   );
 
   const getActiveLeafDropSnapshot = useCallback(

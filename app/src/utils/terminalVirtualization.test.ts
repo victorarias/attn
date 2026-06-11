@@ -6,16 +6,13 @@ describe('computeWarmWorkspaceIds', () => {
     expect(computeWarmWorkspaceIds(['a', 'b', 'c'], ['a', 'b', 'c'], 'a', -1)).toBeNull();
   });
 
-  it('keeps all live when workspace count is within the warm budget', () => {
-    // budget = limit + 1 = 4; with <= 4 workspaces there is nothing to reclaim.
-    expect(computeWarmWorkspaceIds(['a'], ['a'], 'a', 3)).toBeNull();
-    expect(computeWarmWorkspaceIds(['a', 'b', 'c', 'd'], ['a'], 'a', 3)).toBeNull();
+  it('keeps only selected and recent workspaces live even within the warm budget', () => {
+    expect(computeWarmWorkspaceIds(['a'], ['a'], 'a', 3)).toEqual(new Set(['a']));
+    expect(computeWarmWorkspaceIds(['a', 'b', 'c', 'd'], ['a'], 'a', 3)).toEqual(new Set(['a']));
   });
 
-  it('keeps all live at startup (no active workspace) while within budget', () => {
-    // Regression guard: before an active workspace is established, a small set of
-    // workspaces must stay mounted rather than collapsing to an empty live-set.
-    expect(computeWarmWorkspaceIds(['a', 'b'], [], null, 3)).toBeNull();
+  it('keeps terminals cold on the dashboard before a workspace is selected', () => {
+    expect(computeWarmWorkspaceIds(['a', 'b'], [], null, 3)).toEqual(new Set());
   });
 
   it('keeps only the active workspace at limit 0 once over budget', () => {
@@ -55,22 +52,17 @@ describe('computeWarmWorkspaceIds', () => {
     expect(warm).toEqual(new Set(['a', 'b']));
   });
 
-  it('fills the budget from current workspaces before recency is established', () => {
-    // active set but no recency yet: never leave warm smaller than the budget
-    // while extra workspaces exist.
+  it('does not eagerly fill unused warm slots before recency is established', () => {
     const warm = computeWarmWorkspaceIds(['a', 'b', 'c', 'd', 'e'], [], 'a', 2);
-    expect(warm).toEqual(new Set(['a', 'b', 'c']));
-    expect(warm?.size).toBe(3);
+    expect(warm).toEqual(new Set(['a']));
   });
 
   it('ignores stale active/recent ids no longer among current workspaces', () => {
     const warm = computeWarmWorkspaceIds(['a', 'b', 'c', 'd'], ['x', 'b'], 'y', 1);
-    // active(y) and recent(x) are gone; keep present recent(b) then fill (a).
-    expect(warm).toEqual(new Set(['b', 'a']));
-    expect(warm?.size).toBe(2);
+    expect(warm).toEqual(new Set(['b']));
   });
 
-  it('keeps protected workspaces live even when they are cold', () => {
+  it('keeps required visible workspaces live even when they are cold', () => {
     const warm = computeWarmWorkspaceIds(
       ['a', 'b', 'c', 'd', 'e'],
       ['a', 'b'],
@@ -81,7 +73,7 @@ describe('computeWarmWorkspaceIds', () => {
     expect(warm).toEqual(new Set(['e', 'a']));
   });
 
-  it('lets protected workspaces exceed the warm budget', () => {
+  it('lets required visible workspaces exceed the warm budget', () => {
     const warm = computeWarmWorkspaceIds(
       ['a', 'b', 'c', 'd', 'e'],
       ['a', 'b'],
@@ -92,7 +84,7 @@ describe('computeWarmWorkspaceIds', () => {
     expect(warm).toEqual(new Set(['d', 'e', 'a']));
   });
 
-  it('ignores stale protected workspace ids', () => {
+  it('ignores stale required workspace ids', () => {
     const warm = computeWarmWorkspaceIds(
       ['a', 'b', 'c', 'd'],
       ['a', 'b', 'c'],

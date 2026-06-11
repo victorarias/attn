@@ -279,8 +279,36 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       }),
     ]), [agentPanes, sessionById]);
 
-    const runtime = useGhosttyPaneRuntime(runtimePanes, activePaneId, eventRouter, isActiveSessionRef);
+    const runtime = useGhosttyPaneRuntime(
+      runtimePanes,
+      activePaneId,
+      eventRouter,
+      isActiveSessionRef,
+      terminalsLive,
+    );
+    const setTerminalHandleRef = useRef(runtime.setTerminalHandle);
+    const terminalRefCallbacksRef = useRef(new Map<
+      string,
+      (handle: GhosttyTerminalHandle | null) => void
+    >());
+    setTerminalHandleRef.current = runtime.setTerminalHandle;
+    const terminalRefForPane = useCallback((paneId: string) => {
+      const existing = terminalRefCallbacksRef.current.get(paneId);
+      if (existing) return existing;
+      const callback = (handle: GhosttyTerminalHandle | null) => {
+        setTerminalHandleRef.current(paneId, handle);
+      };
+      terminalRefCallbacksRef.current.set(paneId, callback);
+      return callback;
+    }, []);
     const fitPane = runtime.fitPane;
+    const scheduleTerminalFitAfterResize = useCallback(() => {
+      window.requestAnimationFrame(() => {
+        for (const pane of runtimePanes) {
+          fitPane(pane.paneId);
+        }
+      });
+    }, [fitPane, runtimePanes]);
     const getPaneSize = runtime.getPaneSize;
     const splitLayoutActive = workspace.layoutTree?.type === 'split';
     // Show the pane header (which doubles as the drag-to-move handle) whenever the
@@ -698,7 +726,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 <div className="workspace-pane-virtualized" aria-hidden="true" data-testid={`pane-virtualized-${agentPane.id}`} />
               ) : (
                 <GhosttyTerminal
-                  ref={(handle) => runtime.setTerminalHandle(agentPane.id, handle)}
+                  ref={terminalRefForPane(agentPane.id)}
                   fontSize={fontSize}
                   resolvedTheme={resolvedTheme}
                   debugName={`agent:${paneTitle}:${paneSession?.agent ?? 'shell'}:${agentPane.sessionId}`}
@@ -938,6 +966,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         pendingRatioRef.current = null;
         draggingSplitRef.current = null;
         clearRatioOverride(splitId);
+        scheduleTerminalFitAfterResize();
       };
       const onUp = (ev: PointerEvent) => {
         ev.preventDefault();
@@ -947,6 +976,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         pendingRatioRef.current = { splitId, ratio };
         flushRatioOverride();
         draggingSplitRef.current = null;
+        scheduleTerminalFitAfterResize();
         const resizeResult = onResizeSplit?.(splitId, ratio);
         if (resizeResult) {
           void resizeResult.catch(() => clearRatioOverride(splitId, ratio));
@@ -957,7 +987,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       window.addEventListener('pointerup', onUp, true);
       window.addEventListener('pointercancel', onCancel, true);
       window.addEventListener('blur', onCancel);
-    }, [clearRatioOverride, flushRatioOverride, onResizeSplit]);
+    }, [clearRatioOverride, flushRatioOverride, onResizeSplit, scheduleTerminalFitAfterResize]);
 
     useEffect(() => () => {
       dragCleanupRef.current?.();

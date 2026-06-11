@@ -4,14 +4,16 @@ import { useGhosttyPaneRuntime } from './useGhosttyPaneRuntime';
 import type { PaneRuntimeEventBinding, PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import type { GhosttyTerminalHandle } from '../GhosttyTerminal';
 
-const { mockPtyAttach, mockPtyResize, mockPtyWrite } = vi.hoisted(() => ({
+const { mockPtyAttach, mockPtyDetach, mockPtyResize, mockPtyWrite } = vi.hoisted(() => ({
   mockPtyAttach: vi.fn((_request?: unknown) => Promise.resolve()),
+  mockPtyDetach: vi.fn((_request?: unknown) => Promise.resolve()),
   mockPtyResize: vi.fn((_request?: unknown) => Promise.resolve()),
   mockPtyWrite: vi.fn((_request?: unknown) => Promise.resolve()),
 }));
 
 vi.mock('../../pty/bridge', () => ({
   ptyAttach: mockPtyAttach,
+  ptyDetach: mockPtyDetach,
   ptyResize: mockPtyResize,
   ptyWrite: mockPtyWrite,
 }));
@@ -41,6 +43,7 @@ describe('useGhosttyPaneRuntime', () => {
   beforeEach(() => {
     binding = null;
     mockPtyAttach.mockClear();
+    mockPtyDetach.mockClear();
     mockPtyResize.mockClear();
     mockPtyWrite.mockClear();
     delete (window as Window & { __TEST_SESSION_INPUT_EVENTS?: unknown }).__TEST_SESSION_INPUT_EVENTS;
@@ -138,8 +141,121 @@ describe('useGhosttyPaneRuntime', () => {
       });
     });
 
-    expect(terminal.write).toHaveBeenCalledWith(expect.any(Uint8Array), { suppressResponses: true });
+    expect(terminal.write).toHaveBeenCalledWith(
+      expect.any(Uint8Array),
+      {
+        suppressResponses: true,
+        yieldBefore: true,
+        deferRender: true,
+        historicalReplay: true,
+      },
+    );
     expect(mockPtyWrite).not.toHaveBeenCalled();
+  });
+
+  it('splits large historical replay into cooperative writes without losing bytes', async () => {
+    const terminal = createTerminal();
+    const bytes = new Uint8Array((16 * 1024) + 1);
+    bytes.fill(65);
+    bytes[bytes.length - 1] = 66;
+    const { result } = renderHook(() => useGhosttyPaneRuntime([
+      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
+    ], 'pane-session', router, { current: true }));
+
+    act(() => result.current.setTerminalHandle('pane-session', terminal));
+    await act(async () => {
+      binding?.onEvent({
+        event: 'data',
+        id: 'runtime-1',
+        source: 'attach_replay',
+        data: btoa(String.fromCharCode(...bytes)),
+      });
+    });
+
+    expect(terminal.write).toHaveBeenCalledTimes(2);
+    const firstWrite = vi.mocked(terminal.write).mock.calls[0];
+    const secondWrite = vi.mocked(terminal.write).mock.calls[1];
+    expect(firstWrite[0]).toBeInstanceOf(Uint8Array);
+    expect(secondWrite[0]).toBeInstanceOf(Uint8Array);
+    expect((firstWrite[0] as Uint8Array).byteLength).toBe(16 * 1024);
+    expect((secondWrite[0] as Uint8Array)).toEqual(Uint8Array.of(66));
+    expect(firstWrite[1]).toEqual({
+      suppressResponses: true,
+      yieldBefore: true,
+      deferRender: true,
+      historicalReplay: true,
+    });
+    expect(secondWrite[1]).toEqual({
+      suppressResponses: true,
+      yieldBefore: true,
+      deferRender: true,
+      historicalReplay: true,
+    });
+  });
+
+  it('marks historical geometry changes as replay-only resizes', async () => {
+    const terminal = createTerminal();
+    const { result } = renderHook(() => useGhosttyPaneRuntime([
+      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
+    ], 'pane-session', router, { current: true }));
+
+    act(() => result.current.setTerminalHandle('pane-session', terminal));
+    await act(async () => {
+      binding?.onEvent({
+        event: 'local_resize',
+        id: 'runtime-1',
+        source: 'attach_replay',
+        cols: 118,
+        rows: 48,
+      });
+    });
+
+    expect(terminal.resizeLocal).toHaveBeenCalledWith(
+      118,
+      48,
+      { historicalReplay: true },
+    );
+  });
+
+  it('fits an active pane after queued historical replay completes', async () => {
+    const terminal = createTerminal();
+    const isActiveSessionRef = { current: true };
+    const { result } = renderHook(() => useGhosttyPaneRuntime([
+      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
+    ], 'pane-session', router, isActiveSessionRef));
+
+    act(() => result.current.setTerminalHandle('pane-session', terminal));
+    await act(async () => {
+      binding?.onEvent({ event: 'replay_complete', id: 'runtime-1' });
+      await Promise.resolve();
+    });
+
+    expect(terminal.drain).toHaveBeenCalled();
+    expect(terminal.fit).toHaveBeenCalled();
+  });
+
+  it('does not fit replay completion after the workspace becomes inactive', async () => {
+    let resolveDrain: (() => void) | undefined;
+    const terminal = createTerminal();
+    vi.mocked(terminal.drain).mockReturnValue(new Promise<void>((resolve) => {
+      resolveDrain = resolve;
+    }));
+    const isActiveSessionRef = { current: true };
+    const { result } = renderHook(() => useGhosttyPaneRuntime([
+      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
+    ], 'pane-session', router, isActiveSessionRef));
+
+    act(() => {
+      result.current.setTerminalHandle('pane-session', terminal);
+      binding?.onEvent({ event: 'replay_complete', id: 'runtime-1' });
+      isActiveSessionRef.current = false;
+      resolveDrain?.();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(terminal.fit).not.toHaveBeenCalled();
   });
 
   it('sends only ordinary active-session resize updates after the runtime is ready', async () => {
@@ -159,58 +275,52 @@ describe('useGhosttyPaneRuntime', () => {
     expect(mockPtyResize).toHaveBeenCalledWith({ id: 'runtime-1', cols: 130, rows: 45, reason: 'test' });
   });
 
-  it('coalesces deferred split-drag resize updates before sending them to the PTY', async () => {
-    vi.useFakeTimers();
+  it('flushes the measured pane size after a fresh runtime finishes attaching', async () => {
+    let resolveAttach: (() => void) | undefined;
+    mockPtyAttach.mockReturnValueOnce(new Promise<void>((resolve) => {
+      resolveAttach = resolve;
+    }));
     const { result } = renderHook(() => useGhosttyPaneRuntime([
       {
         paneId: 'pane-session',
         runtimeId: 'runtime-1',
         paneKind: 'agent',
+        agent: 'codex',
       },
     ], 'pane-session', router, { current: true }));
     const terminal = createTerminal();
-    await act(async () => {
-      await result.current.handleTerminalReady('pane-session')(terminal);
-    });
-    mockPtyResize.mockClear();
+    vi.mocked(terminal.getSize).mockReturnValue({ cols: 106, rows: 64 });
 
+    let readyPromise: Promise<void>;
     act(() => {
-      result.current.handleTerminalResize('pane-session')(130, 45, { reason: 'ghostty_fit', deferPty: true });
-      result.current.handleTerminalResize('pane-session')(131, 45, { reason: 'ghostty_fit', deferPty: true });
-      vi.advanceTimersByTime(119);
+      result.current.handleTerminalResize('pane-session')(106, 64, { reason: 'ghostty_fit' });
+      readyPromise = result.current.handleTerminalReady('pane-session')(terminal);
     });
+
     expect(mockPtyResize).not.toHaveBeenCalled();
 
-    act(() => {
-      vi.advanceTimersByTime(1);
-    });
-    expect(mockPtyResize).toHaveBeenCalledTimes(1);
-    expect(mockPtyResize).toHaveBeenCalledWith({ id: 'runtime-1', cols: 131, rows: 45, reason: 'ghostty_fit' });
-  });
-
-  it('cancels a deferred split-drag resize when a normal resize arrives', async () => {
-    vi.useFakeTimers();
-    const { result } = renderHook(() => useGhosttyPaneRuntime([
-      {
-        paneId: 'pane-session',
-        runtimeId: 'runtime-1',
-        paneKind: 'agent',
-      },
-    ], 'pane-session', router, { current: true }));
-    const terminal = createTerminal();
     await act(async () => {
-      await result.current.handleTerminalReady('pane-session')(terminal);
-    });
-    mockPtyResize.mockClear();
-
-    act(() => {
-      result.current.handleTerminalResize('pane-session')(130, 45, { reason: 'ghostty_fit', deferPty: true });
-      result.current.handleTerminalResize('pane-session')(132, 45, { reason: 'ghostty_fit' });
-      vi.advanceTimersByTime(120);
+      resolveAttach?.();
+      await readyPromise!;
     });
 
-    expect(mockPtyResize).toHaveBeenCalledTimes(1);
-    expect(mockPtyResize).toHaveBeenCalledWith({ id: 'runtime-1', cols: 132, rows: 45, reason: 'ghostty_fit' });
+    expect(mockPtyAttach).toHaveBeenCalledWith({
+      args: {
+        id: 'runtime-1',
+        cols: 106,
+        rows: 64,
+        shell: false,
+        agent: 'codex',
+        policy: 'fresh_spawn',
+      },
+      forceResizeBeforeAttach: false,
+    });
+    expect(mockPtyResize).toHaveBeenCalledWith({
+      id: 'runtime-1',
+      cols: 106,
+      rows: 64,
+      reason: 'ghostty_fit',
+    });
   });
 
   it('resizes daemon-attached runtimes after their first delivered PTY event', async () => {
@@ -257,6 +367,104 @@ describe('useGhosttyPaneRuntime', () => {
       },
       forceResizeBeforeAttach: true,
     });
+    expect(mockPtyDetach).not.toHaveBeenCalled();
+  });
+
+  it('detaches an attached runtime when its terminal is virtualized', async () => {
+    const { result, rerender } = renderHook(
+      ({ terminalsLive }) => useGhosttyPaneRuntime([
+        { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
+      ], 'pane-session', router, { current: true }, terminalsLive),
+      { initialProps: { terminalsLive: true } },
+    );
+    const terminal = createTerminal();
+
+    await act(async () => {
+      await result.current.handleTerminalReady('pane-session')(terminal);
+    });
+    expect(mockPtyDetach).not.toHaveBeenCalled();
+
+    rerender({ terminalsLive: false });
+
+    expect(mockPtyDetach).toHaveBeenCalledWith({ id: 'runtime-1' });
+  });
+
+  it('invalidates an in-flight attach when its terminal is virtualized', async () => {
+    let resolveAttach: (() => void) | undefined;
+    mockPtyAttach.mockReturnValueOnce(new Promise<void>((resolve) => {
+      resolveAttach = resolve;
+    }));
+    const { result, rerender } = renderHook(
+      ({ terminalsLive }) => useGhosttyPaneRuntime([
+        { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
+      ], 'pane-session', router, { current: true }, terminalsLive),
+      { initialProps: { terminalsLive: true } },
+    );
+    const terminal = createTerminal();
+
+    let readyPromise: Promise<void>;
+    act(() => {
+      readyPromise = result.current.handleTerminalReady('pane-session')(terminal);
+    });
+    rerender({ terminalsLive: false });
+
+    expect(mockPtyDetach).toHaveBeenCalledWith({ id: 'runtime-1' });
+
+    await act(async () => {
+      resolveAttach?.();
+      await readyPromise!;
+    });
+
+    expect(mockPtyResize).not.toHaveBeenCalled();
+    expect(terminal.write).not.toHaveBeenCalledWith(expect.stringContaining('Failed to attach PTY'));
+  });
+
+  it('waits for a canceled attach result before attaching a remounted terminal', async () => {
+    let resolveFirstAttach: (() => void) | undefined;
+    mockPtyAttach.mockReturnValueOnce(new Promise<void>((resolve) => {
+      resolveFirstAttach = resolve;
+    }));
+    const { result, rerender } = renderHook(
+      ({ terminalsLive }) => useGhosttyPaneRuntime([
+        { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
+      ], 'pane-session', router, { current: true }, terminalsLive),
+      { initialProps: { terminalsLive: true } },
+    );
+    const firstTerminal = createTerminal();
+    const remountedTerminal = createTerminal();
+
+    let firstReadyPromise: Promise<void>;
+    act(() => {
+      firstReadyPromise = result.current.handleTerminalReady('pane-session')(firstTerminal);
+    });
+    rerender({ terminalsLive: false });
+    rerender({ terminalsLive: true });
+
+    let remountedReadyPromise: Promise<void>;
+    act(() => {
+      remountedReadyPromise = result.current.handleTerminalReady('pane-session')(remountedTerminal);
+    });
+    expect(mockPtyAttach).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveFirstAttach?.();
+      await firstReadyPromise!;
+      await remountedReadyPromise!;
+    });
+
+    expect(mockPtyAttach).toHaveBeenCalledTimes(2);
+    expect(mockPtyAttach).toHaveBeenLastCalledWith({
+      args: {
+        id: 'runtime-1',
+        cols: 120,
+        rows: 40,
+        shell: false,
+        agent: undefined,
+        policy: 'fresh_spawn',
+      },
+      forceResizeBeforeAttach: false,
+    });
+    expect(mockPtyResize).not.toHaveBeenCalled();
   });
 
   it('does not send transient unusable session-pane sizes to the PTY', async () => {

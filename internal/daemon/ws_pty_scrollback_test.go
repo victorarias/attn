@@ -16,3 +16,11 @@ func TestDefaultReplayLogCoversRawReplayClip(t *testing.T) {
 			pty.DefaultReplayLogSize, maxAgentRawReplayBytes)
 	}
 }
+
+func TestAgentRawReplayBudgetStaysResponsive(t *testing.T) {
+	const responsiveReplayBudget = 64 * 1024
+	if maxAgentRawReplayBytes != responsiveReplayBudget {
+		t.Fatalf("maxAgentRawReplayBytes = %d, want %d to bound synchronous frontend replay work",
+			maxAgentRawReplayBytes, responsiveReplayBudget)
+	}
+}

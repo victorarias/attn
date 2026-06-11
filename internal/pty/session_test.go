@@ -221,12 +221,12 @@ func TestTerminalQueryFallbackMode(t *testing.T) {
 			wantSource:        "read_loop_startup_unattached",
 		},
 		{
-			name:              "non shell unattached",
+			name:              "non shell unattached can resend",
 			agent:             "codex",
 			startedAt:         now.Add(-startupQueryFallbackWindow / 2),
 			noInteractiveSubs: true,
 			wantEnabled:       true,
-			wantAllowResend:   false,
+			wantAllowResend:   true,
 			wantSource:        "read_loop_unattached",
 		},
 		{

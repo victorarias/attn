@@ -27,9 +27,10 @@ const (
 	// DefaultReplayLogSize bounds the lazily-grown segmented replay log — the
 	// source of terminal history restored on remount/relaunch (see
 	// daemon.buildAttachReplayPayload). Unlike the ring it only costs memory
-	// proportional to what a session actually emitted, so it can afford real
-	// scrollback depth: agents that rely on terminal-native history (Codex)
-	// get this much restored after an app restart or warm-set rehydrate.
+	// proportional to what a session actually emitted, so it retains enough
+	// history for the daemon to select a recent self-sufficient replay tail or
+	// derive a current screen snapshot. Attach transport is capped separately
+	// because parsing this whole log synchronously would stall the frontend.
 	// Must stay >= daemon.maxAgentRawReplayBytes or attach replay is starved.
 	DefaultReplayLogSize = 8 * 1024 * 1024
 	defaultKillTimeout   = 10 * time.Second

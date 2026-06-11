@@ -2,10 +2,11 @@
 //
 // Each live workspace keeps a Ghostty WASM model + WebGL renderer (~32 MiB of
 // atlas + GPU texture per pane, plus scrollback) mounted. attn keeps every
-// workspace mounted at once, so with many workspaces this dominates the app's
-// memory. We keep only the active workspace plus the N most-recently-used
-// workspaces "warm" (terminals mounted); the rest render a placeholder and
-// rehydrate from daemon replay (same_app_remount) when they next become visible.
+// workspace mounted at once, so replay and memory scale with every persisted
+// workspace. We keep only the active workspace plus the N most-recently-used
+// workspaces "warm" (terminals mounted); the dashboard starts with none mounted.
+// Cold workspaces render a placeholder and rehydrate from daemon replay
+// (same_app_remount) when they next become visible.
 //
 // N is configurable at runtime so the memory-vs-instant-switching tradeoff can
 // be tuned without a rebuild:
@@ -40,42 +41,26 @@ export function writeWarmWorkspaceLimit(limit: number): void {
 // Returns the set of workspace ids whose terminals should stay mounted, or
 // null meaning "all workspaces live" (no virtualization). `allWorkspaceIds` is
 // every currently-rendered workspace; `recentWorkspaceIds` is most-recent-first;
-// `protectedWorkspaceIds` are workspaces whose PTYs can still be running and
-// therefore need a live terminal model to answer terminal queries.
-//
-// Virtualization only engages when there are MORE workspaces than the warm
-// budget (active + `limit` recent). With no more workspaces than the budget
-// there is nothing to reclaim, so we keep them all live — this both matches the
-// pre-virtualization behavior for the common case (a handful of workspaces) and
-// avoids tearing terminals down before an active workspace is established (e.g.
-// first paint, when activeWorkspaceId is still null), which would otherwise drop
-// freshly-streamed PTY output across the remount.
+// `requiredWorkspaceIds` are workspaces currently visible outside the single
+// session view, such as visible grid tiles.
 export function computeWarmWorkspaceIds(
   allWorkspaceIds: string[],
   recentWorkspaceIds: string[],
   activeWorkspaceId: string | null,
   limit: number,
-  protectedWorkspaceIds: string[] = [],
+  requiredWorkspaceIds: string[] = [],
 ): Set<string> | null {
   if (limit < 0) return null;
   const budget = limit + 1; // active + `limit` recent workspaces.
   const present = new Set(allWorkspaceIds);
-  if (present.size <= budget) return null; // nothing to reclaim; keep all live.
   const warm = new Set<string>();
-  for (const id of protectedWorkspaceIds) {
+  for (const id of requiredWorkspaceIds) {
     if (present.has(id)) warm.add(id);
   }
   if (activeWorkspaceId && present.has(activeWorkspaceId)) warm.add(activeWorkspaceId);
   for (const id of recentWorkspaceIds) {
     if (warm.size >= budget) break;
     if (present.has(id)) warm.add(id);
-  }
-  // Fill any remaining budget from the current workspaces so the warm set is
-  // never smaller than the budget while extra workspaces exist — before recency
-  // or an active workspace are established there can be unused slots.
-  for (const id of allWorkspaceIds) {
-    if (warm.size >= budget) break;
-    warm.add(id);
   }
   return warm;
 }

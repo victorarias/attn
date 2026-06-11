@@ -261,9 +261,10 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				// PTYs before the interactive terminal is ready, while non-interactive
 				// worker subscribers like debug capture are already attached.
 				// Fish waits about 2 s for these terminal queries before the prompt
-				// becomes truly interactive. Shell prompts can also re-issue the
-				// same queries shortly after the first attach/resize, so allow
-				// resends during the startup window for shell sessions.
+				// becomes truly interactive. A virtualized running TUI can issue
+				// queries repeatedly while no frontend parser is attached, so the
+				// daemon must answer every occurrence until an interactive
+				// subscriber takes ownership again.
 				noInteractiveSubs := false
 				if queries.any() {
 					s.subMu.RLock()
@@ -710,7 +711,7 @@ func (s *Session) terminalQueryFallbackMode(now time.Time, noInteractiveSubs boo
 	case noInteractiveSubs && startupFallback:
 		return true, true, "read_loop_startup_unattached"
 	case noInteractiveSubs:
-		return true, false, "read_loop_unattached"
+		return true, true, "read_loop_unattached"
 	case startupFallback:
 		return true, true, "read_loop_startup_interactive"
 	default:

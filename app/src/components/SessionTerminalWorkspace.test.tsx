@@ -39,8 +39,9 @@ const mockEventRouter: PaneRuntimeEventRouter = {
   registerBinding: vi.fn(() => () => {}),
 };
 
-const { mockPtyAttach, mockPtyResize, mockPtyWrite } = vi.hoisted(() => ({
+const { mockPtyAttach, mockPtyDetach, mockPtyResize, mockPtyWrite } = vi.hoisted(() => ({
   mockPtyAttach: vi.fn(() => Promise.resolve()),
+  mockPtyDetach: vi.fn(() => Promise.resolve()),
   mockPtyResize: vi.fn(() => Promise.resolve()),
   mockPtyWrite: vi.fn(() => Promise.resolve()),
 }));
@@ -48,6 +49,7 @@ const { mockPtyAttach, mockPtyResize, mockPtyWrite } = vi.hoisted(() => ({
 vi.mock('../pty/bridge', () => ({
   listenPtyEvents: vi.fn(() => Promise.resolve(() => {})),
   ptyAttach: mockPtyAttach,
+  ptyDetach: mockPtyDetach,
   ptyResize: mockPtyResize,
   ptyWrite: mockPtyWrite,
 }));
@@ -147,6 +149,7 @@ describe('SessionTerminalWorkspace', () => {
     vi.mocked(mockEventRouter.registerBinding).mockClear();
     mockTerminalFit.mockReset();
     mockPtyAttach.mockReset();
+    mockPtyDetach.mockReset();
     mockPtyResize.mockReset();
     mockPtyWrite.mockReset();
     delete document.documentElement.dataset.attnWorkspaceResizing;
@@ -278,6 +281,37 @@ describe('SessionTerminalWorkspace', () => {
       );
     });
     expect(screen.getByTestId('mock-terminal')).toBeTruthy();
+  });
+
+  it('does not detach a visible terminal during an ordinary rerender', async () => {
+    const { rerender } = render(
+      <SessionTerminalWorkspace
+        {...virtualizationProps}
+        workspace={createSingleAgentWorkspace()}
+        isActiveSession
+        terminalsLive
+      />,
+    );
+    const readyTerminal = createMockTerminal();
+    const terminalProps = renderedTerminalProps.get('agent:Session 1:claude:session-1');
+
+    await act(async () => {
+      terminalProps.onReady(readyTerminal);
+    });
+    expect(mockPtyAttach).toHaveBeenCalledTimes(1);
+    mockPtyDetach.mockClear();
+
+    rerender(
+      <SessionTerminalWorkspace
+        {...virtualizationProps}
+        workspace={createSingleAgentWorkspace()}
+        fontSize={15}
+        isActiveSession
+        terminalsLive
+      />,
+    );
+
+    expect(mockPtyDetach).not.toHaveBeenCalled();
   });
 
   it('focuses the main Claude pane immediately on mouse down', () => {
@@ -532,6 +566,50 @@ describe('SessionTerminalWorkspace', () => {
 
     expect(onResizeSplit).toHaveBeenCalledWith('root', 0.8);
     expect(container.querySelector('.workspace-layout-metadata [data-split-id="root"]')).toHaveAttribute('data-split-ratio', '0.500');
+  });
+
+  it('fits both terminal models after a split drag ends', () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      <SessionTerminalWorkspace
+        workspaceId="workspace-session-1"
+        workspaceSessions={[
+          { id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" },
+          { id: "session-2", label: "Session 2", agent: "claude", cwd: "/tmp/repo" },
+        ]}
+        workspace={createSplitWorkspace()}
+        activePaneId={SESSION_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+        onResizeSplit={vi.fn()}
+      />,
+    );
+    const panes = container.querySelector('.session-terminal-panes') as HTMLElement;
+    vi.spyOn(panes, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, right: 1000, bottom: 500, width: 1000, height: 500, x: 0, y: 0, toJSON: () => {},
+    });
+    mockTerminalFit.mockClear();
+
+    fireEvent.pointerDown(screen.getByRole('separator'), { button: 0, clientX: 500, clientY: 250 });
+    fireEvent.pointerMove(window, { clientX: 700, clientY: 250 });
+    act(() => {
+      vi.advanceTimersByTime(20);
+    });
+
+    expect(mockTerminalFit).not.toHaveBeenCalled();
+
+    fireEvent.pointerUp(window, { clientX: 700, clientY: 250 });
+    act(() => {
+      vi.advanceTimersByTime(20);
+    });
+
+    expect(mockTerminalFit).toHaveBeenCalledTimes(2);
   });
 
   it('accepts an authoritative split ratio that supersedes an optimistic resize', () => {

@@ -701,6 +701,40 @@ export function useDaemonSocket({
   const reposRef = useRef<RepoState[]>([]);
   const authorsRef = useRef<AuthorState[]>([]);
   const settingsRef = useRef<DaemonSettings>({});
+  const callbacksRef = useRef({
+    onSessionsUpdate,
+    onChiefOfStaffDispatchesUpdate,
+    onWorkspacesUpdate,
+    onPRsUpdate,
+    onEndpointsUpdate,
+    onPluginsUpdate,
+    onGitHubHostsUpdate,
+    onReposUpdate,
+    onAuthorsUpdate,
+    onWorktreesUpdate,
+    onSettingsUpdate,
+    onSettingError,
+    onGitStatusUpdate,
+    onReviewLoopUpdate,
+    onSessionExited,
+  });
+  callbacksRef.current = {
+    onSessionsUpdate,
+    onChiefOfStaffDispatchesUpdate,
+    onWorkspacesUpdate,
+    onPRsUpdate,
+    onEndpointsUpdate,
+    onPluginsUpdate,
+    onGitHubHostsUpdate,
+    onReposUpdate,
+    onAuthorsUpdate,
+    onWorktreesUpdate,
+    onSettingsUpdate,
+    onSettingError,
+    onGitStatusUpdate,
+    onReviewLoopUpdate,
+    onSessionExited,
+  };
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectDelayRef = useRef<number>(1000); // Start with 1s, exponential backoff
   const pendingActionsRef = useRef<Map<string, { resolve: (result: any) => void; reject: (error: Error) => void }>>(new Map());
@@ -713,6 +747,7 @@ export function useDaemonSocket({
   // the daemon coordinator owns the actual git/process coalescing and snapshot.
   const branchDiffInFlightRef = useRef<Map<string, Promise<BranchDiffFilesResult>>>(new Map());
   const ptyTransportRef = useRef(createPtyTransportState<AttachRequestContext>());
+  const canceledAttachIdsRef = useRef(new Set<string>());
   const pendingSessionVisualizedRef = useRef<Set<string>>(new Set());
   const selectedSessionRef = useRef<string | null>(null);
   const selectedWorkspaceRef = useRef<string | null>(null);
@@ -1117,34 +1152,34 @@ export function useDaemonSocket({
             }
             const nextSessions = dedupeSessionsByID(data.sessions || []);
             sessionsRef.current = nextSessions;
-            onSessionsUpdate(nextSessions);
-            onChiefOfStaffDispatchesUpdate?.(data.chief_of_staff_dispatches || []);
+            callbacksRef.current.onSessionsUpdate(nextSessions);
+            callbacksRef.current.onChiefOfStaffDispatchesUpdate?.(data.chief_of_staff_dispatches || []);
             const nextWorkspaces = data.workspaces || [];
             workspacesRef.current = nextWorkspaces;
-            onWorkspacesUpdate(nextWorkspaces);
+            callbacksRef.current.onWorkspacesUpdate(nextWorkspaces);
             setTileContents((prev) => pruneTileContentsForWorkspaces(prev, nextWorkspaces));
             pruneAttachedPtySessions(nextSessions, nextWorkspaces);
             const nextPRs = data.prs || [];
             prsRef.current = nextPRs;
-            onPRsUpdate(nextPRs);
+            callbacksRef.current.onPRsUpdate(nextPRs);
 
             const nextEndpoints = data.endpoints || [];
             endpointsRef.current = nextEndpoints;
-            onEndpointsUpdate?.(nextEndpoints);
+            callbacksRef.current.onEndpointsUpdate?.(nextEndpoints);
 
             const nextRepos = data.repos || [];
             reposRef.current = nextRepos;
-            onReposUpdate(nextRepos);
+            callbacksRef.current.onReposUpdate(nextRepos);
 
             const nextAuthors = data.authors || [];
             authorsRef.current = nextAuthors;
-            onAuthorsUpdate(nextAuthors);
+            callbacksRef.current.onAuthorsUpdate(nextAuthors);
 
-            onGitHubHostsUpdate?.(data.github_hosts || []);
+            callbacksRef.current.onGitHubHostsUpdate?.(data.github_hosts || []);
 
             const nextSettings = data.settings || {};
             settingsRef.current = nextSettings;
-            onSettingsUpdate?.(nextSettings);
+            callbacksRef.current.onSettingsUpdate?.(nextSettings);
             const nextWarnings = data.warnings || [];
             setWarnings(nextWarnings);
             if (nextWarnings.length > 0 && ws.readyState === WebSocket.OPEN) {
@@ -1182,7 +1217,7 @@ export function useDaemonSocket({
                   : workspace
               ));
               workspacesRef.current = nextWorkspaces;
-              onWorkspacesUpdate(nextWorkspaces);
+              callbacksRef.current.onWorkspacesUpdate(nextWorkspaces);
               setTileContents((prev) => pruneTileContentsForWorkspace(
                 prev,
                 workspaceID,
@@ -1246,7 +1281,7 @@ export function useDaemonSocket({
           }
 
           case 'chief_of_staff_dispatches_updated':
-            onChiefOfStaffDispatchesUpdate?.(data.dispatches || []);
+            callbacksRef.current.onChiefOfStaffDispatchesUpdate?.(data.dispatches || []);
             break;
 
           case 'wake_dispatch_agent_result': {
@@ -1339,7 +1374,7 @@ export function useDaemonSocket({
               pendingActionsRef.current.delete(key);
               const nextWorkspaces = upsertWorkspaceByID(workspacesRef.current, data.workspace);
               workspacesRef.current = nextWorkspaces;
-              onWorkspacesUpdate(nextWorkspaces);
+              callbacksRef.current.onWorkspacesUpdate(nextWorkspaces);
             }
             break;
 
@@ -1373,7 +1408,7 @@ export function useDaemonSocket({
               pendingActionsRef.current.delete(key);
               const nextWorkspaces = workspacesRef.current.filter((workspace) => workspace.id !== data.workspace!.id);
               workspacesRef.current = nextWorkspaces;
-              onWorkspacesUpdate(nextWorkspaces);
+              callbacksRef.current.onWorkspacesUpdate(nextWorkspaces);
               setTileContents((prev) => pruneTileContentsForWorkspace(prev, data.workspace!.id));
             }
             break;
@@ -1382,14 +1417,14 @@ export function useDaemonSocket({
             if (data.endpoint) {
               const nextEndpoints = upsertEndpointByID(endpointsRef.current, data.endpoint);
               endpointsRef.current = nextEndpoints;
-              onEndpointsUpdate?.(nextEndpoints);
+              callbacksRef.current.onEndpointsUpdate?.(nextEndpoints);
             }
             break;
 
           case 'endpoints_updated':
             if (data.endpoints) {
               endpointsRef.current = data.endpoints;
-              onEndpointsUpdate?.(data.endpoints);
+              callbacksRef.current.onEndpointsUpdate?.(data.endpoints);
             }
             if (pendingActionsRef.current.has('list_endpoints')) {
               const pending = pendingActionsRef.current.get('list_endpoints');
@@ -1435,10 +1470,16 @@ export function useDaemonSocket({
 
           case 'attach_result': {
             if (data.id) {
-              const attachContext = ptyTransportRef.current.getAttachContext(data.id);
-              const replayPlan = classifyAttachReplay(data, attachContext);
               const key = `pty_attach_${data.id}`;
               const pending = pendingActionsRef.current.get(key);
+              if (canceledAttachIdsRef.current.delete(data.id)) {
+                pendingActionsRef.current.delete(key);
+                ptyTransportRef.current.clearRuntime(data.id);
+                pending?.reject(new Error('Attach session canceled'));
+                break;
+              }
+              const attachContext = ptyTransportRef.current.getAttachContext(data.id);
+              const replayPlan = classifyAttachReplay(data, attachContext);
               if (pending) {
                 pendingActionsRef.current.delete(key);
                 if (data.success) {
@@ -1480,16 +1521,28 @@ export function useDaemonSocket({
                   queuedOutputs: ptyTransportRef.current.getQueuedAttachOutputs(data.id),
                   sessionAgent: session?.agent,
                 });
-                if (
-                  attachContext?.policy === 'relaunch_restore'
+                const snapshotGeometry = replayPlan.replayApplied
+                  && replayPlan.hasScreenSnapshot
+                  && typeof replayPlan.replayCols === 'number'
+                  && typeof replayPlan.replayRows === 'number'
+                  && (
+                    attachContext?.policy === 'relaunch_restore'
+                    || replayPlan.replayGeometryMismatch
+                  )
+                  ? { cols: replayPlan.replayCols, rows: replayPlan.replayRows }
+                  : null;
+                const relaunchFallbackGeometry = attachContext?.policy === 'relaunch_restore'
                   && typeof data.cols === 'number'
                   && typeof data.rows === 'number'
-                ) {
+                  ? { cols: data.cols, rows: data.rows }
+                  : null;
+                const replayGeometry = snapshotGeometry || relaunchFallbackGeometry;
+                if (replayGeometry) {
                   emitPtyEvent({
                     event: 'local_resize',
                     id: data.id,
-                    cols: data.cols,
-                    rows: data.rows,
+                    cols: replayGeometry.cols,
+                    rows: replayGeometry.rows,
                     source: 'attach_replay',
                   });
                 }
@@ -1517,22 +1570,34 @@ export function useDaemonSocket({
                     source: 'attach_replay',
                     suppressResponses: !replayPlan.respondToTerminalQueries,
                   });
-                } else if (attachEffects.replayAction.kind === 'scrollback_segments') {
+                }
+                const replayWasEmitted = attachEffects.replayAction.kind === 'screen_snapshot'
+                  || attachEffects.replayAction.kind === 'scrollback'
+                  || attachEffects.replayAction.kind === 'scrollback_segments';
+                if (attachEffects.replayAction.kind === 'scrollback_segments') {
+                  let replayCols: number | null = null;
+                  let replayRows: number | null = null;
                   for (const segment of attachEffects.replayAction.segments) {
-                    emitPtyEvent({
-                      event: 'local_resize',
-                      id: data.id,
-                      cols: segment.cols,
-                      rows: segment.rows,
-                      source: 'attach_replay',
-                    });
-                    emitPtyEvent({
-                      event: 'data',
-                      id: data.id,
-                      data: segment.data,
-                      source: 'attach_replay',
-                      suppressResponses: !replayPlan.respondToTerminalQueries,
-                    });
+                    if (segment.cols !== replayCols || segment.rows !== replayRows) {
+                      emitPtyEvent({
+                        event: 'local_resize',
+                        id: data.id,
+                        cols: segment.cols,
+                        rows: segment.rows,
+                        source: 'attach_replay',
+                      });
+                      replayCols = segment.cols;
+                      replayRows = segment.rows;
+                    }
+                    if (segment.data) {
+                      emitPtyEvent({
+                        event: 'data',
+                        id: data.id,
+                        data: segment.data,
+                        source: 'attach_replay',
+                        suppressResponses: !replayPlan.respondToTerminalQueries,
+                      });
+                    }
                   }
                 }
                 if (attachEffects.queuedOutputsToEmit.length > 0) {
@@ -1540,6 +1605,12 @@ export function useDaemonSocket({
                   for (const chunk of attachEffects.queuedOutputsToEmit) {
                     emitPtyEvent({ event: 'data', id: data.id, data: chunk.data, seq: chunk.seq });
                   }
+                }
+                if (replayWasEmitted) {
+                  emitPtyEvent({
+                    event: 'replay_complete',
+                    id: data.id,
+                  });
                 }
                 if (attachEffects.shouldWarnTruncatedRestore) {
                   emitPtyEvent({
@@ -1602,8 +1673,8 @@ export function useDaemonSocket({
                 code: data.exit_code ?? 0,
                 signal: data.signal,
               });
-              if (onSessionExited) {
-                onSessionExited({
+              if (callbacksRef.current.onSessionExited) {
+                callbacksRef.current.onSessionExited({
                   id: data.id,
                   exitCode: data.exit_code ?? 0,
                   signal: data.signal,
@@ -1631,7 +1702,7 @@ export function useDaemonSocket({
           case 'session_registered':
             if (data.session) {
               sessionsRef.current = upsertSessionByID(sessionsRef.current, data.session);
-              onSessionsUpdate(sessionsRef.current);
+              callbacksRef.current.onSessionsUpdate(sessionsRef.current);
             }
             break;
 
@@ -1647,7 +1718,7 @@ export function useDaemonSocket({
               sessionsRef.current = sessionsRef.current.filter(
                 (s) => s.id !== data.session!.id
               );
-              onSessionsUpdate(sessionsRef.current);
+              callbacksRef.current.onSessionsUpdate(sessionsRef.current);
               const layoutsInvalidated = invalidateWorkspaceLayoutsForSession(
                 workspacesRef.current,
                 data.session.id,
@@ -1658,7 +1729,7 @@ export function useDaemonSocket({
               );
               if (nextWorkspaces !== workspacesRef.current) {
                 workspacesRef.current = nextWorkspaces;
-                onWorkspacesUpdate(nextWorkspaces);
+                callbacksRef.current.onWorkspacesUpdate(nextWorkspaces);
               }
               pruneAttachedPtySessions(sessionsRef.current, workspacesRef.current);
             }
@@ -1668,7 +1739,7 @@ export function useDaemonSocket({
           case 'session_todos_updated':
             if (data.session) {
               sessionsRef.current = upsertSessionByID(sessionsRef.current, data.session);
-              onSessionsUpdate(sessionsRef.current);
+              callbacksRef.current.onSessionsUpdate(sessionsRef.current);
             }
             break;
 
@@ -1676,14 +1747,14 @@ export function useDaemonSocket({
             {
               const dedupedSessions = dedupeSessionsByID(data.sessions || []);
               sessionsRef.current = dedupedSessions;
-              onSessionsUpdate(dedupedSessions);
+              callbacksRef.current.onSessionsUpdate(dedupedSessions);
               const nextWorkspaces = pruneWorkspacesBySessions(
                 dedupedSessions,
                 workspacesRef.current,
               );
               if (nextWorkspaces !== workspacesRef.current) {
                 workspacesRef.current = nextWorkspaces;
-                onWorkspacesUpdate(nextWorkspaces);
+                callbacksRef.current.onWorkspacesUpdate(nextWorkspaces);
               }
               pruneAttachedPtySessions(dedupedSessions, workspacesRef.current);
             }
@@ -1692,42 +1763,42 @@ export function useDaemonSocket({
           case 'prs_updated':
             if (data.prs) {
               prsRef.current = data.prs;
-              onPRsUpdate(data.prs);
+              callbacksRef.current.onPRsUpdate(data.prs);
             }
             break;
 
           case 'repos_updated':
             if (data.repos) {
               reposRef.current = data.repos;
-              onReposUpdate(data.repos);
+              callbacksRef.current.onReposUpdate(data.repos);
             }
             break;
 
           case 'authors_updated':
             if (data.authors) {
               authorsRef.current = data.authors;
-              onAuthorsUpdate(data.authors);
+              callbacksRef.current.onAuthorsUpdate(data.authors);
             }
             break;
 
           case 'settings_updated':
             if (data.settings) {
               settingsRef.current = data.settings;
-              onSettingsUpdate?.(data.settings);
+              callbacksRef.current.onSettingsUpdate?.(data.settings);
             }
             if (data.success === false && data.error) {
-              onSettingError?.(data.error);
+              callbacksRef.current.onSettingError?.(data.error);
             }
             break;
 
           case 'github_hosts_updated':
-            onGitHubHostsUpdate?.(data.github_hosts || []);
+            callbacksRef.current.onGitHubHostsUpdate?.(data.github_hosts || []);
             break;
 
           case 'plugins_updated': {
             const plugins = data.plugins || [];
             const issues = data.issues || [];
-            onPluginsUpdate?.(plugins, issues);
+            callbacksRef.current.onPluginsUpdate?.(plugins, issues);
             const pending = pendingActionsRef.current.get('list_plugins');
             if (pending) {
               pendingActionsRef.current.delete('list_plugins');
@@ -1801,7 +1872,7 @@ export function useDaemonSocket({
 
           case 'worktrees_updated':
             // Note: worktrees may be undefined due to Go's omitempty on empty arrays
-            onWorktreesUpdate?.(data.worktrees || []);
+            callbacksRef.current.onWorktreesUpdate?.(data.worktrees || []);
             break;
 
           case 'worktree_created':
@@ -1950,7 +2021,7 @@ export function useDaemonSocket({
 
           case 'git_status_update':
             if (data.directory) {
-              onGitStatusUpdate?.({
+              callbacksRef.current.onGitStatusUpdate?.({
                 directory: data.directory,
                 staged: data.staged || [],
                 unstaged: data.unstaged || [],
@@ -2053,8 +2124,8 @@ export function useDaemonSocket({
           }
 
           case 'review_loop_updated':
-            if (onReviewLoopUpdate) {
-              onReviewLoopUpdate((data as any).review_loop_run ?? null);
+            if (callbacksRef.current.onReviewLoopUpdate) {
+              callbacksRef.current.onReviewLoopUpdate((data as any).review_loop_run ?? null);
             }
             break;
 
@@ -2155,6 +2226,7 @@ export function useDaemonSocket({
     ws.onclose = () => {
       wsRef.current = null;
       hasReceivedInitialStateRef.current = false;
+      canceledAttachIdsRef.current.clear();
 
       // Circuit breaker: if open, don't retry
       if (circuitOpenRef.current) {
@@ -2187,7 +2259,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [resolvedWsUrl, onSessionsUpdate, onChiefOfStaffDispatchesUpdate, onWorkspacesUpdate, onPRsUpdate, onEndpointsUpdate, onPluginsUpdate, onGitHubHostsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand, flushQueuedCommands, pruneAttachedPtySessions]);
+  }, [resolvedWsUrl, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand, flushQueuedCommands, pruneAttachedPtySessions]);
 
   useEffect(() => {
     void connect();
@@ -2285,6 +2357,7 @@ export function useDaemonSocket({
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
+          canceledAttachIdsRef.current.delete(id);
           ptyTransportRef.current.clearQueuedAttachOutputs(id);
           ptyTransportRef.current.setAttachContext(id);
           reject(new Error('Attach session timed out'));
@@ -2312,6 +2385,9 @@ export function useDaemonSocket({
   const sendDetachSession = useCallback((id: string) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (pendingActionsRef.current.has(`pty_attach_${id}`)) {
+      canceledAttachIdsRef.current.add(id);
+    }
     ptyTransportRef.current.clearRuntime(id);
     recordPtyCommand('detach_session', id);
     ws.send(JSON.stringify({ cmd: 'detach_session', id }));
@@ -2358,6 +2434,7 @@ export function useDaemonSocket({
     options: {
       attachPolicy: PtyAttachPolicy;
       attachContext?: AttachRequestContext;
+      requestedGeometryAuthoritative?: boolean;
     },
   ) => {
     const plan = planAttachedRuntimeGeometry(args, attachResult, options);
@@ -2391,6 +2468,7 @@ export function useDaemonSocket({
     reconcileAttachedRuntimeGeometry(args, attachResult, {
       attachPolicy: options.policy,
       attachContext,
+      requestedGeometryAuthoritative: options.forceResizeBeforeAttach === true,
     });
   }, [reconcileAttachedRuntimeGeometry, sendAttachSessionWithRetry, sendPtyResize]);
 
@@ -2660,6 +2738,9 @@ export function useDaemonSocket({
       resize: async (id: string, cols: number, rows: number, reason?: string) => {
         sendPtyResize(id, cols, rows, reason);
       },
+      detach: async (id: string) => {
+        sendDetachSession(id);
+      },
       kill: async (id: string) => {
         sendDetachSession(id);
         await sendKillSession(id);
@@ -2738,10 +2819,10 @@ export function useDaemonSocket({
       pr.id === prId ? { ...pr, muted: !pr.muted } : pr
     );
     prsRef.current = updatedPRs;
-    onPRsUpdate(updatedPRs);
+    callbacksRef.current.onPRsUpdate(updatedPRs);
 
     ws.send(JSON.stringify({ cmd: 'mute_pr', id: prId }));
-  }, [onPRsUpdate]);
+  }, []);
 
   // Mute a repo with optimistic update
   const sendMuteRepo = useCallback((repo: string) => {
@@ -2760,10 +2841,10 @@ export function useDaemonSocket({
       updatedRepos = [...reposRef.current, { repo, muted: true, collapsed: false }];
     }
     reposRef.current = updatedRepos;
-    onReposUpdate(updatedRepos);
+    callbacksRef.current.onReposUpdate(updatedRepos);
 
     ws.send(JSON.stringify({ cmd: 'mute_repo', repo }));
-  }, [onReposUpdate]);
+  }, []);
 
   // Mute a PR author with optimistic update
   const sendMuteAuthor = useCallback((author: string) => {
@@ -2782,10 +2863,10 @@ export function useDaemonSocket({
       updatedAuthors = [...authorsRef.current, { author, muted: true }];
     }
     authorsRef.current = updatedAuthors;
-    onAuthorsUpdate(updatedAuthors);
+    callbacksRef.current.onAuthorsUpdate(updatedAuthors);
 
     ws.send(JSON.stringify({ cmd: 'mute_author', author }));
-  }, [onAuthorsUpdate]);
+  }, []);
 
   // Mute a workspace (toggle muted state)
   const sendMuteWorkspace = useCallback((workspaceId: string, endpointId?: string) => {
@@ -3046,10 +3127,10 @@ export function useDaemonSocket({
       pr.id === prId ? { ...pr, has_new_changes: false } : pr
     );
     prsRef.current = updatedPRs;
-    onPRsUpdate(updatedPRs);
+    callbacksRef.current.onPRsUpdate(updatedPRs);
 
     ws.send(JSON.stringify({ cmd: 'pr_visited', id: prId }));
-  }, [onPRsUpdate]);
+  }, []);
 
   const sendListWorktrees = useCallback((mainRepo: string) => {
     const ws = wsRef.current;
@@ -3120,10 +3201,10 @@ export function useDaemonSocket({
 
     // Optimistic update
     settingsRef.current = { ...settingsRef.current, [key]: value };
-    onSettingsUpdate?.(settingsRef.current);
+    callbacksRef.current.onSettingsUpdate?.(settingsRef.current);
 
     ws.send(JSON.stringify({ cmd: 'set_setting', key, value }));
-  }, [onSettingsUpdate]);
+  }, []);
 
   const sendListPlugins = useCallback((): Promise<PluginListResult> => {
     return new Promise((resolve, reject) => {

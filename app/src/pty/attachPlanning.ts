@@ -136,14 +136,15 @@ export function classifyAttachReplay(
   const replayGeometryMismatch = requestedCols !== null && requestedRows !== null && hasReplayPayload && (
     replayCols !== requestedCols || replayRows !== requestedRows
   );
-  // A relaunch is reconstructing a frontend model for an already-running PTY.
-  // The daemon's current dimensions are authoritative until restored layout
-  // measurement produces a subsequent interactive resize.
-  const preserveAttachedGeometry = context?.policy === 'relaunch_restore';
+  // Restore payloads describe the daemon's current terminal grid. Reconstruct
+  // the fresh frontend model at that grid first; the interactive client's
+  // subsequent fit/pty_resize remains authoritative.
+  const replayAtAttachedGeometry = context?.policy === 'relaunch_restore'
+    || context?.policy === 'same_app_remount';
   const replayAllowedByPolicy = context?.policy === 'relaunch_restore'
     || context?.policy === 'same_app_remount'
     || codexRawReplayBootstrap;
-  const geometryMismatchSkipsReplay = !preserveAttachedGeometry
+  const geometryMismatchSkipsReplay = !replayAtAttachedGeometry
     && hasScreenSnapshot
     && (attachedGeometryMismatch || replayGeometryMismatch);
   const replaySkipped = hasReplayPayload && (
@@ -184,6 +185,7 @@ export function planAttachedRuntimeGeometry(
   options: {
     attachPolicy: PtyAttachPolicy;
     attachContext?: AttachRequestContext;
+    requestedGeometryAuthoritative?: boolean;
   },
 ) {
   const replayPlan = classifyAttachReplay(attachResult, options.attachContext);
@@ -201,7 +203,8 @@ export function planAttachedRuntimeGeometry(
     : hasRawScrollbackReplay
       ? ptyGeometryMatches
       : false;
-  const preserveAttachedGeometry = options.attachPolicy === 'relaunch_restore';
+  const preserveAttachedGeometry = options.attachPolicy === 'relaunch_restore'
+    || options.requestedGeometryAuthoritative === false;
   const resizeRequired = !preserveAttachedGeometry && !ptyGeometryMatches;
 
   return {
@@ -287,9 +290,15 @@ export function planAttachResultEffects({
     queuedOutputsToEmit.push(chunk);
   }
 
+  // The daemon only returns segmented replay after verifying it reconstructs
+  // the fresh worker screen. Truncation then means older history was omitted.
+  const hasVerifiedSegmentedReplay = Boolean(
+    attachResult.replay_segments && attachResult.replay_segments.length > 0,
+  );
   const shouldWarnTruncatedRestore = Boolean(
     !replayPlan.hasScreenSnapshot &&
     attachResult.scrollback_truncated &&
+    !hasVerifiedSegmentedReplay &&
     String(sessionAgent || '').toLowerCase() === 'codex',
   );
 
