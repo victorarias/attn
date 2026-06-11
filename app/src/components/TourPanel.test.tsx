@@ -281,4 +281,39 @@ describe('TourPanel', () => {
       }));
     });
   });
+
+  it('renders Markdown files by default and can switch back to the diff', () => {
+    const markdownTour: DaemonTour = {
+      ...tour,
+      files: [{
+        ...tour.files[0],
+        path: 'docs/review.md',
+        modified: '# Rendered review\n\nThis is **formatted** Markdown.',
+      }],
+    };
+    window.localStorage.setItem('attn.tour.briefing.tour-1', '1');
+    render(
+      <TourPanel
+        tour={markdownTour}
+        resolvedTheme="dark"
+        uiScale={1}
+        onClose={vi.fn()}
+        refreshTour={vi.fn(async () => markdownTour)}
+        saveTourDraft={vi.fn(async () => markdownTour)}
+        askTour={vi.fn(async () => markdownTour)}
+        submitTour={vi.fn(async () => markdownTour)}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Rendered review' })).toBeInTheDocument();
+    expect(screen.getByText('formatted')).toHaveProperty('tagName', 'STRONG');
+    expect(screen.queryByTestId('tour-diff')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Changes' }));
+    expect(screen.getByTestId('tour-diff')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Rendered review' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rendered' }));
+    expect(screen.getByRole('heading', { name: 'Rendered review' })).toBeInTheDocument();
+  });
 });

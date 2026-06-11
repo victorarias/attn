@@ -44,31 +44,63 @@ const initialTour: DaemonTour = {
 export function TourPanelHarness({ onReady }: HarnessProps) {
   const params = new URLSearchParams(window.location.search);
   const longGuidance = params.get('guidance') === 'long';
+  const markdownFile = params.get('file') === 'markdown';
   const uiScale = Number.parseFloat(params.get('scale') || '1');
-  const [tour, setTour] = useState<DaemonTour>(() => longGuidance ? {
-    ...initialTour,
-    files: initialTour.files.map((file) => ({
-      ...file,
-      note: [
-        '# A deliberately large reading lens',
-        '',
-        ...Array.from(
-          { length: 12 },
-          (_, index) => `Paragraph ${index + 1}: preserve access to the diff while authored guidance remains readable.`,
-        ),
-        '',
-        '```mermaid',
-        'flowchart LR',
-        '  Guide --> Diff',
-        '  Diff --> Comment',
-        '```',
-      ].join('\n\n'),
-      risk_note: Array.from(
-        { length: 12 },
-        (_, index) => `Risk ${index + 1}: verify the bounded guidance area cannot consume the code viewport.`,
-      ).join('\n\n'),
-    })),
-  } : initialTour);
+  const [tour, setTour] = useState<DaemonTour>(() => {
+    if (markdownFile) {
+      return {
+        ...initialTour,
+        files: initialTour.files.map((file) => ({
+          ...file,
+          path: 'docs/tour-reader.md',
+          note: 'Review the rendered document, then inspect its source changes.',
+          original: '# Tour document\n\nThe old explanation.',
+          modified: [
+            '# Rendered Tour document',
+            '',
+            'The Tour now presents **Markdown as a document** before asking you to inspect syntax.',
+            '',
+            '## Review path',
+            '',
+            '- Read the rendered structure.',
+            '- Switch to Changes when exact edits matter.',
+            '- Switch back without losing your place in the Tour.',
+            '',
+            '> The selected display mode belongs to this file.',
+          ].join('\n'),
+          additions: 8,
+          deletions: 1,
+        })),
+      };
+    }
+    if (longGuidance) {
+      return {
+        ...initialTour,
+        files: initialTour.files.map((file) => ({
+          ...file,
+          note: [
+            '# A deliberately large reading lens',
+            '',
+            ...Array.from(
+              { length: 12 },
+              (_, index) => `Paragraph ${index + 1}: preserve access to the diff while authored guidance remains readable.`,
+            ),
+            '',
+            '```mermaid',
+            'flowchart LR',
+            '  Guide --> Diff',
+            '  Diff --> Comment',
+            '```',
+          ].join('\n\n'),
+          risk_note: Array.from(
+            { length: 12 },
+            (_, index) => `Risk ${index + 1}: verify the bounded guidance area cannot consume the code viewport.`,
+          ).join('\n\n'),
+        })),
+      };
+    }
+    return initialTour;
+  });
 
   window.localStorage.setItem(`attn.tour.briefing.${initialTour.tour_id}`, '1');
 

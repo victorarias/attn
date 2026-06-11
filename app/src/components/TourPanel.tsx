@@ -216,6 +216,11 @@ function fileDirectory(path: string): string {
   return parts.length > 1 ? parts.slice(0, -1).join('/') : 'repository root';
 }
 
+function isMarkdownFile(path: string): boolean {
+  const lowerPath = path.toLowerCase();
+  return lowerPath.endsWith('.md') || lowerPath.endsWith('.markdown');
+}
+
 function emptyDraft(path: string): DaemonTourDraft {
   return {
     path,
@@ -385,10 +390,21 @@ export function TourPanel({
   const [reviewSent, setReviewSent] = useState(false);
   const [noteInputs, setNoteInputs] = useState<Record<string, string>>({});
   const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
+  const [markdownRenderOverrides, setMarkdownRenderOverrides] = useState<Record<string, boolean>>({});
 
   const sections = useMemo(() => buildSections(tour.files), [tour.files]);
   const selectedFile = tour.files.find((file) => file.path === selectedPath) ?? firstTourFile;
   const selectedSection = selectedFile ? sectionForFile(sections, selectedFile.path) : undefined;
+  const canRenderMarkdown = Boolean(
+    selectedFile
+      && isMarkdownFile(selectedFile.path)
+      && selectedFile.modified.trim(),
+  );
+  const renderMarkdown = Boolean(
+    selectedFile
+      && canRenderMarkdown
+      && (markdownRenderOverrides[selectedFile.path] ?? true),
+  );
   const reviewedPaths = useMemo(
     () => new Set(tour.drafts.filter((draft) => draft.reviewed).map((draft) => draft.path)),
     [tour.drafts],
@@ -782,6 +798,36 @@ export function TourPanel({
                 <div className="tour-panel__file-actions">
                   <FileStats file={selectedFile} />
                   {selectedFile.risk_note ? <span className="tour-panel__hotspot-badge">Hotspot</span> : null}
+                  {canRenderMarkdown ? (
+                    <div className="tour-panel__view-toggle" role="group" aria-label="Markdown display mode">
+                      <button
+                        type="button"
+                        className={renderMarkdown ? 'is-active' : ''}
+                        aria-pressed={renderMarkdown}
+                        onClick={() => {
+                          setMarkdownRenderOverrides((current) => ({
+                            ...current,
+                            [selectedFile.path]: true,
+                          }));
+                        }}
+                      >
+                        Rendered
+                      </button>
+                      <button
+                        type="button"
+                        className={!renderMarkdown ? 'is-active' : ''}
+                        aria-pressed={!renderMarkdown}
+                        onClick={() => {
+                          setMarkdownRenderOverrides((current) => ({
+                            ...current,
+                            [selectedFile.path]: false,
+                          }));
+                        }}
+                      >
+                        {selectedFile.view === 'content' ? 'Source' : 'Changes'}
+                      </button>
+                    </div>
+                  ) : null}
                   <label>
                     <input
                       type="checkbox"
@@ -820,8 +866,17 @@ export function TourPanel({
                 </section>
               ) : null}
 
-              <div className="tour-panel__code">
-                {selectedFile.view === 'content' ? (
+              <div className={`tour-panel__code ${renderMarkdown ? 'tour-panel__code--markdown' : ''}`.trim()}>
+                {renderMarkdown ? (
+                  <article
+                    className="tour-panel__markdown-preview"
+                    aria-label={`Rendered Markdown: ${selectedFile.path}`}
+                  >
+                    <TourMarkdown resolvedTheme={resolvedTheme} uiScale={uiScale}>
+                      {selectedFile.modified}
+                    </TourMarkdown>
+                  </article>
+                ) : selectedFile.view === 'content' ? (
                   <pre><code>{selectedFile.modified}</code></pre>
                 ) : (
                   <DiffView

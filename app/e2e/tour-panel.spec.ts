@@ -92,3 +92,25 @@ test('keeps the diff usable with long guidance, Mermaid, a hotspot, and large UI
   expect(await diffScroller.evaluate((element) => element.clientHeight)).toBeGreaterThan(120);
   expect(await diffScroller.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeGreaterThan(500);
 });
+
+test('renders Markdown files as documents and can return to their changes', async ({ page }) => {
+  await page.goto('/test-harness/?component=TourPanel&file=markdown');
+  await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+
+  const displayMode = page.getByRole('group', { name: 'Markdown display mode' });
+  const rendered = displayMode.getByRole('button', { name: 'Rendered' });
+  const changes = displayMode.getByRole('button', { name: 'Changes' });
+
+  await expect(page.getByRole('heading', { name: 'Rendered Tour document' })).toBeVisible();
+  await expect(page.locator('.tour-panel__markdown-preview strong')).toHaveText('Markdown as a document');
+  await expect(page.locator('diffs-container')).toHaveCount(0);
+  await expect(rendered).toHaveAttribute('aria-pressed', 'true');
+
+  await changes.click();
+  await expect(page.locator('diffs-container')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Rendered Tour document' })).toHaveCount(0);
+  await expect(changes).toHaveAttribute('aria-pressed', 'true');
+
+  await rendered.click();
+  await expect(page.getByRole('heading', { name: 'Rendered Tour document' })).toBeVisible();
+});
