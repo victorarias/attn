@@ -1316,6 +1316,13 @@ function collectTourUiState() {
     reviewSubmitVisible: Boolean(reviewButton),
     reviewSubmitText: reviewButton?.textContent?.trim() || '',
     conversationText: tour?.querySelector('.tour-panel__transcript')?.textContent?.trim() || '',
+    conversationHasFileControls: Boolean(
+      tour?.querySelector(
+        'textarea[placeholder="Feedback on this file"], textarea[placeholder="Reply to this annotation"]',
+      ),
+    ),
+    inlineCommentCount: tour?.querySelectorAll('.diff-comment').length || 0,
+    activeElementInTour: Boolean(tour && document.activeElement && tour.contains(document.activeElement)),
     errorText: tour?.querySelector('.tour-panel__error')?.textContent?.trim() || '',
     panelBounds: rectSnapshot(tour),
     mainScrollTop: main?.scrollTop || 0,
@@ -2212,34 +2219,66 @@ export function useUiAutomationBridge({
         button?.click();
         return collectTourUiState();
       }
-      case 'tour_set_file_note': {
-        const note = typeof payload.note === 'string' ? payload.note : '';
+      case 'tour_set_question': {
+        const question = typeof payload.question === 'string' ? payload.question : '';
         const textarea = document.querySelector<HTMLTextAreaElement>(
-          '.tour-panel__notes textarea[placeholder="Feedback on this file"]',
+          '.tour-panel__conversation-composer textarea[placeholder="Ask about this Tour"]',
         );
         if (!textarea) {
-          throw new Error('Tour file feedback textarea is not open');
+          throw new Error('Tour question textarea is not open');
         }
-        setTextAreaValue(textarea, note);
+        setTextAreaValue(textarea, question);
         await settleUi(2);
         return collectTourUiState();
       }
-      case 'tour_type_file_note': {
-        const note = typeof payload.note === 'string' ? payload.note : '';
+      case 'tour_type_question': {
+        const question = typeof payload.question === 'string' ? payload.question : '';
         const textarea = document.querySelector<HTMLTextAreaElement>(
-          '.tour-panel__notes textarea[placeholder="Feedback on this file"]',
+          '.tour-panel__conversation-composer textarea[placeholder="Ask about this Tour"]',
         );
         if (!textarea) {
-          throw new Error('Tour file feedback textarea is not open');
+          throw new Error('Tour question textarea is not open');
         }
         textarea.focus();
         const scrollSamples: number[] = [];
-        for (const character of note) {
+        for (const character of question) {
           setTextAreaValue(textarea, `${textarea.value}${character}`);
           await settleUi(1);
           scrollSamples.push(collectTourUiState().diffScrollTop);
         }
         return { ...collectTourUiState(), scrollSamples };
+      }
+      case 'tour_send_question': {
+        const button = document.querySelector<HTMLButtonElement>(
+          '.tour-panel__conversation-composer button',
+        );
+        if (!button) {
+          throw new Error('Tour question composer is not open');
+        }
+        button.click();
+        await settleUi(2);
+        return collectTourUiState();
+      }
+      case 'tour_press_shortcut_from_background': {
+        const key = typeof payload.key === 'string' ? payload.key : '';
+        const terminal = document.querySelector<HTMLElement>('.terminal-container');
+        if (!terminal || !key) {
+          throw new Error('Tour background shortcut requires a terminal target and key');
+        }
+        terminal.focus();
+        const event = new KeyboardEvent('keydown', {
+          key,
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+        });
+        const dispatchReturned = terminal.dispatchEvent(event);
+        await settleUi(2);
+        return {
+          ...collectTourUiState(),
+          defaultPrevented: event.defaultPrevented,
+          dispatchReturned,
+        };
       }
       case 'tour_scroll_diff': {
         const scroller = document.querySelector<HTMLElement>('.tour-panel .diff-view-scroller');

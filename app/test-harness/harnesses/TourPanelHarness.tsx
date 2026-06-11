@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonTour, DaemonTourDraft } from '../../src/hooks/useDaemonSocket';
 import { TourPanel } from '../../src/components/TourPanel';
 import { TourConnectionState, TourStatus } from '../../src/types/generated';
@@ -45,7 +45,9 @@ export function TourPanelHarness({ onReady }: HarnessProps) {
   const params = new URLSearchParams(window.location.search);
   const longGuidance = params.get('guidance') === 'long';
   const markdownFile = params.get('file') === 'markdown';
+  const outsideAnnotation = params.get('file') === 'outside-annotation';
   const uiScale = Number.parseFloat(params.get('scale') || '1');
+  const backgroundKeysRef = useRef<string[]>([]);
   const [tour, setTour] = useState<DaemonTour>(() => {
     if (markdownFile) {
       return {
@@ -53,8 +55,9 @@ export function TourPanelHarness({ onReady }: HarnessProps) {
         files: initialTour.files.map((file) => ({
           ...file,
           path: 'docs/tour-reader.md',
+          view: 'content',
           note: 'Review the rendered document, then inspect its source changes.',
-          original: '# Tour document\n\nThe old explanation.',
+          original: '',
           modified: [
             '# Rendered Tour document',
             '',
@@ -70,6 +73,41 @@ export function TourPanelHarness({ onReady }: HarnessProps) {
           ].join('\n'),
           additions: 8,
           deletions: 1,
+          annotations: [{
+            id: 'markdown-review-path',
+            line_start: 5,
+            line_end: 9,
+            comments: [{
+              author: 'agent',
+              body: 'Verify the rendered structure and the exact source tell the same story.',
+            }],
+          }],
+        })),
+      };
+    }
+    if (outsideAnnotation) {
+      const original = generateFileContents('stable');
+      const modified = original
+        .split('\n')
+        .map((line, index) => index === 1 ? "export const value_001 = 'changed';" : line)
+        .join('\n');
+      return {
+        ...initialTour,
+        files: initialTour.files.map((file) => ({
+          ...file,
+          original,
+          modified,
+          additions: 1,
+          deletions: 1,
+          annotations: [{
+            id: 'outside-diff-note',
+            line_start: 150,
+            line_end: 150,
+            comments: [{
+              author: 'agent',
+              body: 'This note needs local context even though the line did not change.',
+            }],
+          }],
         })),
       };
     }
@@ -145,15 +183,23 @@ export function TourPanelHarness({ onReady }: HarnessProps) {
         updated_at: new Date().toISOString(),
       }));
     };
+    api.backgroundKeys = backgroundKeysRef.current;
   }, []);
 
   return (
-    <TourPanel
-      tour={tour}
-      resolvedTheme="dark"
-      uiScale={uiScale}
-      onClose={() => {}}
-      {...props}
-    />
+    <>
+      <input
+        className="terminal-container"
+        data-testid="tour-background-terminal"
+        onKeyDown={(event) => backgroundKeysRef.current.push(event.key)}
+      />
+      <TourPanel
+        tour={tour}
+        resolvedTheme="dark"
+        uiScale={uiScale}
+        onClose={() => {}}
+        {...props}
+      />
+    </>
   );
 }

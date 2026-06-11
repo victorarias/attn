@@ -13,8 +13,28 @@ vi.mock('mermaid', () => ({
 }));
 
 vi.mock('./DiffView', () => ({
-  DiffView: ({ fontSize }: { fontSize?: number }) => (
-    <div data-testid="tour-diff" data-font-size={fontSize}>diff</div>
+  DiffView: ({
+    comments,
+    expandUnchanged,
+    fontSize,
+    onAddComment,
+  }: {
+    comments: Array<{ content: string }>;
+    expandUnchanged: boolean;
+    fontSize?: number;
+    onAddComment: (lineStart: number, lineEnd: number, content: string) => void;
+  }) => (
+    <div
+      data-testid="tour-diff"
+      data-comment-count={comments.length}
+      data-expand-unchanged={expandUnchanged}
+      data-font-size={fontSize}
+    >
+      {comments.map((comment) => comment.content).join(' ')}
+      <button type="button" onClick={() => onAddComment(2, 2, 'Inline review note')}>
+        Add mock line comment
+      </button>
+    </div>
   ),
 }));
 
@@ -74,35 +94,28 @@ describe('TourPanel', () => {
     _resetEscapeStackForTest();
   });
 
-  it('sends a contextual question without adding it to feedback', async () => {
+  it('sends a Tour-wide question without tying it to the selected file', async () => {
     const { askTour, submitTour } = renderPanel();
     fireEvent.click(screen.getByRole('button', { name: 'Start reading' }));
     fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
-    fireEvent.change(screen.getByPlaceholderText('Ask about the selected file'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask about this Tour'), {
       target: { value: 'Why does this call change?' },
     });
-    fireEvent.change(screen.getByPlaceholderText('Start line'), { target: { value: '2' } });
-    fireEvent.change(screen.getByPlaceholderText('End line'), { target: { value: '2' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Ask question' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask agent' }));
 
     await waitFor(() => {
       expect(askTour).toHaveBeenCalledWith('tour-1', 'Why does this call change?', {
         source: 'tour',
-        path: 'main.go',
-        line_start: 2,
-        line_end: 2,
-        code: 'newCall()',
+        path: '',
       });
     });
     expect(submitTour).not.toHaveBeenCalled();
-    expect(screen.getByPlaceholderText('Ask about the selected file')).toHaveValue('');
+    expect(screen.getByPlaceholderText('Ask about this Tour')).toHaveValue('');
   });
 
-  it('ends explicitly and states that feedback stays off GitHub', async () => {
+  it('ends explicitly from the Tour header', async () => {
     const { submitTour } = renderPanel();
     fireEvent.click(screen.getByRole('button', { name: 'Start reading' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
-    expect(screen.getByText(/Nothing is submitted to GitHub/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'End tour' }));
     await waitFor(() => {
       expect(submitTour).toHaveBeenCalledWith(
@@ -130,27 +143,39 @@ describe('TourPanel', () => {
     expect(screen.getByRole('button', { name: 'Send review to agent' })).toHaveTextContent('Review sent');
   });
 
-  it('flushes the current file note before sending the review', async () => {
-    const { saveTourDraft, submitTour } = renderPanel();
-    fireEvent.click(screen.getByRole('button', { name: 'Start reading' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
-    fireEvent.change(screen.getByPlaceholderText('Feedback on this file'), {
-      target: { value: 'Please revisit this edge case.' },
-    });
-    const sendButtons = screen.getAllByRole('button', { name: 'Send review to agent' });
-    fireEvent.click(sendButtons[sendButtons.length - 1]);
+  it('keeps file annotations inline and leaves the conversation free of annotation forms', () => {
+    const annotatedTour: DaemonTour = {
+      ...tour,
+      files: [{
+        ...tour.files[0],
+        annotations: [{
+          id: 'listener-default',
+          line_start: 2,
+          line_end: 2,
+          comments: [{ author: 'agent', body: 'Listening is the default.' }],
+        }],
+      }],
+    };
+    window.localStorage.setItem('attn.tour.briefing.tour-1', '1');
+    render(
+      <TourPanel
+        tour={annotatedTour}
+        resolvedTheme="dark"
+        uiScale={1}
+        onClose={vi.fn()}
+        refreshTour={vi.fn(async () => annotatedTour)}
+        saveTourDraft={vi.fn(async () => annotatedTour)}
+        askTour={vi.fn(async () => annotatedTour)}
+        submitTour={vi.fn(async () => annotatedTour)}
+      />,
+    );
 
-    await waitFor(() => {
-      expect(saveTourDraft).toHaveBeenCalledWith(
-        'tour-1',
-        expect.objectContaining({ path: 'main.go', note: 'Please revisit this edge case.' }),
-      );
-      expect(submitTour).toHaveBeenCalledWith(
-        'tour-1',
-        expect.stringContaining('Please revisit this edge case.'),
-        false,
-      );
-    });
+    expect(screen.getByTestId('tour-diff')).toHaveAttribute('data-comment-count', '1');
+    expect(screen.getByTestId('tour-diff')).toHaveTextContent('Listening is the default.');
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
+    expect(screen.queryByPlaceholderText('Feedback on this file')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Reply to this annotation')).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Ask about this Tour')).toBeInTheDocument();
   });
 
   it('shows the briefing on first open and avoids rerendering stable diagrams', async () => {
@@ -171,7 +196,9 @@ describe('TourPanel', () => {
 
     expect(document.querySelector('.tour-panel__briefing')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'How to read this change' })).toBeInTheDocument();
-    await waitFor(() => expect(mermaid.render).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mermaid.render).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const initialRenderCount = vi.mocked(mermaid.render).mock.calls.length;
     expect(screen.getByRole('button', { name: 'Reset diagram zoom' })).toHaveTextContent('100%');
     fireEvent.click(screen.getByRole('button', { name: 'Zoom in diagram' }));
     expect(screen.getByRole('button', { name: 'Reset diagram zoom' })).toHaveTextContent('125%');
@@ -190,7 +217,7 @@ describe('TourPanel', () => {
     );
 
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(mermaid.render).toHaveBeenCalledTimes(1);
+    expect(mermaid.render).toHaveBeenCalledTimes(initialRenderCount);
   });
 
   it('closes the topmost Tour layer with Escape before dismissing fullscreen', () => {
@@ -315,5 +342,121 @@ describe('TourPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Rendered' }));
     expect(screen.getByRole('heading', { name: 'Rendered review' })).toBeInTheDocument();
+  });
+
+  it('uses the line-numbered diff surface for Markdown source mode', () => {
+    const markdownTour: DaemonTour = {
+      ...tour,
+      files: [{
+        ...tour.files[0],
+        path: 'docs/review.md',
+        view: 'content',
+        original: '',
+        modified: '# Rendered review\n\nThis is **formatted** Markdown.',
+        annotations: [{
+          id: 'markdown-note',
+          line_start: 3,
+          line_end: 3,
+          comments: [{ author: 'agent', body: 'Check the wording.' }],
+        }],
+      }],
+    };
+    window.localStorage.setItem('attn.tour.briefing.tour-1', '1');
+    render(
+      <TourPanel
+        tour={markdownTour}
+        resolvedTheme="dark"
+        uiScale={1}
+        onClose={vi.fn()}
+        refreshTour={vi.fn(async () => markdownTour)}
+        saveTourDraft={vi.fn(async () => markdownTour)}
+        askTour={vi.fn(async () => markdownTour)}
+        submitTour={vi.fn(async () => markdownTour)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+    expect(screen.getByTestId('tour-diff')).toHaveAttribute('data-expand-unchanged', 'true');
+    expect(screen.getByTestId('tour-diff')).toHaveAttribute('data-comment-count', '1');
+    expect(screen.queryByText('# Rendered review', { selector: 'code' })).not.toBeInTheDocument();
+  });
+
+  it('supports Jaunt-style navigation without firing shortcuts while typing', async () => {
+    const keyboardTour: DaemonTour = {
+      ...tour,
+      files: [
+        tour.files[0],
+        {
+          ...tour.files[0],
+          path: 'second.go',
+          note: 'Read this second.',
+        },
+      ],
+    };
+    window.localStorage.setItem('attn.tour.briefing.tour-1', '1');
+    const saveTourDraft = vi.fn(async () => keyboardTour);
+    render(
+      <TourPanel
+        tour={keyboardTour}
+        resolvedTheme="dark"
+        uiScale={1}
+        onClose={vi.fn()}
+        refreshTour={vi.fn(async () => keyboardTour)}
+        saveTourDraft={saveTourDraft}
+        askTour={vi.fn(async () => keyboardTour)}
+        submitTour={vi.fn(async () => keyboardTour)}
+      />,
+    );
+
+    const panel = screen.getByRole('dialog', { name: 'Code Tour: Listener tour' });
+    fireEvent.keyDown(panel, { key: 'j' });
+    expect(screen.getByRole('heading', { name: 'second.go' })).toBeInTheDocument();
+    fireEvent.keyDown(panel, { key: 'k' });
+    expect(screen.getByRole('heading', { name: 'main.go' })).toBeInTheDocument();
+    fireEvent.keyDown(panel, { key: 'r' });
+    await waitFor(() => {
+      expect(saveTourDraft).toHaveBeenCalledWith(
+        'tour-1',
+        expect.objectContaining({ path: 'main.go', reviewed: true }),
+      );
+    });
+
+    fireEvent.keyDown(panel, { key: 'a' });
+    const question = screen.getByPlaceholderText('Ask about this Tour');
+    await waitFor(() => expect(question).toHaveFocus());
+    fireEvent.keyDown(question, { key: 'j' });
+    expect(screen.getByRole('heading', { name: 'main.go' })).toBeInTheDocument();
+  });
+
+  it('recaptures focus and blocks Tour keystrokes from a background terminal', () => {
+    window.localStorage.setItem('attn.tour.briefing.tour-1', '1');
+    const terminalKeyDown = vi.fn();
+    render(
+      <>
+        <div
+          className="terminal-container"
+          data-testid="background-terminal"
+          onKeyDown={terminalKeyDown}
+          tabIndex={0}
+        />
+        <TourPanel
+          tour={tour}
+          resolvedTheme="dark"
+          uiScale={1}
+          onClose={vi.fn()}
+          refreshTour={vi.fn(async () => tour)}
+          saveTourDraft={vi.fn(async () => tour)}
+          askTour={vi.fn(async () => tour)}
+          submitTour={vi.fn(async () => tour)}
+        />
+      </>,
+    );
+
+    const terminal = screen.getByTestId('background-terminal');
+    terminal.focus();
+    fireEvent.keyDown(terminal, { key: 'j' });
+
+    expect(terminalKeyDown).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'Code Tour: Listener tour' })).toHaveFocus();
   });
 });

@@ -168,6 +168,7 @@ async function main() {
   let sessionId = null;
   let otherSessionId = null;
   let listener = null;
+  let paneId = null;
 
   console.log(`[RealAppHarness] runDir=${runDir}`);
   console.log(`[RealAppHarness] fixtureRepo=${repoDir}`);
@@ -184,6 +185,9 @@ async function main() {
       sessionWaitMs: 30_000,
     });
     await client.request('select_session', { sessionId });
+    const workspace = await client.request('get_workspace', { sessionId });
+    paneId = workspace.panes?.[0]?.paneId || null;
+    assert(paneId, 'Tour fixture shell has an addressable pane');
 
     const { stdout: guideOutput } = await execFileAsync(binaryPath, [
       'tour',
@@ -322,31 +326,41 @@ skip:
       `outer reading column does not compete for diff scrolling (got ${readingState.mainScrollRange})`,
     );
 
-    await client.request('tour_toggle_conversation');
-    const conversationState = await pollFor(
-      async () => {
-        const current = await client.request('tour_get_state', {}, { timeoutMs: 5_000 });
-        return current.conversationOpen ? current : null;
-      },
-      'Tour conversation drawer to open on demand',
-    );
+    const paneBeforeShortcut = await client.request('read_pane_text', { sessionId, paneId });
+    const conversationState = await client.request('tour_press_shortcut_from_background', { key: 'a' });
+    assert(conversationState.conversationOpen, 'A opens the Tour conversation from a background terminal target');
+    assert(conversationState.defaultPrevented, 'Tour shortcut prevents the background terminal key event');
+    assert(conversationState.activeElementInTour, 'Tour recaptures keyboard focus after a background target');
     assert(conversationState.conversationText.includes('No questions yet.'), 'empty conversation state rendered on demand');
+    assert(!conversationState.conversationHasFileControls, 'conversation does not expose file annotation controls');
+    const paneAfterShortcut = await client.request('read_pane_text', { sessionId, paneId });
+    assert(
+      paneAfterShortcut.text === paneBeforeShortcut.text,
+      'Tour shortcut does not type into the background shell',
+    );
 
-    const pendingNote = 'Please verify the packaged pending-note path.';
+    const tourQuestion = 'How does the complete change preserve the startup contract?';
     const scrolledState = await client.request('tour_scroll_diff', { top: 900 });
     assert(scrolledState.diffScrollTop > 500, `Tour diff can scroll deeply (got ${scrolledState.diffScrollTop})`);
-    const typedState = await client.request('tour_type_file_note', { note: pendingNote });
+    const typedState = await client.request('tour_type_question', { question: tourQuestion });
     assert(
       typedState.scrollSamples.every((top) => Math.abs(top - scrolledState.diffScrollTop) <= 1),
-      `typing feedback keeps the packaged diff anchored (got ${JSON.stringify(typedState.scrollSamples)})`,
+      `typing a Tour question keeps the packaged diff anchored (got ${JSON.stringify(typedState.scrollSamples)})`,
     );
+    const questionReady = waitForTourEvent(listener, 'QUESTION_READY ');
+    await client.request('tour_send_question');
+    const questionLine = await questionReady;
+    const questionEvent = JSON.parse(questionLine.slice('QUESTION_READY '.length));
+    assert(questionEvent.markdown.includes(tourQuestion), 'listener receives the Tour-wide question');
+    assert(!questionEvent.markdown.includes('**Context:**'), 'Tour-wide question is not tied to the selected file');
+
     const feedbackReady = waitForTourEvent(listener, 'FEEDBACK_READY ');
     await client.request('tour_send_review');
     const feedbackLine = await feedbackReady;
     const feedbackEvent = JSON.parse(feedbackLine.slice('FEEDBACK_READY '.length));
     assert(
-      feedbackEvent.markdown.includes(pendingNote),
-      `listener receives the pending file note (got ${JSON.stringify(feedbackEvent.markdown)})`,
+      feedbackEvent.markdown.includes('No additional notes.'),
+      `listener receives the review submission (got ${JSON.stringify(feedbackEvent.markdown)})`,
     );
     const { stdout: fetchedEventOutput } = await execFileAsync(binaryPath, [
       'tour',

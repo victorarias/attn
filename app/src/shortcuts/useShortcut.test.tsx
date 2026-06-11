@@ -136,4 +136,25 @@ describe('useShortcut close priority', () => {
     expect(allowed).toBe(false);
     expect(onSelectWorkspace).toHaveBeenCalledTimes(1);
   });
+
+  it('does not route app or terminal shortcuts behind an active Tour', () => {
+    const onSessionClose = vi.fn();
+    const onTerminalClose = vi.fn();
+    const { container } = render(
+      <ShortcutHarness
+        onSessionClose={onSessionClose}
+        onTerminalClose={onTerminalClose}
+      />,
+    );
+    const tour = document.createElement('section');
+    tour.className = 'tour-panel';
+    tour.setAttribute('aria-modal', 'true');
+    container.appendChild(tour);
+
+    fireEvent.keyDown(screen.getByTestId('terminal-target'), { key: 'w', metaKey: true });
+    window.dispatchEvent(new CustomEvent('attn:native-shortcut', { detail: 'session.close' }));
+
+    expect(onSessionClose).not.toHaveBeenCalled();
+    expect(onTerminalClose).not.toHaveBeenCalled();
+  });
 });

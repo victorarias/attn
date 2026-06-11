@@ -20,6 +20,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
+  FileDiff,
   MultiFileDiff,
   Virtualizer,
   useStableCallback,
@@ -29,7 +30,12 @@ import {
   type SelectedLineRange,
 } from '@pierre/diffs/react';
 // FileDiffOptions / OnDiffLineClickProps are exported from the package root, not the /react entry.
-import { parseDiffFromFile, type FileDiffOptions, type OnDiffLineClickProps } from '@pierre/diffs';
+import {
+  parseDiffFromFile,
+  type FileDiffMetadata,
+  type FileDiffOptions,
+  type OnDiffLineClickProps,
+} from '@pierre/diffs';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import type { ResolvedTheme } from '../hooks/useTheme';
 import type { ReviewComment } from '../types/generated';
@@ -81,12 +87,27 @@ export interface DiffViewProps {
   onResolveComment: (id: string, resolved: boolean) => Promise<void> | void;
   onDeleteComment: (id: string) => Promise<void> | void;
   onSendToClaude?: (reference: string) => void;
+  agentLabel?: string;
+  /** Render bounded source context so comments outside changed hunks stay inline. */
+  revealCommentContext?: boolean;
+  getCommentCapabilities?: (comment: ReviewComment) => {
+    edit: boolean;
+    resolve: boolean;
+    delete: boolean;
+  };
 }
 
 /** Stable no-op for the top-banner comment thread, which never hosts a draft form. */
 const noop = () => {};
 
 type VisibleLineRanges = Record<AnnotationSide, Array<[number, number]>>;
+
+export interface CommentContextBlock {
+  start: number;
+  end: number;
+  comments: ReviewComment[];
+  fileDiff: FileDiffMetadata;
+}
 
 export function normalizeRange(range: SelectedLineRange): { side: AnnotationSide; start: number; end: number } | null {
   const side = range.side ?? range.endSide ?? 'additions';
@@ -102,24 +123,88 @@ function isLineInRanges(line: number, ranges: Array<[number, number]>): boolean 
 }
 
 function getVisibleLineRanges(
-  oldFile: FileContents,
-  newFile: FileContents,
+  diff: FileDiffMetadata | null,
   expandUnchanged: boolean
 ): VisibleLineRanges | null {
-  if (expandUnchanged) return null;
-  try {
-    const diff = parseDiffFromFile(oldFile, newFile);
-    return diff.hunks.reduce<VisibleLineRanges>(
-      (ranges, hunk) => {
-        ranges.deletions.push([hunk.deletionStart, hunk.deletionStart + hunk.deletionCount - 1]);
-        ranges.additions.push([hunk.additionStart, hunk.additionStart + hunk.additionCount - 1]);
-        return ranges;
-      },
-      { additions: [], deletions: [] }
-    );
-  } catch {
-    return null;
+  if (expandUnchanged || !diff) return null;
+  return diff.hunks.reduce<VisibleLineRanges>(
+    (ranges, hunk) => {
+      ranges.deletions.push([hunk.deletionStart, hunk.deletionStart + hunk.deletionCount - 1]);
+      ranges.additions.push([hunk.additionStart, hunk.additionStart + hunk.additionCount - 1]);
+      return ranges;
+    },
+    { additions: [], deletions: [] }
+  );
+}
+
+export function buildCommentContextBlocks(
+  fileName: string,
+  source: string,
+  comments: ReviewComment[],
+  contextLines = 3
+): CommentContextBlock[] {
+  const sourceLines = source.split('\n');
+  const spans = comments
+    .map((comment) => ({
+      start: Math.max(1, comment.line_start - contextLines),
+      end: Math.min(sourceLines.length, comment.line_start + contextLines),
+      comment,
+    }))
+    .filter((span) => span.start <= span.end)
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+  const groups: Array<{ start: number; end: number; comments: ReviewComment[] }> = [];
+
+  for (const span of spans) {
+    const previous = groups[groups.length - 1];
+    if (previous && span.start <= previous.end + 1) {
+      previous.end = Math.max(previous.end, span.end);
+      previous.comments.push(span.comment);
+    } else {
+      groups.push({ start: span.start, end: span.end, comments: [span.comment] });
+    }
   }
+
+  return groups.map((group) => {
+    const lines = sourceLines.slice(group.start - 1, group.end);
+    const lineCount = lines.length;
+    const diffLines = lines.map((line) => `${line}\n`);
+    return {
+      ...group,
+      fileDiff: {
+        name: fileName,
+        type: 'change',
+        hunks: [{
+          collapsedBefore: 0,
+          additionStart: group.start,
+          additionCount: lineCount,
+          additionLines: 0,
+          additionLineIndex: 0,
+          deletionStart: group.start,
+          deletionCount: lineCount,
+          deletionLines: 0,
+          deletionLineIndex: 0,
+          hunkContent: [{
+            type: 'context',
+            lines: lineCount,
+            additionLineIndex: 0,
+            deletionLineIndex: 0,
+          }],
+          hunkSpecs: `@@ -${group.start},${lineCount} +${group.start},${lineCount} @@\n`,
+          splitLineStart: 0,
+          splitLineCount: lineCount,
+          unifiedLineStart: 0,
+          unifiedLineCount: lineCount,
+          noEOFCRAdditions: false,
+          noEOFCRDeletions: false,
+        }],
+        splitLineCount: lineCount,
+        unifiedLineCount: lineCount,
+        isPartial: true,
+        deletionLines: diffLines,
+        additionLines: diffLines,
+      },
+    };
+  });
 }
 
 export function DiffView({
@@ -139,6 +224,9 @@ export function DiffView({
   onResolveComment,
   onDeleteComment,
   onSendToClaude,
+  agentLabel,
+  revealCommentContext = false,
+  getCommentCapabilities,
 }: DiffViewProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const pointerRef = useRef({ x: 0, y: 0 });
@@ -212,31 +300,49 @@ export function DiffView({
 
   const oldFile = useMemo<FileContents>(() => ({ name, contents: shownOriginal }), [name, shownOriginal]);
   const newFile = useMemo<FileContents>(() => ({ name, contents: shownModified }), [name, shownModified]);
+  const parsedDiff = useMemo(() => {
+    try {
+      return parseDiffFromFile(oldFile, newFile);
+    } catch {
+      return null;
+    }
+  }, [newFile, oldFile]);
+  const lineCounts = useMemo(
+    () => ({ additions: shownModified.split('\n').length, deletions: shownOriginal.split('\n').length }),
+    [shownModified, shownOriginal]
+  );
 
   const visibleLineRanges = useMemo(
-    () => getVisibleLineRanges(oldFile, newFile, expandUnchanged),
-    [oldFile, newFile, expandUnchanged]
+    () => getVisibleLineRanges(parsedDiff, expandUnchanged),
+    [expandUnchanged, parsedDiff]
   );
 
   // A comment cannot render inline when its anchor line no longer exists or when
   // Hunks mode collapses that unchanged line. The diff library silently drops
   // annotations for non-rendered lines, so surface them in a collapsed banner.
-  const lineCounts = useMemo(
-    () => ({ additions: shownModified.split('\n').length, deletions: shownOriginal.split('\n').length }),
-    [shownModified, shownOriginal]
-  );
-  const { anchoredComments, staleComments } = useMemo(() => {
+  const { anchoredComments, contextComments, staleComments } = useMemo(() => {
     const anchored: ReviewComment[] = [];
+    const context: ReviewComment[] = [];
     const stale: ReviewComment[] = [];
     for (const c of comments) {
       const side: AnnotationSide = isOriginalSideComment(c) ? 'deletions' : 'additions';
       const max = side === 'deletions' ? lineCounts.deletions : lineCounts.additions;
       const lineExists = c.line_start >= 1 && c.line_start <= max;
       const lineVisible = !visibleLineRanges || isLineInRanges(c.line_start, visibleLineRanges[side]);
-      (lineExists && lineVisible ? anchored : stale).push(c);
+      if (lineExists && lineVisible) {
+        anchored.push(c);
+      } else if (lineExists && revealCommentContext && side === 'additions') {
+        context.push(c);
+      } else {
+        stale.push(c);
+      }
     }
-    return { anchoredComments: anchored, staleComments: stale };
-  }, [comments, lineCounts, visibleLineRanges]);
+    return { anchoredComments: anchored, contextComments: context, staleComments: stale };
+  }, [comments, lineCounts, revealCommentContext, visibleLineRanges]);
+  const commentContextBlocks = useMemo(
+    () => buildCommentContextBlocks(name, shownModified, contextComments),
+    [contextComments, name, shownModified]
+  );
 
   // Remount the diff whenever the shown target (path or content) changes — the
   // library's intended way to switch files. While frozen, the shown content is
@@ -342,6 +448,12 @@ export function DiffView({
     handleGutterUtilityClick,
     restoreScrollPosition,
   ]);
+  const contextOptions = useMemo<FileDiffOptions<AnnotationMeta>>(() => ({
+    ...options,
+    disableFileHeader: true,
+    expandUnchanged: false,
+    onPostRender: undefined,
+  }), [options]);
 
   // Group saved comments + the optional draft into one annotation per
   // (side, anchor line). The library slots annotations by `side`+`lineNumber`,
@@ -362,7 +474,9 @@ export function DiffView({
       group.comments.push(comment);
     }
 
-    if (draft) {
+    const draftInContext = draft?.side === 'additions'
+      && commentContextBlocks.some((block) => draft.start >= block.start && draft.start <= block.end);
+    if (draft && !draftInContext) {
       const key = keyOf(draft.side, draft.start);
       let group = groups.get(key);
       if (!group) {
@@ -390,7 +504,47 @@ export function DiffView({
       lineNumber: meta.lineNumber,
       metadata: meta,
     }));
-  }, [anchoredComments, draft, editingCommentId]);
+  }, [anchoredComments, commentContextBlocks, draft, editingCommentId]);
+
+  const contextBlockAnnotations = useMemo(
+    () => commentContextBlocks.map((block) => {
+      const groups = new Map<number, AnnotationMeta>();
+      for (const comment of block.comments) {
+        const lineNumber = comment.line_start;
+        const group = groups.get(lineNumber) ?? {
+          side: 'additions' as const,
+          lineNumber,
+          comments: [],
+          draft: false,
+        };
+        group.comments.push(comment);
+        groups.set(lineNumber, group);
+      }
+      if (
+        draft?.side === 'additions'
+        && draft.start >= block.start
+        && draft.start <= block.end
+      ) {
+        const group = groups.get(draft.start) ?? {
+          side: 'additions' as const,
+          lineNumber: draft.start,
+          comments: [],
+          draft: false,
+        };
+        group.draft = true;
+        groups.set(draft.start, group);
+      }
+      return {
+        block,
+        annotations: [...groups.values()].map((metadata) => ({
+          side: metadata.side,
+          lineNumber: metadata.lineNumber,
+          metadata,
+        })),
+      };
+    }),
+    [commentContextBlocks, draft]
+  );
 
   const handleSaveDraft = useCallback(
     async (content: string) => {
@@ -444,6 +598,8 @@ export function DiffView({
           onResolveComment={onResolveComment}
           onDeleteComment={onDeleteComment}
           onSendComment={handleSendComment}
+          agentLabel={agentLabel}
+          getCommentCapabilities={getCommentCapabilities}
         />
       );
     },
@@ -461,6 +617,8 @@ export function DiffView({
       onResolveComment,
       onDeleteComment,
       handleSendComment,
+      agentLabel,
+      getCommentCapabilities,
     ]
   );
 
@@ -543,12 +701,26 @@ export function DiffView({
                 onResolveComment={onResolveComment}
                 onDeleteComment={onDeleteComment}
                 onSendComment={handleSendComment}
+                agentLabel={agentLabel}
+                getCommentCapabilities={getCommentCapabilities}
               />
             </div>
           )}
         </div>
       )}
       <Virtualizer className="diff-view-scroller" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+        {contextBlockAnnotations.map(({ block, annotations }) => (
+          <section className="diff-comment-context-block" key={`${block.start}:${block.end}`}>
+            <header>Authored context / lines {block.start}-{block.end}</header>
+            <FileDiff<AnnotationMeta>
+              fileDiff={block.fileDiff}
+              options={contextOptions}
+              lineAnnotations={annotations}
+              renderAnnotation={renderAnnotation}
+              disableWorkerPool
+            />
+          </section>
+        ))}
         <MultiFileDiff<AnnotationMeta>
           key={diffKey}
           oldFile={oldFile}

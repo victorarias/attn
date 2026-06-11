@@ -27,6 +27,9 @@ function installGlobalListener() {
   listenerInstalled = true;
 
   window.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (isTourKeyboardScopeActive()) {
+      return;
+    }
     const editableTarget = isNonTerminalEditableTarget(e.target);
     const terminalTarget = isTerminalTarget(e.target);
     for (const [id, def] of Object.entries(SHORTCUTS)) {
@@ -52,6 +55,9 @@ function installGlobalListener() {
   }, true); // Capture phase to get events before terminal input.
 
   window.addEventListener(NATIVE_SHORTCUT_EVENT, (event) => {
+    if (isTourKeyboardScopeActive()) {
+      return;
+    }
     const shortcutId = (event as CustomEvent<unknown>).detail;
     if (
       typeof shortcutId === 'string'
@@ -60,6 +66,10 @@ function installGlobalListener() {
       triggerShortcut(shortcutId as ShortcutId);
     }
   });
+}
+
+function isTourKeyboardScopeActive(): boolean {
+  return document.querySelector('.tour-panel[aria-modal="true"]') !== null;
 }
 
 function isTerminalTarget(target: EventTarget | null): boolean {

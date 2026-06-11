@@ -99,6 +99,12 @@ export interface DiffCommentThreadProps {
   onResolveComment: (id: string, resolved: boolean) => void;
   onDeleteComment: (id: string) => void;
   onSendComment: (comment: ReviewComment) => void;
+  agentLabel?: string;
+  getCommentCapabilities?: (comment: ReviewComment) => {
+    edit: boolean;
+    resolve: boolean;
+    delete: boolean;
+  };
 }
 
 export function DiffCommentThread({
@@ -116,12 +122,23 @@ export function DiffCommentThread({
   onResolveComment,
   onDeleteComment,
   onSendComment,
+  agentLabel = 'Claude',
+  getCommentCapabilities,
 }: DiffCommentThreadProps) {
   return (
     <div className="diff-comment-thread" data-testid="diff-comment-thread">
       {comments.map((comment) => {
         const isEditing = editingCommentId === comment.id;
         const isAgent = comment.author === 'agent';
+        const capabilities = getCommentCapabilities?.(comment) ?? {
+          edit: true,
+          resolve: true,
+          delete: true,
+        };
+        const showActions = capabilities.edit
+          || capabilities.resolve
+          || capabilities.delete
+          || showSendToClaude;
         return (
           <div
             key={comment.id}
@@ -139,26 +156,34 @@ export function DiffCommentThread({
               <>
                 <div className="diff-comment-header">
                   <div className="diff-comment-left">
-                    <span className="diff-comment-author">{isAgent ? 'Claude' : 'You'}</span>
+                    <span className="diff-comment-author">{isAgent ? agentLabel : 'You'}</span>
                     {comment.resolved && (
                       <span className="diff-comment-resolved">
                         Resolved by {comment.resolved_by === 'agent' ? 'Claude' : 'you'}
                       </span>
                     )}
                   </div>
-                  <div className="diff-comment-actions">
-                    <button className="edit-btn" onClick={() => onStartEdit(comment.id)}>Edit</button>
-                    {showSendToClaude && (
-                      <button className="send-btn" onClick={() => onSendComment(comment)}>Send to CC</button>
-                    )}
-                    <button
-                      className="resolve-btn"
-                      onClick={() => onResolveComment(comment.id, !comment.resolved)}
-                    >
-                      {comment.resolved ? 'Unresolve' : 'Resolve'}
-                    </button>
-                    <button className="delete-btn" onClick={() => onDeleteComment(comment.id)}>Delete</button>
-                  </div>
+                  {showActions ? (
+                    <div className="diff-comment-actions">
+                      {capabilities.edit ? (
+                        <button className="edit-btn" onClick={() => onStartEdit(comment.id)}>Edit</button>
+                      ) : null}
+                      {showSendToClaude && (
+                        <button className="send-btn" onClick={() => onSendComment(comment)}>Send to CC</button>
+                      )}
+                      {capabilities.resolve ? (
+                        <button
+                          className="resolve-btn"
+                          onClick={() => onResolveComment(comment.id, !comment.resolved)}
+                        >
+                          {comment.resolved ? 'Unresolve' : 'Resolve'}
+                        </button>
+                      ) : null}
+                      {capabilities.delete ? (
+                        <button className="delete-btn" onClick={() => onDeleteComment(comment.id)}>Delete</button>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
                 <CommentBody content={comment.content} />
               </>

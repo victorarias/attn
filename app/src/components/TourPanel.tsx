@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -48,6 +49,23 @@ const MERMAID_ZOOM_MIN = 0.75;
 const MERMAID_ZOOM_MAX = 3;
 let mermaidRenderQueue = Promise.resolve();
 const noop = () => {};
+const noTourCommentActions = {
+  edit: false,
+  resolve: false,
+  delete: false,
+};
+
+function tourCommentCapabilities(comment: ReviewComment) {
+  const reviewerOwned = comment.id.startsWith('line:') || comment.id.startsWith('reply:');
+  return reviewerOwned
+    ? { edit: true, resolve: false, delete: true }
+    : noTourCommentActions;
+}
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])') !== null;
+}
 
 function briefingWasSeen(tourId: string): boolean {
   try {
@@ -252,20 +270,6 @@ function feedbackMarkdown(tour: DaemonTour): string {
     : '## Tour feedback\n\nNo additional notes.';
 }
 
-function tourWithDraft(tour: DaemonTour, nextDraft: DaemonTourDraft): DaemonTour {
-  return {
-    ...tour,
-    drafts: [
-      ...tour.drafts.filter((draft) => draft.path !== nextDraft.path),
-      nextDraft,
-    ],
-  };
-}
-
-function draftsMatch(left: DaemonTourDraft, right: DaemonTourDraft): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 function commentsForFile(file: TourFile, draft: DaemonTourDraft): ReviewComment[] {
   const createdAt = new Date(0).toISOString();
   const comments: ReviewComment[] = [];
@@ -311,12 +315,6 @@ function commentsForFile(file: TourFile, draft: DaemonTourDraft): ReviewComment[
     });
   }
   return comments;
-}
-
-function codeContext(file: TourFile, start?: number, end?: number): string | undefined {
-  if (!start) return undefined;
-  const lines = file.modified.split('\n');
-  return lines.slice(start - 1, Math.max(start, end || start)).join('\n');
 }
 
 function buildSections(files: TourFile[]): TourSection[] {
@@ -378,19 +376,20 @@ export function TourPanel({
   const [selectedPath, setSelectedPath] = useState(tour.current_file || firstTourFile?.path || '');
   const [briefingOpen, setBriefingOpen] = useState(() => !briefingWasSeen(tour.tour_id));
   const [conversationOpen, setConversationOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [hotspotsOnly, setHotspotsOnly] = useState(false);
   const [unreviewedOnly, setUnreviewedOnly] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(() => new Set());
   const [question, setQuestion] = useState('');
-  const [questionStart, setQuestionStart] = useState('');
-  const [questionEnd, setQuestionEnd] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reviewSent, setReviewSent] = useState(false);
-  const [noteInputs, setNoteInputs] = useState<Record<string, string>>({});
-  const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [annotationCursor, setAnnotationCursor] = useState(-1);
   const [markdownRenderOverrides, setMarkdownRenderOverrides] = useState<Record<string, boolean>>({});
+  const panelRef = useRef<HTMLElement>(null);
+  const questionRef = useRef<HTMLTextAreaElement>(null);
 
   const sections = useMemo(() => buildSections(tour.files), [tour.files]);
   const selectedFile = tour.files.find((file) => file.path === selectedPath) ?? firstTourFile;
@@ -434,6 +433,18 @@ export function TourPanel({
   const progressPercent = curatedFiles.length > 0
     ? Math.round((reviewedCurated / curatedFiles.length) * 100)
     : 0;
+  const reviewableFiles = useMemo(
+    () => tour.files.filter((file) => file.group !== 'skip'),
+    [tour.files],
+  );
+  const annotationOrder = useMemo(
+    () => [...(selectedFile?.annotations ?? [])].sort(
+      (left, right) => left.line_start - right.line_start
+        || left.line_end - right.line_end
+        || left.id.localeCompare(right.id),
+    ),
+    [selectedFile?.annotations],
+  );
 
   const filteredSections = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -473,9 +484,25 @@ export function TourPanel({
     });
   }, [selectedSection]);
 
+  useLayoutEffect(() => {
+    panelRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    setAnnotationCursor(-1);
+    setEditingCommentId(null);
+  }, [selectedPath]);
+
+  useEffect(() => {
+    if (!conversationOpen) return;
+    const frame = window.requestAnimationFrame(() => questionRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [conversationOpen]);
+
   useEscapeStack(onClose, true);
   useEscapeStack(() => setConversationOpen(false), conversationOpen);
   useEscapeStack(() => setBriefingOpen(false), briefingOpen);
+  useEscapeStack(() => setShortcutsOpen(false), shortcutsOpen);
 
   const persistDraft = useCallback(async (nextDraft: DaemonTourDraft) => {
     setBusy('save');
@@ -497,22 +524,22 @@ export function TourPanel({
   }, [persistDraft, tour.drafts]);
 
   const selectNextUnreviewed = useCallback(() => {
-    const reviewable = tour.files.filter((file) => file.group !== 'skip');
-    if (reviewable.length === 0) return;
-    const currentIndex = reviewable.findIndex((file) => file.path === selectedFile?.path);
+    if (reviewableFiles.length === 0) return;
+    const currentIndex = reviewableFiles.findIndex((file) => file.path === selectedFile?.path);
     const ordered = [
-      ...reviewable.slice(currentIndex + 1),
-      ...reviewable.slice(0, Math.max(0, currentIndex + 1)),
+      ...reviewableFiles.slice(currentIndex + 1),
+      ...reviewableFiles.slice(0, Math.max(0, currentIndex)),
     ];
     const next = ordered.find((file) => !reviewedPaths.has(file.path));
     if (next) selectFile(next);
-  }, [reviewedPaths, selectFile, selectedFile?.path, tour.files]);
+  }, [reviewableFiles, reviewedPaths, selectFile, selectedFile?.path]);
 
-  const updateAnnotationReply = (annotationId: string, body: string) => {
-    const replies = draft.annotation_replies.filter((reply) => reply.id !== annotationId);
-    if (body.trim()) replies.push({ id: annotationId, body: body.trim() });
-    void persistDraft({ ...draft, annotation_replies: replies });
-  };
+  const selectPreviousFile = useCallback(() => {
+    if (reviewableFiles.length === 0) return;
+    const currentIndex = reviewableFiles.findIndex((file) => file.path === selectedFile?.path);
+    if (currentIndex <= 0) return;
+    selectFile(reviewableFiles[currentIndex - 1]);
+  }, [reviewableFiles, selectFile, selectedFile?.path]);
 
   const addLineComment = useCallback((lineStart: number, _lineEnd: number, content: string) => {
     const currentDraft = draftRef.current;
@@ -522,72 +549,211 @@ export function TourPanel({
     });
   }, [persistDraft]);
 
-  const draftWithPendingInputs = useCallback((): DaemonTourDraft => {
+  const updateTourComment = useCallback((id: string, content: string) => {
     const currentDraft = draftRef.current;
-    if (!selectedFile) return currentDraft;
-    const replies = currentDraft.annotation_replies.filter(
-      (reply) => !selectedFile.annotations.some((annotation) => annotation.id === reply.id),
-    );
-    for (const annotation of selectedFile.annotations) {
-      const key = `${selectedFile.path}:${annotation.id}`;
-      const body = replyInputs[key]
-        ?? currentDraft.annotation_replies.find((reply) => reply.id === annotation.id)?.body
-        ?? '';
-      if (body.trim()) replies.push({ id: annotation.id, body: body.trim() });
+    let nextDraft = currentDraft;
+    if (id.startsWith('line:')) {
+      const index = Number.parseInt(id.slice('line:'.length), 10);
+      if (Number.isInteger(index) && currentDraft.line_comments[index]) {
+        nextDraft = {
+          ...currentDraft,
+          line_comments: currentDraft.line_comments.map((comment, commentIndex) => (
+            commentIndex === index ? { ...comment, body: content } : comment
+          )),
+        };
+      }
+    } else if (id.startsWith('reply:')) {
+      const annotationId = id.slice('reply:'.length);
+      nextDraft = {
+        ...currentDraft,
+        annotation_replies: currentDraft.annotation_replies.map((reply) => (
+          reply.id === annotationId ? { ...reply, body: content } : reply
+        )),
+      };
     }
-    return {
-      ...currentDraft,
-      note: noteInputs[selectedFile.path] ?? currentDraft.note,
-      annotation_replies: replies,
-    };
-  }, [noteInputs, replyInputs, selectedFile]);
+    setEditingCommentId(null);
+    return persistDraft(nextDraft);
+  }, [persistDraft]);
 
-  const handleAsk = async () => {
-    if (!selectedFile || !question.trim()) return;
-    const start = Number.parseInt(questionStart, 10);
-    const end = Number.parseInt(questionEnd, 10);
+  const deleteTourComment = useCallback((id: string) => {
+    const currentDraft = draftRef.current;
+    if (id.startsWith('line:')) {
+      const index = Number.parseInt(id.slice('line:'.length), 10);
+      if (!Number.isInteger(index)) return;
+      void persistDraft({
+        ...currentDraft,
+        line_comments: currentDraft.line_comments.filter((_comment, commentIndex) => commentIndex !== index),
+      });
+    } else if (id.startsWith('reply:')) {
+      const annotationId = id.slice('reply:'.length);
+      void persistDraft({
+        ...currentDraft,
+        annotation_replies: currentDraft.annotation_replies.filter((reply) => reply.id !== annotationId),
+      });
+    }
+  }, [persistDraft]);
+
+  const handleAsk = useCallback(async () => {
+    if (!question.trim()) return;
     const context: DaemonTourQuestionContext = {
       source: 'tour',
-      path: selectedFile.path,
-      ...(Number.isFinite(start) && start > 0 ? { line_start: start } : {}),
-      ...(Number.isFinite(end) && end >= start ? { line_end: end } : {}),
-      ...(codeContext(selectedFile, start, end) ? { code: codeContext(selectedFile, start, end) } : {}),
+      path: '',
     };
     setBusy('ask');
     setError(null);
     try {
       await askTour(tour.tour_id, question.trim(), context);
       setQuestion('');
-      setQuestionStart('');
-      setQuestionEnd('');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(null);
     }
-  };
+  }, [askTour, question, tour.tour_id]);
 
-  const handleSubmit = async (finish: boolean) => {
+  const handleSubmit = useCallback(async (finish: boolean) => {
     setBusy(finish ? 'finish' : 'submit');
     setError(null);
     try {
-      const submissionDraft = draftWithPendingInputs();
-      let feedbackTour = tour;
-      if (submissionDraft.path && !draftsMatch(submissionDraft, draft)) {
-        await saveTourDraft(tour.tour_id, submissionDraft);
-        feedbackTour = tourWithDraft(tour, submissionDraft);
-      }
-      await submitTour(tour.tour_id, feedbackMarkdown(feedbackTour), finish);
+      await submitTour(tour.tour_id, feedbackMarkdown(tour), finish);
       if (!finish) setReviewSent(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(null);
     }
-  };
+  }, [submitTour, tour]);
+
+  const scrollToAnnotation = useCallback((annotationId: string, line: number) => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const comment = Array.from(panel.querySelectorAll<HTMLElement>('.diff-comment[data-comment-id]'))
+      .find((element) => element.dataset.commentId?.startsWith(`annotation:${annotationId}:`));
+    if (comment) {
+      comment.scrollIntoView({ block: 'center' });
+      return;
+    }
+    const diffsContainer = panel.querySelector('diffs-container') as (HTMLElement & { shadowRoot: ShadowRoot | null }) | null;
+    const lineNumber = Array.from(
+      diffsContainer?.shadowRoot?.querySelectorAll<HTMLElement>('[data-line-number-content]') ?? [],
+    ).find((element) => element.textContent?.trim() === String(line));
+    lineNumber?.scrollIntoView({ block: 'center' });
+  }, []);
+
+  const goToAnnotation = useCallback((delta: 1 | -1) => {
+    if (!selectedFile || annotationOrder.length === 0) return;
+    const nextIndex = annotationCursor === -1
+      ? (delta === 1 ? 0 : annotationOrder.length - 1)
+      : annotationCursor + delta;
+    if (nextIndex < 0 || nextIndex >= annotationOrder.length) return;
+    const annotation = annotationOrder[nextIndex];
+    if (!annotation) return;
+    if (canRenderMarkdown && renderMarkdown) {
+      setMarkdownRenderOverrides((current) => ({
+        ...current,
+        [selectedFile.path]: false,
+      }));
+    }
+    setAnnotationCursor(nextIndex);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => scrollToAnnotation(annotation.id, annotation.line_start));
+    });
+  }, [
+    annotationCursor,
+    annotationOrder,
+    canRenderMarkdown,
+    renderMarkdown,
+    scrollToAnnotation,
+    selectedFile,
+  ]);
+
+  const toggleReviewed = useCallback(() => {
+    if (!selectedFile) return;
+    void persistDraft({ ...draftRef.current, reviewed: !draftRef.current.reviewed });
+  }, [persistDraft, selectedFile]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const targetInPanel = Boolean(target && panel.contains(target));
+      if (!targetInPanel) {
+        panel.focus({ preventScroll: true });
+      }
+      if (targetInPanel && isTypingTarget(target)) return;
+      if (briefingOpen || conversationOpen || shortcutsOpen) {
+        if (!targetInPanel) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
+      if (event.metaKey || event.ctrlKey || event.altKey) {
+        if (!targetInPanel) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      let handled = false;
+      const run = (action: () => void) => {
+        handled = true;
+        event.preventDefault();
+        event.stopPropagation();
+        action();
+      };
+      if (key === 'j') run(selectNextUnreviewed);
+      else if (key === 'k') run(selectPreviousFile);
+      else if (key === 'n') run(() => goToAnnotation(1));
+      else if (key === 'p') run(() => goToAnnotation(-1));
+      else if (key === 'r') run(toggleReviewed);
+      else if (key === 'a') run(() => setConversationOpen(true));
+      else if (key === 's') run(() => {
+        if (busy === null && tour.status !== 'ended') void handleSubmit(false);
+      });
+      else if (key === 'v' && canRenderMarkdown && selectedFile) run(() => {
+        setMarkdownRenderOverrides((current) => ({
+          ...current,
+          [selectedFile.path]: !(current[selectedFile.path] ?? true),
+        }));
+      });
+      else if (event.key === '?') run(() => setShortcutsOpen(true));
+      if (!handled && !targetInPanel) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [
+    briefingOpen,
+    busy,
+    canRenderMarkdown,
+    conversationOpen,
+    goToAnnotation,
+    handleSubmit,
+    selectNextUnreviewed,
+    selectPreviousFile,
+    selectedFile,
+    shortcutsOpen,
+    toggleReviewed,
+    tour.status,
+  ]);
 
   return (
-    <section className="tour-panel" role="dialog" aria-modal="true" aria-label={`Code Tour: ${tour.name}`}>
+    <section
+      className="tour-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Code Tour: ${tour.name}`}
+      ref={panelRef}
+      tabIndex={-1}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
       <header className="tour-panel__header">
         <div className="tour-panel__identity">
           <span className="tour-panel__mark" aria-hidden="true">AT</span>
@@ -615,6 +781,7 @@ export function TourPanel({
             {tour.connection_state === 'connected' ? 'Agent listening' : 'Agent disconnected'}
           </span>
           <button type="button" onClick={() => setBriefingOpen(true)}>Briefing</button>
+          <button type="button" onClick={() => setShortcutsOpen(true)}>Shortcuts</button>
           <button
             type="button"
             className={conversationOpen ? 'is-active' : ''}
@@ -644,6 +811,14 @@ export function TourPanel({
             disabled={busy !== null || tour.status === 'ended'}
           >
             {busy === 'refresh' ? 'Refreshing...' : 'Refresh'}
+          </button>
+          <button
+            type="button"
+            className="tour-panel__end"
+            onClick={() => void handleSubmit(true)}
+            disabled={busy !== null || tour.status === 'ended'}
+          >
+            {tour.status === 'ended' ? 'Tour ended' : busy === 'finish' ? 'Ending...' : 'End tour'}
           </button>
           <button type="button" className="tour-panel__close" onClick={onClose} aria-label="Close tour">
             Close
@@ -828,6 +1003,11 @@ export function TourPanel({
                       </button>
                     </div>
                   ) : null}
+                  {selectedFile.annotations.length > 0 ? (
+                    <span className="tour-panel__annotation-count">
+                      {selectedFile.annotations.length} inline {selectedFile.annotations.length === 1 ? 'note' : 'notes'}
+                    </span>
+                  ) : null}
                   <label>
                     <input
                       type="checkbox"
@@ -876,25 +1056,26 @@ export function TourPanel({
                       {selectedFile.modified}
                     </TourMarkdown>
                   </article>
-                ) : selectedFile.view === 'content' ? (
-                  <pre><code>{selectedFile.modified}</code></pre>
                 ) : (
                   <DiffView
                     original={selectedFile.original}
                     modified={selectedFile.modified}
                     filePath={selectedFile.path}
                     comments={diffComments}
-                    editingCommentId={null}
+                    editingCommentId={editingCommentId}
                     resolvedTheme={resolvedTheme}
                     fontSize={13 * uiScale}
                     diffStyle="unified"
-                    expandUnchanged={false}
+                    expandUnchanged={selectedFile.view === 'content'}
                     onAddComment={addLineComment}
-                    onEditComment={noop}
-                    onStartEdit={noop}
-                    onCancelEdit={noop}
+                    onEditComment={updateTourComment}
+                    onStartEdit={setEditingCommentId}
+                    onCancelEdit={() => setEditingCommentId(null)}
                     onResolveComment={noop}
-                    onDeleteComment={noop}
+                    onDeleteComment={deleteTourComment}
+                    agentLabel="Agent"
+                    revealCommentContext
+                    getCommentCapabilities={tourCommentCapabilities}
                   />
                 )}
               </div>
@@ -908,8 +1089,8 @@ export function TourPanel({
           <header className="tour-panel__conversation-heading">
             <div>
               <div className="tour-panel__section-kicker">Conversation</div>
-              <h3>Questions and review notes</h3>
-              <p>Your agent keeps listening while this drawer is closed.</p>
+              <h3>Tour conversation</h3>
+              <p>Ask about the change as a whole. File comments stay inline in the review.</p>
             </div>
             <button type="button" onClick={() => setConversationOpen(false)} aria-label="Close conversation">
               Close
@@ -917,70 +1098,7 @@ export function TourPanel({
           </header>
 
           <div className="tour-panel__conversation-scroll">
-            <section className="tour-panel__notes">
-              <h4>File feedback</h4>
-              <textarea
-                value={noteInputs[draft.path] ?? draft.note}
-                placeholder="Feedback on this file"
-                onChange={(event) => {
-                  setReviewSent(false);
-                  setNoteInputs((current) => ({ ...current, [draft.path]: event.target.value }));
-                }}
-                onBlur={(event) => {
-                  if ((event.relatedTarget as HTMLElement | null)?.closest('[data-tour-submit]')) return;
-                  void persistDraft({ ...draft, note: event.target.value });
-                }}
-              />
-            </section>
-
-            {selectedFile?.annotations.map((annotation) => {
-              const reply = draft.annotation_replies.find((entry) => entry.id === annotation.id)?.body || '';
-              return (
-                <section className="tour-panel__annotation" key={annotation.id}>
-                  <h4>Lines {annotation.line_start}{annotation.line_end !== annotation.line_start ? `-${annotation.line_end}` : ''}</h4>
-                  {annotation.comments.map((comment, index) => (
-                    <div className="tour-panel__annotation-comment" key={`${annotation.id}:${index}`}>
-                      <strong>{comment.author}</strong>
-                      <TourMarkdown resolvedTheme={resolvedTheme} uiScale={uiScale}>
-                        {comment.body}
-                      </TourMarkdown>
-                    </div>
-                  ))}
-                  <textarea
-                    value={replyInputs[`${draft.path}:${annotation.id}`] ?? reply}
-                    placeholder="Reply to this annotation"
-                    onChange={(event) => {
-                      setReviewSent(false);
-                      const key = `${draft.path}:${annotation.id}`;
-                      setReplyInputs((current) => ({ ...current, [key]: event.target.value }));
-                    }}
-                    onBlur={(event) => {
-                      if ((event.relatedTarget as HTMLElement | null)?.closest('[data-tour-submit]')) return;
-                      updateAnnotationReply(annotation.id, event.target.value);
-                    }}
-                  />
-                </section>
-              );
-            })}
-
-            <section className="tour-panel__question">
-              <h4>Ask the agent</h4>
-              <textarea
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
-                placeholder="Ask about the selected file"
-              />
-              <div className="tour-panel__line-inputs">
-                <input value={questionStart} onChange={(event) => setQuestionStart(event.target.value)} placeholder="Start line" inputMode="numeric" />
-                <input value={questionEnd} onChange={(event) => setQuestionEnd(event.target.value)} placeholder="End line" inputMode="numeric" />
-              </div>
-              <button type="button" onClick={() => void handleAsk()} disabled={!question.trim() || busy !== null || tour.status === 'ended'}>
-                {busy === 'ask' ? 'Sending...' : 'Ask question'}
-              </button>
-            </section>
-
             <section className="tour-panel__transcript">
-              <h4>Conversation history</h4>
               {tour.transcript.length === 0 ? <p>No questions yet.</p> : tour.transcript.map((entry) => (
                 <div className={`tour-panel__message tour-panel__message--${entry.role}`} key={entry.id}>
                   <strong>{entry.role === 'agent' ? 'Agent' : 'You'}</strong>
@@ -992,14 +1110,26 @@ export function TourPanel({
             </section>
           </div>
 
-          <footer className="tour-panel__submit">
-            <button type="button" data-tour-submit onClick={() => void handleSubmit(false)} disabled={busy !== null || tour.status === 'ended'}>
-              {busy === 'submit' ? 'Sending...' : reviewSent ? 'Review sent' : 'Send review to agent'}
-            </button>
-            <button type="button" data-tour-submit className="tour-panel__end" onClick={() => void handleSubmit(true)} disabled={busy !== null || tour.status === 'ended'}>
-              {tour.status === 'ended' ? 'Tour ended' : busy === 'finish' ? 'Ending...' : 'End tour'}
-            </button>
-            <small>Feedback stays local to attn. Nothing is submitted to GitHub.</small>
+          <footer className="tour-panel__conversation-composer">
+            <textarea
+              ref={questionRef}
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                  event.preventDefault();
+                  void handleAsk();
+                }
+              }}
+              placeholder="Ask about this Tour"
+              aria-label="Ask about this Tour"
+            />
+            <div>
+              <span><kbd>⌘</kbd><kbd>Enter</kbd> to send</span>
+              <button type="button" onClick={() => void handleAsk()} disabled={!question.trim() || busy !== null || tour.status === 'ended'}>
+                {busy === 'ask' ? 'Sending...' : 'Ask agent'}
+              </button>
+            </div>
           </footer>
         </aside>
       ) : null}
@@ -1025,6 +1155,33 @@ export function TourPanel({
               </span>
               <button type="button" onClick={() => setBriefingOpen(false)}>Start reading</button>
             </footer>
+          </article>
+        </div>
+      ) : null}
+
+      {shortcutsOpen ? (
+        <div className="tour-panel__shortcuts-backdrop">
+          <article className="tour-panel__shortcuts" role="dialog" aria-modal="true" aria-label="Tour keyboard shortcuts">
+            <header>
+              <div>
+                <div className="tour-panel__section-kicker">Keyboard</div>
+                <h3>Tour shortcuts</h3>
+              </div>
+              <button type="button" onClick={() => setShortcutsOpen(false)} aria-label="Close shortcuts">Close</button>
+            </header>
+            <div className="tour-panel__shortcut-grid">
+              <span><kbd>J</kbd><strong>Next unreviewed file</strong></span>
+              <span><kbd>K</kbd><strong>Previous file</strong></span>
+              <span><kbd>N</kbd><strong>Next inline note</strong></span>
+              <span><kbd>P</kbd><strong>Previous inline note</strong></span>
+              <span><kbd>R</kbd><strong>Toggle reviewed</strong></span>
+              <span><kbd>A</kbd><strong>Open conversation</strong></span>
+              <span><kbd>S</kbd><strong>Send review</strong></span>
+              <span><kbd>V</kbd><strong>Toggle Markdown view</strong></span>
+              <span><kbd>?</kbd><strong>Show shortcuts</strong></span>
+              <span><kbd>Esc</kbd><strong>Close the top layer</strong></span>
+            </div>
+            <footer>Single-key shortcuts pause while you are typing in a field or writing an inline comment.</footer>
           </article>
         </div>
       ) : null}
