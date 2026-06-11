@@ -461,6 +461,18 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           const startRow = block.promptRow - firstRow;
           const endRow = block.endRow - 1 - firstRow;
           if (endRow >= 0 && startRow < terminal.rows) {
+            // A faint accent wash behind the block, plus the crisp border. The
+            // wash gives the selection weight without competing with the text;
+            // the border keeps the bounds legible where the wash is too subtle.
+            overlays.push({
+              startRow,
+              startCol: 0,
+              endRow,
+              endCol: terminal.cols,
+              color: '#4d9de0',
+              alpha: 0.08,
+              kind: 'background',
+            });
             overlays.push({
               startRow,
               startCol: 0,
