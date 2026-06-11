@@ -31,6 +31,23 @@ interface OverlaySpan {
   kind: 'background' | 'underline';
 }
 
+// Which horizontal edges of an outline are real boundaries given the viewport.
+// An edge that falls outside [0, rows) is not the region's true top/bottom — it
+// only landed there because the region (e.g. a command block) extends past the
+// visible area. Drawing it would clamp the border to the viewport edge and make
+// the outline look like a box wrapping the whole terminal. Omitting it leaves
+// side rails that read as "continues above/below".
+export function visibleOutlineEdges(
+  startRow: number,
+  endRow: number,
+  rows: number,
+): { drawTop: boolean; drawBottom: boolean } {
+  return {
+    drawTop: startRow >= 0 && startRow < rows,
+    drawBottom: endRow >= 0 && endRow < rows,
+  };
+}
+
 interface AtlasGlyph {
   u0: number;
   v0: number;
@@ -444,8 +461,17 @@ export class WebGlTerminalRenderer {
       const right = Math.min(terminal.cols, outline.endCol) * this.cellWidth * scale;
       if (right <= left || bottom <= top) continue;
       const thickness = scale;
-      this.pushSolidQuad(vertices, left, top, right - left, thickness, outline.rgb, outline.alpha);
-      this.pushSolidQuad(vertices, left, bottom - thickness, right - left, thickness, outline.rgb, outline.alpha);
+      // Only draw an edge that is a real boundary of the outlined region (see
+      // visibleOutlineEdges): a block taller than the screen has its top/bottom
+      // off-screen, and drawing them clamped to the viewport makes the outline
+      // look like a box wrapping the whole terminal.
+      const { drawTop, drawBottom } = visibleOutlineEdges(outline.startRow, outline.endRow, terminal.rows);
+      if (drawTop) {
+        this.pushSolidQuad(vertices, left, top, right - left, thickness, outline.rgb, outline.alpha);
+      }
+      if (drawBottom) {
+        this.pushSolidQuad(vertices, left, bottom - thickness, right - left, thickness, outline.rgb, outline.alpha);
+      }
       this.pushSolidQuad(vertices, left, top, thickness, bottom - top, outline.rgb, outline.alpha);
       this.pushSolidQuad(vertices, right - thickness, top, thickness, bottom - top, outline.rgb, outline.alpha);
     }

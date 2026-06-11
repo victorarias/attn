@@ -32,6 +32,7 @@ import {
 } from '../utils/terminalFind';
 import { emptyOsc133State, parseOsc133, type Osc133State } from '../utils/terminalOsc133';
 import {
+  blockViewportSpan,
   extractBlock,
   reanchorDelta,
   TerminalBlockStore,
@@ -75,6 +76,7 @@ import { recordTerminalLinkHitTestEvent } from '../utils/terminalLinkHitTestLog'
 import {
   recordDiag,
   recordPaint,
+  recordBlock,
   noteResize,
   registerRenderProbe,
   disposePaneDiagnostics,
@@ -456,35 +458,38 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       }
       if (selectedBlockIdRef.current !== null) {
         const block = blockStoreRef.current.blockById(selectedBlockIdRef.current);
-        if (block && block.endRow !== undefined) {
-          const firstRow = viewportBufferStart(scrollbackLength, viewportOffsetRef.current);
-          const startRow = block.promptRow - firstRow;
-          const endRow = block.endRow - 1 - firstRow;
-          if (endRow >= 0 && startRow < terminal.rows) {
-            // A faint accent wash behind the block, plus the crisp border. The
-            // wash gives the selection weight without competing with the text;
-            // the border keeps the bounds legible where the wash is too subtle.
-            overlays.push({
-              startRow,
-              startCol: 0,
-              endRow,
-              endCol: terminal.cols,
-              color: '#4d9de0',
-              alpha: 0.08,
-              kind: 'background',
-            });
-            overlays.push({
-              startRow,
-              startCol: 0,
-              endRow,
-              endCol: terminal.cols,
-              color: '#4d9de0',
-              alpha: 0.9,
-              kind: 'outline',
-            });
-          }
-        } else {
+        const span = block
+          ? blockViewportSpan(block, viewportBufferStart(scrollbackLength, viewportOffsetRef.current), terminal.rows)
+          : null;
+        if (!span) {
+          // The block was evicted from the store (or never completed): the
+          // selection no longer refers to anything.
           selectedBlockIdRef.current = null;
+        } else if (span.visible) {
+          // A faint accent wash behind the block, plus the crisp border. The
+          // wash gives the selection weight without competing with the text;
+          // the border keeps the bounds legible where the wash is too subtle.
+          // The renderer omits border edges that fall outside the viewport
+          // (visibleOutlineEdges), so an over-tall block reads as "continues
+          // above/below" instead of a box around the whole terminal.
+          overlays.push({
+            startRow: span.startRow,
+            startCol: 0,
+            endRow: span.endRow,
+            endCol: terminal.cols,
+            color: '#4d9de0',
+            alpha: 0.08,
+            kind: 'background',
+          });
+          overlays.push({
+            startRow: span.startRow,
+            startCol: 0,
+            endRow: span.endRow,
+            endCol: terminal.cols,
+            color: '#4d9de0',
+            alpha: 0.9,
+            kind: 'outline',
+          });
         }
       }
       if (findOpenRef.current && findMatchesRef.current.length > 0) {
@@ -828,6 +833,51 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return blockStoreRef.current.blockById(selectedBlockIdRef.current);
     }, []);
 
+    // Record a block selection with the exact viewport geometry the overlay will
+    // draw, so the log shows when a selected block's box would cover the whole
+    // terminal (fillsViewport) and what rows produced it.
+    const logBlockSelection = useCallback((blockId: number | null) => {
+      const terminal = terminalRef.current;
+      if (blockId === null) {
+        recordBlock({ pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, phase: 'clear' });
+        return;
+      }
+      const block = blockStoreRef.current.blockById(blockId);
+      if (!terminal || !block || block.endRow === undefined) return;
+      // Same mapping the overlay uses, so the log reflects what gets drawn.
+      const span = blockViewportSpan(
+        block,
+        viewportBufferStart(terminal.getScrollbackLength(), viewportOffsetRef.current),
+        terminal.rows,
+      );
+      if (!span) return;
+      recordBlock({
+        pane: diagKeyRef.current,
+        session: runtimeMetaRef.current?.sessionId ?? undefined,
+        phase: 'select',
+        id: block.id,
+        promptRow: block.promptRow,
+        outputStartRow: block.outputStartRow,
+        endRow: block.endRow,
+        height: block.endRow - block.promptRow,
+        rows: terminal.rows,
+        scrollback: terminal.getScrollbackLength(),
+        startRowInViewport: span.startRow,
+        endRowInViewport: span.endRow,
+        fillsViewport: span.spansViewport,
+        command: block.command.slice(0, 80),
+      });
+    }, []);
+
+    // Single entry point for changing the selected block: keeps the ref, the
+    // diagnostics event, and the repaint in lock-step so the click and
+    // right-click paths can't drift.
+    const selectBlock = useCallback((blockId: number | null) => {
+      selectedBlockIdRef.current = blockId;
+      logBlockSelection(blockId);
+      renderSurface(true);
+    }, [logBlockSelection, renderSurface]);
+
     // Copy a selected block: whole = command + output, otherwise command only.
     // Extraction re-anchors against the live buffer and refuses (returns
     // false) when the block's content has been trimmed away.
@@ -1004,11 +1054,28 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           if (segment.bytes.length > 0) terminal.write(segment.bytes);
           if (segment.marker) {
             const cursor = terminal.getCursor();
-            blockStoreRef.current.applyMarker(
+            const result = blockStoreRef.current.applyMarker(
               segment.marker,
               { row: terminal.getScrollbackLength() + cursor.y, col: cursor.x },
               (row) => selectionLineAtBufferRow(row, 0, terminal.cols),
             );
+            if (result.completed) {
+              const b = result.completed;
+              recordBlock({
+                pane: diagKeyRef.current,
+                session: runtimeMetaRef.current?.sessionId ?? undefined,
+                phase: 'complete',
+                reason: result.reason ?? undefined,
+                id: b.id,
+                promptRow: b.promptRow,
+                outputStartRow: b.outputStartRow,
+                endRow: b.endRow,
+                height: b.endRow !== undefined ? b.endRow - b.promptRow : undefined,
+                rows: terminal.rows,
+                scrollback: terminal.getScrollbackLength(),
+                command: b.command.slice(0, 80),
+              });
+            }
           }
         }
         const responses: string[] = [];
@@ -1854,8 +1921,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           }
         }
         if (nextBlockId !== null || selectionRef.current) {
-          selectedBlockIdRef.current = nextBlockId;
-          renderSurface(true);
+          selectBlock(nextBlockId);
         }
       }
     };
@@ -2156,8 +2222,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           // Right-clicking a block selects it (outline + arms ⌘C/⇧⌘C), same
           // as a plain click, but without clearing an existing text selection.
           if (blockId !== null && selectedBlockIdRef.current !== blockId) {
-            selectedBlockIdRef.current = blockId;
-            renderSurface(true);
+            selectBlock(blockId);
           }
           const frameRect = containerRef.current?.parentElement?.getBoundingClientRect();
           setContextMenu({

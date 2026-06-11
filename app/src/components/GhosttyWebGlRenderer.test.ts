@@ -3,6 +3,7 @@ import type { GhosttyTerminal } from 'ghostty-web';
 import {
   graphemeAtViewportCell,
   nextAtlasSize,
+  visibleOutlineEdges,
   INITIAL_ATLAS_SIZE,
   MAX_ATLAS_SIZE,
   WebGlTerminalRenderer,
@@ -29,6 +30,33 @@ describe('graphemeAtViewportCell', () => {
 
     expect(graphemeAtViewportCell(terminal, 2, 4, 1)).toBe('live:1:4');
     expect(terminal.getGraphemeString).toHaveBeenCalledWith(1, 4);
+  });
+});
+
+// Regression for the "selected command block's box covers the whole terminal"
+// bug: a block taller than the viewport has its top above row 0 and its bottom
+// below the last row, so neither is a real boundary and must not be drawn.
+describe('visibleOutlineEdges', () => {
+  const ROWS = 24;
+
+  it('draws both edges for a block fully inside the viewport', () => {
+    expect(visibleOutlineEdges(3, 10, ROWS)).toEqual({ drawTop: true, drawBottom: true });
+  });
+
+  it('omits the top edge when the block starts above the viewport', () => {
+    expect(visibleOutlineEdges(-5, 10, ROWS)).toEqual({ drawTop: false, drawBottom: true });
+  });
+
+  it('omits the bottom edge when the block ends below the viewport', () => {
+    expect(visibleOutlineEdges(3, 40, ROWS)).toEqual({ drawTop: true, drawBottom: false });
+  });
+
+  it('omits both edges for a block taller than the viewport (no full-screen box)', () => {
+    expect(visibleOutlineEdges(-8, 40, ROWS)).toEqual({ drawTop: false, drawBottom: false });
+  });
+
+  it('treats the last visible row as inside the viewport', () => {
+    expect(visibleOutlineEdges(0, ROWS - 1, ROWS)).toEqual({ drawTop: true, drawBottom: true });
   });
 });
 

@@ -32,6 +32,20 @@ export interface BlockRowAccess {
   rowText(bufferRow: number): string;
 }
 
+// Why a block closed. 'command-end' is the normal OSC 133;D path; 'self-heal'
+// means a new prompt context arrived while the previous command was still open
+// (its command-end was lost), so we closed it at the recovered prompt row.
+export type BlockCloseReason = 'command-end' | 'self-heal';
+
+export interface ApplyMarkerResult {
+  // The block this marker just completed, if any — for diagnostics and so the
+  // caller can react to a completion without re-scanning blocks().
+  completed: TerminalBlock | null;
+  reason: BlockCloseReason | null;
+}
+
+const NO_COMPLETION: ApplyMarkerResult = { completed: null, reason: null };
+
 const MAX_BLOCKS = 200;
 const ANCHOR_LENGTH = 64;
 const REANCHOR_SCAN_ROWS = 64;
@@ -49,17 +63,18 @@ export class TerminalBlockStore {
   private pending: PendingBlock | null = null;
   private nextId = 1;
 
-  applyMarker(marker: Osc133Marker, position: BlockPosition, rowTextAt?: (row: number) => string): void {
+  applyMarker(marker: Osc133Marker, position: BlockPosition, rowTextAt?: (row: number) => string): ApplyMarkerResult {
     // Self-heal against a lost command-end. If a command already ran in the
     // current block (outputStartRow is set) and a marker that begins a NEW
     // command context arrives, fish's `OSC 133;D` for the previous command
     // never reached us (e.g. a PTY output chunk was dropped). Close the open
     // block here so two commands don't silently merge into one.
+    let healed: TerminalBlock | null = null;
     if (
       this.pending?.outputStartRow !== undefined
       && (marker.kind === 'prompt-start' || marker.kind === 'input-start' || marker.kind === 'pre-exec')
     ) {
-      this.complete(this.pending, position.row, undefined, rowTextAt);
+      healed = this.complete(this.pending, position.row, undefined, rowTextAt);
       this.pending = null;
     }
 
@@ -67,30 +82,33 @@ export class TerminalBlockStore {
       case 'prompt-start':
         this.pending = { id: this.nextId, promptRow: position.row };
         this.nextId += 1;
-        return;
+        break;
       case 'input-start':
         // A surviving input-start with no prompt-start (its prompt-start was
         // lost) still anchors a block, just at the input row.
         if (!this.pending) this.pending = this.openPending(position.row);
         this.pending.inputStart = position;
-        return;
+        break;
       case 'pre-exec':
         if (!this.pending) this.pending = this.openPending(position.row);
         this.pending.outputStartRow = position.row;
         this.pending.command = marker.cmdline;
-        return;
+        break;
       case 'command-end': {
         const pending = this.pending;
         this.pending = null;
         // A block without a pre-exec marker never ran a command (e.g. a bare
         // Enter at the prompt) — nothing copyable.
-        if (!pending || pending.outputStartRow === undefined) return;
-        this.complete(pending, position.row, marker.exitCode, rowTextAt);
-        return;
+        if (pending && pending.outputStartRow !== undefined) {
+          const completed = this.complete(pending, position.row, marker.exitCode, rowTextAt);
+          if (completed) return { completed, reason: 'command-end' };
+        }
+        break;
       }
       default:
-        return;
+        break;
     }
+    return healed ? { completed: healed, reason: 'self-heal' } : NO_COMPLETION;
   }
 
   private openPending(promptRow: number): PendingBlock {
@@ -105,10 +123,10 @@ export class TerminalBlockStore {
     endRow: number,
     exitCode: number | undefined,
     rowTextAt?: (row: number) => string,
-  ): void {
-    if (pending.outputStartRow === undefined) return;
+  ): TerminalBlock | null {
+    if (pending.outputStartRow === undefined) return null;
     const anchorRow = pending.inputStart?.row ?? pending.promptRow;
-    this.completed.push({
+    const block: TerminalBlock = {
       id: pending.id,
       promptRow: pending.promptRow,
       inputStart: pending.inputStart,
@@ -118,10 +136,12 @@ export class TerminalBlockStore {
       exitCode,
       anchorRow,
       anchorText: (rowTextAt?.(anchorRow) ?? '').slice(0, ANCHOR_LENGTH),
-    });
+    };
+    this.completed.push(block);
     if (this.completed.length > MAX_BLOCKS) {
       this.completed.splice(0, this.completed.length - MAX_BLOCKS);
     }
+    return block;
   }
 
   blocks(): readonly TerminalBlock[] {
@@ -150,6 +170,33 @@ export class TerminalBlockStore {
     this.completed = [];
     this.pending = null;
   }
+}
+
+// A completed block's position relative to the current viewport, in viewport
+// rows. startRow may be negative and endRow may exceed the last viewport row
+// when the block extends past the visible area — renderers and diagnostics
+// must share this one mapping so what gets logged is what gets drawn.
+export interface BlockViewportSpan {
+  startRow: number; // viewport row of the block's prompt row
+  endRow: number;   // viewport row of the block's last row (inclusive)
+  visible: boolean; // intersects the viewport at all
+  spansViewport: boolean; // covers every visible row (both edges off-screen or at the borders)
+}
+
+export function blockViewportSpan(
+  block: TerminalBlock,
+  firstViewportBufferRow: number,
+  viewportRows: number,
+): BlockViewportSpan | null {
+  if (block.endRow === undefined) return null;
+  const startRow = block.promptRow - firstViewportBufferRow;
+  const endRow = block.endRow - 1 - firstViewportBufferRow;
+  return {
+    startRow,
+    endRow,
+    visible: endRow >= 0 && startRow < viewportRows,
+    spansViewport: startRow <= 0 && endRow >= viewportRows - 1,
+  };
 }
 
 // Row offset between the block's recorded rows and the live buffer, found by

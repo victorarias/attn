@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  blockViewportSpan,
   extractBlock,
   reanchorDelta,
   TerminalBlockStore,
@@ -97,6 +98,26 @@ describe('TerminalBlockStore', () => {
     expect(blocks[1].endRow).toBe(44);
   });
 
+  it('reports the completed block and why it closed', () => {
+    const store = new TerminalBlockStore();
+    expect(store.applyMarker({ kind: 'prompt-start' }, { row: 0, col: 0 })).toEqual({ completed: null, reason: null });
+    expect(store.applyMarker({ kind: 'pre-exec', cmdline: 'echo hi' }, { row: 1, col: 0 })).toEqual({ completed: null, reason: null });
+
+    // Normal close via command-end.
+    const ended = store.applyMarker({ kind: 'command-end', exitCode: 0 }, { row: 2, col: 0 });
+    expect(ended.reason).toBe('command-end');
+    expect(ended.completed?.command).toBe('echo hi');
+    expect(ended.completed?.endRow).toBe(2);
+
+    // Self-heal close: a new prompt arrives while the previous command is open.
+    store.applyMarker({ kind: 'prompt-start' }, { row: 3, col: 0 });
+    store.applyMarker({ kind: 'pre-exec', cmdline: 'sleep' }, { row: 4, col: 0 });
+    const healed = store.applyMarker({ kind: 'prompt-start' }, { row: 9, col: 0 });
+    expect(healed.reason).toBe('self-heal');
+    expect(healed.completed?.command).toBe('sleep');
+    expect(healed.completed?.endRow).toBe(9);
+  });
+
   it('caps stored blocks and keeps the newest', () => {
     const store = new TerminalBlockStore();
     for (let i = 0; i < 250; i += 1) {
@@ -108,6 +129,38 @@ describe('TerminalBlockStore', () => {
     expect(store.blocks()).toHaveLength(200);
     expect(store.blocks()[0].command).toBe('cmd-50');
     expect(store.blocks()[199].command).toBe('cmd-249');
+  });
+});
+
+describe('blockViewportSpan', () => {
+  const block = (promptRow: number, endRow: number) => ({
+    id: 1, promptRow, endRow, command: 'x', anchorRow: promptRow, anchorText: '',
+  });
+
+  it('maps a fully visible block to viewport rows', () => {
+    // Buffer rows 3..7 (endRow exclusive) with the viewport starting at buffer row 0.
+    expect(blockViewportSpan(block(3, 8), 0, 24)).toEqual({
+      startRow: 3, endRow: 7, visible: true, spansViewport: false,
+    });
+  });
+
+  it('reports an over-tall block as spanning the viewport (the make-in-a-small-pane case)', () => {
+    // 204-row block, 27-row viewport scrolled to its bottom: top is far off-screen.
+    expect(blockViewportSpan(block(3, 207), 183, 27)).toEqual({
+      startRow: -180, endRow: 23, visible: true, spansViewport: false,
+    });
+    // Scrolled into the middle: both edges off-screen → spans the whole viewport.
+    expect(blockViewportSpan(block(3, 207), 100, 27)).toEqual({
+      startRow: -97, endRow: 106, visible: true, spansViewport: true,
+    });
+  });
+
+  it('reports a scrolled-away block as not visible', () => {
+    expect(blockViewportSpan(block(3, 8), 50, 24)?.visible).toBe(false);
+  });
+
+  it('returns null for an incomplete block', () => {
+    expect(blockViewportSpan({ id: 1, promptRow: 3, command: 'x', anchorRow: 3, anchorText: '' }, 0, 24)).toBeNull();
   });
 });
 
