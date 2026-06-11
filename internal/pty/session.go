@@ -26,6 +26,13 @@ const (
 	startupQueryFallbackWindow = 5 * time.Second
 )
 
+// infoSnapshotHook is a test-only seam invoked inside info() after the replay
+// payload (scrollback/replay segments) and screen snapshot are captured but
+// before the attach sequence watermark (LastSeq) is read. It is nil in
+// production. Tests set it to inject PTY writes into that window to
+// deterministically reproduce the snapshot/watermark consistency race.
+var infoSnapshotHook func()
+
 type sessionSubscriber struct {
 	id     string
 	send   func(data []byte, seq uint32) bool
@@ -63,6 +70,14 @@ type Session struct {
 	replayLog  *ReplayLog
 	screen     *virtualScreen
 	seqCounter atomic.Uint32
+
+	// replayMu makes the attach replay payload (scrollback / replay segments /
+	// screen) and its sequence watermark (lastReplaySeq) a consistent pair, so
+	// a re-attaching frontend never drops a chunk that landed between the
+	// payload snapshot and the watermark read. Held briefly around each chunk's
+	// buffer writes and around info()'s snapshot; fanOut stays outside it.
+	replayMu      sync.Mutex
+	lastReplaySeq uint32
 
 	subMu       sync.RWMutex
 	subscribers map[string]*sessionSubscriber
@@ -280,6 +295,7 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				cols := s.cols
 				rows := s.rows
 				s.metaMu.RUnlock()
+				s.replayMu.Lock()
 				s.scrollback.Write(data)
 				if s.replayLog != nil {
 					s.replayLog.Write(data, cols, rows)
@@ -287,6 +303,8 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				if s.screen != nil {
 					s.screen.Observe(data)
 				}
+				s.lastReplaySeq = seq
+				s.replayMu.Unlock()
 				s.fanOut(data, seq)
 				if s.detector != nil && s.onState != nil {
 					if state, changed := s.detector.Observe(data); changed {
@@ -315,6 +333,7 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 		cols := s.cols
 		rows := s.rows
 		s.metaMu.RUnlock()
+		s.replayMu.Lock()
 		s.scrollback.Write(carryover)
 		if s.replayLog != nil {
 			s.replayLog.Write(carryover, cols, rows)
@@ -322,6 +341,8 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 		if s.screen != nil {
 			s.screen.Observe(carryover)
 		}
+		s.lastReplaySeq = seq
+		s.replayMu.Unlock()
 		s.fanOut(carryover, seq)
 	}
 
@@ -478,6 +499,12 @@ func (s *Session) info() AttachInfo {
 		pid = s.cmd.Process.Pid
 	}
 
+	// Capture the replay payload and its sequence watermark atomically so a
+	// re-attaching frontend can dedup the live stream against LastSeq without a
+	// hole: every byte is either in this payload (seq <= lastReplaySeq) or a
+	// live chunk it will apply (seq >= LastSeq). Without this, a chunk written
+	// between the payload snapshot and the watermark read is in neither — lost.
+	s.replayMu.Lock()
 	scrollback, truncated := s.scrollback.Snapshot()
 	var replaySegments []ReplaySegment
 	replayTruncated := false
@@ -504,13 +531,25 @@ func (s *Session) info() AttachInfo {
 			screenSnapshotFresh = true
 		}
 	}
+	replayWatermark := s.lastReplaySeq
+	s.replayMu.Unlock()
 
+	// Test seam: drives a PTY write into the post-snapshot window to expose the
+	// race on unfixed code. Fired after the unlock so it never deadlocks the
+	// read loop. nil (zero overhead) in production.
+	if infoSnapshotHook != nil {
+		infoSnapshotHook()
+	}
+
+	// LastSeq is the dedup boundary: the frontend applies live chunks with
+	// seq >= LastSeq. The payload holds through replayWatermark, so live must
+	// resume at the next sequence.
 	return AttachInfo{
 		Scrollback:          scrollback,
 		ScrollbackTruncated: truncated,
 		ReplaySegments:      replaySegments,
 		ReplayTruncated:     replayTruncated,
-		LastSeq:             s.seqCounter.Load(),
+		LastSeq:             replayWatermark + 1,
 		Cols:                cols,
 		Rows:                rows,
 		PID:                 pid,

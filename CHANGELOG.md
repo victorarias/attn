@@ -11,6 +11,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Fixed
 - **Opening or resizing a workspace with deep terminal history no longer blanks or stalls the app.** attn now keeps the daemon connection stable while navigating, restores terminal history only when a workspace becomes visible, limits each synchronous replay to 64 KiB, uses a fixed Ghostty terminal core, preserves OSC 8 hyperlink metadata, compacts redundant replay work, coalesces split-drag geometry updates, and returns visible panes to their live size after replay.
 - **New Codex sessions now use the visible pane size immediately.** Their first measured terminal geometry is retained until attachment completes instead of leaving the PTY at `80x24` until the window is resized.
+- **Terminal output is no longer dropped when the app reconnects to a session.** A chunk of output emitted right as the app reloaded — or as a command relaunched it (e.g. `make install`) — could fall into a gap between the replayed history and the resumed live stream and vanish. This made long-running commands look stuck and, with command blocks, merged two separate commands into one block. Reconnects now hand off history and live output with no gap, and block tracking recovers cleanly even if a boundary marker is ever lost.
 
 ---
 

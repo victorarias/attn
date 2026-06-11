@@ -50,19 +50,34 @@ export class TerminalBlockStore {
   private nextId = 1;
 
   applyMarker(marker: Osc133Marker, position: BlockPosition, rowTextAt?: (row: number) => string): void {
+    // Self-heal against a lost command-end. If a command already ran in the
+    // current block (outputStartRow is set) and a marker that begins a NEW
+    // command context arrives, fish's `OSC 133;D` for the previous command
+    // never reached us (e.g. a PTY output chunk was dropped). Close the open
+    // block here so two commands don't silently merge into one.
+    if (
+      this.pending?.outputStartRow !== undefined
+      && (marker.kind === 'prompt-start' || marker.kind === 'input-start' || marker.kind === 'pre-exec')
+    ) {
+      this.complete(this.pending, position.row, undefined, rowTextAt);
+      this.pending = null;
+    }
+
     switch (marker.kind) {
       case 'prompt-start':
         this.pending = { id: this.nextId, promptRow: position.row };
         this.nextId += 1;
         return;
       case 'input-start':
-        if (this.pending) this.pending.inputStart = position;
+        // A surviving input-start with no prompt-start (its prompt-start was
+        // lost) still anchors a block, just at the input row.
+        if (!this.pending) this.pending = this.openPending(position.row);
+        this.pending.inputStart = position;
         return;
       case 'pre-exec':
-        if (this.pending) {
-          this.pending.outputStartRow = position.row;
-          this.pending.command = marker.cmdline;
-        }
+        if (!this.pending) this.pending = this.openPending(position.row);
+        this.pending.outputStartRow = position.row;
+        this.pending.command = marker.cmdline;
         return;
       case 'command-end': {
         const pending = this.pending;
@@ -70,25 +85,42 @@ export class TerminalBlockStore {
         // A block without a pre-exec marker never ran a command (e.g. a bare
         // Enter at the prompt) — nothing copyable.
         if (!pending || pending.outputStartRow === undefined) return;
-        const anchorRow = pending.inputStart?.row ?? pending.promptRow;
-        this.completed.push({
-          id: pending.id,
-          promptRow: pending.promptRow,
-          inputStart: pending.inputStart,
-          outputStartRow: pending.outputStartRow,
-          endRow: position.row,
-          command: pending.command ?? '',
-          exitCode: marker.exitCode,
-          anchorRow,
-          anchorText: (rowTextAt?.(anchorRow) ?? '').slice(0, ANCHOR_LENGTH),
-        });
-        if (this.completed.length > MAX_BLOCKS) {
-          this.completed.splice(0, this.completed.length - MAX_BLOCKS);
-        }
+        this.complete(pending, position.row, marker.exitCode, rowTextAt);
         return;
       }
       default:
         return;
+    }
+  }
+
+  private openPending(promptRow: number): PendingBlock {
+    const pending = { id: this.nextId, promptRow };
+    this.nextId += 1;
+    return pending;
+  }
+
+  // Pushes a completed block from a pending one with a known outputStartRow.
+  private complete(
+    pending: PendingBlock,
+    endRow: number,
+    exitCode: number | undefined,
+    rowTextAt?: (row: number) => string,
+  ): void {
+    if (pending.outputStartRow === undefined) return;
+    const anchorRow = pending.inputStart?.row ?? pending.promptRow;
+    this.completed.push({
+      id: pending.id,
+      promptRow: pending.promptRow,
+      inputStart: pending.inputStart,
+      outputStartRow: pending.outputStartRow,
+      endRow,
+      command: pending.command ?? '',
+      exitCode,
+      anchorRow,
+      anchorText: (rowTextAt?.(anchorRow) ?? '').slice(0, ANCHOR_LENGTH),
+    });
+    if (this.completed.length > MAX_BLOCKS) {
+      this.completed.splice(0, this.completed.length - MAX_BLOCKS);
     }
   }
 
