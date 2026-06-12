@@ -33,6 +33,13 @@ const (
 // deterministically reproduce the snapshot/watermark consistency race.
 var infoSnapshotHook func()
 
+// readLoopSeqGapHook is a test-only seam invoked in the read loop after a
+// chunk's sequence number is allocated but before the chunk is applied to
+// replay/screen state under replayMu. It is nil in production. Tests set it
+// to take snapshots inside that gap and deterministically verify the
+// snapshot's watermark never claims chunks its screen does not contain.
+var readLoopSeqGapHook func()
+
 type sessionSubscriber struct {
 	id     string
 	send   func(data []byte, seq uint32) bool
@@ -304,6 +311,9 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				}
 
 				seq := s.seqCounter.Add(1)
+				if readLoopSeqGapHook != nil {
+					readLoopSeqGapHook()
+				}
 				s.metaMu.RLock()
 				cols := s.cols
 				rows := s.rows
@@ -607,10 +617,14 @@ func (s *Session) info() AttachInfo {
 // so it is cheap enough to call for many sessions at once (e.g. seeding every
 // grid tile). It registers no subscriber and claims no geometry.
 //
-// The screen is read BEFORE the sequence counter so the reported LastSeq is
-// never behind the rendered bytes. This mirrors info()/Attach: a slightly-ahead
-// seq makes a consumer DROP a chunk already baked into the snapshot (safe),
-// whereas a behind seq would make it RE-APPLY one (double-painting, corrupting).
+// The screen and its watermark are captured atomically under replayMu — the
+// same critical section the read loop uses to apply a chunk and advance
+// lastReplaySeq — so LastSeq names exactly the last chunk baked into this
+// snapshot, matching info()/Attach semantics (the two must not diverge).
+// seqCounter would be wrong here: the read loop increments it BEFORE applying
+// the chunk, so a snapshot landing in that gap would claim to cover bytes the
+// screen does not contain, and an observer deduping the live stream against
+// LastSeq would silently drop the chunk carrying them.
 func (s *Session) screenSnapshot() AttachInfo {
 	s.metaMu.RLock()
 	cols := s.cols
@@ -632,6 +646,7 @@ func (s *Session) screenSnapshot() AttachInfo {
 		PID:     pid,
 		Running: running,
 	}
+	s.replayMu.Lock()
 	if s.screen != nil {
 		if snapshot, ok := s.screen.Snapshot(); ok {
 			info.ScreenSnapshot = snapshot.payload
@@ -643,7 +658,8 @@ func (s *Session) screenSnapshot() AttachInfo {
 			info.ScreenSnapshotFresh = true
 		}
 	}
-	info.LastSeq = s.seqCounter.Load()
+	info.LastSeq = s.lastReplaySeq
+	s.replayMu.Unlock()
 	return info
 }
 

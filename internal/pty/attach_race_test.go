@@ -154,6 +154,110 @@ func TestAttachSnapshotSeqConsistency(t *testing.T) {
 	}
 }
 
+// TestScreenSnapshotSeqConsistency proves the same replay-boundary loss for
+// the snapshot observer path (Manager.Snapshot): grid/read-only consumers seed
+// a tile from screenSnapshot() and then dedupe the live firehose against its
+// LastSeq. The read loop allocates a chunk's sequence number BEFORE applying
+// the chunk to replay/screen state, so a snapshot taken in that gap must
+// report the watermark of the last APPLIED chunk (lastReplaySeq), not
+// seqCounter. Reporting seqCounter would claim coverage of the in-flight chunk
+// while the snapshot screen lacks its bytes — the observer then drops that
+// live chunk and the bytes vanish, the same class of loss as the attach race
+// above.
+//
+// readLoopSeqGapHook drives the race deterministically: it takes the observer
+// snapshot inside the gap for a known marker chunk.
+func TestScreenSnapshotSeqConsistency(t *testing.T) {
+	const cols, rows = 80, 24
+	defer func() { readLoopSeqGapHook = nil }()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close(); _ = r.Close() })
+
+	s := &Session{
+		id:          "snapshot-race",
+		cols:        cols,
+		rows:        rows,
+		ptmx:        r,
+		cmd:         &exec.Cmd{}, // unstarted: readLoop's Wait() returns an error, never panics
+		scrollback:  NewRingBuffer(1 << 20),
+		replayLog:   NewReplayLog(1 << 20),
+		screen:      newVirtualScreen(cols, rows),
+		subscribers: make(map[string]*sessionSubscriber),
+		running:     true,
+		exited:      make(chan struct{}),
+		startedAt:   time.Now(),
+	}
+	go s.readLoop(nil, func(string, ...any) {})
+
+	mirror := &streamMirror{}
+	s.addSubscriber("mirror", mirror.send, nil)
+
+	write := func(line string) int {
+		n, werr := w.Write([]byte(line))
+		if werr != nil {
+			t.Fatalf("pipe write: %v", werr)
+		}
+		return n
+	}
+	waitMirror := func(want int) {
+		deadline := time.Now().Add(2 * time.Second)
+		for mirror.len() < want {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for mirror to reach %d bytes (have %d)", want, mirror.len())
+			}
+			time.Sleep(100 * time.Microsecond)
+		}
+	}
+
+	// Seed applied history so the gap snapshot has a real screen and a non-zero
+	// watermark to report.
+	seeded := write("SEED|earlier-output\r\n")
+	waitMirror(seeded)
+
+	// Arm the race: when the marker chunk's seq is allocated but its bytes have
+	// not yet reached the screen, take the observer snapshot inside the gap.
+	var (
+		once    sync.Once
+		gapInfo AttachInfo
+		gapSeq  uint32
+	)
+	readLoopSeqGapHook = func() {
+		once.Do(func() {
+			gapSeq = s.seqCounter.Load()
+			gapInfo = s.screenSnapshot()
+		})
+	}
+	written := write("MARKER|in-flight-chunk\r\n")
+	waitMirror(seeded + written)
+
+	if gapSeq == 0 {
+		t.Fatal("readLoopSeqGapHook never fired")
+	}
+	if bytes.Contains(gapInfo.ScreenSnapshot, []byte("MARKER")) {
+		t.Fatal("gap snapshot already contains the in-flight chunk; the seam fired too late to exercise the race")
+	}
+	// The core invariant: a snapshot whose screen lacks the chunk's bytes must
+	// not claim the chunk. LastSeq >= gapSeq would make an observer drop the
+	// live chunk carrying bytes the snapshot does not have.
+	if gapInfo.LastSeq >= gapSeq {
+		t.Fatalf("snapshot taken before chunk %d reached the screen reports LastSeq=%d — observers deduping seq <= LastSeq would lose the chunk's bytes", gapSeq, gapInfo.LastSeq)
+	}
+
+	// Once applied, the pair is consistent again: the watermark covers the
+	// marker chunk and the screen contains its bytes.
+	settled := s.screenSnapshot()
+	if settled.LastSeq != gapSeq {
+		t.Fatalf("settled snapshot LastSeq = %d, want %d (the applied marker chunk)", settled.LastSeq, gapSeq)
+	}
+	if !bytes.Contains(settled.ScreenSnapshot, []byte("MARKER")) {
+		t.Fatalf("settled snapshot screen should contain the applied marker chunk; got %q", settled.ScreenSnapshot)
+	}
+}
+
 func firstLine(b []byte) string {
 	line, _, _ := bytes.Cut(b, []byte{'\n'})
 	return string(line)
