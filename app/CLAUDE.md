@@ -50,14 +50,14 @@ Daemon-managed PTY handling (`internal/pty` in Go):
 ### Unit Tests (Vitest)
 
 ```bash
-pnpm test               # Run all tests
-pnpm test -- --watch    # Watch mode
-pnpm test ReviewPanel   # Run specific component tests
+pnpm test                   # Run all tests
+pnpm test -- --watch        # Watch mode
+pnpm test DiffDetailPanel   # Run specific component tests
 ```
 
 **Purpose:** Catch bugs before manual testing - infinite loops, race conditions, incorrect state management.
 
-**Architecture:** Components use `useDaemon()` hook. In tests, a `MockDaemonProvider` replaces the real WebSocket with a controllable mock that tracks all calls.
+**Architecture:** Components receive daemon functions as props. In tests, `createMockDaemon()` (`src/test/mocks/daemon.ts`) provides `create*()` factories (e.g. `createFetchDiff()`) that record every call and return configured responses; `src/test/utils.ts` re-exports testing-library plus `setupDefaultResponses()`, `waitForCalls()`, and `assertNoMoreCalls()`.
 
 **When to run:**
 - After ANY change to components that use `useDaemon()`
@@ -73,16 +73,18 @@ pnpm test ReviewPanel   # Run specific component tests
 **Test pattern:**
 ```typescript
 it('fetches diff exactly once on open', async () => {
-  render(<ReviewPanel {...props} />, { wrapper: MockDaemonProvider });
+  const mockDaemon = createMockDaemon();
+  setupDefaultResponses(mockDaemon);
+  render(<DiffDetailPanel fetchDiff={mockDaemon.createFetchDiff()} {...props} />);
   await waitFor(() => screen.getByText('file.tsx'));
 
-  expect(mockDaemon.getCalls('get_file_diff')).toHaveLength(1);
+  expect(mockDaemon.getCalls('fetchDiff')).toHaveLength(1);
   await sleep(100); // Ensure no loop
-  expect(mockDaemon.getCalls('get_file_diff')).toHaveLength(1);
+  expect(mockDaemon.getCalls('fetchDiff')).toHaveLength(1);
 });
 ```
 
-**Full design:** See `docs/plans/2026-01-02-frontend-testing-strategy.md`
+Canonical example: `src/components/DiffDetailPanel.test.tsx` (including the memoized-callbacks pattern that keeps wrapper re-renders from retriggering fetch effects).
 
 ### E2E Tests (Playwright)
 
@@ -115,7 +117,7 @@ test-harness/harnesses/MyComponentHarness.tsx
 
 # 2. Register in harnesses/index.ts
 export const harnesses = {
-  ReviewPanel: ReviewPanelHarness,
+  DiffView: DiffViewHarness,
   MyComponent: MyComponentHarness,  // Add here
 };
 
@@ -178,10 +180,10 @@ pnpm run e2e:headed -- e2e/component-harness.spec.ts  # Debug visually
 1. **App.tsx two-component pattern**: App.tsx has two components: `App` (outer) and `AppContent` (inner). This split exists because `AppContent` needs to be wrapped in providers (like `DaemonProvider`) that require functions from `useDaemonSocket()`.
 
    **When adding a new daemon socket function**, update these 4 places in order:
-   1. Destructure from `useDaemonSocket()` return in `App` (~line 141)
-   2. Pass as prop to `<AppContent ... />` (~line 216)
-   3. Add to `AppContentProps` interface (~line 263)
-   4. Destructure in `AppContent` function parameters (~line 333)
+   1. Destructure from `useDaemonSocket()` return in `App`
+   2. Pass as prop to `<AppContent ... />`
+   3. Add to the `AppContentProps` interface
+   4. Destructure in `AppContent` function parameters
 
    Missing any step causes the function to be undefined where you try to use it.
 

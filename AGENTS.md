@@ -84,7 +84,7 @@ DEBUG=debug attn -s test
 
 ### Frontend Instrumentation (disk-based)
 
-For hard-to-reproduce UI bugs, prefer disk-based JSONL logs over `console.log` — agents can read files but not DevTools. Write to `$APPLOCALDATA/debug/<name>.jsonl` using Tauri's `writeTextFile`. See `app/src/utils/paneRuntimeDebug.ts` and `app/src/utils/terminalRuntimeLog.ts` for the pattern. Remove temporary instrumentation once the bug is resolved.
+For hard-to-reproduce UI bugs, prefer disk-based JSONL logs over `console.log` — agents can read files but not DevTools. Write to `$APPLOCALDATA/debug/<name>.jsonl` using Tauri's `writeTextFile`. See `app/src/utils/terminalDiagnosticsLog.ts` and `app/src/utils/terminalLinkHitTestLog.ts` for the pattern. Remove temporary instrumentation once the bug is resolved.
 
 ## Architecture Snapshot
 
@@ -104,7 +104,8 @@ Session states:
 - `waiting_input`: stopped and needs user direction
 - `idle`: done
 - `unknown`: state could not be determined reliably
-- `needs_review_after_long_run`: 5+ minute run held for user review before final classification
+
+`needs_review_after_long_run` is not a state — it is a separate boolean flag on the session, set when a 5+ minute run finishes; final classification is deferred until the user views the session, which clears the flag.
 
 ## Critical Patterns
 
@@ -146,13 +147,9 @@ Classifier work is asynchronous and can be slow. Capture the timestamp before cl
 When changing `ReviewComment`, update all consumers:
 
 - TypeSpec schema
-- store
-- daemon websocket handlers
+- store (`internal/store/review.go`)
+- daemon websocket handlers (`internal/daemon/ws_review.go`)
 - frontend hooks and UI
-- reviewer MCP tools in `internal/reviewer/mcp/tools.go`
-- reviewer filtering logic
-
-Easy miss: reviewer-agent MCP tools do not read through the websocket protocol.
 
 ### 5. Pointer/Value Conversions
 
