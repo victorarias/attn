@@ -147,6 +147,14 @@ func TestDetectTerminalQueries(t *testing.T) {
 	if !queries.da1 || !queries.cpr || !queries.osc10 || !queries.osc11 {
 		t.Fatalf("detectTerminalQueries() = %+v, want all queries detected", queries)
 	}
+	if queries.da1BeforeCPR {
+		t.Fatalf("detectTerminalQueries() = %+v, want da1BeforeCPR=false for CPR-first chunk", queries)
+	}
+
+	reversed := detectTerminalQueries([]byte("\x1b[0c...\x1b[6n"))
+	if !reversed.da1BeforeCPR {
+		t.Fatalf("detectTerminalQueries() = %+v, want da1BeforeCPR=true for DA1-first chunk", reversed)
+	}
 }
 
 func TestClaimTerminalQueryResponsesOnlyOnce(t *testing.T) {
@@ -277,9 +285,11 @@ func TestWriteTerminalQueryResponsesAllowResend(t *testing.T) {
 		ptmx: writer,
 	}
 
+	// CPR and DA1 are no longer handled here — the daemon answers both directly
+	// from the read loop (writeCursorPositionResponse / writeDeviceAttributesResponse).
+	// This fallback now covers only the theme-dependent OSC10/OSC11 color queries.
 	queries := terminalQueries{
-		da1: true,
-		cpr: true,
+		osc11: true,
 	}
 	session.writeTerminalQueryResponses(queries, "startup", true, nil)
 	session.writeTerminalQueryResponses(queries, "startup", true, nil)
@@ -293,7 +303,7 @@ func TestWriteTerminalQueryResponsesAllowResend(t *testing.T) {
 		t.Fatalf("io.ReadAll() failed: %v", err)
 	}
 
-	wantOnce := "\x1b[?1;2c\x1b[1;1R"
+	wantOnce := fallbackOSC11Response
 	want := wantOnce + wantOnce
 	if string(got) != want {
 		t.Fatalf("writeTerminalQueryResponses() wrote %q, want %q", string(got), want)

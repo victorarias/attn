@@ -50,6 +50,7 @@ export function buildCheatsheet(): CheatsheetCategory[] {
     {
       title: 'Panes & Terminals',
       rows: [
+        { label: 'Find in terminal', combos: [fromId('terminal.find')] },
         { label: 'Split pane down', combos: [fromId('terminal.splitVertical')] },
         { label: 'Split pane sideways', combos: [fromId('terminal.splitHorizontal')] },
         {

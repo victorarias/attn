@@ -6,17 +6,32 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-12]
+
+### Fixed
+- **Resizing or splitting a pane while its history is still restoring no longer wipes the terminal.** A geometry change landing mid-restore used to silently discard the queued history, leaving the pane blank (after an app relaunch) or without scrollback (after a split). A resize that matches where the restore already ends now lets it finish, and a genuine size change re-requests the history at the new size — including the command blocks, which come back clickable.
+- **The first output after reconnecting to a session no longer goes missing, and new panes no longer intermittently get stuck loading.** Reconnecting (relaunch, split, or recovery) could silently swallow the next chunk of terminal output — typed commands would run but never appear. Separately, two rapid attachments to the same session could pair a response with the wrong request and leave the pane waiting forever. Both reconnect handoffs are now exact: output resumes with no gap, and attachments run one at a time per session.
+
+---
+
 ## [2026-06-11]
 
 ### Fixed
 - **Opening or resizing a workspace with deep terminal history no longer blanks or stalls the app.** attn now keeps the daemon connection stable while navigating, restores terminal history only when a workspace becomes visible, limits each synchronous replay to 64 KiB, uses a fixed Ghostty terminal core, preserves OSC 8 hyperlink metadata, compacts redundant replay work, coalesces split-drag geometry updates, and returns visible panes to their live size after replay.
 - **New Codex sessions now use the visible pane size immediately.** Their first measured terminal geometry is retained until attachment completes instead of leaving the PTY at `80x24` until the window is resized.
+- **Command-block selection stays correct across resizes and app restarts.** Selecting a long command's block (e.g. `make`) no longer draws a box around the whole terminal — off-screen edges read as side rails that say "this block continues above/below" instead. Blocks now survive an app restart: reconnecting rebuilds them from the replayed history, so clicking an old command still selects exactly that command. Changing a pane's width makes old block positions unrecoverable — those blocks now clear instead of drawing boxes in the wrong place, and new commands track correctly in the new size; height-only changes keep every block. Reconnecting also no longer briefly forces the live shell back to a default terminal size, which used to redraw prompts at the wrong width and shift the restored history.
+- **Terminal output is no longer dropped when the app reconnects to a session.** A chunk of output emitted right as the app reloaded — or as a command relaunched it (e.g. `make install`) — could fall into a gap between the replayed history and the resumed live stream and vanish. This made long-running commands look stuck and, with command blocks, merged two separate commands into one block. Reconnects now hand off history and live output with no gap, and block tracking recovers cleanly even if a boundary marker is ever lost.
+- **The shell prompt no longer hangs for several seconds after the app reconnects.** When the app reattached to a shell session — including when a command like `make install` quits and relaunches it — the prompt could freeze for up to ~30 seconds before redrawing, even though the command had already finished. The shell was waiting on terminal probes (cursor position and device attributes) that the reconnecting app could miss while it was still painting; attn now answers those probes itself, so the prompt comes back immediately.
 
 ---
 
 ## [2026-06-10]
 
 ### Added
+- **File paths and URLs in terminal output are clickable.** Hovering a path or URL underlines it; Cmd+click opens URLs in the browser and existing files in their default app. Paths with `:line:col` suffixes, `~/` prefixes, and paths relative to the session's directory all resolve — including long paths that wrap across terminal lines — and detection only runs for the text under the pointer so heavy output streams stay as fast as before.
+- **Right-click in the terminal opens a context menu.** Copy the selection or the command block under the pointer (whole block, command only, or output only), paste from the clipboard, jump to find, or scroll to the top or bottom of a block. On a command block the menu also offers **Filter block output**: type a query to see just the output lines that match, with highlighted hits — click a line to jump the terminal to it.
+- **Cmd+F finds text in the terminal.** Search covers the full scrollback with live match highlighting, a match counter, Enter / Shift+Enter navigation that scrolls matches into view, and an optional case-sensitive mode. The previous quick-find shortcut moved to Cmd+Shift+F.
+- **Commands and their output are copyable as blocks (fish).** When the shell announces command boundaries (fish does this out of the box), clicking anywhere in a command's output selects the whole block: Cmd+C copies the command together with its output, Cmd+Shift+C copies just the command — exactly as typed, with no prompt decoration. Clicking the command line itself highlights just the command, and triple-click selects a whole row.
 - **Large workspace contexts can compact themselves.** Choose Codex or Claude and a recommended model preset in Settings, or enter a custom model, to let attn occasionally summarize contexts above 12 KiB after a quiet period. Claude can use normal OAuth, keychain, or organization-managed authentication without loading user or project customizations. Compaction runs without an interactive session, leaves existing working copies stale for the normal refresh/conflict workflow, publishes only against the revision it read, and keeps the latest pre-compaction version available through `attn workspace context rollback`. Use `attn workspace context compact` to run it immediately.
 
 ### Changed

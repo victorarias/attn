@@ -15,6 +15,7 @@ import { buildSessionRenderHealth } from '../utils/renderHealth';
 import { collectWorkspaceLayoutDiagnostics, projectWorkspaceBounds } from '../utils/workspaceDiagnostics';
 import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot } from '../utils/terminalStyleSummary';
+import type { BlockStateSnapshot } from '../components/GhosttyTerminal';
 
 const UI_AUTOMATION_REQUEST_EVENT = 'attn://ui-automation/request';
 const UI_AUTOMATION_RESPONSE_EVENT = 'attn://ui-automation/response';
@@ -76,6 +77,7 @@ interface UseUiAutomationBridgeArgs {
   getPaneSize: (sessionId: string, paneId: string) => { cols: number; rows: number } | null;
   getPaneVisibleContent: (sessionId: string, paneId: string) => TerminalVisibleContentSnapshot;
   getPaneVisibleStyleSummary: (sessionId: string, paneId: string) => TerminalVisibleStyleSnapshot;
+  getPaneBlockState: (sessionId: string, paneId: string) => BlockStateSnapshot | null;
   fitSessionActivePane: (sessionId: string) => void;
   sendRuntimeInput: (runtimeId: string, data: string, source?: string) => void;
   isRuntimeAttached: (runtimeId: string) => boolean;
@@ -779,13 +781,14 @@ function wheelPaneElement(sessionId: string, paneId: string, deltaY: number, del
   }));
 }
 
-function dragPaneSelection(
-  sessionId: string,
-  paneId: string,
-  size: { cols: number; rows: number },
-  start: { col: number; row: number },
-  end: { col: number; row: number },
-) {
+// Resolves a pane's terminal container plus the rect of its CELL GRID. The
+// grid rect is the canvas, which the renderer sizes to exactly
+// cols*cellWidth x rows*cellHeight; the container is taller/wider by the
+// fit remainder. Cell math must use the grid rect — proportional division of
+// the container rect drifts downward and clicks the wrong row near the
+// bottom of the pane (the app's own hit-test divides the canvas rect by the
+// renderer's real cell metrics).
+function paneTerminalGrid(sessionId: string, paneId: string) {
   const paneElement = document.querySelector(
     `[data-pane-session-id="${sessionId}"][data-pane-id="${paneId}"]`
   );
@@ -793,13 +796,120 @@ function dragPaneSelection(
   if (!(terminal instanceof HTMLElement)) {
     throw new Error(`Terminal element not found for ${sessionId}:${paneId}`);
   }
-  const rect = terminal.getBoundingClientRect();
-  const point = ({ col, row }: { col: number; row: number }) => ({
-    clientX: rect.left + ((col + 0.5) / Math.max(1, size.cols)) * rect.width,
-    clientY: rect.top + ((row + 0.5) / Math.max(1, size.rows)) * rect.height,
+  const canvas = terminal.querySelector('canvas');
+  const gridRect = (canvas instanceof HTMLElement ? canvas : terminal).getBoundingClientRect();
+  return { terminal, gridRect };
+}
+
+function paneCellPoint(
+  gridRect: DOMRect,
+  size: { cols: number; rows: number },
+  cell: { col: number; row: number },
+) {
+  return {
+    clientX: gridRect.left + ((cell.col + 0.5) / Math.max(1, size.cols)) * gridRect.width,
+    clientY: gridRect.top + ((cell.row + 0.5) / Math.max(1, size.rows)) * gridRect.height,
+  };
+}
+
+function clickPaneCell(
+  sessionId: string,
+  paneId: string,
+  size: { cols: number; rows: number },
+  cell: { col: number; row: number },
+) {
+  const { terminal, gridRect } = paneTerminalGrid(sessionId, paneId);
+  const point = paneCellPoint(gridRect, size, cell);
+  terminal.dispatchEvent(new MouseEvent('mousedown', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    button: 0,
+    buttons: 1,
+    detail: 1,
+    ...point,
+  }));
+  terminal.dispatchEvent(new MouseEvent('mouseup', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    button: 0,
+    detail: 1,
+    ...point,
+  }));
+  terminal.dispatchEvent(new MouseEvent('click', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    button: 0,
+    detail: 1,
+    ...point,
+  }));
+}
+
+// Page-coordinate center of a terminal cell plus the window inner size, so
+// native (HID) drivers can convert to window-relative click positions.
+function paneCellRect(
+  sessionId: string,
+  paneId: string,
+  size: { cols: number; rows: number },
+  cell: { col: number; row: number },
+) {
+  const { gridRect } = paneTerminalGrid(sessionId, paneId);
+  const point = paneCellPoint(gridRect, size, cell);
+  return {
+    centerX: point.clientX,
+    centerY: point.clientY,
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+  };
+}
+
+function terminalContextMenuState() {
+  const menu = document.querySelector('[data-testid="terminal-context-menu"]');
+  if (!menu) {
+    return { open: false, items: [], innerWidth: window.innerWidth, innerHeight: window.innerHeight };
+  }
+  const items = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).map((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      id: element.getAttribute('data-testid')?.replace('terminal-context-menu-', '') ?? '',
+      disabled: element.disabled,
+      centerX: rect.left + rect.width / 2,
+      centerY: rect.top + rect.height / 2,
+    };
   });
-  const startPoint = point(start);
-  const endPoint = point(end);
+  return { open: true, items, innerWidth: window.innerWidth, innerHeight: window.innerHeight };
+}
+
+function hoverPaneCell(
+  sessionId: string,
+  paneId: string,
+  size: { cols: number; rows: number },
+  cell: { col: number; row: number },
+  meta: boolean,
+): string {
+  const { terminal, gridRect } = paneTerminalGrid(sessionId, paneId);
+  terminal.dispatchEvent(new MouseEvent('mousemove', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    metaKey: meta,
+    ...paneCellPoint(gridRect, size, cell),
+  }));
+  return getComputedStyle(terminal).cursor;
+}
+
+function dragPaneSelection(
+  sessionId: string,
+  paneId: string,
+  size: { cols: number; rows: number },
+  start: { col: number; row: number },
+  end: { col: number; row: number },
+) {
+  const { terminal, gridRect } = paneTerminalGrid(sessionId, paneId);
+  const startPoint = paneCellPoint(gridRect, size, start);
+  const endPoint = paneCellPoint(gridRect, size, end);
   terminal.dispatchEvent(new MouseEvent('mousedown', {
     bubbles: true,
     cancelable: true,
@@ -1347,6 +1457,7 @@ export function useUiAutomationBridge({
   getPaneSize,
   getPaneVisibleContent,
   getPaneVisibleStyleSummary,
+  getPaneBlockState,
   fitSessionActivePane,
   sendRuntimeInput,
   isRuntimeAttached,
@@ -1900,6 +2011,73 @@ export function useUiAutomationBridge({
         await settleUi(2);
         return { sessionId, paneId, ownerSessionId, viewSessionId, deltaY, deltaMode };
       }
+      case 'click_pane_cell': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const session = sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+        const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
+        const size = getPaneSize(viewSessionId, paneId);
+        const cell = payload.cell as { col?: unknown; row?: unknown } | undefined;
+        if (!size || typeof cell?.col !== 'number' || typeof cell?.row !== 'number') {
+          throw new Error('click_pane_cell requires pane size and a numeric cell');
+        }
+        selectSession(sessionId);
+        await settleUi(1);
+        clickPaneCell(viewSessionId, paneId, size, { col: cell.col, row: cell.row });
+        await settleUi(2);
+        return { sessionId, paneId, viewSessionId };
+      }
+      case 'hover_pane_cell': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const session = sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+        const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
+        const size = getPaneSize(viewSessionId, paneId);
+        const cell = payload.cell as { col?: unknown; row?: unknown } | undefined;
+        if (!size || typeof cell?.col !== 'number' || typeof cell?.row !== 'number') {
+          throw new Error('hover_pane_cell requires pane size and a numeric cell');
+        }
+        selectSession(sessionId);
+        await settleUi(1);
+        const cursor = hoverPaneCell(
+          viewSessionId,
+          paneId,
+          size,
+          { col: cell.col, row: cell.row },
+          payload.meta === true,
+        );
+        await settleUi(2);
+        return { sessionId, paneId, viewSessionId, cursor };
+      }
+      case 'get_pane_cell_rect': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const session = sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+        const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
+        const size = getPaneSize(viewSessionId, paneId);
+        const cell = payload.cell as { col?: unknown; row?: unknown } | undefined;
+        if (!size || typeof cell?.col !== 'number' || typeof cell?.row !== 'number') {
+          throw new Error('get_pane_cell_rect requires pane size and a numeric cell');
+        }
+        return {
+          sessionId,
+          paneId,
+          viewSessionId,
+          ...paneCellRect(viewSessionId, paneId, size, { col: cell.col, row: cell.row }),
+        };
+      }
+      case 'get_terminal_context_menu_state': {
+        return terminalContextMenuState();
+      }
       case 'drag_pane_selection': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
         const session = sessions.find((entry) => entry.id === sessionId);
@@ -2057,6 +2235,25 @@ export function useUiAutomationBridge({
           viewSessionId,
           size: getPaneSize(viewSessionId, paneId),
           style: getPaneVisibleStyleSummary(viewSessionId, paneId),
+        };
+      }
+      case 'get_pane_block_state': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const session = sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+        const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
+        const blockState = getPaneBlockState(viewSessionId, paneId);
+        // Stable response shape: callers can distinguish "pane has no live
+        // terminal handle" (available=false) from "pane has no blocks".
+        return {
+          sessionId,
+          paneId,
+          viewSessionId,
+          available: blockState !== null,
+          ...(blockState ?? {}),
         };
       }
       case 'get_pane_state': {
@@ -2401,6 +2598,7 @@ export function useUiAutomationBridge({
     getActivePaneIdForSession,
     getPaneSize,
     getPaneText,
+    getPaneBlockState,
     resetSessionPaneTerminal,
     drainSessionPaneTerminal,
     selectSession,

@@ -7,12 +7,45 @@ interface RendererTheme {
   cursor: string;
 }
 
-export interface WebGlSelection {
+// A rectangular range overlay in viewport coordinates. Rows are inclusive of
+// endRow; columns are exclusive of endCol. Spans follow selection semantics:
+// rows strictly between startRow and endRow cover the full grid width.
+// - background: solid fill drawn under glyphs (selection, find matches)
+// - underline: bar at the text baseline drawn over glyphs (hovered links)
+// - outline: thin border around the bounding rectangle (selected block)
+export interface WebGlOverlay {
   startRow: number;
   startCol: number;
   endRow: number;
   endCol: number;
   color: string;
+  alpha?: number;
+  kind: 'background' | 'underline' | 'outline';
+}
+
+interface OverlaySpan {
+  startCol: number;
+  endCol: number;
+  rgb: Rgb;
+  alpha: number;
+  kind: 'background' | 'underline';
+}
+
+// Which horizontal edges of an outline are real boundaries given the viewport.
+// An edge that falls outside [0, rows) is not the region's true top/bottom — it
+// only landed there because the region (e.g. a command block) extends past the
+// visible area. Drawing it would clamp the border to the viewport edge and make
+// the outline look like a box wrapping the whole terminal. Omitting it leaves
+// side rails that read as "continues above/below".
+export function visibleOutlineEdges(
+  startRow: number,
+  endRow: number,
+  rows: number,
+): { drawTop: boolean; drawBottom: boolean } {
+  return {
+    drawTop: startRow >= 0 && startRow < rows,
+    drawBottom: endRow >= 0 && endRow < rows,
+  };
 }
 
 interface AtlasGlyph {
@@ -308,7 +341,7 @@ export class WebGlTerminalRenderer {
     terminal: GhosttyTerminal,
     force = false,
     viewportCells?: GhosttyCell[],
-    selection?: WebGlSelection | null,
+    overlays?: readonly WebGlOverlay[] | null,
     viewportOffset = 0,
   ): WebGlRenderSample | null {
     const startedAt = performance.now();
@@ -330,6 +363,27 @@ export class WebGlTerminalRenderer {
     const vertices: number[] = [];
     const glyphCountBefore = this.glyphs.size;
     const atlasGenerationBefore = this.atlasGeneration;
+    // Resolve overlays into per-row column spans once per frame so the cell
+    // loop only checks the (typically 0-2) spans on its own row. Outlines are
+    // geometric borders and render in a dedicated pass after the cells.
+    const spansByRow: Array<OverlaySpan[] | undefined> = new Array(terminal.rows);
+    const outlines: Array<{ startRow: number; startCol: number; endRow: number; endCol: number; rgb: Rgb; alpha: number }> = [];
+    for (const overlay of overlays ?? []) {
+      const rgb = parseColor(overlay.color);
+      const alpha = overlay.alpha ?? 1;
+      if (overlay.kind === 'outline') {
+        outlines.push({ ...overlay, rgb, alpha });
+        continue;
+      }
+      const firstRow = Math.max(0, overlay.startRow);
+      const lastRow = Math.min(terminal.rows - 1, overlay.endRow);
+      for (let row = firstRow; row <= lastRow; row += 1) {
+        const startCol = row === overlay.startRow ? overlay.startCol : 0;
+        const endCol = row === overlay.endRow ? overlay.endCol : terminal.cols;
+        if (endCol <= startCol) continue;
+        (spansByRow[row] ??= []).push({ startCol, endCol, rgb, alpha, kind: overlay.kind });
+      }
+    }
     // TEMP (blank-on-split): count printable cells dropped by the width/null
     // skip below, to distinguish "cells array too short" from "width===0".
     let printableSkippedNull = 0;
@@ -339,6 +393,7 @@ export class WebGlTerminalRenderer {
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     for (let row = 0; row < terminal.rows; row += 1) {
+      const rowSpans = spansByRow[row];
       for (let col = 0; col < terminal.cols; col += 1) {
         const cell = cells[row * terminal.cols + col];
         if (!cell || cell.width === 0) {
@@ -359,18 +414,16 @@ export class WebGlTerminalRenderer {
         const isCursor = cursorRow !== null && cursor.x === col && cursorRow === row;
         const fg = isCursor ? cursorFg : this.cellForeground(cell);
         const bg = this.cellBackground(cell);
-        const isSelected = selection
-          ? row > selection.startRow && row < selection.endRow
-            || row === selection.startRow && row === selection.endRow && col >= selection.startCol && col < selection.endCol
-            || row === selection.startRow && row < selection.endRow && col >= selection.startCol
-            || row === selection.endRow && row > selection.startRow && col < selection.endCol
-          : false;
 
         if (bg.r !== defaultBg.r || bg.g !== defaultBg.g || bg.b !== defaultBg.b) {
           this.pushSolidQuad(vertices, x, y, width, this.cellHeight * scale, bg, 1);
         }
-        if (isSelected && selection) {
-          this.pushSolidQuad(vertices, x, y, width, this.cellHeight * scale, parseColor(selection.color), 1);
+        if (rowSpans) {
+          for (const span of rowSpans) {
+            if (span.kind === 'background' && col >= span.startCol && col < span.endCol) {
+              this.pushSolidQuad(vertices, x, y, width, this.cellHeight * scale, span.rgb, span.alpha);
+            }
+          }
         }
         if (isCursor) {
           this.pushSolidQuad(vertices, x, y, width, this.cellHeight * scale, cursorBg, 1);
@@ -391,13 +444,42 @@ export class WebGlTerminalRenderer {
         if ((cell.flags & CellFlags.STRIKETHROUGH) !== 0) {
           this.pushSolidQuad(vertices, x, y + Math.floor(this.cellHeight / 2) * scale, width, scale, fg, 1);
         }
+        if (rowSpans) {
+          for (const span of rowSpans) {
+            if (span.kind === 'underline' && col >= span.startCol && col < span.endCol) {
+              this.pushSolidQuad(vertices, x, y + (this.baseline + 2) * scale, width, scale, span.rgb, span.alpha);
+            }
+          }
+        }
       }
+    }
+
+    for (const outline of outlines) {
+      const top = Math.max(0, outline.startRow) * this.cellHeight * scale;
+      const bottom = (Math.min(terminal.rows - 1, outline.endRow) + 1) * this.cellHeight * scale;
+      const left = Math.max(0, outline.startCol) * this.cellWidth * scale;
+      const right = Math.min(terminal.cols, outline.endCol) * this.cellWidth * scale;
+      if (right <= left || bottom <= top) continue;
+      const thickness = scale;
+      // Only draw an edge that is a real boundary of the outlined region (see
+      // visibleOutlineEdges): a block taller than the screen has its top/bottom
+      // off-screen, and drawing them clamped to the viewport makes the outline
+      // look like a box wrapping the whole terminal.
+      const { drawTop, drawBottom } = visibleOutlineEdges(outline.startRow, outline.endRow, terminal.rows);
+      if (drawTop) {
+        this.pushSolidQuad(vertices, left, top, right - left, thickness, outline.rgb, outline.alpha);
+      }
+      if (drawBottom) {
+        this.pushSolidQuad(vertices, left, bottom - thickness, right - left, thickness, outline.rgb, outline.alpha);
+      }
+      this.pushSolidQuad(vertices, left, top, thickness, bottom - top, outline.rgb, outline.alpha);
+      this.pushSolidQuad(vertices, right - thickness, top, thickness, bottom - top, outline.rgb, outline.alpha);
     }
 
     if (this.atlasGeneration !== atlasGenerationBefore && !this.retryingAtlasFrame) {
       this.retryingAtlasFrame = true;
       try {
-        return this.render(terminal, true, viewportCells, selection, viewportOffset);
+        return this.render(terminal, true, viewportCells, overlays, viewportOffset);
       } finally {
         this.retryingAtlasFrame = false;
       }

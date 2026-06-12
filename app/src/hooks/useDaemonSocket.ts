@@ -46,6 +46,7 @@ import {
   spawnPtyRuntime,
 } from '../pty/runtimeLifecycle';
 import { createPtyTransportState } from '../pty/transportState';
+import { enqueuePerKey } from '../pty/attachQueue';
 import { parseLayoutJSON, tileContentKey, tileIdsFromLayoutJSON, type TerminalDockEdge, type TileContentState } from '../types/workspace';
 import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import { collectWorkspaceLayoutDiagnostics } from '../utils/workspaceDiagnostics';
@@ -168,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '99';
+export const PROTOCOL_VERSION = '100';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -748,6 +749,8 @@ export function useDaemonSocket({
   const branchDiffInFlightRef = useRef<Map<string, Promise<BranchDiffFilesResult>>>(new Map());
   const ptyTransportRef = useRef(createPtyTransportState<AttachRequestContext>());
   const canceledAttachIdsRef = useRef(new Set<string>());
+  // Per-session attach serialization chain — see sendAttachSession.
+  const attachQueueRef = useRef(new Map<string, Promise<unknown>>());
   const pendingSessionVisualizedRef = useRef<Set<string>>(new Set());
   const selectedSessionRef = useRef<string | null>(null);
   const selectedWorkspaceRef = useRef<string | null>(null);
@@ -2332,7 +2335,7 @@ export function useDaemonSocket({
     });
   }, []);
 
-  const sendAttachSession = useCallback((id: string, context?: AttachRequestContext): Promise<AttachResult> => {
+  const sendAttachSessionNow = useCallback((id: string, context?: AttachRequestContext): Promise<AttachResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -2365,6 +2368,14 @@ export function useDaemonSocket({
       }, 15000);
     });
   }, []);
+
+  // Attaches to the same session must not overlap (see attachQueue.ts):
+  // a second in-flight attach overwrites the first's pending entry (its
+  // promise then never settles — callers hang), gets resolved with the FIRST
+  // attach's result, and has its replay classified against the wrong context.
+  const sendAttachSession = useCallback((id: string, context?: AttachRequestContext): Promise<AttachResult> => {
+    return enqueuePerKey(attachQueueRef.current, id, () => sendAttachSessionNow(id, context));
+  }, [sendAttachSessionNow]);
 
   const sendAttachSessionWithRetry = useCallback(async (id: string, context?: AttachRequestContext): Promise<AttachResult> => {
     return retryTransientAttachRequest(
@@ -2429,7 +2440,7 @@ export function useDaemonSocket({
   }, [sendOrQueueCommand]);
 
   const reconcileAttachedRuntimeGeometry = useCallback((
-    args: Pick<PtySpawnArgs, 'id' | 'cols' | 'rows' | 'shell'>,
+    args: Pick<PtyAttachArgs, 'id' | 'cols' | 'rows' | 'shell'>,
     attachResult: AttachResult,
     options: {
       attachPolicy: PtyAttachPolicy;

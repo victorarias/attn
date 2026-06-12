@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -144,6 +145,18 @@ export class MacOSDriver {
     await delay(this.actionDelayMs);
   }
 
+  async rightClickWindow(relativeX, relativeY) {
+    await this.runInputDriver([
+      'right_click',
+      '--relative-x',
+      String(relativeX),
+      '--relative-y',
+      String(relativeY),
+      '--prompt-accessibility',
+    ]);
+    await delay(this.actionDelayMs);
+  }
+
   async parkWindow(visiblePx) {
     const stdout = await this.runInputDriverCapture([
       'window_park',
@@ -169,13 +182,21 @@ export class MacOSDriver {
 
   async ensureInputDriver() {
     fs.mkdirSync(INPUT_DRIVER_BUILD_DIR, { recursive: true });
+    // Staleness is content-based, not mtime-based: the binary is tracked in
+    // git, so a `git checkout` can hand it a fresh mtime while its content
+    // predates the current InputDriver.swift (observed as "Unknown argument:
+    // right_click" from a binary that looked newer than the source).
+    const sourceHash = createHash('sha256').update(fs.readFileSync(INPUT_DRIVER_SOURCE)).digest('hex');
+    const fingerprintPath = `${INPUT_DRIVER_BINARY}.fingerprint`;
     const binaryExists = fs.existsSync(INPUT_DRIVER_BINARY);
-    const sourceMtime = fs.statSync(INPUT_DRIVER_SOURCE).mtimeMs;
-    const binaryMtime = binaryExists ? fs.statSync(INPUT_DRIVER_BINARY).mtimeMs : 0;
-    if (!binaryExists || binaryMtime < sourceMtime) {
+    const builtFromHash = fs.existsSync(fingerprintPath)
+      ? fs.readFileSync(fingerprintPath, 'utf8').trim()
+      : null;
+    if (!binaryExists || builtFromHash !== sourceHash) {
       await execFileAsync('/usr/bin/swiftc', [INPUT_DRIVER_SOURCE, '-o', INPUT_DRIVER_BINARY], {
         timeout: 30_000,
       });
+      fs.writeFileSync(fingerprintPath, `${sourceHash}\n`);
     }
     await this.signInputDriverIfPossible(INPUT_DRIVER_BINARY);
     return INPUT_DRIVER_BINARY;

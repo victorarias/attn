@@ -1,33 +1,61 @@
 import { describe, expect, it } from 'vitest';
-import { buildTerminalQueryResponses } from './terminalQueryResponses';
+import { buildTerminalQueryResponses, stripDaemonOwnedResponses } from './terminalQueryResponses';
+
+const ESC = String.fromCharCode(0x1b);
+
+describe('stripDaemonOwnedResponses', () => {
+  // The daemon owns CPR and DA1 replies; the frontend must not forward its own,
+  // or the shell reads the duplicate ESC[r;cR / ESC[?...c as stray input.
+
+  it('drops a standalone cursor position report', () => {
+    expect(stripDaemonOwnedResponses(ESC + '[24;1R')).toBe('');
+  });
+
+  it('drops a standalone DA1 device-attributes report', () => {
+    expect(stripDaemonOwnedResponses(ESC + '[?1;2c')).toBe('');
+  });
+
+  it('keeps non-CPR / non-DA1 responses untouched', () => {
+    const osc11 = ESC + ']11;rgb:0000/0000/0000' + ESC + '\\';
+    expect(stripDaemonOwnedResponses(osc11)).toBe(osc11);
+  });
+
+  it('removes CPR and DA1 embedded alongside other response bytes', () => {
+    expect(stripDaemonOwnedResponses(ESC + '[5;7R' + ESC + '[?1;2c' + ESC + ']11;?')).toBe(
+      ESC + ']11;?',
+    );
+  });
+});
 
 describe('buildTerminalQueryResponses', () => {
-  it('answers shell prompt terminal queries not handled by ghostty-web', () => {
-    expect(buildTerminalQueryResponses('\u001b]11;?\u001b\\\u001b[0c', 'dark')).toEqual([
-      '\u001b]11;rgb:1e1e/1e1e/1e1e\u001b\\',
-      '\u001b[?1;2c',
+  it('answers OSC color queries but leaves DA1 to the daemon', () => {
+    const write = ESC + ']11;?' + ESC + '\\' + ESC + '[0c';
+    expect(buildTerminalQueryResponses(write, 'dark')).toEqual([
+      ESC + ']11;rgb:1e1e/1e1e/1e1e' + ESC + '\\',
     ]);
   });
 
   it('uses the active terminal theme for OSC color query responses', () => {
-    expect(buildTerminalQueryResponses('\u001b]10;?\u0007\u001b]12;?\u0007', 'light')).toEqual([
-      '\u001b]10;rgb:3b3b/3b3b/3b3b\u001b\\',
-      '\u001b]12;rgb:3b3b/3b3b/3b3b\u001b\\',
+    const write = ESC + ']10;?' + String.fromCharCode(0x07) + ESC + ']12;?' + String.fromCharCode(0x07);
+    expect(buildTerminalQueryResponses(write, 'light')).toEqual([
+      ESC + ']10;rgb:3b3b/3b3b/3b3b' + ESC + '\\',
+      ESC + ']12;rgb:3b3b/3b3b/3b3b' + ESC + '\\',
     ]);
   });
 
-  it('does not duplicate model-provided responses', () => {
+  it('does not duplicate model-provided OSC responses', () => {
+    const write = ESC + ']11;?' + ESC + '\\' + ESC + '[0c';
     expect(buildTerminalQueryResponses(
-      '\u001b]11;?\u001b\\\u001b[0c',
+      write,
       'dark',
-      ['\u001b]11;rgb:0000/0000/0000\u001b\\', '\u001b[?62;4;6;22c'],
+      [ESC + ']11;rgb:0000/0000/0000' + ESC + '\\', ESC + '[?62;4;6;22c'],
     )).toEqual([]);
   });
 
   it('detects terminal queries in byte writes', () => {
-    const bytes = new TextEncoder().encode('\u001b]11;?\u0007');
+    const bytes = new TextEncoder().encode(ESC + ']11;?' + String.fromCharCode(0x07));
     expect(buildTerminalQueryResponses(bytes, 'light')).toEqual([
-      '\u001b]11;rgb:ffff/ffff/ffff\u001b\\',
+      ESC + ']11;rgb:ffff/ffff/ffff' + ESC + '\\',
     ]);
   });
 });

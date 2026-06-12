@@ -49,6 +49,9 @@ export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
       if (event.shiftKey && event.key.toLowerCase() === 'n') {
         return !triggerShortcut('session.newHorizontal');
       }
+      if (!event.shiftKey && event.key.toLowerCase() === 'f') {
+        return !triggerShortcut('terminal.find');
+      }
       if (!event.shiftKey && event.key.toLowerCase() === 'd') {
         return !triggerShortcut('terminal.splitVertical');
       }

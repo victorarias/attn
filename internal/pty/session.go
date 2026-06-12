@@ -26,6 +26,20 @@ const (
 	startupQueryFallbackWindow = 5 * time.Second
 )
 
+// infoSnapshotHook is a test-only seam invoked inside info() after the replay
+// payload (scrollback/replay segments) and screen snapshot are captured but
+// before the attach sequence watermark (LastSeq) is read. It is nil in
+// production. Tests set it to inject PTY writes into that window to
+// deterministically reproduce the snapshot/watermark consistency race.
+var infoSnapshotHook func()
+
+// readLoopSeqGapHook is a test-only seam invoked in the read loop after a
+// chunk's sequence number is allocated but before the chunk is applied to
+// replay/screen state under replayMu. It is nil in production. Tests set it
+// to take snapshots inside that gap and deterministically verify the
+// snapshot's watermark never claims chunks its screen does not contain.
+var readLoopSeqGapHook func()
+
 type sessionSubscriber struct {
 	id     string
 	send   func(data []byte, seq uint32) bool
@@ -37,6 +51,9 @@ type terminalQueries struct {
 	cpr   bool
 	osc10 bool
 	osc11 bool
+	// da1BeforeCPR records that the chunk asked DA1 before CPR. Query-driven
+	// programs read replies sequentially, so the daemon answers in ask order.
+	da1BeforeCPR bool
 }
 
 func (q terminalQueries) any() bool {
@@ -63,6 +80,14 @@ type Session struct {
 	replayLog  *ReplayLog
 	screen     *virtualScreen
 	seqCounter atomic.Uint32
+
+	// replayMu makes the attach replay payload (scrollback / replay segments /
+	// screen) and its sequence watermark (lastReplaySeq) a consistent pair, so
+	// a re-attaching frontend never drops a chunk that landed between the
+	// payload snapshot and the watermark read. Held briefly around each chunk's
+	// buffer writes and around info()'s snapshot; fanOut stays outside it.
+	replayMu      sync.Mutex
+	lastReplaySeq uint32
 
 	subMu       sync.RWMutex
 	subscribers map[string]*sessionSubscriber
@@ -256,36 +281,73 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				data := chunk[:boundary]
 				queries := detectTerminalQueries(data)
 
-				// Respond to DA1 (Primary Device Attributes) queries when no
-				// frontend subscriber is attached. The daemon can spawn shell
-				// PTYs before the interactive terminal is ready, while non-interactive
-				// worker subscribers like debug capture are already attached.
-				// Fish waits about 2 s for these terminal queries before the prompt
-				// becomes truly interactive. A virtualized running TUI can issue
-				// queries repeatedly while no frontend parser is attached, so the
-				// daemon must answer every occurrence until an interactive
-				// subscriber takes ownership again.
-				noInteractiveSubs := false
-				if queries.any() {
+				// CPR and DA1 are answered directly by the daemon below — it owns
+				// terminal geometry/capabilities (AGENTS.md pattern #7) and replies
+				// always, race-free, regardless of frontend attach/replay timing.
+				// fish blocks its prompt redraw on the resize-triggered CPR+DA1
+				// until both are answered; after a reattach the frontend can be
+				// mid-remount/replay and miss them, stalling the prompt for fish's
+				// ~10 s query timeout. Only the theme-dependent OSC color queries
+				// remain a startup/unattached fallback: the daemon can spawn shell
+				// PTYs before the interactive terminal is ready (only non-interactive
+				// worker subscribers like debug capture are attached), and fish waits
+				// for these replies before its prompt becomes interactive; shell
+				// prompts can re-issue them shortly after the first attach/resize, so
+				// resends are allowed during the startup window — and a virtualized
+				// running TUI can re-issue them repeatedly while no frontend parser
+				// is attached, so unattached resends are always answered. Once a real
+				// terminal is attached it owns the OSC color replies (they depend on
+				// its theme).
+				oscQueries := queries
+				oscQueries.cpr = false
+				oscQueries.da1 = false
+				if oscQueries.any() {
 					s.subMu.RLock()
-					noInteractiveSubs = !hasInteractiveSubscribers(s.subscribers)
+					noInteractiveSubs := !hasInteractiveSubscribers(s.subscribers)
 					s.subMu.RUnlock()
-				}
-				if enabled, allowResend, source := s.terminalQueryFallbackMode(time.Now(), noInteractiveSubs); enabled {
-					s.writeTerminalQueryResponses(queries, source, allowResend, logf)
+					if enabled, allowResend, source := s.terminalQueryFallbackMode(time.Now(), noInteractiveSubs); enabled {
+						s.writeTerminalQueryResponses(oscQueries, source, allowResend, logf)
+					}
 				}
 
 				seq := s.seqCounter.Add(1)
+				if readLoopSeqGapHook != nil {
+					readLoopSeqGapHook()
+				}
 				s.metaMu.RLock()
 				cols := s.cols
 				rows := s.rows
 				s.metaMu.RUnlock()
+				s.replayMu.Lock()
 				s.scrollback.Write(data)
 				if s.replayLog != nil {
 					s.replayLog.Write(data, cols, rows)
 				}
 				if s.screen != nil {
 					s.screen.Observe(data)
+				}
+				s.lastReplaySeq = seq
+				s.replayMu.Unlock()
+				// The daemon is the single authority for CPR (cursor position)
+				// and DA1 (device attributes) replies. Answer after the chunk is
+				// applied so the reported cursor is current, and reply in the
+				// order the chunk asked (fish sends ESC[6n ESC[0c, but other
+				// programs may ask DA1 first and read replies sequentially). fish
+				// blocks its prompt redraw on the resize-triggered CPR+DA1 until it
+				// gets both; routing them through the daemon makes the replies
+				// race-free regardless of frontend attach/replay timing (the
+				// frontend no longer answers either). See writeCursorPositionResponse
+				// and writeDeviceAttributesResponse.
+				if queries.da1BeforeCPR {
+					s.writeDeviceAttributesResponse(logf)
+					s.writeCursorPositionResponse(logf)
+				} else {
+					if queries.cpr {
+						s.writeCursorPositionResponse(logf)
+					}
+					if queries.da1 {
+						s.writeDeviceAttributesResponse(logf)
+					}
 				}
 				s.fanOut(data, seq)
 				if s.detector != nil && s.onState != nil {
@@ -315,6 +377,7 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 		cols := s.cols
 		rows := s.rows
 		s.metaMu.RUnlock()
+		s.replayMu.Lock()
 		s.scrollback.Write(carryover)
 		if s.replayLog != nil {
 			s.replayLog.Write(carryover, cols, rows)
@@ -322,6 +385,8 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 		if s.screen != nil {
 			s.screen.Observe(carryover)
 		}
+		s.lastReplaySeq = seq
+		s.replayMu.Unlock()
 		s.fanOut(carryover, seq)
 	}
 
@@ -478,6 +543,12 @@ func (s *Session) info() AttachInfo {
 		pid = s.cmd.Process.Pid
 	}
 
+	// Capture the replay payload and its sequence watermark atomically so a
+	// re-attaching frontend can dedup the live stream against LastSeq without a
+	// hole: every byte is either in this payload (seq <= LastSeq) or a live
+	// chunk it will apply (seq > LastSeq). Without this, a chunk written
+	// between the payload snapshot and the watermark read is in neither — lost.
+	s.replayMu.Lock()
 	scrollback, truncated := s.scrollback.Snapshot()
 	var replaySegments []ReplaySegment
 	replayTruncated := false
@@ -504,13 +575,27 @@ func (s *Session) info() AttachInfo {
 			screenSnapshotFresh = true
 		}
 	}
+	replayWatermark := s.lastReplaySeq
+	s.replayMu.Unlock()
 
+	// Test seam: drives a PTY write into the post-snapshot window to expose the
+	// race on unfixed code. Fired after the unlock so it never deadlocks the
+	// read loop. nil (zero overhead) in production.
+	if infoSnapshotHook != nil {
+		infoSnapshotHook()
+	}
+
+	// LastSeq is the dedup boundary: it names the last chunk covered by this
+	// payload, so the frontend applies live chunks with seq > LastSeq and
+	// drops the rest as already-replayed. screenSnapshot() reports the same
+	// covered-chunk semantics; the two must not diverge or the first live
+	// chunk after an attach is silently lost (or double-applied).
 	return AttachInfo{
 		Scrollback:          scrollback,
 		ScrollbackTruncated: truncated,
 		ReplaySegments:      replaySegments,
 		ReplayTruncated:     replayTruncated,
-		LastSeq:             s.seqCounter.Load(),
+		LastSeq:             replayWatermark,
 		Cols:                cols,
 		Rows:                rows,
 		PID:                 pid,
@@ -532,10 +617,14 @@ func (s *Session) info() AttachInfo {
 // so it is cheap enough to call for many sessions at once (e.g. seeding every
 // grid tile). It registers no subscriber and claims no geometry.
 //
-// The screen is read BEFORE the sequence counter so the reported LastSeq is
-// never behind the rendered bytes. This mirrors info()/Attach: a slightly-ahead
-// seq makes a consumer DROP a chunk already baked into the snapshot (safe),
-// whereas a behind seq would make it RE-APPLY one (double-painting, corrupting).
+// The screen and its watermark are captured atomically under replayMu — the
+// same critical section the read loop uses to apply a chunk and advance
+// lastReplaySeq — so LastSeq names exactly the last chunk baked into this
+// snapshot, matching info()/Attach semantics (the two must not diverge).
+// seqCounter would be wrong here: the read loop increments it BEFORE applying
+// the chunk, so a snapshot landing in that gap would claim to cover bytes the
+// screen does not contain, and an observer deduping the live stream against
+// LastSeq would silently drop the chunk carrying them.
 func (s *Session) screenSnapshot() AttachInfo {
 	s.metaMu.RLock()
 	cols := s.cols
@@ -557,6 +646,7 @@ func (s *Session) screenSnapshot() AttachInfo {
 		PID:     pid,
 		Running: running,
 	}
+	s.replayMu.Lock()
 	if s.screen != nil {
 		if snapshot, ok := s.screen.Snapshot(); ok {
 			info.ScreenSnapshot = snapshot.payload
@@ -568,7 +658,8 @@ func (s *Session) screenSnapshot() AttachInfo {
 			info.ScreenSnapshotFresh = true
 		}
 	}
-	info.LastSeq = s.seqCounter.Load()
+	info.LastSeq = s.lastReplaySeq
+	s.replayMu.Unlock()
 	return info
 }
 
@@ -644,11 +735,14 @@ func (s *Session) closePTY() {
 }
 
 func detectTerminalQueries(data []byte) terminalQueries {
+	da1Idx := indexDA1Query(data)
+	cprIdx := indexCPRQuery(data)
 	return terminalQueries{
-		da1:   containsDA1Query(data),
-		cpr:   containsCPRQuery(data),
-		osc10: containsOSCColorQuery(data, "10"),
-		osc11: containsOSCColorQuery(data, "11"),
+		da1:          da1Idx >= 0,
+		cpr:          cprIdx >= 0,
+		da1BeforeCPR: da1Idx >= 0 && cprIdx >= 0 && da1Idx < cprIdx,
+		osc10:        containsOSCColorQuery(data, "10"),
+		osc11:        containsOSCColorQuery(data, "11"),
 	}
 }
 
@@ -749,49 +843,65 @@ func (s *Session) writeTerminalQueryResponses(queries terminalQueries, source st
 		return
 	}
 
-	cprRow := 0
-	cprCol := 0
 	if responses.osc10 {
 		_, _ = s.ptmx.Write([]byte(fallbackOSC10Response))
 	}
 	if responses.osc11 {
 		_, _ = s.ptmx.Write([]byte(fallbackOSC11Response))
 	}
-	if responses.da1 {
-		// DA1 response: VT100 with Advanced Video Option.
-		_, _ = s.ptmx.Write([]byte("\x1b[?1;2c"))
-	}
-	if responses.cpr {
-		row, col := 1, 1
-		if s.screen != nil {
-			if snapshot, ok := s.screen.Snapshot(); ok {
-				row = int(snapshot.cursorY) + 1
-				col = int(snapshot.cursorX) + 1
-			}
-		}
-		cprRow = row
-		cprCol = col
-		_, _ = s.ptmx.Write([]byte(fmt.Sprintf("\x1b[%d;%dR", row, col)))
-	}
 
 	if logf != nil {
 		logf(
-			"pty terminal-query fallback: session=%s source=%s da1=%v cpr=%v osc10=%v osc11=%v cpr_row=%d cpr_col=%d",
+			"pty terminal-query fallback: session=%s source=%s osc10=%v osc11=%v",
 			s.id,
 			source,
-			responses.da1,
-			responses.cpr,
 			responses.osc10,
 			responses.osc11,
-			cprRow,
-			cprCol,
 		)
 	}
 }
 
-// containsDA1Query scans data for a CSI Primary Device Attributes query
-// (ESC [ c  or  ESC [ 0 c).  It ignores DA2 (ESC [ > c) and other variants.
-func containsDA1Query(data []byte) bool {
+// writeCursorPositionResponse answers a CPR (cursor position report) query from
+// the authoritative screen model. The daemon is the single CPR responder for a
+// session: fish blocks its prompt redraw on the resize-triggered CPR until it
+// gets a reply, and routing every CPR through the daemon (which owns geometry,
+// AGENTS.md pattern #7) makes the reply race-free regardless of frontend
+// attach/replay timing. The frontend deliberately does not answer CPR, so there
+// is no double-reply to confuse the shell.
+func (s *Session) writeCursorPositionResponse(logf func(string, ...any)) {
+	row, col := 1, 1
+	if s.screen != nil {
+		if snapshot, ok := s.screen.Snapshot(); ok {
+			row = int(snapshot.cursorY) + 1
+			col = int(snapshot.cursorX) + 1
+		}
+	}
+	_, _ = fmt.Fprintf(s.ptmx, "\x1b[%d;%dR", row, col)
+	if logf != nil {
+		logf("pty cpr reply: session=%s row=%d col=%d", s.id, row, col)
+	}
+}
+
+// writeDeviceAttributesResponse answers a DA1 (primary device attributes) query.
+// Like CPR, the daemon is the single DA1 responder for a session: fish blocks its
+// prompt redraw on the resize-triggered DA1 until it gets a reply, and after a
+// reattach the frontend can be mid-remount/replay and miss it (fish then stalls
+// for its ~10 s query timeout). The reply is a static capability string identical
+// to the one the frontend would send, so routing every DA1 through the daemon
+// (which owns geometry/capabilities, AGENTS.md pattern #7) is safe and race-free.
+// The frontend deliberately does not answer DA1, so there is no double-reply.
+func (s *Session) writeDeviceAttributesResponse(logf func(string, ...any)) {
+	// DA1 response: VT100 with Advanced Video Option.
+	_, _ = s.ptmx.Write([]byte("\x1b[?1;2c"))
+	if logf != nil {
+		logf("pty da1 reply: session=%s", s.id)
+	}
+}
+
+// indexDA1Query returns the offset of the first CSI Primary Device Attributes
+// query (ESC [ c  or  ESC [ 0 c) in data, or -1. It ignores DA2 (ESC [ > c)
+// and other variants.
+func indexDA1Query(data []byte) int {
 	for i := 0; i < len(data)-2; i++ {
 		if data[i] != 0x1b || data[i+1] != '[' {
 			continue
@@ -802,21 +912,24 @@ func containsDA1Query(data []byte) bool {
 			j++
 		}
 		if j < len(data) && data[j] == 'c' {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
-// containsCPRQuery scans data for a DSR 6 / CPR query (ESC [ 6 n).
-func containsCPRQuery(data []byte) bool {
+// indexCPRQuery returns the offset of the first DSR 6 / CPR query
+// (ESC [ 6 n) in data, or -1.
+func indexCPRQuery(data []byte) int {
 	for i := 0; i < len(data)-3; i++ {
 		if data[i] == 0x1b && data[i+1] == '[' && data[i+2] == '6' && data[i+3] == 'n' {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
+
+func containsCPRQuery(data []byte) bool { return indexCPRQuery(data) >= 0 }
 
 func containsOSCColorQuery(data []byte, code string) bool {
 	prefix := []byte("\x1b]" + code + ";?")

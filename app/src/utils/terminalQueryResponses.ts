@@ -4,8 +4,6 @@ import {
 } from './terminalSizing';
 
 const OSC_TERMINATOR_RE = '(?:\\u0007|\\u001b\\\\)';
-const PRIMARY_DEVICE_ATTRIBUTES_QUERY_RE = /\u001b\[(?:0)?c/;
-const PRIMARY_DEVICE_ATTRIBUTES_RESPONSE_RE = /\u001b\[\?[0-9;]*c/;
 
 function oscQueryRe(code: number): RegExp {
   return new RegExp(`\\u001b\\]${code};\\?${OSC_TERMINATOR_RE}`);
@@ -24,6 +22,24 @@ function hexToTerminalRgb(color: string): string {
 
 function textFromTerminalWrite(data: string | Uint8Array): string {
   return typeof data === 'string' ? data : new TextDecoder().decode(data);
+}
+
+const CURSOR_POSITION_REPORT_RE = /\x1b\[\d+;\d+R/g;
+const DEVICE_ATTRIBUTES_RESPONSE_RE = /\x1b\[\?[0-9;]*c/g;
+
+// The daemon is the single authority for CPR (cursor position) and DA1 (device
+// attributes) replies — it owns terminal geometry/capabilities (AGENTS.md
+// pattern #7) and answers both directly from its read loop. This avoids a
+// reattach race where fish's resize-triggered CPR+DA1 go unanswered while the
+// frontend is mid-remount/replay, stalling the prompt for fish's ~10 s query
+// timeout. The frontend must NOT also answer, or the shell reads the duplicate
+// ESC[r;cR / ESC[?...c as stray input. Strip any CPR or DA1 the local terminal
+// model emitted before forwarding responses to the PTY. (OSC color queries stay
+// frontend-owned — they depend on the active theme — and are not stripped.)
+export function stripDaemonOwnedResponses(response: string): string {
+  return response
+    .replace(CURSOR_POSITION_REPORT_RE, '')
+    .replace(DEVICE_ATTRIBUTES_RESPONSE_RE, '');
 }
 
 export function buildTerminalQueryResponses(
@@ -49,12 +65,9 @@ export function buildTerminalQueryResponses(
     responses.push(`\u001b]12;rgb:${hexToTerminalRgb(theme.cursor)}\u001b\\`);
   }
 
-  if (
-    PRIMARY_DEVICE_ATTRIBUTES_QUERY_RE.test(text)
-    && !existingResponses.some((response) => PRIMARY_DEVICE_ATTRIBUTES_RESPONSE_RE.test(response))
-  ) {
-    responses.push('\u001b[?1;2c');
-  }
+  // DA1 (primary device attributes) is intentionally NOT answered here: the
+  // daemon owns it (see stripDaemonOwnedResponses), so the frontend neither
+  // generates nor forwards a DA1 reply.
 
   return responses;
 }

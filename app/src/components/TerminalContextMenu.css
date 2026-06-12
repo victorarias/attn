@@ -1,0 +1,50 @@
+/* Context menu floats above the terminal as a sibling of the contentEditable
+   container (same layering rule as the find bar). */
+.ghostty-context-menu {
+  position: absolute;
+  z-index: 7;
+  min-width: 220px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border, rgba(127, 127, 127, 0.35));
+  background: var(--color-bg-secondary, rgba(30, 30, 30, 0.97));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  font: 12px var(--font-ui, sans-serif);
+}
+
+.ghostty-context-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-text-primary, #ddd);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ghostty-context-menu-item:hover:not(:disabled) {
+  background: rgba(127, 127, 127, 0.2);
+}
+
+.ghostty-context-menu-item:disabled {
+  color: var(--color-text-secondary, #777);
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ghostty-context-menu-shortcut {
+  color: var(--color-text-secondary, #999);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ghostty-context-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--color-border, rgba(127, 127, 127, 0.3));
+}

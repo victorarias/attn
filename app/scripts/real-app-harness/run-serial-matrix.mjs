@@ -65,6 +65,24 @@ const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-diff-review'],
   },
   {
+    id: 'terminal-block-copy',
+    label: 'OSC 133 block copy via real fish + native Cmd+C',
+    command: ['pnpm', 'run', 'real-app:scenario-terminal-block-copy'],
+  },
+  {
+    id: 'terminal-context-menu',
+    label: 'Terminal context menu via native right-click + clipboard',
+    command: ['pnpm', 'run', 'real-app:scenario-terminal-context-menu'],
+  },
+  {
+    id: 'terminal-block-resize',
+    label: 'Block geometry across fish/bash/zsh through relaunch replay + split/close-split',
+    command: ['pnpm', 'run', 'real-app:scenario-terminal-block-resize'],
+    // Three shells share one launch + relaunch lifecycle; the default
+    // per-scenario budget is too tight for the full sweep.
+    timeoutMs: 360_000,
+  },
+  {
     id: 'tr205-codex',
     label: 'TR-205 remote codex',
     command: ['pnpm', 'run', 'real-app:scenario-tr205'],
@@ -256,11 +274,14 @@ function runScenario(scenario, timeoutMs, runAgainstProd) {
     });
     activeChild = child;
     let timedOut = false;
+    // A scenario may declare a larger budget than the matrix default (e.g.
+    // multi-shell sweeps); an explicit --timeout-ms still wins when larger.
+    const effectiveTimeoutMs = Math.max(timeoutMs, scenario.timeoutMs ?? 0);
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill('SIGTERM');
       setTimeout(() => child.kill('SIGKILL'), 5_000).unref();
-    }, timeoutMs);
+    }, effectiveTimeoutMs);
     child.on('exit', (code, signal) => {
       clearTimeout(timer);
       if (activeChild === child) {

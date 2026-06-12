@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { GhosttyTerminal, type GhosttyTerminalHandle } from '../GhosttyTerminal';
+import { GhosttyTerminal, type BlockStateSnapshot, type GhosttyTerminalHandle } from '../GhosttyTerminal';
 import { RenamePopover } from '../RenamePopover';
 import { useShortcut } from '../../shortcuts';
 import {
@@ -86,6 +86,7 @@ export interface SessionTerminalWorkspaceHandle {
   getPaneSize: (paneId: string) => { cols: number; rows: number } | null;
   getPaneVisibleContent: (paneId: string) => TerminalVisibleContentSnapshot;
   getPaneVisibleStyleSummary: (paneId: string) => TerminalVisibleStyleSnapshot;
+  getPaneBlockState: (paneId: string) => BlockStateSnapshot | null;
   resetPaneTerminal: (paneId: string) => boolean;
   injectPaneBytes: (paneId: string, bytes: Uint8Array) => Promise<boolean>;
   injectPaneBase64: (paneId: string, payload: string) => Promise<boolean>;
@@ -411,6 +412,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       getPaneSize: runtime.getPaneSize,
       getPaneVisibleContent: runtime.getPaneVisibleContent,
       getPaneVisibleStyleSummary: runtime.getPaneVisibleStyleSummary,
+      getPaneBlockState: runtime.getPaneBlockState,
       resetPaneTerminal: runtime.resetPaneTerminal,
       injectPaneBytes: runtime.injectPaneBytes,
       injectPaneBase64: runtime.injectPaneBase64,
@@ -592,6 +594,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     }, [focusPaneIfCurrentlyActive, runtime]);
 
     useShortcut('terminal.open', focusActivePane, sessionVisible);
+    useShortcut('terminal.find', () => { runtime.openFindInActivePane(); }, sessionVisible);
     useShortcut('terminal.splitVertical', () => { handleSplit('vertical'); }, sessionVisible);
     useShortcut('terminal.splitHorizontal', () => { handleSplit('horizontal'); }, sessionVisible);
     useShortcut('terminal.toggleZoom', toggleZoomActivePane, sessionVisible);
@@ -729,11 +732,13 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   ref={terminalRefForPane(agentPane.id)}
                   fontSize={fontSize}
                   resolvedTheme={resolvedTheme}
+                  cwd={paneSession?.cwd}
                   debugName={`agent:${paneTitle}:${paneSession?.agent ?? 'shell'}:${agentPane.sessionId}`}
                   runtimeLogMeta={{ sessionId: agentPane.sessionId, paneId: agentPane.id, runtimeId: agentPane.runtimeId, paneKind: 'agent', isActivePane: activePaneId === agentPane.id, isActiveSession, paneCount: paneIds.length }}
                   onInput={runtime.handleTerminalInput(agentPane.id)}
                   onReady={handleGhosttyTerminalReady(agentPane.id)}
                   onResize={runtime.handleTerminalResize(agentPane.id)}
+                  onReplayInterrupted={runtime.handleReplayInterrupted(agentPane.id)}
                 />
               )}
             </div>

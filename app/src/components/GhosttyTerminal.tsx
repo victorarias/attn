@@ -8,14 +8,51 @@ import {
 } from 'react';
 import { Ghostty, InputHandler, CellFlags, type GhosttyCell, type GhosttyTerminal as GhosttyModel } from 'ghostty-web';
 import { ghosttyWasmUrl } from '../ghostty/wasm';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openPath, openUrl } from '@tauri-apps/plugin-opener';
+import { exists } from '@tauri-apps/plugin-fs';
+import { homeDir } from '@tauri-apps/api/path';
+import {
+  fragmentAtColumn,
+  logicalIndexForCell,
+  logicalLineAt,
+  pathCandidatesForFragment,
+  resolveDetectedPath,
+  spanFromLogicalRange,
+  urlAtColumn,
+  type DetectedTerminalLink,
+  type LogicalLine,
+  type LogicalSpan,
+} from '../utils/terminalLinks';
+import {
+  initialFocusedMatch,
+  startFindScan,
+  visibleMatches,
+  type FindMatch,
+  type FindScanHandle,
+} from '../utils/terminalFind';
+import { emptyOsc133State, parseOsc133, type Osc133State } from '../utils/terminalOsc133';
+import {
+  blockViewportSpanAnchored,
+  extractBlock,
+  reanchorDelta,
+  TerminalBlockStore,
+  type BlockRowAccess,
+  type BlockViewportSpan,
+  type TerminalBlock,
+} from '../utils/terminalBlocks';
+import {
+  filterBlockOutputLines,
+  lineSegments,
+  type FilteredBlockLine,
+} from '../utils/terminalBlockFilter';
+import { TerminalContextMenu, type TerminalContextMenuItem } from './TerminalContextMenu';
 import {
   cleanTerminalLines,
   terminalStyledSelectionToMarkdown,
   type TerminalMarkdownLine,
   type TerminalMarkdownRun,
 } from '../utils/terminalMarkdown';
-import { writeClipboardText } from '../utils/clipboardBridge';
+import { readClipboardText, writeClipboardText } from '../utils/clipboardBridge';
 import { parseOsc52Writes, type Osc52State } from '../utils/terminalOsc';
 import {
   parseSynchronizedOutput,
@@ -34,7 +71,7 @@ import {
   type ResizeCoalescer,
   type TerminalDimensions,
 } from '../utils/ghosttyResize';
-import { buildTerminalQueryResponses } from '../utils/terminalQueryResponses';
+import { buildTerminalQueryResponses, stripDaemonOwnedResponses } from '../utils/terminalQueryResponses';
 import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import { recordTerminalLinkHitTestEvent } from '../utils/terminalLinkHitTestLog';
 import {
@@ -64,7 +101,7 @@ import {
 import { installTerminalKeyHandler } from './SessionTerminalWorkspace/terminalKeyHandler';
 import {
   WebGlTerminalRenderer,
-  type WebGlSelection,
+  type WebGlOverlay,
 } from './GhosttyWebGlRenderer';
 import './GhosttyTerminal.css';
 
@@ -72,6 +109,8 @@ interface GhosttyTerminalProps {
   fontSize: number;
   resolvedTheme?: ResolvedTheme;
   debugName: string;
+  // Working directory used to resolve relative file paths detected in output.
+  cwd?: string;
   runtimeLogMeta?: {
     sessionId: string;
     paneId: string;
@@ -84,10 +123,16 @@ interface GhosttyTerminalProps {
   onInput: (data: string) => void;
   onReady: (terminal: GhosttyTerminalHandle) => void;
   onResize: (cols: number, rows: number, options?: { reason?: string }) => void;
+  // A live geometry change cancelled queued historical replay (the model
+  // would otherwise interleave history parsed at the wrong width). The
+  // history is gone from the model; the owner should re-request the attach
+  // replay once the geometry settles.
+  onReplayInterrupted?: () => void;
 }
 
 export interface GhosttyTerminalHandle {
   fit: () => void;
+  openFind: () => void;
   focus: () => boolean;
   typeTextViaInput: (text: string) => boolean;
   isInputFocused: () => boolean;
@@ -109,10 +154,48 @@ export interface GhosttyTerminalHandle {
   scrollToTop: () => boolean;
   getText: () => string;
   getSize: () => { cols: number; rows: number } | null;
+  // True once the model's size has come from a real container measurement
+  // (a fit() that did not bail). Until then getSize() reports the provisional
+  // construction default, which must never claim PTY geometry authority.
+  hasMeasuredSize: () => boolean;
   getVisibleContent: () => TerminalVisibleContentSnapshot;
   getVisibleStyleSummary: () => TerminalVisibleStyleSnapshot;
+  getBlockState: () => BlockStateSnapshot;
   drain: () => Promise<void>;
 }
+
+// Live inspection of the command-block store for the get_pane_block_state
+// bridge action. Returns BOTH the raw stored rows AND the live re-anchor delta /
+// drawable span, so a harness can assert the "correct or absent" invariant: no
+// surviving block has endRow beyond the buffer, and every drawable span is
+// in-bounds (or null). This replaces the old 'block' jsonl disk stream.
+export interface BlockStateSnapshotBlock {
+  id: number;
+  command: string;
+  exitCode?: number;
+  promptRow: number;
+  outputStartRow?: number;
+  endRow?: number;
+  anchorRow: number;
+  anchorText: string;
+  reanchorDelta: number | null;
+  viewportSpan: BlockViewportSpan | null;
+}
+
+export interface BlockStateSnapshot {
+  cols: number;
+  rows: number;
+  scrollback: number;
+  viewportOffset: number;
+  firstViewportBufferRow: number;
+  selectedBlockId: number | null;
+  blocks: BlockStateSnapshotBlock[];
+}
+
+const EMPTY_BLOCK_STATE: BlockStateSnapshot = {
+  cols: 0, rows: 0, scrollback: 0, viewportOffset: 0, firstViewportBufferRow: 0,
+  selectedBlockId: null, blocks: [],
+};
 
 interface SelectionRange {
   startRow: number;
@@ -123,10 +206,29 @@ interface SelectionRange {
 
 // ghostty-web's low-level model exposes hyperlink IDs but currently returns
 // null for hyperlink URIs, so OSC 8 labels cannot be opened without API work.
-const URL_RE = /\b(?:https?:\/\/|file:\/\/|mailto:|ftp:\/\/|ssh:\/\/|git:\/\/|tel:|magnet:|gemini:\/\/|gopher:\/\/|news:)[^\s<>()]+/g;
 // Ghostty's native renderer resets synchronized-output mode after 1000ms so
 // one bad producer cannot freeze rendering indefinitely.
 const SYNCHRONIZED_OUTPUT_RENDER_TIMEOUT_MS = 1000;
+
+// Hover-time link detection state (Warp's fragment-boundary model): the word
+// fragment under the pointer is analyzed once and cached; pointer movement
+// inside the fragment costs nothing. The generation counter invalidates the
+// cache when content or the viewport shifts under the pointer. The fragment
+// lives on a logical line — the hovered row joined with its soft-wrapped
+// neighbors — so links spanning visual rows detect and underline whole.
+interface HoverLinkState {
+  generation: number;
+  line: LogicalLine;
+  // Fragment span as logical indexes into line.text.
+  startIndex: number;
+  endIndex: number;
+  // link.startCol/endCol are logical indexes; linkSpan is the same range
+  // mapped to viewport rows for the underline overlay.
+  link: DetectedTerminalLink | null;
+  linkSpan: LogicalSpan | null;
+}
+
+const utf8Encoder = new TextEncoder();
 
 function isWorkspaceResizeActive(element: HTMLElement | null): boolean {
   if (document.documentElement.dataset.attnWorkspaceResizing === '1') {
@@ -153,14 +255,28 @@ export function fitRequiresTerminalResize(
   return current.cols !== next.cols || current.rows !== next.rows;
 }
 
-function literalUrlAtColumn(line: string, col: number): string | null {
-  for (const match of line.matchAll(URL_RE)) {
-    const start = match.index ?? -1;
-    const uri = match[0].replace(/[.,;:!?]+$/, '');
-    if (col >= start && col < start + uri.length) return uri;
-  }
-  return null;
+// Geometry the queued (not yet applied) historical replay will end at.
+// `resizes` counts replay resize operations still on the write chain.
+export interface PendingReplayGeometry extends TerminalDimensions {
+  resizes: number;
 }
+
+// Replay segments march the model through historical geometries before
+// landing on the live PTY size. A live fit or daemon resize echo arriving
+// mid-replay would see a transient mismatch and cancel the queued history —
+// but if it targets the geometry replay already ends at, it is not a
+// conflict: skip it and let the replay land there. Only a genuinely
+// different target cancels.
+export function liveResizeConflictsWithQueuedReplay(
+  pendingReplay: PendingReplayGeometry | null,
+  target: TerminalDimensions,
+): 'skip' | 'cancel' | 'none' {
+  if (!pendingReplay || pendingReplay.resizes <= 0) {
+    return 'none';
+  }
+  return fitRequiresTerminalResize(pendingReplay, target) ? 'cancel' : 'skip';
+}
+
 
 function wordRangeAtColumn(line: string, col: number): { startCol: number; endCol: number } | null {
   const isWordCharacter = (character: string | undefined) => Boolean(character && /[\w-]/.test(character));
@@ -277,13 +393,16 @@ function cellText(
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
-  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, runtimeLogMeta, onInput, onReady, onResize }, ref) {
+  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, cwd, runtimeLogMeta, onInput, onReady, onResize, onReplayInterrupted }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const terminalRef = useRef<GhosttyModel | null>(null);
     const rendererRef = useRef<WebGlTerminalRenderer | null>(null);
     const inputRef = useRef<InputHandler | null>(null);
     const modelSizeRef = useRef({ cols: 80, rows: 24 });
+    // False until fit() measures the container: the construction-default size
+    // is provisional and must not be pushed to the PTY as geometry authority.
+    const hasMeasuredSizeRef = useRef(false);
     const viewportOffsetRef = useRef(0);
     const wheelRemainderRowsRef = useRef(0);
     const selectionRef = useRef<SelectionRange | null>(null);
@@ -296,8 +415,30 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const trackedMouseButtonRef = useRef<number | null>(null);
     const hoveredCellRef = useRef<{ row: number; col: number } | null>(null);
     const acceleratorHeldRef = useRef(false);
+    const cwdRef = useRef(cwd);
+    const hoverGenerationRef = useRef(0);
+    const hoverLinkRef = useRef<HoverLinkState | null>(null);
+    // undefined = not fetched yet; null = unavailable (non-Tauri host).
+    const homeDirRef = useRef<string | null | undefined>(undefined);
+    const pathExistsCacheRef = useRef(new Map<string, boolean | Promise<boolean>>());
+    const findOpenRef = useRef(false);
+    const findQueryRef = useRef('');
+    const findCaseSensitiveRef = useRef(false);
+    const findMatchesRef = useRef<FindMatch[]>([]);
+    const findFocusedIndexRef = useRef(-1);
+    const findScanRef = useRef<FindScanHandle | null>(null);
+    const findRescanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const findInputRef = useRef<HTMLInputElement>(null);
+    const runFindScanRef = useRef<(() => void) | null>(null);
+    const osc133StateRef = useRef<Osc133State>(emptyOsc133State());
+    const blockStoreRef = useRef(new TerminalBlockStore());
+    const selectedBlockIdRef = useRef<number | null>(null);
     const writeChainRef = useRef(Promise.resolve());
     const historicalReplayGenerationRef = useRef(0);
+    const pendingReplayGeometryRef = useRef<PendingReplayGeometry | null>(null);
+    // Queued historical-replay operations (writes + resizes) not yet applied.
+    // Used to detect that a generation bump actually discarded history.
+    const pendingReplayOpsRef = useRef(0);
     const fitResizeCoalescerRef = useRef<ResizeCoalescer | null>(null);
     const applyFitDimensionsRef = useRef<(dimensions: TerminalDimensions) => void>(() => undefined);
     const osc52StateRef = useRef<Osc52State>({ pending: '' });
@@ -318,17 +459,27 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const onInputRef = useRef(onInput);
     const onReadyRef = useRef(onReady);
     const onResizeRef = useRef(onResize);
+    const onReplayInterruptedRef = useRef(onReplayInterrupted);
     const runtimeMetaRef = useRef(runtimeLogMeta);
     const debugNameRef = useRef(debugName);
     const diagKeyRef = useRef<string>(runtimeLogMeta?.paneId ?? runtimeLogMeta?.sessionId ?? debugName);
     const [error, setError] = useState<string | null>(null);
     const [linkCursorActive, setLinkCursorActive] = useState(false);
+    const [findUi, setFindUi] = useState({ open: false, matchCount: 0, focusedIndex: -1, scanning: false, caseSensitive: false });
+    const [contextMenu, setContextMenu] = useState<{ x: number; y: number; blockId: number | null } | null>(null);
+    const [filterUi, setFilterUi] = useState<{ open: boolean; blockId: number | null; caseSensitive: boolean }>({ open: false, blockId: null, caseSensitive: false });
+    const [filterMatches, setFilterMatches] = useState<FilteredBlockLine[]>([]);
+    const filterQueryRef = useRef('');
+    const filterInputRef = useRef<HTMLInputElement>(null);
+    const filterRescanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     onInputRef.current = onInput;
     onReadyRef.current = onReady;
     onResizeRef.current = onResize;
+    onReplayInterruptedRef.current = onReplayInterrupted;
     runtimeMetaRef.current = runtimeLogMeta;
     debugNameRef.current = debugName;
+    cwdRef.current = cwd;
     // Stable diagnostics key for the per-pane watchdog/probe registries. paneId
     // is stable for a pane's life and correlates with daemon/workspace logs;
     // debugName can change (its agent/title segment is reassigned on relabel).
@@ -356,14 +507,97 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       if (runtimeMetaRef.current && !runtimeMetaRef.current.isActiveSession) return;
       const range = selectionRef.current ? normalizeSelection(selectionRef.current) : null;
       const scrollbackLength = terminal.getScrollbackLength();
-      const overlay: WebGlSelection | null = range ? {
-        startRow: viewportRowFromBufferRow(range.startRow, scrollbackLength, viewportOffsetRef.current),
-        startCol: range.startCol,
-        endRow: viewportRowFromBufferRow(range.endRow, scrollbackLength, viewportOffsetRef.current),
-        endCol: range.endCol,
-        color: getTerminalTheme(resolvedTheme).selectionBackground,
-      } : null;
-      const sample = renderer.render(terminal, force, getViewportCells(), overlay, viewportOffsetRef.current);
+      const overlays: WebGlOverlay[] = [];
+      if (range) {
+        overlays.push({
+          startRow: viewportRowFromBufferRow(range.startRow, scrollbackLength, viewportOffsetRef.current),
+          startCol: range.startCol,
+          endRow: viewportRowFromBufferRow(range.endRow, scrollbackLength, viewportOffsetRef.current),
+          endCol: range.endCol,
+          color: getTerminalTheme(resolvedTheme).selectionBackground,
+          kind: 'background',
+        });
+      }
+      const hover = hoverLinkRef.current;
+      if (hover?.link && hover.linkSpan && hover.generation === hoverGenerationRef.current) {
+        overlays.push({
+          startRow: hover.linkSpan.startRow,
+          startCol: hover.linkSpan.startCol,
+          endRow: hover.linkSpan.endRow,
+          endCol: hover.linkSpan.endCol,
+          color: getTerminalTheme(resolvedTheme).foreground,
+          alpha: 0.8,
+          kind: 'underline',
+        });
+      }
+      if (selectedBlockIdRef.current !== null) {
+        const block = blockStoreRef.current.blockById(selectedBlockIdRef.current);
+        const access = blockRowAccess();
+        // Re-anchor against the live buffer before drawing: a stale stored row
+        // (e.g. scrollback trimmed since the click) must clear the selection,
+        // never draw a box at dead coordinates.
+        const span = block && access
+          ? blockViewportSpanAnchored(
+              block,
+              access,
+              viewportBufferStart(scrollbackLength, viewportOffsetRef.current),
+              terminal.rows,
+            )
+          : null;
+        if (!span) {
+          // The block was evicted from the store, never completed, or its anchor
+          // is gone: the selection no longer refers to anything drawable.
+          selectedBlockIdRef.current = null;
+        } else if (span.visible) {
+          // A faint accent wash behind the block, plus the crisp border. The
+          // wash gives the selection weight without competing with the text;
+          // the border keeps the bounds legible where the wash is too subtle.
+          // The renderer omits border edges that fall outside the viewport
+          // (visibleOutlineEdges), so an over-tall block reads as "continues
+          // above/below" instead of a box around the whole terminal. When the
+          // block covers EVERY visible row, skip the wash too — tinting the
+          // entire viewport reads as "a giant box swallowed the terminal";
+          // the side rails alone carry the selection.
+          if (!span.spansViewport) {
+            overlays.push({
+              startRow: span.startRow,
+              startCol: 0,
+              endRow: span.endRow,
+              endCol: terminal.cols,
+              color: '#4d9de0',
+              alpha: 0.08,
+              kind: 'background',
+            });
+          }
+          overlays.push({
+            startRow: span.startRow,
+            startCol: 0,
+            endRow: span.endRow,
+            endCol: terminal.cols,
+            color: '#4d9de0',
+            alpha: 0.9,
+            kind: 'outline',
+          });
+        }
+      }
+      if (findOpenRef.current && findMatchesRef.current.length > 0) {
+        const firstRow = viewportBufferStart(scrollbackLength, viewportOffsetRef.current);
+        const focused = findFocusedIndexRef.current >= 0
+          ? findMatchesRef.current[findFocusedIndexRef.current]
+          : null;
+        for (const match of visibleMatches(findMatchesRef.current, firstRow, terminal.rows)) {
+          overlays.push({
+            startRow: match.bufferRow - firstRow,
+            startCol: match.startCol,
+            endRow: match.bufferRow - firstRow,
+            endCol: match.endCol,
+            color: '#f5c542',
+            alpha: match === focused ? 0.6 : 0.28,
+            kind: 'background',
+          });
+        }
+      }
+      const sample = renderer.render(terminal, force, getViewportCells(), overlays, viewportOffsetRef.current);
       if (sample) {
         renderCountRef.current += 1;
         lastRenderAtRef.current = Date.now();
@@ -588,6 +822,249 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return { cols: terminal.cols, rows: terminal.rows, viewportY: viewportOffsetRef.current, lineCount: lines.length, lines, summary };
     }, [getViewportCells, lineAtVisibleRow]);
 
+    const scrollToFindMatch = useCallback((match: FindMatch) => {
+      const terminal = terminalRef.current;
+      if (!terminal) return;
+      const history = terminal.getScrollbackLength();
+      const firstVisible = viewportBufferStart(history, viewportOffsetRef.current);
+      if (match.bufferRow >= firstVisible && match.bufferRow < firstVisible + terminal.rows) return;
+      viewportOffsetRef.current = Math.max(0, Math.min(history, history - match.bufferRow));
+      wheelRemainderRowsRef.current = 0;
+      hoverGenerationRef.current += 1;
+    }, []);
+
+    const runFindScan = useCallback(() => {
+      findScanRef.current?.cancel();
+      findScanRef.current = null;
+      const terminal = terminalRef.current;
+      if (!terminal || !findOpenRef.current) return;
+      const query = findQueryRef.current;
+      if (!query) {
+        findMatchesRef.current = [];
+        findFocusedIndexRef.current = -1;
+        setFindUi((ui) => ({ ...ui, matchCount: 0, focusedIndex: -1, scanning: false }));
+        renderSurface(true);
+        return;
+      }
+      setFindUi((ui) => ({ ...ui, scanning: true }));
+      const access = {
+        totalRows: () => {
+          const model = terminalRef.current;
+          return model ? model.getScrollbackLength() + model.rows : 0;
+        },
+        rowText: (bufferRow: number) => {
+          const model = terminalRef.current;
+          return model ? selectionLineAtBufferRow(bufferRow, 0, model.cols) : '';
+        },
+      };
+      findScanRef.current = startFindScan(
+        access,
+        query,
+        { caseSensitive: findCaseSensitiveRef.current },
+        (progress) => {
+          findMatchesRef.current = progress;
+          setFindUi((ui) => ({ ...ui, matchCount: progress.length }));
+          renderSurface(true);
+        },
+        (matches) => {
+          findScanRef.current = null;
+          findMatchesRef.current = matches;
+          const focused = initialFocusedMatch(matches);
+          findFocusedIndexRef.current = focused;
+          setFindUi((ui) => ({ ...ui, scanning: false, matchCount: matches.length, focusedIndex: focused }));
+          if (focused >= 0) scrollToFindMatch(matches[focused]);
+          renderSurface(true);
+        },
+      );
+    }, [renderSurface, scrollToFindMatch, selectionLineAtBufferRow]);
+    runFindScanRef.current = runFindScan;
+
+    const findNavigate = useCallback((direction: 1 | -1) => {
+      const matches = findMatchesRef.current;
+      if (matches.length === 0) return;
+      const current = findFocusedIndexRef.current;
+      const next = current < 0
+        ? matches.length - 1
+        : (current + direction + matches.length) % matches.length;
+      findFocusedIndexRef.current = next;
+      setFindUi((ui) => ({ ...ui, focusedIndex: next }));
+      scrollToFindMatch(matches[next]);
+      renderSurface(true);
+    }, [renderSurface, scrollToFindMatch]);
+
+    const openFind = useCallback(() => {
+      findOpenRef.current = true;
+      setFindUi((ui) => ({ ...ui, open: true }));
+      requestAnimationFrame(() => {
+        const input = findInputRef.current;
+        // If the user already started typing into the input before this frame
+        // fired, leave their caret alone — select() would make the next
+        // keystroke replace what they typed.
+        if (!input || document.activeElement === input) return;
+        input.focus();
+        input.select();
+      });
+      if (findQueryRef.current) runFindScan();
+    }, [runFindScan]);
+
+    const blockRowAccess = useCallback((): BlockRowAccess | null => {
+      const terminal = terminalRef.current;
+      if (!terminal) return null;
+      return {
+        totalRows: () => terminal.getScrollbackLength() + terminal.rows,
+        rowText: (row) => selectionLineAtBufferRow(row, 0, terminal.cols),
+      };
+    }, [selectionLineAtBufferRow]);
+
+    const selectedBlock = useCallback((): TerminalBlock | null => {
+      if (selectedBlockIdRef.current === null) return null;
+      return blockStoreRef.current.blockById(selectedBlockIdRef.current);
+    }, []);
+
+    // Live block-store snapshot for the get_pane_block_state bridge action.
+    // Returns the raw stored rows plus the live re-anchor delta and the drawable
+    // viewport span each block, so a harness can verify "correct or absent"
+    // without a disk log.
+    const getBlockState = useCallback((): BlockStateSnapshot => {
+      const terminal = terminalRef.current;
+      const access = blockRowAccess();
+      if (!terminal || !access) return { ...EMPTY_BLOCK_STATE };
+      const scrollback = terminal.getScrollbackLength();
+      const viewportOffset = viewportOffsetRef.current;
+      const firstViewportBufferRow = viewportBufferStart(scrollback, viewportOffset);
+      const blocks: BlockStateSnapshotBlock[] = blockStoreRef.current.blocks().map((block) => ({
+        id: block.id,
+        command: block.command,
+        exitCode: block.exitCode,
+        promptRow: block.promptRow,
+        outputStartRow: block.outputStartRow,
+        endRow: block.endRow,
+        anchorRow: block.anchorRow,
+        anchorText: block.anchorText,
+        reanchorDelta: reanchorDelta(block, access),
+        viewportSpan: blockViewportSpanAnchored(block, access, firstViewportBufferRow, terminal.rows),
+      }));
+      return {
+        cols: terminal.cols,
+        rows: terminal.rows,
+        scrollback,
+        viewportOffset,
+        firstViewportBufferRow,
+        selectedBlockId: selectedBlockIdRef.current,
+        blocks,
+      };
+    }, [blockRowAccess]);
+
+    // Single entry point for changing the selected block: keeps the ref and the
+    // repaint in lock-step so the click and right-click paths can't drift.
+    const selectBlock = useCallback((blockId: number | null) => {
+      selectedBlockIdRef.current = blockId;
+      renderSurface(true);
+    }, [renderSurface]);
+
+    // Copy a selected block: whole = command + output, otherwise command only.
+    // Extraction re-anchors against the live buffer and refuses (returns
+    // false) when the block's content has been trimmed away.
+    const selectedBlockCopyText = useCallback((whole: boolean): string | null => {
+      const block = selectedBlock();
+      const access = blockRowAccess();
+      if (!block || !access) return null;
+      if (!whole) return block.command || null;
+      const extracted = extractBlock(block, access);
+      if (!extracted) return null;
+      return extracted.output ? `${extracted.command}\n${extracted.output}` : extracted.command;
+    }, [blockRowAccess, selectedBlock]);
+
+    const copySelectedBlock = useCallback((whole: boolean): boolean => {
+      const text = selectedBlockCopyText(whole);
+      if (!text) return false;
+      void writeClipboardText(text);
+      return true;
+    }, [selectedBlockCopyText]);
+
+    const blockOutputText = useCallback((blockId: number): string | null => {
+      const block = blockStoreRef.current.blockById(blockId);
+      const access = blockRowAccess();
+      if (!block || !access) return null;
+      return extractBlock(block, access)?.output ?? null;
+    }, [blockRowAccess]);
+
+    const scrollToBufferRow = useCallback((bufferRow: number) => {
+      const terminal = terminalRef.current;
+      if (!terminal) return;
+      const history = terminal.getScrollbackLength();
+      viewportOffsetRef.current = Math.max(0, Math.min(history, history - bufferRow));
+      wheelRemainderRowsRef.current = 0;
+      hoverGenerationRef.current += 1;
+      renderSurface(true);
+    }, [renderSurface]);
+
+    const scrollToBlockEdge = useCallback((blockId: number, edge: 'top' | 'bottom') => {
+      const terminal = terminalRef.current;
+      const block = blockStoreRef.current.blockById(blockId);
+      if (!terminal || !block || block.endRow === undefined) return;
+      const access = blockRowAccess();
+      const delta = access ? reanchorDelta(block, access) ?? 0 : 0;
+      const target = edge === 'top'
+        ? block.promptRow + delta
+        // Last block row at the bottom of the viewport (endRow is exclusive).
+        : Math.max(block.promptRow + delta, block.endRow + delta - terminal.rows);
+      scrollToBufferRow(target);
+    }, [blockRowAccess, scrollToBufferRow]);
+
+    const pasteFromClipboard = useCallback(async () => {
+      let text = '';
+      try {
+        text = await readClipboardText();
+      } catch {
+        return;
+      }
+      if (!text) return;
+      const normalized = text.replace(/\r\n/g, '\r').replace(/\n/g, '\r');
+      onInputRef.current(terminalRef.current?.hasBracketedPaste()
+        ? `\x1b[200~${normalized}\x1b[201~`
+        : normalized);
+    }, []);
+
+    const runBlockFilter = useCallback((blockId: number | null, caseSensitive: boolean) => {
+      const query = filterQueryRef.current;
+      const output = blockId !== null && query ? blockOutputText(blockId) : null;
+      setFilterMatches(output ? filterBlockOutputLines(output, query, caseSensitive) : []);
+    }, [blockOutputText]);
+
+    const openBlockFilter = useCallback((blockId: number) => {
+      filterQueryRef.current = '';
+      setFilterMatches([]);
+      setFilterUi({ open: true, blockId, caseSensitive: false });
+      requestAnimationFrame(() => filterInputRef.current?.focus());
+    }, []);
+
+    const closeBlockFilter = useCallback(() => {
+      if (filterRescanTimerRef.current) {
+        clearTimeout(filterRescanTimerRef.current);
+        filterRescanTimerRef.current = null;
+      }
+      filterQueryRef.current = '';
+      setFilterMatches([]);
+      setFilterUi({ open: false, blockId: null, caseSensitive: false });
+      containerRef.current?.focus();
+    }, []);
+
+    const closeFind = useCallback(() => {
+      findOpenRef.current = false;
+      findScanRef.current?.cancel();
+      findScanRef.current = null;
+      if (findRescanTimerRef.current) {
+        clearTimeout(findRescanTimerRef.current);
+        findRescanTimerRef.current = null;
+      }
+      findMatchesRef.current = [];
+      findFocusedIndexRef.current = -1;
+      setFindUi((ui) => ({ ...ui, open: false, matchCount: 0, focusedIndex: -1, scanning: false }));
+      renderSurface(true);
+      containerRef.current?.focus();
+    }, [renderSurface]);
+
     const enqueueOperation = useCallback((operation: () => void | Promise<void>) => {
       writeChainRef.current = writeChainRef.current
         .catch(() => undefined)
@@ -611,7 +1088,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       },
     ) => {
       const historicalReplayGeneration = historicalReplayGenerationRef.current;
+      if (options?.historicalReplay) {
+        pendingReplayOpsRef.current += 1;
+      }
       return enqueueOperation(async () => {
+        if (options?.historicalReplay) {
+          pendingReplayOpsRef.current = Math.max(0, pendingReplayOpsRef.current - 1);
+        }
         if (
           options?.historicalReplay
           && historicalReplayGeneration !== historicalReplayGenerationRef.current
@@ -650,7 +1133,26 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }
         const scrollbackBefore = terminal.getScrollbackLength();
         const viewportOffsetBefore = viewportOffsetRef.current;
-        terminal.write(data);
+        // Segment the stream at OSC 133 markers so each marker's buffer
+        // position can be read from the model cursor right after the bytes
+        // preceding it are applied. Without markers this degenerates to a
+        // single write of the original bytes.
+        const chunkBytes = typeof data === 'string' ? utf8Encoder.encode(data) : data;
+        const osc133 = parseOsc133(osc133StateRef.current, chunkBytes);
+        osc133StateRef.current = osc133.state;
+        for (const segment of osc133.segments) {
+          if (segment.bytes.length > 0) terminal.write(segment.bytes);
+          if (segment.marker) {
+            const cursor = terminal.getCursor();
+            // Block completions are inspected live via get_pane_block_state, not
+            // streamed to disk.
+            blockStoreRef.current.applyMarker(
+              segment.marker,
+              { row: terminal.getScrollbackLength() + cursor.y, col: cursor.x },
+              (row) => selectionLineAtBufferRow(row, 0, terminal.cols),
+            );
+          }
+        }
         const responses: string[] = [];
         while (terminal.hasResponse()) {
           const response = terminal.readResponse();
@@ -658,7 +1160,15 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }
         if (!options?.suppressResponses) {
           for (const response of responses) {
-            onInputRef.current(response);
+            // CPR (cursor position) and DA1 (device attributes) replies are
+            // owned by the daemon, the geometry/capability authority. Answering
+            // here too would double-reply and the shell reads the extra
+            // ESC[r;cR / ESC[?...c as stray input — and after a reattach the
+            // frontend can miss them entirely, stalling fish's prompt. Strip
+            // both; forward everything else (DSR, OSC color, etc.) the model
+            // produced.
+            const forwarded = stripDaemonOwnedResponses(response);
+            if (forwarded) onInputRef.current(forwarded);
           }
           for (const response of buildTerminalQueryResponses(data, resolvedTheme, responses)) {
             onInputRef.current(response);
@@ -669,6 +1179,16 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           scrollbackBefore,
           terminal.getScrollbackLength(),
         );
+        // Content changed under the pointer: drop the hover-link fragment cache.
+        hoverGenerationRef.current += 1;
+        if (findOpenRef.current && findQueryRef.current) {
+          // New output while find is open: refresh matches once writes settle.
+          if (findRescanTimerRef.current) clearTimeout(findRescanTimerRef.current);
+          findRescanTimerRef.current = setTimeout(() => {
+            findRescanTimerRef.current = null;
+            runFindScanRef.current?.();
+          }, 300);
+        }
         if (viewportOffsetRef.current === 0) {
           wheelRemainderRowsRef.current = 0;
         }
@@ -709,7 +1229,31 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           scheduleSynchronizedOutputRenderFallback();
         }
       });
-    }, [enqueueOperation, flushSynchronizedOutputRender, lineAtVisibleRow, scheduleSynchronizedOutputRenderFallback]);
+    }, [enqueueOperation, flushSynchronizedOutputRender, lineAtVisibleRow, scheduleSynchronizedOutputRenderFallback, selectionLineAtBufferRow]);
+
+    // Reconcile the block store with the model's new geometry after a resize.
+    //
+    // A WIDTH change invalidates stored rows: a reflowing resize (live
+    // resizeLocal) re-wraps the scrollback and renumbers every absolute row
+    // NON-uniformly, and even the wraparound-off no-reflow path used by fit
+    // and replay can truncate or pad rows — clear the store (correct-or-absent;
+    // new commands rebuild it). Now that fits resize without reflow, a future
+    // improvement can turn this clear into a reanchor for the no-reflow paths.
+    //
+    // A HEIGHT-only change shifts rows uniformly (rows move between scrollback
+    // and screen) — re-anchor each block and keep it.
+    const reconcileBlocksAfterResize = useCallback((widthChanged: boolean) => {
+      if (widthChanged) {
+        blockStoreRef.current.clear();
+        selectedBlockIdRef.current = null;
+        return;
+      }
+      const access = blockRowAccess();
+      if (!access) return;
+      if (blockStoreRef.current.reanchorOnResize(access) === 'all-stale') {
+        selectedBlockIdRef.current = null;
+      }
+    }, [blockRowAccess]);
 
     // Replay segments alternate resize and bytes; both must be applied on one
     // chain or all historical bytes are parsed at the final geometry.
@@ -718,19 +1262,57 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       rows: number,
       options?: { historicalReplay?: boolean },
     ) => {
+      if (options?.historicalReplay) {
+        // Replay resizes arrive in order, so the last submission is the
+        // geometry the queued history ends at.
+        pendingReplayGeometryRef.current = {
+          cols,
+          rows,
+          resizes: (pendingReplayGeometryRef.current?.resizes ?? 0) + 1,
+        };
+        pendingReplayOpsRef.current += 1;
+      }
       const historicalReplayGeneration = historicalReplayGenerationRef.current;
       const currentTerminal = terminalRef.current;
-      if (
-        !options?.historicalReplay
-        && currentTerminal
-        && fitRequiresTerminalResize(
+      if (!options?.historicalReplay && currentTerminal) {
+        const replayConflict = liveResizeConflictsWithQueuedReplay(
+          pendingReplayGeometryRef.current,
+          { cols, rows },
+        );
+        if (replayConflict === 'skip') {
+          // The daemon's resize echo targets the geometry the queued replay
+          // already ends at — applying it now (mid-replay) would cancel the
+          // history for nothing. Let the replay land there.
+          noteResize(diagKeyRef.current, {
+            session: runtimeMetaRef.current?.sessionId ?? undefined,
+            paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
+            source: 'resizeLocal', bail: 'replayPending', toCols: cols, toRows: rows,
+          });
+          return Promise.resolve();
+        }
+        if (fitRequiresTerminalResize(
           { cols: currentTerminal.cols, rows: currentTerminal.rows },
           { cols, rows },
-        )
-      ) {
-        historicalReplayGenerationRef.current += 1;
+        )) {
+          historicalReplayGenerationRef.current += 1;
+          pendingReplayGeometryRef.current = null;
+          if (pendingReplayOpsRef.current > 0) {
+            // Queued history was discarded; the owner re-requests the attach
+            // replay once geometry settles.
+            onReplayInterruptedRef.current?.();
+          }
+        }
       }
       return enqueueOperation(() => {
+        if (options?.historicalReplay) {
+          pendingReplayOpsRef.current = Math.max(0, pendingReplayOpsRef.current - 1);
+          if (pendingReplayGeometryRef.current) {
+            pendingReplayGeometryRef.current.resizes = Math.max(
+              0,
+              pendingReplayGeometryRef.current.resizes - 1,
+            );
+          }
+        }
         if (
           options?.historicalReplay
           && historicalReplayGeneration !== historicalReplayGenerationRef.current
@@ -757,8 +1339,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         } else {
           terminal.resize(cols, rows);
         }
+        reconcileBlocksAfterResize(cols !== fromCols);
         modelSizeRef.current = { cols, rows };
         renderer.resize(cols, rows);
+        hoverGenerationRef.current += 1;
         noteResize(diagKeyRef.current, {
           session: runtimeMetaRef.current?.sessionId ?? undefined,
           paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
@@ -770,7 +1354,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           renderSurface(true);
         }
       });
-    }, [enqueueOperation, renderSurface]);
+    }, [enqueueOperation, reconcileBlocksAfterResize, renderSurface]);
 
     const applyFitDimensions = useCallback((dims: TerminalDimensions) => {
       const terminal = terminalRef.current;
@@ -790,20 +1374,38 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         renderSurface(false);
         return;
       }
-      // A no-op fit can arrive while cooperative replay is yielding between
-      // chunks. Only a real geometry change conflicts with the queued history.
+      // A fit can land while the model is mid-replay at a historical
+      // geometry. If it targets the geometry the queued replay ends at, it
+      // is not a conflict — skip it and let the replay land there (the PTY
+      // is already that size, so there is nothing to notify either).
+      if (liveResizeConflictsWithQueuedReplay(pendingReplayGeometryRef.current, dims) === 'skip') {
+        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'replayPending', toCols: dims.cols, toRows: dims.rows });
+        renderSurface(false);
+        return;
+      }
+      // Only a real geometry change conflicts with the queued history; a
+      // no-op fit arriving while cooperative replay yields between chunks
+      // bails above.
       historicalReplayGenerationRef.current += 1;
+      pendingReplayGeometryRef.current = null;
+      if (pendingReplayOpsRef.current > 0) {
+        // Queued history was discarded (e.g. a split landed mid-replay); the
+        // owner re-requests the attach replay once geometry settles.
+        onReplayInterruptedRef.current?.();
+      }
       const fromCols = terminal.cols;
       const fromRows = terminal.rows;
       resizeGhosttyWithoutReflow(terminal, dims.cols, dims.rows);
+      reconcileBlocksAfterResize(dims.cols !== fromCols);
       modelSizeRef.current = dims;
       renderer.resize(dims.cols, dims.rows);
+      hoverGenerationRef.current += 1;
       noteResize(diagKeyRef.current, {
         session, paneKind, source: 'fit', fromCols, fromRows, toCols: dims.cols, toRows: dims.rows,
       });
       renderSurface(true);
       onResizeRef.current(dims.cols, dims.rows, { reason: 'ghostty_fit' });
-    }, [renderSurface]);
+    }, [reconcileBlocksAfterResize, renderSurface]);
 
     applyFitDimensionsRef.current = applyFitDimensions;
 
@@ -822,6 +1424,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'suspiciousSize', toCols: dims.cols, toRows: dims.rows });
         return;
       }
+      // The size is now backed by a real container measurement: attaches may
+      // treat it as authoritative PTY geometry (see hasMeasuredSize).
+      hasMeasuredSizeRef.current = true;
       if (!fitResizeCoalescerRef.current) {
         fitResizeCoalescerRef.current = createResizeCoalescer(
           (dimensions) => applyFitDimensionsRef.current(dimensions),
@@ -832,7 +1437,19 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
     useImperativeHandle(ref, () => ({
       fit,
+      openFind,
       focus: () => {
+        // The find bar / block filter own keyboard focus while open: a
+        // deferred pane focus (e.g. focusPane's retry loop after a session
+        // switch) must not steal it and leak keystrokes into the PTY.
+        if (filterInputRef.current) {
+          if (document.activeElement !== filterInputRef.current) filterInputRef.current.focus();
+          return true;
+        }
+        if (findOpenRef.current && findInputRef.current) {
+          if (document.activeElement !== findInputRef.current) findInputRef.current.focus();
+          return true;
+        }
         const container = containerRef.current;
         if (!container) return false;
         container.focus();
@@ -842,21 +1459,24 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       isInputFocused: () => document.activeElement === containerRef.current,
       write,
       resizeLocal,
-      reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); void write('\x1bc'); },
+      reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); blockStoreRef.current.clear(); selectedBlockIdRef.current = null; void write('\x1bc'); },
       scrollToTop: () => {
         const terminal = terminalRef.current;
         if (!terminal) return false;
         viewportOffsetRef.current = terminal.getScrollbackLength();
         wheelRemainderRowsRef.current = 0;
+        hoverGenerationRef.current += 1;
         renderSurface(true);
         return true;
       },
       getText,
       getSize: () => terminalRef.current ? { cols: terminalRef.current.cols, rows: terminalRef.current.rows } : null,
+      hasMeasuredSize: () => hasMeasuredSizeRef.current,
       getVisibleContent,
       getVisibleStyleSummary,
+      getBlockState,
       drain: () => writeChainRef.current,
-    }), [fit, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, resizeLocal, write]);
+    }), [fit, getBlockState, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, write]);
 
     useEffect(() => {
       let active = true;
@@ -879,6 +1499,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         synchronizedOutputStateRef.current = { active: false, pending: '' };
         clearSynchronizedOutputRenderTimer();
         modelInstanceRef.current += 1;
+        // Fresh model: buffer rows from any previous find or command blocks
+        // are meaningless.
+        osc133StateRef.current = emptyOsc133State();
+        blockStoreRef.current.clear();
+        selectedBlockIdRef.current = null;
+        findScanRef.current?.cancel();
+        findScanRef.current = null;
+        findOpenRef.current = false;
+        findMatchesRef.current = [];
+        findFocusedIndexRef.current = -1;
+        setFindUi((ui) => ({ ...ui, open: false, matchCount: 0, focusedIndex: -1, scanning: false }));
         recordDiag({
           kind: 'pane_mount',
           pane: diagKeyRef.current,
@@ -907,6 +1538,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             modelPrintable: countModelPrintable(model),
             lastPaintAt: lastRenderAtRef.current,
             lastPaintQuads: lastPaintQuadsRef.current,
+            // Mirrors renderSurface's inactive-session bail: a pane that is
+            // not allowed to paint must not be judged blank by the watchdog.
+            active: runtimeMetaRef.current ? runtimeMetaRef.current.isActiveSession : true,
           };
         });
         inputRef.current = new InputHandler(
@@ -927,17 +1561,32 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         observer.observe(container);
         onReadyRef.current({
           fit,
-          focus: () => { container.focus(); return document.activeElement === container; },
+          openFind,
+          focus: () => {
+            // Same find-bar/filter focus ownership rule as the imperative handle.
+            if (filterInputRef.current) {
+              if (document.activeElement !== filterInputRef.current) filterInputRef.current.focus();
+              return true;
+            }
+            if (findOpenRef.current && findInputRef.current) {
+              if (document.activeElement !== findInputRef.current) findInputRef.current.focus();
+              return true;
+            }
+            container.focus();
+            return document.activeElement === container;
+          },
           typeTextViaInput: (text) => { onInputRef.current(text.replace(/\n/g, '\r')); return true; },
           isInputFocused: () => document.activeElement === container,
           write,
           resizeLocal,
-          reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); void write('\x1bc'); },
-          scrollToTop: () => { viewportOffsetRef.current = terminal.getScrollbackLength(); wheelRemainderRowsRef.current = 0; renderSurface(true); return true; },
+          reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); blockStoreRef.current.clear(); selectedBlockIdRef.current = null; void write('\x1bc'); },
+          scrollToTop: () => { viewportOffsetRef.current = terminal.getScrollbackLength(); wheelRemainderRowsRef.current = 0; hoverGenerationRef.current += 1; renderSurface(true); return true; },
           getText,
           getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
+          hasMeasuredSize: () => hasMeasuredSizeRef.current,
           getVisibleContent,
           getVisibleStyleSummary,
+          getBlockState,
           drain: () => writeChainRef.current,
         });
       }).catch((reason) => {
@@ -1010,7 +1659,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // Ghostty cells contain their resolved default RGB values, so theme
     // changes require a fresh model. The pane runtime rehydrates this model
     // from verified replay without sending historical replies to the live PTY.
-    }, [cancelScheduledOutputRender, clearSynchronizedOutputRenderTimer, fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, renderSurface, resizeLocal, resolvedTheme, write]);
+    }, [cancelScheduledOutputRender, clearSynchronizedOutputRenderTimer, fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, resolvedTheme, write]);
 
     // Release this pane's WebGL2 context when the pane unmounts. Browsers cap the
     // number of simultaneously-live WebGL contexts (WKWebView's cap is low), and
@@ -1069,8 +1718,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const selection = selectionRef.current;
       const containerLine = containerCell ? lineAtVisibleRow(containerCell.row) : '';
       const canvasLine = canvasCell ? lineAtVisibleRow(canvasCell.row) : '';
-      const containerUri = containerCell ? literalUrlAtColumn(containerLine, containerCell.col) : null;
-      const canvasUri = canvasCell ? literalUrlAtColumn(canvasLine, canvasCell.col) : null;
+      const containerUri = containerCell ? urlAtColumn(containerLine, containerCell.col)?.uri ?? null : null;
+      const canvasUri = canvasCell ? urlAtColumn(canvasLine, canvasCell.col)?.uri ?? null : null;
       recordTerminalLinkHitTestEvent({
         event: eventName,
         debugName: debugNameRef.current,
@@ -1154,15 +1803,184 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return 0;
     };
 
+    const hoverLinkAtCell = useCallback((cell: { row: number; col: number } | null): DetectedTerminalLink | null => {
+      const hover = hoverLinkRef.current;
+      if (!cell || !hover?.link || hover.generation !== hoverGenerationRef.current) return null;
+      const index = logicalIndexForCell(hover.line, cell.row, cell.col);
+      if (index !== null && index >= hover.link.startCol && index < hover.link.endCol) {
+        return hover.link;
+      }
+      return null;
+    }, []);
+
     const updateLinkCursor = useCallback((cell: { row: number; col: number } | null, acceleratorHeld: boolean) => {
-      const uri = cell ? literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col) : null;
-      setLinkCursorActive(Boolean(uri && acceleratorHeld));
-    }, [lineAtVisibleRow]);
+      setLinkCursorActive(Boolean(hoverLinkAtCell(cell) && acceleratorHeld));
+    }, [hoverLinkAtCell]);
+
+    const cachedPathExists = useCallback((absolutePath: string): Promise<boolean> => {
+      const cache = pathExistsCacheRef.current;
+      const cached = cache.get(absolutePath);
+      if (cached !== undefined) return Promise.resolve(cached);
+      if (cache.size > 512) cache.clear();
+      const pending = exists(absolutePath)
+        .catch(() => false)
+        .then((result) => {
+          cache.set(absolutePath, result);
+          return result;
+        });
+      cache.set(absolutePath, pending);
+      return pending;
+    }, []);
+
+    const ensureHomeDir = useCallback(async (): Promise<string | null> => {
+      if (homeDirRef.current === undefined) {
+        try {
+          homeDirRef.current = await homeDir();
+        } catch {
+          homeDirRef.current = null;
+        }
+      }
+      return homeDirRef.current;
+    }, []);
+
+    // Does this viewport row continue the line started on the row above it?
+    // Active-screen rows have an authoritative wrap flag; ghostty-web exposes
+    // no flag for scrollback rows, so a completely full previous row is
+    // treated as wrapping. False joins are filtered downstream: path
+    // candidates must pass the existence check before anything links.
+    const isContinuationRow = useCallback((viewportRow: number): boolean => {
+      const terminal = terminalRef.current;
+      if (!terminal) return false;
+      const history = terminal.getScrollbackLength();
+      const bufferRow = bufferRowFromViewportRow(viewportRow, history, viewportOffsetRef.current);
+      if (bufferRow <= 0) return false;
+      if (bufferRow >= history) return terminal.isRowWrapped(bufferRow - history);
+      return selectionLineAtBufferRow(bufferRow - 1, 0, terminal.cols).length === terminal.cols;
+    }, [selectionLineAtBufferRow]);
+
+    // Analyze the word fragment under the pointer on its logical line (the
+    // hovered row joined with its soft-wrapped neighbors). Movement inside the
+    // cached fragment exits immediately; URLs resolve synchronously; file
+    // paths are validated asynchronously against the filesystem (cached).
+    const detectHoverLink = useCallback((cell: { row: number; col: number } | null) => {
+      const generation = hoverGenerationRef.current;
+      const current = hoverLinkRef.current;
+      if (cell && current && current.generation === generation) {
+        const cachedIndex = logicalIndexForCell(current.line, cell.row, cell.col);
+        if (cachedIndex !== null && cachedIndex >= current.startIndex && cachedIndex < current.endIndex) {
+          return;
+        }
+      }
+      const hadUnderline = Boolean(current?.link && current.generation === generation);
+      const clearHover = () => {
+        hoverLinkRef.current = null;
+        if (hadUnderline) {
+          renderSurface(true);
+          setLinkCursorActive(false);
+        }
+      };
+      const terminal = terminalRef.current;
+      if (!cell || !terminal) {
+        clearHover();
+        return;
+      }
+      const logical = logicalLineAt(lineAtVisibleRow, isContinuationRow, cell.row, terminal.cols, terminal.rows);
+      const index = logicalIndexForCell(logical, cell.row, cell.col);
+      if (index === null) {
+        clearHover();
+        return;
+      }
+      const url = urlAtColumn(logical.text, index);
+      if (url) {
+        hoverLinkRef.current = {
+          generation,
+          line: logical,
+          startIndex: url.startCol,
+          endIndex: url.endCol,
+          link: { kind: 'url', uri: url.uri, startCol: url.startCol, endCol: url.endCol },
+          linkSpan: spanFromLogicalRange(logical, url.startCol, url.endCol),
+        };
+        renderSurface(true);
+        updateLinkCursor(cell, acceleratorHeldRef.current);
+        return;
+      }
+      const fragment = fragmentAtColumn(logical.text, index);
+      if (!fragment) {
+        clearHover();
+        return;
+      }
+      const entry: HoverLinkState = {
+        generation,
+        line: logical,
+        startIndex: fragment.startCol,
+        endIndex: fragment.endCol,
+        link: null,
+        linkSpan: null,
+      };
+      hoverLinkRef.current = entry;
+      if (hadUnderline) {
+        renderSurface(true);
+        setLinkCursorActive(false);
+      }
+      const candidates = pathCandidatesForFragment(
+        logical.text.slice(fragment.startCol, fragment.endCol),
+        fragment.startCol,
+      );
+      if (candidates.length === 0) return;
+      void (async () => {
+        const home = await ensureHomeDir();
+        for (const candidate of candidates) {
+          const absolutePath = resolveDetectedPath(candidate.path, cwdRef.current, home ?? undefined);
+          if (!absolutePath) continue;
+          if (!(await cachedPathExists(absolutePath))) continue;
+          if (hoverLinkRef.current !== entry || hoverGenerationRef.current !== generation) return;
+          entry.link = {
+            kind: 'path',
+            absolutePath,
+            line: candidate.line,
+            column: candidate.column,
+            startCol: candidate.startCol,
+            endCol: candidate.endCol,
+          };
+          entry.linkSpan = spanFromLogicalRange(logical, candidate.startCol, candidate.endCol);
+          renderSurface(true);
+          updateLinkCursor(hoveredCellRef.current, acceleratorHeldRef.current);
+          return;
+        }
+      })();
+    }, [cachedPathExists, ensureHomeDir, isContinuationRow, lineAtVisibleRow, renderSurface, updateLinkCursor]);
+
+    // Link under a cell for click handling: prefer the resolved hover state
+    // (paths require it — existence was already validated), fall back to a
+    // synchronous URL scan for clicks that arrive before any hover.
+    const linkAtCell = useCallback((cell: { row: number; col: number } | null): DetectedTerminalLink | null => {
+      const hovered = hoverLinkAtCell(cell);
+      if (hovered) return hovered;
+      if (!cell) return null;
+      const url = urlAtColumn(lineAtVisibleRow(cell.row), cell.col);
+      return url ? { kind: 'url', uri: url.uri, startCol: url.startCol, endCol: url.endCol } : null;
+    }, [hoverLinkAtCell, lineAtVisibleRow]);
+
+    const openLink = useCallback((link: DetectedTerminalLink) => {
+      if (link.kind === 'url' && link.uri) {
+        void openUrl(link.uri);
+      } else if (link.kind === 'path' && link.absolutePath) {
+        void openPath(link.absolutePath);
+      }
+    }, []);
+
 
     useEffect(() => {
       const handleModifierChange = (event: KeyboardEvent) => {
         if (event.key !== 'Meta' && event.key !== 'Control') return;
         acceleratorHeldRef.current = event.metaKey || event.ctrlKey;
+        // A fit/scroll between the last pointer move and this keypress bumps
+        // hoverGeneration and discards the in-flight hover resolution; nothing
+        // re-detects until the pointer moves again. Re-detect when the
+        // accelerator engages so Cmd over an unmoved pointer always reflects
+        // the link actually under it (detectHoverLink exits immediately when
+        // the cached hover is still current).
+        if (acceleratorHeldRef.current) detectHoverLink(hoveredCellRef.current);
         updateLinkCursor(hoveredCellRef.current, acceleratorHeldRef.current);
       };
       window.addEventListener('keydown', handleModifierChange);
@@ -1171,7 +1989,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         window.removeEventListener('keydown', handleModifierChange);
         window.removeEventListener('keyup', handleModifierChange);
       };
-    }, [updateLinkCursor]);
+    }, [detectHoverLink, updateLinkCursor]);
 
     useEffect(() => () => {
       selectionDragCleanupRef.current?.();
@@ -1228,7 +2046,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       if (!selectingRef.current) return;
       selectingRef.current = false;
       selectionPointerStartRef.current = null;
-      if (!selectionDragThresholdMetRef.current) {
+      const wasClick = !selectionDragThresholdMetRef.current;
+      if (wasClick) {
         selectionRef.current = null;
         renderSurface(true);
       }
@@ -1236,16 +2055,54 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       selectedTextRef.current = text || null;
       if (text) await writeClipboardText(text);
       const cell = cellFromPointer(event);
-      const uri = cell ? literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col) : null;
+      const link = linkAtCell(cell);
       recordPointerHitTest('mouseup', event, {
         activeCell: cell,
-        activeUri: uri,
-        opensUri: Boolean(uri && !text && (event.metaKey || event.ctrlKey)),
+        activeUri: link ? link.uri ?? link.absolutePath ?? null : null,
+        opensUri: Boolean(link && !text && (event.metaKey || event.ctrlKey)),
         copiedTextLength: text.length,
         phase: 'after-selection',
       });
-      if (uri && !text && (event.metaKey || event.ctrlKey)) {
-        void openUrl(uri);
+      if (link && !text && (event.metaKey || event.ctrlKey)) {
+        openLink(link);
+        return;
+      }
+      // A plain click inside a completed command block selects the block;
+      // clicking its command line additionally highlights the command and
+      // arms Cmd+C with the exact command text from the pre-exec marker.
+      if (wasClick && !text && !(event.metaKey || event.ctrlKey)) {
+        const terminal = terminalRef.current;
+        // mousedown already cleared any previous block selection.
+        let nextBlockId: number | null = null;
+        const access = blockRowAccess();
+        if (terminal && cell && access && blockStoreRef.current.hasBlocks()) {
+          const bufferRow = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
+          const block = blockStoreRef.current.blockAtAnchored(bufferRow, access);
+          if (block) {
+            nextBlockId = block.id;
+            // blockAtAnchored matched against the live buffer at a possibly
+            // non-zero delta (scrollback trimmed since the block was recorded).
+            // The command-line range below compares and draws against LIVE
+            // buffer rows, so it must shift the stored rows by the same delta —
+            // otherwise clicking trimmed output is misread as a command-line
+            // click and the box is drawn at stale rows.
+            const delta = reanchorDelta(block, access) ?? 0;
+            if (block.outputStartRow !== undefined && bufferRow < block.outputStartRow + delta && block.inputStart) {
+              const lastCommandRow = block.outputStartRow - 1 + delta;
+              const lineLength = selectionLineAtBufferRow(lastCommandRow, 0, terminal.cols).trimEnd().length;
+              selectionRef.current = {
+                startRow: block.inputStart.row + delta,
+                startCol: block.inputStart.col,
+                endRow: lastCommandRow,
+                endCol: Math.max(lineLength, block.inputStart.col + 1),
+              };
+              selectedTextRef.current = block.command || null;
+            }
+          }
+        }
+        if (nextBlockId !== null || selectionRef.current) {
+          selectBlock(nextBlockId);
+        }
       }
     };
 
@@ -1295,7 +2152,82 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       };
     };
 
+    const contextMenuBlock = contextMenu?.blockId != null
+      ? blockStoreRef.current.blockById(contextMenu.blockId)
+      : null;
+    const contextMenuItems: TerminalContextMenuItem[] = contextMenu ? [
+      { id: 'copy', label: 'Copy', shortcut: '⌘C', disabled: !selectedTextRef.current && !contextMenuBlock },
+      { id: 'copy-command', label: 'Copy command', shortcut: '⇧⌘C', disabled: !contextMenuBlock?.command },
+      { id: 'copy-output', label: 'Copy output', disabled: !contextMenuBlock },
+      { id: 'paste', label: 'Paste', shortcut: '⌘V', separatorBefore: true },
+      { id: 'filter-block', label: 'Filter block output', separatorBefore: true, disabled: !contextMenuBlock },
+      { id: 'find', label: 'Find', shortcut: '⌘F' },
+      { id: 'scroll-block-top', label: 'Scroll to top of block', separatorBefore: true, disabled: !contextMenuBlock },
+      { id: 'scroll-block-bottom', label: 'Scroll to bottom of block', disabled: !contextMenuBlock },
+    ] : [];
+
+    const handleContextMenuSelect = (id: string) => {
+      const blockId = contextMenu?.blockId ?? null;
+      setContextMenu(null);
+      const refocusTerminal = () => containerRef.current?.focus();
+      switch (id) {
+        case 'copy': {
+          const text = selectedTextRef.current ?? selectedBlockCopyText(true);
+          if (text) void writeClipboardText(text);
+          refocusTerminal();
+          break;
+        }
+        case 'copy-command': {
+          copySelectedBlock(false);
+          refocusTerminal();
+          break;
+        }
+        case 'copy-output': {
+          const output = blockId !== null ? blockOutputText(blockId) : null;
+          if (output) void writeClipboardText(output);
+          refocusTerminal();
+          break;
+        }
+        case 'paste': {
+          void pasteFromClipboard();
+          refocusTerminal();
+          break;
+        }
+        case 'filter-block': {
+          if (blockId !== null) openBlockFilter(blockId);
+          break;
+        }
+        case 'find': {
+          openFind();
+          break;
+        }
+        case 'scroll-block-top': {
+          if (blockId !== null) scrollToBlockEdge(blockId, 'top');
+          refocusTerminal();
+          break;
+        }
+        case 'scroll-block-bottom': {
+          if (blockId !== null) scrollToBlockEdge(blockId, 'bottom');
+          refocusTerminal();
+          break;
+        }
+        default:
+          break;
+      }
+    };
+
+    const scrollToFilteredLine = (lineOffset: number) => {
+      const blockId = filterUi.blockId;
+      const block = blockId !== null ? blockStoreRef.current.blockById(blockId) : null;
+      const access = blockRowAccess();
+      if (!block || block.outputStartRow === undefined || !access) return;
+      const delta = reanchorDelta(block, access);
+      if (delta === null) return;
+      scrollToBufferRow(block.outputStartRow + delta + lineOffset);
+    };
+
     return (
+      <div className="ghostty-terminal-frame">
       <div
         ref={containerRef}
         className={`terminal-container ghostty-terminal${linkCursorActive ? ' ghostty-terminal-link-hover' : ''}`}
@@ -1367,6 +2299,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             scrollbackLength,
             viewportOffsetRef.current - wheel.lines,
           ));
+          if (nextOffset !== viewportOffsetRef.current) {
+            hoverGenerationRef.current += 1;
+          }
           viewportOffsetRef.current = nextOffset;
           if ((nextOffset === 0 && wheel.lines > 0) || (nextOffset === scrollbackLength && wheel.lines < 0)) {
             wheelRemainderRowsRef.current = 0;
@@ -1383,18 +2318,37 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           const terminal = terminalRef.current;
           const cell = cellFromPointer(event);
           if (!terminal || !cell) return;
-          const uri = literalUrlAtColumn(lineAtVisibleRow(cell.row), cell.col);
-          const opensUri = Boolean(uri && (event.metaKey || event.ctrlKey));
+          if (event.button === 2) {
+            // Right-click belongs to onContextMenu (or to a mouse-tracking
+            // TUI): it must not clear the selection or start a drag.
+            sendTrackedMouse('press', event);
+            return;
+          }
+          const link = linkAtCell(cell);
+          const opensUri = Boolean(link && (event.metaKey || event.ctrlKey));
           recordPointerHitTest('mousedown', event, {
             activeCell: cell,
-            activeUri: uri,
+            activeUri: link ? link.uri ?? link.absolutePath ?? null : null,
             opensUri,
             phase: 'before-selection',
           });
           if (!opensUri && !event.altKey && sendTrackedMouse('press', event)) return;
           const row = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
+          if (event.detail === 3) {
+            // Triple click selects the visual row.
+            selectionRef.current = { startRow: row, startCol: 0, endRow: row, endCol: terminal.cols };
+            applicationSelectionAnchorRef.current = null;
+            selectedBlockIdRef.current = null;
+            selectingRef.current = false;
+            const rowText = textForSelectionRange(selectionRef.current);
+            selectedTextRef.current = rowText || null;
+            renderSurface(true);
+            if (rowText) void writeClipboardText(rowText);
+            return;
+          }
           selectedTextRef.current = null;
           applicationSelectionAnchorRef.current = null;
+          selectedBlockIdRef.current = null;
           selectingRef.current = true;
           selectionPointerStartRef.current = { clientX: event.clientX, clientY: event.clientY };
           selectionDragThresholdMetRef.current = false;
@@ -1414,9 +2368,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           const hoveredCell = cellFromPointer(event);
           hoveredCellRef.current = hoveredCell;
           acceleratorHeldRef.current = event.metaKey || event.ctrlKey;
+          detectHoverLink(hoveredCell);
           updateLinkCursor(hoveredCell, acceleratorHeldRef.current);
-          const hoveredLine = hoveredCell ? lineAtVisibleRow(hoveredCell.row) : '';
-          const hoveredUri = hoveredCell ? literalUrlAtColumn(hoveredLine, hoveredCell.col) : null;
+          const hoveredLink = hoverLinkAtCell(hoveredCell);
+          const hoveredUri = hoveredLink ? hoveredLink.uri ?? hoveredLink.absolutePath ?? null : null;
           if (acceleratorHeldRef.current || hoveredUri) {
             recordPointerHitTest('mousemove', event, {
               activeCell: hoveredCell,
@@ -1428,7 +2383,34 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }}
         onMouseLeave={() => {
           hoveredCellRef.current = null;
+          detectHoverLink(null);
           setLinkCursorActive(false);
+        }}
+        onContextMenu={(event) => {
+          // Always suppress the webview's own menu inside the terminal.
+          event.preventDefault();
+          const terminal = terminalRef.current;
+          if (!terminal) return;
+          // TUI apps that track the mouse own right-click.
+          if (terminal.hasMouseTracking()) return;
+          const cell = cellFromPointer(event);
+          let blockId: number | null = null;
+          const access = blockRowAccess();
+          if (cell && access && blockStoreRef.current.hasBlocks()) {
+            const bufferRow = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
+            blockId = blockStoreRef.current.blockAtAnchored(bufferRow, access)?.id ?? null;
+          }
+          // Right-clicking a block selects it (outline + arms ⌘C/⇧⌘C), same
+          // as a plain click, but without clearing an existing text selection.
+          if (blockId !== null && selectedBlockIdRef.current !== blockId) {
+            selectBlock(blockId);
+          }
+          const frameRect = containerRef.current?.parentElement?.getBoundingClientRect();
+          setContextMenu({
+            x: event.clientX - (frameRect?.left ?? 0),
+            y: event.clientY - (frameRect?.top ?? 0),
+            blockId,
+          });
         }}
         onMouseUp={(event) => {
           if (isWorkspaceResizeActive(containerRef.current)) {
@@ -1462,23 +2444,219 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             endCol: range.endCol,
           };
           applicationSelectionAnchorRef.current = null;
+          selectedBlockIdRef.current = null;
           const text = textForSelectionRange(selectionRef.current);
           selectedTextRef.current = text || null;
           renderSurface(true);
           if (text) await writeClipboardText(text);
         }}
+        onCopy={(event) => {
+          // In the packaged app plain Cmd+C never reaches keydown: the native
+          // Edit > Copy menu intercepts the key equivalent and WebKit fires
+          // this clipboard event instead. Serve terminal selections and
+          // selected blocks from here so both the shortcut and the menu work.
+          const text = selectedTextRef.current ?? selectedBlockCopyText(true);
+          if (!text) return;
+          event.preventDefault();
+          if (event.clipboardData) {
+            event.clipboardData.setData('text/plain', text);
+          } else {
+            void writeClipboardText(text);
+          }
+        }}
         onKeyDown={(event) => {
-          if (event.metaKey && event.shiftKey && event.key.toLowerCase() === 'c') {
+          if (!event.metaKey || event.key.toLowerCase() !== 'c') return;
+          if (event.shiftKey) {
+            // Styled-markdown copy of a text selection keeps priority; with a
+            // block selected and no text selection, copy just the command.
             const text = selectedMarkdown();
             if (text) {
               void writeClipboardText(text);
               event.preventDefault();
+            } else if (copySelectedBlock(false)) {
+              event.preventDefault();
             }
+            return;
+          }
+          // Cmd+C: a text selection (e.g. a clicked command) wins; otherwise a
+          // selected block copies command + output.
+          if (selectedTextRef.current) {
+            void writeClipboardText(selectedTextRef.current);
+            event.preventDefault();
+          } else if (copySelectedBlock(true)) {
+            event.preventDefault();
           }
         }}
       >
         <canvas ref={canvasRef} />
         {error && <div className="ghostty-terminal-error">{error}</div>}
+      </div>
+      {findUi.open && (
+        <div className="ghostty-find-bar" data-testid="ghostty-find-bar">
+          <input
+            ref={findInputRef}
+            className="ghostty-find-input"
+            data-testid="ghostty-find-input"
+            type="text"
+            placeholder="Find"
+            spellCheck={false}
+            autoComplete="off"
+            defaultValue={findQueryRef.current}
+            onChange={(event) => {
+              findQueryRef.current = event.target.value;
+              if (findRescanTimerRef.current) clearTimeout(findRescanTimerRef.current);
+              findRescanTimerRef.current = setTimeout(() => {
+                findRescanTimerRef.current = null;
+                runFindScan();
+              }, 150);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                closeFind();
+              } else if (event.key === 'Enter') {
+                event.preventDefault();
+                findNavigate(event.shiftKey ? 1 : -1);
+              }
+              event.stopPropagation();
+            }}
+          />
+          <button
+            type="button"
+            className={`ghostty-find-button ghostty-find-case${findUi.caseSensitive ? ' ghostty-find-case-active' : ''}`}
+            aria-label="Match case"
+            aria-pressed={findUi.caseSensitive}
+            title="Match case"
+            onClick={() => {
+              findCaseSensitiveRef.current = !findCaseSensitiveRef.current;
+              setFindUi((ui) => ({ ...ui, caseSensitive: findCaseSensitiveRef.current }));
+              runFindScan();
+              findInputRef.current?.focus();
+            }}
+          >
+            Aa
+          </button>
+          <span className="ghostty-find-count" data-testid="ghostty-find-count">
+            {findUi.matchCount > 0 ? `${findUi.focusedIndex + 1}/${findUi.matchCount}` : '0/0'}
+          </span>
+          <button
+            type="button"
+            className="ghostty-find-button"
+            aria-label="Previous match"
+            title="Previous match (Enter)"
+            onClick={() => { findNavigate(-1); findInputRef.current?.focus(); }}
+          >
+            ▲
+          </button>
+          <button
+            type="button"
+            className="ghostty-find-button"
+            aria-label="Next match"
+            title="Next match (Shift+Enter)"
+            onClick={() => { findNavigate(1); findInputRef.current?.focus(); }}
+          >
+            ▼
+          </button>
+          <button
+            type="button"
+            className="ghostty-find-button"
+            aria-label="Close find"
+            title="Close (Esc)"
+            onClick={closeFind}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+      {filterUi.open && (
+        <div className="ghostty-filter-panel" data-testid="ghostty-filter-panel">
+          <div className="ghostty-filter-bar">
+            <input
+              ref={filterInputRef}
+              className="ghostty-find-input ghostty-filter-input"
+              data-testid="ghostty-filter-input"
+              type="text"
+              placeholder="Filter block output"
+              spellCheck={false}
+              autoComplete="off"
+              defaultValue=""
+              onChange={(event) => {
+                filterQueryRef.current = event.target.value;
+                if (filterRescanTimerRef.current) clearTimeout(filterRescanTimerRef.current);
+                filterRescanTimerRef.current = setTimeout(() => {
+                  filterRescanTimerRef.current = null;
+                  runBlockFilter(filterUi.blockId, filterUi.caseSensitive);
+                }, 150);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  closeBlockFilter();
+                }
+                event.stopPropagation();
+              }}
+            />
+            <button
+              type="button"
+              className={`ghostty-find-button ghostty-find-case${filterUi.caseSensitive ? ' ghostty-find-case-active' : ''}`}
+              aria-label="Match case"
+              aria-pressed={filterUi.caseSensitive}
+              title="Match case"
+              onClick={() => {
+                const caseSensitive = !filterUi.caseSensitive;
+                setFilterUi((ui) => ({ ...ui, caseSensitive }));
+                runBlockFilter(filterUi.blockId, caseSensitive);
+                filterInputRef.current?.focus();
+              }}
+            >
+              Aa
+            </button>
+            <span className="ghostty-find-count" data-testid="ghostty-filter-count">
+              {filterMatches.length} {filterMatches.length === 1 ? 'line' : 'lines'}
+            </span>
+            <button
+              type="button"
+              className="ghostty-find-button"
+              aria-label="Close filter"
+              title="Close (Esc)"
+              onClick={closeBlockFilter}
+            >
+              ✕
+            </button>
+          </div>
+          {filterQueryRef.current && (
+            <div className="ghostty-filter-results" data-testid="ghostty-filter-results">
+              {filterMatches.length === 0 ? (
+                <div className="ghostty-filter-empty">No matching lines</div>
+              ) : (
+                filterMatches.map((line) => (
+                  <button
+                    key={line.lineOffset}
+                    type="button"
+                    className="ghostty-filter-line"
+                    title="Scroll to line"
+                    onClick={() => scrollToFilteredLine(line.lineOffset)}
+                  >
+                    {lineSegments(line).map((segment, index) => (
+                      segment.match
+                        ? <mark key={index} className="ghostty-filter-match">{segment.text}</mark>
+                        : <span key={index}>{segment.text}</span>
+                    ))}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {contextMenu && (
+        <TerminalContextMenu
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          items={contextMenuItems}
+          onSelect={handleContextMenuSelect}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
       </div>
     );
   },

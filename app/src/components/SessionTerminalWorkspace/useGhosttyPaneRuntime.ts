@@ -3,11 +3,15 @@ import { ptyAttach, ptyDetach, ptyResize, ptyWrite, type PtyEventPayload } from 
 import { isSuspiciousTerminalSize } from '../../utils/terminalDebug';
 import { recordFocus } from '../../utils/terminalDiagnosticsLog';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
-import type { GhosttyTerminalHandle } from '../GhosttyTerminal';
+import type { BlockStateSnapshot, GhosttyTerminalHandle } from '../GhosttyTerminal';
 import type { TerminalVisibleContentSnapshot } from '../../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot } from '../../utils/terminalStyleSummary';
 
 const HISTORICAL_REPLAY_CHUNK_BYTES = 16 * 1024;
+// Delay before re-attaching after a geometry change cancelled queued replay:
+// long enough for a split/drag burst of fits to settle, short enough that the
+// restored history feels immediate.
+const REPLAY_INTERRUPTED_RETRY_MS = 250;
 
 interface TerminalResizeOptions {
   reason?: string;
@@ -35,9 +39,11 @@ export interface GhosttyPaneRuntime {
   handleTerminalReady: (paneId: string) => (terminal: GhosttyTerminalHandle) => Promise<void>;
   handleTerminalInput: (paneId: string) => (data: string) => void;
   handleTerminalResize: (paneId: string) => (cols: number, rows: number, options?: TerminalResizeOptions) => void;
+  handleReplayInterrupted: (paneId: string) => () => void;
   focusPane: (paneId: string, retries?: number) => void;
   fitPane: (paneId: string) => void;
   fitActivePane: () => void;
+  openFindInActivePane: () => void;
   typeTextViaPaneInput: (paneId: string, text: string) => boolean;
   isPaneInputFocused: (paneId: string) => boolean;
   scrollPaneToTop: (paneId: string) => boolean;
@@ -45,6 +51,7 @@ export interface GhosttyPaneRuntime {
   getPaneSize: (paneId: string) => { cols: number; rows: number } | null;
   getPaneVisibleContent: (paneId: string) => TerminalVisibleContentSnapshot;
   getPaneVisibleStyleSummary: (paneId: string) => TerminalVisibleStyleSnapshot;
+  getPaneBlockState: (paneId: string) => BlockStateSnapshot | null;
   resetPaneTerminal: (paneId: string) => boolean;
   injectPaneBytes: (paneId: string, bytes: Uint8Array) => Promise<boolean>;
   injectPaneBase64: (paneId: string, data: string) => Promise<boolean>;
@@ -73,6 +80,7 @@ export function useGhosttyPaneRuntime(
     reason: string;
   }>());
   const terminalsLiveRef = useRef(terminalsLive);
+  const replayRetryTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   panesRef.current = panes;
   terminalsLiveRef.current = terminalsLive;
 
@@ -187,6 +195,10 @@ export function useGhosttyPaneRuntime(
     for (const pane of panesRef.current) {
       cancelRuntimeConnection(pane.runtimeId);
     }
+    for (const timer of replayRetryTimersRef.current.values()) {
+      clearTimeout(timer);
+    }
+    replayRetryTimersRef.current.clear();
   }, [cancelRuntimeConnection]);
 
   const setTerminalHandle = useCallback((paneId: string, handle: GhosttyTerminalHandle | null) => {
@@ -232,6 +244,11 @@ export function useGhosttyPaneRuntime(
     }
     const attachGeneration = (attachGenerationRef.current.get(pane.runtimeId) ?? 0) + 1;
     attachGenerationRef.current.set(pane.runtimeId, attachGeneration);
+    // A pane mounted while its session is inactive never measured its
+    // container (fit bails on display:none), so its size is the construction
+    // default. That provisional size must not claim PTY geometry authority:
+    // the daemon's geometry holds until a real fit resizes.
+    const geometryMeasured = terminal.hasMeasuredSize();
     const attachPromise = ptyAttach({
       args: {
         id: pane.runtimeId,
@@ -241,7 +258,7 @@ export function useGhosttyPaneRuntime(
         agent: pane.agent,
         policy: attachPolicy,
       },
-      forceResizeBeforeAttach: attachPolicy === 'same_app_remount',
+      forceResizeBeforeAttach: attachPolicy === 'same_app_remount' && geometryMeasured,
     });
     connectingRef.current.set(pane.runtimeId, {
       generation: attachGeneration,
@@ -277,6 +294,24 @@ export function useGhosttyPaneRuntime(
       }
     }
   }, [paneFor]);
+
+  // A live geometry change (split, drag, window resize) landed while attach
+  // replay was still applying: the queued history was cancelled and the model
+  // is missing it. Re-request the attach once the geometry settles — the
+  // daemon re-serves replay consistent with the new size. Debounced so a
+  // resize burst yields one re-attach.
+  const handleReplayInterrupted = useCallback((paneId: string) => () => {
+    const timers = replayRetryTimersRef.current;
+    const existing = timers.get(paneId);
+    if (existing !== undefined) clearTimeout(existing);
+    timers.set(paneId, setTimeout(() => {
+      timers.delete(paneId);
+      const pane = paneFor(paneId);
+      const terminal = handlesRef.current.get(paneId);
+      if (!pane || !terminal || !terminalsLiveRef.current) return;
+      void handleTerminalReady(paneId)(terminal);
+    }, REPLAY_INTERRUPTED_RETRY_MS));
+  }, [handleTerminalReady, paneFor]);
 
   const handleTerminalInput = useCallback((paneId: string) => (data: string) => {
     const pane = paneFor(paneId);
@@ -324,6 +359,7 @@ export function useGhosttyPaneRuntime(
     handleTerminalReady,
     handleTerminalInput,
     handleTerminalResize,
+    handleReplayInterrupted,
     focusPane: (paneId: string, retries = 20) => {
       recordFocus(paneId, retries);
       const focus = (remaining: number) => {
@@ -334,6 +370,7 @@ export function useGhosttyPaneRuntime(
     },
     fitPane: (paneId: string) => get(paneId)?.fit(),
     fitActivePane: () => get(activePaneId)?.fit(),
+    openFindInActivePane: () => get(activePaneId)?.openFind(),
     typeTextViaPaneInput: (paneId: string, text: string) => get(paneId)?.typeTextViaInput(text) ?? false,
     isPaneInputFocused: (paneId: string) => get(paneId)?.isInputFocused() ?? false,
     scrollPaneToTop: (paneId: string) => get(paneId)?.scrollToTop() ?? false,
@@ -341,9 +378,10 @@ export function useGhosttyPaneRuntime(
     getPaneSize: (paneId: string) => get(paneId)?.getSize() ?? null,
     getPaneVisibleContent: (paneId: string) => get(paneId)?.getVisibleContent() ?? emptyContent(),
     getPaneVisibleStyleSummary: (paneId: string) => get(paneId)?.getVisibleStyleSummary() ?? emptyStyle(),
+    getPaneBlockState: (paneId: string) => get(paneId)?.getBlockState() ?? null,
     resetPaneTerminal: (paneId: string) => { const terminal = get(paneId); if (!terminal) return false; terminal.reset(); return true; },
     injectPaneBytes: async (paneId: string, bytes: Uint8Array) => { const terminal = get(paneId); if (!terminal) return false; await terminal.write(bytes); return true; },
     injectPaneBase64: async (paneId: string, data: string) => { const terminal = get(paneId); if (!terminal) return false; await terminal.write(decodePtyBytes(data)); return true; },
     drainPaneTerminal: async (paneId: string) => { const terminal = get(paneId); if (!terminal) return false; await terminal.drain(); return true; },
-  }), [activePaneId, emptyContent, emptyStyle, get, handleTerminalInput, handleTerminalReady, handleTerminalResize, setTerminalHandle]);
+  }), [activePaneId, emptyContent, emptyStyle, get, handleReplayInterrupted, handleTerminalInput, handleTerminalReady, handleTerminalResize, setTerminalHandle]);
 }

@@ -49,6 +49,42 @@ async function installOpenerProbe(page: import('@playwright/test').Page) {
   });
 }
 
+async function installFileLinkProbe(
+  page: import('@playwright/test').Page,
+  existingPaths: string[],
+) {
+  await page.addInitScript((paths: string[]) => {
+    const probeWindow = window as Window & {
+      __OPENED_TERMINAL_PATHS?: string[];
+      __OPENED_TERMINAL_URLS?: string[];
+      __FS_EXISTING_PATHS?: string[];
+      __TAURI_INTERNALS__?: { invoke: (command: string, args?: { url?: string; path?: string }) => Promise<unknown> };
+    };
+    probeWindow.__OPENED_TERMINAL_PATHS = [];
+    probeWindow.__OPENED_TERMINAL_URLS = [];
+    probeWindow.__FS_EXISTING_PATHS = paths;
+    probeWindow.__TAURI_INTERNALS__ = {
+      invoke: async (command, args) => {
+        if (command === 'plugin:opener|open_url' && args?.url) {
+          probeWindow.__OPENED_TERMINAL_URLS?.push(args.url);
+          return undefined;
+        }
+        if (command === 'plugin:opener|open_path' && args?.path) {
+          probeWindow.__OPENED_TERMINAL_PATHS?.push(args.path);
+          return undefined;
+        }
+        if (command === 'plugin:fs|exists') {
+          return (probeWindow.__FS_EXISTING_PATHS ?? []).includes(args?.path ?? '');
+        }
+        if (command === 'plugin:path|resolve_directory') {
+          return '/home/test-user';
+        }
+        return undefined;
+      },
+    };
+  }, existingPaths);
+}
+
 async function expectOpenedUrl(page: import('@playwright/test').Page, url: string) {
   await expect
     .poll(
@@ -131,6 +167,242 @@ test.describe('Ghostty terminal interactions', () => {
     await page.keyboard.up('Meta');
 
     await expectOpenedUrl(page, url);
+  });
+
+  test('cmd+click opens an existing file path resolved against the session cwd', async ({ page, daemon }) => {
+    await installFileLinkProbe(page, ['/tmp/test/terminal-links/src/main.go']);
+    const terminal = await openTerminalSession(page, daemon, 's-file-link');
+    await writeTerminalOutput(page, 's-file-link', '[2J[Hsrc/main.go:12:3 compiled');
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('src/main.go:12:3');
+
+    // Hover starts async path validation (through the fs shim); the link
+    // cursor appears once the candidate resolves and the accelerator is held.
+    await terminal.hover({ position: { x: 55, y: 8 } });
+    await page.keyboard.down('Meta');
+    await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
+    await terminal.click({ position: { x: 55, y: 8 } });
+    await page.keyboard.up('Meta');
+
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
+        ),
+        { timeout: 3000 },
+      )
+      .toContain('/tmp/test/terminal-links/src/main.go');
+  });
+
+  test('cmd+click opens a path embedded in an agent tool-call line', async ({ page, daemon }) => {
+    // Regression: Claude Code prints `⏺ Read(/abs/path · lines 1-2)` — the
+    // hover fragment is `Read(/abs/path` and the path starts mid-fragment.
+    await installFileLinkProbe(page, ['/tmp/test/terminal-links/src/main.go']);
+    const terminal = await openTerminalSession(page, daemon, 's-file-link-tool');
+    await writeTerminalOutput(
+      page,
+      's-file-link-tool',
+      '[2J[H* Read(/tmp/test/terminal-links/src/main.go · lines 1-20)',
+    );
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-tool') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('Read(/tmp/test/terminal-links/src/main.go');
+
+    // Hover inside the path portion (col ~14 at the e2e cell width).
+    await terminal.hover({ position: { x: 120, y: 8 } });
+    await page.keyboard.down('Meta');
+    await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
+    await terminal.click({ position: { x: 120, y: 8 } });
+    await page.keyboard.up('Meta');
+
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
+        ),
+        { timeout: 3000 },
+      )
+      .toContain('/tmp/test/terminal-links/src/main.go');
+  });
+
+  test('cmd+click opens a path that soft-wraps across rows', async ({ page, daemon }) => {
+    // A long absolute path wraps across visual rows; hovering the SECOND row
+    // must detect the whole path (logical-line join) and open it.
+    const wrappedPath = `/tmp/test/terminal-links/${'deeply-nested-segment/'.repeat(12)}wrapped-target.go`;
+    await installFileLinkProbe(page, [wrappedPath]);
+    const terminal = await openTerminalSession(page, daemon, 's-file-link-wrap');
+    await writeTerminalOutput(page, 's-file-link-wrap', `[2J[H${wrappedPath}`);
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-wrap') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('wrapped-target.go');
+
+    const size = await page.evaluate(() => window.__TEST_GET_SESSION_PANE_SIZE?.('s-file-link-wrap') ?? null);
+    expect(size).not.toBeNull();
+    expect(wrappedPath.length).toBeGreaterThan(size!.cols);
+
+    // The canvas is sized exactly cols*cellWidth x rows*cellHeight, so cell
+    // centers are derivable from its bounding box.
+    const canvas = terminal.locator('canvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    const cellWidth = box!.width / size!.cols;
+    const cellHeight = box!.height / size!.rows;
+    const hoverAt = { x: (5 + 0.5) * cellWidth, y: (1 + 0.5) * cellHeight };
+
+    await terminal.hover({ position: hoverAt });
+    await page.keyboard.down('Meta');
+    await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
+    await terminal.click({ position: hoverAt });
+    await page.keyboard.up('Meta');
+
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
+        ),
+        { timeout: 3000 },
+      )
+      .toContain(wrappedPath);
+  });
+
+  test('cmd press re-detects a hover invalidated by a mid-hover refit', async ({ page, daemon }) => {
+    // Regression: a pane fit between the last pointer move and pressing Cmd
+    // bumps the hover generation, which discards the hover's async path
+    // resolution. The pointer has not moved, so nothing re-detected the link,
+    // and Cmd over a real link kept the text cursor until the mouse moved.
+    await installFileLinkProbe(page, ['/tmp/test/terminal-links/src/main.go']);
+    const terminal = await openTerminalSession(page, daemon, 's-file-link-refit');
+    await writeTerminalOutput(page, 's-file-link-refit', '[2J[Hsrc/main.go:12:3 compiled');
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-refit') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('src/main.go:12:3');
+
+    // Hover without the modifier so the link resolves for this generation.
+    await terminal.hover({ position: { x: 55, y: 8 } });
+
+    // A height-only viewport shrink refits the pane (same cols, fewer rows):
+    // the fit bumps the hover generation while row 0 and the pointer stay put.
+    const sizeBefore = await page.evaluate(
+      (id) => window.__TEST_GET_SESSION_PANE_SIZE?.(id) ?? null,
+      's-file-link-refit',
+    );
+    expect(sizeBefore).not.toBeNull();
+    const viewport = page.viewportSize();
+    expect(viewport).not.toBeNull();
+    await page.setViewportSize({ width: viewport!.width, height: viewport!.height - 80 });
+    await expect
+      .poll(
+        async () => page.evaluate(
+          (id) => window.__TEST_GET_SESSION_PANE_SIZE?.(id) ?? null,
+          's-file-link-refit',
+        ),
+        { timeout: 5000 },
+      )
+      .not.toEqual(sizeBefore);
+
+    // Pressing Cmd with the pointer unmoved must re-detect the link under it.
+    await page.keyboard.down('Meta');
+    await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
+    await terminal.click({ position: { x: 55, y: 8 } });
+    await page.keyboard.up('Meta');
+
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
+        ),
+        { timeout: 3000 },
+      )
+      .toContain('/tmp/test/terminal-links/src/main.go');
+  });
+
+  test('hovered file link survives unrelated terminal writes (streaming TUI redraws)', async ({ page, daemon }) => {
+    await installFileLinkProbe(page, ['/tmp/test/terminal-links/src/main.go']);
+    const terminal = await openTerminalSession(page, daemon, 's-file-link-stream');
+    await writeTerminalOutput(page, 's-file-link-stream', '[2J[Hsrc/main.go:12:3 compiled');
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-stream') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('src/main.go:12:3');
+
+    await terminal.hover({ position: { x: 55, y: 8 } });
+    await page.keyboard.down('Meta');
+    await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
+
+    // An agent TUI repaints constantly (spinner frames, status line). The
+    // pointer does not move while unrelated writes land on another row; the
+    // hovered link must stay resolved and clickable.
+    for (let i = 0; i < 5; i += 1) {
+      await writeTerminalOutput(
+        page,
+        's-file-link-stream',
+        `[s[3;1Hspinner-frame-${i}[u`,
+      );
+      await page.waitForTimeout(120);
+    }
+
+    await expect(terminal).toHaveCSS('cursor', 'pointer');
+    await terminal.click({ position: { x: 55, y: 8 } });
+    await page.keyboard.up('Meta');
+
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
+        ),
+        { timeout: 3000 },
+      )
+      .toContain('/tmp/test/terminal-links/src/main.go');
+  });
+
+  test('does not mark non-existing path-like words as links', async ({ page, daemon }) => {
+    await installFileLinkProbe(page, []);
+    const terminal = await openTerminalSession(page, daemon, 's-file-link-miss');
+    await writeTerminalOutput(page, 's-file-link-miss', '[2J[Hmissing/file.go broken');
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-miss') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('missing/file.go');
+
+    await terminal.hover({ position: { x: 55, y: 8 } });
+    await page.keyboard.down('Meta');
+    // Give async validation time to (not) resolve, then confirm no link cursor.
+    await page.waitForTimeout(400);
+    await expect(terminal).toHaveCSS('cursor', 'text');
+    await terminal.click({ position: { x: 55, y: 8 } });
+    await page.keyboard.up('Meta');
+
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
+        ),
+        { timeout: 500 },
+      )
+      .toEqual([]);
   });
 
   test('hit-tests URL clicks against the rendered canvas when it is vertically offset', async ({ page, daemon }) => {

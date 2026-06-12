@@ -123,12 +123,12 @@ test('agent pane stays painted after opening a shell split', async ({ page, daem
 
   const trace = await readTrace(page, agentId);
   const tail = trace.slice(-12);
-  const last = trace[trace.length - 1];
+  const draw = lastRealDraw(trace);
 
   console.log('=== SPLIT-BLANK REPRO DIAGNOSTICS ===');
   console.log('sizeBefore', JSON.stringify(sizeBefore), 'sizeAfter', JSON.stringify(sizeAfter));
   console.log('post-split render count:', trace.length);
-  console.log('last render:', JSON.stringify(last));
+  console.log('last real draw:', JSON.stringify(draw));
   console.log('tail renders:');
   for (const entry of tail) {
     console.log(`  force=${entry.force} offset=${entry.offset} modelPrintable=${entry.modelPrintable} quads=${entry.quads} ${entry.cols}x${entry.rows}`);
@@ -140,10 +140,11 @@ test('agent pane stays painted after opening a shell split', async ({ page, daem
 
   // The model must hold the redraw (sanity: bytes were applied).
   expect(modelText).toContain('NEW line 0');
-  // The bug: the agent paints blank despite the model holding content. If the
-  // last paint drew (near) nothing, we've reproduced it.
-  expect(last, 'expected at least one agent paint after the split redraw').toBeTruthy();
-  expect(last!.quads ?? 0, `agent surface drew ${last?.quads} quads while model held ${last?.modelPrintable} printable cells`).toBeGreaterThan(50);
+  // The bug: the agent paints blank despite the model holding content. The
+  // canvas shows whatever the last REAL draw painted, at that draw's geometry.
+  expect(draw, 'expected at least one agent draw after the split redraw').toBeTruthy();
+  expect(draw!.quads ?? 0, `agent surface drew ${draw?.quads} quads while model held ${draw?.modelPrintable} printable cells`).toBeGreaterThan(50);
+  expect({ cols: draw!.cols, rows: draw!.rows }, 'last draw must be at the post-split geometry (a later resize would have cleared the canvas)').toEqual({ cols: sizeAfter?.cols, rows: sizeAfter?.rows });
 });
 
 async function setupAgent(
@@ -192,6 +193,20 @@ function chunks(value: string, size: number): string[] {
   return out;
 }
 
+// The newest paint entry that actually DREW. A `quads: null` entry is a
+// renderer skip (nothing dirty, not forced): it leaves the canvas exactly as
+// the previous draw painted it, so asserting on it reads a healthy surface as
+// blank — the source of this spec's historical flake. Every canvas-clearing
+// resize is immediately followed by a forced draw (applyFitDimensions), so the
+// last real draw is what the canvas shows; the geometry assertion below pins
+// it to the final pane size to prove no later resize invalidated it.
+function lastRealDraw(trace: RenderTraceEntry[]): RenderTraceEntry | undefined {
+  for (let i = trace.length - 1; i >= 0; i -= 1) {
+    if (trace[i].quads !== null) return trace[i];
+  }
+  return undefined;
+}
+
 function dumpTail(label: string, trace: RenderTraceEntry[]) {
   console.log(`=== ${label} ===`);
   console.log('post-split render count:', trace.length);
@@ -233,10 +248,13 @@ test('agent stays painted when split races a chunked redraw', async ({ page, dae
   await page.waitForTimeout(1200);
   const trace = await readTrace(page, agentId);
   dumpTail('CHUNKED RACE', trace);
-  const last = trace[trace.length - 1];
-  console.log('last:', JSON.stringify(last));
+  const draw = lastRealDraw(trace);
+  console.log('last real draw:', JSON.stringify(draw));
   await terminal.screenshot({ path: 'test-results/split-blank-race.png' }).catch(() => {});
-  expect(last?.quads ?? 0, `agent drew ${last?.quads} quads, model had ${last?.modelPrintable}`).toBeGreaterThan(50);
+  const finalSize = await page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_SIZE?.(sid) ?? null, agentId);
+  expect(draw, 'expected at least one agent draw after the split redraw').toBeTruthy();
+  expect(draw!.quads ?? 0, `agent drew ${draw?.quads} quads, model had ${draw?.modelPrintable}`).toBeGreaterThan(50);
+  expect({ cols: draw!.cols, rows: draw!.rows }, 'last draw must be at the final geometry (a later resize would have cleared the canvas)').toEqual({ cols: finalSize?.cols, rows: finalSize?.rows });
 });
 
 // Variant: the user is scrolled up (viewportOffset != 0) when the split lands.
@@ -273,11 +291,11 @@ test('agent stays painted when split lands while scrolled up', async ({ page, da
 
   const trace = await readTrace(page, agentId);
   dumpTail('SCROLLED-UP SPLIT', trace);
-  const last = trace[trace.length - 1];
-  console.log('last:', JSON.stringify(last));
+  const draw = lastRealDraw(trace);
+  console.log('last real draw:', JSON.stringify(draw));
   await terminal.screenshot({ path: 'test-results/split-blank-scrolled.png' }).catch(() => {});
   // Diagnostic only: report whether a stale scrollback slice was painted.
-  console.log('offset on last paint:', last?.offset, 'force:', last?.force, 'quads:', last?.quads);
+  console.log('offset on last draw:', draw?.offset, 'force:', draw?.force, 'quads:', draw?.quads);
 });
 
 test('hidden split workspace defers paints until return after a window resize', async ({ page, daemon }) => {

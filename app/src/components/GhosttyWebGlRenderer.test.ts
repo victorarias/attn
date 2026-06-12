@@ -3,6 +3,7 @@ import type { GhosttyTerminal } from 'ghostty-web';
 import {
   graphemeAtViewportCell,
   nextAtlasSize,
+  visibleOutlineEdges,
   INITIAL_ATLAS_SIZE,
   MAX_ATLAS_SIZE,
   WebGlTerminalRenderer,
@@ -29,6 +30,33 @@ describe('graphemeAtViewportCell', () => {
 
     expect(graphemeAtViewportCell(terminal, 2, 4, 1)).toBe('live:1:4');
     expect(terminal.getGraphemeString).toHaveBeenCalledWith(1, 4);
+  });
+});
+
+// Regression for the "selected command block's box covers the whole terminal"
+// bug: a block taller than the viewport has its top above row 0 and its bottom
+// below the last row, so neither is a real boundary and must not be drawn.
+describe('visibleOutlineEdges', () => {
+  const ROWS = 24;
+
+  it('draws both edges for a block fully inside the viewport', () => {
+    expect(visibleOutlineEdges(3, 10, ROWS)).toEqual({ drawTop: true, drawBottom: true });
+  });
+
+  it('omits the top edge when the block starts above the viewport', () => {
+    expect(visibleOutlineEdges(-5, 10, ROWS)).toEqual({ drawTop: false, drawBottom: true });
+  });
+
+  it('omits the bottom edge when the block ends below the viewport', () => {
+    expect(visibleOutlineEdges(3, 40, ROWS)).toEqual({ drawTop: true, drawBottom: false });
+  });
+
+  it('omits both edges for a block taller than the viewport (no full-screen box)', () => {
+    expect(visibleOutlineEdges(-8, 40, ROWS)).toEqual({ drawTop: false, drawBottom: false });
+  });
+
+  it('treats the last visible row as inside the viewport', () => {
+    expect(visibleOutlineEdges(0, ROWS - 1, ROWS)).toEqual({ drawTop: true, drawBottom: true });
   });
 });
 
@@ -123,6 +151,7 @@ function makeFakeCanvas() {
   return {
     _w: 0,
     _h: 0,
+    style: {} as Record<string, string>,
     get width() {
       return this._w;
     },
@@ -184,6 +213,71 @@ function makeRenderer(fontSize = 14, fontFamily = 'monospace') {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return { renderer: renderer as any, atlasContext };
 }
+
+function makeFakeTerminal(cols: number, rows: number) {
+  const cell = () => ({
+    codepoint: 0,
+    grapheme_len: 0,
+    width: 1,
+    flags: 0,
+    fg_r: 255, fg_g: 255, fg_b: 255,
+    bg_r: 0, bg_g: 0, bg_b: 0,
+  });
+  return {
+    cols,
+    rows,
+    update: () => 1,
+    markClean: () => {},
+    getCursor: () => ({ x: 0, y: 0, visible: false }),
+    getViewport: () => Array.from({ length: cols * rows }, cell),
+    getScrollbackLength: () => 0,
+    getGraphemeString: () => '',
+    getScrollbackGraphemeString: () => '',
+  } as unknown as GhosttyTerminal;
+}
+
+describe('WebGlTerminalRenderer overlays', () => {
+  it('emits one background quad per covered cell with full-width middle rows', () => {
+    const { renderer } = makeRenderer();
+    const terminal = makeFakeTerminal(4, 3);
+    renderer.resize(4, 3);
+
+    const sample = renderer.render(terminal, true, undefined, [
+      // row 0: cols 1..4 (3 cells), row 1: full width (4), row 2: cols 0..2 (2)
+      { startRow: 0, startCol: 1, endRow: 2, endCol: 2, color: '#3366ff', kind: 'background' },
+    ]);
+    expect(sample?.quads).toBe(9);
+  });
+
+  it('emits underline quads only on covered columns and outline as four border quads', () => {
+    const { renderer } = makeRenderer();
+    const terminal = makeFakeTerminal(4, 3);
+    renderer.resize(4, 3);
+
+    const underlined = renderer.render(terminal, true, undefined, [
+      { startRow: 1, startCol: 0, endRow: 1, endCol: 3, color: '#ffffff', kind: 'underline' },
+    ]);
+    expect(underlined?.quads).toBe(3);
+
+    const outlined = renderer.render(terminal, true, undefined, [
+      { startRow: 0, startCol: 0, endRow: 2, endCol: 4, color: '#ffffff', kind: 'outline' },
+    ]);
+    expect(outlined?.quads).toBe(4);
+  });
+
+  it('clamps overlays that extend past the viewport and renders nothing for empty ranges', () => {
+    const { renderer } = makeRenderer();
+    const terminal = makeFakeTerminal(4, 2);
+    renderer.resize(4, 2);
+
+    const clamped = renderer.render(terminal, true, undefined, [
+      // rows -3..9 clamp to 0..1 (full grid: 8 cells)
+      { startRow: -3, startCol: 0, endRow: 9, endCol: 4, color: '#3366ff', kind: 'background' },
+      { startRow: 0, startCol: 2, endRow: 0, endCol: 2, color: '#3366ff', kind: 'background' },
+    ]);
+    expect(clamped?.quads).toBe(8);
+  });
+});
 
 describe('WebGlTerminalRenderer glyph atlas grow path', () => {
   it('keeps the intended font on the glyph that triggers a grow and an at-cap reset', () => {

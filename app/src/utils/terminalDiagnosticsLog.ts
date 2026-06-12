@@ -86,6 +86,11 @@ export interface RenderProbe {
   modelPrintable: number;
   lastPaintAt: number;
   lastPaintQuads: number;
+  // Whether this pane is currently allowed to paint at all. renderSurface
+  // refuses to draw panes of an inactive session, so judging such a pane
+  // "blank" is meaningless — it will paint on activation via the model's
+  // accumulated dirty flag.
+  active: boolean;
 }
 
 interface PaneHealth {
@@ -266,6 +271,11 @@ export function recordFocus(pane: string, retries: number): void {
   recordDiag({ kind: 'focus', pane, retries });
 }
 
+// Command-block geometry is no longer streamed to disk. It is inspected live
+// and on demand through the get_pane_block_state bridge action (which returns
+// both the raw stored rows and the live re-anchor delta / drawable span), so a
+// stale disk stream cannot mislead a diagnosis.
+
 const lastLayoutSig = new Map<string, string>();
 
 // Records a workspace layout snapshot, deduped on its pane set + split count so
@@ -303,6 +313,16 @@ export function recordPaint(sample: PaintSample): void {
   const now = Date.now();
   pushRing({ at: now, kind: 'paint', ...sample });
 
+  // quads === null means the renderer SKIPPED this frame (nothing dirty, not
+  // forced) and left the canvas exactly as the previous draw painted it. That
+  // is not a draw: folding it into pane health as "0 quads" poisons the
+  // watchdog, and running the anomaly check on it flags a perfectly painted
+  // idle pane as under-drawn (the source of every paint_underdraw false
+  // positive captured in prod).
+  if (sample.quads === null) {
+    return;
+  }
+
   const health = paneHealth.get(sample.pane) ?? {
     pane: sample.pane,
     session: sample.session,
@@ -317,14 +337,14 @@ export function recordPaint(sample: PaintSample): void {
   health.cols = sample.cols;
   health.rows = sample.rows;
   health.lastPaintAt = now;
-  health.lastPaintQuads = sample.quads ?? 0;
+  health.lastPaintQuads = sample.quads;
   health.lastModelPrintable = sample.modelPrintable;
   health.session = sample.session ?? health.session;
   paneHealth.set(sample.pane, health);
 
-  // Immediate anomaly: a forced paint that drew far less than the model holds,
-  // or dropped many printable cells at the renderer skip.
-  const quads = sample.quads ?? 0;
+  // Immediate anomaly: a real draw that painted far less than the model holds,
+  // or dropped many printable cells at the renderer's cell skip.
+  const quads = sample.quads;
   const underdrawn = sample.modelPrintable >= MIN_CONTENT_CELLS
     && quads < sample.modelPrintable * UNDERDRAW_RATIO;
   const droppedCells = (sample.skipZeroWidth ?? 0) + (sample.skipNull ?? 0)
@@ -398,6 +418,13 @@ function clearWatchdog(pane: string) {
 function runWatchdog(pane: string, session: string | undefined, delay: number) {
   const probe = renderProbes.get(pane)?.();
   if (!probe) {
+    return;
+  }
+  if (!probe.active) {
+    // Hidden panes cannot paint by design (renderSurface bails for inactive
+    // sessions); they repaint on activation from the model's dirty flag. Note
+    // the skip so the lifecycle stream stays self-describing, but do not judge.
+    recordDiag({ kind: 'watchdog', pane, session, delay, skipped: 'inactive' });
     return;
   }
   const health = paneHealth.get(pane);
