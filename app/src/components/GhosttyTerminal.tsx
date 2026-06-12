@@ -123,6 +123,11 @@ interface GhosttyTerminalProps {
   onInput: (data: string) => void;
   onReady: (terminal: GhosttyTerminalHandle) => void;
   onResize: (cols: number, rows: number, options?: { reason?: string }) => void;
+  // A live geometry change cancelled queued historical replay (the model
+  // would otherwise interleave history parsed at the wrong width). The
+  // history is gone from the model; the owner should re-request the attach
+  // replay once the geometry settles.
+  onReplayInterrupted?: () => void;
 }
 
 export interface GhosttyTerminalHandle {
@@ -250,6 +255,28 @@ export function fitRequiresTerminalResize(
   return current.cols !== next.cols || current.rows !== next.rows;
 }
 
+// Geometry the queued (not yet applied) historical replay will end at.
+// `resizes` counts replay resize operations still on the write chain.
+export interface PendingReplayGeometry extends TerminalDimensions {
+  resizes: number;
+}
+
+// Replay segments march the model through historical geometries before
+// landing on the live PTY size. A live fit or daemon resize echo arriving
+// mid-replay would see a transient mismatch and cancel the queued history —
+// but if it targets the geometry replay already ends at, it is not a
+// conflict: skip it and let the replay land there. Only a genuinely
+// different target cancels.
+export function liveResizeConflictsWithQueuedReplay(
+  pendingReplay: PendingReplayGeometry | null,
+  target: TerminalDimensions,
+): 'skip' | 'cancel' | 'none' {
+  if (!pendingReplay || pendingReplay.resizes <= 0) {
+    return 'none';
+  }
+  return fitRequiresTerminalResize(pendingReplay, target) ? 'cancel' : 'skip';
+}
+
 
 function wordRangeAtColumn(line: string, col: number): { startCol: number; endCol: number } | null {
   const isWordCharacter = (character: string | undefined) => Boolean(character && /[\w-]/.test(character));
@@ -366,7 +393,7 @@ function cellText(
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
-  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, cwd, runtimeLogMeta, onInput, onReady, onResize }, ref) {
+  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, cwd, runtimeLogMeta, onInput, onReady, onResize, onReplayInterrupted }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const terminalRef = useRef<GhosttyModel | null>(null);
@@ -408,6 +435,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const selectedBlockIdRef = useRef<number | null>(null);
     const writeChainRef = useRef(Promise.resolve());
     const historicalReplayGenerationRef = useRef(0);
+    const pendingReplayGeometryRef = useRef<PendingReplayGeometry | null>(null);
+    // Queued historical-replay operations (writes + resizes) not yet applied.
+    // Used to detect that a generation bump actually discarded history.
+    const pendingReplayOpsRef = useRef(0);
     const fitResizeCoalescerRef = useRef<ResizeCoalescer | null>(null);
     const applyFitDimensionsRef = useRef<(dimensions: TerminalDimensions) => void>(() => undefined);
     const osc52StateRef = useRef<Osc52State>({ pending: '' });
@@ -428,6 +459,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const onInputRef = useRef(onInput);
     const onReadyRef = useRef(onReady);
     const onResizeRef = useRef(onResize);
+    const onReplayInterruptedRef = useRef(onReplayInterrupted);
     const runtimeMetaRef = useRef(runtimeLogMeta);
     const debugNameRef = useRef(debugName);
     const diagKeyRef = useRef<string>(runtimeLogMeta?.paneId ?? runtimeLogMeta?.sessionId ?? debugName);
@@ -444,6 +476,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     onInputRef.current = onInput;
     onReadyRef.current = onReady;
     onResizeRef.current = onResize;
+    onReplayInterruptedRef.current = onReplayInterrupted;
     runtimeMetaRef.current = runtimeLogMeta;
     debugNameRef.current = debugName;
     cwdRef.current = cwd;
@@ -1055,7 +1088,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       },
     ) => {
       const historicalReplayGeneration = historicalReplayGenerationRef.current;
+      if (options?.historicalReplay) {
+        pendingReplayOpsRef.current += 1;
+      }
       return enqueueOperation(async () => {
+        if (options?.historicalReplay) {
+          pendingReplayOpsRef.current = Math.max(0, pendingReplayOpsRef.current - 1);
+        }
         if (
           options?.historicalReplay
           && historicalReplayGeneration !== historicalReplayGenerationRef.current
@@ -1223,19 +1262,57 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       rows: number,
       options?: { historicalReplay?: boolean },
     ) => {
+      if (options?.historicalReplay) {
+        // Replay resizes arrive in order, so the last submission is the
+        // geometry the queued history ends at.
+        pendingReplayGeometryRef.current = {
+          cols,
+          rows,
+          resizes: (pendingReplayGeometryRef.current?.resizes ?? 0) + 1,
+        };
+        pendingReplayOpsRef.current += 1;
+      }
       const historicalReplayGeneration = historicalReplayGenerationRef.current;
       const currentTerminal = terminalRef.current;
-      if (
-        !options?.historicalReplay
-        && currentTerminal
-        && fitRequiresTerminalResize(
+      if (!options?.historicalReplay && currentTerminal) {
+        const replayConflict = liveResizeConflictsWithQueuedReplay(
+          pendingReplayGeometryRef.current,
+          { cols, rows },
+        );
+        if (replayConflict === 'skip') {
+          // The daemon's resize echo targets the geometry the queued replay
+          // already ends at — applying it now (mid-replay) would cancel the
+          // history for nothing. Let the replay land there.
+          noteResize(diagKeyRef.current, {
+            session: runtimeMetaRef.current?.sessionId ?? undefined,
+            paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
+            source: 'resizeLocal', bail: 'replayPending', toCols: cols, toRows: rows,
+          });
+          return Promise.resolve();
+        }
+        if (fitRequiresTerminalResize(
           { cols: currentTerminal.cols, rows: currentTerminal.rows },
           { cols, rows },
-        )
-      ) {
-        historicalReplayGenerationRef.current += 1;
+        )) {
+          historicalReplayGenerationRef.current += 1;
+          pendingReplayGeometryRef.current = null;
+          if (pendingReplayOpsRef.current > 0) {
+            // Queued history was discarded; the owner re-requests the attach
+            // replay once geometry settles.
+            onReplayInterruptedRef.current?.();
+          }
+        }
       }
       return enqueueOperation(() => {
+        if (options?.historicalReplay) {
+          pendingReplayOpsRef.current = Math.max(0, pendingReplayOpsRef.current - 1);
+          if (pendingReplayGeometryRef.current) {
+            pendingReplayGeometryRef.current.resizes = Math.max(
+              0,
+              pendingReplayGeometryRef.current.resizes - 1,
+            );
+          }
+        }
         if (
           options?.historicalReplay
           && historicalReplayGeneration !== historicalReplayGenerationRef.current
@@ -1297,9 +1374,25 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         renderSurface(false);
         return;
       }
-      // A no-op fit can arrive while cooperative replay is yielding between
-      // chunks. Only a real geometry change conflicts with the queued history.
+      // A fit can land while the model is mid-replay at a historical
+      // geometry. If it targets the geometry the queued replay ends at, it
+      // is not a conflict — skip it and let the replay land there (the PTY
+      // is already that size, so there is nothing to notify either).
+      if (liveResizeConflictsWithQueuedReplay(pendingReplayGeometryRef.current, dims) === 'skip') {
+        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'replayPending', toCols: dims.cols, toRows: dims.rows });
+        renderSurface(false);
+        return;
+      }
+      // Only a real geometry change conflicts with the queued history; a
+      // no-op fit arriving while cooperative replay yields between chunks
+      // bails above.
       historicalReplayGenerationRef.current += 1;
+      pendingReplayGeometryRef.current = null;
+      if (pendingReplayOpsRef.current > 0) {
+        // Queued history was discarded (e.g. a split landed mid-replay); the
+        // owner re-requests the attach replay once geometry settles.
+        onReplayInterruptedRef.current?.();
+      }
       const fromCols = terminal.cols;
       const fromRows = terminal.rows;
       resizeGhosttyWithoutReflow(terminal, dims.cols, dims.rows);

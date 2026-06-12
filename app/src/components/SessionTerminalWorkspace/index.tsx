@@ -738,6 +738,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   onInput={runtime.handleTerminalInput(agentPane.id)}
                   onReady={handleGhosttyTerminalReady(agentPane.id)}
                   onResize={runtime.handleTerminalResize(agentPane.id)}
+                  onReplayInterrupted={runtime.handleReplayInterrupted(agentPane.id)}
                 />
               )}
             </div>

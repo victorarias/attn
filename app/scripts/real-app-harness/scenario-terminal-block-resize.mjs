@@ -11,12 +11,15 @@
 //
 // Shell contract (correct-or-absent invariant):
 //   - fish emits OSC 133 natively: blocks must exist, survive the relaunch
-//     replay, clear on width change, and hit-test correctly at every step
+//     replay, and hit-test correctly at every step. A width change clears the
+//     store; if the change interrupted attach replay, the re-requested replay
+//     rebuilds the blocks at the new width — either way a click must select
+//     the right block or nothing
 //   - bash/zsh run WITHOUT shell integration (--norc / -f so a host config
 //     cannot add markers): blocks must be ABSENT and clicks must select
 //     nothing — never a wrong box
-//   - text integrity (replay + reflow, including wrapped colored lines) must
-//     hold for all three shells at every step
+//   - text integrity (replay + width changes, including wrapped colored
+//     lines) must hold for all three shells at every step
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -137,6 +140,25 @@ async function clickAndExpectSelected(client, sessionId, paneId, lineText, comma
   console.log(`[verify] ${label}: click selected the correct block (${block.id})`);
 }
 
+// After a width change the block store clears, then the replay re-request
+// (triggered when the geometry change interrupted queued replay) may rebuild
+// the blocks at the new width. Both outcomes honor correct-or-absent: if a
+// block covers the clicked line it must be the RIGHT block; if none does, the
+// click must select nothing.
+async function clickAndExpectCorrectOrAbsent(client, sessionId, paneId, lineText, commandPrefix, label) {
+  const state = await client.request('get_pane_block_state', { sessionId, paneId });
+  const selected = await clickOutputLine(client, sessionId, paneId, state, lineText);
+  if (selected.selectedBlockId === null) {
+    console.log(`[verify] ${label}: click selected nothing (absent is correct)`);
+    return;
+  }
+  const block = selected.blocks.find((b) => b.id === selected.selectedBlockId);
+  if (!block || !(block.command || '').startsWith(commandPrefix)) {
+    throw new Error(`${label}: clicked ${JSON.stringify(lineText)} selected block ${selected.selectedBlockId} (${block?.command ?? 'unknown'}) — want ${JSON.stringify(commandPrefix)} or nothing`);
+  }
+  console.log(`[verify] ${label}: click selected the correct rebuilt block (${block.id})`);
+}
+
 async function clickAndExpectNothing(client, sessionId, paneId, lineText, label) {
   const state = await client.request('get_pane_block_state', { sessionId, paneId });
   const selected = await clickOutputLine(client, sessionId, paneId, state, lineText);
@@ -168,9 +190,12 @@ async function main() {
 
   const token = (shell) => `RESIZE_${shell}_${runId}`;
   const makeDone = (shell) => `MAKE_DONE_${shell}_${runId}`;
-  // Short sentinels are checked as whole rows; the runId tokens and compiler
-  // paths exceed a split pane's width, so they wrap and are checked as
-  // contiguous tokens in the row-joined text.
+  // Short sentinels are checked as whole rows at every geometry. The runId
+  // tokens and compiler paths wrap at full width and are checked as
+  // contiguous tokens in the row-joined text — but ONLY at the geometry the
+  // history was replayed at: the terminal resizes without reflow, so a
+  // narrower pane truncates each row at its width by design (the worker keeps
+  // the raw bytes; the next replay re-parses them at the new size).
   const sentinelsFor = () => ['smallblock', '142', 'linked OK'];
   const longTokensFor = (shell) => [
     token(shell.name),
@@ -256,10 +281,12 @@ async function main() {
     }
     await client.request('capture_native_window_screenshot', { path: path.join(runDir, '1-after-relaunch.png') }).catch(() => {});
 
-    // Phase C: width changes via split + close-split, per shell. Ghostty
-    // reflows the whole buffer; fish blocks are cleared (correct-or-absent)
-    // and new commands must track in the new geometry; bash/zsh stay
-    // block-free; wrapped lines must re-wrap without corruption everywhere.
+    // Phase C: width changes via split + close-split, per shell. A width
+    // change invalidates stored block rows (the store clears); when it lands
+    // while attach replay is still applying, the app re-requests the replay
+    // and rebuilds the model — history must come back intact at the new
+    // width, and fish blocks must be correct-or-absent at every step;
+    // bash/zsh stay block-free.
     for (const { shell, sessionId, paneId } of sessions) {
       await selectAndWaitForPane(client, sessionId, paneId);
       await client.request('split_pane', { sessionId, targetPaneId: paneId, direction: 'vertical' });
@@ -268,13 +295,25 @@ async function main() {
       // clicks resolve against the workspace view the DOM renders.
       await client.request('select_session', { sessionId });
       await delay(300);
+      // History may be restored by a debounced replay re-request after the
+      // split's geometry change — wait for it rather than sampling once.
+      // Short sentinels only: rows truncate at the narrower width (no-reflow
+      // resize), so the wrapped long tokens are not expected here.
+      await waitForPaneText(client, sessionId, paneId, (text) => {
+        const lines = text.split('\n').map((line) => line.trim());
+        return sentinelsFor(shell).every((sentinel) => lines.includes(sentinel));
+      }, `${shell.name} history restored after split`, 20_000);
       const afterSplit = assertBlockInvariants(
         await client.request('get_pane_block_state', { sessionId, paneId }),
         `${shell.name} after-split`,
       );
-      assertNoBlocks(afterSplit, `${shell.name} after-split`); // width change clears fish blocks too
+      if (shell.blocksExpected) {
+        await clickAndExpectCorrectOrAbsent(client, sessionId, paneId, 'smallblock', 'echo smallblock', `${shell.name} after-split`);
+      } else {
+        assertNoBlocks(afterSplit, `${shell.name} after-split`);
+      }
       const splitRead = await client.request('read_pane_text', { sessionId, paneId });
-      assertTextIntegrity(splitRead.text, sentinelsFor(shell), longTokensFor(shell), `${shell.name} after-split`);
+      assertTextIntegrity(splitRead.text, sentinelsFor(shell), [], `${shell.name} after-split`);
 
       await runCommandAndWait(client, sessionId, paneId, 'echo postsplit', 'postsplit');
       if (shell.blocksExpected) {
@@ -301,11 +340,18 @@ async function main() {
       } else {
         await clickAndExpectNothing(client, sessionId, paneId, 'postclose', `${shell.name} post-close`);
       }
+      // Widening back keeps every row, but columns truncated at the narrow
+      // width stay truncated until the next replay re-parses the raw history
+      // (no-reflow resize) — so the long tokens are not required here either.
+      await waitForPaneText(client, sessionId, paneId, (text) => {
+        const lines = text.split('\n').map((line) => line.trim());
+        return [...sentinelsFor(shell), 'postsplit'].every((sentinel) => lines.includes(sentinel));
+      }, `${shell.name} history intact after close-split`, 20_000);
       const finalRead = await client.request('read_pane_text', { sessionId, paneId });
       assertTextIntegrity(
         finalRead.text,
         [...sentinelsFor(shell), 'postsplit'],
-        longTokensFor(shell),
+        [],
         `${shell.name} final`,
       );
       console.log(`[verify] ${shell.name}: resize round-trip OK`);

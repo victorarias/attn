@@ -373,6 +373,46 @@ describe('useGhosttyPaneRuntime', () => {
     expect(mockPtyDetach).not.toHaveBeenCalled();
   });
 
+  it('re-attaches after queued replay is interrupted by a geometry change', async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useGhosttyPaneRuntime([
+      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent', agent: 'claude' },
+    ], 'pane-session', router, { current: true }));
+    const terminal = createTerminal();
+
+    act(() => result.current.setTerminalHandle('pane-session', terminal));
+    await act(async () => {
+      binding?.onEvent({ event: 'data', id: 'runtime-1', data: btoa('ready') });
+      await result.current.handleTerminalReady('pane-session')(terminal);
+    });
+    mockPtyAttach.mockClear();
+
+    // A split lands mid-replay: the terminal reports the interruption twice
+    // in quick succession (burst of fits) — one debounced re-attach follows.
+    act(() => {
+      result.current.handleReplayInterrupted('pane-session')();
+      result.current.handleReplayInterrupted('pane-session')();
+    });
+    expect(mockPtyAttach).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(mockPtyAttach).toHaveBeenCalledTimes(1);
+    expect(mockPtyAttach).toHaveBeenCalledWith({
+      args: {
+        id: 'runtime-1',
+        cols: 120,
+        rows: 40,
+        shell: false,
+        agent: 'claude',
+        policy: 'same_app_remount',
+      },
+      forceResizeBeforeAttach: true,
+    });
+  });
+
   it('detaches an attached runtime when its terminal is virtualized', async () => {
     const { result, rerender } = renderHook(
       ({ terminalsLive }) => useGhosttyPaneRuntime([

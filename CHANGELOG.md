@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-12]
+
+### Fixed
+- **Resizing or splitting a pane while its history is still restoring no longer wipes the terminal.** A geometry change landing mid-restore used to silently discard the queued history, leaving the pane blank (after an app relaunch) or without scrollback (after a split). A resize that matches where the restore already ends now lets it finish, and a genuine size change re-requests the history at the new size — including the command blocks, which come back clickable.
+
+---
+
 ## [2026-06-11]
 
 ### Fixed
