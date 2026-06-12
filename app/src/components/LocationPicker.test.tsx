@@ -472,6 +472,34 @@ describe('LocationPicker', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('does not auto-highlight cached recents on reopen until the fresh request resolves', async () => {
+    const gates: Array<ReturnType<typeof deferred<{ locations: RecentLocation[]; home_path?: string }>>> = [];
+    const onGetRecentLocations = vi.fn(() => {
+      const gate = deferred<{ locations: RecentLocation[]; home_path?: string }>();
+      gates.push(gate);
+      return gate.promise;
+    });
+    renderClosablePicker({ onGetRecentLocations });
+
+    gates[0].resolve({ locations: [buildRecentLocation()], home_path: '/home/remote' });
+    await waitFor(() => {
+      expect(screen.getByTestId('location-picker-item-0')).toHaveClass('selected');
+    });
+
+    fireEvent.click(screen.getByTestId('location-picker-overlay'));
+    fireEvent.click(screen.getByRole('button', { name: 'Reopen' }));
+
+    // The cached row still renders for instant feedback, but it must not be
+    // auto-highlighted: bare Enter could launch a stale path.
+    const cachedItem = await screen.findByTestId('location-picker-item-0');
+    expect(cachedItem).not.toHaveClass('selected');
+
+    gates[1].resolve({ locations: [buildRecentLocation()], home_path: '/home/remote' });
+    await waitFor(() => {
+      expect(screen.getByTestId('location-picker-item-0')).toHaveClass('selected');
+    });
+  });
+
   it('typing consumes the automatic highlight so Enter submits the typed path', async () => {
     const onGetRecentLocations = vi.fn(async () => ({
       locations: [buildRecentLocation()],

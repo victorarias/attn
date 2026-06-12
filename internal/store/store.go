@@ -1746,11 +1746,13 @@ func (s *Store) GetRecentLocations(limit int) []*protocol.RecentLocation {
 			raw = append(raw, &cloned)
 		}
 	} else {
+		// Fetch every row: ranking happens below, and pre-truncating here
+		// (e.g. by last_seen) would hide old-but-frequent locations. The
+		// table stays small via missing-path cleanup and
+		// CleanupStaleLocations.
 		rows, err := s.db.Query(`
 			SELECT path, last_seen, use_count
-			FROM recent_locations
-			ORDER BY last_seen DESC
-			LIMIT 200`)
+			FROM recent_locations`)
 		if err != nil {
 			s.mu.RUnlock()
 			return nil

@@ -228,6 +228,11 @@ export function LocationPicker({
   const [pickerOperation, setPickerOperation] = useState<string | null>(null);
   const [hasSelectedSinceTab, setHasSelectedSinceTab] = useState(true);
   const [autoHighlight, setAutoHighlight] = useState(false);
+  // True only once the recents request issued for the current open/endpoint
+  // has resolved. Cached recents from a previous open still render, but they
+  // must never drive the automatic highlight: bare Enter could launch a path
+  // from another target.
+  const [recentsFresh, setRecentsFresh] = useState(false);
   const autoHighlightDoneRef = useRef(false);
   const requestGenerationRef = useRef(0);
 
@@ -425,6 +430,7 @@ export function LocationPicker({
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    setRecentsFresh(false);
     if (!isOpen) {
       return;
     }
@@ -441,6 +447,7 @@ export function LocationPicker({
           return;
         }
         setRecentLocations(result.locations);
+        setRecentsFresh(true);
         const nextHomePath = result.home_path;
         if (nextHomePath) {
           setHomePath((prev) => (prev === nextHomePath ? prev : nextHomePath));
@@ -515,16 +522,17 @@ export function LocationPicker({
   }, [highlightedIndex, highlightedItemKey]);
 
   // Pre-highlight the top recent location when it loads so a bare Enter opens
-  // it. One-shot per open: typing or tab-completing consumes it, and Esc still
-  // closes the picker while the automatic highlight is in place.
+  // it. Only fresh recents qualify (never a cached list from a previous open
+  // or target). One-shot per open: typing or tab-completing consumes it, and
+  // Esc still closes the picker while the automatic highlight is in place.
   useEffect(() => {
-    if (!isOpen || mode !== 'path-input' || autoHighlightDoneRef.current || visibleRecent.length === 0) {
+    if (!isOpen || mode !== 'path-input' || !recentsFresh || autoHighlightDoneRef.current || visibleRecent.length === 0) {
       return;
     }
     autoHighlightDoneRef.current = true;
     setAutoHighlight(true);
     setHighlightedItemKey(`recent:${visibleRecent[0].path}`);
-  }, [isOpen, mode, visibleRecent]);
+  }, [isOpen, mode, recentsFresh, visibleRecent]);
 
   useEffect(() => {
     if (highlightedIndex >= 0) {
@@ -683,6 +691,7 @@ export function LocationPicker({
     setInputValue(buildInitialPickerInput(initialInputPathForTarget(nextTarget), homePath));
     setHighlightedItemKey(null);
     setAutoHighlight(false);
+    setRecentsFresh(false);
     autoHighlightDoneRef.current = false;
     setSelectedPath('');
     setRepoRootPath(null);

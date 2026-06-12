@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -71,6 +72,37 @@ func TestGetRecentLocationsRanksByFrecency(t *testing.T) {
 		if locs[i].Path != path {
 			t.Errorf("position %d: expected %s, got %s", i, path, locs[i].Path)
 		}
+	}
+}
+
+func TestGetRecentLocationsRanksBeforeTruncating(t *testing.T) {
+	s := newRecentLocationsStore(t)
+	root := t.TempDir()
+	now := time.Now()
+
+	// An old but heavily used project must beat hundreds of fresher one-off
+	// rows, so ranking has to happen over the full table, not a recency-
+	// truncated prefix of it.
+	frequentOld := filepath.Join(root, "frequent-old")
+	if err := os.MkdirAll(frequentOld, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seedRecentLocation(t, s, frequentOld, now.Add(-30*24*time.Hour).Format(time.RFC3339), 100) // 100 * 0.25 = 25
+
+	for i := 0; i < 250; i++ {
+		dir := filepath.Join(root, fmt.Sprintf("fresh-%03d", i))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		seedRecentLocation(t, s, dir, now.Format(time.RFC3339), 1) // 1 * 4 = 4
+	}
+
+	locs := s.GetRecentLocations(10)
+	if len(locs) != 10 {
+		t.Fatalf("expected 10 locations, got %d", len(locs))
+	}
+	if locs[0].Path != frequentOld {
+		t.Errorf("expected %s first, got %s", frequentOld, locs[0].Path)
 	}
 }
 
