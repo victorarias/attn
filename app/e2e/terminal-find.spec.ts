@@ -34,6 +34,20 @@ async function openTerminalSession(
   await page.locator(`[data-testid="session-${sessionId}"]`).click();
   const terminal = page.locator(`[data-pane-session-id="${sessionId}"][data-pane-kind="agent"] .terminal-container`);
   await expect(terminal).toBeVisible({ timeout: 5000 });
+  // The container becomes visible before the Ghostty wasm terminal finishes
+  // initializing, and PTY data delivered before the pane handle registers is
+  // dropped by design (a real attach replays it; the e2e mock has no replay).
+  // Wait for the pane's connect_terminal signal before writing output.
+  await expect
+    .poll(
+      async () => page.evaluate(
+        (id) => (window.__TEST_GET_SESSION_INPUT_EVENTS?.(id) ?? [])
+          .some((event) => event.event === 'connect_terminal'),
+        sessionId,
+      ),
+      { timeout: 5000 },
+    )
+    .toBe(true);
   return terminal;
 }
 
