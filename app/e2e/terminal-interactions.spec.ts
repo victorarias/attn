@@ -278,6 +278,61 @@ test.describe('Ghostty terminal interactions', () => {
       .toContain(wrappedPath);
   });
 
+  test('cmd press re-detects a hover invalidated by a mid-hover refit', async ({ page, daemon }) => {
+    // Regression: a pane fit between the last pointer move and pressing Cmd
+    // bumps the hover generation, which discards the hover's async path
+    // resolution. The pointer has not moved, so nothing re-detected the link,
+    // and Cmd over a real link kept the text cursor until the mouse moved.
+    await installFileLinkProbe(page, ['/tmp/test/terminal-links/src/main.go']);
+    const terminal = await openTerminalSession(page, daemon, 's-file-link-refit');
+    await writeTerminalOutput(page, 's-file-link-refit', '[2J[Hsrc/main.go:12:3 compiled');
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-refit') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('src/main.go:12:3');
+
+    // Hover without the modifier so the link resolves for this generation.
+    await terminal.hover({ position: { x: 55, y: 8 } });
+
+    // A height-only viewport shrink refits the pane (same cols, fewer rows):
+    // the fit bumps the hover generation while row 0 and the pointer stay put.
+    const sizeBefore = await page.evaluate(
+      (id) => window.__TEST_GET_SESSION_PANE_SIZE?.(id) ?? null,
+      's-file-link-refit',
+    );
+    expect(sizeBefore).not.toBeNull();
+    const viewport = page.viewportSize();
+    expect(viewport).not.toBeNull();
+    await page.setViewportSize({ width: viewport!.width, height: viewport!.height - 80 });
+    await expect
+      .poll(
+        async () => page.evaluate(
+          (id) => window.__TEST_GET_SESSION_PANE_SIZE?.(id) ?? null,
+          's-file-link-refit',
+        ),
+        { timeout: 5000 },
+      )
+      .not.toEqual(sizeBefore);
+
+    // Pressing Cmd with the pointer unmoved must re-detect the link under it.
+    await page.keyboard.down('Meta');
+    await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
+    await terminal.click({ position: { x: 55, y: 8 } });
+    await page.keyboard.up('Meta');
+
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
+        ),
+        { timeout: 3000 },
+      )
+      .toContain('/tmp/test/terminal-links/src/main.go');
+  });
+
   test('hovered file link survives unrelated terminal writes (streaming TUI redraws)', async ({ page, daemon }) => {
     await installFileLinkProbe(page, ['/tmp/test/terminal-links/src/main.go']);
     const terminal = await openTerminalSession(page, daemon, 's-file-link-stream');

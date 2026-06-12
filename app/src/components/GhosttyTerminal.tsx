@@ -1974,6 +1974,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const handleModifierChange = (event: KeyboardEvent) => {
         if (event.key !== 'Meta' && event.key !== 'Control') return;
         acceleratorHeldRef.current = event.metaKey || event.ctrlKey;
+        // A fit/scroll between the last pointer move and this keypress bumps
+        // hoverGeneration and discards the in-flight hover resolution; nothing
+        // re-detects until the pointer moves again. Re-detect when the
+        // accelerator engages so Cmd over an unmoved pointer always reflects
+        // the link actually under it (detectHoverLink exits immediately when
+        // the cached hover is still current).
+        if (acceleratorHeldRef.current) detectHoverLink(hoveredCellRef.current);
         updateLinkCursor(hoveredCellRef.current, acceleratorHeldRef.current);
       };
       window.addEventListener('keydown', handleModifierChange);
@@ -1982,7 +1989,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         window.removeEventListener('keydown', handleModifierChange);
         window.removeEventListener('keyup', handleModifierChange);
       };
-    }, [updateLinkCursor]);
+    }, [detectHoverLink, updateLinkCursor]);
 
     useEffect(() => () => {
       selectionDragCleanupRef.current?.();
