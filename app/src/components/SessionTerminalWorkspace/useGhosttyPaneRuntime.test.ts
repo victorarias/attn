@@ -31,8 +31,10 @@ function createTerminal(): GhosttyTerminalHandle {
     scrollToTop: vi.fn(() => true),
     getText: vi.fn(() => ''),
     getSize: vi.fn(() => ({ cols: 120, rows: 40 })),
+    hasMeasuredSize: vi.fn(() => true),
     getVisibleContent: vi.fn() as never,
     getVisibleStyleSummary: vi.fn() as never,
+    getBlockState: vi.fn() as never,
     drain: vi.fn(() => Promise.resolve()),
   };
 }
@@ -466,6 +468,38 @@ describe('useGhosttyPaneRuntime', () => {
       forceResizeBeforeAttach: false,
     });
     expect(mockPtyResize).not.toHaveBeenCalled();
+  });
+
+  it('marks attach geometry provisional and skips the pre-attach resize for unmeasured terminals', async () => {
+    // A pane mounted while its session is inactive never measured its
+    // container, so attaching with its construction-default size must not
+    // claim PTY geometry authority (no remount_hydrate resize, and the
+    // attach reconcile skips daemon_known_attach downstream).
+    const { result } = renderHook(() => useGhosttyPaneRuntime([
+      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent', agent: 'claude' },
+    ], 'pane-session', router, { current: true }));
+    const firstTerminal = createTerminal();
+    const remountedTerminal = createTerminal();
+    vi.mocked(remountedTerminal.hasMeasuredSize).mockReturnValue(false);
+
+    act(() => result.current.setTerminalHandle('pane-session', firstTerminal));
+    await act(async () => {
+      binding?.onEvent({ event: 'data', id: 'runtime-1', data: btoa('ready') });
+      result.current.setTerminalHandle('pane-session', null);
+      await result.current.handleTerminalReady('pane-session')(remountedTerminal);
+    });
+
+    expect(mockPtyAttach).toHaveBeenCalledWith({
+      args: {
+        id: 'runtime-1',
+        cols: 120,
+        rows: 40,
+        shell: false,
+        agent: 'claude',
+        policy: 'same_app_remount',
+      },
+      forceResizeBeforeAttach: false,
+    });
   });
 
   it('does not send transient unusable session-pane sizes to the PTY', async () => {

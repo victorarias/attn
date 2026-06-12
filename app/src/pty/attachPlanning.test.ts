@@ -226,6 +226,10 @@ describe('attachPlanning', () => {
     expect(plan.strategy).toBe('none');
   });
 
+  // A pane mounted while its session is inactive attaches with the model's
+  // construction default (e.g. 80x24). Forcing the live PTY to that size
+  // SIGWINCH-churns the shell and width-bounces every attached model,
+  // invalidating freshly replayed command blocks.
   it('preserves daemon geometry when same-app requested geometry was not measured', () => {
     const plan = planAttachedRuntimeGeometry({
       cols: 80,

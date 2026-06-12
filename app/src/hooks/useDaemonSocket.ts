@@ -2429,7 +2429,7 @@ export function useDaemonSocket({
   }, [sendOrQueueCommand]);
 
   const reconcileAttachedRuntimeGeometry = useCallback((
-    args: Pick<PtySpawnArgs, 'id' | 'cols' | 'rows' | 'shell'>,
+    args: Pick<PtyAttachArgs, 'id' | 'cols' | 'rows' | 'shell'>,
     attachResult: AttachResult,
     options: {
       attachPolicy: PtyAttachPolicy;

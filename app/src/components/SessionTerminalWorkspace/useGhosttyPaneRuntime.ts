@@ -3,7 +3,7 @@ import { ptyAttach, ptyDetach, ptyResize, ptyWrite, type PtyEventPayload } from 
 import { isSuspiciousTerminalSize } from '../../utils/terminalDebug';
 import { recordFocus } from '../../utils/terminalDiagnosticsLog';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
-import type { GhosttyTerminalHandle } from '../GhosttyTerminal';
+import type { BlockStateSnapshot, GhosttyTerminalHandle } from '../GhosttyTerminal';
 import type { TerminalVisibleContentSnapshot } from '../../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot } from '../../utils/terminalStyleSummary';
 
@@ -46,6 +46,7 @@ export interface GhosttyPaneRuntime {
   getPaneSize: (paneId: string) => { cols: number; rows: number } | null;
   getPaneVisibleContent: (paneId: string) => TerminalVisibleContentSnapshot;
   getPaneVisibleStyleSummary: (paneId: string) => TerminalVisibleStyleSnapshot;
+  getPaneBlockState: (paneId: string) => BlockStateSnapshot | null;
   resetPaneTerminal: (paneId: string) => boolean;
   injectPaneBytes: (paneId: string, bytes: Uint8Array) => Promise<boolean>;
   injectPaneBase64: (paneId: string, data: string) => Promise<boolean>;
@@ -233,6 +234,11 @@ export function useGhosttyPaneRuntime(
     }
     const attachGeneration = (attachGenerationRef.current.get(pane.runtimeId) ?? 0) + 1;
     attachGenerationRef.current.set(pane.runtimeId, attachGeneration);
+    // A pane mounted while its session is inactive never measured its
+    // container (fit bails on display:none), so its size is the construction
+    // default. That provisional size must not claim PTY geometry authority:
+    // the daemon's geometry holds until a real fit resizes.
+    const geometryMeasured = terminal.hasMeasuredSize();
     const attachPromise = ptyAttach({
       args: {
         id: pane.runtimeId,
@@ -242,7 +248,7 @@ export function useGhosttyPaneRuntime(
         agent: pane.agent,
         policy: attachPolicy,
       },
-      forceResizeBeforeAttach: attachPolicy === 'same_app_remount',
+      forceResizeBeforeAttach: attachPolicy === 'same_app_remount' && geometryMeasured,
     });
     connectingRef.current.set(pane.runtimeId, {
       generation: attachGeneration,
@@ -343,6 +349,7 @@ export function useGhosttyPaneRuntime(
     getPaneSize: (paneId: string) => get(paneId)?.getSize() ?? null,
     getPaneVisibleContent: (paneId: string) => get(paneId)?.getVisibleContent() ?? emptyContent(),
     getPaneVisibleStyleSummary: (paneId: string) => get(paneId)?.getVisibleStyleSummary() ?? emptyStyle(),
+    getPaneBlockState: (paneId: string) => get(paneId)?.getBlockState() ?? null,
     resetPaneTerminal: (paneId: string) => { const terminal = get(paneId); if (!terminal) return false; terminal.reset(); return true; },
     injectPaneBytes: async (paneId: string, bytes: Uint8Array) => { const terminal = get(paneId); if (!terminal) return false; await terminal.write(bytes); return true; },
     injectPaneBase64: async (paneId: string, data: string) => { const terminal = get(paneId); if (!terminal) return false; await terminal.write(decodePtyBytes(data)); return true; },

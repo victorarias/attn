@@ -24,3 +24,6 @@ test-results
 *.njsproj
 *.sln
 *.sw?
+
+# real-app harness input-driver build fingerprint (content hash sidecar)
+scripts/real-app-harness/.build/*.fingerprint

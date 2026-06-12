@@ -32,11 +32,12 @@ import {
 } from '../utils/terminalFind';
 import { emptyOsc133State, parseOsc133, type Osc133State } from '../utils/terminalOsc133';
 import {
-  blockViewportSpan,
+  blockViewportSpanAnchored,
   extractBlock,
   reanchorDelta,
   TerminalBlockStore,
   type BlockRowAccess,
+  type BlockViewportSpan,
   type TerminalBlock,
 } from '../utils/terminalBlocks';
 import {
@@ -76,7 +77,6 @@ import { recordTerminalLinkHitTestEvent } from '../utils/terminalLinkHitTestLog'
 import {
   recordDiag,
   recordPaint,
-  recordBlock,
   noteResize,
   registerRenderProbe,
   disposePaneDiagnostics,
@@ -149,10 +149,48 @@ export interface GhosttyTerminalHandle {
   scrollToTop: () => boolean;
   getText: () => string;
   getSize: () => { cols: number; rows: number } | null;
+  // True once the model's size has come from a real container measurement
+  // (a fit() that did not bail). Until then getSize() reports the provisional
+  // construction default, which must never claim PTY geometry authority.
+  hasMeasuredSize: () => boolean;
   getVisibleContent: () => TerminalVisibleContentSnapshot;
   getVisibleStyleSummary: () => TerminalVisibleStyleSnapshot;
+  getBlockState: () => BlockStateSnapshot;
   drain: () => Promise<void>;
 }
+
+// Live inspection of the command-block store for the get_pane_block_state
+// bridge action. Returns BOTH the raw stored rows AND the live re-anchor delta /
+// drawable span, so a harness can assert the "correct or absent" invariant: no
+// surviving block has endRow beyond the buffer, and every drawable span is
+// in-bounds (or null). This replaces the old 'block' jsonl disk stream.
+export interface BlockStateSnapshotBlock {
+  id: number;
+  command: string;
+  exitCode?: number;
+  promptRow: number;
+  outputStartRow?: number;
+  endRow?: number;
+  anchorRow: number;
+  anchorText: string;
+  reanchorDelta: number | null;
+  viewportSpan: BlockViewportSpan | null;
+}
+
+export interface BlockStateSnapshot {
+  cols: number;
+  rows: number;
+  scrollback: number;
+  viewportOffset: number;
+  firstViewportBufferRow: number;
+  selectedBlockId: number | null;
+  blocks: BlockStateSnapshotBlock[];
+}
+
+const EMPTY_BLOCK_STATE: BlockStateSnapshot = {
+  cols: 0, rows: 0, scrollback: 0, viewportOffset: 0, firstViewportBufferRow: 0,
+  selectedBlockId: null, blocks: [],
+};
 
 interface SelectionRange {
   startRow: number;
@@ -335,6 +373,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const rendererRef = useRef<WebGlTerminalRenderer | null>(null);
     const inputRef = useRef<InputHandler | null>(null);
     const modelSizeRef = useRef({ cols: 80, rows: 24 });
+    // False until fit() measures the container: the construction-default size
+    // is provisional and must not be pushed to the PTY as geometry authority.
+    const hasMeasuredSizeRef = useRef(false);
     const viewportOffsetRef = useRef(0);
     const wheelRemainderRowsRef = useRef(0);
     const selectionRef = useRef<SelectionRange | null>(null);
@@ -458,12 +499,21 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       }
       if (selectedBlockIdRef.current !== null) {
         const block = blockStoreRef.current.blockById(selectedBlockIdRef.current);
-        const span = block
-          ? blockViewportSpan(block, viewportBufferStart(scrollbackLength, viewportOffsetRef.current), terminal.rows)
+        const access = blockRowAccess();
+        // Re-anchor against the live buffer before drawing: a stale stored row
+        // (e.g. scrollback trimmed since the click) must clear the selection,
+        // never draw a box at dead coordinates.
+        const span = block && access
+          ? blockViewportSpanAnchored(
+              block,
+              access,
+              viewportBufferStart(scrollbackLength, viewportOffsetRef.current),
+              terminal.rows,
+            )
           : null;
         if (!span) {
-          // The block was evicted from the store (or never completed): the
-          // selection no longer refers to anything.
+          // The block was evicted from the store, never completed, or its anchor
+          // is gone: the selection no longer refers to anything drawable.
           selectedBlockIdRef.current = null;
         } else if (span.visible) {
           // A faint accent wash behind the block, plus the crisp border. The
@@ -471,16 +521,21 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           // the border keeps the bounds legible where the wash is too subtle.
           // The renderer omits border edges that fall outside the viewport
           // (visibleOutlineEdges), so an over-tall block reads as "continues
-          // above/below" instead of a box around the whole terminal.
-          overlays.push({
-            startRow: span.startRow,
-            startCol: 0,
-            endRow: span.endRow,
-            endCol: terminal.cols,
-            color: '#4d9de0',
-            alpha: 0.08,
-            kind: 'background',
-          });
+          // above/below" instead of a box around the whole terminal. When the
+          // block covers EVERY visible row, skip the wash too — tinting the
+          // entire viewport reads as "a giant box swallowed the terminal";
+          // the side rails alone carry the selection.
+          if (!span.spansViewport) {
+            overlays.push({
+              startRow: span.startRow,
+              startCol: 0,
+              endRow: span.endRow,
+              endCol: terminal.cols,
+              color: '#4d9de0',
+              alpha: 0.08,
+              kind: 'background',
+            });
+          }
           overlays.push({
             startRow: span.startRow,
             startCol: 0,
@@ -833,50 +888,46 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return blockStoreRef.current.blockById(selectedBlockIdRef.current);
     }, []);
 
-    // Record a block selection with the exact viewport geometry the overlay will
-    // draw, so the log shows when a selected block's box would cover the whole
-    // terminal (fillsViewport) and what rows produced it.
-    const logBlockSelection = useCallback((blockId: number | null) => {
+    // Live block-store snapshot for the get_pane_block_state bridge action.
+    // Returns the raw stored rows plus the live re-anchor delta and the drawable
+    // viewport span each block, so a harness can verify "correct or absent"
+    // without a disk log.
+    const getBlockState = useCallback((): BlockStateSnapshot => {
       const terminal = terminalRef.current;
-      if (blockId === null) {
-        recordBlock({ pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, phase: 'clear' });
-        return;
-      }
-      const block = blockStoreRef.current.blockById(blockId);
-      if (!terminal || !block || block.endRow === undefined) return;
-      // Same mapping the overlay uses, so the log reflects what gets drawn.
-      const span = blockViewportSpan(
-        block,
-        viewportBufferStart(terminal.getScrollbackLength(), viewportOffsetRef.current),
-        terminal.rows,
-      );
-      if (!span) return;
-      recordBlock({
-        pane: diagKeyRef.current,
-        session: runtimeMetaRef.current?.sessionId ?? undefined,
-        phase: 'select',
+      const access = blockRowAccess();
+      if (!terminal || !access) return { ...EMPTY_BLOCK_STATE };
+      const scrollback = terminal.getScrollbackLength();
+      const viewportOffset = viewportOffsetRef.current;
+      const firstViewportBufferRow = viewportBufferStart(scrollback, viewportOffset);
+      const blocks: BlockStateSnapshotBlock[] = blockStoreRef.current.blocks().map((block) => ({
         id: block.id,
+        command: block.command,
+        exitCode: block.exitCode,
         promptRow: block.promptRow,
         outputStartRow: block.outputStartRow,
         endRow: block.endRow,
-        height: block.endRow - block.promptRow,
+        anchorRow: block.anchorRow,
+        anchorText: block.anchorText,
+        reanchorDelta: reanchorDelta(block, access),
+        viewportSpan: blockViewportSpanAnchored(block, access, firstViewportBufferRow, terminal.rows),
+      }));
+      return {
+        cols: terminal.cols,
         rows: terminal.rows,
-        scrollback: terminal.getScrollbackLength(),
-        startRowInViewport: span.startRow,
-        endRowInViewport: span.endRow,
-        fillsViewport: span.spansViewport,
-        command: block.command.slice(0, 80),
-      });
-    }, []);
+        scrollback,
+        viewportOffset,
+        firstViewportBufferRow,
+        selectedBlockId: selectedBlockIdRef.current,
+        blocks,
+      };
+    }, [blockRowAccess]);
 
-    // Single entry point for changing the selected block: keeps the ref, the
-    // diagnostics event, and the repaint in lock-step so the click and
-    // right-click paths can't drift.
+    // Single entry point for changing the selected block: keeps the ref and the
+    // repaint in lock-step so the click and right-click paths can't drift.
     const selectBlock = useCallback((blockId: number | null) => {
       selectedBlockIdRef.current = blockId;
-      logBlockSelection(blockId);
       renderSurface(true);
-    }, [logBlockSelection, renderSurface]);
+    }, [renderSurface]);
 
     // Copy a selected block: whole = command + output, otherwise command only.
     // Extraction re-anchors against the live buffer and refuses (returns
@@ -1054,28 +1105,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           if (segment.bytes.length > 0) terminal.write(segment.bytes);
           if (segment.marker) {
             const cursor = terminal.getCursor();
-            const result = blockStoreRef.current.applyMarker(
+            // Block completions are inspected live via get_pane_block_state, not
+            // streamed to disk.
+            blockStoreRef.current.applyMarker(
               segment.marker,
               { row: terminal.getScrollbackLength() + cursor.y, col: cursor.x },
               (row) => selectionLineAtBufferRow(row, 0, terminal.cols),
             );
-            if (result.completed) {
-              const b = result.completed;
-              recordBlock({
-                pane: diagKeyRef.current,
-                session: runtimeMetaRef.current?.sessionId ?? undefined,
-                phase: 'complete',
-                reason: result.reason ?? undefined,
-                id: b.id,
-                promptRow: b.promptRow,
-                outputStartRow: b.outputStartRow,
-                endRow: b.endRow,
-                height: b.endRow !== undefined ? b.endRow - b.promptRow : undefined,
-                rows: terminal.rows,
-                scrollback: terminal.getScrollbackLength(),
-                command: b.command.slice(0, 80),
-              });
-            }
           }
         }
         const responses: string[] = [];
@@ -1156,6 +1192,30 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       });
     }, [enqueueOperation, flushSynchronizedOutputRender, lineAtVisibleRow, scheduleSynchronizedOutputRenderFallback, selectionLineAtBufferRow]);
 
+    // Reconcile the block store with the model's new geometry after a resize.
+    //
+    // A WIDTH change invalidates stored rows: a reflowing resize (live
+    // resizeLocal) re-wraps the scrollback and renumbers every absolute row
+    // NON-uniformly, and even the wraparound-off no-reflow path used by fit
+    // and replay can truncate or pad rows — clear the store (correct-or-absent;
+    // new commands rebuild it). Now that fits resize without reflow, a future
+    // improvement can turn this clear into a reanchor for the no-reflow paths.
+    //
+    // A HEIGHT-only change shifts rows uniformly (rows move between scrollback
+    // and screen) — re-anchor each block and keep it.
+    const reconcileBlocksAfterResize = useCallback((widthChanged: boolean) => {
+      if (widthChanged) {
+        blockStoreRef.current.clear();
+        selectedBlockIdRef.current = null;
+        return;
+      }
+      const access = blockRowAccess();
+      if (!access) return;
+      if (blockStoreRef.current.reanchorOnResize(access) === 'all-stale') {
+        selectedBlockIdRef.current = null;
+      }
+    }, [blockRowAccess]);
+
     // Replay segments alternate resize and bytes; both must be applied on one
     // chain or all historical bytes are parsed at the final geometry.
     const resizeLocal = useCallback((
@@ -1202,6 +1262,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         } else {
           terminal.resize(cols, rows);
         }
+        reconcileBlocksAfterResize(cols !== fromCols);
         modelSizeRef.current = { cols, rows };
         renderer.resize(cols, rows);
         hoverGenerationRef.current += 1;
@@ -1216,7 +1277,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           renderSurface(true);
         }
       });
-    }, [enqueueOperation, renderSurface]);
+    }, [enqueueOperation, reconcileBlocksAfterResize, renderSurface]);
 
     const applyFitDimensions = useCallback((dims: TerminalDimensions) => {
       const terminal = terminalRef.current;
@@ -1242,6 +1303,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const fromCols = terminal.cols;
       const fromRows = terminal.rows;
       resizeGhosttyWithoutReflow(terminal, dims.cols, dims.rows);
+      reconcileBlocksAfterResize(dims.cols !== fromCols);
       modelSizeRef.current = dims;
       renderer.resize(dims.cols, dims.rows);
       hoverGenerationRef.current += 1;
@@ -1250,7 +1312,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       });
       renderSurface(true);
       onResizeRef.current(dims.cols, dims.rows, { reason: 'ghostty_fit' });
-    }, [renderSurface]);
+    }, [reconcileBlocksAfterResize, renderSurface]);
 
     applyFitDimensionsRef.current = applyFitDimensions;
 
@@ -1269,6 +1331,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'suspiciousSize', toCols: dims.cols, toRows: dims.rows });
         return;
       }
+      // The size is now backed by a real container measurement: attaches may
+      // treat it as authoritative PTY geometry (see hasMeasuredSize).
+      hasMeasuredSizeRef.current = true;
       if (!fitResizeCoalescerRef.current) {
         fitResizeCoalescerRef.current = createResizeCoalescer(
           (dimensions) => applyFitDimensionsRef.current(dimensions),
@@ -1313,10 +1378,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       },
       getText,
       getSize: () => terminalRef.current ? { cols: terminalRef.current.cols, rows: terminalRef.current.rows } : null,
+      hasMeasuredSize: () => hasMeasuredSizeRef.current,
       getVisibleContent,
       getVisibleStyleSummary,
+      getBlockState,
       drain: () => writeChainRef.current,
-    }), [fit, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, write]);
+    }), [fit, getBlockState, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, write]);
 
     useEffect(() => {
       let active = true;
@@ -1420,8 +1487,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           scrollToTop: () => { viewportOffsetRef.current = terminal.getScrollbackLength(); wheelRemainderRowsRef.current = 0; hoverGenerationRef.current += 1; renderSurface(true); return true; },
           getText,
           getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
+          hasMeasuredSize: () => hasMeasuredSizeRef.current,
           getVisibleContent,
           getVisibleStyleSummary,
+          getBlockState,
           drain: () => writeChainRef.current,
         });
       }).catch((reason) => {
@@ -1902,16 +1971,24 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         const terminal = terminalRef.current;
         // mousedown already cleared any previous block selection.
         let nextBlockId: number | null = null;
-        if (terminal && cell && blockStoreRef.current.hasBlocks()) {
+        const access = blockRowAccess();
+        if (terminal && cell && access && blockStoreRef.current.hasBlocks()) {
           const bufferRow = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
-          const block = blockStoreRef.current.blockAt(bufferRow);
+          const block = blockStoreRef.current.blockAtAnchored(bufferRow, access);
           if (block) {
             nextBlockId = block.id;
-            if (block.outputStartRow !== undefined && bufferRow < block.outputStartRow && block.inputStart) {
-              const lastCommandRow = block.outputStartRow - 1;
+            // blockAtAnchored matched against the live buffer at a possibly
+            // non-zero delta (scrollback trimmed since the block was recorded).
+            // The command-line range below compares and draws against LIVE
+            // buffer rows, so it must shift the stored rows by the same delta —
+            // otherwise clicking trimmed output is misread as a command-line
+            // click and the box is drawn at stale rows.
+            const delta = reanchorDelta(block, access) ?? 0;
+            if (block.outputStartRow !== undefined && bufferRow < block.outputStartRow + delta && block.inputStart) {
+              const lastCommandRow = block.outputStartRow - 1 + delta;
               const lineLength = selectionLineAtBufferRow(lastCommandRow, 0, terminal.cols).trimEnd().length;
               selectionRef.current = {
-                startRow: block.inputStart.row,
+                startRow: block.inputStart.row + delta,
                 startCol: block.inputStart.col,
                 endRow: lastCommandRow,
                 endCol: Math.max(lineLength, block.inputStart.col + 1),
@@ -2215,9 +2292,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           if (terminal.hasMouseTracking()) return;
           const cell = cellFromPointer(event);
           let blockId: number | null = null;
-          if (cell && blockStoreRef.current.hasBlocks()) {
+          const access = blockRowAccess();
+          if (cell && access && blockStoreRef.current.hasBlocks()) {
             const bufferRow = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
-            blockId = blockStoreRef.current.blockAt(bufferRow)?.id ?? null;
+            blockId = blockStoreRef.current.blockAtAnchored(bufferRow, access)?.id ?? null;
           }
           // Right-clicking a block selects it (outline + arms ⌘C/⇧⌘C), same
           // as a plain click, but without clearing an existing text selection.

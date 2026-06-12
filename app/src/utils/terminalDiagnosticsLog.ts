@@ -55,7 +55,6 @@ export type DiagKind =
   | 'attach'
   | 'desync'
   | 'watchdog'
-  | 'block'
   | 'incident';
 
 export interface DiagEvent {
@@ -78,7 +77,6 @@ const LIFECYCLE_KINDS = new Set<DiagKind>([
   'attach',
   'desync',
   'watchdog',
-  'block',
   'incident',
 ]);
 
@@ -268,39 +266,10 @@ export function recordFocus(pane: string, retries: number): void {
   recordDiag({ kind: 'focus', pane, retries });
 }
 
-// Command-block lifecycle (OSC 133). Low-frequency — one event per command
-// completion and per block selection — so it streams to disk like other
-// lifecycle events. This is the signal for diagnosing block geometry bugs (a
-// selected block's box covering the whole terminal, blocks merging, wrong
-// hit-testing): every event carries the block's absolute rows and how tall it
-// is relative to the viewport.
-export interface BlockDiagEvent {
-  pane: string;
-  session?: string;
-  phase: 'complete' | 'select' | 'clear';
-  // For 'complete': why the block closed. 'self-heal' means a command-end was
-  // lost — the prime suspect for an over-tall block.
-  reason?: string;
-  id?: number | null;
-  promptRow?: number;
-  outputStartRow?: number;
-  endRow?: number;
-  // endRow - promptRow: the block's height in buffer rows.
-  height?: number;
-  // Viewport rows at the time, so `height > rows` (box would fill the screen)
-  // is visible directly in the log.
-  rows?: number;
-  scrollback?: number;
-  // For 'select': the computed viewport rect and whether it spans the viewport.
-  startRowInViewport?: number;
-  endRowInViewport?: number;
-  fillsViewport?: boolean;
-  command?: string;
-}
-
-export function recordBlock(event: BlockDiagEvent): void {
-  recordDiag({ kind: 'block', ...event });
-}
+// Command-block geometry is no longer streamed to disk. It is inspected live
+// and on demand through the get_pane_block_state bridge action (which returns
+// both the raw stored rows and the live re-anchor delta / drawable span), so a
+// stale disk stream cannot mislead a diagnosis.
 
 const lastLayoutSig = new Map<string, string>();
 

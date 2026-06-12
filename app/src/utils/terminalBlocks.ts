@@ -32,23 +32,17 @@ export interface BlockRowAccess {
   rowText(bufferRow: number): string;
 }
 
-// Why a block closed. 'command-end' is the normal OSC 133;D path; 'self-heal'
-// means a new prompt context arrived while the previous command was still open
-// (its command-end was lost), so we closed it at the recovered prompt row.
-export type BlockCloseReason = 'command-end' | 'self-heal';
-
-export interface ApplyMarkerResult {
-  // The block this marker just completed, if any — for diagnostics and so the
-  // caller can react to a completion without re-scanning blocks().
-  completed: TerminalBlock | null;
-  reason: BlockCloseReason | null;
-}
-
-const NO_COMPLETION: ApplyMarkerResult = { completed: null, reason: null };
-
 const MAX_BLOCKS = 200;
 const ANCHOR_LENGTH = 64;
-const REANCHOR_SCAN_ROWS = 64;
+// Per-click / per-extract re-anchor window. Drift between a stored row and the
+// live buffer on these hot paths comes from scrollback trimming, which is small.
+export const REANCHOR_SCAN_ROWS = 64;
+// Re-anchor window used after a HEIGHT-only resize (width changes reflow the
+// buffer non-uniformly and clear the store instead — see GhosttyTerminal's
+// resizeModelAndReanchor). Height changes shift rows uniformly (rows move
+// between scrollback and screen, plus any trim), which can exceed the per-click
+// window; 512 covers it with margin. An anchor outside it tombstones the block.
+export const RESIZE_REANCHOR_SCAN_ROWS = 512;
 
 interface PendingBlock {
   id: number;
@@ -63,18 +57,17 @@ export class TerminalBlockStore {
   private pending: PendingBlock | null = null;
   private nextId = 1;
 
-  applyMarker(marker: Osc133Marker, position: BlockPosition, rowTextAt?: (row: number) => string): ApplyMarkerResult {
+  applyMarker(marker: Osc133Marker, position: BlockPosition, rowTextAt?: (row: number) => string): void {
     // Self-heal against a lost command-end. If a command already ran in the
     // current block (outputStartRow is set) and a marker that begins a NEW
     // command context arrives, fish's `OSC 133;D` for the previous command
     // never reached us (e.g. a PTY output chunk was dropped). Close the open
     // block here so two commands don't silently merge into one.
-    let healed: TerminalBlock | null = null;
     if (
       this.pending?.outputStartRow !== undefined
       && (marker.kind === 'prompt-start' || marker.kind === 'input-start' || marker.kind === 'pre-exec')
     ) {
-      healed = this.complete(this.pending, position.row, undefined, rowTextAt);
+      this.complete(this.pending, position.row, undefined, rowTextAt);
       this.pending = null;
     }
 
@@ -82,33 +75,31 @@ export class TerminalBlockStore {
       case 'prompt-start':
         this.pending = { id: this.nextId, promptRow: position.row };
         this.nextId += 1;
-        break;
+        return;
       case 'input-start':
         // A surviving input-start with no prompt-start (its prompt-start was
         // lost) still anchors a block, just at the input row.
         if (!this.pending) this.pending = this.openPending(position.row);
         this.pending.inputStart = position;
-        break;
+        return;
       case 'pre-exec':
         if (!this.pending) this.pending = this.openPending(position.row);
         this.pending.outputStartRow = position.row;
         this.pending.command = marker.cmdline;
-        break;
+        return;
       case 'command-end': {
         const pending = this.pending;
         this.pending = null;
         // A block without a pre-exec marker never ran a command (e.g. a bare
         // Enter at the prompt) — nothing copyable.
         if (pending && pending.outputStartRow !== undefined) {
-          const completed = this.complete(pending, position.row, marker.exitCode, rowTextAt);
-          if (completed) return { completed, reason: 'command-end' };
+          this.complete(pending, position.row, marker.exitCode, rowTextAt);
         }
-        break;
+        return;
       }
       default:
-        break;
+        return;
     }
-    return healed ? { completed: healed, reason: 'self-heal' } : NO_COMPLETION;
   }
 
   private openPending(promptRow: number): PendingBlock {
@@ -123,10 +114,10 @@ export class TerminalBlockStore {
     endRow: number,
     exitCode: number | undefined,
     rowTextAt?: (row: number) => string,
-  ): TerminalBlock | null {
-    if (pending.outputStartRow === undefined) return null;
+  ): void {
+    if (pending.outputStartRow === undefined) return;
     const anchorRow = pending.inputStart?.row ?? pending.promptRow;
-    const block: TerminalBlock = {
+    this.completed.push({
       id: pending.id,
       promptRow: pending.promptRow,
       inputStart: pending.inputStart,
@@ -136,12 +127,10 @@ export class TerminalBlockStore {
       exitCode,
       anchorRow,
       anchorText: (rowTextAt?.(anchorRow) ?? '').slice(0, ANCHOR_LENGTH),
-    };
-    this.completed.push(block);
+    });
     if (this.completed.length > MAX_BLOCKS) {
       this.completed.splice(0, this.completed.length - MAX_BLOCKS);
     }
-    return block;
   }
 
   blocks(): readonly TerminalBlock[] {
@@ -162,8 +151,53 @@ export class TerminalBlockStore {
     return null;
   }
 
+  // Reflow-aware hit-test: re-anchor each block against the live buffer before
+  // range-checking, so a stale stored row never matches (or mismatches) the
+  // wrong buffer row. Blocks whose anchor is gone are skipped (never matched).
+  blockAtAnchored(bufferRow: number, access: BlockRowAccess): TerminalBlock | null {
+    for (let i = this.completed.length - 1; i >= 0; i -= 1) {
+      const block = this.completed[i];
+      if (block.endRow === undefined) continue;
+      const delta = reanchorDelta(block, access);
+      if (delta === null) continue;
+      if (bufferRow >= block.promptRow + delta && bufferRow < block.endRow + delta) {
+        return block;
+      }
+    }
+    return null;
+  }
+
   blockById(id: number): TerminalBlock | null {
     return this.completed.find((block) => block.id === id) ?? null;
+  }
+
+  // Re-anchor every completed block against the live buffer after a resize.
+  // A block whose anchor matches at a non-zero delta is shifted in place so its
+  // stored rows track the live buffer again; a block whose anchor is gone is
+  // dropped (its content is unrecoverable). Returns 'all-stale' when the store
+  // held blocks but every one was dropped, so the caller can clear the
+  // selection; otherwise 'ok'.
+  reanchorOnResize(
+    access: BlockRowAccess,
+    scanRows: number = RESIZE_REANCHOR_SCAN_ROWS,
+  ): 'ok' | 'all-stale' {
+    const hadBlocks = this.completed.length > 0;
+    if (!hadBlocks) return 'ok';
+    const survivors: TerminalBlock[] = [];
+    for (const block of this.completed) {
+      const delta = reanchorDelta(block, access, scanRows);
+      if (delta === null) continue;
+      if (delta !== 0) {
+        block.promptRow += delta;
+        block.anchorRow += delta;
+        if (block.outputStartRow !== undefined) block.outputStartRow += delta;
+        if (block.endRow !== undefined) block.endRow += delta;
+        if (block.inputStart) block.inputStart = { ...block.inputStart, row: block.inputStart.row + delta };
+      }
+      survivors.push(block);
+    }
+    this.completed = survivors;
+    return survivors.length === 0 && hadBlocks ? 'all-stale' : 'ok';
   }
 
   clear(): void {
@@ -199,21 +233,64 @@ export function blockViewportSpan(
   };
 }
 
+// Minimum characters an anchor comparison must cover to count as a match. A
+// narrower pane clips rowText to the visible width, so the comparison runs on
+// the overlapping prefix — but a tiny overlap (e.g. a 4-col pane) would match
+// almost anything, so short overlaps refuse instead.
+const MIN_ANCHOR_OVERLAP = 8;
+
+// Width-tolerant anchor comparison. The anchor was captured at the pane width
+// of completion time; the live row may be clipped to a narrower width (or the
+// anchor itself may be the shorter one after re-widening). Compare the
+// overlapping prefix, requiring MIN_ANCHOR_OVERLAP unless the anchor is
+// genuinely shorter than that (a short command line is fully compared).
+function anchorMatches(anchorText: string, rowText: string): boolean {
+  const overlap = Math.min(anchorText.length, rowText.length);
+  if (overlap < Math.min(anchorText.length, MIN_ANCHOR_OVERLAP)) return false;
+  return rowText.slice(0, overlap) === anchorText.slice(0, overlap);
+}
+
 // Row offset between the block's recorded rows and the live buffer, found by
 // matching the anchor text. null means the block's content is gone (trimmed
 // or rewritten) and extraction must not proceed.
-export function reanchorDelta(block: TerminalBlock, access: BlockRowAccess): number | null {
+export function reanchorDelta(
+  block: TerminalBlock,
+  access: BlockRowAccess,
+  scanRows: number = REANCHOR_SCAN_ROWS,
+): number | null {
   if (!block.anchorText) return 0;
   const total = access.totalRows();
   const matches = (row: number) => (
-    row >= 0 && row < total && access.rowText(row).slice(0, block.anchorText.length) === block.anchorText
+    row >= 0 && row < total && anchorMatches(block.anchorText, access.rowText(row))
   );
   if (matches(block.anchorRow)) return 0;
-  for (let delta = 1; delta <= REANCHOR_SCAN_ROWS; delta += 1) {
+  for (let delta = 1; delta <= scanRows; delta += 1) {
     if (matches(block.anchorRow - delta)) return -delta;
     if (matches(block.anchorRow + delta)) return delta;
   }
   return null;
+}
+
+// Reflow-aware viewport span: re-anchors the block against the live buffer
+// (default per-click window) before mapping to viewport rows. Returns null when
+// the block's anchor is gone, so the overlay clears the selection rather than
+// drawing a box at stale coordinates. firstViewportBufferRow must be computed
+// from the SAME live scrollback the access reads, so the delta and the mapping
+// agree.
+export function blockViewportSpanAnchored(
+  block: TerminalBlock,
+  access: BlockRowAccess,
+  firstViewportBufferRow: number,
+  viewportRows: number,
+): BlockViewportSpan | null {
+  if (block.endRow === undefined) return null;
+  const delta = reanchorDelta(block, access);
+  if (delta === null) return null;
+  return blockViewportSpan(
+    { ...block, promptRow: block.promptRow + delta, endRow: block.endRow + delta },
+    firstViewportBufferRow,
+    viewportRows,
+  );
 }
 
 export interface ExtractedBlock {

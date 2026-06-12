@@ -203,6 +203,13 @@ export function planAttachedRuntimeGeometry(
     : hasRawScrollbackReplay
       ? ptyGeometryMatches
       : false;
+  // requestedGeometryAuthoritative === false means the client size is
+  // provisional (never measured against a visible container): it must not
+  // claim PTY geometry authority. Forcing the live PTY to a construction
+  // default SIGWINCH-churns the shell and bounces every attached model's
+  // width, invalidating freshly replayed command blocks. The daemon's
+  // geometry stays authoritative until a real fit produces an interactive
+  // resize.
   const preserveAttachedGeometry = options.attachPolicy === 'relaunch_restore'
     || options.requestedGeometryAuthoritative === false;
   const resizeRequired = !preserveAttachedGeometry && !ptyGeometryMatches;
