@@ -352,7 +352,7 @@ export function registerRenderProbe(pane: string, probe: () => RenderProbe | nul
 
 export function noteResize(
   pane: string,
-  info: { session?: string; source: string; fromCols?: number; fromRows?: number; toCols?: number; toRows?: number; bail?: string; noop?: boolean; paneKind?: string },
+  info: { session?: string; source: string; fromCols?: number; fromRows?: number; toCols?: number; toRows?: number; bail?: string; noop?: boolean; paneKind?: string; historicalReplay?: boolean },
 ): void {
   recordDiag({ kind: 'resize', pane, ...info });
   // A WebGL canvas only clears its drawing buffer when its pixel dimensions
@@ -364,6 +364,7 @@ export function noteResize(
   const geometryChanged =
     info.bail === undefined &&
     !info.noop &&
+    !info.historicalReplay &&
     info.toCols != null &&
     info.toRows != null &&
     (info.fromCols !== info.toCols || info.fromRows !== info.toRows);

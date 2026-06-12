@@ -20,7 +20,7 @@
 // to whichever pane held focus when the grid opened.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Ghostty, InputHandler } from 'ghostty-web';
-import ghosttyWasmUrl from 'ghostty-web/ghostty-vt.wasm?url';
+import { ghosttyWasmUrl } from '../../ghostty/wasm';
 import { listenPtyEvents, ptyWrite } from '../../pty/bridge';
 import { installTerminalKeyHandler } from '../SessionTerminalWorkspace/terminalKeyHandler';
 import type { ScreenSnapshotResult } from '../../hooks/useDaemonSocket';

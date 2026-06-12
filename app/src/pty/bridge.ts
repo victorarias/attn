@@ -49,6 +49,7 @@ export interface PtyReplaySegment {
 export type PtyEventPayload =
   | { event: 'data'; id: string; data: string | Uint8Array; seq?: number; source?: PtyDataEventSource; suppressResponses?: boolean }
   | { event: 'local_resize'; id: string; cols: number; rows: number; source?: PtyDataEventSource }
+  | { event: 'replay_complete'; id: string }
   | { event: 'exit'; id: string; code: number; signal?: string }
   | { event: 'error'; id: string; error: string }
   | { event: 'transcript'; id: string; matched: boolean }
@@ -64,6 +65,7 @@ export interface PtyBackend {
   ) => Promise<void>;
   write: (id: string, data: string, source?: string) => Promise<void>;
   resize: (id: string, cols: number, rows: number, reason?: string) => Promise<void>;
+  detach: (id: string) => Promise<void>;
   kill: (id: string) => Promise<void>;
 }
 
@@ -191,6 +193,13 @@ export async function ptyResize(request: { id: string; cols: number; rows: numbe
     throw new Error('PTY backend is not configured');
   }
   await backend.resize(request.id, request.cols, request.rows, request.reason);
+}
+
+export async function ptyDetach(request: { id: string }) {
+  if (mockEnabled() || !backend) {
+    return;
+  }
+  await backend.detach(request.id);
 }
 
 export async function ptyKill(request: { id: string }) {

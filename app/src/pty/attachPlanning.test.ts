@@ -120,6 +120,23 @@ describe('attachPlanning', () => {
     expect(plan.respondToTerminalQueries).toBe(false);
   });
 
+  it('applies a same-app snapshot at its recorded geometry when the mounted pane size differs', () => {
+    const plan = classifyAttachReplay({
+      cols: 56,
+      rows: 35,
+      screen_cols: 56,
+      screen_rows: 35,
+      screen_snapshot: 'fresh-daemon-frame',
+      screen_snapshot_fresh: true,
+    }, createAttachRequestContext({ cols: 52, rows: 35, agent: 'codex' }, 'same_app_remount'));
+
+    expect(plan.replayKind).toBe('screen_snapshot');
+    expect(plan.attachedGeometryMismatch).toBe(true);
+    expect(plan.replayGeometryMismatch).toBe(true);
+    expect(plan.replayApplied).toBe(true);
+    expect(plan.replaySkipped).toBe(false);
+  });
+
   it('applies raw scrollback for Codex fresh_spawn so the terminal can answer capability queries', () => {
     const plan = classifyAttachReplay({
       cols: 68,
@@ -207,6 +224,40 @@ describe('attachPlanning', () => {
 
     expect(plan.resizeRequired).toBe(false);
     expect(plan.strategy).toBe('none');
+  });
+
+  it('preserves daemon geometry when same-app requested geometry was not measured', () => {
+    const plan = planAttachedRuntimeGeometry({
+      cols: 80,
+      rows: 24,
+      shell: false,
+    }, {
+      cols: 45,
+      rows: 35,
+    }, {
+      attachPolicy: 'same_app_remount',
+      requestedGeometryAuthoritative: false,
+    });
+
+    expect(plan.resizeRequired).toBe(false);
+    expect(plan.strategy).toBe('preserve_attached');
+  });
+
+  it('reconciles an explicitly measured same-app remount geometry', () => {
+    const plan = planAttachedRuntimeGeometry({
+      cols: 58,
+      rows: 46,
+      shell: false,
+    }, {
+      cols: 80,
+      rows: 24,
+    }, {
+      attachPolicy: 'same_app_remount',
+      requestedGeometryAuthoritative: true,
+    });
+
+    expect(plan.resizeRequired).toBe(true);
+    expect(plan.strategy).toBe('resize');
   });
 
   it('preserves daemon geometry during relaunch restore rather than resizing from bootstrap layout', () => {
@@ -420,6 +471,30 @@ describe('attachPlanning', () => {
     });
 
     expect(effects.shouldWarnTruncatedRestore).toBe(true);
+  });
+
+  it('does not warn for daemon-verified segmented replay when recovery context is absent', () => {
+    const replayPlan = classifyAttachReplay({
+      cols: 58,
+      rows: 46,
+      replay_segments: [
+        { cols: 58, rows: 46, data: 'verified-tail' },
+      ],
+    });
+
+    const effects = planAttachResultEffects({
+      attachResult: {
+        replay_segments: [
+          { cols: 58, rows: 46, data: 'verified-tail' },
+        ],
+        scrollback_truncated: true,
+      },
+      replayPlan,
+      sessionAgent: 'codex',
+    });
+
+    expect(effects.replayAction.kind).toBe('skipped');
+    expect(effects.shouldWarnTruncatedRestore).toBe(false);
   });
 
   it('bounds queued attach output by dropping the oldest chunk first', () => {

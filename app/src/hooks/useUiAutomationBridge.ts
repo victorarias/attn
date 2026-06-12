@@ -875,6 +875,73 @@ function dragLeafHeader(leafId: string, dropFracX: number, dropFracY: number) {
   return { startX, startY, dropX, dropY };
 }
 
+async function dragSplitDivider(
+  workspaceId: string,
+  splitId: string,
+  deltaPx: number,
+  steps: number,
+) {
+  const workspaceRoot = getSessionWorkspaceRoot(workspaceId);
+  const separator = Array.from(workspaceRoot?.querySelectorAll('[role="separator"][data-split-id]') ?? [])
+    .find((element): element is HTMLElement => (
+      element instanceof HTMLElement && element.dataset.splitId === splitId
+    ));
+  if (!separator) {
+    throw new Error(`Split divider not found for ${splitId}`);
+  }
+  const direction = separator.getAttribute('aria-orientation') === 'horizontal'
+    ? 'horizontal'
+    : 'vertical';
+  const rect = separator.getBoundingClientRect();
+  const startX = rect.left + rect.width / 2;
+  const startY = rect.top + rect.height / 2;
+  const pointerId = 1;
+  const moveCount = Math.max(1, Math.round(steps));
+  const fire = (
+    type: string,
+    target: EventTarget,
+    clientX: number,
+    clientY: number,
+    extra: PointerEventInit,
+  ) => {
+    target.dispatchEvent(new PointerEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      pointerId,
+      pointerType: 'mouse',
+      isPrimary: true,
+      clientX,
+      clientY,
+      ...extra,
+    }));
+  };
+
+  fire('pointerdown', separator, startX, startY, { button: 0, buttons: 1 });
+  for (let index = 1; index <= moveCount; index += 1) {
+    const progress = index / moveCount;
+    const clientX = direction === 'vertical' ? startX + deltaPx * progress : startX;
+    const clientY = direction === 'horizontal' ? startY + deltaPx * progress : startY;
+    fire('pointermove', window, clientX, clientY, { buttons: 1 });
+    await nextAnimationFrame();
+  }
+  const endX = direction === 'vertical' ? startX + deltaPx : startX;
+  const endY = direction === 'horizontal' ? startY + deltaPx : startY;
+  fire('pointerup', window, endX, endY, { button: 0, buttons: 0 });
+  await settleUi(2);
+
+  return {
+    splitId,
+    direction,
+    startX,
+    startY,
+    endX,
+    endY,
+    steps: moveCount,
+    splits: collectSplitDomMetrics(workspaceId),
+  };
+}
+
 function clickElement(element: HTMLElement) {
   element.dispatchEvent(new MouseEvent('mousedown', {
     bubbles: true,
@@ -1879,6 +1946,24 @@ export function useUiAutomationBridge({
         const points = dragLeafHeader(leafId, dropFracX, dropFracY);
         await settleUi(2);
         return { sessionId, leafId, viewSessionId, dropFracX, dropFracY, ...points };
+      }
+      case 'drag_split': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const session = sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+        const splitId = typeof payload.splitId === 'string' ? payload.splitId : '';
+        const deltaPx = typeof payload.deltaPx === 'number' ? payload.deltaPx : 0;
+        const steps = typeof payload.steps === 'number' ? payload.steps : 8;
+        if (!splitId || !Number.isFinite(deltaPx) || !Number.isFinite(steps)) {
+          throw new Error('drag_split requires splitId and numeric deltaPx/steps');
+        }
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
+        selectSession(sessionId);
+        await settleUi(2);
+        const result = await dragSplitDivider(session.workspaceId, splitId, deltaPx, steps);
+        return { sessionId, viewSessionId, workspaceId: session.workspaceId, ...result };
       }
       case 'move_workspace_leaf': {
         const sourceWorkspaceId = typeof payload.sourceWorkspaceId === 'string' ? payload.sourceWorkspaceId : '';

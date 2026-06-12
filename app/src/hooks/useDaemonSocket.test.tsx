@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { ptyAttach, ptyKill, ptySpawn } from '../pty/bridge';
+import { ptyAttach, ptyDetach, ptyKill, ptySpawn } from '../pty/bridge';
 import { PROTOCOL_VERSION, retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
 
 class FakeWebSocket {
@@ -164,6 +164,36 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     // Signal kill (e.g. reload/close): signal is forwarded so consumers can skip auto-close.
     ws.emit({ event: 'session_exited', id: 'killed', exit_code: -1, signal: 'SIGTERM' });
     expect(onSessionExited).toHaveBeenCalledWith({ id: 'killed', exitCode: -1, signal: 'SIGTERM' });
+
+    unmount();
+  });
+
+  it('keeps the socket connected across callback rerenders and uses the latest callback', async () => {
+    const firstSessionsUpdate = vi.fn();
+    const latestSessionsUpdate = vi.fn();
+    const { rerender, unmount } = renderHook(
+      ({ onSessionsUpdate }) => useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+      { initialProps: { onSessionsUpdate: firstSessionsUpdate } },
+    );
+
+    const ws = await waitForOpenSocket();
+    rerender({ onSessionsUpdate: latestSessionsUpdate });
+
+    expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    act(() => {
+      ws.emit({ event: 'sessions_updated', sessions: [] });
+    });
+    expect(firstSessionsUpdate).not.toHaveBeenCalled();
+    expect(latestSessionsUpdate).toHaveBeenCalledWith([]);
 
     unmount();
   });
@@ -926,6 +956,78 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('ignores an attach result after the runtime was detached', async () => {
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+    const ws = await waitForOpenSocket();
+    const initialState = {
+      event: 'initial_state',
+      protocol_version: PROTOCOL_VERSION,
+      sessions: [{
+        id: 'sess-canceled',
+        label: 'Canceled',
+        agent: 'codex',
+        directory: '/tmp/repo',
+        state: 'working',
+      }],
+      workspaces: [],
+      prs: [],
+      repos: [],
+      authors: [],
+      settings: {},
+    };
+
+    act(() => {
+      ws.emit(initialState);
+    });
+    const attachPromise = ptyAttach({
+      args: {
+        id: 'sess-canceled',
+        cols: 120,
+        rows: 40,
+        agent: 'codex',
+        policy: 'same_app_remount',
+      },
+    });
+    await waitFor(() => {
+      expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual({
+        cmd: 'attach_session',
+        id: 'sess-canceled',
+        attach_policy: 'same_app_remount',
+      });
+    });
+
+    await ptyDetach({ id: 'sess-canceled' });
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'sess-canceled',
+        success: true,
+        cols: 120,
+        rows: 40,
+        running: true,
+      });
+    });
+    await expect(attachPromise).rejects.toThrow('Attach session canceled');
+
+    act(() => {
+      ws.emit(initialState);
+    });
+    const attachCommands = ws.sent
+      .map((entry) => JSON.parse(entry))
+      .filter((entry) => entry.cmd === 'attach_session' && entry.id === 'sess-canceled');
+    expect(attachCommands).toHaveLength(1);
+    unmount();
+  });
+
   it('preserves daemon geometry while relaunch restores before workspace layout settles', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
@@ -1570,6 +1672,143 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('replays a fresh same-app snapshot when the mounted pane geometry differs', async () => {
+    (window as Window & {
+      __TEST_PTY_EVENTS?: Array<{
+        event: string;
+        id: string;
+        data?: string;
+        cols?: number;
+        rows?: number;
+        source?: string;
+        reason?: string;
+      }>;
+    }).__TEST_PTY_EVENTS = [];
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: PROTOCOL_VERSION,
+        sessions: [{
+          id: 'sess-existing',
+          label: 'thunk',
+          agent: 'codex',
+          directory: '/tmp/repo',
+          workspace_id: 'workspace-sess-existing',
+          state: 'idle',
+          state_since: '2026-04-08T00:00:00Z',
+          state_updated_at: '2026-04-08T00:00:00Z',
+          last_seen: '2026-04-08T00:00:00Z',
+        }],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    const attachPromise = ptyAttach({
+      args: {
+        id: 'sess-existing',
+        cols: 52,
+        rows: 35,
+        shell: false,
+        agent: 'codex',
+        policy: 'fresh_spawn',
+      },
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({
+        cmd: 'attach_session',
+        id: 'sess-existing',
+        attach_policy: 'same_app_remount',
+      });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'pty_output',
+        id: 'sess-existing',
+        seq: 29377,
+        data: btoa('live-after-snapshot'),
+      });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'sess-existing',
+        success: true,
+        cols: 56,
+        rows: 35,
+        screen_cols: 56,
+        screen_rows: 35,
+        screen_snapshot: btoa('fresh-daemon-frame'),
+        screen_snapshot_fresh: true,
+        last_seq: 29376,
+        running: true,
+      });
+    });
+
+    await expect(attachPromise).resolves.toBeUndefined();
+    const ptyEvents = (window as Window & {
+      __TEST_PTY_EVENTS?: Array<{
+        event: string;
+        id: string;
+        data?: string;
+        cols?: number;
+        rows?: number;
+        source?: string;
+        reason?: string;
+      }>;
+    }).__TEST_PTY_EVENTS || [];
+    expect(ptyEvents).toContainEqual({
+      event: 'local_resize',
+      id: 'sess-existing',
+      cols: 56,
+      rows: 35,
+      source: 'attach_replay',
+    });
+    expect(ptyEvents).toContainEqual({
+      event: 'reset',
+      id: 'sess-existing',
+      reason: 'snapshot_restore',
+    });
+    expect(ptyEvents).toContainEqual({
+      event: 'data',
+      id: 'sess-existing',
+      data: btoa('fresh-daemon-frame'),
+      source: 'attach_replay',
+      suppressResponses: true,
+    });
+    expect(ptyEvents).toContainEqual({ event: 'replay_complete', id: 'sess-existing' });
+    const snapshotIndex = ptyEvents.findIndex((event) => (
+      event.event === 'data' && event.source === 'attach_replay'
+    ));
+    const queuedLiveIndex = ptyEvents.findIndex((event) => (
+      event.event === 'data' && event.data === btoa('live-after-snapshot')
+    ));
+    const replayCompleteIndex = ptyEvents.findIndex((event) => event.event === 'replay_complete');
+    expect(snapshotIndex).toBeGreaterThanOrEqual(0);
+    expect(queuedLiveIndex).toBeGreaterThan(snapshotIndex);
+    expect(replayCompleteIndex).toBeGreaterThan(queuedLiveIndex);
+    unmount();
+  });
+
   it('replays geometry-aware segmented raw history for relaunching a daemon-known Codex session', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
@@ -1647,7 +1886,16 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         cols: 58,
         rows: 46,
         replay_segments: [
-          { cols: 118, rows: 48, data: 'd2lkZS1oaXN0b3J5' },
+          {
+            cols: 118,
+            rows: 48,
+            data: btoa('wide \x1b]8;;https://example.com\x07label\x1b]8;;\x07 history'),
+          },
+          {
+            cols: 118,
+            rows: 48,
+            data: btoa(' continued'),
+          },
           { cols: 58, rows: 46, data: 'bmFycm93LXRhaWw=' },
         ],
         screen_cols: 58,
@@ -1671,9 +1919,29 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     }).__TEST_PTY_EVENTS || [];
     expect(ptyEvents).toContainEqual({ event: 'reset', id: 'sess-existing', reason: 'reattach' });
     expect(ptyEvents).toContainEqual({ event: 'local_resize', id: 'sess-existing', cols: 118, rows: 48, source: 'attach_replay' });
-    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'd2lkZS1oaXN0b3J5', source: 'attach_replay', suppressResponses: true });
+    expect(ptyEvents).toContainEqual({
+      event: 'data',
+      id: 'sess-existing',
+      data: btoa('wide \x1b]8;;https://example.com\x07label\x1b]8;;\x07 history'),
+      source: 'attach_replay',
+      suppressResponses: true,
+    });
+    expect(ptyEvents).toContainEqual({
+      event: 'data',
+      id: 'sess-existing',
+      data: btoa(' continued'),
+      source: 'attach_replay',
+      suppressResponses: true,
+    });
     expect(ptyEvents).toContainEqual({ event: 'local_resize', id: 'sess-existing', cols: 58, rows: 46, source: 'attach_replay' });
     expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'bmFycm93LXRhaWw=', source: 'attach_replay', suppressResponses: true });
+    expect(ptyEvents).toContainEqual({ event: 'replay_complete', id: 'sess-existing' });
+    expect(ptyEvents.filter((event) => (
+      event.event === 'local_resize'
+      && event.id === 'sess-existing'
+      && event.cols === 118
+      && event.rows === 48
+    ))).toHaveLength(1);
     expect(ptyEvents.some((event) => event.event === 'data' && event.id === 'sess-existing' && event.data === 'c25hcHNob3Qtd2lucw==')).toBe(false);
 
     unmount();
@@ -1745,7 +2013,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         success: true,
         cols: 58,
         rows: 46,
-        scrollback: 'cmF3LXJlcGxheQ==',
+        scrollback: btoa('raw \x1b]8;;https://example.com\x07label\x1b]8;;\x07 replay'),
         scrollback_truncated: true,
         running: true,
       });
@@ -1755,7 +2023,14 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     const ptyEvents = (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string; source?: string }> }).__TEST_PTY_EVENTS || [];
     expect(ptyEvents).toContainEqual({ event: 'reset', id: 'sess-existing', reason: 'reattach' });
-    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'cmF3LXJlcGxheQ==', source: 'attach_replay', suppressResponses: true });
+    expect(ptyEvents).toContainEqual({
+      event: 'data',
+      id: 'sess-existing',
+      data: btoa('raw \x1b]8;;https://example.com\x07label\x1b]8;;\x07 replay'),
+      source: 'attach_replay',
+      suppressResponses: true,
+    });
+    expect(ptyEvents).toContainEqual({ event: 'replay_complete', id: 'sess-existing' });
 
     const resizes = ws.sent
       .map((entry) => JSON.parse(entry))

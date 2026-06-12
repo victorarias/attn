@@ -91,12 +91,11 @@ type attachReplayPayload struct {
 	rawReplayReason     string
 }
 
-// maxAgentRawReplayBytes bounds how much raw terminal history an attach
-// replays into a remounted pane. It matches pty.DefaultReplayLogSize so a
-// restored pane gets everything the worker retained; replay delivery is cheap
-// (a handful of websocket messages) and the parse cost is a one-time burst at
-// remount.
-const maxAgentRawReplayBytes = 8 * 1024 * 1024
+// maxAgentRawReplayBytes bounds how much raw terminal history one attach can
+// synchronously feed into the frontend terminal model. Workers retain a deeper
+// replay log so the daemon can select the newest self-sufficient tail, but the
+// WebKit main thread must not parse the full retained history in one message.
+const maxAgentRawReplayBytes = 64 * 1024
 
 func shouldPreferAgentRawReplay(session *protocol.Session) bool {
 	if session == nil {

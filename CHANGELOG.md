@@ -6,6 +6,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-11]
+
+### Fixed
+- **Opening or resizing a workspace with deep terminal history no longer blanks or stalls the app.** attn now keeps the daemon connection stable while navigating, restores terminal history only when a workspace becomes visible, limits each synchronous replay to 64 KiB, uses a fixed Ghostty terminal core, preserves OSC 8 hyperlink metadata, compacts redundant replay work, coalesces split-drag geometry updates, and returns visible panes to their live size after replay.
+- **New Codex sessions now use the visible pane size immediately.** Their first measured terminal geometry is retained until attachment completes instead of leaving the PTY at `80x24` until the window is resized.
+
+---
+
 ## [2026-06-10]
 
 ### Added

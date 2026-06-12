@@ -7,7 +7,7 @@ import {
   useState,
 } from 'react';
 import { Ghostty, InputHandler, CellFlags, type GhosttyCell, type GhosttyTerminal as GhosttyModel } from 'ghostty-web';
-import ghosttyWasmUrl from 'ghostty-web/ghostty-vt.wasm?url';
+import { ghosttyWasmUrl } from '../ghostty/wasm';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import {
   cleanTerminalLines,
@@ -28,6 +28,12 @@ import {
   getTerminalTheme,
   type ResolvedTheme,
 } from '../utils/terminalSizing';
+import {
+  createResizeCoalescer,
+  resizeGhosttyWithoutReflow,
+  type ResizeCoalescer,
+  type TerminalDimensions,
+} from '../utils/ghosttyResize';
 import { buildTerminalQueryResponses } from '../utils/terminalQueryResponses';
 import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import { recordTerminalLinkHitTestEvent } from '../utils/terminalLinkHitTestLog';
@@ -77,7 +83,7 @@ interface GhosttyTerminalProps {
   };
   onInput: (data: string) => void;
   onReady: (terminal: GhosttyTerminalHandle) => void;
-  onResize: (cols: number, rows: number, options?: { reason?: string; deferPty?: boolean }) => void;
+  onResize: (cols: number, rows: number, options?: { reason?: string }) => void;
 }
 
 export interface GhosttyTerminalHandle {
@@ -85,8 +91,20 @@ export interface GhosttyTerminalHandle {
   focus: () => boolean;
   typeTextViaInput: (text: string) => boolean;
   isInputFocused: () => boolean;
-  write: (data: string | Uint8Array, options?: { suppressResponses?: boolean }) => Promise<void>;
-  resizeLocal: (cols: number, rows: number) => Promise<void>;
+  write: (
+    data: string | Uint8Array,
+    options?: {
+      suppressResponses?: boolean;
+      yieldBefore?: boolean;
+      deferRender?: boolean;
+      historicalReplay?: boolean;
+    },
+  ) => Promise<void>;
+  resizeLocal: (
+    cols: number,
+    rows: number,
+    options?: { historicalReplay?: boolean },
+  ) => Promise<void>;
   reset: () => void;
   scrollToTop: () => boolean;
   getText: () => string;
@@ -121,11 +139,18 @@ function isWorkspaceResizeActive(element: HTMLElement | null): boolean {
   return Boolean(element?.closest('.session-terminal-panes[data-resizing-split-id]'));
 }
 
-function isWorkspaceResizeDragActive(element: HTMLElement | null): boolean {
+export function isWorkspaceResizeDragActive(element: HTMLElement | null): boolean {
   if (document.documentElement.dataset.attnWorkspaceResizing === '1') {
     return true;
   }
   return Boolean(element?.closest('.session-terminal-panes[data-resizing-split-id]'));
+}
+
+export function fitRequiresTerminalResize(
+  current: TerminalDimensions,
+  next: TerminalDimensions,
+): boolean {
+  return current.cols !== next.cols || current.rows !== next.rows;
 }
 
 function literalUrlAtColumn(line: string, col: number): string | null {
@@ -272,6 +297,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const hoveredCellRef = useRef<{ row: number; col: number } | null>(null);
     const acceleratorHeldRef = useRef(false);
     const writeChainRef = useRef(Promise.resolve());
+    const historicalReplayGenerationRef = useRef(0);
+    const fitResizeCoalescerRef = useRef<ResizeCoalescer | null>(null);
+    const applyFitDimensionsRef = useRef<(dimensions: TerminalDimensions) => void>(() => undefined);
     const osc52StateRef = useRef<Osc52State>({ pending: '' });
     const synchronizedOutputStateRef = useRef<SynchronizedOutputState>({ active: false, pending: '' });
     const synchronizedOutputRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -573,12 +601,40 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return writeChainRef.current;
     }, []);
 
-    const write = useCallback((data: string | Uint8Array, options?: { suppressResponses?: boolean }) => {
+    const write = useCallback((
+      data: string | Uint8Array,
+      options?: {
+        suppressResponses?: boolean;
+        yieldBefore?: boolean;
+        deferRender?: boolean;
+        historicalReplay?: boolean;
+      },
+    ) => {
+      const historicalReplayGeneration = historicalReplayGenerationRef.current;
       return enqueueOperation(async () => {
+        if (
+          options?.historicalReplay
+          && historicalReplayGeneration !== historicalReplayGenerationRef.current
+        ) {
+          return;
+        }
+        if (options?.yieldBefore) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+        }
+        if (
+          options?.historicalReplay
+          && historicalReplayGeneration !== historicalReplayGenerationRef.current
+        ) {
+          return;
+        }
         const terminal = terminalRef.current;
         if (!terminal) return;
         const searchableOutput = typeof data === 'string' ? data : new TextDecoder().decode(data);
-        if (searchableOutput) {
+        if (options?.historicalReplay) {
+          // Replay reconstructs the terminal model; it must not re-execute
+          // stale host integrations such as OSC 52 clipboard writes.
+          osc52StateRef.current = { pending: '' };
+        } else if (searchableOutput) {
           // Preserve the existing terminal contract: OSC 52 writes copy text
           // to the host clipboard; clipboard read queries are not answered.
           const parsed = parseOsc52Writes(osc52StateRef.current, searchableOutput);
@@ -644,6 +700,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           cols: terminal.cols,
           rows: terminal.rows,
         });
+        if (options?.deferRender && synchronizedOutput.shouldRender) {
+          return;
+        }
         if (synchronizedOutput.shouldRender) {
           flushSynchronizedOutputRender();
         } else {
@@ -654,42 +713,104 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
     // Replay segments alternate resize and bytes; both must be applied on one
     // chain or all historical bytes are parsed at the final geometry.
-    const resizeLocal = useCallback((cols: number, rows: number) => enqueueOperation(() => {
-      const terminal = terminalRef.current;
-      const renderer = rendererRef.current;
-      if (!terminal || !renderer) return;
-      const fromCols = terminal.cols;
-      const fromRows = terminal.rows;
-      if (fromCols === cols && fromRows === rows) {
+    const resizeLocal = useCallback((
+      cols: number,
+      rows: number,
+      options?: { historicalReplay?: boolean },
+    ) => {
+      const historicalReplayGeneration = historicalReplayGenerationRef.current;
+      const currentTerminal = terminalRef.current;
+      if (
+        !options?.historicalReplay
+        && currentTerminal
+        && fitRequiresTerminalResize(
+          { cols: currentTerminal.cols, rows: currentTerminal.rows },
+          { cols, rows },
+        )
+      ) {
+        historicalReplayGenerationRef.current += 1;
+      }
+      return enqueueOperation(() => {
+        if (
+          options?.historicalReplay
+          && historicalReplayGeneration !== historicalReplayGenerationRef.current
+        ) {
+          return;
+        }
+        const terminal = terminalRef.current;
+        const renderer = rendererRef.current;
+        if (!terminal || !renderer) return;
+        const fromCols = terminal.cols;
+        const fromRows = terminal.rows;
+        if (fromCols === cols && fromRows === rows) {
+          modelSizeRef.current = { cols, rows };
+          noteResize(diagKeyRef.current, {
+            session: runtimeMetaRef.current?.sessionId ?? undefined,
+            paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
+            source: 'resizeLocal', fromCols, fromRows, toCols: cols, toRows: rows,
+            noop: true,
+          });
+          return;
+        }
+        if (options?.historicalReplay) {
+          resizeGhosttyWithoutReflow(terminal, cols, rows);
+        } else {
+          terminal.resize(cols, rows);
+        }
         modelSizeRef.current = { cols, rows };
+        renderer.resize(cols, rows);
         noteResize(diagKeyRef.current, {
           session: runtimeMetaRef.current?.sessionId ?? undefined,
           paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
           source: 'resizeLocal', fromCols, fromRows, toCols: cols, toRows: rows,
-          noop: true,
+          noop: false,
+          historicalReplay: options?.historicalReplay ?? false,
         });
-        return;
-      }
-      terminal.resize(cols, rows);
-      modelSizeRef.current = { cols, rows };
-      renderer.resize(cols, rows);
-      noteResize(diagKeyRef.current, {
-        session: runtimeMetaRef.current?.sessionId ?? undefined,
-        paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
-        source: 'resizeLocal', fromCols, fromRows, toCols: cols, toRows: rows,
-        noop: false,
+        if (!options?.historicalReplay) {
+          renderSurface(true);
+        }
       });
-      renderSurface(true);
-    }), [enqueueOperation, renderSurface]);
+    }, [enqueueOperation, renderSurface]);
 
-    const fit = useCallback(() => {
-      const container = containerRef.current;
+    const applyFitDimensions = useCallback((dims: TerminalDimensions) => {
       const terminal = terminalRef.current;
       const renderer = rendererRef.current;
-      if (!container || !terminal || !renderer) return;
+      if (!terminal || !renderer) return;
       // Inactive session wrappers use display:none. Resizing the Ghostty
       // model from that hidden geometry discards an idle alternate-screen
       // frame before the session becomes visible again.
+      const paneKind = runtimeMetaRef.current?.paneKind ?? undefined;
+      const session = runtimeMetaRef.current?.sessionId ?? undefined;
+      if (runtimeMetaRef.current && !runtimeMetaRef.current.isActiveSession) {
+        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'inactiveSession' });
+        return;
+      }
+      if (!fitRequiresTerminalResize({ cols: terminal.cols, rows: terminal.rows }, dims)) {
+        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'sameSize', toCols: dims.cols, toRows: dims.rows });
+        renderSurface(false);
+        return;
+      }
+      // A no-op fit can arrive while cooperative replay is yielding between
+      // chunks. Only a real geometry change conflicts with the queued history.
+      historicalReplayGenerationRef.current += 1;
+      const fromCols = terminal.cols;
+      const fromRows = terminal.rows;
+      resizeGhosttyWithoutReflow(terminal, dims.cols, dims.rows);
+      modelSizeRef.current = dims;
+      renderer.resize(dims.cols, dims.rows);
+      noteResize(diagKeyRef.current, {
+        session, paneKind, source: 'fit', fromCols, fromRows, toCols: dims.cols, toRows: dims.rows,
+      });
+      renderSurface(true);
+      onResizeRef.current(dims.cols, dims.rows, { reason: 'ghostty_fit' });
+    }, [renderSurface]);
+
+    applyFitDimensionsRef.current = applyFitDimensions;
+
+    const fit = useCallback(() => {
+      const container = containerRef.current;
+      const renderer = rendererRef.current;
+      if (!container || !renderer) return;
       const paneKind = runtimeMetaRef.current?.paneKind ?? undefined;
       const session = runtimeMetaRef.current?.sessionId ?? undefined;
       if (runtimeMetaRef.current && !runtimeMetaRef.current.isActiveSession) {
@@ -701,25 +822,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'suspiciousSize', toCols: dims.cols, toRows: dims.rows });
         return;
       }
-      if (dims.cols === terminal.cols && dims.rows === terminal.rows) {
-        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'sameSize', toCols: dims.cols, toRows: dims.rows });
-        renderSurface(false);
-        return;
+      if (!fitResizeCoalescerRef.current) {
+        fitResizeCoalescerRef.current = createResizeCoalescer(
+          (dimensions) => applyFitDimensionsRef.current(dimensions),
+        );
       }
-      const fromCols = terminal.cols;
-      const fromRows = terminal.rows;
-      terminal.resize(dims.cols, dims.rows);
-      modelSizeRef.current = dims;
-      renderer.resize(dims.cols, dims.rows);
-      noteResize(diagKeyRef.current, {
-        session, paneKind, source: 'fit', fromCols, fromRows, toCols: dims.cols, toRows: dims.rows,
-      });
-      renderSurface(true);
-      onResizeRef.current(dims.cols, dims.rows, {
-        reason: 'ghostty_fit',
-        deferPty: isWorkspaceResizeDragActive(container),
-      });
-    }, [renderSurface]);
+      fitResizeCoalescerRef.current.submit(dims, isWorkspaceResizeDragActive(container));
+    }, []);
 
     useImperativeHandle(ref, () => ({
       fit,
@@ -889,6 +998,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         unregister();
         clearSynchronizedOutputRenderTimer();
         cancelScheduledOutputRender();
+        fitResizeCoalescerRef.current?.cancel();
+        fitResizeCoalescerRef.current = null;
         inputRef.current?.dispose();
         rendererRef.current?.dispose();
         terminalRef.current?.free();
