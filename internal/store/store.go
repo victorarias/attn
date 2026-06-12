@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
@@ -1654,102 +1656,161 @@ func (s *Store) ClearProfileRole(role, sessionID string) error {
 
 // Recent Locations methods
 
+// resolveRecentLocationPath collapses a path inside a linked git worktree to
+// the worktree's main repository root so all worktrees of a repo share one
+// recent-locations entry. Non-worktree paths are returned unchanged.
+func resolveRecentLocationPath(path string) string {
+	for dir := filepath.Clean(path); ; {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			if mainRepo := git.GetMainRepoFromWorktree(dir); mainRepo != "" {
+				return mainRepo
+			}
+			return path
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return path
+		}
+		dir = parent
+	}
+}
+
+// frecencyScore ranks a location by combining how often it is used with how
+// recently it was used, so a frequently-used project keeps a stable slot near
+// the top of the picker even after one-off sessions elsewhere.
+func frecencyScore(useCount int, lastSeen string, now time.Time) float64 {
+	count := float64(useCount)
+	t, err := time.Parse(time.RFC3339, lastSeen)
+	if err != nil {
+		return count * 0.25
+	}
+	switch age := now.Sub(t); {
+	case age < time.Hour:
+		return count * 4
+	case age < 24*time.Hour:
+		return count * 2
+	case age < 7*24*time.Hour:
+		return count * 0.5
+	default:
+		return count * 0.25
+	}
+}
+
 // UpsertRecentLocation adds or updates a location in the recent locations table
-func (s *Store) UpsertRecentLocation(path, label string) {
+func (s *Store) UpsertRecentLocation(path string) {
+	path = resolveRecentLocationPath(path)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	now := time.Now().Format(time.RFC3339)
 	if s.db == nil {
 		if s.recentLocations == nil {
 			s.recentLocations = make(map[string]*protocol.RecentLocation)
 		}
-		now := time.Now().Format(time.RFC3339)
 		if existing := s.recentLocations[path]; existing != nil {
-			existing.Label = label
 			existing.LastSeen = now
 			existing.UseCount++
 			return
 		}
 		s.recentLocations[path] = &protocol.RecentLocation{
 			Path:     path,
-			Label:    label,
 			LastSeen: now,
 			UseCount: 1,
 		}
 		return
 	}
 
-	now := time.Now().Format(time.RFC3339)
 	s.execLog(`
-		INSERT INTO recent_locations (path, label, last_seen, use_count)
-		VALUES (?, ?, ?, 1)
+		INSERT INTO recent_locations (path, last_seen, use_count)
+		VALUES (?, ?, 1)
 		ON CONFLICT(path) DO UPDATE SET
-			label = excluded.label,
 			last_seen = excluded.last_seen,
 			use_count = use_count + 1`,
-		path, label, now)
+		path, now)
 }
 
-// GetRecentLocations returns recent locations that still exist on disk, sorted by last_seen DESC
+// GetRecentLocations returns recent locations that still exist on disk,
+// ranked by frecency (frequency weighted by recency)
 func (s *Store) GetRecentLocations(limit int) []*protocol.RecentLocation {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.db == nil {
-		if limit <= 0 {
-			limit = 20
-		}
-		result := make([]*protocol.RecentLocation, 0, len(s.recentLocations))
-		for _, loc := range s.recentLocations {
-			if _, err := os.Stat(loc.Path); os.IsNotExist(err) {
-				continue
-			}
-			cloned := *loc
-			result = append(result, &cloned)
-		}
-		sort.Slice(result, func(i, j int) bool {
-			return result[i].LastSeen > result[j].LastSeen
-		})
-		if len(result) > limit {
-			result = result[:limit]
-		}
-		return result
-	}
-
 	if limit <= 0 {
 		limit = 20
 	}
 
-	rows, err := s.db.Query(`
-		SELECT path, label, last_seen, use_count
-		FROM recent_locations
-		ORDER BY last_seen DESC
-		LIMIT ?`, limit)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-
-	var result []*protocol.RecentLocation
-	var toDelete []string
-
-	for rows.Next() {
-		var loc protocol.RecentLocation
-		if err := rows.Scan(&loc.Path, &loc.Label, &loc.LastSeen, &loc.UseCount); err != nil {
-			continue
+	s.mu.RLock()
+	var raw []*protocol.RecentLocation
+	if s.db == nil {
+		raw = make([]*protocol.RecentLocation, 0, len(s.recentLocations))
+		for _, loc := range s.recentLocations {
+			cloned := *loc
+			raw = append(raw, &cloned)
 		}
+	} else {
+		// Fetch every row: ranking happens below, and pre-truncating here
+		// (e.g. by last_seen) would hide old-but-frequent locations. The
+		// table stays small via missing-path cleanup and
+		// CleanupStaleLocations.
+		rows, err := s.db.Query(`
+			SELECT path, last_seen, use_count
+			FROM recent_locations`)
+		if err != nil {
+			s.mu.RUnlock()
+			return nil
+		}
+		for rows.Next() {
+			var loc protocol.RecentLocation
+			if err := rows.Scan(&loc.Path, &loc.LastSeen, &loc.UseCount); err != nil {
+				continue
+			}
+			raw = append(raw, &loc)
+		}
+		rows.Close()
+	}
+	s.mu.RUnlock()
 
-		// Validate path still exists
+	// Merge rows recorded before worktree paths collapsed into their main
+	// repository root, and drop entries whose directory disappeared.
+	var toDelete []string
+	merged := make(map[string]*protocol.RecentLocation, len(raw))
+	for _, loc := range raw {
 		if _, err := os.Stat(loc.Path); os.IsNotExist(err) {
 			toDelete = append(toDelete, loc.Path)
 			continue
 		}
+		resolved := resolveRecentLocationPath(loc.Path)
+		if existing := merged[resolved]; existing != nil {
+			existing.UseCount += loc.UseCount
+			if loc.LastSeen > existing.LastSeen {
+				existing.LastSeen = loc.LastSeen
+			}
+			continue
+		}
+		loc.Path = resolved
+		merged[resolved] = loc
+	}
 
-		result = append(result, &loc)
+	result := make([]*protocol.RecentLocation, 0, len(merged))
+	for _, loc := range merged {
+		result = append(result, loc)
+	}
+	now := time.Now()
+	sort.Slice(result, func(i, j int) bool {
+		si := frecencyScore(result[i].UseCount, result[i].LastSeen, now)
+		sj := frecencyScore(result[j].UseCount, result[j].LastSeen, now)
+		if si != sj {
+			return si > sj
+		}
+		if result[i].LastSeen != result[j].LastSeen {
+			return result[i].LastSeen > result[j].LastSeen
+		}
+		return result[i].Path < result[j].Path
+	})
+	if len(result) > limit {
+		result = result[:limit]
 	}
 
 	// Clean up non-existent paths (async, don't block the read)
-	if len(toDelete) > 0 {
+	if len(toDelete) > 0 && s.db != nil {
 		go func() {
 			s.mu.Lock()
 			defer s.mu.Unlock()
@@ -1811,13 +1872,6 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
-}
-
-func nullString(s string) interface{} {
-	if s == "" {
-		return nil
-	}
-	return s
 }
 
 func nullPtrString(s *string) interface{} {

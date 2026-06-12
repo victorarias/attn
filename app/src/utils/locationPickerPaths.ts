@@ -1,3 +1,12 @@
+export function pathBasename(path: string): string {
+  const trimmed = path.replace(/\/+$/, '');
+  if (!trimmed) {
+    return path ? '/' : '';
+  }
+  const idx = trimmed.lastIndexOf('/');
+  return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
+}
+
 export function toDisplayPath(path: string, homePath: string): string {
   if (!path) {
     return '';

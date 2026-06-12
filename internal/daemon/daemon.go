@@ -1843,8 +1843,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	}
 
 	// Track this location in recent locations
-	label := filepath.Base(msg.Dir)
-	d.store.UpsertRecentLocation(msg.Dir, label)
+	d.store.UpsertRecentLocation(msg.Dir)
 
 	d.sendOK(conn)
 

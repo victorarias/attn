@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-06-12]
 
+### Changed
+- **The new-session location picker is faster to use and easier to scan.** Recent locations now always show the folder name instead of session names like "shell" or manual renames, so the list reads as a list of places again. The list is ranked by how often *and* how recently you use each location, keeping your main projects in stable slots near the top, and all worktrees of a repository collapse into a single entry for its main checkout. The top recent location is pre-highlighted when the picker opens, so pressing Enter immediately opens your most-used project — typing or arrow keys take over as before, and Escape still closes the dialog right away.
+
 ### Fixed
 - **Resizing or splitting a pane while its history is still restoring no longer wipes the terminal.** A geometry change landing mid-restore used to silently discard the queued history, leaving the pane blank (after an app relaunch) or without scrollback (after a split). A resize that matches where the restore already ends now lets it finish, and a genuine size change re-requests the history at the new size — including the command blocks, which come back clickable.
 - **The first output after reconnecting to a session no longer goes missing, and new panes no longer intermittently get stuck loading.** Reconnecting (relaunch, split, or recovery) could silently swallow the next chunk of terminal output — typed commands would run but never appear. Separately, two rapid attachments to the same session could pair a response with the wrong request and leave the pane waiting forever. Both reconnect handoffs are now exact: output resumes with no gap, and attachments run one at a time per session.
