@@ -147,6 +147,14 @@ func TestDetectTerminalQueries(t *testing.T) {
 	if !queries.da1 || !queries.cpr || !queries.osc10 || !queries.osc11 {
 		t.Fatalf("detectTerminalQueries() = %+v, want all queries detected", queries)
 	}
+	if queries.da1BeforeCPR {
+		t.Fatalf("detectTerminalQueries() = %+v, want da1BeforeCPR=false for CPR-first chunk", queries)
+	}
+
+	reversed := detectTerminalQueries([]byte("\x1b[0c...\x1b[6n"))
+	if !reversed.da1BeforeCPR {
+		t.Fatalf("detectTerminalQueries() = %+v, want da1BeforeCPR=true for DA1-first chunk", reversed)
+	}
 }
 
 func TestClaimTerminalQueryResponsesOnlyOnce(t *testing.T) {

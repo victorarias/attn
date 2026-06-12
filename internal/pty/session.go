@@ -44,6 +44,9 @@ type terminalQueries struct {
 	cpr   bool
 	osc10 bool
 	osc11 bool
+	// da1BeforeCPR records that the chunk asked DA1 before CPR. Query-driven
+	// programs read replies sequentially, so the daemon answers in ask order.
+	da1BeforeCPR bool
 }
 
 func (q terminalQueries) any() bool {
@@ -317,18 +320,24 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				s.replayMu.Unlock()
 				// The daemon is the single authority for CPR (cursor position)
 				// and DA1 (device attributes) replies. Answer after the chunk is
-				// applied so the reported cursor is current, and reply in query
-				// order (CPR before DA1, matching fish's ESC[6n ESC[0c). fish
+				// applied so the reported cursor is current, and reply in the
+				// order the chunk asked (fish sends ESC[6n ESC[0c, but other
+				// programs may ask DA1 first and read replies sequentially). fish
 				// blocks its prompt redraw on the resize-triggered CPR+DA1 until it
 				// gets both; routing them through the daemon makes the replies
 				// race-free regardless of frontend attach/replay timing (the
 				// frontend no longer answers either). See writeCursorPositionResponse
 				// and writeDeviceAttributesResponse.
-				if queries.cpr {
-					s.writeCursorPositionResponse(logf)
-				}
-				if queries.da1 {
+				if queries.da1BeforeCPR {
 					s.writeDeviceAttributesResponse(logf)
+					s.writeCursorPositionResponse(logf)
+				} else {
+					if queries.cpr {
+						s.writeCursorPositionResponse(logf)
+					}
+					if queries.da1 {
+						s.writeDeviceAttributesResponse(logf)
+					}
 				}
 				s.fanOut(data, seq)
 				if s.detector != nil && s.onState != nil {
@@ -710,11 +719,14 @@ func (s *Session) closePTY() {
 }
 
 func detectTerminalQueries(data []byte) terminalQueries {
+	da1Idx := indexDA1Query(data)
+	cprIdx := indexCPRQuery(data)
 	return terminalQueries{
-		da1:   containsDA1Query(data),
-		cpr:   containsCPRQuery(data),
-		osc10: containsOSCColorQuery(data, "10"),
-		osc11: containsOSCColorQuery(data, "11"),
+		da1:          da1Idx >= 0,
+		cpr:          cprIdx >= 0,
+		da1BeforeCPR: da1Idx >= 0 && cprIdx >= 0 && da1Idx < cprIdx,
+		osc10:        containsOSCColorQuery(data, "10"),
+		osc11:        containsOSCColorQuery(data, "11"),
 	}
 }
 
@@ -870,9 +882,10 @@ func (s *Session) writeDeviceAttributesResponse(logf func(string, ...any)) {
 	}
 }
 
-// containsDA1Query scans data for a CSI Primary Device Attributes query
-// (ESC [ c  or  ESC [ 0 c).  It ignores DA2 (ESC [ > c) and other variants.
-func containsDA1Query(data []byte) bool {
+// indexDA1Query returns the offset of the first CSI Primary Device Attributes
+// query (ESC [ c  or  ESC [ 0 c) in data, or -1. It ignores DA2 (ESC [ > c)
+// and other variants.
+func indexDA1Query(data []byte) int {
 	for i := 0; i < len(data)-2; i++ {
 		if data[i] != 0x1b || data[i+1] != '[' {
 			continue
@@ -883,21 +896,24 @@ func containsDA1Query(data []byte) bool {
 			j++
 		}
 		if j < len(data) && data[j] == 'c' {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
-// containsCPRQuery scans data for a DSR 6 / CPR query (ESC [ 6 n).
-func containsCPRQuery(data []byte) bool {
+// indexCPRQuery returns the offset of the first DSR 6 / CPR query
+// (ESC [ 6 n) in data, or -1.
+func indexCPRQuery(data []byte) int {
 	for i := 0; i < len(data)-3; i++ {
 		if data[i] == 0x1b && data[i+1] == '[' && data[i+2] == '6' && data[i+3] == 'n' {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
+
+func containsCPRQuery(data []byte) bool { return indexCPRQuery(data) >= 0 }
 
 func containsOSCColorQuery(data []byte, code string) bool {
 	prefix := []byte("\x1b]" + code + ";?")

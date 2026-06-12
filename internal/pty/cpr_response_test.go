@@ -79,6 +79,56 @@ func TestDaemonAnswersCPRAndDA1FromReadLoop(t *testing.T) {
 	}
 }
 
+// TestTerminalQueryRepliesPreserveChunkOrder: a real terminal answers queries
+// in the order they were asked, and query-driven programs read replies
+// sequentially. A chunk asking DA1 before CPR must get the DA1 reply first —
+// not a fixed CPR-then-DA1 order tuned to fish.
+func TestTerminalQueryRepliesPreserveChunkOrder(t *testing.T) {
+	const cols, rows = 80, 24
+
+	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatalf("socketpair: %v", err)
+	}
+	ptmx := os.NewFile(uintptr(fds[0]), "ptmx")
+	peer := os.NewFile(uintptr(fds[1]), "peer")
+	t.Cleanup(func() { _ = ptmx.Close(); _ = peer.Close() })
+
+	s := &Session{
+		id:          "query-order",
+		cols:        cols,
+		rows:        rows,
+		ptmx:        ptmx,
+		cmd:         &exec.Cmd{}, // unstarted: readLoop's Wait() returns an error, never panics
+		scrollback:  NewRingBuffer(1 << 20),
+		replayLog:   NewReplayLog(1 << 20),
+		screen:      newVirtualScreen(cols, rows),
+		subscribers: make(map[string]*sessionSubscriber),
+		running:     true,
+		exited:      make(chan struct{}),
+		startedAt:   time.Now().Add(-time.Hour),
+	}
+	go s.readLoop(nil, func(string, ...any) {})
+
+	// DA1 first, then CPR — the reverse of fish's resize probe.
+	if _, err := peer.Write([]byte("\x1b[3;4H\x1b[0c\x1b[6n")); err != nil {
+		t.Fatalf("peer write: %v", err)
+	}
+
+	reply := readReplyUntil(t, peer, 2*time.Second, func(buf []byte) bool {
+		return bytes.IndexByte(buf, 'R') >= 0 && bytes.IndexByte(buf, 'c') >= 0
+	})
+
+	da1Idx := bytes.Index([]byte(reply), []byte("\x1b[?1;2c"))
+	cprIdx := bytes.Index([]byte(reply), []byte("\x1b[3;4R"))
+	if da1Idx < 0 || cprIdx < 0 {
+		t.Fatalf("expected both DA1 and CPR replies; got %q", reply)
+	}
+	if da1Idx > cprIdx {
+		t.Fatalf("DA1 was asked first but answered second; got %q", reply)
+	}
+}
+
 func readReplyUntil(t *testing.T, f *os.File, timeout time.Duration, done func([]byte) bool) string {
 	t.Helper()
 	_ = f.SetReadDeadline(time.Now().Add(timeout))
