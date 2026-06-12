@@ -1538,6 +1538,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             modelPrintable: countModelPrintable(model),
             lastPaintAt: lastRenderAtRef.current,
             lastPaintQuads: lastPaintQuadsRef.current,
+            // Mirrors renderSurface's inactive-session bail: a pane that is
+            // not allowed to paint must not be judged blank by the watchdog.
+            active: runtimeMetaRef.current ? runtimeMetaRef.current.isActiveSession : true,
           };
         });
         inputRef.current = new InputHandler(
