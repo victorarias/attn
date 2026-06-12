@@ -671,7 +671,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		if !isShell {
 			d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, spawnStartedAt)
 		}
-		d.store.UpsertRecentLocation(cwd, label)
+		d.store.UpsertRecentLocation(cwd)
 		d.associateSessionWithWorkspace(session.ID, workspaceID)
 		d.setWorkspacePaneStatusForSession(session.ID, workspacelayout.PaneStatusReady, "")
 		eventType := protocol.EventSessionRegistered

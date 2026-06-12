@@ -313,11 +313,7 @@ func (d *Daemon) handleRegisterWorkspace(client *wsClient, msg *protocol.Registe
 	snapshot, isNew := d.workspaces.register(id, title, directory, muted)
 	d.store.AddWorkspace(&snapshot)
 	// Make workspace directories available in the recent-locations picker.
-	label := title
-	if label == "" {
-		label = directory
-	}
-	d.store.UpsertRecentLocation(directory, label)
+	d.store.UpsertRecentLocation(directory)
 	if !isNew {
 		// Re-register: pick up any new associations that occurred while it
 		// was registered, then publish a state-changed event so clients

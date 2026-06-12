@@ -395,6 +395,7 @@ var migrations = []migration{
 			created_at TEXT NOT NULL
 		);
 	`},
+	{48, "drop label from recent_locations", "ALTER TABLE recent_locations DROP COLUMN label"},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -538,6 +539,11 @@ func migrateDB(db *sql.DB) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
+		} else if m.version == 48 {
+			if err := applyMigration48(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		} else {
 			if _, err := tx.Exec(m.sql); err != nil {
 				tx.Rollback()
@@ -639,6 +645,21 @@ func applyMigration45(tx *sql.Tx) error {
 		ALTER TABLE chief_of_staff_dispatches
 			ADD COLUMN structured_report_json TEXT NOT NULL DEFAULT ''
 	`)
+	return err
+}
+
+// applyMigration48 drops the label column from recent_locations. Labels are
+// derived from the path now. Skips databases (including partial test
+// fixtures) where the table or column never existed.
+func applyMigration48(tx *sql.Tx) error {
+	hasLabel, err := columnExists(tx, "recent_locations", "label")
+	if err != nil {
+		return err
+	}
+	if !hasLabel {
+		return nil
+	}
+	_, err = tx.Exec("ALTER TABLE recent_locations DROP COLUMN label")
 	return err
 }
 

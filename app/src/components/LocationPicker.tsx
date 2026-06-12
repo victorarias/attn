@@ -18,6 +18,7 @@ import {
   buildInitialPickerInput,
   expandDisplayPath,
   normalizePickerPath,
+  pathBasename,
   toDisplayPath,
 } from '../utils/locationPickerPaths';
 import './LocationPicker.css';
@@ -56,7 +57,6 @@ interface PickerTarget {
 interface PathSelectableItem {
   kind: 'recent' | 'directory';
   key: string;
-  label: string;
   path: string;
 }
 
@@ -227,6 +227,8 @@ export function LocationPicker({
   const [refreshing, setRefreshing] = useState(false);
   const [pickerOperation, setPickerOperation] = useState<string | null>(null);
   const [hasSelectedSinceTab, setHasSelectedSinceTab] = useState(true);
+  const [autoHighlight, setAutoHighlight] = useState(false);
+  const autoHighlightDoneRef = useRef(false);
   const requestGenerationRef = useRef(0);
 
   const agentCapabilities = useMemo(() => getAgentCapabilities(settings), [settings]);
@@ -413,6 +415,8 @@ export function LocationPicker({
     setMode('path-input');
     setInputValue(buildInitialPickerInput(initialInputPathForTarget(selectedTarget), homePath));
     setHighlightedItemKey(null);
+    setAutoHighlight(false);
+    autoHighlightDoneRef.current = false;
     setSelectedPath('');
     setRepoRootPath(null);
     setRepoInfo(null);
@@ -459,9 +463,7 @@ export function LocationPicker({
   const filteredRecent = useMemo(
     () => (expandedInput
       ? recentLocations.filter(
-          (loc) =>
-            loc.label.toLowerCase().includes(expandedInput.toLowerCase()) ||
-            loc.path.toLowerCase().includes(expandedInput.toLowerCase()),
+          (loc) => loc.path.toLowerCase().includes(expandedInput.toLowerCase()),
         )
       : recentLocations),
     [expandedInput, recentLocations],
@@ -469,6 +471,7 @@ export function LocationPicker({
   const visibleRecent = useMemo(
     () => filteredRecent.slice(0, MAX_RECENT_LOCATIONS).map((loc) => ({
       ...loc,
+      name: pathBasename(loc.path),
       selectionPath: homePath ? toDisplayPath(loc.path, homePath) : loc.path,
     })),
     [filteredRecent, homePath],
@@ -478,13 +481,11 @@ export function LocationPicker({
       ...visibleRecent.map((loc) => ({
         kind: 'recent' as const,
         key: `recent:${loc.path}`,
-        label: loc.label,
         path: loc.selectionPath,
       })),
       ...fsSuggestions.map((item) => ({
         kind: 'directory' as const,
         key: `directory:${item.path}`,
-        label: item.name,
         path: item.path,
       })),
     ],
@@ -513,6 +514,18 @@ export function LocationPicker({
     }
   }, [highlightedIndex, highlightedItemKey]);
 
+  // Pre-highlight the top recent location when it loads so a bare Enter opens
+  // it. One-shot per open: typing or tab-completing consumes it, and Esc still
+  // closes the picker while the automatic highlight is in place.
+  useEffect(() => {
+    if (!isOpen || mode !== 'path-input' || autoHighlightDoneRef.current || visibleRecent.length === 0) {
+      return;
+    }
+    autoHighlightDoneRef.current = true;
+    setAutoHighlight(true);
+    setHighlightedItemKey(`recent:${visibleRecent[0].path}`);
+  }, [isOpen, mode, visibleRecent]);
+
   useEffect(() => {
     if (highlightedIndex >= 0) {
       document.querySelector(`[data-index="${highlightedIndex}"]`)?.scrollIntoView({ block: 'nearest' });
@@ -530,6 +543,8 @@ export function LocationPicker({
       return;
     }
     invalidateRequestGeneration();
+    autoHighlightDoneRef.current = true;
+    setAutoHighlight(false);
     setInputValue(nextPath);
     setHighlightedItemKey(null);
     setSelectedPath('');
@@ -542,6 +557,8 @@ export function LocationPicker({
       return;
     }
     invalidateRequestGeneration();
+    autoHighlightDoneRef.current = true;
+    setAutoHighlight(false);
     setInputValue(nextPath);
     setHighlightedItemKey(null);
     setSelectedPath('');
@@ -665,6 +682,8 @@ export function LocationPicker({
     setMode('path-input');
     setInputValue(buildInitialPickerInput(initialInputPathForTarget(nextTarget), homePath));
     setHighlightedItemKey(null);
+    setAutoHighlight(false);
+    autoHighlightDoneRef.current = false;
     setSelectedPath('');
     setRepoRootPath(null);
     setRepoInfo(null);
@@ -800,6 +819,7 @@ export function LocationPicker({
       : (highlightedIndex <= 0 ? totalItems - 1 : highlightedIndex - 1);
     const nextItem = selectableItems[nextIndex];
     if (nextItem) {
+      setAutoHighlight(false);
       setHighlightedItemKey(nextItem.key);
     }
   }, [highlightedIndex, selectableItems]);
@@ -814,12 +834,12 @@ export function LocationPicker({
       // RepoOptions pushes its own sub-state handlers (pendingDeletePath, showNewWorktree)
       // above this one in the escape stack. This branch fires only when those are inactive.
       handleBack();
-    } else if (highlightedItemKey) {
+    } else if (highlightedItemKey && !autoHighlight) {
       setHighlightedItemKey(null);
     } else {
       handleClosePicker();
     }
-  }, [mode, handleBack, highlightedItemKey, handleClosePicker]);
+  }, [mode, handleBack, highlightedItemKey, autoHighlight, handleClosePicker]);
   useEscapeStack(handleEscape, isOpen);
 
   const handleDialogKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -1008,7 +1028,7 @@ export function LocationPicker({
                     >
                       <div className="picker-icon">🕐</div>
                       <div className="picker-info">
-                        <div className="picker-name">{loc.label}</div>
+                        <div className="picker-name">{loc.name}</div>
                         <div className="picker-path">{loc.selectionPath}</div>
                       </div>
                     </div>

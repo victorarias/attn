@@ -354,7 +354,6 @@ model AuthorState {
 
 model RecentLocation {
   path: string;
-  label: string;
   last_seen: string;    // ISO timestamp
   use_count: int32;
 }

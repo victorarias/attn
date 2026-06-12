@@ -15,7 +15,6 @@ type LocationPickerProps = ComponentProps<typeof LocationPicker>;
 
 function buildRecentLocation(overrides?: Partial<RecentLocation>) {
   return {
-    label: 'Recent Repo',
     path: '/home/remote/projects/recent-repo',
     last_seen: '2026-04-11T08:30:00Z',
     use_count: 4,
@@ -390,6 +389,117 @@ describe('LocationPicker', () => {
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('/tmp/project', undefined);
       expect(onSelect).toHaveBeenCalledWith('/tmp/project', 'claude', undefined, false);
+    });
+  });
+
+  it('shows the folder name derived from the path on recent rows', async () => {
+    const onGetRecentLocations = vi.fn(async () => ({
+      locations: [buildRecentLocation()],
+      home_path: '/home/remote',
+    }));
+    renderPicker({ onGetRecentLocations });
+
+    await waitFor(() => {
+      const item = screen.getByTestId('location-picker-item-0');
+      expect(within(item).getByText('recent-repo')).toBeInTheDocument();
+      expect(within(item).getByText('~/projects/recent-repo')).toBeInTheDocument();
+    });
+  });
+
+  it('pre-highlights the top recent location so a bare Enter opens it', async () => {
+    const onGetRecentLocations = vi.fn(async () => ({
+      locations: [buildRecentLocation()],
+      home_path: '/home/remote',
+    }));
+    const onInspectPath = vi.fn(async () => ({
+      success: true,
+      inspection: {
+        input_path: '~/projects/recent-repo',
+        resolved_path: '/home/remote/projects/recent-repo',
+        home_path: '/home/remote',
+        exists: true,
+        is_directory: true,
+      },
+    }));
+    const { onSelect } = renderPicker({ onGetRecentLocations, onInspectPath });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-picker-item-0')).toHaveClass('selected');
+    });
+
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(onInspectPath).toHaveBeenCalledWith('/home/remote/projects/recent-repo', undefined);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/recent-repo', 'claude', undefined, false);
+    });
+  });
+
+  it('Escape closes the picker while the automatic highlight is active', async () => {
+    const onGetRecentLocations = vi.fn(async () => ({
+      locations: [buildRecentLocation()],
+      home_path: '/home/remote',
+    }));
+    const { onClose } = renderPicker({ onGetRecentLocations });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-picker-item-0')).toHaveClass('selected');
+    });
+
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('arrow navigation converts the automatic highlight into a manual one', async () => {
+    const onGetRecentLocations = vi.fn(async () => ({
+      locations: [buildRecentLocation()],
+      home_path: '/home/remote',
+    }));
+    const { onClose } = renderPicker({ onGetRecentLocations });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-picker-item-0')).toHaveClass('selected');
+    });
+
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'ArrowDown' });
+
+    // After manual navigation, Escape deselects first and only then closes.
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId('location-picker-item-0')).not.toHaveClass('selected');
+
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('typing consumes the automatic highlight so Enter submits the typed path', async () => {
+    const onGetRecentLocations = vi.fn(async () => ({
+      locations: [buildRecentLocation()],
+      home_path: '/home/remote',
+    }));
+    const onInspectPath = vi.fn(async () => ({
+      success: true,
+      inspection: {
+        input_path: '/tmp/other',
+        resolved_path: '/tmp/other',
+        home_path: '/home/remote',
+        exists: true,
+        is_directory: true,
+      },
+    }));
+    const { onSelect } = renderPicker({ onGetRecentLocations, onInspectPath });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-picker-item-0')).toHaveClass('selected');
+    });
+
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: '/tmp/other' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(onInspectPath).toHaveBeenCalledWith('/tmp/other', undefined);
+      expect(onSelect).toHaveBeenCalledWith('/tmp/other', 'claude', undefined, false);
     });
   });
 
