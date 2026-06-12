@@ -396,7 +396,10 @@ describe('attachPlanning', () => {
     expect(effects.nextSeq).toBe(5);
   });
 
-  it('filters queued output older than the attach sequence watermark', () => {
+  it('filters queued output already covered by the attach replay payload', () => {
+    // last_seq names the LAST chunk inside the replay payload, so a queued
+    // chunk with seq == last_seq is a duplicate of replayed bytes and must be
+    // skipped; the first genuinely-live chunk is last_seq + 1.
     const replayPlan = classifyAttachReplay({
       cols: 58,
       rows: 46,
@@ -419,7 +422,6 @@ describe('attachPlanning', () => {
 
     expect(effects.replayAction.kind).toBe('scrollback');
     expect(effects.queuedOutputsToEmit).toEqual([
-      { data: 'equal', seq: 10 },
       { data: 'new', seq: 11 },
       { data: 'noseq' },
     ]);

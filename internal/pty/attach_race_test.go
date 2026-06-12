@@ -15,11 +15,11 @@ import (
 //
 // On attach the daemon hands the frontend a replay payload (raw scrollback /
 // replay segments) plus a LastSeq watermark; the frontend applies the replay
-// and then keeps only live chunks with seq >= LastSeq, assuming everything with
-// a smaller seq is already in the replay. info() captures the replay payload
-// and reads LastSeq (seqCounter) at DIFFERENT times. A PTY write landing in
+// and then keeps only live chunks with seq > LastSeq, assuming everything up
+// to LastSeq is already in the replay. If info() captured the replay payload
+// and read LastSeq (seqCounter) at DIFFERENT times, a PTY write landing in
 // that window is in neither: not yet in the replay payload, and deduped out of
-// the live stream because its seq < LastSeq. It vanishes.
+// the live stream because its seq <= LastSeq. It vanishes.
 //
 // fish emits `OSC 133;D` (close command) + `OSC 133;A` (open next prompt)
 // back-to-back at each new prompt, so a single lost chunk here silently merges
@@ -126,7 +126,7 @@ func TestAttachSnapshotSeqConsistency(t *testing.T) {
 	}
 
 	// The bytes the frontend would actually apply after the replay: live chunks
-	// with seq >= LastSeq.
+	// with seq > LastSeq (matching planLivePtyOutput's stale rule).
 	var applied []byte
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
@@ -178,15 +178,16 @@ func (r *recordingSink) send(data []byte, seq uint32) bool {
 }
 
 // appliedAfter returns the concatenated bytes of the first maxChunks live
-// chunks the frontend would APPLY: those with seq >= lastSeq (the rest are
-// deduped as already-in-replay).
+// chunks the frontend would APPLY: those with seq > lastSeq (the rest are
+// deduped as already-in-replay). This must mirror the real client rule in
+// planLivePtyOutput, or the test validates a contract no client implements.
 func (r *recordingSink) appliedAfter(lastSeq uint32, maxChunks int) []byte {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []byte
 	n := 0
 	for _, c := range r.chunks {
-		if c.seq >= lastSeq {
+		if c.seq > lastSeq {
 			out = append(out, c.data...)
 			n++
 			if n >= maxChunks {

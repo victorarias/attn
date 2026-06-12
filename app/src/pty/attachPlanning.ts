@@ -285,10 +285,15 @@ export function planAttachResultEffects({
             replayKind: replayPlan.replayKind,
           };
 
+  // last_seq names the last chunk covered by the replay payload (see
+  // Session.info in internal/pty/session.go). A queued chunk with
+  // seq <= last_seq is already inside the replay; emitting it again would
+  // double-apply those bytes. Live chunks resume at last_seq + 1, which
+  // planLivePtyOutput's `incomingSeq <= lastSeq` stale rule lets through.
   let nextSeq = typeof attachResult.last_seq === 'number' ? attachResult.last_seq : 0;
   const queuedOutputsToEmit: PendingAttachOutputChunk[] = [];
   for (const chunk of queuedOutputs || []) {
-    if (typeof chunk.seq === 'number' && chunk.seq < nextSeq) {
+    if (typeof chunk.seq === 'number' && chunk.seq <= nextSeq) {
       continue;
     }
     if (typeof chunk.seq === 'number') {

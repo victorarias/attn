@@ -526,8 +526,8 @@ func (s *Session) info() AttachInfo {
 
 	// Capture the replay payload and its sequence watermark atomically so a
 	// re-attaching frontend can dedup the live stream against LastSeq without a
-	// hole: every byte is either in this payload (seq <= lastReplaySeq) or a
-	// live chunk it will apply (seq >= LastSeq). Without this, a chunk written
+	// hole: every byte is either in this payload (seq <= LastSeq) or a live
+	// chunk it will apply (seq > LastSeq). Without this, a chunk written
 	// between the payload snapshot and the watermark read is in neither — lost.
 	s.replayMu.Lock()
 	scrollback, truncated := s.scrollback.Snapshot()
@@ -566,15 +566,17 @@ func (s *Session) info() AttachInfo {
 		infoSnapshotHook()
 	}
 
-	// LastSeq is the dedup boundary: the frontend applies live chunks with
-	// seq >= LastSeq. The payload holds through replayWatermark, so live must
-	// resume at the next sequence.
+	// LastSeq is the dedup boundary: it names the last chunk covered by this
+	// payload, so the frontend applies live chunks with seq > LastSeq and
+	// drops the rest as already-replayed. screenSnapshot() reports the same
+	// covered-chunk semantics; the two must not diverge or the first live
+	// chunk after an attach is silently lost (or double-applied).
 	return AttachInfo{
 		Scrollback:          scrollback,
 		ScrollbackTruncated: truncated,
 		ReplaySegments:      replaySegments,
 		ReplayTruncated:     replayTruncated,
-		LastSeq:             replayWatermark + 1,
+		LastSeq:             replayWatermark,
 		Cols:                cols,
 		Rows:                rows,
 		PID:                 pid,
