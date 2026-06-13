@@ -423,6 +423,59 @@ func TestDaemon_PrunesSessionsWithoutLivePTYOnStart(t *testing.T) {
 	}
 }
 
+// Startup recovery rewrites session states directly in the store (prune flips a
+// recoverable session to idle) without going through the per-session broadcast
+// that normally refreshes the workspace rollup. reseedWorkspaceStatuses, run at
+// the end of recovery, must repair the cached rollup so the first InitialState
+// snapshot shows a workspace dot consistent with its recovered sessions.
+func TestDaemon_ReseedWorkspaceStatusesAfterRecovery(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "reseed.sock"))
+	d.ptyBackend = nil // no live PTYs, so prune treats the session as missing
+	d.workspaces = newWorkspaceRegistry()
+
+	workspaceID := "ws-reseed"
+	sessionID := "sess-reseed"
+	cwd := t.TempDir()
+
+	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: "Reseed", Directory: cwd})
+	d.workspaces.register(workspaceID, "Reseed", cwd, "a0", false)
+	nowStr := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             sessionID,
+		Label:          "claude",
+		Agent:          protocol.SessionAgentClaude, // recoverable: prune keeps it
+		Directory:      cwd,
+		State:          protocol.SessionStateWorking,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+		WorkspaceID:    workspaceID,
+	})
+	d.workspaces.associateSession(sessionID, workspaceID, "claude")
+
+	// Seed the cached rollup the way loadWorkspacesFromStore does at startup.
+	d.recomputeWorkspaceStatus(workspaceID)
+	if ws, _ := d.workspaces.snapshot(workspaceID); ws.Status != protocol.WorkspaceStatusWorking {
+		t.Fatalf("precondition: seeded rollup = %q, want working", ws.Status)
+	}
+
+	// Recovery flips the missing-PTY session to idle in the store, but does NOT
+	// recompute the rollup — so the cached status is now stale.
+	d.pruneSessionsWithoutPTY()
+	if got := d.store.Get(sessionID); got == nil || got.State != protocol.SessionStateIdle {
+		t.Fatalf("prune should keep recoverable session and mark it idle, got %+v", got)
+	}
+	if ws, _ := d.workspaces.snapshot(workspaceID); ws.Status != protocol.WorkspaceStatusWorking {
+		t.Fatalf("rollup should still be stale-working before reseed, got %q", ws.Status)
+	}
+
+	// The reseed performStartupPTYRecovery runs after pruning repairs it.
+	d.reseedWorkspaceStatuses()
+	if ws, _ := d.workspaces.snapshot(workspaceID); ws.Status != protocol.WorkspaceStatusIdle {
+		t.Fatalf("rollup after reseed = %q, want idle", ws.Status)
+	}
+}
+
 func TestDaemon_Start_SelectsWorkerBackendWhenRequested(t *testing.T) {
 	t.Setenv("ATTN_PTY_BACKEND", "worker")
 	t.Setenv("ATTN_PTY_SKIP_STARTUP_PROBE", "1")

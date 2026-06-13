@@ -261,20 +261,26 @@ func snapshotEntry(e *workspaceEntry) protocol.Workspace {
 
 // rollupWorkspaceStatus returns the workspace status that summarizes the
 // supplied session states. Higher-priority states win:
-// working > waiting_input > pending_approval > scheduled > idle > launching.
+// working > waiting_input > pending_approval > unknown > scheduled > idle > launching.
+// `unknown` sits just below the explicit attention states: a session whose
+// state could not be determined still wants a look, so it must out-prioritize
+// the quiet `scheduled`/`idle` peers and surface at the workspace level (at the
+// session level `unknown` is already an attention state — see
+// isAttentionSessionState — so a single-session workspace whose only session is
+// `unknown` would otherwise show an `idle` dot that disagrees with its session).
 // `scheduled` sits above `idle` because a parked-on-schedule session will
 // auto-resume — more informative than a settled idle peer — but below the
 // attention states since it needs no steering. `launching` sits below `idle`
 // on purpose — it carries less information than any settled state, so as soon
 // as one session reports a real state, that one wins over a peer that's still
-// booting. There's no `unknown` workspace status: an empty slice or sessions
-// all in `unknown` fall through to `idle`, since a workspace always has a
-// directory and a registry entry, so the rollup always has a meaningful answer.
+// booting. Only a truly empty slice (no member sessions) falls through to the
+// `idle` default.
 func rollupWorkspaceStatus(sessionStates []protocol.SessionState) protocol.WorkspaceStatus {
 	priority := map[protocol.SessionState]int{
-		protocol.SessionStateWorking:         6,
-		protocol.SessionStateWaitingInput:    5,
-		protocol.SessionStatePendingApproval: 4,
+		protocol.SessionStateWorking:         7,
+		protocol.SessionStateWaitingInput:    6,
+		protocol.SessionStatePendingApproval: 5,
+		protocol.SessionStateUnknown:         4,
 		protocol.SessionStateScheduled:       3,
 		protocol.SessionStateIdle:            2,
 		protocol.SessionStateLaunching:       1,
@@ -284,6 +290,7 @@ func rollupWorkspaceStatus(sessionStates []protocol.SessionState) protocol.Works
 		protocol.SessionStateWorking:         protocol.WorkspaceStatusWorking,
 		protocol.SessionStateWaitingInput:    protocol.WorkspaceStatusWaitingInput,
 		protocol.SessionStatePendingApproval: protocol.WorkspaceStatusPendingApproval,
+		protocol.SessionStateUnknown:         protocol.WorkspaceStatusUnknown,
 		protocol.SessionStateScheduled:       protocol.WorkspaceStatusScheduled,
 		protocol.SessionStateIdle:            protocol.WorkspaceStatusIdle,
 	}
@@ -292,8 +299,8 @@ func rollupWorkspaceStatus(sessionStates []protocol.SessionState) protocol.Works
 	for _, s := range sessionStates {
 		p, ok := priority[s]
 		if !ok {
-			// Unrecognised state (e.g. SessionStateUnknown) — skip; we
-			// fall back to `idle` if nothing scores higher.
+			// Unrecognised state — skip; we fall back to `idle` if nothing
+			// scores higher.
 			continue
 		}
 		if p > bestPriority {
@@ -320,6 +327,25 @@ func (d *Daemon) recomputeWorkspaceStatus(workspaceID string) (protocol.Workspac
 	}
 	status := rollupWorkspaceStatus(states)
 	return d.workspaces.applyStatus(workspaceID, status)
+}
+
+// reseedWorkspaceStatuses recomputes every workspace's cached rollup from the
+// current store session states WITHOUT broadcasting. Startup recovery mutates
+// session states directly in the store (pruneSessionsWithoutPTY,
+// reconcileSessionsWithWorkerBackend) without going through the normal
+// per-session broadcast path, so the cached rollup seeded by
+// loadWorkspacesFromStore goes stale before the recovery barrier flushes
+// InitialState. Reseeding here keeps the workspace dot consistent with the
+// recovered session states in that first snapshot. No broadcast is needed:
+// clients are still parked behind the recovery barrier and read the corrected
+// status from InitialState. Mirrors the seed loop in loadWorkspacesFromStore.
+func (d *Daemon) reseedWorkspaceStatuses() {
+	if d.workspaces == nil {
+		return
+	}
+	for _, ws := range d.workspaces.list() {
+		d.recomputeWorkspaceStatus(ws.ID)
+	}
 }
 
 // recomputeAndBroadcastWorkspaceForSession is a convenience used after a

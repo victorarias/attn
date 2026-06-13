@@ -76,6 +76,63 @@ func TestWorkspaceSessionProtocolLifecycleMatchesAppOrder(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSessionProtocolShellSpawnsIdleNotWorking(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &fakeSpawnBackend{}
+	client := newWorkspaceProtocolTestClient()
+	workspaceID := "workspace-shell-idle"
+	sessionID := "session-shell-idle"
+	paneID := "pane-session-shell-idle"
+	cwd := t.TempDir()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        workspaceID,
+		Title:     "Shell Idle",
+		Directory: cwd,
+	})
+	d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutAddSessionPane,
+		WorkspaceID: workspaceID,
+		PaneID:      protocol.Ptr(paneID),
+		SessionID:   sessionID,
+		Title:       protocol.Ptr("shell"),
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, paneID, true)
+
+	d.handleSpawnSession(client, &protocol.SpawnSessionMessage{
+		Cmd:         protocol.CmdSpawnSession,
+		ID:          sessionID,
+		Label:       protocol.Ptr("shell"),
+		Cwd:         cwd,
+		Agent:       protocol.AgentShellValue,
+		WorkspaceID: workspaceID,
+		Cols:        80,
+		Rows:        24,
+	})
+	expectSpawnResult(t, client, sessionID, true)
+
+	// A shell has no agent lifecycle, no Stop hook, and no state detector, so it
+	// would be stuck in whatever state it spawns with. It must spawn `idle`, not
+	// `working` — otherwise every shell shows a permanent green dot it can never
+	// leave until the process exits.
+	session := d.store.Get(sessionID)
+	if session == nil {
+		t.Fatalf("session %s was not registered", sessionID)
+	}
+	if session.State != protocol.SessionStateIdle {
+		t.Fatalf("shell session state = %q, want %q", session.State, protocol.SessionStateIdle)
+	}
+	// The workspace dot rolls up from its only session, so it must agree: idle.
+	ws, ok := d.workspaces.snapshot(workspaceID)
+	if !ok {
+		t.Fatalf("workspace %s missing from registry", workspaceID)
+	}
+	if ws.Status != protocol.WorkspaceStatusIdle {
+		t.Fatalf("workspace rollup status = %q, want %q", ws.Status, protocol.WorkspaceStatusIdle)
+	}
+}
+
 func TestWorkspaceLayoutClosePaneKeepsLayoutUntilSessionUnregistered(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	client := newWorkspaceProtocolTestClient()

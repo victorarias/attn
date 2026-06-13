@@ -3954,6 +3954,7 @@ const WorkspaceStatusIdle WorkspaceStatus = "idle"
 const WorkspaceStatusLaunching WorkspaceStatus = "launching"
 const WorkspaceStatusPendingApproval WorkspaceStatus = "pending_approval"
 const WorkspaceStatusScheduled WorkspaceStatus = "scheduled"
+const WorkspaceStatusUnknown WorkspaceStatus = "unknown"
 const WorkspaceStatusWaitingInput WorkspaceStatus = "waiting_input"
 const WorkspaceStatusWorking WorkspaceStatus = "working"
 

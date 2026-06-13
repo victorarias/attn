@@ -459,7 +459,7 @@ export interface SessionElement {
     main_repo?:                   string;
     needs_review_after_long_run?: boolean;
     recoverable?:                 boolean;
-    state:                        SessionState;
+    state:                        WorkspaceStatus;
     state_since:                  string;
     state_updated_at:             string;
     todos?:                       string[];
@@ -467,7 +467,7 @@ export interface SessionElement {
     [property: string]: any;
 }
 
-export enum SessionState {
+export enum WorkspaceStatus {
     Idle = "idle",
     Launching = "launching",
     PendingApproval = "pending_approval",
@@ -1687,15 +1687,6 @@ export enum WorkspaceLayoutPaneStatus {
     Spawning = "spawning",
 }
 
-export enum WorkspaceStatus {
-    Idle = "idle",
-    Launching = "launching",
-    PendingApproval = "pending_approval",
-    Scheduled = "scheduled",
-    WaitingInput = "waiting_input",
-    Working = "working",
-}
-
 export interface InjectTestPRMessage {
     cmd: InjectTestPRMessageCmd;
     pr:  PRElement;
@@ -2748,7 +2739,7 @@ export interface Session {
     main_repo?:                   string;
     needs_review_after_long_run?: boolean;
     recoverable?:                 boolean;
-    state:                        SessionState;
+    state:                        WorkspaceStatus;
     state_since:                  string;
     state_updated_at:             string;
     todos?:                       string[];
@@ -5085,12 +5076,12 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SessionSelectedMessage")), null, 2);
     }
 
-    public static toSessionState(json: string): SessionState {
-        return cast(JSON.parse(json), r("SessionState"));
+    public static toSessionState(json: string): WorkspaceStatus {
+        return cast(JSON.parse(json), r("WorkspaceStatus"));
     }
 
-    public static sessionStateToJson(value: SessionState): string {
-        return JSON.stringify(uncast(value, r("SessionState")), null, 2);
+    public static sessionStateToJson(value: WorkspaceStatus): string {
+        return JSON.stringify(uncast(value, r("WorkspaceStatus")), null, 2);
     }
 
     public static toSessionStateChangedMessage(json: string): SessionStateChangedMessage {
@@ -5974,7 +5965,7 @@ const typeMap: any = {
         { json: "main_repo", js: "main_repo", typ: u(undefined, "") },
         { json: "needs_review_after_long_run", js: "needs_review_after_long_run", typ: u(undefined, true) },
         { json: "recoverable", js: "recoverable", typ: u(undefined, true) },
-        { json: "state", js: "state", typ: r("SessionState") },
+        { json: "state", js: "state", typ: r("WorkspaceStatus") },
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
@@ -7326,7 +7317,7 @@ const typeMap: any = {
         { json: "main_repo", js: "main_repo", typ: u(undefined, "") },
         { json: "needs_review_after_long_run", js: "needs_review_after_long_run", typ: u(undefined, true) },
         { json: "recoverable", js: "recoverable", typ: u(undefined, true) },
-        { json: "state", js: "state", typ: r("SessionState") },
+        { json: "state", js: "state", typ: r("WorkspaceStatus") },
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
@@ -7878,7 +7869,7 @@ const typeMap: any = {
     "BranchChangedMessageEvent": [
         "branch_changed",
     ],
-    "SessionState": [
+    "WorkspaceStatus": [
         "idle",
         "launching",
         "pending_approval",
@@ -8106,14 +8097,6 @@ const typeMap: any = {
         "failed",
         "ready",
         "spawning",
-    ],
-    "WorkspaceStatus": [
-        "idle",
-        "launching",
-        "pending_approval",
-        "scheduled",
-        "waiting_input",
-        "working",
     ],
     "InjectTestPRMessageCmd": [
         "inject_test_pr",
