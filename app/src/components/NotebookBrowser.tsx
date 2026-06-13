@@ -128,6 +128,14 @@ export function NotebookBrowser({
       const current = selectedPathRef.current;
       if (current && next.some((e) => e.path === current)) {
         void loadNote(current);
+      } else if (current) {
+        // The open note vanished from the tree — an external delete (the watcher
+        // surfaces those). Don't keep rendering its now-stale content; clear the
+        // selection so the document pane returns to the empty state.
+        setSelectedPath(null);
+        setNote(null);
+        setNoteError(null);
+        setBacklinks([]);
       }
     })();
     return () => { cancelled = true; };

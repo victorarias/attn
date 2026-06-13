@@ -98,6 +98,24 @@ describe('NotebookBrowser', () => {
     );
   });
 
+  it('clears the open note when a change signal shows it was deleted on disk', async () => {
+    const { props, listNotebook } = makeProps();
+    // First list (initial open) has the note; after the change signal it is gone
+    // (an external delete the watcher surfaced).
+    listNotebook.mockResolvedValue(ENTRIES.filter((e) => e.path !== 'memory/index.md'));
+    listNotebook.mockResolvedValueOnce(ENTRIES);
+    const { rerender } = render(<NotebookBrowser {...props} />);
+
+    // The preferred note opens and renders.
+    expect(await screen.findByRole('heading', { level: 1, name: 'memory/index.md' })).toBeInTheDocument();
+
+    rerender(<NotebookBrowser {...props} changeSignal={1} />);
+
+    // The deleted note's stale content is gone; the document returns to empty.
+    expect(await screen.findByText('Nothing selected')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 1, name: 'memory/index.md' })).not.toBeInTheDocument();
+  });
+
   it('shows the empty state and reads nothing when the notebook has no notes', async () => {
     const emptyList = vi.fn<() => Promise<NotebookEntry[]>>().mockResolvedValue([]);
     const { props, readNotebook } = makeProps({ listNotebook: emptyList });

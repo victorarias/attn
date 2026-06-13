@@ -21,6 +21,11 @@ import (
 // pass ("dreaming"), and external edits ("external") arrive on other paths.
 const originAgent = "agent"
 
+// originExternal labels notebook changes the watcher detects on disk that attn
+// did not make itself (an external markdown sync tool, or the user editing files
+// directly).
+const originExternal = "external"
+
 // notebookStoreFor resolves the active notebook root and returns the daemon's
 // single Store for it. The Store is cached and reused so writes serialize
 // through one in-process writer; it is rebuilt only when the resolved root
@@ -31,11 +36,63 @@ func (d *Daemon) notebookStoreFor() (*notebook.Store, error) {
 		return nil, err
 	}
 	d.notebookMu.Lock()
-	defer d.notebookMu.Unlock()
 	if d.notebookStore == nil || d.notebookStore.Root() != root {
 		d.notebookStore = notebook.NewStore(root)
 	}
-	return d.notebookStore, nil
+	store := d.notebookStore
+	d.notebookMu.Unlock()
+	// Every notebook operation is a chance to (lazily) start watching for
+	// external edits. Done after releasing notebookMu — ensureNotebookWatcher
+	// takes its own lock — and it no-ops once the active root is already watched.
+	d.ensureNotebookWatcher(root)
+	return store, nil
+}
+
+// ensureNotebookWatcher starts the external-edit watcher for root if it is not
+// already watching it. A root that does not exist yet (no notebook on disk) is
+// skipped; the next operation after the scaffold is created starts the watcher.
+func (d *Daemon) ensureNotebookWatcher(root string) {
+	d.notebookWatcherMu.Lock()
+	defer d.notebookWatcherMu.Unlock()
+	if d.notebookWatcher != nil && d.notebookWatchedRoot == root {
+		return
+	}
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+		return // nothing to watch yet
+	}
+	if d.notebookWatcher != nil {
+		_ = d.notebookWatcher.Close() // root changed (notebook.root setting edited)
+		d.notebookWatcher = nil
+		d.notebookWatchedRoot = ""
+	}
+	w, err := notebook.NewWatcher(root, notebook.DefaultWatchDebounce, func(paths []string) {
+		d.broadcastNotebookChanged(originExternal, paths...)
+	})
+	if err != nil {
+		d.logf("notebook watcher: failed to watch %s: %v", root, err)
+		return
+	}
+	d.notebookWatcher = w
+	d.notebookWatchedRoot = root
+}
+
+// noteNotebookSelfWrite tells the watcher that attn is about to write these
+// notebook-relative paths, so the resulting filesystem events are not reported
+// as external edits. Safe to call before the watcher exists (no-op).
+func (d *Daemon) noteNotebookSelfWrite(rels ...string) {
+	d.notebookWatcherMu.Lock()
+	w := d.notebookWatcher
+	d.notebookWatcherMu.Unlock()
+	w.NoteSelfWrite(rels...)
+}
+
+func (d *Daemon) stopNotebookWatcher() {
+	d.notebookWatcherMu.Lock()
+	w := d.notebookWatcher
+	d.notebookWatcher = nil
+	d.notebookWatchedRoot = ""
+	d.notebookWatcherMu.Unlock()
+	_ = w.Close()
 }
 
 // notebookRoot returns the configured notebook.root, or the profile-derived
@@ -74,12 +131,16 @@ func (d *Daemon) ensureNotebookScaffold() (root string, created bool, err error)
 	if err != nil {
 		return "", false, err
 	}
+	d.noteNotebookSelfWrite(notebook.ScaffoldPaths()...)
 	created, err = store.EnsureScaffold()
 	if err != nil {
 		return "", false, err
 	}
 	if created {
 		d.broadcastNotebookChanged(originAgent, notebook.ScaffoldPaths()...)
+		// The root now exists; start watching it for external edits (the first
+		// scaffold may have run before any operation could start the watcher).
+		d.ensureNotebookWatcher(store.Root())
 	}
 	return store.Root(), created, nil
 }
@@ -192,6 +253,14 @@ func (d *Daemon) handleNotebookWrite(conn net.Conn, msg *protocol.NotebookWriteM
 	if msg.BaseHash != nil {
 		baseHash = *msg.BaseHash
 	}
+	// The normalized relative path is the form notebook_list/append/watcher all
+	// key on; compute it up front so the self-write record (which must be in
+	// place BEFORE the write fires its filesystem event) and the broadcast agree.
+	changed := msg.Path
+	if rel, cerr := notebook.CleanPath(msg.Path); cerr == nil {
+		changed = rel
+		d.noteNotebookSelfWrite(rel)
+	}
 	hash, conflict, err := store.Write(msg.Path, []byte(msg.Content), baseHash)
 	if err != nil {
 		d.sendError(conn, "notebook write: "+err.Error())
@@ -207,13 +276,6 @@ func (d *Daemon) handleNotebookWrite(conn net.Conn, msg *protocol.NotebookWriteM
 		}
 	} else {
 		res.Hash = protocol.Ptr(hash)
-		// Broadcast the normalized relative path so notebook_changed always
-		// carries the same form as notebook_list/append (a leading-slash or
-		// un-cleaned write path would otherwise miss a consumer keyed on it).
-		changed := msg.Path
-		if rel, cerr := notebook.CleanPath(msg.Path); cerr == nil {
-			changed = rel
-		}
 		d.broadcastNotebookChanged(originAgent, changed)
 	}
 	_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, NotebookWrite: res})
@@ -232,6 +294,9 @@ func (d *Daemon) handleNotebookAppendJournal(conn net.Conn, msg *protocol.Notebo
 	if date == "" {
 		date = time.Now().Format("2006-01-02")
 	}
+	// Record the self-write before the append fires its filesystem event so the
+	// watcher does not report attn's own journal write as an external edit.
+	d.noteNotebookSelfWrite(notebook.DirJournal + "/" + date + ".md")
 	relPath, hash, err := store.AppendJournal(date, msg.Entry)
 	if err != nil {
 		d.sendError(conn, "notebook append: "+err.Error())

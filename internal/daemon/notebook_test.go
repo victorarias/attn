@@ -3,7 +3,9 @@ package daemon
 import (
 	"encoding/json"
 	"net"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -263,6 +265,63 @@ func TestNotebookReadsDispatchThroughClientMessage(t *testing.T) {
 	if back.Event != protocol.EventNotebookBacklinksResult || back.RequestID != "rb" || !back.Success ||
 		len(back.Entries) != 1 || back.Entries[0].Path != "memory/decisions/b.md" {
 		t.Fatalf("backlinks result = %+v, want [memory/decisions/b.md] for rb", back)
+	}
+}
+
+// The watcher reports edits made on disk outside attn (Obsidian, external sync)
+// as origin=external, but suppresses attn's own writes so they don't echo.
+func TestNotebookWatcherReportsExternalEditsNotSelfWrites(t *testing.T) {
+	d := newNotebookDaemon(t)
+	root := d.store.GetSetting(SettingNotebookRoot)
+	client := &wsClient{send: make(chan outboundMessage, 64)}
+	d.wsHub.clients[client] = true
+	go d.wsHub.run()
+
+	// Touch the notebook so the lazy watcher starts (root already exists), then
+	// let the watch registration settle before mutating the tree.
+	sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
+	time.Sleep(80 * time.Millisecond)
+
+	// attn's own write records the path as a self-write before it lands, so the
+	// resulting filesystem event must not be reported as external.
+	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{
+		Cmd: protocol.CmdNotebookWrite, Path: "own.md",
+		Content: "---\nkind: memory\n---\nattn wrote this\n",
+	})
+	// An edit straight to disk (bypassing the daemon) must surface as external.
+	if err := os.WriteFile(filepath.Join(root, "ext.md"),
+		[]byte("---\nkind: memory\n---\nedited externally\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ext := waitForExternalNotebookChange(t, client.send)
+	if !slices.Contains(ext, "ext.md") {
+		t.Fatalf("external change %v missing ext.md", ext)
+	}
+	if slices.Contains(ext, "own.md") {
+		t.Fatalf("external change %v wrongly included attn's own write own.md", ext)
+	}
+}
+
+// waitForExternalNotebookChange returns the paths of the first origin=external
+// notebook_changed broadcast, skipping origin=agent (and any non-notebook) events.
+func waitForExternalNotebookChange(t *testing.T, ch chan outboundMessage) []string {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case msg := <-ch:
+			var ev protocol.NotebookChangedMessage
+			if err := json.Unmarshal(msg.payload, &ev); err != nil {
+				continue
+			}
+			if ev.Event == protocol.EventNotebookChanged && ev.Origin == originExternal {
+				return ev.Paths
+			}
+		case <-deadline:
+			t.Fatal("no external notebook change was broadcast")
+			return nil
+		}
 	}
 }
 

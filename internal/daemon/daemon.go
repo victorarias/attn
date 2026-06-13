@@ -133,6 +133,12 @@ type Daemon struct {
 	recovering       bool
 	notebookMu       sync.Mutex
 	notebookStore    *notebook.Store
+	// notebookWatcher observes notebook.root for external edits; guarded by its
+	// own mutex (distinct from notebookMu) so notebookStoreFor can start it
+	// without nesting locks. Lazily started on first notebook use.
+	notebookWatcherMu   sync.Mutex
+	notebookWatcher     *notebook.Watcher
+	notebookWatchedRoot string
 	pendingInitialWS map[*wsClient]struct{}
 	startedOnce      sync.Once
 	startedCh        chan struct{}
@@ -1168,6 +1174,7 @@ func sessionStateFromRecoveredInfo(info ptybackend.SessionInfo) protocol.Session
 func (d *Daemon) Stop() {
 	d.log("daemon stopping")
 	close(d.done)
+	d.stopNotebookWatcher()
 	d.stopWorkspaceContextJanitor()
 	if d.hubManager != nil {
 		d.hubManager.Stop()
