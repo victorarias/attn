@@ -194,7 +194,9 @@ test.describe('Keyboard Shortcuts', () => {
       const mainPane = page.locator('[data-pane-session-id="s-zoom"][data-pane-id="pane-session"]');
       const utilityPane = page.locator('[data-pane-session-id="s-zoom"][data-pane-id="pane-shell-1"]').first();
       const rootSplit = page.locator('[data-split-id="root"]');
-      const zoomHint = page.getByText('⌘⇧Z zoom');
+      // Dock chips render their key tokens in a styled child span, so match the
+      // chip by its label rather than the full "keys + label" string.
+      const zoomHint = page.locator('.shortcut-hint', { hasText: 'zoom' });
 
       await expect(zoomHint).toHaveAttribute('data-active', 'false');
 
