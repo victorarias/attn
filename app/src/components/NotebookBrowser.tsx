@@ -45,6 +45,10 @@ export function NotebookBrowser({
   // a slow response from a superseded navigation is dropped. (A render-synced ref
   // can't do this — it only updates on commit, after the await may have resolved.)
   const loadSeqRef = useRef(0);
+  // The dialog container is the deliberate initial focus target so keyboard/AT
+  // users land inside the modal (engaging the focus trap) without auto-selecting
+  // the Close button. Tab from here moves to the first interactive control.
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEscapeStack(onClose, isOpen);
 
@@ -142,8 +146,8 @@ export function NotebookBrowser({
 
   return (
     <div className="notebook-browser-shell">
-      <FocusTrap focusTrapOptions={{ escapeDeactivates: false, initialFocus: false }}>
-        <div className="notebook-browser" role="dialog" aria-modal="true" aria-labelledby="notebook-browser-title">
+      <FocusTrap focusTrapOptions={{ escapeDeactivates: false, initialFocus: () => dialogRef.current ?? false }}>
+        <div ref={dialogRef} tabIndex={-1} className="notebook-browser" role="dialog" aria-modal="true" aria-labelledby="notebook-browser-title">
           <header className="notebook-browser-header">
             <div className="notebook-browser-heading">
               <NotebookIcon />

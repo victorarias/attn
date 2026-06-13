@@ -84,10 +84,36 @@ describe('NotebookBrowser', () => {
     const { rerender } = render(<NotebookBrowser {...props} />);
     await waitFor(() => expect(readNotebook).toHaveBeenCalledWith('memory/index.md'));
     const listCallsBefore = listNotebook.mock.calls.length;
+    const openNoteReadsBefore = readNotebook.mock.calls.filter((c) => c[0] === 'memory/index.md').length;
 
     rerender(<NotebookBrowser {...props} changeSignal={1} />);
 
     await waitFor(() => expect(listNotebook.mock.calls.length).toBeGreaterThan(listCallsBefore));
+    // The open note must be re-read, not just the tree — this is what makes the
+    // live view reflect edits to the note the user is currently viewing.
+    await waitFor(() =>
+      expect(readNotebook.mock.calls.filter((c) => c[0] === 'memory/index.md').length).toBeGreaterThan(
+        openNoteReadsBefore,
+      ),
+    );
+  });
+
+  it('shows the empty state and reads nothing when the notebook has no notes', async () => {
+    const emptyList = vi.fn<() => Promise<NotebookEntry[]>>().mockResolvedValue([]);
+    const { props, readNotebook } = makeProps({ listNotebook: emptyList });
+    render(<NotebookBrowser {...props} />);
+
+    expect(await screen.findByText('No notes yet.')).toBeInTheDocument();
+    // No phantom first-note read against a null/empty path.
+    expect(readNotebook).not.toHaveBeenCalled();
+  });
+
+  it('moves focus into the dialog on open so the focus trap engages', async () => {
+    const { props } = makeProps();
+    render(<NotebookBrowser {...props} />);
+
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(dialog).toHaveFocus());
   });
 
   it('shows an error state when a note cannot be read but keeps the list', async () => {

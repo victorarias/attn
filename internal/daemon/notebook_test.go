@@ -218,6 +218,54 @@ func TestNotebookListAndBacklinksWSResults(t *testing.T) {
 	}
 }
 
+// The notebook reads must dispatch correctly through handleClientMessage — the
+// path the real frontend uses — not just when the WS-result handlers are called
+// directly. This covers the request_id/prefix/path argument extraction in the
+// websocket switch (a swapped Deref on notebook_list would compile and ship).
+func TestNotebookReadsDispatchThroughClientMessage(t *testing.T) {
+	d := newNotebookDaemon(t)
+	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: "memory/decisions/a.md", Content: "---\nkind: memory\n---\nbody\n"})
+	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: "memory/decisions/b.md", Content: "---\nkind: memory\n---\nsee [a](/memory/decisions/a.md)\n"})
+	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: "journal/2026-06-13.md", Content: "---\nkind: journal\n---\nentry\n"})
+
+	client := newWorkspaceProtocolTestClient()
+	client.setIdentity("test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
+
+	// notebook_list with BOTH request_id and prefix set: a swapped Deref would
+	// put the prefix in request_id (and vice versa), so we assert the result is
+	// correlated to "rl" AND the prefix actually scoped the result to memory/.
+	d.handleClientMessage(client, []byte(`{"cmd":"notebook_list","request_id":"rl","prefix":"/memory"}`))
+	var list protocol.NotebookListResultMessage
+	readNotebookWSEvent(t, client.send, &list)
+	if list.Event != protocol.EventNotebookListResult || list.RequestID != "rl" || !list.Success {
+		t.Fatalf("list result = %+v, want success notebook_list_result for rl", list)
+	}
+	for _, e := range list.Entries {
+		if !strings.HasPrefix(e.Path, "memory/") {
+			t.Fatalf("prefix not applied: list returned %q outside memory/", e.Path)
+		}
+	}
+	if len(list.Entries) != 2 {
+		t.Fatalf("list entries = %d, want 2 under memory/", len(list.Entries))
+	}
+
+	d.handleClientMessage(client, []byte(`{"cmd":"notebook_read","request_id":"rr","path":"/memory/decisions/a.md"}`))
+	var read protocol.NotebookReadResultMessage
+	readNotebookWSEvent(t, client.send, &read)
+	if read.Event != protocol.EventNotebookReadResult || read.RequestID != "rr" || !read.Success ||
+		read.Result == nil || read.Result.Path != "/memory/decisions/a.md" {
+		t.Fatalf("read result = %+v, want success notebook_read_result for rr", read)
+	}
+
+	d.handleClientMessage(client, []byte(`{"cmd":"notebook_backlinks","request_id":"rb","path":"/memory/decisions/a.md"}`))
+	var back protocol.NotebookBacklinksResultMessage
+	readNotebookWSEvent(t, client.send, &back)
+	if back.Event != protocol.EventNotebookBacklinksResult || back.RequestID != "rb" || !back.Success ||
+		len(back.Entries) != 1 || back.Entries[0].Path != "memory/decisions/b.md" {
+		t.Fatalf("backlinks result = %+v, want [memory/decisions/b.md] for rb", back)
+	}
+}
+
 func addIdleNotebookSession(d *Daemon, id string, state protocol.SessionState) {
 	now := string(protocol.TimestampNow())
 	d.store.Add(&protocol.Session{

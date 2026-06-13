@@ -201,8 +201,15 @@ func (s *Store) List(prefix string) ([]Entry, error) {
 	var entries []Entry
 	walkErr := filepath.WalkDir(s.root, func(p string, dirent fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) && p == s.root {
-				return fs.SkipAll // root not created yet => empty list
+			if os.IsNotExist(err) {
+				if p == s.root {
+					return fs.SkipAll // root not created yet => empty list
+				}
+				// A subtree vanished mid-walk. The root is externally syncable, so
+				// an external client can remove a directory during the scan; treat
+				// the gone path as empty rather than failing the whole List (and the
+				// UI-triggered Backlinks that calls it on every navigation).
+				return nil
 			}
 			return err
 		}
@@ -277,6 +284,13 @@ func (s *Store) Backlinks(target string) ([]Entry, error) {
 	for _, e := range entries {
 		if e.Path == want {
 			continue // a note linking to itself is not a backlink
+		}
+		if e.Size > MaxFileSize {
+			// attn never writes a note larger than MaxFileSize, so anything bigger
+			// is an oversized externally-synced file. Skip it rather than pull its
+			// whole body into memory on every navigation — List caps its own
+			// per-file read (listFrontmatterScanLimit) for the same reason.
+			continue
 		}
 		content, _, rerr := s.Read(e.Path)
 		if rerr != nil {

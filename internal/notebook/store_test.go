@@ -393,17 +393,51 @@ func TestBacklinks(t *testing.T) {
 	}
 }
 
+func TestBacklinksSkipsOversizedExternalFiles(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	if _, err := s.EnsureScaffold(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A normal note that links to the target is a real backlink.
+	mustWrite(t, s, "memory/decisions/linker.md", "---\nkind: memory\n---\nsee [the call](/memory/decisions/target.md) here\n")
+
+	// An oversized file (larger than attn ever writes) is synced in externally,
+	// bypassing Write's MaxFileSize guard. It also links to the target, but
+	// Backlinks must not pull its whole body into memory — so it is skipped.
+	big := append([]byte("---\nkind: memory\n---\nlinks [target](/memory/decisions/target.md)\n"), make([]byte, MaxFileSize+1)...)
+	bigPath := filepath.Join(dir, "memory", "decisions", "oversized.md")
+	if err := os.WriteFile(bigPath, big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.Backlinks("/memory/decisions/target.md")
+	if err != nil {
+		t.Fatalf("Backlinks: %v", err)
+	}
+	gotPaths := make([]string, len(got))
+	for i, e := range got {
+		gotPaths[i] = e.Path
+	}
+	want := []string{"memory/decisions/linker.md"}
+	if !reflect.DeepEqual(gotPaths, want) {
+		t.Fatalf("Backlinks skipped/included the wrong files: got %v, want %v", gotPaths, want)
+	}
+}
+
 func mustWrite(t *testing.T, s *Store, relPath, content string) {
 	t.Helper()
-	if _, _, err := s.Write(relPath, []byte(content), ""); err != nil {
-		// Allow rewriting an existing path (create-only conflicts) by retrying
-		// with the current hash, so a test can intentionally overwrite a note.
-		cur, hash, rerr := s.Read(relPath)
-		if rerr != nil {
-			t.Fatalf("write %s: %v", relPath, err)
-		}
-		_ = cur
-		if _, _, werr := s.Write(relPath, []byte(content), hash); werr != nil {
+	// A create-only write (empty baseHash) against an existing path returns a
+	// non-nil Conflict with a nil error, not an error — so retrying on err alone
+	// silently no-ops the rewrite. Retry as a hash-CAS edit using the conflict's
+	// current hash so a test can intentionally overwrite a note.
+	_, conflict, err := s.Write(relPath, []byte(content), "")
+	if err != nil {
+		t.Fatalf("write %s: %v", relPath, err)
+	}
+	if conflict != nil {
+		if _, _, werr := s.Write(relPath, []byte(content), conflict.CurrentHash); werr != nil {
 			t.Fatalf("rewrite %s: %v", relPath, werr)
 		}
 	}

@@ -21,6 +21,13 @@
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
 }
 
+/* The container is the initial focus target (tabIndex -1) so focus lands inside
+   the modal on open; it is not an interactive control, so suppress its ring. */
+.notebook-browser:focus,
+.notebook-browser:focus-visible {
+  outline: none;
+}
+
 .notebook-browser-header {
   min-height: 72px;
   display: flex;
