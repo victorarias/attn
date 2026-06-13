@@ -1,6 +1,12 @@
 export type ResolvedTheme = 'dark' | 'light';
 
-export const FONT_FAMILY = 'Iosevka, Menlo, Monaco, "Courier New", monospace';
+// "Symbols Nerd Font Mono" is a bundled fallback (see index.html @font-face): it
+// sits after the real monospace faces so it only supplies Private Use Area icon
+// glyphs (eza --icons, powerline, devicons) that no system monospace font has.
+// Text still renders from Iosevka/Menlo; per-character canvas font fallback
+// reaches the symbols face only for codepoints the earlier faces lack.
+export const FONT_FAMILY =
+  'Iosevka, Menlo, Monaco, "Courier New", "Symbols Nerd Font Mono", monospace';
 // Ghostty's `scrollbackLimit` is documented as lines but ghostty-web 0.4.0
 // passes it straight through to libghostty's `max_scrollback`, which is BYTES
 // of page data (and floors small values to ~1 MiB internally). This constant

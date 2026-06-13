@@ -18,6 +18,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **You can now drag a session straight from the sidebar to reorganize your workspaces.** Press and drag any session in the sidebar list — a ghost follows your cursor — and drop it on another workspace to move it there, or on the "New workspace" zone at the foot of the list to split it into a brand-new workspace of its own. (Dragging a session's pane in the main view does the same thing; now the sidebar list is a drag handle too.) Splitting a session into a new workspace adds it at the end of your list, and if the move empties the workspace it came from, that empty one is cleaned up for you.
 
 ### Fixed
+- **Emoji and terminal icons now render in the terminal.** Color emoji show in their real colors instead of a flat one-color blob, and the file-type and Git icons that tools like `eza --icons`, `starship`, and powerline prompts draw (which need a "Nerd Font") now appear instead of blank gaps — attn bundles the icon font, so it works without installing anything.
 - **A session running work in the background no longer flips to a confusing "unknown" state.** When Claude Code hands off to a background workflow or background shell command and pauses its turn, the session now stays shown as working until the background work finishes and the turn resumes — instead of briefly being mis-detected as "unknown" because it paused before its transcript was written.
 
 ## [2026-06-12]

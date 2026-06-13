@@ -12,6 +12,13 @@
 //      an index cursor — NOT `number[].push(...)` + `new Float32Array(...)`,
 //      which benchmarked at ~57ms/frame for 25 tiles (hard jank).
 import { CellFlags, type GhosttyCell, type GhosttyTerminal } from 'ghostty-web';
+import {
+  GLYPH_MODE_COLOR,
+  GLYPH_MODE_TINT,
+  TERMINAL_GLYPH_FRAGMENT_SHADER,
+  TERMINAL_GLYPH_VERTEX_SHADER,
+  isColorGlyphBitmap,
+} from '../terminalGlyphProgram';
 import type { UISessionState } from '../../types/sessionState';
 import type {
   GridRenderer,
@@ -34,6 +41,10 @@ interface AtlasGlyph {
   v1: number;
   width: number;
   height: number;
+  // True when the rasterized bitmap carries its own colors (a color font such as
+  // Apple Color Emoji): drawn directly (mode 1) instead of tinted with the cell
+  // foreground.
+  colored: boolean;
 }
 
 interface BlockRect {
@@ -44,7 +55,8 @@ interface BlockRect {
 }
 
 const ATLAS_SIZE = 2048;
-const FLOATS_PER_VERTEX = 8;
+// position(2) + texcoord(2) + color(4) + mode(1); see terminalGlyphProgram.
+const FLOATS_PER_VERTEX = 9;
 const FLOATS_PER_QUAD = FLOATS_PER_VERTEX * 6;
 const SOLID_TEXEL_CENTER = 0.5 / ATLAS_SIZE;
 // Blue accent for the focused (zoomed/input-target) tile, so it is obvious which
@@ -150,31 +162,8 @@ function compileShader(gl: WebGL2RenderingContext, type: number, source: string)
 }
 
 function createProgram(gl: WebGL2RenderingContext): WebGLProgram {
-  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, `#version 300 es
-    in vec2 a_position;
-    in vec2 a_texcoord;
-    in vec4 a_color;
-    uniform vec2 u_resolution;
-    out vec2 v_texcoord;
-    out vec4 v_color;
-    void main() {
-      vec2 clip = (a_position / u_resolution) * 2.0 - 1.0;
-      gl_Position = vec4(clip * vec2(1.0, -1.0), 0.0, 1.0);
-      v_texcoord = a_texcoord;
-      v_color = a_color;
-    }
-  `);
-  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, `#version 300 es
-    precision mediump float;
-    uniform sampler2D u_atlas;
-    in vec2 v_texcoord;
-    in vec4 v_color;
-    out vec4 out_color;
-    void main() {
-      float mask = texture(u_atlas, v_texcoord).a;
-      out_color = vec4(v_color.rgb, v_color.a * mask);
-    }
-  `);
+  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, TERMINAL_GLYPH_VERTEX_SHADER);
+  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, TERMINAL_GLYPH_FRAGMENT_SHADER);
   const program = gl.createProgram();
   if (!program) throw new Error('grid: unable to allocate program');
   gl.attachShader(program, vertexShader);
@@ -273,6 +262,10 @@ export class UnifiedGridRenderer implements GridRenderer {
     atlasContext.fillStyle = '#ffffff';
     atlasContext.fillRect(0, 0, 1, 1);
 
+    // Premultiply alpha on upload so color-glyph (emoji) bitmaps filter cleanly;
+    // coverage-only glyphs are unaffected (the tinted path reads only the alpha).
+    // See terminalGlyphProgram for the shared pipeline contract.
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     const minFilter = this.mipmaps ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR;
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, minFilter);
@@ -288,10 +281,14 @@ export class UnifiedGridRenderer implements GridRenderer {
     this.configureAttribute('a_position', 2, stride, 0);
     this.configureAttribute('a_texcoord', 2, stride, 2 * Float32Array.BYTES_PER_ELEMENT);
     this.configureAttribute('a_color', 4, stride, 4 * Float32Array.BYTES_PER_ELEMENT);
+    this.configureAttribute('a_mode', 1, stride, 8 * Float32Array.BYTES_PER_ELEMENT);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_atlas'), 0);
     this.uResolution = gl.getUniformLocation(this.program, 'u_resolution');
     gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    // Premultiplied-alpha blending (source factor ONE): identical on-screen result
+    // to the old SRC_ALPHA blend for tinted quads, and lets color glyphs composite
+    // without dark edge fringing.
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   }
 
   setTiles(tiles: TileModel[]): void {
@@ -573,9 +570,10 @@ export class UnifiedGridRenderer implements GridRenderer {
     context.fillStyle = '#ffffff';
     context.textBaseline = 'alphabetic';
     context.fillText(text, x, y + this.metrics.baseline * scale);
+    const bitmap = context.getImageData(x, y, width, height);
     const gl = this.gl!;
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, context.getImageData(x, y, width, height));
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
     if (this.mipmaps) gl.generateMipmap(gl.TEXTURE_2D);
     this.glyphUploads += 1;
 
@@ -586,11 +584,22 @@ export class UnifiedGridRenderer implements GridRenderer {
       v1: (y + height) / ATLAS_SIZE,
       width,
       height,
+      colored: isColorGlyphBitmap(bitmap),
     };
     this.atlasX += width + 1;
     this.atlasRowHeight = Math.max(this.atlasRowHeight, height);
     this.glyphs.set(key, glyph);
     return glyph;
+  }
+
+  // Drop every cached glyph so the next frame re-rasterizes against the current
+  // document fonts. Used when the bundled Nerd Font finishes loading after some
+  // tiles already cached blank icon glyphs (grid runs a continuous RAF loop, so
+  // no explicit repaint is needed). No-op before mount, when there is nothing to
+  // invalidate.
+  invalidateGlyphCache(): void {
+    if (!this.gl || !this.atlasContext) return;
+    this.resetAtlas();
   }
 
   private resetAtlas(): void {
@@ -617,11 +626,12 @@ export class UnifiedGridRenderer implements GridRenderer {
   }
 
   private pushSolid(x: number, y: number, w: number, h: number, color: Rgb, alpha: number): void {
-    this.pushQuad(x, y, w, h, SOLID_TEXEL_CENTER, SOLID_TEXEL_CENTER, SOLID_TEXEL_CENTER, SOLID_TEXEL_CENTER, color, alpha);
+    this.pushQuad(x, y, w, h, SOLID_TEXEL_CENTER, SOLID_TEXEL_CENTER, SOLID_TEXEL_CENTER, SOLID_TEXEL_CENTER, color, alpha, GLYPH_MODE_TINT);
   }
 
   private pushTextured(x: number, y: number, w: number, h: number, glyph: AtlasGlyph, color: Rgb, alpha: number): void {
-    this.pushQuad(x, y, w, h, glyph.u0, glyph.v0, glyph.u1, glyph.v1, color, alpha);
+    // Color glyphs (emoji) pass the atlas RGBA through; monochrome glyphs tint.
+    this.pushQuad(x, y, w, h, glyph.u0, glyph.v0, glyph.u1, glyph.v1, color, alpha, glyph.colored ? GLYPH_MODE_COLOR : GLYPH_MODE_TINT);
   }
 
   private pushBlockElement(codepoint: number, x: number, y: number, w: number, h: number, color: Rgb, alpha: number): boolean {
@@ -633,7 +643,8 @@ export class UnifiedGridRenderer implements GridRenderer {
     return true;
   }
 
-  // The hot path: write 48 floats straight into the preallocated scratch.
+  // The hot path: write 54 floats (6 verts × 9) straight into the preallocated
+  // scratch. The trailing float per vertex is a_mode (see terminalGlyphProgram).
   private pushQuad(
     x: number,
     y: number,
@@ -645,6 +656,7 @@ export class UnifiedGridRenderer implements GridRenderer {
     v1: number,
     color: Rgb,
     alpha: number,
+    mode: number,
   ): void {
     if (this.p + FLOATS_PER_QUAD > this.scratch.length) {
       const next = new Float32Array(this.scratch.length * 2);
@@ -655,15 +667,17 @@ export class UnifiedGridRenderer implements GridRenderer {
     const r = color.r / 255;
     const g = color.g / 255;
     const b = color.b / 255;
+    const a = alpha;
+    const e = mode;
     let p = this.p;
     // tri 1
-    s[p++] = x; s[p++] = y; s[p++] = u0; s[p++] = v0; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = alpha;
-    s[p++] = x + w; s[p++] = y; s[p++] = u1; s[p++] = v0; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = alpha;
-    s[p++] = x; s[p++] = y + h; s[p++] = u0; s[p++] = v1; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = alpha;
+    s[p++] = x; s[p++] = y; s[p++] = u0; s[p++] = v0; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = a; s[p++] = e;
+    s[p++] = x + w; s[p++] = y; s[p++] = u1; s[p++] = v0; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = a; s[p++] = e;
+    s[p++] = x; s[p++] = y + h; s[p++] = u0; s[p++] = v1; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = a; s[p++] = e;
     // tri 2
-    s[p++] = x; s[p++] = y + h; s[p++] = u0; s[p++] = v1; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = alpha;
-    s[p++] = x + w; s[p++] = y; s[p++] = u1; s[p++] = v0; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = alpha;
-    s[p++] = x + w; s[p++] = y + h; s[p++] = u1; s[p++] = v1; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = alpha;
+    s[p++] = x; s[p++] = y + h; s[p++] = u0; s[p++] = v1; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = a; s[p++] = e;
+    s[p++] = x + w; s[p++] = y; s[p++] = u1; s[p++] = v0; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = a; s[p++] = e;
+    s[p++] = x + w; s[p++] = y + h; s[p++] = u1; s[p++] = v1; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = a; s[p++] = e;
     this.p = p;
     this.quads += 1;
   }

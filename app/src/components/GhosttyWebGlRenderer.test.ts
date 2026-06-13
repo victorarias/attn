@@ -105,6 +105,9 @@ function makeRecordingContext() {
     fillStyle: '#000000',
     textBaseline: 'alphabetic',
     fillTextCalls: [] as FillTextCall[],
+    // When set, getImageData fills every pixel with this RGBA so tests can
+    // simulate a color-font raster (e.g. emoji) vs the default transparent one.
+    nextPixel: null as null | { r: number; g: number; b: number; a: number },
     measureText(text: string) {
       return { width: text.length * 8 };
     },
@@ -114,7 +117,17 @@ function makeRecordingContext() {
       this.fillTextCalls.push({ text, x, y, font: this.font });
     },
     getImageData(_x: number, _y: number, w: number, h: number) {
-      return { data: new Uint8ClampedArray(Math.max(1, w * h * 4)), width: w, height: h };
+      const data = new Uint8ClampedArray(Math.max(1, w * h * 4));
+      const px = this.nextPixel;
+      if (px) {
+        for (let i = 0; i < data.length; i += 4) {
+          data[i] = px.r;
+          data[i + 1] = px.g;
+          data[i + 2] = px.b;
+          data[i + 3] = px.a;
+        }
+      }
+      return { data, width: w, height: h };
     },
   };
 }
@@ -276,6 +289,42 @@ describe('WebGlTerminalRenderer overlays', () => {
       { startRow: 0, startCol: 2, endRow: 0, endCol: 2, color: '#3366ff', kind: 'background' },
     ]);
     expect(clamped?.quads).toBe(8);
+  });
+});
+
+describe('WebGlTerminalRenderer color glyphs', () => {
+  it('flags chromatic rasters as color glyphs and neutral ones as tinted', () => {
+    const { renderer, atlasContext } = makeRenderer();
+
+    // Default raster is fully transparent -> a monochrome/tinted glyph.
+    expect(renderer.getGlyph('A', 0).colored).toBe(false);
+
+    // A color font ignores the white fill and paints its own colors: chromatic
+    // opaque pixels mark the glyph as one to draw directly instead of tinting.
+    atlasContext.nextPixel = { r: 240, g: 40, b: 30, a: 255 };
+    expect(renderer.getGlyph('🔥', 0).colored).toBe(true);
+
+    // A white coverage glyph (r === g === b) stays tinted even when opaque.
+    atlasContext.nextPixel = { r: 255, g: 255, b: 255, a: 255 };
+    expect(renderer.getGlyph('B', 0).colored).toBe(false);
+  });
+});
+
+describe('WebGlTerminalRenderer glyph cache invalidation', () => {
+  it('re-rasterizes a cached glyph after invalidateGlyphCache (font finished loading)', () => {
+    const { renderer, atlasContext } = makeRenderer(14, 'monospace');
+
+    // First request rasterizes; a second identical request is served from cache.
+    renderer.getGlyph('', 0);
+    const afterFirst = atlasContext.fillTextCalls.length;
+    renderer.getGlyph('', 0);
+    expect(atlasContext.fillTextCalls.length).toBe(afterFirst);
+
+    // After invalidation the same glyph must be drawn again so a now-loaded web
+    // font replaces the stale fallback raster instead of being served forever.
+    renderer.invalidateGlyphCache();
+    renderer.getGlyph('', 0);
+    expect(atlasContext.fillTextCalls.length).toBe(afterFirst + 1);
   });
 });
 

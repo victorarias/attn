@@ -27,6 +27,7 @@ import type { ScreenSnapshotResult } from '../../hooks/useDaemonSocket';
 import type { UISessionState } from '../../types/sessionState';
 import { getTerminalTheme, getTerminalAnsiPalette } from '../../utils/terminalSizing';
 import { UnifiedGridRenderer } from './UnifiedGridRenderer';
+import { ensureTerminalIconFont } from '../../utils/terminalIconFont';
 import { GridCompositor, type GridTileSpec } from './GridCompositor';
 import type { Rect } from './GridRenderer';
 import { GridHiddenSessions, type HiddenGridSession } from './GridHiddenSessions';
@@ -200,6 +201,14 @@ export function GridView({
       comp.setLayout(layoutRef.current.rows, layoutRef.current.cols);
       reconcileSeeding(comp);
       comp.start();
+
+      // Drop blank icon glyphs cached before the bundled Nerd Font loaded; the
+      // continuous RAF loop re-rasterizes them on the next frame. (The main
+      // terminal usually triggers the load first, but the grid can open before
+      // that completes on a cold start.)
+      void ensureTerminalIconFont(FONT_SIZE).then(() => {
+        if (!disposed) renderer.invalidateGlyphCache();
+      });
 
       // Keyboard input for the zoomed tile. The InputHandler attaches keydown to
       // the stage (and makes it focusable); we encode against the zoomed model's

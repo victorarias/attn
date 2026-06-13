@@ -99,6 +99,7 @@ import {
   type ApplicationSelectionAnchor,
 } from '../utils/ghosttyScroll';
 import { installTerminalKeyHandler } from './SessionTerminalWorkspace/terminalKeyHandler';
+import { ensureTerminalIconFont } from '../utils/terminalIconFont';
 import {
   WebGlTerminalRenderer,
   type WebGlOverlay,
@@ -1527,6 +1528,14 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         });
         terminalRef.current = terminal;
         rendererRef.current = renderer;
+        // The bundled Nerd Font may not be loaded yet, so the first glyphs that
+        // need it rasterize blank. Once it loads, drop the stale glyph cache and
+        // repaint so terminal icons (eza --icons, powerline, devicons) appear.
+        void ensureTerminalIconFont(fontSize).then(() => {
+          if (!active || rendererRef.current !== renderer) return;
+          renderer.invalidateGlyphCache();
+          renderSurface(true);
+        });
         // Live probe for the blank-on-resize watchdog: lets the diagnostics
         // module read the current model fill vs the last paint's quad count.
         registerRenderProbe(diagKeyRef.current, () => {
