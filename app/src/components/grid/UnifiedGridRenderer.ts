@@ -56,14 +56,25 @@ const STATE_COLORS: Record<UISessionState, Rgb> = {
   waiting_input: { r: 245, g: 158, b: 11 },
   idle: { r: 107, g: 114, b: 128 },
   pending_approval: { r: 234, g: 179, b: 8 },
+  // sky blue — calm and distinct from launching's periwinkle, the royal-blue
+  // PR/focus accent, and the unknown purple.
+  scheduled: { r: 14, g: 165, b: 233 },
   unknown: { r: 168, g: 85, b: 247 },
 };
 const FOCUS_BORDER_ALPHA = 0.95;
 const WAITING_INPUT_FLASH_PERIOD_MS = 1_600;
+const SCHEDULED_PULSE_PERIOD_MS = 3_200;
 
 export function waitingInputFlash(now: number): number {
   const wave = 0.5 + 0.5 * Math.sin((now / WAITING_INPUT_FLASH_PERIOD_MS) * Math.PI * 2);
   return wave * wave;
+}
+
+// scheduledPulse is a gentle breathing wave in [0,1], slower and softer than
+// the waiting_input flash — it reads as "parked but alive, will auto-resume"
+// rather than "needs you now".
+export function scheduledPulse(now: number): number {
+  return 0.5 + 0.5 * Math.sin((now / SCHEDULED_PULSE_PERIOD_MS) * Math.PI * 2);
 }
 
 const BLOCK_ELEMENT_RECTS: Readonly<Record<number, readonly BlockRect[]>> = {
@@ -397,12 +408,15 @@ export class UnifiedGridRenderer implements GridRenderer {
     const h = rows * cellH;
     const stateColor = STATE_COLORS[frame.state];
     const waitingFlash = frame.state === 'waiting_input' ? waitingInputFlash(now) : 0;
+    const scheduledWave = frame.state === 'scheduled' ? scheduledPulse(now) : 0;
 
     const pulse = frame.state === 'waiting_input'
       ? 0.02 + 0.14 * waitingFlash
-      : frame.attention > 0.001
-        ? frame.attention * (0.04 + 0.08 * (0.5 + 0.5 * Math.sin(now / 320)))
-        : 0;
+      : frame.state === 'scheduled'
+        ? 0.015 + 0.05 * scheduledWave
+        : frame.attention > 0.001
+          ? frame.attention * (0.04 + 0.08 * (0.5 + 0.5 * Math.sin(now / 320)))
+          : 0;
     this.pushSolid(
       ox,
       oy,
@@ -464,7 +478,9 @@ export class UnifiedGridRenderer implements GridRenderer {
         (
           frame.state === 'waiting_input'
             ? 0.28 + 0.72 * waitingFlash
-            : this.stateBorderAlpha(frame.state)
+            : frame.state === 'scheduled'
+              ? 0.4 + 0.35 * scheduledWave
+              : this.stateBorderAlpha(frame.state)
         ) * alpha,
         Math.max(2 * this.dpr, 1.5),
       );
@@ -490,6 +506,8 @@ export class UnifiedGridRenderer implements GridRenderer {
       case 'working':
         return 0.07;
       case 'launching':
+        return 0.085;
+      case 'scheduled':
         return 0.085;
       case 'waiting_input':
       case 'pending_approval':

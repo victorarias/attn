@@ -30,7 +30,13 @@ export function StateIndicator({
     <span
       className={`state-indicator state-indicator--${size} state-indicator--${stateClass} state-indicator--${kind} ${className}`.trim()}
       data-testid="state-indicator"
-      aria-label={state === 'unknown' ? 'state unknown' : undefined}
+      aria-label={
+        state === 'unknown'
+          ? 'state unknown'
+          : state === 'scheduled'
+            ? 'scheduled'
+            : undefined
+      }
     >
       {launchingEmoji}
     </span>

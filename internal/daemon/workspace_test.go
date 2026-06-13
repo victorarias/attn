@@ -49,6 +49,26 @@ func TestRollupWorkspaceStatus_PriorityOrdering(t *testing.T) {
 			want:   protocol.WorkspaceStatusPendingApproval,
 		},
 		{
+			name:   "pending_approval beats scheduled",
+			states: []protocol.SessionState{protocol.SessionStateScheduled, protocol.SessionStatePendingApproval},
+			want:   protocol.WorkspaceStatusPendingApproval,
+		},
+		{
+			name:   "scheduled beats idle",
+			states: []protocol.SessionState{protocol.SessionStateIdle, protocol.SessionStateScheduled},
+			want:   protocol.WorkspaceStatusScheduled,
+		},
+		{
+			name:   "scheduled beats launching",
+			states: []protocol.SessionState{protocol.SessionStateLaunching, protocol.SessionStateScheduled},
+			want:   protocol.WorkspaceStatusScheduled,
+		},
+		{
+			name:   "all scheduled yields scheduled",
+			states: []protocol.SessionState{protocol.SessionStateScheduled, protocol.SessionStateScheduled},
+			want:   protocol.WorkspaceStatusScheduled,
+		},
+		{
 			name:   "idle beats launching",
 			states: []protocol.SessionState{protocol.SessionStateLaunching, protocol.SessionStateIdle},
 			want:   protocol.WorkspaceStatusIdle,
