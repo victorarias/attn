@@ -42,6 +42,8 @@ Run full app builds and installs via `make` or `make dev` outside the sandbox. T
 
 To make CLI commands (`attn`, `attn list`, etc.) target the dev daemon in your shell, run `eval "$(./attn profile-env dev)"` (bash/zsh) or `./attn profile-env --fish dev | source` (fish). Any `attn` subcommand then prints a one-line `[attn profile=dev ...]` banner so you can always see which daemon you're talking to. Unset with `eval "$(attn profile-env --unset)"`.
 
+`dev` is just one named profile. `ATTN_PROFILE` selects an isolated world (data dir, socket, port, app bundle) for **every** entrypoint, so multiple agents can run side by side. Run `attn profile` to see where you are, `attn profile list` for all profiles, and `attn profile resolve --json` for the machine-readable resolution. See **[docs/profiles.md](docs/profiles.md)** for the full model, the per-agent test recipe, and the safety rules.
+
 Frontend-only shortcuts:
 
 ```bash

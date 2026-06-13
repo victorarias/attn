@@ -18,7 +18,13 @@ import (
 // in bash, zsh, and fish's posix-compat eval. For native fish, use
 // `attn profile-env --fish dev` which prints `set -gx ATTN_PROFILE dev`.
 func runProfileEnv() {
-	args := os.Args[2:]
+	runProfileEnvArgs(os.Args[2:])
+}
+
+// runProfileEnvArgs emits the shell commands for the given args. Split out so
+// both the top-level `attn profile-env …` and the `attn profile env …` alias
+// share one implementation.
+func runProfileEnvArgs(args []string) {
 	fishMode := false
 	filtered := make([]string, 0, len(args))
 	for _, a := range args {
