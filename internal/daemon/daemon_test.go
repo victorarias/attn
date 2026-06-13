@@ -821,8 +821,8 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend_PreservesScheduled(t *testing
 				SessionID: "live-scheduled",
 				Agent:     string(protocol.SessionAgentCodex),
 				CWD:       "/tmp/loop",
-				Running:   true,                // worker alive, parked on a cron
-				State:     protocol.StateIdle,  // parked screen reads as idle
+				Running:   true,               // worker alive, parked on a cron
+				State:     protocol.StateIdle, // parked screen reads as idle
 			},
 		},
 	}
