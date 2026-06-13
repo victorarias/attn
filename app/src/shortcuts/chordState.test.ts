@@ -82,6 +82,31 @@ describe('chordState', () => {
     expect(resolvePendingThen(key({ key: 'd', metaKey: true }))).toEqual({ kind: 'fired', id: 'dock.diff' });
   });
 
+  it('re-arms (does not cancel) when the leader is pressed again', () => {
+    enterLeader(LEADER, [{ id: 'dock.diff', then: { key: 'd' } }]);
+    expect(resolvePendingThen(key({ key: 'k', metaKey: true }))).toEqual({ kind: 'rearmed' });
+    expect(isLeaderPending()).toBe(true);
+    // The follow key still fires after a re-arm.
+    expect(resolvePendingThen(key({ key: 'd' }))).toEqual({ kind: 'fired', id: 'dock.diff' });
+  });
+
+  it('keeps the leader pending on OS auto-repeat instead of self-cancelling', () => {
+    enterLeader(LEADER, [{ id: 'dock.diff', then: { key: 'd' } }]);
+    expect(resolvePendingThen(key({ key: 'k', metaKey: true, repeat: true }))).toEqual({ kind: 'rearmed' });
+    expect(isLeaderPending()).toBe(true);
+  });
+
+  it('does not re-render the HUD when re-armed with the same leader', () => {
+    const sub = vi.fn();
+    const unsubscribe = subscribeChord(sub);
+    enterLeader(LEADER, [{ id: 'dock.diff', then: { key: 'd' } }]);
+    expect(sub).toHaveBeenCalledTimes(1);
+    // Same leader object -> snapshot unchanged -> no extra notification.
+    enterLeader(LEADER, [{ id: 'dock.diff', then: { key: 'd' } }]);
+    expect(sub).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
   it('auto-cancels after the timeout', () => {
     enterLeader(LEADER, [{ id: 'dock.diff', then: { key: 'd' } }]);
     vi.advanceTimersByTime(LEADER_TIMEOUT_MS + 1);

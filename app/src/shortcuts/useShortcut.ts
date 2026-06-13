@@ -47,19 +47,14 @@ function installGlobalListener() {
   window.addEventListener('keydown', (e: KeyboardEvent) => {
     if (captureSuspended) return;
 
-    // A pending leader owns the next keystroke entirely: fire its chord or
-    // cancel, but always consume so it can't fall through to a single combo or
-    // leak into the terminal PTY.
+    // A pending leader owns the next keystroke entirely: fire its chord, refresh
+    // a re-press, or cancel — but always consume so it can't fall through to a
+    // single combo or leak into the terminal PTY.
     const pendingThen = resolvePendingThen(e);
-    if (pendingThen.kind === 'fired') {
+    if (pendingThen.kind !== 'none') {
       e.preventDefault();
       e.stopPropagation();
-      triggerShortcut(pendingThen.id);
-      return;
-    }
-    if (pendingThen.kind === 'cancelled') {
-      e.preventDefault();
-      e.stopPropagation();
+      if (pendingThen.kind === 'fired') triggerShortcut(pendingThen.id);
       return;
     }
 
@@ -91,13 +86,18 @@ function installGlobalListener() {
       }
     }
 
-    // No single combo matched — arm a chord if this is a leader with at least
-    // one registered follow action. Consuming the leader keeps it off the PTY.
-    const chord = matchChordLeader(e);
-    if (chord) {
-      const fireable = chord.candidates.filter((c) => hasHandler(c.id));
-      if (fireable.length > 0) {
-        enterLeader(chord.leader, fireable);
+    // No single combo matched — arm a chord if this keystroke is a bound leader.
+    // A bound leader is always consumed (never leaks to the PTY) even when no
+    // follow action currently has a handler; it just arms nothing in that case.
+    // Skip in non-terminal editable targets so a leader can't swallow a
+    // keystroke meant for an input/textarea.
+    if (!editableTarget) {
+      const chord = matchChordLeader(e);
+      if (chord) {
+        const fireable = chord.candidates.filter((c) => hasHandler(c.id));
+        if (fireable.length > 0) {
+          enterLeader(chord.leader, fireable);
+        }
         e.preventDefault();
         e.stopPropagation();
         return;

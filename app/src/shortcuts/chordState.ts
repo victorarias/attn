@@ -28,6 +28,9 @@ let snapshot: { leader: Combo | null } = { leader: null };
 const subscribers = new Set<() => void>();
 
 function publish(leader: Combo | null): void {
+  // Re-arming with the same leader (held key / double-tap) must not churn the
+  // snapshot or re-render subscribers.
+  if (snapshot.leader === leader) return;
   snapshot = { leader };
   for (const cb of subscribers) cb();
 }
@@ -74,13 +77,16 @@ export type ThenResult =
   // with normal single-combo handling (and pending, if any, survives).
   | { kind: 'none' }
   | { kind: 'fired'; id: ShortcutId }
+  // Leader re-pressed / auto-repeated: pending refreshed, consume but do nothing.
+  | { kind: 'rearmed' }
   | { kind: 'cancelled' };
 
 /**
  * Resolve the follow keystroke after a leader. A matching candidate fires and
- * clears the leader; Escape or any non-matching, non-modifier key cancels. Both
- * 'fired' and 'cancelled' mean the caller must consume the event so the follow
- * key never reaches the PTY.
+ * clears the leader; pressing the leader again (or OS auto-repeat of a held
+ * leader) refreshes the window instead of cancelling; Escape or any other
+ * non-modifier key cancels. Every result except 'none' means the caller must
+ * consume the event so the key never reaches the PTY.
  */
 export function resolvePendingThen(e: KeyboardEvent): ThenResult {
   if (!pending) return { kind: 'none' };
@@ -94,6 +100,11 @@ export function resolvePendingThen(e: KeyboardEvent): ThenResult {
       cancelLeader();
       return { kind: 'fired', id: c.id };
     }
+  }
+  // A held or re-pressed leader should keep the chord armed, not self-cancel.
+  if (e.repeat || matchesShortcut(e, pending.leader)) {
+    enterLeader(pending.leader, pending.candidates); // refresh the timeout
+    return { kind: 'rearmed' };
   }
   cancelLeader();
   return { kind: 'cancelled' };

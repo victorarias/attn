@@ -39,12 +39,9 @@ export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
     // this is the safety net for packaged-app capture-order differences.)
     if (event.type === 'keydown') {
       const pendingThen = resolvePendingThen(event);
-      if (pendingThen.kind === 'fired') {
-        triggerShortcut(pendingThen.id);
-        return false;
-      }
-      if (pendingThen.kind === 'cancelled') {
-        return false;
+      if (pendingThen.kind !== 'none') {
+        if (pendingThen.kind === 'fired') triggerShortcut(pendingThen.id);
+        return false; // fired / rearmed / cancelled all consume the follow key
       }
     }
 
@@ -75,16 +72,6 @@ export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
     }
 
     if (event.type === 'keydown') {
-      // Arm a chord leader before the single-combo intercepts, consuming it so
-      // the leader keystroke never reaches the PTY.
-      const chord = matchChordLeader(event);
-      if (chord) {
-        const fireable = chord.candidates.filter((c) => hasHandler(c.id));
-        if (fireable.length > 0) {
-          enterLeader(chord.leader, fireable);
-          return false;
-        }
-      }
       for (const id of TERMINAL_INTERCEPTS) {
         if (matchesBinding(event, id)) {
           return !triggerShortcut(id);
@@ -96,6 +83,18 @@ export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
       }
       if (matchesBinding(event, 'session.close')) {
         return !triggerShortcut('session.close');
+      }
+      // Arm a chord leader AFTER the single-combo intercepts, mirroring the
+      // window listener's combo-first precedence. A bound leader is always
+      // consumed (never reaches the PTY) even when no follow action has a
+      // handler — it just arms nothing in that case.
+      const chord = matchChordLeader(event);
+      if (chord) {
+        const fireable = chord.candidates.filter((c) => hasHandler(c.id));
+        if (fireable.length > 0) {
+          enterLeader(chord.leader, fireable);
+        }
+        return false;
       }
     }
 

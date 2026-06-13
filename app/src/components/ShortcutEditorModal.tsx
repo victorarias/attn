@@ -4,10 +4,10 @@
 // binding a taken combo asks to reassign, unbinding the previous holder.
 // Saves immediately on each edit. Chords and "show in dock" land in later PRs.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
 import { useEscapeStack } from '../hooks/useEscapeStack';
-import { SHORTCUTS, ShortcutId, Binding, bindingsConflict } from '../shortcuts/registry';
+import { SHORTCUTS, ShortcutId, Binding, bindingsConflict, isChord } from '../shortcuts/registry';
 import {
   SHORTCUT_META,
   SHORTCUT_CATEGORY_ORDER,
@@ -54,8 +54,12 @@ function effectiveBinding(id: ShortcutId, change: BindingChange): Binding {
 
 // The value to persist: undefined (drop override → default) when the change is
 // a reset or resolves to the default binding, otherwise the explicit binding.
+// A chord is never the default (defaults are all combos), so it must always be
+// persisted — using the combo keystroke-equivalence here would wrongly drop a
+// chord whose leader equals the default combo (e.g. ⌘K-then-D on ⌘K).
 function overrideValue(id: ShortcutId, change: BindingChange): Binding | undefined {
   if (change === 'default') return undefined;
+  if (isChord(change)) return change;
   return bindingsConflict(change, SHORTCUTS[id]) ? undefined : change;
 }
 
@@ -70,10 +74,23 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
 
   useEscapeStack(onClose, isOpen && recordingId === null && pending === null);
 
+  // The modal stays mounted (it just renders null when closed), so reset any
+  // in-flight recording when it closes — otherwise it reopens stuck recording,
+  // which re-suspends the global shortcut dispatcher.
+  useEffect(() => {
+    if (!isOpen) {
+      setRecordingId(null);
+      setRecordingMode('combo');
+      setPending(null);
+      setRowError(null);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const clearTransient = () => {
     setRecordingId(null);
+    setRecordingMode('combo');
     setPending(null);
     setRowError(null);
   };

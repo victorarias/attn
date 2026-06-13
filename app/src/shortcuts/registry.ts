@@ -135,9 +135,10 @@ export function combosConflict(a: Combo, b: Combo): boolean {
  * - combo × combo: same keystroke (the original rule).
  * - chord × chord: same leader AND same follow key. Sharing only a leader is
  *   fine — that is how several chords hang off one leader (⌘K D, ⌘K G).
- * - chord × combo: collide iff the combo equals the chord's leader. A leader is
- *   exclusive: it must swallow its keystroke to wait for the follow key, so a
- *   plain combo on the same keystroke could never fire.
+ * - chord × combo: collide iff the combo equals the chord's leader. Dispatch
+ *   matches single combos first and fires them immediately, so a chord sharing
+ *   that leader keystroke could never arm — they genuinely collide and the
+ *   editor must force a reassign.
  */
 export function bindingsConflict(a: Binding, b: Binding): boolean {
   const aChord = isChord(a);

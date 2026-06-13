@@ -200,15 +200,17 @@ describe('installTerminalKeyHandler', () => {
       expect(isLeaderPending()).toBe(false);
     });
 
-    it('does not arm a leader when no follow action has a handler', () => {
+    it('consumes a bound leader even when no follow action has a handler (no arm, no PTY leak)', () => {
       vi.mocked(hasHandler).mockReturnValue(false);
       setShortcutOverrides({ 'dock.diff': CHORD });
       const sendToPty = vi.fn();
       const handler = installTerminalKeyHandler(sendToPty);
 
-      // ⌘K with no fireable candidate falls through; nothing arms, nothing leaks.
-      expect(handler(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))).toBe(true);
+      // ⌘K is a bound leader: it must be swallowed (never reach the PTY) even
+      // though no follow action can currently fire — it just arms nothing.
+      expect(handler(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))).toBe(false);
       expect(isLeaderPending()).toBe(false);
+      expect(sendToPty).not.toHaveBeenCalled();
     });
   });
 });

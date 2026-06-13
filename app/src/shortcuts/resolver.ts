@@ -108,7 +108,11 @@ export function resolvedShortcutEntries(): Array<[ShortcutId, Binding]> {
 export function findConflict(binding: Binding, excludeId: ShortcutId): ShortcutId | null {
   for (const [id, d] of resolvedShortcutEntries()) {
     if (id === excludeId) continue;
-    if (isAllowedConflict(excludeId, id)) continue;
+    // The allowed-conflict exemption (e.g. session.close vs terminal.close on
+    // ⌘W) only holds for two plain combos that dispatch disambiguates by target.
+    // A chord leader arms globally and is NOT context-gated, so a chord on
+    // either side must still surface the conflict.
+    if (!isChord(binding) && !isChord(d) && isAllowedConflict(excludeId, id)) continue;
     if (bindingsConflict(binding, d)) return id;
   }
   return null;

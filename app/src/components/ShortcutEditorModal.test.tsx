@@ -145,6 +145,54 @@ describe('ShortcutEditorModal', () => {
     expect(lastConfig(setSetting).dock.items).toEqual(['dock.attention']);
   });
 
+  function recordChord(label: string, leader: KeyboardEventInit, follow: KeyboardEventInit) {
+    fireEvent.click(within(row(label)).getByLabelText('Record a chord'));
+    fireEvent.keyDown(window, leader);
+    fireEvent.keyDown(window, follow);
+  }
+
+  it('records a chord on a row and persists it as the override', () => {
+    const { setSetting } = renderEditor();
+    recordChord('New session in this workspace', { key: 'y', metaKey: true }, { key: 'd' });
+    expect(lastConfig(setSetting).overrides['session.new']).toEqual({
+      leader: { key: 'y', meta: true },
+      then: { key: 'd' },
+    });
+  });
+
+  it('persists a chord whose leader equals the row’s own default combo', () => {
+    // Regression: ⌘K-then-D on "Action menu" (default ⌘K) must not be silently
+    // dropped as if it resolved to the default.
+    const { setSetting } = renderEditor();
+    recordChord('Action menu', { key: 'k', metaKey: true }, { key: 'd' });
+    expect(lastConfig(setSetting).overrides['ui.actionMenu']).toEqual({
+      leader: { key: 'k', meta: true },
+      then: { key: 'd' },
+    });
+  });
+
+  it('resets in-flight recording when the editor closes and reopens', () => {
+    const setSetting = vi.fn();
+    const tree = (open: boolean) => (
+      <SettingsProvider settings={{}} setSetting={setSetting}>
+        <KeybindingsProvider>
+          <ShortcutEditorModal isOpen={open} onClose={() => {}} />
+        </KeybindingsProvider>
+      </SettingsProvider>
+    );
+    const { rerender } = render(tree(true));
+
+    // Start a chord recording and capture the leader (now awaiting the follow key).
+    fireEvent.click(within(row('Action menu')).getByLabelText('Record a chord'));
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    expect(within(row('Action menu')).queryByLabelText('Record a chord')).toBeNull();
+
+    rerender(tree(false));
+    rerender(tree(true));
+    // The row is no longer stuck recording.
+    expect(within(row('Action menu')).getByLabelText('Record a chord')).toBeInTheDocument();
+  });
+
   it('restores defaults', () => {
     const { setSetting } = renderEditor({
       [KEYBINDINGS_SETTING_KEY]: JSON.stringify({
