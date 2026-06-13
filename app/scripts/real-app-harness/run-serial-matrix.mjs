@@ -8,13 +8,16 @@ import {
   defaultWSURLForProfile,
 } from './harnessProfile.mjs';
 
-// Matrix runs against the dev install by default. The dev install is the
-// whole point of the profile feature: iterate on attn-on-attn test
-// scenarios without ever taking over the live prod app. Opt out by
-// setting ATTN_HARNESS_PROFILE to an empty string (prod) or a different
-// profile name explicitly, plus --run-against-prod. This must happen before
-// any import that reads the env var at module-load time.
-if (process.env.ATTN_HARNESS_PROFILE === undefined) {
+// Matrix runs against the safe dev install by default — the whole point of the
+// profile feature is to iterate on attn-on-attn scenarios without ever taking
+// over the live prod app. But honor the one knob: if the shell already selected
+// a profile via ATTN_PROFILE (e.g. agent7), let it win so the matrix drives that
+// profile's app/daemon. Only pin the dev sibling when NEITHER knob is set; an
+// unset/empty ATTN_PROFILE never targets prod by omission (currentHarnessProfile
+// falls back to dev). Opt into prod with ATTN_HARNESS_PROFILE= plus
+// --run-against-prod. This must happen before any import that reads the env var
+// at module-load time.
+if (process.env.ATTN_HARNESS_PROFILE === undefined && !process.env.ATTN_PROFILE) {
   process.env.ATTN_HARNESS_PROFILE = 'dev';
 }
 

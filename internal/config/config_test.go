@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -347,10 +348,10 @@ func TestDeepLinkScheme(t *testing.T) {
 			t.Errorf("DeepLinkScheme() = %q, want %q", got, "attn-dev")
 		}
 	})
-	t.Run("unknown profile → attn (prod scheme is safe default)", func(t *testing.T) {
+	t.Run("named profile → attn-<name> (its own bundle's scheme)", func(t *testing.T) {
 		t.Setenv("ATTN_PROFILE", "staging")
-		if got := DeepLinkScheme(); got != "attn" {
-			t.Errorf("DeepLinkScheme() = %q, want %q", got, "attn")
+		if got := DeepLinkScheme(); got != "attn-staging" {
+			t.Errorf("DeepLinkScheme() = %q, want %q", got, "attn-staging")
 		}
 	})
 }
@@ -412,5 +413,89 @@ func TestPprofAddr(t *testing.T) {
 				t.Fatalf("PprofAddr() = (%q, %v), want (%q, %v)", addr, enabled, tc.wantAddr, tc.wantEnabled)
 			}
 		})
+	}
+}
+
+// TestProfileDerivation_DefaultAndDev pins the default/dev literals so the
+// single-source-of-truth helpers stay wire-compatible with the values currently
+// hardcoded in profile.rs, harnessProfile.mjs, and the tauri configs.
+func TestProfileDerivation_DefaultAndDev(t *testing.T) {
+	cases := []struct {
+		profile                   string
+		bundleID, appName, scheme string
+	}{
+		{"", "com.attn.manager", "attn", "attn"},
+		{"default", "com.attn.manager", "attn", "attn"},
+		{"dev", "com.attn.manager.dev", "attn-dev", "attn-dev"},
+		{"agent7", "com.attn.manager.agent7", "attn-agent7", "attn-agent7"},
+	}
+	for _, tc := range cases {
+		t.Run("profile="+tc.profile, func(t *testing.T) {
+			if got := BundleIdentifierForProfile(tc.profile); got != tc.bundleID {
+				t.Errorf("BundleIdentifierForProfile(%q) = %q, want %q", tc.profile, got, tc.bundleID)
+			}
+			if got := AppNameForProfile(tc.profile); got != tc.appName {
+				t.Errorf("AppNameForProfile(%q) = %q, want %q", tc.profile, got, tc.appName)
+			}
+			if got := DeepLinkSchemeForProfile(tc.profile); got != tc.scheme {
+				t.Errorf("DeepLinkSchemeForProfile(%q) = %q, want %q", tc.profile, got, tc.scheme)
+			}
+		})
+	}
+}
+
+// TestE2EPorts_BandsAreDisjoint verifies the e2e harness ports for a named
+// profile fall in their reserved bands and never collide with prod (9849), dev
+// (29849), the real-profile band [20000,29848], or the default e2e ports.
+func TestE2EPorts_BandsAreDisjoint(t *testing.T) {
+	if got := E2EDaemonPortForProfile(""); got != "19849" {
+		t.Errorf("E2EDaemonPortForProfile(\"\") = %q, want 19849", got)
+	}
+	if got := E2EVitePortForProfile(""); got != "1421" {
+		t.Errorf("E2EVitePortForProfile(\"\") = %q, want 1421", got)
+	}
+	for _, profile := range []string{"agent7", "alpha", "ci-2", "z"} {
+		dPort, err := strconv.Atoi(E2EDaemonPortForProfile(profile))
+		if err != nil {
+			t.Fatalf("E2EDaemonPortForProfile(%q) not numeric: %v", profile, err)
+		}
+		vPort, err := strconv.Atoi(E2EVitePortForProfile(profile))
+		if err != nil {
+			t.Fatalf("E2EVitePortForProfile(%q) not numeric: %v", profile, err)
+		}
+		if dPort < 30000 || dPort > 30999 {
+			t.Errorf("e2e daemon port for %q = %d, want [30000,30999]", profile, dPort)
+		}
+		if vPort < 31000 || vPort > 31999 {
+			t.Errorf("e2e vite port for %q = %d, want [31000,31999]", profile, vPort)
+		}
+		// Disjoint from real daemon ports and each other's band by construction,
+		// but assert the cross-band invariants explicitly.
+		realPort, _ := strconv.Atoi(WSPortForProfile(profile)) // [20000,29848]
+		for _, reserved := range []int{9849, 29849, 1420, 1421, 19849, realPort} {
+			if dPort == reserved || vPort == reserved {
+				t.Errorf("e2e port for %q collided with reserved %d (daemon=%d vite=%d)", profile, reserved, dPort, vPort)
+			}
+		}
+	}
+}
+
+// TestE2EPorts_NeverCollideWithRealDaemon is the cross-entrypoint safety
+// invariant: a throwaway e2e daemon (any profile) can never bind a port a *real*
+// daemon (any profile) uses, so running e2e never hijacks or is hijacked by a
+// live daemon. Guaranteed by disjoint bands; asserted here so a future band edit
+// that breaks it fails loudly.
+func TestE2EPorts_NeverCollideWithRealDaemon(t *testing.T) {
+	profiles := []string{"", "dev", "agent7", "agent8", "ci-1", "alpha"}
+	realPorts := map[string]string{} // port -> profile that owns it
+	for _, p := range profiles {
+		realPorts[WSPortForProfile(p)] = p
+	}
+	for _, p := range profiles {
+		for _, e2ePort := range []string{E2EDaemonPortForProfile(p), E2EVitePortForProfile(p)} {
+			if owner, taken := realPorts[e2ePort]; taken {
+				t.Errorf("e2e port %q for profile %q collides with the real daemon port of profile %q", e2ePort, p, owner)
+			}
+		}
 	}
 }

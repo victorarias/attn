@@ -21,7 +21,7 @@ import {
   waitForPaneVisible,
 } from './scenarioAssertions.mjs';
 import { ensureCodexInitialPanePromptReady } from './scenarioAgents.mjs';
-import { currentHarnessProfile } from './harnessProfile.mjs';
+import { currentHarnessProfile, dataDirForProfile } from './harnessProfile.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -115,14 +115,6 @@ function prepareIsolatedCodexExecutable(realExecutable) {
     { mode: 0o700 }
   );
   return { codexHome, executable: wrapperPath, realExecutable };
-}
-
-function dataDirForProfile(profile) {
-  const normalized = String(profile || '').trim().toLowerCase();
-  if (!normalized || normalized === 'default') {
-    return path.join(os.homedir(), '.attn');
-  }
-  return path.join(os.homedir(), `.attn-${normalized}`);
 }
 
 function dbPathForHarnessProfile() {

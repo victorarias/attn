@@ -107,19 +107,75 @@ func ProfileLabel() string {
 	return "default"
 }
 
-// DeepLinkScheme returns the macOS URL scheme the running profile's .app
-// is registered under. Default → "attn", dev → "attn-dev". Must stay in
-// sync with the `deep-link.desktop.schemes` entries in:
-//   - app/src-tauri/tauri.conf.json         (prod)
-//   - app/src-tauri/tauri.dev.conf.json     (dev)
+// DeepLinkScheme returns the macOS URL scheme the running profile's .app is
+// registered under: default → "attn", dev → "attn-dev", agent7 → "attn-agent7".
+// It is the per-profile authority (DeepLinkSchemeForProfile) applied to the
+// active profile, so the scheme a profile's bundle registers at build time and
+// the scheme the CLI opens at runtime can never diverge.
 //
-// Used by the CLI wrapper so `attn` in a dev-scoped shell opens
-// attn-dev.app, not attn.app.
+// Used by the CLI wrapper so `attn` in a profile-scoped shell opens that
+// profile's app, never another profile's.
 func DeepLinkScheme() string {
-	if p := Profile(); p == "dev" {
-		return "attn-dev"
+	return DeepLinkSchemeForProfile(Profile())
+}
+
+// normalizeProfileForDerivation lowercases/trims a profile name and maps the
+// literal "default" and any invalid name to "" so every per-profile derivation
+// helper (bundle id, app name, ports) shares exactly one rule.
+func normalizeProfileForDerivation(profile string) string {
+	p := strings.ToLower(strings.TrimSpace(profile))
+	if p == "" || p == "default" || !profileNamePattern.MatchString(p) {
+		return ""
 	}
-	return "attn"
+	return p
+}
+
+// BundleIdentifierForProfile returns the macOS bundle identifier for a profile:
+// default → com.attn.manager, dev → com.attn.manager.dev, agent7 →
+// com.attn.manager.agent7. Single source of truth — the Makefile, Rust build,
+// and real-app harness all derive from this (via `attn profile resolve`) instead
+// of re-encoding the mapping.
+func BundleIdentifierForProfile(profile string) string {
+	p := normalizeProfileForDerivation(profile)
+	if p == "" {
+		return "com.attn.manager"
+	}
+	return "com.attn.manager." + p
+}
+
+// AppNameForProfile returns the .app bundle folder name (without ".app") for a
+// profile: default → attn, dev → attn-dev, agent7 → attn-agent7. Must match the
+// Tauri productName the build produces.
+func AppNameForProfile(profile string) string {
+	p := normalizeProfileForDerivation(profile)
+	if p == "" {
+		return "attn"
+	}
+	return "attn-" + p
+}
+
+// AppPathForProfile returns the installed bundle path (~/Applications/<name>.app)
+// for a profile.
+func AppPathForProfile(profile string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "/tmp"
+	}
+	return filepath.Join(home, "Applications", AppNameForProfile(profile)+".app")
+}
+
+// DeepLinkSchemeForProfile returns the macOS URL scheme a profile's .app
+// registers: default → attn, dev → attn-dev, agent7 → attn-agent7. Each profile
+// bundle registers a distinct scheme so macOS never cross-routes a spawn deep
+// link to the wrong app. The per-profile build (`make install PROFILE=<name>`)
+// bakes this scheme into the bundle, and DeepLinkScheme() reports it at runtime,
+// so the registered and opened schemes are derived from this one function.
+func DeepLinkSchemeForProfile(profile string) string {
+	p := normalizeProfileForDerivation(profile)
+	if p == "" {
+		return "attn"
+	}
+	return "attn-" + p
 }
 
 // ValidateProfileName validates a profile name against the same rules
@@ -365,13 +421,43 @@ func WSPortForProfile(profile string) string {
 	}
 }
 
+// profileFNV hashes a profile name with FNV-1a (32-bit). Shared by every
+// per-profile port derivation so the algorithm lives in exactly one place.
+func profileFNV(profile string) uint32 {
+	h := fnv.New32a()
+	h.Write([]byte(profile))
+	return h.Sum32()
+}
+
 // derivedProfilePort maps a profile name to a stable port in [20000,29848],
 // reserving 29849 for "dev" so future named profiles never collide with it.
 func derivedProfilePort(profile string) string {
-	h := fnv.New32a()
-	h.Write([]byte(profile))
-	port := 20000 + int(h.Sum32()%9849)
+	port := 20000 + int(profileFNV(profile)%9849)
 	return fmt.Sprintf("%d", port)
+}
+
+// E2EDaemonPortForProfile returns the throwaway-daemon WS port the Playwright
+// e2e harness should use for a profile. Default → 19849 (unchanged). Named
+// profiles hash into [30000,30999] — disjoint from prod 9849, dev 29849, the
+// real-profile band [20000,29848], and Vite 1420/1421 — so an e2e daemon never
+// collides with a *real* daemon of the same profile.
+func E2EDaemonPortForProfile(profile string) string {
+	p := normalizeProfileForDerivation(profile)
+	if p == "" {
+		return "19849"
+	}
+	return fmt.Sprintf("%d", 30000+int(profileFNV(p)%1000))
+}
+
+// E2EVitePortForProfile returns the Vite dev-server port the e2e harness should
+// use for a profile. Default → 1421 (unchanged). Named profiles hash into
+// [31000,31999]. strictPort makes a rare cross-profile collision fail loudly.
+func E2EVitePortForProfile(profile string) string {
+	p := normalizeProfileForDerivation(profile)
+	if p == "" {
+		return "1421"
+	}
+	return fmt.Sprintf("%d", 31000+int(profileFNV(p)%1000))
 }
 
 // WSBindAddress returns the interface/address the HTTP server binds to.

@@ -7,7 +7,11 @@
 //! a parent attn terminal. That prevents the dev bundle from reaching the
 //! production daemon while being launched from a production session.
 //!
-//! Keep the dev port in sync with `internal/config/config.go::WSPort`.
+//! A named per-profile build additionally bakes `ATTN_BUILD_WS_PORT` and
+//! `ATTN_BUILD_BUNDLE_ID`, both resolved by the single authority
+//! (`attn profile resolve`) in the Makefile, so this Rust view never re-derives
+//! (and never drifts from) the Go side. Default/dev builds leave them unset and
+//! use the well-known fallbacks below.
 
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -16,6 +20,13 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::PathBuf;
 
 const BUILD_PROFILE: Option<&str> = option_env!("ATTN_BUILD_PROFILE");
+
+// Resources resolved by the single authority (`attn profile resolve`) and baked
+// in by the Makefile for a per-profile build. Cargo tracks env vars referenced
+// by `option_env!` in its dep-info, so changing the profile recompiles this
+// crate. Default/prod builds leave these unset and use the fallbacks below.
+const BUILD_WS_PORT: Option<&str> = option_env!("ATTN_BUILD_WS_PORT");
+const BUILD_BUNDLE_ID: Option<&str> = option_env!("ATTN_BUILD_BUNDLE_ID");
 
 /// Returns the compile-time profile name (empty string for default).
 pub fn build_profile() -> &'static str {
@@ -32,16 +43,20 @@ pub fn build_profile_label() -> &'static str {
     }
 }
 
-/// Returns the default WS port for the compile-time profile.
-/// Mirrors `config.WSPort()` in Go.
+/// Returns the default WS port for the compile-time profile. A per-profile
+/// build bakes the authority's resolved port (`ATTN_BUILD_WS_PORT`); default and
+/// dev builds, which leave it unset, fall back to their well-known ports.
+/// Mirrors `config.WSPortForProfile()` in Go.
 pub fn default_port_for_build_profile() -> &'static str {
+    if let Some(port) = BUILD_WS_PORT {
+        let port = port.trim();
+        if !port.is_empty() {
+            return port;
+        }
+    }
     match build_profile() {
-        "" => "9849",
         "dev" => "29849",
-        // For any other named build, we require ATTN_WS_PORT to be set
-        // explicitly at build time. Fall back to the dev port so we
-        // never silently collide with prod.
-        _ => "29849",
+        _ => "9849",
     }
 }
 
@@ -106,10 +121,18 @@ pub fn ensure_browser_host_token() -> Result<String, String> {
     Ok(token)
 }
 
-/// macOS bundle identifier for the running build. Must stay in sync with
-/// the `identifier` field in `tauri.conf.json` (default build) and
-/// `tauri.dev.conf.json` (dev build overlay).
+/// macOS bundle identifier for the running build. A per-profile build bakes the
+/// authority's resolved id (`ATTN_BUILD_BUNDLE_ID`), which is the same value the
+/// generated Tauri `--config` overlay sets as `identifier`, so the bundle's id
+/// and this runtime view can never diverge. Default and dev builds, which leave
+/// it unset, fall back to their well-known ids.
 pub fn bundle_identifier() -> &'static str {
+    if let Some(id) = BUILD_BUNDLE_ID {
+        let id = id.trim();
+        if !id.is_empty() {
+            return id;
+        }
+    }
     match build_profile() {
         "dev" => "com.attn.manager.dev",
         _ => "com.attn.manager",
@@ -150,6 +173,16 @@ fn decide_automation_enabled(automation: Option<&str>, profile: Option<&str>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unbaked_build_falls_back_to_prod_resources() {
+        // In a plain `cargo test` build none of the ATTN_BUILD_* vars are set,
+        // so the fallbacks must resolve to the SAFE prod values — never dev's
+        // 29849 (the pre-PR4 unknown-profile collision bug).
+        assert_eq!(build_profile(), "");
+        assert_eq!(default_port_for_build_profile(), "9849");
+        assert_eq!(bundle_identifier(), "com.attn.manager");
+    }
 
     #[test]
     fn automation_decision_rules() {

@@ -227,6 +227,10 @@ func main() {
 	case "workspace":
 		maybePrintProfileBanner()
 		runWorkspace()
+	case "profile":
+		// No banner: `attn profile resolve --field …` must print only the
+		// value so the Makefile / harness can consume it cleanly.
+		runProfile()
 	case "open":
 		maybePrintProfileBanner()
 		runOpen()
@@ -507,6 +511,7 @@ commands:
   review-loop <command>             manage an autonomous review loop
   list                              list sessions
   daemon <command>                  manage the daemon
+  profile <status|resolve|list>     show / resolve the active profile's resources
   profile-env <profile|--unset>     print shell commands for selecting a profile
   version                           print version information
 `)

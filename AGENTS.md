@@ -36,11 +36,13 @@ make dev              # builds + installs ~/Applications/attn-dev.app, starts de
 make install-daemon-dev  # faster: only rebuild the Go sidecar inside attn-dev.app
 ```
 
-The dev install is fully isolated: its own bundle identifier (`com.attn.manager.dev`), its own data dir (`~/.attn-dev/`), its own socket, its own port. Once a fix is verified, run `make` to install the production app so the user receives the fix immediately. The production install closes and reopens the app and restarts its daemon; attn is designed to recover persisted session state gracefully. `make install` and `make install-daemon` refuse at parse time if `ATTN_PROFILE` is set in the environment — if you hit that error during iteration, you meant `make dev`.
+The dev install is fully isolated: its own bundle identifier (`com.attn.manager.dev`), its own data dir (`~/.attn-dev/`), its own socket, its own port. Once a fix is verified, run `make` to install the production app so the user receives the fix immediately. The production install closes and reopens the app and restarts its daemon; attn is designed to recover persisted session state gracefully. Bare `make install` / `make install-daemon` build the **prod** bundle, so they refuse at parse time if `ATTN_PROFILE` is set in your shell (that would clobber prod). To build a profile's own isolated app instead, use `make install PROFILE=<name>` — it must match your shell's `ATTN_PROFILE`. `make dev` (and `install-daemon-dev`) is the shorthand for the dev sibling and works from any shell, including one scoped to another profile. `attn profile clean <name>` tears a profile down (stop daemon, quit app, remove its bundle + data dir).
 
 Run full app builds and installs via `make` or `make dev` outside the sandbox. These commands need access to the user's macOS keychain so `security find-identity` can select the stable code-signing identity. Inside the sandbox, identity discovery can incorrectly return nothing, causing certificate creation or ad-hoc signing and breaking the app's persistent macOS permissions.
 
 To make CLI commands (`attn`, `attn list`, etc.) target the dev daemon in your shell, run `eval "$(./attn profile-env dev)"` (bash/zsh) or `./attn profile-env --fish dev | source` (fish). Any `attn` subcommand then prints a one-line `[attn profile=dev ...]` banner so you can always see which daemon you're talking to. Unset with `eval "$(attn profile-env --unset)"`.
+
+`dev` is just one named profile. `ATTN_PROFILE` selects an isolated world (data dir, socket, port, app bundle) for **every** entrypoint, so multiple agents can run side by side. Run `attn profile` to see where you are, `attn profile list` for all profiles, and `attn profile resolve --json` for the machine-readable resolution. See **[docs/profiles.md](docs/profiles.md)** for the full model, the per-agent test recipe, and the safety rules.
 
 Frontend-only shortcuts:
 
@@ -66,7 +68,7 @@ pnpm run e2e
 - Prefer `pnpm --dir app run real-app:serial-matrix` for multiple packaged-app scenarios.
 - If you need one scenario, run exactly one packaged-app scenario at a time and wait for it to finish.
 - Rebuild first when packaged-app evidence matters, or you may be testing an older installed app.
-- All real-app harness commands target the **dev** install (`~/Applications/attn-dev.app`, port 29849) by default so they never take over the live prod app. Run `make dev` first if there's no dev install yet. To target prod explicitly, set `ATTN_HARNESS_PROFILE=` (empty) and pass `--run-against-prod`; the harness refuses production lifecycle operations without that flag.
+- Real-app harness commands honor the active `ATTN_PROFILE` (the one knob — see [docs/profiles.md](docs/profiles.md)) and otherwise default to the **dev** install (`~/Applications/attn-dev.app`, port 29849) so they never take over the live prod app. Run `make dev` first if there's no dev install yet. `ATTN_HARNESS_PROFILE` overrides the shell's profile for the harness only. To target prod explicitly, set `ATTN_HARNESS_PROFILE=` (empty) and pass `--run-against-prod`; the harness refuses production lifecycle operations without that flag.
 - When a packaged-app scenario fails, always inspect the captured pane text and any native screenshot artifacts before diagnosing the cause. Startup prompts, permission dialogs, and agent-owned redraws are part of the evidence.
 
 ## Debugging And Logging
