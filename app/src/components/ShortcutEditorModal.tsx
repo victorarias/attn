@@ -4,10 +4,10 @@
 // binding a taken combo asks to reassign, unbinding the previous holder.
 // Saves immediately on each edit. Chords and "show in dock" land in later PRs.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
 import { useEscapeStack } from '../hooks/useEscapeStack';
-import { SHORTCUTS, ShortcutId, ShortcutDef, bindingsConflict } from '../shortcuts/registry';
+import { SHORTCUTS, ShortcutId, Binding, bindingsConflict, isChord } from '../shortcuts/registry';
 import {
   SHORTCUT_META,
   SHORTCUT_CATEGORY_ORDER,
@@ -24,14 +24,15 @@ interface ShortcutEditorModalProps {
   onClose: () => void;
 }
 
-// A requested change to a shortcut: an explicit combo, or 'default' to restore
-// the registry default. Both flow through the same conflict check.
-type BindingChange = ShortcutDef | 'default';
+// A requested change to a shortcut: an explicit binding (combo or chord), or
+// 'default' to restore the registry default. Both flow through the same
+// conflict check.
+type BindingChange = Binding | 'default';
 
 interface PendingReassign {
   id: ShortcutId;
   change: BindingChange;
-  combo: ShortcutDef; // the effective combo, for display + conflict messaging
+  binding: Binding; // the effective binding, for display + conflict messaging
   conflictId: ShortcutId;
 }
 
@@ -47,14 +48,18 @@ function groupedByCategory(): Record<ShortcutCategory, ShortcutId[]> {
   return groups;
 }
 
-function effectiveCombo(id: ShortcutId, change: BindingChange): ShortcutDef {
+function effectiveBinding(id: ShortcutId, change: BindingChange): Binding {
   return change === 'default' ? SHORTCUTS[id] : change;
 }
 
 // The value to persist: undefined (drop override → default) when the change is
-// a reset or resolves to the default combo, otherwise the explicit combo.
-function overrideValue(id: ShortcutId, change: BindingChange): ShortcutDef | undefined {
+// a reset or resolves to the default binding, otherwise the explicit binding.
+// A chord is never the default (defaults are all combos), so it must always be
+// persisted — using the combo keystroke-equivalence here would wrongly drop a
+// chord whose leader equals the default combo (e.g. ⌘K-then-D on ⌘K).
+function overrideValue(id: ShortcutId, change: BindingChange): Binding | undefined {
   if (change === 'default') return undefined;
+  if (isChord(change)) return change;
   return bindingsConflict(change, SHORTCUTS[id]) ? undefined : change;
 }
 
@@ -63,15 +68,29 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
   const groups = useMemo(groupedByCategory, []);
 
   const [recordingId, setRecordingId] = useState<ShortcutId | null>(null);
+  const [recordingMode, setRecordingMode] = useState<'combo' | 'chord'>('combo');
   const [pending, setPending] = useState<PendingReassign | null>(null);
   const [rowError, setRowError] = useState<{ id: ShortcutId; message: string } | null>(null);
 
   useEscapeStack(onClose, isOpen && recordingId === null && pending === null);
 
+  // The modal stays mounted (it just renders null when closed), so reset any
+  // in-flight recording when it closes — otherwise it reopens stuck recording,
+  // which re-suspends the global shortcut dispatcher.
+  useEffect(() => {
+    if (!isOpen) {
+      setRecordingId(null);
+      setRecordingMode('combo');
+      setPending(null);
+      setRowError(null);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const clearTransient = () => {
     setRecordingId(null);
+    setRecordingMode('combo');
     setPending(null);
     setRowError(null);
   };
@@ -85,17 +104,17 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
     setRowError(null);
     setPending(null);
 
-    const combo = effectiveCombo(id, change);
-    const conflictId = kb.findConflict(combo, id);
+    const binding = effectiveBinding(id, change);
+    const conflictId = kb.findConflict(binding, id);
     if (conflictId) {
       if (kb.isProtected(conflictId)) {
         setRowError({
           id,
-          message: `${formatShortcut(combo)} is reserved by “${SHORTCUT_META[conflictId].label}” and can’t be reassigned.`,
+          message: `${formatShortcut(binding)} is reserved by “${SHORTCUT_META[conflictId].label}” and can’t be reassigned.`,
         });
         return;
       }
-      setPending({ id, change, combo, conflictId });
+      setPending({ id, change, binding, conflictId });
       return;
     }
     kb.applyOverrides({ [id]: overrideValue(id, change) });
@@ -214,7 +233,7 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
                         {isPending ? (
                           <span className="shortcut-editor-reassign">
                             <span className="shortcut-editor-reassign-text">
-                              {formatShortcut(pending!.combo)} is “{SHORTCUT_META[pending!.conflictId].label}”.
+                              {formatShortcut(pending!.binding)} is “{SHORTCUT_META[pending!.conflictId].label}”.
                             </span>
                             <button
                               type="button"
@@ -239,12 +258,21 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
                             <KeyCaptureInput
                               binding={binding}
                               recording={recordingId === id}
+                              mode={recordingMode}
                               onStart={() => {
                                 setRowError(null);
                                 setPending(null);
+                                setRecordingMode('combo');
+                                setRecordingId(id);
+                              }}
+                              onStartChord={() => {
+                                setRowError(null);
+                                setPending(null);
+                                setRecordingMode('chord');
                                 setRecordingId(id);
                               }}
                               onCapture={(def) => applyBinding(id, def)}
+                              onCaptureChord={(chord) => applyBinding(id, chord)}
                               onCancel={() => setRecordingId(null)}
                             />
                             <button

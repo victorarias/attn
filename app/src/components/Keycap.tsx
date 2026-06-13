@@ -3,14 +3,18 @@
 
 import './Keycap.css';
 
-/** A single combo (e.g. ['⌘', '⇧', 'N']) rendered as adjacent keycaps. */
+/**
+ * A combo rendered as adjacent keycaps. The literal 'then' token (emitted by
+ * shortcutTokens for a chord, e.g. ['⌘','K','then','D']) renders as a small
+ * separator word rather than a keycap, so chords read "⌘K then D".
+ */
 export function KeyCombo({ tokens }: { tokens: string[] }) {
   return (
     <span className="key-combo">
       {tokens.map((token, i) => (
-        <kbd className="keycap" key={`${token}-${i}`}>
-          {token}
-        </kbd>
+        token === 'then'
+          ? <span className="key-combo-then" key={`then-${i}`}>then</span>
+          : <kbd className="keycap" key={`${token}-${i}`}>{token}</kbd>
       ))}
     </span>
   );

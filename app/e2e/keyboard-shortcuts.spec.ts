@@ -244,6 +244,69 @@ test.describe('Keyboard Shortcuts', () => {
     });
   });
 
+  test.describe('Leader-key chords', () => {
+    test('records a chord in the editor, then fires it globally', async ({ page, daemon }) => {
+      await daemon.start();
+      await page.goto('/');
+      await page.waitForSelector('.dashboard');
+
+      // Open the shortcut editor via the action menu.
+      await page.keyboard.press('Meta+k');
+      await expect(page.getByRole('dialog', { name: 'Action menu' })).toBeVisible();
+      await page.getByText('Customize keyboard shortcuts').click();
+      const editor = page.getByRole('dialog', { name: 'Customize Shortcuts' });
+      await expect(editor).toBeVisible();
+
+      // Rebind "Action menu" to a chord: ⌘E then A. ⌘E is otherwise unbound, so
+      // it can act as an exclusive leader.
+      const row = editor.locator('.shortcut-editor-row', { hasText: 'Action menu' });
+      await row.getByLabel('Record a chord').click();
+      await page.keyboard.press('Meta+e');
+      // After the leader, the prompt asks for the follow key.
+      await expect(row).toContainText('then');
+      await page.keyboard.press('a');
+      // The row now shows the persisted chord (leader · then · follow keycaps).
+      await expect(row).toContainText('then');
+
+      // Close the editor.
+      await editor.getByRole('button', { name: 'Done' }).click();
+      await expect(editor).not.toBeVisible();
+
+      // Pressing the leader arms the chord and shows the HUD…
+      await page.keyboard.press('Meta+e');
+      await expect(page.getByTestId('chord-leader-hud')).toBeVisible();
+
+      // …and the follow key fires the bound action (and clears the HUD).
+      await page.keyboard.press('a');
+      await expect(page.getByRole('dialog', { name: 'Action menu' })).toBeVisible();
+      await expect(page.getByTestId('chord-leader-hud')).not.toBeVisible();
+    });
+
+    test('the leader times out and clears the HUD if no follow key arrives', async ({ page, daemon }) => {
+      await daemon.start();
+      await page.goto('/');
+      await page.waitForSelector('.dashboard');
+
+      await page.keyboard.press('Meta+k');
+      await page.getByText('Customize keyboard shortcuts').click();
+      const editor = page.getByRole('dialog', { name: 'Customize Shortcuts' });
+      await expect(editor).toBeVisible();
+
+      const row = editor.locator('.shortcut-editor-row', { hasText: 'Action menu' });
+      await row.getByLabel('Record a chord').click();
+      await page.keyboard.press('Meta+e');
+      await page.keyboard.press('a');
+      await editor.getByRole('button', { name: 'Done' }).click();
+      await expect(editor).not.toBeVisible();
+
+      await page.keyboard.press('Meta+e');
+      await expect(page.getByTestId('chord-leader-hud')).toBeVisible();
+      // No follow key: the HUD disappears once the leader times out.
+      await expect(page.getByTestId('chord-leader-hud')).not.toBeVisible({ timeout: 2000 });
+      await expect(page.getByRole('dialog', { name: 'Action menu' })).not.toBeVisible();
+    });
+  });
+
   test.describe('Action Menu', () => {
     test('⌘K opens the action menu and preserves attention drawer access', async ({ page, daemon }) => {
       await daemon.start();

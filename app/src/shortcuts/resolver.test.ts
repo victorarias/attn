@@ -123,6 +123,46 @@ describe('isRiskyBinding', () => {
     expect(isRiskyBinding({ key: 'a', meta: true })).toBe(false);
     expect(isRiskyBinding({ key: 'a', alt: true })).toBe(false);
   });
+
+  it('evaluates the leader for a chord', () => {
+    // Accelerator on the leader -> safe, even though the follow key is bare.
+    expect(isRiskyBinding({ leader: { key: 'k', meta: true }, then: { key: 'd' } })).toBe(false);
+    // Bare leader -> risky (would collide with typing before the chord arms).
+    expect(isRiskyBinding({ leader: { key: 'k' }, then: { key: 'd' } })).toBe(true);
+  });
+});
+
+describe('chord overrides', () => {
+  it('resolves a chord override and round-trips it through parse/serialize', () => {
+    const chord = { leader: { key: 'k', meta: true }, then: { key: 'd' } };
+    const cfg = {
+      version: 1 as const,
+      overrides: { 'dock.diff': chord },
+      dock: DEFAULT_DOCK,
+    };
+    const parsed = parseKeybindingsConfig(serializeKeybindingsConfig(cfg));
+    expect(parsed.overrides['dock.diff']).toEqual(chord);
+  });
+
+  it('drops a malformed chord (missing follow step) so the id keeps its default', () => {
+    const raw = JSON.stringify({
+      overrides: { 'dock.diff': { leader: { key: 'k', meta: true } } },
+    });
+    expect('dock.diff' in parseKeybindingsConfig(raw).overrides).toBe(false);
+  });
+
+  it('finds a conflict for a chord whose leader equals an existing combo', () => {
+    // ⌘G is view.toggleGrid. A chord with leader ⌘G conflicts with it.
+    expect(findConflict({ leader: { key: 'g', meta: true }, then: { key: 'x' } }, 'dock.diff'))
+      .toBe('view.toggleGrid');
+  });
+
+  it('lets a chord leader coexist with a different existing combo', () => {
+    // ⌘K is ui.actionMenu (combo). A chord leader of ⌘J (jumpToWaiting) would
+    // conflict; a leader on an unused accel like ⌘⌥J does not.
+    expect(findConflict({ leader: { key: 'j', meta: true, alt: true }, then: { key: 'x' } }, 'dock.diff'))
+      .toBeNull();
+  });
 });
 
 describe('parseKeybindingsConfig', () => {

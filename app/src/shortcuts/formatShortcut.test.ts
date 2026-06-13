@@ -23,4 +23,25 @@ describe('formatShortcut', () => {
     expect(shortcutTokens('session.newHorizontal')).toEqual(['⌘', '⇧', 'N']);
     expect(modifierTokens('terminal.focusLeft')).toEqual(['⌘', '⌥']);
   });
+
+  describe('chords', () => {
+    const chord = { leader: { key: 'k', meta: true }, then: { key: 'd' } };
+
+    it('renders a chord as "leader then follow"', () => {
+      expect(formatShortcut(chord)).toBe('⌘K then D');
+    });
+
+    it('renders a chord with a modified follow key', () => {
+      expect(formatShortcut({ leader: { key: 'k', meta: true }, then: { key: 'd', meta: true } }))
+        .toBe('⌘K then ⌘D');
+    });
+
+    it('joins chord steps with a literal "then" token for keycap renderers', () => {
+      expect(shortcutTokens(chord)).toEqual(['⌘', 'K', 'then', 'D']);
+    });
+
+    it('reports the leader modifiers for a chord', () => {
+      expect(modifierTokens(chord)).toEqual(['⌘']);
+    });
+  });
 });

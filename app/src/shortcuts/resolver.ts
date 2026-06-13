@@ -11,8 +11,11 @@ import {
   SHORTCUTS,
   ShortcutDef,
   ShortcutId,
+  Combo,
+  Binding,
   bindingsConflict,
   isAllowedConflict,
+  isChord,
 } from './registry';
 import { isMacLikePlatform } from './platform';
 
@@ -25,10 +28,10 @@ export interface DockConfig {
 
 export interface KeybindingsConfig {
   version: 1;
-  // Absent id  -> use default.
-  // ShortcutDef -> rebind to this combo.
-  // null        -> explicitly unbound.
-  overrides: Partial<Record<ShortcutId, ShortcutDef | null>>;
+  // Absent id -> use default.
+  // Binding   -> rebind to this combo or chord.
+  // null      -> explicitly unbound.
+  overrides: Partial<Record<ShortcutId, Binding | null>>;
   dock: DockConfig;
 }
 
@@ -59,19 +62,19 @@ export const KEYBINDINGS_SETTING_KEY = 'keybindings_config';
 
 // --- Module-level resolved state (read by the global dispatch + formatting) ---
 
-let overrides: Partial<Record<ShortcutId, ShortcutDef | null>> = {};
+let overrides: Partial<Record<ShortcutId, Binding | null>> = {};
 
 /** Replace the active override set (called when settings load or the user edits). */
-export function setShortcutOverrides(next: Partial<Record<ShortcutId, ShortcutDef | null>>): void {
+export function setShortcutOverrides(next: Partial<Record<ShortcutId, Binding | null>>): void {
   overrides = { ...next };
 }
 
-export function getShortcutOverrides(): Partial<Record<ShortcutId, ShortcutDef | null>> {
+export function getShortcutOverrides(): Partial<Record<ShortcutId, Binding | null>> {
   return overrides;
 }
 
 /** The effective binding for an id, or null when unbound. */
-export function resolveBinding(id: ShortcutId): ShortcutDef | null {
+export function resolveBinding(id: ShortcutId): Binding | null {
   if (Object.prototype.hasOwnProperty.call(overrides, id)) {
     const ov = overrides[id];
     return ov ?? null;
@@ -88,8 +91,8 @@ export function isCustomized(id: ShortcutId): boolean {
 }
 
 /** Bound shortcuts in registry order — the dispatch iteration source. */
-export function resolvedShortcutEntries(): Array<[ShortcutId, ShortcutDef]> {
-  const entries: Array<[ShortcutId, ShortcutDef]> = [];
+export function resolvedShortcutEntries(): Array<[ShortcutId, Binding]> {
+  const entries: Array<[ShortcutId, Binding]> = [];
   for (const id of Object.keys(SHORTCUTS) as ShortcutId[]) {
     const def = resolveBinding(id);
     if (def) entries.push([id, def]);
@@ -98,15 +101,19 @@ export function resolvedShortcutEntries(): Array<[ShortcutId, ShortcutDef]> {
 }
 
 /**
- * Find an already-bound shortcut that uses the same combo as `def`, excluding
+ * Find an already-bound shortcut that conflicts with `binding`, excluding
  * `excludeId` and any context-gated allowed-conflict partner. Returns the
  * conflicting id or null. Used by the editor for VSCode-style reassign.
  */
-export function findConflict(def: ShortcutDef, excludeId: ShortcutId): ShortcutId | null {
+export function findConflict(binding: Binding, excludeId: ShortcutId): ShortcutId | null {
   for (const [id, d] of resolvedShortcutEntries()) {
     if (id === excludeId) continue;
-    if (isAllowedConflict(excludeId, id)) continue;
-    if (bindingsConflict(def, d)) return id;
+    // The allowed-conflict exemption (e.g. session.close vs terminal.close on
+    // ⌘W) only holds for two plain combos that dispatch disambiguates by target.
+    // A chord leader arms globally and is NOT context-gated, so a chord on
+    // either side must still surface the conflict.
+    if (!isChord(binding) && !isChord(d) && isAllowedConflict(excludeId, id)) continue;
+    if (bindingsConflict(binding, d)) return id;
   }
   return null;
 }
@@ -149,19 +156,22 @@ export function eventToBinding(e: KeyboardEvent): CaptureResult {
 
 /**
  * A binding with no accelerator (no ⌘/⌃/⌥) collides with ordinary typing in the
- * terminal and text inputs. The editor surfaces this as a soft warning.
+ * terminal and text inputs. The editor surfaces this as a soft warning. For a
+ * chord the leader is what must claim a keystroke up front, so the leader is
+ * what's evaluated.
  */
-export function isRiskyBinding(def: ShortcutDef): boolean {
-  return !def.meta && !def.ctrl && !def.alt;
+export function isRiskyBinding(binding: Binding): boolean {
+  const combo = isChord(binding) ? binding.leader : binding;
+  return !combo.meta && !combo.ctrl && !combo.alt;
 }
 
 // --- Config (de)serialization with tolerant sanitization ---
 
-function sanitizeDef(value: unknown): ShortcutDef | null {
+function sanitizeCombo(value: unknown): Combo | null {
   if (!value || typeof value !== 'object') return null;
   const v = value as Record<string, unknown>;
   if (typeof v.key !== 'string' || v.key.length === 0) return null;
-  const def: ShortcutDef = { key: v.key };
+  const def: Combo = { key: v.key };
   if (typeof v.code === 'string') def.code = v.code;
   if (v.meta === true) def.meta = true;
   if (v.ctrl === true) def.ctrl = true;
@@ -169,6 +179,22 @@ function sanitizeDef(value: unknown): ShortcutDef | null {
   if (v.shift === true) def.shift = true;
   if (v.editableTarget === 'native') def.editableTarget = 'native';
   return def;
+}
+
+/**
+ * Sanitize a persisted binding: a `{leader, then}` shape becomes a Chord (both
+ * steps must sanitize, else the whole chord is dropped so the id falls back to
+ * its default), otherwise a single Combo.
+ */
+function sanitizeBinding(value: unknown): Binding | null {
+  if (value && typeof value === 'object' && ('leader' in value || 'then' in value)) {
+    const v = value as Record<string, unknown>;
+    const leader = sanitizeCombo(v.leader);
+    const then = sanitizeCombo(v.then);
+    if (!leader || !then) return null;
+    return { leader, then };
+  }
+  return sanitizeCombo(value);
 }
 
 /** A fresh empty config (own copy of the default dock so callers can't mutate it). */
@@ -216,7 +242,7 @@ export function parseKeybindingsConfig(raw: string | undefined | null): Keybindi
   if (!parsed || typeof parsed !== 'object') return emptyConfig();
 
   const rawOverrides = (parsed as Record<string, unknown>).overrides;
-  const overridesOut: Partial<Record<ShortcutId, ShortcutDef | null>> = {};
+  const overridesOut: Partial<Record<ShortcutId, Binding | null>> = {};
   if (rawOverrides && typeof rawOverrides === 'object') {
     for (const [id, value] of Object.entries(rawOverrides as Record<string, unknown>)) {
       if (!Object.prototype.hasOwnProperty.call(SHORTCUTS, id)) continue; // unknown id
@@ -224,8 +250,8 @@ export function parseKeybindingsConfig(raw: string | undefined | null): Keybindi
         overridesOut[id as ShortcutId] = null;
         continue;
       }
-      const def = sanitizeDef(value);
-      if (def) overridesOut[id as ShortcutId] = def;
+      const binding = sanitizeBinding(value);
+      if (binding) overridesOut[id as ShortcutId] = binding;
       // malformed override -> drop, so the id falls back to its default
     }
   }

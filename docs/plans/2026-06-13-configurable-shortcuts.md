@@ -160,12 +160,16 @@ Notes / refinements during implementation:
 - `Restore Defaults` resets the whole config (overrides + dock), not just keybindings.
 - Reorder uses up/down buttons (not drag-drop): accessible, testable in happy-dom.
 
-PR 3 — Leader-key chords (depth 2)
-- [ ] Extend `Binding`/resolver/validation for `{leader, then}`; enforce leader exclusivity
-- [ ] `chordState.ts` pending-leader machine (timeout, Esc cancel) inside shared `dispatchKey`
-- [ ] Transient leader HUD hint (e.g. "⌘K …")
-- [ ] `KeyCaptureInput` records leader + then
-- [ ] Tests: chord match, timeout/cancel, terminal path (Playwright — capture-phase + PTY focus)
+PR 3 — Leader-key chords (depth 2) — DONE
+- [x] Extend `Binding`/resolver/validation for `{leader, then}`; enforce leader exclusivity
+      (`combosConflict` + chord-aware `bindingsConflict`, `sanitizeBinding`, `isChord`)
+- [x] `chordState.ts` pending-leader machine (timeout, Esc cancel) + `chordDispatch.ts` leader scan
+- [x] Transient leader HUD (`ChordLeaderHud`, `useSyncExternalStore` over `chordState`)
+- [x] `KeyCaptureInput` records leader + then (chord mode); editor wires `onCaptureChord`
+- [x] `formatShortcut`/`shortcutTokens` chord-aware (`⌘K then D`); dock chips via `formatShortcut`
+- [x] `dispatchShortcutEvent` (automation bridge) resolves overrides + fires chords as two keystrokes
+- [x] Tests: chordState (fake timers), conflict, format, capture, HUD, terminal-path no-PTY-leak,
+      e2e (record-in-editor → fire globally + leader-timeout HUD clear)
 
 ## Decisions
 
@@ -174,9 +178,16 @@ PR 3 — Leader-key chords (depth 2)
 - **One JSON settings key for bindings + dock + collapse.** Reuses `set_setting`/`settings_updated`
   with zero protocol/schema work, atomic multi-field writes, cross-window sync for free. A new
   daemon table (C2) would force the full protocol-versioning ritual for no current benefit.
-- **Single shared `dispatchKey` for global + terminal.** The existing second dispatch path in
-  `terminalKeyHandler.ts` is the most likely place for silent rebind/chord breakage and leader
-  leakage into the PTY; collapsing to one matcher is required, not optional.
+- **Chord layer added to both dispatch paths, NOT a single collapsed `dispatchKey`.** The original
+  plan called for collapsing the window listener and `terminalKeyHandler` into one matcher. On
+  implementation that proved riskier than the problem it solved: it would have changed *which*
+  shortcuts the terminal intercepts (the `TERMINAL_INTERCEPTS` subset has different, deliberate
+  semantics from the window listener — e.g. `!triggerShortcut(id)` forwards unhandled intercepts to
+  the PTY). Instead both paths keep their existing single-combo logic and each gains a thin chord
+  layer that shares one `chordState` singleton: resolve-pending-then first (always consume so the
+  follow key can't leak to the PTY), then arm a leader on match. The window capture listener handles
+  leader+follow first in practice; the terminal path is the belt-and-suspenders for packaged-app
+  capture-order differences (CLAUDE.md #8). Smaller blast radius, same leak guarantees.
 - **Leaders are exclusive.** A combo used as a chord leader can't also be a standalone binding —
   removes prefix/standalone ambiguity and keeps the chord engine simple.
 - **Phased into 3 review-sized PRs.** Foundation+editor, then dock, then chords. Each is

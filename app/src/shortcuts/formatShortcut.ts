@@ -6,7 +6,7 @@
 // attn ships as a macOS app, so shortcuts always render with Mac glyphs
 // (⌘ ⌥ ⇧). Cross-platform keystroke *matching* lives in registry.ts.
 
-import { ShortcutId, ShortcutDef } from './registry';
+import { ShortcutId, Binding, Combo, isChord } from './registry';
 import { resolveBinding } from './resolver';
 
 // Symbols for non-printable keys. Single-character keys are upper-cased; any
@@ -27,32 +27,59 @@ function keyToken(key: string): string {
 }
 
 // Resolve a string id through the override-aware resolver so display surfaces
-// reflect rebinds; a passed ShortcutDef is used verbatim. Returns null when the
-// id resolves to "unbound".
-function resolve(idOrDef: ShortcutId | ShortcutDef): ShortcutDef | null {
-  return typeof idOrDef === 'string' ? resolveBinding(idOrDef) : idOrDef;
+// reflect rebinds; a passed Binding is used verbatim. Returns null when the id
+// resolves to "unbound".
+function resolve(idOrBinding: ShortcutId | Binding): Binding | null {
+  return typeof idOrBinding === 'string' ? resolveBinding(idOrBinding) : idOrBinding;
 }
 
-/** Modifier glyphs only, in the order attn shows them (⌘ before ⌃/⌥/⇧). */
-export function modifierTokens(idOrDef: ShortcutId | ShortcutDef): string[] {
-  const def = resolve(idOrDef);
-  if (!def) return [];
+/** Tokens for a single combo, e.g. ['⌘', '⇧', 'N']. */
+function comboTokens(combo: Combo): string[] {
   const tokens: string[] = [];
-  if (def.meta) tokens.push('⌘');
-  if (def.ctrl) tokens.push('⌃');
-  if (def.alt) tokens.push('⌥');
-  if (def.shift) tokens.push('⇧');
+  if (combo.meta) tokens.push('⌘');
+  if (combo.ctrl) tokens.push('⌃');
+  if (combo.alt) tokens.push('⌥');
+  if (combo.shift) tokens.push('⇧');
+  tokens.push(keyToken(combo.key));
   return tokens;
 }
 
-/** All tokens for a shortcut, e.g. ['⌘', '⇧', 'N']. Empty when unbound. */
-export function shortcutTokens(idOrDef: ShortcutId | ShortcutDef): string[] {
-  const def = resolve(idOrDef);
-  if (!def) return [];
-  return [...modifierTokens(def), keyToken(def.key)];
+/** Modifier glyphs only, in the order attn shows them (⌘ before ⌃/⌥/⇧). For a
+ * chord this is the leader's modifiers. */
+export function modifierTokens(idOrBinding: ShortcutId | Binding): string[] {
+  const binding = resolve(idOrBinding);
+  if (!binding) return [];
+  const combo = isChord(binding) ? binding.leader : binding;
+  const tokens: string[] = [];
+  if (combo.meta) tokens.push('⌘');
+  if (combo.ctrl) tokens.push('⌃');
+  if (combo.alt) tokens.push('⌥');
+  if (combo.shift) tokens.push('⇧');
+  return tokens;
 }
 
-/** Flat string form, e.g. '⌘⇧N'. Empty string when unbound. */
-export function formatShortcut(idOrDef: ShortcutId | ShortcutDef): string {
-  return shortcutTokens(idOrDef).join('');
+/**
+ * Flat keycap tokens. For a combo: ['⌘', '⇧', 'N']. For a chord the steps are
+ * joined by a literal 'then' token (['⌘', 'K', 'then', 'D']) so keycap
+ * renderers show the sequence. Empty when unbound.
+ */
+export function shortcutTokens(idOrBinding: ShortcutId | Binding): string[] {
+  const binding = resolve(idOrBinding);
+  if (!binding) return [];
+  if (isChord(binding)) {
+    return [...comboTokens(binding.leader), 'then', ...comboTokens(binding.then)];
+  }
+  return comboTokens(binding);
+}
+
+/**
+ * Flat string form. Combo: '⌘⇧N'. Chord: '⌘K then D'. Empty when unbound.
+ */
+export function formatShortcut(idOrBinding: ShortcutId | Binding): string {
+  const binding = resolve(idOrBinding);
+  if (!binding) return '';
+  if (isChord(binding)) {
+    return `${comboTokens(binding.leader).join('')} then ${comboTokens(binding.then).join('')}`;
+  }
+  return comboTokens(binding).join('');
 }

@@ -23,6 +23,12 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
+.key-combo-then {
+  color: var(--color-text-dimmed);
+  font-size: 11px;
+  padding: 0 1px;
+}
+
 .key-combos {
   display: inline-flex;
   align-items: center;
