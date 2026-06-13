@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -439,13 +440,116 @@ func TestWorkspaceContextCheckoutPathReturnsCheckoutPath(t *testing.T) {
 
 func TestWorkspaceContextGuidanceProvidedAtLaunch(t *testing.T) {
 	t.Setenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE", "developer_instructions")
+	t.Setenv("ATTN_NOTEBOOK_GUIDANCE", "")
 	if !workspaceContextGuidanceProvidedAtLaunch() {
-		t.Fatal("launch guidance should suppress hook guidance output")
+		t.Fatal("workspace launch guidance should suppress hook guidance output")
+	}
+
+	// A chief launch injects Notebook guidance (not workspace context); its
+	// marker must equally suppress the SessionStart hook's workspace guidance.
+	t.Setenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE", "")
+	t.Setenv("ATTN_NOTEBOOK_GUIDANCE", "append_system_prompt")
+	if !workspaceContextGuidanceProvidedAtLaunch() {
+		t.Fatal("notebook launch guidance should suppress hook guidance output")
 	}
 
 	t.Setenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE", "")
+	t.Setenv("ATTN_NOTEBOOK_GUIDANCE", "")
 	if workspaceContextGuidanceProvidedAtLaunch() {
 		t.Fatal("missing launch guidance should preserve hook fallback output")
+	}
+}
+
+type fakeNotebookGuideClient struct {
+	result *protocol.NotebookGuideResult
+	err    error
+	gotID  string
+}
+
+func (f *fakeNotebookGuideClient) NotebookGuide(sessionID string) (*protocol.NotebookGuideResult, error) {
+	f.gotID = sessionID
+	return f.result, f.err
+}
+
+func TestResolveChiefNotebookRoot(t *testing.T) {
+	t.Run("chief returns root", func(t *testing.T) {
+		c := &fakeNotebookGuideClient{result: &protocol.NotebookGuideResult{Root: "/nb", SessionIsChief: true}}
+		if got := resolveChiefNotebookRoot(c, "s1"); got != "/nb" {
+			t.Fatalf("root = %q, want /nb", got)
+		}
+		if c.gotID != "s1" {
+			t.Fatalf("session id = %q, want s1", c.gotID)
+		}
+	})
+	t.Run("non-chief returns empty", func(t *testing.T) {
+		c := &fakeNotebookGuideClient{result: &protocol.NotebookGuideResult{Root: "/nb", SessionIsChief: false}}
+		if got := resolveChiefNotebookRoot(c, "s1"); got != "" {
+			t.Fatalf("root = %q, want empty for non-chief", got)
+		}
+	})
+	t.Run("lookup error returns empty (falls back to workspace context)", func(t *testing.T) {
+		c := &fakeNotebookGuideClient{err: errors.New("daemon down")}
+		if got := resolveChiefNotebookRoot(c, "s1"); got != "" {
+			t.Fatalf("root = %q, want empty on error", got)
+		}
+	})
+}
+
+func TestParseNotebookJournalArgs(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
+		got, err := parseNotebookJournalArgs([]string{"append", "--text", "hi", "--date", "2026-06-13"})
+		if err != nil || got.text != "hi" || got.date != "2026-06-13" {
+			t.Fatalf("got %+v err %v", got, err)
+		}
+	})
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"wrong subverb", []string{"appendx", "--text", "hi"}},
+		{"missing subverb", []string{"--text", "hi"}},
+		{"missing text", []string{"append", "--date", "2026-06-13"}},
+		{"empty text", []string{"append", "--text", "   "}},
+		{"stray positional", []string{"append", "--text", "hi", "extra"}},
+		{"unknown flag", []string{"append", "--nope", "x"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := parseNotebookJournalArgs(tc.args); err == nil {
+				t.Fatalf("args %v: expected error", tc.args)
+			}
+		})
+	}
+}
+
+func TestParseNotebookMemoryArgs(t *testing.T) {
+	t.Run("create (no base-hash, stdin)", func(t *testing.T) {
+		got, err := parseNotebookMemoryArgs([]string{"write", "--path", "/memory/decisions/x.md"})
+		if err != nil || got.path != "/memory/decisions/x.md" || got.baseHash != "" || got.file != "" {
+			t.Fatalf("got %+v err %v", got, err)
+		}
+	})
+	t.Run("edit with base-hash and file", func(t *testing.T) {
+		got, err := parseNotebookMemoryArgs([]string{"write", "--path", "/m/x.md", "--base-hash", "abc", "--file", "/tmp/x"})
+		if err != nil || got.baseHash != "abc" || got.file != "/tmp/x" {
+			t.Fatalf("got %+v err %v", got, err)
+		}
+	})
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"wrong subverb", []string{"writex", "--path", "/m/x.md"}},
+		{"missing subverb", []string{"--path", "/m/x.md"}},
+		{"missing path", []string{"write", "--base-hash", "abc"}},
+		{"empty path", []string{"write", "--path", "  "}},
+		{"stray positional", []string{"write", "--path", "/m/x.md", "extra"}},
+		{"unknown flag", []string{"write", "--nope", "x"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := parseNotebookMemoryArgs(tc.args); err == nil {
+				t.Fatalf("args %v: expected error", tc.args)
+			}
+		})
 	}
 }
 

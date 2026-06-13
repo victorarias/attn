@@ -1084,21 +1084,85 @@ func runNotebook() {
 	}
 }
 
-// runNotebookJournal handles `attn notebook journal append --text … [--date …]`.
-func runNotebookJournal(c *client.Client, args []string) {
+// notebookGuideClient is the slice of the daemon client the launch-guidance
+// decision needs; narrowed so it can be faked in tests.
+type notebookGuideClient interface {
+	NotebookGuide(sessionID string) (*protocol.NotebookGuideResult, error)
+}
+
+// resolveChiefNotebookRoot returns the notebook root to use as chief-of-staff
+// launch guidance for sessionID, or "" when the session is not the chief or the
+// lookup fails — callers then fall back to the workspace-context checkout. A
+// lookup error is deliberately treated as "not chief" so a transient daemon
+// hiccup degrades to workspace guidance rather than failing the launch.
+func resolveChiefNotebookRoot(c notebookGuideClient, sessionID string) string {
+	guide, err := c.NotebookGuide(sessionID)
+	if err != nil || guide == nil || !guide.SessionIsChief {
+		return ""
+	}
+	return guide.Root
+}
+
+type notebookJournalArgs struct {
+	text string
+	date string
+}
+
+func parseNotebookJournalArgs(args []string) (notebookJournalArgs, error) {
 	if len(args) == 0 || args[0] != "append" {
-		fmt.Fprintln(os.Stderr, "usage: attn notebook journal append --text T [--date YYYY-MM-DD]")
-		os.Exit(2)
+		return notebookJournalArgs{}, errors.New("usage: attn notebook journal append --text T [--date YYYY-MM-DD]")
 	}
 	fs := flag.NewFlagSet("notebook journal append", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	text := fs.String("text", "", "journal entry text (required)")
 	date := fs.String("date", "", "journal date YYYY-MM-DD (defaults to today)")
-	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || strings.TrimSpace(*text) == "" {
-		fmt.Fprintln(os.Stderr, "usage: attn notebook journal append --text T [--date YYYY-MM-DD]")
+	if err := fs.Parse(args[1:]); err != nil {
+		return notebookJournalArgs{}, err
+	}
+	if fs.NArg() != 0 {
+		return notebookJournalArgs{}, fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	if strings.TrimSpace(*text) == "" {
+		return notebookJournalArgs{}, errors.New("--text is required")
+	}
+	return notebookJournalArgs{text: *text, date: strings.TrimSpace(*date)}, nil
+}
+
+type notebookMemoryArgs struct {
+	path     string
+	baseHash string
+	file     string
+}
+
+func parseNotebookMemoryArgs(args []string) (notebookMemoryArgs, error) {
+	if len(args) == 0 || args[0] != "write" {
+		return notebookMemoryArgs{}, errors.New("usage: attn notebook memory write --path P [--base-hash H] [--file F]")
+	}
+	fs := flag.NewFlagSet("notebook memory write", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	path := fs.String("path", "", "note path, e.g. /memory/decisions/foo.md (required)")
+	baseHash := fs.String("base-hash", "", "expected current hash for a safe edit (omit to create)")
+	file := fs.String("file", "", "read content from this file instead of stdin")
+	if err := fs.Parse(args[1:]); err != nil {
+		return notebookMemoryArgs{}, err
+	}
+	if fs.NArg() != 0 {
+		return notebookMemoryArgs{}, fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	if strings.TrimSpace(*path) == "" {
+		return notebookMemoryArgs{}, errors.New("--path is required")
+	}
+	return notebookMemoryArgs{path: *path, baseHash: strings.TrimSpace(*baseHash), file: strings.TrimSpace(*file)}, nil
+}
+
+// runNotebookJournal handles `attn notebook journal append --text … [--date …]`.
+func runNotebookJournal(c *client.Client, args []string) {
+	parsed, err := parseNotebookJournalArgs(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	res, err := c.NotebookAppendJournal(*text, strings.TrimSpace(*date))
+	res, err := c.NotebookAppendJournal(parsed.text, parsed.date)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "notebook journal append: %v\n", err)
 		os.Exit(1)
@@ -1109,23 +1173,15 @@ func runNotebookJournal(c *client.Client, args []string) {
 // runNotebookMemory handles `attn notebook memory write --path P [--base-hash H]
 // [--file F]`. Content comes from --file, else stdin.
 func runNotebookMemory(c *client.Client, args []string) {
-	if len(args) == 0 || args[0] != "write" {
-		fmt.Fprintln(os.Stderr, "usage: attn notebook memory write --path P [--base-hash H] [--file F]")
-		os.Exit(2)
-	}
-	fs := flag.NewFlagSet("notebook memory write", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	path := fs.String("path", "", "note path, e.g. /memory/decisions/foo.md (required)")
-	baseHash := fs.String("base-hash", "", "expected current hash for a safe edit (omit to create)")
-	file := fs.String("file", "", "read content from this file instead of stdin")
-	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || strings.TrimSpace(*path) == "" {
-		fmt.Fprintln(os.Stderr, "usage: attn notebook memory write --path P [--base-hash H] [--file F]")
+	parsed, err := parseNotebookMemoryArgs(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
 	var content []byte
 	var readErr error
-	if strings.TrimSpace(*file) != "" {
-		content, readErr = os.ReadFile(*file)
+	if parsed.file != "" {
+		content, readErr = os.ReadFile(parsed.file)
 	} else {
 		content, readErr = io.ReadAll(os.Stdin)
 	}
@@ -1133,7 +1189,7 @@ func runNotebookMemory(c *client.Client, args []string) {
 		fmt.Fprintf(os.Stderr, "notebook memory write: read content: %v\n", readErr)
 		os.Exit(1)
 	}
-	res, err := c.NotebookWrite(*path, string(content), strings.TrimSpace(*baseHash))
+	res, err := c.NotebookWrite(parsed.path, string(content), parsed.baseHash)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "notebook memory write: %v\n", err)
 		os.Exit(1)
@@ -2047,9 +2103,10 @@ func runAgentDirectly(requestedAgent string) {
 		// A chief-of-staff session gets Notebook guidance (its profile-wide
 		// durable home) in place of the workspace-context checkout. A fresh
 		// session is never the chief, so this only fires on relaunch/recovery of
-		// an already-chief session; otherwise we fall through to the checkout.
-		if guide, gerr := c.NotebookGuide(sessionID); gerr == nil && guide.SessionIsChief {
-			opts.NotebookRoot = guide.Root
+		// an already-chief session; otherwise (incl. a lookup error) we fall
+		// through to the workspace-context checkout.
+		if root := resolveChiefNotebookRoot(c, sessionID); root != "" {
+			opts.NotebookRoot = root
 		} else {
 			contextPath, checkoutErr := workspaceContextCheckoutPath(c, sessionID, 40, 25*time.Millisecond)
 			if checkoutErr != nil {
