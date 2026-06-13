@@ -221,7 +221,7 @@ func TestDaemon_StateUpdate(t *testing.T) {
 // "scheduled") over the real socket. It must land as scheduled (not idle, not
 // dropped) so the parked session reads correctly end to end.
 func TestDaemon_ScheduledStateUpdate(t *testing.T) {
-	t.Setenv("ATTN_WS_PORT", "19951")
+	t.Setenv("ATTN_WS_PORT", "19952")
 
 	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
