@@ -1,0 +1,404 @@
+.notebook-browser-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  padding: 12px;
+  background: var(--color-bg-app);
+  animation: notebook-browser-reveal 170ms ease-out;
+}
+
+.notebook-browser {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  background:
+    radial-gradient(circle at 80% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 32%),
+    var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+}
+
+/* The container is the initial focus target (tabIndex -1) so focus lands inside
+   the modal on open; it is not an interactive control, so suppress its ring. */
+.notebook-browser:focus,
+.notebook-browser:focus-visible {
+  outline: none;
+}
+
+.notebook-browser-header {
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.notebook-browser-heading {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.notebook-browser-heading > svg {
+  width: 25px;
+  height: 25px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.45;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.notebook-browser-eyebrow {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--accent);
+  font: 700 9px/1.1 ui-monospace, 'SFMono-Regular', monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.notebook-browser-heading h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.notebook-browser-close {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 11px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.notebook-browser-close:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
+  border-color: var(--color-border);
+}
+
+.notebook-browser-close kbd {
+  padding: 2px 5px;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-app);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font: 600 9px/1.2 ui-monospace, monospace;
+}
+
+.notebook-browser-body {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(230px, 320px) minmax(0, 1fr);
+}
+
+.notebook-browser-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 10px;
+  background: color-mix(in srgb, var(--color-bg-app) 58%, transparent);
+  border-right: 1px solid var(--color-border-subtle);
+}
+
+.notebook-browser-group + .notebook-browser-group {
+  margin-top: 14px;
+}
+
+.notebook-browser-group-label {
+  padding: 0 8px 6px;
+  color: var(--color-text-muted);
+  font: 700 9px/1 ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.notebook-browser-list-item {
+  position: relative;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 3px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 9px 8px 5px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.notebook-browser-list-item:hover {
+  background: color-mix(in srgb, var(--color-bg-elevated) 60%, transparent);
+}
+
+.notebook-browser-list-item.is-selected {
+  background: var(--color-bg-elevated);
+  border-color: var(--color-border);
+}
+
+.notebook-browser-list-marker {
+  width: 3px;
+  height: 26px;
+  background: transparent;
+  border-radius: 4px;
+}
+
+.notebook-browser-list-item.is-selected .notebook-browser-list-marker {
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.notebook-browser-list-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.notebook-browser-list-copy strong,
+.notebook-browser-list-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notebook-browser-list-copy strong {
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.notebook-browser-list-copy span {
+  color: var(--color-text-muted);
+  font: 10px/1.2 ui-monospace, 'SFMono-Regular', monospace;
+}
+
+.notebook-browser-list-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  gap: 10px;
+  color: var(--color-text-muted);
+  text-align: center;
+  font-size: 11px;
+}
+
+.notebook-browser-list-hint {
+  color: var(--color-text-dimmed);
+  font-size: 10px;
+}
+
+.notebook-browser-list-state button {
+  padding: 6px 9px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.notebook-browser-document {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.notebook-browser-document-meta {
+  padding: 28px clamp(28px, 6vw, 90px) 18px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.notebook-browser-document-meta h2 {
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 680;
+  letter-spacing: -0.035em;
+}
+
+.notebook-browser-document-meta p {
+  margin: 0;
+  color: var(--color-text-tertiary);
+  font: 11px/1.4 ui-monospace, 'SFMono-Regular', monospace;
+}
+
+.notebook-browser-markdown {
+  max-width: 900px;
+  padding: 30px clamp(28px, 6vw, 90px) 24px;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.notebook-browser-markdown h1,
+.notebook-browser-markdown h2,
+.notebook-browser-markdown h3 {
+  color: var(--color-text-primary);
+  letter-spacing: -0.02em;
+}
+
+.notebook-browser-markdown h1 { margin: 0 0 24px; font-size: 28px; }
+
+.notebook-browser-markdown h2 {
+  margin: 34px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  font-size: 18px;
+}
+
+.notebook-browser-markdown h3 { margin: 24px 0 8px; font-size: 15px; }
+
+.notebook-browser-markdown p,
+.notebook-browser-markdown ul,
+.notebook-browser-markdown ol,
+.notebook-browser-markdown pre,
+.notebook-browser-markdown blockquote {
+  margin: 0 0 16px;
+}
+
+.notebook-browser-markdown ul,
+.notebook-browser-markdown ol { padding-left: 22px; }
+
+.notebook-browser-markdown code {
+  padding: 2px 5px;
+  color: color-mix(in srgb, var(--accent) 75%, var(--color-text-primary));
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 4px;
+  font: 0.9em/1.4 ui-monospace, 'SFMono-Regular', monospace;
+}
+
+.notebook-browser-markdown pre {
+  overflow-x: auto;
+  padding: 14px;
+  background: var(--color-bg-app);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.notebook-browser-markdown pre code {
+  padding: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 0;
+}
+
+.notebook-browser-markdown blockquote {
+  padding-left: 14px;
+  color: var(--color-text-tertiary);
+  border-left: 3px solid var(--accent);
+}
+
+.notebook-browser-markdown a { color: var(--accent); }
+
+/* An in-notebook link reads as a wiki cross-reference. */
+.notebook-browser-markdown a.notebook-link {
+  color: color-mix(in srgb, var(--accent) 88%, var(--color-text-primary));
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.notebook-browser-backlinks {
+  max-width: 900px;
+  margin: 0 clamp(28px, 6vw, 90px) 70px;
+  padding-top: 18px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.notebook-browser-backlinks h3 {
+  margin: 0 0 10px;
+  color: var(--color-text-muted);
+  font: 700 10px/1 ui-monospace, monospace;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.notebook-browser-backlinks-empty {
+  margin: 0;
+  color: var(--color-text-dimmed);
+  font-size: 12px;
+}
+
+.notebook-browser-backlinks ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.notebook-browser-backlinks button {
+  padding: 6px 10px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+
+.notebook-browser-backlinks button:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+
+.notebook-browser-document-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 360px;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.notebook-browser-document-state svg {
+  width: 34px;
+  height: 34px;
+  margin-bottom: 18px;
+  fill: none;
+  stroke: var(--color-text-dimmed);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.notebook-browser-document-state h2 {
+  margin-bottom: 7px;
+  color: var(--color-text-secondary);
+  font-size: 15px;
+}
+
+.notebook-browser-document-state p {
+  max-width: 360px;
+  font-size: 12px;
+}
+
+@keyframes notebook-browser-reveal {
+  from { opacity: 0; transform: scale(0.995); }
+}
+
+@media (max-width: 760px) {
+  .notebook-browser-shell { padding: 0; }
+  .notebook-browser { border: 0; border-radius: 0; }
+  .notebook-browser-body { grid-template-columns: 200px minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notebook-browser-shell { animation: none; }
+}

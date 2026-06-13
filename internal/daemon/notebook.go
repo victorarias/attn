@@ -144,6 +144,23 @@ func (d *Daemon) handleNotebookList(conn net.Conn, msg *protocol.NotebookListMes
 	})
 }
 
+func (d *Daemon) handleNotebookBacklinks(conn net.Conn, msg *protocol.NotebookBacklinksMessage) {
+	store, err := d.notebookStoreFor()
+	if err != nil {
+		d.sendError(conn, "notebook: "+err.Error())
+		return
+	}
+	entries, err := store.Backlinks(msg.Path)
+	if err != nil {
+		d.sendError(conn, "notebook backlinks: "+err.Error())
+		return
+	}
+	_ = json.NewEncoder(conn).Encode(protocol.Response{
+		Ok:              true,
+		NotebookEntries: notebookEntriesToProtocol(entries),
+	})
+}
+
 func (d *Daemon) handleNotebookRead(conn net.Conn, msg *protocol.NotebookReadMessage) {
 	store, err := d.notebookStoreFor()
 	if err != nil {
@@ -271,6 +288,77 @@ func (d *Daemon) activateNotebookGuidanceLive(sessionID string) {
 	if err := d.ptyBackend.Input(context.Background(), sessionID, []byte{'\r'}); err != nil {
 		d.logf("notebook activation: input enter failed for %s: %v", sessionID, err)
 	}
+}
+
+// sendNotebookListWSResult lists notes and replies to a websocket client with a
+// notebook_list_result event correlated by requestID. The unix-socket CLI uses
+// handleNotebookList (a synchronous Response) instead.
+func (d *Daemon) sendNotebookListWSResult(client *wsClient, requestID, prefix string) {
+	var entries []protocol.NotebookEntry
+	store, err := d.notebookStoreFor()
+	if err == nil {
+		var list []notebook.Entry
+		if list, err = store.List(prefix); err == nil {
+			entries = notebookEntriesToProtocol(list)
+		}
+	}
+	msg := protocol.NotebookListResultMessage{
+		Event:     protocol.EventNotebookListResult,
+		RequestID: requestID,
+		Success:   err == nil,
+		Entries:   entries,
+	}
+	if err != nil {
+		msg.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, msg)
+}
+
+// sendNotebookReadWSResult reads one note and replies with a notebook_read_result
+// event correlated by requestID.
+func (d *Daemon) sendNotebookReadWSResult(client *wsClient, requestID, path string) {
+	var result *protocol.NotebookReadResult
+	store, err := d.notebookStoreFor()
+	if err == nil {
+		var content []byte
+		var hash string
+		if content, hash, err = store.Read(path); err == nil {
+			result = &protocol.NotebookReadResult{Path: path, Content: string(content), Hash: hash}
+		}
+	}
+	msg := protocol.NotebookReadResultMessage{
+		Event:     protocol.EventNotebookReadResult,
+		RequestID: requestID,
+		Success:   err == nil,
+		Result:    result,
+	}
+	if err != nil {
+		msg.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, msg)
+}
+
+// sendNotebookBacklinksWSResult computes backlinks and replies with a
+// notebook_backlinks_result event correlated by requestID.
+func (d *Daemon) sendNotebookBacklinksWSResult(client *wsClient, requestID, path string) {
+	var entries []protocol.NotebookEntry
+	store, err := d.notebookStoreFor()
+	if err == nil {
+		var list []notebook.Entry
+		if list, err = store.Backlinks(path); err == nil {
+			entries = notebookEntriesToProtocol(list)
+		}
+	}
+	msg := protocol.NotebookBacklinksResultMessage{
+		Event:     protocol.EventNotebookBacklinksResult,
+		RequestID: requestID,
+		Success:   err == nil,
+		Entries:   entries,
+	}
+	if err != nil {
+		msg.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, msg)
 }
 
 func notebookEntriesToProtocol(entries []notebook.Entry) []protocol.NotebookEntry {

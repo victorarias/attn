@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "104"
+const ProtocolVersion = "105"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -64,6 +64,7 @@ const (
 	CmdNotebookWrite                      = "notebook_write"
 	CmdNotebookAppendJournal              = "notebook_append_journal"
 	CmdNotebookGuide                      = "notebook_guide"
+	CmdNotebookBacklinks                  = "notebook_backlinks"
 	CmdUnregister                         = "unregister"
 	CmdState                              = "state"
 	CmdSetSessionResumeID                 = "set_session_resume_id"
@@ -182,6 +183,9 @@ const (
 	EventDelegateResult                = "delegate_result"
 	EventWorkspaceContextResult        = "workspace_context_result"
 	EventWorkspaceContextListResult    = "workspace_context_list_result"
+	EventNotebookListResult            = "notebook_list_result"
+	EventNotebookReadResult            = "notebook_read_result"
+	EventNotebookBacklinksResult       = "notebook_backlinks_result"
 	EventPRsUpdated                    = "prs_updated"
 	EventReposUpdated                  = "repos_updated"
 	EventAuthorsUpdated                = "authors_updated"
@@ -478,6 +482,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdNotebookGuide:
 		var msg NotebookGuideMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdNotebookBacklinks:
+		var msg NotebookBacklinksMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

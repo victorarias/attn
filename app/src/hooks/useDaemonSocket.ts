@@ -169,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '104';
+export const PROTOCOL_VERSION = '105';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -394,8 +394,29 @@ export interface SessionExitInfo {
   signal?: string;
 }
 
+// One Notebook note's metadata, as surfaced by notebook_list / notebook_backlinks
+// (no body). Mirrors the daemon's protocol.NotebookEntry.
+export interface NotebookEntry {
+  path: string;
+  kind?: string;
+  title?: string;
+  summary?: string;
+  updated?: string;
+  size: number;
+}
+
+// The full bytes of one Notebook note plus its content hash (for hash-CAS edits).
+export interface NotebookReadResult {
+  path: string;
+  content: string;
+  hash: string;
+}
+
 interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
+  // Fired when notebook content changes (any client/agent/external write). paths
+  // are notebook-relative; origin is agent|dreaming|ui|external.
+  onNotebookChanged?: (origin: string, paths: string[]) => void;
   onChiefOfStaffDispatchesUpdate?: (dispatches: ChiefOfStaffDispatch[]) => void;
   onWorkspacesUpdate: (workspaces: DaemonWorkspace[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
@@ -676,6 +697,7 @@ export async function retryTransientAttachRequest<T>(
 
 export function useDaemonSocket({
   onSessionsUpdate,
+  onNotebookChanged,
   onChiefOfStaffDispatchesUpdate,
   onWorkspacesUpdate,
   onPRsUpdate,
@@ -704,6 +726,7 @@ export function useDaemonSocket({
   const settingsRef = useRef<DaemonSettings>({});
   const callbacksRef = useRef({
     onSessionsUpdate,
+    onNotebookChanged,
     onChiefOfStaffDispatchesUpdate,
     onWorkspacesUpdate,
     onPRsUpdate,
@@ -721,6 +744,7 @@ export function useDaemonSocket({
   });
   callbacksRef.current = {
     onSessionsUpdate,
+    onNotebookChanged,
     onChiefOfStaffDispatchesUpdate,
     onWorkspacesUpdate,
     onPRsUpdate,
@@ -1400,6 +1424,53 @@ export function useDaemonSocket({
               pending.resolve(data.contexts || []);
             } else {
               pending.reject(new Error(data.error || 'Workspace context list failed'));
+            }
+            break;
+          }
+
+          case 'notebook_changed':
+            callbacksRef.current.onNotebookChanged?.(
+              typeof data.origin === 'string' ? data.origin : '',
+              Array.isArray(data.paths) ? data.paths : [],
+            );
+            break;
+
+          case 'notebook_list_result':
+          case 'notebook_backlinks_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const prefix = data.event === 'notebook_list_result' ? 'notebook_list' : 'notebook_backlinks';
+            const key = `${prefix}:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success) {
+              pending.resolve(data.entries || []);
+            } else {
+              pending.reject(new Error(data.error || 'Notebook request failed'));
+            }
+            break;
+          }
+
+          case 'notebook_read_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `notebook_read:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success && data.result) {
+              pending.resolve(data.result);
+            } else {
+              pending.reject(new Error(data.error || 'Notebook read failed'));
             }
             break;
           }
@@ -3455,6 +3526,69 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
+  // List Notebook notes (metadata only). Optional prefix scopes a subtree.
+  const sendNotebookList = useCallback((prefix?: string): Promise<NotebookEntry[]> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('notebook_list');
+      const key = `notebook_list:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'notebook_list', request_id: requestId, ...(prefix ? { prefix } : {}) }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Notebook list timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
+  // Read one Notebook note's full bytes + content hash.
+  const sendNotebookRead = useCallback((path: string): Promise<NotebookReadResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('notebook_read');
+      const key = `notebook_read:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'notebook_read', request_id: requestId, path }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Notebook read timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
+  // List the notes whose body links to `path` (root-absolute markdown links).
+  const sendNotebookBacklinks = useCallback((path: string): Promise<NotebookEntry[]> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('notebook_backlinks');
+      const key = `notebook_backlinks:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'notebook_backlinks', request_id: requestId, path }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Notebook backlinks timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
   // Get recent locations from daemon
   const sendGetRecentLocations = useCallback((endpointId?: string, limit?: number): Promise<RecentLocationsResult> => {
     return new Promise((resolve, reject) => {
@@ -4153,6 +4287,9 @@ export function useDaemonSocket({
     sendBootstrapEndpoint,
     sendListEndpoints,
     sendListWorkspaceContexts,
+    sendNotebookList,
+    sendNotebookRead,
+    sendNotebookBacklinks,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,

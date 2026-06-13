@@ -27,6 +27,7 @@ import { ShortcutEditorModal } from './components/ShortcutEditorModal';
 import { WhatsNewModal } from './components/WhatsNewModal';
 import { ActionMenu, type ActionMenuItem } from './components/ActionMenu';
 import { WorkspaceContextNavigator, type WorkspaceContextView } from './components/WorkspaceContextNavigator';
+import { NotebookBrowser } from './components/NotebookBrowser';
 import { CopyToast, useCopyToast } from './components/CopyToast';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { ChordLeaderHud } from './components/ChordLeaderHud';
@@ -433,6 +434,10 @@ function App() {
     sessionExitHandlerRef.current?.(info);
   }, []);
 
+  // Bumped on every notebook_changed event so an open Notebook browser re-fetches
+  // the tree and the open note (covers agent writes and external edits).
+  const [notebookChangeSignal, setNotebookChangeSignal] = useState(0);
+
   // Connect to daemon WebSocket
   const {
     sendPRAction,
@@ -463,6 +468,9 @@ function App() {
     sendSetEndpointRemoteWeb,
     sendBootstrapEndpoint,
     sendListWorkspaceContexts,
+    sendNotebookList,
+    sendNotebookRead,
+    sendNotebookBacklinks,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,
@@ -509,6 +517,7 @@ function App() {
     clearWarnings,
   } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
+    onNotebookChanged: () => setNotebookChangeSignal((n) => n + 1),
     onChiefOfStaffDispatchesUpdate: setChiefOfStaffDispatches,
     onWorkspacesUpdate: setDaemonWorkspaces,
     onPRsUpdate: setPRs,
@@ -597,6 +606,10 @@ function App() {
         sendSetEndpointRemoteWeb={sendSetEndpointRemoteWeb}
         sendBootstrapEndpoint={sendBootstrapEndpoint}
         sendListWorkspaceContexts={sendListWorkspaceContexts}
+        sendNotebookList={sendNotebookList}
+        sendNotebookRead={sendNotebookRead}
+        sendNotebookBacklinks={sendNotebookBacklinks}
+        notebookChangeSignal={notebookChangeSignal}
         sendGetRecentLocations={sendGetRecentLocations}
         sendBrowseDirectory={sendBrowseDirectory}
         sendInspectPath={sendInspectPath}
@@ -696,6 +709,10 @@ interface AppContentProps {
   sendSetEndpointRemoteWeb: ReturnType<typeof useDaemonSocket>['sendSetEndpointRemoteWeb'];
   sendBootstrapEndpoint: ReturnType<typeof useDaemonSocket>['sendBootstrapEndpoint'];
   sendListWorkspaceContexts: ReturnType<typeof useDaemonSocket>['sendListWorkspaceContexts'];
+  sendNotebookList: ReturnType<typeof useDaemonSocket>['sendNotebookList'];
+  sendNotebookRead: ReturnType<typeof useDaemonSocket>['sendNotebookRead'];
+  sendNotebookBacklinks: ReturnType<typeof useDaemonSocket>['sendNotebookBacklinks'];
+  notebookChangeSignal: number;
   sendGetRecentLocations: ReturnType<typeof useDaemonSocket>['sendGetRecentLocations'];
   sendBrowseDirectory: ReturnType<typeof useDaemonSocket>['sendBrowseDirectory'];
   sendInspectPath: ReturnType<typeof useDaemonSocket>['sendInspectPath'];
@@ -789,6 +806,10 @@ function AppContent({
   sendSetEndpointRemoteWeb,
   sendBootstrapEndpoint,
   sendListWorkspaceContexts,
+  sendNotebookList,
+  sendNotebookRead,
+  sendNotebookBacklinks,
+  notebookChangeSignal,
   sendGetRecentLocations,
   sendBrowseDirectory,
 sendInspectPath,
@@ -969,6 +990,7 @@ sendFetchPRDetails,
   const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [workspaceContextsOpen, setWorkspaceContextsOpen] = useState(false);
+  const [notebookOpen, setNotebookOpen] = useState(false);
   const [workspaceContextsLoading, setWorkspaceContextsLoading] = useState(false);
   const [workspaceContextsError, setWorkspaceContextsError] = useState<string | null>(null);
   const [workspaceContexts, setWorkspaceContexts] = useState<Awaited<ReturnType<typeof sendListWorkspaceContexts>>>([]);
@@ -1575,6 +1597,7 @@ sendFetchPRDetails,
     || shortcutEditorOpen
     || actionMenuOpen
     || workspaceContextsOpen
+    || notebookOpen
     || chiefTransferTarget !== null
     || closedWorktree !== null
     || pendingSessionClose !== null
@@ -1620,7 +1643,19 @@ sendFetchPRDetails,
     void loadWorkspaceContexts();
   }, [loadWorkspaceContexts]);
 
+  const openNotebookBrowser = useCallback(() => {
+    setNotebookOpen(true);
+  }, []);
+
   const actionMenuItems = useMemo<ActionMenuItem[]>(() => [
+    {
+      id: 'notebook',
+      title: 'Browse the Notebook',
+      description: 'Read the durable, profile-wide markdown memory',
+      keywords: ['notebook', 'memory', 'journal', 'decisions', 'chief'],
+      icon: <ContextActionIcon />,
+      run: openNotebookBrowser,
+    },
     {
       id: 'workspace-contexts',
       title: 'Browse workspace contexts',
@@ -1646,7 +1681,7 @@ sendFetchPRDetails,
       icon: <KeyboardActionIcon />,
       run: () => setShortcutEditorOpen(true),
     },
-  ], [openDockPanel, openWorkspaceContextNavigator]);
+  ], [openDockPanel, openWorkspaceContextNavigator, openNotebookBrowser]);
 
   const handleToggleActionMenu = useCallback(() => {
     if (actionMenuOpen) {
@@ -1654,7 +1689,7 @@ sendFetchPRDetails,
       return;
     }
     if (settingsOpen || shortcutsOpen || locationPickerOpen || thumbsOpen || whatsNew.isOpen
-      || workspaceContextsOpen
+      || workspaceContextsOpen || notebookOpen
       || chiefTransferTarget !== null || closedWorktree !== null || pendingSessionClose !== null
       || sessionCreationJob !== null || openPRLauncherJob !== null) {
       return;
@@ -1673,6 +1708,7 @@ sendFetchPRDetails,
     thumbsOpen,
     whatsNew.isOpen,
     workspaceContextsOpen,
+    notebookOpen,
   ]);
   const waitingReviewSessions = useMemo(
     () => sessions
@@ -3216,7 +3252,8 @@ sendFetchPRDetails,
       && !whatsNew.isOpen
       && !actionMenuOpen
       && !shortcutEditorOpen
-      && !workspaceContextsOpen,
+      && !workspaceContextsOpen
+      && !notebookOpen,
   });
 
   return (
@@ -3638,6 +3675,14 @@ sendFetchPRDetails,
         error={workspaceContextsError}
         onClose={() => setWorkspaceContextsOpen(false)}
         onRetry={() => void loadWorkspaceContexts()}
+      />
+      <NotebookBrowser
+        isOpen={notebookOpen}
+        onClose={() => setNotebookOpen(false)}
+        listNotebook={sendNotebookList}
+        readNotebook={sendNotebookRead}
+        backlinksNotebook={sendNotebookBacklinks}
+        changeSignal={notebookChangeSignal}
       />
       <ActionMenu
         isOpen={actionMenuOpen}
