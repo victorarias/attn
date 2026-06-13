@@ -27,6 +27,7 @@ import (
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/hub"
 	"github.com/victorarias/attn/internal/logging"
+	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
@@ -130,6 +131,8 @@ type Daemon struct {
 	pendingInputSrc  map[string]string
 	recoveryMu       sync.RWMutex
 	recovering       bool
+	notebookMu       sync.Mutex
+	notebookStore    *notebook.Store
 	pendingInitialWS map[*wsClient]struct{}
 	startedOnce      sync.Once
 	startedCh        chan struct{}
@@ -1720,6 +1723,16 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleWorkspaceContextCompact(conn, msg.(*protocol.WorkspaceContextCompactMessage))
 	case protocol.CmdWorkspaceContextRollback:
 		d.handleWorkspaceContextRollback(conn, msg.(*protocol.WorkspaceContextRollbackMessage))
+	case protocol.CmdNotebookInit:
+		d.handleNotebookInit(conn)
+	case protocol.CmdNotebookList:
+		d.handleNotebookList(conn, msg.(*protocol.NotebookListMessage))
+	case protocol.CmdNotebookRead:
+		d.handleNotebookRead(conn, msg.(*protocol.NotebookReadMessage))
+	case protocol.CmdNotebookWrite:
+		d.handleNotebookWrite(conn, msg.(*protocol.NotebookWriteMessage))
+	case protocol.CmdNotebookAppendJournal:
+		d.handleNotebookAppendJournal(conn, msg.(*protocol.NotebookAppendJournalMessage))
 	case protocol.CmdUnregister:
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:

@@ -37,6 +37,9 @@ const (
 	SettingTailscaleEnabled         = "tailscale_enabled"
 	SettingKeybindingsConfig        = "keybindings_config"
 	SettingNewSessionYoloPrefix     = "new_session_yolo_"
+	// SettingNotebookRoot overrides the notebook's filesystem root. Empty =>
+	// the profile-derived default (~/attn-notebook[-profile]).
+	SettingNotebookRoot = "notebook.root"
 )
 
 func (d *Daemon) handleGetSettingsWS(client *wsClient) {

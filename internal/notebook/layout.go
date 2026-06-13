@@ -89,6 +89,17 @@ func scaffoldFiles() []scaffoldFile {
 	}
 }
 
+// ScaffoldPaths returns the notebook-relative paths of the reserved files that
+// EnsureScaffold creates, for callers that need to announce a fresh init.
+func ScaffoldPaths() []string {
+	files := scaffoldFiles()
+	out := make([]string, len(files))
+	for i, f := range files {
+		out[i] = f.relPath
+	}
+	return out
+}
+
 const indexTemplate = `# Notebook
 
 Durable, profile-wide markdown memory — written by attn on behalf of agents, a
