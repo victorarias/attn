@@ -45,6 +45,7 @@
         --warning: #f59e0b;
         --danger: #fb7185;
         --launching: #60a5fa;
+        --scheduled: #0ea5e9;
         --idle: #94a3b8;
         --unknown: #c084fc;
         --safe-top: env(safe-area-inset-top, 0px);
@@ -340,6 +341,10 @@
       .state-pending_approval,
       .state-waiting_input {
         color: var(--warning);
+      }
+
+      .state-scheduled {
+        color: var(--scheduled);
       }
 
       .state-idle {
@@ -738,6 +743,7 @@
         working: { label: "working", className: "state-working" },
         pending_approval: { label: "pending approval", className: "state-pending_approval" },
         waiting_input: { label: "waiting input", className: "state-waiting_input" },
+        scheduled: { label: "scheduled", className: "state-scheduled" },
         idle: { label: "idle", className: "state-idle" },
         unknown: { label: "unknown", className: "state-unknown" },
       };

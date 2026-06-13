@@ -463,7 +463,10 @@ export class GridCompositor {
       if (Math.abs(next - tile.attention) > 0.001) attentionAnimating = true;
       tile.attention = next;
       if (tile.attention > 0.01) attentionAnimating = true; // keep pulsing
-      if (!tile.hidden && tile.state === 'waiting_input') attentionAnimating = true;
+      // waiting_input flashes and scheduled slowly pulses; both are time-driven
+      // and attention-excluded, so keep the render loop alive for a visible
+      // tile or the animation freezes between repaints.
+      if (!tile.hidden && (tile.state === 'waiting_input' || tile.state === 'scheduled')) attentionAnimating = true;
     }
 
     // Advance zoom clock.

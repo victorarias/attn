@@ -795,6 +795,49 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend(t *testing.T) {
 	}
 }
 
+// TestDaemon_ReconcileSessionsWithWorkerBackend_PreservesScheduled proves that
+// daemon recovery does not clobber a live session parked on a cron/loop. The
+// worker is alive (Running) but its parked screen reads as idle, which would
+// otherwise be recovered as launching; the hook-reported "scheduled" state must
+// survive instead, since the next Stop re-derives it from live session_crons.
+func TestDaemon_ReconcileSessionsWithWorkerBackend_PreservesScheduled(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "live-scheduled",
+		Label:          "loop",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/loop",
+		State:          protocol.SessionStateScheduled,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+		Recoverable:    protocol.Ptr(true),
+	})
+	d.ptyBackend = &fakeWorkerReconcileBackend{
+		liveIDs: []string{"live-scheduled"},
+		info: map[string]ptybackend.SessionInfo{
+			"live-scheduled": {
+				SessionID: "live-scheduled",
+				Agent:     string(protocol.SessionAgentCodex),
+				CWD:       "/tmp/loop",
+				Running:   true,                // worker alive, parked on a cron
+				State:     protocol.StateIdle,  // parked screen reads as idle
+			},
+		},
+	}
+
+	d.reconcileSessionsWithWorkerBackend(context.Background(), true, time.Time{})
+
+	got := d.store.Get("live-scheduled")
+	if got == nil {
+		t.Fatal("scheduled session missing after reconcile")
+	}
+	if got.State != protocol.SessionStateScheduled {
+		t.Fatalf("state = %s, want scheduled preserved across recovery (not launching/idle)", got.State)
+	}
+}
+
 func TestDaemon_ReconcileSessionsWithWorkerBackend_ReapRemovesEmptyWorkspace(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	now := string(protocol.TimestampNow())
@@ -5623,6 +5666,38 @@ func TestUpdateAndBroadcastStateWithTimestamp_StaleIdleDoesNotClearLongRunTracki
 	}
 	if !d.sessionNeedsReviewAfterLongRun("sess-stale") {
 		t.Fatal("needs_review_after_long_run should remain set for stale timestamped update")
+	}
+}
+
+// TestScheduledClearsLongRunTracking proves that parking on a cron/loop ends
+// the current run for long-run-review purposes: a session that did real work
+// and then goes "scheduled" must drop its workingSince, so a later short
+// resumed turn does not falsely trip the 5-minute long-run review threshold.
+func TestScheduledClearsLongRunTracking(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+
+	now := time.Now()
+	nowStr := string(protocol.NewTimestamp(now))
+	d.store.Add(&protocol.Session{
+		ID:             "sess-loop",
+		Agent:          protocol.SessionAgentCodex,
+		Label:          "loop",
+		Directory:      "/tmp",
+		State:          protocol.StateWorking,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	})
+	// It has been working for 10 minutes, then parks on a cron.
+	d.longRun["sess-loop"] = longRunSession{workingSince: now.Add(-10 * time.Minute)}
+
+	d.updateAndBroadcastState("sess-loop", protocol.StateScheduled)
+
+	d.longRunMu.Lock()
+	_, tracked := d.longRun["sess-loop"]
+	d.longRunMu.Unlock()
+	if tracked {
+		t.Fatal("parking on a schedule must clear long-run tracking; the leaked workingSince would mis-fire a review on the next short turn")
 	}
 }
 

@@ -113,6 +113,18 @@ func (b *claudeTranscriptWatcherBehavior) Tick(now time.Time, sessionState proto
 }
 
 func (b *claudeTranscriptWatcherBehavior) SkipClassification(sessionState protocol.SessionState, lastSeen string, now time.Time) (bool, string) {
+	// A scheduled session is parked on a /loop or cron and was set
+	// authoritatively by the Stop hook. The transcript only shows the last turn
+	// — which the classifier would read as idle/waiting/done, the wrong answer —
+	// and the session leaves "scheduled" through the normal hook path when the
+	// cron fires or the user acts. A genuinely dead park is demoted by session
+	// reaping, not here. So never let the watcher reclassify it. This is an
+	// UNCONDITIONAL skip (unlike the freshness-gated working/pending_approval
+	// case below): parks routinely outlast the 2-minute hook-stale threshold,
+	// and we must not flip the tile back mid-park.
+	if sessionState == protocol.SessionStateScheduled {
+		return true, "transcript watcher: skipping classification, session scheduled"
+	}
 	if sessionState != protocol.SessionStateWorking && sessionState != protocol.SessionStatePendingApproval {
 		return false, ""
 	}
