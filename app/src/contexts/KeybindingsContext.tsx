@@ -18,6 +18,8 @@ import { ShortcutDef, ShortcutId } from '../shortcuts/registry';
 import { isProtectedShortcut } from '../shortcuts/metadata';
 import {
   KeybindingsConfig,
+  DockConfig,
+  DEFAULT_DOCK,
   KEYBINDINGS_SETTING_KEY,
   parseKeybindingsConfig,
   serializeKeybindingsConfig,
@@ -31,12 +33,19 @@ export type OverrideChange = ShortcutDef | null | undefined;
 
 interface KeybindingsContextValue {
   config: KeybindingsConfig;
+  dock: DockConfig;
   resolve: (id: ShortcutId) => ShortcutDef | null;
   isProtected: (id: ShortcutId) => boolean;
   isCustomized: (id: ShortcutId) => boolean;
   findConflict: (def: ShortcutDef, excludeId: ShortcutId) => ShortcutId | null;
   /** Apply one or more override changes in a single persisted write (atomic). */
   applyOverrides: (changes: Partial<Record<ShortcutId, OverrideChange>>) => void;
+  isInDock: (id: ShortcutId) => boolean;
+  /** Add (append) or remove a shortcut from the dock membership list. */
+  setInDock: (id: ShortcutId, inDock: boolean) => void;
+  /** Move a dock item one slot earlier (-1) or later (+1); no-op at the ends. */
+  moveDockItem: (id: ShortcutId, direction: -1 | 1) => void;
+  setDockCollapsed: (collapsed: boolean) => void;
   restoreDefaults: () => void;
 }
 
@@ -88,23 +97,51 @@ export function KeybindingsProvider({ children }: { children: ReactNode }) {
         overrides[id] = change;
       }
     }
-    commit({ version: 1, overrides });
+    commit({ ...configRef.current, overrides });
+  }, [commit]);
+
+  const setInDock = useCallback((id: ShortcutId, inDock: boolean) => {
+    const items = configRef.current.dock.items;
+    const present = items.includes(id);
+    if (inDock === present) return;
+    const nextItems = inDock ? [...items, id] : items.filter((x) => x !== id);
+    commit({ ...configRef.current, dock: { ...configRef.current.dock, items: nextItems } });
+  }, [commit]);
+
+  const moveDockItem = useCallback((id: ShortcutId, direction: -1 | 1) => {
+    const items = [...configRef.current.dock.items];
+    const from = items.indexOf(id);
+    if (from === -1) return;
+    const to = from + direction;
+    if (to < 0 || to >= items.length) return;
+    [items[from], items[to]] = [items[to], items[from]];
+    commit({ ...configRef.current, dock: { ...configRef.current.dock, items } });
+  }, [commit]);
+
+  const setDockCollapsed = useCallback((collapsed: boolean) => {
+    if (configRef.current.dock.collapsed === collapsed) return;
+    commit({ ...configRef.current, dock: { ...configRef.current.dock, collapsed } });
   }, [commit]);
 
   const restoreDefaults = useCallback(() => {
-    commit({ version: 1, overrides: {} });
+    commit({ version: 1, overrides: {}, dock: { ...DEFAULT_DOCK, items: [...DEFAULT_DOCK.items] } });
   }, [commit]);
 
   const value = useMemo<KeybindingsContextValue>(() => ({
     config,
+    dock: config.dock,
     resolve: resolveBinding,
     isProtected: isProtectedShortcut,
     isCustomized: (id: ShortcutId) =>
       Object.prototype.hasOwnProperty.call(config.overrides, id),
     findConflict,
     applyOverrides,
+    isInDock: (id: ShortcutId) => config.dock.items.includes(id),
+    setInDock,
+    moveDockItem,
+    setDockCollapsed,
     restoreDefaults,
-  }), [config, applyOverrides, restoreDefaults]);
+  }), [config, applyOverrides, setInDock, moveDockItem, setDockCollapsed, restoreDefaults]);
 
   return (
     <KeybindingsContext.Provider value={value}>

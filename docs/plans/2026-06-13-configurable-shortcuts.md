@@ -142,11 +142,23 @@ PR 1 — Foundation + single-key rebinding + editor (chords/dock deferred) — D
   rebinds only on next natural re-render. PR 2's ID-driven dock fixes live reactivity.
 
 PR 2 — Config-driven collapsible dock + "show in dock"
-- [ ] ID-driven dock model in `App.tsx` + `Sidebar.tsx`; dedup by id; `dockActions` map
-- [ ] Default `dock.items` migrated from current hardcoded chips (mapped to ids)
-- [ ] Independent `dock.collapsed` + collapse toggle UI in the dock header
-- [ ] "show in dock" checkbox in editor -> `config.dock.items`; reorder support
-- [ ] Tests: dock rebuilds from config, reflects rebinds, collapse persists
+- [x] `KeybindingsConfig` gains `dock: { collapsed, items: ShortcutId[] }`; resolver parses/sanitizes
+      (drop unknown ids, dedup) with a `DEFAULT_DOCK` fallback
+- [x] `dockLabel?` added to `ShortcutMeta` (terse dock chip text, falls back to `label`)
+- [x] ID-driven dock model in `App.tsx` (`dockActions` map: `run?`/`isActive?`/`available?`) +
+      `Sidebar.tsx` renders `DockItem[]`; dedup by id; tokens resolve live (fixes PR1 reactivity note)
+- [x] Default `dock.items` migrated from current chips (panel toggles + split/zoom/session-h + sidebar)
+- [x] Independent `dock.collapsed` + chevron toggle in the sidebar dock header
+- [x] Editor: per-row pin (show in dock) + a "Dock" section with up/down reorder + remove
+- [x] `KeybindingsContext` dock mutations: `setInDock`, `moveDockItem`, `setDockCollapsed`, `isInDock`
+- [x] Tests: resolver dock parse/sanitize, context mutations persist, editor pin/reorder, Sidebar render
+
+Notes / refinements during implementation:
+- Dock chips use `dockLabel ?? label` so the dock stays terse while any shortcut is dock-eligible.
+- The combined `⌘⌥←↑→↓ pane` hint is dropped from the *default* dock — it can't be one id. The four
+  focus shortcuts remain dock-eligible individually. Pane focus itself is unchanged.
+- `Restore Defaults` resets the whole config (overrides + dock), not just keybindings.
+- Reorder uses up/down buttons (not drag-drop): accessible, testable in happy-dom.
 
 PR 3 — Leader-key chords (depth 2)
 - [ ] Extend `Binding`/resolver/validation for `{leader, then}`; enforce leader exclusivity

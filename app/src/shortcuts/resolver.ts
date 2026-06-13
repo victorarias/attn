@@ -16,15 +16,44 @@ import {
 } from './registry';
 import { isMacLikePlatform } from './platform';
 
+export interface DockConfig {
+  /** When true the sidebar dock chips are hidden behind a "show dock" affordance. */
+  collapsed: boolean;
+  /** Ordered membership; each id renders one dock chip. */
+  items: ShortcutId[];
+}
+
 export interface KeybindingsConfig {
   version: 1;
   // Absent id  -> use default.
   // ShortcutDef -> rebind to this combo.
   // null        -> explicitly unbound.
   overrides: Partial<Record<ShortcutId, ShortcutDef | null>>;
+  dock: DockConfig;
 }
 
-export const EMPTY_KEYBINDINGS_CONFIG: KeybindingsConfig = { version: 1, overrides: {} };
+// Default dock membership, in render order. Mirrors the chips the sidebar showed
+// before the dock became config-driven (panel toggles, the common terminal
+// actions, then the sidebar toggle). Every entry must be a real ShortcutId.
+export const DEFAULT_DOCK_ITEMS: ShortcutId[] = [
+  'dock.diffDetail',
+  'dock.reviewLoop',
+  'dock.diff',
+  'dock.attention',
+  'terminal.splitVertical',
+  'terminal.splitHorizontal',
+  'session.newHorizontal',
+  'terminal.toggleZoom',
+  'session.toggleSidebar',
+];
+
+export const DEFAULT_DOCK: DockConfig = { collapsed: false, items: DEFAULT_DOCK_ITEMS };
+
+export const EMPTY_KEYBINDINGS_CONFIG: KeybindingsConfig = {
+  version: 1,
+  overrides: {},
+  dock: DEFAULT_DOCK,
+};
 
 export const KEYBINDINGS_SETTING_KEY = 'keybindings_config';
 
@@ -142,19 +171,49 @@ function sanitizeDef(value: unknown): ShortcutDef | null {
   return def;
 }
 
+/** A fresh empty config (own copy of the default dock so callers can't mutate it). */
+function emptyConfig(): KeybindingsConfig {
+  return { version: 1, overrides: {}, dock: defaultDock() };
+}
+
+function defaultDock(): DockConfig {
+  return { collapsed: false, items: [...DEFAULT_DOCK_ITEMS] };
+}
+
+/**
+ * Sanitize a persisted dock blob: keep only real, deduped ShortcutIds in order,
+ * coerce `collapsed` to a boolean. A missing/malformed dock falls back to the
+ * default so the sidebar always has a usable dock.
+ */
+function sanitizeDock(value: unknown): DockConfig {
+  if (!value || typeof value !== 'object') return defaultDock();
+  const v = value as Record<string, unknown>;
+  if (!Array.isArray(v.items)) return defaultDock();
+  const seen = new Set<string>();
+  const items: ShortcutId[] = [];
+  for (const id of v.items) {
+    if (typeof id !== 'string') continue;
+    if (!Object.prototype.hasOwnProperty.call(SHORTCUTS, id)) continue; // unknown id
+    if (seen.has(id)) continue; // dedup
+    seen.add(id);
+    items.push(id as ShortcutId);
+  }
+  return { collapsed: v.collapsed === true, items };
+}
+
 /**
  * Parse a persisted blob into a config, dropping anything unrecognized so a bad
  * value can never crash dispatch (the affected id just keeps its default).
  */
 export function parseKeybindingsConfig(raw: string | undefined | null): KeybindingsConfig {
-  if (!raw) return { version: 1, overrides: {} };
+  if (!raw) return emptyConfig();
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { version: 1, overrides: {} };
+    return emptyConfig();
   }
-  if (!parsed || typeof parsed !== 'object') return { version: 1, overrides: {} };
+  if (!parsed || typeof parsed !== 'object') return emptyConfig();
 
   const rawOverrides = (parsed as Record<string, unknown>).overrides;
   const overridesOut: Partial<Record<ShortcutId, ShortcutDef | null>> = {};
@@ -171,7 +230,11 @@ export function parseKeybindingsConfig(raw: string | undefined | null): Keybindi
     }
   }
 
-  return { version: 1, overrides: overridesOut };
+  return {
+    version: 1,
+    overrides: overridesOut,
+    dock: sanitizeDock((parsed as Record<string, unknown>).dock),
+  };
 }
 
 export function serializeKeybindingsConfig(config: KeybindingsConfig): string {

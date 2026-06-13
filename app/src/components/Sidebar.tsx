@@ -138,7 +138,10 @@ interface SidebarProps {
   // Optional so existing Sidebar tests render without wiring the grid picker.
   gridLayout?: GridLayout;
   onSelectGridLayout?: (layout: GridLayout) => void;
-  footerShortcuts?: FooterShortcut[];
+  // Config-driven dock chips (ordered). Built in App from the keybindings config.
+  dockItems?: DockItem[];
+  dockCollapsed?: boolean;
+  onToggleDockCollapsed?: () => void;
   mutedWorkspaces?: SidebarWorkspace[];
   mutedExpanded?: boolean;
   onMutedExpandedChange?: (expanded: boolean) => void;
@@ -173,13 +176,18 @@ export interface SidebarHeaderAction {
   active?: boolean;
   toneClassName?: string;
   badge?: string | number;
-  shortcutHint?: string;
   onClick: () => void;
 }
 
-export interface FooterShortcut {
+export interface DockItem {
+  id: string;
+  /** Terse chip label, e.g. "diff". */
   label: string;
+  /** Rendered key tokens, e.g. "⌘⇧G". Empty when the shortcut is unbound. */
+  keys: string;
   active?: boolean;
+  /** When set, the chip is an actionable button; otherwise an informational hint. */
+  onClick?: () => void;
 }
 
 function HomeIcon() {
@@ -286,7 +294,9 @@ export function Sidebar({
   headerActions,
   gridLayout,
   onSelectGridLayout,
-  footerShortcuts,
+  dockItems = [],
+  dockCollapsed = false,
+  onToggleDockCollapsed,
   mutedWorkspaces = [],
   mutedExpanded: mutedExpandedProp,
   onMutedExpandedChange,
@@ -385,13 +395,6 @@ export function Sidebar({
   const visualIndexOfWorkspace = (id: string) => (
     visibleVisualIndexByWorkspaceId.get(id) ?? visualIndexByWorkspaceId.get(id) ?? -1
   );
-  const dockShortcutHints = Array.from(new Map([
-    ...headerActions
-      .filter((action) => action.shortcutHint && !action.disabled)
-      .map((action) => [action.shortcutHint as string, { label: action.shortcutHint as string, active: false }] as const),
-    ...(footerShortcuts ?? []).map((shortcut) => [shortcut.label, shortcut] as const),
-  ]).values());
-
   if (collapsed) {
     return (
       <div className="sidebar collapsed">
@@ -780,18 +783,50 @@ export function Sidebar({
         </div>
       )}
 
-      <div className="sidebar-footer">
-        <span className="sidebar-footer-label">Dock</span>
-        {dockShortcutHints.map((shortcut) => (
-          <span
-            key={shortcut.label}
-            className={`shortcut-hint ${shortcut.active ? 'active' : ''}`.trim()}
-            data-active={shortcut.active ? 'true' : 'false'}
-          >
-            {shortcut.label}
-          </span>
-        ))}
-        <span className="shortcut-hint">{`${formatShortcut('session.toggleSidebar')} sidebar`}</span>
+      <div className={`sidebar-footer ${dockCollapsed ? 'sidebar-footer--collapsed' : ''}`.trim()}>
+        <div className="sidebar-footer-head">
+          <span className="sidebar-footer-label">Dock</span>
+          {onToggleDockCollapsed && (
+            <button
+              type="button"
+              className="dock-collapse-btn"
+              onClick={onToggleDockCollapsed}
+              aria-expanded={!dockCollapsed}
+              title={dockCollapsed ? 'Show dock' : 'Hide dock'}
+              aria-label={dockCollapsed ? 'Show dock' : 'Hide dock'}
+            >
+              {dockCollapsed ? '+' : '−'}
+            </button>
+          )}
+        </div>
+        {!dockCollapsed && (
+          <div className="sidebar-dock-items">
+            {dockItems.map((item) => (
+              item.onClick ? (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`shortcut-hint shortcut-hint--action ${item.active ? 'active' : ''}`.trim()}
+                  data-active={item.active ? 'true' : 'false'}
+                  onClick={item.onClick}
+                  title={item.label}
+                >
+                  {item.keys && <span className="shortcut-hint-keys">{item.keys}</span>}
+                  {item.label}
+                </button>
+              ) : (
+                <span
+                  key={item.id}
+                  className={`shortcut-hint ${item.active ? 'active' : ''}`.trim()}
+                  data-active={item.active ? 'true' : 'false'}
+                >
+                  {item.keys && <span className="shortcut-hint-keys">{item.keys}</span>}
+                  {item.label}
+                </span>
+              )
+            ))}
+          </div>
+        )}
       </div>
 
       {renameTarget && (

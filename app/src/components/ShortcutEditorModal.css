@@ -179,6 +179,73 @@
   border-color: var(--color-border);
 }
 
+.shortcut-editor-icon-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.shortcut-editor-icon-btn:disabled:hover {
+  color: var(--color-text-dimmed);
+  background: transparent;
+  border-color: transparent;
+}
+
+.shortcut-editor-icon-btn--on,
+.shortcut-editor-icon-btn--on:hover {
+  color: #ff6b35;
+}
+
+/* Dock section (reorderable membership list at the top of the editor) */
+.shortcut-editor-dock-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--color-text-dimmed);
+}
+
+.shortcut-editor-dock-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-dimmed);
+  font-style: italic;
+}
+
+.shortcut-editor-dock-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.shortcut-editor-dock-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.shortcut-editor-dock-item:last-child {
+  border-bottom: none;
+}
+
+.shortcut-editor-dock-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut-editor-dock-keys {
+  font-size: 12px;
+  color: var(--color-text-dimmed);
+  font-variant-numeric: tabular-nums;
+}
+
 .shortcut-editor-reassign {
   display: flex;
   align-items: center;

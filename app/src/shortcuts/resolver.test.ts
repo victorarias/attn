@@ -7,7 +7,7 @@ vi.mock('./platform', () => ({
   isAccelKeyPressed: (e: KeyboardEvent) => e.metaKey,
 }));
 
-import { SHORTCUTS } from './registry';
+import { SHORTCUTS, ShortcutId } from './registry';
 import {
   setShortcutOverrides,
   resolveBinding,
@@ -19,6 +19,7 @@ import {
   isRiskyBinding,
   parseKeybindingsConfig,
   serializeKeybindingsConfig,
+  DEFAULT_DOCK,
 } from './resolver';
 
 beforeEach(() => setShortcutOverrides({}));
@@ -153,7 +154,43 @@ describe('parseKeybindingsConfig', () => {
   });
 
   it('round-trips through serialize', () => {
-    const cfg = { version: 1 as const, overrides: { 'session.new': { key: 'm', meta: true } } };
+    const cfg = {
+      version: 1 as const,
+      overrides: { 'session.new': { key: 'm', meta: true } },
+      dock: { collapsed: true, items: ['dock.diff', 'session.toggleSidebar'] as ShortcutId[] },
+    };
     expect(parseKeybindingsConfig(serializeKeybindingsConfig(cfg))).toEqual(cfg);
+  });
+});
+
+describe('dock config', () => {
+  it('falls back to the default dock when absent or malformed', () => {
+    expect(parseKeybindingsConfig(undefined).dock).toEqual(DEFAULT_DOCK);
+    expect(parseKeybindingsConfig(JSON.stringify({ overrides: {} })).dock).toEqual(DEFAULT_DOCK);
+    expect(parseKeybindingsConfig(JSON.stringify({ dock: 'nope' })).dock).toEqual(DEFAULT_DOCK);
+    // items present but not an array -> default
+    expect(parseKeybindingsConfig(JSON.stringify({ dock: { items: 5 } })).dock).toEqual(DEFAULT_DOCK);
+  });
+
+  it('keeps known ids in order, drops unknown ids, and dedups', () => {
+    const raw = JSON.stringify({
+      dock: { collapsed: true, items: ['dock.diff', 'bogus.id', 'dock.diff', 'session.new'] },
+    });
+    expect(parseKeybindingsConfig(raw).dock).toEqual({
+      collapsed: true,
+      items: ['dock.diff', 'session.new'],
+    });
+  });
+
+  it('coerces collapsed to a boolean', () => {
+    const raw = JSON.stringify({ dock: { collapsed: 'yes', items: [] } });
+    expect(parseKeybindingsConfig(raw).dock.collapsed).toBe(false);
+  });
+
+  it('does not share the default dock array between parses (no cross-mutation)', () => {
+    const a = parseKeybindingsConfig(undefined).dock.items;
+    const b = parseKeybindingsConfig(undefined).dock.items;
+    expect(a).not.toBe(b);
+    expect(a).toEqual(b);
   });
 });
