@@ -64,6 +64,27 @@
   letter-spacing: -0.01em;
 }
 
+.shortcuts-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shortcuts-edit {
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 107, 53, 0.5);
+  background: rgba(255, 107, 53, 0.12);
+  color: #ff6b35;
+  cursor: pointer;
+  transition: all 120ms ease-out;
+}
+
+.shortcuts-edit:hover {
+  background: rgba(255, 107, 53, 0.2);
+}
+
 .shortcuts-close {
   background: transparent;
   border: none;

@@ -67,6 +67,7 @@ interface UseUiAutomationBridgeArgs {
   closeSession: (sessionId: string) => Promise<void>;
   reloadSession?: (sessionId: string, size?: { cols: number; rows: number }) => Promise<void>;
   setSetting?: (key: string, value: string) => void;
+  openShortcutEditor?: () => void;
   splitPane: (sessionId: string, targetPaneId: string, direction: TerminalSplitDirection) => Promise<unknown>;
   closePane: (sessionId: string, paneId: string) => Promise<unknown>;
   focusPane: (sessionId: string, paneId: string) => void;
@@ -1447,6 +1448,7 @@ export function useUiAutomationBridge({
   closeSession,
   reloadSession,
   setSetting,
+  openShortcutEditor,
   splitPane,
   closePane,
   focusPane,
@@ -2168,6 +2170,14 @@ export function useUiAutomationBridge({
         await settleUi(2);
         return { shortcutId };
       }
+      case 'open_shortcut_editor': {
+        if (!openShortcutEditor) {
+          throw new Error('openShortcutEditor handler is not wired');
+        }
+        openShortcutEditor();
+        await settleUi(2);
+        return { opened: true };
+      }
       case 'write_pane': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
         const text = typeof payload.text === 'string' ? payload.text : '';
@@ -2599,6 +2609,7 @@ export function useUiAutomationBridge({
     getPaneSize,
     getPaneText,
     getPaneBlockState,
+    openShortcutEditor,
     resetSessionPaneTerminal,
     drainSessionPaneTerminal,
     selectSession,

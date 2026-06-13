@@ -1,5 +1,32 @@
 import { triggerShortcut } from '../../shortcuts/useShortcut';
 import { isMacLikePlatform } from '../../shortcuts/platform';
+import { matchesShortcut, ShortcutId } from '../../shortcuts/registry';
+import { resolveBinding } from '../../shortcuts/resolver';
+
+// Shortcuts intercepted on the terminal's OWN input path (Ghostty's
+// InputHandler), in priority order. This is a second dispatch path separate
+// from the window-level listener, so it must read bindings through the resolver
+// to honor user rebinds/unbinds. ⌘W (close) is handled after the loop because
+// it falls back from closing the focused pane to closing the session.
+const TERMINAL_INTERCEPTS: ShortcutId[] = [
+  'workspace.select1', 'workspace.select2', 'workspace.select3',
+  'workspace.select4', 'workspace.select5', 'workspace.select6',
+  'workspace.select7', 'workspace.select8', 'workspace.select9',
+  'session.newWorkspace',
+  'app.quit',
+  'ui.showShortcuts',
+  'session.newHorizontal',
+  'terminal.find',
+  'terminal.splitVertical',
+  'terminal.splitHorizontal',
+  'terminal.toggleZoom',
+  'terminal.toggleMaximize',
+];
+
+function matchesBinding(event: KeyboardEvent, id: ShortcutId): boolean {
+  const def = resolveBinding(id);
+  return def ? matchesShortcut(event, def) : false;
+}
 
 export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
   return (event: KeyboardEvent) => {
@@ -28,49 +55,22 @@ export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
       sendToPty('\x16');
       return false;
     }
-    const accel = isMacLikePlatform() ? event.metaKey : (event.metaKey || event.ctrlKey);
-    if (event.type === 'keydown' && accel && !event.altKey) {
-      if (!event.shiftKey) {
-        const digitMatch = event.code.match(/^Digit([1-9])$/);
-        const digit = digitMatch?.[1] ?? (/^[1-9]$/.test(event.key) ? event.key : null);
-        if (digit) {
-          return !triggerShortcut(`workspace.select${digit}` as Parameters<typeof triggerShortcut>[0]);
+
+    if (event.type === 'keydown') {
+      for (const id of TERMINAL_INTERCEPTS) {
+        if (matchesBinding(event, id)) {
+          return !triggerShortcut(id);
         }
       }
-      if (!event.shiftKey && event.key.toLowerCase() === 't') {
-        return !triggerShortcut('session.newWorkspace');
+      // ⌘W: close the focused pane, falling back to closing the session.
+      if (matchesBinding(event, 'terminal.close') && triggerShortcut('terminal.close')) {
+        return false;
       }
-      if (!event.shiftKey && event.key.toLowerCase() === 'q') {
-        return !triggerShortcut('app.quit');
-      }
-      if (!event.shiftKey && event.key === '/') {
-        return !triggerShortcut('ui.showShortcuts');
-      }
-      if (event.shiftKey && event.key.toLowerCase() === 'n') {
-        return !triggerShortcut('session.newHorizontal');
-      }
-      if (!event.shiftKey && event.key.toLowerCase() === 'f') {
-        return !triggerShortcut('terminal.find');
-      }
-      if (!event.shiftKey && event.key.toLowerCase() === 'd') {
-        return !triggerShortcut('terminal.splitVertical');
-      }
-      if (event.shiftKey && event.key.toLowerCase() === 'd') {
-        return !triggerShortcut('terminal.splitHorizontal');
-      }
-      if (event.shiftKey && event.key.toLowerCase() === 'z') {
-        return !triggerShortcut('terminal.toggleZoom');
-      }
-      if (event.shiftKey && event.key === 'Enter') {
-        return !triggerShortcut('terminal.toggleMaximize');
-      }
-      if (!event.shiftKey && event.key.toLowerCase() === 'w') {
-        if (triggerShortcut('terminal.close')) {
-          return false;
-        }
+      if (matchesBinding(event, 'session.close')) {
         return !triggerShortcut('session.close');
       }
     }
+
     if (event.key === 'Enter' && event.shiftKey && !event.ctrlKey && !event.altKey) {
       if (event.type === 'keydown') {
         sendToPty('\n');

@@ -89,9 +89,11 @@ export const SHORTCUTS = {
 export type ShortcutId = keyof typeof SHORTCUTS;
 
 /**
- * Convert a ShortcutDef to a unique string key for conflict detection
+ * Convert a ShortcutDef to a unique string key for conflict detection.
+ * Modifiers + key only (code is ignored), matching how matchesShortcut treats
+ * equivalent combos. Shared by the load-time validator and the runtime resolver.
  */
-function shortcutToKey(def: ShortcutDef): string {
+export function shortcutToKey(def: ShortcutDef): string {
   const parts: string[] = [];
   if (def.meta) parts.push('meta');
   if (def.ctrl) parts.push('ctrl');
@@ -101,7 +103,11 @@ function shortcutToKey(def: ShortcutDef): string {
   return parts.join('+');
 }
 
-function isAllowedConflict(idA: ShortcutId, idB: ShortcutId): boolean {
+/**
+ * Two ids are an allowed conflict when they intentionally share a combo but are
+ * context-gated at dispatch (e.g. session.close vs terminal.close on ⌘W).
+ */
+export function isAllowedConflict(idA: ShortcutId, idB: ShortcutId): boolean {
   const pair = [idA, idB].sort().join('|');
   return ALLOWED_CONFLICT_PAIRS.has(pair);
 }

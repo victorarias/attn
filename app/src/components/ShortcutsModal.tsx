@@ -11,9 +11,10 @@ import './ShortcutsModal.css';
 interface ShortcutsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onEdit?: () => void;
 }
 
-export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
+export function ShortcutsModal({ isOpen, onClose, onEdit }: ShortcutsModalProps) {
   const categories = useMemo(() => buildCheatsheet(), []);
   useEscapeStack(onClose, isOpen);
 
@@ -36,14 +37,25 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
         >
           <div className="shortcuts-header">
             <h2 id="shortcuts-modal-title">Keyboard Shortcuts</h2>
-            <button
-              className="shortcuts-close"
-              onClick={onClose}
-              aria-label="Close keyboard shortcuts"
-              type="button"
-            >
-              ×
-            </button>
+            <div className="shortcuts-header-actions">
+              {onEdit && (
+                <button
+                  className="shortcuts-edit"
+                  onClick={onEdit}
+                  type="button"
+                >
+                  Edit shortcuts
+                </button>
+              )}
+              <button
+                className="shortcuts-close"
+                onClick={onClose}
+                aria-label="Close keyboard shortcuts"
+                type="button"
+              >
+                ×
+              </button>
+            </div>
           </div>
 
           <div className="shortcuts-body">
