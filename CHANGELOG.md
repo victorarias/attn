@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-14]
+
+### Added
+- **Preview what the Notebook's nightly memory pass would keep.** A new `attn notebook dream` command shows the recurring, durable facts attn could distill into lasting memory — gathered from your journals, your workspaces' decisions and constraints, and finished chief-of-staff dispatches, with the ones that recur across several places ranked first. `attn notebook dream status` is a quick summary; `attn notebook dream --dry-run` lists the candidates. It's read-only — nothing is written yet — so you can see the raw material before the automatic consolidation pass that acts on it arrives in an upcoming release.
+
 ## [2026-06-13]
 
 ### Added

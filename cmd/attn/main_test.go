@@ -521,6 +521,48 @@ func TestParseNotebookJournalArgs(t *testing.T) {
 	}
 }
 
+func TestPrintDreamStatus(t *testing.T) {
+	var buf bytes.Buffer
+	printDreamStatus(&buf, &protocol.NotebookDreamStatusResult{
+		Enabled:           false,
+		CandidateCount:    3,
+		MultiContextCount: 1,
+		SourceCounts: []protocol.NotebookDreamSourceCount{
+			{Source: "context", Count: 1},
+			{Source: "journal", Count: 2},
+		},
+		Top: []protocol.NotebookDreamCandidate{
+			{Source: "context", Title: protocol.Ptr("ws-a"), Snippet: "Daemon owns every notebook write.", Occurrences: 2, Contexts: []string{"workspace:ws-a", "workspace:ws-b"}},
+		},
+	})
+	out := buf.String()
+	for _, want := range []string{"dreaming: disabled", "candidates: 3 (1 across multiple contexts)", "context:", "journal:", "[2× ·2 ctx]", "Daemon owns every notebook write."} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("status output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestPrintDreamRunPreviewOnly(t *testing.T) {
+	var buf bytes.Buffer
+	printDreamRun(&buf, &protocol.NotebookDreamRunResult{
+		Applied:           false,
+		CandidateCount:    1,
+		MultiContextCount: 0,
+		SourceCounts:      []protocol.NotebookDreamSourceCount{{Source: "journal", Count: 1}},
+		Candidates: []protocol.NotebookDreamCandidate{
+			{Source: "journal", Snippet: "A durable fact.", Occurrences: 1, Contexts: []string{"journal:2026-06-13"}},
+		},
+	})
+	out := buf.String()
+	if !strings.Contains(out, "preview only, nothing written") {
+		t.Fatalf("run output should state it is preview-only:\n%s", out)
+	}
+	if !strings.Contains(out, "A durable fact.") {
+		t.Fatalf("run output missing the candidate snippet:\n%s", out)
+	}
+}
+
 func TestParseNotebookMemoryArgs(t *testing.T) {
 	t.Run("create (no base-hash, stdin)", func(t *testing.T) {
 		got, err := parseNotebookMemoryArgs([]string{"write", "--path", "/memory/decisions/x.md"})
