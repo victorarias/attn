@@ -102,7 +102,7 @@ func TestClaudeBuildCommand_NotebookGuidanceTakesPrecedence(t *testing.T) {
 		t.Fatalf("args = %#v, want --append-system-prompt with notebook guidance", cmd.Args)
 	}
 	prompt := cmd.Args[flagIndex+1]
-	if !strings.Contains(prompt, "/home/u/attn-notebook") || !strings.Contains(prompt, "chief-of-staff role") {
+	if !strings.Contains(prompt, "/home/u/attn-notebook") || !strings.Contains(prompt, "chief of staff") {
 		t.Fatalf("system prompt = %q, want notebook guidance", prompt)
 	}
 	if strings.Contains(prompt, "/tmp/context.md") {
@@ -133,7 +133,7 @@ func TestCodexConfigOverrides_NotebookGuidanceTakesPrecedence(t *testing.T) {
 	if !strings.Contains(joined, "developer_instructions=") {
 		t.Fatal("codex overrides should set developer_instructions for a chief launch")
 	}
-	if !strings.Contains(joined, "attn-notebook") || !strings.Contains(joined, "chief-of-staff role") {
+	if !strings.Contains(joined, "attn-notebook") || !strings.Contains(joined, "chief of staff") {
 		t.Fatalf("developer_instructions should carry notebook guidance: %q", joined)
 	}
 	if strings.Contains(joined, "/tmp/context.md") {

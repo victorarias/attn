@@ -78,7 +78,7 @@ func NotebookGuidance(root string) string {
 	if root == "" {
 		return ""
 	}
-	return fmt.Sprintf(`You hold the chief-of-staff role. Your durable memory is the attn Notebook at %s — a profile-wide markdown store that outlives any single workspace. It is your home, in place of a per-workspace shared context.
+	return fmt.Sprintf(`The attn Notebook at %s is attn's durable, profile-wide markdown memory: it outlives any single workspace and is the chief of staff's home, used in place of a per-workspace shared context. If you are the chief of staff, it is your durable memory; either way, read it to orient and contribute through the daemon.
 
 - Orient first: run `+"`"+`attn notebook show /memory/index.md`+"`"+` (and `+"`"+`attn notebook list memory`+"`"+`) to load what is already known. Run `+"`"+`attn notebook init`+"`"+` once if the notebook does not exist yet.
 - Two kinds of notes: dated `+"`"+`journal`+"`"+` entries (the raw record) and distilled `+"`"+`memory`+"`"+` notes (decisions, gotchas, domain knowledge that outlived a single PR). Memory ≠ tasks; the notebook is not a task tracker.

@@ -211,7 +211,7 @@ func TestNotebookGuidance(t *testing.T) {
 	guidance := NotebookGuidance("/home/u/attn-notebook")
 	for _, expected := range []string{
 		"/home/u/attn-notebook",
-		"chief-of-staff role",
+		"chief of staff",
 		"attn notebook show /memory/index.md",
 		"attn notebook journal append",
 		"attn notebook memory write",

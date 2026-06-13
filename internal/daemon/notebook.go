@@ -255,6 +255,14 @@ func (d *Daemon) activateNotebookGuidanceLive(sessionID string) {
 		d.logf("notebook activation: session %s is %s, not idle/waiting; skipping live trigger", sessionID, session.State)
 		return
 	}
+	// Re-confirm ownership right before typing: the role is a single-holder
+	// upsert, so a promotion of another session between the goroutine's launch
+	// and here would mean this session is no longer the chief. Never tell a
+	// demoted session it is now the chief.
+	if d.chiefOfStaffSessionID() != sessionID {
+		d.logf("notebook activation: session %s no longer holds the chief role; skipping live trigger", sessionID)
+		return
+	}
 	if err := d.ptyBackend.Input(context.Background(), sessionID, []byte(notebookActivationPrompt)); err != nil {
 		d.logf("notebook activation: input prompt failed for %s: %v", sessionID, err)
 		return
