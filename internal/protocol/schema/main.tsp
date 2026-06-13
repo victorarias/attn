@@ -161,6 +161,7 @@ model Workspace {
   directory: string;
   status: WorkspaceStatus;
   muted: boolean;               // Muting parks the whole workspace out of attention surfaces.
+  rank: string;                 // Fractional-index sort key; default order is opening (creation) order.
   layout?: WorkspaceLayout;
 }
 
@@ -1137,6 +1138,21 @@ model WorkspaceLayoutMoveLeafToWorkspaceMessage {
   ratio?: float64;
 }
 
+// Move an existing leaf out of its current workspace into a brand-new workspace
+// the daemon creates on the fly. Like WorkspaceLayoutMoveLeafToWorkspaceMessage
+// but with no target_workspace_id: the daemon registers a fresh workspace (seeded
+// after the current max rank so it lands at the end of the order) and moves the
+// leaf into it. The optional anchor_id/edge/ratio position the leaf within the
+// new layout; an empty anchor docks it against the new workspace root.
+model WorkspaceLayoutMoveLeafToNewWorkspaceMessage {
+  cmd: "workspace_layout_move_leaf_to_new_workspace";
+  source_workspace_id: string;
+  leaf_id: string;
+  anchor_id?: string;
+  edge?: WorkspaceLayoutDockEdge;
+  ratio?: float64;
+}
+
 // Request the current rendered content of a docked tile (e.g. the markdown
 // file a markdown tile points at). The daemon resolves the file from the
 // tile's persisted params, reads it, and replies with WorkspaceTileContentMessage.
@@ -1222,6 +1238,16 @@ model RenameWorkspaceMessage {
   cmd: "rename_workspace";
   workspace_id: string;
   title: string;
+}
+
+// Reorder a workspace by placing it between two neighbours. The frontend sends
+// neighbour ids only; the daemon computes the fractional-index rank key from
+// the neighbours' ranks. Empty prev = move to top; empty next = move to bottom.
+model SetWorkspaceRankMessage {
+  cmd: "set_workspace_rank";
+  workspace_id: string;
+  prev_workspace_id?: string;
+  next_workspace_id?: string;
 }
 
 // Assign or remove the profile-wide chief-of-staff role. Assigning a new

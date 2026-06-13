@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/victorarias/attn/internal/rankkey"
 )
 
 // baseSchema creates the core tables. Column additions are handled by migrations.
@@ -396,6 +398,7 @@ var migrations = []migration{
 		);
 	`},
 	{48, "drop label from recent_locations", "ALTER TABLE recent_locations DROP COLUMN label"},
+	{49, "add rank to workspaces", `ALTER TABLE workspaces ADD COLUMN rank TEXT NOT NULL DEFAULT ''`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -544,6 +547,11 @@ func migrateDB(db *sql.DB) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
+		} else if m.version == 49 {
+			if err := applyMigration49(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		} else {
 			if _, err := tx.Exec(m.sql); err != nil {
 				tx.Rollback()
@@ -661,6 +669,53 @@ func applyMigration48(tx *sql.Tx) error {
 	}
 	_, err = tx.Exec("ALTER TABLE recent_locations DROP COLUMN label")
 	return err
+}
+
+// applyMigration49 adds the rank column to workspaces and backfills it for any
+// existing rows in created_at (opening) order using rankkey.Seed. It is
+// idempotent: the ALTER is guarded by columnExists, and the backfill only
+// touches rows whose rank is still the empty default.
+func applyMigration49(tx *sql.Tx) error {
+	hasRank, err := columnExists(tx, "workspaces", "rank")
+	if err != nil {
+		return err
+	}
+	if !hasRank {
+		if _, err := tx.Exec(`ALTER TABLE workspaces ADD COLUMN rank TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+
+	rows, err := tx.Query(`SELECT id FROM workspaces WHERE rank = '' ORDER BY created_at, id`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	if len(ids) == 0 {
+		return nil
+	}
+
+	seeds := rankkey.Seed(len(ids))
+	for i, id := range ids {
+		if _, err := tx.Exec(`UPDATE workspaces SET rank = ? WHERE id = ?`, seeds[i], id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func applyMigration28(tx *sql.Tx) error {

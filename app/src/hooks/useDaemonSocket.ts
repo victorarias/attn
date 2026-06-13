@@ -169,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '102';
+export const PROTOCOL_VERSION = '104';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -2691,6 +2691,55 @@ export function useDaemonSocket({
     );
   }, [sendWorkspaceCommand]);
 
+  // Split a leaf out into a brand-new workspace. Mirrors
+  // sendWorkspaceMoveLeafToWorkspace, but with no target: the daemon registers a
+  // fresh workspace (seeded at the end of the rank order), moves the leaf into it,
+  // and tears down the source if it ends up empty. Correlated by leaf id, like the
+  // move-to-workspace path.
+  const sendWorkspaceMoveLeafToNewWorkspace = useCallback((
+    sourceWorkspaceId: string,
+    leafId: string,
+    options: { anchorId?: string; edge?: TerminalDockEdge; ratio?: number } = {},
+  ) => {
+    return sendWorkspaceCommand(
+      'workspace_layout_move_leaf_to_new_workspace',
+      sourceWorkspaceId,
+      {
+        cmd: 'workspace_layout_move_leaf_to_new_workspace',
+        source_workspace_id: sourceWorkspaceId,
+        leaf_id: leafId,
+        anchor_id: options.anchorId ?? '',
+        edge: options.edge ?? 'left',
+        ...(options.ratio != null ? { ratio: options.ratio } : {}),
+      },
+      leafId,
+    );
+  }, [sendWorkspaceCommand]);
+
+  // Reorder a workspace by dropping it between two neighbours. The frontend sends
+  // only the neighbour ids (the workspace that should end up directly above and
+  // directly below the moved one); the daemon computes the fractional-index rank
+  // key, writes the single moved row, and broadcasts the authoritative order.
+  // Empty prevWorkspaceId = move to the top; empty nextWorkspaceId = move to the
+  // bottom. Mirrors sendWorkspaceMoveLeafToWorkspace's request/result pattern: the
+  // daemon replies with a workspace_layout_action_result keyed by action+workspace.
+  const sendSetWorkspaceRank = useCallback((
+    workspaceId: string,
+    prevWorkspaceId?: string,
+    nextWorkspaceId?: string,
+  ) => {
+    return sendWorkspaceCommand(
+      'set_workspace_rank',
+      workspaceId,
+      {
+        cmd: 'set_workspace_rank',
+        workspace_id: workspaceId,
+        ...(prevWorkspaceId ? { prev_workspace_id: prevWorkspaceId } : {}),
+        ...(nextWorkspaceId ? { next_workspace_id: nextWorkspaceId } : {}),
+      },
+    );
+  }, [sendWorkspaceCommand]);
+
   // requestTileContent pulls a tile's current content (used on first render).
   // The reply and all subsequent live-reload updates arrive as
   // workspace_tile_content events handled above. Fire-and-forget: no result
@@ -4174,6 +4223,8 @@ export function useDaemonSocket({
     sendWorkspaceUpdateTile,
     sendWorkspaceMoveLeaf,
     sendWorkspaceMoveLeafToWorkspace,
+    sendWorkspaceMoveLeafToNewWorkspace,
+    sendSetWorkspaceRank,
     tileContents,
     requestTileContent,
     sendRuntimeInput: sendPtyInput,

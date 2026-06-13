@@ -1026,6 +1026,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkspaceLayoutMoveLeaf(client, msg.(*protocol.WorkspaceLayoutMoveLeafMessage))
 	case protocol.CmdWorkspaceLayoutMoveLeafToWorkspace:
 		d.handleWorkspaceLayoutMoveLeafToWorkspace(client, msg.(*protocol.WorkspaceLayoutMoveLeafToWorkspaceMessage))
+	case protocol.CmdWorkspaceLayoutMoveLeafToNewWorkspace:
+		d.handleWorkspaceLayoutMoveLeafToNewWorkspace(client, msg.(*protocol.WorkspaceLayoutMoveLeafToNewWorkspaceMessage))
+	case protocol.CmdSetWorkspaceRank:
+		d.handleSetWorkspaceRank(client, msg.(*protocol.SetWorkspaceRankMessage))
 	case protocol.CmdWorkspaceTileContentGet:
 		d.handleWorkspaceTileContentGet(client, msg.(*protocol.WorkspaceTileContentGetMessage))
 	case protocol.CmdBrowserControl:
@@ -1235,6 +1239,14 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 	case protocol.CmdWorkspaceLayoutMoveLeafToWorkspace:
 		if typed, ok := msg.(*protocol.WorkspaceLayoutMoveLeafToWorkspaceMessage); ok {
 			return typed.SourceWorkspaceID
+		}
+	case protocol.CmdWorkspaceLayoutMoveLeafToNewWorkspace:
+		if typed, ok := msg.(*protocol.WorkspaceLayoutMoveLeafToNewWorkspaceMessage); ok {
+			return typed.SourceWorkspaceID
+		}
+	case protocol.CmdSetWorkspaceRank:
+		if typed, ok := msg.(*protocol.SetWorkspaceRankMessage); ok {
+			return typed.WorkspaceID
 		}
 	case protocol.CmdWorkspaceTileContentGet:
 		if typed, ok := msg.(*protocol.WorkspaceTileContentGetMessage); ok {

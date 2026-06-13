@@ -7,6 +7,19 @@
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  /* The sidebar is interactive chrome (click to select, drag to reorder), not
+     readable prose — disabling selection stops the browser from highlighting
+     workspace/session labels while you drag a header or a leaf. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Keep text editable/selectable inside popovers the sidebar hosts (e.g. the
+   rename input), which would otherwise inherit the no-select above. */
+.sidebar input,
+.sidebar textarea {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .sidebar-header {
@@ -228,6 +241,116 @@
   }
   to {
     transform: scaleY(1);
+  }
+}
+
+/* The workspace being reordered fades in place while its ghost follows the cursor. */
+.workspace-group--reorder-source {
+  opacity: 0.35;
+}
+
+.session-list--reordering {
+  cursor: grabbing;
+}
+
+/* A session row dragged out of the sidebar dims in place while a ghost label
+   follows the cursor. It reuses the same drop targets as the in-view pane drag:
+   other workspace groups to merge, the "New workspace" zone to split. */
+.session-item--draggable {
+  touch-action: none;
+}
+
+.session-item--dragging {
+  opacity: 0.35;
+}
+
+.session-drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  max-width: 220px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--color-bg-elevated));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  color: var(--color-text-primary);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Insertion seam between workspaces, shown only during a reorder drag. It keeps a
+   stable hit-zone so the cursor can land between rows without merging them. */
+.workspace-reorder-seam {
+  position: relative;
+  height: 10px;
+  margin: -3px 0;
+}
+
+.workspace-reorder-seam-line {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 50%;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: translateY(-50%) scaleX(0);
+  transform-origin: center;
+  opacity: 0;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
+  transition: transform 120ms cubic-bezier(0.2, 0.7, 0.2, 1), opacity 120ms ease;
+}
+
+.workspace-reorder-seam.active .workspace-reorder-seam-line {
+  transform: translateY(-50%) scaleX(1);
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-reorder-seam-line {
+    transition: none;
+  }
+}
+
+/* "New workspace" drop-zone at the foot of the list, shown only while a leaf drag
+   is active. Dropping the dragged leaf here splits it into a brand-new workspace.
+   Existing workspace groups stay merge targets; this is the dedicated split target. */
+.new-workspace-dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 6px 0 2px;
+  padding: 12px 10px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--accent);
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.new-workspace-dropzone-plus {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.new-workspace-dropzone--active {
+  border-style: solid;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .new-workspace-dropzone {
+    transition: none;
   }
 }
 

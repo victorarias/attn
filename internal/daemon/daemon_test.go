@@ -1096,7 +1096,7 @@ func TestDaemon_PruneSessionsWithoutPTY_RemovesReapedWorkspaceLayout(t *testing.
 		LastSeen:       now,
 		WorkspaceID:    workspaceID,
 	})
-	d.workspaces.register(workspaceID, "Stale", "/tmp/stale", false)
+	d.workspaces.register(workspaceID, "Stale", "/tmp/stale", "", false)
 	d.workspaces.associateSession(sessionID, workspaceID, sessionID)
 	if err := d.store.SaveWorkspaceLayout(workspacelayout.WorkspaceLayout{
 		WorkspaceID:  workspaceID,
@@ -1151,7 +1151,7 @@ func TestDaemon_PruneSessionsWithoutPTY_KeepsTileOnlyWorkspace(t *testing.T) {
 		LastSeen:       now,
 		WorkspaceID:    workspaceID,
 	})
-	d.workspaces.register(workspaceID, "Stale Tile", "/tmp/stale-tile", false)
+	d.workspaces.register(workspaceID, "Stale Tile", "/tmp/stale-tile", "", false)
 	d.workspaces.associateSession(sessionID, workspaceID, sessionID)
 	if err := d.store.SaveWorkspaceLayout(workspacelayout.WorkspaceLayout{
 		WorkspaceID:  workspaceID,
@@ -1700,8 +1700,9 @@ func (b *fakeReviewLoopBackend) SetScrollback(sessionID, text string) {
 }
 
 func addTestWorkspace(d *Daemon, id, directory string) {
-	d.store.AddWorkspace(&protocol.Workspace{ID: id, Title: id, Directory: directory, Status: protocol.WorkspaceStatusLaunching})
-	d.workspaces.register(id, id, directory, false)
+	rank := d.resolveWorkspaceRank(d.store.GetWorkspace(id))
+	d.store.AddWorkspace(&protocol.Workspace{ID: id, Title: id, Directory: directory, Status: protocol.WorkspaceStatusLaunching, Rank: rank})
+	d.workspaces.register(id, id, directory, rank, false)
 }
 
 func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDForRecoverableClaudeSession(t *testing.T) {

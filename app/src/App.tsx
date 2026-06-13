@@ -155,6 +155,11 @@ interface LeafDragPreviewState {
   ghostPos: { x: number; y: number } | null;
 }
 
+// Placement for a leaf relocated by a sidebar drag — merging into a workspace or
+// splitting into a new one. Dock against the whole target (empty anchor), left
+// edge, taking ~a third of the resulting split.
+const SIDEBAR_LEAF_DROP_PLACEMENT = { anchorId: '', edge: 'left' as const, ratio: 0.32 };
+
 
 function terminalStateForWorkspaceSessions(sessions: Session[]): TerminalWorkspaceState | null {
   let selected: TerminalWorkspaceState | null = null;
@@ -482,6 +487,8 @@ function App() {
     sendWorkspaceUpdateTile,
     sendWorkspaceMoveLeaf,
     sendWorkspaceMoveLeafToWorkspace,
+    sendWorkspaceMoveLeafToNewWorkspace,
+    sendSetWorkspaceRank,
     tileContents,
     requestTileContent,
     sendRuntimeInput,
@@ -616,6 +623,8 @@ function App() {
         sendWorkspaceUpdateTile={sendWorkspaceUpdateTile}
         sendWorkspaceMoveLeaf={sendWorkspaceMoveLeaf}
         sendWorkspaceMoveLeafToWorkspace={sendWorkspaceMoveLeafToWorkspace}
+        sendWorkspaceMoveLeafToNewWorkspace={sendWorkspaceMoveLeafToNewWorkspace}
+        sendSetWorkspaceRank={sendSetWorkspaceRank}
         tileContents={tileContents}
         requestTileContent={requestTileContent}
         sendRuntimeInput={sendRuntimeInput}
@@ -715,6 +724,8 @@ interface AppContentProps {
   sendWorkspaceUpdateTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceUpdateTile'];
   sendWorkspaceMoveLeaf: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeaf'];
   sendWorkspaceMoveLeafToWorkspace: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeafToWorkspace'];
+  sendWorkspaceMoveLeafToNewWorkspace: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeafToNewWorkspace'];
+  sendSetWorkspaceRank: ReturnType<typeof useDaemonSocket>['sendSetWorkspaceRank'];
   tileContents: ReturnType<typeof useDaemonSocket>['tileContents'];
   requestTileContent: ReturnType<typeof useDaemonSocket>['requestTileContent'];
   sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
@@ -808,6 +819,8 @@ sendFetchPRDetails,
   sendWorkspaceUpdateTile,
   sendWorkspaceMoveLeaf,
   sendWorkspaceMoveLeafToWorkspace,
+  sendWorkspaceMoveLeafToNewWorkspace,
+  sendSetWorkspaceRank,
   tileContents,
   requestTileContent,
   sendRuntimeInput,
@@ -2502,12 +2515,11 @@ sendFetchPRDetails,
   const [leafWorkspaceDrag, setLeafWorkspaceDrag] = useState<LeafWorkspaceDragState | null>(null);
   const [leafDragPreview, setLeafDragPreview] = useState<LeafDragPreviewState | null>(null);
   const [dragHoverWorkspaceId, setDragHoverWorkspaceId] = useState<string | null>(null);
+  // Written synchronously alongside setLeafWorkspaceDrag by handleLeafDragStart
+  // and handleLeafDragEnd so the drop handlers (which read .current at event time)
+  // always see the latest drag without a mirror effect.
   const leafWorkspaceDragRef = useRef<LeafWorkspaceDragState | null>(null);
   const dragHoverTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    leafWorkspaceDragRef.current = leafWorkspaceDrag;
-  }, [leafWorkspaceDrag]);
 
   const clearWorkspaceDragHoverTimer = useCallback(() => {
     if (dragHoverTimerRef.current != null) {
@@ -2670,12 +2682,35 @@ sendFetchPRDetails,
     clearWorkspaceDragHoverTimer();
     setDragHoverWorkspaceId(null);
     handleSelectWorkspace(workspace.id);
-    void sendWorkspaceMoveLeafToWorkspace(drag.sourceWorkspaceId, workspace.id, drag.leafId, {
-      anchorId: '',
-      edge: 'left',
-      ratio: 0.32,
-    }).catch(() => {});
+    void sendWorkspaceMoveLeafToWorkspace(drag.sourceWorkspaceId, workspace.id, drag.leafId, SIDEBAR_LEAF_DROP_PLACEMENT).catch(() => {});
   }, [canMoveDraggedLeafToWorkspace, clearWorkspaceDragHoverTimer, handleSelectWorkspace, sendWorkspaceMoveLeafToWorkspace]);
+
+  // Drop the dragged leaf onto the "New workspace" zone at the foot of the list:
+  // split it out into a fresh workspace. The daemon registers the workspace (rank
+  // seeded to the end of the order), moves the leaf into it, and tears down the
+  // source if it ends up empty, then broadcasts the authoritative layout — so this
+  // is fire-and-forget like the merge path.
+  const handleNewWorkspaceDrop = useCallback(() => {
+    const drag = leafWorkspaceDragRef.current;
+    if (!drag) {
+      return;
+    }
+    clearWorkspaceDragHoverTimer();
+    setDragHoverWorkspaceId(null);
+    void sendWorkspaceMoveLeafToNewWorkspace(drag.sourceWorkspaceId, drag.leafId, SIDEBAR_LEAF_DROP_PLACEMENT).catch(() => {});
+  }, [clearWorkspaceDragHoverTimer, sendWorkspaceMoveLeafToNewWorkspace]);
+
+  // Persist a workspace reorder. The Sidebar computes the drop's neighbour ids
+  // from the seam; the daemon derives the fractional rank key and broadcasts the
+  // authoritative order, so this is fire-and-forget (a rejected/timed-out write
+  // just leaves the existing order in place).
+  const handleWorkspaceReorder = useCallback((args: {
+    workspaceId: string;
+    prevWorkspaceId?: string;
+    nextWorkspaceId?: string;
+  }) => {
+    void sendSetWorkspaceRank(args.workspaceId, args.prevWorkspaceId, args.nextWorkspaceId).catch(() => {});
+  }, [sendSetWorkspaceRank]);
 
   const handleSelectWorkspaceByIndex = useCallback(
     (index: number) => {
@@ -3326,6 +3361,10 @@ sendFetchPRDetails,
           onWorkspaceDragEnter={handleWorkspaceDragEnter}
           onWorkspaceDragLeave={handleWorkspaceDragLeave}
           onWorkspaceDragDrop={handleWorkspaceDragDrop}
+          onNewWorkspaceDrop={handleNewWorkspaceDrop}
+          onSessionDragStart={handleLeafDragStart}
+          onSessionDragEnd={handleLeafDragEnd}
+          onWorkspaceReorder={handleWorkspaceReorder}
           onSelectSession={handleSelectSession}
           onSelectWorkspace={handleSelectWorkspace}
           onSelectTile={handleSelectTile}

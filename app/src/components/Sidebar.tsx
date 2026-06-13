@@ -1,6 +1,6 @@
 import './Sidebar.css';
-import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
-import { useState } from 'react';
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { RenamePopover } from './RenamePopover';
 import { ChiefOfStaffBadge } from './ChiefOfStaffBadge';
 import { SessionActionsPopover } from './SessionActionsPopover';
@@ -156,6 +156,26 @@ interface SidebarProps {
   onWorkspaceDragEnter?: (workspace: SidebarWorkspace) => void;
   onWorkspaceDragLeave?: (workspace: SidebarWorkspace) => void;
   onWorkspaceDragDrop?: (workspace: SidebarWorkspace) => void;
+  // Drop the dragged leaf onto the "New workspace" zone at the foot of the list to
+  // split it into a brand-new workspace. Wired in App to
+  // sendWorkspaceMoveLeafToNewWorkspace.
+  onNewWorkspaceDrop?: () => void;
+  // Begin / end a leaf drag started by pressing a session row in the sidebar.
+  // onSessionDragStart arms the same App-level leaf drag the in-view pane header
+  // uses (leafId = the session's layout pane id), so the existing workspace-group
+  // and "New workspace" drop targets handle the actual move/split. onSessionDragEnd
+  // tears the drag down. Wired in App to handleLeafDragStart / handleLeafDragEnd.
+  onSessionDragStart?: (workspaceId: string, endpointId: string | undefined, paneId: string) => void;
+  onSessionDragEnd?: () => void;
+  // Reorder a workspace by dropping its header onto an insertion seam. The
+  // neighbour ids describe the seam: prevWorkspaceId ends up directly above the
+  // moved workspace, nextWorkspaceId directly below. Either may be undefined when
+  // dropping at the very top or bottom. Wired in App to sendSetWorkspaceRank.
+  onWorkspaceReorder?: (args: {
+    workspaceId: string;
+    prevWorkspaceId?: string;
+    nextWorkspaceId?: string;
+  }) => void;
   onSelectSession: (id: string) => void;
   onSelectWorkspace: (id: string) => void;
   onSelectTile?: (workspaceId: string, tileId: string) => void;
@@ -311,6 +331,10 @@ export function Sidebar({
   onWorkspaceDragEnter,
   onWorkspaceDragLeave,
   onWorkspaceDragDrop,
+  onNewWorkspaceDrop,
+  onSessionDragStart,
+  onSessionDragEnd,
+  onWorkspaceReorder,
   onSelectSession,
   onSelectWorkspace,
   onSelectTile,
@@ -395,6 +419,332 @@ export function Sidebar({
   const visualIndexOfWorkspace = (id: string) => (
     visibleVisualIndexByWorkspaceId.get(id) ?? visualIndexByWorkspaceId.get(id) ?? -1
   );
+
+  // --- Workspace reorder (header drag onto an insertion seam) ---
+  // A press on a workspace header arms a reorder once the pointer crosses a small
+  // threshold; a sub-threshold release stays a plain selection click. Only
+  // unmuted, visible, same-endpoint workspaces participate — muted workspaces live
+  // in their own section and keep a separate order space. The body of a group is a
+  // no-op: dropping there snaps to the nearest seam, so workspaces never merge.
+  const REORDER_THRESHOLD = 6;
+  // The set of workspaces a drag may reorder within: the dragged workspace's
+  // endpoint, in visible visual order. Empty when no drag is active.
+  const [reorderDrag, setReorderDrag] = useState<{ workspaceId: string; endpointId?: string } | null>(null);
+  // True while the cursor is over the "New workspace" drop-zone during a leaf drag,
+  // so the zone shows its active/hover styling. Reset on leave and on drop.
+  const [newWorkspaceDropActive, setNewWorkspaceDropActive] = useState(false);
+  // Floating ghost label following the cursor while dragging a session row out of
+  // the sidebar (null when no session drag is active), plus the session id of the
+  // dragged row so it can render dimmed. The drop itself is handled by the same
+  // workspace-group / "New workspace" targets the in-view pane drag uses.
+  const [sessionDragGhost, setSessionDragGhost] = useState<{ x: number; y: number; label: string } | null>(null);
+  const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
+  const sessionDragRef = useRef<{ pointerId: number; startX: number; startY: number; armed: boolean } | null>(null);
+  const suppressNextSessionClickRef = useRef(false);
+  // The insertion slot (0..N) the cursor is currently nearest. null = none yet.
+  const [reorderSeamIndex, setReorderSeamIndex] = useState<number | null>(null);
+  // Per-interaction refs so listeners read fresh values without re-binding.
+  const reorderDragRef = useRef<{
+    workspaceId: string;
+    endpointId?: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    armed: boolean;
+    sourceEl: HTMLElement;
+  } | null>(null);
+  const reorderSeamIndexRef = useRef<number | null>(null);
+  // Set true the moment a drag arms so the click that follows pointerup selects
+  // nothing (a sub-threshold press leaves this false and still selects).
+  const suppressNextHeaderClickRef = useRef(false);
+
+  const reorderParticipants = (endpointId?: string): SidebarWorkspace[] => (
+    visibleVisualOrder.filter((workspace) => (workspace.endpointId || '') === (endpointId || ''))
+  );
+
+  const updateReorderSeam = useCallback((index: number | null) => {
+    reorderSeamIndexRef.current = index;
+    setReorderSeamIndex(index);
+  }, []);
+
+  // Pick the insertion seam whose vertical centre is closest to the cursor. The
+  // group body resolves to the nearer of its two bounding seams (same math), so a
+  // drop is always a reorder, never a merge.
+  const nearestSeamIndex = useCallback((clientY: number): number | null => {
+    const list = document.querySelector('.session-list');
+    if (!list) {
+      return null;
+    }
+    const seams = Array.from(list.querySelectorAll<HTMLElement>('.workspace-reorder-seam'));
+    let best: number | null = null;
+    let bestDist = Infinity;
+    for (const seam of seams) {
+      const index = Number(seam.dataset.seamIndex);
+      if (Number.isNaN(index)) {
+        continue;
+      }
+      const rect = seam.getBoundingClientRect();
+      const center = (rect.top + rect.bottom) / 2;
+      const dist = Math.abs(clientY - center);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = index;
+      }
+    }
+    return best;
+  }, []);
+
+  const endReorderDrag = useCallback(() => {
+    reorderDragRef.current = null;
+    setReorderDrag(null);
+    updateReorderSeam(null);
+  }, [updateReorderSeam]);
+
+  // Translate the dropped seam slot into the neighbour ids the daemon expects.
+  // Dropping back into the moved workspace's own slot is a no-op.
+  const commitReorder = useCallback((
+    workspaceId: string,
+    endpointId: string | undefined,
+    seamIndex: number | null,
+  ) => {
+    if (seamIndex == null || !onWorkspaceReorder) {
+      return;
+    }
+    const participants = visibleVisualOrder.filter(
+      (workspace) => (workspace.endpointId || '') === (endpointId || ''),
+    );
+    const fromIndex = participants.findIndex((workspace) => workspace.id === workspaceId);
+    if (fromIndex < 0) {
+      return;
+    }
+    // Removing the moved row shifts later rows up by one, so slots fromIndex and
+    // fromIndex+1 both land it back where it started.
+    if (seamIndex === fromIndex || seamIndex === fromIndex + 1) {
+      return;
+    }
+    const remaining = participants.filter((workspace) => workspace.id !== workspaceId);
+    const insertAt = seamIndex > fromIndex ? seamIndex - 1 : seamIndex;
+    const prevWorkspaceId = insertAt > 0 ? remaining[insertAt - 1]?.id : undefined;
+    const nextWorkspaceId = insertAt < remaining.length ? remaining[insertAt]?.id : undefined;
+    onWorkspaceReorder({ workspaceId, prevWorkspaceId, nextWorkspaceId });
+  }, [onWorkspaceReorder, visibleVisualOrder]);
+
+  const handleHeaderPointerDown = useCallback((
+    workspace: SidebarWorkspace,
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    // Only a primary-button press on the header chrome itself arms a reorder. The
+    // rename/mute buttons stop propagation, so this never fires from them.
+    if (event.button !== 0 || !onWorkspaceReorder) {
+      return;
+    }
+    const sourceEl = event.currentTarget;
+    reorderDragRef.current = {
+      workspaceId: workspace.id,
+      endpointId: workspace.endpointId,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      armed: false,
+      sourceEl,
+    };
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const drag = reorderDragRef.current;
+      if (!drag || moveEvent.pointerId !== drag.pointerId) {
+        return;
+      }
+      if (!drag.armed) {
+        const dx = moveEvent.clientX - drag.startX;
+        const dy = moveEvent.clientY - drag.startY;
+        if (Math.hypot(dx, dy) < REORDER_THRESHOLD) {
+          return;
+        }
+        drag.armed = true;
+        suppressNextHeaderClickRef.current = true;
+        try {
+          sourceEl.setPointerCapture(drag.pointerId);
+        } catch {
+          // setPointerCapture can throw if the pointer is already gone; ignore.
+        }
+        setReorderDrag({ workspaceId: drag.workspaceId, endpointId: drag.endpointId });
+      }
+      updateReorderSeam(nearestSeamIndex(moveEvent.clientY));
+    };
+
+    const finish = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      const drag = reorderDragRef.current;
+      if (drag) {
+        try {
+          sourceEl.releasePointerCapture(drag.pointerId);
+        } catch {
+          // releasePointerCapture throws when capture was never taken; ignore.
+        }
+      }
+    };
+
+    const onUp = (upEvent: PointerEvent) => {
+      const drag = reorderDragRef.current;
+      finish();
+      if (!drag || upEvent.pointerId !== drag.pointerId) {
+        endReorderDrag();
+        return;
+      }
+      if (drag.armed) {
+        commitReorder(drag.workspaceId, drag.endpointId, reorderSeamIndexRef.current);
+      }
+      endReorderDrag();
+    };
+
+    const onCancel = () => {
+      finish();
+      endReorderDrag();
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+  }, [onWorkspaceReorder, nearestSeamIndex, updateReorderSeam, endReorderDrag, commitReorder]);
+
+  // The participating set for the live drag (same endpoint as the dragged ws),
+  // indexed so each rendered workspace knows which seam slot precedes it. The
+  // trailing seam slot equals the participant count.
+  const reorderActiveParticipants = reorderDrag
+    ? reorderParticipants(reorderDrag.endpointId)
+    : [];
+  const reorderSeamIndexByWorkspaceId = reorderDrag
+    ? new Map(reorderActiveParticipants.map((workspace, index) => [workspace.id, index]))
+    : null;
+  const reorderTrailingSeamIndex = reorderActiveParticipants.length;
+  const lastReorderParticipantId = reorderActiveParticipants[reorderActiveParticipants.length - 1]?.id;
+
+  const renderReorderSeam = (index: number) => (
+    <div
+      className={`workspace-reorder-seam ${reorderSeamIndex === index ? 'active' : ''}`.trim()}
+      data-testid={`workspace-reorder-seam-${index}`}
+      data-seam-index={index}
+      aria-hidden="true"
+      // Hovering a seam directly highlights it; the pointermove handler still
+      // snaps to the nearest seam when the cursor is over a group body.
+      onPointerEnter={() => {
+        if (reorderDragRef.current?.armed) {
+          updateReorderSeam(index);
+        }
+      }}
+    >
+      <span className="workspace-reorder-seam-line" />
+    </div>
+  );
+
+  const handleHeaderClickCapture = useCallback((event: ReactMouseEvent) => {
+    // Swallow the click that fires right after an armed drag's pointerup so the
+    // release does not also select the workspace.
+    if (suppressNextHeaderClickRef.current) {
+      suppressNextHeaderClickRef.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, []);
+
+  // Tear down a live reorder if the component unmounts mid-drag.
+  useEffect(() => endReorderDrag, [endReorderDrag]);
+
+  // A press on a session row arms a leaf drag once the pointer crosses the
+  // threshold; a sub-threshold release stays a plain selection click. Unlike the
+  // workspace reorder, this takes NO pointer capture: the workspace-group and
+  // "New workspace" drop targets rely on their own pointer handlers firing as the
+  // cursor moves over them, exactly like the in-view pane drag. So this gesture
+  // only arms the App-level leaf drag and floats a ghost; the existing targets do
+  // the move. Requires a layout pane id (sessions without one aren't in a pane).
+  const SESSION_DRAG_THRESHOLD = 6;
+  const handleSessionPointerDown = useCallback((
+    workspace: SidebarWorkspace,
+    paneId: string,
+    sessionId: string,
+    label: string,
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    // Child buttons (the ••• actions) stop propagation, so this only fires from a
+    // primary-button press on the row chrome itself.
+    if (event.button !== 0 || !onSessionDragStart) {
+      return;
+    }
+    // A fresh press always starts un-suppressed, so a drag that ended over another
+    // element (leaving the flag set) can't swallow this row's next real click.
+    suppressNextSessionClickRef.current = false;
+    sessionDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      armed: false,
+    };
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const drag = sessionDragRef.current;
+      if (!drag || moveEvent.pointerId !== drag.pointerId) {
+        return;
+      }
+      if (!drag.armed) {
+        const dx = moveEvent.clientX - drag.startX;
+        const dy = moveEvent.clientY - drag.startY;
+        if (Math.hypot(dx, dy) < SESSION_DRAG_THRESHOLD) {
+          return;
+        }
+        drag.armed = true;
+        suppressNextSessionClickRef.current = true;
+        setDraggingSessionId(sessionId);
+        onSessionDragStart(workspace.id, workspace.endpointId, paneId);
+      }
+      setSessionDragGhost({ x: moveEvent.clientX, y: moveEvent.clientY, label });
+    };
+
+    const finish = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+
+    const teardownDrag = (armed: boolean) => {
+      sessionDragRef.current = null;
+      setSessionDragGhost(null);
+      setDraggingSessionId(null);
+      // Only tear down the App-level drag if we actually started one — a
+      // sub-threshold press never armed it.
+      if (armed) {
+        onSessionDragEnd?.();
+      }
+    };
+
+    const onUp = () => {
+      const drag = sessionDragRef.current;
+      finish();
+      teardownDrag(Boolean(drag?.armed));
+    };
+
+    const onCancel = () => {
+      const drag = sessionDragRef.current;
+      finish();
+      teardownDrag(Boolean(drag?.armed));
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+  }, [onSessionDragStart, onSessionDragEnd]);
+
+  // Swallow the click that fires right after an armed session drag's pointerup so
+  // the release does not also select the session.
+  const handleSessionClickCapture = useCallback((event: ReactMouseEvent) => {
+    if (suppressNextSessionClickRef.current) {
+      suppressNextSessionClickRef.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, []);
+
   if (collapsed) {
     return (
       <div className="sidebar collapsed">
@@ -525,34 +875,39 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className="session-list">
+      <div className={`session-list ${reorderDrag ? 'session-list--reordering' : ''}`.trim()}>
         {visibleWorkspaces.map((workspace) => {
           const workspaceIndex = visualIndexOfWorkspace(workspace.id);
+          const seamIndex = reorderSeamIndexByWorkspaceId?.get(workspace.id);
+          const isReorderSource = reorderDrag?.workspaceId === workspace.id;
           return (
-            <div
-              key={`${workspace.endpointId || 'local'}:${workspace.id}`}
-              className={`workspace-group ${selectedWorkspaceId === workspace.id ? 'selected' : ''}${workspaceDragClass(workspace)}`}
-              data-testid={`sidebar-workspace-${workspace.id}`}
-              onPointerEnter={() => {
-                if (canAcceptLeafDrag(workspace)) {
-                  onWorkspaceDragEnter?.(workspace);
-                }
-              }}
-              onPointerLeave={() => {
-                if (canAcceptLeafDrag(workspace)) {
-                  onWorkspaceDragLeave?.(workspace);
-                }
-              }}
-              onPointerUp={() => {
-                if (canAcceptLeafDrag(workspace)) {
-                  onWorkspaceDragDrop?.(workspace);
-                }
-              }}
-            >
+            <div className="workspace-row" key={`${workspace.endpointId || 'local'}:${workspace.id}`}>
+              {seamIndex !== undefined && renderReorderSeam(seamIndex)}
+              <div
+                className={`workspace-group ${selectedWorkspaceId === workspace.id ? 'selected' : ''}${isReorderSource ? ' workspace-group--reorder-source' : ''}${workspaceDragClass(workspace)}`}
+                data-testid={`sidebar-workspace-${workspace.id}`}
+                onPointerEnter={() => {
+                  if (canAcceptLeafDrag(workspace)) {
+                    onWorkspaceDragEnter?.(workspace);
+                  }
+                }}
+                onPointerLeave={() => {
+                  if (canAcceptLeafDrag(workspace)) {
+                    onWorkspaceDragLeave?.(workspace);
+                  }
+                }}
+                onPointerUp={() => {
+                  if (canAcceptLeafDrag(workspace)) {
+                    onWorkspaceDragDrop?.(workspace);
+                  }
+                }}
+              >
               <div
                 role="button"
                 tabIndex={0}
                 className="workspace-group-header"
+                onPointerDown={(event) => handleHeaderPointerDown(workspace, event)}
+                onClickCapture={handleHeaderClickCapture}
                 onClick={() => onSelectWorkspace(workspace.id)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
@@ -625,13 +980,19 @@ export function Sidebar({
                   );
                 }
                 const session = child.session;
+                const paneId = child.paneId;
+                const draggable = Boolean(paneId && onSessionDragStart);
                 return (
                   <div
                     key={session.id}
-                    className={`session-item grouped ${selectedId === session.id ? 'selected' : ''} ${session.recoverable ? 'recoverable' : ''} ${session.reviewLoopStatus ? `session-item--loop-${session.reviewLoopStatus}` : ''}`}
+                    className={`session-item grouped ${selectedId === session.id ? 'selected' : ''} ${session.recoverable ? 'recoverable' : ''} ${session.reviewLoopStatus ? `session-item--loop-${session.reviewLoopStatus}` : ''} ${draggable ? 'session-item--draggable' : ''} ${draggingSessionId === session.id ? 'session-item--dragging' : ''}`.trim().replace(/\s+/g, ' ')}
                     data-testid={`sidebar-session-${session.id}`}
                     data-state={session.state}
                     onClick={() => onSelectSession(session.id)}
+                    onClickCapture={draggable ? handleSessionClickCapture : undefined}
+                    onPointerDown={draggable && paneId
+                      ? (event) => handleSessionPointerDown(workspace, paneId, session.id, session.label, event)
+                      : undefined}
                     title={session.recoverable ? 'Session will be recovered when opened' : undefined}
                   >
                     <StateIndicator state={session.state} size="md" seed={session.id} />
@@ -669,9 +1030,35 @@ export function Sidebar({
                   </div>
                 );
               })}
+              </div>
+              {workspace.id === lastReorderParticipantId && renderReorderSeam(reorderTrailingSeamIndex)}
             </div>
           );
         })}
+        {leafDrag && (
+          <div
+            className={`new-workspace-dropzone${newWorkspaceDropActive ? ' new-workspace-dropzone--active' : ''}`}
+            data-testid="new-workspace-dropzone"
+            onPointerEnter={() => setNewWorkspaceDropActive(true)}
+            onPointerLeave={() => setNewWorkspaceDropActive(false)}
+            onPointerUp={() => {
+              setNewWorkspaceDropActive(false);
+              onNewWorkspaceDrop?.();
+            }}
+          >
+            <span className="new-workspace-dropzone-plus">＋</span>
+            <span className="new-workspace-dropzone-label">New workspace</span>
+          </div>
+        )}
+        {sessionDragGhost && (
+          <div
+            className="session-drag-ghost"
+            data-testid="session-drag-ghost"
+            style={{ left: sessionDragGhost.x + 12, top: sessionDragGhost.y + 12 }}
+          >
+            {sessionDragGhost.label}
+          </div>
+        )}
       </div>
 
       {mutedWorkspaces.length > 0 && (

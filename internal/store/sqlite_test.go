@@ -362,6 +362,96 @@ func TestMigration41_PreservesMutedSessionsAsMutedWorkspaces(t *testing.T) {
 	}
 }
 
+func TestMigration49_BackfillsRankInCreatedAtOrder(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration-49.db")
+	rawDB, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open raw sqlite db: %v", err)
+	}
+	// Pre-49 workspaces table: no rank column. Rows are inserted out of created_at
+	// order so the backfill must read created_at, not insertion/rowid order.
+	if _, err := rawDB.Exec(`
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL,
+			directory TEXT NOT NULL,
+			muted INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		);
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at TEXT NOT NULL
+		);
+		INSERT INTO workspaces (id, title, directory, created_at) VALUES
+			('ws-second', 'Second', '/repo/second', '2026-05-31T00:00:02Z'),
+			('ws-third', 'Third', '/repo/third', '2026-05-31T00:00:03Z'),
+			('ws-first', 'First', '/repo/first', '2026-05-31T00:00:01Z');
+	`); err != nil {
+		rawDB.Close()
+		t.Fatalf("seed migration 49 legacy db: %v", err)
+	}
+	for version := 1; version <= 48; version++ {
+		if _, err := rawDB.Exec(
+			"INSERT INTO schema_migrations (version, applied_at) VALUES (?, datetime('now'))",
+			version,
+		); err != nil {
+			rawDB.Close()
+			t.Fatalf("seed migration version %d: %v", version, err)
+		}
+	}
+	rawDB.Close()
+
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() migrating version 49 error = %v", err)
+	}
+	defer db.Close()
+
+	ranks := map[string]string{}
+	rows, err := db.Query("SELECT id, rank FROM workspaces")
+	if err != nil {
+		t.Fatalf("query backfilled ranks: %v", err)
+	}
+	for rows.Next() {
+		var id, rank string
+		if err := rows.Scan(&id, &rank); err != nil {
+			rows.Close()
+			t.Fatalf("scan rank: %v", err)
+		}
+		if rank == "" {
+			t.Fatalf("workspace %s has empty rank after backfill", id)
+		}
+		ranks[id] = rank
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows err: %v", err)
+	}
+	rows.Close()
+
+	// created_at order is first < second < third, so ranks must sort the same way.
+	if !(ranks["ws-first"] < ranks["ws-second"] && ranks["ws-second"] < ranks["ws-third"]) {
+		t.Fatalf("ranks not strictly increasing in created_at order: %#v", ranks)
+	}
+
+	// Idempotent: reopening must not re-rank already-ranked rows.
+	db.Close()
+	reopened, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() reopen error = %v", err)
+	}
+	defer reopened.Close()
+
+	for id, want := range ranks {
+		var got string
+		if err := reopened.QueryRow("SELECT rank FROM workspaces WHERE id = ?", id).Scan(&got); err != nil {
+			t.Fatalf("query rank after reopen for %s: %v", id, err)
+		}
+		if got != want {
+			t.Fatalf("rank for %s changed on reopen = %q, want %q", id, got, want)
+		}
+	}
+}
+
 func TestMigration20_IdempotentWhenHostColumnAlreadyExists(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
