@@ -1,7 +1,7 @@
 package rankkey
 
 import (
-	"strings"
+	"strconv"
 	"testing"
 )
 
@@ -144,9 +144,9 @@ func assertStrictlySorted(t *testing.T, keys []string) {
 
 func TestSeedMonotonicAndCanonical(t *testing.T) {
 	for _, n := range []int{0, 1, 2, 3, 5, 10, 35, 36, 37, 64, 100, 500} {
-		t.Run("n="+itoa(n), func(t *testing.T) {
+		t.Run("n="+strconv.Itoa(n), func(t *testing.T) {
 			keys := Seed(n)
-			if len(keys) != max0(n) {
+			if len(keys) != n {
 				t.Fatalf("Seed(%d) returned %d keys", n, len(keys))
 			}
 			assertStrictlySorted(t, keys)
@@ -302,36 +302,4 @@ func newLCG(seed uint32) func() uint32 {
 		state = state*1664525 + 1013904223
 		return state
 	}
-}
-
-// --- tiny local helpers to avoid pulling strconv into the test for labels ---
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	var b strings.Builder
-	var rev []byte
-	for n > 0 {
-		rev = append(rev, byte('0'+n%10))
-		n /= 10
-	}
-	if neg {
-		b.WriteByte('-')
-	}
-	for i := len(rev) - 1; i >= 0; i-- {
-		b.WriteByte(rev[i])
-	}
-	return b.String()
-}
-
-func max0(n int) int {
-	if n < 0 {
-		return 0
-	}
-	return n
 }

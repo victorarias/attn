@@ -155,6 +155,11 @@ interface LeafDragPreviewState {
   ghostPos: { x: number; y: number } | null;
 }
 
+// Placement for a leaf relocated by a sidebar drag — merging into a workspace or
+// splitting into a new one. Dock against the whole target (empty anchor), left
+// edge, taking ~a third of the resulting split.
+const SIDEBAR_LEAF_DROP_PLACEMENT = { anchorId: '', edge: 'left' as const, ratio: 0.32 };
+
 
 function terminalStateForWorkspaceSessions(sessions: Session[]): TerminalWorkspaceState | null {
   let selected: TerminalWorkspaceState | null = null;
@@ -2510,12 +2515,11 @@ sendFetchPRDetails,
   const [leafWorkspaceDrag, setLeafWorkspaceDrag] = useState<LeafWorkspaceDragState | null>(null);
   const [leafDragPreview, setLeafDragPreview] = useState<LeafDragPreviewState | null>(null);
   const [dragHoverWorkspaceId, setDragHoverWorkspaceId] = useState<string | null>(null);
+  // Written synchronously alongside setLeafWorkspaceDrag by handleLeafDragStart
+  // and handleLeafDragEnd so the drop handlers (which read .current at event time)
+  // always see the latest drag without a mirror effect.
   const leafWorkspaceDragRef = useRef<LeafWorkspaceDragState | null>(null);
   const dragHoverTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    leafWorkspaceDragRef.current = leafWorkspaceDrag;
-  }, [leafWorkspaceDrag]);
 
   const clearWorkspaceDragHoverTimer = useCallback(() => {
     if (dragHoverTimerRef.current != null) {
@@ -2678,11 +2682,7 @@ sendFetchPRDetails,
     clearWorkspaceDragHoverTimer();
     setDragHoverWorkspaceId(null);
     handleSelectWorkspace(workspace.id);
-    void sendWorkspaceMoveLeafToWorkspace(drag.sourceWorkspaceId, workspace.id, drag.leafId, {
-      anchorId: '',
-      edge: 'left',
-      ratio: 0.32,
-    }).catch(() => {});
+    void sendWorkspaceMoveLeafToWorkspace(drag.sourceWorkspaceId, workspace.id, drag.leafId, SIDEBAR_LEAF_DROP_PLACEMENT).catch(() => {});
   }, [canMoveDraggedLeafToWorkspace, clearWorkspaceDragHoverTimer, handleSelectWorkspace, sendWorkspaceMoveLeafToWorkspace]);
 
   // Drop the dragged leaf onto the "New workspace" zone at the foot of the list:
@@ -2697,11 +2697,7 @@ sendFetchPRDetails,
     }
     clearWorkspaceDragHoverTimer();
     setDragHoverWorkspaceId(null);
-    void sendWorkspaceMoveLeafToNewWorkspace(drag.sourceWorkspaceId, drag.leafId, {
-      anchorId: '',
-      edge: 'left',
-      ratio: 0.32,
-    }).catch(() => {});
+    void sendWorkspaceMoveLeafToNewWorkspace(drag.sourceWorkspaceId, drag.leafId, SIDEBAR_LEAF_DROP_PLACEMENT).catch(() => {});
   }, [clearWorkspaceDragHoverTimer, sendWorkspaceMoveLeafToNewWorkspace]);
 
   // Persist a workspace reorder. The Sidebar computes the drop's neighbour ids

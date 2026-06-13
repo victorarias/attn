@@ -738,15 +738,15 @@ func (d *Daemon) handleSetWorkspaceRank(client *wsClient, msg *protocol.SetWorks
 	prevID := strings.TrimSpace(protocol.Deref(msg.PrevWorkspaceID))
 	nextID := strings.TrimSpace(protocol.Deref(msg.NextWorkspaceID))
 	if workspaceID == "" {
-		d.sendSetWorkspaceRankResult(client, workspaceID, fmt.Errorf("missing workspace_id"))
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdSetWorkspaceRank, workspaceID, nil, fmt.Errorf("missing workspace_id"))
 		return
 	}
 	if d.workspaces == nil {
-		d.sendSetWorkspaceRankResult(client, workspaceID, fmt.Errorf("workspace registry unavailable"))
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdSetWorkspaceRank, workspaceID, nil, fmt.Errorf("workspace registry unavailable"))
 		return
 	}
 	if _, ok := d.workspaces.snapshot(workspaceID); !ok {
-		d.sendSetWorkspaceRankResult(client, workspaceID, fmt.Errorf("workspace not found: %s", workspaceID))
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdSetWorkspaceRank, workspaceID, nil, fmt.Errorf("workspace not found: %s", workspaceID))
 		return
 	}
 
@@ -756,34 +756,21 @@ func (d *Daemon) handleSetWorkspaceRank(client *wsClient, msg *protocol.SetWorks
 	nextRank := d.workspaces.rankOf(nextID)
 	rank, err := rankkey.Between(prevRank, nextRank)
 	if err != nil {
-		d.sendSetWorkspaceRankResult(client, workspaceID, fmt.Errorf("could not rank workspace between %q and %q: %w", prevID, nextID, err))
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdSetWorkspaceRank, workspaceID, nil, fmt.Errorf("could not rank workspace between %q and %q: %w", prevID, nextID, err))
 		return
 	}
 
 	d.store.UpdateWorkspaceRank(workspaceID, rank)
 	snapshot, ok := d.workspaces.applyRank(workspaceID, rank)
 	if !ok {
-		d.sendSetWorkspaceRankResult(client, workspaceID, fmt.Errorf("workspace not found: %s", workspaceID))
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdSetWorkspaceRank, workspaceID, nil, fmt.Errorf("workspace not found: %s", workspaceID))
 		return
 	}
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:     protocol.EventWorkspaceStateChanged,
 		Workspace: &snapshot,
 	})
-	d.sendSetWorkspaceRankResult(client, workspaceID, nil)
-}
-
-func (d *Daemon) sendSetWorkspaceRankResult(client *wsClient, workspaceID string, err error) {
-	result := protocol.WorkspaceLayoutActionResultMessage{
-		Event:       protocol.EventWorkspaceLayoutActionResult,
-		Action:      protocol.CmdSetWorkspaceRank,
-		WorkspaceID: workspaceID,
-		Success:     err == nil,
-	}
-	if err != nil {
-		result.Error = protocol.Ptr(err.Error())
-	}
-	d.sendToClient(client, result)
+	d.sendWorkspaceLayoutActionResult(client, protocol.CmdSetWorkspaceRank, workspaceID, nil, nil)
 }
 
 // moveLeaf relocates an existing leaf (terminal pane or docked tile) within a
