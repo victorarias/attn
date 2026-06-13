@@ -19,3 +19,6 @@ app/src-tauri/binaries/
 
 # Claude Code local config
 .claude/
+
+# Generated per-profile Tauri config overlays (see scripts/build-app-profile.sh)
+app/src-tauri/*.gen.conf.json

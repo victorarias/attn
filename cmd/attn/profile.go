@@ -30,6 +30,8 @@ func runProfile() {
 		runProfileStatus()
 	case "resolve":
 		runProfileResolve(os.Args[3:])
+	case "tauri-config":
+		runProfileTauriConfig(os.Args[3:])
 	case "list":
 		runProfileList()
 	case "env":
@@ -180,6 +182,63 @@ func runProfileResolve(args []string) {
 	fmt.Println(string(b))
 }
 
+// runProfileTauriConfig emits a Tauri `--config` overlay for a profile's
+// packaged build: productName, bundle identifier, deep-link scheme, and window
+// title, all derived from the single authority. The Makefile writes this to a
+// gitignored tauri.<name>.gen.conf.json and passes it to `tauri build --config`
+// so a named profile's bundle metadata is never hand-maintained. Structurally
+// identical to the (now removed) committed tauri.dev.conf.json, so the dev build
+// is byte-for-byte equivalent after unification.
+func runProfileTauriConfig(args []string) {
+	profile := config.Profile()
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--profile":
+			if i+1 >= len(args) {
+				profileFatal("--profile requires a value")
+			}
+			i++
+			p, err := config.NormalizeProfileName(args[i])
+			if err != nil {
+				profileFatal(err.Error())
+			}
+			profile = p
+		case "-h", "--help":
+			printProfileHelp(os.Stdout)
+			return
+		default:
+			profileFatal(fmt.Sprintf("unknown flag %q", args[i]))
+		}
+	}
+
+	r := resolveProfile(profile)
+	overlay := map[string]any{
+		"$schema":     "https://schema.tauri.app/config/2",
+		"productName": r.AppName,
+		"identifier":  r.BundleID,
+		"app": map[string]any{
+			"windows": []any{
+				map[string]any{
+					"title":                r.AppName,
+					"backgroundThrottling": "disabled",
+				},
+			},
+		},
+		"plugins": map[string]any{
+			"deep-link": map[string]any{
+				"desktop": map[string]any{
+					"schemes": []string{r.DeepLinkScheme},
+				},
+			},
+		},
+	}
+	b, err := json.MarshalIndent(overlay, "", "  ")
+	if err != nil {
+		profileFatal(err.Error())
+	}
+	fmt.Println(string(b))
+}
+
 func runProfileList() {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -262,6 +321,7 @@ Usage:
   attn profile resolve         resolved resources as JSON
   attn profile resolve --field wsPort      print one resolved value
   attn profile resolve --profile agent7    resolve a different profile
+  attn profile tauri-config    Tauri --config overlay for the profile's build
   attn profile list            every profile with data and/or an installed app
   attn profile env <name>      alias of: attn profile-env <name>
 

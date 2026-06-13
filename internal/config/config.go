@@ -107,19 +107,16 @@ func ProfileLabel() string {
 	return "default"
 }
 
-// DeepLinkScheme returns the macOS URL scheme the running profile's .app
-// is registered under. Default → "attn", dev → "attn-dev". Must stay in
-// sync with the `deep-link.desktop.schemes` entries in:
-//   - app/src-tauri/tauri.conf.json         (prod)
-//   - app/src-tauri/tauri.dev.conf.json     (dev)
+// DeepLinkScheme returns the macOS URL scheme the running profile's .app is
+// registered under: default → "attn", dev → "attn-dev", agent7 → "attn-agent7".
+// It is the per-profile authority (DeepLinkSchemeForProfile) applied to the
+// active profile, so the scheme a profile's bundle registers at build time and
+// the scheme the CLI opens at runtime can never diverge.
 //
-// Used by the CLI wrapper so `attn` in a dev-scoped shell opens
-// attn-dev.app, not attn.app.
+// Used by the CLI wrapper so `attn` in a profile-scoped shell opens that
+// profile's app, never another profile's.
 func DeepLinkScheme() string {
-	if p := Profile(); p == "dev" {
-		return "attn-dev"
-	}
-	return "attn"
+	return DeepLinkSchemeForProfile(Profile())
 }
 
 // normalizeProfileForDerivation lowercases/trims a profile name and maps the
@@ -170,8 +167,9 @@ func AppPathForProfile(profile string) string {
 // DeepLinkSchemeForProfile returns the macOS URL scheme a profile's .app
 // registers: default → attn, dev → attn-dev, agent7 → attn-agent7. Each profile
 // bundle registers a distinct scheme so macOS never cross-routes a spawn deep
-// link to the wrong app. (DeepLinkScheme() above still reports today's runtime
-// behavior; the per-profile build that consumes attn-<profile> lands later.)
+// link to the wrong app. The per-profile build (`make install PROFILE=<name>`)
+// bakes this scheme into the bundle, and DeepLinkScheme() reports it at runtime,
+// so the registered and opened schemes are derived from this one function.
 func DeepLinkSchemeForProfile(profile string) string {
 	p := normalizeProfileForDerivation(profile)
 	if p == "" {

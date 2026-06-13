@@ -1,4 +1,4 @@
-.PHONY: run build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-dev ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
 
 # Bare `make` does the full prod inner loop: install + open the app.
 # `make install` is install-only (for scripts/CI that drive the launch
@@ -7,17 +7,19 @@
 .DEFAULT_GOAL := run
 
 BINARY_NAME=attn
+# Prod bundle. Referenced by the parse-time guard message and `sign-app`; every
+# other profile's app path / bundle id / port is derived at build+install time
+# from the single authority (`attn profile resolve`), never hardcoded here.
 APP_BUNDLE=$(HOME)/Applications/attn.app
 APP_BINARY=$(APP_BUNDLE)/Contents/MacOS/attn
-# Dev sibling install. Separate bundle identifier (com.attn.manager.dev),
-# separate data dir (~/.attn-dev), separate port (29849). See
-# docs/plans or Phase 2 of the profiles feature for the full design.
-APP_BUNDLE_DEV=$(HOME)/Applications/attn-dev.app
-APP_BINARY_DEV=$(APP_BUNDLE_DEV)/Contents/MacOS/attn
-# Dev targets may be invoked from a terminal hosted by the prod app, whose
-# session env points back at the prod socket/wrapper. Do not let that routing
-# state cross into the isolated dev daemon.
-DEV_DAEMON_ENV=env -u ATTN_SOCKET_PATH -u ATTN_DB_PATH -u ATTN_CONFIG_PATH -u ATTN_WS_PORT -u ATTN_WRAPPER_PATH -u ATTN_INSIDE_APP -u ATTN_DAEMON_MANAGED -u ATTN_PTY_WORKER -u ATTN_SESSION_ID -u ATTN_AGENT ATTN_PROFILE=dev
+# Which profile to build/install. Empty = the default/prod bundle. A named
+# profile (e.g. `make install PROFILE=agent7`) builds attn-agent7.app /
+# com.attn.manager.agent7 with its own data dir + port. `make dev` ==
+# `make install PROFILE=dev`. See docs/profiles.md.
+PROFILE ?=
+# Routing env that must NOT leak from a parent attn terminal into an isolated
+# profile daemon we (re)start. Shared by every non-default profile install.
+PROFILE_DAEMON_UNSET = -u ATTN_SOCKET_PATH -u ATTN_DB_PATH -u ATTN_CONFIG_PATH -u ATTN_WS_PORT -u ATTN_WRAPPER_PATH -u ATTN_INSIDE_APP -u ATTN_DAEMON_MANAGED -u ATTN_PTY_WORKER -u ATTN_SESSION_ID -u ATTN_AGENT
 BUILD_DIR=./cmd/attn
 VERSION ?= $(shell bash ./scripts/version.sh)
 BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -95,83 +97,105 @@ ACTIVE_GOALS := $(if $(MAKECMDGOALS),$(MAKECMDGOALS),$(.DEFAULT_GOAL))
 GUARDED_INVOCATION := $(filter $(GUARDED_PROD_TARGETS),$(ACTIVE_GOALS))
 ifneq (,$(GUARDED_INVOCATION))
 ifneq (,$(ATTN_PROFILE))
-$(error ATTN_PROFILE=$(ATTN_PROFILE) is set. `make $(firstword $(ACTIVE_GOALS))` targets the PROD bundle ($(APP_BUNDLE)). Did you mean `make dev`? To proceed anyway: env -u ATTN_PROFILE make $(firstword $(ACTIVE_GOALS)))
+ifeq (,$(PROFILE))
+# Bare (prod) install while a profile is active in the shell — almost always a
+# mistake that would clobber the live prod bundle.
+$(error ATTN_PROFILE=$(ATTN_PROFILE) is set but `make $(firstword $(ACTIVE_GOALS))` targets the PROD bundle ($(APP_BUNDLE)). Build that profile with `make $(firstword $(ACTIVE_GOALS)) PROFILE=$(ATTN_PROFILE)`, or target prod explicitly with `env -u ATTN_PROFILE make $(firstword $(ACTIVE_GOALS))`)
+else ifneq ($(ATTN_PROFILE),$(PROFILE))
+# Build/runtime consistency (profiles design, safety #2): you cannot build
+# agent7's app while your shell says you are agent8.
+$(error build/runtime mismatch: ATTN_PROFILE=$(ATTN_PROFILE) but PROFILE=$(PROFILE). Refusing to build a different profile than your shell. Re-run with PROFILE=$(ATTN_PROFILE), or unset ATTN_PROFILE)
+endif
 endif
 endif
 
+# Build + install + open the PROFILE's app (bare `make` = prod). Every path is
+# derived from the single authority so a named profile opens its own bundle.
 run: install
-	@open $(APP_BUNDLE)
-	@echo "Launched $(APP_BUNDLE)"
+	@app_name="$$($(CURDIR)/$(OUTPUT) profile resolve --profile "$(PROFILE)" --field appName)"; \
+	open "$(HOME)/Applications/$$app_name.app"; \
+	echo "Launched $(HOME)/Applications/$$app_name.app"
 
+# Install-only (no open). `make install` = prod; `make install PROFILE=agent7`
+# = the isolated agent7 bundle. Resources resolved from `attn profile resolve`.
 install: build-app
-	@echo ">>> Installing PROD: $(APP_BUNDLE) (profile=default, port=9849)"
-	@mkdir -p ~/Applications
-	@# Quit a running instance first. macOS keeps the running image
-	@# via mmap, so rm -rf + cp alone would leave an old process running
-	@# out of a deleted bundle while disk has the new code. Quiet
-	@# no-op if nothing is running.
-	@osascript -e 'tell application id "com.attn.manager" to quit' 2>/dev/null || true
-	@rm -rf ~/Applications/attn.app
-	cp -r app/src-tauri/target/release/bundle/macos/attn.app ~/Applications/
-	@$(APP_BINARY) daemon ensure >/dev/null
-	@echo "Installed attn.app to ~/Applications"
+	@set -e; \
+	profile="$(PROFILE)"; \
+	attn="$(CURDIR)/$(OUTPUT)"; \
+	app_name="$$("$$attn" profile resolve --profile "$$profile" --field appName)"; \
+	bundle_id="$$("$$attn" profile resolve --profile "$$profile" --field bundleId)"; \
+	ws_port="$$("$$attn" profile resolve --profile "$$profile" --field wsPort)"; \
+	label="$$("$$attn" profile resolve --profile "$$profile" --field label)"; \
+	app_bundle="$(HOME)/Applications/$$app_name.app"; \
+	app_binary="$$app_bundle/Contents/MacOS/attn"; \
+	echo ">>> Installing $$label: $$app_bundle (port=$$ws_port)"; \
+	mkdir -p ~/Applications; \
+	: "Quit a running instance first. macOS keeps the running image via mmap,"; \
+	: "so rm -rf + cp alone would leave an old process out of a deleted bundle."; \
+	osascript -e "tell application id \"$$bundle_id\" to quit" 2>/dev/null || true; \
+	rm -rf "$$app_bundle"; \
+	cp -r "app/src-tauri/target/release/bundle/macos/$$app_name.app" ~/Applications/; \
+	if [ -n "$$profile" ]; then \
+		env $(PROFILE_DAEMON_UNSET) ATTN_PROFILE="$$profile" "$$app_binary" daemon ensure >/dev/null; \
+	else \
+		"$$app_binary" daemon ensure >/dev/null; \
+	fi; \
+	echo "Installed $$app_bundle (profile=$$label, port=$$ws_port)"
 
+# Fast path: swap just the Go daemon sidecar into the already-installed PROFILE
+# bundle, re-sign, and restart its daemon. `make install-daemon PROFILE=agent7`.
 install-daemon: ensure-codesign-identity build
-	@if [ ! -d "$(APP_BUNDLE)" ]; then \
-		echo "No installed attn.app found in ~/Applications; run make install first"; \
+	@set -e; \
+	profile="$(PROFILE)"; \
+	attn="$(CURDIR)/$(OUTPUT)"; \
+	app_name="$$("$$attn" profile resolve --profile "$$profile" --field appName)"; \
+	label="$$("$$attn" profile resolve --profile "$$profile" --field label)"; \
+	app_bundle="$(HOME)/Applications/$$app_name.app"; \
+	app_binary="$$app_bundle/Contents/MacOS/attn"; \
+	if [ ! -d "$$app_bundle" ]; then \
+		echo "No installed $$app_name.app in ~/Applications; run make install$$([ -n "$$profile" ] && echo " PROFILE=$$profile") first"; \
 		exit 1; \
-	fi
-	@echo ">>> Updating PROD daemon at $(APP_BINARY)"
-	cp $(OUTPUT) $(APP_BINARY)
-	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+	fi; \
+	echo ">>> Updating $$label daemon at $$app_binary"; \
+	cp $(OUTPUT) "$$app_binary"; \
+	if [ "$(UNAME_S)" = "Darwin" ]; then \
 		identity="$(MACOS_CODESIGN_IDENTITY)"; \
 		if [ -z "$$identity" ]; then identity="$$(bash ./scripts/macos-codesign-identity.sh find)"; fi; \
 		if [ -z "$$identity" ]; then identity="-"; fi; \
-		codesign --force --sign "$$identity" $(APP_BINARY); \
-		codesign --force --sign "$$identity" $(APP_BUNDLE); \
-	fi
-	@$(APP_BINARY) daemon ensure >/dev/null
-	@echo "Updated bundled daemon at $(APP_BINARY)"
+		codesign --force --sign "$$identity" "$$app_binary"; \
+		codesign --force --sign "$$identity" "$$app_bundle"; \
+	fi; \
+	if [ -n "$$profile" ]; then \
+		env $(PROFILE_DAEMON_UNSET) ATTN_PROFILE="$$profile" "$$app_binary" daemon ensure >/dev/null; \
+	else \
+		"$$app_binary" daemon ensure >/dev/null; \
+	fi; \
+	echo "Updated bundled daemon at $$app_binary"
 
-# Dev-sibling install. `make dev` is THE command for the attn-on-attn
-# inner loop: rebuild, reinstall, restart dev daemon — without ever
-# touching the prod install. Uses a separate bundle identifier
-# (com.attn.manager.dev), productName (attn-dev), data dir (~/.attn-dev),
-# and port (29849). Prod daemon and app keep running.
+# `make dev` is THE command for the attn-on-attn inner loop: rebuild, reinstall,
+# restart the dev daemon — without ever touching the prod install. It is now a
+# thin alias for the profile-parameterized targets (PROFILE=dev → attn-dev.app /
+# com.attn.manager.dev / ~/.attn-dev / port 29849). `make install PROFILE=<name>`
+# is the general form; these aliases preserve the documented dev commands.
+#
+# These aliases target the dev profile UNCONDITIONALLY, so they clear the
+# inherited ATTN_PROFILE before recursing. Without that, an agent whose shell is
+# scoped to its own profile (e.g. ATTN_PROFILE=agent7 — the documented per-agent
+# setup) would trip the build/runtime-mismatch guard (PROFILE=dev != agent7) on
+# the very command the docs hand them as the dev escape hatch. `make dev` means
+# "I want the dev sibling, period", independent of the shell's profile.
 #
 # Run `eval "$(attn profile-env dev)"` (or `attn profile-env --fish dev | source`)
 # in your shell if you want `attn ...` commands to target the dev daemon
 # by default.
-dev: install-dev
-	@open $(APP_BUNDLE_DEV)
-	@echo "Launched $(APP_BUNDLE_DEV)"
+dev:
+	@env -u ATTN_PROFILE $(MAKE) run PROFILE=dev
 
-install-dev: build-app-dev
-	@echo ">>> Installing DEV: $(APP_BUNDLE_DEV) (profile=dev, port=29849)"
-	@mkdir -p ~/Applications
-	@# Quit a running dev instance first; same mmap reasoning as `install`.
-	@osascript -e 'tell application id "com.attn.manager.dev" to quit' 2>/dev/null || true
-	@rm -rf $(APP_BUNDLE_DEV)
-	cp -r app/src-tauri/target/release/bundle/macos/attn-dev.app ~/Applications/
-	@$(DEV_DAEMON_ENV) $(APP_BINARY_DEV) daemon ensure >/dev/null
-	@echo "Installed $(APP_BUNDLE_DEV) — profile=dev, data=~/.attn-dev, port=29849"
+install-dev:
+	@env -u ATTN_PROFILE $(MAKE) install PROFILE=dev
 
-install-daemon-dev: ensure-codesign-identity build
-	@if [ ! -d "$(APP_BUNDLE_DEV)" ]; then \
-		echo "No installed attn-dev.app found in ~/Applications; run make dev first"; \
-		exit 1; \
-	fi
-	@echo ">>> Updating DEV daemon at $(APP_BINARY_DEV)"
-	cp $(OUTPUT) $(APP_BINARY_DEV)
-	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		identity="$(MACOS_CODESIGN_IDENTITY)"; \
-		if [ -z "$$identity" ]; then identity="$$(bash ./scripts/macos-codesign-identity.sh find)"; fi; \
-		if [ -z "$$identity" ]; then identity="-"; fi; \
-		codesign --force --sign "$$identity" $(APP_BINARY_DEV); \
-		codesign --force --sign "$$identity" $(APP_BUNDLE_DEV); \
-	fi
-	@$(DEV_DAEMON_ENV) $(APP_BINARY_DEV) daemon ensure >/dev/null
-	@echo "Updated bundled dev daemon at $(APP_BINARY_DEV)"
+install-daemon-dev:
+	@env -u ATTN_PROFILE $(MAKE) install-daemon PROFILE=dev
 
 clean:
 	rm -f $(BINARY_NAME)
@@ -192,45 +216,21 @@ generate-types:
 check-types: generate-types
 	git diff --exit-code internal/protocol/generated.go app/src/types/generated.ts
 
-# Build Tauri app with bundled daemon (app bundle only, no DMG dialog).
-# Args:
-#   $(1) — build-time env-var prefix (VITE_* for frontend, ATTN_* for cargo)
-#   $(2) — productName (controls the .app bundle *folder* name — "attn" for
-#          prod, "attn-dev" for the dev sibling). Matches the productName
-#          in tauri.conf.json / tauri.dev.conf.json.
-#   $(3) — extra args for `pnpm tauri build` (e.g. --config for overlays)
-# The Go daemon is bundled as a sidecar under Contents/MacOS/attn regardless
-# of productName. Sign the sidecar first, then the enclosing app bundle, so
-# macOS grants attach to a stable signed app identity across source rebuilds.
-define build_tauri_app
-	@mkdir -p app/src-tauri/binaries
-	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
-	cd app && pnpm install
-	cd app && $(1) pnpm tauri build --bundles app $(3)
-	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		mkdir -p app/src-tauri/target/release/bundle/macos/$(2).app/Contents/Resources; \
-		printf '{\n  "version": "%s",\n  "sourceFingerprint": "%s",\n  "gitCommit": "%s",\n  "buildTime": "%s"\n}\n' '$(VERSION)' '$(SOURCE_FINGERPRINT)' '$(GIT_COMMIT)' '$(BUILD_TIME)' > app/src-tauri/target/release/bundle/macos/$(2).app/Contents/Resources/build-identity.json; \
-	fi
-	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		identity="$(MACOS_CODESIGN_IDENTITY)"; \
-		if [ -z "$$identity" ]; then identity="$$(bash ./scripts/macos-codesign-identity.sh find)"; fi; \
-		if [ -z "$$identity" ]; then identity="-"; fi; \
-		codesign --force --sign "$$identity" app/src-tauri/target/release/bundle/macos/$(2).app/Contents/MacOS/attn; \
-		codesign --force --sign "$$identity" app/src-tauri/target/release/bundle/macos/$(2).app; \
-	fi
-endef
-
+# Build the packaged app for $(PROFILE) (empty = prod). All bundle metadata is
+# derived from `attn profile resolve` by scripts/build-app-profile.sh: the
+# default build uses the committed tauri.conf.json; a named profile gets a
+# generated tauri.<name>.gen.conf.json overlay and bakes ATTN_BUILD_PROFILE /
+# ATTN_BUILD_WS_PORT / ATTN_BUILD_BUNDLE_ID into the binary so it can never
+# point at another profile's daemon. UI automation is gated at runtime (see
+# profile::automation_enabled) — a profiled build sees its ATTN_PROFILE and
+# enables automation for dev; prod stays off unless ATTN_AUTOMATION=1.
 build-app: ensure-codesign-identity build
-	$(call build_tauri_app,VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)',attn,)
+	@PROFILE="$(PROFILE)" ATTN_BIN="$(CURDIR)/$(OUTPUT)" \
+		VERSION='$(VERSION)' SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' \
+		GIT_COMMIT='$(GIT_COMMIT)' BUILD_TIME='$(BUILD_TIME)' \
+		MACOS_CODESIGN_IDENTITY='$(MACOS_CODESIGN_IDENTITY)' \
+		bash ./scripts/build-app-profile.sh
 
-# Dev build. Bakes ATTN_BUILD_PROFILE=dev into the Rust binary and
-# VITE_ATTN_BUILD_PROFILE=dev + VITE_DAEMON_PORT=29849 into the frontend
-# so the dev bundle can never accidentally point at the prod daemon.
-# UI automation is gated at *runtime* now (see profile::automation_enabled
-# in app/src-tauri/src/profile.rs) — dev builds get it on by default
-# because the runtime sees ATTN_PROFILE=dev; prod builds get it off
-# unless the user sets ATTN_AUTOMATION=1.
-# Output: app/src-tauri/target/release/bundle/macos/attn-dev.app
 ensure-codesign-identity:
 	@identity="$$(bash ./scripts/macos-codesign-identity.sh ensure)"; \
 	if [ "$$identity" = "-" ]; then \
@@ -238,9 +238,6 @@ ensure-codesign-identity:
 	else \
 		echo "Using macOS code-signing identity $$identity"; \
 	fi
-
-build-app-dev: ensure-codesign-identity build
-	$(call build_tauri_app,ATTN_BUILD_PROFILE=dev VITE_ATTN_BUILD_PROFILE=dev VITE_DAEMON_PORT=29849 VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)',attn-dev,--config src-tauri/tauri.dev.conf.json)
 
 app-screenshot:
 	cd app && node scripts/real-app-harness/capture-app-screenshot.mjs $(if $(SCREENSHOT_PATH),--path "$(SCREENSHOT_PATH)",) $(APP_SCREENSHOT_FLAGS)

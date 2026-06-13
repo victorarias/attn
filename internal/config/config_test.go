@@ -348,10 +348,10 @@ func TestDeepLinkScheme(t *testing.T) {
 			t.Errorf("DeepLinkScheme() = %q, want %q", got, "attn-dev")
 		}
 	})
-	t.Run("unknown profile → attn (prod scheme is safe default)", func(t *testing.T) {
+	t.Run("named profile → attn-<name> (its own bundle's scheme)", func(t *testing.T) {
 		t.Setenv("ATTN_PROFILE", "staging")
-		if got := DeepLinkScheme(); got != "attn" {
-			t.Errorf("DeepLinkScheme() = %q, want %q", got, "attn")
+		if got := DeepLinkScheme(); got != "attn-staging" {
+			t.Errorf("DeepLinkScheme() = %q, want %q", got, "attn-staging")
 		}
 	})
 }
