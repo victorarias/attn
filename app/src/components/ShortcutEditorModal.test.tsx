@@ -92,7 +92,7 @@ describe('ShortcutEditorModal', () => {
       }),
     });
 
-    fireEvent.click(within(row('New session in this workspace')).getByTitle('Reset to default'));
+    fireEvent.click(within(row('New session in this workspace')).getByTitle('Reset to ⌘N'));
 
     // Reassign prompt appears naming the current ⌘N holder (Diff panel).
     const reassignBtn = screen.getByText('Reassign');
@@ -191,6 +191,105 @@ describe('ShortcutEditorModal', () => {
     rerender(tree(true));
     // The row is no longer stuck recording.
     expect(within(row('Action menu')).getByLabelText('Record a chord')).toBeInTheDocument();
+  });
+
+  const filterInput = () => screen.getByLabelText('Filter shortcuts') as HTMLInputElement;
+
+  it('filters rows to matching labels and hides the dock while searching', () => {
+    renderEditor();
+    // "maximize" is unique to the panes category and not a default dock member.
+    fireEvent.change(filterInput(), { target: { value: 'maximize' } });
+
+    expect(screen.getByText('Maximize active pane')).toBeInTheDocument();
+    expect(screen.queryByText('New session in this workspace')).toBeNull();
+    // Dock section and now-empty categories are hidden during a search.
+    expect(screen.queryByText('Dock')).toBeNull();
+    expect(screen.queryByText('Workspaces & Sessions')).toBeNull();
+    expect(screen.getByText('Panes & Terminals')).toBeInTheDocument();
+  });
+
+  it('filters rows by the displayed key string', () => {
+    renderEditor();
+    fireEvent.change(filterInput(), { target: { value: '⌘⇧n' } });
+    // session.newHorizontal's default is ⌘⇧N; plain ⌘N must not match.
+    expect(screen.getByText('New session, split sideways')).toBeInTheDocument();
+    expect(screen.queryByText('New session in this workspace')).toBeNull();
+  });
+
+  it('shows an announced, trimmed no-matches message when nothing matches', () => {
+    renderEditor();
+    fireEvent.change(filterInput(), { target: { value: '  zzznope  ' } });
+    // role=status so screen readers announce it; the echoed query is trimmed.
+    expect(screen.getByRole('status')).toHaveTextContent(/^No shortcuts match .zzznope.$/);
+    expect(screen.queryByText('Panes & Terminals')).toBeNull();
+  });
+
+  it('clears a stranded reassign prompt when the user starts filtering', () => {
+    renderEditor();
+    // Capture a taken combo (⌘⇧G belongs to Diff panel) to raise the inline
+    // Reassign prompt on this row.
+    fireEvent.click(row('New session in this workspace').querySelector('.key-capture-button')!);
+    fireEvent.keyDown(window, { key: 'g', code: 'KeyG', metaKey: true, shiftKey: true });
+    expect(screen.getByText('Reassign')).toBeInTheDocument();
+
+    // Typing in the filter must not leave the prompt stranded on a hidden row.
+    fireEvent.change(filterInput(), { target: { value: 'new session' } });
+    expect(within(row('New session in this workspace')).queryByText('Reassign')).toBeNull();
+  });
+
+  it('clears the filter when the editor closes and reopens', () => {
+    const setSetting = vi.fn();
+    const tree = (open: boolean) => (
+      <SettingsProvider settings={{}} setSetting={setSetting}>
+        <KeybindingsProvider>
+          <ShortcutEditorModal isOpen={open} onClose={() => {}} />
+        </KeybindingsProvider>
+      </SettingsProvider>
+    );
+    const { rerender } = render(tree(true));
+
+    fireEvent.change(filterInput(), { target: { value: 'split' } });
+    expect(filterInput().value).toBe('split');
+
+    rerender(tree(false));
+    rerender(tree(true));
+    expect(filterInput().value).toBe('');
+  });
+
+  it('reset button tooltip names the default binding', () => {
+    renderEditor({
+      [KEYBINDINGS_SETTING_KEY]: JSON.stringify({
+        version: 1,
+        overrides: { 'session.new': { key: 'm', meta: true } },
+      }),
+    });
+    expect(
+      within(row('New session in this workspace')).getByTitle('Reset to ⌘N'),
+    ).toBeInTheDocument();
+  });
+
+  it('badges only the shortcuts gated behind an open terminal', () => {
+    renderEditor();
+    // Gated via sessionVisible (and not a default dock member, so the row is unique).
+    expect(within(row('Maximize active pane')).getByText('Needs terminal')).toBeInTheDocument();
+    // App-global shortcut.
+    expect(within(row('New session in this workspace')).queryByText('Needs terminal')).toBeNull();
+    // No useShortcut handler at all, despite the panes category.
+    expect(within(row('Collapse utility terminal')).queryByText('Needs terminal')).toBeNull();
+    // Global despite the 'terminal.' id prefix.
+    expect(within(row('Quick Find')).queryByText('Needs terminal')).toBeNull();
+  });
+
+  it('shows both Customized and Needs terminal on an overridden gated row', () => {
+    renderEditor({
+      [KEYBINDINGS_SETTING_KEY]: JSON.stringify({
+        version: 1,
+        overrides: { 'terminal.find': { key: 'y', meta: true } },
+      }),
+    });
+    const r = row('Find in terminal');
+    expect(within(r).getByText('Customized')).toBeInTheDocument();
+    expect(within(r).getByText('Needs terminal')).toBeInTheDocument();
   });
 
   it('restores defaults', () => {

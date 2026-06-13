@@ -23,6 +23,15 @@ export interface ShortcutMeta {
    * any shortcut is dock-eligible while the default dock entries stay compact.
    */
   dockLabel?: string;
+  /**
+   * The handler is registered in `SessionTerminalWorkspace` gated by
+   * `sessionVisible`, so the shortcut does nothing unless a terminal workspace
+   * is on screen. This is an availability fact, NOT a focus claim — the key
+   * still fires from the global window listener. Set only on the ids actually
+   * gated this way; do not infer it from the `terminal.` id prefix (e.g.
+   * `terminal.quickFind` is global and `terminal.collapse` has no handler).
+   */
+  requiresTerminal?: boolean;
 }
 
 export const SHORTCUT_CATEGORY_LABELS: Record<ShortcutCategory, string> = {
@@ -63,18 +72,18 @@ export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
   'workspace.select9': { label: 'Jump to workspace 9', category: 'sessions' },
 
   // Panes & Terminals
-  'terminal.open': { label: 'Focus utility terminal', category: 'panes' },
+  'terminal.open': { label: 'Focus utility terminal', category: 'panes', requiresTerminal: true },
   'terminal.collapse': { label: 'Collapse utility terminal', category: 'panes' },
-  'terminal.splitVertical': { label: 'Split pane down', category: 'panes', dockLabel: 'split v' },
-  'terminal.splitHorizontal': { label: 'Split pane sideways', category: 'panes', dockLabel: 'split h' },
-  'terminal.toggleZoom': { label: 'Zoom active pane', category: 'panes', dockLabel: 'zoom' },
-  'terminal.toggleMaximize': { label: 'Maximize active pane', category: 'panes' },
-  'terminal.close': { label: 'Close focused pane', category: 'panes' },
-  'terminal.focusLeft': { label: 'Move focus left', category: 'panes' },
-  'terminal.focusRight': { label: 'Move focus right', category: 'panes' },
-  'terminal.focusUp': { label: 'Move focus up', category: 'panes' },
-  'terminal.focusDown': { label: 'Move focus down', category: 'panes' },
-  'terminal.find': { label: 'Find in terminal', category: 'panes' },
+  'terminal.splitVertical': { label: 'Split pane down', category: 'panes', dockLabel: 'split v', requiresTerminal: true },
+  'terminal.splitHorizontal': { label: 'Split pane sideways', category: 'panes', dockLabel: 'split h', requiresTerminal: true },
+  'terminal.toggleZoom': { label: 'Zoom active pane', category: 'panes', dockLabel: 'zoom', requiresTerminal: true },
+  'terminal.toggleMaximize': { label: 'Maximize active pane', category: 'panes', requiresTerminal: true },
+  'terminal.close': { label: 'Close focused pane', category: 'panes', requiresTerminal: true },
+  'terminal.focusLeft': { label: 'Move focus left', category: 'panes', requiresTerminal: true },
+  'terminal.focusRight': { label: 'Move focus right', category: 'panes', requiresTerminal: true },
+  'terminal.focusUp': { label: 'Move focus up', category: 'panes', requiresTerminal: true },
+  'terminal.focusDown': { label: 'Move focus down', category: 'panes', requiresTerminal: true },
+  'terminal.find': { label: 'Find in terminal', category: 'panes', requiresTerminal: true },
 
   // Review & Git
   'dock.diff': { label: 'Diff panel', category: 'review', dockLabel: 'diff' },

@@ -202,11 +202,26 @@ PR 3 — Leader-key chords (depth 2) — DONE
 - Should `dockActions` informational chips (split/zoom/pane-focus — no click/active) still be
   dock-eligible? "Any shortcut" says yes; they just render as static hints.
 
+PR 4 — Editor follow-ups (search + default-binding tooltip + scope badge) — DONE
+- [x] Filter box (substring over label + displayed keys; hides Dock + empty categories while
+      searching; "no shortcuts match" state; autofocus on open; clears on close; clears any
+      stranded reassign/error on query change)
+- [x] Reset (↺) tooltip names the default it restores (`Reset to ${formatShortcut(SHORTCUTS[id])}`)
+- [x] `requiresTerminal?` on `ShortcutMeta` (the 11 `sessionVisible`-gated ids) → muted
+      "Needs terminal" badge; sourced from one explicit flag, NOT id prefix / intercept list
+- [x] Tests: filter (label/key/no-matches/clear-on-close/clear-stranded-reassign), tooltip,
+      scope badge (positive + collapse/quickFind/global negatives)
+
 ## Follow-ups
 
-- Fuzzy search in the editor list if it grows.
-- Per-binding "changed from default" indicator in the editor.
-- Consider a `view`/scope column in the editor (global vs terminal vs panel) for clarity.
+- ~~Fuzzy search in the editor list~~ — shipped as substring filter in PR 4 (fuzzy deemed
+  unnecessary for short, specific labels).
+- ~~Per-binding "changed from default" indicator~~ — the "Customized" badge already covered the
+  binary state; PR 4 added the *default value* via the reset tooltip.
+- ~~`view`/scope column~~ — investigated in PR 4 and rejected as a full column: most shortcuts
+  dispatch through the global window listener (the terminal path only mirrors them to avoid PTY
+  leaks), so a per-row scope would be ~75% "Global" noise and the rest subtly wrong about "active".
+  Shipped instead as a conservative "Needs terminal" badge on only the `sessionVisible`-gated ids.
 
 ## Verification notes
 
