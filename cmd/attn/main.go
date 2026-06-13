@@ -994,9 +994,13 @@ func writeNotebookHelp(w io.Writer) {
 	fmt.Fprint(w, `usage: attn notebook <command>
 
 commands:
-  init                 create the notebook (idempotent); prints its root
-  show <path>          print a note's contents (path may be root-absolute)
-  list [prefix]        list notes, optionally under a path prefix
+  init                       create the notebook (idempotent); prints its root
+  show <path>                print a note's contents (path may be root-absolute)
+  list [prefix]              list notes, optionally under a path prefix
+  journal append --text T    append an entry to today's journal (--date YYYY-MM-DD to override)
+  memory write --path P      write/edit a durable note; content from --file or stdin
+                             (--base-hash H for a safe hash-CAS edit)
+  guide                      print the notebook operating guidance
 `)
 }
 
@@ -1058,11 +1062,95 @@ func runNotebook() {
 				fmt.Println(e.Path)
 			}
 		}
+	case "journal":
+		runNotebookJournal(c, args)
+	case "memory":
+		runNotebookMemory(c, args)
+	case "guide":
+		if len(args) != 0 {
+			fmt.Fprintln(os.Stderr, "usage: attn notebook guide")
+			os.Exit(2)
+		}
+		res, err := c.NotebookGuide(strings.TrimSpace(os.Getenv("ATTN_SESSION_ID")))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "notebook guide: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(res.Guidance)
 	default:
 		fmt.Fprintf(os.Stderr, "notebook: unknown command %q\n\n", action)
 		writeNotebookHelp(os.Stderr)
 		os.Exit(2)
 	}
+}
+
+// runNotebookJournal handles `attn notebook journal append --text … [--date …]`.
+func runNotebookJournal(c *client.Client, args []string) {
+	if len(args) == 0 || args[0] != "append" {
+		fmt.Fprintln(os.Stderr, "usage: attn notebook journal append --text T [--date YYYY-MM-DD]")
+		os.Exit(2)
+	}
+	fs := flag.NewFlagSet("notebook journal append", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	text := fs.String("text", "", "journal entry text (required)")
+	date := fs.String("date", "", "journal date YYYY-MM-DD (defaults to today)")
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || strings.TrimSpace(*text) == "" {
+		fmt.Fprintln(os.Stderr, "usage: attn notebook journal append --text T [--date YYYY-MM-DD]")
+		os.Exit(2)
+	}
+	res, err := c.NotebookAppendJournal(*text, strings.TrimSpace(*date))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "notebook journal append: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("appended to %s\n", res.Path)
+}
+
+// runNotebookMemory handles `attn notebook memory write --path P [--base-hash H]
+// [--file F]`. Content comes from --file, else stdin.
+func runNotebookMemory(c *client.Client, args []string) {
+	if len(args) == 0 || args[0] != "write" {
+		fmt.Fprintln(os.Stderr, "usage: attn notebook memory write --path P [--base-hash H] [--file F]")
+		os.Exit(2)
+	}
+	fs := flag.NewFlagSet("notebook memory write", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	path := fs.String("path", "", "note path, e.g. /memory/decisions/foo.md (required)")
+	baseHash := fs.String("base-hash", "", "expected current hash for a safe edit (omit to create)")
+	file := fs.String("file", "", "read content from this file instead of stdin")
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || strings.TrimSpace(*path) == "" {
+		fmt.Fprintln(os.Stderr, "usage: attn notebook memory write --path P [--base-hash H] [--file F]")
+		os.Exit(2)
+	}
+	var content []byte
+	var readErr error
+	if strings.TrimSpace(*file) != "" {
+		content, readErr = os.ReadFile(*file)
+	} else {
+		content, readErr = io.ReadAll(os.Stdin)
+	}
+	if readErr != nil {
+		fmt.Fprintf(os.Stderr, "notebook memory write: read content: %v\n", readErr)
+		os.Exit(1)
+	}
+	res, err := c.NotebookWrite(*path, string(content), strings.TrimSpace(*baseHash))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "notebook memory write: %v\n", err)
+		os.Exit(1)
+	}
+	if res.Conflict {
+		current := ""
+		if res.CurrentHash != nil {
+			current = *res.CurrentHash
+		}
+		fmt.Fprintf(os.Stderr, "notebook memory write: conflict — %s changed on disk (current hash %s); re-read and retry\n", res.Path, current)
+		os.Exit(1)
+	}
+	hash := ""
+	if res.Hash != nil {
+		hash = *res.Hash
+	}
+	fmt.Printf("wrote %s (%s)\n", res.Path, hash)
 }
 
 func workspaceContextSourceSession(args []string, allowForce bool) (string, bool, error) {
@@ -1956,11 +2044,19 @@ func runAgentDirectly(requestedAgent string) {
 
 	hasHooks := false
 	if agentdriver.EffectiveCapabilities(driver).HasWorkspaceContext {
-		contextPath, checkoutErr := workspaceContextCheckoutPath(c, sessionID, 40, 25*time.Millisecond)
-		if checkoutErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not prepare workspace context guidance: %v\n", checkoutErr)
+		// A chief-of-staff session gets Notebook guidance (its profile-wide
+		// durable home) in place of the workspace-context checkout. A fresh
+		// session is never the chief, so this only fires on relaunch/recovery of
+		// an already-chief session; otherwise we fall through to the checkout.
+		if guide, gerr := c.NotebookGuide(sessionID); gerr == nil && guide.SessionIsChief {
+			opts.NotebookRoot = guide.Root
 		} else {
-			opts.WorkspaceContextPath = contextPath
+			contextPath, checkoutErr := workspaceContextCheckoutPath(c, sessionID, 40, 25*time.Millisecond)
+			if checkoutErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not prepare workspace context guidance: %v\n", checkoutErr)
+			} else {
+				opts.WorkspaceContextPath = contextPath
+			}
 		}
 	}
 	if cp, ok := agentdriver.GetConfigOverrideProvider(driver); ok {
@@ -2154,7 +2250,11 @@ func runHookSessionStart() {
 }
 
 func workspaceContextGuidanceProvidedAtLaunch() bool {
-	return strings.TrimSpace(os.Getenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE")) != ""
+	// Either marker means launch-time guidance was already injected, so the
+	// SessionStart hook must not also emit workspace-context guidance. A chief
+	// session is launched with Notebook guidance in place of workspace context.
+	return strings.TrimSpace(os.Getenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE")) != "" ||
+		strings.TrimSpace(os.Getenv("ATTN_NOTEBOOK_GUIDANCE")) != ""
 }
 
 type workspaceContextCheckoutClient interface {
