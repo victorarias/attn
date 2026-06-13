@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/hooks"
 	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -64,23 +66,60 @@ func (d *Daemon) broadcastNotebookChanged(origin string, paths ...string) {
 	})
 }
 
-func (d *Daemon) handleNotebookInit(conn net.Conn) {
+// ensureNotebookScaffold creates the notebook scaffold if absent (idempotent),
+// broadcasting notebook_changed only when it actually created files. Returns the
+// resolved root so callers can report it.
+func (d *Daemon) ensureNotebookScaffold() (root string, created bool, err error) {
 	store, err := d.notebookStoreFor()
 	if err != nil {
-		d.sendError(conn, "notebook: "+err.Error())
-		return
+		return "", false, err
 	}
-	created, err := store.EnsureScaffold()
+	created, err = store.EnsureScaffold()
 	if err != nil {
-		d.sendError(conn, "notebook init: "+err.Error())
-		return
+		return "", false, err
 	}
 	if created {
 		d.broadcastNotebookChanged(originAgent, notebook.ScaffoldPaths()...)
 	}
+	return store.Root(), created, nil
+}
+
+func (d *Daemon) handleNotebookInit(conn net.Conn) {
+	root, created, err := d.ensureNotebookScaffold()
+	if err != nil {
+		d.sendError(conn, "notebook init: "+err.Error())
+		return
+	}
 	_ = json.NewEncoder(conn).Encode(protocol.Response{
 		Ok:           true,
-		NotebookInit: &protocol.NotebookInitResult{Root: store.Root(), Created: created},
+		NotebookInit: &protocol.NotebookInitResult{Root: root, Created: created},
+	})
+}
+
+// handleNotebookGuide returns the canonical notebook operating guidance (the
+// single source for both the at-launch injection and the live pull). When the
+// requesting session currently holds the chief role, it also ensures the
+// notebook scaffold exists so the chief always has a real notebook to work in.
+func (d *Daemon) handleNotebookGuide(conn net.Conn, msg *protocol.NotebookGuideMessage) {
+	root, err := d.notebookRoot()
+	if err != nil {
+		d.sendError(conn, "notebook: "+err.Error())
+		return
+	}
+	sessionID := strings.TrimSpace(protocol.Deref(msg.SessionID))
+	sessionIsChief := sessionID != "" && sessionID == d.chiefOfStaffSessionID()
+	if sessionIsChief {
+		if _, _, serr := d.ensureNotebookScaffold(); serr != nil {
+			d.logf("notebook guide: ensure scaffold failed: %v", serr)
+		}
+	}
+	_ = json.NewEncoder(conn).Encode(protocol.Response{
+		Ok: true,
+		NotebookGuide: &protocol.NotebookGuideResult{
+			Guidance:       hooks.NotebookGuidance(root),
+			Root:           root,
+			SessionIsChief: sessionIsChief,
+		},
 	})
 }
 
@@ -186,6 +225,44 @@ func (d *Daemon) handleNotebookAppendJournal(conn net.Conn, msg *protocol.Notebo
 		Ok:            true,
 		NotebookWrite: &protocol.NotebookWriteResult{Path: relPath, Hash: protocol.Ptr(hash)},
 	})
+}
+
+// notebookActivationPrompt is the bounded doorbell typed into a freshly-promoted
+// chief session's PTY. It carries only an instruction to pull guidance from the
+// daemon-owned CLI — never guidance content itself. This is the safe exception
+// to the chief-of-staff "no arbitrary PTY content" boundary: a fixed trigger,
+// content pulled deterministically from `attn notebook guide`.
+const notebookActivationPrompt = "You are now the chief of staff. Run `attn notebook guide` and follow it: your durable memory is the attn Notebook, not this workspace's shared context."
+
+// activateNotebookGuidanceLive types the bounded notebook-activation doorbell
+// into a just-promoted chief session's PTY, but only when that session is idle
+// or waiting for input — never an agent mid-task. It first ensures the notebook
+// scaffold exists. Fire-and-forget: failures are logged, not surfaced.
+func (d *Daemon) activateNotebookGuidanceLive(sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || d.ptyBackend == nil || d.store == nil {
+		return
+	}
+	if _, _, err := d.ensureNotebookScaffold(); err != nil {
+		d.logf("notebook activation: ensure scaffold failed: %v", err)
+	}
+	session := d.store.Get(sessionID)
+	if session == nil {
+		d.logf("notebook activation: session %s closed or remote; skipping live trigger", sessionID)
+		return
+	}
+	if session.State != protocol.SessionStateIdle && session.State != protocol.SessionStateWaitingInput {
+		d.logf("notebook activation: session %s is %s, not idle/waiting; skipping live trigger", sessionID, session.State)
+		return
+	}
+	if err := d.ptyBackend.Input(context.Background(), sessionID, []byte(notebookActivationPrompt)); err != nil {
+		d.logf("notebook activation: input prompt failed for %s: %v", sessionID, err)
+		return
+	}
+	time.Sleep(100 * time.Millisecond)
+	if err := d.ptyBackend.Input(context.Background(), sessionID, []byte{'\r'}); err != nil {
+		d.logf("notebook activation: input enter failed for %s: %v", sessionID, err)
+	}
 }
 
 func notebookEntriesToProtocol(entries []notebook.Entry) []protocol.NotebookEntry {
