@@ -5,7 +5,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as net from 'net';
-import { fileURLToPath } from 'url';
+import { e2ePorts, resolveAttnBinaryPath } from './profileEnv';
 import { WHATS_NEW_ID, WHATS_NEW_STORAGE_KEY } from '../src/hooks/useWhatsNew';
 
 // Mock GitHub Server
@@ -101,29 +101,13 @@ class MockGitHubServer {
   }
 }
 
-// Test port - different from production (9849) to avoid conflicts
-const TEST_DAEMON_PORT = '19849';
+// Daemon port for the active ATTN_PROFILE (default profile keeps the historical
+// 19849; a named profile gets a disjoint per-profile band). The teardown kill
+// below interpolates this port, so it is automatically scoped to this run's own
+// daemon and never touches a peer agent's. See e2e/profileEnv.ts.
+const { daemonPort: TEST_DAEMON_PORT } = e2ePorts();
 const MOCK_GH_HOST = 'mock.github.local';
-const E2E_DIR = path.dirname(fileURLToPath(import.meta.url));
 const TEST_DAEMON_WS_URL = `ws://127.0.0.1:${TEST_DAEMON_PORT}/ws`;
-
-function resolveAttnBinaryPath(): string {
-  const candidates = [
-    process.env.ATTN_E2E_BIN,
-    path.resolve(E2E_DIR, '../../attn'),
-  ].filter((candidate): candidate is string => Boolean(candidate));
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  throw new Error(
-    `attn binary not found. Tried: ${candidates.join(', ')}. ` +
-      `Set ATTN_E2E_BIN or build binary with 'go build -o ./attn ./cmd/attn'.`
-  );
-}
 
 async function killTestDaemons(): Promise<void> {
   try {

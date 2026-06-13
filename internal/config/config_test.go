@@ -479,3 +479,23 @@ func TestE2EPorts_BandsAreDisjoint(t *testing.T) {
 		}
 	}
 }
+
+// TestE2EPorts_NeverCollideWithRealDaemon is the cross-entrypoint safety
+// invariant: a throwaway e2e daemon (any profile) can never bind a port a *real*
+// daemon (any profile) uses, so running e2e never hijacks or is hijacked by a
+// live daemon. Guaranteed by disjoint bands; asserted here so a future band edit
+// that breaks it fails loudly.
+func TestE2EPorts_NeverCollideWithRealDaemon(t *testing.T) {
+	profiles := []string{"", "dev", "agent7", "agent8", "ci-1", "alpha"}
+	realPorts := map[string]string{} // port -> profile that owns it
+	for _, p := range profiles {
+		realPorts[WSPortForProfile(p)] = p
+	}
+	for _, p := range profiles {
+		for _, e2ePort := range []string{E2EDaemonPortForProfile(p), E2EVitePortForProfile(p)} {
+			if owner, taken := realPorts[e2ePort]; taken {
+				t.Errorf("e2e port %q for profile %q collides with the real daemon port of profile %q", e2ePort, p, owner)
+			}
+		}
+	}
+}
