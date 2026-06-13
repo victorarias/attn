@@ -23,6 +23,7 @@ import type { DockTarget } from './components/SessionTerminalWorkspace/dockTarge
 import { ThumbsModal } from './components/ThumbsModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
+import { ShortcutEditorModal } from './components/ShortcutEditorModal';
 import { WhatsNewModal } from './components/WhatsNewModal';
 import { ActionMenu, type ActionMenuItem } from './components/ActionMenu';
 import { WorkspaceContextNavigator, type WorkspaceContextView } from './components/WorkspaceContextNavigator';
@@ -30,6 +31,7 @@ import { CopyToast, useCopyToast } from './components/CopyToast';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
+import { KeybindingsProvider } from './contexts/KeybindingsContext';
 import { useSessionStore, type Session, type TerminalWorkspaceState } from './store/sessions';
 import {
   computeWarmWorkspaceIds,
@@ -107,6 +109,15 @@ function AttentionActionIcon() {
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12 3.5a6 6 0 0 0-6 6v3.2L4.5 16h15L18 12.7V9.5a6 6 0 0 0-6-6Z" />
       <path d="M9.5 19a2.8 2.8 0 0 0 5 0" />
+    </svg>
+  );
+}
+
+function KeyboardActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3" y="6" width="18" height="12" rx="2" />
+      <path d="M7 10h.01M11 10h.01M15 10h.01M8 13.5h8" />
     </svg>
   );
 }
@@ -529,9 +540,11 @@ function App() {
   // Memoize clearGitStatus to prevent subscription effect from re-running
   const clearGitStatus = useCallback(() => setGitStatus(null), []);
 
-  // Wrap the app content with SettingsProvider so useUIScale can access settings
+  // Wrap the app content with SettingsProvider so useUIScale can access settings.
+  // KeybindingsProvider (inside it) syncs shortcut overrides into the resolver.
   return (
     <SettingsProvider settings={settings} setSetting={sendSetSetting}>
+      <KeybindingsProvider>
       <AppContent
         daemonSessions={daemonSessions}
         daemonWorkspaces={daemonWorkspaces}
@@ -625,6 +638,7 @@ function App() {
         clearGitStatus={clearGitStatus}
         registerSessionExitHandler={registerSessionExitHandler}
       />
+      </KeybindingsProvider>
     </SettingsProvider>
   );
 }
@@ -949,6 +963,7 @@ sendFetchPRDetails,
   // Settings modal (lifted from Dashboard for Cmd+, access)
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [workspaceContextsOpen, setWorkspaceContextsOpen] = useState(false);
   const [workspaceContextsLoading, setWorkspaceContextsLoading] = useState(false);
@@ -1554,6 +1569,7 @@ sendFetchPRDetails,
     || whatsNew.isOpen
     || settingsOpen
     || shortcutsOpen
+    || shortcutEditorOpen
     || actionMenuOpen
     || workspaceContextsOpen
     || chiefTransferTarget !== null
@@ -1618,6 +1634,14 @@ sendFetchPRDetails,
       icon: <AttentionActionIcon />,
       shortcut: [shortcutTokens('dock.attention')],
       run: () => openDockPanel('attention'),
+    },
+    {
+      id: 'customize-shortcuts',
+      title: 'Customize keyboard shortcuts',
+      description: 'Rebind shortcuts and restore defaults',
+      keywords: ['keybindings', 'shortcuts', 'keyboard', 'rebind', 'hotkeys'],
+      icon: <KeyboardActionIcon />,
+      run: () => setShortcutEditorOpen(true),
     },
   ], [openDockPanel, openWorkspaceContextNavigator]);
 
@@ -2083,6 +2107,7 @@ sendFetchPRDetails,
     closeSession: handleCloseSession,
     reloadSession,
     setSetting: sendSetSetting,
+    openShortcutEditor: () => setShortcutEditorOpen(true),
     splitPane: (sessionId, paneId, direction) => {
       return createSplitSession('shell', direction, paneId, { baseSessionId: sessionId });
     },
@@ -3139,6 +3164,7 @@ sendFetchPRDetails,
       && !thumbsOpen
       && !whatsNew.isOpen
       && !actionMenuOpen
+      && !shortcutEditorOpen
       && !workspaceContextsOpen,
   });
 
@@ -3567,6 +3593,14 @@ sendFetchPRDetails,
       <ShortcutsModal
         isOpen={shortcutsOpen}
         onClose={() => setShortcutsOpen(false)}
+        onEdit={() => {
+          setShortcutsOpen(false);
+          setShortcutEditorOpen(true);
+        }}
+      />
+      <ShortcutEditorModal
+        isOpen={shortcutEditorOpen}
+        onClose={() => setShortcutEditorOpen(false)}
       />
       <WhatsNewModal
         isOpen={whatsNew.isOpen}

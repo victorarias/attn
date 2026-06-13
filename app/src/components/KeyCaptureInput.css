@@ -1,0 +1,63 @@
+/* app/src/components/KeyCaptureInput.css */
+
+.key-capture-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 3px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 120ms ease-out;
+}
+
+.key-capture-button:hover {
+  border-color: var(--color-border-hover);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.key-capture-button--risky {
+  border-color: rgba(255, 176, 32, 0.5);
+}
+
+.key-capture-empty {
+  font-size: 12px;
+  color: var(--color-text-dimmed);
+  font-style: italic;
+}
+
+.key-capture {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.key-capture--recording .key-capture-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: #ff6b35;
+  border: 1px dashed #ff6b35;
+  border-radius: 6px;
+  background: rgba(255, 107, 53, 0.06);
+}
+
+.key-capture-esc {
+  font-size: 10px;
+  color: var(--color-text-dimmed);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.key-capture-error {
+  font-size: 11px;
+  color: #ff6b35;
+  max-width: 220px;
+  text-align: right;
+}

@@ -1,6 +1,7 @@
 // app/src/shortcuts/useShortcut.ts
 import { useEffect, useRef } from 'react';
-import { SHORTCUTS, ShortcutDef, ShortcutId, matchesShortcut } from './registry';
+import { SHORTCUTS, ShortcutId, matchesShortcut } from './registry';
+import { resolvedShortcutEntries } from './resolver';
 
 type Handler = () => void;
 const NATIVE_SHORTCUT_EVENT = 'attn:native-shortcut';
@@ -19,6 +20,15 @@ export function triggerShortcut(id: ShortcutId): boolean {
   return true;
 }
 
+// While the shortcut editor is capturing a keystroke, the global dispatcher
+// must stand down so recording a combo (even an always-enabled one like ⌘Q)
+// never fires its action. Registration order can't be relied on, so the
+// dispatcher checks this flag directly.
+let captureSuspended = false;
+export function setShortcutCaptureSuspended(suspended: boolean): void {
+  captureSuspended = suspended;
+}
+
 // Single global listener (installed once)
 let listenerInstalled = false;
 
@@ -27,24 +37,27 @@ function installGlobalListener() {
   listenerInstalled = true;
 
   window.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (captureSuspended) return;
     const editableTarget = isNonTerminalEditableTarget(e.target);
     const terminalTarget = isTerminalTarget(e.target);
-    for (const [id, def] of Object.entries(SHORTCUTS)) {
+    // Iterate resolved bindings (defaults merged with user overrides) so rebinds
+    // and unbinds take effect without reinstalling this listener.
+    for (const [id, def] of resolvedShortcutEntries()) {
       if (id === 'terminal.close' && !terminalTarget) {
         continue;
       }
       if (matchesShortcut(e, def)) {
-        if (editableTarget && (def as ShortcutDef).editableTarget === 'native') {
+        if (editableTarget && def.editableTarget === 'native') {
           continue;
         }
-        const shortcutHandlers = handlers.get(id as ShortcutId);
+        const shortcutHandlers = handlers.get(id);
         if (shortcutHandlers && shortcutHandlers.size > 0) {
           if (id === 'session.refreshPRs' && terminalTarget) {
             return;
           }
           e.preventDefault();
           e.stopPropagation(); // Prevent event from reaching the terminal.
-          triggerShortcut(id as ShortcutId);
+          triggerShortcut(id);
           return;
         }
       }
