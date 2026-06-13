@@ -183,9 +183,15 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
               className="shortcut-editor-search-input"
               placeholder="Filter shortcuts…"
               value={query}
+              // Clear any in-flight recording/reassign BEFORE the filter takes
+              // keystrokes. While a row records, KeyCaptureInput owns a
+              // capture-phase window keydown listener that would otherwise grab
+              // the first character typed here and bind it to that row — and the
+              // event never reaches onChange. Focus/mousedown fire first, so we
+              // tear that listener down before the keystroke lands.
+              onFocus={clearTransient}
+              onMouseDown={clearTransient}
               onChange={(e) => {
-                // Filtering can unmount a row mid-reassign/-error, stranding its
-                // inline prompt; drop any transient row state when the query moves.
                 clearTransient();
                 setQuery(e.target.value);
               }}

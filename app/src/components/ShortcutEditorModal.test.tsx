@@ -237,6 +237,24 @@ describe('ShortcutEditorModal', () => {
     expect(within(row('New session in this workspace')).queryByText('Reassign')).toBeNull();
   });
 
+  it('clears recording when the filter is focused, so the first keystroke is not captured as a binding', () => {
+    const { setSetting } = renderEditor();
+    // Enter combo-recording on a row (its KeyCaptureInput now owns a
+    // capture-phase window keydown listener).
+    fireEvent.click(row('Maximize active pane').querySelector('.key-capture-button')!);
+    expect(within(row('Maximize active pane')).queryByLabelText('Record a chord')).toBeNull();
+
+    // Focusing the filter must tear that listener down BEFORE any keystroke,
+    // otherwise the first character would rebind the row instead of searching.
+    fireEvent.focus(filterInput());
+    expect(within(row('Maximize active pane')).getByLabelText('Record a chord')).toBeInTheDocument();
+
+    // The filter now receives text, and no binding was persisted.
+    fireEvent.change(filterInput(), { target: { value: 'zoom' } });
+    expect(filterInput().value).toBe('zoom');
+    expect(setSetting.mock.calls.filter(([k]) => k === KEYBINDINGS_SETTING_KEY)).toHaveLength(0);
+  });
+
   it('clears the filter when the editor closes and reopens', () => {
     const setSetting = vi.fn();
     const tree = (open: boolean) => (
