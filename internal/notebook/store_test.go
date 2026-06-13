@@ -1,0 +1,336 @@
+package notebook
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestEnsureScaffold(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "nb")
+	s := NewStore(root)
+
+	created, err := s.EnsureScaffold()
+	if err != nil {
+		t.Fatalf("EnsureScaffold: %v", err)
+	}
+	if !created {
+		t.Fatal("first EnsureScaffold should report created=true")
+	}
+	for _, rel := range []string{"index.md", "log.md", "memory/index.md"} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+			t.Fatalf("scaffold file %s missing: %v", rel, err)
+		}
+	}
+	for _, rel := range []string{"journal", "memory/decisions", "memory/gotchas", "memory/domain"} {
+		info, err := os.Stat(filepath.Join(root, rel))
+		if err != nil || !info.IsDir() {
+			t.Fatalf("scaffold dir %s missing: %v", rel, err)
+		}
+	}
+
+	// Idempotent: a second run creates nothing and never clobbers.
+	if err := os.WriteFile(filepath.Join(root, "index.md"), []byte("EDITED"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	created, err = s.EnsureScaffold()
+	if err != nil {
+		t.Fatalf("second EnsureScaffold: %v", err)
+	}
+	if created {
+		t.Fatal("second EnsureScaffold should report created=false")
+	}
+	got, _ := os.ReadFile(filepath.Join(root, "index.md"))
+	if string(got) != "EDITED" {
+		t.Fatalf("EnsureScaffold clobbered an existing file: %q", got)
+	}
+}
+
+func TestReadNotFound(t *testing.T) {
+	s := NewStore(t.TempDir())
+	if _, _, err := s.Read("memory/missing.md"); !IsNotFound(err) {
+		t.Fatalf("Read missing = %v, want NotFoundError", err)
+	}
+}
+
+func TestWriteCreateAndConflict(t *testing.T) {
+	s := NewStore(t.TempDir())
+	content := []byte("---\nkind: memory\n---\nhello\n")
+
+	hash, conflict, err := s.Write("memory/decisions/foo.md", content, "")
+	if err != nil || conflict != nil {
+		t.Fatalf("create: err=%v conflict=%v", err, conflict)
+	}
+	if hash != Hash(content) {
+		t.Fatalf("create hash = %q, want %q", hash, Hash(content))
+	}
+
+	// Create-only against an existing file is a conflict, not an overwrite.
+	_, conflict, err = s.Write("memory/decisions/foo.md", []byte("other"), "")
+	if err != nil {
+		t.Fatalf("create-conflict err: %v", err)
+	}
+	if conflict == nil || conflict.CurrentHash != Hash(content) {
+		t.Fatalf("expected create conflict carrying current hash, got %#v", conflict)
+	}
+	got, _, _ := s.Read("memory/decisions/foo.md")
+	if string(got) != string(content) {
+		t.Fatalf("create-conflict overwrote the file: %q", got)
+	}
+}
+
+func TestWriteCASEdit(t *testing.T) {
+	s := NewStore(t.TempDir())
+	v1 := []byte("---\nkind: memory\n---\nv1\n")
+	h1, _, err := s.Write("memory/decisions/foo.md", v1, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Stale base hash => conflict, no write.
+	v2 := []byte("---\nkind: memory\n---\nv2\n")
+	_, conflict, err := s.Write("memory/decisions/foo.md", v2, "deadbeef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conflict == nil || conflict.CurrentHash != h1 {
+		t.Fatalf("stale-base write = conflict %#v, want current hash %q", conflict, h1)
+	}
+
+	// Matching base hash => applies.
+	h2, conflict, err := s.Write("memory/decisions/foo.md", v2, h1)
+	if err != nil || conflict != nil {
+		t.Fatalf("CAS edit: err=%v conflict=%v", err, conflict)
+	}
+	got, gotHash, _ := s.Read("memory/decisions/foo.md")
+	if string(got) != string(v2) || gotHash != h2 {
+		t.Fatalf("CAS edit did not apply: content=%q hash=%q", got, gotHash)
+	}
+}
+
+func TestWriteRejectsInvalidKind(t *testing.T) {
+	s := NewStore(t.TempDir())
+	_, _, err := s.Write("memory/foo.md", []byte("---\nkind: bogus\n---\nx\n"), "")
+	if err == nil {
+		t.Fatal("Write should reject an explicitly-declared invalid kind")
+	}
+	// Absent kind is permitted.
+	if _, _, err := s.Write("memory/bar.md", []byte("# no frontmatter\n"), ""); err != nil {
+		t.Fatalf("Write without a kind should be allowed: %v", err)
+	}
+}
+
+func TestAppendJournal(t *testing.T) {
+	s := NewStore(t.TempDir())
+
+	rel, _, err := s.AppendJournal("2026-06-13", "first entry")
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if rel != "journal/2026-06-13.md" {
+		t.Fatalf("journal path = %q", rel)
+	}
+	rel, _, err = s.AppendJournal("2026-06-13", "second entry")
+	if err != nil {
+		t.Fatalf("second append: %v", err)
+	}
+
+	content, _, _ := s.Read(rel)
+	doc := ParsePermissive(content)
+	if doc.Kind() != KindJournal {
+		t.Fatalf("journal kind = %q, want %q", doc.Kind(), KindJournal)
+	}
+	if !strings.Contains(doc.Body, "first entry") || !strings.Contains(doc.Body, "second entry") {
+		t.Fatalf("journal body missing entries:\n%s", doc.Body)
+	}
+
+	if _, _, err := s.AppendJournal("not-a-date", "x"); err == nil {
+		t.Fatal("AppendJournal should reject a malformed date")
+	}
+}
+
+// A symlinked directory inside the root that points outside must not let
+// reads/writes escape the root (the notebook lives in the user's home and is
+// externally writable, so a planted symlink is realistic).
+func TestStoreRejectsSymlinkEscape(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "nb")
+	outside := filepath.Join(base, "outside")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(outside, "secret.md")
+	if err := os.WriteFile(secret, []byte("TOP SECRET\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "evil")); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(root)
+
+	if _, _, err := s.Read("evil/secret.md"); err == nil {
+		t.Fatal("Read through a symlinked dir should be rejected")
+	}
+	if _, _, err := s.Write("evil/secret.md", []byte("---\nkind: memory\n---\nx\n"), ""); err == nil {
+		t.Fatal("Write through a symlinked dir should be rejected")
+	}
+	if got, _ := os.ReadFile(secret); string(got) != "TOP SECRET\n" {
+		t.Fatalf("outside file was modified through the symlink: %q", got)
+	}
+}
+
+// A legitimately symlinked root (user points ~/attn-notebook at a synced folder)
+// must still work — the guard resolves the root too.
+func TestStoreAllowsSymlinkedRoot(t *testing.T) {
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	link := filepath.Join(base, "link")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(link)
+	if _, err := s.EnsureScaffold(); err != nil {
+		t.Fatalf("EnsureScaffold on a symlinked root: %v", err)
+	}
+	if _, _, err := s.Write("memory/foo.md", []byte("---\nkind: memory\n---\nx\n"), ""); err != nil {
+		t.Fatalf("write under a symlinked root should work: %v", err)
+	}
+}
+
+// The prefix scopes a subtree on path-segment boundaries, not raw substring.
+func TestListPrefixIsPathSegmentBoundary(t *testing.T) {
+	s := NewStore(t.TempDir())
+	body := []byte("---\nkind: memory\n---\nx\n")
+	if _, _, err := s.Write("memory/decisions/foo.md", body, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Write("memory/decisions-archive/bar.md", body, ""); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := s.List("memory/decisions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundFoo, foundArchive := false, false
+	for _, e := range entries {
+		switch e.Path {
+		case "memory/decisions/foo.md":
+			foundFoo = true
+		case "memory/decisions-archive/bar.md":
+			foundArchive = true
+		}
+	}
+	if !foundFoo {
+		t.Fatalf("prefix should include memory/decisions/foo.md; got %+v", entries)
+	}
+	if foundArchive {
+		t.Fatalf("prefix must NOT leak the sibling memory/decisions-archive/bar.md; got %+v", entries)
+	}
+}
+
+// List extracts frontmatter from a large file without loading the whole body,
+// and still reports the full size.
+func TestListReadsFrontmatterFromLargeFile(t *testing.T) {
+	s := NewStore(t.TempDir())
+	big := "---\nkind: memory\ntitle: Big\n---\n" + strings.Repeat("x\n", 100<<10) // ~200 KiB body
+	if _, _, err := s.Write("memory/big.md", []byte(big), ""); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := s.List("memory/big.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Kind != "memory" || entries[0].Title != "Big" {
+		t.Fatalf("List did not extract frontmatter from a large file: %+v", entries)
+	}
+	if entries[0].Size != int64(len(big)) {
+		t.Fatalf("List size = %d, want %d", entries[0].Size, len(big))
+	}
+}
+
+// AppendJournal must not corrupt frontmatter an external tool wrote (comments,
+// key order, ambiguous scalars all survive the next attn append).
+func TestAppendJournalPreservesExistingFrontmatter(t *testing.T) {
+	s := NewStore(t.TempDir())
+	existing := "---\nkind: journal\n# external note\nobsidian_id: 007\nzeta: z\ntitle: jrnl\n---\n# entries\n\nfirst\n"
+	if _, _, err := s.Write("journal/2026-06-13.md", []byte(existing), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.AppendJournal("2026-06-13", "second"); err != nil {
+		t.Fatal(err)
+	}
+	content, _, _ := s.Read("journal/2026-06-13.md")
+	got := string(content)
+	for _, want := range []string{"# external note", "obsidian_id: 007", "first", "second"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("append dropped %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestList(t *testing.T) {
+	s := NewStore(t.TempDir())
+
+	// Uninitialized root => empty list, not an error.
+	entries, err := s.List("")
+	if err != nil {
+		t.Fatalf("List uninitialized: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("List uninitialized = %d entries, want 0", len(entries))
+	}
+
+	if _, err := s.EnsureScaffold(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Write("memory/decisions/foo.md", []byte("---\nkind: memory\ntitle: Foo\nsummary: a decision\n---\nbody\n"), ""); err != nil {
+		t.Fatal(err)
+	}
+	// Machine state under .attn/ must never be surfaced.
+	if err := os.MkdirAll(filepath.Join(s.Root(), ".attn", "dreams"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.Root(), ".attn", "dreams", "note.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err = s.List("")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	paths := make(map[string]Entry, len(entries))
+	for _, e := range entries {
+		if strings.HasPrefix(e.Path, ".attn/") {
+			t.Fatalf("List surfaced machine state: %q", e.Path)
+		}
+		paths[e.Path] = e
+	}
+	foo, ok := paths["memory/decisions/foo.md"]
+	if !ok {
+		t.Fatalf("List missing the written note; got %v", entries)
+	}
+	if foo.Kind != "memory" || foo.Title != "Foo" || foo.Summary != "a decision" {
+		t.Fatalf("List entry metadata = %+v", foo)
+	}
+
+	// Prefix filters to a subtree.
+	mem, err := s.List("/memory/decisions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range mem {
+		if !strings.HasPrefix(e.Path, "memory/decisions") {
+			t.Fatalf("prefixed List returned out-of-subtree entry %q", e.Path)
+		}
+	}
+	if len(mem) == 0 {
+		t.Fatal("prefixed List returned nothing")
+	}
+}

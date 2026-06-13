@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
@@ -37,6 +38,9 @@ const (
 	SettingTailscaleEnabled         = "tailscale_enabled"
 	SettingKeybindingsConfig        = "keybindings_config"
 	SettingNewSessionYoloPrefix     = "new_session_yolo_"
+	// SettingNotebookRoot overrides the notebook's filesystem root. Empty =>
+	// the profile-derived default (~/attn-notebook[-profile]).
+	SettingNotebookRoot = "notebook.root"
 )
 
 func (d *Daemon) handleGetSettingsWS(client *wsClient) {
@@ -234,6 +238,8 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateBooleanSetting(value)
 	case SettingWorkspaceContextJanitor:
 		return d.validateWorkspaceContextJanitorSetting(value)
+	case SettingNotebookRoot:
+		return validateNotebookRoot(value)
 	case SettingKeybindingsConfig:
 		return validateKeybindingsConfig(value)
 	case SettingReviewLoopPresets, SettingReviewLoopLastPreset, SettingReviewLoopLastPrompt, SettingReviewLoopLastIterations, SettingReviewLoopModel, SettingReviewerModel:
@@ -274,6 +280,34 @@ func validateUIScale(value string) error {
 	}
 	if scale < 0.5 || scale > 2.0 {
 		return fmt.Errorf("scale must be between 0.5 and 2.0")
+	}
+	return nil
+}
+
+// validateNotebookRoot accepts an empty value (meaning the profile-derived
+// default) or an absolute path (a leading ~/ is expanded). It refuses a path
+// inside the attn data dir: the notebook must live OUTSIDE ~/.attn[-profile] so
+// it stays a plain, externally-syncable directory a dotfile-skipping scanner
+// won't miss.
+func validateNotebookRoot(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	path := value
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("cannot determine home directory: %w", err)
+		}
+		path = filepath.Join(home, path[2:])
+	}
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("notebook.root must be an absolute path")
+	}
+	dataDir := config.DataDir()
+	clean := filepath.Clean(path)
+	if clean == dataDir || strings.HasPrefix(clean, dataDir+string(filepath.Separator)) {
+		return fmt.Errorf("notebook.root must be outside the attn data dir (%s)", dataDir)
 	}
 	return nil
 }

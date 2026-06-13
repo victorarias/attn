@@ -227,6 +227,9 @@ func main() {
 	case "workspace":
 		maybePrintProfileBanner()
 		runWorkspace()
+	case "notebook":
+		maybePrintProfileBanner()
+		runNotebook()
 	case "profile":
 		// No banner: `attn profile resolve --field …` must print only the
 		// value so the Makefile / harness can consume it cleanly.
@@ -506,6 +509,7 @@ commands:
   delegate --brief-file <path>      start another agent with a delegated brief
   dispatch <command>                 list or report chief-of-staff dispatches
   workspace context <command>       edit shared workspace context
+  notebook <command>                browse the durable markdown notebook
   open <file.md> [--session <id>]   show a markdown file in attn
   browser <command>                 open and control the in-app browser
   review-loop <command>             manage an autonomous review loop
@@ -984,6 +988,81 @@ commands:
   compact [--session <id>]         compact now with the configured janitor
   rollback [--session <id>]        restore the latest pre-compaction snapshot
 `)
+}
+
+func writeNotebookHelp(w io.Writer) {
+	fmt.Fprint(w, `usage: attn notebook <command>
+
+commands:
+  init                 create the notebook (idempotent); prints its root
+  show <path>          print a note's contents (path may be root-absolute)
+  list [prefix]        list notes, optionally under a path prefix
+`)
+}
+
+func runNotebook() {
+	if len(os.Args) < 3 || os.Args[2] == "-h" || os.Args[2] == "--help" {
+		writeNotebookHelp(os.Stdout)
+		return
+	}
+	warnIfDaemonVersionMismatch()
+	action := os.Args[2]
+	args := os.Args[3:]
+	c := client.New("")
+	switch action {
+	case "init":
+		if len(args) != 0 {
+			fmt.Fprintln(os.Stderr, "usage: attn notebook init")
+			os.Exit(2)
+		}
+		res, err := c.NotebookInit()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "notebook init: %v\n", err)
+			os.Exit(1)
+		}
+		if res.Created {
+			fmt.Printf("initialized notebook at %s\n", res.Root)
+		} else {
+			fmt.Printf("notebook already initialized at %s\n", res.Root)
+		}
+	case "show":
+		if len(args) != 1 {
+			fmt.Fprintln(os.Stderr, "usage: attn notebook show <path>")
+			os.Exit(2)
+		}
+		res, err := c.NotebookRead(args[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "notebook show: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Print(res.Content)
+	case "list":
+		prefix := ""
+		switch len(args) {
+		case 0:
+		case 1:
+			prefix = args[0]
+		default:
+			fmt.Fprintln(os.Stderr, "usage: attn notebook list [prefix]")
+			os.Exit(2)
+		}
+		entries, err := c.NotebookList(prefix)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "notebook list: %v\n", err)
+			os.Exit(1)
+		}
+		for _, e := range entries {
+			if e.Title != nil && *e.Title != "" {
+				fmt.Printf("%s\t%s\n", e.Path, *e.Title)
+			} else {
+				fmt.Println(e.Path)
+			}
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "notebook: unknown command %q\n\n", action)
+		writeNotebookHelp(os.Stderr)
+		os.Exit(2)
+	}
 }
 
 func workspaceContextSourceSession(args []string, allowForce bool) (string, bool, error) {

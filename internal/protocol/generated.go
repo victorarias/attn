@@ -1708,6 +1708,116 @@ type MuteWorkspaceMessage struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
+type NotebookAppendJournalMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Date corresponds to the JSON schema field "date".
+	Date *string `json:"date,omitempty,omitzero"`
+
+	// Entry corresponds to the JSON schema field "entry".
+	Entry string `json:"entry"`
+}
+
+type NotebookChangedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Origin corresponds to the JSON schema field "origin".
+	Origin string `json:"origin"`
+
+	// Paths corresponds to the JSON schema field "paths".
+	Paths []string `json:"paths"`
+}
+
+type NotebookEntry struct {
+	// Kind corresponds to the JSON schema field "kind".
+	Kind *string `json:"kind,omitempty,omitzero"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// Size corresponds to the JSON schema field "size".
+	Size int `json:"size"`
+
+	// Summary corresponds to the JSON schema field "summary".
+	Summary *string `json:"summary,omitempty,omitzero"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title *string `json:"title,omitempty,omitzero"`
+
+	// Updated corresponds to the JSON schema field "updated".
+	Updated *string `json:"updated,omitempty,omitzero"`
+}
+
+type NotebookInitMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+}
+
+type NotebookInitResult struct {
+	// Created corresponds to the JSON schema field "created".
+	Created bool `json:"created"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root string `json:"root"`
+}
+
+type NotebookListMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Prefix corresponds to the JSON schema field "prefix".
+	Prefix *string `json:"prefix,omitempty,omitzero"`
+}
+
+type NotebookReadMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+}
+
+type NotebookReadResult struct {
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// Hash corresponds to the JSON schema field "hash".
+	Hash string `json:"hash"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+}
+
+type NotebookWriteMessage struct {
+	// BaseHash corresponds to the JSON schema field "base_hash".
+	BaseHash *string `json:"base_hash,omitempty,omitzero"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+}
+
+type NotebookWriteResult struct {
+	// Conflict corresponds to the JSON schema field "conflict".
+	Conflict bool `json:"conflict"`
+
+	// CurrentHash corresponds to the JSON schema field "current_hash".
+	CurrentHash *string `json:"current_hash,omitempty,omitzero"`
+
+	// Hash corresponds to the JSON schema field "hash".
+	Hash *string `json:"hash,omitempty,omitzero"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+}
+
 type OpenBrowserMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2334,6 +2444,18 @@ type Response struct {
 
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
+
+	// NotebookEntries corresponds to the JSON schema field "notebook_entries".
+	NotebookEntries []NotebookEntry `json:"notebook_entries,omitempty,omitzero"`
+
+	// NotebookInit corresponds to the JSON schema field "notebook_init".
+	NotebookInit *NotebookInitResult `json:"notebook_init,omitempty,omitzero"`
+
+	// NotebookRead corresponds to the JSON schema field "notebook_read".
+	NotebookRead *NotebookReadResult `json:"notebook_read,omitempty,omitzero"`
+
+	// NotebookWrite corresponds to the JSON schema field "notebook_write".
+	NotebookWrite *NotebookWriteResult `json:"notebook_write,omitempty,omitzero"`
 
 	// Ok corresponds to the JSON schema field "ok".
 	Ok bool `json:"ok"`
