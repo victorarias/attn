@@ -253,6 +253,35 @@
   cursor: grabbing;
 }
 
+/* A session row dragged out of the sidebar dims in place while a ghost label
+   follows the cursor. It reuses the same drop targets as the in-view pane drag:
+   other workspace groups to merge, the "New workspace" zone to split. */
+.session-item--draggable {
+  touch-action: none;
+}
+
+.session-item--dragging {
+  opacity: 0.35;
+}
+
+.session-drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  max-width: 220px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--color-bg-elevated));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  color: var(--color-text-primary);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Insertion seam between workspaces, shown only during a reorder drag. It keeps a
    stable hit-zone so the cursor can land between rows without merging them. */
 .workspace-reorder-seam {

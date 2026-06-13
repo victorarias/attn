@@ -160,6 +160,13 @@ interface SidebarProps {
   // split it into a brand-new workspace. Wired in App to
   // sendWorkspaceMoveLeafToNewWorkspace.
   onNewWorkspaceDrop?: () => void;
+  // Begin / end a leaf drag started by pressing a session row in the sidebar.
+  // onSessionDragStart arms the same App-level leaf drag the in-view pane header
+  // uses (leafId = the session's layout pane id), so the existing workspace-group
+  // and "New workspace" drop targets handle the actual move/split. onSessionDragEnd
+  // tears the drag down. Wired in App to handleLeafDragStart / handleLeafDragEnd.
+  onSessionDragStart?: (workspaceId: string, endpointId: string | undefined, paneId: string) => void;
+  onSessionDragEnd?: () => void;
   // Reorder a workspace by dropping its header onto an insertion seam. The
   // neighbour ids describe the seam: prevWorkspaceId ends up directly above the
   // moved workspace, nextWorkspaceId directly below. Either may be undefined when
@@ -325,6 +332,8 @@ export function Sidebar({
   onWorkspaceDragLeave,
   onWorkspaceDragDrop,
   onNewWorkspaceDrop,
+  onSessionDragStart,
+  onSessionDragEnd,
   onWorkspaceReorder,
   onSelectSession,
   onSelectWorkspace,
@@ -424,6 +433,14 @@ export function Sidebar({
   // True while the cursor is over the "New workspace" drop-zone during a leaf drag,
   // so the zone shows its active/hover styling. Reset on leave and on drop.
   const [newWorkspaceDropActive, setNewWorkspaceDropActive] = useState(false);
+  // Floating ghost label following the cursor while dragging a session row out of
+  // the sidebar (null when no session drag is active), plus the session id of the
+  // dragged row so it can render dimmed. The drop itself is handled by the same
+  // workspace-group / "New workspace" targets the in-view pane drag uses.
+  const [sessionDragGhost, setSessionDragGhost] = useState<{ x: number; y: number; label: string } | null>(null);
+  const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
+  const sessionDragRef = useRef<{ pointerId: number; startX: number; startY: number; armed: boolean } | null>(null);
+  const suppressNextSessionClickRef = useRef(false);
   // The insertion slot (0..N) the cursor is currently nearest. null = none yet.
   const [reorderSeamIndex, setReorderSeamIndex] = useState<number | null>(null);
   // Per-interaction refs so listeners read fresh values without re-binding.
@@ -634,6 +651,99 @@ export function Sidebar({
 
   // Tear down a live reorder if the component unmounts mid-drag.
   useEffect(() => endReorderDrag, [endReorderDrag]);
+
+  // A press on a session row arms a leaf drag once the pointer crosses the
+  // threshold; a sub-threshold release stays a plain selection click. Unlike the
+  // workspace reorder, this takes NO pointer capture: the workspace-group and
+  // "New workspace" drop targets rely on their own pointer handlers firing as the
+  // cursor moves over them, exactly like the in-view pane drag. So this gesture
+  // only arms the App-level leaf drag and floats a ghost; the existing targets do
+  // the move. Requires a layout pane id (sessions without one aren't in a pane).
+  const SESSION_DRAG_THRESHOLD = 6;
+  const handleSessionPointerDown = useCallback((
+    workspace: SidebarWorkspace,
+    paneId: string,
+    sessionId: string,
+    label: string,
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    // Child buttons (the ••• actions) stop propagation, so this only fires from a
+    // primary-button press on the row chrome itself.
+    if (event.button !== 0 || !onSessionDragStart) {
+      return;
+    }
+    // A fresh press always starts un-suppressed, so a drag that ended over another
+    // element (leaving the flag set) can't swallow this row's next real click.
+    suppressNextSessionClickRef.current = false;
+    sessionDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      armed: false,
+    };
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const drag = sessionDragRef.current;
+      if (!drag || moveEvent.pointerId !== drag.pointerId) {
+        return;
+      }
+      if (!drag.armed) {
+        const dx = moveEvent.clientX - drag.startX;
+        const dy = moveEvent.clientY - drag.startY;
+        if (Math.hypot(dx, dy) < SESSION_DRAG_THRESHOLD) {
+          return;
+        }
+        drag.armed = true;
+        suppressNextSessionClickRef.current = true;
+        setDraggingSessionId(sessionId);
+        onSessionDragStart(workspace.id, workspace.endpointId, paneId);
+      }
+      setSessionDragGhost({ x: moveEvent.clientX, y: moveEvent.clientY, label });
+    };
+
+    const finish = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+
+    const teardownDrag = (armed: boolean) => {
+      sessionDragRef.current = null;
+      setSessionDragGhost(null);
+      setDraggingSessionId(null);
+      // Only tear down the App-level drag if we actually started one — a
+      // sub-threshold press never armed it.
+      if (armed) {
+        onSessionDragEnd?.();
+      }
+    };
+
+    const onUp = () => {
+      const drag = sessionDragRef.current;
+      finish();
+      teardownDrag(Boolean(drag?.armed));
+    };
+
+    const onCancel = () => {
+      const drag = sessionDragRef.current;
+      finish();
+      teardownDrag(Boolean(drag?.armed));
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+  }, [onSessionDragStart, onSessionDragEnd]);
+
+  // Swallow the click that fires right after an armed session drag's pointerup so
+  // the release does not also select the session.
+  const handleSessionClickCapture = useCallback((event: ReactMouseEvent) => {
+    if (suppressNextSessionClickRef.current) {
+      suppressNextSessionClickRef.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, []);
 
   if (collapsed) {
     return (
@@ -870,13 +980,19 @@ export function Sidebar({
                   );
                 }
                 const session = child.session;
+                const paneId = child.paneId;
+                const draggable = Boolean(paneId && onSessionDragStart);
                 return (
                   <div
                     key={session.id}
-                    className={`session-item grouped ${selectedId === session.id ? 'selected' : ''} ${session.recoverable ? 'recoverable' : ''} ${session.reviewLoopStatus ? `session-item--loop-${session.reviewLoopStatus}` : ''}`}
+                    className={`session-item grouped ${selectedId === session.id ? 'selected' : ''} ${session.recoverable ? 'recoverable' : ''} ${session.reviewLoopStatus ? `session-item--loop-${session.reviewLoopStatus}` : ''} ${draggable ? 'session-item--draggable' : ''} ${draggingSessionId === session.id ? 'session-item--dragging' : ''}`.trim().replace(/\s+/g, ' ')}
                     data-testid={`sidebar-session-${session.id}`}
                     data-state={session.state}
                     onClick={() => onSelectSession(session.id)}
+                    onClickCapture={draggable ? handleSessionClickCapture : undefined}
+                    onPointerDown={draggable && paneId
+                      ? (event) => handleSessionPointerDown(workspace, paneId, session.id, session.label, event)
+                      : undefined}
                     title={session.recoverable ? 'Session will be recovered when opened' : undefined}
                   >
                     <StateIndicator state={session.state} size="md" seed={session.id} />
@@ -932,6 +1048,15 @@ export function Sidebar({
           >
             <span className="new-workspace-dropzone-plus">＋</span>
             <span className="new-workspace-dropzone-label">New workspace</span>
+          </div>
+        )}
+        {sessionDragGhost && (
+          <div
+            className="session-drag-ghost"
+            data-testid="session-drag-ghost"
+            style={{ left: sessionDragGhost.x + 12, top: sessionDragGhost.y + 12 }}
+          >
+            {sessionDragGhost.label}
           </div>
         )}
       </div>

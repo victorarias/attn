@@ -38,6 +38,10 @@ export type WorkspaceChild<TSession extends WorkspaceViewSession = WorkspaceView
   | {
     kind: 'session';
     id: string;
+    // The layout pane (leaf) id wrapping this session, when the session is
+    // represented in the workspace layout. Undefined for sessions not yet in a
+    // pane. Drag-from-sidebar uses it as the leaf id for move/split commands.
+    paneId?: string;
     session: TSession;
   }
   | {
@@ -207,7 +211,7 @@ function workspaceChildren<TSession extends WorkspaceViewSession>(
     const session = sessionId ? sessionById.get(sessionId) : undefined;
     if (session && !representedSessionIds.has(session.id)) {
       representedSessionIds.add(session.id);
-      children.push({ kind: 'session', id: session.id, session });
+      children.push({ kind: 'session', id: session.id, paneId: leaf.paneId, session });
     }
   }
 

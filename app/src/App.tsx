@@ -3366,6 +3366,8 @@ sendFetchPRDetails,
           onWorkspaceDragLeave={handleWorkspaceDragLeave}
           onWorkspaceDragDrop={handleWorkspaceDragDrop}
           onNewWorkspaceDrop={handleNewWorkspaceDrop}
+          onSessionDragStart={handleLeafDragStart}
+          onSessionDragEnd={handleLeafDragEnd}
           onWorkspaceReorder={handleWorkspaceReorder}
           onSelectSession={handleSelectSession}
           onSelectWorkspace={handleSelectWorkspace}

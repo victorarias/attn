@@ -280,6 +280,64 @@ describe('Sidebar', () => {
     expect(onNewWorkspaceDrop).toHaveBeenCalledTimes(1);
   });
 
+  it('starts a leaf drag when a session row is dragged out of the sidebar', () => {
+    const workspace = workspaceWithBrowserTile();
+    const onSessionDragStart = vi.fn();
+    const onSessionDragEnd = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        workspaces={[workspace]}
+        visualOrder={[workspace]}
+        visualIndexByWorkspaceId={new Map([[workspace.id, 0]])}
+        onSessionDragStart={onSessionDragStart}
+        onSessionDragEnd={onSessionDragEnd}
+      />,
+    );
+
+    const row = screen.getByTestId('sidebar-session-s1');
+    expect(screen.queryByTestId('session-drag-ghost')).not.toBeInTheDocument();
+
+    // Press, then cross the activation threshold to arm the drag. The leaf id is
+    // the session's layout pane id, not the session id.
+    fireEvent.pointerDown(row, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    expect(onSessionDragStart).not.toHaveBeenCalled();
+
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 10, clientY: 40 });
+    expect(onSessionDragStart).toHaveBeenCalledWith('workspace-browser', undefined, 'pane-s1');
+    expect(screen.getByTestId('session-drag-ghost')).toBeInTheDocument();
+    expect(row).toHaveClass('session-item--dragging');
+
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 10, clientY: 40 });
+    expect(onSessionDragEnd).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('session-drag-ghost')).not.toBeInTheDocument();
+  });
+
+  it('treats a sub-threshold press on a session row as a plain selection click', () => {
+    const workspace = workspaceWithBrowserTile();
+    const onSessionDragStart = vi.fn();
+    const onSelectSession = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        workspaces={[workspace]}
+        visualOrder={[workspace]}
+        visualIndexByWorkspaceId={new Map([[workspace.id, 0]])}
+        onSelectSession={onSelectSession}
+        onSessionDragStart={onSessionDragStart}
+      />,
+    );
+
+    const row = screen.getByTestId('sidebar-session-s1');
+    fireEvent.pointerDown(row, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 11, clientY: 12 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 11, clientY: 12 });
+    fireEvent.click(row);
+
+    expect(onSessionDragStart).not.toHaveBeenCalled();
+    expect(onSelectSession).toHaveBeenCalledWith('s1');
+  });
+
   it('reorders a workspace by dragging its header onto an insertion seam', () => {
     const sidebarData = buildSidebarData([
       { id: 'a1', label: 'A1', state: 'idle', cwd: '/repo/a' },
