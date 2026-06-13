@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-13]
+
+### Fixed
+- **A session running work in the background no longer flips to a confusing "unknown" state.** When Claude Code hands off to a background workflow or background shell command and pauses its turn, the session now stays shown as working until the background work finishes and the turn resumes — instead of briefly being mis-detected as "unknown" because it paused before its transcript was written.
+
 ## [2026-06-12]
 
 ### Changed

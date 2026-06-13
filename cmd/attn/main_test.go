@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -853,6 +854,53 @@ func TestParseOpenArgs(t *testing.T) {
 			}
 			if path != tc.wantPath || session != tc.wantSession {
 				t.Fatalf("parseOpenArgs(%v) = (%q, %q), want (%q, %q)", tc.args, path, session, tc.wantPath, tc.wantSession)
+			}
+		})
+	}
+}
+
+func TestHasActiveBackgroundTask(t *testing.T) {
+	cases := []struct {
+		name string
+		// payload is a real Claude Code 2.1.177 Stop-hook stdin body (trimmed to
+		// the fields attn parses), captured from a live background Workflow run.
+		payload string
+		want    bool
+	}{
+		{
+			name:    "workflow running (parent yields mid-run)",
+			payload: `{"hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[{"id":"wv9p74ip7","type":"workflow","status":"running","name":"hello-parallel"}],"session_crons":[]}`,
+			want:    true,
+		},
+		{
+			name:    "workflow plus background shells running",
+			payload: `{"background_tasks":[{"type":"workflow","status":"running"},{"type":"shell","status":"running"},{"type":"shell","status":"running"}]}`,
+			want:    true,
+		},
+		{
+			name:    "empty background_tasks (workflow finished)",
+			payload: `{"hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[],"session_crons":[]}`,
+			want:    false,
+		},
+		{
+			name:    "field absent (e.g. another agent)",
+			payload: `{"hook_event_name":"Stop","stop_hook_active":false}`,
+			want:    false,
+		},
+		{
+			name:    "task present but not running",
+			payload: `{"background_tasks":[{"type":"workflow","status":"completed"}]}`,
+			want:    false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var input hookInput
+			if err := json.Unmarshal([]byte(tc.payload), &input); err != nil {
+				t.Fatalf("unmarshal payload: %v", err)
+			}
+			if got := hasActiveBackgroundTask(input); got != tc.want {
+				t.Fatalf("hasActiveBackgroundTask() = %v, want %v", got, tc.want)
 			}
 		})
 	}
