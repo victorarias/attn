@@ -633,6 +633,7 @@ model NotebookWriteMessage {
   path: string;
   content: string;
   base_hash?: string; // omitted = create-only; present = hash-CAS edit
+  request_id?: string; // set by the WS frontend for result correlation; the unix CLI omits it
 }
 
 model NotebookAppendJournalMessage {
@@ -2070,6 +2071,17 @@ model NotebookBacklinksResultMessage {
   entries?: NotebookEntry[];
 }
 
+// Result of a WS notebook_write (the in-app editor's hash-CAS save). A conflict
+// (the file changed on disk since the editor loaded it) is a successful response
+// the UI reconciles, carried in result.conflict — not a transport error.
+model NotebookWriteResultMessage {
+  event: "notebook_write_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  result?: NotebookWriteResult;
+}
+
 model WorkspaceContextResultMessage {
   event: "workspace_context_result";
   action: string;
@@ -2250,6 +2262,7 @@ alias DaemonEvent =
   | NotebookListResultMessage
   | NotebookReadResultMessage
   | NotebookBacklinksResultMessage
+  | NotebookWriteResultMessage
   | MarkFileViewedResultMessage
   | AddCommentResultMessage
   | UpdateCommentResultMessage

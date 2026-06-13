@@ -887,6 +887,9 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdNotebookBacklinks:
 		nbBack := msg.(*protocol.NotebookBacklinksMessage)
 		go d.sendNotebookBacklinksWSResult(client, protocol.Deref(nbBack.RequestID), nbBack.Path)
+	case protocol.CmdNotebookWrite:
+		nbWrite := msg.(*protocol.NotebookWriteMessage)
+		go d.sendNotebookWriteWSResult(client, protocol.Deref(nbWrite.RequestID), nbWrite.Path, nbWrite.Content, protocol.Deref(nbWrite.BaseHash))
 	case protocol.CmdApprovePR:
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
 	case protocol.CmdMergePR:

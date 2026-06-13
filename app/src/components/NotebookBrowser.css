@@ -217,8 +217,16 @@
 }
 
 .notebook-browser-document-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   padding: 28px clamp(28px, 6vw, 90px) 18px;
   border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.notebook-browser-document-titles {
+  min-width: 0;
 }
 
 .notebook-browser-document-meta h2 {
@@ -232,6 +240,123 @@
   margin: 0;
   color: var(--color-text-tertiary);
   font: 11px/1.4 ui-monospace, 'SFMono-Regular', monospace;
+}
+
+.notebook-browser-document-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.notebook-browser-saved {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.notebook-browser-edit-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.notebook-browser-edit-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--accent);
+}
+
+/* Editor */
+.notebook-browser-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px clamp(28px, 6vw, 90px) 28px;
+}
+
+.notebook-browser-editor-area {
+  width: 100%;
+  min-height: 320px;
+  resize: vertical;
+  padding: 16px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-app);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font: 13px/1.6 ui-monospace, 'SFMono-Regular', monospace;
+  tab-size: 2;
+}
+
+.notebook-browser-editor-area:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.notebook-browser-editor-conflict {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  background: color-mix(in srgb, var(--color-warning, #d9a23a) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning, #d9a23a) 40%, transparent);
+  border-radius: 8px;
+}
+
+.notebook-browser-editor-conflict-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.notebook-browser-editor-conflict-actions button,
+.notebook-browser-editor-actions button {
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.notebook-browser-editor-conflict-actions button:hover:not(:disabled),
+.notebook-browser-editor-actions button:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  border-color: var(--accent);
+}
+
+.notebook-browser-editor-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.notebook-browser-editor-save {
+  color: var(--color-bg-app) !important;
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  font-weight: 600;
+}
+
+.notebook-browser-editor-save:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.notebook-browser-editor-actions button:disabled,
+.notebook-browser-editor-conflict-actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.notebook-browser-editor-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-danger, #e5484d);
 }
 
 .notebook-browser-markdown {

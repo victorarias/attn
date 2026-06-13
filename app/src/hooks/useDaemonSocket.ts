@@ -169,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '105';
+export const PROTOCOL_VERSION = '106';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -410,6 +410,17 @@ export interface NotebookReadResult {
   path: string;
   content: string;
   hash: string;
+}
+
+// The outcome of a Notebook hash-CAS save. conflict=true means the note changed
+// on disk since the editor loaded it, so the write did NOT apply; currentHash is
+// the hash now on disk, for the editor to reconcile against. Mirrors the daemon's
+// protocol.NotebookWriteResult.
+export interface NotebookWriteResult {
+  path: string;
+  hash?: string;
+  conflict: boolean;
+  currentHash?: string;
 }
 
 interface UseDaemonSocketOptions {
@@ -1471,6 +1482,32 @@ export function useDaemonSocket({
               pending.resolve(data.result);
             } else {
               pending.reject(new Error(data.error || 'Notebook read failed'));
+            }
+            break;
+          }
+
+          case 'notebook_write_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `notebook_write:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success && data.result) {
+              // A conflict is a SUCCESSFUL result the editor reconciles, not a
+              // rejection — only a transport/daemon error rejects.
+              pending.resolve({
+                path: data.result.path,
+                hash: data.result.hash,
+                conflict: !!data.result.conflict,
+                currentHash: data.result.current_hash,
+              });
+            } else {
+              pending.reject(new Error(data.error || 'Notebook write failed'));
             }
             break;
           }
@@ -3589,6 +3626,30 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
+  // Save one Notebook note via the daemon (hash-CAS). Omit baseHash to create-only;
+  // pass the note's loaded hash to edit. Resolves with the outcome — including a
+  // conflict (resolve, not reject) the editor reconciles; rejects only on a
+  // transport/daemon error.
+  const sendNotebookWrite = useCallback((path: string, content: string, baseHash?: string): Promise<NotebookWriteResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('notebook_write');
+      const key = `notebook_write:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'notebook_write', request_id: requestId, path, content, ...(baseHash ? { base_hash: baseHash } : {}) }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Notebook save timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
   // Get recent locations from daemon
   const sendGetRecentLocations = useCallback((endpointId?: string, limit?: number): Promise<RecentLocationsResult> => {
     return new Promise((resolve, reject) => {
@@ -4290,6 +4351,7 @@ export function useDaemonSocket({
     sendNotebookList,
     sendNotebookRead,
     sendNotebookBacklinks,
+    sendNotebookWrite,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,
