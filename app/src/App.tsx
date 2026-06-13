@@ -3070,8 +3070,12 @@ sendFetchPRDetails,
     available?: boolean;
   }>>>(() => ({
     'dock.diffDetail': {
-      run: handleOpenEditorForSession,
-      available: Boolean(activeSessionId) && !(activeRemoteSession && !remoteEditorAvailable),
+      // Must match the dock.diffDetail keyboard shortcut, which toggles the
+      // diff-detail panel — not the external-editor action (that stays on the
+      // sidebar's "Open in Editor" tool button).
+      run: () => toggleDockPanel('diffDetail'),
+      isActive: diffDetailPanelOpen,
+      available: Boolean(activeSessionId),
     },
     'dock.reviewLoop': {
       run: () => toggleDockPanel('reviewLoop'),
@@ -3093,14 +3097,12 @@ sendFetchPRDetails,
     'terminal.toggleZoom': { isActive: activeSessionZoomed, available: Boolean(activeSessionId) },
   }), [
     activeSessionId,
-    activeRemoteSession,
-    remoteEditorAvailable,
     reviewLoopPanelOpen,
     activeReviewLoopAvailable,
     diffPanelOpen,
+    diffDetailPanelOpen,
     attentionPanelOpen,
     activeSessionZoomed,
-    handleOpenEditorForSession,
     toggleDockPanel,
   ]);
 
