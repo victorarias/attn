@@ -509,6 +509,7 @@ fn quit_app(app: tauri::AppHandle) {
 }
 
 const CLOSE_ACTIVE_PANE_MENU_ID: &str = "attn-close-active-pane";
+const TOGGLE_ZOOM_MENU_ID: &str = "attn-toggle-zoom";
 const NATIVE_SHORTCUT_EVENT: &str = "attn:native-shortcut";
 const NATIVE_BROWSER_CLOSE_EVENT: &str = "attn:native-browser-close";
 
@@ -523,29 +524,46 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
         true,
         Some("CmdOrCtrl+W"),
     )?;
+    let zoom_active_pane = MenuItem::with_id(
+        app,
+        TOGGLE_ZOOM_MENU_ID,
+        "Zoom Pane",
+        true,
+        Some("CmdOrCtrl+Shift+Z"),
+    )?;
     let mut inserted_close_active_pane = false;
+    let mut inserted_zoom_pane = false;
 
     for item in menu.items()? {
         let MenuItemKind::Submenu(submenu) = item else {
             continue;
         };
-        let is_file_menu = submenu.text()?.replace('&', "") == "File";
+        let submenu_text = submenu.text()?.replace('&', "");
+        let is_file_menu = submenu_text == "File";
+        let is_edit_menu = submenu_text == "Edit";
         let mut removed_close_window = false;
 
         for (position, item) in submenu.items()?.into_iter().enumerate().rev() {
-            let is_close_window = item
+            let text = item
                 .as_predefined_menuitem()
                 .and_then(|item| item.text().ok())
-                .is_some_and(|text| text.replace('&', "") == "Close Window");
-            if !is_close_window {
-                continue;
-            }
+                .map(|text| text.replace('&', ""))
+                .unwrap_or_default();
 
-            submenu.remove_at(position)?;
-            removed_close_window = true;
-            if is_file_menu {
-                submenu.insert(&close_active_pane, position)?;
-                inserted_close_active_pane = true;
+            let is_close_window = text == "Close Window";
+            let is_redo = text == "Redo";
+
+            if is_close_window {
+                submenu.remove_at(position)?;
+                removed_close_window = true;
+                if is_file_menu {
+                    submenu.insert(&close_active_pane, position)?;
+                    inserted_close_active_pane = true;
+                }
+            } else if is_redo && is_edit_menu && !inserted_zoom_pane {
+                submenu.remove_at(position)?;
+                submenu.insert(&zoom_active_pane, position)?;
+                inserted_zoom_pane = true;
             }
         }
 
@@ -564,6 +582,14 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
         if is_file_menu && !inserted_close_active_pane {
             submenu.append(&close_active_pane)?;
             inserted_close_active_pane = true;
+        }
+
+        // Mirror the Close Pane fallback: if the default Edit menu ever ships
+        // without a Redo item to replace, still surface Zoom Pane (and its
+        // accelerator) by appending it.
+        if is_edit_menu && !inserted_zoom_pane {
+            submenu.append(&zoom_active_pane)?;
+            inserted_zoom_pane = true;
         }
     }
 
@@ -990,6 +1016,8 @@ Object.defineProperty(window, "__ATTN_NATIVE_DIALOGS", {
                 } else {
                     dispatch_native_shortcut(app, "session.close");
                 }
+            } else if event.id() == TOGGLE_ZOOM_MENU_ID {
+                dispatch_native_shortcut(app, "terminal.toggleZoom");
             }
         })
         .invoke_handler(tauri::generate_handler![

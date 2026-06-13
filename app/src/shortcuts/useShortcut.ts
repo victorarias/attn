@@ -1,6 +1,6 @@
 // app/src/shortcuts/useShortcut.ts
 import { useEffect, useRef } from 'react';
-import { SHORTCUTS, ShortcutId, matchesShortcut, isChord } from './registry';
+import { SHORTCUTS, ShortcutId, ShortcutDef, matchesShortcut, isChord } from './registry';
 import { resolvedShortcutEntries } from './resolver';
 import { enterLeader, resolvePendingThen } from './chordState';
 import { matchChordLeader } from './chordDispatch';
@@ -111,6 +111,19 @@ function installGlobalListener() {
       typeof shortcutId === 'string'
       && Object.prototype.hasOwnProperty.call(SHORTCUTS, shortcutId)
     ) {
+      // Honor the same editableTarget guard as the keydown path: a shortcut
+      // marked editableTarget:'native' must not hijack a focused input. The
+      // native menu item (which forwarded this event) already consumed the key
+      // equivalent in place of the OS default — e.g. Zoom Pane replacing Redo on
+      // ⇧⌘Z — so in a non-terminal editable target the correct behavior is to do
+      // nothing rather than fire the action over the user's typing.
+      const def = SHORTCUTS[shortcutId as ShortcutId] as ShortcutDef;
+      if (
+        def.editableTarget === 'native'
+        && isNonTerminalEditableTarget(document.activeElement)
+      ) {
+        return;
+      }
       triggerShortcut(shortcutId as ShortcutId);
     }
   });

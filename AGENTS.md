@@ -204,6 +204,18 @@ copy behavior in an `onCopy` handler (see `GhosttyTerminal`), not only keydown. 
 e2e cannot catch this — Playwright delivers Cmd+C as a normal keydown — so copy-shortcut
 changes need packaged-app verification (`real-app:scenario-terminal-block-copy`).
 
+The same trap applies to ANY web shortcut whose combo matches a `Menu::default` accelerator
+(the macOS Edit/File/View/Window standard items). Example: `terminal.toggleZoom` is ⇧⌘Z,
+which is Edit > Redo — the native Redo item swallowed it, so zoom was dead in the packaged
+app while e2e/unit tests passed. There is no DOM clipboard-event analog for these, so the
+fix is in `app/src-tauri/src/lib.rs` `app_menu()`: remove the predefined item and insert a
+custom `MenuItem` carrying the same accelerator, then forward its `on_menu_event` to the
+frontend via `dispatch_native_shortcut(app, "<SHORTCUTS id>")` — the generic
+`attn:native-shortcut` bridge in `useShortcut.ts` routes any valid id to its handler (mirrors
+Close Window → Close Pane). That bridge must re-apply the `editableTarget:'native'` guard so a
+forwarded shortcut can't hijack a focused input. When adding a new shortcut, check it against
+the default-menu accelerators first.
+
 ## Communication
 
 - unix socket IPC: `~/.attn/attn.sock`
