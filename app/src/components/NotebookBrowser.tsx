@@ -2,7 +2,7 @@ import { createElement, useCallback, useEffect, useMemo, useRef, useState, type 
 import FocusTrap from 'focus-trap-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { NotebookEntry, NotebookReadResult, NotebookWriteResult } from '../hooks/useDaemonSocket';
+import type { NotebookEntry, NotebookReadResult, NotebookSendToChiefResult, NotebookWriteResult } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import './NotebookBrowser.css';
 
@@ -15,6 +15,10 @@ interface NotebookBrowserProps {
   // Save an edited note (hash-CAS). Omit baseHash to create-only; pass the note's
   // loaded hash to edit. Resolves with the outcome, including a conflict to reconcile.
   writeNotebook: (path: string, content: string, baseHash?: string) => Promise<NotebookWriteResult>;
+  // Hand a highlighted selection to the daemon to deliver to the chief of staff
+  // (appends to the chief inbox note + best-effort live PTY nudge). The UI never
+  // messages the chief directly. sourcePath is the note the selection came from.
+  sendToChief: (selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>;
   // Increments whenever a notebook_changed event arrives, so an open browser
   // re-fetches the tree and the open note (covering agent and external writes).
   changeSignal?: number;
@@ -31,6 +35,7 @@ export function NotebookBrowser({
   readNotebook,
   backlinksNotebook,
   writeNotebook,
+  sendToChief,
   changeSignal = 0,
 }: NotebookBrowserProps) {
   const [entries, setEntries] = useState<NotebookEntry[]>([]);
@@ -126,6 +131,14 @@ export function NotebookBrowser({
   const editingRef = useRef(false);
   editingRef.current = editing;
 
+  // --- Send to chief ---
+  // The current rendered-markdown selection and where to float its action button
+  // (viewport coords from the selection rect). Cleared on navigation/scroll/edit.
+  const [chiefSel, setChiefSel] = useState<{ text: string; top: number; left: number } | null>(null);
+  const [sendingToChief, setSendingToChief] = useState(false);
+  // A transient outcome line ("Added to chief's inbox" / an error), auto-dismissed.
+  const [chiefStatus, setChiefStatus] = useState<{ text: string; error: boolean } | null>(null);
+
   const startEditing = useCallback(() => {
     if (!note) return;
     setDraft(note.content);
@@ -133,6 +146,9 @@ export function NotebookBrowser({
     setConflict(null);
     setSaveError(null);
     setJustSaved(false);
+    // The rendered article (and its selection) is replaced by the textarea, so
+    // drop any floating "Send to chief" button left over from the view.
+    setChiefSel(null);
     setEditing(true);
   }, [note]);
 
@@ -195,6 +211,37 @@ export function NotebookBrowser({
     }
   }, [readNotebook]);
 
+  // Capture the rendered-markdown selection on mouseup so the "Send to chief"
+  // button can float over it. An empty/collapsed selection clears the button.
+  const captureSelection = useCallback(() => {
+    const sel = window.getSelection();
+    const text = sel ? sel.toString().trim() : '';
+    if (!text || !sel || sel.rangeCount === 0) {
+      setChiefSel(null);
+      return;
+    }
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    setChiefSel({ text, top: rect.top, left: rect.left + rect.width / 2 });
+  }, []);
+
+  // Hand the captured selection to the daemon for the chief of staff. The daemon
+  // appends it to the chief inbox note and best-effort nudges a live chief; the
+  // UI only surfaces the outcome and never messages the chief directly.
+  const sendSelectionToChief = useCallback(async () => {
+    if (!chiefSel) return;
+    const path = selectedPathRef.current ?? undefined;
+    setSendingToChief(true);
+    try {
+      await sendToChief(chiefSel.text, path);
+      setChiefSel(null);
+      setChiefStatus({ text: "Added to chief's inbox", error: false });
+    } catch (err) {
+      setChiefStatus({ text: err instanceof Error ? err.message : 'Could not send to chief', error: true });
+    } finally {
+      setSendingToChief(false);
+    }
+  }, [chiefSel, sendToChief]);
+
   // On open, load the tree and select a sensible first note.
   useEffect(() => {
     if (!isOpen) return;
@@ -256,7 +303,17 @@ export function NotebookBrowser({
     setConflict(null);
     setSaveError(null);
     setJustSaved(false);
+    setChiefSel(null);
+    setChiefStatus(null);
   }, [selectedPath]);
+
+  // The "Send to chief" outcome line is a transient confirmation; auto-dismiss it
+  // (errors linger a little longer than the success acknowledgement).
+  useEffect(() => {
+    if (!chiefStatus) return;
+    const timer = window.setTimeout(() => setChiefStatus(null), chiefStatus.error ? 6000 : 3000);
+    return () => window.clearTimeout(timer);
+  }, [chiefStatus]);
 
   // The "Saved" badge is a transient confirmation, not a persistent status. Clear
   // it on a timer so it doesn't linger while the user keeps reading the same note
@@ -334,7 +391,10 @@ export function NotebookBrowser({
               ))}
             </aside>
 
-            <main className="notebook-browser-document">
+            <main
+              className="notebook-browser-document"
+              onScroll={() => { if (chiefSel) setChiefSel(null); }}
+            >
               {noteLoading && !note && (
                 <div className="notebook-browser-document-state">Loading note…</div>
               )}
@@ -353,6 +413,14 @@ export function NotebookBrowser({
                       <p>{note.path}</p>
                     </div>
                     <div className="notebook-browser-document-actions">
+                      {!editing && chiefStatus && (
+                        <span
+                          className={`notebook-browser-chief-status${chiefStatus.error ? ' is-error' : ''}`}
+                          role="status"
+                        >
+                          {chiefStatus.text}
+                        </span>
+                      )}
                       {!editing && justSaved && (
                         <span className="notebook-browser-saved" role="status">Saved</span>
                       )}
@@ -409,7 +477,7 @@ export function NotebookBrowser({
                     </div>
                   ) : (
                     <>
-                      <article className="notebook-browser-markdown">
+                      <article className="notebook-browser-markdown" onMouseUp={captureSelection}>
                         <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                           {note.content || '_This note is empty._'}
                         </ReactMarkdown>
@@ -443,6 +511,20 @@ export function NotebookBrowser({
               )}
             </main>
           </div>
+          {chiefSel && (
+            <button
+              type="button"
+              className="notebook-browser-send-chief"
+              style={{ top: chiefSel.top, left: chiefSel.left }}
+              // Keep the text selection (and focus) intact through the click so the
+              // captured selection isn't collapsed before onClick reads it.
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => void sendSelectionToChief()}
+              disabled={sendingToChief}
+            >
+              {sendingToChief ? 'Sending…' : 'Send to chief'}
+            </button>
+          )}
         </div>
       </FocusTrap>
     </div>

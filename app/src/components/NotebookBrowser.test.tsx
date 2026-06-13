@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NotebookBrowser, parseNotebookHref } from './NotebookBrowser';
-import type { NotebookEntry, NotebookReadResult, NotebookWriteResult } from '../hooks/useDaemonSocket';
+import type { NotebookEntry, NotebookReadResult, NotebookSendToChiefResult, NotebookWriteResult } from '../hooks/useDaemonSocket';
 
 const ENTRIES: NotebookEntry[] = [
   { path: 'memory/index.md', kind: 'memory', title: 'Memory index', size: 10 },
@@ -20,6 +20,9 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof NotebookBrowse
   const writeNotebook = vi
     .fn<(path: string, content: string, baseHash?: string) => Promise<NotebookWriteResult>>()
     .mockImplementation((path) => Promise.resolve({ path, hash: 'h2', conflict: false }));
+  const sendToChief = vi
+    .fn<(selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>>()
+    .mockResolvedValue({ path: 'inbox.md', nudged: false });
   return {
     props: {
       isOpen: true,
@@ -28,6 +31,7 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof NotebookBrowse
       readNotebook,
       backlinksNotebook,
       writeNotebook,
+      sendToChief,
       changeSignal: 0,
       ...overrides,
     },
@@ -35,10 +39,27 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof NotebookBrowse
     readNotebook,
     backlinksNotebook,
     writeNotebook,
+    sendToChief,
   };
 }
 
+// mockSelection stubs window.getSelection so a mouseup on the rendered markdown
+// behaves as if `text` is highlighted (empty/whitespace = collapsed selection).
+function mockSelection(text: string) {
+  const rect = { top: 40, left: 60, width: 120, height: 18 } as DOMRect;
+  const sel = {
+    toString: () => text,
+    rangeCount: text.trim() ? 1 : 0,
+    getRangeAt: () => ({ getBoundingClientRect: () => rect }),
+  } as unknown as Selection;
+  return vi.spyOn(window, 'getSelection').mockReturnValue(sel);
+}
+
 describe('NotebookBrowser', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('renders nothing when closed', () => {
     const { props } = makeProps({ isOpen: false });
     const { container } = render(<NotebookBrowser {...props} />);
@@ -293,6 +314,48 @@ describe('NotebookBrowser', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('sends a highlighted selection to the chief and shows the outcome', async () => {
+    const { props, sendToChief } = makeProps();
+    const { container } = render(<NotebookBrowser {...props} />);
+    await screen.findByRole('heading', { level: 1, name: 'memory/index.md' });
+
+    // Highlight text in the rendered note; the floating action appears.
+    mockSelection('a key decision');
+    fireEvent.mouseUp(container.querySelector('.notebook-browser-markdown') as HTMLElement);
+    fireEvent.click(await screen.findByRole('button', { name: 'Send to chief' }));
+
+    // The selection + its source note go to the daemon, and the outcome is shown.
+    await waitFor(() => expect(sendToChief).toHaveBeenCalledWith('a key decision', 'memory/index.md'));
+    expect(await screen.findByText("Added to chief's inbox")).toBeInTheDocument();
+    // The floating button clears once the send lands.
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Send to chief' })).not.toBeInTheDocument());
+  });
+
+  it('shows no send-to-chief action for an empty selection', async () => {
+    const { props, sendToChief } = makeProps();
+    const { container } = render(<NotebookBrowser {...props} />);
+    await screen.findByRole('heading', { level: 1, name: 'memory/index.md' });
+
+    mockSelection('   '); // whitespace only
+    fireEvent.mouseUp(container.querySelector('.notebook-browser-markdown') as HTMLElement);
+
+    expect(screen.queryByRole('button', { name: 'Send to chief' })).not.toBeInTheDocument();
+    expect(sendToChief).not.toHaveBeenCalled();
+  });
+
+  it('surfaces an error when sending to the chief fails', async () => {
+    const { props, sendToChief } = makeProps();
+    sendToChief.mockRejectedValueOnce(new Error('no chief reachable'));
+    const { container } = render(<NotebookBrowser {...props} />);
+    await screen.findByRole('heading', { level: 1, name: 'memory/index.md' });
+
+    mockSelection('something');
+    fireEvent.mouseUp(container.querySelector('.notebook-browser-markdown') as HTMLElement);
+    fireEvent.click(await screen.findByRole('button', { name: 'Send to chief' }));
+
+    expect(await screen.findByText('no chief reachable')).toBeInTheDocument();
   });
 });
 

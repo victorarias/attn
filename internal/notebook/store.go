@@ -155,9 +155,38 @@ func (s *Store) AppendJournal(dateISO, entry string) (relPath string, hash strin
 		return "", "", fmt.Errorf("notebook: empty journal entry")
 	}
 	rel := path.Join(DirJournal, dateISO+".md")
+	hash, err = s.appendToNote(rel, entry, func() Document {
+		return Document{
+			Frontmatter: map[string]any{"kind": KindJournal, "title": dateISO},
+			Body:        "# " + dateISO + "\n",
+		}
+	})
+	return rel, hash, err
+}
+
+// AppendInbox appends an entry to the reserved chief inbox note (inbox.md),
+// creating it on first write. Like AppendJournal, appends are serialized under
+// the store lock and never conflict.
+func (s *Store) AppendInbox(entry string) (relPath string, hash string, err error) {
+	if strings.TrimSpace(entry) == "" {
+		return "", "", fmt.Errorf("notebook: empty inbox entry")
+	}
+	hash, err = s.appendToNote(FileInbox, entry, func() Document {
+		return Document{
+			Frontmatter: map[string]any{"title": "Chief inbox"},
+			Body:        inboxTemplate,
+		}
+	})
+	return FileInbox, hash, err
+}
+
+// appendToNote appends entry to the note at rel, creating it from newDoc() when
+// it does not yet exist. The whole read-modify-write runs under the store lock so
+// concurrent appends serialize and never conflict (unlike the hash-CAS Write).
+func (s *Store) appendToNote(rel, entry string, newDoc func() Document) (hash string, err error) {
 	abs, err := s.abs(rel)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 
 	s.mu.Lock()
@@ -165,26 +194,23 @@ func (s *Store) AppendJournal(dateISO, entry string) (relPath string, hash strin
 
 	existing, statErr := os.ReadFile(abs)
 	if statErr != nil && !os.IsNotExist(statErr) {
-		return "", "", statErr
+		return "", statErr
 	}
 	var doc Document
 	if statErr == nil {
 		doc = ParsePermissive(existing)
 	} else {
-		doc = Document{
-			Frontmatter: map[string]any{"kind": KindJournal, "title": dateISO},
-			Body:        "# " + dateISO + "\n",
-		}
+		doc = newDoc()
 	}
 	doc.Body = strings.TrimRight(doc.Body, "\n") + "\n\n" + strings.TrimRight(entry, "\n") + "\n"
 	out := doc.Bytes()
 	if int64(len(out)) > MaxFileSize {
-		return "", "", fmt.Errorf("notebook: journal %s exceeds %d bytes", dateISO, MaxFileSize)
+		return "", fmt.Errorf("notebook: %s exceeds %d bytes", rel, MaxFileSize)
 	}
 	if err := writeAtomic(abs, out); err != nil {
-		return "", "", err
+		return "", err
 	}
-	return rel, Hash(out), nil
+	return Hash(out), nil
 }
 
 // List returns the notes under the root, sorted by path. The optional prefix

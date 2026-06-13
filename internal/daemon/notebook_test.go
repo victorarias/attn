@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -758,5 +759,146 @@ func TestValidateNotebookRoot(t *testing.T) {
 	inside := filepath.Join(config.DataDir(), "notebook")
 	if err := d.validateSetting(SettingNotebookRoot, inside); err == nil {
 		t.Fatalf("notebook.root inside the data dir (%s) should be rejected", inside)
+	}
+}
+
+// readInboxNote returns the inbox note body for assertions.
+func readInboxNote(t *testing.T, d *Daemon) string {
+	t.Helper()
+	store, err := d.notebookStoreFor()
+	if err != nil {
+		t.Fatalf("notebook store: %v", err)
+	}
+	content, _, err := store.Read(notebook.FileInbox)
+	if err != nil {
+		t.Fatalf("read inbox: %v", err)
+	}
+	return string(content)
+}
+
+// Sending a selection to a live, idle chief appends it to the inbox note AND
+// fires the bounded PTY nudge (and only that bounded text).
+func TestNotebookSendToChiefAppendsAndNudges(t *testing.T) {
+	d := newNotebookDaemon(t)
+	var mu sync.Mutex
+	var inputs []string
+	d.ptyBackend = recordingBackend(&inputs, &mu)
+	addIdleNotebookSession(d, "chief", protocol.SessionStateIdle)
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, "chief"); err != nil {
+		t.Fatal(err)
+	}
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+
+	d.sendNotebookToChiefWSResult(client, "c1", "/memory/index.md", "remember this decision")
+
+	var res protocol.NotebookSendToChiefResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Event != protocol.EventNotebookSendToChiefResult || res.RequestID != "c1" || !res.Success ||
+		res.Result == nil || res.Result.Path != notebook.FileInbox || !res.Result.Nudged {
+		t.Fatalf("send-to-chief result = %+v, want success inbox.md nudged", res.Result)
+	}
+
+	// Only the bounded doorbell + Enter was typed into the chief PTY — never the
+	// selection content itself (that goes to the inbox note, not the terminal).
+	mu.Lock()
+	got := append([]string(nil), inputs...)
+	mu.Unlock()
+	if len(got) != 2 || got[0] != chiefInboxNudgePrompt || got[1] != "\r" {
+		t.Fatalf("PTY inputs = %q, want [nudge prompt, \\r]", got)
+	}
+
+	body := readInboxNote(t, d)
+	if !strings.Contains(body, "> remember this decision") || !strings.Contains(body, "(/memory/index.md)") {
+		t.Fatalf("inbox note = %q, want blockquoted selection + backlink to the source", body)
+	}
+}
+
+// With no live chief (role unset), the selection still lands in the inbox note —
+// the durable channel — but no PTY nudge is sent and nudged is false.
+func TestNotebookSendToChiefQueuesWithoutLiveChief(t *testing.T) {
+	d := newNotebookDaemon(t)
+	var mu sync.Mutex
+	var inputs []string
+	d.ptyBackend = recordingBackend(&inputs, &mu)
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+
+	d.sendNotebookToChiefWSResult(client, "c2", "", "queued for later")
+
+	var res protocol.NotebookSendToChiefResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if !res.Success || res.Result == nil || res.Result.Path != notebook.FileInbox || res.Result.Nudged {
+		t.Fatalf("send-to-chief result = %+v, want success inbox.md not nudged", res.Result)
+	}
+	mu.Lock()
+	n := len(inputs)
+	mu.Unlock()
+	if n != 0 {
+		t.Fatalf("PTY inputs = %d, want 0 with no live chief", n)
+	}
+	if body := readInboxNote(t, d); !strings.Contains(body, "> queued for later") {
+		t.Fatalf("inbox note = %q, want the selection delivered even without a live chief", body)
+	}
+}
+
+// A busy chief (working/pending) is not interrupted: the inbox delivery happens
+// but the nudge is withheld, mirroring the activation doorbell's state gate.
+func TestNotebookSendToChiefDoesNotNudgeBusyChief(t *testing.T) {
+	d := newNotebookDaemon(t)
+	var mu sync.Mutex
+	var inputs []string
+	d.ptyBackend = recordingBackend(&inputs, &mu)
+	addIdleNotebookSession(d, "chief", protocol.SessionStateWorking)
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, "chief"); err != nil {
+		t.Fatal(err)
+	}
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+
+	d.sendNotebookToChiefWSResult(client, "c3", "/index.md", "do not interrupt")
+
+	var res protocol.NotebookSendToChiefResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if !res.Success || res.Result == nil || res.Result.Nudged {
+		t.Fatalf("send-to-chief result = %+v, want success not nudged for a busy chief", res.Result)
+	}
+	mu.Lock()
+	n := len(inputs)
+	mu.Unlock()
+	if n != 0 {
+		t.Fatalf("PTY inputs = %d, want 0 (never interrupt a working chief)", n)
+	}
+}
+
+// An empty selection is rejected as a daemon error (success=false), not silently
+// turned into an empty inbox entry.
+func TestNotebookSendToChiefRejectsEmptySelection(t *testing.T) {
+	d := newNotebookDaemon(t)
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+
+	d.sendNotebookToChiefWSResult(client, "c4", "/index.md", "   ")
+
+	var res protocol.NotebookSendToChiefResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Result != nil || res.Error == nil {
+		t.Fatalf("empty selection result = %+v (err=%v), want failure", res.Result, res.Error)
+	}
+}
+
+// notebook_send_to_chief must dispatch through handleClientMessage with its
+// request_id, selection, and source_path all extracted (a dropped Deref would
+// compile and ship) — the real frontend path.
+func TestNotebookSendToChiefDispatchesThroughClientMessage(t *testing.T) {
+	d := newNotebookDaemon(t)
+	client := newWorkspaceProtocolTestClient()
+	client.setIdentity("test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
+
+	d.handleClientMessage(client, []byte(`{"cmd":"notebook_send_to_chief","request_id":"d1","selection":"dispatched selection","source_path":"/memory/index.md"}`))
+	var res protocol.NotebookSendToChiefResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Event != protocol.EventNotebookSendToChiefResult || res.RequestID != "d1" || !res.Success ||
+		res.Result == nil || res.Result.Path != notebook.FileInbox {
+		t.Fatalf("dispatch result = %+v", res.Result)
+	}
+	if body := readInboxNote(t, d); !strings.Contains(body, "> dispatched selection") {
+		t.Fatalf("inbox note = %q, want the dispatched selection", body)
 	}
 }

@@ -180,6 +180,36 @@ func TestAppendJournal(t *testing.T) {
 	}
 }
 
+func TestAppendInbox(t *testing.T) {
+	s := NewStore(t.TempDir())
+
+	rel, _, err := s.AppendInbox("first message")
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if rel != FileInbox {
+		t.Fatalf("inbox path = %q, want %q", rel, FileInbox)
+	}
+	if _, _, err = s.AppendInbox("second message"); err != nil {
+		t.Fatalf("second append: %v", err)
+	}
+
+	content, _, _ := s.Read(FileInbox)
+	doc := ParsePermissive(content)
+	// The seed header plus both appended messages accumulate in order.
+	if !strings.Contains(doc.Body, "Chief inbox") ||
+		!strings.Contains(doc.Body, "first message") || !strings.Contains(doc.Body, "second message") {
+		t.Fatalf("inbox body missing header/entries:\n%s", doc.Body)
+	}
+	if strings.Index(doc.Body, "first message") > strings.Index(doc.Body, "second message") {
+		t.Fatalf("inbox entries out of order:\n%s", doc.Body)
+	}
+
+	if _, _, err := s.AppendInbox("   "); err == nil {
+		t.Fatal("AppendInbox should reject an empty entry")
+	}
+}
+
 // A symlinked directory inside the root that points outside must not let
 // reads/writes escape the root (the notebook lives in the user's home and is
 // externally writable, so a planted symlink is realistic).

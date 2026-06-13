@@ -169,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '106';
+export const PROTOCOL_VERSION = '107';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -421,6 +421,15 @@ export interface NotebookWriteResult {
   hash?: string;
   conflict: boolean;
   currentHash?: string;
+}
+
+// The outcome of sending a selection to the chief of staff. path is the inbox
+// note it was appended to; nudged is true when a live chief session was pinged in
+// its PTY (false when no chief is set or it was busy — the inbox delivery still
+// happened). Mirrors the daemon's protocol.NotebookSendToChiefResult.
+export interface NotebookSendToChiefResult {
+  path: string;
+  nudged: boolean;
 }
 
 interface UseDaemonSocketOptions {
@@ -1508,6 +1517,28 @@ export function useDaemonSocket({
               });
             } else {
               pending.reject(new Error(data.error || 'Notebook write failed'));
+            }
+            break;
+          }
+
+          case 'notebook_send_to_chief_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `notebook_send_to_chief:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success && data.result) {
+              pending.resolve({
+                path: data.result.path,
+                nudged: !!data.result.nudged,
+              });
+            } else {
+              pending.reject(new Error(data.error || 'Send to chief failed'));
             }
             break;
           }
@@ -3650,6 +3681,30 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
+  // Hand a Notebook selection to the daemon to deliver to the chief of staff. The
+  // daemon appends it to the chief inbox note and (if a chief is live and idle)
+  // nudges its PTY. The UI never messages the chief directly. Resolves with the
+  // inbox path + whether a live nudge fired; rejects on a transport/daemon error.
+  const sendNotebookToChief = useCallback((selection: string, sourcePath?: string): Promise<NotebookSendToChiefResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('notebook_send_to_chief');
+      const key = `notebook_send_to_chief:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'notebook_send_to_chief', request_id: requestId, selection, ...(sourcePath ? { source_path: sourcePath } : {}) }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Send to chief timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
   // Get recent locations from daemon
   const sendGetRecentLocations = useCallback((endpointId?: string, limit?: number): Promise<RecentLocationsResult> => {
     return new Promise((resolve, reject) => {
@@ -4352,6 +4407,7 @@ export function useDaemonSocket({
     sendNotebookRead,
     sendNotebookBacklinks,
     sendNotebookWrite,
+    sendNotebookToChief,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,

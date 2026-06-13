@@ -505,6 +505,75 @@ func (d *Daemon) sendNotebookWriteWSResult(client *wsClient, requestID, path, co
 	d.sendToClient(client, msg)
 }
 
+// maxInboxSelection caps a single "send to chief" selection. The whole inbox note
+// is still bounded by MaxFileSize; this rejects one runaway paste up front with a
+// clear error rather than letting it bloat the note.
+const maxInboxSelection = 32 << 10 // 32 KiB
+
+// chiefInboxNudgePrompt is the bounded doorbell typed into a live chief session
+// when a selection lands in its inbox. Like the activation prompt, it carries only
+// a pointer to the daemon-owned CLI — never the selection content itself (that is
+// written to the inbox note, the daemon's job, never streamed into the PTY).
+const chiefInboxNudgePrompt = "A new selection was added to your Notebook inbox. Run `attn notebook show /inbox.md` to read it."
+
+// sendNotebookToChiefWSResult delivers a Notebook selection to the chief of staff:
+// it appends the selection to the chief inbox note (the daemon is the sole writer)
+// and, when a chief session is live and idle/waiting, fires a bounded PTY nudge.
+// The inbox delivery is the durable channel; the nudge is best-effort immediacy.
+// The UI never messages the chief directly — it only hands the selection here.
+func (d *Daemon) sendNotebookToChiefWSResult(client *wsClient, requestID, sourcePath, selection string) {
+	var result *protocol.NotebookSendToChiefResult
+	store, err := d.notebookStoreFor()
+	if err == nil {
+		if strings.TrimSpace(selection) == "" {
+			err = fmt.Errorf("notebook: empty selection")
+		} else if len(selection) > maxInboxSelection {
+			err = fmt.Errorf("notebook: selection exceeds %d bytes", maxInboxSelection)
+		}
+	}
+	if err == nil {
+		var relPath, hash string
+		if relPath, hash, err = store.AppendInbox(formatChiefInboxEntry(sourcePath, selection)); err == nil {
+			// Content-aware self-write + broadcast so the open browser refreshes but
+			// the watcher does not re-announce attn's own write as an external edit.
+			d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: relPath, Hash: hash})
+			d.broadcastNotebookChanged(originUI, relPath)
+			result = &protocol.NotebookSendToChiefResult{
+				Path:   relPath,
+				Nudged: d.nudgeChiefOfStaff(chiefInboxNudgePrompt),
+			}
+		}
+	}
+	msg := protocol.NotebookSendToChiefResultMessage{
+		Event:     protocol.EventNotebookSendToChiefResult,
+		RequestID: requestID,
+		Success:   err == nil,
+		Result:    result,
+	}
+	if err != nil {
+		msg.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, msg)
+}
+
+// formatChiefInboxEntry renders one inbox entry: a heading that links back to the
+// source note (when known) followed by the selection as a markdown blockquote.
+func formatChiefInboxEntry(sourcePath, selection string) string {
+	var b strings.Builder
+	if rel, cerr := notebook.CleanPath(sourcePath); cerr == nil {
+		// Root-absolute link so the chief can open the source from the inbox note.
+		fmt.Fprintf(&b, "## From [/%s](/%s)\n\n", rel, rel)
+	} else {
+		b.WriteString("## From the Notebook\n\n")
+	}
+	for _, line := range strings.Split(strings.TrimRight(selection, "\n"), "\n") {
+		b.WriteString("> ")
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 func notebookEntriesToProtocol(entries []notebook.Entry) []protocol.NotebookEntry {
 	out := make([]protocol.NotebookEntry, 0, len(entries))
 	for _, e := range entries {

@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -41,6 +43,48 @@ func (d *Daemon) clearChiefOfStaffIfSession(sessionID string) {
 	if err := d.store.ClearProfileRole(profileRoleChiefOfStaff, sessionID); err != nil {
 		d.logf("clear chief of staff role failed for session %s: %v", sessionID, err)
 	}
+}
+
+// nudgeChiefOfStaff types a bounded prompt into the current chief-of-staff
+// session's PTY, but only when a chief is set and that session is idle or waiting
+// for input — never an agent mid-task. It re-confirms the role right before
+// typing (the role is a single-holder upsert that another promotion may have
+// moved). Returns true only when the nudge was actually delivered, so callers can
+// report whether the chief was pinged live versus only queued in the inbox.
+func (d *Daemon) nudgeChiefOfStaff(prompt string) bool {
+	if d.ptyBackend == nil || d.store == nil {
+		return false
+	}
+	sessionID := d.chiefOfStaffSessionID()
+	if sessionID == "" {
+		return false
+	}
+	session := d.store.Get(sessionID)
+	if session == nil {
+		return false
+	}
+	if session.State != protocol.SessionStateIdle && session.State != protocol.SessionStateWaitingInput {
+		return false
+	}
+	if d.chiefOfStaffSessionID() != sessionID {
+		return false
+	}
+	if err := d.typeDoorbell(sessionID, prompt); err != nil {
+		d.logf("chief nudge: input failed for %s: %v", sessionID, err)
+		return false
+	}
+	return true
+}
+
+// typeDoorbell types a bounded prompt followed by Enter into a session's PTY. It
+// is the shared primitive behind the chief-of-staff doorbells (notebook
+// activation, inbox nudge): a fixed trigger, never arbitrary streamed content.
+func (d *Daemon) typeDoorbell(sessionID, prompt string) error {
+	if err := d.ptyBackend.Input(context.Background(), sessionID, []byte(prompt)); err != nil {
+		return err
+	}
+	time.Sleep(100 * time.Millisecond)
+	return d.ptyBackend.Input(context.Background(), sessionID, []byte{'\r'})
 }
 
 func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefOfStaffMessage) {

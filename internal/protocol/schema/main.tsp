@@ -642,6 +642,16 @@ model NotebookAppendJournalMessage {
   date?: string; // YYYY-MM-DD; defaults to the daemon's local date
 }
 
+// Send a Notebook selection to the chief of staff. The daemon appends it to the
+// chief inbox note and, when a chief session is live and idle/waiting, fires a
+// bounded PTY nudge. The UI never messages the chief directly.
+model NotebookSendToChiefMessage {
+  cmd: "notebook_send_to_chief";
+  selection: string;
+  source_path?: string; // the note the selection came from (root-absolute or relative)
+  request_id?: string; // set by the WS frontend for result correlation
+}
+
 // Pull the canonical notebook operating guidance (single source, daemon-owned).
 // Both the at-launch injection and the live "run `attn notebook guide`" path
 // resolve to this, so guidance is versioned in one place.
@@ -2082,6 +2092,22 @@ model NotebookWriteResultMessage {
   result?: NotebookWriteResult;
 }
 
+// Result of notebook_send_to_chief. path is the inbox note the selection was
+// appended to; nudged is true when a live chief session was pinged in its PTY
+// (false when no chief is set or it was busy — the inbox delivery still happened).
+model NotebookSendToChiefResult {
+  path: string;
+  nudged: boolean;
+}
+
+model NotebookSendToChiefResultMessage {
+  event: "notebook_send_to_chief_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  result?: NotebookSendToChiefResult;
+}
+
 model WorkspaceContextResultMessage {
   event: "workspace_context_result";
   action: string;
@@ -2263,6 +2289,7 @@ alias DaemonEvent =
   | NotebookReadResultMessage
   | NotebookBacklinksResultMessage
   | NotebookWriteResultMessage
+  | NotebookSendToChiefResultMessage
   | MarkFileViewedResultMessage
   | AddCommentResultMessage
   | UpdateCommentResultMessage
