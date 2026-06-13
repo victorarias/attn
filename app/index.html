@@ -7,6 +7,21 @@
     <meta name="color-scheme" content="dark light" />
     <title>attn</title>
     <style>
+      /* Bundled Nerd Font symbols, used only as a fallback for the terminal's
+         Private Use Area icon glyphs (eza --icons, powerline, devicons). The
+         primary monospace family still renders all text; this face only
+         supplies the icon codepoints no system monospace font carries. The
+         WebGL terminal rasterizes glyphs through a 2D canvas, which won't use
+         this face until it has loaded — GhosttyTerminal forces the load and
+         invalidates its glyph cache once ready (see fonts-ready wiring). */
+      @font-face {
+        font-family: 'Symbols Nerd Font Mono';
+        src: url('/fonts/SymbolsNerdFontMono-Regular.ttf') format('truetype');
+        font-weight: normal;
+        font-style: normal;
+        font-display: swap;
+      }
+
       /* Loading screen - shown before React mounts */
       * {
         margin: 0;

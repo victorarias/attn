@@ -1,5 +1,12 @@
 import { CellFlags, type GhosttyCell, type GhosttyTerminal } from 'ghostty-web';
 import { cursorRowInViewport, viewportBufferStart } from '../utils/ghosttyScroll';
+import {
+  GLYPH_MODE_COLOR,
+  GLYPH_MODE_TINT,
+  TERMINAL_GLYPH_FRAGMENT_SHADER,
+  TERMINAL_GLYPH_VERTEX_SHADER,
+  isColorGlyphBitmap,
+} from './terminalGlyphProgram';
 
 interface RendererTheme {
   background: string;
@@ -55,6 +62,10 @@ interface AtlasGlyph {
   v1: number;
   width: number;
   height: number;
+  // True when the rasterized bitmap carries its own colors (a color font such
+  // as Apple Color Emoji). Such glyphs are drawn directly from the atlas
+  // instead of being tinted with the cell's foreground color.
+  colored: boolean;
 }
 
 interface Rgb {
@@ -107,7 +118,11 @@ export function graphemeAtViewportCell(
 // without risking glyph-atlas thrash on heavy content. See growAtlas/resetAtlas.
 export const INITIAL_ATLAS_SIZE = 1024;
 export const MAX_ATLAS_SIZE = 2048;
-const FLOATS_PER_VERTEX = 8;
+// position(2) + texcoord(2) + color(4) + mode(1). The mode flag selects the
+// fragment path: 0 = tinted coverage (text/box/overlays sample the atlas alpha
+// and paint it in the quad's color), 1 = color glyph (emoji: sample the atlas
+// RGBA directly so the glyph keeps its own colors).
+const FLOATS_PER_VERTEX = 9;
 
 // Next atlas size when the current one fills: double it, but never exceed the
 // cap. Idempotent at the cap, so repeated growth always converges to
@@ -190,33 +205,8 @@ function compileShader(gl: WebGL2RenderingContext, type: number, source: string)
 }
 
 function createProgram(gl: WebGL2RenderingContext): WebGLProgram {
-  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, `#version 300 es
-    in vec2 a_position;
-    in vec2 a_texcoord;
-    in vec4 a_color;
-    uniform vec2 u_resolution;
-    out vec2 v_texcoord;
-    out vec4 v_color;
-
-    void main() {
-      vec2 clip = (a_position / u_resolution) * 2.0 - 1.0;
-      gl_Position = vec4(clip * vec2(1.0, -1.0), 0.0, 1.0);
-      v_texcoord = a_texcoord;
-      v_color = a_color;
-    }
-  `);
-  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, `#version 300 es
-    precision mediump float;
-    uniform sampler2D u_atlas;
-    in vec2 v_texcoord;
-    in vec4 v_color;
-    out vec4 out_color;
-
-    void main() {
-      float mask = texture(u_atlas, v_texcoord).a;
-      out_color = vec4(v_color.rgb, v_color.a * mask);
-    }
-  `);
+  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, TERMINAL_GLYPH_VERTEX_SHADER);
+  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, TERMINAL_GLYPH_FRAGMENT_SHADER);
   const program = gl.createProgram();
   if (!program) {
     throw new Error('Unable to allocate WebGL program');
@@ -299,6 +289,13 @@ export class WebGlTerminalRenderer {
     this.atlasContext.fillStyle = '#ffffff';
     this.atlasContext.fillRect(0, 0, 1, 1);
 
+    // Premultiply alpha on upload so color-glyph (emoji) bitmaps filter cleanly:
+    // straight-alpha color sampled with LINEAR bleeds the transparent border's
+    // black into glyph edges, leaving dark fringes. Premultiplied source plus a
+    // premultiplied blend (set below) interpolates correctly. Coverage-only
+    // glyphs are unaffected — only their RGB is scaled, and the tinted path
+    // reads just the alpha channel.
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -312,9 +309,13 @@ export class WebGlTerminalRenderer {
     this.configureAttribute('a_position', 2, stride, 0);
     this.configureAttribute('a_texcoord', 2, stride, 2 * Float32Array.BYTES_PER_ELEMENT);
     this.configureAttribute('a_color', 4, stride, 4 * Float32Array.BYTES_PER_ELEMENT);
+    this.configureAttribute('a_mode', 1, stride, 8 * Float32Array.BYTES_PER_ELEMENT);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_atlas'), 0);
     gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    // Premultiplied-alpha blending: the shader emits color already multiplied by
+    // coverage, so source factor is ONE. This keeps tinted text identical to the
+    // old SRC_ALPHA blend while letting color glyphs composite without fringing.
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   }
 
   fitDimensions(width: number, height: number): { cols: number; rows: number } {
@@ -510,6 +511,15 @@ export class WebGlTerminalRenderer {
     this.glyphs.clear();
   }
 
+  // Drop every cached glyph so the next render re-rasterizes against the current
+  // document fonts. Used when a web font (e.g. the bundled Nerd Font) finishes
+  // loading after the first glyphs were already rasterized with a fallback face:
+  // those stale bitmaps would otherwise be served from the cache forever. The
+  // caller is responsible for forcing a redraw afterwards.
+  invalidateGlyphCache(): void {
+    this.reseedAtlas();
+  }
+
   private configureAttribute(name: string, size: number, stride: number, offset: number): void {
     const location = this.gl.getAttribLocation(this.program, name);
     this.gl.enableVertexAttribArray(location);
@@ -576,8 +586,9 @@ export class WebGlTerminalRenderer {
     context.fillStyle = '#ffffff';
     context.textBaseline = 'alphabetic';
     context.fillText(text, x, y + this.baseline * scale);
+    const bitmap = context.getImageData(x, y, width, height);
     this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture);
-    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, x, y, width, height, this.gl.RGBA, this.gl.UNSIGNED_BYTE, context.getImageData(x, y, width, height));
+    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, x, y, width, height, this.gl.RGBA, this.gl.UNSIGNED_BYTE, bitmap);
 
     const glyph = {
       u0: x / this.atlasSize,
@@ -586,6 +597,7 @@ export class WebGlTerminalRenderer {
       v1: (y + height) / this.atlasSize,
       width,
       height,
+      colored: isColorGlyphBitmap(bitmap),
     };
     this.atlasX += width + 1;
     this.atlasRowHeight = Math.max(this.atlasRowHeight, height);
@@ -640,8 +652,9 @@ export class WebGlTerminalRenderer {
 
   private pushSolidQuad(vertices: number[], x: number, y: number, width: number, height: number, color: Rgb, alpha: number): void {
     // Keep all samples within the white texel. Sampling its edges with LINEAR
-    // filtering blends into transparent atlas neighbours and leaves seams.
-    this.pushQuad(vertices, x, y, width, height, this.solidTexelCenter, this.solidTexelCenter, this.solidTexelCenter, this.solidTexelCenter, color, alpha);
+    // filtering blends into transparent atlas neighbours and leaves seams. Mode
+    // 0: tint the (fully-opaque) texel coverage with the quad color.
+    this.pushQuad(vertices, x, y, width, height, this.solidTexelCenter, this.solidTexelCenter, this.solidTexelCenter, this.solidTexelCenter, color, alpha, GLYPH_MODE_TINT);
   }
 
   private pushBlockElement(vertices: number[], codepoint: number, x: number, y: number, width: number, height: number, color: Rgb, alpha: number): boolean {
@@ -664,7 +677,9 @@ export class WebGlTerminalRenderer {
   }
 
   private pushTexturedQuad(vertices: number[], x: number, y: number, width: number, height: number, glyph: AtlasGlyph, color: Rgb, alpha: number): void {
-    this.pushQuad(vertices, x, y, width, height, glyph.u0, glyph.v0, glyph.u1, glyph.v1, color, alpha);
+    // Color glyphs (emoji) carry their own colors and use mode 1 so the shader
+    // passes the atlas RGBA through; monochrome glyphs use mode 0 and are tinted.
+    this.pushQuad(vertices, x, y, width, height, glyph.u0, glyph.v0, glyph.u1, glyph.v1, color, alpha, glyph.colored ? GLYPH_MODE_COLOR : GLYPH_MODE_TINT);
   }
 
   private pushQuad(
@@ -679,15 +694,16 @@ export class WebGlTerminalRenderer {
     v1: number,
     color: Rgb,
     alpha: number,
+    mode: number,
   ): void {
     const rgba = [color.r / 255, color.g / 255, color.b / 255, alpha];
     vertices.push(
-      x, y, u0, v0, ...rgba,
-      x + width, y, u1, v0, ...rgba,
-      x, y + height, u0, v1, ...rgba,
-      x, y + height, u0, v1, ...rgba,
-      x + width, y, u1, v0, ...rgba,
-      x + width, y + height, u1, v1, ...rgba,
+      x, y, u0, v0, ...rgba, mode,
+      x + width, y, u1, v0, ...rgba, mode,
+      x, y + height, u0, v1, ...rgba, mode,
+      x, y + height, u0, v1, ...rgba, mode,
+      x + width, y, u1, v0, ...rgba, mode,
+      x + width, y + height, u1, v1, ...rgba, mode,
     );
   }
 }
