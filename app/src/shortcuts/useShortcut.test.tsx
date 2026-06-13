@@ -1,6 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useShortcut } from './useShortcut';
+import { setShortcutOverrides } from './resolver';
+import { cancelLeader, isLeaderPending } from './chordState';
 
 function ShortcutHarness(props: {
   onSessionClose: () => void;
@@ -135,5 +137,71 @@ describe('useShortcut close priority', () => {
 
     expect(allowed).toBe(false);
     expect(onSelectWorkspace).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('useShortcut leader-key chords', () => {
+  afterEach(() => {
+    setShortcutOverrides({});
+    cancelLeader();
+  });
+
+  it('arms a leader (consuming it) and fires the bound action on the follow key', () => {
+    setShortcutOverrides({ 'terminal.toggleZoom': { leader: { key: 'y', meta: true }, then: { key: 'z' } } });
+    const onToggleZoom = vi.fn();
+    render(<ShortcutHarness onSessionClose={vi.fn()} onTerminalClose={vi.fn()} onToggleZoom={onToggleZoom} />);
+
+    const armed = fireEvent.keyDown(screen.getByTestId('plain-target'), { key: 'y', metaKey: true });
+    expect(armed).toBe(false); // leader consumed (preventDefault)
+    expect(isLeaderPending()).toBe(true);
+    expect(onToggleZoom).not.toHaveBeenCalled();
+
+    const fired = fireEvent.keyDown(screen.getByTestId('plain-target'), { key: 'z' });
+    expect(fired).toBe(false); // follow consumed
+    expect(onToggleZoom).toHaveBeenCalledTimes(1);
+    expect(isLeaderPending()).toBe(false);
+  });
+
+  it('does not let the follow key also fire a single combo on the same keystroke', () => {
+    setShortcutOverrides({ 'terminal.toggleZoom': { leader: { key: 'y', meta: true }, then: { key: '1', meta: true } } });
+    const onToggleZoom = vi.fn();
+    const onSelectWorkspace = vi.fn();
+    render(
+      <ShortcutHarness
+        onSessionClose={vi.fn()}
+        onTerminalClose={vi.fn()}
+        onToggleZoom={onToggleZoom}
+        onSelectWorkspace={onSelectWorkspace}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByTestId('plain-target'), { key: 'y', metaKey: true });
+    fireEvent.keyDown(screen.getByTestId('plain-target'), { key: '1', code: 'Digit1', metaKey: true });
+    expect(onToggleZoom).toHaveBeenCalledTimes(1); // chord fired
+    expect(onSelectWorkspace).not.toHaveBeenCalled(); // ⌘1 combo did NOT also fire
+  });
+
+  it('consumes a bound leader even when its follow action has no handler', () => {
+    // toggleZoom is bound to a chord but not registered (no handler).
+    setShortcutOverrides({ 'terminal.toggleZoom': { leader: { key: 'y', meta: true }, then: { key: 'z' } } });
+    render(<ShortcutHarness onSessionClose={vi.fn()} onTerminalClose={vi.fn()} />);
+
+    const armed = fireEvent.keyDown(screen.getByTestId('plain-target'), { key: 'y', metaKey: true });
+    expect(armed).toBe(false); // consumed, no default leak
+    expect(isLeaderPending()).toBe(false); // nothing armed
+  });
+
+  it('does not arm a chord leader inside a non-terminal editable target', () => {
+    setShortcutOverrides({ 'terminal.toggleZoom': { leader: { key: 'y', meta: true }, then: { key: 'z' } } });
+    const onToggleZoom = vi.fn();
+    render(<ShortcutHarness onSessionClose={vi.fn()} onTerminalClose={vi.fn()} onToggleZoom={onToggleZoom} />);
+
+    const allowed = fireEvent.keyDown(screen.getByRole('textbox', { name: 'Browser address' }), {
+      key: 'y',
+      metaKey: true,
+    });
+    expect(allowed).toBe(true); // passed through to the input
+    expect(isLeaderPending()).toBe(false);
+    expect(onToggleZoom).not.toHaveBeenCalled();
   });
 });

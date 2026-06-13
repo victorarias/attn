@@ -1,6 +1,14 @@
 // app/src/shortcuts/registry.test.ts
 import { describe, it, expect } from 'vitest';
-import { SHORTCUTS, ShortcutDef, matchesShortcut } from './registry';
+import {
+  SHORTCUTS,
+  ShortcutDef,
+  Chord,
+  matchesShortcut,
+  bindingsConflict,
+  combosConflict,
+  isChord,
+} from './registry';
 
 function withNavigatorPlatform<T>(platform: string, fn: () => T): T {
   const nav = window.navigator as Navigator & { platform?: string };
@@ -232,6 +240,51 @@ describe('shortcut registry', () => {
     it('has expected workspace shortcuts defined', () => {
       expect(SHORTCUTS['workspace.select1']).toEqual({ key: '1', code: 'Digit1', meta: true });
       expect(SHORTCUTS['workspace.select9']).toEqual({ key: '9', code: 'Digit9', meta: true });
+    });
+  });
+
+  describe('isChord', () => {
+    it('distinguishes chords from combos', () => {
+      expect(isChord({ key: 'k', meta: true })).toBe(false);
+      expect(isChord({ leader: { key: 'k', meta: true }, then: { key: 'd' } })).toBe(true);
+      expect(isChord(null)).toBe(false);
+      expect(isChord(undefined)).toBe(false);
+    });
+  });
+
+  describe('bindingsConflict', () => {
+    const leaderK: Chord = { leader: { key: 'k', meta: true }, then: { key: 'd' } };
+
+    it('treats combo vs combo as a same-keystroke collision', () => {
+      expect(bindingsConflict({ key: 'g', meta: true }, { key: 'g', meta: true })).toBe(true);
+      expect(bindingsConflict({ key: 'g', meta: true }, { key: 'g', meta: true, shift: true })).toBe(false);
+    });
+
+    it('lets chords share a leader as long as the follow key differs', () => {
+      const sameLeaderDifferentThen: Chord = { leader: { key: 'k', meta: true }, then: { key: 'g' } };
+      expect(bindingsConflict(leaderK, sameLeaderDifferentThen)).toBe(false);
+    });
+
+    it('conflicts when two chords share leader AND follow key', () => {
+      const duplicate: Chord = { leader: { key: 'k', meta: true }, then: { key: 'd' } };
+      expect(bindingsConflict(leaderK, duplicate)).toBe(true);
+    });
+
+    it('conflicts a chord with a plain combo equal to its leader (leader exclusivity)', () => {
+      expect(bindingsConflict(leaderK, { key: 'k', meta: true })).toBe(true);
+      expect(bindingsConflict({ key: 'k', meta: true }, leaderK)).toBe(true);
+    });
+
+    it('does not conflict a chord with a combo that only equals its follow key', () => {
+      // A bare ⌘D combo collides with the leader (⌘K) check? No — different keystroke.
+      expect(bindingsConflict(leaderK, { key: 'd' })).toBe(false);
+    });
+  });
+
+  describe('combosConflict', () => {
+    it('matches the matchesShortcut key-or-code equivalence', () => {
+      expect(combosConflict({ key: '1', code: 'Digit1', meta: true }, { key: '&', code: 'Digit1', meta: true })).toBe(true);
+      expect(combosConflict({ key: 'a' }, { key: 'b' })).toBe(false);
     });
   });
 });

@@ -29,6 +29,7 @@ import { ActionMenu, type ActionMenuItem } from './components/ActionMenu';
 import { WorkspaceContextNavigator, type WorkspaceContextView } from './components/WorkspaceContextNavigator';
 import { CopyToast, useCopyToast } from './components/CopyToast';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
+import { ChordLeaderHud } from './components/ChordLeaderHud';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { KeybindingsProvider, useKeybindings } from './contexts/KeybindingsContext';
@@ -57,7 +58,7 @@ import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useWhatsNew } from './hooks/useWhatsNew';
-import { shortcutTokens, dockShortcutLabel } from './shortcuts';
+import { shortcutTokens, formatShortcut, dockShortcutLabel } from './shortcuts';
 import type { ShortcutId } from './shortcuts';
 import { useUIScale } from './hooks/useUIScale';
 import { useTheme } from './hooks/useTheme';
@@ -3113,7 +3114,7 @@ sendFetchPRDetails,
     keybindings.dock.items.flatMap((id) => {
       const action = dockActions[id];
       if (action && action.available === false) return [];
-      const keys = shortcutTokens(id).join('');
+      const keys = formatShortcut(id);
       if (!keys) return []; // unbound -> nothing to show
       return [{
         id,
@@ -3629,6 +3630,7 @@ sendFetchPRDetails,
       />
       <CopyToast message={copyMessage} onDone={clearCopyToast} />
       <ErrorToast message={errorMessage} onDone={clearError} />
+      <ChordLeaderHud />
       <WorkspaceContextNavigator
         isOpen={workspaceContextsOpen}
         contexts={workspaceContextViews}

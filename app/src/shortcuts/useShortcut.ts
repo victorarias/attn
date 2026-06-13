@@ -1,7 +1,9 @@
 // app/src/shortcuts/useShortcut.ts
 import { useEffect, useRef } from 'react';
-import { SHORTCUTS, ShortcutId, matchesShortcut } from './registry';
+import { SHORTCUTS, ShortcutId, matchesShortcut, isChord } from './registry';
 import { resolvedShortcutEntries } from './resolver';
+import { enterLeader, resolvePendingThen } from './chordState';
+import { matchChordLeader } from './chordDispatch';
 
 type Handler = () => void;
 const NATIVE_SHORTCUT_EVENT = 'attn:native-shortcut';
@@ -18,6 +20,12 @@ export function triggerShortcut(id: ShortcutId): boolean {
     handler();
   }
   return true;
+}
+
+/** Whether any component currently has a handler registered for this id. */
+export function hasHandler(id: ShortcutId): boolean {
+  const set = handlers.get(id);
+  return !!set && set.size > 0;
 }
 
 // While the shortcut editor is capturing a keystroke, the global dispatcher
@@ -38,6 +46,18 @@ function installGlobalListener() {
 
   window.addEventListener('keydown', (e: KeyboardEvent) => {
     if (captureSuspended) return;
+
+    // A pending leader owns the next keystroke entirely: fire its chord, refresh
+    // a re-press, or cancel — but always consume so it can't fall through to a
+    // single combo or leak into the terminal PTY.
+    const pendingThen = resolvePendingThen(e);
+    if (pendingThen.kind !== 'none') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (pendingThen.kind === 'fired') triggerShortcut(pendingThen.id);
+      return;
+    }
+
     const editableTarget = isNonTerminalEditableTarget(e.target);
     const terminalTarget = isTerminalTarget(e.target);
     // Iterate resolved bindings (defaults merged with user overrides) so rebinds
@@ -45,6 +65,9 @@ function installGlobalListener() {
     for (const [id, def] of resolvedShortcutEntries()) {
       if (id === 'terminal.close' && !terminalTarget) {
         continue;
+      }
+      if (isChord(def)) {
+        continue; // chord leaders are armed in the pass below
       }
       if (matchesShortcut(e, def)) {
         if (editableTarget && def.editableTarget === 'native') {
@@ -60,6 +83,24 @@ function installGlobalListener() {
           triggerShortcut(id);
           return;
         }
+      }
+    }
+
+    // No single combo matched — arm a chord if this keystroke is a bound leader.
+    // A bound leader is always consumed (never leaks to the PTY) even when no
+    // follow action currently has a handler; it just arms nothing in that case.
+    // Skip in non-terminal editable targets so a leader can't swallow a
+    // keystroke meant for an input/textarea.
+    if (!editableTarget) {
+      const chord = matchChordLeader(e);
+      if (chord) {
+        const fireable = chord.candidates.filter((c) => hasHandler(c.id));
+        if (fireable.length > 0) {
+          enterLeader(chord.leader, fireable);
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        return;
       }
     }
   }, true); // Capture phase to get events before terminal input.
