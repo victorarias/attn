@@ -599,6 +599,39 @@ model WorkspaceContextRollbackMessage {
   source_session_id: string;
 }
 
+// ============================================================================
+// Notebook (durable, profile-wide markdown memory).
+// See docs/plans/2026-06-13-notebook.md. Filesystem-canonical: edits use
+// hash-CAS on file bytes, not a revision table.
+// ============================================================================
+
+model NotebookInitMessage {
+  cmd: "notebook_init";
+}
+
+model NotebookListMessage {
+  cmd: "notebook_list";
+  prefix?: string;
+}
+
+model NotebookReadMessage {
+  cmd: "notebook_read";
+  path: string;
+}
+
+model NotebookWriteMessage {
+  cmd: "notebook_write";
+  path: string;
+  content: string;
+  base_hash?: string; // omitted = create-only; present = hash-CAS edit
+}
+
+model NotebookAppendJournalMessage {
+  cmd: "notebook_append_journal";
+  entry: string;
+  date?: string; // YYYY-MM-DD; defaults to the daemon's local date
+}
+
 model DelegateWorktreeRequest {
   repo?: string;
   branch: string;
@@ -1309,6 +1342,13 @@ model WorkspaceContextChangedMessage {
   updated_at: string;
 }
 
+// Broadcast when notebook content changes. origin is agent|dreaming|ui|external.
+model NotebookChangedMessage {
+  event: "notebook_changed";
+  paths: string[];
+  origin: string;
+}
+
 model SessionTodosUpdatedMessage {
   event: "session_todos_updated";
   session: Session;
@@ -1901,6 +1941,10 @@ model Response {
   repos?: RepoState[];
   authors?: AuthorState[];
   review_loop_run?: ReviewLoopRun;
+  notebook_init?: NotebookInitResult;
+  notebook_entries?: NotebookEntry[];
+  notebook_read?: NotebookReadResult;
+  notebook_write?: NotebookWriteResult;
 }
 
 model DelegateResult {
@@ -1940,6 +1984,36 @@ model WorkspaceContextMaintenanceResult {
   changed: boolean;
   agent?: string;
   agent_model?: string;
+}
+
+// One notebook note as surfaced by notebook_list (metadata only, no body).
+model NotebookEntry {
+  path: string;
+  kind?: string;
+  title?: string;
+  summary?: string;
+  updated?: string;
+  size: int32;
+}
+
+model NotebookInitResult {
+  root: string;
+  created: boolean;
+}
+
+model NotebookReadResult {
+  path: string;
+  content: string;
+  hash: string;
+}
+
+// Result of notebook_write / notebook_append_journal. When conflict is true the
+// write did not apply; current_hash is the hash now on disk (empty if gone).
+model NotebookWriteResult {
+  path: string;
+  hash?: string;
+  conflict: boolean;
+  current_hash?: string;
 }
 
 model WorkspaceContextResultMessage {
@@ -2073,6 +2147,7 @@ alias DaemonEvent =
   | WorkspaceUnregisteredMessage
   | WorkspaceStateChangedMessage
   | WorkspaceContextChangedMessage
+  | NotebookChangedMessage
   | SessionTodosUpdatedMessage
   | SessionsUpdatedMessage
   | WorkspaceLayoutMessage
