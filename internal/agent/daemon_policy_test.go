@@ -101,6 +101,42 @@ func TestShouldApplyPTYState_AgentOverrides(t *testing.T) {
 	}
 }
 
+// TestShouldApplyPTYState_ClaudeProtectsScheduled guards the parked-on-a-loop
+// state: Claude's detector still classifies the settled idle prompt while a
+// session is scheduled, but only a genuine resume (working) may move it out.
+// This also asserts Claude actually satisfies PTYStatePolicyProvider — if the
+// interface were unsatisfied, ShouldApplyPTYState would fall to the default
+// (return true) and the idle/waiting_input/pending_approval cases below would
+// wrongly pass.
+func TestShouldApplyPTYState_ClaudeProtectsScheduled(t *testing.T) {
+	claude := Get("claude")
+
+	for _, incoming := range []string{
+		protocol.StateIdle,
+		protocol.StateWaitingInput,
+		protocol.StatePendingApproval,
+	} {
+		if ShouldApplyPTYState(claude, protocol.SessionStateScheduled, incoming) {
+			t.Fatalf("claude should reject %s PTY state while scheduled", incoming)
+		}
+	}
+	if !ShouldApplyPTYState(claude, protocol.SessionStateScheduled, protocol.StateWorking) {
+		t.Fatal("claude should apply working PTY state to resume a scheduled session")
+	}
+
+	// Non-scheduled Claude transitions keep the default (detector-trusting) behavior.
+	for _, incoming := range []string{
+		protocol.StateWorking,
+		protocol.StateWaitingInput,
+		protocol.StateIdle,
+		protocol.StatePendingApproval,
+	} {
+		if !ShouldApplyPTYState(claude, protocol.SessionStateWorking, incoming) {
+			t.Fatalf("claude should apply %s PTY state while working", incoming)
+		}
+	}
+}
+
 func TestResumePolicy_Claude(t *testing.T) {
 	claude := Get("claude")
 	resolved := ResolveSpawnResumeSessionID(claude, "sess-1", "", "stored-resume")
