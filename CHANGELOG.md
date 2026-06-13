@@ -19,6 +19,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **A session running work in the background no longer flips to a confusing "unknown" state.** When Claude Code hands off to a background workflow or background shell command and pauses its turn, the session now stays shown as working until the background work finishes and the turn resumes — instead of briefly being mis-detected as "unknown" because it paused before its transcript was written.
+- **A workspace's status dot now matches the sessions inside it.** A workspace whose only session was in the "unknown" state used to show a settled gray dot that disagreed with the session's own indicator; the unknown state now rolls up to the workspace so the two agree. The workspace dot also stays correct right after the app reopens — restored sessions no longer leave the workspace showing a stale status from before the restart.
+- **Shell sessions no longer show a permanent green "working" dot.** A plain terminal isn't running an agent turn, so it now starts (and stays) idle instead of appearing busy forever until you close it.
 
 ## [2026-06-12]
 

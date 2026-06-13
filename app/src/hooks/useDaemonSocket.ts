@@ -20,7 +20,6 @@ import type {
   ReviewLoopInteraction as GeneratedReviewLoopInteraction,
   WarningElement as GeneratedWarning,
   WorkspaceContext as GeneratedWorkspaceContext,
-  SessionState,
   PRRole,
   HeatState,
 } from '../types/generated';
@@ -90,7 +89,7 @@ export interface PathInspection {
 export type { DaemonEndpointProfile };
 
 // Re-export enums and useful types
-export { SessionState, PRRole, HeatState };
+export { PRRole, HeatState };
 
 // Extended WebSocketEvent with action result fields (generated allows extra properties)
 type WebSocketEvent = GeneratedWebSocketEvent & {
@@ -169,7 +168,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '104';
+export const PROTOCOL_VERSION = '105';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {

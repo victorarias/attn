@@ -772,6 +772,9 @@ func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
 	if _, ok := d.ptyBackend.(ptybackend.RecoverableRuntime); ok {
 		d.reconcileStartupWorkerSessions(recoveryReport, recoverErr, recoveryStartedAt)
 		d.reconcileWorkspaceLayoutsWithPTYBackend(context.Background())
+		// Recovery rewrote session states in the store; refresh the cached
+		// workspace rollups so InitialState matches.
+		d.reseedWorkspaceStatuses()
 		return
 	}
 
@@ -784,6 +787,9 @@ func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
 		)
 	}
 	d.reconcileWorkspaceLayoutsWithPTYBackend(context.Background())
+	// Pruning flipped recovered sessions to idle in the store; refresh the
+	// cached workspace rollups so InitialState matches.
+	d.reseedWorkspaceStatuses()
 }
 
 func (d *Daemon) recoverPTYBackend(timeout time.Duration) (ptybackend.RecoveryReport, error) {

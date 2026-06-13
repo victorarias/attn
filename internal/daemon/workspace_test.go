@@ -74,14 +74,34 @@ func TestRollupWorkspaceStatus_PriorityOrdering(t *testing.T) {
 			want:   protocol.WorkspaceStatusIdle,
 		},
 		{
-			name:   "launching beats unrecognised session_state_unknown",
+			name:   "unknown beats launching",
 			states: []protocol.SessionState{protocol.SessionStateUnknown, protocol.SessionStateLaunching},
-			want:   protocol.WorkspaceStatusLaunching,
+			want:   protocol.WorkspaceStatusUnknown,
 		},
 		{
-			name:   "all session_state_unknown yields idle",
+			name:   "unknown beats idle",
+			states: []protocol.SessionState{protocol.SessionStateIdle, protocol.SessionStateUnknown},
+			want:   protocol.WorkspaceStatusUnknown,
+		},
+		{
+			name:   "unknown beats scheduled",
+			states: []protocol.SessionState{protocol.SessionStateScheduled, protocol.SessionStateUnknown},
+			want:   protocol.WorkspaceStatusUnknown,
+		},
+		{
+			name:   "pending_approval beats unknown",
+			states: []protocol.SessionState{protocol.SessionStateUnknown, protocol.SessionStatePendingApproval},
+			want:   protocol.WorkspaceStatusPendingApproval,
+		},
+		{
+			name:   "working beats unknown",
+			states: []protocol.SessionState{protocol.SessionStateUnknown, protocol.SessionStateWorking},
+			want:   protocol.WorkspaceStatusWorking,
+		},
+		{
+			name:   "all session_state_unknown yields unknown",
 			states: []protocol.SessionState{protocol.SessionStateUnknown, protocol.SessionStateUnknown},
-			want:   protocol.WorkspaceStatusIdle,
+			want:   protocol.WorkspaceStatusUnknown,
 		},
 		{
 			name:   "all idle yields idle",

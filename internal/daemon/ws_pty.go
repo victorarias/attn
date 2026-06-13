@@ -595,7 +595,13 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		nowStr := string(protocol.TimestampNow())
 		initialState := protocol.SessionStateLaunching
 		if isShell {
-			initialState = protocol.SessionStateWorking
+			// A shell is a plain user-driven PTY: it has no agent turn
+			// lifecycle, no Stop hook, and (deliberately) no state detector, so
+			// nothing ever transitions it once spawned. Seed it `idle` rather
+			// than `working` — a shell sitting at a prompt is not "working", and
+			// the old `working` seed made every shell (and its workspace) show a
+			// permanent green dot it could never leave until the process exited.
+			initialState = protocol.SessionStateIdle
 		}
 		initialStateSince := nowStr
 		initialStateUpdatedAt := nowStr
