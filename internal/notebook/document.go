@@ -9,17 +9,27 @@ import (
 )
 
 // Document is a parsed Notebook markdown file: optional YAML frontmatter plus a
-// markdown body. Unknown frontmatter keys are preserved verbatim on round-trip
-// so fields written by Obsidian, an external sync tool, or the user survive an
-// attn rewrite.
+// markdown body. A document parsed from disk re-serializes its frontmatter
+// content byte-for-byte — key order, comments, and scalar text (e.g. ids like
+// 007 or versions like 1.10) are all preserved — so fields written by Obsidian,
+// an external sync tool, or the user survive an attn rewrite untouched (the
+// "---" fence lines themselves are normalized to LF). Only an attn-constructed
+// document is serialized from the parsed map (in deterministic sorted-key order).
 type Document struct {
-	// Frontmatter holds every key from the YAML frontmatter block. A nil map
-	// means the file had no frontmatter block at all.
+	// Frontmatter holds every key from the YAML frontmatter block, parsed for
+	// reading (accessors). A nil map means the file had no frontmatter block.
+	// Mutating this map after Parse does NOT change what Bytes emits for a
+	// parsed document — construct a fresh Document (leaving rawFrontmatter
+	// empty) to serialize edited frontmatter.
 	Frontmatter map[string]any
 	// Body is the markdown content after the frontmatter block, with the
 	// closing fence (and its trailing newline) removed and the remainder kept
 	// byte-for-byte.
 	Body string
+	// rawFrontmatter is the exact YAML text between the fences as read from
+	// disk (empty for an attn-constructed document). When set, Bytes emits it
+	// verbatim, making round-trips byte-faithful.
+	rawFrontmatter string
 }
 
 const frontmatterFence = "---"
@@ -35,13 +45,13 @@ func Parse(raw []byte) (Document, error) {
 		return Document{Body: body}, nil
 	}
 	if strings.TrimSpace(fm) == "" {
-		return Document{Frontmatter: map[string]any{}, Body: body}, nil
+		return Document{Frontmatter: map[string]any{}, Body: body, rawFrontmatter: fm}, nil
 	}
 	meta, err := decodeFrontmatter([]byte(fm))
 	if err != nil {
 		return Document{Body: string(raw)}, fmt.Errorf("parse frontmatter: %w", err)
 	}
-	return Document{Frontmatter: meta, Body: body}, nil
+	return Document{Frontmatter: meta, Body: body, rawFrontmatter: fm}, nil
 }
 
 // decodeFrontmatter decodes a YAML mapping into map[string]any, preserving every
@@ -117,6 +127,10 @@ func ParsePermissive(raw []byte) Document {
 // in deterministic (sorted) order. A document with no frontmatter serializes to
 // its body alone.
 func (d Document) Bytes() []byte {
+	// A parsed document re-emits its frontmatter byte-for-byte.
+	if d.rawFrontmatter != "" {
+		return []byte(frontmatterFence + "\n" + d.rawFrontmatter + frontmatterFence + "\n" + d.Body)
+	}
 	if len(d.Frontmatter) == 0 {
 		return []byte(d.Body)
 	}

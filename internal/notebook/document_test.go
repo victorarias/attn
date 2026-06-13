@@ -125,6 +125,24 @@ func TestNoClosingFenceIsBody(t *testing.T) {
 	}
 }
 
+// A document parsed from disk must re-serialize byte-for-byte: comments, key
+// order, line endings, and ambiguous scalars (ids like 007, versions like 1.10)
+// are all preserved. This is the preserve-verbatim round-trip the design
+// requires for Obsidian/sync/user-authored fields.
+func TestParseRoundTripIsByteFaithful(t *testing.T) {
+	raw := "---\nkind: memory\nticket: 007\nver: 1.10\n# a human note\nzeta: last\nalpha: first\n---\n\n# Body\n"
+	doc, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Kind() != "memory" {
+		t.Fatalf("Kind = %q, want memory", doc.Kind())
+	}
+	if out := string(doc.Bytes()); out != raw {
+		t.Fatalf("round-trip not byte-faithful:\n got: %q\nwant: %q", out, raw)
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

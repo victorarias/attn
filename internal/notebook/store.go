@@ -2,6 +2,7 @@ package notebook
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -47,12 +48,19 @@ func (s *Store) EnsureScaffold() (created bool, err error) {
 		return false, fmt.Errorf("create notebook root: %w", err)
 	}
 	for _, dir := range scaffoldDirs() {
-		if err := os.MkdirAll(filepath.Join(s.root, filepath.FromSlash(dir)), 0o755); err != nil {
+		abs := filepath.Join(s.root, filepath.FromSlash(dir))
+		if err := s.checkWithinResolvedRoot(abs); err != nil {
+			return false, err // refuse to create through a symlinked subdir
+		}
+		if err := os.MkdirAll(abs, 0o755); err != nil {
 			return false, err
 		}
 	}
 	for _, f := range scaffoldFiles() {
 		abs := filepath.Join(s.root, filepath.FromSlash(f.relPath))
+		if err := s.checkWithinResolvedRoot(abs); err != nil {
+			return false, err
+		}
 		if _, statErr := os.Stat(abs); statErr == nil {
 			continue // never clobber an existing file
 		} else if !os.IsNotExist(statErr) {
@@ -180,8 +188,16 @@ func (s *Store) AppendJournal(dateISO, entry string) (relPath string, hash strin
 // (root-absolute or relative) filters to a subtree. The .attn/ dotdir and any
 // dotfile are skipped, and non-.md files are ignored. An uninitialized root
 // yields an empty list, not an error.
+// listFrontmatterScanLimit bounds how many leading bytes List reads per file to
+// extract frontmatter. Frontmatter lives at the top, so a small prefix is
+// enough — List never loads a whole (possibly externally-written, oversized)
+// body into memory just to render the tree.
+const listFrontmatterScanLimit = 64 << 10 // 64 KiB
+
 func (s *Store) List(prefix string) ([]Entry, error) {
-	want := strings.TrimPrefix(strings.TrimSpace(prefix), "/")
+	// A non-empty prefix scopes a subtree on path-segment boundaries (so
+	// "memory/decisions" does NOT match the sibling "memory/decisions-archive").
+	want := strings.Trim(strings.TrimSpace(prefix), "/")
 	var entries []Entry
 	walkErr := filepath.WalkDir(s.root, func(p string, dirent fs.DirEntry, err error) error {
 		if err != nil {
@@ -205,14 +221,14 @@ func (s *Store) List(prefix string) ([]Entry, error) {
 			return nil
 		}
 		rel := filepath.ToSlash(relAbs)
-		if want != "" && !strings.HasPrefix(rel, want) {
+		if want != "" && rel != want && !strings.HasPrefix(rel, want+"/") {
 			return nil
 		}
 		info, ierr := dirent.Info()
 		if ierr != nil {
 			return nil
 		}
-		raw, rerr := os.ReadFile(p)
+		raw, rerr := readPrefix(p, listFrontmatterScanLimit)
 		if rerr != nil {
 			return nil
 		}
@@ -239,7 +255,8 @@ func (s *Store) List(prefix string) ([]Entry, error) {
 }
 
 // abs resolves a notebook path to an absolute filesystem path, validating it and
-// defending against any escape outside the root.
+// defending against any escape outside the root — both lexical (".." after
+// Clean) and via symlinks inside the root that point elsewhere.
 func (s *Store) abs(p string) (string, error) {
 	rel, err := CleanPath(p)
 	if err != nil {
@@ -249,7 +266,60 @@ func (s *Store) abs(p string) (string, error) {
 	if abs != s.root && !strings.HasPrefix(abs, s.root+string(filepath.Separator)) {
 		return "", fmt.Errorf("notebook: %q escapes the notebook root", p)
 	}
+	if err := s.checkWithinResolvedRoot(abs); err != nil {
+		return "", err
+	}
 	return abs, nil
+}
+
+// checkWithinResolvedRoot defends against symlink escape: it resolves the
+// deepest existing ancestor of abs and requires it to stay within the resolved
+// root. A symlinked directory or file inside the root that points outside is
+// rejected; a legitimately symlinked root itself (the user pointing
+// ~/attn-notebook at a synced folder) is allowed, because the root is resolved
+// too. The lexical guard in abs cannot catch this — a symlink uses no "..".
+//
+// A residual TOCTOU remains (a symlink could be planted between the check and
+// the syscall); for a single-user local app that is an accepted limit.
+func (s *Store) checkWithinResolvedRoot(abs string) error {
+	realRoot, err := filepath.EvalSymlinks(s.root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // root not created yet; nothing to traverse through
+		}
+		return err
+	}
+	probe := abs
+	for {
+		resolved, err := filepath.EvalSymlinks(probe)
+		if err == nil {
+			if resolved != realRoot && !strings.HasPrefix(resolved, realRoot+string(filepath.Separator)) {
+				return fmt.Errorf("notebook: %q resolves outside the notebook root via a symlink", abs)
+			}
+			return nil
+		}
+		if !os.IsNotExist(err) {
+			return err
+		}
+		// The leaf (or a not-yet-created ancestor) does not exist; walk up to
+		// the deepest existing component and resolve that.
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return nil
+		}
+		probe = parent
+	}
+}
+
+// readPrefix reads up to limit leading bytes of a file. Used by List to scan
+// frontmatter without loading large bodies.
+func readPrefix(path string, limit int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, limit))
 }
 
 // writeAtomic writes content to absPath atomically: it creates parent

@@ -150,6 +150,131 @@ func TestAppendJournal(t *testing.T) {
 	}
 }
 
+// A symlinked directory inside the root that points outside must not let
+// reads/writes escape the root (the notebook lives in the user's home and is
+// externally writable, so a planted symlink is realistic).
+func TestStoreRejectsSymlinkEscape(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "nb")
+	outside := filepath.Join(base, "outside")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(outside, "secret.md")
+	if err := os.WriteFile(secret, []byte("TOP SECRET\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "evil")); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(root)
+
+	if _, _, err := s.Read("evil/secret.md"); err == nil {
+		t.Fatal("Read through a symlinked dir should be rejected")
+	}
+	if _, _, err := s.Write("evil/secret.md", []byte("---\nkind: memory\n---\nx\n"), ""); err == nil {
+		t.Fatal("Write through a symlinked dir should be rejected")
+	}
+	if got, _ := os.ReadFile(secret); string(got) != "TOP SECRET\n" {
+		t.Fatalf("outside file was modified through the symlink: %q", got)
+	}
+}
+
+// A legitimately symlinked root (user points ~/attn-notebook at a synced folder)
+// must still work — the guard resolves the root too.
+func TestStoreAllowsSymlinkedRoot(t *testing.T) {
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	link := filepath.Join(base, "link")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(link)
+	if _, err := s.EnsureScaffold(); err != nil {
+		t.Fatalf("EnsureScaffold on a symlinked root: %v", err)
+	}
+	if _, _, err := s.Write("memory/foo.md", []byte("---\nkind: memory\n---\nx\n"), ""); err != nil {
+		t.Fatalf("write under a symlinked root should work: %v", err)
+	}
+}
+
+// The prefix scopes a subtree on path-segment boundaries, not raw substring.
+func TestListPrefixIsPathSegmentBoundary(t *testing.T) {
+	s := NewStore(t.TempDir())
+	body := []byte("---\nkind: memory\n---\nx\n")
+	if _, _, err := s.Write("memory/decisions/foo.md", body, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Write("memory/decisions-archive/bar.md", body, ""); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := s.List("memory/decisions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundFoo, foundArchive := false, false
+	for _, e := range entries {
+		switch e.Path {
+		case "memory/decisions/foo.md":
+			foundFoo = true
+		case "memory/decisions-archive/bar.md":
+			foundArchive = true
+		}
+	}
+	if !foundFoo {
+		t.Fatalf("prefix should include memory/decisions/foo.md; got %+v", entries)
+	}
+	if foundArchive {
+		t.Fatalf("prefix must NOT leak the sibling memory/decisions-archive/bar.md; got %+v", entries)
+	}
+}
+
+// List extracts frontmatter from a large file without loading the whole body,
+// and still reports the full size.
+func TestListReadsFrontmatterFromLargeFile(t *testing.T) {
+	s := NewStore(t.TempDir())
+	big := "---\nkind: memory\ntitle: Big\n---\n" + strings.Repeat("x\n", 100<<10) // ~200 KiB body
+	if _, _, err := s.Write("memory/big.md", []byte(big), ""); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := s.List("memory/big.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Kind != "memory" || entries[0].Title != "Big" {
+		t.Fatalf("List did not extract frontmatter from a large file: %+v", entries)
+	}
+	if entries[0].Size != int64(len(big)) {
+		t.Fatalf("List size = %d, want %d", entries[0].Size, len(big))
+	}
+}
+
+// AppendJournal must not corrupt frontmatter an external tool wrote (comments,
+// key order, ambiguous scalars all survive the next attn append).
+func TestAppendJournalPreservesExistingFrontmatter(t *testing.T) {
+	s := NewStore(t.TempDir())
+	existing := "---\nkind: journal\n# external note\nobsidian_id: 007\nzeta: z\ntitle: jrnl\n---\n# entries\n\nfirst\n"
+	if _, _, err := s.Write("journal/2026-06-13.md", []byte(existing), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.AppendJournal("2026-06-13", "second"); err != nil {
+		t.Fatal(err)
+	}
+	content, _, _ := s.Read("journal/2026-06-13.md")
+	got := string(content)
+	for _, want := range []string{"# external note", "obsidian_id: 007", "first", "second"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("append dropped %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestList(t *testing.T) {
 	s := NewStore(t.TempDir())
 
