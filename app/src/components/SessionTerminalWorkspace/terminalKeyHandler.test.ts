@@ -1,14 +1,23 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installTerminalKeyHandler } from './terminalKeyHandler';
-import { triggerShortcut } from '../../shortcuts/useShortcut';
+import { triggerShortcut, hasHandler } from '../../shortcuts/useShortcut';
+import { setShortcutOverrides } from '../../shortcuts/resolver';
+import { cancelLeader, isLeaderPending } from '../../shortcuts/chordState';
 
 vi.mock('../../shortcuts/useShortcut', () => ({
   triggerShortcut: vi.fn(),
+  hasHandler: vi.fn(() => true),
 }));
 
 describe('installTerminalKeyHandler', () => {
   beforeEach(() => {
     vi.mocked(triggerShortcut).mockReset();
+    vi.mocked(hasHandler).mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    setShortcutOverrides({});
+    cancelLeader();
   });
 
   it('sends Shift+Tab as terminal reverse-tab input', () => {
@@ -145,5 +154,61 @@ describe('installTerminalKeyHandler', () => {
     expect(triggerShortcut).toHaveBeenNthCalledWith(1, 'terminal.close');
     expect(triggerShortcut).toHaveBeenNthCalledWith(2, 'session.close');
     expect(sendToPty).not.toHaveBeenCalled();
+  });
+
+  describe('leader-key chords', () => {
+    // Bind a chord (⌘K then D) to an action; the leader collides with no
+    // terminal intercept, so the chord layer owns it.
+    const CHORD = { leader: { key: 'k', meta: true }, then: { key: 'd' } };
+
+    it('arms the leader and consumes it without leaking to the PTY', () => {
+      setShortcutOverrides({ 'dock.diff': CHORD });
+      const sendToPty = vi.fn();
+      const handler = installTerminalKeyHandler(sendToPty);
+
+      const leader = new KeyboardEvent('keydown', { key: 'k', metaKey: true });
+      expect(handler(leader)).toBe(false);
+      expect(isLeaderPending()).toBe(true);
+      expect(sendToPty).not.toHaveBeenCalled();
+      expect(triggerShortcut).not.toHaveBeenCalled();
+    });
+
+    it('fires the bound action on the follow key, still consuming it', () => {
+      vi.mocked(triggerShortcut).mockReturnValue(true);
+      setShortcutOverrides({ 'dock.diff': CHORD });
+      const sendToPty = vi.fn();
+      const handler = installTerminalKeyHandler(sendToPty);
+
+      handler(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
+      const follow = new KeyboardEvent('keydown', { key: 'd' });
+      expect(handler(follow)).toBe(false);
+      expect(triggerShortcut).toHaveBeenCalledWith('dock.diff');
+      expect(sendToPty).not.toHaveBeenCalled();
+      expect(isLeaderPending()).toBe(false);
+    });
+
+    it('consumes a non-matching follow key as a cancel, never reaching the PTY', () => {
+      setShortcutOverrides({ 'dock.diff': CHORD });
+      const sendToPty = vi.fn();
+      const handler = installTerminalKeyHandler(sendToPty);
+
+      handler(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
+      const stray = new KeyboardEvent('keydown', { key: 'x' });
+      expect(handler(stray)).toBe(false);
+      expect(triggerShortcut).not.toHaveBeenCalled();
+      expect(sendToPty).not.toHaveBeenCalled();
+      expect(isLeaderPending()).toBe(false);
+    });
+
+    it('does not arm a leader when no follow action has a handler', () => {
+      vi.mocked(hasHandler).mockReturnValue(false);
+      setShortcutOverrides({ 'dock.diff': CHORD });
+      const sendToPty = vi.fn();
+      const handler = installTerminalKeyHandler(sendToPty);
+
+      // ⌘K with no fireable candidate falls through; nothing arms, nothing leaks.
+      expect(handler(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))).toBe(true);
+      expect(isLeaderPending()).toBe(false);
+    });
   });
 });

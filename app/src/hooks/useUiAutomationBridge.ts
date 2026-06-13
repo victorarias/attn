@@ -5,7 +5,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Session } from '../store/sessions';
 import type { SessionAgent } from '../types/sessionAgent';
 import type { TerminalSplitDirection } from '../types/workspace';
-import { SHORTCUTS, type ShortcutId } from '../shortcuts';
+import { SHORTCUTS, type ShortcutId, type Combo, isChord, resolveBinding } from '../shortcuts';
 import { getGridAutomationHandle, INACTIVE_GRID_STATE } from '../components/grid/gridAutomation';
 import { getTerminalPerfSnapshot } from '../utils/terminalPerf';
 import { readWarmWorkspaceLimit } from '../utils/terminalVirtualization';
@@ -710,31 +710,37 @@ function summarizePtyRecentTraffic(
   };
 }
 
-function dispatchShortcutEvent(shortcutId: ShortcutId) {
-  const shortcut = SHORTCUTS[shortcutId];
-  if (!shortcut) {
-    throw new Error(`Unknown shortcut: ${shortcutId}`);
-  }
-  const shortcutDef = shortcut as {
-    key: string;
-    code?: string;
-    meta?: boolean;
-    ctrl?: boolean;
-    alt?: boolean;
-    shift?: boolean;
-  };
-
+function dispatchCombo(combo: Combo) {
   const event = new KeyboardEvent('keydown', {
-    key: shortcutDef.key,
-    code: shortcutDef.code,
-    metaKey: !!shortcutDef.meta,
-    ctrlKey: !!shortcutDef.ctrl,
-    altKey: !!shortcutDef.alt,
-    shiftKey: !!shortcutDef.shift,
+    key: combo.key,
+    code: combo.code,
+    metaKey: !!combo.meta,
+    ctrlKey: !!combo.ctrl,
+    altKey: !!combo.alt,
+    shiftKey: !!combo.shift,
     bubbles: true,
     cancelable: true,
   });
   window.dispatchEvent(event);
+}
+
+function dispatchShortcutEvent(shortcutId: ShortcutId) {
+  if (!Object.prototype.hasOwnProperty.call(SHORTCUTS, shortcutId)) {
+    throw new Error(`Unknown shortcut: ${shortcutId}`);
+  }
+  // Resolve through overrides so automation exercises the live binding. A chord
+  // fires as two synchronous keystrokes (leader then follow), which the shared
+  // chord state machine pairs up.
+  const binding = resolveBinding(shortcutId);
+  if (!binding) {
+    throw new Error(`Shortcut is unbound: ${shortcutId}`);
+  }
+  if (isChord(binding)) {
+    dispatchCombo(binding.leader);
+    dispatchCombo(binding.then);
+    return;
+  }
+  dispatchCombo(binding);
 }
 
 function clickPaneElement(sessionId: string, paneId: string) {

@@ -14,7 +14,7 @@ import {
   ReactNode,
 } from 'react';
 import { useSettings } from './SettingsContext';
-import { ShortcutDef, ShortcutId } from '../shortcuts/registry';
+import { Binding, ShortcutId } from '../shortcuts/registry';
 import { isProtectedShortcut } from '../shortcuts/metadata';
 import {
   KeybindingsConfig,
@@ -28,16 +28,16 @@ import {
   findConflict,
 } from '../shortcuts/resolver';
 
-// def -> rebind, null -> unbind, undefined -> reset to default (drop override).
-export type OverrideChange = ShortcutDef | null | undefined;
+// binding -> rebind, null -> unbind, undefined -> reset to default (drop override).
+export type OverrideChange = Binding | null | undefined;
 
 interface KeybindingsContextValue {
   config: KeybindingsConfig;
   dock: DockConfig;
-  resolve: (id: ShortcutId) => ShortcutDef | null;
+  resolve: (id: ShortcutId) => Binding | null;
   isProtected: (id: ShortcutId) => boolean;
   isCustomized: (id: ShortcutId) => boolean;
-  findConflict: (def: ShortcutDef, excludeId: ShortcutId) => ShortcutId | null;
+  findConflict: (binding: Binding, excludeId: ShortcutId) => ShortcutId | null;
   /** Apply one or more override changes in a single persisted write (atomic). */
   applyOverrides: (changes: Partial<Record<ShortcutId, OverrideChange>>) => void;
   isInDock: (id: ShortcutId) => boolean;

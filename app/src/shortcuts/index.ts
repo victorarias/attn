@@ -3,10 +3,26 @@ export {
   SHORTCUTS,
   type ShortcutId,
   type ShortcutDef,
+  type Combo,
+  type Chord,
+  type Binding,
+  isChord,
   matchesShortcut,
   bindingsConflict,
+  combosConflict,
   isAllowedConflict,
 } from './registry';
+export {
+  LEADER_TIMEOUT_MS,
+  type ChordCandidate,
+  subscribeChord,
+  getChordSnapshot,
+  isLeaderPending,
+  enterLeader,
+  cancelLeader,
+  resolvePendingThen,
+} from './chordState';
+export { matchChordLeader } from './chordDispatch';
 export { useShortcut, setShortcutCaptureSuspended } from './useShortcut';
 export { formatShortcut, shortcutTokens, modifierTokens } from './formatShortcut';
 export {

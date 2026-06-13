@@ -1,5 +1,29 @@
 /* app/src/components/KeyCaptureInput.css */
 
+.key-capture-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.key-capture-chord-btn {
+  min-height: 28px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--color-text-dimmed);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 120ms ease-out;
+}
+
+.key-capture-chord-btn:hover {
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .key-capture-button {
   display: inline-flex;
   align-items: center;

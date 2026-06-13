@@ -12,6 +12,26 @@ export interface ShortcutDef {
   editableTarget?: 'native';
 }
 
+/** A single key combo. Alias of ShortcutDef so chord code reads naturally. */
+export type Combo = ShortcutDef;
+
+/**
+ * A leader-key chord: press `leader`, then `then` within the timeout. Depth is
+ * fixed at two — one leader plus one follow key — which covers the useful space
+ * without a parser or nested timeout bookkeeping.
+ */
+export interface Chord {
+  leader: Combo;
+  then: Combo;
+}
+
+/** A bound action is either a single combo or a two-step chord. */
+export type Binding = Combo | Chord;
+
+export function isChord(b: Binding | null | undefined): b is Chord {
+  return !!b && typeof b === 'object' && 'leader' in b && 'then' in b;
+}
+
 const ALLOWED_CONFLICT_PAIRS = new Set([
   'session.close|terminal.close',
 ]);
@@ -88,7 +108,7 @@ export const SHORTCUTS = {
 
 export type ShortcutId = keyof typeof SHORTCUTS;
 
-function modifiersEqual(a: ShortcutDef, b: ShortcutDef): boolean {
+function modifiersEqual(a: Combo, b: Combo): boolean {
   return !!a.meta === !!b.meta
     && !!a.ctrl === !!b.ctrl
     && !!a.alt === !!b.alt
@@ -96,17 +116,38 @@ function modifiersEqual(a: ShortcutDef, b: ShortcutDef): boolean {
 }
 
 /**
- * Whether two bindings could be triggered by the same keystroke — equal
+ * Whether two single combos could be triggered by the same keystroke — equal
  * modifiers AND an overlapping key OR code. This mirrors matchesShortcut's
  * key-OR-code equivalence so conflict detection matches dispatch semantics: a
  * localized digit capture (e.g. `key:'&'`, `code:'Digit1'`) collides with ⌘1
- * even though the printed key differs. Shared by the load-time validator and
- * the runtime resolver so there is one definition of "conflict".
+ * even though the printed key differs.
  */
-export function bindingsConflict(a: ShortcutDef, b: ShortcutDef): boolean {
+export function combosConflict(a: Combo, b: Combo): boolean {
   if (!modifiersEqual(a, b)) return false;
   if (a.key.toLowerCase() === b.key.toLowerCase()) return true;
   return !!a.code && !!b.code && a.code === b.code;
+}
+
+/**
+ * Whether two bindings collide. Shared by the load-time validator and the
+ * runtime resolver so there is one definition of "conflict".
+ *
+ * - combo × combo: same keystroke (the original rule).
+ * - chord × chord: same leader AND same follow key. Sharing only a leader is
+ *   fine — that is how several chords hang off one leader (⌘K D, ⌘K G).
+ * - chord × combo: collide iff the combo equals the chord's leader. A leader is
+ *   exclusive: it must swallow its keystroke to wait for the follow key, so a
+ *   plain combo on the same keystroke could never fire.
+ */
+export function bindingsConflict(a: Binding, b: Binding): boolean {
+  const aChord = isChord(a);
+  const bChord = isChord(b);
+  if (aChord && bChord) {
+    return combosConflict(a.leader, b.leader) && combosConflict(a.then, b.then);
+  }
+  if (aChord) return combosConflict(a.leader, b as Combo);
+  if (bChord) return combosConflict(b.leader, a as Combo);
+  return combosConflict(a as Combo, b as Combo);
 }
 
 /**
