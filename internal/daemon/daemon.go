@@ -1836,12 +1836,17 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	session.WorkspaceID = workspaceID
 	// Re-deriving the workspace title from the session label would clobber a
 	// renamed workspace. Preserve a non-empty stored title instead.
+	existingWS := d.store.GetWorkspace(workspaceID)
 	workspaceTitle := session.Label
-	if existingWS := d.store.GetWorkspace(workspaceID); existingWS != nil && strings.TrimSpace(existingWS.Title) != "" {
+	if existingWS != nil && strings.TrimSpace(existingWS.Title) != "" {
 		workspaceTitle = existingWS.Title
 	}
-	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: workspaceTitle, Directory: session.Directory, Status: protocol.WorkspaceStatusLaunching})
-	d.workspaces.register(workspaceID, workspaceTitle, session.Directory, false)
+	// Seed rank before the first AddWorkspace: the store persists rank on INSERT
+	// only, so a brand-new workspace needs its key set here or it would sort
+	// first forever. A re-register carries the stored key forward.
+	workspaceRank := d.resolveWorkspaceRank(existingWS)
+	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: workspaceTitle, Directory: session.Directory, Status: protocol.WorkspaceStatusLaunching, Rank: workspaceRank})
+	d.workspaces.register(workspaceID, workspaceTitle, session.Directory, workspaceRank, false)
 	d.store.Add(session)
 	if resumeSessionID := d.consumePendingResumeSessionID(session.ID); resumeSessionID != "" {
 		d.store.SetResumeSessionID(session.ID, resumeSessionID)
@@ -3014,15 +3019,18 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 		workspaceID = "workspace-" + msg.Session.ID
 	}
 	msg.Session.WorkspaceID = workspaceID
-	if d.store.GetWorkspace(workspaceID) == nil {
+	existingWS := d.store.GetWorkspace(workspaceID)
+	workspaceRank := d.resolveWorkspaceRank(existingWS)
+	if existingWS == nil {
 		d.store.AddWorkspace(&protocol.Workspace{
 			ID:        workspaceID,
 			Title:     msg.Session.Label,
 			Directory: msg.Session.Directory,
 			Status:    protocol.WorkspaceStatusLaunching,
+			Rank:      workspaceRank,
 		})
 	}
-	d.workspaces.register(workspaceID, msg.Session.Label, msg.Session.Directory, false)
+	d.workspaces.register(workspaceID, msg.Session.Label, msg.Session.Directory, workspaceRank, false)
 
 	// Add session directly to store
 	d.store.Add(&msg.Session)

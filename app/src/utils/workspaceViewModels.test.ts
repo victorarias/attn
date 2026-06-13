@@ -27,6 +27,39 @@ describe('workspaceViewModels', () => {
     expect(viewModels.map((workspace) => workspace.firstSessionId)).toEqual(['a1', 'b1']);
   });
 
+  it('orders workspaces by rank key regardless of input order', () => {
+    const viewModels = buildWorkspaceViewModels(
+      [
+        { id: 'workspace-c', title: 'C', directory: '/repo/c', rank: 'a2' },
+        { id: 'workspace-a', title: 'A', directory: '/repo/a', rank: 'a0' },
+        { id: 'workspace-b', title: 'B', directory: '/repo/b', rank: 'a1' },
+      ],
+      [
+        { id: 'a1', label: 'A1', workspaceId: 'workspace-a' },
+        { id: 'b1', label: 'B1', workspaceId: 'workspace-b' },
+        { id: 'c1', label: 'C1', workspaceId: 'workspace-c' },
+      ],
+    );
+
+    expect(viewModels.map((workspace) => workspace.id)).toEqual(['workspace-a', 'workspace-b', 'workspace-c']);
+    expect(viewModels.map((workspace) => workspace.rank)).toEqual(['a0', 'a1', 'a2']);
+  });
+
+  it('falls back to a stable id tiebreaker when ranks are equal or missing', () => {
+    const viewModels = buildWorkspaceViewModels(
+      [
+        { id: 'workspace-z', title: 'Z', directory: '/repo/z' },
+        { id: 'workspace-a', title: 'A', directory: '/repo/a' },
+      ],
+      [
+        { id: 'z1', label: 'Z1', workspaceId: 'workspace-z' },
+        { id: 'a1', label: 'A1', workspaceId: 'workspace-a' },
+      ],
+    );
+
+    expect(viewModels.map((workspace) => workspace.id)).toEqual(['workspace-a', 'workspace-z']);
+  });
+
   it('does not invent workspaces when daemon workspace snapshots are missing', () => {
     const viewModels = buildWorkspaceViewModels([], [
       { id: 's1', label: 'One', workspaceId: 'workspace-s1', cwd: '/repo/one' },

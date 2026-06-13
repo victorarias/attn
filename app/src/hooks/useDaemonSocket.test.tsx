@@ -1228,6 +1228,104 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('sends set_workspace_rank with neighbour ids and resolves on the action result', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    const rankPromise = result.current.sendSetWorkspaceRank('workspace-1', 'workspace-0', 'workspace-2');
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: PROTOCOL_VERSION,
+        sessions: [],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({
+        cmd: 'set_workspace_rank',
+        workspace_id: 'workspace-1',
+        prev_workspace_id: 'workspace-0',
+        next_workspace_id: 'workspace-2',
+      });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'workspace_layout_action_result',
+        action: 'set_workspace_rank',
+        workspace_id: 'workspace-1',
+        success: true,
+      });
+    });
+
+    await expect(rankPromise).resolves.toEqual({ success: true });
+    unmount();
+  });
+
+  it('omits empty neighbour ids when moving a workspace to an edge', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    const rankPromise = result.current.sendSetWorkspaceRank('workspace-1', undefined, 'workspace-2');
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: PROTOCOL_VERSION,
+        sessions: [],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({
+        cmd: 'set_workspace_rank',
+        workspace_id: 'workspace-1',
+        next_workspace_id: 'workspace-2',
+      });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'workspace_layout_action_result',
+        action: 'set_workspace_rank',
+        workspace_id: 'workspace-1',
+        success: false,
+        error: 'rank persist failed',
+      });
+    });
+
+    await expect(rankPromise).rejects.toThrow('rank persist failed');
+    unmount();
+  });
+
   it('correlates concurrent split resize results by split id', async () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({

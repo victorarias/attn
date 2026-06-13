@@ -243,6 +243,81 @@ describe('Sidebar', () => {
     expect(onWorkspaceDragDrop).toHaveBeenCalledWith(expect.objectContaining({ id: 'workspace-/repo/target' }));
   });
 
+  it('reorders a workspace by dragging its header onto an insertion seam', () => {
+    const sidebarData = buildSidebarData([
+      { id: 'a1', label: 'A1', state: 'idle', cwd: '/repo/a' },
+      { id: 'b1', label: 'B1', state: 'idle', cwd: '/repo/b' },
+      { id: 'c1', label: 'C1', state: 'idle', cwd: '/repo/c' },
+    ]);
+    const onWorkspaceReorder = vi.fn();
+    const onSelectWorkspace = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        {...sidebarData}
+        onSelectWorkspace={onSelectWorkspace}
+        onWorkspaceReorder={onWorkspaceReorder}
+      />,
+    );
+
+    const sourceGroup = screen.getByTestId('sidebar-workspace-workspace-/repo/a');
+    const header = sourceGroup.querySelector('.workspace-group-header') as HTMLElement;
+
+    // No seams until a drag arms.
+    expect(screen.queryByTestId('workspace-reorder-seam-0')).not.toBeInTheDocument();
+
+    // Press, then cross the activation threshold to arm the reorder.
+    fireEvent.pointerDown(header, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 10, clientY: 80 });
+
+    // Seams now exist: one before each of the three workspaces plus a trailing one.
+    const seam2 = screen.getByTestId('workspace-reorder-seam-2');
+    expect(seam2).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-reorder-seam-3')).toBeInTheDocument();
+
+    // Drop A onto the seam between B (index 1) and C (index 2).
+    fireEvent.pointerEnter(seam2);
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 10, clientY: 120 });
+
+    expect(onWorkspaceReorder).toHaveBeenCalledWith({
+      workspaceId: 'workspace-/repo/a',
+      prevWorkspaceId: 'workspace-/repo/b',
+      nextWorkspaceId: 'workspace-/repo/c',
+    });
+    // The arming drag suppresses the trailing selection click.
+    expect(onSelectWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('treats a sub-threshold header press as a plain selection click', () => {
+    const sidebarData = buildSidebarData([
+      { id: 'a1', label: 'A1', state: 'idle', cwd: '/repo/a' },
+      { id: 'b1', label: 'B1', state: 'idle', cwd: '/repo/b' },
+    ]);
+    const onWorkspaceReorder = vi.fn();
+    const onSelectWorkspace = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        {...sidebarData}
+        onSelectWorkspace={onSelectWorkspace}
+        onWorkspaceReorder={onWorkspaceReorder}
+      />,
+    );
+
+    const header = screen
+      .getByTestId('sidebar-workspace-workspace-/repo/a')
+      .querySelector('.workspace-group-header') as HTMLElement;
+
+    fireEvent.pointerDown(header, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 12, clientY: 11 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 12, clientY: 11 });
+    fireEvent.click(header);
+
+    expect(onWorkspaceReorder).not.toHaveBeenCalled();
+    expect(onSelectWorkspace).toHaveBeenCalledWith('workspace-/repo/a');
+    expect(screen.queryByTestId('workspace-reorder-seam-0')).not.toBeInTheDocument();
+  });
+
   it('shows review loop indicator for sessions with loop state', () => {
     const sessions: TestSession[] = [{
       id: 's1',

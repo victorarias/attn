@@ -76,6 +76,60 @@ func TestUpdateWorkspaceTitle(t *testing.T) {
 	}
 }
 
+func TestSetWorkspaceRank(t *testing.T) {
+	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewWithDB error: %v", err)
+	}
+	defer s.Close()
+
+	s.AddWorkspace(&protocol.Workspace{ID: "workspace-1", Title: "Project", Directory: "/tmp/project", Rank: "a"})
+
+	s.UpdateWorkspaceRank("workspace-1", "m")
+
+	got := s.GetWorkspace("workspace-1")
+	if got == nil || got.Rank != "m" {
+		t.Fatalf("workspace rank after update = %+v, want m", got)
+	}
+	// Other columns must be left intact.
+	if got.Title != "Project" || got.Directory != "/tmp/project" {
+		t.Fatalf("non-rank columns changed during rank update = %+v", got)
+	}
+}
+
+func TestListWorkspacesOrderedByRank(t *testing.T) {
+	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewWithDB error: %v", err)
+	}
+	defer s.Close()
+
+	// Insert out of rank order; created_at advances in insert order, so a stable
+	// ORDER BY created_at would yield c, a, b. ORDER BY rank must yield a, b, c.
+	s.AddWorkspace(&protocol.Workspace{ID: "ws-c", Title: "C", Directory: "/tmp/c", Rank: "c"})
+	s.AddWorkspace(&protocol.Workspace{ID: "ws-a", Title: "A", Directory: "/tmp/a", Rank: "a"})
+	s.AddWorkspace(&protocol.Workspace{ID: "ws-b", Title: "B", Directory: "/tmp/b", Rank: "b"})
+
+	list := s.ListWorkspaces()
+	if len(list) != 3 {
+		t.Fatalf("ListWorkspaces() returned %d workspaces, want 3", len(list))
+	}
+	wantOrder := []string{"ws-a", "ws-b", "ws-c"}
+	for i, ws := range list {
+		if ws.ID != wantOrder[i] {
+			t.Fatalf("ListWorkspaces()[%d] = %s, want %s (full order: %v)", i, ws.ID, wantOrder[i], idsOf(list))
+		}
+	}
+}
+
+func idsOf(list []*protocol.Workspace) []string {
+	ids := make([]string, len(list))
+	for i, ws := range list {
+		ids[i] = ws.ID
+	}
+	return ids
+}
+
 func TestAssignSessionWorkspaceRefusesEmptyWorkspace(t *testing.T) {
 	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

@@ -7,6 +7,19 @@
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  /* The sidebar is interactive chrome (click to select, drag to reorder), not
+     readable prose — disabling selection stops the browser from highlighting
+     workspace/session labels while you drag a header or a leaf. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Keep text editable/selectable inside popovers the sidebar hosts (e.g. the
+   rename input), which would otherwise inherit the no-select above. */
+.sidebar input,
+.sidebar textarea {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .sidebar-header {
@@ -228,6 +241,49 @@
   }
   to {
     transform: scaleY(1);
+  }
+}
+
+/* The workspace being reordered fades in place while its ghost follows the cursor. */
+.workspace-group--reorder-source {
+  opacity: 0.35;
+}
+
+.session-list--reordering {
+  cursor: grabbing;
+}
+
+/* Insertion seam between workspaces, shown only during a reorder drag. It keeps a
+   stable hit-zone so the cursor can land between rows without merging them. */
+.workspace-reorder-seam {
+  position: relative;
+  height: 10px;
+  margin: -3px 0;
+}
+
+.workspace-reorder-seam-line {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 50%;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: translateY(-50%) scaleX(0);
+  transform-origin: center;
+  opacity: 0;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
+  transition: transform 120ms cubic-bezier(0.2, 0.7, 0.2, 1), opacity 120ms ease;
+}
+
+.workspace-reorder-seam.active .workspace-reorder-seam-line {
+  transform: translateY(-50%) scaleX(1);
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-reorder-seam-line {
+    transition: none;
   }
 }
 

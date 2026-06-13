@@ -482,6 +482,7 @@ function App() {
     sendWorkspaceUpdateTile,
     sendWorkspaceMoveLeaf,
     sendWorkspaceMoveLeafToWorkspace,
+    sendSetWorkspaceRank,
     tileContents,
     requestTileContent,
     sendRuntimeInput,
@@ -616,6 +617,7 @@ function App() {
         sendWorkspaceUpdateTile={sendWorkspaceUpdateTile}
         sendWorkspaceMoveLeaf={sendWorkspaceMoveLeaf}
         sendWorkspaceMoveLeafToWorkspace={sendWorkspaceMoveLeafToWorkspace}
+        sendSetWorkspaceRank={sendSetWorkspaceRank}
         tileContents={tileContents}
         requestTileContent={requestTileContent}
         sendRuntimeInput={sendRuntimeInput}
@@ -715,6 +717,7 @@ interface AppContentProps {
   sendWorkspaceUpdateTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceUpdateTile'];
   sendWorkspaceMoveLeaf: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeaf'];
   sendWorkspaceMoveLeafToWorkspace: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeafToWorkspace'];
+  sendSetWorkspaceRank: ReturnType<typeof useDaemonSocket>['sendSetWorkspaceRank'];
   tileContents: ReturnType<typeof useDaemonSocket>['tileContents'];
   requestTileContent: ReturnType<typeof useDaemonSocket>['requestTileContent'];
   sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
@@ -808,6 +811,7 @@ sendFetchPRDetails,
   sendWorkspaceUpdateTile,
   sendWorkspaceMoveLeaf,
   sendWorkspaceMoveLeafToWorkspace,
+  sendSetWorkspaceRank,
   tileContents,
   requestTileContent,
   sendRuntimeInput,
@@ -2677,6 +2681,18 @@ sendFetchPRDetails,
     }).catch(() => {});
   }, [canMoveDraggedLeafToWorkspace, clearWorkspaceDragHoverTimer, handleSelectWorkspace, sendWorkspaceMoveLeafToWorkspace]);
 
+  // Persist a workspace reorder. The Sidebar computes the drop's neighbour ids
+  // from the seam; the daemon derives the fractional rank key and broadcasts the
+  // authoritative order, so this is fire-and-forget (a rejected/timed-out write
+  // just leaves the existing order in place).
+  const handleWorkspaceReorder = useCallback((args: {
+    workspaceId: string;
+    prevWorkspaceId?: string;
+    nextWorkspaceId?: string;
+  }) => {
+    void sendSetWorkspaceRank(args.workspaceId, args.prevWorkspaceId, args.nextWorkspaceId).catch(() => {});
+  }, [sendSetWorkspaceRank]);
+
   const handleSelectWorkspaceByIndex = useCallback(
     (index: number) => {
       const workspace = visualWorkspaces[index];
@@ -3326,6 +3342,7 @@ sendFetchPRDetails,
           onWorkspaceDragEnter={handleWorkspaceDragEnter}
           onWorkspaceDragLeave={handleWorkspaceDragLeave}
           onWorkspaceDragDrop={handleWorkspaceDragDrop}
+          onWorkspaceReorder={handleWorkspaceReorder}
           onSelectSession={handleSelectSession}
           onSelectWorkspace={handleSelectWorkspace}
           onSelectTile={handleSelectTile}

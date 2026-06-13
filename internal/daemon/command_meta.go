@@ -120,6 +120,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdWorkspaceLayoutUpdateTile:          commandMetadata(ScopeSession, true, true),
 	protocol.CmdWorkspaceLayoutMoveLeaf:            commandMetadata(ScopeSession, true, true),
 	protocol.CmdWorkspaceLayoutMoveLeafToWorkspace: commandMetadata(ScopeSession, true, true),
+	protocol.CmdSetWorkspaceRank:                   commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdWorkspaceTileContentGet:            commandMetadata(ScopeSession, true, true),
 	protocol.CmdBrowserControl:                     commandMetadata(ScopeSession, true, true),
 	protocol.CmdBrowserControlResult:               commandMetadata(ScopeHubLocal, false, true),

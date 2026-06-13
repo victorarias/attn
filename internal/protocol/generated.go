@@ -2896,6 +2896,20 @@ type SetSettingMessage struct {
 	Value string `json:"value"`
 }
 
+type SetWorkspaceRankMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// NextWorkspaceID corresponds to the JSON schema field "next_workspace_id".
+	NextWorkspaceID *string `json:"next_workspace_id,omitempty,omitzero"`
+
+	// PrevWorkspaceID corresponds to the JSON schema field "prev_workspace_id".
+	PrevWorkspaceID *string `json:"prev_workspace_id,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
 type SettingsUpdatedMessage struct {
 	// ChangedKey corresponds to the JSON schema field "changed_key".
 	ChangedKey *string `json:"changed_key,omitempty,omitzero"`
@@ -3400,6 +3414,9 @@ type Workspace struct {
 
 	// Muted corresponds to the JSON schema field "muted".
 	Muted bool `json:"muted"`
+
+	// Rank corresponds to the JSON schema field "rank".
+	Rank string `json:"rank"`
 
 	// Status corresponds to the JSON schema field "status".
 	Status WorkspaceStatus `json:"status"`

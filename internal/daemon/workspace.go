@@ -6,6 +6,7 @@ import (
 	"syscall"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/rankkey"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
@@ -20,6 +21,9 @@ type workspaceEntry struct {
 	directory string
 	status    protocol.WorkspaceStatus
 	muted     bool
+	// rank is the fractional sidebar-order key; the store is the durable
+	// authority. Empty until a workspace is seeded or loaded from store.
+	rank string
 	// sessionIDs in this workspace, used for status rollup.
 	sessionIDs map[string]struct{}
 }
@@ -41,7 +45,12 @@ func newWorkspaceRegistry() *workspaceRegistry {
 
 // register inserts or updates a workspace. Returns the snapshot to broadcast
 // and a flag indicating whether this is a new registration vs an update.
-func (r *workspaceRegistry) register(id, title, directory string, muted bool) (protocol.Workspace, bool) {
+//
+// rank carries the durable sidebar-order key. Like muted/title it is NOT reset
+// from the incoming value when it is empty: a re-register that omits the rank
+// (or the caller passes the stored rank back) leaves a user reorder intact. The
+// caller seeds rank for brand-new workspaces before this runs.
+func (r *workspaceRegistry) register(id, title, directory, rank string, muted bool) (protocol.Workspace, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -57,6 +66,9 @@ func (r *workspaceRegistry) register(id, title, directory string, muted bool) (p
 	entry.title = title
 	entry.directory = directory
 	entry.muted = muted
+	if rank != "" {
+		entry.rank = rank
+	}
 	return snapshotEntry(entry), !existed
 }
 
@@ -195,6 +207,47 @@ func (r *workspaceRegistry) applyStatus(id string, status protocol.WorkspaceStat
 	return snapshotEntry(entry), true
 }
 
+// applyRank updates the cached rank for a workspace and returns the refreshed
+// snapshot plus whether the workspace was found. Mirrors applyStatus; the store
+// is the durable authority and the caller persists the same key.
+func (r *workspaceRegistry) applyRank(id, rank string) (protocol.Workspace, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.workspaces[id]
+	if !ok {
+		return protocol.Workspace{}, false
+	}
+	entry.rank = rank
+	return snapshotEntry(entry), true
+}
+
+// rankOf returns the cached rank for a workspace, or "" when it is unknown. An
+// empty string also doubles as the MIN/MAX sentinel for rankkey.Between, so an
+// unranked or missing neighbour resolves to the open bound naturally.
+func (r *workspaceRegistry) rankOf(id string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if entry, ok := r.workspaces[id]; ok {
+		return entry.rank
+	}
+	return ""
+}
+
+// maxRank returns the greatest rank currently held by any workspace, or "" when
+// the registry is empty. Used to seed a brand-new workspace's rank above the
+// existing maximum so it appends to the bottom of the sidebar.
+func (r *workspaceRegistry) maxRank() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	max := ""
+	for _, entry := range r.workspaces {
+		if entry.rank > max {
+			max = entry.rank
+		}
+	}
+	return max
+}
+
 func snapshotEntry(e *workspaceEntry) protocol.Workspace {
 	return protocol.Workspace{
 		ID:        e.id,
@@ -202,6 +255,7 @@ func snapshotEntry(e *workspaceEntry) protocol.Workspace {
 		Directory: e.directory,
 		Status:    e.status,
 		Muted:     e.muted,
+		Rank:      e.rank,
 	}
 }
 
@@ -289,6 +343,19 @@ func (d *Daemon) recomputeAndBroadcastWorkspaceForSession(sessionID string) {
 	})
 }
 
+// resolveWorkspaceRank returns the rank key a (re)registered workspace should
+// carry. A re-register carries the stored key forward (so a user reorder
+// sticks, like title/muted). A brand-new workspace — or a pre-rank row that
+// somehow lost its key — is seeded above the current maximum so it appends to
+// the bottom of the sidebar. The store persists rank on INSERT only, so the
+// daemon owns this seed and must set it before the first AddWorkspace.
+func (d *Daemon) resolveWorkspaceRank(existing *protocol.Workspace) string {
+	if existing != nil && existing.Rank != "" {
+		return existing.Rank
+	}
+	return rankkey.After(d.workspaces.maxRank())
+}
+
 func (d *Daemon) handleRegisterWorkspace(client *wsClient, msg *protocol.RegisterWorkspaceMessage) {
 	id := strings.TrimSpace(msg.ID)
 	title := strings.TrimSpace(msg.Title)
@@ -314,7 +381,8 @@ func (d *Daemon) handleRegisterWorkspace(client *wsClient, msg *protocol.Registe
 	if existing != nil && strings.TrimSpace(existing.Title) != "" {
 		title = existing.Title
 	}
-	snapshot, isNew := d.workspaces.register(id, title, directory, muted)
+	rank := d.resolveWorkspaceRank(existing)
+	snapshot, isNew := d.workspaces.register(id, title, directory, rank, muted)
 	d.store.AddWorkspace(&snapshot)
 	// Make workspace directories available in the recent-locations picker.
 	d.store.UpsertRecentLocation(directory)
@@ -433,7 +501,7 @@ func (d *Daemon) loadWorkspacesFromStore() {
 				continue
 			}
 		}
-		d.workspaces.register(ws.ID, ws.Title, ws.Directory, ws.Muted)
+		d.workspaces.register(ws.ID, ws.Title, ws.Directory, ws.Rank, ws.Muted)
 	}
 	for _, session := range d.store.List("") {
 		if session == nil {

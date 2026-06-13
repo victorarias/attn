@@ -22,6 +22,7 @@ export interface WorkspaceViewWorkspace {
   directory: string;
   status?: string;
   muted?: boolean;
+  rank?: string;
   endpointId?: string;
   endpoint_id?: string;
   layout?: {
@@ -51,6 +52,7 @@ export interface WorkspaceWithSessions<TSession extends WorkspaceViewSession = W
   directory: string;
   status?: string;
   muted?: boolean;
+  rank?: string;
   endpointId?: string;
   sessions: TSession[];
   children: WorkspaceChild<TSession>[];
@@ -108,7 +110,7 @@ export function buildWorkspaceViewModels<TSession extends WorkspaceViewSession>(
   const result: WorkspaceWithSessions<TSession>[] = [];
   const consumed = new Set<string>();
 
-  for (const workspace of workspaces) {
+  for (const workspace of sortWorkspacesByRank(workspaces)) {
     const key = resolveWorkspaceSessionKey(workspace, sessionKeysByWorkspaceId, consumed);
     const workspaceSessions = sessionsByWorkspace.get(key) || [];
     consumed.add(key);
@@ -116,6 +118,30 @@ export function buildWorkspaceViewModels<TSession extends WorkspaceViewSession>(
   }
 
   return result;
+}
+
+// Workspaces are ordered by their lexicographic rank key (the daemon seeds it in
+// opening order and rewrites a single row per reorder). The rank is the sole
+// authority; id is only a deterministic tiebreaker for the rare case of equal or
+// missing ranks (e.g. an old daemon snapshot before the rank migration). The sort
+// is non-mutating so callers keep their original array.
+function sortWorkspacesByRank<TWorkspace extends WorkspaceViewWorkspace>(
+  workspaces: TWorkspace[],
+): TWorkspace[] {
+  return workspaces
+    .map((workspace, index) => ({ workspace, index }))
+    .sort((a, b) => {
+      const rankA = a.workspace.rank ?? '';
+      const rankB = b.workspace.rank ?? '';
+      if (rankA !== rankB) {
+        return rankA < rankB ? -1 : 1;
+      }
+      if (a.workspace.id !== b.workspace.id) {
+        return a.workspace.id < b.workspace.id ? -1 : 1;
+      }
+      return a.index - b.index;
+    })
+    .map((entry) => entry.workspace);
 }
 
 function resolveWorkspaceSessionKey(
@@ -150,6 +176,7 @@ function toWorkspaceViewModel<TSession extends WorkspaceViewSession>(
     directory: workspace.directory,
     status: workspace.status,
     muted: workspace.muted ?? false,
+    rank: workspace.rank,
     endpointId: workspaceEndpointId(workspace) || (sessions[0] ? sessionEndpointId(sessions[0]) : undefined),
     sessions,
     children,

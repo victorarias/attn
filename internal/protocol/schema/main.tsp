@@ -161,6 +161,7 @@ model Workspace {
   directory: string;
   status: WorkspaceStatus;
   muted: boolean;               // Muting parks the whole workspace out of attention surfaces.
+  rank: string;                 // Fractional-index sort key; default order is opening (creation) order.
   layout?: WorkspaceLayout;
 }
 
@@ -1222,6 +1223,16 @@ model RenameWorkspaceMessage {
   cmd: "rename_workspace";
   workspace_id: string;
   title: string;
+}
+
+// Reorder a workspace by placing it between two neighbours. The frontend sends
+// neighbour ids only; the daemon computes the fractional-index rank key from
+// the neighbours' ranks. Empty prev = move to top; empty next = move to bottom.
+model SetWorkspaceRankMessage {
+  cmd: "set_workspace_rank";
+  workspace_id: string;
+  prev_workspace_id?: string;
+  next_workspace_id?: string;
 }
 
 // Assign or remove the profile-wide chief-of-staff role. Assigning a new

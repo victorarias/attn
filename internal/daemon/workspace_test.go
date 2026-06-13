@@ -106,7 +106,7 @@ func TestRollupWorkspaceStatus_PriorityOrdering(t *testing.T) {
 
 func TestWorkspaceRegistry_RegisterUnregister(t *testing.T) {
 	r := newWorkspaceRegistry()
-	snapshot, isNew := r.register("ws1", "Workspace 1", "/repo", false)
+	snapshot, isNew := r.register("ws1", "Workspace 1", "/repo", "", false)
 	if !isNew {
 		t.Fatal("first register should be new")
 	}
@@ -117,7 +117,7 @@ func TestWorkspaceRegistry_RegisterUnregister(t *testing.T) {
 		t.Fatalf("initial status = %q, want idle", snapshot.Status)
 	}
 
-	_, isNew = r.register("ws1", "Renamed", "/repo", false)
+	_, isNew = r.register("ws1", "Renamed", "/repo", "", false)
 	if isNew {
 		t.Fatal("second register should not be new")
 	}
@@ -136,8 +136,8 @@ func TestWorkspaceRegistry_RegisterUnregister(t *testing.T) {
 
 func TestWorkspaceRegistry_AssociateAndDissociate(t *testing.T) {
 	r := newWorkspaceRegistry()
-	r.register("ws1", "ws", "/repo", false)
-	r.register("ws2", "ws", "/repo", false)
+	r.register("ws1", "ws", "/repo", "", false)
+	r.register("ws2", "ws", "/repo", "", false)
 
 	if !r.associateSession("s1", "ws1", "Session 1") {
 		t.Fatal("associate should succeed")
@@ -206,7 +206,7 @@ func TestDissociateLastSessionUnregistersWorkspace(t *testing.T) {
 
 func TestWorkspaceRegistry_UnregisterCleansSessionLinks(t *testing.T) {
 	r := newWorkspaceRegistry()
-	r.register("ws1", "ws", "/repo", false)
+	r.register("ws1", "ws", "/repo", "", false)
 	r.associateSession("s1", "ws1", "Session 1")
 	r.associateSession("s2", "ws1", "Session 2")
 

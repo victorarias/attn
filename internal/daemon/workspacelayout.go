@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/rankkey"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
@@ -632,6 +633,67 @@ func (d *Daemon) handleWorkspaceLayoutMoveLeaf(client *wsClient, msg *protocol.W
 func (d *Daemon) handleWorkspaceLayoutMoveLeafToWorkspace(client *wsClient, msg *protocol.WorkspaceLayoutMoveLeafToWorkspaceMessage) {
 	finalLeafID, err := d.moveLeafToWorkspace(msg.SourceWorkspaceID, msg.TargetWorkspaceID, msg.LeafID, protocol.Deref(msg.AnchorID), msg.Edge, msg.Ratio)
 	d.sendWorkspaceLayoutMoveToWorkspaceResult(client, msg.SourceWorkspaceID, msg.TargetWorkspaceID, msg.LeafID, finalLeafID, err)
+}
+
+// handleSetWorkspaceRank reorders a workspace in the sidebar. The frontend sends
+// the drop position as neighbour ids — prev_workspace_id ends up ABOVE the moved
+// workspace, next_workspace_id BELOW it — and the daemon computes the fractional
+// key between their current ranks. An empty/omitted neighbour id resolves to "",
+// which rankkey.Between reads as the MIN (top) / MAX (bottom) open bound, so a
+// move to the very top or bottom needs no special case. Exactly one row is
+// written, then the refreshed snapshot (carrying the new rank) is broadcast so
+// every client re-sorts. Mirrors the move_leaf_to_workspace result pattern.
+func (d *Daemon) handleSetWorkspaceRank(client *wsClient, msg *protocol.SetWorkspaceRankMessage) {
+	workspaceID := strings.TrimSpace(msg.WorkspaceID)
+	prevID := strings.TrimSpace(protocol.Deref(msg.PrevWorkspaceID))
+	nextID := strings.TrimSpace(protocol.Deref(msg.NextWorkspaceID))
+	if workspaceID == "" {
+		d.sendSetWorkspaceRankResult(client, workspaceID, fmt.Errorf("missing workspace_id"))
+		return
+	}
+	if d.workspaces == nil {
+		d.sendSetWorkspaceRankResult(client, workspaceID, fmt.Errorf("workspace registry unavailable"))
+		return
+	}
+	if _, ok := d.workspaces.snapshot(workspaceID); !ok {
+		d.sendSetWorkspaceRankResult(client, workspaceID, fmt.Errorf("workspace not found: %s", workspaceID))
+		return
+	}
+
+	// An empty neighbour id (move to top/bottom) resolves to "" — the MIN/MAX
+	// sentinel rankkey.Between expects — so no extra branching is needed.
+	prevRank := d.workspaces.rankOf(prevID)
+	nextRank := d.workspaces.rankOf(nextID)
+	rank, err := rankkey.Between(prevRank, nextRank)
+	if err != nil {
+		d.sendSetWorkspaceRankResult(client, workspaceID, fmt.Errorf("could not rank workspace between %q and %q: %w", prevID, nextID, err))
+		return
+	}
+
+	d.store.UpdateWorkspaceRank(workspaceID, rank)
+	snapshot, ok := d.workspaces.applyRank(workspaceID, rank)
+	if !ok {
+		d.sendSetWorkspaceRankResult(client, workspaceID, fmt.Errorf("workspace not found: %s", workspaceID))
+		return
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:     protocol.EventWorkspaceStateChanged,
+		Workspace: &snapshot,
+	})
+	d.sendSetWorkspaceRankResult(client, workspaceID, nil)
+}
+
+func (d *Daemon) sendSetWorkspaceRankResult(client *wsClient, workspaceID string, err error) {
+	result := protocol.WorkspaceLayoutActionResultMessage{
+		Event:       protocol.EventWorkspaceLayoutActionResult,
+		Action:      protocol.CmdSetWorkspaceRank,
+		WorkspaceID: workspaceID,
+		Success:     err == nil,
+	}
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, result)
 }
 
 // moveLeaf relocates an existing leaf (terminal pane or docked tile) within a

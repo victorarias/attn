@@ -18,13 +18,16 @@ func (s *Store) AddWorkspace(ws *protocol.Workspace) {
 		return
 	}
 	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
+	// rank is set on INSERT only. On re-register (ON CONFLICT) the stored rank is
+	// the durable authority for ordering and must survive — like title, it is not
+	// re-derived from the incoming struct so a user reorder sticks.
 	if _, err := s.db.Exec(`
-		INSERT INTO workspaces (id, title, directory, muted, created_at)
-		VALUES (?, ?, ?, COALESCE(?, 0), ?)
+		INSERT INTO workspaces (id, title, directory, muted, created_at, rank)
+		VALUES (?, ?, ?, COALESCE(?, 0), ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
 			directory = excluded.directory`,
-		ws.ID, ws.Title, ws.Directory, boolToInt(ws.Muted), createdAt,
+		ws.ID, ws.Title, ws.Directory, boolToInt(ws.Muted), createdAt, ws.Rank,
 	); err != nil {
 		log.Printf("[store] AddWorkspace: failed to upsert workspace %s: %v", ws.ID, err)
 	}
@@ -61,8 +64,8 @@ func (s *Store) GetWorkspace(id string) *protocol.Workspace {
 	var ws protocol.Workspace
 	var muted int
 	err := s.db.QueryRow(`
-		SELECT id, title, directory, muted FROM workspaces WHERE id = ?`, id).
-		Scan(&ws.ID, &ws.Title, &ws.Directory, &muted)
+		SELECT id, title, directory, muted, rank FROM workspaces WHERE id = ?`, id).
+		Scan(&ws.ID, &ws.Title, &ws.Directory, &muted, &ws.Rank)
 	if err != nil {
 		return nil
 	}
@@ -79,7 +82,7 @@ func (s *Store) ListWorkspaces() []*protocol.Workspace {
 	if s.db == nil {
 		return nil
 	}
-	rows, err := s.db.Query(`SELECT id, title, directory, muted FROM workspaces ORDER BY created_at`)
+	rows, err := s.db.Query(`SELECT id, title, directory, muted, rank FROM workspaces ORDER BY rank, created_at`)
 	if err != nil {
 		return nil
 	}
@@ -89,7 +92,7 @@ func (s *Store) ListWorkspaces() []*protocol.Workspace {
 	for rows.Next() {
 		var ws protocol.Workspace
 		var muted int
-		if err := rows.Scan(&ws.ID, &ws.Title, &ws.Directory, &muted); err != nil {
+		if err := rows.Scan(&ws.ID, &ws.Title, &ws.Directory, &muted, &ws.Rank); err != nil {
 			continue
 		}
 		ws.Muted = muted == 1
@@ -126,6 +129,22 @@ func (s *Store) UpdateWorkspaceTitle(id, title string) {
 
 	if _, err := s.db.Exec(`UPDATE workspaces SET title = ? WHERE id = ?`, title, id); err != nil {
 		log.Printf("[store] UpdateWorkspaceTitle: failed for workspace %s: %v", id, err)
+	}
+}
+
+// UpdateWorkspaceRank sets a workspace's rank key. Rank is the durable authority
+// for sidebar order; the daemon computes the key (rankkey.Between/After) and the
+// store persists exactly one row per reorder.
+func (s *Store) UpdateWorkspaceRank(id, rank string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	if _, err := s.db.Exec(`UPDATE workspaces SET rank = ? WHERE id = ?`, rank, id); err != nil {
+		log.Printf("[store] UpdateWorkspaceRank: failed for workspace %s: %v", id, err)
 	}
 }
 
