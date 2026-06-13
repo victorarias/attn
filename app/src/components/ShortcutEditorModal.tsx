@@ -7,7 +7,7 @@
 import { useMemo, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
 import { useEscapeStack } from '../hooks/useEscapeStack';
-import { SHORTCUTS, ShortcutId, ShortcutDef, shortcutToKey } from '../shortcuts/registry';
+import { SHORTCUTS, ShortcutId, ShortcutDef, bindingsConflict } from '../shortcuts/registry';
 import {
   SHORTCUT_META,
   SHORTCUT_CATEGORY_ORDER,
@@ -24,9 +24,14 @@ interface ShortcutEditorModalProps {
   onClose: () => void;
 }
 
+// A requested change to a shortcut: an explicit combo, or 'default' to restore
+// the registry default. Both flow through the same conflict check.
+type BindingChange = ShortcutDef | 'default';
+
 interface PendingReassign {
   id: ShortcutId;
-  def: ShortcutDef;
+  change: BindingChange;
+  combo: ShortcutDef; // the effective combo, for display + conflict messaging
   conflictId: ShortcutId;
 }
 
@@ -42,8 +47,15 @@ function groupedByCategory(): Record<ShortcutCategory, ShortcutId[]> {
   return groups;
 }
 
-function equalsDefault(id: ShortcutId, def: ShortcutDef): boolean {
-  return shortcutToKey(def) === shortcutToKey(SHORTCUTS[id]);
+function effectiveCombo(id: ShortcutId, change: BindingChange): ShortcutDef {
+  return change === 'default' ? SHORTCUTS[id] : change;
+}
+
+// The value to persist: undefined (drop override → default) when the change is
+// a reset or resolves to the default combo, otherwise the explicit combo.
+function overrideValue(id: ShortcutId, change: BindingChange): ShortcutDef | undefined {
+  if (change === 'default') return undefined;
+  return bindingsConflict(change, SHORTCUTS[id]) ? undefined : change;
 }
 
 export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProps) {
@@ -64,33 +76,37 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
     setRowError(null);
   };
 
-  const commitBinding = (id: ShortcutId, def: ShortcutDef) => {
+  // Single entry point for any binding change (rebind or reset-to-default).
+  // Conflict detection runs for both, so restoring a default that another
+  // action has since claimed triggers the same reassign flow as a rebind
+  // instead of silently creating a duplicate binding.
+  const applyBinding = (id: ShortcutId, change: BindingChange) => {
     setRecordingId(null);
     setRowError(null);
     setPending(null);
 
-    if (equalsDefault(id, def)) {
-      kb.applyOverrides({ [id]: undefined });
-      return;
-    }
-    const conflictId = kb.findConflict(def, id);
+    const combo = effectiveCombo(id, change);
+    const conflictId = kb.findConflict(combo, id);
     if (conflictId) {
       if (kb.isProtected(conflictId)) {
         setRowError({
           id,
-          message: `${formatShortcut(def)} is reserved by “${SHORTCUT_META[conflictId].label}” and can’t be reassigned.`,
+          message: `${formatShortcut(combo)} is reserved by “${SHORTCUT_META[conflictId].label}” and can’t be reassigned.`,
         });
         return;
       }
-      setPending({ id, def, conflictId });
+      setPending({ id, change, combo, conflictId });
       return;
     }
-    kb.applyOverrides({ [id]: def });
+    kb.applyOverrides({ [id]: overrideValue(id, change) });
   };
 
   const confirmReassign = () => {
     if (!pending) return;
-    kb.applyOverrides({ [pending.id]: pending.def, [pending.conflictId]: null });
+    kb.applyOverrides({
+      [pending.id]: overrideValue(pending.id, pending.change),
+      [pending.conflictId]: null,
+    });
     setPending(null);
   };
 
@@ -150,7 +166,7 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
                         {isPending ? (
                           <span className="shortcut-editor-reassign">
                             <span className="shortcut-editor-reassign-text">
-                              {formatShortcut(pending!.def)} is “{SHORTCUT_META[pending!.conflictId].label}”.
+                              {formatShortcut(pending!.combo)} is “{SHORTCUT_META[pending!.conflictId].label}”.
                             </span>
                             <button
                               type="button"
@@ -180,7 +196,7 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
                                 setPending(null);
                                 setRecordingId(id);
                               }}
-                              onCapture={(def) => commitBinding(id, def)}
+                              onCapture={(def) => applyBinding(id, def)}
                               onCancel={() => setRecordingId(null)}
                             />
                             {customized && (
@@ -188,7 +204,7 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
                                 type="button"
                                 className="shortcut-editor-icon-btn"
                                 title="Reset to default"
-                                onClick={() => kb.applyOverrides({ [id]: undefined })}
+                                onClick={() => applyBinding(id, 'default')}
                               >
                                 ↺
                               </button>

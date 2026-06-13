@@ -79,6 +79,32 @@ describe('ShortcutEditorModal', () => {
     expect(cfg.overrides['dock.diff']).toBeNull();
   });
 
+  it('runs conflict detection when resetting a shortcut whose default is now claimed', () => {
+    // session.new rebound off ⌘N; dock.diff has taken ⌘N. Resetting session.new
+    // to its default (⌘N) must not silently duplicate — it should offer reassign.
+    const { setSetting } = renderEditor({
+      [KEYBINDINGS_SETTING_KEY]: JSON.stringify({
+        version: 1,
+        overrides: {
+          'session.new': { key: 'j', meta: true },
+          'dock.diff': { key: 'n', meta: true },
+        },
+      }),
+    });
+
+    fireEvent.click(within(row('New session in this workspace')).getByTitle('Reset to default'));
+
+    // Reassign prompt appears naming the current ⌘N holder (Diff panel).
+    const reassignBtn = screen.getByText('Reassign');
+    expect(within(row('New session in this workspace')).getByText(/Diff panel/)).toBeInTheDocument();
+    fireEvent.click(reassignBtn);
+
+    const cfg = lastConfig(setSetting);
+    // session.new back to default (override dropped), dock.diff freed.
+    expect('session.new' in cfg.overrides).toBe(false);
+    expect(cfg.overrides['dock.diff']).toBeNull();
+  });
+
   it('restores defaults', () => {
     const { setSetting } = renderEditor({
       [KEYBINDINGS_SETTING_KEY]: JSON.stringify({

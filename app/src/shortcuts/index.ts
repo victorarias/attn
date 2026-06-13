@@ -4,7 +4,7 @@ export {
   type ShortcutId,
   type ShortcutDef,
   matchesShortcut,
-  shortcutToKey,
+  bindingsConflict,
   isAllowedConflict,
 } from './registry';
 export { useShortcut, setShortcutCaptureSuspended } from './useShortcut';

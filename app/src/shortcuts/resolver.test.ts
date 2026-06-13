@@ -80,6 +80,13 @@ describe('findConflict', () => {
   it('returns null for a free combo', () => {
     expect(findConflict({ key: 'y', meta: true, alt: true, shift: true }, 'session.new')).toBeNull();
   });
+
+  it('detects code-equivalent collisions even when the printed key differs', () => {
+    // A localized layout where ⌘+the-1-key reports key '&' but code 'Digit1'.
+    // matchesShortcut would fire workspace.select1, so findConflict must catch it.
+    expect(findConflict({ key: '&', code: 'Digit1', meta: true }, 'session.new'))
+      .toBe('workspace.select1');
+  });
 });
 
 describe('eventToBinding', () => {

@@ -11,7 +11,7 @@ import {
   SHORTCUTS,
   ShortcutDef,
   ShortcutId,
-  shortcutToKey,
+  bindingsConflict,
   isAllowedConflict,
 } from './registry';
 import { isMacLikePlatform } from './platform';
@@ -74,11 +74,10 @@ export function resolvedShortcutEntries(): Array<[ShortcutId, ShortcutDef]> {
  * conflicting id or null. Used by the editor for VSCode-style reassign.
  */
 export function findConflict(def: ShortcutDef, excludeId: ShortcutId): ShortcutId | null {
-  const key = shortcutToKey(def);
   for (const [id, d] of resolvedShortcutEntries()) {
     if (id === excludeId) continue;
     if (isAllowedConflict(excludeId, id)) continue;
-    if (shortcutToKey(d) === key) return id;
+    if (bindingsConflict(def, d)) return id;
   }
   return null;
 }
