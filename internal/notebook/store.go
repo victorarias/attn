@@ -33,45 +33,48 @@ func NewStore(root string) *Store {
 func (s *Store) Root() string { return s.root }
 
 // EnsureScaffold idempotently creates the root, the reserved directory layout,
-// and the reserved index/log files. It never clobbers an existing file. created
-// reports whether the root was newly made or any scaffold file was written.
-func (s *Store) EnsureScaffold() (created bool, err error) {
+// and the reserved index/log files. It never clobbers an existing file. It
+// returns the notebook-relative paths of the files it actually wrote (empty on
+// an idempotent no-op run) so callers can record exactly those as self-writes —
+// recording reserved paths that were not rewritten would wrongly suppress a real
+// external edit to them. On a mid-scaffold failure it returns the files written
+// so far ALONGSIDE the error, so the caller can still account for attn's own
+// partial writes rather than letting them surface later as external edits.
+func (s *Store) EnsureScaffold() (createdPaths []string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, statErr := os.Stat(s.root); os.IsNotExist(statErr) {
-		created = true
-	} else if statErr != nil {
-		return false, statErr
+	if _, statErr := os.Stat(s.root); statErr != nil && !os.IsNotExist(statErr) {
+		return nil, statErr
 	}
 	if err := os.MkdirAll(s.root, 0o755); err != nil {
-		return false, fmt.Errorf("create notebook root: %w", err)
+		return nil, fmt.Errorf("create notebook root: %w", err)
 	}
 	for _, dir := range scaffoldDirs() {
 		abs := filepath.Join(s.root, filepath.FromSlash(dir))
 		if err := s.checkWithinResolvedRoot(abs); err != nil {
-			return false, err // refuse to create through a symlinked subdir
+			return nil, err // refuse to create through a symlinked subdir
 		}
 		if err := os.MkdirAll(abs, 0o755); err != nil {
-			return false, err
+			return nil, err
 		}
 	}
 	for _, f := range scaffoldFiles() {
 		abs := filepath.Join(s.root, filepath.FromSlash(f.relPath))
 		if err := s.checkWithinResolvedRoot(abs); err != nil {
-			return false, err
+			return createdPaths, err
 		}
 		if _, statErr := os.Stat(abs); statErr == nil {
 			continue // never clobber an existing file
 		} else if !os.IsNotExist(statErr) {
-			return false, statErr
+			return createdPaths, statErr
 		}
 		if err := writeAtomic(abs, []byte(f.content)); err != nil {
-			return false, err
+			return createdPaths, err
 		}
-		created = true
+		createdPaths = append(createdPaths, f.relPath)
 	}
-	return created, nil
+	return createdPaths, nil
 }
 
 // Read returns the raw bytes of a note and their content hash. A missing note

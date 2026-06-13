@@ -1,6 +1,7 @@
 package notebook
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -12,14 +13,18 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// DefaultWatchDebounce is the quiet window over which a burst of filesystem
-// events is coalesced into a single change notification.
+// DefaultWatchDebounce is the fixed window, opened by the first event of a
+// burst, over which filesystem events are coalesced into one change
+// notification. It is not an idle/quiet window: later events in the same burst
+// do not extend it, so a burst flushes at most this long after it starts.
 const DefaultWatchDebounce = 400 * time.Millisecond
 
-// selfWriteTTL bounds how long a NoteSelfWrite record suppresses the matching
-// filesystem event. attn's own write fires its event within milliseconds of the
-// rename, so a few seconds is comfortably safe while still expiring a record
-// whose event never arrives (e.g. the write failed after the record was taken).
+// selfWriteTTL caps how long an unconsumed NoteSelfWrite record lingers before
+// it is pruned. Suppression itself is one-shot: a record is consumed by the
+// first coalesced flush that contains its path (a single atomic write fires its
+// events within one debounce window, so all of attn's own events for that write
+// coalesce into that one flush). The TTL only bounds a record whose matching
+// event never arrives, so a stale record cannot suppress a real edit forever.
 const selfWriteTTL = 3 * time.Second
 
 // Watcher observes a notebook root for changes made OUTSIDE attn — an external
@@ -40,25 +45,53 @@ type Watcher struct {
 	fsw *fsnotify.Watcher
 
 	mu         sync.Mutex
-	selfWrites map[string]time.Time // notebook-relative path -> suppression expiry
+	selfWrites map[string]selfWriteRecord // notebook-relative path -> suppression record
 	closeOnce  sync.Once
+	loopDone   chan struct{}    // closed when loop() returns
 	now        func() time.Time // injectable clock for tests
+}
+
+// selfWriteRecord is what NoteSelfWrite stores per path: when the record expires,
+// and the content hash attn wrote (empty for an unconditional suppression).
+type selfWriteRecord struct {
+	expiry time.Time
+	hash   string
+}
+
+// SelfWrite identifies a notebook-relative path attn just wrote. A non-empty Hash
+// makes suppression content-aware: the matching filesystem event is dropped only
+// if the file on disk still holds exactly those bytes, so a genuine external edit
+// that lands in the SAME debounce window (different bytes, or a delete) is still
+// surfaced instead of being swallowed by the self-write. An empty Hash suppresses
+// the next event for the path unconditionally (used where the written content is
+// not readily available, e.g. the scaffold).
+type SelfWrite struct {
+	Rel  string
+	Hash string
 }
 
 // NewWatcher starts watching root (which must already exist) and every
 // non-dotdir subdirectory under it, coalescing events over debounce before
-// calling onChange. Close stops it.
+// calling onChange. Close stops it. It errors if root does not exist or is not a
+// directory, rather than silently watching nothing.
 func NewWatcher(root string, debounce time.Duration, onChange func(paths []string)) (*Watcher, error) {
+	clean := filepath.Clean(root)
+	if info, err := os.Stat(clean); err != nil {
+		return nil, fmt.Errorf("notebook watcher: %w", err)
+	} else if !info.IsDir() {
+		return nil, fmt.Errorf("notebook watcher: %s is not a directory", clean)
+	}
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
 	w := &Watcher{
-		root:       filepath.Clean(root),
+		root:       clean,
 		debounce:   debounce,
 		onChange:   onChange,
 		fsw:        fsw,
-		selfWrites: make(map[string]time.Time),
+		selfWrites: make(map[string]selfWriteRecord),
+		loopDone:   make(chan struct{}),
 		now:        time.Now,
 	}
 	if _, err := w.addTree(w.root); err != nil {
@@ -69,27 +102,29 @@ func NewWatcher(root string, debounce time.Duration, onChange func(paths []strin
 	return w, nil
 }
 
-// NoteSelfWrite marks notebook-relative paths as attn-originated so the next
-// filesystem event for each is treated as our own write, not an external edit.
-// Call it immediately BEFORE the store mutation so the record is in place before
-// the event can fire. A nil Watcher (none running yet) is a no-op.
-func (w *Watcher) NoteSelfWrite(rels ...string) {
-	if w == nil || len(rels) == 0 {
+// NoteSelfWrite marks paths as attn-originated so the next filesystem event for
+// each is treated as our own write, not an external edit. With a per-write content
+// hash, suppression is content-aware (see SelfWrite). A nil Watcher (none running
+// yet) is a no-op.
+func (w *Watcher) NoteSelfWrite(writes ...SelfWrite) {
+	if w == nil || len(writes) == 0 {
 		return
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	exp := w.now().Add(selfWriteTTL)
-	for _, rel := range rels {
-		clean, err := CleanPath(rel)
+	for _, sw := range writes {
+		clean, err := CleanPath(sw.Rel)
 		if err != nil {
 			continue
 		}
-		w.selfWrites[clean] = exp
+		w.selfWrites[clean] = selfWriteRecord{expiry: exp, hash: sw.Hash}
 	}
 }
 
-// Close stops watching. It is safe to call more than once and on a nil Watcher.
+// Close stops watching and waits for the event loop to return, so no onChange
+// can fire after it returns. It is safe to call more than once and on a nil
+// Watcher.
 func (w *Watcher) Close() error {
 	if w == nil {
 		return nil
@@ -98,10 +133,12 @@ func (w *Watcher) Close() error {
 	w.closeOnce.Do(func() {
 		err = w.fsw.Close() // closes Events/Errors, unblocking loop
 	})
+	<-w.loopDone // join the loop goroutine (idempotent: the channel stays closed)
 	return err
 }
 
 func (w *Watcher) loop() {
+	defer close(w.loopDone)
 	pending := make(map[string]struct{})
 	var timerC <-chan time.Time
 	for {
@@ -135,10 +172,13 @@ func (w *Watcher) handleEvent(ev fsnotify.Event, pending map[string]struct{}) {
 			if base := filepath.Base(ev.Name); base == "." || strings.HasPrefix(base, ".") {
 				return // skip .attn/ and any dotdir subtree
 			}
-			if mdFiles, err := w.addTree(ev.Name); err == nil {
-				for _, rel := range mdFiles {
-					pending[rel] = struct{}{}
-				}
+			// Surface whatever addTree discovered even if the walk aborted partway
+			// (e.g. a permission error on a sibling subdir): the .md files found
+			// before the failure are real notes whose parent dirs are already
+			// watched, so dropping them would silently miss external edits.
+			mdFiles, _ := w.addTree(ev.Name)
+			for _, rel := range mdFiles {
+				pending[rel] = struct{}{}
 			}
 			return
 		}
@@ -167,25 +207,55 @@ func (w *Watcher) flush(pending map[string]struct{}) {
 }
 
 // dropSelfWrites removes paths attn just wrote (consuming each record once) and
-// prunes expired records.
+// prunes expired records. For a record that carries a content hash, suppression
+// is content-aware: the path is dropped only if the file on disk still holds
+// exactly the bytes attn wrote. If an external edit coalesced into the same
+// debounce window (so the on-disk bytes differ, or the file was deleted), the
+// path is surfaced instead of being swallowed by the self-write.
 func (w *Watcher) dropSelfWrites(rels []string) []string {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	now := w.now()
-	for k, exp := range w.selfWrites {
-		if now.After(exp) {
+	for k, rec := range w.selfWrites {
+		if now.After(rec.expiry) {
 			delete(w.selfWrites, k)
 		}
 	}
-	out := rels[:0]
+	out := make([]string, 0, len(rels))
+	type recheck struct{ rel, hash string }
+	var pending []recheck
 	for _, rel := range rels {
-		if exp, ok := w.selfWrites[rel]; ok && !now.After(exp) {
-			delete(w.selfWrites, rel) // consume: suppress exactly this event round
+		if rec, ok := w.selfWrites[rel]; ok && !now.After(rec.expiry) {
+			delete(w.selfWrites, rel) // consume: one event round per record
+			if rec.hash == "" {
+				continue // unconditional suppression
+			}
+			pending = append(pending, recheck{rel: rel, hash: rec.hash})
 			continue
 		}
 		out = append(out, rel)
 	}
+	w.mu.Unlock()
+	// Content-aware recheck runs OUTSIDE the lock (it reads files): surface a path
+	// whose on-disk bytes no longer match what attn wrote — an external edit that
+	// landed in the same window. dropSelfWrites is only ever called from the single
+	// loop goroutine, so this stays race-free.
+	for _, rc := range pending {
+		if w.diskHash(rc.rel) != rc.hash {
+			out = append(out, rc.rel)
+		}
+	}
 	return out
+}
+
+// diskHash returns the content hash of the note at rel on disk, or "" if it cannot
+// be read (e.g. it was deleted). "" never equals a real recorded hash, so an
+// unreadable or deleted path is treated as a change worth surfacing.
+func (w *Watcher) diskHash(rel string) string {
+	content, err := os.ReadFile(filepath.Join(w.root, filepath.FromSlash(rel)))
+	if err != nil {
+		return ""
+	}
+	return Hash(content)
 }
 
 // addTree adds a watch for dir and every non-dotdir subdirectory, returning the

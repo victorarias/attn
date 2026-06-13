@@ -116,6 +116,24 @@ describe('NotebookBrowser', () => {
     expect(screen.queryByRole('heading', { level: 1, name: 'memory/index.md' })).not.toBeInTheDocument();
   });
 
+  it('keeps the open note when a change-signal refresh fails transiently', async () => {
+    const { props, listNotebook } = makeProps();
+    const { rerender } = render(<NotebookBrowser {...props} />);
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'memory/index.md' })).toBeInTheDocument();
+
+    // The initial open succeeded; the refresh triggered by the change signal now
+    // rejects (a transient WS hiccup, not a deletion).
+    listNotebook.mockRejectedValueOnce(new Error('socket closed'));
+    rerender(<NotebookBrowser {...props} changeSignal={1} />);
+
+    // A failed refresh must NOT be mistaken for an empty/deleted tree: the open
+    // note stays put and the document does not fall back to the empty state.
+    await waitFor(() => expect(listNotebook.mock.calls.length).toBeGreaterThan(1));
+    expect(screen.getByRole('heading', { level: 1, name: 'memory/index.md' })).toBeInTheDocument();
+    expect(screen.queryByText('Nothing selected')).not.toBeInTheDocument();
+  });
+
   it('shows the empty state and reads nothing when the notebook has no notes', async () => {
     const emptyList = vi.fn<() => Promise<NotebookEntry[]>>().mockResolvedValue([]);
     const { props, readNotebook } = makeProps({ listNotebook: emptyList });

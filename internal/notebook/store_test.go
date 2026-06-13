@@ -16,8 +16,8 @@ func TestEnsureScaffold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureScaffold: %v", err)
 	}
-	if !created {
-		t.Fatal("first EnsureScaffold should report created=true")
+	if !reflect.DeepEqual(created, []string{"index.md", "log.md", "memory/index.md"}) {
+		t.Fatalf("first EnsureScaffold created = %v, want all reserved files", created)
 	}
 	for _, rel := range []string{"index.md", "log.md", "memory/index.md"} {
 		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
@@ -39,12 +39,41 @@ func TestEnsureScaffold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second EnsureScaffold: %v", err)
 	}
-	if created {
-		t.Fatal("second EnsureScaffold should report created=false")
+	if len(created) != 0 {
+		t.Fatalf("second EnsureScaffold created = %v, want none", created)
 	}
 	got, _ := os.ReadFile(filepath.Join(root, "index.md"))
 	if string(got) != "EDITED" {
 		t.Fatalf("EnsureScaffold clobbered an existing file: %q", got)
+	}
+}
+
+func TestEnsureScaffoldReturnsPartialWritesOnFailure(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "nb")
+	// Pre-create the full dir layout so EnsureScaffold's MkdirAll calls are no-ops,
+	// then make memory/ read-only so the memory/index.md write (the last reserved
+	// file) fails while index.md and log.md (in the writable root) succeed.
+	for _, d := range []string{"journal", "memory/decisions", "memory/gotchas", "memory/domain"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mem := filepath.Join(root, "memory")
+	if err := os.Chmod(mem, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(mem, 0o755) })
+
+	s := NewStore(root)
+	created, err := s.EnsureScaffold()
+	if err == nil {
+		t.Skip("write into read-only memory/ unexpectedly succeeded (likely running as root)")
+	}
+	// The files written before the failure must be returned so the caller can
+	// account for attn's own partial writes (and not later mis-surface them as
+	// external edits), rather than discarding them with the error.
+	if !reflect.DeepEqual(created, []string{"index.md", "log.md"}) {
+		t.Fatalf("partial EnsureScaffold created = %v, want [index.md log.md]", created)
 	}
 }
 
