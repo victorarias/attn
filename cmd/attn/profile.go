@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/victorarias/attn/internal/config"
 )
@@ -32,6 +36,8 @@ func runProfile() {
 		runProfileResolve(os.Args[3:])
 	case "tauri-config":
 		runProfileTauriConfig(os.Args[3:])
+	case "clean":
+		runProfileClean(os.Args[3:])
 	case "list":
 		runProfileList()
 	case "env":
@@ -239,6 +245,193 @@ func runProfileTauriConfig(args []string) {
 	fmt.Println(string(b))
 }
 
+// cleanPlan parses `attn profile clean` arguments and applies the safety guard.
+// It is pure (no side effects, no os.Exit) so the rules that decide WHAT gets
+// destroyed are unit-tested in isolation from the destruction itself.
+//
+// Returns the normalized profile name ("" for default/prod) and whether --force
+// was given. Refuses the default/prod profile unless --force is explicit, since
+// cleaning it would remove ~/.attn and ~/Applications/attn.app.
+func cleanPlan(args []string) (normalized string, force bool, err error) {
+	name := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--force", "-f":
+			force = true
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				return "", false, fmt.Errorf("unknown flag %q", args[i])
+			}
+			if name != "" {
+				return "", false, fmt.Errorf("clean takes a single profile name, got %q and %q", name, args[i])
+			}
+			name = args[i]
+		}
+	}
+	if name == "" {
+		return "", false, fmt.Errorf("clean requires a profile name (e.g. `attn profile clean agent7`)")
+	}
+	normalized, err = config.NormalizeProfileName(name)
+	if err != nil {
+		return "", false, err
+	}
+	if normalized == "" && !force {
+		return "", false, fmt.Errorf("refusing to clean the default (production) profile without --force; this removes %s and %s",
+			config.DataDirForProfile(""), config.AppPathForProfile(""))
+	}
+	return normalized, force, nil
+}
+
+// runProfileClean tears down a profile: stop its daemon, quit its app, forget
+// the bundle in LaunchServices, and remove its app bundle and data dir. Every
+// step is best-effort and reported, so cleaning a partially-installed profile is
+// idempotent. The destructive removals (app, data) are the only hard failures.
+func runProfileClean(args []string) {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			printProfileHelp(os.Stdout)
+			return
+		}
+	}
+	normalized, _, err := cleanPlan(args)
+	if err != nil {
+		profileFatal(err.Error())
+	}
+	r := resolveProfile(normalized)
+
+	fmt.Printf(">>> Cleaning profile %s\n", r.Label)
+
+	// Quit the app first so it stops talking to the daemon, then stop the
+	// daemon itself (it outlives the app by design).
+	quitProfileApp(r.BundleID)
+	if msg := stopProfileDaemon(r); msg != "" {
+		fmt.Printf("  daemon   %s\n", msg)
+	} else {
+		fmt.Printf("  daemon   stopped\n")
+	}
+
+	// App bundle: forget it in LaunchServices (so the deep-link scheme and
+	// bundle id stop resolving to a path we're about to delete), then remove it.
+	if fileExists(r.AppPath) {
+		lsregisterForget(r.AppPath)
+		if err := os.RemoveAll(r.AppPath); err != nil {
+			profileFatal(fmt.Sprintf("remove app bundle %s: %v", r.AppPath, err))
+		}
+		fmt.Printf("  app      removed %s\n", r.AppPath)
+	} else {
+		fmt.Printf("  app      not installed (%s)\n", r.AppPath)
+	}
+
+	// Data dir: socket, pid file, db, tokens — everything for this profile.
+	if fileExists(r.DataDir) {
+		if err := os.RemoveAll(r.DataDir); err != nil {
+			profileFatal(fmt.Sprintf("remove data dir %s: %v", r.DataDir, err))
+		}
+		fmt.Printf("  data     removed %s\n", r.DataDir)
+	} else {
+		fmt.Printf("  data     none (%s)\n", r.DataDir)
+	}
+
+	fmt.Printf("Cleaned profile %s.\n", r.Label)
+}
+
+// stopProfileDaemon stops a profile's daemon via its pid file (SIGTERM, then
+// SIGKILL if it lingers), for an arbitrary profile resolved by path rather than
+// the current process's config. Returns a human note ("" on a clean stop)
+// instead of an error because a missing/dead daemon is an expected, non-fatal
+// state during clean.
+//
+// Safety: the pid file is only removed on a *graceful* daemon shutdown
+// (daemon.releasePIDLock); a crash/SIGKILL leaves it behind pointing at a dead
+// pid that macOS may have recycled to an unrelated process. We therefore never
+// trust the pid alone. The daemon holds an exclusive advisory lock on the pid
+// file for its whole lifetime (daemon.acquirePIDLock), so we use that same lock
+// as the liveness+ownership gate: if WE can take the lock, no live daemon owns
+// the file and the pid is stale — we must not signal it.
+func stopProfileDaemon(r profileResolved) string {
+	pidPath := filepath.Join(r.DataDir, "attn.pid")
+	lockFile, err := os.OpenFile(pidPath, os.O_RDWR, 0)
+	if os.IsNotExist(err) {
+		return "not running (no pid file)"
+	}
+	if err != nil {
+		return fmt.Sprintf("could not open pid file: %v", err)
+	}
+	if flockErr := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); flockErr == nil {
+		// Acquired the lock → no live daemon holds it. The pid on disk is stale;
+		// signaling it could hit a recycled, unrelated process.
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		lockFile.Close()
+		return "not running (stale pid file)"
+	}
+	lockFile.Close()
+
+	// The lock is held → a live daemon owns this file and wrote its own pid into
+	// it under the lock, so the pid genuinely names that daemon: safe to signal.
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		return fmt.Sprintf("could not read pid file: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		return fmt.Sprintf("ignoring malformed pid file %q", strings.TrimSpace(string(data)))
+	}
+	// Never signal our own process tree (e.g. cleaning the profile we're
+	// running under): killing it would take down this very command.
+	if pid == os.Getpid() || pid == os.Getppid() {
+		return fmt.Sprintf("skipped (pid %d is this command's own process tree)", pid)
+	}
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		if err == syscall.ESRCH {
+			return "not running (stale pid file)"
+		}
+		return fmt.Sprintf("SIGTERM pid %d failed: %v", pid, err)
+	}
+	if processGoneWithin(pid, 5*time.Second) {
+		return ""
+	}
+	// Escalate: a throwaway profile's daemon should always die on SIGTERM, but
+	// don't leave a wedged process holding the data dir we're removing.
+	_ = syscall.Kill(pid, syscall.SIGKILL)
+	if processGoneWithin(pid, 2*time.Second) {
+		return fmt.Sprintf("force-killed pid %d (did not exit on SIGTERM)", pid)
+	}
+	return fmt.Sprintf("warning: pid %d did not exit", pid)
+}
+
+// processGoneWithin polls `kill(pid, 0)` until the process is gone (ESRCH) or
+// the deadline passes.
+func processGoneWithin(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if err := syscall.Kill(pid, 0); err == syscall.ESRCH {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// quitProfileApp asks the app to quit by bundle id. Best-effort: a not-running
+// app makes osascript fail harmlessly.
+func quitProfileApp(bundleID string) {
+	_ = exec.Command("osascript", "-e", fmt.Sprintf("tell application id %q to quit", bundleID)).Run()
+}
+
+// lsregisterPath is macOS's LaunchServices registration tool. Used to forget a
+// bundle so its identifier and deep-link scheme stop resolving to a path we are
+// about to delete.
+const lsregisterPath = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+
+func lsregisterForget(appPath string) {
+	if !fileExists(lsregisterPath) {
+		return
+	}
+	_ = exec.Command(lsregisterPath, "-u", appPath).Run()
+}
+
 func runProfileList() {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -322,11 +515,13 @@ Usage:
   attn profile resolve --field wsPort      print one resolved value
   attn profile resolve --profile agent7    resolve a different profile
   attn profile tauri-config    Tauri --config overlay for the profile's build
+  attn profile clean <name>    stop daemon, quit app, remove its app + data dir
   attn profile list            every profile with data and/or an installed app
   attn profile env <name>      alias of: attn profile-env <name>
 
 Profile names must match [a-z0-9][a-z0-9-]{0,15}. "dev" is the development
-sibling (port 29849, ~/.attn-dev).`)
+sibling (port 29849, ~/.attn-dev). `+"`clean`"+` refuses the default (production)
+profile unless given --force.`)
 }
 
 // --- small local helpers (profile-prefixed to avoid package collisions) ---
