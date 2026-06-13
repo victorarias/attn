@@ -156,6 +156,10 @@ interface SidebarProps {
   onWorkspaceDragEnter?: (workspace: SidebarWorkspace) => void;
   onWorkspaceDragLeave?: (workspace: SidebarWorkspace) => void;
   onWorkspaceDragDrop?: (workspace: SidebarWorkspace) => void;
+  // Drop the dragged leaf onto the "New workspace" zone at the foot of the list to
+  // split it into a brand-new workspace. Wired in App to
+  // sendWorkspaceMoveLeafToNewWorkspace.
+  onNewWorkspaceDrop?: () => void;
   // Reorder a workspace by dropping its header onto an insertion seam. The
   // neighbour ids describe the seam: prevWorkspaceId ends up directly above the
   // moved workspace, nextWorkspaceId directly below. Either may be undefined when
@@ -320,6 +324,7 @@ export function Sidebar({
   onWorkspaceDragEnter,
   onWorkspaceDragLeave,
   onWorkspaceDragDrop,
+  onNewWorkspaceDrop,
   onWorkspaceReorder,
   onSelectSession,
   onSelectWorkspace,
@@ -416,6 +421,9 @@ export function Sidebar({
   // The set of workspaces a drag may reorder within: the dragged workspace's
   // endpoint, in visible visual order. Empty when no drag is active.
   const [reorderDrag, setReorderDrag] = useState<{ workspaceId: string; endpointId?: string } | null>(null);
+  // True while the cursor is over the "New workspace" drop-zone during a leaf drag,
+  // so the zone shows its active/hover styling. Reset on leave and on drop.
+  const [newWorkspaceDropActive, setNewWorkspaceDropActive] = useState(false);
   // The insertion slot (0..N) the cursor is currently nearest. null = none yet.
   const [reorderSeamIndex, setReorderSeamIndex] = useState<number | null>(null);
   // Per-interaction refs so listeners read fresh values without re-binding.
@@ -911,6 +919,21 @@ export function Sidebar({
             </div>
           );
         })}
+        {leafDrag && (
+          <div
+            className={`new-workspace-dropzone${newWorkspaceDropActive ? ' new-workspace-dropzone--active' : ''}`}
+            data-testid="new-workspace-dropzone"
+            onPointerEnter={() => setNewWorkspaceDropActive(true)}
+            onPointerLeave={() => setNewWorkspaceDropActive(false)}
+            onPointerUp={() => {
+              setNewWorkspaceDropActive(false);
+              onNewWorkspaceDrop?.();
+            }}
+          >
+            <span className="new-workspace-dropzone-plus">＋</span>
+            <span className="new-workspace-dropzone-label">New workspace</span>
+          </div>
+        )}
       </div>
 
       {mutedWorkspaces.length > 0 && (

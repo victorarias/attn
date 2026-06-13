@@ -1326,6 +1326,71 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('sends move_leaf_to_new_workspace and resolves on the leaf-keyed action result', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    const movePromise = result.current.sendWorkspaceMoveLeafToNewWorkspace('workspace-1', 'pane-7');
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: PROTOCOL_VERSION,
+        sessions: [],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({
+        cmd: 'workspace_layout_move_leaf_to_new_workspace',
+        source_workspace_id: 'workspace-1',
+        leaf_id: 'pane-7',
+        anchor_id: '',
+        edge: 'left',
+      });
+    });
+
+    // A result without the source workspace id (just the leaf) must not resolve it.
+    act(() => {
+      ws.emit({
+        event: 'workspace_layout_action_result',
+        action: 'workspace_layout_move_leaf_to_new_workspace',
+        leaf_id: 'pane-7',
+        success: true,
+      });
+    });
+    const marker = vi.fn();
+    movePromise.then(marker, marker);
+    await Promise.resolve();
+    expect(marker).not.toHaveBeenCalled();
+
+    act(() => {
+      ws.emit({
+        event: 'workspace_layout_action_result',
+        action: 'workspace_layout_move_leaf_to_new_workspace',
+        workspace_id: 'workspace-1',
+        leaf_id: 'pane-7',
+        success: true,
+      });
+    });
+
+    await expect(movePromise).resolves.toEqual({ success: true, final_leaf_id: undefined });
+    unmount();
+  });
+
   it('correlates concurrent split resize results by split id', async () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({

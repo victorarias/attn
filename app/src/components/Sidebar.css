@@ -287,6 +287,44 @@
   }
 }
 
+/* "New workspace" drop-zone at the foot of the list, shown only while a leaf drag
+   is active. Dropping the dragged leaf here splits it into a brand-new workspace.
+   Existing workspace groups stay merge targets; this is the dedicated split target. */
+.new-workspace-dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 6px 0 2px;
+  padding: 12px 10px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--accent);
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.new-workspace-dropzone-plus {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.new-workspace-dropzone--active {
+  border-style: solid;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .new-workspace-dropzone {
+    transition: none;
+  }
+}
+
 .workspace-group-header {
   display: flex;
   align-items: center;

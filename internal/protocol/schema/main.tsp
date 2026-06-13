@@ -1138,6 +1138,21 @@ model WorkspaceLayoutMoveLeafToWorkspaceMessage {
   ratio?: float64;
 }
 
+// Move an existing leaf out of its current workspace into a brand-new workspace
+// the daemon creates on the fly. Like WorkspaceLayoutMoveLeafToWorkspaceMessage
+// but with no target_workspace_id: the daemon registers a fresh workspace (seeded
+// after the current max rank so it lands at the end of the order) and moves the
+// leaf into it. The optional anchor_id/edge/ratio position the leaf within the
+// new layout; an empty anchor docks it against the new workspace root.
+model WorkspaceLayoutMoveLeafToNewWorkspaceMessage {
+  cmd: "workspace_layout_move_leaf_to_new_workspace";
+  source_workspace_id: string;
+  leaf_id: string;
+  anchor_id?: string;
+  edge?: WorkspaceLayoutDockEdge;
+  ratio?: float64;
+}
+
 // Request the current rendered content of a docked tile (e.g. the markdown
 // file a markdown tile points at). The daemon resolves the file from the
 // tile's persisted params, reads it, and replies with WorkspaceTileContentMessage.

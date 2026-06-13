@@ -635,6 +635,96 @@ func (d *Daemon) handleWorkspaceLayoutMoveLeafToWorkspace(client *wsClient, msg 
 	d.sendWorkspaceLayoutMoveToWorkspaceResult(client, msg.SourceWorkspaceID, msg.TargetWorkspaceID, msg.LeafID, finalLeafID, err)
 }
 
+// handleWorkspaceLayoutMoveLeafToNewWorkspace splits a leaf out of its source
+// workspace into a brand-new one. It registers the new workspace through the
+// normal registration path (so PR1's rank seeding appends it to the bottom of
+// the sidebar) and inherits the source's directory, then reuses
+// moveLeafToWorkspace verbatim so the leaf relocation, session-ownership
+// transfer, and source-empty teardown all behave exactly like a move to an
+// existing workspace. The workspace_registered broadcast goes out BEFORE the
+// layout move so clients learn the new workspace exists before its first
+// workspace_layout_updated references it.
+func (d *Daemon) handleWorkspaceLayoutMoveLeafToNewWorkspace(client *wsClient, msg *protocol.WorkspaceLayoutMoveLeafToNewWorkspaceMessage) {
+	sourceWorkspaceID := strings.TrimSpace(msg.SourceWorkspaceID)
+	leafID := strings.TrimSpace(msg.LeafID)
+	if sourceWorkspaceID == "" {
+		d.sendWorkspaceLayoutMoveToNewWorkspaceResult(client, sourceWorkspaceID, "", leafID, "", fmt.Errorf("source_workspace_id is required"))
+		return
+	}
+	if leafID == "" {
+		d.sendWorkspaceLayoutMoveToNewWorkspaceResult(client, sourceWorkspaceID, "", leafID, "", fmt.Errorf("leaf_id is required"))
+		return
+	}
+	if d.workspaces == nil {
+		d.sendWorkspaceLayoutMoveToNewWorkspaceResult(client, sourceWorkspaceID, "", leafID, "", fmt.Errorf("workspace registry unavailable"))
+		return
+	}
+	source, ok := d.workspaces.snapshot(sourceWorkspaceID)
+	if !ok {
+		d.sendWorkspaceLayoutMoveToNewWorkspaceResult(client, sourceWorkspaceID, "", leafID, "", fmt.Errorf("workspace not found: %s", sourceWorkspaceID))
+		return
+	}
+
+	newWorkspaceID := uuid.NewString()
+	title := d.newWorkspaceTitleForMovedLeaf(sourceWorkspaceID, leafID, source.Title)
+	// Reuse the normal registration path so rank is auto-seeded above the
+	// current maximum (rankkey.After) and the new workspace appends to the
+	// sidebar. The new workspace inherits the source's directory.
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        newWorkspaceID,
+		Title:     title,
+		Directory: source.Directory,
+	})
+
+	finalLeafID, err := d.moveLeafToWorkspace(sourceWorkspaceID, newWorkspaceID, leafID, protocol.Deref(msg.AnchorID), protocol.Deref(msg.Edge), msg.Ratio)
+	if err != nil {
+		// The move failed after the workspace was registered. Tear the empty
+		// new workspace back down so a failed drag leaves no orphan behind.
+		d.unregisterWorkspaceIfEmptyAfterMove(newWorkspaceID)
+	}
+	d.sendWorkspaceLayoutMoveToNewWorkspaceResult(client, sourceWorkspaceID, newWorkspaceID, leafID, finalLeafID, err)
+}
+
+// newWorkspaceTitleForMovedLeaf picks a sensible default title for a workspace
+// split out from a dragged leaf: the moved pane/session's own title when it has
+// one, else the source workspace title. Mirrors how the rest of the layout code
+// derives pane titles, so the new workspace reads naturally in the sidebar.
+func (d *Daemon) newWorkspaceTitleForMovedLeaf(sourceWorkspaceID, leafID, fallbackTitle string) string {
+	if snapshot := d.store.GetWorkspaceLayout(sourceWorkspaceID); snapshot != nil {
+		for _, pane := range snapshot.Panes {
+			if pane.PaneID == leafID {
+				if title := strings.TrimSpace(pane.Title); title != "" {
+					return title
+				}
+				break
+			}
+		}
+	}
+	return strings.TrimSpace(fallbackTitle)
+}
+
+func (d *Daemon) sendWorkspaceLayoutMoveToNewWorkspaceResult(client *wsClient, sourceWorkspaceID, newWorkspaceID, leafID, finalLeafID string, err error) {
+	result := protocol.WorkspaceLayoutActionResultMessage{
+		Event:             protocol.EventWorkspaceLayoutActionResult,
+		Action:            protocol.CmdWorkspaceLayoutMoveLeafToNewWorkspace,
+		WorkspaceID:       sourceWorkspaceID,
+		SourceWorkspaceID: protocol.Ptr(strings.TrimSpace(sourceWorkspaceID)),
+		LeafID:            protocol.Ptr(strings.TrimSpace(leafID)),
+		Success:           err == nil,
+	}
+	if strings.TrimSpace(newWorkspaceID) != "" {
+		result.TargetWorkspaceID = protocol.Ptr(strings.TrimSpace(newWorkspaceID))
+	}
+	if strings.TrimSpace(finalLeafID) != "" {
+		result.FinalLeafID = protocol.Ptr(strings.TrimSpace(finalLeafID))
+	}
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, result)
+}
+
 // handleSetWorkspaceRank reorders a workspace in the sidebar. The frontend sends
 // the drop position as neighbour ids — prev_workspace_id ends up ABOVE the moved
 // workspace, next_workspace_id BELOW it — and the daemon computes the fractional

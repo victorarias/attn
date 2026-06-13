@@ -93,24 +93,24 @@ never generates rank strings; it sends neighbour ids and *reads* order from the 
 
 ## Implementation Steps
 
-### PR1 — Reorder (protocol 102 → 103)
-- [ ] **rank helper**: new Go pkg (e.g. `internal/rankkey`) with `Between(a,b)`, `Seed(n)`, `After(max)` + thorough unit tests (byte-order strictness, no-room subdivision, MIN/MAX edges).
-- [ ] store: migration **49** `ALTER TABLE workspaces ADD COLUMN rank TEXT NOT NULL DEFAULT ''`; `applyMigration49` backfills existing rows via `rankkey.Seed(n)` in `created_at` order (idempotent: only where rank=''). (real DBs at v48 — 49 is clean)
-- [ ] store: `AddWorkspace` persists rank; `ListWorkspaces`/`GetWorkspace` read rank; `ORDER BY rank, created_at`; add `UpdateWorkspaceRank(id, rank)`.
-- [ ] daemon: `workspaceEntry.rank`; `snapshotEntry` includes rank; `applyRank` (mirror `applyStatus`); `register` reads stored rank on re-register (don't reset); seed rank on first creation via `rankkey.After(currentMax)`.
-- [ ] daemon: `handleSetWorkspaceRank` (resolve prev/next ranks → `rankkey.Between` → `store.UpdateWorkspaceRank` → `applyRank` → broadcast `workspace_state_changed` → action result). Wire `websocket.go` dispatch + `getWorkspaceIDFromMessage` + `command_meta.go`.
-- [ ] protocol: add `rank: string` to `Workspace`; `SetWorkspaceRankMessage{workspace_id, prev_workspace_id?, next_workspace_id?}`; `CmdSetWorkspaceRank` + ParseMessage case; bump `ProtocolVersion` → `103`; `make generate-types`.
-- [ ] frontend: sort by rank feeding `buildWorkspaceViewModels`; `sendSetWorkspaceRank(wsId, prevWsId?, nextWsId?)` (thread App→AppContent 4 places).
-- [ ] frontend: Sidebar workspace-header pointer-drag + insertion seams + live rank badge + distinct workspace-card ghost; drop sends the seam's neighbour ids; recompute BOTH `visualOrder` and `visualIndexByWorkspaceId`.
-- [ ] tests: `rankkey` unit tests; store `TestSetWorkspaceRank`, `TestListWorkspacesOrderedByRank`; daemon `workspace_rank_protocol_test.go` (neighbour-id reorder → order changes, survives reconnect); frontend `workspaceViewModels` ordering + `Sidebar` reorder + `useDaemonSocket` sender/result.
-- [ ] `make install` (protocol bump → reconnect); rebuild `./attn` for e2e; CHANGELOG entry.
+### PR1 — Reorder (protocol 102 → 103) — DONE (commit bb1a2532)
+- [x] **rank helper**: new Go pkg (e.g. `internal/rankkey`) with `Between(a,b)`, `Seed(n)`, `After(max)` + thorough unit tests (byte-order strictness, no-room subdivision, MIN/MAX edges).
+- [x] store: migration **49** `ALTER TABLE workspaces ADD COLUMN rank TEXT NOT NULL DEFAULT ''`; `applyMigration49` backfills existing rows via `rankkey.Seed(n)` in `created_at` order (idempotent: only where rank=''). (real DBs at v48 — 49 is clean)
+- [x] store: `AddWorkspace` persists rank; `ListWorkspaces`/`GetWorkspace` read rank; `ORDER BY rank, created_at`; add `UpdateWorkspaceRank(id, rank)`.
+- [x] daemon: `workspaceEntry.rank`; `snapshotEntry` includes rank; `applyRank` (mirror `applyStatus`); `register` reads stored rank on re-register (don't reset); seed rank on first creation via `rankkey.After(currentMax)`.
+- [x] daemon: `handleSetWorkspaceRank` (resolve prev/next ranks → `rankkey.Between` → `store.UpdateWorkspaceRank` → `applyRank` → broadcast `workspace_state_changed` → action result). Wire `websocket.go` dispatch + `getWorkspaceIDFromMessage` + `command_meta.go`.
+- [x] protocol: add `rank: string` to `Workspace`; `SetWorkspaceRankMessage{workspace_id, prev_workspace_id?, next_workspace_id?}`; `CmdSetWorkspaceRank` + ParseMessage case; bump `ProtocolVersion` → `103`; `make generate-types`.
+- [x] frontend: sort by rank feeding `buildWorkspaceViewModels`; `sendSetWorkspaceRank(wsId, prevWsId?, nextWsId?)` (thread App→AppContent 4 places).
+- [x] frontend: Sidebar workspace-header pointer-drag + insertion seams + distinct workspace-card ghost; drop sends the seam's neighbour ids; recompute BOTH `visualOrder` and `visualIndexByWorkspaceId`. (rank badge dropped + sidebar text-selection disabled per Victor's testing feedback)
+- [x] tests: `rankkey` unit tests; store `TestSetWorkspaceRank`, `TestListWorkspacesOrderedByRank`; daemon `workspace_rank_protocol_test.go` (neighbour-id reorder → order changes, survives reconnect); frontend `workspaceViewModels` ordering + `Sidebar` reorder + `useDaemonSocket` sender/result.
+- [x] `make install` (protocol bump → reconnect); rebuild `./attn` for e2e; CHANGELOG entry.
 
-### PR2 — New workspace from drag (protocol 103 → 104)
-- [ ] protocol: `MoveLeafToNewWorkspaceMessage`; const + ParseMessage; bump → `104`; `make generate-types`.
-- [ ] daemon: `handleWorkspaceLayoutMoveLeafToNewWorkspace` (uuid + register new ws with `rankAfter(max)` + default title → reuse `moveLeafToWorkspace`); broadcast `workspace_registered` before `layout_updated`; action result `entityId = leafId`; empty-source teardown; routing maps.
-- [ ] frontend: `sendMoveLeafToNewWorkspace` (thread 4 places); Sidebar "New workspace" drop-zone shown at foot of list during active `leafDrag` (group bodies stay merge targets); `handleWorkspaceDragDrop` detects zone → new-workspace sender.
-- [ ] tests: daemon `TestMoveLeafToNewWorkspaceCreatesWorkspace` (no pre-created target; verify new ws + moved pane + session ownership + empty-source teardown); Sidebar drop-zone; `useDaemonSocket` sender/result.
-- [ ] `make install`; rebuild `./attn`; CHANGELOG entry.
+### PR2 — New workspace from drag (protocol 103 → 104) — DONE (commit dbdbfdba)
+- [x] protocol: `WorkspaceLayoutMoveLeafToNewWorkspaceMessage`; const + ParseMessage; bump → `104`; `make generate-types`.
+- [x] daemon: `handleWorkspaceLayoutMoveLeafToNewWorkspace` (uuid + register new ws with `rankkey.After(max)` + title from moved pane → reuse `moveLeafToWorkspace`); broadcast `workspace_registered` before `layout_updated`; action result `entityId = leafId`; empty-source teardown on failure; routing maps.
+- [x] frontend: `sendWorkspaceMoveLeafToNewWorkspace` (thread 4 places); Sidebar "New workspace" drop-zone shown at foot of list during active `leafDrag` (group bodies stay merge targets); `handleNewWorkspaceDrop` → new-workspace sender.
+- [x] tests: daemon `workspace_moveleaf_protocol_test.go` (no pre-created target; verify new ws + moved pane + session ownership + empty-source teardown); Sidebar drop-zone; `useDaemonSocket` sender/result.
+- [x] `make dev` (protocol bump → reconnect); CHANGELOG entry. (prod `make install` deferred until Victor verifies both gestures)
 
 ## Decisions
 - **All rank math lives in Go; frontend sends neighbour ids.** The daemon computes the key

@@ -220,6 +220,194 @@ func TestWorkspaceLayoutMoveLeafToWorkspaceBroadcastsLayoutBeforeSessionOwnershi
 	}
 }
 
+func TestMoveLeafToNewWorkspaceCreatesWorkspace(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &fakeSpawnBackend{}
+	client := newWorkspaceProtocolTestClient()
+	sourceWorkspaceID := "ws-source"
+	sourceCwd := t.TempDir()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        sourceWorkspaceID,
+		Title:     "Source",
+		Directory: sourceCwd,
+	})
+	addAndSpawnSessionPane(t, d, client, sourceWorkspaceID, "s-1", "pane-1", "", sourceCwd)
+	addAndSpawnSessionPane(t, d, client, sourceWorkspaceID, "s-2", "pane-2", "pane-1", sourceCwd)
+
+	// No pre-created target: the daemon must mint a brand-new workspace.
+	d.handleWorkspaceLayoutMoveLeafToNewWorkspace(client, &protocol.WorkspaceLayoutMoveLeafToNewWorkspaceMessage{
+		Cmd:               protocol.CmdWorkspaceLayoutMoveLeafToNewWorkspace,
+		SourceWorkspaceID: sourceWorkspaceID,
+		LeafID:            "pane-1",
+	})
+	newWorkspaceID := expectMoveToNewWorkspaceResult(t, client, sourceWorkspaceID, "pane-1", true)
+
+	if newWorkspaceID == "" || newWorkspaceID == sourceWorkspaceID {
+		t.Fatalf("new workspace id = %q, want a fresh id distinct from the source", newWorkspaceID)
+	}
+
+	// The new workspace exists, inherits the source directory, and sorts after
+	// the source (PR1 seeds rank above the current maximum).
+	newWorkspace := d.store.GetWorkspace(newWorkspaceID)
+	if newWorkspace == nil {
+		t.Fatalf("new workspace %s was not registered", newWorkspaceID)
+	}
+	if newWorkspace.Directory != sourceCwd {
+		t.Fatalf("new workspace directory = %q, want inherited %q", newWorkspace.Directory, sourceCwd)
+	}
+	if source := d.store.GetWorkspace(sourceWorkspaceID); source != nil && !(newWorkspace.Rank > source.Rank) {
+		t.Fatalf("new workspace rank %q should sort after source rank %q", newWorkspace.Rank, source.Rank)
+	}
+
+	// The moved pane and its session now live in the new workspace.
+	newLayout := d.store.GetWorkspaceLayout(newWorkspaceID)
+	if newLayout == nil {
+		t.Fatal("new workspace layout missing after move")
+	}
+	if !workspacelayout.HasPane(newLayout.Layout, "pane-1") {
+		t.Fatalf("new workspace layout = %+v, want moved pane-1", newLayout.Layout)
+	}
+	if session := d.store.Get("s-1"); session == nil || session.WorkspaceID != newWorkspaceID {
+		t.Fatalf("moved session = %+v, want workspace %s", session, newWorkspaceID)
+	}
+
+	// The source keeps its other leaf and survives.
+	sourceLayout := d.store.GetWorkspaceLayout(sourceWorkspaceID)
+	if sourceLayout == nil {
+		t.Fatal("source layout torn down despite a remaining leaf")
+	}
+	if !workspacelayout.HasPane(sourceLayout.Layout, "pane-2") {
+		t.Fatalf("source layout = %+v, want remaining pane-2", sourceLayout.Layout)
+	}
+	if workspacelayout.HasPane(sourceLayout.Layout, "pane-1") {
+		t.Fatalf("source layout = %+v, moved pane-1 should be gone", sourceLayout.Layout)
+	}
+	if d.store.GetWorkspace(sourceWorkspaceID) == nil {
+		t.Fatal("source workspace removed despite a remaining leaf")
+	}
+}
+
+func TestMoveLeafToNewWorkspaceTearsDownEmptySource(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &fakeSpawnBackend{}
+	client := newWorkspaceProtocolTestClient()
+	sourceWorkspaceID := "ws-only"
+	sourceCwd := t.TempDir()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        sourceWorkspaceID,
+		Title:     "Only",
+		Directory: sourceCwd,
+	})
+	// A single leaf: moving it out empties the source.
+	addAndSpawnSessionPane(t, d, client, sourceWorkspaceID, "s-only", "pane-only", "", sourceCwd)
+
+	d.handleWorkspaceLayoutMoveLeafToNewWorkspace(client, &protocol.WorkspaceLayoutMoveLeafToNewWorkspaceMessage{
+		Cmd:               protocol.CmdWorkspaceLayoutMoveLeafToNewWorkspace,
+		SourceWorkspaceID: sourceWorkspaceID,
+		LeafID:            "pane-only",
+	})
+	newWorkspaceID := expectMoveToNewWorkspaceResult(t, client, sourceWorkspaceID, "pane-only", true)
+
+	if d.store.GetWorkspace(sourceWorkspaceID) != nil {
+		t.Fatalf("empty source workspace still exists after moving its only leaf")
+	}
+	if d.store.GetWorkspaceLayout(sourceWorkspaceID) != nil {
+		t.Fatalf("empty source layout still exists after moving its only leaf")
+	}
+	newLayout := d.store.GetWorkspaceLayout(newWorkspaceID)
+	if newLayout == nil || !workspacelayout.HasPane(newLayout.Layout, "pane-only") {
+		t.Fatalf("new workspace layout = %+v, want moved pane-only", newLayout)
+	}
+	if session := d.store.Get("s-only"); session == nil || session.WorkspaceID != newWorkspaceID {
+		t.Fatalf("moved session = %+v, want workspace %s", session, newWorkspaceID)
+	}
+}
+
+func TestMoveLeafToNewWorkspaceBroadcastsRegisteredBeforeLayout(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &fakeSpawnBackend{}
+	client := newWorkspaceProtocolTestClient()
+	sourceWorkspaceID := "ws-order"
+	sourceCwd := t.TempDir()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        sourceWorkspaceID,
+		Title:     "Order",
+		Directory: sourceCwd,
+	})
+	addAndSpawnSessionPane(t, d, client, sourceWorkspaceID, "s-a", "pane-a", "", sourceCwd)
+	addAndSpawnSessionPane(t, d, client, sourceWorkspaceID, "s-b", "pane-b", "pane-a", sourceCwd)
+
+	cap := captureBroadcasts(d)
+	d.handleWorkspaceLayoutMoveLeafToNewWorkspace(client, &protocol.WorkspaceLayoutMoveLeafToNewWorkspaceMessage{
+		Cmd:               protocol.CmdWorkspaceLayoutMoveLeafToNewWorkspace,
+		SourceWorkspaceID: sourceWorkspaceID,
+		LeafID:            "pane-a",
+	})
+	newWorkspaceID := expectMoveToNewWorkspaceResult(t, client, sourceWorkspaceID, "pane-a", true)
+
+	// The new workspace must be announced as registered before any layout
+	// update references it, so clients never see a layout for an unknown
+	// workspace.
+	registeredIdx, layoutIdx := -1, -1
+	for i, event := range cap.snapshot() {
+		switch {
+		case registeredIdx == -1 && event.Event == protocol.EventWorkspaceRegistered &&
+			event.Workspace != nil && event.Workspace.ID == newWorkspaceID:
+			registeredIdx = i
+		case layoutIdx == -1 && event.Event == protocol.EventWorkspaceLayoutUpdated &&
+			event.WorkspaceLayout != nil && event.WorkspaceLayout.WorkspaceID == newWorkspaceID:
+			layoutIdx = i
+		}
+	}
+	if registeredIdx == -1 {
+		t.Fatal("no workspace_registered broadcast for the new workspace")
+	}
+	if layoutIdx == -1 {
+		t.Fatal("no workspace_layout_updated broadcast for the new workspace")
+	}
+	if registeredIdx > layoutIdx {
+		t.Fatalf("workspace_registered (#%d) must precede workspace_layout_updated (#%d)", registeredIdx, layoutIdx)
+	}
+}
+
+// expectMoveToNewWorkspaceResult waits for the move-to-new-workspace action
+// result, asserts source/leaf identity and success, and returns the minted new
+// workspace id (target_workspace_id) for follow-up assertions.
+func expectMoveToNewWorkspaceResult(t *testing.T, client *wsClient, sourceWorkspaceID, leafID string, success bool) string {
+	t.Helper()
+	deadline := time.After(1 * time.Second)
+	for {
+		select {
+		case outbound := <-client.send:
+			var result protocol.WorkspaceLayoutActionResultMessage
+			if err := json.Unmarshal(outbound.payload, &result); err != nil || result.Event != protocol.EventWorkspaceLayoutActionResult {
+				continue
+			}
+			if result.Action != protocol.CmdWorkspaceLayoutMoveLeafToNewWorkspace || result.WorkspaceID != sourceWorkspaceID {
+				continue
+			}
+			if result.Success != success {
+				t.Fatalf("move-to-new-workspace success = %v, want %v; payload=%s", result.Success, success, string(outbound.payload))
+			}
+			if got := protocol.Deref(result.SourceWorkspaceID); got != sourceWorkspaceID {
+				t.Fatalf("source_workspace_id = %q, want %q; payload=%s", got, sourceWorkspaceID, string(outbound.payload))
+			}
+			if got := protocol.Deref(result.LeafID); got != leafID {
+				t.Fatalf("leaf_id = %q, want %q; payload=%s", got, leafID, string(outbound.payload))
+			}
+			return protocol.Deref(result.TargetWorkspaceID)
+		case <-deadline:
+			t.Fatalf("timed out waiting for move-to-new-workspace action")
+		}
+	}
+}
+
 func expectWorkspaceLayoutMoveToWorkspaceResult(t *testing.T, client *wsClient, sourceWorkspaceID, targetWorkspaceID, leafID, finalLeafID string, success bool) {
 	t.Helper()
 	deadline := time.After(1 * time.Second)

@@ -3773,6 +3773,26 @@ type WorkspaceLayoutMoveLeafMessage struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
+type WorkspaceLayoutMoveLeafToNewWorkspaceMessage struct {
+	// AnchorID corresponds to the JSON schema field "anchor_id".
+	AnchorID *string `json:"anchor_id,omitempty,omitzero"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Edge corresponds to the JSON schema field "edge".
+	Edge *WorkspaceLayoutDockEdge `json:"edge,omitempty,omitzero"`
+
+	// LeafID corresponds to the JSON schema field "leaf_id".
+	LeafID string `json:"leaf_id"`
+
+	// Ratio corresponds to the JSON schema field "ratio".
+	Ratio *float64 `json:"ratio,omitempty,omitzero"`
+
+	// SourceWorkspaceID corresponds to the JSON schema field "source_workspace_id".
+	SourceWorkspaceID string `json:"source_workspace_id"`
+}
+
 type WorkspaceLayoutMoveLeafToWorkspaceMessage struct {
 	// AnchorID corresponds to the JSON schema field "anchor_id".
 	AnchorID *string `json:"anchor_id,omitempty,omitzero"`

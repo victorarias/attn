@@ -243,6 +243,43 @@ describe('Sidebar', () => {
     expect(onWorkspaceDragDrop).toHaveBeenCalledWith(expect.objectContaining({ id: 'workspace-/repo/target' }));
   });
 
+  it('shows the new-workspace drop-zone only during a leaf drag and splits on drop', () => {
+    const sessions: TestSession[] = [
+      { id: 's1', label: 'source', state: 'idle', cwd: '/repo/source' },
+      { id: 's2', label: 'target', state: 'idle', cwd: '/repo/target' },
+    ];
+    const onNewWorkspaceDrop = vi.fn();
+    const { rerender } = render(
+      <Sidebar
+        {...baseProps}
+        {...buildSidebarData(sessions)}
+        onNewWorkspaceDrop={onNewWorkspaceDrop}
+      />
+    );
+
+    // Hidden until a leaf drag is active.
+    expect(screen.queryByTestId('new-workspace-dropzone')).not.toBeInTheDocument();
+
+    rerender(
+      <Sidebar
+        {...baseProps}
+        {...buildSidebarData(sessions)}
+        leafDrag={{ sourceWorkspaceId: 'workspace-/repo/source' }}
+        onNewWorkspaceDrop={onNewWorkspaceDrop}
+      />
+    );
+
+    const zone = screen.getByTestId('new-workspace-dropzone');
+    expect(zone).toBeInTheDocument();
+    expect(zone).not.toHaveClass('new-workspace-dropzone--active');
+
+    fireEvent.pointerEnter(zone);
+    expect(zone).toHaveClass('new-workspace-dropzone--active');
+
+    fireEvent.pointerUp(zone);
+    expect(onNewWorkspaceDrop).toHaveBeenCalledTimes(1);
+  });
+
   it('reorders a workspace by dragging its header onto an insertion seam', () => {
     const sidebarData = buildSidebarData([
       { id: 'a1', label: 'A1', state: 'idle', cwd: '/repo/a' },
