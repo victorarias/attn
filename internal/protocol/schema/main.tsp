@@ -632,6 +632,14 @@ model NotebookAppendJournalMessage {
   date?: string; // YYYY-MM-DD; defaults to the daemon's local date
 }
 
+// Pull the canonical notebook operating guidance (single source, daemon-owned).
+// Both the at-launch injection and the live "run `attn notebook guide`" path
+// resolve to this, so guidance is versioned in one place.
+model NotebookGuideMessage {
+  cmd: "notebook_guide";
+  session_id?: string; // when set, session_is_chief reflects this session's role
+}
+
 model DelegateWorktreeRequest {
   repo?: string;
   branch: string;
@@ -1945,6 +1953,7 @@ model Response {
   notebook_entries?: NotebookEntry[];
   notebook_read?: NotebookReadResult;
   notebook_write?: NotebookWriteResult;
+  notebook_guide?: NotebookGuideResult;
 }
 
 model DelegateResult {
@@ -2014,6 +2023,15 @@ model NotebookWriteResult {
   hash?: string;
   conflict: boolean;
   current_hash?: string;
+}
+
+// Result of notebook_guide. guidance is the operating rules text; root is the
+// resolved notebook root; session_is_chief is true only when the request's
+// session_id currently holds the chief-of-staff role.
+model NotebookGuideResult {
+  guidance: string;
+  root: string;
+  session_is_chief: boolean;
 }
 
 model WorkspaceContextResultMessage {

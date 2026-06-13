@@ -1750,6 +1750,25 @@ type NotebookEntry struct {
 	Updated *string `json:"updated,omitempty,omitzero"`
 }
 
+type NotebookGuideMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+}
+
+type NotebookGuideResult struct {
+	// Guidance corresponds to the JSON schema field "guidance".
+	Guidance string `json:"guidance"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root string `json:"root"`
+
+	// SessionIsChief corresponds to the JSON schema field "session_is_chief".
+	SessionIsChief bool `json:"session_is_chief"`
+}
+
 type NotebookInitMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2447,6 +2466,9 @@ type Response struct {
 
 	// NotebookEntries corresponds to the JSON schema field "notebook_entries".
 	NotebookEntries []NotebookEntry `json:"notebook_entries,omitempty,omitzero"`
+
+	// NotebookGuide corresponds to the JSON schema field "notebook_guide".
+	NotebookGuide *NotebookGuideResult `json:"notebook_guide,omitempty,omitzero"`
 
 	// NotebookInit corresponds to the JSON schema field "notebook_init".
 	NotebookInit *NotebookInitResult `json:"notebook_init,omitempty,omitzero"`
