@@ -2,7 +2,7 @@ import { createElement, useCallback, useEffect, useMemo, useRef, useState, type 
 import FocusTrap from 'focus-trap-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { NotebookEntry, NotebookReadResult } from '../hooks/useDaemonSocket';
+import type { NotebookEntry, NotebookReadResult, NotebookWriteResult } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import './NotebookBrowser.css';
 
@@ -12,6 +12,9 @@ interface NotebookBrowserProps {
   listNotebook: () => Promise<NotebookEntry[]>;
   readNotebook: (path: string) => Promise<NotebookReadResult>;
   backlinksNotebook: (path: string) => Promise<NotebookEntry[]>;
+  // Save an edited note (hash-CAS). Omit baseHash to create-only; pass the note's
+  // loaded hash to edit. Resolves with the outcome, including a conflict to reconcile.
+  writeNotebook: (path: string, content: string, baseHash?: string) => Promise<NotebookWriteResult>;
   // Increments whenever a notebook_changed event arrives, so an open browser
   // re-fetches the tree and the open note (covering agent and external writes).
   changeSignal?: number;
@@ -27,6 +30,7 @@ export function NotebookBrowser({
   listNotebook,
   readNotebook,
   backlinksNotebook,
+  writeNotebook,
   changeSignal = 0,
 }: NotebookBrowserProps) {
   const [entries, setEntries] = useState<NotebookEntry[]>([]);
@@ -105,6 +109,92 @@ export function NotebookBrowser({
     setBacklinks([]);
   }, []);
 
+  // --- Editing ---
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // Set when the on-disk note changed since the editor loaded it; carries the
+  // current on-disk hash so the user can choose to overwrite it.
+  const [conflict, setConflict] = useState<{ currentHash?: string } | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
+  // The hash the draft is edited against, captured on entering edit mode and held
+  // independently of live `note` updates so an external change during editing is
+  // detected as a save-time conflict rather than silently overwritten.
+  const editBaseHashRef = useRef('');
+  // Lets the live-refresh effect see "are we editing?" without re-subscribing.
+  const editingRef = useRef(false);
+  editingRef.current = editing;
+
+  const startEditing = useCallback(() => {
+    if (!note) return;
+    setDraft(note.content);
+    editBaseHashRef.current = note.hash;
+    setConflict(null);
+    setSaveError(null);
+    setJustSaved(false);
+    setEditing(true);
+  }, [note]);
+
+  const cancelEditing = useCallback(() => {
+    setEditing(false);
+    setConflict(null);
+    setSaveError(null);
+  }, []);
+
+  // Save the draft against baseHash (hash-CAS). An empty baseHash is a create-only
+  // write — used to recreate a note that was deleted on disk while being edited.
+  const saveDraft = useCallback(async (baseHash: string) => {
+    const path = selectedPathRef.current;
+    if (!path) return;
+    // Freeze the load token so a navigation that happens while this save is in
+    // flight can be detected when it resolves (mirrors loadNote's staleness
+    // guard; loadNote/clearSelection both bump loadSeqRef, saveDraft does not).
+    const seq = loadSeqRef.current;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const res = await writeNotebook(path, draft, baseHash || undefined);
+      // The write to `path` completed correctly against its own bytes, but if the
+      // user navigated away (or cleared the selection) while it was in flight, the
+      // result now applies to a note that is no longer shown. Bail before stamping
+      // this note's content/conflict/status onto the now-selected note.
+      if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
+      if (res.conflict) {
+        // The note diverged on disk; let the user reconcile rather than clobber.
+        setConflict({ currentHash: res.currentHash });
+        return;
+      }
+      // Saved: reflect the new content+hash locally and leave edit mode. The
+      // origin=ui broadcast also refreshes the view, so this is just immediacy.
+      setConflict(null);
+      setNote({ path, content: draft, hash: res.hash ?? '' });
+      editBaseHashRef.current = res.hash ?? '';
+      setEditing(false);
+      setJustSaved(true);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Could not save this note');
+    } finally {
+      setSaving(false);
+    }
+  }, [draft, writeNotebook]);
+
+  // Discard the draft and load the current on-disk version into the editor.
+  const reloadFromDisk = useCallback(async () => {
+    const path = selectedPathRef.current;
+    if (!path) return;
+    setConflict(null);
+    setSaveError(null);
+    try {
+      const fresh = await readNotebook(path);
+      setDraft(fresh.content);
+      editBaseHashRef.current = fresh.hash;
+      setNote(fresh);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Could not reload this note');
+    }
+  }, [readNotebook]);
+
   // On open, load the tree and select a sensible first note.
   useEffect(() => {
     if (!isOpen) return;
@@ -140,6 +230,10 @@ export function NotebookBrowser({
       // A failed refresh (null) is NOT an empty notebook: leave the open note
       // alone rather than mistaking a transient WS hiccup for a deletion.
       if (cancelled || next === null) return;
+      // While the user is editing, refresh the tree but never reload or clear the
+      // open note — that would clobber the draft or yank the editor away. On-disk
+      // divergence is surfaced as a save-time conflict instead.
+      if (editingRef.current) return;
       const current = selectedPathRef.current;
       if (current && next.some((e) => e.path === current)) {
         void loadNote(current);
@@ -153,6 +247,26 @@ export function NotebookBrowser({
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [changeSignal]);
+
+  // Navigating to another note discards any in-progress edit and clears its
+  // status. Keyed on selectedPath, so it fires on navigation but not on a
+  // same-note live reload (which keeps selectedPath unchanged).
+  useEffect(() => {
+    setEditing(false);
+    setConflict(null);
+    setSaveError(null);
+    setJustSaved(false);
+  }, [selectedPath]);
+
+  // The "Saved" badge is a transient confirmation, not a persistent status. Clear
+  // it on a timer so it doesn't linger while the user keeps reading the same note
+  // (the navigation-reset effect above only fires on a path change, not on a
+  // same-note live reload, so without this the badge would stick indefinitely).
+  useEffect(() => {
+    if (!justSaved) return;
+    const timer = window.setTimeout(() => setJustSaved(false), 2500);
+    return () => window.clearTimeout(timer);
+  }, [justSaved]);
 
   const grouped = useMemo(() => groupEntries(entries), [entries]);
   const markdownComponents = useMemo(
@@ -234,30 +348,90 @@ export function NotebookBrowser({
               {!noteError && note && (
                 <>
                   <div className="notebook-browser-document-meta">
-                    <h2>{selectedEntry?.title || basename(note.path)}</h2>
-                    <p>{note.path}</p>
+                    <div className="notebook-browser-document-titles">
+                      <h2>{selectedEntry?.title || basename(note.path)}</h2>
+                      <p>{note.path}</p>
+                    </div>
+                    <div className="notebook-browser-document-actions">
+                      {!editing && justSaved && (
+                        <span className="notebook-browser-saved" role="status">Saved</span>
+                      )}
+                      {!editing && (
+                        <button type="button" className="notebook-browser-edit-btn" onClick={startEditing}>
+                          Edit
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <article className="notebook-browser-markdown">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                      {note.content || '_This note is empty._'}
-                    </ReactMarkdown>
-                  </article>
-                  <section className="notebook-browser-backlinks" aria-label="Backlinks">
-                    <h3>Linked from {backlinks.length > 0 ? `(${backlinks.length})` : ''}</h3>
-                    {backlinks.length === 0 ? (
-                      <p className="notebook-browser-backlinks-empty">No other note links here.</p>
-                    ) : (
-                      <ul>
-                        {backlinks.map((entry) => (
-                          <li key={entry.path}>
-                            <button type="button" onClick={() => void loadNote(entry.path)} title={entry.path}>
-                              {entry.title || basename(entry.path)}
+                  {editing ? (
+                    <div className="notebook-browser-editor">
+                      <textarea
+                        className="notebook-browser-editor-area"
+                        aria-label="Edit note"
+                        value={draft}
+                        onChange={(event) => setDraft(event.target.value)}
+                        spellCheck={false}
+                        autoFocus
+                      />
+                      {conflict && (
+                        <div className="notebook-browser-editor-conflict" role="alert">
+                          <span>
+                            {conflict.currentHash
+                              ? 'This note changed on disk since you opened it.'
+                              : 'This note was deleted on disk since you opened it.'}
+                          </span>
+                          <div className="notebook-browser-editor-conflict-actions">
+                            <button type="button" onClick={() => void reloadFromDisk()} disabled={saving}>
+                              Reload from disk
                             </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </section>
+                            <button type="button" onClick={() => void saveDraft(conflict.currentHash ?? '')} disabled={saving}>
+                              Overwrite anyway
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {saveError && (
+                        <p className="notebook-browser-editor-error" role="alert">{saveError}</p>
+                      )}
+                      <div className="notebook-browser-editor-actions">
+                        <button
+                          type="button"
+                          className="notebook-browser-editor-save"
+                          onClick={() => void saveDraft(editBaseHashRef.current)}
+                          disabled={saving}
+                        >
+                          {saving ? 'Saving…' : 'Save'}
+                        </button>
+                        <button type="button" onClick={cancelEditing} disabled={saving}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <article className="notebook-browser-markdown">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                          {note.content || '_This note is empty._'}
+                        </ReactMarkdown>
+                      </article>
+                      <section className="notebook-browser-backlinks" aria-label="Backlinks">
+                        <h3>Linked from {backlinks.length > 0 ? `(${backlinks.length})` : ''}</h3>
+                        {backlinks.length === 0 ? (
+                          <p className="notebook-browser-backlinks-empty">No other note links here.</p>
+                        ) : (
+                          <ul>
+                            {backlinks.map((entry) => (
+                              <li key={entry.path}>
+                                <button type="button" onClick={() => void loadNote(entry.path)} title={entry.path}>
+                                  {entry.title || basename(entry.path)}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </section>
+                    </>
+                  )}
                 </>
               )}
               {!noteLoading && !noteError && !note && (

@@ -220,6 +220,40 @@ func TestNotebookListAndBacklinksWSResults(t *testing.T) {
 	}
 }
 
+// The in-app editor saves over the WS notebook_write path: a hash-CAS write
+// replies with a notebook_write_result, and a stale base hash comes back as a
+// successful result carrying conflict=true (for the UI to reconcile), not an error.
+func TestNotebookWriteWSResultSaveAndConflict(t *testing.T) {
+	d := newNotebookDaemon(t)
+	client := &wsClient{send: make(chan outboundMessage, 8)}
+
+	d.sendNotebookWriteWSResult(client, "w1", "memory/decisions/foo.md", "---\nkind: memory\n---\nv1\n", "")
+	var create protocol.NotebookWriteResultMessage
+	readNotebookWSEvent(t, client.send, &create)
+	if create.Event != protocol.EventNotebookWriteResult || create.RequestID != "w1" || !create.Success ||
+		create.Result == nil || create.Result.Conflict || create.Result.Hash == nil {
+		t.Fatalf("create result = %+v", create.Result)
+	}
+	h1 := *create.Result.Hash
+
+	// Stale base hash => success with conflict=true carrying the current hash.
+	d.sendNotebookWriteWSResult(client, "w2", "memory/decisions/foo.md", "v2", "deadbeef")
+	var conflict protocol.NotebookWriteResultMessage
+	readNotebookWSEvent(t, client.send, &conflict)
+	if !conflict.Success || conflict.Result == nil || !conflict.Result.Conflict ||
+		conflict.Result.CurrentHash == nil || *conflict.Result.CurrentHash != h1 {
+		t.Fatalf("stale write result = %+v, want conflict with current hash %q", conflict.Result, h1)
+	}
+
+	// Correct base hash => the edit applies.
+	d.sendNotebookWriteWSResult(client, "w3", "memory/decisions/foo.md", "---\nkind: memory\n---\nv2\n", h1)
+	var ok protocol.NotebookWriteResultMessage
+	readNotebookWSEvent(t, client.send, &ok)
+	if !ok.Success || ok.Result == nil || ok.Result.Conflict || ok.Result.Hash == nil {
+		t.Fatalf("CAS edit result = %+v", ok.Result)
+	}
+}
+
 // The notebook reads must dispatch correctly through handleClientMessage — the
 // path the real frontend uses — not just when the WS-result handlers are called
 // directly. This covers the request_id/prefix/path argument extraction in the
@@ -265,6 +299,45 @@ func TestNotebookReadsDispatchThroughClientMessage(t *testing.T) {
 	if back.Event != protocol.EventNotebookBacklinksResult || back.RequestID != "rb" || !back.Success ||
 		len(back.Entries) != 1 || back.Entries[0].Path != "memory/decisions/b.md" {
 		t.Fatalf("backlinks result = %+v, want [memory/decisions/b.md] for rb", back)
+	}
+}
+
+// notebook_write must dispatch through handleClientMessage with its request_id,
+// path, content, and base_hash all extracted correctly (a swapped/dropped Deref
+// would compile and ship). Covers a create, a read-back, and a stale base_hash
+// conflict — the editor's full save round-trip over the WS path.
+func TestNotebookWriteDispatchesThroughClientMessage(t *testing.T) {
+	d := newNotebookDaemon(t)
+	client := newWorkspaceProtocolTestClient()
+	client.setIdentity("test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
+
+	d.handleClientMessage(client, []byte(`{"cmd":"notebook_write","request_id":"w1","path":"/memory/decisions/a.md","content":"---\nkind: memory\n---\nbody\n"}`))
+	var res protocol.NotebookWriteResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Event != protocol.EventNotebookWriteResult || res.RequestID != "w1" || !res.Success ||
+		res.Result == nil || res.Result.Conflict || res.Result.Hash == nil {
+		t.Fatalf("write dispatch result = %+v", res)
+	}
+	// The echoed result path is normalized (not the raw leading-slash input), so
+	// it matches the form notebook_list/notebook_changed key on.
+	if res.Result.Path != "memory/decisions/a.md" {
+		t.Fatalf("result path = %q, want normalized memory/decisions/a.md", res.Result.Path)
+	}
+
+	// The note is readable with the hash the write returned.
+	d.handleClientMessage(client, []byte(`{"cmd":"notebook_read","request_id":"r1","path":"/memory/decisions/a.md"}`))
+	var read protocol.NotebookReadResultMessage
+	readNotebookWSEvent(t, client.send, &read)
+	if !read.Success || read.Result == nil || read.Result.Hash != *res.Result.Hash {
+		t.Fatalf("read after write dispatch = %+v, want hash %q", read.Result, *res.Result.Hash)
+	}
+
+	// A stale base_hash exercises base_hash extraction and returns a conflict.
+	d.handleClientMessage(client, []byte(`{"cmd":"notebook_write","request_id":"w2","path":"/memory/decisions/a.md","content":"x","base_hash":"deadbeef"}`))
+	var conflict protocol.NotebookWriteResultMessage
+	readNotebookWSEvent(t, client.send, &conflict)
+	if !conflict.Success || conflict.Result == nil || !conflict.Result.Conflict {
+		t.Fatalf("stale base_hash dispatch = %+v, want conflict", conflict.Result)
 	}
 }
 
@@ -648,6 +721,11 @@ func TestNotebookWriteBroadcastsNormalizedPath(t *testing.T) {
 	})
 	if resp.NotebookWrite == nil || resp.NotebookWrite.Conflict {
 		t.Fatalf("write = %+v", resp.NotebookWrite)
+	}
+	// The echoed result path must be normalized too (not the raw leading-slash
+	// input), so any consumer keying on it matches notebook_list/changed paths.
+	if resp.NotebookWrite.Path != "memory/decisions/foo.md" {
+		t.Fatalf("result path = %q, want normalized memory/decisions/foo.md", resp.NotebookWrite.Path)
 	}
 	select {
 	case message := <-client.send:

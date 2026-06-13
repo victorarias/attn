@@ -471,6 +471,7 @@ function App() {
     sendNotebookList,
     sendNotebookRead,
     sendNotebookBacklinks,
+    sendNotebookWrite,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,
@@ -517,6 +518,11 @@ function App() {
     clearWarnings,
   } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
+    // The daemon tags each notebook_changed with an origin ("ui"/"agent"/
+    // "external"/"dreaming"), but every origin is treated the same here: bump a
+    // signal so an open browser re-fetches. The origin is intentionally unused —
+    // there is no self-echo suppression, so a UI save costs one redundant disk
+    // read of the bytes it just wrote (harmless). Don't assume otherwise.
     onNotebookChanged: () => setNotebookChangeSignal((n) => n + 1),
     onChiefOfStaffDispatchesUpdate: setChiefOfStaffDispatches,
     onWorkspacesUpdate: setDaemonWorkspaces,
@@ -609,6 +615,7 @@ function App() {
         sendNotebookList={sendNotebookList}
         sendNotebookRead={sendNotebookRead}
         sendNotebookBacklinks={sendNotebookBacklinks}
+        sendNotebookWrite={sendNotebookWrite}
         notebookChangeSignal={notebookChangeSignal}
         sendGetRecentLocations={sendGetRecentLocations}
         sendBrowseDirectory={sendBrowseDirectory}
@@ -712,6 +719,7 @@ interface AppContentProps {
   sendNotebookList: ReturnType<typeof useDaemonSocket>['sendNotebookList'];
   sendNotebookRead: ReturnType<typeof useDaemonSocket>['sendNotebookRead'];
   sendNotebookBacklinks: ReturnType<typeof useDaemonSocket>['sendNotebookBacklinks'];
+  sendNotebookWrite: ReturnType<typeof useDaemonSocket>['sendNotebookWrite'];
   notebookChangeSignal: number;
   sendGetRecentLocations: ReturnType<typeof useDaemonSocket>['sendGetRecentLocations'];
   sendBrowseDirectory: ReturnType<typeof useDaemonSocket>['sendBrowseDirectory'];
@@ -809,6 +817,7 @@ function AppContent({
   sendNotebookList,
   sendNotebookRead,
   sendNotebookBacklinks,
+  sendNotebookWrite,
   notebookChangeSignal,
   sendGetRecentLocations,
   sendBrowseDirectory,
@@ -3682,6 +3691,7 @@ sendFetchPRDetails,
         listNotebook={sendNotebookList}
         readNotebook={sendNotebookRead}
         backlinksNotebook={sendNotebookBacklinks}
+        writeNotebook={sendNotebookWrite}
         changeSignal={notebookChangeSignal}
       />
       <ActionMenu

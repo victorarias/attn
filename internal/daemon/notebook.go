@@ -26,6 +26,10 @@ const originAgent = "agent"
 // directly).
 const originExternal = "external"
 
+// originUI labels notebook changes made through the in-app editor (the WS
+// notebook_write path), as distinct from agent/CLI writes (origin "agent").
+const originUI = "ui"
+
 // notebookStoreFor resolves the active notebook root and returns the daemon's
 // single Store for it. The Store is cached and reused so writes serialize
 // through one in-process writer; it is rebuilt only when the resolved root
@@ -286,8 +290,10 @@ func (d *Daemon) handleNotebookWrite(conn net.Conn, msg *protocol.NotebookWriteM
 		return
 	}
 	// A conflict is a successful response (conflict:true) the caller reconciles,
-	// not a daemon error.
-	res := &protocol.NotebookWriteResult{Path: msg.Path}
+	// not a daemon error. Echo the normalized path so result.path matches the
+	// form notebook_list/notebook_changed key on (a root-absolute input like
+	// "/memory/a.md" would otherwise leak back with its leading slash).
+	res := &protocol.NotebookWriteResult{Path: changed}
 	if conflict != nil {
 		res.Conflict = true
 		if conflict.CurrentHash != "" {
@@ -446,6 +452,52 @@ func (d *Daemon) sendNotebookBacklinksWSResult(client *wsClient, requestID, path
 		RequestID: requestID,
 		Success:   err == nil,
 		Entries:   entries,
+	}
+	if err != nil {
+		msg.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, msg)
+}
+
+// sendNotebookWriteWSResult performs a hash-CAS write on behalf of the in-app
+// editor and replies with a notebook_write_result event correlated by requestID.
+// A conflict (the file changed on disk since the editor loaded it) is a
+// successful result carrying conflict=true for the UI to reconcile, not an error.
+func (d *Daemon) sendNotebookWriteWSResult(client *wsClient, requestID, path, content, baseHash string) {
+	var result *protocol.NotebookWriteResult
+	store, err := d.notebookStoreFor()
+	if err == nil {
+		// Normalize to the form notebook_list/append/watcher key on, so the
+		// self-write record and the broadcast agree.
+		changed := path
+		if rel, cerr := notebook.CleanPath(path); cerr == nil {
+			changed = rel
+		}
+		var hash string
+		var conflict *notebook.Conflict
+		if hash, conflict, err = store.Write(path, []byte(content), baseHash); err == nil {
+			// Echo the normalized path so result.path matches the form
+			// notebook_list/notebook_changed key on, not the raw input.
+			result = &protocol.NotebookWriteResult{Path: changed}
+			if conflict != nil {
+				result.Conflict = true
+				if conflict.CurrentHash != "" {
+					result.CurrentHash = protocol.Ptr(conflict.CurrentHash)
+				}
+			} else {
+				result.Hash = protocol.Ptr(hash)
+				// Content-aware self-write so the watcher does not echo this UI edit
+				// as an external one (see handleNotebookWrite for the rationale).
+				d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: changed, Hash: hash})
+				d.broadcastNotebookChanged(originUI, changed)
+			}
+		}
+	}
+	msg := protocol.NotebookWriteResultMessage{
+		Event:     protocol.EventNotebookWriteResult,
+		RequestID: requestID,
+		Success:   err == nil,
+		Result:    result,
 	}
 	if err != nil {
 		msg.Error = protocol.Ptr(err.Error())
