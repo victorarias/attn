@@ -957,6 +957,15 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			d.store.SetRecoverable(sessionID, false)
 			report.Changed = true
 		}
+		// A hook-reported "scheduled" session is parked on a cron/loop. PTY and
+		// worker-info recovery cannot reconstruct that — the parked screen reads
+		// as an idle prompt, which would be mis-recovered as launching/idle — so
+		// preserve it across recovery. The next Stop re-derives from the live
+		// session_crons, and a session whose worker actually died is demoted by
+		// the reaping loop below (it will be absent from liveIDs).
+		if existing.State == protocol.SessionStateScheduled {
+			continue
+		}
 		if haveInfo {
 			if run := d.store.GetAgentDriverRun(sessionID); run.RunID != "" &&
 				(d.pluginDriverReportsState(existing.Agent) ||
@@ -1341,7 +1350,7 @@ func (d *Daemon) handlePTYState(sessionID, state string) {
 	switch state {
 	case protocol.StateWorking:
 		d.markRunStartedIfNeeded(sessionID)
-	case protocol.StateIdle:
+	case protocol.StateIdle, protocol.StateScheduled:
 		d.clearLongRunTracking(sessionID)
 	}
 	d.store.UpdateState(sessionID, state)
@@ -1881,7 +1890,11 @@ func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	case protocol.StateWorking:
 		d.markRunStartedIfNeeded(msg.ID)
 		_ = d.takePendingInputSource(msg.ID)
-	case protocol.StateIdle:
+	case protocol.StateIdle, protocol.StateScheduled:
+		// Both end the current run for long-run-review purposes: idle is
+		// terminal, and scheduled parks until a future cron fires (the resumed
+		// turn is a fresh run). Leaving stale tracking would mis-fire a long-run
+		// review on the next short resumed turn.
 		d.clearLongRunTracking(msg.ID)
 	}
 	d.store.UpdateState(msg.ID, msg.State)
@@ -2472,7 +2485,7 @@ func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
 	switch state {
 	case protocol.StateWorking:
 		d.markRunStartedIfNeeded(sessionID)
-	case protocol.StateIdle:
+	case protocol.StateIdle, protocol.StateScheduled:
 		d.clearLongRunTracking(sessionID)
 	}
 	d.store.UpdateState(sessionID, state)
@@ -2496,7 +2509,7 @@ func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, u
 		switch state {
 		case protocol.StateWorking:
 			d.markRunStartedIfNeeded(sessionID)
-		case protocol.StateIdle:
+		case protocol.StateIdle, protocol.StateScheduled:
 			d.clearLongRunTracking(sessionID)
 		}
 		// Broadcast to WebSocket clients

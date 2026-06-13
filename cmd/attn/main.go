@@ -51,6 +51,11 @@ type hookInput struct {
 	// outstanding when the turn yields. Agents that do not emit this field
 	// simply leave it empty.
 	BackgroundTasks []backgroundTask `json:"background_tasks"`
+	// SessionCrons is reported by Claude Code on the Stop payload: the set of
+	// pending scheduled wakeups (created via CronCreate or /loop) that will
+	// auto-resume this session later. It is present-but-empty when nothing is
+	// scheduled. Agents that do not emit this field simply leave it empty.
+	SessionCrons []sessionCron `json:"session_crons"`
 }
 
 // backgroundTask is one entry of hookInput.BackgroundTasks. Only Status is
@@ -58,6 +63,19 @@ type hookInput struct {
 type backgroundTask struct {
 	Type   string `json:"type"`
 	Status string `json:"status"`
+}
+
+// sessionCron is one entry of hookInput.SessionCrons. Detection keys only on
+// presence (a non-empty list means the session is parked on a schedule); the
+// remaining fields are decoded for diagnostics and possible future rendering.
+// Verified against Claude Code 2.1.177: items carry exactly id/schedule
+// (raw 5-field cron in local time)/recurring/prompt, with no status field —
+// a fired or deleted cron drops out of the list entirely rather than lingering.
+type sessionCron struct {
+	ID        string `json:"id"`
+	Schedule  string `json:"schedule"`
+	Recurring bool   `json:"recurring"`
+	Prompt    string `json:"prompt"`
 }
 
 // hasActiveBackgroundTask reports whether the Stop payload still has background
@@ -72,6 +90,35 @@ func hasActiveBackgroundTask(input hookInput) bool {
 		}
 	}
 	return false
+}
+
+// hasPendingSessionCron reports whether the Stop payload has a pending
+// scheduled wakeup. Such a Stop is not terminal: the session is parked and will
+// auto-resume when a cron fires, so it should read as "scheduled" rather than
+// be classified (which would treat the parked turn as idle/unknown). Detection
+// is presence-only — session_crons carries no per-item status, and a fired or
+// deleted cron leaves the list entirely.
+func hasPendingSessionCron(input hookInput) bool {
+	return len(input.SessionCrons) > 0
+}
+
+// nonTerminalStopState returns the runtime state to report for a Stop that is
+// not terminal, or "" when the Stop should fall through to normal daemon
+// classification. A Stop is non-terminal when the turn yields with background
+// work still in flight (auto-resumes on completion) or parked on a pending
+// scheduled wakeup (auto-resumes when a cron fires); classifying such a Stop
+// reads a not-yet-flushed transcript and mis-detects the session as
+// idle/unknown. Running background work outranks a parked schedule, so a Stop
+// with both stays "working"; once both drain, the next Stop classifies normally.
+func nonTerminalStopState(input hookInput) string {
+	switch {
+	case hasActiveBackgroundTask(input):
+		return protocol.StateWorking
+	case hasPendingSessionCron(input):
+		return protocol.StateScheduled
+	default:
+		return ""
+	}
 }
 
 // todoWriteInput represents the tool_input for TodoWrite
@@ -1982,16 +2029,12 @@ func runHookStop() {
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
 	syncSessionResumeID(c, sessionID, input.SessionID)
 
-	// A Stop with background work still in flight (a background Workflow or
-	// background Bash) is a yield, not a terminal stop — the turn will
-	// auto-resume when the work finishes. Keep the session "working" (green)
-	// and skip classification; the next Stop, once background_tasks drains,
-	// classifies normally. This avoids the failure where stop-time
-	// classification reads a transcript the agent has not flushed yet and falls
-	// back to "unknown".
-	if hasActiveBackgroundTask(input) {
-		if err := c.UpdateState(sessionID, "working"); err != nil {
-			fmt.Fprintf(os.Stderr, "error sending working state: %v\n", err)
+	// A Stop is not always terminal: if the turn yields with background work in
+	// flight or parked on a scheduled wakeup, report that non-terminal state and
+	// skip classification (see nonTerminalStopState for the precedence/rationale).
+	if state := nonTerminalStopState(input); state != "" {
+		if err := c.UpdateState(sessionID, state); err != nil {
+			fmt.Fprintf(os.Stderr, "error sending %s state: %v\n", state, err)
 			os.Exit(1)
 		}
 		return

@@ -187,6 +187,13 @@ func TestSessionAdapter(t *testing.T) {
 		t.Error("Working session should not need attention")
 	}
 
+	// A scheduled session is parked on a /loop or cron and auto-resumes; it
+	// must stay quiet (no attention badge / drawer entry).
+	session.State = protocol.SessionStateScheduled
+	if adapter.NeedsAttention() {
+		t.Error("Scheduled session should not need attention")
+	}
+
 	session.State = protocol.SessionStatePendingApproval
 	if !adapter.NeedsAttention() {
 		t.Error("Pending approval session should need attention")

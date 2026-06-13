@@ -62,6 +62,11 @@
   animation: flash-pending 1s ease-in-out infinite;
 }
 
+.state-indicator--session.state-indicator--scheduled {
+  background-color: #0ea5e9; /* sky blue — parked on a schedule */
+  animation: pulse-scheduled 3.2s ease-in-out infinite;
+}
+
 .state-indicator--session.state-indicator--unknown {
   background-color: #a855f7; /* purple */
 }
@@ -69,6 +74,12 @@
 @keyframes flash-pending {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
+}
+
+/* Gentle, slow breathing — "parked but alive", calmer than flash-pending. */
+@keyframes pulse-scheduled {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 /* PR states - PRs that need attention are always "waiting" */

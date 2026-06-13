@@ -2793,6 +2793,7 @@ type SessionStateChangedMessage struct {
 const SessionStateIdle SessionState = "idle"
 const SessionStateLaunching SessionState = "launching"
 const SessionStatePendingApproval SessionState = "pending_approval"
+const SessionStateScheduled SessionState = "scheduled"
 const SessionStateUnknown SessionState = "unknown"
 const SessionStateWaitingInput SessionState = "waiting_input"
 const SessionStateWorking SessionState = "working"
@@ -3915,6 +3916,7 @@ type WorkspaceStatus string
 const WorkspaceStatusIdle WorkspaceStatus = "idle"
 const WorkspaceStatusLaunching WorkspaceStatus = "launching"
 const WorkspaceStatusPendingApproval WorkspaceStatus = "pending_approval"
+const WorkspaceStatusScheduled WorkspaceStatus = "scheduled"
 const WorkspaceStatusWaitingInput WorkspaceStatus = "waiting_input"
 const WorkspaceStatusWorking WorkspaceStatus = "working"
 

@@ -207,18 +207,21 @@ func snapshotEntry(e *workspaceEntry) protocol.Workspace {
 
 // rollupWorkspaceStatus returns the workspace status that summarizes the
 // supplied session states. Higher-priority states win:
-// working > waiting_input > pending_approval > idle > launching.
-// `launching` sits below `idle` on purpose — it carries less information than
-// any settled state, so as soon as one session reports a real state, that
-// one wins over a peer that's still booting. There's no `unknown` workspace
-// status: an empty slice or sessions all in `unknown` fall through to `idle`,
-// since a workspace always has a directory and a registry entry, so the
-// rollup always has a meaningful answer.
+// working > waiting_input > pending_approval > scheduled > idle > launching.
+// `scheduled` sits above `idle` because a parked-on-schedule session will
+// auto-resume — more informative than a settled idle peer — but below the
+// attention states since it needs no steering. `launching` sits below `idle`
+// on purpose — it carries less information than any settled state, so as soon
+// as one session reports a real state, that one wins over a peer that's still
+// booting. There's no `unknown` workspace status: an empty slice or sessions
+// all in `unknown` fall through to `idle`, since a workspace always has a
+// directory and a registry entry, so the rollup always has a meaningful answer.
 func rollupWorkspaceStatus(sessionStates []protocol.SessionState) protocol.WorkspaceStatus {
 	priority := map[protocol.SessionState]int{
-		protocol.SessionStateWorking:         5,
-		protocol.SessionStateWaitingInput:    4,
-		protocol.SessionStatePendingApproval: 3,
+		protocol.SessionStateWorking:         6,
+		protocol.SessionStateWaitingInput:    5,
+		protocol.SessionStatePendingApproval: 4,
+		protocol.SessionStateScheduled:       3,
 		protocol.SessionStateIdle:            2,
 		protocol.SessionStateLaunching:       1,
 	}
@@ -227,6 +230,7 @@ func rollupWorkspaceStatus(sessionStates []protocol.SessionState) protocol.Works
 		protocol.SessionStateWorking:         protocol.WorkspaceStatusWorking,
 		protocol.SessionStateWaitingInput:    protocol.WorkspaceStatusWaitingInput,
 		protocol.SessionStatePendingApproval: protocol.WorkspaceStatusPendingApproval,
+		protocol.SessionStateScheduled:       protocol.WorkspaceStatusScheduled,
 		protocol.SessionStateIdle:            protocol.WorkspaceStatusIdle,
 	}
 	bestPriority := 0

@@ -63,6 +63,27 @@ describe('Dashboard sessions', () => {
     expect(screen.getByTestId('session-s3')).toBeInTheDocument();
   });
 
+  it('groups scheduled sessions in their own section', () => {
+    render(
+      <Dashboard
+        sessions={[
+          { id: 's1', label: 'loop-bot', state: 'scheduled', cwd: '/repo/a' },
+          { id: 's2', label: 'busy-bot', state: 'working', cwd: '/repo/b' },
+        ]}
+        prs={[]}
+        isLoading={false}
+        onSelectSession={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId('session-group-scheduled')).toBeInTheDocument();
+    const scheduled = screen.getByTestId('session-s1');
+    expect(scheduled).toBeInTheDocument();
+    expect(scheduled).toHaveAttribute('data-state', 'scheduled');
+  });
+
   it('shows review loop state on session rows', () => {
     render(
       <Dashboard

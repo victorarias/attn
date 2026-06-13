@@ -119,6 +119,19 @@ func TestClaudeWatcherBehaviorSkipClassification(t *testing.T) {
 		t.Fatal("should not skip when LastSeen is unparseable")
 	}
 
+	// A scheduled session is parked on a cron/loop and must never be
+	// reclassified by the watcher — UNCONDITIONALLY, regardless of hook
+	// freshness, because parks routinely outlast the 2-minute stale threshold.
+	if skip, _ := b.SkipClassification(protocol.SessionStateScheduled, recent, time.Now()); !skip {
+		t.Fatal("should skip for scheduled session (recent hooks)")
+	}
+	if skip, _ := b.SkipClassification(protocol.SessionStateScheduled, stale, time.Now()); !skip {
+		t.Fatal("should skip for scheduled session even when hooks are stale (long park)")
+	}
+	if skip, _ := b.SkipClassification(protocol.SessionStateScheduled, "garbage", time.Now()); !skip {
+		t.Fatal("should skip for scheduled session even with unparseable LastSeen")
+	}
+
 	// Legacy RFC3339 (pre-Nano) should still parse and skip if fresh.
 	recentRFC3339 := time.Now().Add(-5 * time.Second).Format(time.RFC3339)
 	if skip, _ := b.SkipClassification(protocol.SessionStateWorking, recentRFC3339, time.Now()); !skip {
