@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -34,6 +35,7 @@ const (
 	SettingReviewerModel            = "reviewer_model"
 	SettingWorkspaceContextJanitor  = "workspace_context_janitor"
 	SettingTailscaleEnabled         = "tailscale_enabled"
+	SettingKeybindingsConfig        = "keybindings_config"
 	SettingNewSessionYoloPrefix     = "new_session_yolo_"
 )
 
@@ -232,6 +234,8 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateBooleanSetting(value)
 	case SettingWorkspaceContextJanitor:
 		return d.validateWorkspaceContextJanitorSetting(value)
+	case SettingKeybindingsConfig:
+		return validateKeybindingsConfig(value)
 	case SettingReviewLoopPresets, SettingReviewLoopLastPreset, SettingReviewLoopLastPrompt, SettingReviewLoopLastIterations, SettingReviewLoopModel, SettingReviewerModel:
 		return nil
 	default:
@@ -366,6 +370,20 @@ func (d *Daemon) validateNewSessionAgent(value string) error {
 			}
 		}
 		return fmt.Errorf("unknown agent: %s", value)
+	}
+	return nil
+}
+
+// validateKeybindingsConfig keeps daemon validation light: the frontend owns the
+// shortcut schema and tolerates anything unrecognized, so the daemon only
+// guarantees the stored blob is parseable JSON (or empty).
+func validateKeybindingsConfig(value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	if !json.Valid([]byte(trimmed)) {
+		return fmt.Errorf("keybindings config must be valid JSON")
 	}
 	return nil
 }

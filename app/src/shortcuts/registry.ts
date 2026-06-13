@@ -88,20 +88,32 @@ export const SHORTCUTS = {
 
 export type ShortcutId = keyof typeof SHORTCUTS;
 
-/**
- * Convert a ShortcutDef to a unique string key for conflict detection
- */
-function shortcutToKey(def: ShortcutDef): string {
-  const parts: string[] = [];
-  if (def.meta) parts.push('meta');
-  if (def.ctrl) parts.push('ctrl');
-  if (def.alt) parts.push('alt');
-  if (def.shift) parts.push('shift');
-  parts.push(def.key.toLowerCase());
-  return parts.join('+');
+function modifiersEqual(a: ShortcutDef, b: ShortcutDef): boolean {
+  return !!a.meta === !!b.meta
+    && !!a.ctrl === !!b.ctrl
+    && !!a.alt === !!b.alt
+    && !!a.shift === !!b.shift;
 }
 
-function isAllowedConflict(idA: ShortcutId, idB: ShortcutId): boolean {
+/**
+ * Whether two bindings could be triggered by the same keystroke — equal
+ * modifiers AND an overlapping key OR code. This mirrors matchesShortcut's
+ * key-OR-code equivalence so conflict detection matches dispatch semantics: a
+ * localized digit capture (e.g. `key:'&'`, `code:'Digit1'`) collides with ⌘1
+ * even though the printed key differs. Shared by the load-time validator and
+ * the runtime resolver so there is one definition of "conflict".
+ */
+export function bindingsConflict(a: ShortcutDef, b: ShortcutDef): boolean {
+  if (!modifiersEqual(a, b)) return false;
+  if (a.key.toLowerCase() === b.key.toLowerCase()) return true;
+  return !!a.code && !!b.code && a.code === b.code;
+}
+
+/**
+ * Two ids are an allowed conflict when they intentionally share a combo but are
+ * context-gated at dispatch (e.g. session.close vs terminal.close on ⌘W).
+ */
+export function isAllowedConflict(idA: ShortcutId, idB: ShortcutId): boolean {
   const pair = [idA, idB].sort().join('|');
   return ALLOWED_CONFLICT_PAIRS.has(pair);
 }
@@ -111,20 +123,15 @@ function isAllowedConflict(idA: ShortcutId, idB: ShortcutId): boolean {
  * Throws an error at startup if conflicts are found.
  */
 export function validateNoConflicts(): void {
-  const seen = new Map<string, ShortcutId>();
-
-  for (const [id, def] of Object.entries(SHORTCUTS)) {
-    const key = shortcutToKey(def as ShortcutDef);
-    const existing = seen.get(key);
-    if (existing) {
-      if (isAllowedConflict(existing, id as ShortcutId)) {
-        continue;
-      }
-      throw new Error(
-        `Shortcut conflict: "${id}" and "${existing}" both use ${key}`
-      );
+  const entries = Object.entries(SHORTCUTS) as Array<[ShortcutId, ShortcutDef]>;
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      const [idA, defA] = entries[i];
+      const [idB, defB] = entries[j];
+      if (!bindingsConflict(defA, defB)) continue;
+      if (isAllowedConflict(idA, idB)) continue;
+      throw new Error(`Shortcut conflict: "${idA}" and "${idB}" use the same combo`);
     }
-    seen.set(key, id as ShortcutId);
   }
 }
 

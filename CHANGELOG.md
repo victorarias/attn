@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-13]
+
+### Added
+- **Keyboard shortcuts are now customizable.** A new shortcut editor (open it from the keyboard-shortcuts cheatsheet's "Edit shortcuts" button, or the command menu's "Customize keyboard shortcuts") lets you rebind any shortcut by clicking it and pressing the new keys. Binding a combo that's already taken offers to reassign it, freeing the previous shortcut. A few essential shortcuts (Quit, Settings, and the cheatsheet) can be rebound but not left unbound so you can't lock yourself out, and "Restore Defaults" resets everything. Your bindings are saved automatically and apply everywhere, including inside the terminal.
+
 ## [2026-06-12]
 
 ### Changed
