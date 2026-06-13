@@ -290,8 +290,10 @@ func (d *Daemon) handleNotebookWrite(conn net.Conn, msg *protocol.NotebookWriteM
 		return
 	}
 	// A conflict is a successful response (conflict:true) the caller reconciles,
-	// not a daemon error.
-	res := &protocol.NotebookWriteResult{Path: msg.Path}
+	// not a daemon error. Echo the normalized path so result.path matches the
+	// form notebook_list/notebook_changed key on (a root-absolute input like
+	// "/memory/a.md" would otherwise leak back with its leading slash).
+	res := &protocol.NotebookWriteResult{Path: changed}
 	if conflict != nil {
 		res.Conflict = true
 		if conflict.CurrentHash != "" {
@@ -474,7 +476,9 @@ func (d *Daemon) sendNotebookWriteWSResult(client *wsClient, requestID, path, co
 		var hash string
 		var conflict *notebook.Conflict
 		if hash, conflict, err = store.Write(path, []byte(content), baseHash); err == nil {
-			result = &protocol.NotebookWriteResult{Path: path}
+			// Echo the normalized path so result.path matches the form
+			// notebook_list/notebook_changed key on, not the raw input.
+			result = &protocol.NotebookWriteResult{Path: changed}
 			if conflict != nil {
 				result.Conflict = true
 				if conflict.CurrentHash != "" {

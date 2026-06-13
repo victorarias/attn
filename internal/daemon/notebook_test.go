@@ -318,6 +318,11 @@ func TestNotebookWriteDispatchesThroughClientMessage(t *testing.T) {
 		res.Result == nil || res.Result.Conflict || res.Result.Hash == nil {
 		t.Fatalf("write dispatch result = %+v", res)
 	}
+	// The echoed result path is normalized (not the raw leading-slash input), so
+	// it matches the form notebook_list/notebook_changed key on.
+	if res.Result.Path != "memory/decisions/a.md" {
+		t.Fatalf("result path = %q, want normalized memory/decisions/a.md", res.Result.Path)
+	}
 
 	// The note is readable with the hash the write returned.
 	d.handleClientMessage(client, []byte(`{"cmd":"notebook_read","request_id":"r1","path":"/memory/decisions/a.md"}`))
@@ -716,6 +721,11 @@ func TestNotebookWriteBroadcastsNormalizedPath(t *testing.T) {
 	})
 	if resp.NotebookWrite == nil || resp.NotebookWrite.Conflict {
 		t.Fatalf("write = %+v", resp.NotebookWrite)
+	}
+	// The echoed result path must be normalized too (not the raw leading-slash
+	// input), so any consumer keying on it matches notebook_list/changed paths.
+	if resp.NotebookWrite.Path != "memory/decisions/foo.md" {
+		t.Fatalf("result path = %q, want normalized memory/decisions/foo.md", resp.NotebookWrite.Path)
 	}
 	select {
 	case message := <-client.send:

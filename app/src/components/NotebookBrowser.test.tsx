@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { NotebookBrowser, parseNotebookHref } from './NotebookBrowser';
 import type { NotebookEntry, NotebookReadResult, NotebookWriteResult } from '../hooks/useDaemonSocket';
@@ -240,6 +240,59 @@ describe('NotebookBrowser', () => {
     // ...but the open note is NOT reloaded under the editor, and the draft survives.
     expect((screen.getByRole('textbox', { name: 'Edit note' }) as HTMLTextAreaElement).value).toBe('# my draft\n');
     expect(readNotebook.mock.calls.length).toBe(readsBefore);
+  });
+
+  it('does not stamp a mid-save result onto a note the user navigated to', async () => {
+    const { props, writeNotebook } = makeProps();
+    // Defer the write so the user can navigate before it resolves.
+    let resolveWrite: (r: NotebookWriteResult) => void = () => {};
+    writeNotebook.mockImplementationOnce(
+      () => new Promise<NotebookWriteResult>((resolve) => { resolveWrite = resolve; }),
+    );
+    render(<NotebookBrowser {...props} />);
+
+    // Edit note A (memory/index.md) and click Save; the write is now in flight.
+    await screen.findByRole('heading', { level: 1, name: 'memory/index.md' });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Edit note' }), { target: { value: '# A edited\n' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(writeNotebook).toHaveBeenCalledWith('memory/index.md', '# A edited\n', 'h1'));
+
+    // Navigate to note B (foo.md) before A's save resolves. B loads and renders.
+    fireEvent.click(screen.getByRole('button', { name: /Foo decision/ }));
+    await screen.findByRole('heading', { level: 1, name: 'memory/decisions/foo.md' });
+
+    // A's stale save now resolves. It must NOT overwrite B's pane (no A body under
+    // B, no spurious "Saved" badge) — the save targeted A's bytes correctly, but
+    // its result no longer applies to what's on screen.
+    await act(async () => {
+      resolveWrite({ path: 'memory/index.md', hash: 'h2', conflict: false });
+    });
+
+    expect(screen.getByRole('heading', { level: 1, name: 'memory/decisions/foo.md' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 1, name: 'A edited' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Saved')).not.toBeInTheDocument();
+  });
+
+  it('auto-dismisses the Saved badge after a successful save', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { props } = makeProps();
+      render(<NotebookBrowser {...props} />);
+
+      await screen.findByRole('heading', { level: 1, name: 'memory/index.md' });
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      fireEvent.change(await screen.findByRole('textbox', { name: 'Edit note' }), { target: { value: '# edited\n' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      // The badge appears on save success...
+      expect(await screen.findByText('Saved')).toBeInTheDocument();
+      // ...and clears itself rather than lingering while the user keeps reading.
+      act(() => { vi.advanceTimersByTime(2600); });
+      await waitFor(() => expect(screen.queryByText('Saved')).not.toBeInTheDocument());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -147,10 +147,19 @@ export function NotebookBrowser({
   const saveDraft = useCallback(async (baseHash: string) => {
     const path = selectedPathRef.current;
     if (!path) return;
+    // Freeze the load token so a navigation that happens while this save is in
+    // flight can be detected when it resolves (mirrors loadNote's staleness
+    // guard; loadNote/clearSelection both bump loadSeqRef, saveDraft does not).
+    const seq = loadSeqRef.current;
     setSaving(true);
     setSaveError(null);
     try {
       const res = await writeNotebook(path, draft, baseHash || undefined);
+      // The write to `path` completed correctly against its own bytes, but if the
+      // user navigated away (or cleared the selection) while it was in flight, the
+      // result now applies to a note that is no longer shown. Bail before stamping
+      // this note's content/conflict/status onto the now-selected note.
+      if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
       if (res.conflict) {
         // The note diverged on disk; let the user reconcile rather than clobber.
         setConflict({ currentHash: res.currentHash });
@@ -248,6 +257,16 @@ export function NotebookBrowser({
     setSaveError(null);
     setJustSaved(false);
   }, [selectedPath]);
+
+  // The "Saved" badge is a transient confirmation, not a persistent status. Clear
+  // it on a timer so it doesn't linger while the user keeps reading the same note
+  // (the navigation-reset effect above only fires on a path change, not on a
+  // same-note live reload, so without this the badge would stick indefinitely).
+  useEffect(() => {
+    if (!justSaved) return;
+    const timer = window.setTimeout(() => setJustSaved(false), 2500);
+    return () => window.clearTimeout(timer);
+  }, [justSaved]);
 
   const grouped = useMemo(() => groupEntries(entries), [entries]);
   const markdownComponents = useMemo(
