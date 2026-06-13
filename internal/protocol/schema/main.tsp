@@ -612,11 +612,20 @@ model NotebookInitMessage {
 model NotebookListMessage {
   cmd: "notebook_list";
   prefix?: string;
+  request_id?: string; // set by the WS frontend for result correlation; the unix CLI omits it
 }
 
 model NotebookReadMessage {
   cmd: "notebook_read";
   path: string;
+  request_id?: string; // set by the WS frontend for result correlation; the unix CLI omits it
+}
+
+// List the notes whose body links to `path` (root-absolute markdown links).
+model NotebookBacklinksMessage {
+  cmd: "notebook_backlinks";
+  path: string;
+  request_id?: string; // set by the WS frontend for result correlation
 }
 
 model NotebookWriteMessage {
@@ -2034,6 +2043,33 @@ model NotebookGuideResult {
   session_is_chief: boolean;
 }
 
+// WS result events for the frontend's notebook reads (request/result pattern).
+// The unix CLI uses the synchronous Response fields above; these carry the same
+// payloads back to a websocket client correlated by request_id.
+model NotebookListResultMessage {
+  event: "notebook_list_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  entries?: NotebookEntry[];
+}
+
+model NotebookReadResultMessage {
+  event: "notebook_read_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  result?: NotebookReadResult;
+}
+
+model NotebookBacklinksResultMessage {
+  event: "notebook_backlinks_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  entries?: NotebookEntry[];
+}
+
 model WorkspaceContextResultMessage {
   event: "workspace_context_result";
   action: string;
@@ -2211,6 +2247,9 @@ alias DaemonEvent =
   | ReviewLoopUpdatedMessage
   | WorkspaceContextResultMessage
   | WorkspaceContextListResultMessage
+  | NotebookListResultMessage
+  | NotebookReadResultMessage
+  | NotebookBacklinksResultMessage
   | MarkFileViewedResultMessage
   | AddCommentResultMessage
   | UpdateCommentResultMessage

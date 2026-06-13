@@ -1735,6 +1735,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleNotebookAppendJournal(conn, msg.(*protocol.NotebookAppendJournalMessage))
 	case protocol.CmdNotebookGuide:
 		d.handleNotebookGuide(conn, msg.(*protocol.NotebookGuideMessage))
+	case protocol.CmdNotebookBacklinks:
+		d.handleNotebookBacklinks(conn, msg.(*protocol.NotebookBacklinksMessage))
 	case protocol.CmdUnregister:
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:

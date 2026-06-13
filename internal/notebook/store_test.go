@@ -3,6 +3,7 @@ package notebook
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -332,5 +333,78 @@ func TestList(t *testing.T) {
 	}
 	if len(mem) == 0 {
 		t.Fatal("prefixed List returned nothing")
+	}
+}
+
+func TestBacklinks(t *testing.T) {
+	s := NewStore(t.TempDir())
+	if _, err := s.EnsureScaffold(); err != nil {
+		t.Fatal(err)
+	}
+
+	// target is the note we want backlinks for.
+	mustWrite(t, s, "memory/decisions/target.md", "---\nkind: memory\ntitle: Target\n---\nthe decision\n")
+	// linker references target with a trailing #anchor — the anchor must be
+	// ignored when matching.
+	mustWrite(t, s, "memory/decisions/linker.md", "---\nkind: memory\ntitle: Linker\n---\nsee [the call](/memory/decisions/target.md#why) for context\n")
+	// journal references target with a plain root-absolute link.
+	mustWrite(t, s, "journal/2026-06-13.md", "---\nkind: journal\n---\nfollowed [target](/memory/decisions/target.md) today\n")
+	// unrelated links elsewhere and must not appear.
+	mustWrite(t, s, "memory/gotchas/unrelated.md", "---\nkind: memory\n---\nlinks [elsewhere](/memory/decisions/other.md) only\n")
+	// self-link: target links to itself and must be excluded from its own backlinks.
+	mustWrite(t, s, "memory/decisions/target.md", "---\nkind: memory\ntitle: Target\n---\nthe decision; see [self](/memory/decisions/target.md)\n")
+
+	got, err := s.Backlinks("/memory/decisions/target.md")
+	if err != nil {
+		t.Fatalf("Backlinks: %v", err)
+	}
+	gotPaths := make([]string, len(got))
+	for i, e := range got {
+		gotPaths[i] = e.Path
+	}
+	want := []string{"journal/2026-06-13.md", "memory/decisions/linker.md"} // sorted by path
+	if !reflect.DeepEqual(gotPaths, want) {
+		t.Fatalf("Backlinks paths = %v, want %v", gotPaths, want)
+	}
+	// Metadata (title) should ride along so the UI can render a label.
+	for _, e := range got {
+		if e.Path == "memory/decisions/linker.md" && e.Title != "Linker" {
+			t.Fatalf("backlink entry lost metadata: %+v", e)
+		}
+	}
+
+	// Dangling-link discovery: a target that does not exist still surfaces its
+	// linkers, so the UI can show what points at a not-yet-created note.
+	dangling, err := s.Backlinks("/memory/decisions/other.md")
+	if err != nil {
+		t.Fatalf("Backlinks(dangling): %v", err)
+	}
+	if len(dangling) != 1 || dangling[0].Path != "memory/gotchas/unrelated.md" {
+		t.Fatalf("dangling Backlinks = %v, want [memory/gotchas/unrelated.md]", dangling)
+	}
+
+	// A note nobody links to has no backlinks.
+	none, err := s.Backlinks("/journal/2026-06-13.md")
+	if err != nil {
+		t.Fatalf("Backlinks(none): %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("Backlinks(none) = %v, want empty", none)
+	}
+}
+
+func mustWrite(t *testing.T, s *Store, relPath, content string) {
+	t.Helper()
+	if _, _, err := s.Write(relPath, []byte(content), ""); err != nil {
+		// Allow rewriting an existing path (create-only conflicts) by retrying
+		// with the current hash, so a test can intentionally overwrite a note.
+		cur, hash, rerr := s.Read(relPath)
+		if rerr != nil {
+			t.Fatalf("write %s: %v", relPath, err)
+		}
+		_ = cur
+		if _, _, werr := s.Write(relPath, []byte(content), hash); werr != nil {
+			t.Fatalf("rewrite %s: %v", relPath, werr)
+		}
 	}
 }

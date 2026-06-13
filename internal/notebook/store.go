@@ -254,6 +254,60 @@ func (s *Store) List(prefix string) ([]Entry, error) {
 	return entries, nil
 }
 
+// Backlinks returns the notes whose body contains a root-absolute markdown link
+// targeting the given note, sorted by path. The target's own note is excluded,
+// and a link's #anchor is ignored when matching. A target that does not exist on
+// disk still surfaces any notes that link to it (dangling-link discovery), so
+// the UI can show what points at a note before it is created.
+//
+// Cost note: this reads every note's body on each call. The Notebook is a small,
+// distilled store (that is the point), so a full scan is acceptable; if it ever
+// grows large, an incremental reverse index can replace this without changing
+// the signature.
+func (s *Store) Backlinks(target string) ([]Entry, error) {
+	want, err := CleanPath(target)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := s.List("")
+	if err != nil {
+		return nil, err
+	}
+	var out []Entry
+	for _, e := range entries {
+		if e.Path == want {
+			continue // a note linking to itself is not a backlink
+		}
+		content, _, rerr := s.Read(e.Path)
+		if rerr != nil {
+			continue // skip a note that vanished or is unreadable mid-scan
+		}
+		if bodyLinksTo(ParsePermissive(content).Body, want) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+// bodyLinksTo reports whether body contains a root-absolute markdown link whose
+// target (ignoring any #anchor) resolves to want (a clean notebook-relative path).
+func bodyLinksTo(body, want string) bool {
+	for _, link := range Links(body) {
+		p := link
+		if i := strings.IndexByte(p, '#'); i >= 0 {
+			p = p[:i]
+		}
+		cleaned, err := CleanPath(p)
+		if err != nil {
+			continue // an anchor-only or malformed target cannot be a backlink
+		}
+		if cleaned == want {
+			return true
+		}
+	}
+	return false
+}
+
 // abs resolves a notebook path to an absolute filesystem path, validating it and
 // defending against any escape outside the root — both lexical (".." after
 // Clean) and via symlinks inside the root that point elsewhere.

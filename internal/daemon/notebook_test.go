@@ -141,6 +141,83 @@ func TestNotebookAppendJournalBroadcastsChange(t *testing.T) {
 	}
 }
 
+func TestNotebookBacklinksOverSocket(t *testing.T) {
+	d := newNotebookDaemon(t)
+	const target = "memory/decisions/target.md"
+	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: target, Content: "---\nkind: memory\ntitle: Target\n---\nbody\n"})
+	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: "memory/decisions/linker.md", Content: "---\nkind: memory\n---\nsee [t](/memory/decisions/target.md#why)\n"})
+	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: "memory/gotchas/other.md", Content: "---\nkind: memory\n---\nno link here\n"})
+
+	resp := sendNotebookCmd(t, d, protocol.NotebookBacklinksMessage{Cmd: protocol.CmdNotebookBacklinks, Path: "/memory/decisions/target.md"})
+	if len(resp.NotebookEntries) != 1 || resp.NotebookEntries[0].Path != "memory/decisions/linker.md" {
+		t.Fatalf("backlinks = %+v, want [memory/decisions/linker.md]", resp.NotebookEntries)
+	}
+}
+
+// readNotebookWSEvent reads one outbound message from a client's send channel and
+// decodes it into target, failing if none arrives.
+func readNotebookWSEvent(t *testing.T, ch chan outboundMessage, target any) {
+	t.Helper()
+	select {
+	case message := <-ch:
+		if err := json.Unmarshal(message.payload, target); err != nil {
+			t.Fatalf("decode ws event: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no websocket result event was sent")
+	}
+}
+
+// The websocket read path carries notebook reads back as result events
+// correlated by request_id — distinct from the unix CLI's synchronous Response.
+func TestNotebookReadWSResultCorrelatesRequest(t *testing.T) {
+	d := newNotebookDaemon(t)
+	if _, _, err := d.ensureNotebookScaffold(); err != nil {
+		t.Fatal(err)
+	}
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+
+	d.sendNotebookReadWSResult(client, "req-1", "/index.md")
+	var read protocol.NotebookReadResultMessage
+	readNotebookWSEvent(t, client.send, &read)
+	if read.Event != protocol.EventNotebookReadResult || read.RequestID != "req-1" || !read.Success {
+		t.Fatalf("read result = %+v, want success notebook_read_result for req-1", read)
+	}
+	if read.Result == nil || read.Result.Content == "" || read.Result.Hash == "" {
+		t.Fatalf("read result payload = %+v", read.Result)
+	}
+
+	// A missing note is a failed result (error set), not a panic or empty success.
+	d.sendNotebookReadWSResult(client, "req-2", "/does/not/exist.md")
+	var missing protocol.NotebookReadResultMessage
+	readNotebookWSEvent(t, client.send, &missing)
+	if missing.RequestID != "req-2" || missing.Success || missing.Error == nil {
+		t.Fatalf("missing read result = %+v, want failure with error", missing)
+	}
+}
+
+func TestNotebookListAndBacklinksWSResults(t *testing.T) {
+	d := newNotebookDaemon(t)
+	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: "memory/decisions/a.md", Content: "---\nkind: memory\n---\nbody\n"})
+	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: "memory/decisions/b.md", Content: "---\nkind: memory\n---\nsee [a](/memory/decisions/a.md)\n"})
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+
+	d.sendNotebookListWSResult(client, "list-1", "")
+	var list protocol.NotebookListResultMessage
+	readNotebookWSEvent(t, client.send, &list)
+	if list.Event != protocol.EventNotebookListResult || list.RequestID != "list-1" || !list.Success || len(list.Entries) < 2 {
+		t.Fatalf("list result = %+v, want >=2 entries for list-1", list)
+	}
+
+	d.sendNotebookBacklinksWSResult(client, "back-1", "/memory/decisions/a.md")
+	var back protocol.NotebookBacklinksResultMessage
+	readNotebookWSEvent(t, client.send, &back)
+	if back.Event != protocol.EventNotebookBacklinksResult || back.RequestID != "back-1" || !back.Success ||
+		len(back.Entries) != 1 || back.Entries[0].Path != "memory/decisions/b.md" {
+		t.Fatalf("backlinks result = %+v, want [memory/decisions/b.md] for back-1", back)
+	}
+}
+
 func addIdleNotebookSession(d *Daemon, id string, state protocol.SessionState) {
 	now := string(protocol.TimestampNow())
 	d.store.Add(&protocol.Session{
