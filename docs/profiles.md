@@ -70,9 +70,14 @@ the Go and (soon) e2e suites concurrently with no cross-talk.
 
 ## Safety model — hard to point the wrong profile at the wrong place
 
-- **Prod is sacred.** `make`, `make install`, `make install-daemon` refuse at
-  parse time if `ATTN_PROFILE` is set (they target the prod bundle). Use
-  `make dev` or `make install PROFILE=<name>`.
+- **Prod is sacred.** Bare `make`, `make install`, `make install-daemon` build
+  the prod bundle, so they refuse at parse time if `ATTN_PROFILE` is set. Build
+  a profile's own app with `make install PROFILE=<name>` (or `make dev` for the
+  dev sibling, which works from any shell).
+- **Build matches your shell.** `make install PROFILE=<name>` refuses when
+  `<name>` differs from your shell's `ATTN_PROFILE`, so you can't build agent8's
+  app while you think you're agent7. (`make dev` is exempt — it always targets
+  the dev sibling on purpose.)
 - **The packaged app is bound to its build profile.** A profile's `.app` pins
   `ATTN_PROFILE`/`ATTN_WS_PORT` and strips inherited routing env at launch, so
   it can never reach another profile's daemon.
@@ -88,17 +93,20 @@ the Go and (soon) e2e suites concurrently with no cross-talk.
 |---|---|
 | Pick | `attn profile-env <name> \| source` |
 | Inspect | `attn profile` / `attn profile list` |
-| Build + install app | `make install PROFILE=<name>` *(later PR)* |
+| Build + install app | `make install PROFILE=<name>` (opens it: `make run PROFILE=<name>`) |
 | Sign | uniform stable identity via `scripts/macos-codesign-identity.sh`; macOS grants persist per bundle id |
-| Clean | `attn profile clean <name>` — stop daemon, remove data dir + app, forget the bundle *(later PR)* |
+| Clean | `attn profile clean <name>` — stop daemon, quit app, remove data dir + app, forget the bundle |
 
 ## Rollout status
 
-This page describes the target model. Landed so far: the `internal/config`
-authority, `attn profile status|resolve|list`, Go-test parallel-safety,
-profile-aware **frontend e2e** (derives its daemon + Vite ports from the active
-profile and scopes its teardown kill to its own port), and the profile-aware
-**real-app harness** (honors `ATTN_PROFILE`, `ATTN_HARNESS_PROFILE` overrides,
-resolves every resource via `attn profile resolve`, and never targets prod by
-omission). The per-profile app build and `attn profile clean` land in subsequent
-PRs (see `docs/plans/2026-06-13-parallel-profiles.md`).
+The model above is fully implemented: the `internal/config` authority and
+`attn profile status|resolve|list|clean`; Go-test parallel-safety; profile-aware
+**frontend e2e** (derives its daemon + Vite ports from the active profile and
+scopes its teardown kill to its own port) and **real-app harness** (honors
+`ATTN_PROFILE` with an `ATTN_HARNESS_PROFILE` override, resolves every resource
+via `attn profile resolve`, never targets prod by omission); the
+**per-profile app build** (`make install PROFILE=<name>` — bundle metadata
+generated from `attn profile tauri-config`, the authority's port and bundle id
+baked into the binary so a profiled app can never reach another profile's
+daemon); and **`attn profile clean`** for teardown. See
+`docs/plans/2026-06-13-parallel-profiles.md` for the design history.

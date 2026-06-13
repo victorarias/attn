@@ -1,7 +1,8 @@
 # Parallel Profiles — one coherent, safe, discoverable profile model
 
 Branch: `feat/parallel-profiles` → `main` (independent of the knowledge-base epic).
-Status: design. Lands as a series of small PRs.
+Status: implemented. See the **Rollout status** section of [docs/profiles.md](../profiles.md)
+for what shipped; this document is retained as the design history.
 
 ## Goal
 
