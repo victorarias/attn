@@ -472,6 +472,7 @@ function App() {
     sendNotebookRead,
     sendNotebookBacklinks,
     sendNotebookWrite,
+    sendNotebookToChief,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,
@@ -616,6 +617,7 @@ function App() {
         sendNotebookRead={sendNotebookRead}
         sendNotebookBacklinks={sendNotebookBacklinks}
         sendNotebookWrite={sendNotebookWrite}
+        sendNotebookToChief={sendNotebookToChief}
         notebookChangeSignal={notebookChangeSignal}
         sendGetRecentLocations={sendGetRecentLocations}
         sendBrowseDirectory={sendBrowseDirectory}
@@ -720,6 +722,7 @@ interface AppContentProps {
   sendNotebookRead: ReturnType<typeof useDaemonSocket>['sendNotebookRead'];
   sendNotebookBacklinks: ReturnType<typeof useDaemonSocket>['sendNotebookBacklinks'];
   sendNotebookWrite: ReturnType<typeof useDaemonSocket>['sendNotebookWrite'];
+  sendNotebookToChief: ReturnType<typeof useDaemonSocket>['sendNotebookToChief'];
   notebookChangeSignal: number;
   sendGetRecentLocations: ReturnType<typeof useDaemonSocket>['sendGetRecentLocations'];
   sendBrowseDirectory: ReturnType<typeof useDaemonSocket>['sendBrowseDirectory'];
@@ -818,6 +821,7 @@ function AppContent({
   sendNotebookRead,
   sendNotebookBacklinks,
   sendNotebookWrite,
+  sendNotebookToChief,
   notebookChangeSignal,
   sendGetRecentLocations,
   sendBrowseDirectory,
@@ -3692,6 +3696,7 @@ sendFetchPRDetails,
         readNotebook={sendNotebookRead}
         backlinksNotebook={sendNotebookBacklinks}
         writeNotebook={sendNotebookWrite}
+        sendToChief={sendNotebookToChief}
         changeSignal={notebookChangeSignal}
       />
       <ActionMenu

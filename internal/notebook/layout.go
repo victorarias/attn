@@ -14,6 +14,10 @@ import (
 const (
 	FileIndex = "index.md"
 	FileLog   = "log.md"
+	// FileInbox is the reserved note where "send to chief" messages accumulate.
+	// It is created on the first send (not scaffolded) and lives at the root so
+	// it groups under "Notebook" in the browser, distinct from journal/memory.
+	FileInbox = "inbox.md"
 
 	DirJournal = "journal"
 	DirMemory  = "memory"
@@ -118,6 +122,13 @@ Kinds: ` + "`journal`" + `, ` + "`memory`" + `. Links are root-absolute markdown
 const logTemplate = `# Log
 
 Change history, newest first.
+`
+
+// inboxTemplate seeds inbox.md on the first "send to chief". It has no kind: it
+// is an append-only delivery log, not durable distilled memory.
+const inboxTemplate = `# Chief inbox
+
+Selections sent to the chief of staff from the Notebook, oldest first.
 `
 
 const memoryIndexTemplate = `# Memory

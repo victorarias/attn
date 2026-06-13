@@ -1877,6 +1877,45 @@ type NotebookReadResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type NotebookSendToChiefMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Selection corresponds to the JSON schema field "selection".
+	Selection string `json:"selection"`
+
+	// SourcePath corresponds to the JSON schema field "source_path".
+	SourcePath *string `json:"source_path,omitempty,omitzero"`
+}
+
+type NotebookSendToChiefResult struct {
+	// Nudged corresponds to the JSON schema field "nudged".
+	Nudged bool `json:"nudged"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+}
+
+type NotebookSendToChiefResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Result corresponds to the JSON schema field "result".
+	Result *NotebookSendToChiefResult `json:"result,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type NotebookWriteMessage struct {
 	// BaseHash corresponds to the JSON schema field "base_hash".
 	BaseHash *string `json:"base_hash,omitempty,omitzero"`
