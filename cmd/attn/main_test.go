@@ -955,41 +955,41 @@ func TestHasPendingSessionCron(t *testing.T) {
 
 // TestDecideStop locks the non-terminal-Stop precedence: running background
 // work outranks a parked schedule, and either outranks classification.
-func TestDecideStop(t *testing.T) {
+func TestNonTerminalStopState(t *testing.T) {
 	cases := []struct {
 		name    string
 		payload string
-		want    stopOutcome
+		want    string
 	}{
 		{
 			name:    "background running and cron pending -> working wins",
 			payload: `{"background_tasks":[{"type":"shell","status":"running"}],"session_crons":[{"id":"d0055050","schedule":"*/30 * * * *","recurring":true,"prompt":"echo x"}]}`,
-			want:    stopReportWorking,
+			want:    protocol.StateWorking,
 		},
 		{
 			name:    "cron pending, no background -> scheduled",
 			payload: `{"background_tasks":[],"session_crons":[{"id":"5e9a0f21","schedule":"18 14 * * *","recurring":false,"prompt":"echo x"}]}`,
-			want:    stopReportScheduled,
+			want:    protocol.StateScheduled,
 		},
 		{
 			name:    "background running, no cron -> working",
 			payload: `{"background_tasks":[{"type":"workflow","status":"running"}],"session_crons":[]}`,
-			want:    stopReportWorking,
+			want:    protocol.StateWorking,
 		},
 		{
 			name:    "completed background and cron pending -> scheduled (completed is not running)",
 			payload: `{"background_tasks":[{"type":"workflow","status":"completed"}],"session_crons":[{"id":"d0055050","schedule":"*/30 * * * *","recurring":true,"prompt":"echo x"}]}`,
-			want:    stopReportScheduled,
+			want:    protocol.StateScheduled,
 		},
 		{
-			name:    "nothing pending -> classify",
+			name:    "nothing pending -> classify (empty)",
 			payload: `{"background_tasks":[],"session_crons":[]}`,
-			want:    stopClassify,
+			want:    "",
 		},
 		{
-			name:    "fields absent -> classify",
+			name:    "fields absent -> classify (empty)",
 			payload: `{"hook_event_name":"Stop","stop_hook_active":false}`,
-			want:    stopClassify,
+			want:    "",
 		},
 	}
 	for _, tc := range cases {
@@ -998,8 +998,8 @@ func TestDecideStop(t *testing.T) {
 			if err := json.Unmarshal([]byte(tc.payload), &input); err != nil {
 				t.Fatalf("unmarshal payload: %v", err)
 			}
-			if got := decideStop(input); got != tc.want {
-				t.Fatalf("decideStop() = %v, want %v", got, tc.want)
+			if got := nonTerminalStopState(input); got != tc.want {
+				t.Fatalf("nonTerminalStopState() = %q, want %q", got, tc.want)
 			}
 		})
 	}

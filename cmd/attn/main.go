@@ -102,33 +102,22 @@ func hasPendingSessionCron(input hookInput) bool {
 	return len(input.SessionCrons) > 0
 }
 
-// stopOutcome is what a Stop payload resolves to before daemon classification.
-type stopOutcome int
-
-const (
-	// stopClassify falls through to normal daemon stop-time classification.
-	stopClassify stopOutcome = iota
-	// stopReportWorking keeps the session "working": background work is still
-	// in flight and the turn will auto-resume when it finishes.
-	stopReportWorking
-	// stopReportScheduled marks the session "scheduled": it is parked on a
-	// pending wakeup and will auto-resume when the cron fires.
-	stopReportScheduled
-)
-
-// decideStop encodes the non-terminal-Stop precedence: actively running
-// background work outranks a parked schedule (a Stop that has both stays
-// "working"), and either outranks normal classification. Both cases skip
-// classification because a mid-yield Stop reads a not-yet-flushed transcript
-// and would mis-detect the session as idle/unknown.
-func decideStop(input hookInput) stopOutcome {
+// nonTerminalStopState returns the runtime state to report for a Stop that is
+// not terminal, or "" when the Stop should fall through to normal daemon
+// classification. A Stop is non-terminal when the turn yields with background
+// work still in flight (auto-resumes on completion) or parked on a pending
+// scheduled wakeup (auto-resumes when a cron fires); classifying such a Stop
+// reads a not-yet-flushed transcript and mis-detects the session as
+// idle/unknown. Running background work outranks a parked schedule, so a Stop
+// with both stays "working"; once both drain, the next Stop classifies normally.
+func nonTerminalStopState(input hookInput) string {
 	switch {
 	case hasActiveBackgroundTask(input):
-		return stopReportWorking
+		return protocol.StateWorking
 	case hasPendingSessionCron(input):
-		return stopReportScheduled
+		return protocol.StateScheduled
 	default:
-		return stopClassify
+		return ""
 	}
 }
 
@@ -2040,23 +2029,12 @@ func runHookStop() {
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
 	syncSessionResumeID(c, sessionID, input.SessionID)
 
-	// A Stop is not always terminal. If the turn yields with background work
-	// still in flight (a background Workflow or Bash), or parked on a pending
-	// scheduled wakeup (a /loop or cron), it will auto-resume — report the
-	// matching non-terminal state and skip classification. Classifying a
-	// mid-yield Stop reads a transcript the agent has not flushed yet and falls
-	// back to "unknown". Running work outranks a parked schedule, so a Stop with
-	// both stays "working"; once both drain the next Stop classifies normally.
-	switch decideStop(input) {
-	case stopReportWorking:
-		if err := c.UpdateState(sessionID, protocol.StateWorking); err != nil {
-			fmt.Fprintf(os.Stderr, "error sending working state: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	case stopReportScheduled:
-		if err := c.UpdateState(sessionID, protocol.StateScheduled); err != nil {
-			fmt.Fprintf(os.Stderr, "error sending scheduled state: %v\n", err)
+	// A Stop is not always terminal: if the turn yields with background work in
+	// flight or parked on a scheduled wakeup, report that non-terminal state and
+	// skip classification (see nonTerminalStopState for the precedence/rationale).
+	if state := nonTerminalStopState(input); state != "" {
+		if err := c.UpdateState(sessionID, state); err != nil {
+			fmt.Fprintf(os.Stderr, "error sending %s state: %v\n", state, err)
 			os.Exit(1)
 		}
 		return

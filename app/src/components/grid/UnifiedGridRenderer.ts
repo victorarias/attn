@@ -506,7 +506,6 @@ export class UnifiedGridRenderer implements GridRenderer {
       case 'working':
         return 0.07;
       case 'launching':
-        return 0.085;
       case 'scheduled':
         return 0.085;
       case 'waiting_input':
