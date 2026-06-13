@@ -84,6 +84,11 @@ export function NotebookBrowser({
     setSelectedPath(path);
     setNoteLoading(true);
     setNoteError(null);
+    // Loading replaces the rendered content (navigation or a same-note live
+    // reload), so any floating "Send to chief" button is now mispositioned — drop
+    // it. (Navigation also clears it via the [selectedPath] effect, but a
+    // same-path reload does not change selectedPath, so clear here too.)
+    setChiefSel(null);
     // Fetch content and backlinks together; a backlinks failure must not blank
     // the note, so it is tolerated independently.
     const [readResult, backlinkResult] = await Promise.allSettled([
@@ -230,12 +235,17 @@ export function NotebookBrowser({
   const sendSelectionToChief = useCallback(async () => {
     if (!chiefSel) return;
     const path = selectedPathRef.current ?? undefined;
+    // Freeze the load token (as saveDraft does) so an outcome that resolves after
+    // the user navigated away doesn't flash on the now-selected note.
+    const seq = loadSeqRef.current;
     setSendingToChief(true);
     try {
       await sendToChief(chiefSel.text, path);
+      if (loadSeqRef.current !== seq || (selectedPathRef.current ?? undefined) !== path) return;
       setChiefSel(null);
       setChiefStatus({ text: "Added to chief's inbox", error: false });
     } catch (err) {
+      if (loadSeqRef.current !== seq || (selectedPathRef.current ?? undefined) !== path) return;
       setChiefStatus({ text: err instanceof Error ? err.message : 'Could not send to chief', error: true });
     } finally {
       setSendingToChief(false);
@@ -245,6 +255,12 @@ export function NotebookBrowser({
   // On open, load the tree and select a sensible first note.
   useEffect(() => {
     if (!isOpen) return;
+    // Start clean: a transient outcome/selection from a prior session must not
+    // reappear on reopen. The [selectedPath] reset can't cover a reopen on the
+    // same note (selectedPath doesn't change), so clear it here.
+    setChiefStatus(null);
+    setChiefSel(null);
+    setJustSaved(false);
     let cancelled = false;
     void (async () => {
       const next = await refreshList();
@@ -314,6 +330,22 @@ export function NotebookBrowser({
     const timer = window.setTimeout(() => setChiefStatus(null), chiefStatus.error ? 6000 : 3000);
     return () => window.clearTimeout(timer);
   }, [chiefStatus]);
+
+  // The floating "Send to chief" button is fixed at viewport coords frozen from
+  // the selection rect, so any geometry change invalidates its position. While it
+  // is shown, clear it on window resize and on scroll anywhere — capture phase,
+  // because scroll doesn't bubble, so a nested code-block scroller would otherwise
+  // slip past and leave the button stranded over the wrong text.
+  useEffect(() => {
+    if (!chiefSel) return;
+    const clear = () => setChiefSel(null);
+    window.addEventListener('resize', clear);
+    document.addEventListener('scroll', clear, true);
+    return () => {
+      window.removeEventListener('resize', clear);
+      document.removeEventListener('scroll', clear, true);
+    };
+  }, [chiefSel]);
 
   // The "Saved" badge is a transient confirmation, not a persistent status. Clear
   // it on a timer so it doesn't linger while the user keeps reading the same note
@@ -391,10 +423,7 @@ export function NotebookBrowser({
               ))}
             </aside>
 
-            <main
-              className="notebook-browser-document"
-              onScroll={() => { if (chiefSel) setChiefSel(null); }}
-            >
+            <main className="notebook-browser-document">
               {noteLoading && !note && (
                 <div className="notebook-browser-document-state">Loading note…</div>
               )}

@@ -883,6 +883,72 @@ func TestNotebookSendToChiefRejectsEmptySelection(t *testing.T) {
 	}
 }
 
+// A selection larger than the up-front cap is rejected before any write, so one
+// runaway paste cannot bloat the inbox note. The inbox note is not created.
+func TestNotebookSendToChiefRejectsOversizeSelection(t *testing.T) {
+	d := newNotebookDaemon(t)
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+
+	d.sendNotebookToChiefWSResult(client, "c5", "/index.md", strings.Repeat("a", maxInboxSelection+1))
+
+	var res protocol.NotebookSendToChiefResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Result != nil || res.Error == nil {
+		t.Fatalf("oversize selection result = %+v (err=%v), want failure", res.Result, res.Error)
+	}
+	store, err := d.notebookStoreFor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, rerr := store.Read(notebook.FileInbox); rerr == nil {
+		t.Fatal("inbox note must not be created when the selection is rejected")
+	}
+}
+
+// The inbox entry must survive hostile/odd inputs: a clean source path renders a
+// backlink that the link parser actually resolves; a name with markdown-breaking
+// characters renders as inline code (never a broken link or injected structure);
+// control chars and CRLF are neutralized.
+func TestFormatChiefInboxEntry(t *testing.T) {
+	// A clean path yields a real, resolvable backlink.
+	clean := formatChiefInboxEntry("/memory/decisions/x.md", "a decision")
+	links := notebook.Links(clean)
+	if len(links) != 1 || links[0] != "/memory/decisions/x.md" {
+		t.Fatalf("clean-path links = %v, want [/memory/decisions/x.md]", links)
+	}
+	if !strings.Contains(clean, "> a decision") {
+		t.Fatalf("clean entry missing blockquoted selection:\n%s", clean)
+	}
+
+	// A name with spaces/parens renders as inline code — no broken link syntax,
+	// and the link parser finds nothing to (mis)resolve.
+	special := formatChiefInboxEntry("/memory/Q3 (draft).md", "x")
+	if strings.Contains(special, "](") {
+		t.Fatalf("special-name heading must not emit link syntax:\n%s", special)
+	}
+	if !strings.Contains(special, "`/memory/Q3 (draft).md`") {
+		t.Fatalf("special-name heading should show the path as inline code:\n%s", special)
+	}
+	if len(notebook.Links(special)) != 0 {
+		t.Fatalf("special-name entry must yield no parseable link, got %v", notebook.Links(special))
+	}
+
+	// A newline in the source path cannot inject a second heading line.
+	inject := formatChiefInboxEntry("/memory/a.md\n## INJECTED\nb.md", "x")
+	if strings.Contains(inject, "\n## ") {
+		t.Fatalf("source path must not inject a heading line:\n%s", inject)
+	}
+
+	// CRLF in the selection leaves no stray carriage returns.
+	crlf := formatChiefInboxEntry("/index.md", "line1\r\nline2")
+	if strings.Contains(crlf, "\r") {
+		t.Fatalf("CRLF selection left a stray carriage return:\n%q", crlf)
+	}
+	if !strings.Contains(crlf, "> line1\n> line2") {
+		t.Fatalf("CRLF selection not normalized into clean blockquote lines:\n%s", crlf)
+	}
+}
+
 // notebook_send_to_chief must dispatch through handleClientMessage with its
 // request_id, selection, and source_path all extracted (a dropped Deref would
 // compile and ship) — the real frontend path.

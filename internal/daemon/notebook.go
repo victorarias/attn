@@ -556,22 +556,53 @@ func (d *Daemon) sendNotebookToChiefWSResult(client *wsClient, requestID, source
 	d.sendToClient(client, msg)
 }
 
-// formatChiefInboxEntry renders one inbox entry: a heading that links back to the
-// source note (when known) followed by the selection as a markdown blockquote.
+// formatChiefInboxEntry renders one inbox entry: a heading identifying the source
+// note followed by the selection as a markdown blockquote. Both the path and the
+// selection are sanitized so no input can corrupt the note's markdown structure.
 func formatChiefInboxEntry(sourcePath, selection string) string {
 	var b strings.Builder
-	if rel, cerr := notebook.CleanPath(sourcePath); cerr == nil {
-		// Root-absolute link so the chief can open the source from the inbox note.
-		fmt.Fprintf(&b, "## From [/%s](/%s)\n\n", rel, rel)
-	} else {
-		b.WriteString("## From the Notebook\n\n")
-	}
-	for _, line := range strings.Split(strings.TrimRight(selection, "\n"), "\n") {
+	b.WriteString(chiefInboxSourceHeading(sourcePath))
+	b.WriteString("\n\n")
+	// Normalize CR/CRLF so a non-UI client's line endings don't leave stray
+	// carriage returns on every blockquoted line.
+	normalized := strings.ReplaceAll(selection, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	for _, line := range strings.Split(strings.TrimRight(normalized, "\n"), "\n") {
 		b.WriteString("> ")
 		b.WriteString(line)
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// chiefInboxSourceHeading renders the "## From ..." heading for a source note.
+// CleanPath validates path segments but permits characters that would corrupt the
+// markdown — control chars, spaces, brackets, parens, backticks — and the notebook
+// root is externally syncable, so such filenames are possible. Control chars and
+// backticks are dropped (they break every rendering); a clean path then renders a
+// clickable root-absolute backlink, while anything else renders as inline code so
+// the heading is always well-formed and the path is shown verbatim.
+func chiefInboxSourceHeading(sourcePath string) string {
+	rel, err := notebook.CleanPath(sourcePath)
+	if err != nil {
+		return "## From the Notebook"
+	}
+	rel = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || r == '`' {
+			return -1
+		}
+		return r
+	}, rel)
+	if rel == "" {
+		return "## From the Notebook"
+	}
+	// A bare path with none of these characters round-trips through the link
+	// parser (which stops a target at the first ')' or whitespace) and contains no
+	// nested [..](..) that a heading would auto-link.
+	if strings.IndexAny(rel, " \t()[]<>") < 0 {
+		return fmt.Sprintf("## From [/%s](/%s)", rel, rel)
+	}
+	return fmt.Sprintf("## From `/%s`", rel)
 }
 
 func notebookEntriesToProtocol(entries []notebook.Entry) []protocol.NotebookEntry {

@@ -357,6 +357,33 @@ describe('NotebookBrowser', () => {
 
     expect(await screen.findByText('no chief reachable')).toBeInTheDocument();
   });
+
+  it('does not flash a send-to-chief outcome on a note navigated to mid-send', async () => {
+    const { props, sendToChief } = makeProps();
+    // Defer the send so the user can navigate before it resolves.
+    let resolveSend: (r: NotebookSendToChiefResult) => void = () => {};
+    sendToChief.mockImplementationOnce(
+      () => new Promise<NotebookSendToChiefResult>((resolve) => { resolveSend = resolve; }),
+    );
+    const { container } = render(<NotebookBrowser {...props} />);
+    await screen.findByRole('heading', { level: 1, name: 'memory/index.md' });
+
+    // Highlight + send from note A; the send is now in flight.
+    mockSelection('from A');
+    fireEvent.mouseUp(container.querySelector('.notebook-browser-markdown') as HTMLElement);
+    fireEvent.click(await screen.findByRole('button', { name: 'Send to chief' }));
+    await waitFor(() => expect(sendToChief).toHaveBeenCalledWith('from A', 'memory/index.md'));
+
+    // Navigate to note B before A's send resolves; B loads and renders.
+    fireEvent.click(screen.getByRole('button', { name: /Foo decision/ }));
+    await screen.findByRole('heading', { level: 1, name: 'memory/decisions/foo.md' });
+
+    // A's stale send resolves — its outcome must NOT flash on note B.
+    await act(async () => {
+      resolveSend({ path: 'inbox.md', nudged: false });
+    });
+    expect(screen.queryByText("Added to chief's inbox")).not.toBeInTheDocument();
+  });
 });
 
 describe('parseNotebookHref', () => {
