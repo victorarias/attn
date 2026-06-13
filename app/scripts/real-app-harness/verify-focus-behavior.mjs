@@ -17,7 +17,6 @@ import {
 } from './harnessProfile.mjs';
 
 const execFileAsync = promisify(execFile);
-const ATTN_BUNDLE_ID = bundleIdentifierForProfile();
 
 const scenarioCommands = {
   tr201: ['pnpm', ['--dir', 'app', 'run', 'real-app:scenario-tr201']],
@@ -72,8 +71,11 @@ Known scenario ids: ${Object.keys(scenarioCommands).join(', ')}
 `);
     return;
   }
+  // Resolve after the --help check: a named profile resolves via the attn
+  // binary, and help must not require a build.
+  const attnBundleId = bundleIdentifierForProfile();
   assertProductionRunAllowed(
-    { bundleId: ATTN_BUNDLE_ID },
+    { bundleId: attnBundleId },
     options.runAgainstProd ? ['--run-against-prod'] : [],
   );
 
@@ -122,8 +124,8 @@ Known scenario ids: ${Object.keys(scenarioCommands).join(', ')}
   const finalBundleId = await getFrontmostBundleId();
   const endedAt = Math.round((Date.now() - startedAt) / 1000);
 
-  const attnEverFrontmost = samples.some((s) => s.bundleId === ATTN_BUNDLE_ID);
-  const secondsAttnFrontmost = samples.filter((s) => s.bundleId === ATTN_BUNDLE_ID).length;
+  const attnEverFrontmost = samples.some((s) => s.bundleId === attnBundleId);
+  const secondsAttnFrontmost = samples.filter((s) => s.bundleId === attnBundleId).length;
   const callerRestored = finalBundleId === callerBundleId;
 
   console.log('');

@@ -12,23 +12,20 @@ import {
 } from './harnessProfile.mjs';
 
 export function parseCommonArgs(argv) {
-  // Default to the active profile's install (the safe dev sibling unless
-  // ATTN_PROFILE/ATTN_HARNESS_PROFILE says otherwise). Production requires both
-  // an explicit prod target and the --run-against-prod acknowledgement.
+  // Default to the isolated dev install. Production requires both an explicit
+  // prod target and the --run-against-prod acknowledgement.
   const options = {
-    wsUrl: process.env.ATTN_REAL_APP_WS_URL || null,
-    appPath: process.env.ATTN_REAL_APP_PATH || null,
+    wsUrl: process.env.ATTN_REAL_APP_WS_URL || defaultWSURLForProfile(),
+    appPath: process.env.ATTN_REAL_APP_PATH || defaultAppPathForProfile(),
     artifactsDir: process.env.ATTN_REAL_APP_ARTIFACTS_DIR || path.join(os.tmpdir(), 'attn-real-app-harness'),
     sessionRootDir: process.env.ATTN_REAL_APP_SESSION_ROOT || path.join(os.tmpdir(), 'attn-real-app-sessions'),
     runAgainstProd: false,
   };
-  let wsUrlExplicit = Boolean(process.env.ATTN_REAL_APP_WS_URL);
-  let appPathExplicit = Boolean(process.env.ATTN_REAL_APP_PATH);
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === '--ws-url') { options.wsUrl = argv[++index]; wsUrlExplicit = true; }
-    else if (arg === '--app-path') { options.appPath = argv[++index]; appPathExplicit = true; }
+    if (arg === '--ws-url') options.wsUrl = argv[++index];
+    else if (arg === '--app-path') options.appPath = argv[++index];
     else if (arg === '--artifacts-dir') options.artifactsDir = argv[++index];
     else if (arg === '--session-root-dir') options.sessionRootDir = argv[++index];
     else if (arg === '--run-against-prod') options.runAgainstProd = true;
@@ -36,20 +33,13 @@ export function parseCommonArgs(argv) {
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
+  if (!process.env.ATTN_REAL_APP_WS_URL && !argv.includes('--ws-url')) {
+    options.wsUrl = defaultWSURLForProfile(profileForAppPath(options.appPath));
+  }
+
   const safetyArgv = argv.length > 0 ? argv : process.argv.slice(2);
   const isHelp = options.help || safetyArgv.includes('--help') || safetyArgv.includes('-h');
-  // For --help we do not resolve the active profile's resources: a named
-  // profile resolves via `attn profile resolve`, which needs ./attn built, and
-  // help should never require a build. printCommonHelp resolves defensively.
-  if (isHelp) return options;
-
-  // Resolve the active profile's defaults for anything not set explicitly. The
-  // ws URL follows the (possibly explicit) app path's profile, so an explicit
-  // prod --app-path also routes to the prod daemon.
-  if (!appPathExplicit) options.appPath = defaultAppPathForProfile();
-  if (!wsUrlExplicit) options.wsUrl = defaultWSURLForProfile(profileForAppPath(options.appPath));
-
-  assertCommonTargetAllowed(options, safetyArgv);
+  if (!isHelp) assertCommonTargetAllowed(options, safetyArgv);
   return options;
 }
 
@@ -60,20 +50,18 @@ export function assertCommonTargetAllowed(options, argv = process.argv.slice(2))
 
 export function printCommonHelp(scriptName) {
   // Show the active profile and its resolved defaults so it is always obvious
-  // which world a run targets. currentHarnessProfile() needs no binary, so the
-  // label is always accurate; the per-profile resources need ./attn for a named
-  // profile, so show an honest placeholder (never a mislabeled dev fallback) if
-  // it is not built yet.
-  const profile = currentHarnessProfile();
-  const label = profile === '' ? 'production' : profile;
-  let wsUrl;
-  let appPath;
+  // which world a run targets. Fall back to the dev sibling text if the attn
+  // binary needed to resolve a named profile is not built yet.
+  let label = 'dev';
+  let wsUrl = 'ws://127.0.0.1:29849/ws';
+  let appPath = path.join(os.homedir(), 'Applications', 'attn-dev.app');
   try {
+    const profile = currentHarnessProfile();
+    label = profile === '' ? 'production' : profile;
     wsUrl = defaultWSURLForProfile(profile);
     appPath = defaultAppPathForProfile(profile);
   } catch {
-    wsUrl = '(unresolved — build ./attn with `make dev`)';
-    appPath = '(unresolved — build ./attn with `make dev`)';
+    // Keep the dev fallback above.
   }
 
   console.log(`Usage: pnpm exec node ${scriptName} [options]

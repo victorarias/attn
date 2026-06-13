@@ -63,7 +63,7 @@ with a *real* daemon of the same profile. Names match `[a-z0-9][a-z0-9-]{0,15}`.
 |---|---|---|
 | Go unit/integration | `make test` | already parallel-safe (each test uses `t.TempDir()` + explicit `ATTN_*` env; never touches `~/.attn`) |
 | Frontend e2e | `make test-e2e` | derives this profile's e2e daemon + Vite ports; the per-run daemon kill is scoped to that port |
-| Real-app scenarios | `pnpm --dir app run real-app:…` | targets this profile's daemon/app *(wired in a later PR)* |
+| Real-app scenarios | `pnpm --dir app run real-app:…` | targets the active profile's daemon/app via `attn profile resolve`; `ATTN_HARNESS_PROFILE` overrides; default is the dev sibling, never prod |
 
 So two agents in separate worktrees with distinct `ATTN_PROFILE` values can run
 the Go and (soon) e2e suites concurrently with no cross-talk.
@@ -95,8 +95,10 @@ the Go and (soon) e2e suites concurrently with no cross-talk.
 ## Rollout status
 
 This page describes the target model. Landed so far: the `internal/config`
-authority, `attn profile status|resolve|list`, Go-test parallel-safety, and
-profile-aware **frontend e2e** (the harness derives its daemon + Vite ports from
-the active profile and scopes its teardown kill to its own port). The real-app
-harness profile resolution, per-profile app build, and `attn profile clean` land
-in subsequent PRs (see `docs/plans/2026-06-13-parallel-profiles.md`).
+authority, `attn profile status|resolve|list`, Go-test parallel-safety,
+profile-aware **frontend e2e** (derives its daemon + Vite ports from the active
+profile and scopes its teardown kill to its own port), and the profile-aware
+**real-app harness** (honors `ATTN_PROFILE`, `ATTN_HARNESS_PROFILE` overrides,
+resolves every resource via `attn profile resolve`, and never targets prod by
+omission). The per-profile app build and `attn profile clean` land in subsequent
+PRs (see `docs/plans/2026-06-13-parallel-profiles.md`).

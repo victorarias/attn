@@ -151,10 +151,8 @@ export function bundleIdentifierForProfile(profile = currentHarnessProfile()) {
 
 // Map a packaged-app path back to its profile: `attn.app` ⇒ '' (prod),
 // `attn-<name>.app` ⇒ '<name>'. Anything else falls back to the active profile.
-// The basename is lower-cased first because macOS filesystems are
-// case-insensitive by default — `Attn.app` resolves to the prod bundle.
 export function profileForAppPath(appPath, fallbackProfile = currentHarnessProfile()) {
-  const appName = path.basename(appPath || '').toLowerCase();
+  const appName = path.basename(appPath || '');
   const match = /^attn(?:-([a-z0-9][a-z0-9-]{0,15}))?\.app$/.exec(appName);
   if (match) return match[1] ?? '';
   return fallbackProfile;
@@ -230,12 +228,10 @@ export function isProductionHarnessTarget({
   // Production is the default/empty profile. A *named* profile (dev, agent7, …)
   // is an isolated world and is never production. We still flag an explicit
   // prod app path / bundle id / port as prod (defense in depth — e.g. a named
-  // profile pointed at `--app-path ~/Applications/attn.app`). The app-name
-  // compare is case-insensitive: macOS filesystems treat `Attn.app` as the prod
-  // bundle, so the guard must too.
+  // profile pointed at `--app-path ~/Applications/attn.app`).
   return (
     profile === ''
-    || path.basename(appPath || '').toLowerCase() === PROD_APP_NAME
+    || path.basename(appPath || '') === PROD_APP_NAME
     || bundleId === PROD_BUNDLE_ID
     || wsPort === PROD_DAEMON_PORT
   );
