@@ -15,6 +15,7 @@ enum SessionState {
   waiting_input,
   idle,
   pending_approval,
+  scheduled,
   state_unknown: "unknown",
 }
 
@@ -24,17 +25,20 @@ enum PRRole {
 }
 
 // WorkspaceStatus is the rolled-up status of all sessions in a workspace.
-// Priority (highest first): working > waiting_input > pending_approval > idle > launching.
-// `launching` sits below `idle` because it carries less information — any
-// session in a settled state out-prioritizes a peer that's still booting.
-// No `unknown` value: a workspace always has a directory and a registry
-// entry, so the rollup always has a meaningful answer (empty/all-unknown
-// member sessions roll up to `idle`).
+// Priority (highest first): working > waiting_input > pending_approval > scheduled > idle > launching.
+// `scheduled` sits above `idle` because a parked-on-schedule session will
+// auto-resume and carries more information than a settled idle peer, but below
+// the attention states since it needs no steering. `launching` sits below
+// `idle` because it carries less information — any session in a settled state
+// out-prioritizes a peer that's still booting. No `unknown` value: a workspace
+// always has a directory and a registry entry, so the rollup always has a
+// meaningful answer (empty/all-unknown member sessions roll up to `idle`).
 enum WorkspaceStatus {
   launching,
   working,
   waiting_input,
   pending_approval,
+  scheduled,
   idle,
 }
 

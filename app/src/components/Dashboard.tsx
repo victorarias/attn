@@ -115,6 +115,7 @@ export function Dashboard({
   const pendingApprovalSessions = sessions.filter((s) => s.state === 'pending_approval');
   const launchingSessions = sessions.filter((s) => s.state === 'launching');
   const workingSessions = sessions.filter((s) => s.state === 'working');
+  const scheduledSessions = sessions.filter((s) => s.state === 'scheduled');
   const idleSessions = sessions.filter((s) => s.state === 'idle');
   const unknownSessions = sessions.filter((s) => s.state === 'unknown');
   const chiefSession = dispatchSessions.find((session) => session.chiefOfStaff);
@@ -527,6 +528,30 @@ export function Dashboard({
                         onClick={() => onSelectSession(s.id)}
                       >
                         <StateIndicator state="working" size="sm" seed={s.id} />
+                        <span className="session-name">{s.label}</span>
+                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
+                        {renderEndpointBadge(s)}
+                        {reviewLoopIndicator(s.reviewLoopStatus) && (
+                          <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
+                            {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {scheduledSessions.length > 0 && (
+                  <div className="session-group" data-testid="session-group-scheduled">
+                    <div className="group-label">Scheduled</div>
+                    {scheduledSessions.map((s) => (
+                      <div
+                        key={s.id}
+                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
+                        data-testid={`session-${s.id}`}
+                        data-state={s.state}
+                        onClick={() => onSelectSession(s.id)}
+                      >
+                        <StateIndicator state="scheduled" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
                         {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
                         {renderEndpointBadge(s)}

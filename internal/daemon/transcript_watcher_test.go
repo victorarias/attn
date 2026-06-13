@@ -113,6 +113,50 @@ func TestHandlePTYState_ClaudeAcceptsWaiting(t *testing.T) {
 	}
 }
 
+// TestHandlePTYState_ClaudeScheduledSurvivesDetectorNoise is the daemon-level
+// counterpart to the transcript-watcher skip: a Claude session parked on a
+// /loop or cron is in `scheduled`, but the live PTY detector still classifies
+// the settled idle prompt. Those detector emissions (idle/waiting_input/
+// pending_approval) must not knock the session out of `scheduled`; only a real
+// resume (working) may.
+func TestHandlePTYState_ClaudeScheduledSurvivesDetectorNoise(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "sock"))
+
+	addScheduled := func(id string) {
+		nowStr := string(protocol.TimestampNow())
+		d.store.Add(&protocol.Session{
+			ID:             id,
+			Label:          id,
+			Agent:          protocol.SessionAgentClaude,
+			Directory:      "/tmp",
+			State:          protocol.SessionStateScheduled,
+			StateSince:     nowStr,
+			StateUpdatedAt: nowStr,
+			LastSeen:       nowStr,
+		})
+	}
+
+	for _, noise := range []string{
+		protocol.StateIdle,
+		protocol.StateWaitingInput,
+		protocol.StatePendingApproval,
+	} {
+		id := "claude-scheduled-" + noise
+		addScheduled(id)
+		d.handlePTYState(id, noise)
+		if got := d.store.Get(id); got.State != protocol.SessionStateScheduled {
+			t.Fatalf("scheduled should survive %s PTY detector noise, got=%s", noise, got.State)
+		}
+	}
+
+	// A genuine resume (working) is the one signal that may leave scheduled.
+	addScheduled("claude-scheduled-resume")
+	d.handlePTYState("claude-scheduled-resume", protocol.StateWorking)
+	if got := d.store.Get("claude-scheduled-resume"); got.State != protocol.SessionStateWorking {
+		t.Fatalf("working PTY state should resume a scheduled session, got=%s", got.State)
+	}
+}
+
 func TestHandlePTYState_CopilotKeepsPendingAgainstWorkingNoise(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "sock"))
 

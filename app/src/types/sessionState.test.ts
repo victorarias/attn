@@ -22,6 +22,10 @@ describe('normalizeSessionState', () => {
     expect(normalizeSessionState('pending_approval')).toBe('pending_approval');
   });
 
+  it('returns scheduled for scheduled', () => {
+    expect(normalizeSessionState('scheduled')).toBe('scheduled');
+  });
+
   it('returns unknown for unknown states', () => {
     expect(normalizeSessionState('unknown')).toBe('unknown');
     expect(normalizeSessionState('')).toBe('unknown');
@@ -45,5 +49,7 @@ describe('isAttentionSessionState', () => {
     expect(isAttentionSessionState('launching')).toBe(false);
     expect(isAttentionSessionState('working')).toBe(false);
     expect(isAttentionSessionState('idle')).toBe(false);
+    // scheduled is quiet: a parked session auto-resumes and needs no steering.
+    expect(isAttentionSessionState('scheduled')).toBe(false);
   });
 });

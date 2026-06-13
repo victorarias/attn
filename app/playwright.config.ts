@@ -1,9 +1,10 @@
 import { defineConfig } from '@playwright/test';
+import { e2ePorts } from './e2e/profileEnv';
 
-// Test daemon runs on port 19849 to avoid conflicts with production daemon (9849)
-const TEST_DAEMON_PORT = '19849';
-// Test Vite server runs on a different port to allow reusing existing dev server
-const TEST_VITE_PORT = '1421';
+// Ports for the active ATTN_PROFILE. Default profile keeps the historical
+// 19849 (daemon) / 1421 (Vite); a named profile gets disjoint per-profile bands
+// so multiple agents can run e2e in parallel (see e2e/profileEnv.ts).
+const { daemonPort: TEST_DAEMON_PORT, vitePort: TEST_VITE_PORT } = e2ePorts();
 
 export default defineConfig({
   testDir: './e2e',

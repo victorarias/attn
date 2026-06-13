@@ -212,6 +212,21 @@ describe('GridCompositor', () => {
     expect(renderer.frames.length).toBe(before + 1);
   });
 
+  it('keeps rendering a visible scheduled tile so its slow pulse animates', () => {
+    // scheduled is attention-excluded, so without a keepalive the canvas would
+    // freeze after the one transition paint and the 3.2s pulse would never move.
+    const { comp, renderer } = makeCompositor();
+    const internal = comp as any;
+    comp.syncTiles([tileSpec('a', { state: 'scheduled', attention: false })]);
+    internal.reflowStart = -1;
+    internal.tick();
+    const before = renderer.frames.length;
+
+    internal.tick();
+
+    expect(renderer.frames.length).toBe(before + 1);
+  });
+
   it('routes live bytes to the matching model and drains responses without echoing them', () => {
     const { comp, created } = makeCompositor();
     comp.syncTiles([tileSpec('a')]);
