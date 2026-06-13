@@ -660,6 +660,18 @@ model NotebookGuideMessage {
   session_id?: string; // when set, session_is_chief reflects this session's role
 }
 
+// Dreaming inspection (phase one): a deterministic, LLM-free harvest surfaced
+// read-only. notebook_dream_status returns a summary; notebook_dream_run returns
+// the candidate preview. Neither writes durable memory.
+model NotebookDreamStatusMessage {
+  cmd: "notebook_dream_status";
+}
+
+model NotebookDreamRunMessage {
+  cmd: "notebook_dream_run";
+  apply?: boolean; // reserved for the promote pass; harvest is preview-only for now
+}
+
 model DelegateWorktreeRequest {
   repo?: string;
   branch: string;
@@ -1974,6 +1986,8 @@ model Response {
   notebook_read?: NotebookReadResult;
   notebook_write?: NotebookWriteResult;
   notebook_guide?: NotebookGuideResult;
+  notebook_dream_status?: NotebookDreamStatusResult;
+  notebook_dream_run?: NotebookDreamRunResult;
 }
 
 model DelegateResult {
@@ -2052,6 +2066,49 @@ model NotebookGuideResult {
   guidance: string;
   root: string;
   session_is_chief: boolean;
+}
+
+// One deduplicated dreaming harvest candidate. occurrences is the number of
+// distinct source units carrying the fact; contexts are the distinct context
+// labels (workspaces, journal dates) — recurrence across contexts is the
+// promote phase's strongest durability signal. sources are resolvable
+// provenance pointers; snippet is word-bounded.
+model NotebookDreamCandidate {
+  signal_key: string;
+  source: string;
+  title?: string;
+  snippet: string;
+  occurrences: int32;
+  contexts: string[];
+  sources: string[];
+  first_seen?: string;
+  last_seen?: string;
+}
+
+model NotebookDreamSourceCount {
+  source: string;
+  count: int32;
+}
+
+// Summary of what a dream would consolidate now. enabled reflects the
+// notebook.dreaming.enabled gate; multi_context_count is the subset of
+// candidates seen in more than one distinct context.
+model NotebookDreamStatusResult {
+  enabled: boolean;
+  candidate_count: int32;
+  multi_context_count: int32;
+  source_counts: NotebookDreamSourceCount[];
+  top: NotebookDreamCandidate[];
+}
+
+// Result of notebook_dream_run. applied is false in the preview-only phase (the
+// run wrote nothing); candidates is the bounded harvested preview.
+model NotebookDreamRunResult {
+  applied: boolean;
+  candidate_count: int32;
+  multi_context_count: int32;
+  source_counts: NotebookDreamSourceCount[];
+  candidates: NotebookDreamCandidate[];
 }
 
 // WS result events for the frontend's notebook reads (request/result pattern).

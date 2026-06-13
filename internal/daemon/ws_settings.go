@@ -41,6 +41,11 @@ const (
 	// SettingNotebookRoot overrides the notebook's filesystem root. Empty =>
 	// the profile-derived default (~/attn-notebook[-profile]).
 	SettingNotebookRoot = "notebook.root"
+	// SettingNotebookDreamingEnabled gates the nightly dreaming consolidation
+	// pass. Default false; `attn notebook dream status`/`--dry-run` inspect the
+	// harvest regardless (the gate only governs autonomous runs). The scheduler
+	// that consumes it lands with the promote phase.
+	SettingNotebookDreamingEnabled = "notebook.dreaming.enabled"
 )
 
 func (d *Daemon) handleGetSettingsWS(client *wsClient) {
@@ -240,6 +245,8 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return d.validateWorkspaceContextJanitorSetting(value)
 	case SettingNotebookRoot:
 		return validateNotebookRoot(value)
+	case SettingNotebookDreamingEnabled:
+		return validateBooleanSetting(value)
 	case SettingKeybindingsConfig:
 		return validateKeybindingsConfig(value)
 	case SettingReviewLoopPresets, SettingReviewLoopLastPreset, SettingReviewLoopLastPrompt, SettingReviewLoopLastIterations, SettingReviewLoopModel, SettingReviewerModel:

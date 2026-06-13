@@ -1744,6 +1744,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleNotebookGuide(conn, msg.(*protocol.NotebookGuideMessage))
 	case protocol.CmdNotebookBacklinks:
 		d.handleNotebookBacklinks(conn, msg.(*protocol.NotebookBacklinksMessage))
+	case protocol.CmdNotebookDreamStatus:
+		d.handleNotebookDreamStatus(conn)
+	case protocol.CmdNotebookDreamRun:
+		d.handleNotebookDreamRun(conn, msg.(*protocol.NotebookDreamRunMessage))
 	case protocol.CmdUnregister:
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:

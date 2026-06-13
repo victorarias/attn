@@ -1001,6 +1001,8 @@ commands:
   memory write --path P      write/edit a durable note; content from --file or stdin
                              (--base-hash H for a safe hash-CAS edit)
   guide                      print the notebook operating guidance
+  dream status               summarize what a consolidation pass would harvest
+  dream [--dry-run]          preview the harvested candidates (nothing is written)
 `)
 }
 
@@ -1077,6 +1079,8 @@ func runNotebook() {
 			os.Exit(1)
 		}
 		fmt.Println(res.Guidance)
+	case "dream":
+		runNotebookDream(c, args)
 	default:
 		fmt.Fprintf(os.Stderr, "notebook: unknown command %q\n\n", action)
 		writeNotebookHelp(os.Stderr)
@@ -1207,6 +1211,100 @@ func runNotebookMemory(c *client.Client, args []string) {
 		hash = *res.Hash
 	}
 	fmt.Printf("wrote %s (%s)\n", res.Path, hash)
+}
+
+// runNotebookDream handles `attn notebook dream status` and `attn notebook dream
+// [--dry-run]`. Both are read-only: status summarizes the harvest, the bare/
+// --dry-run form previews the candidates. Nothing is written — the promote phase
+// is not yet available, so --apply is rejected with a clear message.
+func runNotebookDream(c *client.Client, args []string) {
+	sub := ""
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	switch sub {
+	case "status":
+		if len(args) != 1 {
+			fmt.Fprintln(os.Stderr, "usage: attn notebook dream status")
+			os.Exit(2)
+		}
+		res, err := c.NotebookDreamStatus()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "notebook dream status: %v\n", err)
+			os.Exit(1)
+		}
+		printDreamStatus(os.Stdout, res)
+	case "", "--dry-run":
+		if len(args) > 1 {
+			fmt.Fprintln(os.Stderr, "usage: attn notebook dream [--dry-run]")
+			os.Exit(2)
+		}
+		res, err := c.NotebookDreamRun(false)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "notebook dream: %v\n", err)
+			os.Exit(1)
+		}
+		printDreamRun(os.Stdout, res)
+	case "--apply":
+		fmt.Fprintln(os.Stderr, "notebook dream: --apply is not available yet — the consolidation pass that promotes candidates to durable memory lands in a follow-up. Use `--dry-run` to preview.")
+		os.Exit(2)
+	default:
+		fmt.Fprintf(os.Stderr, "notebook dream: unknown argument %q (want: status, --dry-run)\n", sub)
+		os.Exit(2)
+	}
+}
+
+func dreamEnabledLabel(enabled bool) string {
+	if enabled {
+		return "enabled"
+	}
+	return "disabled"
+}
+
+func printDreamSourceCounts(w io.Writer, counts []protocol.NotebookDreamSourceCount) {
+	for _, sc := range counts {
+		fmt.Fprintf(w, "  %-9s %d\n", sc.Source+":", sc.Count)
+	}
+}
+
+// printDreamCandidate renders one candidate line plus its snippet, e.g.
+//
+//	[3× ·2 ctx] journal  2026-06-13
+//	    we decided to split the dreaming PR along the LLM seam …
+func printDreamCandidate(w io.Writer, cand protocol.NotebookDreamCandidate) {
+	label := strings.TrimSpace(protocol.Deref(cand.Title))
+	header := fmt.Sprintf("  [%d× ·%d ctx] %-8s", cand.Occurrences, len(cand.Contexts), cand.Source)
+	if label != "" {
+		header += "  " + label
+	}
+	fmt.Fprintln(w, header)
+	if snippet := strings.TrimSpace(cand.Snippet); snippet != "" {
+		fmt.Fprintf(w, "      %s\n", snippet)
+	}
+}
+
+func printDreamStatus(w io.Writer, res *protocol.NotebookDreamStatusResult) {
+	fmt.Fprintf(w, "dreaming: %s\n", dreamEnabledLabel(res.Enabled))
+	fmt.Fprintf(w, "candidates: %d (%d across multiple contexts)\n", res.CandidateCount, res.MultiContextCount)
+	printDreamSourceCounts(w, res.SourceCounts)
+	if len(res.Top) > 0 {
+		fmt.Fprintln(w, "top candidates:")
+		for _, cand := range res.Top {
+			printDreamCandidate(w, cand)
+		}
+	}
+}
+
+func printDreamRun(w io.Writer, res *protocol.NotebookDreamRunResult) {
+	fmt.Fprintf(w, "harvested %d candidates (%d across multiple contexts) — preview only, nothing written\n",
+		res.CandidateCount, res.MultiContextCount)
+	printDreamSourceCounts(w, res.SourceCounts)
+	if len(res.Candidates) > 0 {
+		fmt.Fprintf(w, "\ncandidates (showing %d):\n", len(res.Candidates))
+		for _, cand := range res.Candidates {
+			printDreamCandidate(w, cand)
+		}
+	}
 }
 
 func workspaceContextSourceSession(args []string, allowForce bool) (string, bool, error) {
