@@ -52,7 +52,10 @@ export function NotebookBrowser({
 
   useEscapeStack(onClose, isOpen);
 
-  const refreshList = useCallback(async (): Promise<NotebookEntry[]> => {
+  // Returns the fetched entries, or null if the fetch FAILED (distinct from an
+  // empty notebook). Callers must not treat a failed refresh as "the notebook is
+  // now empty" — that would, e.g., clear the open note on a transient WS hiccup.
+  const refreshList = useCallback(async (): Promise<NotebookEntry[] | null> => {
     setListLoading(true);
     try {
       const next = await listNotebook();
@@ -61,7 +64,7 @@ export function NotebookBrowser({
       return next;
     } catch (err) {
       setListError(err instanceof Error ? err.message : 'Could not load the notebook');
-      return [];
+      return null;
     } finally {
       setListLoading(false);
     }
@@ -90,13 +93,25 @@ export function NotebookBrowser({
     setNoteLoading(false);
   }, [readNotebook, backlinksNotebook]);
 
+  // Drop the current selection and return the document pane to its empty state.
+  // Bumping loadSeqRef invalidates any in-flight loadNote so a response that
+  // resolves after this clear cannot resurrect the just-cleared note's content.
+  const clearSelection = useCallback(() => {
+    loadSeqRef.current += 1;
+    setSelectedPath(null);
+    setNote(null);
+    setNoteError(null);
+    setNoteLoading(false);
+    setBacklinks([]);
+  }, []);
+
   // On open, load the tree and select a sensible first note.
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
     void (async () => {
       const next = await refreshList();
-      if (cancelled) return;
+      if (cancelled || next === null) return;
       const current = selectedPathRef.current;
       if (current && next.some((e) => e.path === current)) {
         void loadNote(current);
@@ -107,9 +122,7 @@ export function NotebookBrowser({
       if (first) {
         void loadNote(first);
       } else {
-        setSelectedPath(null);
-        setNote(null);
-        setBacklinks([]);
+        clearSelection();
       }
     })();
     return () => { cancelled = true; };
@@ -124,10 +137,17 @@ export function NotebookBrowser({
     let cancelled = false;
     void (async () => {
       const next = await refreshList();
-      if (cancelled) return;
+      // A failed refresh (null) is NOT an empty notebook: leave the open note
+      // alone rather than mistaking a transient WS hiccup for a deletion.
+      if (cancelled || next === null) return;
       const current = selectedPathRef.current;
       if (current && next.some((e) => e.path === current)) {
         void loadNote(current);
+      } else if (current) {
+        // The open note vanished from the tree — an external delete (the watcher
+        // surfaces those). Don't keep rendering its now-stale content; clear the
+        // selection so the document pane returns to the empty state.
+        clearSelection();
       }
     })();
     return () => { cancelled = true; };

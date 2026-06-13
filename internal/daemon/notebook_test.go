@@ -3,7 +3,9 @@ package daemon
 import (
 	"encoding/json"
 	"net"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -263,6 +265,213 @@ func TestNotebookReadsDispatchThroughClientMessage(t *testing.T) {
 	if back.Event != protocol.EventNotebookBacklinksResult || back.RequestID != "rb" || !back.Success ||
 		len(back.Entries) != 1 || back.Entries[0].Path != "memory/decisions/b.md" {
 		t.Fatalf("backlinks result = %+v, want [memory/decisions/b.md] for rb", back)
+	}
+}
+
+// The watcher reports edits made on disk outside attn (Obsidian, external sync)
+// as origin=external, but suppresses attn's own writes so they don't echo.
+func TestNotebookWatcherReportsExternalEditsNotSelfWrites(t *testing.T) {
+	d := newNotebookDaemon(t)
+	root := d.store.GetSetting(SettingNotebookRoot)
+	client := &wsClient{send: make(chan outboundMessage, 64)}
+	d.wsHub.clients[client] = true
+	go d.wsHub.run()
+
+	// Touch the notebook so the lazy watcher starts (root already exists), then
+	// let the watch registration settle before mutating the tree.
+	sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
+	time.Sleep(80 * time.Millisecond)
+
+	// attn's own write records the path as a self-write before it lands, so the
+	// resulting filesystem event must not be reported as external.
+	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{
+		Cmd: protocol.CmdNotebookWrite, Path: "own.md",
+		Content: "---\nkind: memory\n---\nattn wrote this\n",
+	})
+	// An edit straight to disk (bypassing the daemon) must surface as external.
+	if err := os.WriteFile(filepath.Join(root, "ext.md"),
+		[]byte("---\nkind: memory\n---\nedited externally\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ext := waitForExternalNotebookChange(t, client.send)
+	if !slices.Contains(ext, "ext.md") {
+		t.Fatalf("external change %v missing ext.md", ext)
+	}
+	if slices.Contains(ext, "own.md") {
+		t.Fatalf("external change %v wrongly included attn's own write own.md", ext)
+	}
+}
+
+// A CAS-conflicting write performs no file mutation, so it must NOT leave a
+// self-write record that suppresses a later genuine external edit of that path.
+func TestNotebookWatcherReportsExternalEditAfterConflictingWrite(t *testing.T) {
+	d := newNotebookDaemon(t)
+	root := d.store.GetSetting(SettingNotebookRoot)
+	client := &wsClient{send: make(chan outboundMessage, 64)}
+	d.wsHub.clients[client] = true
+	go d.wsHub.run()
+
+	sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
+	time.Sleep(80 * time.Millisecond)
+
+	// CAS write against a missing file => conflict, no write, no event.
+	resp := sendNotebookCmd(t, d, protocol.NotebookWriteMessage{
+		Cmd: protocol.CmdNotebookWrite, Path: "doc.md", Content: "x", BaseHash: protocol.Ptr("deadbeef"),
+	})
+	if resp.NotebookWrite == nil || !resp.NotebookWrite.Conflict {
+		t.Fatalf("expected a conflict, got %+v", resp.NotebookWrite)
+	}
+
+	// The external edit of that same path must still surface as external.
+	if err := os.WriteFile(filepath.Join(root, "doc.md"),
+		[]byte("---\nkind: memory\n---\nexternally created\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ext := waitForExternalNotebookChange(t, client.send)
+	if !slices.Contains(ext, "doc.md") {
+		t.Fatalf("external change %v missing doc.md — a conflicting write wrongly suppressed it", ext)
+	}
+}
+
+// Changing notebook.root restarts the watcher on the new root and stops
+// reporting the old one.
+func TestNotebookWatcherFollowsRootChange(t *testing.T) {
+	d := newNotebookDaemon(t)
+	rootA := d.store.GetSetting(SettingNotebookRoot)
+	rootB := t.TempDir()
+	client := &wsClient{send: make(chan outboundMessage, 64)}
+	d.wsHub.clients[client] = true
+	go d.wsHub.run()
+
+	sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
+	time.Sleep(80 * time.Millisecond)
+
+	// Repoint the root and drive an op so ensureNotebookWatcher restarts on B.
+	d.store.SetSetting(SettingNotebookRoot, rootB)
+	sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
+	time.Sleep(80 * time.Millisecond)
+
+	// An edit under the new root is reported.
+	if err := os.WriteFile(filepath.Join(rootB, "b.md"), []byte("# b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ext := waitForExternalNotebookChange(t, client.send)
+	if !slices.Contains(ext, "b.md") {
+		t.Fatalf("edit under the new root was not reported: %v", ext)
+	}
+
+	// An edit under the OLD root is no longer reported (watcher moved off it).
+	if err := os.WriteFile(filepath.Join(rootA, "a.md"), []byte("# a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	expectNoExternalNotebookChange(t, client.send)
+}
+
+// A genuine external edit that races attn's own write to the SAME path within
+// the debounce window must still surface: suppression is content-aware, so once
+// the on-disk bytes no longer match what attn wrote, the self-write must not
+// swallow the external edit.
+func TestNotebookWatcherSurfacesSameWindowExternalEdit(t *testing.T) {
+	d := newNotebookDaemon(t)
+	root := d.store.GetSetting(SettingNotebookRoot)
+	client := &wsClient{send: make(chan outboundMessage, 64)}
+	d.wsHub.clients[client] = true
+	go d.wsHub.run()
+
+	sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
+	time.Sleep(80 * time.Millisecond)
+
+	// attn writes the note (handler records a content-aware self-write)...
+	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{
+		Cmd: protocol.CmdNotebookWrite, Path: "race.md",
+		Content: "---\nkind: memory\n---\nattn wrote this\n",
+	})
+	// ...and an external tool immediately overwrites the SAME path with different
+	// bytes, within the same debounce window.
+	if err := os.WriteFile(filepath.Join(root, "race.md"),
+		[]byte("---\nkind: memory\n---\nexternal overwrote it\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ext := waitForExternalNotebookChange(t, client.send)
+	if !slices.Contains(ext, "race.md") {
+		t.Fatalf("external change %v missing race.md — a same-window external edit was wrongly suppressed", ext)
+	}
+}
+
+// After shutdown, an in-flight notebook handler racing Stop must not resurrect
+// the watcher. Stop closes d.done before stopping the watcher, and
+// ensureNotebookWatcher bails on a closed d.done, so no orphan watcher (a leaked
+// goroutine + kqueue fd that nothing would ever close) is left behind.
+func TestEnsureNotebookWatcherDoesNotResurrectAfterShutdown(t *testing.T) {
+	d := newNotebookDaemon(t)
+	root := d.store.GetSetting(SettingNotebookRoot)
+
+	// A notebook op on an existing root starts the watcher lazily.
+	sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
+	d.notebookWatcherMu.Lock()
+	started := d.notebookWatcher != nil
+	d.notebookWatcherMu.Unlock()
+	if !started {
+		t.Fatal("watcher should have started after a notebook op on an existing root")
+	}
+
+	// Mirror Stop's shutdown prefix: close done, then stop the watcher.
+	close(d.done)
+	d.stopNotebookWatcher()
+
+	// The racing handler's ensureNotebookWatcher must observe the closed d.done
+	// and return without starting a fresh watcher.
+	d.ensureNotebookWatcher(root)
+	d.notebookWatcherMu.Lock()
+	resurrected := d.notebookWatcher != nil
+	d.notebookWatcherMu.Unlock()
+	if resurrected {
+		t.Fatal("ensureNotebookWatcher resurrected the watcher after shutdown (leaks a goroutine + kqueue fd)")
+	}
+}
+
+// waitForExternalNotebookChange returns the paths of the first origin=external
+// notebook_changed broadcast, skipping origin=agent (and any non-notebook) events.
+func waitForExternalNotebookChange(t *testing.T, ch chan outboundMessage) []string {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case msg := <-ch:
+			var ev protocol.NotebookChangedMessage
+			if err := json.Unmarshal(msg.payload, &ev); err != nil {
+				continue
+			}
+			if ev.Event == protocol.EventNotebookChanged && ev.Origin == originExternal {
+				return ev.Paths
+			}
+		case <-deadline:
+			t.Fatal("no external notebook change was broadcast")
+			return nil
+		}
+	}
+}
+
+// expectNoExternalNotebookChange fails if any origin=external notebook_changed
+// arrives within a short window (origin=agent and other events are ignored).
+func expectNoExternalNotebookChange(t *testing.T, ch chan outboundMessage) {
+	t.Helper()
+	deadline := time.After(600 * time.Millisecond)
+	for {
+		select {
+		case msg := <-ch:
+			var ev protocol.NotebookChangedMessage
+			if err := json.Unmarshal(msg.payload, &ev); err != nil {
+				continue
+			}
+			if ev.Event == protocol.EventNotebookChanged && ev.Origin == originExternal {
+				t.Fatalf("unexpected external notebook change: %v", ev.Paths)
+			}
+		case <-deadline:
+			return
+		}
 	}
 }
 
