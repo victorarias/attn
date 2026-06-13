@@ -216,6 +216,57 @@ func TestDaemon_StateUpdate(t *testing.T) {
 	}
 }
 
+// TestDaemon_ScheduledStateUpdate exercises the exact wire the _hook-stop
+// wrapper uses for a session parked on a /loop or cron: c.UpdateState(id,
+// "scheduled") over the real socket. It must land as scheduled (not idle, not
+// dropped) so the parked session reads correctly end to end.
+func TestDaemon_ScheduledStateUpdate(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19951")
+
+	tmpDir := shortTempDir(t)
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	d := NewForTesting(sockPath)
+	go d.Start()
+	defer d.Stop()
+
+	waitForSocket(t, sockPath, 5*time.Second)
+	deadline := time.Now().Add(2 * time.Second)
+	for d.isRecovering() {
+		if time.Now().After(deadline) {
+			t.Fatal("daemon recovery did not finish before test setup")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	c := client.New(sockPath)
+	c.Register("sess-1", "loop-bot", "/tmp")
+
+	if err := c.UpdateState("sess-1", protocol.StateScheduled); err != nil {
+		t.Fatalf("UpdateState(scheduled) error: %v", err)
+	}
+
+	scheduled, err := c.Query(protocol.StateScheduled)
+	if err != nil {
+		t.Fatalf("Query(scheduled) error: %v", err)
+	}
+	if len(scheduled) != 1 {
+		t.Fatalf("got %d scheduled sessions, want 1", len(scheduled))
+	}
+	if scheduled[0].ID != "sess-1" {
+		t.Fatalf("scheduled session ID = %q, want sess-1", scheduled[0].ID)
+	}
+
+	// It must not have fallen through to idle.
+	idle, err := c.Query(protocol.StateIdle)
+	if err != nil {
+		t.Fatalf("Query(idle) error: %v", err)
+	}
+	if len(idle) != 0 {
+		t.Fatalf("got %d idle sessions, want 0 (scheduled must not read as idle)", len(idle))
+	}
+}
+
 func TestDaemon_Unregister(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19902")
 
