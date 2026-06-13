@@ -68,6 +68,27 @@ func WorkspaceContextSessionStartOutput(path string) string {
 	return string(data)
 }
 
+// NotebookGuidance teaches a chief-of-staff agent that its durable home is the
+// profile-wide Notebook, not any single workspace's shared context. It is the
+// single source of notebook operating guidance: both the at-launch injection
+// and the live `attn notebook guide` pull resolve to this text, so guidance is
+// versioned in one place. root is the resolved notebook root (empty disables).
+func NotebookGuidance(root string) string {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return ""
+	}
+	return fmt.Sprintf(`The attn Notebook at %s is attn's durable, profile-wide markdown memory: it outlives any single workspace and is the chief of staff's home, used in place of a per-workspace shared context. If you are the chief of staff, it is your durable memory; either way, read it to orient and contribute through the daemon.
+
+- Orient first: run `+"`"+`attn notebook show /memory/index.md`+"`"+` (and `+"`"+`attn notebook list memory`+"`"+`) to load what is already known. Run `+"`"+`attn notebook init`+"`"+` once if the notebook does not exist yet.
+- Two kinds of notes: dated `+"`"+`journal`+"`"+` entries (the raw record) and distilled `+"`"+`memory`+"`"+` notes (decisions, gotchas, domain knowledge that outlived a single PR). Memory ≠ tasks; the notebook is not a task tracker.
+- Write through the daemon, never by editing files directly: append the day's log with `+"`"+`attn notebook journal append --text "…"`+"`"+`, and write or hash-CAS-edit a durable note with `+"`"+`attn notebook memory write --path /memory/decisions/<slug>.md`+"`"+` (pass `+"`"+`--base-hash`+"`"+` from the value you read to edit safely).
+- Grounding is a hard rule: every durable `+"`"+`memory`+"`"+` note must carry resolvable `+"`"+`sources:`+"`"+` (journal anchors, `+"`"+`dispatch:<id>`+"`"+`, or URLs). Do not author memory from paraphrase alone.
+- Link with root-absolute markdown links like `+"`"+`[label](/memory/decisions/foo.md)`+"`"+`, not wikilinks. Keep relationship kind (supersedes, relates-to) in prose.
+- You remain profile-wide. You may still `+"`"+`attn workspace context show --session <id>`+"`"+` for a specific workspace you step into, but that is opt-in — the notebook is your primary surface.
+- For the full workflow, load the attn skill's notebook reference.`, strconv.Quote(root))
+}
+
 // Generate generates settings configuration with hooks for a session
 func Generate(sessionID, socketPath, wrapperPath string) string {
 	wrapper := strings.TrimSpace(wrapperPath)

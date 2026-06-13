@@ -28,6 +28,8 @@ If a command reports an unknown subcommand or shows another tool's help, check
   [references/chief-of-staff.md](references/chief-of-staff.md).
 - **Read or update shared workspace context:** read
   [references/workspace-context.md](references/workspace-context.md).
+- **Read or write the durable Notebook (journals + memory), esp. as chief of
+  staff:** read [references/notebook.md](references/notebook.md).
 - **Start, monitor, or answer a review loop:** read
   [references/review-loops.md](references/review-loops.md).
 - **Show the user a markdown document:** read

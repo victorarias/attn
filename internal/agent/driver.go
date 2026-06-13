@@ -238,6 +238,12 @@ type SpawnOpts struct {
 	// shared context. It may become stale after launch.
 	WorkspaceContextPath string
 
+	// NotebookRoot, when set, makes this a chief-of-staff launch: the agent
+	// receives Notebook guidance (its profile-wide durable home) instead of the
+	// workspace-context checkout guidance. In practice the launch path sets at
+	// most one of NotebookRoot and WorkspaceContextPath.
+	NotebookRoot string
+
 	// ConfigOverrides are agent CLI config overrides generated for this launch.
 	ConfigOverrides []string
 }

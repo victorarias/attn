@@ -479,6 +479,24 @@ func (c *Client) NotebookAppendJournal(entry, date string) (*protocol.NotebookWr
 	return resp.NotebookWrite, nil
 }
 
+// NotebookGuide pulls the canonical notebook operating guidance. When sessionID
+// is non-empty, the result's SessionIsChief reflects whether that session holds
+// the chief-of-staff role (used by the launch path to choose guidance).
+func (c *Client) NotebookGuide(sessionID string) (*protocol.NotebookGuideResult, error) {
+	msg := protocol.NotebookGuideMessage{Cmd: protocol.CmdNotebookGuide}
+	if sessionID != "" {
+		msg.SessionID = protocol.Ptr(sessionID)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.NotebookGuide == nil {
+		return nil, errors.New("daemon returned no notebook guide result")
+	}
+	return resp.NotebookGuide, nil
+}
+
 // Query returns sessions matching the filter
 func (c *Client) Query(filter string) ([]protocol.Session, error) {
 	var filterPtr *string

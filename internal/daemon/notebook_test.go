@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -136,6 +138,153 @@ func TestNotebookAppendJournalBroadcastsChange(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("notebook_changed was not broadcast")
+	}
+}
+
+func addIdleNotebookSession(d *Daemon, id string, state protocol.SessionState) {
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID: id, Label: id, Agent: protocol.SessionAgentClaude,
+		Directory: "/tmp/" + id, WorkspaceID: "workspace-" + id,
+		State: state, StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	})
+}
+
+// notebook_guide is the single source of operating guidance. session_is_chief is
+// true only for the session that holds the chief role, and a chief request also
+// ensures the scaffold exists so the chief has a real notebook to work in.
+func TestNotebookGuideChiefVsNonChief(t *testing.T) {
+	d := newNotebookDaemon(t)
+	wantRoot := d.store.GetSetting(SettingNotebookRoot)
+	addIdleNotebookSession(d, "chief", protocol.SessionStateIdle)
+	addIdleNotebookSession(d, "worker", protocol.SessionStateIdle)
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, "chief"); err != nil {
+		t.Fatal(err)
+	}
+
+	chief := sendNotebookCmd(t, d, protocol.NotebookGuideMessage{Cmd: protocol.CmdNotebookGuide, SessionID: protocol.Ptr("chief")})
+	if chief.NotebookGuide == nil || !chief.NotebookGuide.SessionIsChief {
+		t.Fatalf("chief guide = %+v, want session_is_chief=true", chief.NotebookGuide)
+	}
+	if chief.NotebookGuide.Root != wantRoot || chief.NotebookGuide.Guidance == "" {
+		t.Fatalf("chief guide = %+v, want root=%q and non-empty guidance", chief.NotebookGuide, wantRoot)
+	}
+
+	// The chief request ensured the scaffold exists.
+	list := sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
+	if len(list.NotebookEntries) == 0 {
+		t.Fatal("chief guide should have ensured the notebook scaffold")
+	}
+
+	worker := sendNotebookCmd(t, d, protocol.NotebookGuideMessage{Cmd: protocol.CmdNotebookGuide, SessionID: protocol.Ptr("worker")})
+	if worker.NotebookGuide == nil || worker.NotebookGuide.SessionIsChief {
+		t.Fatalf("worker guide = %+v, want session_is_chief=false", worker.NotebookGuide)
+	}
+	if worker.NotebookGuide.Guidance == "" {
+		t.Fatal("guidance text should be returned regardless of role")
+	}
+}
+
+// A non-chief request must not scaffold the notebook (only the chief's home is
+// auto-created).
+func TestNotebookGuideNonChiefDoesNotScaffold(t *testing.T) {
+	d := newNotebookDaemon(t)
+	addIdleNotebookSession(d, "worker", protocol.SessionStateIdle)
+
+	res := sendNotebookCmd(t, d, protocol.NotebookGuideMessage{Cmd: protocol.CmdNotebookGuide, SessionID: protocol.Ptr("worker")})
+	if res.NotebookGuide == nil || res.NotebookGuide.SessionIsChief {
+		t.Fatalf("guide = %+v, want session_is_chief=false", res.NotebookGuide)
+	}
+	list := sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
+	if len(list.NotebookEntries) != 0 {
+		t.Fatalf("non-chief guide should not scaffold; got %v", list.NotebookEntries)
+	}
+}
+
+// recordingBackend captures PTY inputs for live-activation assertions.
+func recordingBackend(inputs *[]string, mu *sync.Mutex) *fakeSpawnBackend {
+	return &fakeSpawnBackend{onInput: func(_ string, data []byte) {
+		mu.Lock()
+		*inputs = append(*inputs, string(data))
+		mu.Unlock()
+	}}
+}
+
+// Live activation types a bounded "run `attn notebook guide`" doorbell + Enter
+// into a just-promoted chief session's PTY only when it is idle or waiting for
+// input — never into a busy/parked agent (working, pending_approval typing Enter
+// would answer a prompt, scheduled would disrupt auto-resume, etc.).
+func TestActivateNotebookGuidanceLiveInjectStates(t *testing.T) {
+	inject := []protocol.SessionState{protocol.SessionStateIdle, protocol.SessionStateWaitingInput}
+	skip := []protocol.SessionState{
+		protocol.SessionStateWorking, protocol.SessionStatePendingApproval,
+		protocol.SessionStateScheduled, protocol.SessionStateLaunching, protocol.SessionStateUnknown,
+	}
+	run := func(t *testing.T, state protocol.SessionState, wantInputs int) {
+		d := newNotebookDaemon(t)
+		var mu sync.Mutex
+		var inputs []string
+		d.ptyBackend = recordingBackend(&inputs, &mu)
+		addIdleNotebookSession(d, "chief", state)
+		if err := d.store.SetProfileRole(profileRoleChiefOfStaff, "chief"); err != nil {
+			t.Fatal(err)
+		}
+
+		d.activateNotebookGuidanceLive("chief")
+
+		mu.Lock()
+		defer mu.Unlock()
+		if len(inputs) != wantInputs {
+			t.Fatalf("state %s: PTY inputs = %q, want %d", state, inputs, wantInputs)
+		}
+		if wantInputs == 2 && (inputs[0] != notebookActivationPrompt || inputs[1] != "\r" ||
+			!strings.Contains(inputs[0], "attn notebook guide")) {
+			t.Fatalf("state %s: doorbell inputs = %q, want [prompt with `attn notebook guide`, \\r]", state, inputs)
+		}
+	}
+	for _, state := range inject {
+		t.Run("inject/"+string(state), func(t *testing.T) { run(t, state, 2) })
+	}
+	for _, state := range skip {
+		t.Run("skip/"+string(state), func(t *testing.T) { run(t, state, 0) })
+	}
+}
+
+// TOCTOU: a session demoted (chief role transferred away) between the goroutine
+// launch and execution must not be told it is now the chief, even while idle.
+func TestActivateNotebookGuidanceLiveSkipsDemotedSession(t *testing.T) {
+	d := newNotebookDaemon(t)
+	var mu sync.Mutex
+	var inputs []string
+	d.ptyBackend = recordingBackend(&inputs, &mu)
+	addIdleNotebookSession(d, "old-chief", protocol.SessionStateIdle)
+	addIdleNotebookSession(d, "new-chief", protocol.SessionStateIdle)
+	// The role now belongs to new-chief; old-chief's stale goroutine must bail.
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, "new-chief"); err != nil {
+		t.Fatal(err)
+	}
+
+	d.activateNotebookGuidanceLive("old-chief")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(inputs) != 0 {
+		t.Fatalf("PTY inputs = %q, want none (demoted session must not be told it is chief)", inputs)
+	}
+}
+
+func TestActivateNotebookGuidanceLiveSkipsMissingSession(t *testing.T) {
+	d := newNotebookDaemon(t)
+	var mu sync.Mutex
+	var inputs []string
+	d.ptyBackend = recordingBackend(&inputs, &mu)
+	// No session registered for this id.
+	d.activateNotebookGuidanceLive("ghost")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(inputs) != 0 {
+		t.Fatalf("PTY inputs = %q, want none for a missing session", inputs)
 	}
 }
 

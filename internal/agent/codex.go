@@ -86,7 +86,11 @@ func (c *Codex) BuildEnv(opts SpawnOpts) []string {
 		"ATTN_SESSION_ID=" + opts.SessionID,
 		"ATTN_AGENT=codex",
 	}
-	if strings.TrimSpace(opts.WorkspaceContextPath) != "" {
+	if strings.TrimSpace(opts.NotebookRoot) != "" {
+		// A chief launch injected Notebook guidance at launch; mark it so the
+		// SessionStart hook does not also emit workspace-context guidance.
+		env = append(env, "ATTN_NOTEBOOK_GUIDANCE=developer_instructions")
+	} else if strings.TrimSpace(opts.WorkspaceContextPath) != "" {
 		env = append(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=developer_instructions")
 	}
 	if opts.SocketPath != "" {
@@ -160,6 +164,7 @@ func (c *Codex) GenerateConfigOverrides(opts SpawnOpts) []string {
 		opts.SocketPath,
 		opts.WrapperPath,
 		opts.WorkspaceContextPath,
+		opts.NotebookRoot,
 	)
 }
 

@@ -88,6 +88,69 @@ func TestClaudeBuildEnvMarksAppendSystemPromptGuidance(t *testing.T) {
 	}
 }
 
+// A chief launch (NotebookRoot set) injects Notebook guidance and suppresses the
+// workspace-context guidance, even if a checkout path is also present.
+func TestClaudeBuildCommand_NotebookGuidanceTakesPrecedence(t *testing.T) {
+	cmd := (&Claude{}).BuildCommand(SpawnOpts{
+		SessionID:            "sess-1",
+		Executable:           "claude",
+		WorkspaceContextPath: "/tmp/context.md",
+		NotebookRoot:         "/home/u/attn-notebook",
+	})
+	flagIndex := slices.Index(cmd.Args, "--append-system-prompt")
+	if flagIndex == -1 || flagIndex+1 >= len(cmd.Args) {
+		t.Fatalf("args = %#v, want --append-system-prompt with notebook guidance", cmd.Args)
+	}
+	prompt := cmd.Args[flagIndex+1]
+	if !strings.Contains(prompt, "/home/u/attn-notebook") || !strings.Contains(prompt, "chief of staff") {
+		t.Fatalf("system prompt = %q, want notebook guidance", prompt)
+	}
+	if strings.Contains(prompt, "/tmp/context.md") {
+		t.Fatalf("chief launch must not inject workspace-context guidance: %q", prompt)
+	}
+}
+
+func TestClaudeBuildEnvMarksNotebookGuidance(t *testing.T) {
+	env := (&Claude{}).BuildEnv(SpawnOpts{
+		WorkspaceContextPath: "/tmp/context.md",
+		NotebookRoot:         "/home/u/attn-notebook",
+	})
+	if !slices.Contains(env, "ATTN_NOTEBOOK_GUIDANCE=append_system_prompt") {
+		t.Fatalf("env = %#v, want notebook guidance marker", env)
+	}
+	if slices.Contains(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=append_system_prompt") {
+		t.Fatalf("env = %#v, chief launch should not also mark workspace context guidance", env)
+	}
+}
+
+func TestCodexConfigOverrides_NotebookGuidanceTakesPrecedence(t *testing.T) {
+	overrides := (&Codex{}).GenerateConfigOverrides(SpawnOpts{
+		SessionID:            "sess-1",
+		WorkspaceContextPath: "/tmp/context.md",
+		NotebookRoot:         "/home/u/attn-notebook",
+	})
+	joined := strings.Join(overrides, "\n")
+	if !strings.Contains(joined, "developer_instructions=") {
+		t.Fatal("codex overrides should set developer_instructions for a chief launch")
+	}
+	if !strings.Contains(joined, "attn-notebook") || !strings.Contains(joined, "chief of staff") {
+		t.Fatalf("developer_instructions should carry notebook guidance: %q", joined)
+	}
+	if strings.Contains(joined, "/tmp/context.md") {
+		t.Fatalf("chief launch must not inject workspace-context guidance: %q", joined)
+	}
+}
+
+func TestCodexBuildEnvMarksNotebookGuidance(t *testing.T) {
+	env := (&Codex{}).BuildEnv(SpawnOpts{
+		SessionID:    "sess-1",
+		NotebookRoot: "/home/u/attn-notebook",
+	})
+	if !slices.Contains(env, "ATTN_NOTEBOOK_GUIDANCE=developer_instructions") {
+		t.Fatalf("env = %#v, want notebook guidance marker", env)
+	}
+}
+
 func TestBuildCommand_AppendsInitialPromptAfterOptionTerminator(t *testing.T) {
 	for _, driver := range []Driver{&Claude{}, &Codex{}} {
 		t.Run(driver.Name(), func(t *testing.T) {

@@ -81,7 +81,11 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	if strings.TrimSpace(opts.SettingsPath) != "" {
 		args = append(args, "--settings", opts.SettingsPath)
 	}
-	if guidance := hooks.WorkspaceContextGuidance(opts.WorkspaceContextPath); guidance != "" {
+	// A chief-of-staff launch (NotebookRoot set) gets Notebook guidance instead
+	// of the workspace-context checkout guidance.
+	if guidance := hooks.NotebookGuidance(opts.NotebookRoot); guidance != "" {
+		args = append(args, "--append-system-prompt", guidance)
+	} else if guidance := hooks.WorkspaceContextGuidance(opts.WorkspaceContextPath); guidance != "" {
 		args = append(args, "--append-system-prompt", guidance)
 	}
 
@@ -102,7 +106,11 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 
 func (c *Claude) BuildEnv(opts SpawnOpts) []string {
 	var env []string
-	if strings.TrimSpace(opts.WorkspaceContextPath) != "" {
+	if strings.TrimSpace(opts.NotebookRoot) != "" {
+		// A chief launch injected Notebook guidance at launch; mark it so the
+		// SessionStart hook does not also emit workspace-context guidance.
+		env = append(env, "ATTN_NOTEBOOK_GUIDANCE=append_system_prompt")
+	} else if strings.TrimSpace(opts.WorkspaceContextPath) != "" {
 		env = append(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=append_system_prompt")
 	}
 	if opts.Executable != "" && opts.Executable != c.DefaultExecutable() {

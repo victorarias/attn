@@ -117,7 +117,7 @@ func TestGenerateHooks_DefaultsWrapperToAttn(t *testing.T) {
 }
 
 func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {
-	overrides := GenerateCodexConfigOverrides("session-1", "/tmp/attn.sock", "/tmp/attn", "/tmp/context.md")
+	overrides := GenerateCodexConfigOverrides("session-1", "/tmp/attn.sock", "/tmp/attn", "/tmp/context.md", "")
 	joined := strings.Join(overrides, "\n")
 
 	if !strings.Contains(joined, "hooks.SessionStart=") {
@@ -204,6 +204,40 @@ func TestWorkspaceContextSessionStartOutputWrapsGuidance(t *testing.T) {
 	}
 	if output.HookSpecificOutput.AdditionalContext != WorkspaceContextGuidance("/tmp/context.md") {
 		t.Fatal("hook output should wrap the shared workspace context guidance")
+	}
+}
+
+func TestNotebookGuidance(t *testing.T) {
+	guidance := NotebookGuidance("/home/u/attn-notebook")
+	for _, expected := range []string{
+		"/home/u/attn-notebook",
+		"chief of staff",
+		"attn notebook show /memory/index.md",
+		"attn notebook journal append",
+		"attn notebook memory write",
+		"--base-hash",
+		"sources:",            // grounding rule
+		"paraphrase",          // grounding rule
+		"root-absolute",       // linking convention
+		"attn workspace context show --session", // opt-in workspace read
+		"load the attn skill's notebook reference",
+	} {
+		if !strings.Contains(guidance, expected) {
+			t.Fatalf("notebook guidance missing %q: %q", expected, guidance)
+		}
+	}
+	// Wikilinks are explicitly not the convention.
+	if strings.Contains(guidance, "[[") {
+		t.Fatalf("notebook guidance should not suggest wikilinks: %q", guidance)
+	}
+}
+
+func TestNotebookGuidanceEmptyWithoutRoot(t *testing.T) {
+	if got := NotebookGuidance(""); got != "" {
+		t.Fatalf("NotebookGuidance(\"\") = %q, want empty", got)
+	}
+	if got := NotebookGuidance("   "); got != "" {
+		t.Fatalf("NotebookGuidance(whitespace) = %q, want empty", got)
 	}
 }
 

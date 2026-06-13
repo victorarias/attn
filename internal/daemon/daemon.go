@@ -1733,6 +1733,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleNotebookWrite(conn, msg.(*protocol.NotebookWriteMessage))
 	case protocol.CmdNotebookAppendJournal:
 		d.handleNotebookAppendJournal(conn, msg.(*protocol.NotebookAppendJournalMessage))
+	case protocol.CmdNotebookGuide:
+		d.handleNotebookGuide(conn, msg.(*protocol.NotebookGuideMessage))
 	case protocol.CmdUnregister:
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:
