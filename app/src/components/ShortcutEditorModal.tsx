@@ -4,7 +4,7 @@
 // binding a taken combo asks to reassign, unbinding the previous holder.
 // Saves immediately on each edit. Chords and "show in dock" land in later PRs.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import { SHORTCUTS, ShortcutId, Binding, bindingsConflict, isChord } from '../shortcuts/registry';
@@ -71,22 +71,42 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
   const [recordingMode, setRecordingMode] = useState<'combo' | 'chord'>('combo');
   const [pending, setPending] = useState<PendingReassign | null>(null);
   const [rowError, setRowError] = useState<{ id: ShortcutId; message: string } | null>(null);
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEscapeStack(onClose, isOpen && recordingId === null && pending === null);
 
   // The modal stays mounted (it just renders null when closed), so reset any
-  // in-flight recording when it closes — otherwise it reopens stuck recording,
-  // which re-suspends the global shortcut dispatcher.
+  // in-flight recording (and the search query) when it closes — otherwise it
+  // reopens stuck recording, which re-suspends the global shortcut dispatcher.
   useEffect(() => {
     if (!isOpen) {
       setRecordingId(null);
       setRecordingMode('combo');
       setPending(null);
       setRowError(null);
+      setQuery('');
     }
   }, [isOpen]);
 
+  // Focus the filter box on open. The modal stays mounted, so the HTML
+  // autoFocus attribute (mount-only) won't fire on reopen; do it imperatively.
+  // Runs after FocusTrap's initial focus, so the search input wins.
+  useEffect(() => {
+    if (isOpen) searchRef.current?.focus();
+  }, [isOpen]);
+
   if (!isOpen) return null;
+
+  // Substring filter over the visible label and the currently-shown keys
+  // (formatShortcut(id) resolves overrides, so users search what they see).
+  const q = query.trim().toLowerCase();
+  const matchesQuery = (id: ShortcutId) =>
+    SHORTCUT_META[id].label.toLowerCase().includes(q) ||
+    formatShortcut(id).toLowerCase().includes(q);
+  const visibleIds = (category: ShortcutCategory): ShortcutId[] =>
+    q ? groups[category].filter(matchesQuery) : groups[category];
+  const hasMatches = SHORTCUT_CATEGORY_ORDER.some((c) => visibleIds(c).length > 0);
 
   const clearTransient = () => {
     setRecordingId(null);
@@ -156,7 +176,33 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
             </button>
           </div>
 
+          <div className="shortcut-editor-search">
+            <input
+              ref={searchRef}
+              type="search"
+              className="shortcut-editor-search-input"
+              placeholder="Filter shortcuts…"
+              value={query}
+              // Clear any in-flight recording/reassign BEFORE the filter takes
+              // keystrokes. While a row records, KeyCaptureInput owns a
+              // capture-phase window keydown listener that would otherwise grab
+              // the first character typed here and bind it to that row — and the
+              // event never reaches onChange. Focus/mousedown fire first, so we
+              // tear that listener down before the keystroke lands.
+              onFocus={clearTransient}
+              onMouseDown={clearTransient}
+              onChange={(e) => {
+                clearTransient();
+                setQuery(e.target.value);
+              }}
+              aria-label="Filter shortcuts"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+
           <div className="shortcut-editor-body">
+            {q === '' && (
             <section className="shortcut-editor-category shortcut-editor-dock">
               <h3 className="shortcut-editor-category-title">Dock</h3>
               <p className="shortcut-editor-dock-hint">
@@ -205,13 +251,17 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
                 </ol>
               )}
             </section>
-            {SHORTCUT_CATEGORY_ORDER.map((category) => (
+            )}
+            {SHORTCUT_CATEGORY_ORDER.map((category) => {
+              const ids = visibleIds(category);
+              if (!ids.length) return null;
+              return (
               <section className="shortcut-editor-category" key={category}>
                 <h3 className="shortcut-editor-category-title">
                   {SHORTCUT_CATEGORY_LABELS[category]}
                 </h3>
                 <div className="shortcut-editor-rows">
-                  {groups[category].map((id) => {
+                  {ids.map((id) => {
                     const binding = kb.resolve(id);
                     const customized = kb.isCustomized(id);
                     const isProtected = kb.isProtected(id);
@@ -226,6 +276,14 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
                           {isProtected && (
                             <span className="shortcut-editor-badge shortcut-editor-badge--locked">
                               Required
+                            </span>
+                          )}
+                          {SHORTCUT_META[id].requiresTerminal && (
+                            <span
+                              className="shortcut-editor-badge shortcut-editor-badge--scope"
+                              title="Active only when a terminal workspace is open"
+                            >
+                              Needs terminal
                             </span>
                           )}
                         </span>
@@ -289,7 +347,7 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
                               <button
                                 type="button"
                                 className="shortcut-editor-icon-btn"
-                                title="Reset to default"
+                                title={`Reset to ${formatShortcut(SHORTCUTS[id])}`}
                                 onClick={() => applyBinding(id, 'default')}
                               >
                                 ↺
@@ -312,7 +370,13 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
                   })}
                 </div>
               </section>
-            ))}
+              );
+            })}
+            {q !== '' && !hasMatches && (
+              <p className="shortcut-editor-no-matches" role="status">
+                No shortcuts match “{query.trim()}”
+              </p>
+            )}
           </div>
 
           <div className="shortcut-editor-footer">
