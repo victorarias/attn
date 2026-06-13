@@ -105,6 +105,46 @@ describe('ShortcutEditorModal', () => {
     expect(cfg.overrides['dock.diff']).toBeNull();
   });
 
+  it('pins a shortcut to the dock from its row star', () => {
+    const { setSetting } = renderEditor();
+    const newSession = row('New session in this workspace');
+    // Not in the default dock -> star offers to add.
+    fireEvent.click(within(newSession).getByLabelText('Add to dock'));
+
+    expect(lastConfig(setSetting).dock.items).toContain('session.new');
+    // Star now reflects membership (same row node, re-rendered in place).
+    expect(within(newSession).getByLabelText('Remove from dock')).toBeInTheDocument();
+  });
+
+  it('reorders dock items with the up/down controls', () => {
+    const { setSetting } = renderEditor({
+      [KEYBINDINGS_SETTING_KEY]: JSON.stringify({
+        version: 1,
+        overrides: {},
+        dock: { collapsed: false, items: ['dock.diff', 'dock.attention'] },
+      }),
+    });
+
+    // First item can't move up; move it down instead.
+    fireEvent.click(screen.getByLabelText('Move Diff panel down'));
+
+    expect(lastConfig(setSetting).dock.items).toEqual(['dock.attention', 'dock.diff']);
+  });
+
+  it('removes a dock item from the dock section', () => {
+    const { setSetting } = renderEditor({
+      [KEYBINDINGS_SETTING_KEY]: JSON.stringify({
+        version: 1,
+        overrides: {},
+        dock: { collapsed: false, items: ['dock.diff', 'dock.attention'] },
+      }),
+    });
+
+    fireEvent.click(screen.getByLabelText('Remove Diff panel from dock'));
+
+    expect(lastConfig(setSetting).dock.items).toEqual(['dock.attention']);
+  });
+
   it('restores defaults', () => {
     const { setSetting } = renderEditor({
       [KEYBINDINGS_SETTING_KEY]: JSON.stringify({

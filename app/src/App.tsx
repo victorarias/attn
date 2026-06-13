@@ -3,7 +3,7 @@ import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sidebar, type SidebarHeaderAction, type FooterShortcut, ReviewLoopIcon, EditorIcon, DiffIcon, PRsIcon } from './components/Sidebar';
+import { Sidebar, type SidebarHeaderAction, type DockItem, ReviewLoopIcon, EditorIcon, DiffIcon, PRsIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
@@ -31,7 +31,7 @@ import { CopyToast, useCopyToast } from './components/CopyToast';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
-import { KeybindingsProvider } from './contexts/KeybindingsContext';
+import { KeybindingsProvider, useKeybindings } from './contexts/KeybindingsContext';
 import { useSessionStore, type Session, type TerminalWorkspaceState } from './store/sessions';
 import {
   computeWarmWorkspaceIds,
@@ -57,7 +57,8 @@ import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useWhatsNew } from './hooks/useWhatsNew';
-import { formatShortcut, modifierTokens, shortcutTokens } from './shortcuts';
+import { shortcutTokens, dockShortcutLabel } from './shortcuts';
+import type { ShortcutId } from './shortcuts';
 import { useUIScale } from './hooks/useUIScale';
 import { useTheme } from './hooks/useTheme';
 import { useOpenPR, type OpenPRProgress } from './hooks/useOpenPR';
@@ -959,6 +960,7 @@ sendFetchPRDetails,
 
   // Theme (dark/light/system)
   const { preference: themePreference, resolved: resolvedTheme, setTheme } = useTheme();
+  const keybindings = useKeybindings();
 
   // Settings modal (lifted from Dashboard for Cmd+, access)
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -3017,7 +3019,6 @@ sendFetchPRDetails,
           : 'Open in Editor',
       icon: <EditorIcon />,
       disabled: !activeSessionId || (activeRemoteSession && !remoteEditorAvailable),
-      shortcutHint: `${formatShortcut('dock.diffDetail')} detail`,
       onClick: handleOpenEditorForSession,
     },
     {
@@ -3027,7 +3028,6 @@ sendFetchPRDetails,
       active: reviewLoopPanelOpen,
       disabled: !activeReviewLoopAvailable,
       toneClassName: activeReviewLoopState?.status ? `sidebar-tool-btn--loop-${activeReviewLoopState.status}` : undefined,
-      shortcutHint: `${formatShortcut('dock.reviewLoop')} loop`,
       onClick: () => toggleDockPanel('reviewLoop'),
     },
     {
@@ -3036,7 +3036,6 @@ sendFetchPRDetails,
       icon: <DiffIcon />,
       active: diffPanelOpen,
       disabled: !activeSessionId,
-      shortcutHint: `${formatShortcut('dock.diff')} diff`,
       onClick: () => toggleDockPanel('diff'),
     },
     {
@@ -3045,7 +3044,6 @@ sendFetchPRDetails,
       icon: <PRsIcon />,
       active: attentionPanelOpen,
       badge: attentionCount > 0 ? attentionCount : undefined,
-      shortcutHint: `${formatShortcut('dock.attention')} PRs`,
       onClick: () => toggleDockPanel('attention'),
     },
   ]), [
@@ -3063,17 +3061,69 @@ sendFetchPRDetails,
 
   const activeSessionZoomed = activeWorkspaceId ? Boolean(zoomModeBySessionId[activeWorkspaceId]) : false;
 
-  const sidebarFooterShortcuts = useMemo<FooterShortcut[]>(() => (
-    activeSessionId
-      ? [
-          { label: `${formatShortcut('terminal.splitVertical')} split v` },
-          { label: `${formatShortcut('terminal.splitHorizontal')} split h` },
-          { label: `${formatShortcut('session.newHorizontal')} session h` },
-          { label: `${formatShortcut('terminal.toggleZoom')} zoom`, active: activeSessionZoomed },
-          { label: `${modifierTokens('terminal.focusLeft').join('')}←↑→↓ pane` },
-        ]
-      : []
-  ), [activeSessionId, activeSessionZoomed]);
+  // Interactive/contextual behavior for dock chips, keyed by shortcut id. Ids
+  // not present here render as informational chips (keys + label, no click).
+  // `available: false` hides the chip in the current context (e.g. no session).
+  const dockActions = useMemo<Partial<Record<ShortcutId, {
+    run?: () => void;
+    isActive?: boolean;
+    available?: boolean;
+  }>>>(() => ({
+    'dock.diffDetail': {
+      // Must match the dock.diffDetail keyboard shortcut, which toggles the
+      // diff-detail panel — not the external-editor action (that stays on the
+      // sidebar's "Open in Editor" tool button).
+      run: () => toggleDockPanel('diffDetail'),
+      isActive: diffDetailPanelOpen,
+      available: Boolean(activeSessionId),
+    },
+    'dock.reviewLoop': {
+      run: () => toggleDockPanel('reviewLoop'),
+      isActive: reviewLoopPanelOpen,
+      available: activeReviewLoopAvailable,
+    },
+    'dock.diff': {
+      run: () => toggleDockPanel('diff'),
+      isActive: diffPanelOpen,
+      available: Boolean(activeSessionId),
+    },
+    'dock.attention': {
+      run: () => toggleDockPanel('attention'),
+      isActive: attentionPanelOpen,
+    },
+    'terminal.splitVertical': { available: Boolean(activeSessionId) },
+    'terminal.splitHorizontal': { available: Boolean(activeSessionId) },
+    'session.newHorizontal': { available: Boolean(activeSessionId) },
+    'terminal.toggleZoom': { isActive: activeSessionZoomed, available: Boolean(activeSessionId) },
+  }), [
+    activeSessionId,
+    reviewLoopPanelOpen,
+    activeReviewLoopAvailable,
+    diffPanelOpen,
+    diffDetailPanelOpen,
+    attentionPanelOpen,
+    activeSessionZoomed,
+    toggleDockPanel,
+  ]);
+
+  // The dock is rebuilt from config on every relevant change, so rebinds and
+  // membership/order edits reflect live. Unbound ids and context-unavailable
+  // ids are filtered out.
+  const dockItems = useMemo<DockItem[]>(() => (
+    keybindings.dock.items.flatMap((id) => {
+      const action = dockActions[id];
+      if (action && action.available === false) return [];
+      const keys = shortcutTokens(id).join('');
+      if (!keys) return []; // unbound -> nothing to show
+      return [{
+        id,
+        label: dockShortcutLabel(id),
+        keys,
+        active: action?.isActive ?? false,
+        onClick: action?.run,
+      }];
+    })
+  ), [keybindings.dock.items, keybindings.config, dockActions]);
 
   const handleStartReviewLoop = useCallback(async (prompt: string, iterationLimit: number, presetId?: string) => {
     if (!activeSessionId) return;
@@ -3255,7 +3305,9 @@ sendFetchPRDetails,
           headerActions={sidebarHeaderActions}
           gridLayout={gridLayout}
           onSelectGridLayout={handleSelectGridLayout}
-          footerShortcuts={sidebarFooterShortcuts}
+          dockItems={dockItems}
+          dockCollapsed={keybindings.dock.collapsed}
+          onToggleDockCollapsed={() => keybindings.setDockCollapsed(!keybindings.dock.collapsed)}
           mutedWorkspaces={mutedWorkspaceViews}
           mutedExpanded={sidebarMutedExpanded}
           onMutedExpandedChange={setSidebarMutedExpanded}

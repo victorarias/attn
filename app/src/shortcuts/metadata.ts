@@ -18,6 +18,11 @@ export interface ShortcutMeta {
   category: ShortcutCategory;
   /** Cannot be unbound (still rebindable). Guards the escape hatches. */
   protected?: boolean;
+  /**
+   * Terse text for the sidebar dock chip. Falls back to `label` when absent, so
+   * any shortcut is dock-eligible while the default dock entries stay compact.
+   */
+  dockLabel?: string;
 }
 
 export const SHORTCUT_CATEGORY_LABELS: Record<ShortcutCategory, string> = {
@@ -38,7 +43,7 @@ export const SHORTCUT_CATEGORY_ORDER: ShortcutCategory[] = [
 export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
   // Workspaces & Sessions
   'session.new': { label: 'New session in this workspace', category: 'sessions' },
-  'session.newHorizontal': { label: 'New session, split sideways', category: 'sessions' },
+  'session.newHorizontal': { label: 'New session, split sideways', category: 'sessions', dockLabel: 'session h' },
   'session.newWorkspace': { label: 'New workspace', category: 'sessions' },
   'session.close': { label: 'Close session (or focused pane)', category: 'sessions' },
   'session.prev': { label: 'Previous session', category: 'sessions' },
@@ -46,7 +51,7 @@ export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
   'session.goToDashboard': { label: 'Go to dashboard (home)', category: 'sessions' },
   'view.toggleGrid': { label: 'Toggle grid view', category: 'sessions' },
   'session.jumpToWaiting': { label: 'Jump to next waiting session', category: 'sessions' },
-  'session.toggleSidebar': { label: 'Toggle sidebar', category: 'sessions' },
+  'session.toggleSidebar': { label: 'Toggle sidebar', category: 'sessions', dockLabel: 'sidebar' },
   'workspace.select1': { label: 'Jump to workspace 1', category: 'sessions' },
   'workspace.select2': { label: 'Jump to workspace 2', category: 'sessions' },
   'workspace.select3': { label: 'Jump to workspace 3', category: 'sessions' },
@@ -60,9 +65,9 @@ export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
   // Panes & Terminals
   'terminal.open': { label: 'Focus utility terminal', category: 'panes' },
   'terminal.collapse': { label: 'Collapse utility terminal', category: 'panes' },
-  'terminal.splitVertical': { label: 'Split pane down', category: 'panes' },
-  'terminal.splitHorizontal': { label: 'Split pane sideways', category: 'panes' },
-  'terminal.toggleZoom': { label: 'Zoom active pane', category: 'panes' },
+  'terminal.splitVertical': { label: 'Split pane down', category: 'panes', dockLabel: 'split v' },
+  'terminal.splitHorizontal': { label: 'Split pane sideways', category: 'panes', dockLabel: 'split h' },
+  'terminal.toggleZoom': { label: 'Zoom active pane', category: 'panes', dockLabel: 'zoom' },
   'terminal.toggleMaximize': { label: 'Maximize active pane', category: 'panes' },
   'terminal.close': { label: 'Close focused pane', category: 'panes' },
   'terminal.focusLeft': { label: 'Move focus left', category: 'panes' },
@@ -72,10 +77,10 @@ export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
   'terminal.find': { label: 'Find in terminal', category: 'panes' },
 
   // Review & Git
-  'dock.diff': { label: 'Diff panel', category: 'review' },
-  'dock.diffDetail': { label: 'Diff detail', category: 'review' },
-  'dock.reviewLoop': { label: 'Review loop', category: 'review' },
-  'dock.attention': { label: 'PRs drawer', category: 'review' },
+  'dock.diff': { label: 'Diff panel', category: 'review', dockLabel: 'diff' },
+  'dock.diffDetail': { label: 'Diff detail', category: 'review', dockLabel: 'detail' },
+  'dock.reviewLoop': { label: 'Review loop', category: 'review', dockLabel: 'loop' },
+  'dock.attention': { label: 'PRs drawer', category: 'review', dockLabel: 'PRs' },
   'session.refreshPRs': { label: 'Refresh PRs', category: 'review' },
 
   // App
@@ -91,4 +96,9 @@ export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
 
 export function isProtectedShortcut(id: ShortcutId): boolean {
   return SHORTCUT_META[id].protected === true;
+}
+
+/** Terse text shown on a dock chip; falls back to the full editor label. */
+export function dockShortcutLabel(id: ShortcutId): string {
+  return SHORTCUT_META[id].dockLabel ?? SHORTCUT_META[id].label;
 }

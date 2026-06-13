@@ -138,6 +138,54 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
           </div>
 
           <div className="shortcut-editor-body">
+            <section className="shortcut-editor-category shortcut-editor-dock">
+              <h3 className="shortcut-editor-category-title">Dock</h3>
+              <p className="shortcut-editor-dock-hint">
+                Shortcuts shown in the sidebar dock, in order. Reorder or remove them here, or
+                pin any shortcut with ☆ below.
+              </p>
+              {kb.dock.items.length === 0 ? (
+                <p className="shortcut-editor-dock-empty">No shortcuts pinned to the dock.</p>
+              ) : (
+                <ol className="shortcut-editor-dock-list">
+                  {kb.dock.items.map((id, index) => (
+                    <li className="shortcut-editor-dock-item" key={id}>
+                      <span className="shortcut-editor-dock-name">{SHORTCUT_META[id].label}</span>
+                      <span className="shortcut-editor-dock-keys">{formatShortcut(id)}</span>
+                      <button
+                        type="button"
+                        className="shortcut-editor-icon-btn"
+                        title="Move up"
+                        aria-label={`Move ${SHORTCUT_META[id].label} up`}
+                        disabled={index === 0}
+                        onClick={() => kb.moveDockItem(id, -1)}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        className="shortcut-editor-icon-btn"
+                        title="Move down"
+                        aria-label={`Move ${SHORTCUT_META[id].label} down`}
+                        disabled={index === kb.dock.items.length - 1}
+                        onClick={() => kb.moveDockItem(id, 1)}
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        className="shortcut-editor-icon-btn"
+                        title="Remove from dock"
+                        aria-label={`Remove ${SHORTCUT_META[id].label} from dock`}
+                        onClick={() => kb.setInDock(id, false)}
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </section>
             {SHORTCUT_CATEGORY_ORDER.map((category) => (
               <section className="shortcut-editor-category" key={category}>
                 <h3 className="shortcut-editor-category-title">
@@ -199,6 +247,16 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
                               onCapture={(def) => applyBinding(id, def)}
                               onCancel={() => setRecordingId(null)}
                             />
+                            <button
+                              type="button"
+                              className={`shortcut-editor-icon-btn ${kb.isInDock(id) ? 'shortcut-editor-icon-btn--on' : ''}`.trim()}
+                              title={kb.isInDock(id) ? 'Remove from dock' : 'Add to dock'}
+                              aria-label={kb.isInDock(id) ? 'Remove from dock' : 'Add to dock'}
+                              aria-pressed={kb.isInDock(id)}
+                              onClick={() => kb.setInDock(id, !kb.isInDock(id))}
+                            >
+                              {kb.isInDock(id) ? '★' : '☆'}
+                            </button>
                             {customized && (
                               <button
                                 type="button"

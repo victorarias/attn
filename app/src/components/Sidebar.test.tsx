@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import { Sidebar, type FooterShortcut } from './Sidebar';
+import { Sidebar, type DockItem } from './Sidebar';
 import { buildWorkspaceViewModels, type WorkspaceWithSessions } from '../utils/workspaceViewModels';
 
 function sessionlessWorkspace(): WorkspaceWithSessions<TestSession> {
@@ -94,7 +94,7 @@ const baseProps = {
   selectedWorkspaceId: null,
   collapsed: false,
   headerActions: [],
-  footerShortcuts: undefined as FooterShortcut[] | undefined,
+  dockItems: undefined as DockItem[] | undefined,
   onSelectSession: () => {},
   onSelectWorkspace: () => {},
   onNewSession: () => {},
@@ -377,34 +377,60 @@ describe('Sidebar', () => {
     expect(screen.getByRole('dialog', { name: 'Sidebar settings' })).toBeInTheDocument();
   });
 
-  it('renders dock action hints alongside custom footer shortcuts when provided', () => {
+  it('renders config-driven dock items, marks active ones, and fires actions on click', () => {
+    const onDiff = vi.fn();
     render(
       <Sidebar
         {...baseProps}
-        headerActions={[{
-          id: 'diff',
-          title: 'Diff',
-          shortcutHint: '⌘⇧G diff',
-          onClick: () => {},
-          icon: null,
-        }]}
-        footerShortcuts={[
-          { label: '⌘D split v' },
-          { label: '⌘⇧D split h' },
-          { label: '⌘⇧Z zoom', active: true },
-          { label: '⌘⌥←↑→↓ pane' },
+        dockItems={[
+          { id: 'dock.diff', label: 'diff', keys: '⌘⇧G', onClick: onDiff },
+          { id: 'terminal.toggleZoom', label: 'zoom', keys: '⌘⇧Z', active: true },
+          { id: 'session.toggleSidebar', label: 'sidebar', keys: '⌘⇧B' },
         ]}
         {...buildSidebarData([])}
       />
     );
 
-    expect(screen.getByText('⌘⇧G diff')).toBeInTheDocument();
-    expect(screen.getByText('⌘D split v')).toBeInTheDocument();
-    expect(screen.getByText('⌘⇧D split h')).toBeInTheDocument();
-    expect(screen.getByText('⌘⇧Z zoom')).toBeInTheDocument();
-    expect(screen.getByText('⌘⇧Z zoom')).toHaveAttribute('data-active', 'true');
-    expect(screen.getByText('⌘⌥←↑→↓ pane')).toBeInTheDocument();
-    expect(screen.getByText('⌘⇧B sidebar')).toBeInTheDocument();
+    // Actionable item is a button and fires its handler.
+    const diff = screen.getByRole('button', { name: /diff/ });
+    expect(diff).toBeInTheDocument();
+    fireEvent.click(diff);
+    expect(onDiff).toHaveBeenCalledTimes(1);
+
+    // Informational items render their keys + label.
+    expect(screen.getByText('zoom')).toBeInTheDocument();
+    expect(screen.getByText('zoom').closest('.shortcut-hint')).toHaveAttribute('data-active', 'true');
+    expect(screen.getByText('sidebar')).toBeInTheDocument();
+    expect(screen.getByText('⌘⇧B')).toBeInTheDocument();
+  });
+
+  it('hides dock items behind the collapse toggle and toggles via the header button', () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(
+      <Sidebar
+        {...baseProps}
+        dockItems={[{ id: 'dock.diff', label: 'diff', keys: '⌘⇧G' }]}
+        dockCollapsed={false}
+        onToggleDockCollapsed={onToggle}
+        {...buildSidebarData([])}
+      />
+    );
+    expect(screen.getByText('diff')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide dock' }));
+    expect(onToggle).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <Sidebar
+        {...baseProps}
+        dockItems={[{ id: 'dock.diff', label: 'diff', keys: '⌘⇧G' }]}
+        dockCollapsed={true}
+        onToggleDockCollapsed={onToggle}
+        {...buildSidebarData([])}
+      />
+    );
+    expect(screen.queryByText('diff')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show dock' })).toBeInTheDocument();
   });
 
   it('shows endpoint badge and renders actions for remote sessions', () => {
