@@ -118,42 +118,6 @@ describe('useShortcut close priority', () => {
     expect(onToggleZoom).not.toHaveBeenCalled();
   });
 
-  it('suppresses an editableTarget:native native-shortcut while a non-terminal input is focused', () => {
-    const onToggleZoom = vi.fn();
-
-    render(
-      <ShortcutHarness
-        onSessionClose={vi.fn()}
-        onTerminalClose={vi.fn()}
-        onToggleZoom={onToggleZoom}
-      />,
-    );
-
-    // The native macOS "Zoom Pane" menu item (which replaced Redo on ⇧⌘Z)
-    // forwards terminal.toggleZoom through the bridge regardless of focus, so the
-    // bridge must defer to a focused text input just like the keydown path does.
-    screen.getByRole('textbox', { name: 'Browser address' }).focus();
-    window.dispatchEvent(new CustomEvent('attn:native-shortcut', { detail: 'terminal.toggleZoom' }));
-
-    expect(onToggleZoom).not.toHaveBeenCalled();
-  });
-
-  it('fires an editableTarget:native native-shortcut when no editable input is focused', () => {
-    const onToggleZoom = vi.fn();
-
-    render(
-      <ShortcutHarness
-        onSessionClose={vi.fn()}
-        onTerminalClose={vi.fn()}
-        onToggleZoom={onToggleZoom}
-      />,
-    );
-
-    window.dispatchEvent(new CustomEvent('attn:native-shortcut', { detail: 'terminal.toggleZoom' }));
-
-    expect(onToggleZoom).toHaveBeenCalledTimes(1);
-  });
-
   it('keeps unrelated app shortcuts active in non-terminal editable controls', () => {
     const onSelectWorkspace = vi.fn();
 

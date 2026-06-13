@@ -206,15 +206,14 @@ changes need packaged-app verification (`real-app:scenario-terminal-block-copy`)
 
 The same trap applies to ANY web shortcut whose combo matches a `Menu::default` accelerator
 (the macOS Edit/File/View/Window standard items). Example: `terminal.toggleZoom` is ⇧⌘Z,
-which is Edit > Redo — the native Redo item swallowed it, so zoom was dead in the packaged
-app while e2e/unit tests passed. There is no DOM clipboard-event analog for these, so the
-fix is in `app/src-tauri/src/lib.rs` `app_menu()`: remove the predefined item and insert a
-custom `MenuItem` carrying the same accelerator, then forward its `on_menu_event` to the
-frontend via `dispatch_native_shortcut(app, "<SHORTCUTS id>")` — the generic
-`attn:native-shortcut` bridge in `useShortcut.ts` routes any valid id to its handler (mirrors
-Close Window → Close Pane). That bridge must re-apply the `editableTarget:'native'` guard so a
-forwarded shortcut can't hijack a focused input. When adding a new shortcut, check it against
-the default-menu accelerators first.
+which is Edit > Redo — the native Redo item swallowed it, so zoom was dead in the installed
+app while e2e/unit tests passed (Playwright/jsdom never hit the native menu). Fix in
+`app/src-tauri/src/lib.rs` `app_menu()`: remove the predefined item that owns the combo so the
+key reaches the WebView, where the DOM shortcut resolver in `useShortcut.ts` dispatches it —
+which keeps the shortcut respecting user rebindings, unlike a hardcoded native menu item. (Use
+the forward-via-`dispatch_native_shortcut` bridge — as Close Window → Close Pane does — only
+when you also need a visible/relabeled menu item; it hardcodes the action and bypasses the
+resolver.) When adding a new shortcut, check it against the default-menu accelerators first.
 
 ## Communication
 

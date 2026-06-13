@@ -509,7 +509,6 @@ fn quit_app(app: tauri::AppHandle) {
 }
 
 const CLOSE_ACTIVE_PANE_MENU_ID: &str = "attn-close-active-pane";
-const TOGGLE_ZOOM_MENU_ID: &str = "attn-toggle-zoom";
 const NATIVE_SHORTCUT_EVENT: &str = "attn:native-shortcut";
 const NATIVE_BROWSER_CLOSE_EVENT: &str = "attn:native-browser-close";
 
@@ -524,15 +523,7 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
         true,
         Some("CmdOrCtrl+W"),
     )?;
-    let zoom_active_pane = MenuItem::with_id(
-        app,
-        TOGGLE_ZOOM_MENU_ID,
-        "Zoom Pane",
-        true,
-        Some("CmdOrCtrl+Shift+Z"),
-    )?;
     let mut inserted_close_active_pane = false;
-    let mut inserted_zoom_pane = false;
 
     for item in menu.items()? {
         let MenuItemKind::Submenu(submenu) = item else {
@@ -560,10 +551,14 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
                     submenu.insert(&close_active_pane, position)?;
                     inserted_close_active_pane = true;
                 }
-            } else if is_redo && is_edit_menu && !inserted_zoom_pane {
+            } else if is_redo && is_edit_menu {
+                // Drop the predefined Redo item so it stops claiming the ⇧⌘Z key
+                // equivalent. With Redo gone the key reaches the WebView, where the
+                // shortcut resolver routes ⇧⌘Z to terminal.toggleZoom — honoring any
+                // user rebinding, exactly like every other DOM shortcut. The macOS
+                // menu would otherwise swallow ⇧⌘Z and "Zoom active pane" did nothing
+                // in packaged builds.
                 submenu.remove_at(position)?;
-                submenu.insert(&zoom_active_pane, position)?;
-                inserted_zoom_pane = true;
             }
         }
 
@@ -582,14 +577,6 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
         if is_file_menu && !inserted_close_active_pane {
             submenu.append(&close_active_pane)?;
             inserted_close_active_pane = true;
-        }
-
-        // Mirror the Close Pane fallback: if the default Edit menu ever ships
-        // without a Redo item to replace, still surface Zoom Pane (and its
-        // accelerator) by appending it.
-        if is_edit_menu && !inserted_zoom_pane {
-            submenu.append(&zoom_active_pane)?;
-            inserted_zoom_pane = true;
         }
     }
 
@@ -1016,8 +1003,6 @@ Object.defineProperty(window, "__ATTN_NATIVE_DIALOGS", {
                 } else {
                     dispatch_native_shortcut(app, "session.close");
                 }
-            } else if event.id() == TOGGLE_ZOOM_MENU_ID {
-                dispatch_native_shortcut(app, "terminal.toggleZoom");
             }
         })
         .invoke_handler(tauri::generate_handler![
