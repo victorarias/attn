@@ -11,6 +11,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **Keyboard shortcuts are now customizable.** A new shortcut editor (open it from the keyboard-shortcuts cheatsheet's "Edit shortcuts" button, or the command menu's "Customize keyboard shortcuts") lets you rebind any shortcut by clicking it and pressing the new keys. Binding a combo that's already taken offers to reassign it, freeing the previous shortcut. A few essential shortcuts (Quit, Settings, and the cheatsheet) can be rebound but not left unbound so you can't lock yourself out, and "Restore Defaults" resets everything. Your bindings are saved automatically and apply everywhere, including inside the terminal.
 
+### Fixed
+- **A session running work in the background no longer flips to a confusing "unknown" state.** When Claude Code hands off to a background workflow or background shell command and pauses its turn, the session now stays shown as working until the background work finishes and the turn resumes — instead of briefly being mis-detected as "unknown" because it paused before its transcript was written.
+
 ## [2026-06-12]
 
 ### Changed

@@ -46,6 +46,32 @@ type hookInput struct {
 	SessionID      string          `json:"session_id"`
 	TranscriptPath string          `json:"transcript_path"`
 	ToolInput      json.RawMessage `json:"tool_input"`
+	// BackgroundTasks is reported by Claude Code on the Stop payload: the set
+	// of asynchronous tasks (background Workflows, background Bash) still
+	// outstanding when the turn yields. Agents that do not emit this field
+	// simply leave it empty.
+	BackgroundTasks []backgroundTask `json:"background_tasks"`
+}
+
+// backgroundTask is one entry of hookInput.BackgroundTasks. Only Status is
+// load-bearing here; Type is kept for diagnostics.
+type backgroundTask struct {
+	Type   string `json:"type"`
+	Status string `json:"status"`
+}
+
+// hasActiveBackgroundTask reports whether the Stop payload still has background
+// work in flight. Such a Stop is a yield, not a terminal stop: the agent will
+// auto-resume when the work completes, so the session should stay "working"
+// rather than be classified (which, mid-run, would read a not-yet-flushed
+// transcript and mis-detect the session as unknown/idle).
+func hasActiveBackgroundTask(input hookInput) bool {
+	for _, t := range input.BackgroundTasks {
+		if strings.EqualFold(strings.TrimSpace(t.Status), "running") {
+			return true
+		}
+	}
+	return false
 }
 
 // todoWriteInput represents the tool_input for TodoWrite
@@ -1953,9 +1979,25 @@ func runHookStop() {
 	}
 	// Note: We gracefully handle stdin parse errors by sending stop without transcript
 
-	// Send stop event to daemon for classification
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
 	syncSessionResumeID(c, sessionID, input.SessionID)
+
+	// A Stop with background work still in flight (a background Workflow or
+	// background Bash) is a yield, not a terminal stop — the turn will
+	// auto-resume when the work finishes. Keep the session "working" (green)
+	// and skip classification; the next Stop, once background_tasks drains,
+	// classifies normally. This avoids the failure where stop-time
+	// classification reads a transcript the agent has not flushed yet and falls
+	// back to "unknown".
+	if hasActiveBackgroundTask(input) {
+		if err := c.UpdateState(sessionID, "working"); err != nil {
+			fmt.Fprintf(os.Stderr, "error sending working state: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Send stop event to daemon for classification
 	if err := c.SendStop(sessionID, transcriptPath); err != nil {
 		fmt.Fprintf(os.Stderr, "error sending stop: %v\n", err)
 		os.Exit(1)
