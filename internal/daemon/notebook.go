@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -39,6 +40,13 @@ func (d *Daemon) notebookStoreFor() (*notebook.Store, error) {
 // default (~/attn-notebook[-profile], outside ~/.attn) when unset.
 func (d *Daemon) notebookRoot() (string, error) {
 	if configured := strings.TrimSpace(d.store.GetSetting(SettingNotebookRoot)); configured != "" {
+		if strings.HasPrefix(configured, "~/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return "", fmt.Errorf("resolve home directory: %w", err)
+			}
+			return filepath.Join(home, configured[2:]), nil
+		}
 		return configured, nil
 	}
 	home, err := os.UserHomeDir()
@@ -143,7 +151,14 @@ func (d *Daemon) handleNotebookWrite(conn net.Conn, msg *protocol.NotebookWriteM
 		}
 	} else {
 		res.Hash = protocol.Ptr(hash)
-		d.broadcastNotebookChanged(originAgent, msg.Path)
+		// Broadcast the normalized relative path so notebook_changed always
+		// carries the same form as notebook_list/append (a leading-slash or
+		// un-cleaned write path would otherwise miss a consumer keyed on it).
+		changed := msg.Path
+		if rel, cerr := notebook.CleanPath(msg.Path); cerr == nil {
+			changed = rel
+		}
+		d.broadcastNotebookChanged(originAgent, changed)
 	}
 	_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, NotebookWrite: res})
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -148,5 +149,53 @@ func TestNotebookRootResolution(t *testing.T) {
 	}
 	if got != custom {
 		t.Fatalf("notebookRoot with setting = %q, want %q", got, custom)
+	}
+}
+
+// A root-absolute (or otherwise un-normalized) write path must still broadcast
+// the normalized relative form, matching notebook_list/append.
+func TestNotebookWriteBroadcastsNormalizedPath(t *testing.T) {
+	d := newNotebookDaemon(t)
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.wsHub.clients[client] = true
+	go d.wsHub.run()
+
+	resp := sendNotebookCmd(t, d, protocol.NotebookWriteMessage{
+		Cmd: protocol.CmdNotebookWrite, Path: "/memory/decisions/foo.md", Content: "---\nkind: memory\n---\nx\n",
+	})
+	if resp.NotebookWrite == nil || resp.NotebookWrite.Conflict {
+		t.Fatalf("write = %+v", resp.NotebookWrite)
+	}
+	select {
+	case message := <-client.send:
+		var event protocol.NotebookChangedMessage
+		if err := json.Unmarshal(message.payload, &event); err != nil {
+			t.Fatal(err)
+		}
+		if len(event.Paths) != 1 || event.Paths[0] != "memory/decisions/foo.md" {
+			t.Fatalf("broadcast paths = %v, want normalized [memory/decisions/foo.md]", event.Paths)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("notebook_changed was not broadcast")
+	}
+}
+
+// notebook.root must be settable via the validated settings path (empty =
+// default, absolute path accepted), and rejected when relative or inside the
+// attn data dir (it must stay an external, syncable directory).
+func TestValidateNotebookRoot(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	if err := d.validateSetting(SettingNotebookRoot, ""); err != nil {
+		t.Fatalf("empty notebook.root (default) should be valid: %v", err)
+	}
+	if err := d.validateSetting(SettingNotebookRoot, filepath.Join(t.TempDir(), "nb")); err != nil {
+		t.Fatalf("absolute notebook.root should be valid: %v", err)
+	}
+	if err := d.validateSetting(SettingNotebookRoot, "relative/path"); err == nil {
+		t.Fatal("relative notebook.root should be rejected")
+	}
+	inside := filepath.Join(config.DataDir(), "notebook")
+	if err := d.validateSetting(SettingNotebookRoot, inside); err == nil {
+		t.Fatalf("notebook.root inside the data dir (%s) should be rejected", inside)
 	}
 }
