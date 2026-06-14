@@ -82,11 +82,14 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 		args = append(args, "--settings", opts.SettingsPath)
 	}
 	// A chief-of-staff launch (NotebookRoot set) gets Notebook guidance instead
-	// of the workspace-context checkout guidance.
+	// of the workspace-context checkout guidance. Every other workspace agent gets
+	// its workspace-context guidance plus the universal journaling directive, so
+	// the work-journal captures notable work across the whole workspace — not only
+	// the chief and delegated dispatches.
 	if guidance := hooks.NotebookGuidance(opts.NotebookRoot); guidance != "" {
 		args = append(args, "--append-system-prompt", guidance)
 	} else if guidance := hooks.WorkspaceContextGuidance(opts.WorkspaceContextPath); guidance != "" {
-		args = append(args, "--append-system-prompt", guidance)
+		args = append(args, "--append-system-prompt", guidance+"\n\n"+hooks.JournalingDirective())
 	}
 
 	if opts.ResumeSessionID != "" {

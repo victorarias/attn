@@ -67,11 +67,14 @@ func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath, workspaceC
 		"hooks.Stop=" + group("", stop),
 	}
 	// A chief-of-staff launch (notebookRoot set) gets Notebook guidance instead
-	// of the workspace-context checkout guidance.
+	// of the workspace-context checkout guidance. Every other workspace agent gets
+	// its workspace-context guidance plus the universal journaling directive, so
+	// the work-journal captures notable work across the whole workspace — not only
+	// the chief and delegated dispatches.
 	if guidance := NotebookGuidance(notebookRoot); guidance != "" {
 		overrides = append(overrides, "developer_instructions="+strconv.Quote(guidance))
 	} else if guidance := WorkspaceContextGuidance(workspaceContextPath); guidance != "" {
-		overrides = append(overrides, "developer_instructions="+strconv.Quote(guidance))
+		overrides = append(overrides, "developer_instructions="+strconv.Quote(guidance+"\n\n"+JournalingDirective()))
 	}
 	return overrides
 }
