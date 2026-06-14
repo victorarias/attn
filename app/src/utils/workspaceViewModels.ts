@@ -68,12 +68,23 @@ interface WorkspaceViewModelOptions {
   focusedSessionIdByWorkspace?: Record<string, string | null | undefined>;
 }
 
-function sessionWorkspaceId(session: WorkspaceViewSession): string {
-  const workspaceId = session.workspaceId || session.workspace_id;
-  if (!workspaceId) {
-    throw new Error(`Session ${session.id} is missing workspace ownership`);
+function sessionWorkspaceId(
+  session: WorkspaceViewSession,
+  workspaceIdBySessionId?: Map<string, string>,
+): string | undefined {
+  return session.workspaceId || session.workspace_id || workspaceIdBySessionId?.get(session.id);
+}
+
+function workspaceIdsBySessionId(workspaces: WorkspaceViewWorkspace[]): Map<string, string> {
+  const workspaceIdBySessionId = new Map<string, string>();
+  for (const workspace of workspaces) {
+    for (const pane of workspace.layout?.panes || []) {
+      if (pane.session_id) {
+        workspaceIdBySessionId.set(pane.session_id, workspace.id);
+      }
+    }
   }
-  return workspaceId;
+  return workspaceIdBySessionId;
 }
 
 function sessionEndpointId(session: WorkspaceViewSession): string | undefined {
@@ -95,9 +106,14 @@ export function buildWorkspaceViewModels<TSession extends WorkspaceViewSession>(
 ): WorkspaceWithSessions<TSession>[] {
   const sessionsByWorkspace = new Map<string, TSession[]>();
   const sessionKeysByWorkspaceId = new Map<string, string[]>();
+  const workspaceIdBySessionId = workspaceIdsBySessionId(workspaces);
 
   for (const session of sessions) {
-    const workspaceId = sessionWorkspaceId(session);
+    const workspaceId = sessionWorkspaceId(session, workspaceIdBySessionId);
+    if (!workspaceId) {
+      console.warn(`[WorkspaceViewModels] Ignoring session ${session.id} without workspace ownership`);
+      continue;
+    }
     const key = workspaceKey(workspaceId, sessionEndpointId(session));
     const current = sessionsByWorkspace.get(key) || [];
     current.push(session);
@@ -233,6 +249,7 @@ export function filterSessionsRepresentedInWorkspaceLayouts<TSession extends Wor
   workspaces: WorkspaceViewWorkspace[],
   sessions: TSession[],
 ): TSession[] {
+  const workspaceIdBySessionId = workspaceIdsBySessionId(workspaces);
   const workspaceIdsWithLayout = new Set(
     workspaces
       .filter((workspace) => Boolean(workspace.layout))
@@ -257,7 +274,10 @@ export function filterSessionsRepresentedInWorkspaceLayouts<TSession extends Wor
   }
 
   return sessions.filter((session) => {
-    const workspaceId = sessionWorkspaceId(session);
+    const workspaceId = sessionWorkspaceId(session, workspaceIdBySessionId);
+    if (!workspaceId) {
+      return false;
+    }
     if (!workspaceIdsWithLayout.has(workspaceId)) {
       return true;
     }

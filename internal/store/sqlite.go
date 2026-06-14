@@ -399,6 +399,7 @@ var migrations = []migration{
 	`},
 	{48, "drop label from recent_locations", "ALTER TABLE recent_locations DROP COLUMN label"},
 	{49, "add rank to workspaces", `ALTER TABLE workspaces ADD COLUMN rank TEXT NOT NULL DEFAULT ''`},
+	{50, "repair missing workspace rank", `ALTER TABLE workspaces ADD COLUMN rank TEXT NOT NULL DEFAULT ''`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -429,6 +430,10 @@ func OpenDB(dbPath string) (*sql.DB, error) {
 
 	// Run versioned migrations
 	if err := migrateDB(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := ensureWorkspaceRankSchema(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -547,7 +552,7 @@ func migrateDB(db *sql.DB) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
-		} else if m.version == 49 {
+		} else if m.version == 49 || m.version == 50 {
 			if err := applyMigration49(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
@@ -714,6 +719,24 @@ func applyMigration49(tx *sql.Tx) error {
 		if _, err := tx.Exec(`UPDATE workspaces SET rank = ? WHERE id = ?`, seeds[i], id); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// ensureWorkspaceRankSchema repairs schema drift caused by development builds
+// that reused a migration version. It runs independently of migration history
+// so a database marked at or beyond version 50 cannot skip the required repair.
+func ensureWorkspaceRankSchema(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("starting workspace rank schema repair: %w", err)
+	}
+	if err := applyMigration49(tx); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("repairing workspace rank schema: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing workspace rank schema repair: %w", err)
 	}
 	return nil
 }

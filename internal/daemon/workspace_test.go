@@ -480,6 +480,25 @@ func TestSessionForBroadcast_PopulatesWorkspaceID(t *testing.T) {
 
 }
 
+func TestSessionForBroadcast_PreservesPersistedWorkspaceIDDuringRegistryRecovery(t *testing.T) {
+	d := newDaemonForTest(t)
+	now := string(protocol.TimestampNow())
+	session := &protocol.Session{
+		ID: "s1", Label: "s1", Agent: protocol.SessionAgentCodex, Directory: "/repo",
+		WorkspaceID: "ws1",
+		State:       protocol.SessionStateIdle, StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	}
+	d.store.Add(session)
+
+	got := d.sessionForBroadcast(d.store.Get("s1"))
+	if got == nil {
+		t.Fatal("nil broadcast clone")
+	}
+	if got.WorkspaceID != "ws1" {
+		t.Fatalf("workspace_id = %q, want persisted ws1", got.WorkspaceID)
+	}
+}
+
 func TestListWorkspaces_IncludesRegistered(t *testing.T) {
 	d := newDaemonForTest(t)
 	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{

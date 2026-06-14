@@ -91,6 +91,32 @@ describe('workspaceViewModels', () => {
     ]);
   });
 
+  it('recovers transiently missing session ownership from the workspace layout', () => {
+    const [workspace] = buildWorkspaceViewModels(
+      [{
+        id: 'workspace-recovered',
+        title: 'Recovered',
+        directory: '/repo/recovered',
+        layout: {
+          panes: [{ pane_id: 'pane-session', session_id: 'session-recovered' }],
+        },
+      }],
+      [{ id: 'session-recovered', label: 'Recovered session' }],
+    );
+
+    expect(workspace.sessions.map((session) => session.id)).toEqual(['session-recovered']);
+  });
+
+  it('does not blank workspace rendering for a session with no recoverable ownership', () => {
+    const viewModels = buildWorkspaceViewModels(
+      [{ id: 'workspace-a', title: 'A', directory: '/repo/a' }],
+      [{ id: 'orphan', label: 'Orphan' }],
+    );
+
+    expect(viewModels).toHaveLength(1);
+    expect(viewModels[0].sessions).toEqual([]);
+  });
+
   it('nests remote sessions under endpoint-less daemon workspace snapshots', () => {
     const viewModels = buildWorkspaceViewModels(
       [{ id: 'workspace-remote', title: 'Remote', directory: '/srv/repo' }],
