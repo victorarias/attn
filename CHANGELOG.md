@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Agents and shells launched by attn no longer inherit a stale Claude Code session identity.** When attn itself was started from inside a Claude Code session (for example an agent running `make install`), that session's per-session environment — including its session ID — leaked into the daemon and then into every agent or shell attn spawned, which broke things like transcript generation. attn now drops those inherited per-session identifiers before launching agents and shells, while still honoring any Claude Code settings you've configured in your shell profile.
+- **Multi-part emoji now render as a single emoji instead of their separate pieces.** Family and couple emoji (👨‍👩‍👧‍👦), country flags (🇺🇸), skin-tone variants (👍🏽), and keycaps (1️⃣) were splitting into their components — four separate people, two boxed flag letters, a thumb next to a color swatch. They now combine into the one intended glyph.
 
 ## [2026-06-13]
 
