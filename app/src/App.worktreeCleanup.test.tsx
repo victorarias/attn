@@ -184,16 +184,6 @@ vi.mock('./components/UndoToast', () => ({ UndoToast: () => null }));
 vi.mock('./components/ChangesPanel', () => ({ ChangesPanel: () => null }));
 vi.mock('./components/DiffDetailPanel', () => ({ DiffDetailPanel: () => null }));
 vi.mock('./components/SessionTerminalWorkspace', () => ({ SessionTerminalWorkspace: () => null }));
-vi.mock('./components/ThumbsModal', () => ({ ThumbsModal: () => null }));
-
-vi.mock('./components/CopyToast', () => ({
-  CopyToast: () => null,
-  useCopyToast: () => ({
-    message: null,
-    showToast: vi.fn(),
-    clearToast: vi.fn(),
-  }),
-}));
 
 vi.mock('./components/ErrorToast', () => ({
   ErrorToast: () => null,

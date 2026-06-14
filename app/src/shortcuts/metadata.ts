@@ -29,7 +29,7 @@ export interface ShortcutMeta {
    * is on screen. This is an availability fact, NOT a focus claim — the key
    * still fires from the global window listener. Set only on the ids actually
    * gated this way; do not infer it from the `terminal.` id prefix (e.g.
-   * `terminal.quickFind` is global and `terminal.collapse` has no handler).
+   * `terminal.collapse` has no handler at all).
    */
   requiresTerminal?: boolean;
 }
@@ -93,7 +93,6 @@ export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
   'session.refreshPRs': { label: 'Refresh PRs', category: 'review' },
 
   // App
-  'terminal.quickFind': { label: 'Quick Find', category: 'app' },
   'ui.actionMenu': { label: 'Action menu', category: 'app' },
   'ui.openSettings': { label: 'Settings', category: 'app', protected: true },
   'ui.showShortcuts': { label: 'Keyboard shortcuts', category: 'app', protected: true },

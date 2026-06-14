@@ -76,7 +76,6 @@ export function buildCheatsheet(): CheatsheetCategory[] {
     {
       title: 'App',
       rows: [
-        { label: 'Quick Find', combos: [fromId('terminal.quickFind')] },
         { label: 'Action menu', combos: [fromId('ui.actionMenu')] },
         { label: 'Settings', combos: [fromId('ui.openSettings')] },
         {

@@ -294,8 +294,6 @@ describe('ShortcutEditorModal', () => {
     expect(within(row('New session in this workspace')).queryByText('Needs terminal')).toBeNull();
     // No useShortcut handler at all, despite the panes category.
     expect(within(row('Collapse utility terminal')).queryByText('Needs terminal')).toBeNull();
-    // Global despite the 'terminal.' id prefix.
-    expect(within(row('Quick Find')).queryByText('Needs terminal')).toBeNull();
   });
 
   it('shows both Customized and Needs terminal on an overridden gated row', () => {
