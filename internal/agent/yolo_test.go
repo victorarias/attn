@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/victorarias/attn/internal/hooks"
 )
 
 func TestBuildCommand_YoloMapping(t *testing.T) {
@@ -65,17 +67,28 @@ func TestCodexBuildEnvMarksDeveloperInstructionGuidance(t *testing.T) {
 }
 
 func TestClaudeBuildCommand_AppendsWorkspaceContextSystemPrompt(t *testing.T) {
-	cmd := (&Claude{}).BuildCommand(SpawnOpts{
+	opts := SpawnOpts{
 		SessionID:            "sess-1",
 		Executable:           "claude",
 		WorkspaceContextPath: "/tmp/context.md",
-	})
+	}
+	cmd := (&Claude{}).BuildCommand(opts)
 	flagIndex := slices.Index(cmd.Args, "--append-system-prompt")
 	if flagIndex == -1 || flagIndex+1 >= len(cmd.Args) {
 		t.Fatalf("args = %#v, want --append-system-prompt with guidance", cmd.Args)
 	}
-	if !strings.Contains(cmd.Args[flagIndex+1], "/tmp/context.md") {
-		t.Fatalf("system prompt = %q, want workspace context path", cmd.Args[flagIndex+1])
+	// A non-chief workspace agent gets its workspace-context guidance AND the
+	// universal journaling directive composed into one system-prompt value. Pin the
+	// exact composition (not just co-presence) so a dropped separator or a directive
+	// injected as a separate arg is caught.
+	want := hooks.WorkspaceContextGuidance("/tmp/context.md") + "\n\n" + hooks.JournalingDirective()
+	if cmd.Args[flagIndex+1] != want {
+		t.Fatalf("system prompt = %q, want exact guidance+directive composition", cmd.Args[flagIndex+1])
+	}
+	// The same launch sets the suppression marker, so the SessionStart fallback does
+	// not re-emit (and duplicate) the directive on resume/compact.
+	if !slices.Contains((&Claude{}).BuildEnv(opts), "ATTN_WORKSPACE_CONTEXT_GUIDANCE=append_system_prompt") {
+		t.Fatal("non-chief launch must set ATTN_WORKSPACE_CONTEXT_GUIDANCE so the SessionStart fallback is suppressed")
 	}
 }
 
@@ -108,6 +121,11 @@ func TestClaudeBuildCommand_NotebookGuidanceTakesPrecedence(t *testing.T) {
 	if strings.Contains(prompt, "/tmp/context.md") {
 		t.Fatalf("chief launch must not inject workspace-context guidance: %q", prompt)
 	}
+	// The chief's fuller guidance already covers journaling; it must not also carry
+	// the lite directive (which would duplicate/contradict the curator guidance).
+	if strings.Contains(prompt, "notable moments, not routine steps") {
+		t.Fatalf("chief launch must not append the lite journaling directive: %q", prompt)
+	}
 }
 
 func TestClaudeBuildEnvMarksNotebookGuidance(t *testing.T) {
@@ -138,6 +156,35 @@ func TestCodexConfigOverrides_NotebookGuidanceTakesPrecedence(t *testing.T) {
 	}
 	if strings.Contains(joined, "/tmp/context.md") {
 		t.Fatalf("chief launch must not inject workspace-context guidance: %q", joined)
+	}
+	if strings.Contains(joined, "notable moments, not routine steps") {
+		t.Fatalf("chief launch must not append the lite journaling directive: %q", joined)
+	}
+}
+
+// A non-chief Codex launch carries its workspace-context guidance plus the
+// universal journaling directive in a SINGLE developer_instructions override.
+func TestCodexConfigOverrides_NonChiefIncludesJournalingDirective(t *testing.T) {
+	overrides := (&Codex{}).GenerateConfigOverrides(SpawnOpts{
+		SessionID:            "sess-1",
+		WorkspaceContextPath: "/tmp/context.md",
+	})
+	var devInstr []string
+	for _, o := range overrides {
+		if strings.HasPrefix(o, "developer_instructions=") {
+			devInstr = append(devInstr, o)
+		}
+	}
+	// Exactly one developer_instructions entry — guidance and directive must share
+	// it, not arrive as a second entry that the parser would let the first clobber.
+	if len(devInstr) != 1 {
+		t.Fatalf("want exactly one developer_instructions override, got %d: %q", len(devInstr), overrides)
+	}
+	if !strings.Contains(devInstr[0], "/tmp/context.md") {
+		t.Fatalf("developer_instructions should carry workspace-context guidance: %q", devInstr[0])
+	}
+	if !strings.Contains(devInstr[0], "notable moments, not routine steps") {
+		t.Fatalf("developer_instructions should append the journaling directive: %q", devInstr[0])
 	}
 }
 
