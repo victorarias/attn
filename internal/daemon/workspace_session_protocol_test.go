@@ -76,6 +76,28 @@ func TestWorkspaceSessionProtocolLifecycleMatchesAppOrder(t *testing.T) {
 	}
 }
 
+func TestWorkspaceLayoutAddSessionPaneCorrelatesSetupFailure(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	client := newWorkspaceProtocolTestClient()
+	paneID := "pane-requested"
+
+	d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutAddSessionPane,
+		WorkspaceID: "workspace-missing",
+		PaneID:      protocol.Ptr(paneID),
+		SessionID:   "session-requested",
+	})
+
+	expectWorkspaceLayoutActionResult(
+		t,
+		client,
+		protocol.CmdWorkspaceLayoutAddSessionPane,
+		"workspace-missing",
+		paneID,
+		false,
+	)
+}
+
 func TestWorkspaceSessionProtocolShellSpawnsIdleNotWorking(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.ptyBackend = &fakeSpawnBackend{}
