@@ -106,6 +106,17 @@ func (s *store) loadPath(path string) (*Task, error) {
 	return &t, nil
 }
 
+// delete removes a task's record file. A missing file is not an error (the
+// record is already gone). Used by Runner.Remove to forget a task whose subject
+// no longer exists (e.g. a removed workspace), so its record does not leak.
+func (s *store) delete(id string) error {
+	err := os.Remove(taskPath(s.root, id))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
 // list returns every persisted task, newest-updated first. A missing tasks dir is
 // not an error — it means nothing has been enqueued yet.
 func (s *store) list() ([]*Task, error) {

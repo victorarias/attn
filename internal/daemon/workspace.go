@@ -396,7 +396,7 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 	if !removed {
 		return
 	}
-	d.cancelWorkspaceContextJanitor(id)
+	d.forgetWorkspaceContextCompaction(id)
 	d.store.RemoveWorkspace(id)
 	d.pruneTileContentSubscriptionsForLayout(id, nil)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
@@ -429,6 +429,9 @@ func (d *Daemon) loadWorkspacesFromStore() {
 			if !registered &&
 				!d.workspaceHasPendingSpawn(ws.ID) &&
 				!d.workspaceHasSessionlessContent(ws.ID) {
+				// loadWorkspacesFromStore runs during Start() before the compaction
+				// runner is constructed; forgetWorkspaceContextCompaction is nil-safe.
+				d.forgetWorkspaceContextCompaction(ws.ID)
 				d.store.RemoveWorkspace(ws.ID)
 				continue
 			}
@@ -543,7 +546,7 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 		if !removed {
 			return
 		}
-		d.cancelWorkspaceContextJanitor(workspaceID)
+		d.forgetWorkspaceContextCompaction(workspaceID)
 		d.store.RemoveWorkspace(workspaceID)
 		d.pruneTileContentSubscriptionsForLayout(workspaceID, nil)
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{

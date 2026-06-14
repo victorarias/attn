@@ -27,13 +27,10 @@ func shellSingleQuote(value string) string {
 func TestCodexRunHeadlessTaskScopesToolsAndConfiguration(t *testing.T) {
 	executable, logPath := writeHeadlessArgsRecorder(t)
 	_, err := (&Codex{}).RunHeadlessTask(context.Background(), HeadlessTaskRequest{
-		Executable:       executable,
-		Model:            "gpt-test",
-		Prompt:           "compact",
-		WorkDir:          t.TempDir(),
-		MCPServerName:    "attn_context",
-		MCPServerCommand: "/tmp/attn",
-		MCPServerArgs:    []string{"_workspace-context-janitor-mcp", "--source-file", "/tmp/source"},
+		Executable: executable,
+		Model:      "gpt-test",
+		Prompt:     "compact",
+		WorkDir:    t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("RunHeadlessTask error: %v", err)
@@ -49,10 +46,9 @@ func TestCodexRunHeadlessTaskScopesToolsAndConfiguration(t *testing.T) {
 		"--ignore-user-config",
 		"--ignore-rules",
 		"--strict-config",
-		"read-only",
+		"--skip-git-repo-check",
+		"workspace-write",
 		`approval_policy="never"`,
-		"features.shell_tool=false",
-		"features.unified_exec=false",
 		"features.apps=false",
 		"features.hooks=false",
 		"features.plugins=false",
@@ -60,15 +56,25 @@ func TestCodexRunHeadlessTaskScopesToolsAndConfiguration(t *testing.T) {
 		"features.memories=false",
 		"features.multi_agent=false",
 		"features.standalone_web_search=false",
-		"mcp_servers.attn_context.command=\"/tmp/attn\"",
-		"mcp_servers.attn_context.required=true",
-		`mcp_servers.attn_context.enabled_tools=["read_context","replace_context"]`,
-		`mcp_servers.attn_context.default_tools_approval_mode="approve"`,
 		"gpt-test",
 		"compact",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Codex args missing %q:\n%s", want, got)
+		}
+	}
+	// The constrained-MCP read-only sandbox and read_context/replace_context pin
+	// must be gone: native mode gives Codex its own file tools.
+	for _, forbidden := range []string{
+		"read-only",
+		"features.shell_tool=false",
+		"features.unified_exec=false",
+		"mcp_servers.attn_context",
+		"read_context",
+		"replace_context",
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("Codex args unexpectedly contained %q:\n%s", forbidden, got)
 		}
 	}
 }
@@ -84,13 +90,10 @@ func TestClaudeRunHeadlessTaskExcludesNonManagedSettingsWithoutExplicitAuthentic
 	}
 	executable, logPath := writeHeadlessArgsRecorder(t)
 	_, err := (&Claude{}).RunHeadlessTask(context.Background(), HeadlessTaskRequest{
-		Executable:       executable,
-		Model:            "claude-test",
-		Prompt:           "compact",
-		WorkDir:          t.TempDir(),
-		MCPServerName:    "attn_context",
-		MCPServerCommand: "/tmp/attn",
-		MCPServerArgs:    []string{"_workspace-context-janitor-mcp", "--candidate-file", "/tmp/candidate"},
+		Executable: executable,
+		Model:      "claude-test",
+		Prompt:     "compact",
+		WorkDir:    t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("RunHeadlessTask error: %v", err)
@@ -104,13 +107,12 @@ func TestClaudeRunHeadlessTaskExcludesNonManagedSettingsWithoutExplicitAuthentic
 		"--print",
 		"--setting-sources",
 		"--no-session-persistence",
-		"--strict-mcp-config",
 		"--disable-slash-commands",
 		"--no-chrome",
-		"--tools",
-		"mcp__attn_context__read_context,mcp__attn_context__replace_context",
 		"--allowedTools",
-		"mcp__attn_context__read_context,mcp__attn_context__replace_context",
+		"Read,Write,Edit,Grep,Glob",
+		"--permission-mode",
+		"dontAsk",
 		"claude-test",
 		"compact",
 	} {
@@ -121,11 +123,17 @@ func TestClaudeRunHeadlessTaskExcludesNonManagedSettingsWithoutExplicitAuthentic
 	if !strings.Contains(got, "--setting-sources\n\n--model") {
 		t.Fatalf("Claude args did not pass an empty setting source list:\n%s", got)
 	}
-	if strings.Contains(got, "--safe-mode") {
-		t.Fatalf("Claude args unexpectedly contained --safe-mode, which disables explicit MCP servers:\n%s", got)
-	}
-	if strings.Contains(got, "--bare") {
-		t.Fatalf("Claude managed-auth args unexpectedly contained --bare:\n%s", got)
+	// The constrained-MCP pin must be gone in native mode.
+	for _, forbidden := range []string{
+		"--strict-mcp-config",
+		"--mcp-config",
+		"--tools",
+		"mcp__attn_context__read_context,mcp__attn_context__replace_context",
+		"--bare",
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("Claude managed-auth args unexpectedly contained %q:\n%s", forbidden, got)
+		}
 	}
 }
 
@@ -133,13 +141,10 @@ func TestClaudeRunHeadlessTaskUsesBareModeWithExplicitAuthentication(t *testing.
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	executable, logPath := writeHeadlessArgsRecorder(t)
 	_, err := (&Claude{}).RunHeadlessTask(context.Background(), HeadlessTaskRequest{
-		Executable:       executable,
-		Model:            "claude-test",
-		Prompt:           "compact",
-		WorkDir:          t.TempDir(),
-		MCPServerName:    "attn_context",
-		MCPServerCommand: "/tmp/attn",
-		MCPServerArgs:    []string{"_workspace-context-janitor-mcp"},
+		Executable: executable,
+		Model:      "claude-test",
+		Prompt:     "compact",
+		WorkDir:    t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("RunHeadlessTask error: %v", err)

@@ -263,17 +263,22 @@ type ConfigOverrideProvider interface {
 	GenerateConfigOverrides(opts SpawnOpts) []string
 }
 
-// HeadlessTaskRequest describes a daemon-owned non-interactive task. The
-// provider must expose only the supplied MCP server and must not create an
-// interactive attn session.
+// HeadlessTaskRequest describes a daemon-owned non-interactive task. The task
+// must not create an interactive attn session. The agent runs in native-tools
+// mode: it gets its OWN file tools and a writable working dir (WorkDir). The
+// daemon writes inputs into WorkDir and reads the agent's output file back;
+// validation + commit stay daemon-owned.
 type HeadlessTaskRequest struct {
-	Executable       string
-	Model            string
-	Prompt           string
-	WorkDir          string
-	MCPServerName    string
-	MCPServerCommand string
-	MCPServerArgs    []string
+	Executable string
+	Model      string
+	Prompt     string
+	WorkDir    string
+
+	// AllowedTools optionally overrides the default native tool set
+	// (Claude: Read,Write,Edit,Grep,Glob). Empty => provider default. (Codex
+	// ignores this field; its native tooling comes from the workspace-write
+	// sandbox defaults, not a CLI list.)
+	AllowedTools []string
 }
 
 type HeadlessTaskResult struct {

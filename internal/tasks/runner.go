@@ -443,6 +443,36 @@ func (r *Runner) Cancel(id string) {
 	<-done
 }
 
+// Remove forgets a task entirely: it cancels the run if that task is currently
+// executing (blocking until the goroutine exits, honoring the commit fence) and
+// then deletes the record file. It is the "the subject is gone" operation — e.g.
+// a workspace was removed, so its compact_context task should leave nothing
+// behind. Cancel alone is a no-op for a queued task and never deletes the
+// record, so without Remove a removed subject would leak its record on disk
+// forever. Safe (no-op) on a disabled runner.
+//
+// The delete runs under ioMu, serialized with every other record mutation. There
+// is a narrow, data-safe window: between Cancel returning and the delete, the
+// worker may claim a still-queued record and begin running it; the delete then
+// removes the file mid-run and the run's finish() reloads, finds the record gone,
+// and discards its result (a no-op). The executor's own durable write (if any) is
+// guarded elsewhere by the store's optimistic-revision check, so a stale result
+// cannot land. The window is tiny in practice (compaction is debounced minutes).
+func (r *Runner) Remove(id string) {
+	if r.disabled {
+		return
+	}
+	r.Cancel(id)
+	r.ioMu.Lock()
+	err := r.store.delete(id)
+	r.ioMu.Unlock()
+	if err != nil {
+		r.log("tasks: remove %s: %v", id, err)
+		return
+	}
+	r.notifyChange()
+}
+
 // List returns every persisted task, newest-updated first. Cheap os.ReadDir; safe
 // (returns nil) on a disabled runner.
 func (r *Runner) List() ([]*Task, error) {

@@ -33,6 +33,7 @@ import (
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
+	"github.com/victorarias/attn/internal/tasks"
 	"github.com/victorarias/attn/internal/transcript"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
@@ -179,19 +180,29 @@ type Daemon struct {
 
 	workspaceContextCheckoutMu sync.Mutex
 
-	workspaceContextJanitorMu              sync.Mutex
-	workspaceContextJanitorTimers          map[string]*workspaceContextJanitorTimer
-	workspaceContextJanitorRunning         bool
-	workspaceContextJanitorActiveWorkspace string
-	workspaceContextJanitorCancel          context.CancelFunc
-	workspaceContextJanitorDone            chan struct{}
-	workspaceContextJanitorCanceled        bool
-	workspaceContextJanitorCommitting      bool
-	workspaceContextJanitorExecutor        workspaceContextJanitorExecutor
-	workspaceContextJanitorThreshold       int
-	workspaceContextJanitorDebounce        time.Duration
-	workspaceContextJanitorTimeout         time.Duration
-	workspaceContextBeforeJanitorApply     func()
+	// compactRunner is the durable task runner that owns the workspace-context
+	// compaction janitor (kind "compact_context"). It replaces the bespoke
+	// time.AfterFunc scheduling + single-flight/cancel/commit-fence guards. New
+	// always returns a non-nil value (disabled when no notebook root resolves), so
+	// the Cancel/Enqueue callsites call it unconditionally.
+	compactRunner *tasks.Runner
+	// The *Threshold/*Debounce/*Timeout fields remain the test-override knobs
+	// feeding the size gate, the Enqueue debounce, and RegisterWithTimeout.
+	workspaceContextJanitorThreshold int
+	workspaceContextJanitorDebounce  time.Duration
+	workspaceContextJanitorTimeout   time.Duration
+	// workspaceContextBeforeJanitorApply is the apply-injection test hook, fired
+	// inside the executor immediately before the CommitGuard fence + Apply.
+	workspaceContextBeforeJanitorApply func()
+	// workspaceContextCompactionExecution, when set, replaces the agentic
+	// executeWorkspaceContextJanitor spawn with a canned execution. Tests use it
+	// to return a fixed compacted candidate without spawning a real LLM; the
+	// validate + commit-under-CommitGuard path stays real.
+	workspaceContextCompactionExecution func(
+		ctx context.Context,
+		config workspaceContextJanitorConfig,
+		canonical *protocol.WorkspaceContext,
+	) (workspaceContextJanitorExecution, error)
 
 	// Dreaming scheduler (notebook consolidation janitor). dreamMu guards the
 	// single-flight dreamRunning guard; dreamSchedulerInterval overrides the tick
@@ -447,6 +458,10 @@ func NewForTesting(socketPath string) *Daemon {
 		plugins:          newPluginRegistry(),
 		pluginProcesses:  newPluginProcessRegistry(),
 		workspaces:       newWorkspaceRegistry(),
+		// A disabled runner (no root) keeps the unconditional Cancel/Enqueue
+		// callsites nil-safe in tests; tests that exercise a live compaction
+		// override this with an enabled runner (see newTestCompactRunner).
+		compactRunner: tasks.New(tasks.Options{}),
 	}
 }
 
@@ -486,6 +501,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		plugins:          newPluginRegistry(),
 		pluginProcesses:  newPluginProcessRegistry(),
 		workspaces:       newWorkspaceRegistry(),
+		compactRunner:    tasks.New(tasks.Options{}),
 	}
 }
 
@@ -679,6 +695,9 @@ func (d *Daemon) Start() error {
 	// Start the dreaming consolidation scheduler (clears orphaned run locks, then
 	// runs the nightly harvest when due). Off unless notebook.dreaming.enabled.
 	go d.startDreamingScheduler(d.done)
+
+	// Construct + start the durable compaction runner (kind "compact_context").
+	d.startCompactRunner()
 
 	d.signalStarted()
 	startSucceeded = true
@@ -1186,7 +1205,9 @@ func (d *Daemon) Stop() {
 	d.log("daemon stopping")
 	close(d.done)
 	d.stopNotebookWatcher()
-	d.stopWorkspaceContextJanitor()
+	if d.compactRunner != nil {
+		d.compactRunner.Stop()
+	}
 	if d.hubManager != nil {
 		d.hubManager.Stop()
 	}

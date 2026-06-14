@@ -14,6 +14,7 @@ import (
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/tasks"
 )
 
 const (
@@ -33,16 +34,6 @@ type workspaceContextJanitorExecution struct {
 	ResolvedExecutable string
 	Diagnostics        string
 }
-
-type workspaceContextJanitorTimer struct {
-	timer *time.Timer
-}
-
-type workspaceContextJanitorExecutor func(
-	ctx context.Context,
-	config workspaceContextJanitorConfig,
-	canonical *protocol.WorkspaceContext,
-) (workspaceContextJanitorExecution, error)
 
 func parseWorkspaceContextJanitorConfig(raw string) (workspaceContextJanitorConfig, error) {
 	raw = strings.TrimSpace(raw)
@@ -110,7 +101,52 @@ func (d *Daemon) workspaceContextJanitorConfig() (workspaceContextJanitorConfig,
 	return parseWorkspaceContextJanitorConfig(d.store.GetSetting(SettingWorkspaceContextJanitor))
 }
 
-func (d *Daemon) scheduleWorkspaceContextJanitor(canonical *protocol.WorkspaceContext) {
+// compactContextKind is the runner task kind for workspace-context compaction.
+const compactContextKind = "compact_context"
+
+// forgetWorkspaceContextCompaction drops any in-flight or pending compaction for a
+// workspace AND deletes its task record. It is the single nil-safe entry point:
+// the runner is constructed late in Start() (startCompactRunner, after the
+// websocket server is already accepting connections), so every teardown callsite —
+// including the ones reachable over the websocket before the runner exists — must
+// route through here rather than dereferencing d.compactRunner directly. Remove
+// (not Cancel) is used so a removed workspace leaves no orphan compact_context
+// record behind: Cancel alone is a no-op for a queued task and never deletes the
+// record.
+func (d *Daemon) forgetWorkspaceContextCompaction(workspaceID string) {
+	if d.compactRunner == nil {
+		return
+	}
+	d.compactRunner.Remove(tasks.TaskID(compactContextKind, workspaceID))
+}
+
+// startCompactRunner constructs and starts the durable compaction runner. The
+// runner root is the notebook root; when it cannot be resolved the runner is
+// disabled and the daemon degrades to the inline fallback (see
+// enqueueWorkspaceContextCompaction). New always returns a non-nil value, so the
+// Cancel/Enqueue callsites can call d.compactRunner unconditionally.
+func (d *Daemon) startCompactRunner() {
+	root, _ := d.notebookRoot()
+	d.compactRunner = tasks.New(tasks.Options{Root: root, Log: d.logf})
+	if !d.compactRunner.Disabled() {
+		if err := d.compactRunner.RegisterWithTimeout(
+			compactContextKind,
+			d.compactContextExecutor,
+			d.workspaceContextJanitorTimeoutDuration(),
+		); err != nil {
+			d.logf("workspace context janitor: register compact_context: %v", err)
+		}
+	}
+	_ = d.compactRunner.Start()
+}
+
+// enqueueWorkspaceContextCompaction is THE trigger callsite. It carries the
+// size-threshold gate, the non-empty-workspaceID guard, and the loaded-config
+// guard that used to live in scheduleWorkspaceContextJanitor. When the runner is
+// enabled it coalesces a debounced compaction onto the per-workspace task;
+// otherwise (no notebook root) it runs the compaction inline/synchronously so
+// compaction still happens.
+func (d *Daemon) enqueueWorkspaceContextCompaction(canonical *protocol.WorkspaceContext) {
 	if canonical == nil || strings.TrimSpace(canonical.WorkspaceID) == "" {
 		return
 	}
@@ -122,80 +158,91 @@ func (d *Daemon) scheduleWorkspaceContextJanitor(canonical *protocol.WorkspaceCo
 	if config.Agent == "" {
 		return
 	}
-	threshold := d.workspaceContextJanitorSizeThreshold()
-
-	d.workspaceContextJanitorMu.Lock()
-	defer d.workspaceContextJanitorMu.Unlock()
-	if d.workspaceContextJanitorTimers == nil {
-		d.workspaceContextJanitorTimers = make(map[string]*workspaceContextJanitorTimer)
-	}
-	if scheduled := d.workspaceContextJanitorTimers[canonical.WorkspaceID]; scheduled != nil {
-		scheduled.timer.Stop()
-		delete(d.workspaceContextJanitorTimers, canonical.WorkspaceID)
-	}
-	if len([]byte(canonical.Content)) <= threshold {
-		return
-	}
-	workspaceID := canonical.WorkspaceID
-	scheduled := &workspaceContextJanitorTimer{}
-	scheduled.timer = time.AfterFunc(
-		d.workspaceContextJanitorDebounceDuration(),
-		func() { d.runScheduledWorkspaceContextJanitor(workspaceID, scheduled) },
-	)
-	d.workspaceContextJanitorTimers[workspaceID] = scheduled
-}
-
-func (d *Daemon) runScheduledWorkspaceContextJanitor(
-	workspaceID string,
-	scheduled *workspaceContextJanitorTimer,
-) {
-	d.workspaceContextJanitorMu.Lock()
-	if d.workspaceContextJanitorTimers[workspaceID] != scheduled {
-		d.workspaceContextJanitorMu.Unlock()
-		return
-	}
-	delete(d.workspaceContextJanitorTimers, workspaceID)
-	d.workspaceContextJanitorMu.Unlock()
-
-	canonical, err := d.store.GetWorkspaceContext(workspaceID)
-	if err != nil {
-		d.logf("workspace context janitor: load %s: %v", workspaceID, err)
-		return
-	}
 	if len([]byte(canonical.Content)) <= d.workspaceContextJanitorSizeThreshold() {
 		return
 	}
-	if _, err := d.runWorkspaceContextJanitor(context.Background(), canonical); err != nil {
-		d.logf("workspace context janitor: compact %s: %v", workspaceID, err)
+	if d.compactRunner == nil || d.compactRunner.Disabled() {
+		// Inline fallback: no durable queue, no debounce, no retry. Compaction
+		// still happens, synchronously, on the trigger.
+		// runWorkspaceContextCompactionInline applies the per-run timeout.
+		if _, err := d.runWorkspaceContextCompactionInline(context.Background(), config, canonical); err != nil {
+			d.logf("workspace context janitor: inline compact %s: %v", canonical.WorkspaceID, err)
+		}
+		return
+	}
+	if _, err := d.compactRunner.Enqueue(compactContextKind, canonical.WorkspaceID, tasks.EnqueueOptions{
+		Debounce: d.workspaceContextJanitorDebounceDuration(),
+	}); err != nil {
+		d.logf("workspace context janitor: enqueue %s: %v", canonical.WorkspaceID, err)
 	}
 }
 
-func (d *Daemon) runWorkspaceContextJanitor(
-	parent context.Context,
+// compactContextExecutor is the runner-registered ExecutorFunc for
+// compact_context. The runner supplies the timeout context and the per-run
+// CommitGuard; this body loads the current context, re-checks the size threshold
+// (the doc may have shrunk during the debounce window), runs the agentic
+// compaction, validates, and commits under the guard.
+func (d *Daemon) compactContextExecutor(ctx context.Context, task *tasks.Task) error {
+	workspaceID := task.Subject
+	config, err := d.workspaceContextJanitorConfig()
+	if err != nil {
+		return err
+	}
+	if config.Agent == "" {
+		return errors.New("workspace context janitor is disabled")
+	}
+	canonical, err := d.store.GetWorkspaceContext(workspaceID)
+	if err != nil {
+		return err
+	}
+	// Re-check the size gate after the debounce: a doc edited down below the
+	// threshold should not burn an LLM pass. No-op success.
+	if len([]byte(canonical.Content)) <= d.workspaceContextJanitorSizeThreshold() {
+		return nil
+	}
+	_, err = d.applyWorkspaceContextCompaction(ctx, config, canonical, task.CommitGuard)
+	return err
+}
+
+// runWorkspaceContextCompactionInline runs execute+validate+apply synchronously
+// without the durable queue. It is used by the disabled-runner fallback and by
+// the manual `attn workspace context compact` command, which must return a
+// result synchronously. It uses a throwaway CommitGuard (no concurrent Cancel
+// fences an inline run, but the apply path is shared so it must take a guard).
+//
+// It applies the same per-run timeout the runner-driven path gets from
+// RegisterWithTimeout, so a hung/runaway agent cannot block an inline run (the
+// disabled-runner fallback) or the synchronous manual-command IPC response
+// indefinitely. This is the SOLE timeout boundary for both inline callers.
+func (d *Daemon) runWorkspaceContextCompactionInline(
+	ctx context.Context,
+	config workspaceContextJanitorConfig,
 	canonical *protocol.WorkspaceContext,
+) (*protocol.WorkspaceContextMaintenanceResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, d.workspaceContextJanitorTimeoutDuration())
+	defer cancel()
+	return d.applyWorkspaceContextCompaction(ctx, config, canonical, &tasks.CommitGuard{})
+}
+
+// applyWorkspaceContextCompaction is the single execute+validate+apply helper
+// shared by the runner executor, the inline fallback, and the manual command.
+// It runs the agentic compaction, validates the candidate, then commits under
+// the supplied CommitGuard so a concurrent Cancel either fences the run cleanly
+// before the durable write or waits for it to finish untorn.
+func (d *Daemon) applyWorkspaceContextCompaction(
+	ctx context.Context,
+	config workspaceContextJanitorConfig,
+	canonical *protocol.WorkspaceContext,
+	guard *tasks.CommitGuard,
 ) (*protocol.WorkspaceContextMaintenanceResult, error) {
 	if canonical == nil || strings.TrimSpace(canonical.WorkspaceID) == "" {
 		return nil, errors.New("workspace context is required")
 	}
-	config, err := d.workspaceContextJanitorConfig()
-	if err != nil {
-		return nil, err
+	execute := d.executeWorkspaceContextJanitor
+	if d.workspaceContextCompactionExecution != nil {
+		execute = d.workspaceContextCompactionExecution
 	}
-	if config.Agent == "" {
-		return nil, errors.New("workspace context janitor is disabled")
-	}
-
-	ctx, err := d.beginWorkspaceContextJanitorRun(parent, canonical.WorkspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer d.finishWorkspaceContextJanitorRun(canonical.WorkspaceID)
-
-	executor := d.workspaceContextJanitorExecutor
-	if executor == nil {
-		executor = d.executeWorkspaceContextJanitor
-	}
-	execution, err := executor(ctx, config, canonical)
+	execution, err := execute(ctx, config, canonical)
 	if err != nil {
 		return nil, err
 	}
@@ -203,9 +250,15 @@ func (d *Daemon) runWorkspaceContextJanitor(
 	if err := validateWorkspaceContextJanitorCandidate(canonical.Content, candidate); err != nil {
 		return nil, err
 	}
-	if err := d.beginWorkspaceContextJanitorCommit(canonical.WorkspaceID, ctx); err != nil {
-		return nil, err
+
+	// Enter the commit fence BEFORE the test hook. Once admitted, a concurrent
+	// Cancel must wait for the durable write to finish untorn; the test hook then
+	// blocks inside the admitted commit so a test can prove the fence holds. If a
+	// Cancel already fired before Enter, skip the durable write entirely.
+	if !guard.Enter() {
+		return nil, context.Canceled
 	}
+	defer guard.Leave()
 	if d.workspaceContextBeforeJanitorApply != nil {
 		d.workspaceContextBeforeJanitorApply()
 	}
@@ -248,105 +301,6 @@ func (d *Daemon) runWorkspaceContextJanitor(
 	return result, nil
 }
 
-func (d *Daemon) beginWorkspaceContextJanitorRun(
-	parent context.Context,
-	workspaceID string,
-) (context.Context, error) {
-	d.workspaceContextJanitorMu.Lock()
-	defer d.workspaceContextJanitorMu.Unlock()
-	if d.workspaceContextJanitorRunning {
-		return nil, errors.New("workspace context janitor is already running")
-	}
-	if parent == nil {
-		parent = context.Background()
-	}
-	ctx, cancel := context.WithTimeout(parent, d.workspaceContextJanitorTimeoutDuration())
-	d.workspaceContextJanitorRunning = true
-	d.workspaceContextJanitorActiveWorkspace = workspaceID
-	d.workspaceContextJanitorCancel = cancel
-	d.workspaceContextJanitorDone = make(chan struct{})
-	d.workspaceContextJanitorCanceled = false
-	d.workspaceContextJanitorCommitting = false
-	return ctx, nil
-}
-
-func (d *Daemon) beginWorkspaceContextJanitorCommit(workspaceID string, ctx context.Context) error {
-	d.workspaceContextJanitorMu.Lock()
-	defer d.workspaceContextJanitorMu.Unlock()
-	if !d.workspaceContextJanitorRunning || d.workspaceContextJanitorActiveWorkspace != workspaceID {
-		return errors.New("workspace context janitor run is no longer active")
-	}
-	if d.workspaceContextJanitorCanceled {
-		return context.Canceled
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	d.workspaceContextJanitorCommitting = true
-	return nil
-}
-
-func (d *Daemon) finishWorkspaceContextJanitorRun(workspaceID string) {
-	d.workspaceContextJanitorMu.Lock()
-	defer d.workspaceContextJanitorMu.Unlock()
-	if d.workspaceContextJanitorActiveWorkspace != workspaceID {
-		return
-	}
-	if d.workspaceContextJanitorCancel != nil {
-		d.workspaceContextJanitorCancel()
-	}
-	done := d.workspaceContextJanitorDone
-	d.workspaceContextJanitorRunning = false
-	d.workspaceContextJanitorActiveWorkspace = ""
-	d.workspaceContextJanitorCancel = nil
-	d.workspaceContextJanitorDone = nil
-	d.workspaceContextJanitorCanceled = false
-	d.workspaceContextJanitorCommitting = false
-	if done != nil {
-		close(done)
-	}
-}
-
-func (d *Daemon) cancelWorkspaceContextJanitor(workspaceID string) {
-	d.workspaceContextJanitorMu.Lock()
-	if scheduled := d.workspaceContextJanitorTimers[workspaceID]; scheduled != nil {
-		scheduled.timer.Stop()
-		delete(d.workspaceContextJanitorTimers, workspaceID)
-	}
-	var done chan struct{}
-	if d.workspaceContextJanitorActiveWorkspace == workspaceID && d.workspaceContextJanitorCancel != nil {
-		if !d.workspaceContextJanitorCommitting {
-			d.workspaceContextJanitorCanceled = true
-			d.workspaceContextJanitorCancel()
-		}
-		done = d.workspaceContextJanitorDone
-	}
-	d.workspaceContextJanitorMu.Unlock()
-	if done != nil {
-		<-done
-	}
-}
-
-func (d *Daemon) stopWorkspaceContextJanitor() {
-	d.workspaceContextJanitorMu.Lock()
-	for workspaceID, scheduled := range d.workspaceContextJanitorTimers {
-		scheduled.timer.Stop()
-		delete(d.workspaceContextJanitorTimers, workspaceID)
-	}
-	var done chan struct{}
-	if d.workspaceContextJanitorCancel != nil {
-		if !d.workspaceContextJanitorCommitting {
-			d.workspaceContextJanitorCanceled = true
-			d.workspaceContextJanitorCancel()
-		}
-		done = d.workspaceContextJanitorDone
-	}
-	d.workspaceContextJanitorMu.Unlock()
-	if done != nil {
-		<-done
-	}
-}
-
 func (d *Daemon) workspaceContextJanitorSizeThreshold() int {
 	if d.workspaceContextJanitorThreshold > 0 {
 		return d.workspaceContextJanitorThreshold
@@ -387,10 +341,6 @@ func (d *Daemon) executeWorkspaceContextJanitor(
 	if err != nil {
 		return workspaceContextJanitorExecution{}, fmt.Errorf("resolve %s executable: %w", config.Agent, err)
 	}
-	attnExecutable, err := os.Executable()
-	if err != nil {
-		return workspaceContextJanitorExecution{}, fmt.Errorf("resolve attn executable: %w", err)
-	}
 	tempDir, err := os.MkdirTemp("", "attn-context-janitor-*")
 	if err != nil {
 		return workspaceContextJanitorExecution{}, fmt.Errorf("create janitor workspace: %w", err)
@@ -402,18 +352,14 @@ func (d *Daemon) executeWorkspaceContextJanitor(
 	if err := os.WriteFile(sourcePath, []byte(canonical.Content), 0o600); err != nil {
 		return workspaceContextJanitorExecution{}, fmt.Errorf("write janitor source: %w", err)
 	}
+	// Native-tools mode: the agent gets its own file tools and a writable scratch
+	// dir (WorkDir). It reads the source and writes the candidate itself; the
+	// daemon reads the candidate back and owns validation + commit.
 	request := agentdriver.HeadlessTaskRequest{
-		Executable:       executablePath,
-		Model:            config.Model,
-		Prompt:           workspaceContextJanitorPrompt,
-		WorkDir:          tempDir,
-		MCPServerName:    "attn_context",
-		MCPServerCommand: attnExecutable,
-		MCPServerArgs: []string{
-			"_workspace-context-janitor-mcp",
-			"--source-file", sourcePath,
-			"--candidate-file", candidatePath,
-		},
+		Executable: executablePath,
+		Model:      config.Model,
+		Prompt:     fmt.Sprintf(workspaceContextJanitorPrompt, sourcePath, candidatePath),
+		WorkDir:    tempDir,
 	}
 	result, err := provider.RunHeadlessTask(ctx, request)
 	if err != nil {
@@ -438,9 +384,13 @@ func (d *Daemon) executeWorkspaceContextJanitor(
 	}, nil
 }
 
-const workspaceContextJanitorPrompt = `Compact the supplied workspace context without changing its meaning.
+// workspaceContextJanitorPrompt is a format string: the two %s are the absolute
+// source path (to read) and candidate path (to write). Absolute paths are robust
+// regardless of how the agent resolves cwd, and both providers' file tools accept
+// absolute paths inside the writable workspace.
+const workspaceContextJanitorPrompt = `Compact the workspace context file without changing its meaning.
 
-Use read_context first. Then call replace_context exactly once with the complete result.
+Read the file at %s. Write the complete compacted result to %s. Do not modify any other file. Write the candidate file exactly once with the full result; do not leave it empty.
 
 Preserve:
 - Area and all current truths
@@ -450,7 +400,7 @@ Preserve:
 
 You may shorten prose, deduplicate facts, and merge overlapping Threads. Remove stale or superseded material only when the document itself establishes that it is stale or superseded.
 
-Do not add facts, dates, chronology, causality, ownership, thread structure, or conclusions. If uncertain, preserve the content. A byte-identical replacement is valid.
+Do not add facts, dates, chronology, causality, ownership, thread structure, or conclusions. If uncertain, preserve the content. A byte-identical copy is valid.
 
 The result must contain exactly one "# Workspace Context" heading, a non-empty "## Area", and a non-empty "## Current Picture".`
 
@@ -571,17 +521,20 @@ func (d *Daemon) compactWorkspaceContextForSession(
 	if strings.TrimSpace(canonical.Content) == "" {
 		return nil, errors.New("workspace context is empty")
 	}
-	d.cancelScheduledWorkspaceContextJanitor(session.WorkspaceID)
-	return d.runWorkspaceContextJanitor(ctx, canonical)
-}
-
-func (d *Daemon) cancelScheduledWorkspaceContextJanitor(workspaceID string) {
-	d.workspaceContextJanitorMu.Lock()
-	defer d.workspaceContextJanitorMu.Unlock()
-	if scheduled := d.workspaceContextJanitorTimers[workspaceID]; scheduled != nil {
-		scheduled.timer.Stop()
-		delete(d.workspaceContextJanitorTimers, workspaceID)
+	config, err := d.workspaceContextJanitorConfig()
+	if err != nil {
+		return nil, err
 	}
+	if config.Agent == "" {
+		return nil, errors.New("workspace context janitor is disabled")
+	}
+	// Drop any pending/in-flight debounced run so the manual command is
+	// authoritative, then run the inline execute+validate+apply path synchronously
+	// so the command can return a result to the user. Remove cancels any in-flight
+	// run (blocking until it exits) and deletes a pending record, so a queued run
+	// cannot fire again after the manual one and double-compact.
+	d.forgetWorkspaceContextCompaction(session.WorkspaceID)
+	return d.runWorkspaceContextCompactionInline(ctx, config, canonical)
 }
 
 func (d *Daemon) rollbackWorkspaceContextForSession(

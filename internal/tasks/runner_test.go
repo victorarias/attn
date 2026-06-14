@@ -1274,3 +1274,91 @@ func TestSecondRunnerOnSameRootIsRefused(t *testing.T) {
 	}
 	third.Stop()
 }
+
+// TestRemoveDeletesQueuedRecord proves Remove deletes a queued task's record (the
+// orphan-leak case: Cancel alone is a no-op for a queued task and never deletes
+// the record). The worker is never started, so the task stays queued.
+func TestRemoveDeletesQueuedRecord(t *testing.T) {
+	clock := newFakeClock()
+	r := testRunner(t, clock)
+	if err := r.Register("k", func(context.Context, *Task) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Enqueue("k", "ws-1", EnqueueOptions{Debounce: time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	id := TaskID("k", "ws-1")
+	if got, _ := r.Get(id); got == nil {
+		t.Fatal("precondition: queued record should exist before Remove")
+	}
+
+	r.Remove(id)
+
+	got, err := r.Get(id)
+	if err != nil {
+		t.Fatalf("Get after Remove: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("Remove left a queued record behind: %+v", got)
+	}
+}
+
+// TestRemoveCancelsRunningThenDeletes proves Remove of a running task blocks until
+// the executor goroutine exits (it wraps Cancel) and then deletes the record.
+func TestRemoveCancelsRunningThenDeletes(t *testing.T) {
+	clock := newFakeClock()
+	r := testRunner(t, clock)
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var exited int32
+
+	if err := r.Register("blocking", func(ctx context.Context, _ *Task) error {
+		close(entered)
+		<-release
+		atomic.StoreInt32(&exited, 1)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer r.Stop()
+
+	if _, err := r.Enqueue("blocking", "ws-1", EnqueueOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	<-entered // running and parked
+
+	id := TaskID("blocking", "ws-1")
+	removeReturned := make(chan struct{})
+	go func() {
+		r.Remove(id)
+		close(removeReturned)
+	}()
+
+	select {
+	case <-removeReturned:
+		t.Fatal("Remove returned before the running executor exited")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-removeReturned:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Remove did not return after the executor exited")
+	}
+	if atomic.LoadInt32(&exited) != 1 {
+		t.Fatal("Remove returned but executor had not exited")
+	}
+
+	got, err := r.Get(id)
+	if err != nil {
+		t.Fatalf("Get after Remove: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("Remove left the record behind after cancelling the run: %+v", got)
+	}
+}

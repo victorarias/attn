@@ -22,7 +22,6 @@ import (
 	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
-	"github.com/victorarias/attn/internal/contextjanitor"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/daemonctl"
 	"github.com/victorarias/attn/internal/hooks"
@@ -157,11 +156,6 @@ func applyLegacyBuildInfoOverrides() {
 }
 
 func main() {
-	if len(os.Args) >= 2 && os.Args[1] == "_workspace-context-janitor-mcp" {
-		runWorkspaceContextJanitorMCP(os.Args[2:])
-		return
-	}
-
 	if isProtocolVersionCommand(os.Args) {
 		runProtocolVersion()
 		return
@@ -260,28 +254,6 @@ func main() {
 			writeHelp(os.Stderr)
 			os.Exit(1)
 		}
-	}
-}
-
-func runWorkspaceContextJanitorMCP(args []string) {
-	fs := flag.NewFlagSet("_workspace-context-janitor-mcp", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	sourcePath := fs.String("source-file", "", "captured context file")
-	candidatePath := fs.String("candidate-file", "", "candidate output file")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 ||
-		strings.TrimSpace(*sourcePath) == "" || strings.TrimSpace(*candidatePath) == "" {
-		fmt.Fprintln(os.Stderr, "invalid workspace context janitor MCP arguments")
-		os.Exit(2)
-	}
-	if err := contextjanitor.ServeToolServer(
-		context.Background(),
-		*sourcePath,
-		*candidatePath,
-		os.Stdin,
-		os.Stdout,
-	); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
 	}
 }
 

@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -122,41 +121,37 @@ func (c *Claude) BuildEnv(opts SpawnOpts) []string {
 	return env
 }
 
+// claudeNativeDefaultTools is the file-tool allow-list used when a native-tools
+// headless task does not specify AllowedTools. Bash is intentionally omitted:
+// the janitor only needs to read/write/edit files, and Grep/Glob cover
+// navigation, so the surface stays minimal.
+var claudeNativeDefaultTools = []string{"Read", "Write", "Edit", "Grep", "Glob"}
+
 func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest) (HeadlessTaskResult, error) {
-	serverName := strings.TrimSpace(request.MCPServerName)
-	if serverName == "" {
-		serverName = "attn_context"
+	return runHeadlessCommand(ctx, request.Executable, claudeHeadlessArgs(request), request.WorkDir, "claude")
+}
+
+// claudeHeadlessArgs builds the native-tools arg set: the agent gets its own
+// file tools and writes into cmd.Dir (the scratch WorkDir). Only the allow-list
+// and permission mode let it read/write its cwd unprompted.
+func claudeHeadlessArgs(request HeadlessTaskRequest) []string {
+	tools := request.AllowedTools
+	if len(tools) == 0 {
+		tools = claudeNativeDefaultTools
 	}
-	config, err := json.Marshal(map[string]any{
-		"mcpServers": map[string]any{
-			serverName: map[string]any{
-				"type":    "stdio",
-				"command": request.MCPServerCommand,
-				"args":    request.MCPServerArgs,
-			},
-		},
-	})
-	if err != nil {
-		return HeadlessTaskResult{}, fmt.Errorf("encode MCP config: %w", err)
-	}
-	toolPrefix := "mcp__" + serverName + "__"
-	tools := toolPrefix + "read_context," + toolPrefix + "replace_context"
 	args := []string{"--print"}
 	args = append(args, claudeHeadlessIsolationArgs()...)
 	args = append(args,
 		"--model", strings.TrimSpace(request.Model),
 		"--no-session-persistence",
-		"--strict-mcp-config",
-		"--mcp-config", string(config),
 		"--disable-slash-commands",
 		"--no-chrome",
-		"--tools", tools,
-		"--allowedTools", tools,
+		"--allowedTools", strings.Join(tools, ","),
 		"--permission-mode", "dontAsk",
 		"--output-format", "json",
 		request.Prompt,
 	)
-	return runHeadlessCommand(ctx, request.Executable, args, request.WorkDir, "claude")
+	return args
 }
 
 func (c *Claude) HeadlessTaskAvailability() (bool, string) {

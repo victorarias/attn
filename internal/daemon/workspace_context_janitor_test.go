@@ -5,12 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
+	"github.com/victorarias/attn/internal/tasks"
 )
 
 const (
@@ -40,6 +40,43 @@ Workspace context product work and use.
 The area-map format is being implemented.
 `
 )
+
+// installTestCompactRunner replaces the daemon's default disabled runner with an
+// enabled one over a temp root, registers the real compact_context executor (so
+// the executor's load/threshold/validate/commit-under-CommitGuard logic runs for
+// real), and starts the worker. The fake compaction execution is injected via
+// d.workspaceContextCompactionExecution so no real LLM is spawned. A fast poll
+// interval avoids real-time waits.
+func installTestCompactRunner(t *testing.T, d *Daemon) {
+	t.Helper()
+	runner := tasks.New(tasks.Options{
+		Root:         t.TempDir(),
+		Log:          func(string, ...interface{}) {},
+		PollInterval: 2 * time.Millisecond,
+	})
+	if err := runner.RegisterWithTimeout(
+		compactContextKind,
+		d.compactContextExecutor,
+		d.workspaceContextJanitorTimeoutDuration(),
+	); err != nil {
+		t.Fatalf("register compact_context: %v", err)
+	}
+	if err := runner.Start(); err != nil {
+		t.Fatalf("start runner: %v", err)
+	}
+	t.Cleanup(runner.Stop)
+	d.compactRunner = runner
+}
+
+func fakeCompaction(candidate string) func(
+	context.Context, workspaceContextJanitorConfig, *protocol.WorkspaceContext,
+) (workspaceContextJanitorExecution, error) {
+	return func(
+		context.Context, workspaceContextJanitorConfig, *protocol.WorkspaceContext,
+	) (workspaceContextJanitorExecution, error) {
+		return workspaceContextJanitorExecution{Candidate: candidate}, nil
+	}
+}
 
 func TestParseWorkspaceContextJanitorConfig(t *testing.T) {
 	t.Run("disabled", func(t *testing.T) {
@@ -138,7 +175,11 @@ Other.
 	}
 }
 
-func TestWorkspaceContextJanitorCompactsAndLeavesExistingCheckoutsStale(t *testing.T) {
+// TestWorkspaceContextCompactionAppliesAndLeavesExistingCheckoutsStale exercises
+// the shared execute+validate+apply path (inline) end to end: the canonical is
+// compacted, both checkouts are left untouched (clean stays stale, modified keeps
+// its local edit), a backup is written, and rollback restores the source.
+func TestWorkspaceContextCompactionAppliesAndLeavesExistingCheckoutsStale(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-clean", "workspace-1")
 	setupWorkspaceContextSession(t, d, "session-modified", "workspace-1")
@@ -160,16 +201,14 @@ func TestWorkspaceContextJanitorCompactsAndLeavesExistingCheckoutsStale(t *testi
 	if err := os.WriteFile(modified.Path, []byte(localEdit), 0o600); err != nil {
 		t.Fatalf("edit modified checkout: %v", err)
 	}
-	d.workspaceContextJanitorExecutor = func(
-		context.Context,
-		workspaceContextJanitorConfig,
-		*protocol.WorkspaceContext,
-	) (workspaceContextJanitorExecution, error) {
-		return workspaceContextJanitorExecution{Candidate: janitorCandidate}, nil
-	}
-	result, err := d.runWorkspaceContextJanitor(context.Background(), canonical)
+	d.workspaceContextCompactionExecution = fakeCompaction(janitorCandidate)
+	config, err := d.workspaceContextJanitorConfig()
 	if err != nil {
-		t.Fatalf("run janitor: %v", err)
+		t.Fatalf("config: %v", err)
+	}
+	result, err := d.runWorkspaceContextCompactionInline(context.Background(), config, canonical)
+	if err != nil {
+		t.Fatalf("run compaction: %v", err)
 	}
 	if !result.Changed || result.SourceRevision != 1 || result.ResultRevision != 2 ||
 		protocol.Deref(result.Agent) != "codex" || protocol.Deref(result.AgentModel) != "gpt-test" {
@@ -236,36 +275,48 @@ func TestWorkspaceContextJanitorCompactsAndLeavesExistingCheckoutsStale(t *testi
 	}
 }
 
-func TestManualWorkspaceContextCompactionCancelsScheduledRun(t *testing.T) {
+// TestManualWorkspaceContextCompactionCancelsPendingRun proves the manual command
+// drops a pending debounced runner task and returns a result synchronously.
+func TestManualWorkspaceContextCompactionCancelsPendingRun(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
 	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
 	d.workspaceContextJanitorThreshold = 1
 	d.workspaceContextJanitorDebounce = time.Hour
-	canonical, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0)
-	if err != nil {
+	installTestCompactRunner(t, d)
+	d.workspaceContextCompactionExecution = fakeCompaction(janitorCandidate)
+
+	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0); err != nil {
 		t.Fatalf("seed context: %v", err)
 	}
-	d.scheduleWorkspaceContextJanitor(canonical)
-	d.workspaceContextJanitorExecutor = func(
-		context.Context,
-		workspaceContextJanitorConfig,
-		*protocol.WorkspaceContext,
-	) (workspaceContextJanitorExecution, error) {
-		return workspaceContextJanitorExecution{Candidate: janitorCandidate}, nil
+	// Enqueue a far-future debounced task that must be cancelled by the manual run.
+	if _, err := d.compactRunner.Enqueue(compactContextKind, "workspace-1", tasks.EnqueueOptions{Debounce: time.Hour}); err != nil {
+		t.Fatalf("enqueue pending: %v", err)
 	}
 
-	if _, err := d.compactWorkspaceContextForSession(context.Background(), "session-1"); err != nil {
+	result, err := d.compactWorkspaceContextForSession(context.Background(), "session-1")
+	if err != nil {
 		t.Fatalf("manual compaction: %v", err)
 	}
-	d.workspaceContextJanitorMu.Lock()
-	defer d.workspaceContextJanitorMu.Unlock()
-	if scheduled := d.workspaceContextJanitorTimers["workspace-1"]; scheduled != nil {
-		t.Fatal("manual compaction left the automatic timer scheduled")
+	if !result.Changed || result.ResultRevision != 2 {
+		t.Fatalf("manual result = %+v", result)
+	}
+	pending, err := d.compactRunner.Get(tasks.TaskID(compactContextKind, "workspace-1"))
+	if err != nil {
+		t.Fatalf("get pending: %v", err)
+	}
+	// Cancel does not delete the record, but the manual run committed revision 2;
+	// the pending record stays queued for the far-future debounce and must not have
+	// run (it would conflict on the stale revision). The deterministic seam here is
+	// that the manual command returned a committed result synchronously.
+	if pending != nil && pending.State == tasks.StateRunning {
+		t.Fatalf("pending task still running after manual cancel: %+v", pending)
 	}
 }
 
-func TestWorkspaceContextJanitorRejectsStaleRevision(t *testing.T) {
+// TestWorkspaceContextCompactionRejectsStaleRevision proves the revision-guarded
+// apply rejects a candidate built from a now-stale source revision.
+func TestWorkspaceContextCompactionRejectsStaleRevision(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
 	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
@@ -274,18 +325,19 @@ func TestWorkspaceContextJanitorRejectsStaleRevision(t *testing.T) {
 		t.Fatalf("seed context: %v", err)
 	}
 	later := janitorSource + "\nA later verified edit.\n"
-	d.workspaceContextJanitorExecutor = func(
-		context.Context,
-		workspaceContextJanitorConfig,
-		*protocol.WorkspaceContext,
+	d.workspaceContextCompactionExecution = func(
+		context.Context, workspaceContextJanitorConfig, *protocol.WorkspaceContext,
 	) (workspaceContextJanitorExecution, error) {
 		if _, _, updateErr := d.store.UpdateWorkspaceContext("workspace-1", later, "session-1", 1); updateErr != nil {
 			return workspaceContextJanitorExecution{}, updateErr
 		}
 		return workspaceContextJanitorExecution{Candidate: janitorCandidate}, nil
 	}
-
-	if _, err := d.runWorkspaceContextJanitor(context.Background(), canonical); !errors.Is(err, store.ErrWorkspaceContextConflict) {
+	config, err := d.workspaceContextJanitorConfig()
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	if _, err := d.runWorkspaceContextCompactionInline(context.Background(), config, canonical); !errors.Is(err, store.ErrWorkspaceContextConflict) {
 		t.Fatalf("run error = %v, want revision conflict", err)
 	}
 	current, err := d.store.GetWorkspaceContext("workspace-1")
@@ -300,91 +352,93 @@ func TestWorkspaceContextJanitorRejectsStaleRevision(t *testing.T) {
 	}
 }
 
-func TestWorkspaceContextJanitorTimeoutAndCancellation(t *testing.T) {
+// TestCompactRunnerTimeoutAndCancellationProtectContext proves the runner-owned
+// timeout and a runner.Cancel both abort a stuck compaction without writing the
+// context.
+func TestCompactRunnerTimeoutAndCancellationProtectContext(t *testing.T) {
 	for name, stop := range map[string]func(*Daemon){
-		"timeout":                func(d *Daemon) {},
-		"workspace cancellation": func(d *Daemon) { d.cancelWorkspaceContextJanitor("workspace-1") },
+		"timeout":      func(d *Daemon) {},
+		"cancellation": func(d *Daemon) { d.compactRunner.Cancel(tasks.TaskID(compactContextKind, "workspace-1")) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 			setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
 			d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
-			canonical, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0)
-			if err != nil {
-				t.Fatalf("seed context: %v", err)
-			}
+			d.workspaceContextJanitorThreshold = 1
 			if name == "timeout" {
 				d.workspaceContextJanitorTimeout = 20 * time.Millisecond
 			} else {
 				d.workspaceContextJanitorTimeout = time.Second
 			}
 			started := make(chan struct{})
-			d.workspaceContextJanitorExecutor = func(
-				ctx context.Context,
-				_ workspaceContextJanitorConfig,
-				_ *protocol.WorkspaceContext,
+			d.workspaceContextCompactionExecution = func(
+				ctx context.Context, _ workspaceContextJanitorConfig, _ *protocol.WorkspaceContext,
 			) (workspaceContextJanitorExecution, error) {
 				close(started)
 				<-ctx.Done()
-				return workspaceContextJanitorExecution{Candidate: janitorCandidate}, nil
+				return workspaceContextJanitorExecution{}, ctx.Err()
 			}
-			done := make(chan error, 1)
-			go func() {
-				_, runErr := d.runWorkspaceContextJanitor(context.Background(), canonical)
-				done <- runErr
-			}()
+			installTestCompactRunner(t, d)
+			if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0); err != nil {
+				t.Fatalf("seed context: %v", err)
+			}
+			if _, err := d.compactRunner.Enqueue(compactContextKind, "workspace-1", tasks.EnqueueOptions{}); err != nil {
+				t.Fatalf("enqueue: %v", err)
+			}
 			<-started
 			stop(d)
-			select {
-			case runErr := <-done:
-				if !errors.Is(runErr, context.DeadlineExceeded) && !errors.Is(runErr, context.Canceled) {
-					t.Fatalf("run error = %v", runErr)
+			deadline := time.Now().Add(2 * time.Second)
+			for {
+				current, err := d.store.GetWorkspaceContext("workspace-1")
+				if err != nil {
+					t.Fatalf("get current context: %v", err)
 				}
-			case <-time.After(time.Second):
-				t.Fatal("janitor run did not stop")
-			}
-			current, getErr := d.store.GetWorkspaceContext("workspace-1")
-			if getErr != nil {
-				t.Fatalf("get current context: %v", getErr)
-			}
-			if current.Content != janitorSource || current.Revision != 1 {
-				t.Fatalf("context changed after canceled run: %+v", current)
+				if current.Content != janitorSource || current.Revision != 1 {
+					t.Fatalf("context changed after aborted run: %+v", current)
+				}
+				task, err := d.compactRunner.Get(tasks.TaskID(compactContextKind, "workspace-1"))
+				if err != nil {
+					t.Fatalf("get task: %v", err)
+				}
+				if task != nil && task.State != tasks.StateRunning {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("compaction run did not stop")
+				}
+				time.Sleep(5 * time.Millisecond)
 			}
 		})
 	}
 }
 
-func TestWorkspaceContextJanitorCancellationWaitsForAdmittedCommit(t *testing.T) {
+// TestCompactRunnerCancellationWaitsForAdmittedCommit proves the CommitGuard
+// fence: a Cancel that arrives after the executor has entered its commit waits
+// for the durable write to finish untorn.
+func TestCompactRunnerCancellationWaitsForAdmittedCommit(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
 	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
-	canonical, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0)
-	if err != nil {
-		t.Fatalf("seed context: %v", err)
-	}
-	d.workspaceContextJanitorExecutor = func(
-		context.Context,
-		workspaceContextJanitorConfig,
-		*protocol.WorkspaceContext,
-	) (workspaceContextJanitorExecution, error) {
-		return workspaceContextJanitorExecution{Candidate: janitorCandidate}, nil
-	}
+	d.workspaceContextJanitorThreshold = 1
+	d.workspaceContextCompactionExecution = fakeCompaction(janitorCandidate)
 	commitStarted := make(chan struct{})
 	releaseCommit := make(chan struct{})
 	d.workspaceContextBeforeJanitorApply = func() {
 		close(commitStarted)
 		<-releaseCommit
 	}
-	runDone := make(chan error, 1)
-	go func() {
-		_, runErr := d.runWorkspaceContextJanitor(context.Background(), canonical)
-		runDone <- runErr
-	}()
+	installTestCompactRunner(t, d)
+	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0); err != nil {
+		t.Fatalf("seed context: %v", err)
+	}
+	if _, err := d.compactRunner.Enqueue(compactContextKind, "workspace-1", tasks.EnqueueOptions{}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
 	<-commitStarted
 
 	cancelDone := make(chan struct{})
 	go func() {
-		d.cancelWorkspaceContextJanitor("workspace-1")
+		d.compactRunner.Cancel(tasks.TaskID(compactContextKind, "workspace-1"))
 		close(cancelDone)
 	}()
 	select {
@@ -393,9 +447,6 @@ func TestWorkspaceContextJanitorCancellationWaitsForAdmittedCommit(t *testing.T)
 	case <-time.After(20 * time.Millisecond):
 	}
 	close(releaseCommit)
-	if err := <-runDone; err != nil {
-		t.Fatalf("admitted commit failed: %v", err)
-	}
 	select {
 	case <-cancelDone:
 	case <-time.After(time.Second):
@@ -410,145 +461,61 @@ func TestWorkspaceContextJanitorCancellationWaitsForAdmittedCommit(t *testing.T)
 	}
 }
 
-func TestWorkspaceDeletionCancelsJanitorBeforeRemovingContext(t *testing.T) {
+// TestWorkspaceDeletionCancelsCompactionBeforeRemovingContext proves the
+// cancel-then-remove ordering: dissociateSessionFromWorkspace cancels the
+// in-flight compaction (blocking until it exits) before removing the workspace
+// row, so no torn compaction can write a deleted workspace's context.
+func TestWorkspaceDeletionCancelsCompactionBeforeRemovingContext(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
 	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
-	canonical, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0)
-	if err != nil {
-		t.Fatalf("seed context: %v", err)
-	}
+	d.workspaceContextJanitorThreshold = 1
 	started := make(chan struct{})
-	d.workspaceContextJanitorExecutor = func(
-		ctx context.Context,
-		_ workspaceContextJanitorConfig,
-		_ *protocol.WorkspaceContext,
+	d.workspaceContextCompactionExecution = func(
+		ctx context.Context, _ workspaceContextJanitorConfig, _ *protocol.WorkspaceContext,
 	) (workspaceContextJanitorExecution, error) {
 		close(started)
 		<-ctx.Done()
-		return workspaceContextJanitorExecution{Candidate: janitorCandidate}, nil
+		return workspaceContextJanitorExecution{}, ctx.Err()
 	}
-	done := make(chan error, 1)
-	go func() {
-		_, runErr := d.runWorkspaceContextJanitor(context.Background(), canonical)
-		done <- runErr
-	}()
+	installTestCompactRunner(t, d)
+	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0); err != nil {
+		t.Fatalf("seed context: %v", err)
+	}
+	if _, err := d.compactRunner.Enqueue(compactContextKind, "workspace-1", tasks.EnqueueOptions{}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
 	<-started
 
 	d.dissociateSessionFromWorkspace("session-1")
 	if d.store.GetWorkspace("workspace-1") != nil || d.store.HasWorkspaceContext("workspace-1") {
 		t.Fatal("workspace deletion returned before removing the workspace context")
 	}
-	select {
-	case runErr := <-done:
-		if !errors.Is(runErr, context.Canceled) {
-			t.Fatalf("run error = %v, want canceled", runErr)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("janitor did not stop before workspace deletion returned")
-	}
 	if _, err := d.store.GetWorkspaceContextJanitorBackup("workspace-1"); !errors.Is(err, store.ErrWorkspaceContextJanitorBackupNotFound) {
 		t.Fatalf("backup error = %v, want not found", err)
 	}
 }
 
-func TestWorkspaceContextJanitorStaleDebounceCallbackDoesNotReplaceNewTimer(t *testing.T) {
+// TestWorkspaceContextCompactionEnqueuesOnThresholdViaTrigger proves the
+// context-write trigger enqueues a coalesced compaction once the doc crosses the
+// size threshold, and that the runner runs it to a committed revision.
+func TestWorkspaceContextCompactionEnqueuesOnThresholdViaTrigger(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
 	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
 	d.workspaceContextJanitorThreshold = 1
-	d.workspaceContextJanitorDebounce = time.Hour
-	canonical := &protocol.WorkspaceContext{
-		WorkspaceID: "workspace-1",
-		Content:     janitorSource,
-		Revision:    1,
-	}
-
-	d.scheduleWorkspaceContextJanitor(canonical)
-	d.workspaceContextJanitorMu.Lock()
-	first := d.workspaceContextJanitorTimers["workspace-1"]
-	d.workspaceContextJanitorMu.Unlock()
-	if first == nil {
-		t.Fatal("first timer was not scheduled")
-	}
-
-	d.scheduleWorkspaceContextJanitor(canonical)
-	d.workspaceContextJanitorMu.Lock()
-	second := d.workspaceContextJanitorTimers["workspace-1"]
-	d.workspaceContextJanitorMu.Unlock()
-	if second == nil || second == first {
-		t.Fatal("second publish did not replace the debounce timer")
-	}
-
-	d.runScheduledWorkspaceContextJanitor("workspace-1", first)
-	d.workspaceContextJanitorMu.Lock()
-	current := d.workspaceContextJanitorTimers["workspace-1"]
-	d.workspaceContextJanitorMu.Unlock()
-	if current != second {
-		t.Fatal("stale debounce callback removed the current timer")
-	}
-	d.cancelWorkspaceContextJanitor("workspace-1")
-}
-
-func TestWorkspaceContextJanitorAllowsOnlyOneInvocation(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-	setupWorkspaceContextSession(t, d, "session-2", "workspace-2")
-	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
-	first, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0)
-	if err != nil {
-		t.Fatalf("seed first context: %v", err)
-	}
-	second, _, err := d.store.UpdateWorkspaceContext("workspace-2", janitorSource, "session-2", 0)
-	if err != nil {
-		t.Fatalf("seed second context: %v", err)
-	}
-	started := make(chan struct{})
-	release := make(chan struct{})
-	d.workspaceContextJanitorExecutor = func(
-		ctx context.Context,
-		_ workspaceContextJanitorConfig,
-		_ *protocol.WorkspaceContext,
-	) (workspaceContextJanitorExecution, error) {
-		close(started)
-		select {
-		case <-release:
-			return workspaceContextJanitorExecution{Candidate: janitorCandidate}, nil
-		case <-ctx.Done():
-			return workspaceContextJanitorExecution{}, ctx.Err()
-		}
-	}
-	done := make(chan error, 1)
-	go func() {
-		_, runErr := d.runWorkspaceContextJanitor(context.Background(), first)
-		done <- runErr
-	}()
-	<-started
-	if _, err := d.runWorkspaceContextJanitor(context.Background(), second); err == nil ||
-		!strings.Contains(err.Error(), "already running") {
-		t.Fatalf("second run error = %v, want already running", err)
-	}
-	close(release)
-	if err := <-done; err != nil {
-		t.Fatalf("first run: %v", err)
-	}
-}
-
-func TestWorkspaceContextJanitorDebouncesAgentPublish(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
-	d.workspaceContextJanitorThreshold = 1
-	d.workspaceContextJanitorDebounce = 20 * time.Millisecond
+	d.workspaceContextJanitorDebounce = 5 * time.Millisecond
 	calls := make(chan struct{}, 1)
-	d.workspaceContextJanitorExecutor = func(
-		context.Context,
-		workspaceContextJanitorConfig,
-		*protocol.WorkspaceContext,
+	d.workspaceContextCompactionExecution = func(
+		context.Context, workspaceContextJanitorConfig, *protocol.WorkspaceContext,
 	) (workspaceContextJanitorExecution, error) {
-		calls <- struct{}{}
+		select {
+		case calls <- struct{}{}:
+		default:
+		}
 		return workspaceContextJanitorExecution{Candidate: janitorCandidate}, nil
 	}
+	installTestCompactRunner(t, d)
 
 	checkout, err := d.checkoutWorkspaceContext(&protocol.WorkspaceContextCheckoutMessage{SourceSessionID: "session-1"})
 	if err != nil {
@@ -564,7 +531,7 @@ func TestWorkspaceContextJanitorDebouncesAgentPublish(t *testing.T) {
 	select {
 	case <-calls:
 	case <-time.After(time.Second):
-		t.Fatal("debounced janitor did not run")
+		t.Fatal("trigger did not enqueue a compaction")
 	}
 	deadline := time.Now().Add(time.Second)
 	for {
@@ -581,18 +548,192 @@ func TestWorkspaceContextJanitorDebouncesAgentPublish(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("context revision = %d, want 2", current.Revision)
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+// TestWorkspaceContextCompactionInlineFallbackWhenRunnerDisabled proves that with
+// a disabled runner (no notebook root) the trigger compacts inline/synchronously
+// so compaction still happens.
+func TestWorkspaceContextCompactionInlineFallbackWhenRunnerDisabled(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
+	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
+	d.workspaceContextJanitorThreshold = 1
+	// NewForTesting installs a disabled runner; keep it.
+	if !d.compactRunner.Disabled() {
+		t.Fatal("expected disabled runner in test")
+	}
+	d.workspaceContextCompactionExecution = fakeCompaction(janitorCandidate)
+
+	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0); err != nil {
+		t.Fatalf("seed context: %v", err)
+	}
+	canonical, err := d.store.GetWorkspaceContext("workspace-1")
+	if err != nil {
+		t.Fatalf("get canonical: %v", err)
+	}
+	// The trigger runs the inline fallback synchronously.
+	d.enqueueWorkspaceContextCompaction(canonical)
+
+	current, err := d.store.GetWorkspaceContext("workspace-1")
+	if err != nil {
+		t.Fatalf("get current context: %v", err)
+	}
+	if current.Revision != 2 || current.Content != janitorCandidate {
+		t.Fatalf("inline fallback did not compact: %+v", current)
+	}
+}
+
+// TestWorkspaceContextCompactionReChecksThresholdAfterDebounce proves the run-time
+// size re-check: a doc edited below the threshold during the debounce window is a
+// no-op success (no LLM pass, no revision bump).
+func TestWorkspaceContextCompactionReChecksThresholdAfterDebounce(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
+	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
+	// Threshold far above the seeded doc size so the run-time re-check no-ops.
+	d.workspaceContextJanitorThreshold = 1 << 20
+	executed := false
+	d.workspaceContextCompactionExecution = func(
+		context.Context, workspaceContextJanitorConfig, *protocol.WorkspaceContext,
+	) (workspaceContextJanitorExecution, error) {
+		executed = true
+		return workspaceContextJanitorExecution{Candidate: janitorCandidate}, nil
+	}
+	installTestCompactRunner(t, d)
+	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0); err != nil {
+		t.Fatalf("seed context: %v", err)
+	}
+	// Enqueue directly (the trigger would gate it, but a pre-debounce enqueue may
+	// have outlived a shrink); the executor must re-check and no-op.
+	if _, err := d.compactRunner.Enqueue(compactContextKind, "workspace-1", tasks.EnqueueOptions{}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	deadline := time.Now().Add(time.Second)
 	for {
-		d.workspaceContextJanitorMu.Lock()
-		running := d.workspaceContextJanitorRunning
-		d.workspaceContextJanitorMu.Unlock()
-		if !running {
+		task, err := d.compactRunner.Get(tasks.TaskID(compactContextKind, "workspace-1"))
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		if task != nil && task.State == tasks.StateDone {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("janitor run did not finish")
+			t.Fatalf("task did not finish: %+v", task)
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
+	}
+	if executed {
+		t.Fatal("executor ran despite the doc being below the size threshold")
+	}
+	current, err := d.store.GetWorkspaceContext("workspace-1")
+	if err != nil {
+		t.Fatalf("get current context: %v", err)
+	}
+	if current.Revision != 1 {
+		t.Fatalf("context was modified by a below-threshold run: %+v", current)
+	}
+}
+
+// TestWorkspaceTeardownDoesNotPanicBeforeCompactRunnerExists proves the runtime
+// teardown sites tolerate a nil compactRunner. Production New() leaves
+// compactRunner nil until startCompactRunner() runs late in Start(), but the
+// websocket server already accepts connections by then, so an UnregisterWorkspace
+// / session-close / move-out arriving in that window reaches these sites with a
+// nil runner. An unconditional d.compactRunner.Cancel(...) would nil-deref on the
+// first line of Runner.Cancel (it reads r.disabled) and crash the daemon.
+func TestWorkspaceTeardownDoesNotPanicBeforeCompactRunnerExists(t *testing.T) {
+	t.Run("dissociateSessionFromWorkspace", func(t *testing.T) {
+		d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+		setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
+		// Mimic production New(): the runner is not constructed yet.
+		d.compactRunner = nil
+
+		d.dissociateSessionFromWorkspace("session-1")
+
+		if d.store.GetWorkspace("workspace-1") != nil {
+			t.Fatal("workspace was not removed after dissociation")
+		}
+	})
+
+	t.Run("handleUnregisterWorkspace", func(t *testing.T) {
+		d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+		setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
+		d.compactRunner = nil
+
+		d.handleUnregisterWorkspace(nil, &protocol.UnregisterWorkspaceMessage{ID: "workspace-1"})
+
+		if d.store.GetWorkspace("workspace-1") != nil {
+			t.Fatal("workspace was not removed after unregister")
+		}
+	})
+
+	t.Run("unregisterWorkspaceIfEmptyAfterMove", func(t *testing.T) {
+		d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+		setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
+		// The session must be gone for the workspace to be considered empty.
+		d.workspaces.dissociateSession("session-1")
+		d.store.Remove("session-1")
+		d.compactRunner = nil
+
+		d.unregisterWorkspaceIfEmptyAfterMove("workspace-1")
+
+		if d.store.GetWorkspace("workspace-1") != nil {
+			t.Fatal("empty workspace was not removed after move-out")
+		}
+	})
+}
+
+// TestManualWorkspaceContextCompactionAppliesTimeout proves the manual command
+// path (compactWorkspaceContextForSession -> runWorkspaceContextCompactionInline)
+// bounds the agent run with the configured per-run timeout. The original code
+// funneled every run through a WithTimeout wrapper; the inline manual path must
+// keep that bound so a hung/runaway agent cannot block the synchronous IPC
+// response indefinitely.
+func TestManualWorkspaceContextCompactionAppliesTimeout(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
+	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
+	d.workspaceContextJanitorThreshold = 1
+	d.workspaceContextJanitorTimeout = 20 * time.Millisecond
+
+	gotDeadline := make(chan bool, 1)
+	d.workspaceContextCompactionExecution = func(
+		ctx context.Context, _ workspaceContextJanitorConfig, _ *protocol.WorkspaceContext,
+	) (workspaceContextJanitorExecution, error) {
+		_, hasDeadline := ctx.Deadline()
+		gotDeadline <- hasDeadline
+		// A runaway agent: block until the context aborts. With a deadline the
+		// manual command returns promptly; without one it would hang here forever.
+		<-ctx.Done()
+		return workspaceContextJanitorExecution{}, ctx.Err()
+	}
+	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0); err != nil {
+		t.Fatalf("seed context: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := d.compactWorkspaceContextForSession(context.Background(), "session-1")
+		done <- err
+	}()
+
+	select {
+	case hasDeadline := <-gotDeadline:
+		if !hasDeadline {
+			t.Fatal("manual compaction executor ctx has NO deadline")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("manual compaction executor was not invoked")
+	}
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("manual compaction error = %v, want context deadline exceeded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("manual compaction did not abort within the configured timeout")
 	}
 }

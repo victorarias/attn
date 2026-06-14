@@ -268,7 +268,7 @@ func (d *Daemon) updateWorkspaceContext(msg *protocol.WorkspaceContextUpdateMess
 	result := workspaceContextResult(session, canonical, contextPath, metadata, content)
 	if changed {
 		d.broadcastWorkspaceContextChanged(canonical)
-		d.scheduleWorkspaceContextJanitor(canonical)
+		d.enqueueWorkspaceContextCompaction(canonical)
 	}
 	return result, changed, nil
 }
