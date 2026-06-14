@@ -46,7 +46,11 @@ import {
   type FilteredBlockLine,
 } from '../utils/terminalBlockFilter';
 import { TerminalContextMenu, type TerminalContextMenuItem } from './TerminalContextMenu';
-import { enableGraphemeClustering, ensureGraphemeClustering } from './terminalGraphemeMode';
+import {
+  enableGraphemeClustering,
+  ensureGraphemeClustering,
+  writeReassertingClustering,
+} from './terminalGraphemeMode';
 import {
   cleanTerminalLines,
   terminalStyledSelectionToMarkdown,
@@ -433,6 +437,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const findInputRef = useRef<HTMLInputElement>(null);
     const runFindScanRef = useRef<(() => void) | null>(null);
     const osc133StateRef = useRef<Osc133State>(emptyOsc133State());
+    // Carries a lone trailing ESC across output chunks so a RIS split on the
+    // chunk boundary still re-enables grapheme clustering (see terminalGraphemeMode).
+    const graphemeResetCarryRef = useRef(false);
     const blockStoreRef = useRef(new TerminalBlockStore());
     const selectedBlockIdRef = useRef<number | null>(null);
     const writeChainRef = useRef(Promise.resolve());
@@ -1143,7 +1150,16 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         const osc133 = parseOsc133(osc133StateRef.current, chunkBytes);
         osc133StateRef.current = osc133.state;
         for (const segment of osc133.segments) {
-          if (segment.bytes.length > 0) terminal.write(segment.bytes);
+          if (segment.bytes.length > 0) {
+            // Write through the model re-asserting grapheme clustering right
+            // after any RIS, so emoji later in this same chunk stay whole (see
+            // terminalGraphemeMode).
+            graphemeResetCarryRef.current = writeReassertingClustering(
+              terminal,
+              segment.bytes,
+              graphemeResetCarryRef.current,
+            );
+          }
           if (segment.marker) {
             const cursor = terminal.getCursor();
             // Block completions are inspected live via get_pane_block_state, not
@@ -1155,9 +1171,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             );
           }
         }
-        // Keep grapheme clustering on so emoji clusters stay whole for the
-        // renderer (see terminalGraphemeMode). A RIS anywhere in this chunk would
-        // otherwise leave the mode off for everything that follows.
+        // Backstop: recover clustering if an explicit DECRST 2027l (or any other
+        // mode-off this chunk did not split on) left it disabled.
         ensureGraphemeClustering(terminal);
         const responses: string[] = [];
         while (terminal.hasResponse()) {
@@ -1505,6 +1520,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         // Enable grapheme clustering up front so emoji clusters render as whole
         // ligatures from the first frame (see terminalGraphemeMode).
         enableGraphemeClustering(terminal);
+        graphemeResetCarryRef.current = false;
         synchronizedOutputStateRef.current = { active: false, pending: '' };
         clearSynchronizedOutputRenderTimer();
         modelInstanceRef.current += 1;
