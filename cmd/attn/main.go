@@ -397,6 +397,13 @@ func runPTYWorker() {
 		fmt.Fprintf(os.Stderr, "[pty-worker] "+format+"\n", args...)
 	}
 
+	// Belt-and-suspenders: the daemon already scrubs these before spawning the
+	// worker, but a worker spawned from any unscrubbed parent self-protects so
+	// the leaked per-session agent env never reaches the PTY it spawns.
+	if scrubbed := config.ScrubInheritedAgentSessionEnv(); len(scrubbed) > 0 {
+		cfg.Logf("scrubbed inherited agent session env before startup: %v", scrubbed)
+	}
+
 	if err := ptyworker.Run(context.Background(), cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "pty-worker error: %v\n", err)
 		os.Exit(1)
@@ -419,6 +426,10 @@ func runDaemon() {
 	}
 
 	d := daemon.New(socketPath)
+	// Drop any per-session agent env (e.g. CLAUDE_CODE_SESSION_ID) inherited
+	// when attn was launched from inside an agent session, before Start() warms
+	// the login-shell env cache or spawns anything.
+	d.ScrubInheritedAgentSessionEnv()
 	if err := d.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "daemon error: %v\n", err)
 		os.Exit(1)
@@ -1905,6 +1916,12 @@ func runAgentDirectly(requestedAgent string) {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	// If this wrapper was launched from inside another agent's session (e.g. a
+	// terminal that is itself a Claude Code session), drop that session's
+	// identity so the agent we launch gets a fresh one. Only the identity vars
+	// are scrubbed here: this path inherits the live shell env directly, so
+	// tuning vars the user exported in their profile must be left intact.
+	config.ScrubAgentSessionIdentityEnv()
 	cmd.Env = mergeEnv(os.Environ(), driver.BuildEnv(opts))
 
 	startedAt := time.Now()

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/victorarias/attn/internal/config"
 )
 
 func TestParseNullSeparatedEnv(t *testing.T) {
@@ -244,6 +246,28 @@ func TestBuildSpawnEnv_StripsInheritedNoColorFromInteractiveSessions(t *testing.
 			for _, entry := range env {
 				if strings.HasPrefix(entry, "NO_COLOR=") {
 					t.Fatalf("did not expect NO_COLOR in %s PTY environment, got %v", agent, env)
+				}
+			}
+		})
+	}
+}
+
+// TestBuildSpawnEnv_OmitsScrubbedAgentSessionEnv ties the daemon/worker startup
+// scrub to the real spawn-env builder: once the process env has been scrubbed
+// (as runDaemon/runPTYWorker do before spawning), a per-session agent var that
+// leaked into the process must not reappear in any spawned PTY's environment.
+func TestBuildSpawnEnv_OmitsScrubbedAgentSessionEnv(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "cbcaa879-leaked")
+
+	// Simulate the daemon/worker scrubbing its inherited env at startup.
+	config.ScrubInheritedAgentSessionEnv()
+
+	for _, agent := range []string{"shell", "codex"} {
+		t.Run(agent, func(t *testing.T) {
+			env := buildSpawnEnv("", SpawnOptions{ID: "session-1"}, agent, "/tmp/attn-wrapper", nil)
+			for _, entry := range env {
+				if strings.HasPrefix(entry, "CLAUDE_CODE_SESSION_ID=") {
+					t.Fatalf("spawned %s PTY leaked CLAUDE_CODE_SESSION_ID: %v", agent, env)
 				}
 			}
 		})

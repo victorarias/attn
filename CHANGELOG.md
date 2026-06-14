@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-14]
+
+### Fixed
+- **Agents and shells launched by attn no longer inherit a stale Claude Code session identity.** When attn itself was started from inside a Claude Code session (for example an agent running `make install`), that session's per-session environment — including its session ID — leaked into the daemon and then into every agent or shell attn spawned, which broke things like transcript generation. attn now drops those inherited per-session identifiers before launching agents and shells, while still honoring any Claude Code settings you've configured in your shell profile.
+
 ## [2026-06-13]
 
 ### Added
