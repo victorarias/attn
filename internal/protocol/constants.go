@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "105"
+const ProtocolVersion = "106"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -121,6 +121,11 @@ const (
 	CmdGetReviewLoopRun                      = "get_review_loop_run"
 	CmdSetReviewLoopIterations               = "set_review_loop_iteration_limit"
 	CmdAnswerReviewLoop                      = "answer_review_loop"
+	CmdWorkflowRunUpsert                     = "workflow_run_upsert"
+	CmdWorkflowCallUpsert                    = "workflow_call_upsert"
+	CmdWorkflowRunGet                        = "workflow_run_get"
+	CmdWorkflowRunList                       = "workflow_run_list"
+	CmdWorkflowRunCancel                     = "workflow_run_cancel"
 	CmdMarkFileViewed                        = "mark_file_viewed"
 	CmdAddComment                            = "add_comment"
 	CmdUpdateComment                         = "update_comment"
@@ -215,6 +220,8 @@ const (
 	EventGetReviewStateResult          = "get_review_state_result"
 	EventReviewLoopResult              = "review_loop_result"
 	EventReviewLoopUpdated             = "review_loop_updated"
+	EventWorkflowRunUpdated            = "workflow_run_updated"
+	EventWorkflowActionResult          = "workflow_action_result"
 	EventMarkFileViewedResult          = "mark_file_viewed_result"
 	EventAddCommentResult              = "add_comment_result"
 	EventUpdateCommentResult           = "update_comment_result"
@@ -881,6 +888,41 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg AnswerReviewLoopMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal answer_review_loop: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkflowRunUpsert:
+		var msg WorkflowRunUpsertMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workflow_run_upsert: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkflowCallUpsert:
+		var msg WorkflowCallUpsertMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workflow_call_upsert: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkflowRunGet:
+		var msg WorkflowRunGetMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workflow_run_get: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkflowRunList:
+		var msg WorkflowRunListMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workflow_run_list: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkflowRunCancel:
+		var msg WorkflowRunCancelMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workflow_run_cancel: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

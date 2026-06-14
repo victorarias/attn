@@ -3402,6 +3402,194 @@ type WebSocketEvent struct {
 	Worktrees []Worktree `json:"worktrees,omitempty,omitzero"`
 }
 
+type WorkflowActionResultMessage struct {
+	// Action corresponds to the JSON schema field "action".
+	Action string `json:"action"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Run corresponds to the JSON schema field "run".
+	Run *WorkflowRun `json:"run,omitempty,omitzero"`
+
+	// RunID corresponds to the JSON schema field "run_id".
+	RunID *string `json:"run_id,omitempty,omitzero"`
+
+	// Runs corresponds to the JSON schema field "runs".
+	Runs []WorkflowRun `json:"runs,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type WorkflowAgentCall struct {
+	// AgentType corresponds to the JSON schema field "agent_type".
+	AgentType *string `json:"agent_type,omitempty,omitzero"`
+
+	// CompletedAt corresponds to the JSON schema field "completed_at".
+	CompletedAt *string `json:"completed_at,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Label corresponds to the JSON schema field "label".
+	Label *string `json:"label,omitempty,omitzero"`
+
+	// Ordinal corresponds to the JSON schema field "ordinal".
+	Ordinal string `json:"ordinal"`
+
+	// Phase corresponds to the JSON schema field "phase".
+	Phase *string `json:"phase,omitempty,omitzero"`
+
+	// PromptHash corresponds to the JSON schema field "prompt_hash".
+	PromptHash *string `json:"prompt_hash,omitempty,omitzero"`
+
+	// ResolvedHarness corresponds to the JSON schema field "resolved_harness".
+	ResolvedHarness *string `json:"resolved_harness,omitempty,omitzero"`
+
+	// ResolvedModel corresponds to the JSON schema field "resolved_model".
+	ResolvedModel *string `json:"resolved_model,omitempty,omitzero"`
+
+	// ResultJson corresponds to the JSON schema field "result_json".
+	ResultJson *string `json:"result_json,omitempty,omitzero"`
+
+	// ResultPath corresponds to the JSON schema field "result_path".
+	ResultPath *string `json:"result_path,omitempty,omitzero"`
+
+	// RunID corresponds to the JSON schema field "run_id".
+	RunID string `json:"run_id"`
+
+	// SchemaHash corresponds to the JSON schema field "schema_hash".
+	SchemaHash *string `json:"schema_hash,omitempty,omitzero"`
+
+	// StartedAt corresponds to the JSON schema field "started_at".
+	StartedAt *string `json:"started_at,omitempty,omitzero"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status WorkflowAgentCallStatus `json:"status"`
+}
+
+type WorkflowAgentCallStatus string
+
+const WorkflowAgentCallStatusErrored WorkflowAgentCallStatus = "errored"
+const WorkflowAgentCallStatusOk WorkflowAgentCallStatus = "ok"
+const WorkflowAgentCallStatusRunning WorkflowAgentCallStatus = "running"
+const WorkflowAgentCallStatusSkipped WorkflowAgentCallStatus = "skipped"
+
+type WorkflowCallUpsertMessage struct {
+	// Call corresponds to the JSON schema field "call".
+	Call WorkflowAgentCall `json:"call"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RunID corresponds to the JSON schema field "run_id".
+	RunID string `json:"run_id"`
+}
+
+type WorkflowRun struct {
+	// AgentCalls corresponds to the JSON schema field "agent_calls".
+	AgentCalls []WorkflowAgentCall `json:"agent_calls,omitempty,omitzero"`
+
+	// ArgsJson corresponds to the JSON schema field "args_json".
+	ArgsJson *string `json:"args_json,omitempty,omitzero"`
+
+	// CompletedAt corresponds to the JSON schema field "completed_at".
+	CompletedAt *string `json:"completed_at,omitempty,omitzero"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// Harness corresponds to the JSON schema field "harness".
+	Harness *string `json:"harness,omitempty,omitzero"`
+
+	// LastError corresponds to the JSON schema field "last_error".
+	LastError *string `json:"last_error,omitempty,omitzero"`
+
+	// Phase corresponds to the JSON schema field "phase".
+	Phase *string `json:"phase,omitempty,omitzero"`
+
+	// ResultJson corresponds to the JSON schema field "result_json".
+	ResultJson *string `json:"result_json,omitempty,omitzero"`
+
+	// Resumable corresponds to the JSON schema field "resumable".
+	Resumable bool `json:"resumable"`
+
+	// RunID corresponds to the JSON schema field "run_id".
+	RunID string `json:"run_id"`
+
+	// ScriptHash corresponds to the JSON schema field "script_hash".
+	ScriptHash string `json:"script_hash"`
+
+	// ScriptPath corresponds to the JSON schema field "script_path".
+	ScriptPath string `json:"script_path"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status WorkflowRunStatus `json:"status"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+}
+
+type WorkflowRunCancelMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RunID corresponds to the JSON schema field "run_id".
+	RunID string `json:"run_id"`
+}
+
+type WorkflowRunGetMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RunID corresponds to the JSON schema field "run_id".
+	RunID string `json:"run_id"`
+}
+
+type WorkflowRunListMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+}
+
+type WorkflowRunStatus string
+
+const WorkflowRunStatusCanceled WorkflowRunStatus = "canceled"
+const WorkflowRunStatusCompleted WorkflowRunStatus = "completed"
+const WorkflowRunStatusFailed WorkflowRunStatus = "failed"
+const WorkflowRunStatusRunning WorkflowRunStatus = "running"
+
+type WorkflowRunUpdatedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Run corresponds to the JSON schema field "run".
+	Run WorkflowRun `json:"run"`
+}
+
+type WorkflowRunUpsertMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Run corresponds to the JSON schema field "run".
+	Run WorkflowRun `json:"run"`
+}
+
 type Workspace struct {
 	// Directory corresponds to the JSON schema field "directory".
 	Directory string `json:"directory"`
