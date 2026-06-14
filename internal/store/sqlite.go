@@ -433,10 +433,6 @@ func OpenDB(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
-	if err := ensureWorkspaceRankSchema(db); err != nil {
-		db.Close()
-		return nil, err
-	}
 
 	return db, nil
 }
@@ -719,24 +715,6 @@ func applyMigration49(tx *sql.Tx) error {
 		if _, err := tx.Exec(`UPDATE workspaces SET rank = ? WHERE id = ?`, seeds[i], id); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-// ensureWorkspaceRankSchema repairs schema drift caused by development builds
-// that reused a migration version. It runs independently of migration history
-// so a database marked at or beyond version 50 cannot skip the required repair.
-func ensureWorkspaceRankSchema(db *sql.DB) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("starting workspace rank schema repair: %w", err)
-	}
-	if err := applyMigration49(tx); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("repairing workspace rank schema: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing workspace rank schema repair: %w", err)
 	}
 	return nil
 }
