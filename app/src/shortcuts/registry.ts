@@ -56,10 +56,6 @@ export const SHORTCUTS = {
   // Find in terminal scrollback
   'terminal.find': { key: 'f', meta: true },
 
-  // Quick Find (thumbs) — moved off ⌘F so find-in-terminal gets the
-  // conventional binding.
-  'terminal.quickFind': { key: 'f', meta: true, shift: true },
-
   // Session management
   'session.new': { key: 'n', meta: true },
   'session.newHorizontal': { key: 'n', meta: true, shift: true },

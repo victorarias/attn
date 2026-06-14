@@ -1,7 +1,6 @@
 mod browser_alerts;
 mod browser_host;
 mod profile;
-mod thumbs;
 mod ui_automation;
 
 use std::env;
@@ -1020,8 +1019,6 @@ Object.defineProperty(window, "__ATTN_NATIVE_DIALOGS", {
             browser_host::browser_host_clear_focus,
             browser_host::browser_host_claim_focus,
             browser_host::browser_host_focus_state,
-            thumbs::extract_patterns,
-            thumbs::reveal_in_finder,
         ])
         .setup(|app| {
             use tauri::Manager;

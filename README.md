@@ -6,38 +6,36 @@
 
 **attention hub** — because your head shouldn't feel like concrete by 3pm.
 
-I built this after noticing a pattern: I'd start the day sharp, spin up 4-5 AI agents across different repos, and by mid-afternoon my brain was soup. Not from the coding — from the *managing*. Which terminal has the agent that's stuck? Did that one finish? Wait, who asked me a question 20 minutes ago? Alt-tab, alt-tab, alt-tab, scroll, squint, repeat.
+attn is a macOS app that wraps your agent CLIs — Claude Code, Codex, Copilot — in one window with color-coded status, so you always know which one needs you. Green = working. Yellow = "hey, I need you." Gray = done.
+
+I built it after noticing a pattern: I'd start the day sharp, spin up 4-5 AI agents across different repos, and by mid-afternoon my brain was soup. Not from the coding — from the *managing*. Which terminal has the agent that's stuck? Did that one finish? Wait, who asked me a question 20 minutes ago? Alt-tab, alt-tab, alt-tab, scroll, squint, repeat.
 
 attn fixes the dumbest part of multi-agent workflows: knowing what needs you right now.
 
-It also lets one app manage sessions running somewhere else. Point attn at a remote daemon over SSH — a cloud box, a homelab machine, or even a local VM — and those sessions show up in the same sidebar, terminals, and worktree picker as your local ones.
-
-It's a desktop app that wraps your agent CLIs — Claude Code, Codex, Copilot — and puts them all in one window with color-coded status. Green means working. Yellow means "hey, I need you." Gray means done. No more tab-hunting. No more heavy head.
-
-**There is no custom agent UI.** attn wraps each CLI directly. You get the real, native experience of every agent — just organized.
-
-<!-- ![Demo](docs/demo.gif) -->
+**There is no custom agent UI** — attn wraps each CLI directly, so you get the real thing, just organized.
 
 ## What you get
 
-**Workspaces in one sidebar** — The sidebar groups your work into workspaces, each holding the sessions and terminals for one task. Live state at a glance — the one that needs you glows. Click it. Done.
+**Workspaces in one sidebar** — The sidebar groups your work into workspaces, each holding the sessions and terminals for one task. The one that needs you glows. Click it. Done. Drag to reorder, drag a session out into its own workspace, rename anything inline.
+
+**Grid view — mission control** — Hit Cmd+G to see every session as a live terminal tile at once; the ones waiting on you flash. Click a tile to zoom in and type straight into it. Pick the layout, drop tiles you don't care about — it sticks across restarts.
 
 **Panes, splits, and first-class shells** — A workspace can hold several sessions side by side. Split a pane, open a plain shell as its own session from the same dialog you use for agents, and move focus between panes with the keyboard. Never leave the window.
+
+**A terminal that does more** — Cmd+F finds across the full scrollback. Cmd-click a path or URL to open it. When your shell marks commands (fish does by default), click a command's output to grab the whole block — copy the command with its output in one go, or filter a long block down to just the lines you want.
 
 **Remote daemons over SSH** — Keep sessions on a GPU box, Linux host, or local VM and manage them from the same app. Spawn new sessions remotely, browse remote repos, and open remote worktrees without juggling another terminal window.
 
 **PR dashboard** — Your PRs, your review requests, CI failures, merge conflicts — one place. Works across GitHub.com and GitHub Enterprise. Open a PR directly into a worktree.
 
-**Git worktrees & branches** — Parallel agents need parallel branches. Create, switch, and manage worktrees from the app. Stop stepping on your own feet.
-
-**Quick Find** — Cmd+F to yank URLs, paths, and hashes out of terminal output.
+**Git worktrees & branches** — Parallel agents need parallel branches. Spin them up from the app — stop stepping on your own feet.
 
 ## Supported agents
 
 | Agent | State detection | Resume |
 |---|---|---|
 | [Claude Code](https://claude.ai/code) | Hooks + classifier | Yes |
-| [Codex](https://developers.openai.com/codex) | PTY heuristics + transcript classifier | No |
+| [Codex](https://developers.openai.com/codex) | Hooks + classifier | No |
 | [Copilot CLI](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line) | PTY heuristics + transcript classifier | No |
 
 ## Install
@@ -74,7 +72,7 @@ The app nudges you when a new release exists. No auto-install — you pick when.
 1. Launch **attn** from Applications.
 2. **Cmd+T** — start a workspace: pick an agent (or a plain shell), pick a directory, go. **Cmd+N** adds another session to the workspace you're in.
 3. Watch the sidebar. Colors tell you who needs you.
-4. Press **Cmd+/** any time for the full keyboard shortcuts list.
+4. Press **Cmd+/** any time for the full shortcuts list.
 5. Optional: add an SSH endpoint in Settings and run remote or VM sessions from the same picker.
 
 ## Session states
@@ -82,11 +80,11 @@ The app nudges you when a new release exists. No auto-install — you pick when.
 | Color | What it means |
 |---|---|
 | 🟢 Green | Agent is working — leave it alone |
-| 🟡 Yellow | Agent needs attention: asked a question, or finished a long run (5+ min) and is waiting for your review |
+| 🟡 Yellow | Agent needs you: asked a question, or finished a long run (5+ min) and is waiting for your review |
 | 🟡 Flashing | Agent wants tool approval — go approve |
-| ⚫ Gray | Agent is done — move on |
-
-Long-run review behavior: if a run takes 5+ minutes, attn keeps it yellow when it finishes, then runs smart done/waiting classification only after you actually view that session (5 seconds stable selection; immediate if you were already focused on it).
+| 🔵 Blue (slow pulse) | Parked on a `/loop` or schedule — it'll resume itself, no action needed |
+| 🟣 Purple | State couldn't be read reliably — worth a glance |
+| ⚪ Gray | Done, or a plain shell — move on |
 
 ## Shortcuts
 
@@ -95,16 +93,19 @@ Long-run review behavior: if a run takes 5+ minutes, attn keeps it yellow when i
 | Cmd+T | New workspace (with an initial session) |
 | Cmd+N | New session in current workspace |
 | Cmd+Shift+N | New session, split sideways |
+| Cmd+D / Cmd+Shift+D | Split pane down / sideways |
 | Cmd+Option+←↑→↓ | Move between panes (cross into the next workspace at an edge) |
 | Cmd+1–9 | Jump to a workspace |
-| Cmd+F | Quick Find |
-| Cmd+K | Attention drawer (who needs me?) |
-| Cmd+\` | Utility terminal |
 | Cmd+Up / Down | Jump between sessions |
+| Cmd+G | Grid view |
+| Cmd+F | Find in terminal |
+| Cmd+K | Action menu |
+| Cmd+Shift+P | Attention drawer (who needs me?) |
+| Cmd+\` | Utility terminal |
 | Cmd+R | Refresh PRs |
 | Cmd+/ | All keyboard shortcuts |
 
-Press **Cmd+/** in the app for the full, always-current list.
+Every binding is customizable — press **Cmd+/** in the app for the full, always-current list, and "Edit shortcuts" there to remap any of them.
 
 ### Selecting text in agent terminals
 
@@ -112,15 +113,20 @@ Agents like Claude Code enable terminal mouse tracking, which means a normal cli
 
 If the agent explicitly copies text for you (e.g. "copy this to my clipboard"), attn honors the terminal's OSC 52 clipboard sequence and writes to your Mac clipboard directly. No xclip / X server needed on the remote.
 
+## Multi-agent coordination
+
+Your agents can work as a team, not just side by side:
+
+- **Shared workspace context** — a living brief agents read and keep current, so a new session orients itself without you re-explaining the task.
+- **Delegation** — an agent can spin up a fresh, visible session with a focused brief (`attn delegate`) instead of cramming everything into one context.
+- **Chief of staff** — promote one session to track and hand off work to the agents it delegates, through a dispatch + mailbox you watch from the dashboard.
+- **In-app browser** — `attn browser open <url>` docks a real browser an agent can drive; log in once and it persists.
+
 ## How it works
 
-1. The bundled attn runtime wraps your agent CLI and installs hooks (Claude) or reads PTY output (Codex, Copilot) to detect state.
-2. A background daemon tracks sessions via unix socket (`~/.attn/attn.sock`).
-3. The desktop app connects over WebSocket for real-time updates.
-4. Optional SSH-managed remote daemons connect through the local hub, so local and remote sessions share one session list and one control surface.
-5. A lightweight classifier figures out if Claude stopped because it's done or because it's waiting for you.
-6. For 5+ minute runs, classification is intentionally deferred until you visualize the session, so "done" runs still surface for manual review first.
-7. `gh` polls PRs across all your authenticated GitHub hosts.
+1. The bundled attn runtime wraps your agent CLI and installs hooks (Claude, Codex) or reads PTY output (Copilot) to detect state — a classifier decides whether a stop means "done" or "waiting for you."
+2. A background daemon tracks every session, local and SSH-remote, in one list; the desktop app connects over WebSocket for real-time updates.
+3. `gh` polls PRs across all your authenticated GitHub hosts.
 
 ## Build from source
 
@@ -134,30 +140,20 @@ git clone https://github.com/victorarias/attn.git && cd attn
 
 | Command | What it does |
 |---|---|
-| `make build` | Build Go daemon binary |
-| `make` | Install attn.app and launch it — the one-command prod inner loop |
+| `make build` | Build the Go daemon binary |
+| `make` | Install attn.app and launch it — the one-command inner loop |
 | `make install` | Install the app bundle without launching (scripts / CI) |
-| `make install-daemon` | Update only the installed app's bundled daemon/runtime for the fast dev loop |
-| `make dev` | Install and launch `attn-dev.app` — the isolated dev sibling, for safely iterating on attn without touching your live install |
-| `make install-dev` | Same as `make dev` but without launching |
-| `make install-daemon-dev` | Fast sidecar-only loop for the dev install |
-| `make build-app` | Build daemon + Tauri app |
-| `make dist` | Create DMG |
+| `make dev` | Install and launch the isolated `attn-dev.app` sibling — iterate without touching your live install |
+| `make dist` | Create a DMG |
 | `make test` | Go tests |
-| `make test-frontend` | Frontend tests (vitest) |
-| `make test-harness` | Go + frontend + E2E |
 
-### Iterating on attn itself (attn-on-attn)
-
-If you use attn daily and want to develop attn *with* attn running, use the dev sibling install instead of reinstalling your live copy. `make dev` builds and launches `~/Applications/attn-dev.app` — separate bundle identifier (`com.attn.manager.dev`), separate data dir (`~/.attn-dev/`), separate WebSocket port (`29849`). Both apps run side-by-side with zero cross-contamination. `make install` and `make install-daemon` refuse at parse time if `ATTN_PROFILE` is set in your shell, so you can't accidentally reinstall the live app while iterating on dev.
-
-The same `ATTN_PROFILE=<name>` env var scopes CLI commands (`eval "$(attn profile-env dev)"` to set it shell-wide), and every real-app harness command defaults to the dev install so it never takes over your live app. Production harness runs require both an explicit production target and `--run-against-prod`.
+Developing attn while running attn? `make dev` gives you a fully isolated dev sibling (own bundle, data dir, and port) so rebuilds never touch your live copy. The full dev-loop, profile, and harness targets live in **[docs/profiles.md](docs/profiles.md)** and [AGENTS.md](AGENTS.md).
 
 ## Docs
 
 | | |
 |---|---|
-| [Terminal rendering learnings](docs/TERMINAL_RENDERING_LEARNINGS.md) | PTY and harness notes from the current cleanup stream |
+| [Profiles](docs/profiles.md) | Run multiple isolated attn worlds side by side |
 | [Release](docs/RELEASE.md) | Maintainer runbook |
 
 ## Status

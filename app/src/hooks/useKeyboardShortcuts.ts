@@ -21,7 +21,6 @@ interface KeyboardShortcutsConfig {
   onToggleReviewLoopPanel?: () => void;
   onToggleDiffDetailPanel?: () => void;
   onToggleAttentionPanel?: () => void;
-  onQuickFind?: () => void;
   onOpenSettings?: () => void;
   onShowShortcuts?: () => void;
   onIncreaseFontSize?: () => void;
@@ -49,7 +48,6 @@ export function useKeyboardShortcuts({
   onToggleReviewLoopPanel,
   onToggleDiffDetailPanel,
   onToggleAttentionPanel,
-  onQuickFind,
   onOpenSettings,
   onShowShortcuts,
   onIncreaseFontSize,
@@ -85,9 +83,6 @@ export function useKeyboardShortcuts({
   useShortcut('dock.reviewLoop', onToggleReviewLoopPanel ?? (() => {}), enabled && !!onToggleReviewLoopPanel);
   useShortcut('dock.diffDetail', onToggleDiffDetailPanel ?? (() => {}), enabled && !!onToggleDiffDetailPanel);
   useShortcut('dock.attention', onToggleAttentionPanel ?? (() => {}), enabled && !!onToggleAttentionPanel);
-
-  // Quick Find (thumbs)
-  useShortcut('terminal.quickFind', onQuickFind ?? (() => {}), enabled && !!onQuickFind);
 
   // Action menu remains available while its own input is focused.
   useShortcut('ui.actionMenu', onToggleActionMenu, true);

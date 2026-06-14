@@ -20,14 +20,12 @@ import { SessionCreationProgress, type SessionCreationPhase } from './components
 import { RightDock } from './components/RightDock';
 import { SessionTerminalWorkspace } from './components/SessionTerminalWorkspace';
 import type { DockTarget } from './components/SessionTerminalWorkspace/dockTarget';
-import { ThumbsModal } from './components/ThumbsModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { ShortcutEditorModal } from './components/ShortcutEditorModal';
 import { WhatsNewModal } from './components/WhatsNewModal';
 import { ActionMenu, type ActionMenuItem } from './components/ActionMenu';
 import { WorkspaceContextNavigator, type WorkspaceContextView } from './components/WorkspaceContextNavigator';
-import { CopyToast, useCopyToast } from './components/CopyToast';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { ChordLeaderHud } from './components/ChordLeaderHud';
 import { DaemonProvider } from './contexts/DaemonContext';
@@ -1475,11 +1473,7 @@ sendFetchPRDetails,
   const [locationPickerPurpose, setLocationPickerPurpose] = useState<LocationPickerPurpose>('workspace');
   const [locationPickerSessionDirection, setLocationPickerSessionDirection] = useState<TerminalSplitDirection>('vertical');
 
-  // Thumbs (Quick Find) state
-  const [thumbsOpen, setThumbsOpen] = useState(false);
-  const [thumbsText, setThumbsText] = useState('');
   const [zoomModeBySessionId, setZoomModeBySessionId] = useState<Record<string, boolean>>({});
-  const { message: copyMessage, showToast: showCopyToast, clearToast: clearCopyToast } = useCopyToast();
   const { message: errorMessage, showError, clearError } = useErrorToast();
   const [chiefTransferTarget, setChiefTransferTarget] = useState<{
     sessionId: string;
@@ -1581,7 +1575,6 @@ sendFetchPRDetails,
   const diffDetailPanelOpen = openDockPanels.diffDetail;
   const changesPanelVisible = view === 'session' && diffPanelOpen && Boolean(activeRepoDaemonSession?.directory);
   const blockingOverlayOpen = locationPickerOpen
-    || thumbsOpen
     || whatsNew.isOpen
     || settingsOpen
     || shortcutsOpen
@@ -1666,7 +1659,7 @@ sendFetchPRDetails,
       setActionMenuOpen(false);
       return;
     }
-    if (settingsOpen || shortcutsOpen || locationPickerOpen || thumbsOpen || whatsNew.isOpen
+    if (settingsOpen || shortcutsOpen || locationPickerOpen || whatsNew.isOpen
       || workspaceContextsOpen
       || chiefTransferTarget !== null || closedWorktree !== null || pendingSessionClose !== null
       || sessionCreationJob !== null || openPRLauncherJob !== null) {
@@ -1683,7 +1676,6 @@ sendFetchPRDetails,
     sessionCreationJob,
     settingsOpen,
     shortcutsOpen,
-    thumbsOpen,
     whatsNew.isOpen,
     workspaceContextsOpen,
   ]);
@@ -1969,27 +1961,6 @@ sendFetchPRDetails,
   const closeLocationPicker = useCallback(() => {
     setLocationPickerOpen(false);
   }, []);
-
-  // Quick Find (thumbs) handlers
-  const handleOpenQuickFind = useCallback(() => {
-    if (!activeSessionId) return;
-    const session = sessions.find((entry) => entry.id === activeSessionId);
-    if (!session) return;
-    const activePaneId = getActivePaneIdForSession(session);
-    const paneText = getPaneText(activeSessionId, activePaneId);
-    if (!paneText) return;
-    const textLines = paneText.split('\n');
-    setThumbsText(textLines.slice(-1000).join('\n'));
-    setThumbsOpen(true);
-  }, [activeSessionId, getActivePaneIdForSession, getPaneText, sessions]);
-
-  const handleThumbsClose = useCallback(() => {
-    setThumbsOpen(false);
-  }, []);
-
-  const handleThumbsCopy = useCallback((_value: string) => {
-    showCopyToast('Copied to clipboard');
-  }, [showCopyToast]);
 
   const prepareWorktreeCleanupPrompt = useCallback((session: (typeof enrichedLocalSessions)[number] | undefined) => {
     if (!session?.isWorktree || !session.cwd) {
@@ -3239,7 +3210,6 @@ sendFetchPRDetails,
       toggleDockPanel('diffDetail');
     },
     onToggleAttentionPanel: () => toggleDockPanel('attention'),
-    onQuickFind: view === 'session' ? handleOpenQuickFind : undefined,
     onOpenSettings: useCallback(() => setSettingsOpen(prev => !prev), []),
     onShowShortcuts: useCallback(() => setShortcutsOpen(prev => !prev), []),
     onIncreaseFontSize: increaseScale,
@@ -3247,7 +3217,6 @@ sendFetchPRDetails,
     onResetFontSize: resetScale,
     onQuit: handleQuitApp,
     enabled: !locationPickerOpen
-      && !thumbsOpen
       && !whatsNew.isOpen
       && !actionMenuOpen
       && !shortcutEditorOpen
@@ -3661,13 +3630,6 @@ sendFetchPRDetails,
           }
         }}
       />
-      <ThumbsModal
-        isOpen={thumbsOpen}
-        terminalText={thumbsText}
-        onClose={handleThumbsClose}
-        onCopy={handleThumbsCopy}
-      />
-      <CopyToast message={copyMessage} onDone={clearCopyToast} />
       <ErrorToast message={errorMessage} onDone={clearError} />
       <ChordLeaderHud />
       <WorkspaceContextNavigator

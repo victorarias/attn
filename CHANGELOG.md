@@ -30,6 +30,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **A workspace's status dot now matches the sessions inside it.** A workspace whose only session was in the "unknown" state used to show a settled gray dot that disagreed with the session's own indicator; the unknown state now rolls up to the workspace so the two agree. The workspace dot also stays correct right after the app reopens — restored sessions no longer leave the workspace showing a stale status from before the restart.
 - **Shell sessions no longer show a permanent green "working" dot.** A plain terminal isn't running an agent turn, so it now starts (and stays) idle instead of appearing busy forever until you close it.
 
+### Removed
+- **Quick Find is gone.** The ⌘F "thumbs" picker that pulled URLs, paths, and addresses out of the terminal into a hint list has been retired. Find in terminal (⌘F) and the clickable, Cmd-clickable file paths and URLs in terminal output now cover the same ground more reliably.
+
 ## [2026-06-12]
 
 ### Changed
