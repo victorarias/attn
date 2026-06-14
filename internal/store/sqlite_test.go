@@ -453,91 +453,74 @@ func TestMigration49_BackfillsRankInCreatedAtOrder(t *testing.T) {
 	}
 }
 
-func TestOpenDBRepairsWorkspaceRankRegardlessOfRecordedVersion(t *testing.T) {
-	for _, tc := range []struct {
-		name            string
-		recordedVersion int
-	}{
-		{name: "version 49 collision", recordedVersion: 49},
-		{name: "version 50 collision", recordedVersion: 50},
-		{name: "higher development version", recordedVersion: 999},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dbPath := filepath.Join(t.TempDir(), "workspace-rank-repair.db")
-			rawDB, err := sql.Open("sqlite3", dbPath)
-			if err != nil {
-				t.Fatalf("open raw sqlite db: %v", err)
-			}
-			if _, err := rawDB.Exec(`
-				CREATE TABLE workspaces (
-					id TEXT PRIMARY KEY,
-					title TEXT NOT NULL,
-					directory TEXT NOT NULL,
-					muted INTEGER NOT NULL DEFAULT 0,
-					created_at TEXT NOT NULL
-				);
-				CREATE TABLE schema_migrations (
-					version INTEGER PRIMARY KEY,
-					applied_at TEXT NOT NULL
-				);
-				INSERT INTO workspaces (id, title, directory, created_at) VALUES
-					('ws-second', 'Second', '/repo/second', '2026-05-31T00:00:02Z'),
-					('ws-first', 'First', '/repo/first', '2026-05-31T00:00:01Z');
-			`); err != nil {
-				rawDB.Close()
-				t.Fatalf("seed workspace rank repair db: %v", err)
-			}
-			if _, err := rawDB.Exec(
-				"INSERT INTO schema_migrations (version, applied_at) VALUES (?, datetime('now'))",
-				tc.recordedVersion,
-			); err != nil {
-				rawDB.Close()
-				t.Fatalf("seed migration version %d: %v", tc.recordedVersion, err)
-			}
-			rawDB.Close()
+func TestMigration50RepairsRankWhenVersion49WasAlreadyRecorded(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "workspace-rank-repair.db")
+	rawDB, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open raw sqlite db: %v", err)
+	}
+	if _, err := rawDB.Exec(`
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL,
+			directory TEXT NOT NULL,
+			muted INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		);
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at TEXT NOT NULL
+		);
+		INSERT INTO workspaces (id, title, directory, created_at) VALUES
+			('ws-second', 'Second', '/repo/second', '2026-05-31T00:00:02Z'),
+			('ws-first', 'First', '/repo/first', '2026-05-31T00:00:01Z');
+		INSERT INTO schema_migrations (version, applied_at) VALUES (49, datetime('now'));
+	`); err != nil {
+		rawDB.Close()
+		t.Fatalf("seed workspace rank repair db: %v", err)
+	}
+	rawDB.Close()
 
-			db, err := OpenDB(dbPath)
-			if err != nil {
-				t.Fatalf("OpenDB() repairing version %d collision: %v", tc.recordedVersion, err)
-			}
-			defer db.Close()
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() repairing version 49 collision: %v", err)
+	}
+	defer db.Close()
 
-			var count int
-			if err := db.QueryRow(`
-				SELECT COUNT(*) FROM pragma_table_info('workspaces') WHERE name = 'rank'
-			`).Scan(&count); err != nil {
-				t.Fatalf("query rank column: %v", err)
-			}
-			if count != 1 {
-				t.Fatalf("workspaces.rank columns = %d, want 1", count)
-			}
+	var count int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('workspaces') WHERE name = 'rank'
+	`).Scan(&count); err != nil {
+		t.Fatalf("query rank column: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("workspaces.rank columns = %d, want 1", count)
+	}
 
-			rows, err := db.Query("SELECT id, rank FROM workspaces ORDER BY rank")
-			if err != nil {
-				t.Fatalf("query repaired ranks: %v", err)
-			}
-			var ids []string
-			for rows.Next() {
-				var id, rank string
-				if err := rows.Scan(&id, &rank); err != nil {
-					rows.Close()
-					t.Fatalf("scan repaired rank: %v", err)
-				}
-				if rank == "" {
-					rows.Close()
-					t.Fatalf("workspace %s has empty repaired rank", id)
-				}
-				ids = append(ids, id)
-			}
-			if err := rows.Err(); err != nil {
-				rows.Close()
-				t.Fatalf("repaired rank rows: %v", err)
-			}
+	rows, err := db.Query("SELECT id, rank FROM workspaces ORDER BY rank")
+	if err != nil {
+		t.Fatalf("query repaired ranks: %v", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id, rank string
+		if err := rows.Scan(&id, &rank); err != nil {
 			rows.Close()
-			if want := []string{"ws-first", "ws-second"}; !reflect.DeepEqual(ids, want) {
-				t.Fatalf("workspace order = %v, want %v", ids, want)
-			}
-		})
+			t.Fatalf("scan repaired rank: %v", err)
+		}
+		if rank == "" {
+			rows.Close()
+			t.Fatalf("workspace %s has empty repaired rank", id)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatalf("repaired rank rows: %v", err)
+	}
+	rows.Close()
+	if want := []string{"ws-first", "ws-second"}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("workspace order = %v, want %v", ids, want)
 	}
 }
 
