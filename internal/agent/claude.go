@@ -113,28 +113,91 @@ func (c *Claude) BuildEnv(opts SpawnOpts) []string {
 }
 
 func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest) (HeadlessTaskResult, error) {
+	args, err := buildClaudeHeadlessArgs(request)
+	if err != nil {
+		return HeadlessTaskResult{}, err
+	}
+
+	// The process working directory is CWD when set (the writable engine path
+	// points it at the run's working tree), else WorkDir (back-compat: the
+	// janitor's throwaway temp dir).
+	runDir := strings.TrimSpace(request.CWD)
+	if runDir == "" {
+		runDir = request.WorkDir
+	}
+
+	result, stdout, err := runHeadlessCommand(ctx, request.Executable, args, runDir, "claude")
+	if err != nil {
+		return result, err
+	}
+	result.Text = parseClaudeFinalText(stdout)
+	return result, nil
+}
+
+// buildClaudeHeadlessArgs builds the `claude --print` argv for a headless run.
+// It is pure except for the env-dependent isolation arg (--bare vs
+// --setting-sources), so a table test can assert the tool allowlist and
+// --mcp-config wiring without spawning claude.
+//
+// Sandbox posture:
+//   - request.Sandbox == "workspace-write" => the writable tool set adds Edit,
+//     Write, MultiEdit, and Bash alongside the prefixed MCP tools. We keep
+//     --permission-mode dontAsk: in Claude headless (`--print`) it auto-approves
+//     edits and bash without any interactive prompt, which is exactly the
+//     no-human-in-the-loop posture the engine needs (acceptEdits would NOT
+//     auto-approve Bash). SECURITY BOUNDARY: unlike Codex, Claude has no OS
+//     seatbelt here, so the allowlist itself is the boundary — only edit/write
+//     and bash are added, nothing else; no MCP/network features beyond the
+//     attached servers, and no --dangerously-skip-permissions.
+//   - any other value (including "") => the locked MCP-tool-only allowlist,
+//     byte-identical to the janitor.
+func buildClaudeHeadlessArgs(request HeadlessTaskRequest) ([]string, error) {
 	serverName := strings.TrimSpace(request.MCPServerName)
 	if serverName == "" {
 		serverName = "attn_context"
 	}
-	config, err := json.Marshal(map[string]any{
-		"mcpServers": map[string]any{
-			serverName: map[string]any{
-				"type":    "stdio",
-				"command": request.MCPServerCommand,
-				"args":    request.MCPServerArgs,
-			},
+
+	mcpServers := map[string]any{
+		serverName: map[string]any{
+			"type":    "stdio",
+			"command": request.MCPServerCommand,
+			"args":    request.MCPServerArgs,
 		},
-	})
+	}
+	// Merge any additional MCP servers IN ADDITION to the primary one.
+	for _, spec := range request.ExtraMCPServers {
+		name := strings.TrimSpace(spec.Name)
+		if name == "" {
+			continue
+		}
+		mcpServers[name] = map[string]any{
+			"type":    "stdio",
+			"command": spec.Command,
+			"args":    spec.Args,
+		}
+	}
+	config, err := json.Marshal(map[string]any{"mcpServers": mcpServers})
 	if err != nil {
-		return HeadlessTaskResult{}, fmt.Errorf("encode MCP config: %w", err)
+		return nil, fmt.Errorf("encode MCP config: %w", err)
 	}
-	toolPrefix := "mcp__" + serverName + "__"
-	names := headlessToolNames(request.ToolName)
-	prefixed := make([]string, len(names))
-	for i, n := range names {
-		prefixed[i] = toolPrefix + n
+
+	// Primary server's prefixed tool names.
+	prefixed := claudePrefixedTools(serverName, headlessToolNames(request.ToolName))
+	// Each additional server's prefixed tool names.
+	for _, spec := range request.ExtraMCPServers {
+		name := strings.TrimSpace(spec.Name)
+		if name == "" {
+			continue
+		}
+		prefixed = append(prefixed, claudePrefixedTools(name, spec.EnabledTools)...)
 	}
+
+	if request.Sandbox == "workspace-write" {
+		// Built-in edit + shell tools. These are NOT mcp__-prefixed; they are
+		// Claude's native tool names.
+		prefixed = append(prefixed, "Edit", "Write", "MultiEdit", "Bash")
+	}
+
 	tools := strings.Join(prefixed, ",")
 	args := []string{"--print"}
 	args = append(args, claudeHeadlessIsolationArgs()...)
@@ -147,16 +210,24 @@ func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskReques
 		"--no-chrome",
 		"--tools", tools,
 		"--allowedTools", tools,
+		// dontAsk auto-approves edits AND bash in --print mode (acceptEdits would
+		// not cover Bash); it is the headless no-prompt posture for both paths.
 		"--permission-mode", "dontAsk",
 		"--output-format", "json",
 		request.Prompt,
 	)
-	result, stdout, err := runHeadlessCommand(ctx, request.Executable, args, request.WorkDir, "claude")
-	if err != nil {
-		return result, err
+	return args, nil
+}
+
+// claudePrefixedTools maps an MCP server's tool names to their mcp__<server>__
+// prefixed form for --tools/--allowedTools.
+func claudePrefixedTools(serverName string, names []string) []string {
+	prefix := "mcp__" + serverName + "__"
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = prefix + n
 	}
-	result.Text = parseClaudeFinalText(stdout)
-	return result, nil
+	return out
 }
 
 // parseClaudeFinalText extracts the final assistant text from Claude headless

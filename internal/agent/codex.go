@@ -106,20 +106,67 @@ func (c *Codex) PrepareLaunch(opts SpawnOpts) error {
 }
 
 func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest) (HeadlessTaskResult, error) {
+	// Capture the child's final message to a file. This is the parser-free,
+	// robust no-schema text path (codex -o, --output-last-message <FILE>). We
+	// create the file ourselves so cleanup is deterministic; codex overwrites it.
+	// It is rooted at WorkDir (NOT CWD) so the working tree stays clean even on
+	// the writable path.
+	lastMsgPath := ""
+	if f, err := os.CreateTemp(headlessTempDir(request.WorkDir), "codex-last-msg-*.txt"); err == nil {
+		lastMsgPath = f.Name()
+		f.Close()
+		defer os.Remove(lastMsgPath)
+	}
+
+	args := buildCodexHeadlessArgs(request, lastMsgPath)
+
+	// The process working directory is CWD when set (the writable engine path
+	// points it at the run's working tree), else WorkDir (back-compat: the
+	// janitor's throwaway temp dir).
+	runDir := strings.TrimSpace(request.CWD)
+	if runDir == "" {
+		runDir = request.WorkDir
+	}
+
+	result, stdout, err := runHeadlessCommand(ctx, request.Executable, args, runDir, "codex")
+	if err != nil {
+		return result, err
+	}
+	result.Text = codexFinalText(lastMsgPath, stdout)
+	return result, nil
+}
+
+// buildCodexHeadlessArgs builds the `codex exec` argv for a headless run. It is
+// pure (no process spawn, no filesystem access beyond the caller-provided
+// lastMsgPath string) so a table test can assert the sandbox/feature flags and
+// MCP-server wiring without running codex.
+//
+// Sandbox posture:
+//   - request.Sandbox == "workspace-write" => `--sandbox workspace-write` and
+//     `features.shell_tool=true`. SECURITY BOUNDARY: on macOS this confines
+//     writes to the process cwd + TMPDIR with network disabled by default via
+//     the OS seatbelt. `approval_policy="never"` stays because the sandbox — NOT
+//     an interactive approval prompt — is the enforcement boundary; with no human
+//     in the loop a prompt would only deadlock. We NEVER emit
+//     `--dangerously-bypass-approvals-and-sandbox` and NEVER use
+//     `danger-full-access`; every non-essential feature stays disabled exactly as
+//     on the read-only path. The ONLY things re-enabled are the OS sandbox mode
+//     and the shell tool.
+//   - any other value (including "") => read-only, byte-identical to the janitor:
+//     `--sandbox read-only` + `features.shell_tool=false`.
+func buildCodexHeadlessArgs(request HeadlessTaskRequest, lastMsgPath string) []string {
 	serverName := strings.TrimSpace(request.MCPServerName)
 	if serverName == "" {
 		serverName = "attn_context"
 	}
 	toolNames := headlessToolNames(request.ToolName)
 
-	// Capture the child's final message to a file. This is the parser-free,
-	// robust no-schema text path (codex -o, --output-last-message <FILE>). We
-	// create the file ourselves so cleanup is deterministic; codex overwrites it.
-	lastMsgPath := ""
-	if f, err := os.CreateTemp(headlessTempDir(request.WorkDir), "codex-last-msg-*.txt"); err == nil {
-		lastMsgPath = f.Name()
-		f.Close()
-		defer os.Remove(lastMsgPath)
+	writable := request.Sandbox == "workspace-write"
+	sandboxMode := "read-only"
+	shellTool := "features.shell_tool=false"
+	if writable {
+		sandboxMode = "workspace-write"
+		shellTool = "features.shell_tool=true"
 	}
 
 	args := []string{
@@ -130,7 +177,7 @@ func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest
 		"--ignore-rules",
 		"--strict-config",
 		"--skip-git-repo-check",
-		"--sandbox", "read-only",
+		"--sandbox", sandboxMode,
 		"-m", strings.TrimSpace(request.Model),
 	}
 	if lastMsgPath != "" {
@@ -138,7 +185,9 @@ func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest
 	}
 	args = append(args,
 		"-c", `approval_policy="never"`,
-		"-c", "features.shell_tool=false",
+		"-c", shellTool,
+		// Every other feature stays OFF on BOTH paths. Writable re-enables only the
+		// shell tool above; nothing else here changes between read-only and writable.
 		"-c", "features.unified_exec=false",
 		"-c", "features.apps=false",
 		"-c", "features.hooks=false",
@@ -154,19 +203,32 @@ func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest
 		"-c", "features.standalone_web_search=false",
 		"-c", "features.tool_suggest=false",
 		"-c", "features.workspace_dependencies=false",
-		"-c", fmt.Sprintf("mcp_servers.%s.command=%s", serverName, strconv.Quote(request.MCPServerCommand)),
-		"-c", fmt.Sprintf("mcp_servers.%s.args=%s", serverName, tomlStringArray(request.MCPServerArgs)),
-		"-c", fmt.Sprintf("mcp_servers.%s.required=true", serverName),
-		"-c", fmt.Sprintf("mcp_servers.%s.enabled_tools=%s", serverName, tomlStringArray(toolNames)),
-		"-c", fmt.Sprintf(`mcp_servers.%s.default_tools_approval_mode="approve"`, serverName),
-		request.Prompt,
 	)
-	result, stdout, err := runHeadlessCommand(ctx, request.Executable, args, request.WorkDir, "codex")
-	if err != nil {
-		return result, err
+	args = append(args, codexMCPServerArgs(serverName, request.MCPServerCommand, request.MCPServerArgs, toolNames)...)
+	// Attach any additional MCP servers IN ADDITION to the primary one, mirroring
+	// its emission exactly (command/args/required/enabled_tools/approval-mode).
+	for _, spec := range request.ExtraMCPServers {
+		name := strings.TrimSpace(spec.Name)
+		if name == "" {
+			continue
+		}
+		args = append(args, codexMCPServerArgs(name, spec.Command, spec.Args, spec.EnabledTools)...)
 	}
-	result.Text = codexFinalText(lastMsgPath, stdout)
-	return result, nil
+	args = append(args, request.Prompt)
+	return args
+}
+
+// codexMCPServerArgs emits the `-c mcp_servers.<name>.*` argv pairs for one MCP
+// server. Both the primary server and each ExtraMCPServers entry go through here
+// so their wiring is identical by construction.
+func codexMCPServerArgs(name, command string, cmdArgs, enabledTools []string) []string {
+	return []string{
+		"-c", fmt.Sprintf("mcp_servers.%s.command=%s", name, strconv.Quote(command)),
+		"-c", fmt.Sprintf("mcp_servers.%s.args=%s", name, tomlStringArray(cmdArgs)),
+		"-c", fmt.Sprintf("mcp_servers.%s.required=true", name),
+		"-c", fmt.Sprintf("mcp_servers.%s.enabled_tools=%s", name, tomlStringArray(enabledTools)),
+		"-c", fmt.Sprintf(`mcp_servers.%s.default_tools_approval_mode="approve"`, name),
+	}
 }
 
 // codexFinalText returns the child's final assistant message. It prefers the

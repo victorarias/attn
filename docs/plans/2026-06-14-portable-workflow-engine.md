@@ -130,6 +130,16 @@ All three are **in the skeleton** (decided 2026-06-14).
 - **Worktree isolation** (`isolation:'worktree'`). Opt-in for parallel mutation; hand the subagent a fresh worktree as CWD (auto-removed if unchanged) over attn's existing worktree infra. The structured result still returns via `return_result`; mutations are the consumed side effect. Pairs with the §6 side-effect contract.
 - **Subagent MCP attach** (parity, decided). Native subagents reach session-connected MCP tools. Attach the workflow session's MCP servers to the spawned subagent **in addition to** `return_result` (not instead of). Generalize `HeadlessTaskRequest` beyond its single `MCPServer*` triple to a list, and thread real tool names through each driver's argv (`enabled_tools` for Codex, `--allowedTools` for Claude) instead of the hardcoded `read_context,replace_context`.
 
+### E3 security posture (implemented)
+
+The writable headless mode landed in E3 (`internal/agent/{driver,codex,claude}.go`, `internal/workflow/driveragent.go`). The approved security boundary:
+
+- **Opt-in + fail-closed.** `HeadlessTaskRequest.Sandbox` is `""` (read-only) by default; only `"workspace-write"` is writable, and any unrecognized value falls back to read-only. The workspace-context janitor sets none of the new fields, so it is **byte-identically** read-only — guarded by `TestJanitorShapedRequestStaysReadOnly`.
+- **Codex = OS sandbox is the boundary.** `workspace-write` emits `--sandbox workspace-write` + `features.shell_tool=true`. On macOS the seatbelt confines writes to the process cwd + `TMPDIR` with **network disabled by default**. `approval_policy="never"` stays because the OS sandbox — not an interactive approval prompt — is the enforcement boundary (no human is in the loop; a prompt would only deadlock). We **never** emit `--dangerously-bypass-approvals-and-sandbox` and **never** use `danger-full-access`. Every other `features.*` stays `false` exactly as on the read-only path; only the sandbox mode and the shell tool change.
+- **Claude = the allowlist is the boundary.** Claude headless has no OS seatbelt, so the tool allowlist itself is the boundary. `workspace-write` adds only `Edit`, `Write`, `MultiEdit`, `Bash` alongside the prefixed MCP tools, keeping `--permission-mode dontAsk` (which in `--print` mode auto-approves edits **and** bash without prompting; `acceptEdits` would not cover bash). No `--dangerously-skip-permissions`; no features beyond the attached MCP servers.
+- **MCP attach is additive.** `ExtraMCPServers` are wired in addition to the primary server (the result sink / janitor tools), mirroring its emission exactly (`required=true`, `default_tools_approval_mode="approve"`, prefixed tool names). Empty list = no change.
+- **Residual gap (not fixed in E3 — follow-up).** Codex `workspace-write` disables network by default, so a writable subagent that runs `go mod download`, `npm install`, `pip install`, etc. will fail offline. v1 expects cached/vendored dependencies; lifting this (a scoped network allowance or a pre-fetch step) is a deliberate follow-up, tracked here, not addressed in E3.
+
 ---
 
 ## 8. Safety + lifecycle (in scope)

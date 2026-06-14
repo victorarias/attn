@@ -290,6 +290,44 @@ type HeadlessTaskRequest struct {
 	Label  string
 	Phase  string
 	CallID string
+
+	// --- E3 additive (all optional; the janitor sets none of these) ---
+
+	// Sandbox selects the OS sandbox posture of the headless run. Accepted values:
+	//   - ""               => read-only (DEFAULT, byte-identical to the janitor):
+	//                         Codex `--sandbox read-only` + every feature stripped;
+	//                         Claude locked to the MCP tool allowlist only.
+	//   - "workspace-write" => writable: the agent may edit files and run shell,
+	//                          confined by the macOS seatbelt to cwd + TMPDIR with
+	//                          network disabled by default. NO other features are
+	//                          re-enabled, and no approval bypass is used.
+	// Any UNRECOGNIZED value is treated as read-only (fail closed).
+	Sandbox string
+	// CWD is the process working directory for the run. Empty => fall back to
+	// WorkDir (back-compat). The writable engine path sets this to the run's
+	// working tree so edits land where the workflow expects them; scratch files
+	// (last-message, schema, result) stay rooted at WorkDir to keep the tree clean.
+	CWD string
+	// ExtraMCPServers are attached IN ADDITION to the primary MCPServer* triple
+	// (not instead of it), so a workflow session's MCP tools reach the subagent
+	// alongside return_result. The janitor sets none.
+	ExtraMCPServers []MCPServerSpec
+}
+
+// MCPServerSpec describes one MCP server to attach to a headless run. It mirrors
+// the primary MCPServer* triple as a value so a list of additional servers can
+// be threaded through HeadlessTaskRequest.ExtraMCPServers.
+type MCPServerSpec struct {
+	// Name is the server identifier; tool names are prefixed with it for Claude
+	// (mcp__<Name>__<tool>) and keyed under mcp_servers.<Name> for Codex.
+	Name string
+	// Command is the executable that hosts the MCP server (stdio transport).
+	Command string
+	// Args are the command arguments.
+	Args []string
+	// EnabledTools is the explicit tool allowlist exposed by this server. Each is
+	// added to the driver's enabled_tools / --allowedTools (prefixed for Claude).
+	EnabledTools []string
 }
 
 type HeadlessTaskResult struct {

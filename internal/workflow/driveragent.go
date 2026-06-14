@@ -45,6 +45,15 @@ type driverAgent struct {
 	attnExec   string // path to the attn binary (hosts the result-sink subcommand)
 	runTmpDir  string // per-call schema/result files live here
 	maxRetries int
+
+	// workingTree is the writable CWD handed to each subagent (native parity:
+	// agent() shares a writable working tree). Empty => fall back to runTmpDir so
+	// the agent still has a valid cwd. Scratch (schema/result/last-msg) always
+	// lives under runTmpDir, so a working tree here stays clean of attn files.
+	workingTree string
+	// sessionMCPServers are the workflow session's MCP servers, attached to every
+	// subagent IN ADDITION to the return_result sink (native parity).
+	sessionMCPServers []agentdriver.MCPServerSpec
 }
 
 // DriverAgentOptions configures NewDriverAgent.
@@ -65,6 +74,15 @@ type DriverAgentOptions struct {
 	MaxRetries int
 	// Runner optionally injects a headlessRunner (tests). nil => the real driver.
 	Runner headlessRunner
+	// WorkingTree is the writable working tree handed to each subagent as its CWD
+	// (native parity: agent() shares a writable tree). Empty => RunTmpDir is used
+	// as the CWD so subagents still run somewhere valid. Scratch files stay in
+	// RunTmpDir regardless, keeping the working tree free of attn artifacts.
+	WorkingTree string
+	// SessionMCPServers are the workflow session's MCP servers, threaded into each
+	// subagent request's ExtraMCPServers so their tools attach in addition to
+	// return_result (native parity). Empty is acceptable.
+	SessionMCPServers []agentdriver.MCPServerSpec
 }
 
 var _ AgentStub = (*driverAgent)(nil)
@@ -130,14 +148,25 @@ func NewDriverAgent(opts DriverAgentOptions) (*driverAgent, error) {
 	}
 
 	return &driverAgent{
-		runner:     runner,
-		provider:   provider,
-		executable: executable,
-		model:      strings.TrimSpace(opts.Model),
-		attnExec:   attnExec,
-		runTmpDir:  runTmpDir,
-		maxRetries: maxRetries,
+		runner:            runner,
+		provider:          provider,
+		executable:        executable,
+		model:             strings.TrimSpace(opts.Model),
+		attnExec:          attnExec,
+		runTmpDir:         runTmpDir,
+		maxRetries:        maxRetries,
+		workingTree:       strings.TrimSpace(opts.WorkingTree),
+		sessionMCPServers: opts.SessionMCPServers,
 	}, nil
+}
+
+// runCWD is the writable working directory handed to each subagent: the working
+// tree when set, else runTmpDir so the subagent still runs somewhere valid.
+func (d *driverAgent) runCWD() string {
+	if d.workingTree != "" {
+		return d.workingTree
+	}
+	return d.runTmpDir
 }
 
 // Run implements AgentStub. With a schema it drives the return_result sink and
@@ -156,10 +185,13 @@ func (d *driverAgent) Run(ordinal OrdinalPath, prompt string, schema json.RawMes
 // JSON-encoded so the engine decodes it back to a JS string.
 func (d *driverAgent) runNoSchema(ctx context.Context, prompt string) (json.RawMessage, error) {
 	req := agentdriver.HeadlessTaskRequest{
-		Executable: d.executable,
-		Model:      d.model,
-		Prompt:     prompt,
-		WorkDir:    d.runTmpDir,
+		Executable:      d.executable,
+		Model:           d.model,
+		Prompt:          prompt,
+		WorkDir:         d.runTmpDir,
+		CWD:             d.runCWD(),
+		Sandbox:         "workspace-write",
+		ExtraMCPServers: d.sessionMCPServers,
 	}
 	res, err := d.runner.Run(ctx, req)
 	if err != nil {
@@ -203,17 +235,22 @@ func (d *driverAgent) runWithSchema(ctx context.Context, ordinal OrdinalPath, pr
 			Model:         d.model,
 			Prompt:        fullPrompt,
 			WorkDir:       d.runTmpDir,
+			CWD:           d.runCWD(),
+			Sandbox:       "workspace-write",
 			MCPServerName: "attn_workflow_result",
 			ToolName:      resultToolName,
 			Schema:        schema,
 			ResultPath:    resultPath,
 			MCPServerCommand: d.attnExec,
+			// Scratch (schema/result) paths are absolute under runTmpDir; keep them
+			// absolute so the sink resolves them regardless of the writable CWD.
 			MCPServerArgs: []string{
 				"_workflow-result-mcp",
 				"--tool-name", resultToolName,
 				"--schema-file", schemaPath,
 				"--result-file", resultPath,
 			},
+			ExtraMCPServers: d.sessionMCPServers,
 		}
 
 		res, runErr := d.runner.Run(ctx, req)

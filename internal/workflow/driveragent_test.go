@@ -277,6 +277,142 @@ func TestDriverAgentThroughEngineResolvesNull(t *testing.T) {
 	}
 }
 
+// newWritableTestDriverAgent builds a driverAgent with an explicit working tree
+// and session MCP servers so the E3 writable/CWD/ExtraMCPServers threading can be
+// asserted on the built request.
+func newWritableTestDriverAgent(t *testing.T, runner headlessRunner, workingTree string, servers []agentdriver.MCPServerSpec) *driverAgent {
+	t.Helper()
+	da, err := NewDriverAgent(DriverAgentOptions{
+		Provider:          "codex",
+		Executable:        "/bin/true",
+		Model:             "test-model",
+		RunTmpDir:         t.TempDir(),
+		AttnExecutable:    "/bin/true",
+		MaxRetries:        2,
+		Runner:            runner,
+		WorkingTree:       workingTree,
+		SessionMCPServers: servers,
+	})
+	if err != nil {
+		t.Fatalf("NewDriverAgent: %v", err)
+	}
+	return da
+}
+
+// TestDriverAgentSchemaPathIsWritableWithCWDAndExtraServers asserts the schema
+// path builds a writable request whose CWD is the working tree and whose
+// ExtraMCPServers carry the session MCP servers — in addition to the wired
+// return_result sink (E2 behavior preserved).
+func TestDriverAgentSchemaPathIsWritableWithCWDAndExtraServers(t *testing.T) {
+	tree := t.TempDir()
+	servers := []agentdriver.MCPServerSpec{{
+		Name:         "session_tools",
+		Command:      "/tmp/session-mcp",
+		Args:         []string{"serve"},
+		EnabledTools: []string{"do_thing"},
+	}}
+	runner := &fakeRunner{behave: func(_ int, req agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+		writeValid(t, req.ResultPath, `{"answer":"yes"}`)
+		return agentdriver.HeadlessTaskResult{}, nil
+	}}
+	da := newWritableTestDriverAgent(t, runner, tree, servers)
+
+	if _, err := da.Run(ordForTest(), "do it", json.RawMessage(testSchema)); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	req := runner.calls[0]
+	if req.Sandbox != "workspace-write" {
+		t.Fatalf("schema path sandbox = %q, want workspace-write", req.Sandbox)
+	}
+	if req.CWD != tree {
+		t.Fatalf("schema path CWD = %q, want working tree %q", req.CWD, tree)
+	}
+	if req.WorkDir == tree {
+		t.Fatalf("scratch WorkDir must stay in the run temp dir, not the working tree: %q", req.WorkDir)
+	}
+	if len(req.ExtraMCPServers) != 1 || req.ExtraMCPServers[0].Name != "session_tools" {
+		t.Fatalf("session MCP servers not threaded into ExtraMCPServers: %+v", req.ExtraMCPServers)
+	}
+	// E2 behavior preserved: return_result sink still wired.
+	if req.ToolName != resultToolName || req.MCPServerName != "attn_workflow_result" {
+		t.Fatalf("schema path no longer wires the result sink: %+v", req)
+	}
+	// Scratch paths in the sink argv must stay absolute under the run temp dir.
+	if !containsArg(req.MCPServerArgs, "--result-file") {
+		t.Fatalf("result sink argv lost --result-file: %v", req.MCPServerArgs)
+	}
+}
+
+// TestDriverAgentNoSchemaPathIsWritableWithCWDAndExtraServers asserts the same
+// writable/CWD/ExtraMCPServers threading for the no-schema path, which must NOT
+// wire a result sink (E2 behavior preserved).
+func TestDriverAgentNoSchemaPathIsWritableWithCWDAndExtraServers(t *testing.T) {
+	tree := t.TempDir()
+	servers := []agentdriver.MCPServerSpec{{
+		Name:         "session_tools",
+		Command:      "/tmp/session-mcp",
+		EnabledTools: []string{"do_thing"},
+	}}
+	runner := &fakeRunner{behave: func(_ int, _ agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+		return agentdriver.HeadlessTaskResult{Text: "ok"}, nil
+	}}
+	da := newWritableTestDriverAgent(t, runner, tree, servers)
+
+	if _, err := da.Run(ordForTest(), "answer", nil); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	req := runner.calls[0]
+	if req.Sandbox != "workspace-write" {
+		t.Fatalf("no-schema path sandbox = %q, want workspace-write", req.Sandbox)
+	}
+	if req.CWD != tree {
+		t.Fatalf("no-schema path CWD = %q, want working tree %q", req.CWD, tree)
+	}
+	if len(req.ExtraMCPServers) != 1 || req.ExtraMCPServers[0].Name != "session_tools" {
+		t.Fatalf("session MCP servers not threaded into ExtraMCPServers: %+v", req.ExtraMCPServers)
+	}
+	// E2 behavior preserved: no result sink on the no-schema path.
+	if req.MCPServerName != "" || req.ToolName != "" {
+		t.Fatalf("no-schema path wired an MCP result sink: %+v", req)
+	}
+}
+
+// TestDriverAgentCWDFallsBackToRunTmpDirWhenNoWorkingTree asserts that with an
+// empty WorkingTree the CWD falls back to the run temp dir (so subagents still
+// run somewhere valid), for both the schema and no-schema paths.
+func TestDriverAgentCWDFallsBackToRunTmpDirWhenNoWorkingTree(t *testing.T) {
+	runner := &fakeRunner{behave: func(_ int, req agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+		if len(req.Schema) != 0 {
+			writeValid(t, req.ResultPath, `{"answer":"yes"}`)
+		}
+		return agentdriver.HeadlessTaskResult{Text: "ok"}, nil
+	}}
+	da := newWritableTestDriverAgent(t, runner, "" /* no working tree */, nil)
+
+	if _, err := da.Run(ordForTest(), "answer", nil); err != nil {
+		t.Fatalf("no-schema Run error: %v", err)
+	}
+	if got := runner.calls[0].CWD; got != da.runTmpDir {
+		t.Fatalf("no-schema CWD = %q, want runTmpDir %q", got, da.runTmpDir)
+	}
+
+	if _, err := da.Run(ordForTest(), "do it", json.RawMessage(testSchema)); err != nil {
+		t.Fatalf("schema Run error: %v", err)
+	}
+	if got := runner.calls[1].CWD; got != da.runTmpDir {
+		t.Fatalf("schema CWD = %q, want runTmpDir %q", got, da.runTmpDir)
+	}
+}
+
+func containsArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
 func jsonStringEqual(a, b string) bool {
 	var av, bv any
 	if json.Unmarshal([]byte(a), &av) != nil {
