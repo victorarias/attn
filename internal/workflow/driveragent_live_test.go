@@ -57,7 +57,7 @@ func TestDriverAgentLiveCodexRoundTrip(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	result, runErr := da.runWithSchema(ctx, ordForTest(), "Respond with the word PONG in the answer field.", schema)
+	result, runErr := da.runWithSchema(ctx, ordForTest(), "Respond with the word PONG in the answer field.", schema, da.defaultRunCWD(), da.model)
 	if runErr != nil {
 		t.Fatalf("live codex round-trip failed: %v", runErr)
 	}
@@ -123,7 +123,7 @@ func TestDriverAgentLiveWritableCodexRoundTrip(t *testing.T) {
 
 	prompt := "Create a file named OUTPUT.txt in the current working directory containing exactly the word PONG. " +
 		"Then return a result with the field `wrote` set to the absolute path of the file you created."
-	result, runErr := da.runWithSchema(ctx, ordForTest(), prompt, schema)
+	result, runErr := da.runWithSchema(ctx, ordForTest(), prompt, schema, da.defaultRunCWD(), da.model)
 	if runErr != nil {
 		t.Fatalf("live writable codex round-trip failed: %v", runErr)
 	}

@@ -322,7 +322,7 @@ type fixedStub struct {
 	result json.RawMessage
 }
 
-func (s fixedStub) Run(_ workflow.OrdinalPath, _ string, _ json.RawMessage) (json.RawMessage, error) {
+func (s fixedStub) Run(_ workflow.AgentCall) (json.RawMessage, error) {
 	return s.result, nil
 }
 
@@ -411,7 +411,7 @@ type ctxAwareBlockingStub struct {
 	once    sync.Once
 }
 
-func (s *ctxAwareBlockingStub) Run(_ workflow.OrdinalPath, _ string, _ json.RawMessage) (json.RawMessage, error) {
+func (s *ctxAwareBlockingStub) Run(_ workflow.AgentCall) (json.RawMessage, error) {
 	s.once.Do(func() { close(s.started) })
 	<-s.release
 	return nil, context.Canceled

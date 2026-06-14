@@ -135,6 +135,14 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 		// callers pass no opts => schema nil => schemaHash "none" => behavior
 		// unchanged.
 		schema := extractAgentSchema(rs.vm, call.Argument(1))
+		// isolation/model/agentType select the live call's execution context. They
+		// are threaded to the stub but NOT folded into the cache identity: the
+		// predicate stays ordinal+prompt_hash+schema_hash (§6). isolation is
+		// validated to "" | "worktree" (unknown => "") so a typo can't silently run
+		// in an unexpected mode.
+		isolation := validateIsolation(extractAgentString(rs.vm, call.Argument(1), "isolation"))
+		model := extractAgentString(rs.vm, call.Argument(1), "model")
+		agentType := extractAgentString(rs.vm, call.Argument(1), "agentType")
 
 		// --- fix the ordinal synchronously, before anything async ---
 		site := rs.callsiteKey()
@@ -169,7 +177,14 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 		go func() {
 			// Concurrency cap (correctness semaphore).
 			rs.sem <- struct{}{}
-			res, runErr := rs.stub.Run(ordSnapshot, prompt, schema)
+			res, runErr := rs.stub.Run(AgentCall{
+				Ordinal:   ordSnapshot,
+				Prompt:    prompt,
+				Schema:    schema,
+				Isolation: isolation,
+				Model:     model,
+				AgentType: agentType,
+			})
 			<-rs.sem
 
 			// Hop back to the loop goroutine to journal + resolve. This is the ONLY
@@ -224,6 +239,40 @@ func extractAgentSchema(vm *goja.Runtime, optsVal goja.Value) json.RawMessage {
 		return nil
 	}
 	return json.RawMessage(raw)
+}
+
+// extractAgentString pulls a string-valued property (e.g. "isolation", "model",
+// "agentType") off the agent() opts object. It mirrors extractAgentSchema: an
+// absent opts object, a missing key, or a non-string value yields "". Numbers and
+// other non-strings are deliberately ignored rather than coerced, so a malformed
+// opt never silently becomes a meaningful value.
+func extractAgentString(vm *goja.Runtime, optsVal goja.Value, key string) string {
+	if optsVal == nil || goja.IsUndefined(optsVal) || goja.IsNull(optsVal) {
+		return ""
+	}
+	obj, ok := optsVal.(*goja.Object)
+	if !ok {
+		return ""
+	}
+	v := obj.Get(key)
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return ""
+	}
+	s, ok := v.Export().(string)
+	if !ok {
+		return ""
+	}
+	return s
+}
+
+// validateIsolation normalizes the isolation opt to the supported set: "" (none,
+// share the writable working tree) or "worktree". Any unknown value falls back to
+// "" so a typo can't silently change WHERE the call runs.
+func validateIsolation(s string) string {
+	if s == "worktree" {
+		return "worktree"
+	}
+	return ""
 }
 
 // mustResolve calls a NewPromise resolve func and propagates an uncatchable error

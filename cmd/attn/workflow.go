@@ -433,6 +433,12 @@ func buildWorkflowStub(parsed workflowRunArgs) (workflow.AgentStub, error) {
 		Model:       parsed.model,
 		RunTmpDir:   tmpDir,
 		WorkingTree: cwd,
+		// Surface worktree-isolation lifecycle diagnostics (notably retained,
+		// mutated worktrees) on the engine process's stderr so the operator can
+		// find kept worktrees after the run.
+		LogFunc: func(format string, args ...interface{}) {
+			fmt.Fprintf(os.Stderr, "workflow run: "+format+"\n", args...)
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build driver agent: %w", err)

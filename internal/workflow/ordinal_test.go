@@ -34,16 +34,16 @@ func ordinalResultMap(t *testing.T, stub AgentStub, script string) map[string]st
 }
 
 // deterministicResult is a pure function of the prompt, independent of the
-// ordinal (and the schema). It matches the StubFunc 3-arg shape.
-func deterministicResult(_ OrdinalPath, prompt string, _ json.RawMessage) (json.RawMessage, error) {
-	b, _ := json.Marshal("R:" + prompt)
+// ordinal (and the schema/isolation). It matches the StubFunc AgentCall shape.
+func deterministicResult(call AgentCall) (json.RawMessage, error) {
+	b, _ := json.Marshal("R:" + call.Prompt)
 	return b, nil
 }
 
 // scriptedDeterministicResult adapts deterministicResult to the 2-arg resultFor
 // signature NewScriptedStub expects (the gated stub does not vary by schema).
 func scriptedDeterministicResult(ordinal OrdinalPath, prompt string) (json.RawMessage, error) {
-	return deterministicResult(ordinal, prompt, nil)
+	return deterministicResult(AgentCall{Ordinal: ordinal, Prompt: prompt})
 }
 
 // TestPipelineOrdinalStabilityUnderReorder is the crux E1 proof: a pipeline whose

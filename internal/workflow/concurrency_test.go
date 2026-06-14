@@ -47,7 +47,7 @@ func newBlockingStub(resultFor func(prompt string) json.RawMessage) *blockingStu
 	}
 }
 
-func (s *blockingStub) Run(_ OrdinalPath, prompt string, _ json.RawMessage) (json.RawMessage, error) {
+func (s *blockingStub) Run(call AgentCall) (json.RawMessage, error) {
 	s.calls.Add(1)
 	cur := s.inFlight.Add(1)
 	// Raise the high-water-mark to cur (monotonic CAS loop).
@@ -59,7 +59,7 @@ func (s *blockingStub) Run(_ OrdinalPath, prompt string, _ json.RawMessage) (jso
 	}
 	<-s.release
 	s.inFlight.Add(-1)
-	return s.resultFor(prompt), nil
+	return s.resultFor(call.Prompt), nil
 }
 
 // releaseAll lets every currently-parked and future Run proceed.
@@ -216,12 +216,12 @@ type raceStub struct {
 	resultFor func(prompt string) json.RawMessage
 }
 
-func (s *raceStub) Run(_ OrdinalPath, prompt string, _ json.RawMessage) (json.RawMessage, error) {
+func (s *raceStub) Run(call AgentCall) (json.RawMessage, error) {
 	// Yield to the scheduler so resolution order is genuinely nondeterministic
 	// across runs and across goroutines. No sleep duration is prescribed; runtime
 	// scheduling decides who finishes first.
 	runtime.Gosched()
-	return s.resultFor(prompt), nil
+	return s.resultFor(call.Prompt), nil
 }
 
 // ordinalMapUnderRace runs script under a raceStub with a large concurrency cap
@@ -315,12 +315,12 @@ func TestParallelNeverRejectsNullSlotUnderConcurrency(t *testing.T) {
 	// boomStub errors on prompts containing "boom" (terminal subagent failure ->
 	// null slot, never reject); otherwise echoes. It yields so the good and bad
 	// slots truly race.
-	boomStub := StubFunc(func(_ OrdinalPath, prompt string, _ json.RawMessage) (json.RawMessage, error) {
+	boomStub := StubFunc(func(call AgentCall) (json.RawMessage, error) {
 		runtime.Gosched()
-		if strings.Contains(prompt, "boom") {
-			return nil, fmt.Errorf("subagent crashed on %q", prompt)
+		if strings.Contains(call.Prompt, "boom") {
+			return nil, fmt.Errorf("subagent crashed on %q", call.Prompt)
 		}
-		return echoPrompt(prompt), nil
+		return echoPrompt(call.Prompt), nil
 	})
 	script := `
 		const out = await parallel([
@@ -356,12 +356,12 @@ func TestParallelNeverRejectsNullSlotUnderConcurrency(t *testing.T) {
 // item to null for the rest of the pipeline, surviving items flow through both
 // stages, and the pipeline never rejects.
 func TestPipelineNeverRejectsNullItemUnderConcurrency(t *testing.T) {
-	boomStub := StubFunc(func(_ OrdinalPath, prompt string, _ json.RawMessage) (json.RawMessage, error) {
+	boomStub := StubFunc(func(call AgentCall) (json.RawMessage, error) {
 		runtime.Gosched()
-		if strings.Contains(prompt, "boom") {
-			return nil, fmt.Errorf("subagent crashed on %q", prompt)
+		if strings.Contains(call.Prompt, "boom") {
+			return nil, fmt.Errorf("subagent crashed on %q", call.Prompt)
 		}
-		return echoPrompt(prompt), nil
+		return echoPrompt(call.Prompt), nil
 	})
 	script := `
 		const out = await pipeline(["keep", "throw", "boom"],

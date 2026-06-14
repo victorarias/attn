@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/git"
 )
 
 // headlessRunner is the seam over agent.RunHeadlessTask so driverAgent is
@@ -54,6 +55,10 @@ type driverAgent struct {
 	// sessionMCPServers are the workflow session's MCP servers, attached to every
 	// subagent IN ADDITION to the return_result sink (native parity).
 	sessionMCPServers []agentdriver.MCPServerSpec
+	// log is an optional diagnostics sink (e.g. the daemon logger). nil => silent.
+	// The worktree lifecycle uses it to record retained worktrees so a kept,
+	// mutated worktree can be found after the run.
+	log func(format string, args ...interface{})
 }
 
 // DriverAgentOptions configures NewDriverAgent.
@@ -83,6 +88,9 @@ type DriverAgentOptions struct {
 	// subagent request's ExtraMCPServers so their tools attach in addition to
 	// return_result (native parity). Empty is acceptable.
 	SessionMCPServers []agentdriver.MCPServerSpec
+	// LogFunc is an optional diagnostics sink for the worktree lifecycle (retained
+	// worktree paths, cleanup failures). nil => silent.
+	LogFunc func(format string, args ...interface{})
 }
 
 var _ AgentStub = (*driverAgent)(nil)
@@ -157,12 +165,14 @@ func NewDriverAgent(opts DriverAgentOptions) (*driverAgent, error) {
 		maxRetries:        maxRetries,
 		workingTree:       strings.TrimSpace(opts.WorkingTree),
 		sessionMCPServers: opts.SessionMCPServers,
+		log:               opts.LogFunc,
 	}, nil
 }
 
-// runCWD is the writable working directory handed to each subagent: the working
-// tree when set, else runTmpDir so the subagent still runs somewhere valid.
-func (d *driverAgent) runCWD() string {
+// defaultRunCWD is the writable working directory handed to each subagent on the
+// non-isolated path: the working tree when set, else runTmpDir so the subagent
+// still runs somewhere valid.
+func (d *driverAgent) defaultRunCWD() string {
 	if d.workingTree != "" {
 		return d.workingTree
 	}
@@ -173,23 +183,122 @@ func (d *driverAgent) runCWD() string {
 // returns the validated result bytes; without a schema it returns the child's
 // captured final text encoded as a JSON string. Terminal failure returns a Go
 // error (engine -> null), never a thrown rejection.
-func (d *driverAgent) Run(ordinal OrdinalPath, prompt string, schema json.RawMessage) (json.RawMessage, error) {
+//
+// Execution context is per-call:
+//   - call.Isolation == "" (default): CWD is the shared writable working tree —
+//     byte-identical to E3.
+//   - call.Isolation == "worktree": the call runs in a FRESH git worktree as CWD
+//     so parallel mutating agents don't collide (see runIsolated). The structured
+//     result still returns via return_result; the worktree is the consumed side
+//     effect. It is auto-removed iff the agent left it git-clean, else KEPT.
+//
+// call.Model overrides d.model for this call when non-empty. call.AgentType is
+// carried for native parity but currently unused.
+func (d *driverAgent) Run(call AgentCall) (json.RawMessage, error) {
 	ctx := context.Background()
-	if len(schema) == 0 {
-		return d.runNoSchema(ctx, prompt)
+	model := d.model
+	if call.Model != "" {
+		model = call.Model
 	}
-	return d.runWithSchema(ctx, ordinal, prompt, schema)
+	if call.Isolation == "worktree" {
+		return d.runIsolated(ctx, call, model)
+	}
+	return d.runInCWD(ctx, call, d.defaultRunCWD(), model)
+}
+
+// runInCWD dispatches the schema / no-schema path against an explicit CWD and
+// model. It is the single body both the default and worktree-isolated paths flow
+// through, so the only thing isolation changes is WHERE the subagent runs.
+func (d *driverAgent) runInCWD(ctx context.Context, call AgentCall, cwd, model string) (json.RawMessage, error) {
+	if len(call.Schema) == 0 {
+		return d.runNoSchema(ctx, call.Prompt, cwd, model)
+	}
+	return d.runWithSchema(ctx, call.Ordinal, call.Prompt, call.Schema, cwd, model)
+}
+
+// runIsolated implements isolation:'worktree'. It resolves the repo root from the
+// shared working tree, creates a fresh worktree on a unique branch derived from
+// the call's ordinal, runs the subagent with that worktree as CWD, and then —
+// success OR failure — applies the §6/§7 cleanup rule:
+//
+//   - the agent left the worktree git-clean  -> remove it (and best-effort prune
+//     the branch): a no-op isolated call leaves nothing behind.
+//   - the agent made changes                 -> KEEP it: the mutations are the
+//     consumed side effect and must not be discarded; the retained path is logged.
+//
+// On CreateWorktree failure it returns a clear error (engine -> null) rather than
+// silently running in the wrong CWD. Scratch (schema/result) files stay under
+// runTmpDir as always, so the worktree's cleanliness reflects ONLY the subagent's
+// own edits, never attn artifacts.
+func (d *driverAgent) runIsolated(ctx context.Context, call AgentCall, model string) (json.RawMessage, error) {
+	repoRoot := git.ResolveMainRepoPath(d.defaultRunCWD())
+	if repoRoot == "" {
+		return nil, fmt.Errorf("worktree isolation: cannot resolve repo root from working tree %q", d.defaultRunCWD())
+	}
+
+	branch := worktreeBranchFor(call.Ordinal)
+	path := git.GenerateWorktreePath(repoRoot, branch)
+	if err := git.CreateWorktree(repoRoot, branch, path); err != nil {
+		// Fail closed: never fall back to the shared tree — that would defeat the
+		// whole point of isolation (parallel mutators must not collide).
+		return nil, fmt.Errorf("worktree isolation: create worktree for %s: %w", call.Ordinal.String(), err)
+	}
+
+	result, runErr := d.runInCWD(ctx, call, path, model)
+
+	// Cleanup applies regardless of the run outcome: a failed run that still dirtied
+	// the tree keeps its worktree (the user may inspect partial work); a clean run
+	// (success or failure) leaves nothing behind.
+	clean, cleanErr := git.IsWorktreeClean(path)
+	switch {
+	case cleanErr != nil:
+		// Could not determine cleanliness: keep the worktree to avoid discarding
+		// possible mutations, and surface the path so it can be found later.
+		d.logf("worktree isolation: could not determine cleanliness of %q (%v); keeping it", path, cleanErr)
+	case clean:
+		if err := git.DeleteWorktree(repoRoot, path, true); err != nil {
+			d.logf("worktree isolation: remove clean worktree %q failed: %v", path, err)
+		} else {
+			// Best-effort branch prune; a leftover branch is harmless but untidy.
+			_ = git.DeleteBranch(repoRoot, branch, true)
+		}
+	default:
+		d.logf("worktree isolation: agent left changes; keeping worktree %q (branch %s)", path, branch)
+	}
+
+	return result, runErr
+}
+
+// worktreeBranchFor derives a unique, filesystem-safe branch name for an isolated
+// call from its ordinal. The ordinal already disambiguates every call site /
+// parallel slot / pipeline stage in a run, so a short hash of it gives a stable,
+// collision-free branch per call.
+func worktreeBranchFor(ordinal OrdinalPath) string {
+	sum := sha256.Sum256([]byte(ordinal.String()))
+	return "attn-wf/" + hex.EncodeToString(sum[:])[:12]
+}
+
+// logf emits a driver diagnostic. It is nil-safe (no logger wired in tests) and
+// kept lightweight so the worktree lifecycle leaves a trail without a hard
+// dependency on a logging sink.
+func (d *driverAgent) logf(format string, args ...interface{}) {
+	if d.log == nil {
+		return
+	}
+	d.log(format, args...)
 }
 
 // runNoSchema spawns a sink-less read-only agent and returns its final text,
-// JSON-encoded so the engine decodes it back to a JS string.
-func (d *driverAgent) runNoSchema(ctx context.Context, prompt string) (json.RawMessage, error) {
+// JSON-encoded so the engine decodes it back to a JS string. cwd is the per-call
+// writable working directory (the shared tree, or an isolated worktree); model is
+// the per-call model.
+func (d *driverAgent) runNoSchema(ctx context.Context, prompt, cwd, model string) (json.RawMessage, error) {
 	req := agentdriver.HeadlessTaskRequest{
 		Executable:      d.executable,
-		Model:           d.model,
+		Model:           model,
 		Prompt:          prompt,
 		WorkDir:         d.runTmpDir,
-		CWD:             d.runCWD(),
+		CWD:             cwd,
 		Sandbox:         "workspace-write",
 		ExtraMCPServers: d.sessionMCPServers,
 	}
@@ -209,7 +318,7 @@ func (d *driverAgent) runNoSchema(ctx context.Context, prompt string) (json.RawM
 // validated result file. On a missing result (the model never called the tool)
 // or a non-zero exit with no file, it re-spawns with a corrective prompt up to
 // maxRetries. Retries exhausted with no file -> error (engine -> null).
-func (d *driverAgent) runWithSchema(ctx context.Context, ordinal OrdinalPath, prompt string, schema json.RawMessage) (json.RawMessage, error) {
+func (d *driverAgent) runWithSchema(ctx context.Context, ordinal OrdinalPath, prompt string, schema json.RawMessage, cwd, model string) (json.RawMessage, error) {
 	base := ordinalFileBase(ordinal)
 	schemaPath := filepath.Join(d.runTmpDir, base+".schema.json")
 	resultPath := filepath.Join(d.runTmpDir, base+".result.json")
@@ -232,10 +341,10 @@ func (d *driverAgent) runWithSchema(ctx context.Context, ordinal OrdinalPath, pr
 
 		req := agentdriver.HeadlessTaskRequest{
 			Executable:    d.executable,
-			Model:         d.model,
+			Model:         model,
 			Prompt:        fullPrompt,
 			WorkDir:       d.runTmpDir,
-			CWD:           d.runCWD(),
+			CWD:           cwd,
 			Sandbox:       "workspace-write",
 			MCPServerName: "attn_workflow_result",
 			ToolName:      resultToolName,
