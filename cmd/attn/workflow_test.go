@@ -1,0 +1,616 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/workflow"
+)
+
+// fakeWorkflowClient is a hermetic in-memory stand-in for the daemon socket
+// client. It records every upsert and serves get/list from its own state, so the
+// CLI orchestration can be exercised with no daemon, no socket, and no real agent.
+type fakeWorkflowClient struct {
+	mu sync.Mutex
+
+	runs      map[string]*protocol.WorkflowRun
+	callsByID map[string][]protocol.WorkflowAgentCall
+
+	runUpserts  []protocol.WorkflowRun
+	callUpserts []protocol.WorkflowAgentCall
+
+	// getStatusOverride, when set for a runID, forces WorkflowRunGet to report that
+	// status (used to drive the cancel watcher deterministically).
+	getStatusOverride map[string]protocol.WorkflowRunStatus
+
+	getErr error
+}
+
+func newFakeWorkflowClient() *fakeWorkflowClient {
+	return &fakeWorkflowClient{
+		runs:              map[string]*protocol.WorkflowRun{},
+		callsByID:         map[string][]protocol.WorkflowAgentCall{},
+		getStatusOverride: map[string]protocol.WorkflowRunStatus{},
+	}
+}
+
+var _ workflowClient = (*fakeWorkflowClient)(nil)
+
+func (f *fakeWorkflowClient) WorkflowRunUpsert(run *protocol.WorkflowRun) (*protocol.WorkflowRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	stored := *run
+	f.runUpserts = append(f.runUpserts, stored)
+	saved := stored
+	f.runs[run.RunID] = &saved
+	return f.hydrateLocked(run.RunID), nil
+}
+
+func (f *fakeWorkflowClient) WorkflowCallUpsert(runID string, call *protocol.WorkflowAgentCall) (*protocol.WorkflowRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	stored := *call
+	if stored.RunID == "" {
+		stored.RunID = runID
+	}
+	f.callUpserts = append(f.callUpserts, stored)
+
+	calls := f.callsByID[runID]
+	replaced := false
+	for i := range calls {
+		if calls[i].Ordinal == stored.Ordinal {
+			calls[i] = stored
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		calls = append(calls, stored)
+	}
+	f.callsByID[runID] = calls
+	return f.hydrateLocked(runID), nil
+}
+
+func (f *fakeWorkflowClient) WorkflowRunGet(runID string) (*protocol.WorkflowRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	return f.hydrateLocked(runID), nil
+}
+
+func (f *fakeWorkflowClient) WorkflowRunList(sessionID string) ([]protocol.WorkflowRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []protocol.WorkflowRun{}
+	for id := range f.runs {
+		run := f.hydrateLocked(id)
+		if sessionID != "" && protocol.Deref(run.SessionID) != sessionID {
+			continue
+		}
+		out = append(out, *run)
+	}
+	return out, nil
+}
+
+func (f *fakeWorkflowClient) WorkflowRunCancel(runID string) (*protocol.WorkflowRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.getStatusOverride[runID] = protocol.WorkflowRunStatusCanceled
+	if run, ok := f.runs[runID]; ok {
+		run.Status = protocol.WorkflowRunStatusCanceled
+	}
+	return f.hydrateLocked(runID), nil
+}
+
+// hydrateLocked returns a copy of the run with its agent calls and any status
+// override applied. Returns nil when the run is absent. Caller holds f.mu.
+func (f *fakeWorkflowClient) hydrateLocked(runID string) *protocol.WorkflowRun {
+	run, ok := f.runs[runID]
+	if !ok {
+		return nil
+	}
+	copied := *run
+	if status, ok := f.getStatusOverride[runID]; ok {
+		copied.Status = status
+	}
+	calls := f.callsByID[runID]
+	if len(calls) > 0 {
+		copied.AgentCalls = append([]protocol.WorkflowAgentCall(nil), calls...)
+	}
+	return &copied
+}
+
+func (f *fakeWorkflowClient) seedRun(run protocol.WorkflowRun) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	calls := run.AgentCalls
+	run.AgentCalls = nil
+	saved := run
+	f.runs[run.RunID] = &saved
+	if len(calls) > 0 {
+		f.callsByID[run.RunID] = append([]protocol.WorkflowAgentCall(nil), calls...)
+	}
+}
+
+func (f *fakeWorkflowClient) callUpsertCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.callUpserts)
+}
+
+func (f *fakeWorkflowClient) lastRunUpsert() (protocol.WorkflowRun, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.runUpserts) == 0 {
+		return protocol.WorkflowRun{}, false
+	}
+	return f.runUpserts[len(f.runUpserts)-1], true
+}
+
+// --- arg parsing -----------------------------------------------------------
+
+func TestWorkflowParseRunArgs(t *testing.T) {
+	t.Run("args-file exclusive with args", func(t *testing.T) {
+		_, err := parseWorkflowRunArgs([]string{"s.js", "--args", "{}", "--args-file", "f.json"}, "")
+		if err == nil {
+			t.Fatal("expected mutual-exclusion error")
+		}
+	})
+
+	t.Run("session defaults to ATTN_SESSION_ID", func(t *testing.T) {
+		got, err := parseWorkflowRunArgs([]string{"s.js"}, "sess-env")
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if got.session != "sess-env" {
+			t.Fatalf("session = %q, want sess-env", got.session)
+		}
+	})
+
+	t.Run("explicit session overrides env", func(t *testing.T) {
+		got, err := parseWorkflowRunArgs([]string{"s.js", "--session", "sess-flag"}, "sess-env")
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if got.session != "sess-flag" {
+			t.Fatalf("session = %q, want sess-flag", got.session)
+		}
+	})
+
+	t.Run("resume and harness default", func(t *testing.T) {
+		got, err := parseWorkflowRunArgs([]string{"s.js", "--resume", "wf-1"}, "")
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if got.resume != "wf-1" {
+			t.Fatalf("resume = %q, want wf-1", got.resume)
+		}
+		if got.harness != "codex" {
+			t.Fatalf("harness = %q, want codex (default)", got.harness)
+		}
+	})
+
+	t.Run("missing script", func(t *testing.T) {
+		if _, err := parseWorkflowRunArgs(nil, ""); err == nil {
+			t.Fatal("expected missing-script error")
+		}
+	})
+}
+
+func TestWorkflowResolveArgsJSON(t *testing.T) {
+	t.Run("from --args", func(t *testing.T) {
+		got, err := resolveWorkflowArgsJSON(workflowRunArgs{argsInline: `{"a":1}`})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if got != `{"a":1}` {
+			t.Fatalf("got %q", got)
+		}
+	})
+
+	t.Run("from --args-file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "args.json")
+		if err := os.WriteFile(path, []byte(`{"b":2}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := resolveWorkflowArgsJSON(workflowRunArgs{argsFile: path})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if got != `{"b":2}` {
+			t.Fatalf("got %q", got)
+		}
+	})
+
+	t.Run("rejects invalid JSON", func(t *testing.T) {
+		if _, err := resolveWorkflowArgsJSON(workflowRunArgs{argsInline: `{not json`}); err == nil {
+			t.Fatal("expected invalid-JSON error")
+		}
+	})
+}
+
+// --- ipc journal -----------------------------------------------------------
+
+func TestWorkflowIPCJournalProxiesAndMirrors(t *testing.T) {
+	fake := newFakeWorkflowClient()
+	fake.seedRun(protocol.WorkflowRun{RunID: "wf-1", Status: protocol.WorkflowRunStatusRunning})
+
+	j := NewIPCJournal(fake, "wf-1")
+
+	entry := workflow.JournalEntry{
+		Ordinal:    "ord-1",
+		PromptHash: "ph",
+		SchemaHash: "none",
+		Result:     json.RawMessage(`"hi"`),
+		Status:     "ok",
+	}
+	if err := j.Append(entry); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	// Mirror read path: no network.
+	if got, ok := j.Lookup("ord-1"); !ok || got.PromptHash != "ph" {
+		t.Fatalf("lookup miss after append: %+v ok=%v", got, ok)
+	}
+	if len(j.Entries()) != 1 {
+		t.Fatalf("entries = %d, want 1", len(j.Entries()))
+	}
+
+	// Proxy: a WorkflowCallUpsert reached the fake client.
+	if fake.callUpsertCount() != 1 {
+		t.Fatalf("call upserts = %d, want 1", fake.callUpsertCount())
+	}
+	if got := fake.callUpserts[0]; got.Ordinal != "ord-1" || got.Status != protocol.WorkflowAgentCallStatusOk {
+		t.Fatalf("proxied call = %+v", got)
+	}
+
+	// Upsert overwrites in the mirror and proxies again.
+	j.Upsert(workflow.JournalEntry{Ordinal: "ord-1", PromptHash: "ph2", SchemaHash: "none", Status: "ok"})
+	if got, _ := j.Lookup("ord-1"); got.PromptHash != "ph2" {
+		t.Fatalf("upsert did not overwrite mirror: %+v", got)
+	}
+	if fake.callUpsertCount() != 2 {
+		t.Fatalf("call upserts after upsert = %d, want 2", fake.callUpsertCount())
+	}
+}
+
+func TestWorkflowIPCJournalSeedsFromDaemon(t *testing.T) {
+	fake := newFakeWorkflowClient()
+	fake.seedRun(protocol.WorkflowRun{
+		RunID:  "wf-1",
+		Status: protocol.WorkflowRunStatusRunning,
+		AgentCalls: []protocol.WorkflowAgentCall{
+			{
+				RunID:      "wf-1",
+				Ordinal:    "ord-seed",
+				PromptHash: protocol.Ptr("seed-ph"),
+				SchemaHash: protocol.Ptr("none"),
+				ResultJson: protocol.Ptr(`"seeded"`),
+				Status:     protocol.WorkflowAgentCallStatusOk,
+			},
+		},
+	})
+
+	j := NewIPCJournal(fake, "wf-1")
+
+	got, ok := j.Lookup("ord-seed")
+	if !ok {
+		t.Fatal("seeded entry not found in mirror")
+	}
+	if got.PromptHash != "seed-ph" || string(got.Result) != `"seeded"` {
+		t.Fatalf("seeded entry = %+v", got)
+	}
+	// Seeding is a read, not a write: no proxy call yet.
+	if fake.callUpsertCount() != 0 {
+		t.Fatalf("seeding should not proxy; got %d call upserts", fake.callUpsertCount())
+	}
+}
+
+// --- end-to-end orchestration (stub agent, fake client) --------------------
+
+// fixedStub is a deterministic AgentStub returning the same result for every call.
+type fixedStub struct {
+	result json.RawMessage
+}
+
+func (s fixedStub) Run(_ workflow.OrdinalPath, _ string, _ json.RawMessage) (json.RawMessage, error) {
+	return s.result, nil
+}
+
+func TestWorkflowExecuteRunCompletes(t *testing.T) {
+	fake := newFakeWorkflowClient()
+
+	const script = `export const meta={name:'t',description:'d'};
+const a = await agent('hi', {schema:{type:'object'}});
+return a;`
+
+	runID := "wf-e2e"
+	parsed := workflowRunArgs{
+		script:  "inline.js",
+		harness: "codex",
+		session: "sess-1",
+		wait:    true,
+	}
+
+	// Drive the engine directly with the fake client + stub. We mirror what
+	// executeWorkflowRun does but inject the stub (no driverAgent / no codex).
+	stub := fixedStub{result: json.RawMessage(`{"ok":true}`)}
+	exit := runWorkflowEngineForTest(t, fake, parsed, runID, script, stub)
+
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+
+	// A per-call upsert was proxied for the single agent() call.
+	if fake.callUpsertCount() < 1 {
+		t.Fatalf("expected at least one call upsert, got %d", fake.callUpsertCount())
+	}
+
+	last, ok := fake.lastRunUpsert()
+	if !ok {
+		t.Fatal("expected a final run upsert")
+	}
+	if last.Status != protocol.WorkflowRunStatusCompleted {
+		t.Fatalf("final status = %q, want completed", last.Status)
+	}
+	if last.ResultJson == nil || *last.ResultJson != `{"ok":true}` {
+		t.Fatalf("final result_json = %v", last.ResultJson)
+	}
+}
+
+// runWorkflowEngineForTest reproduces executeWorkflowRun's engine wiring with an
+// injected stub (so no driverAgent/codex is spawned). It seeds the initial run
+// upsert, runs the engine through the IPC journal, finalizes, and returns the
+// exit code — exercising the same finalize + result-projection code paths.
+func runWorkflowEngineForTest(t *testing.T, c workflowClient, parsed workflowRunArgs, runID, source string, stub workflow.AgentStub) int {
+	t.Helper()
+	now := string(protocol.TimestampNow())
+	initial := &protocol.WorkflowRun{
+		RunID:      runID,
+		ScriptPath: parsed.script,
+		ScriptHash: sha256Hex([]byte(source)),
+		Status:     protocol.WorkflowRunStatusRunning,
+		Resumable:  true,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	applyOptionalRunFields(initial, parsed, parsed.argsJSON)
+	if _, err := c.WorkflowRunUpsert(initial); err != nil {
+		t.Fatalf("initial upsert: %v", err)
+	}
+
+	journal := NewIPCJournal(c, runID)
+	engine := workflow.New(workflow.Config{Stub: stub, Journal: journal})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result, _ := engine.Run(ctx, source, nil)
+
+	final := finishWorkflowRun(c, runID, result)
+	_ = buildWorkflowResultOutput(final)
+	return workflowResultExitCode(final.Status)
+}
+
+// --- cancel watcher --------------------------------------------------------
+
+// ctxAwareBlockingStub blocks in Run until the test releases it. The engine does
+// not pass ctx to AgentStub, so the test closes `release` once it has canceled the
+// run context, proving the watcher's cancellation actually reaches in-flight work.
+type ctxAwareBlockingStub struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *ctxAwareBlockingStub) Run(_ workflow.OrdinalPath, _ string, _ json.RawMessage) (json.RawMessage, error) {
+	s.once.Do(func() { close(s.started) })
+	<-s.release
+	return nil, context.Canceled
+}
+
+func TestWorkflowCancelWatcherInterruptsRun(t *testing.T) {
+	fake := newFakeWorkflowClient()
+	runID := "wf-cancel"
+	fake.seedRun(protocol.WorkflowRun{RunID: runID, Status: protocol.WorkflowRunStatusRunning})
+
+	stub := &ctxAwareBlockingStub{started: make(chan struct{}), release: make(chan struct{})}
+
+	const script = `const a = await agent('hi'); return a;`
+
+	journal := NewIPCJournal(fake, runID)
+	engine := workflow.New(workflow.Config{
+		Stub:            stub,
+		Journal:         journal,
+		WatchdogTimeout: 5 * time.Second,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Fast poll interval so the watcher trips quickly once the fake reports canceled.
+	stopWatcher := startCancelWatcher(ctx, cancel, fake, runID, 5*time.Millisecond)
+	defer stopWatcher()
+
+	resultCh := make(chan workflow.RunResult, 1)
+	go func() {
+		res, _ := engine.Run(ctx, script, nil)
+		resultCh <- res
+	}()
+
+	// Wait for the subagent to be in flight, then mark the run canceled at the
+	// daemon. The watcher polls, observes canceled, cancels ctx; the engine's
+	// watchdog interrupts the in-flight await; we release the stub so it returns.
+	select {
+	case <-stub.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("subagent never started")
+	}
+	if _, err := fake.WorkflowRunCancel(runID); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+
+	// Once ctx is canceled by the watcher, unblock the stub so its goroutine exits.
+	go func() {
+		<-ctx.Done()
+		close(stub.release)
+	}()
+
+	select {
+	case res := <-resultCh:
+		if res.Status != workflow.StatusInterrupted {
+			t.Fatalf("status = %q, want interrupted", res.Status)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("engine did not finish after cancel")
+	}
+}
+
+func TestWorkflowMapRunStatus(t *testing.T) {
+	cases := []struct {
+		name string
+		res  workflow.RunResult
+		want protocol.WorkflowRunStatus
+	}{
+		{"completed", workflow.RunResult{Status: workflow.StatusCompleted}, protocol.WorkflowRunStatusCompleted},
+		{"errored", workflow.RunResult{Status: workflow.StatusErrored}, protocol.WorkflowRunStatusFailed},
+		{
+			"interrupted by cancel",
+			workflow.RunResult{Status: workflow.StatusInterrupted, Err: &workflow.ErrInterrupted{Reason: "workflow cancelled"}},
+			protocol.WorkflowRunStatusCanceled,
+		},
+		{
+			"interrupted by watchdog timeout is a failure",
+			workflow.RunResult{Status: workflow.StatusInterrupted, Err: &workflow.ErrInterrupted{Reason: "workflow exceeded the watchdog timeout"}},
+			protocol.WorkflowRunStatusFailed,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mapRunStatus(tc.res); got != tc.want {
+				t.Fatalf("mapRunStatus = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWorkflowObserveCanceled(t *testing.T) {
+	fake := newFakeWorkflowClient()
+	fake.seedRun(protocol.WorkflowRun{RunID: "wf-1", Status: protocol.WorkflowRunStatusRunning})
+
+	if observeCanceled(fake, "wf-1") {
+		t.Fatal("running run reported as canceled")
+	}
+	if _, err := fake.WorkflowRunCancel("wf-1"); err != nil {
+		t.Fatal(err)
+	}
+	if !observeCanceled(fake, "wf-1") {
+		t.Fatal("canceled run not observed")
+	}
+	if observeCanceled(fake, "missing") {
+		t.Fatal("absent run reported as canceled")
+	}
+}
+
+// --- result / show / list output -------------------------------------------
+
+func TestWorkflowResultOutputAndExitCode(t *testing.T) {
+	run := &protocol.WorkflowRun{
+		RunID:      "wf-1",
+		Status:     protocol.WorkflowRunStatusCompleted,
+		Phase:      protocol.Ptr("review"),
+		ResultJson: protocol.Ptr(`{"value":42}`),
+		AgentCalls: []protocol.WorkflowAgentCall{
+			{Ordinal: "a", Status: protocol.WorkflowAgentCallStatusOk},
+			{Ordinal: "b", Status: protocol.WorkflowAgentCallStatusErrored},
+			{Ordinal: "c", Status: protocol.WorkflowAgentCallStatusRunning},
+		},
+	}
+
+	out := buildWorkflowResultOutput(run)
+	if out.Status != "completed" {
+		t.Fatalf("status = %q", out.Status)
+	}
+	if out.Phase != "review" {
+		t.Fatalf("phase = %q", out.Phase)
+	}
+	if string(out.Result) != `{"value":42}` {
+		t.Fatalf("result = %s", out.Result)
+	}
+	if out.CallsTotal != 3 {
+		t.Fatalf("calls_total = %d, want 3", out.CallsTotal)
+	}
+	if out.CallsDone != 2 {
+		t.Fatalf("calls_done = %d, want 2 (ok+errored, not running)", out.CallsDone)
+	}
+
+	// Exit-code logic is pure and testable.
+	if got := workflowResultExitCode(protocol.WorkflowRunStatusCompleted); got != 0 {
+		t.Fatalf("completed exit = %d, want 0", got)
+	}
+	for _, s := range []protocol.WorkflowRunStatus{
+		protocol.WorkflowRunStatusFailed,
+		protocol.WorkflowRunStatusCanceled,
+		protocol.WorkflowRunStatusRunning,
+	} {
+		if got := workflowResultExitCode(s); got != 1 {
+			t.Fatalf("%s exit = %d, want 1", s, got)
+		}
+	}
+}
+
+func TestWorkflowResultOutputJSONShape(t *testing.T) {
+	run := &protocol.WorkflowRun{
+		RunID:      "wf-1",
+		Status:     protocol.WorkflowRunStatusFailed,
+		LastError:  protocol.Ptr("boom"),
+		AgentCalls: []protocol.WorkflowAgentCall{{Ordinal: "a", Status: protocol.WorkflowAgentCallStatusErrored}},
+	}
+	out := buildWorkflowResultOutput(run)
+	b, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{"status", "calls_total", "calls_done"} {
+		if _, ok := decoded[key]; !ok {
+			t.Fatalf("missing key %q in %s", key, b)
+		}
+	}
+	if decoded["error"] != "boom" {
+		t.Fatalf("error = %v", decoded["error"])
+	}
+	// No result key when result_json is absent.
+	if _, ok := decoded["result"]; ok {
+		t.Fatalf("result key should be omitted when absent: %s", b)
+	}
+}
+
+func TestWorkflowListEntries(t *testing.T) {
+	runs := []protocol.WorkflowRun{
+		{RunID: "wf-1", Status: protocol.WorkflowRunStatusCompleted, ScriptPath: "a.js", CreatedAt: "t1", Resumable: true, Phase: protocol.Ptr("p1")},
+		{RunID: "wf-2", Status: protocol.WorkflowRunStatusRunning, ScriptPath: "b.js", CreatedAt: "t2"},
+	}
+	entries := buildWorkflowListEntries(runs)
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(entries))
+	}
+	if entries[0].RunID != "wf-1" || entries[0].Script != "a.js" || entries[0].Phase != "p1" || !entries[0].Resumable {
+		t.Fatalf("entry[0] = %+v", entries[0])
+	}
+	if entries[1].Status != "running" || entries[1].Resumable {
+		t.Fatalf("entry[1] = %+v", entries[1])
+	}
+}

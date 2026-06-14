@@ -216,6 +216,9 @@ func main() {
 		runPTYWorker()
 	case "review-loop":
 		runReviewLoop()
+	case "workflow":
+		maybePrintProfileBanner()
+		runWorkflow()
 	case "plugin":
 		maybePrintProfileBanner()
 		runPluginCommand()
@@ -562,6 +565,7 @@ commands:
   open <file.md> [--session <id>]   show a markdown file in attn
   browser <command>                 open and control the in-app browser
   review-loop <command>             manage an autonomous review loop
+  workflow <command>                run, inspect, and resume durable workflows
   list                              list sessions
   daemon <command>                  manage the daemon
   profile <status|resolve|list>     show / resolve the active profile's resources
