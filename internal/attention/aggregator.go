@@ -35,15 +35,18 @@ type Result struct {
 	Items []Item
 
 	// Counts by kind
-	SessionCount int
-	PRCount      int
+	SessionCount  int
+	PRCount       int
+	WorkflowCount int
 
 	// Total items needing attention
 	TotalCount int
 }
 
-// Aggregate combines sessions and PRs into a unified attention result.
-func (a *Aggregator) Aggregate(sessions []protocol.Session, prs []protocol.PR) Result {
+// Aggregate combines sessions, PRs, and workflow runs into a unified attention
+// result. Finished workflow runs (completed/failed) surface the same way a
+// waiting session or PR does.
+func (a *Aggregator) Aggregate(sessions []protocol.Session, prs []protocol.PR, workflowRuns []protocol.WorkflowRun) Result {
 	var items []Item
 
 	// Process sessions
@@ -66,6 +69,14 @@ func (a *Aggregator) Aggregate(sessions []protocol.Session, prs []protocol.PR) R
 		}
 	}
 
+	// Process workflow runs
+	for i := range workflowRuns {
+		adapter := WorkflowRunAdapter{Run: &workflowRuns[i]}
+		if adapter.NeedsAttention() {
+			items = append(items, FromSource(adapter))
+		}
+	}
+
 	// Sort by Since (oldest first - they've been waiting longest)
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].Since.Before(items[j].Since)
@@ -74,20 +85,24 @@ func (a *Aggregator) Aggregate(sessions []protocol.Session, prs []protocol.PR) R
 	// Count by kind
 	sessionCount := 0
 	prCount := 0
+	workflowCount := 0
 	for _, item := range items {
 		switch item.Kind {
 		case "session":
 			sessionCount++
 		case "pr":
 			prCount++
+		case "workflow":
+			workflowCount++
 		}
 	}
 
 	return Result{
-		Items:        items,
-		SessionCount: sessionCount,
-		PRCount:      prCount,
-		TotalCount:   len(items),
+		Items:         items,
+		SessionCount:  sessionCount,
+		PRCount:       prCount,
+		WorkflowCount: workflowCount,
+		TotalCount:    len(items),
 	}
 }
 

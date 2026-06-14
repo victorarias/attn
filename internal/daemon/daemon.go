@@ -19,6 +19,7 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/attention"
 	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/config"
@@ -167,6 +168,17 @@ type Daemon struct {
 
 	browserControlMu sync.Mutex
 	browserControl   map[string]browserControlPending
+
+	// Durable workflow engine IPC state. The engine runs in a separate process
+	// (the `attn workflow run` CLI); the daemon persists, coalesced-broadcasts
+	// run updates to the read-only UI, and relays cancel to the engine sink.
+	// All maps lazy-init so a directly-constructed test daemon is nil-safe.
+	workflowBroadcastMu   sync.Mutex
+	workflowDirty         map[string]bool
+	workflowEngineMu      sync.Mutex
+	workflowEngineConn    map[string]workflowEngineSink
+	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
+	workflowAttentionHook func(attention.Result)                   // optional, tests only
 
 	workspaceContextCheckoutMu sync.Mutex
 
@@ -377,36 +389,38 @@ func New(socketPath string) *Daemon {
 	}
 
 	return &Daemon{
-		socketPath:       socketPath,
-		pidPath:          pidPath,
-		dataRoot:         dataRoot,
-		store:            sessionStore,
-		wsHub:            newWSHub(),
-		done:             make(chan struct{}),
-		logger:           logger,
-		debugLogging:     logger != nil && logger.DebugEnabled(),
-		ghRegistry:       github.NewClientRegistry(),
-		hubManager:       nil,
-		reviewLoopExec:   reviewLoopExecutor,
-		repoCaches:       make(map[string]*repoCache),
-		gitCoord:         newGitCoordinator(),
-		warnings:         startupWarnings,
-		ptyBackend:       ptybackend.NewEmbedded(manager),
-		transcriptWatch:  make(map[string]*transcriptWatcher),
-		pendingInitialWS: make(map[*wsClient]struct{}),
-		startedCh:        make(chan struct{}),
-		classifiedTurn:   make(map[string]string),
-		classifyingTurn:  make(map[string]string),
-		longRun:          make(map[string]longRunSession),
-		forcedStop:       make(map[string]time.Time),
-		pendingResumeID:  make(map[string]string),
-		reviewLoopCancel: make(map[string]context.CancelFunc),
-		pendingInputSrc:  make(map[string]string),
-		tailscale:        newTailscaleRuntime(),
-		plugins:          newPluginRegistry(),
-		pluginProcesses:  newPluginProcessRegistry(),
-		pluginDir:        config.PluginDir(),
-		workspaces:       newWorkspaceRegistry(),
+		socketPath:         socketPath,
+		pidPath:            pidPath,
+		dataRoot:           dataRoot,
+		store:              sessionStore,
+		wsHub:              newWSHub(),
+		done:               make(chan struct{}),
+		logger:             logger,
+		debugLogging:       logger != nil && logger.DebugEnabled(),
+		ghRegistry:         github.NewClientRegistry(),
+		hubManager:         nil,
+		reviewLoopExec:     reviewLoopExecutor,
+		repoCaches:         make(map[string]*repoCache),
+		gitCoord:           newGitCoordinator(),
+		warnings:           startupWarnings,
+		workflowDirty:      make(map[string]bool),
+		workflowEngineConn: make(map[string]workflowEngineSink),
+		ptyBackend:         ptybackend.NewEmbedded(manager),
+		transcriptWatch:    make(map[string]*transcriptWatcher),
+		pendingInitialWS:   make(map[*wsClient]struct{}),
+		startedCh:          make(chan struct{}),
+		classifiedTurn:     make(map[string]string),
+		classifyingTurn:    make(map[string]string),
+		longRun:            make(map[string]longRunSession),
+		forcedStop:         make(map[string]time.Time),
+		pendingResumeID:    make(map[string]string),
+		reviewLoopCancel:   make(map[string]context.CancelFunc),
+		pendingInputSrc:    make(map[string]string),
+		tailscale:          newTailscaleRuntime(),
+		plugins:            newPluginRegistry(),
+		pluginProcesses:    newPluginProcessRegistry(),
+		pluginDir:          config.PluginDir(),
+		workspaces:         newWorkspaceRegistry(),
 	}
 }
 
@@ -416,32 +430,34 @@ func NewForTesting(socketPath string) *Daemon {
 	pidPath := filepath.Join(dataRoot, "attn.pid")
 	manager := pty.NewManager(pty.DefaultScrollbackSize, nil)
 	return &Daemon{
-		socketPath:       socketPath,
-		pidPath:          pidPath,
-		dataRoot:         dataRoot,
-		store:            store.New(),
-		wsHub:            newWSHub(),
-		done:             make(chan struct{}),
-		logger:           nil, // No logging in tests
-		ghRegistry:       github.NewClientRegistry(),
-		hubManager:       nil,
-		repoCaches:       make(map[string]*repoCache),
-		gitCoord:         newGitCoordinator(),
-		ptyBackend:       ptybackend.NewEmbedded(manager),
-		transcriptWatch:  make(map[string]*transcriptWatcher),
-		pendingInitialWS: make(map[*wsClient]struct{}),
-		startedCh:        make(chan struct{}),
-		classifiedTurn:   make(map[string]string),
-		classifyingTurn:  make(map[string]string),
-		longRun:          make(map[string]longRunSession),
-		forcedStop:       make(map[string]time.Time),
-		pendingResumeID:  make(map[string]string),
-		reviewLoopCancel: make(map[string]context.CancelFunc),
-		pendingInputSrc:  make(map[string]string),
-		tailscale:        newTailscaleRuntime(),
-		plugins:          newPluginRegistry(),
-		pluginProcesses:  newPluginProcessRegistry(),
-		workspaces:       newWorkspaceRegistry(),
+		socketPath:         socketPath,
+		pidPath:            pidPath,
+		dataRoot:           dataRoot,
+		store:              store.New(),
+		wsHub:              newWSHub(),
+		done:               make(chan struct{}),
+		logger:             nil, // No logging in tests
+		ghRegistry:         github.NewClientRegistry(),
+		hubManager:         nil,
+		repoCaches:         make(map[string]*repoCache),
+		gitCoord:           newGitCoordinator(),
+		ptyBackend:         ptybackend.NewEmbedded(manager),
+		transcriptWatch:    make(map[string]*transcriptWatcher),
+		pendingInitialWS:   make(map[*wsClient]struct{}),
+		startedCh:          make(chan struct{}),
+		classifiedTurn:     make(map[string]string),
+		classifyingTurn:    make(map[string]string),
+		longRun:            make(map[string]longRunSession),
+		forcedStop:         make(map[string]time.Time),
+		pendingResumeID:    make(map[string]string),
+		reviewLoopCancel:   make(map[string]context.CancelFunc),
+		pendingInputSrc:    make(map[string]string),
+		tailscale:          newTailscaleRuntime(),
+		plugins:            newPluginRegistry(),
+		pluginProcesses:    newPluginProcessRegistry(),
+		workspaces:         newWorkspaceRegistry(),
+		workflowDirty:      make(map[string]bool),
+		workflowEngineConn: make(map[string]workflowEngineSink),
 	}
 }
 
@@ -455,32 +471,34 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 	}
 	manager := pty.NewManager(pty.DefaultScrollbackSize, nil)
 	return &Daemon{
-		socketPath:       socketPath,
-		pidPath:          pidPath,
-		dataRoot:         dataRoot,
-		store:            store.New(),
-		wsHub:            newWSHub(),
-		done:             make(chan struct{}),
-		logger:           nil,
-		ghRegistry:       registry,
-		hubManager:       nil,
-		repoCaches:       make(map[string]*repoCache),
-		gitCoord:         newGitCoordinator(),
-		ptyBackend:       ptybackend.NewEmbedded(manager),
-		transcriptWatch:  make(map[string]*transcriptWatcher),
-		pendingInitialWS: make(map[*wsClient]struct{}),
-		startedCh:        make(chan struct{}),
-		classifiedTurn:   make(map[string]string),
-		classifyingTurn:  make(map[string]string),
-		longRun:          make(map[string]longRunSession),
-		forcedStop:       make(map[string]time.Time),
-		pendingResumeID:  make(map[string]string),
-		reviewLoopCancel: make(map[string]context.CancelFunc),
-		pendingInputSrc:  make(map[string]string),
-		tailscale:        newTailscaleRuntime(),
-		plugins:          newPluginRegistry(),
-		pluginProcesses:  newPluginProcessRegistry(),
-		workspaces:       newWorkspaceRegistry(),
+		socketPath:         socketPath,
+		pidPath:            pidPath,
+		dataRoot:           dataRoot,
+		store:              store.New(),
+		wsHub:              newWSHub(),
+		done:               make(chan struct{}),
+		logger:             nil,
+		ghRegistry:         registry,
+		hubManager:         nil,
+		repoCaches:         make(map[string]*repoCache),
+		gitCoord:           newGitCoordinator(),
+		ptyBackend:         ptybackend.NewEmbedded(manager),
+		transcriptWatch:    make(map[string]*transcriptWatcher),
+		pendingInitialWS:   make(map[*wsClient]struct{}),
+		startedCh:          make(chan struct{}),
+		classifiedTurn:     make(map[string]string),
+		classifyingTurn:    make(map[string]string),
+		longRun:            make(map[string]longRunSession),
+		forcedStop:         make(map[string]time.Time),
+		pendingResumeID:    make(map[string]string),
+		reviewLoopCancel:   make(map[string]context.CancelFunc),
+		pendingInputSrc:    make(map[string]string),
+		tailscale:          newTailscaleRuntime(),
+		plugins:            newPluginRegistry(),
+		pluginProcesses:    newPluginProcessRegistry(),
+		workspaces:         newWorkspaceRegistry(),
+		workflowDirty:      make(map[string]bool),
+		workflowEngineConn: make(map[string]workflowEngineSink),
 	}
 }
 
@@ -631,6 +649,9 @@ func (d *Daemon) Start() error {
 	// Start WebSocket hub with daemon's logger
 	d.wsHub.logf = d.logf
 	go d.wsHub.run()
+
+	// Coalesce workflow run updates into ~75ms-spaced full-run broadcasts.
+	go d.startWorkflowBroadcastLoop(d.doneContext())
 
 	// Watch open markdown tiles for on-disk changes and live-reload them.
 	go d.runMarkdownContentWatcher(d.done)
@@ -1759,6 +1780,16 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleSetReviewLoopIterations(conn, msg.(*protocol.SetReviewLoopIterationLimitMessage))
 	case protocol.CmdAnswerReviewLoop:
 		d.handleAnswerReviewLoop(conn, msg.(*protocol.AnswerReviewLoopMessage))
+	case protocol.CmdWorkflowRunUpsert:
+		d.handleWorkflowRunUpsert(conn, msg.(*protocol.WorkflowRunUpsertMessage))
+	case protocol.CmdWorkflowCallUpsert:
+		d.handleWorkflowCallUpsert(conn, msg.(*protocol.WorkflowCallUpsertMessage))
+	case protocol.CmdWorkflowRunGet:
+		d.handleWorkflowRunGet(conn, msg.(*protocol.WorkflowRunGetMessage))
+	case protocol.CmdWorkflowRunList:
+		d.handleWorkflowRunList(conn, msg.(*protocol.WorkflowRunListMessage))
+	case protocol.CmdWorkflowRunCancel:
+		d.handleWorkflowRunCancel(conn, msg.(*protocol.WorkflowRunCancelMessage))
 	case protocol.CmdQuery:
 		d.handleQuery(conn, msg.(*protocol.QueryMessage))
 	case protocol.CmdHeartbeat:
