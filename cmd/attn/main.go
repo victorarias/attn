@@ -1916,6 +1916,12 @@ func runAgentDirectly(requestedAgent string) {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	// If this wrapper was launched from inside another agent's session (e.g. a
+	// terminal that is itself a Claude Code session), drop that session's
+	// identity so the agent we launch gets a fresh one. Only the identity vars
+	// are scrubbed here: this path inherits the live shell env directly, so
+	// tuning vars the user exported in their profile must be left intact.
+	config.ScrubAgentSessionIdentityEnv()
 	cmd.Env = mergeEnv(os.Environ(), driver.BuildEnv(opts))
 
 	startedAt := time.Now()

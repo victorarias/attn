@@ -7,10 +7,11 @@ import (
 )
 
 func TestScrubInheritedAgentSessionEnv(t *testing.T) {
-	// Leaked per-session vars that must be removed.
+	// Leaked per-session vars (identity + tuning) that must be removed.
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "cbcaa879-725b-44b2-8d91-212f6b00a516")
 	t.Setenv("CLAUDE_CODE_CHILD_SESSION", "1")
 	t.Setenv("CLAUDE_EFFORT", "xhigh")
+	t.Setenv("CLAUDE_CODE_NO_FLICKER", "1")
 
 	// User configuration and unrelated vars that must survive — they are not in
 	// the scrub list, mirroring how a real login shell re-exports profile config.
@@ -20,7 +21,7 @@ func TestScrubInheritedAgentSessionEnv(t *testing.T) {
 
 	scrubbed := ScrubInheritedAgentSessionEnv()
 
-	for _, key := range []string{"CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_EFFORT"} {
+	for _, key := range []string{"CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_EFFORT", "CLAUDE_CODE_NO_FLICKER"} {
 		if _, ok := os.LookupEnv(key); ok {
 			t.Errorf("%s should have been scrubbed but is still set", key)
 		}
@@ -37,9 +38,35 @@ func TestScrubInheritedAgentSessionEnv(t *testing.T) {
 	}
 }
 
+// ScrubAgentSessionIdentityEnv runs on launch paths that inherit the live shell
+// env directly, so it must drop the parent-session identity but keep tuning vars
+// the user may have deliberately exported (nothing re-exports them there).
+func TestScrubAgentSessionIdentityEnv_KeepsTuningVars(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "cbcaa879-leaked")
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+	t.Setenv("CLAUDE_CODE_NO_FLICKER", "1")
+	t.Setenv("CLAUDE_EFFORT", "xhigh")
+
+	scrubbed := ScrubAgentSessionIdentityEnv()
+
+	for _, key := range []string{"CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT"} {
+		if _, ok := os.LookupEnv(key); ok {
+			t.Errorf("identity var %s should have been scrubbed but is still set", key)
+		}
+	}
+	for _, key := range []string{"CLAUDE_CODE_NO_FLICKER", "CLAUDE_EFFORT"} {
+		if _, ok := os.LookupEnv(key); !ok {
+			t.Errorf("tuning var %s must survive identity-only scrub (no login shell re-captures it)", key)
+		}
+		if slices.Contains(scrubbed, key) {
+			t.Errorf("identity scrub should not report tuning var %s", key)
+		}
+	}
+}
+
 func TestScrubInheritedAgentSessionEnv_OnlyReportsSetKeys(t *testing.T) {
 	// Ensure none of the scrub keys are set in this process.
-	for _, key := range inheritedAgentSessionEnvKeys {
+	for _, key := range append(slices.Clone(agentSessionIdentityEnvKeys), agentSessionTuningEnvKeys...) {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
 	}
