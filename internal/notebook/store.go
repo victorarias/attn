@@ -1,6 +1,7 @@
 package notebook
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"io/fs"
@@ -155,13 +156,41 @@ func (s *Store) AppendJournal(dateISO, entry string) (relPath string, hash strin
 		return "", "", fmt.Errorf("notebook: empty journal entry")
 	}
 	rel := path.Join(DirJournal, dateISO+".md")
-	hash, err = s.appendToNote(rel, entry, func() Document {
+	hash, err = s.appendToNote(rel, entry, newJournalDoc(dateISO))
+	return rel, hash, err
+}
+
+// AppendJournalEntryOnce appends entry to journal/<date>.md, but only when
+// dedupeMarker is not already present in the file. It reports written=false (and
+// no error) when the marker is already there, so repeated calls for the same
+// logical entry are idempotent. dedupeMarker must be a stable string embedded in
+// entry (typically a hidden HTML comment): the journal file itself is the dedup
+// ledger, so suppression needs no separate bookkeeping and survives a daemon
+// restart. This is how attn auto-captures an event (a dispatch outcome) exactly
+// once even when more than one lifecycle path fires for it.
+func (s *Store) AppendJournalEntryOnce(dateISO, dedupeMarker, entry string) (relPath string, written bool, hash string, err error) {
+	if !journalDateRE.MatchString(dateISO) {
+		return "", false, "", fmt.Errorf("notebook: invalid journal date %q (want YYYY-MM-DD)", dateISO)
+	}
+	if strings.TrimSpace(entry) == "" {
+		return "", false, "", fmt.Errorf("notebook: empty journal entry")
+	}
+	if strings.TrimSpace(dedupeMarker) == "" {
+		return "", false, "", fmt.Errorf("notebook: empty journal dedupe marker")
+	}
+	rel := path.Join(DirJournal, dateISO+".md")
+	written, hash, err = s.appendToNoteOnce(rel, dedupeMarker, entry, newJournalDoc(dateISO))
+	return rel, written, hash, err
+}
+
+// newJournalDoc returns the factory for a fresh dated journal note.
+func newJournalDoc(dateISO string) func() Document {
+	return func() Document {
 		return Document{
 			Frontmatter: map[string]any{"kind": KindJournal, "title": dateISO},
 			Body:        "# " + dateISO + "\n",
 		}
-	})
-	return rel, hash, err
+	}
 }
 
 // AppendInbox appends an entry to the reserved chief inbox note (inbox.md),
@@ -184,9 +213,19 @@ func (s *Store) AppendInbox(entry string) (relPath string, hash string, err erro
 // it does not yet exist. The whole read-modify-write runs under the store lock so
 // concurrent appends serialize and never conflict (unlike the hash-CAS Write).
 func (s *Store) appendToNote(rel, entry string, newDoc func() Document) (hash string, err error) {
+	_, hash, err = s.appendToNoteOnce(rel, "", entry, newDoc)
+	return hash, err
+}
+
+// appendToNoteOnce is appendToNote with optional idempotency: when dedupeMarker is
+// non-empty and already present in the existing note, it appends nothing and
+// reports written=false. The read-check-write runs as one critical section under
+// the store lock, so the dedup test is atomic with the append and two callers
+// racing the same marker can never both write.
+func (s *Store) appendToNoteOnce(rel, dedupeMarker, entry string, newDoc func() Document) (written bool, hash string, err error) {
 	abs, err := s.abs(rel)
 	if err != nil {
-		return "", err
+		return false, "", err
 	}
 
 	s.mu.Lock()
@@ -194,7 +233,12 @@ func (s *Store) appendToNote(rel, entry string, newDoc func() Document) (hash st
 
 	existing, statErr := os.ReadFile(abs)
 	if statErr != nil && !os.IsNotExist(statErr) {
-		return "", statErr
+		return false, "", statErr
+	}
+	if dedupeMarker != "" && statErr == nil && bytes.Contains(existing, []byte(dedupeMarker)) {
+		// Already recorded — return the current hash so callers can still suppress
+		// the (absent) watcher event without surfacing a spurious write.
+		return false, Hash(existing), nil
 	}
 	var doc Document
 	if statErr == nil {
@@ -205,12 +249,12 @@ func (s *Store) appendToNote(rel, entry string, newDoc func() Document) (hash st
 	doc.Body = strings.TrimRight(doc.Body, "\n") + "\n\n" + strings.TrimRight(entry, "\n") + "\n"
 	out := doc.Bytes()
 	if int64(len(out)) > MaxFileSize {
-		return "", fmt.Errorf("notebook: %s exceeds %d bytes", rel, MaxFileSize)
+		return false, "", fmt.Errorf("notebook: %s exceeds %d bytes", rel, MaxFileSize)
 	}
 	if err := writeAtomic(abs, out); err != nil {
-		return "", err
+		return false, "", err
 	}
-	return Hash(out), nil
+	return true, Hash(out), nil
 }
 
 // List returns the notes under the root, sorted by path. The optional prefix

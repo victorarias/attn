@@ -1334,7 +1334,7 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 	d.terminateSession(sessionID, sig)
 	d.handleReviewLoopSourceSessionExit(sessionID)
 	d.setPendingInputSource(sessionID, "")
-	d.store.Remove(sessionID)
+	d.dropSessionRecord(sessionID)
 	d.clearChiefOfStaffIfSession(sessionID)
 	if d.hubManager != nil {
 		d.hubManager.ForgetSession(sessionID)
@@ -1346,10 +1346,22 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 }
 
 func (d *Daemon) removeReapedSession(sessionID string) {
-	d.store.Remove(sessionID)
+	d.dropSessionRecord(sessionID)
 	d.clearChiefOfStaffIfSession(sessionID)
 	d.dissociateSessionFromWorkspace(sessionID)
 	d.removeWorkspaceLayoutPaneForSession(sessionID)
+}
+
+// dropSessionRecord removes a session's store record, first capturing the outcome
+// of any chief-of-staff dispatch it was running. Routing every session-removal
+// path through here means a delegated worker's result is journaled no matter how
+// its session ends — cleanly unregistered, reaped on restart/liveness sweep, or
+// torn down with its worktree — and not just on the orderly close path. The
+// capture is idempotent (a prior terminal-report write wins via the per-dispatch
+// marker) and a no-op for non-dispatch sessions.
+func (d *Daemon) dropSessionRecord(sessionID string) {
+	d.journalDispatchOnSessionGone(sessionID)
+	d.store.Remove(sessionID)
 }
 
 func (d *Daemon) handlePTYState(sessionID, state string) {

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -177,6 +179,100 @@ func TestAppendJournal(t *testing.T) {
 
 	if _, _, err := s.AppendJournal("not-a-date", "x"); err == nil {
 		t.Fatal("AppendJournal should reject a malformed date")
+	}
+}
+
+// AppendJournalEntryOnce writes a marked entry once and suppresses any repeat that
+// carries the same marker, while still admitting other entries — the file itself
+// is the dedup ledger, so this holds across a fresh Store (i.e. a daemon restart).
+func TestAppendJournalEntryOnce(t *testing.T) {
+	root := t.TempDir()
+	s := NewStore(root)
+
+	const marker = "<!-- attn:dispatch:abc -->"
+	entry := "## 09:00 — Ship it (completed)\n\nShipped.\n\n" + marker
+
+	rel, written, _, err := s.AppendJournalEntryOnce("2026-06-14", marker, entry)
+	if err != nil || !written {
+		t.Fatalf("first append: written=%v err=%v", written, err)
+	}
+
+	// Same marker again is a no-op, even through a brand-new Store on the same root
+	// (the in-memory writer is gone, but the marker persists in the file).
+	if _, written, _, err := NewStore(root).AppendJournalEntryOnce("2026-06-14", marker, entry); err != nil || written {
+		t.Fatalf("duplicate append: written=%v err=%v (want written=false)", written, err)
+	}
+
+	// A different marker still appends.
+	const marker2 = "<!-- attn:dispatch:xyz -->"
+	if _, written, _, err := s.AppendJournalEntryOnce("2026-06-14", marker2, "## 10:00 — Other (failed)\n\nBroke.\n\n"+marker2); err != nil || !written {
+		t.Fatalf("distinct append: written=%v err=%v", written, err)
+	}
+
+	content, _, _ := s.Read(rel)
+	body := string(content)
+	if strings.Count(body, marker) != 1 {
+		t.Fatalf("marker appears %d times, want 1:\n%s", strings.Count(body, marker), body)
+	}
+	if !strings.Contains(body, "Shipped.") || !strings.Contains(body, "Broke.") {
+		t.Fatalf("journal missing expected entries:\n%s", body)
+	}
+
+	if _, _, _, err := s.AppendJournalEntryOnce("2026-06-14", "", "x"); err == nil {
+		t.Fatal("AppendJournalEntryOnce should reject an empty marker")
+	}
+}
+
+// The dedup is a whole-file substring scan, so it is collision-safe ONLY because the
+// marker carries a closing " -->" delimiter: "<!-- attn:dispatch:dsp-1 -->" is not a
+// substring of "<!-- attn:dispatch:dsp-10 -->". This pins that property — a marker
+// format change that dropped the delimiter would silently treat dsp-1 as already
+// journaled once dsp-10 was written first, losing the entry.
+func TestAppendJournalEntryOnceMarkerPrefixDoesNotCollide(t *testing.T) {
+	s := NewStore(t.TempDir())
+	const m10 = "<!-- attn:dispatch:dsp-10 -->"
+	const m1 = "<!-- attn:dispatch:dsp-1 -->"
+
+	if _, written, _, err := s.AppendJournalEntryOnce("2026-06-14", m10, "## dsp-10\n\nten.\n\n"+m10); err != nil || !written {
+		t.Fatalf("append dsp-10: written=%v err=%v", written, err)
+	}
+	// dsp-1's marker is a prefix-ish of dsp-10's text but must NOT be seen as present.
+	if _, written, _, err := s.AppendJournalEntryOnce("2026-06-14", m1, "## dsp-1\n\none.\n\n"+m1); err != nil || !written {
+		t.Fatalf("append dsp-1 after dsp-10: written=%v err=%v (delimiter collision?)", written, err)
+	}
+}
+
+// The "exactly once under concurrency" invariant is the whole reason appendToNoteOnce
+// does its read-check-write under one lock. Race N goroutines on the same marker and
+// assert exactly one wins (written==true once) and the marker lands once. Run under
+// `go test -race ./internal/notebook` to also catch a lock regression.
+func TestAppendJournalEntryOnceConcurrent(t *testing.T) {
+	root := t.TempDir()
+	s := NewStore(root)
+	const marker = "<!-- attn:dispatch:race -->"
+	entry := "## 09:00 — Race (completed)\n\nRan.\n\n" + marker
+
+	const n = 16
+	var wins int64
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for range n {
+		go func() {
+			defer wg.Done()
+			if _, written, _, err := s.AppendJournalEntryOnce("2026-06-14", marker, entry); err == nil && written {
+				atomic.AddInt64(&wins, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if wins != 1 {
+		t.Fatalf("concurrent writers that reported written=true: %d, want 1", wins)
+	}
+	rel, _, _, _ := s.AppendJournalEntryOnce("2026-06-14", marker, entry) // no-op, returns the path
+	content, _, _ := s.Read(rel)
+	if got := strings.Count(string(content), marker); got != 1 {
+		t.Fatalf("marker appears %d times after %d concurrent writers, want 1", got, n)
 	}
 }
 
