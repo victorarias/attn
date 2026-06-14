@@ -35,7 +35,7 @@ attn fixes the dumbest part of multi-agent workflows: knowing what needs you rig
 | Agent | State detection | Resume |
 |---|---|---|
 | [Claude Code](https://claude.ai/code) | Hooks + classifier | Yes |
-| [Codex](https://developers.openai.com/codex) | PTY heuristics + transcript classifier | No |
+| [Codex](https://developers.openai.com/codex) | Hooks + classifier | No |
 | [Copilot CLI](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line) | PTY heuristics + transcript classifier | No |
 
 ## Install
@@ -124,7 +124,7 @@ Your agents can work as a team, not just side by side:
 
 ## How it works
 
-1. The bundled attn runtime wraps your agent CLI and installs hooks (Claude) or reads PTY output (Codex, Copilot) to detect state — a classifier decides whether a stop means "done" or "waiting for you."
+1. The bundled attn runtime wraps your agent CLI and installs hooks (Claude, Codex) or reads PTY output (Copilot) to detect state — a classifier decides whether a stop means "done" or "waiting for you."
 2. A background daemon tracks every session, local and SSH-remote, in one list; the desktop app connects over WebSocket for real-time updates.
 3. `gh` polls PRs across all your authenticated GitHub hosts.
 
