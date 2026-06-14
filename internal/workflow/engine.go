@@ -28,7 +28,8 @@ const (
 
 // Config configures an Engine. All fields are optional; zero values use defaults.
 type Config struct {
-	// Stub is the fake agent() implementation. nil -> DefaultStub.
+	// Stub is the agent() implementation. nil -> DefaultStub (fake, for E1/tests);
+	// use NewDriverAgent for real subagents (E2).
 	Stub AgentStub
 	// Journal seeds the run. nil -> a fresh MemJournal (a Run from scratch).
 	// For Resume, pass the prior run's journal.

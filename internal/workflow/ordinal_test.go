@@ -33,10 +33,17 @@ func ordinalResultMap(t *testing.T, stub AgentStub, script string) map[string]st
 	return out
 }
 
-// deterministicResult is a pure function of the prompt, independent of the ordinal.
-func deterministicResult(_ OrdinalPath, prompt string) (json.RawMessage, error) {
+// deterministicResult is a pure function of the prompt, independent of the
+// ordinal (and the schema). It matches the StubFunc 3-arg shape.
+func deterministicResult(_ OrdinalPath, prompt string, _ json.RawMessage) (json.RawMessage, error) {
 	b, _ := json.Marshal("R:" + prompt)
 	return b, nil
+}
+
+// scriptedDeterministicResult adapts deterministicResult to the 2-arg resultFor
+// signature NewScriptedStub expects (the gated stub does not vary by schema).
+func scriptedDeterministicResult(ordinal OrdinalPath, prompt string) (json.RawMessage, error) {
+	return deterministicResult(ordinal, prompt, nil)
 }
 
 // TestPipelineOrdinalStabilityUnderReorder is the crux E1 proof: a pipeline whose
@@ -53,7 +60,7 @@ func TestPipelineOrdinalStabilityUnderReorder(t *testing.T) {
 
 	// The four ordinals the pipeline produces (item x stage), with site lines.
 	// Discover them with an all-release run first.
-	all := NewScriptedStub(deterministicResult)
+	all := NewScriptedStub(scriptedDeterministicResult)
 	all.ReleaseAll()
 	baseline := ordinalResultMap(t, all, script)
 	if len(baseline) != 4 {
@@ -73,7 +80,7 @@ func TestPipelineOrdinalStabilityUnderReorder(t *testing.T) {
 	}
 
 	runWithReleaseOrder := func(order []string) map[string]string {
-		stub := NewScriptedStub(deterministicResult)
+		stub := NewScriptedStub(scriptedDeterministicResult)
 		eng := New(Config{Stub: stub, WatchdogTimeout: 5 * time.Second})
 		done := make(chan RunResult, 1)
 		go func() {
@@ -139,7 +146,7 @@ func TestPipelineOrdinalStabilityUnderReorder(t *testing.T) {
 // lets a test drive the post-await continuations to resolve in a chosen order.
 func releaseOrderedMap(t *testing.T, script string, firstWave, secondWave []string) map[string]string {
 	t.Helper()
-	stub := NewScriptedStub(deterministicResult)
+	stub := NewScriptedStub(scriptedDeterministicResult)
 	eng := New(Config{Stub: stub, WatchdogTimeout: 5 * time.Second})
 	done := make(chan RunResult, 1)
 	go func() {
@@ -182,7 +189,7 @@ func TestPipelinePostAwaitOrdinalStability(t *testing.T) {
 		});
 		return out;
 	`
-	all := NewScriptedStub(deterministicResult)
+	all := NewScriptedStub(scriptedDeterministicResult)
 	all.ReleaseAll()
 	baseline := ordinalResultMap(t, all, script)
 	if len(baseline) != 4 {
@@ -245,7 +252,7 @@ func TestParallelPostAwaitOrdinalStability(t *testing.T) {
 		const out = await parallel([ () => mk("0"), () => mk("1"), () => mk("2") ]);
 		return out;
 	`
-	all := NewScriptedStub(deterministicResult)
+	all := NewScriptedStub(scriptedDeterministicResult)
 	all.ReleaseAll()
 	baseline := ordinalResultMap(t, all, script)
 	if len(baseline) != 6 {
@@ -301,7 +308,7 @@ func TestParallelOrdinalStabilityUnderReorder(t *testing.T) {
 		]);
 		return out;
 	`
-	all := NewScriptedStub(deterministicResult)
+	all := NewScriptedStub(scriptedDeterministicResult)
 	all.ReleaseAll()
 	baseline := ordinalResultMap(t, all, script)
 	if len(baseline) != 3 {
@@ -315,7 +322,7 @@ func TestParallelOrdinalStabilityUnderReorder(t *testing.T) {
 	sort.Strings(ords)
 
 	runWithReleaseOrder := func(order []string) map[string]string {
-		stub := NewScriptedStub(deterministicResult)
+		stub := NewScriptedStub(scriptedDeterministicResult)
 		eng := New(Config{Stub: stub, WatchdogTimeout: 5 * time.Second})
 		done := make(chan RunResult, 1)
 		go func() {

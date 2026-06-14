@@ -28,6 +28,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"regexp"
@@ -268,10 +269,37 @@ type HeadlessTaskRequest struct {
 	MCPServerName    string
 	MCPServerCommand string
 	MCPServerArgs    []string
+
+	// --- E2 additive (all optional; the janitor sets none of these) ---
+
+	// ToolName overrides the single MCP tool name threaded through the driver
+	// argv. Empty => the janitor default tool set {read_context, replace_context}
+	// (back-compat). Non-empty => exactly that one tool is enabled.
+	ToolName string
+	// Schema, when non-empty, is the per-call JSON Schema the result sink
+	// advertises as the tool inputSchema. It is NOT consumed by the driver; it
+	// travels to the sink via MCPServerArgs (the caller builds those argv).
+	// Stored on the request for documentation/threading symmetry; drivers ignore it.
+	Schema json.RawMessage
+	// ResultPath is the per-call file the sink writes the validated payload to.
+	// Like Schema, the caller bakes it into MCPServerArgs; drivers ignore it.
+	ResultPath string
+	// Label / Phase / CallID are journaling/diagnostic identifiers for the call.
+	// Drivers ignore them; they exist so the engine boundary can thread identity
+	// without a second struct.
+	Label  string
+	Phase  string
+	CallID string
 }
 
 type HeadlessTaskResult struct {
 	Diagnostics string
+	// Result is reserved for the engine boundary, which populates it after
+	// reading ResultPath. Drivers leave it nil.
+	Result json.RawMessage
+	// Text is the child's captured final assistant text (the no-schema path).
+	// Drivers populate this on a successful run.
+	Text string
 }
 
 // HeadlessTaskProvider runs a bounded non-interactive agent task.

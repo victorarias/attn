@@ -7,21 +7,26 @@ import (
 	"sync"
 )
 
-// AgentStub is the fake agent() implementation. It is the ONLY thing E2 swaps for
-// a real subprocess. Run is called on a worker goroutine and MUST be a pure
-// deterministic function of its inputs for replay tests to hold.
+// AgentStub is the agent() implementation behind the engine. DefaultStub is the
+// fake (E1/tests); driverAgent (E2) spawns a real headless subagent. Run is
+// called on a worker goroutine and MUST be a pure deterministic function of its
+// inputs for replay tests to hold (the fakes are; the real driver is not, which
+// is why live runs do not assert ordinal replay).
+//
+// schema is the per-call JSON Schema (nil when the call has no schema). The
+// fakes ignore it; the real driver advertises it through the return_result sink.
 type AgentStub interface {
-	// Run returns the canned result for (ordinal, prompt). A returned error models
-	// a terminal subagent failure: the engine resolves the agent() promise to null
-	// and journals status "errored" (never rejects).
-	Run(ordinal OrdinalPath, prompt string) (json.RawMessage, error)
+	// Run returns the result for (ordinal, prompt, schema). A returned error
+	// models a terminal subagent failure: the engine resolves the agent() promise
+	// to null and journals status "errored" (never rejects).
+	Run(ordinal OrdinalPath, prompt string, schema json.RawMessage) (json.RawMessage, error)
 }
 
 // DefaultStub returns a deterministic result derived from the prompt:
 // JSON string of sha256(prompt)[:12].
 type DefaultStub struct{}
 
-func (DefaultStub) Run(_ OrdinalPath, prompt string) (json.RawMessage, error) {
+func (DefaultStub) Run(_ OrdinalPath, prompt string, _ json.RawMessage) (json.RawMessage, error) {
 	sum := sha256.Sum256([]byte(prompt))
 	h := hex.EncodeToString(sum[:])[:12]
 	b, _ := json.Marshal(h)
@@ -29,10 +34,10 @@ func (DefaultStub) Run(_ OrdinalPath, prompt string) (json.RawMessage, error) {
 }
 
 // StubFunc adapts a plain function to AgentStub.
-type StubFunc func(ordinal OrdinalPath, prompt string) (json.RawMessage, error)
+type StubFunc func(ordinal OrdinalPath, prompt string, schema json.RawMessage) (json.RawMessage, error)
 
-func (f StubFunc) Run(ordinal OrdinalPath, prompt string) (json.RawMessage, error) {
-	return f(ordinal, prompt)
+func (f StubFunc) Run(ordinal OrdinalPath, prompt string, schema json.RawMessage) (json.RawMessage, error) {
+	return f(ordinal, prompt, schema)
 }
 
 // ScriptedStub is the resolution-ORDER injection seam. It gates when each call's
@@ -52,7 +57,9 @@ type ScriptedStub struct {
 	openAll  bool
 }
 
-// NewScriptedStub builds a gated stub. resultFor must be deterministic.
+// NewScriptedStub builds a gated stub. resultFor must be deterministic. The
+// schema is not part of the resultFor signature because the ordinal-stability
+// tests that use ScriptedStub do not vary by schema; Run accepts and ignores it.
 func NewScriptedStub(resultFor func(ordinal OrdinalPath, prompt string) (json.RawMessage, error)) *ScriptedStub {
 	return &ScriptedStub{
 		resultFor: resultFor,
@@ -77,7 +84,7 @@ func (s *ScriptedStub) gate(ordinal string) chan struct{} {
 	return ch
 }
 
-func (s *ScriptedStub) Run(ordinal OrdinalPath, prompt string) (json.RawMessage, error) {
+func (s *ScriptedStub) Run(ordinal OrdinalPath, prompt string, _ json.RawMessage) (json.RawMessage, error) {
 	<-s.gate(ordinal.String())
 	return s.resultFor(ordinal, prompt)
 }

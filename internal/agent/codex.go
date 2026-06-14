@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -107,6 +110,18 @@ func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest
 	if serverName == "" {
 		serverName = "attn_context"
 	}
+	toolNames := headlessToolNames(request.ToolName)
+
+	// Capture the child's final message to a file. This is the parser-free,
+	// robust no-schema text path (codex -o, --output-last-message <FILE>). We
+	// create the file ourselves so cleanup is deterministic; codex overwrites it.
+	lastMsgPath := ""
+	if f, err := os.CreateTemp(headlessTempDir(request.WorkDir), "codex-last-msg-*.txt"); err == nil {
+		lastMsgPath = f.Name()
+		f.Close()
+		defer os.Remove(lastMsgPath)
+	}
+
 	args := []string{
 		"exec",
 		"--json",
@@ -117,6 +132,11 @@ func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest
 		"--skip-git-repo-check",
 		"--sandbox", "read-only",
 		"-m", strings.TrimSpace(request.Model),
+	}
+	if lastMsgPath != "" {
+		args = append(args, "--output-last-message", lastMsgPath)
+	}
+	args = append(args,
 		"-c", `approval_policy="never"`,
 		"-c", "features.shell_tool=false",
 		"-c", "features.unified_exec=false",
@@ -137,11 +157,62 @@ func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest
 		"-c", fmt.Sprintf("mcp_servers.%s.command=%s", serverName, strconv.Quote(request.MCPServerCommand)),
 		"-c", fmt.Sprintf("mcp_servers.%s.args=%s", serverName, tomlStringArray(request.MCPServerArgs)),
 		"-c", fmt.Sprintf("mcp_servers.%s.required=true", serverName),
-		"-c", fmt.Sprintf("mcp_servers.%s.enabled_tools=%s", serverName, tomlStringArray([]string{"read_context", "replace_context"})),
+		"-c", fmt.Sprintf("mcp_servers.%s.enabled_tools=%s", serverName, tomlStringArray(toolNames)),
 		"-c", fmt.Sprintf(`mcp_servers.%s.default_tools_approval_mode="approve"`, serverName),
 		request.Prompt,
+	)
+	result, stdout, err := runHeadlessCommand(ctx, request.Executable, args, request.WorkDir, "codex")
+	if err != nil {
+		return result, err
 	}
-	return runHeadlessCommand(ctx, request.Executable, args, request.WorkDir, "codex")
+	result.Text = codexFinalText(lastMsgPath, stdout)
+	return result, nil
+}
+
+// codexFinalText returns the child's final assistant message. It prefers the
+// --output-last-message file (parser-free, robust) and falls back to scanning
+// the live --json stdout for the last agent_message item. NOTE: the live
+// `codex exec --json` stream is NOT the on-disk transcript envelope, so we do
+// not route this through internal/transcript.
+func codexFinalText(lastMsgPath string, stdout []byte) string {
+	if lastMsgPath != "" {
+		if b, err := os.ReadFile(lastMsgPath); err == nil {
+			if text := strings.TrimSpace(string(b)); text != "" {
+				return text
+			}
+		}
+	}
+	return parseCodexFinalText(stdout)
+}
+
+// parseCodexFinalText scans `codex exec --json` stdout (JSONL) for the LAST
+// agent_message item and returns its text. The relevant line shape is:
+//
+//	{"type":"item.completed","item":{"type":"agent_message","text":"..."}}
+func parseCodexFinalText(stdout []byte) string {
+	last := ""
+	for _, raw := range bytes.Split(stdout, []byte("\n")) {
+		line := bytes.TrimSpace(raw)
+		if len(line) == 0 {
+			continue
+		}
+		var event struct {
+			Type string `json:"type"`
+			Item struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"item"`
+		}
+		if err := json.Unmarshal(line, &event); err != nil {
+			continue
+		}
+		if event.Type == "item.completed" && event.Item.Type == "agent_message" {
+			if text := strings.TrimSpace(event.Item.Text); text != "" {
+				last = text
+			}
+		}
+	}
+	return last
 }
 
 func tomlStringArray(values []string) string {

@@ -11,7 +11,7 @@ import (
 
 // promptEcho is a stub whose result is the literal prompt, so downstream prompts
 // that embed an upstream result change deterministically when the upstream changes.
-func promptEcho(_ OrdinalPath, prompt string) (json.RawMessage, error) {
+func promptEcho(_ OrdinalPath, prompt string, _ json.RawMessage) (json.RawMessage, error) {
 	b, _ := json.Marshal(prompt)
 	return b, nil
 }
@@ -272,7 +272,7 @@ func TestKillAtKThenResume(t *testing.T) {
 // TestAgentTerminalFailureResolvesNull: an agent() whose stub returns an error
 // resolves to null (never rejects the script); the run completes.
 func TestAgentTerminalFailureResolvesNull(t *testing.T) {
-	failOnSecond := StubFunc(func(_ OrdinalPath, prompt string) (json.RawMessage, error) {
+	failOnSecond := StubFunc(func(_ OrdinalPath, prompt string, _ json.RawMessage) (json.RawMessage, error) {
 		if strings.Contains(prompt, "boom") {
 			return nil, errors.New("subagent crashed")
 		}

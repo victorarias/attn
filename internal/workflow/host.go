@@ -129,8 +129,12 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 		if len(call.Arguments) > 0 {
 			prompt = call.Arguments[0].String()
 		}
-		// E1: schema is always absent. (opts may carry one in E2; we hash it then.)
-		var schema json.RawMessage
+		// opts (call.Argument(1)) may carry a schema (and label/phase). The schema
+		// is part of the cache identity (hashSchema) AND is threaded to the stub so
+		// the real driver can advertise it through the return_result sink. E1
+		// callers pass no opts => schema nil => schemaHash "none" => behavior
+		// unchanged.
+		schema := extractAgentSchema(rs.vm, call.Argument(1))
 
 		// --- fix the ordinal synchronously, before anything async ---
 		site := rs.callsiteKey()
@@ -165,7 +169,7 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 		go func() {
 			// Concurrency cap (correctness semaphore).
 			rs.sem <- struct{}{}
-			res, runErr := rs.stub.Run(ordSnapshot, prompt)
+			res, runErr := rs.stub.Run(ordSnapshot, prompt, schema)
 			<-rs.sem
 
 			// Hop back to the loop goroutine to journal + resolve. This is the ONLY
@@ -192,6 +196,34 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 
 		return vm.ToValue(p)
 	}
+}
+
+// extractAgentSchema pulls the `schema` property off the agent() opts object (the
+// second argument) and marshals it to canonical JSON. Returns nil when opts is
+// absent, not an object, or carries no schema — keeping the no-schema path
+// (schemaHash "none") exact. The schema is canonicalized via Go's json.Marshal
+// so the same logical schema hashes identically across runs.
+func extractAgentSchema(vm *goja.Runtime, optsVal goja.Value) json.RawMessage {
+	if optsVal == nil || goja.IsUndefined(optsVal) || goja.IsNull(optsVal) {
+		return nil
+	}
+	obj, ok := optsVal.(*goja.Object)
+	if !ok {
+		return nil
+	}
+	schemaVal := obj.Get("schema")
+	if schemaVal == nil || goja.IsUndefined(schemaVal) || goja.IsNull(schemaVal) {
+		return nil
+	}
+	exported := schemaVal.Export()
+	if exported == nil {
+		return nil
+	}
+	raw, err := json.Marshal(exported)
+	if err != nil || len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	return json.RawMessage(raw)
 }
 
 // mustResolve calls a NewPromise resolve func and propagates an uncatchable error

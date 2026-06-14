@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -129,7 +130,12 @@ func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskReques
 		return HeadlessTaskResult{}, fmt.Errorf("encode MCP config: %w", err)
 	}
 	toolPrefix := "mcp__" + serverName + "__"
-	tools := toolPrefix + "read_context," + toolPrefix + "replace_context"
+	names := headlessToolNames(request.ToolName)
+	prefixed := make([]string, len(names))
+	for i, n := range names {
+		prefixed[i] = toolPrefix + n
+	}
+	tools := strings.Join(prefixed, ",")
 	args := []string{"--print"}
 	args = append(args, claudeHeadlessIsolationArgs()...)
 	args = append(args,
@@ -145,7 +151,97 @@ func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskReques
 		"--output-format", "json",
 		request.Prompt,
 	)
-	return runHeadlessCommand(ctx, request.Executable, args, request.WorkDir, "claude")
+	result, stdout, err := runHeadlessCommand(ctx, request.Executable, args, request.WorkDir, "claude")
+	if err != nil {
+		return result, err
+	}
+	result.Text = parseClaudeFinalText(stdout)
+	return result, nil
+}
+
+// parseClaudeFinalText extracts the final assistant text from Claude headless
+// `--output-format json` stdout. Claude canonically emits a single result
+// object {"type":"result","result":"<final text>"}, but some configs emit a
+// stream array of events instead. Both shapes are handled. We do not route
+// through internal/transcript (a different on-disk shape).
+func parseClaudeFinalText(stdout []byte) string {
+	trimmed := bytes.TrimSpace(stdout)
+	if len(trimmed) == 0 {
+		return ""
+	}
+
+	// (a) single object with a string `result`.
+	var single struct {
+		Type   string          `json:"type"`
+		Result json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(trimmed, &single); err == nil {
+		if text := claudeResultString(single.Result); text != "" {
+			return text
+		}
+	}
+
+	// (b) stream array of events: take the last `type==result` with a string
+	// `result`, else the last assistant message's joined text blocks.
+	var events []json.RawMessage
+	if err := json.Unmarshal(trimmed, &events); err == nil {
+		for i := len(events) - 1; i >= 0; i-- {
+			var ev struct {
+				Type   string          `json:"type"`
+				Result json.RawMessage `json:"result"`
+			}
+			if json.Unmarshal(events[i], &ev) != nil {
+				continue
+			}
+			if ev.Type == "result" {
+				if text := claudeResultString(ev.Result); text != "" {
+					return text
+				}
+			}
+		}
+		for i := len(events) - 1; i >= 0; i-- {
+			if text := claudeAssistantText(events[i]); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
+}
+
+// claudeResultString returns the trimmed string value of a `result` field, or
+// "" when it is absent / not a string.
+func claudeResultString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(s)
+}
+
+// claudeAssistantText joins the text blocks of an `assistant` stream event.
+func claudeAssistantText(raw json.RawMessage) string {
+	var ev struct {
+		Type    string `json:"type"`
+		Message struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(raw, &ev) != nil || ev.Type != "assistant" {
+		return ""
+	}
+	var parts []string
+	for _, block := range ev.Message.Content {
+		if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
+			parts = append(parts, block.Text)
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, ""))
 }
 
 func (c *Claude) HeadlessTaskAvailability() (bool, string) {
