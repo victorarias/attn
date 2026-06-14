@@ -18,6 +18,7 @@ import type {
   Comment as GeneratedComment,
   ReviewLoopRun as GeneratedReviewLoopRun,
   ReviewLoopInteraction as GeneratedReviewLoopInteraction,
+  WorkflowRun as GeneratedWorkflowRun,
   WarningElement as GeneratedWarning,
   WorkspaceContext as GeneratedWorkspaceContext,
   PRRole,
@@ -55,6 +56,7 @@ import { decodeBinaryPtyFrame } from '../pty/binaryPtyFrame';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
 import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
 import { controlBrowserHost, serializeBrowserControlResultMessage } from '../browser/host';
+import { useWorkflowRunsStore } from '../store/workflowRuns';
 
 // Short names for daemon payloads used throughout the app.
 export type DaemonSession = GeneratedSession;
@@ -71,6 +73,7 @@ export type AuthorState = GeneratedAuthorState;
 export type RecentLocation = GeneratedRecentLocation;
 export type ReviewLoopState = GeneratedReviewLoopRun;
 export type ReviewLoopInteraction = GeneratedReviewLoopInteraction;
+export type WorkflowRunState = GeneratedWorkflowRun;
 export type DaemonSettings = Record<string, string>;
 export type DaemonWarning = GeneratedWarning;
 export type DaemonWorkspaceContext = GeneratedWorkspaceContext;
@@ -2131,6 +2134,38 @@ export function useDaemonSocket({
             }
             break;
 
+          case 'workflow_run_updated': {
+            const run = (data as any).run;
+            if (run) useWorkflowRunsStore.getState().upsertWorkflowRun(run);
+            break;
+          }
+
+          case 'workflow_action_result': {
+            const action = (data as any).action || '';
+            const runId = (data as any).run_id || '';
+            // populate the store from any returned run(s) so list/get hydrate the slice
+            const run = (data as any).run ?? null;
+            const runs = (data as any).runs ?? [];
+            if (run) useWorkflowRunsStore.getState().upsertWorkflowRun(run);
+            if (Array.isArray(runs) && runs.length > 0) useWorkflowRunsStore.getState().upsertWorkflowRuns(runs);
+            let key: string | null = null;
+            if (action === 'get') key = `workflow_run_get_${runId}`;
+            else if (action === 'list') key = 'workflow_run_list';
+            else if (action === 'cancel') key = `workflow_run_cancel_${runId}`;
+            if (key) {
+              const pending = pendingActionsRef.current.get(key);
+              if (pending) {
+                pendingActionsRef.current.delete(key);
+                if ((data as any).success) {
+                  pending.resolve({ success: true, run, runs });
+                } else {
+                  pending.reject(new Error((data as any).error || 'Workflow action failed'));
+                }
+              }
+            }
+            break;
+          }
+
           case 'mark_file_viewed_result': {
             const pending = pendingActionsRef.current.get('mark_file_viewed');
             if (pending) {
@@ -3936,6 +3971,44 @@ export function useDaemonSocket({
     });
   }, []);
 
+  const getWorkflowRun = useCallback((runId: string): Promise<{ success: boolean; run: WorkflowRunState | null }> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = `workflow_run_get_${runId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'workflow_run_get', run_id: runId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Get workflow run timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
+  const listWorkflowRuns = useCallback((sessionId?: string): Promise<{ success: boolean; runs: WorkflowRunState[] }> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = 'workflow_run_list';
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'workflow_run_list', ...(sessionId ? { session_id: sessionId } : {}) }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('List workflow runs timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
   const setReviewLoopIterationLimit = useCallback((sessionId: string, iterationLimit: number): Promise<ReviewLoopActionResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
@@ -4234,6 +4307,8 @@ export function useDaemonSocket({
     getReviewState,
     getReviewLoopRun,
     getReviewLoopState,
+    getWorkflowRun,
+    listWorkflowRuns,
     markFileViewed,
     sendAddComment,
     sendUpdateComment,

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { ptyAttach, ptyDetach, ptyKill, ptySpawn } from '../pty/bridge';
 import { PROTOCOL_VERSION, retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
+import { useWorkflowRunsStore } from '../store/workflowRuns';
 
 class FakeWebSocket {
   static readonly CONNECTING = 0;
@@ -2794,4 +2795,113 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+});
+
+describe('useDaemonSocket workflow runs', () => {
+  let originalWebSocket: typeof WebSocket;
+
+  beforeEach(() => {
+    originalWebSocket = globalThis.WebSocket;
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    vi.mocked(isTauri).mockReturnValue(true);
+    vi.mocked(invoke).mockResolvedValue(true);
+    useWorkflowRunsStore.getState().reset();
+  });
+
+  afterEach(() => {
+    globalThis.WebSocket = originalWebSocket;
+    vi.clearAllMocks();
+    useWorkflowRunsStore.getState().reset();
+  });
+
+  function renderSocket() {
+    return renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+  }
+
+  it('populates the store on workflow_run_updated', async () => {
+    const { unmount } = renderSocket();
+    const ws = await waitForOpenSocket();
+
+    act(() => {
+      ws.emit({
+        event: 'workflow_run_updated',
+        run: { run_id: 'wr1', status: 'running', script_path: '/x/wf.js' },
+      });
+    });
+
+    await waitFor(() => {
+      const run = useWorkflowRunsStore.getState().workflowRuns['wr1'];
+      expect(run).toBeDefined();
+      expect(run.status).toBe('running');
+    });
+
+    unmount();
+  });
+
+  it('listWorkflowRuns sends workflow_run_list and resolves + hydrates the store', async () => {
+    const { result, unmount } = renderSocket();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.listWorkflowRuns();
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent.some((entry) => entry.cmd === 'workflow_run_list')).toBe(true);
+    });
+
+    const run = { run_id: 'wr1', status: 'running', script_path: '/x/wf.js' };
+    act(() => {
+      ws.emit({
+        event: 'workflow_action_result',
+        action: 'list',
+        success: true,
+        runs: [run],
+      });
+    });
+
+    await expect(promise).resolves.toMatchObject({ success: true, runs: [run] });
+    expect(useWorkflowRunsStore.getState().workflowRuns['wr1']).toBeDefined();
+
+    unmount();
+  });
+
+  it('getWorkflowRun sends workflow_run_get and resolves with the run', async () => {
+    const { result, unmount } = renderSocket();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.getWorkflowRun('wr1');
+
+    await waitFor(() => {
+      expect(JSON.parse(ws.sent[ws.sent.length - 1])).toMatchObject({
+        cmd: 'workflow_run_get',
+        run_id: 'wr1',
+      });
+    });
+
+    const run = { run_id: 'wr1', status: 'completed', script_path: '/x/wf.js' };
+    act(() => {
+      ws.emit({
+        event: 'workflow_action_result',
+        action: 'get',
+        run_id: 'wr1',
+        success: true,
+        run,
+      });
+    });
+
+    await expect(promise).resolves.toMatchObject({ success: true, run });
+    expect(useWorkflowRunsStore.getState().workflowRuns['wr1']).toBeDefined();
+
+    unmount();
+  });
 });
