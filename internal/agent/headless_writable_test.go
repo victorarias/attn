@@ -336,3 +336,62 @@ func TestBuildClaudeHeadlessArgsWritableAddsEditAndBashAndExtraServers(t *testin
 		t.Fatalf("writable used --dangerously-skip-permissions: %v", argv)
 	}
 }
+
+// --- model flag omitted when empty (harness uses its own default) ---
+
+func TestBuildCodexHeadlessArgsOmitsModelWhenEmpty(t *testing.T) {
+	// No Model => codex must NOT receive "-m" at all. An empty "-m" makes codex
+	// reject the run as "model is invalid or unavailable" (surfaced live in E4).
+	argv := buildCodexHeadlessArgs(HeadlessTaskRequest{
+		Prompt:           "ping",
+		MCPServerName:    "attn_workflow_result",
+		MCPServerCommand: "/tmp/attn",
+		ToolName:         "return_result",
+	}, "")
+	if argvHas(argv, "-m") {
+		t.Fatalf("empty model still emitted -m: %v", argv)
+	}
+	for _, a := range argv {
+		if a == "" {
+			t.Fatalf("empty model produced an empty argv token: %v", argv)
+		}
+	}
+	withModel := buildCodexHeadlessArgs(HeadlessTaskRequest{
+		Model:            "gpt-test",
+		Prompt:           "ping",
+		MCPServerName:    "attn_workflow_result",
+		MCPServerCommand: "/tmp/attn",
+		ToolName:         "return_result",
+	}, "")
+	if !argvHasPair(withModel, "-m", "gpt-test") {
+		t.Fatalf("non-empty model not pinned with -m: %v", withModel)
+	}
+}
+
+func TestBuildClaudeHeadlessArgsOmitsModelWhenEmpty(t *testing.T) {
+	argv, err := buildClaudeHeadlessArgs(HeadlessTaskRequest{
+		Prompt:           "ping",
+		MCPServerName:    "attn_workflow_result",
+		MCPServerCommand: "/tmp/attn",
+		ToolName:         "return_result",
+	})
+	if err != nil {
+		t.Fatalf("buildClaudeHeadlessArgs: %v", err)
+	}
+	if argvHas(argv, "--model") {
+		t.Fatalf("empty model still emitted --model: %v", argv)
+	}
+	withModel, err := buildClaudeHeadlessArgs(HeadlessTaskRequest{
+		Model:            "claude-test",
+		Prompt:           "ping",
+		MCPServerName:    "attn_workflow_result",
+		MCPServerCommand: "/tmp/attn",
+		ToolName:         "return_result",
+	})
+	if err != nil {
+		t.Fatalf("buildClaudeHeadlessArgs(withModel): %v", err)
+	}
+	if !argvHasPair(withModel, "--model", "claude-test") {
+		t.Fatalf("non-empty model not pinned with --model: %v", withModel)
+	}
+}

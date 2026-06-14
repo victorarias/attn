@@ -178,7 +178,13 @@ func buildCodexHeadlessArgs(request HeadlessTaskRequest, lastMsgPath string) []s
 		"--strict-config",
 		"--skip-git-repo-check",
 		"--sandbox", sandboxMode,
-		"-m", strings.TrimSpace(request.Model),
+	}
+	// Only pin the model when one is requested. An empty "-m" makes codex reject
+	// the run as "model is invalid or unavailable"; omitting the flag lets codex
+	// fall back to its own default model (the faithful "harness decides" default
+	// for a workflow agent() with no per-call/run model override).
+	if model := strings.TrimSpace(request.Model); model != "" {
+		args = append(args, "-m", model)
 	}
 	if lastMsgPath != "" {
 		args = append(args, "--output-last-message", lastMsgPath)

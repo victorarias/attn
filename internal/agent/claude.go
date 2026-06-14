@@ -201,8 +201,13 @@ func buildClaudeHeadlessArgs(request HeadlessTaskRequest) ([]string, error) {
 	tools := strings.Join(prefixed, ",")
 	args := []string{"--print"}
 	args = append(args, claudeHeadlessIsolationArgs()...)
+	// Only pin the model when one is requested; an empty "--model" is rejected as
+	// an invalid model. Omitting it lets Claude use its own default (the faithful
+	// "harness decides" default when agent() has no model override).
+	if model := strings.TrimSpace(request.Model); model != "" {
+		args = append(args, "--model", model)
+	}
 	args = append(args,
-		"--model", strings.TrimSpace(request.Model),
 		"--no-session-persistence",
 		"--strict-mcp-config",
 		"--mcp-config", string(config),
