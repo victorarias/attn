@@ -527,6 +527,11 @@ func TestPrintDreamStatus(t *testing.T) {
 		Enabled:           false,
 		CandidateCount:    3,
 		MultiContextCount: 1,
+		PersistedCount:    2,
+		Schedule:          protocol.Ptr("0 3 * * *"),
+		Timezone:          protocol.Ptr("America/New_York"),
+		NextRunAt:         protocol.Ptr("2026-06-15T07:00:00Z"),
+		LastRunAt:         protocol.Ptr("2026-06-14T07:00:00Z"),
 		SourceCounts: []protocol.NotebookDreamSourceCount{
 			{Source: "context", Count: 1},
 			{Source: "journal", Count: 2},
@@ -536,7 +541,13 @@ func TestPrintDreamStatus(t *testing.T) {
 		},
 	})
 	out := buf.String()
-	for _, want := range []string{"dreaming: disabled", "candidates: 3 (1 across multiple contexts)", "context:", "journal:", "[2× ·2 ctx]", "Daemon owns every notebook write."} {
+	for _, want := range []string{
+		"dreaming: disabled",
+		"schedule: 0 3 * * * (America/New_York), next run ",
+		"last run: ",
+		"candidates: 3 (1 across multiple contexts), 2 persisted",
+		"context:", "journal:", "[2× ·2 ctx]", "Daemon owns every notebook write.",
+	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("status output missing %q:\n%s", want, out)
 		}

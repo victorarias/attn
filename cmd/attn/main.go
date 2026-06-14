@@ -1283,9 +1283,34 @@ func printDreamCandidate(w io.Writer, cand protocol.NotebookDreamCandidate) {
 	}
 }
 
+// formatDreamTime renders a persisted RFC3339 timestamp in local time for
+// display, falling back to the raw string if it cannot be parsed.
+func formatDreamTime(s string) string {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.Local().Format("2006-01-02 15:04")
+		}
+	}
+	return s
+}
+
 func printDreamStatus(w io.Writer, res *protocol.NotebookDreamStatusResult) {
 	fmt.Fprintf(w, "dreaming: %s\n", dreamEnabledLabel(res.Enabled))
-	fmt.Fprintf(w, "candidates: %d (%d across multiple contexts)\n", res.CandidateCount, res.MultiContextCount)
+	if sched := strings.TrimSpace(protocol.Deref(res.Schedule)); sched != "" {
+		line := "schedule: " + sched
+		if tz := strings.TrimSpace(protocol.Deref(res.Timezone)); tz != "" {
+			line += " (" + tz + ")"
+		}
+		if next := strings.TrimSpace(protocol.Deref(res.NextRunAt)); next != "" {
+			line += ", next run " + formatDreamTime(next)
+		}
+		fmt.Fprintln(w, line)
+	}
+	if last := strings.TrimSpace(protocol.Deref(res.LastRunAt)); last != "" {
+		fmt.Fprintf(w, "last run: %s\n", formatDreamTime(last))
+	}
+	fmt.Fprintf(w, "candidates: %d (%d across multiple contexts), %d persisted\n",
+		res.CandidateCount, res.MultiContextCount, res.PersistedCount)
 	printDreamSourceCounts(w, res.SourceCounts)
 	if len(res.Top) > 0 {
 		fmt.Fprintln(w, "top candidates:")

@@ -22,6 +22,7 @@ require github.com/BurntSushi/toml v1.5.0
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/robfig/cron/v3 v3.0.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 

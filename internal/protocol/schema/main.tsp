@@ -2092,13 +2092,21 @@ model NotebookDreamSourceCount {
 
 // Summary of what a dream would consolidate now. enabled reflects the
 // notebook.dreaming.enabled gate; multi_context_count is the subset of
-// candidates seen in more than one distinct context.
+// candidates seen in more than one distinct context. candidate_count is the live
+// preview (persisted candidates merged with a fresh harvest); persisted_count is
+// how many are durably saved on disk from prior scheduled runs. schedule/timezone
+// describe the cron; last_run_at/next_run_at bracket the scheduled runs.
 model NotebookDreamStatusResult {
   enabled: boolean;
   candidate_count: int32;
   multi_context_count: int32;
+  persisted_count: int32;
   source_counts: NotebookDreamSourceCount[];
   top: NotebookDreamCandidate[];
+  schedule?: string;
+  timezone?: string;
+  last_run_at?: string;
+  next_run_at?: string;
 }
 
 // Result of notebook_dream_run. applied is false in the preview-only phase (the

@@ -109,6 +109,28 @@ func NewDreamCandidateSet() *DreamCandidateSet {
 	return &DreamCandidateSet{byKey: make(map[string]*DreamCandidate)}
 }
 
+// LoadDreamCandidateSet rebuilds a set from previously persisted candidates so a
+// run can merge fresh signals into the accumulated state. Re-adding a signal whose
+// SourceRef is already recorded is idempotent, so re-harvesting the same source
+// into a loaded set never inflates a candidate's occurrence count. Candidates with
+// no SignalKey or a duplicate key (corrupt state) are skipped.
+func LoadDreamCandidateSet(cands []DreamCandidate) *DreamCandidateSet {
+	s := NewDreamCandidateSet()
+	for i := range cands {
+		key := strings.TrimSpace(cands[i].SignalKey)
+		if key == "" {
+			continue
+		}
+		if _, ok := s.byKey[key]; ok {
+			continue
+		}
+		c := cands[i]
+		s.byKey[key] = &c
+		s.order = append(s.order, key)
+	}
+	return s
+}
+
 // Add merges one signal into the set. A signal whose text is blank (after
 // normalization) is ignored. Re-adding the same SourceRef is idempotent, so a
 // scanner may safely re-scan a source without inflating Occurrences.

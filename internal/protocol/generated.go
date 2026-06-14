@@ -1832,11 +1832,26 @@ type NotebookDreamStatusResult struct {
 	// Enabled corresponds to the JSON schema field "enabled".
 	Enabled bool `json:"enabled"`
 
+	// LastRunAt corresponds to the JSON schema field "last_run_at".
+	LastRunAt *string `json:"last_run_at,omitempty,omitzero"`
+
 	// MultiContextCount corresponds to the JSON schema field "multi_context_count".
 	MultiContextCount int `json:"multi_context_count"`
 
+	// NextRunAt corresponds to the JSON schema field "next_run_at".
+	NextRunAt *string `json:"next_run_at,omitempty,omitzero"`
+
+	// PersistedCount corresponds to the JSON schema field "persisted_count".
+	PersistedCount int `json:"persisted_count"`
+
+	// Schedule corresponds to the JSON schema field "schedule".
+	Schedule *string `json:"schedule,omitempty,omitzero"`
+
 	// SourceCounts corresponds to the JSON schema field "source_counts".
 	SourceCounts []NotebookDreamSourceCount `json:"source_counts"`
+
+	// Timezone corresponds to the JSON schema field "timezone".
+	Timezone *string `json:"timezone,omitempty,omitzero"`
 
 	// Top corresponds to the JSON schema field "top".
 	Top []NotebookDreamCandidate `json:"top"`

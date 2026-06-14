@@ -6,6 +6,7 @@ import (
 	"net"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/protocol"
@@ -32,16 +33,47 @@ const topDreamCandidates = 10
 // returns, so a large notebook can't produce an unbounded response.
 const maxDreamRunCandidates = 200
 
-// harvestDreamCandidates scans all three v1 sources into a merged candidate set.
-// It is read-only: callers decide what to do with the result (status summary,
-// dry-run preview). Failure to read any single source is logged and skipped — a
-// partial harvest is more useful than none, and the preview is advisory.
+// harvestDreamCandidates scans all three v1 sources into a fresh merged candidate
+// set. It is read-only: callers decide what to do with the result. Failure to read
+// any single source is logged and skipped — a partial harvest is more useful than
+// none, and the preview is advisory.
 func (d *Daemon) harvestDreamCandidates() (*notebook.DreamCandidateSet, error) {
-	store, err := d.notebookStoreFor()
-	if err != nil {
+	set := notebook.NewDreamCandidateSet()
+	if err := d.harvestInto(set); err != nil {
 		return nil, err
 	}
-	set := notebook.NewDreamCandidateSet()
+	return set, nil
+}
+
+// dreamHarvestUnion loads the persisted candidate set and merges a fresh harvest
+// into it, returning the union and how many candidates were already persisted
+// before the harvest. This is exactly what the next scheduled run would persist,
+// so status and dry-run preview the real accumulated state — not just what one
+// in-the-moment scan happens to see. It never writes; runDreamHarvest persists.
+func (d *Daemon) dreamHarvestUnion() (set *notebook.DreamCandidateSet, persisted int, err error) {
+	root, err := d.notebookRoot()
+	if err != nil {
+		return nil, 0, err
+	}
+	cands, err := notebook.LoadDreamCandidates(root)
+	if err != nil {
+		return nil, 0, err
+	}
+	set = notebook.LoadDreamCandidateSet(cands)
+	persisted = set.Len()
+	if err := d.harvestInto(set); err != nil {
+		return nil, 0, err
+	}
+	return set, persisted, nil
+}
+
+// harvestInto scans all three v1 sources into the supplied set, merging with
+// whatever it already holds (re-adding a known source ref is idempotent).
+func (d *Daemon) harvestInto(set *notebook.DreamCandidateSet) error {
+	store, err := d.notebookStoreFor()
+	if err != nil {
+		return err
+	}
 
 	// 1. Journals: each dated note's blocks (the raw system of record).
 	entries, err := store.List(notebook.DirJournal)
@@ -91,7 +123,7 @@ func (d *Daemon) harvestDreamCandidates() (*notebook.DreamCandidateSet, error) {
 		}
 	}
 
-	return set, nil
+	return nil
 }
 
 // contextDurableHeadings are the workspace-context sections whose bullets are
@@ -235,29 +267,65 @@ func dispatchDecisionText(req *protocol.DispatchDecisionRequest) string {
 }
 
 // dreamStatus returns a cheap summary of what a dream would consolidate now: the
-// gate flag, candidate totals (overall and recurring-across-contexts), per-source
-// counts, and the top candidates by durability signal.
+// gate flag, the persisted-plus-fresh candidate totals (overall and recurring-
+// across-contexts), per-source counts, the top candidates by durability signal,
+// and the schedule bracketing the nightly runs.
 func (d *Daemon) dreamStatus() (*protocol.NotebookDreamStatusResult, error) {
-	set, err := d.harvestDreamCandidates()
+	set, persisted, err := d.dreamHarvestUnion()
 	if err != nil {
 		return nil, err
 	}
 	candidates := set.Candidates()
 	res := &protocol.NotebookDreamStatusResult{
-		Enabled:           parseBooleanSetting(d.store.GetSetting(SettingNotebookDreamingEnabled)),
+		Enabled:           d.dreamingEnabled(),
 		CandidateCount:    len(candidates),
 		MultiContextCount: countMultiContext(candidates),
+		PersistedCount:    persisted,
 		SourceCounts:      sourceCounts(candidates),
 		Top:               toProtocolDreamCandidates(candidates, topDreamCandidates),
 	}
+	d.fillDreamSchedule(res)
 	return res, nil
+}
+
+// fillDreamSchedule populates the schedule/timezone/last-run/next-run fields from
+// the configured cron and persisted run state. A misconfigured frequency leaves
+// the schedule fields unset rather than failing the whole status.
+func (d *Daemon) fillDreamSchedule(res *protocol.NotebookDreamStatusResult) {
+	sched, raw, err := d.dreamingSchedule()
+	if err != nil {
+		return
+	}
+	loc := d.dreamingLocation()
+	res.Schedule = protocol.Ptr(raw)
+	res.Timezone = protocol.Ptr(loc.String())
+
+	root, err := d.notebookRoot()
+	if err != nil {
+		return
+	}
+	state, err := notebook.LoadDreamRunState(root)
+	if err != nil {
+		return
+	}
+	if state.LastRunAt != "" {
+		res.LastRunAt = protocol.Ptr(state.LastRunAt)
+	}
+	// Next run is computed from the persisted anchor, or from now when dreaming
+	// has never been anchored yet (its first run will land at the next slot).
+	anchor, ok := parseDreamTime(state.ScheduledFrom)
+	if !ok {
+		anchor = time.Now()
+	}
+	res.NextRunAt = protocol.Ptr(sched.Next(anchor.In(loc)).UTC().Format(time.RFC3339))
 }
 
 // dreamRun performs a harvest and returns the candidate preview. apply is
 // accepted for forward compatibility with the promote phase, but this phase is
-// preview-only: it always reports Applied=false and writes nothing.
+// preview-only: it always reports Applied=false and writes nothing. The nightly
+// scheduler is what persists; this command only previews the union.
 func (d *Daemon) dreamRun(apply bool) (*protocol.NotebookDreamRunResult, error) {
-	set, err := d.harvestDreamCandidates()
+	set, _, err := d.dreamHarvestUnion()
 	if err != nil {
 		return nil, err
 	}

@@ -2081,8 +2081,13 @@ export enum NotebookDreamStatusMessageCmd {
 export interface NotebookDreamStatusResult {
     candidate_count:     number;
     enabled:             boolean;
+    last_run_at?:        string;
     multi_context_count: number;
+    next_run_at?:        string;
+    persisted_count:     number;
+    schedule?:           string;
     source_counts:       SourceCountElement[];
+    timezone?:           string;
     top:                 CandidateElement[];
     [property: string]: any;
 }
@@ -2815,8 +2820,13 @@ export interface NotebookDreamRun {
 export interface NotebookDreamStatus {
     candidate_count:     number;
     enabled:             boolean;
+    last_run_at?:        string;
     multi_context_count: number;
+    next_run_at?:        string;
+    persisted_count:     number;
+    schedule?:           string;
     source_counts:       SourceCountElement[];
+    timezone?:           string;
     top:                 CandidateElement[];
     [property: string]: any;
 }
@@ -7436,8 +7446,13 @@ const typeMap: any = {
     "NotebookDreamStatusResult": o([
         { json: "candidate_count", js: "candidate_count", typ: 0 },
         { json: "enabled", js: "enabled", typ: true },
+        { json: "last_run_at", js: "last_run_at", typ: u(undefined, "") },
         { json: "multi_context_count", js: "multi_context_count", typ: 0 },
+        { json: "next_run_at", js: "next_run_at", typ: u(undefined, "") },
+        { json: "persisted_count", js: "persisted_count", typ: 0 },
+        { json: "schedule", js: "schedule", typ: u(undefined, "") },
         { json: "source_counts", js: "source_counts", typ: a(r("SourceCountElement")) },
+        { json: "timezone", js: "timezone", typ: u(undefined, "") },
         { json: "top", js: "top", typ: a(r("CandidateElement")) },
     ], "any"),
     "NotebookEntry": o([
@@ -7864,8 +7879,13 @@ const typeMap: any = {
     "NotebookDreamStatus": o([
         { json: "candidate_count", js: "candidate_count", typ: 0 },
         { json: "enabled", js: "enabled", typ: true },
+        { json: "last_run_at", js: "last_run_at", typ: u(undefined, "") },
         { json: "multi_context_count", js: "multi_context_count", typ: 0 },
+        { json: "next_run_at", js: "next_run_at", typ: u(undefined, "") },
+        { json: "persisted_count", js: "persisted_count", typ: 0 },
+        { json: "schedule", js: "schedule", typ: u(undefined, "") },
         { json: "source_counts", js: "source_counts", typ: a(r("SourceCountElement")) },
+        { json: "timezone", js: "timezone", typ: u(undefined, "") },
         { json: "top", js: "top", typ: a(r("CandidateElement")) },
     ], "any"),
     "NotebookGuide": o([
