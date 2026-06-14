@@ -529,23 +529,36 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
         let MenuItemKind::Submenu(submenu) = item else {
             continue;
         };
-        let is_file_menu = submenu.text()?.replace('&', "") == "File";
+        let submenu_text = submenu.text()?.replace('&', "");
+        let is_file_menu = submenu_text == "File";
+        let is_edit_menu = submenu_text == "Edit";
         let mut removed_close_window = false;
 
         for (position, item) in submenu.items()?.into_iter().enumerate().rev() {
-            let is_close_window = item
+            let text = item
                 .as_predefined_menuitem()
                 .and_then(|item| item.text().ok())
-                .is_some_and(|text| text.replace('&', "") == "Close Window");
-            if !is_close_window {
-                continue;
-            }
+                .map(|text| text.replace('&', ""))
+                .unwrap_or_default();
 
-            submenu.remove_at(position)?;
-            removed_close_window = true;
-            if is_file_menu {
-                submenu.insert(&close_active_pane, position)?;
-                inserted_close_active_pane = true;
+            let is_close_window = text == "Close Window";
+            let is_redo = text == "Redo";
+
+            if is_close_window {
+                submenu.remove_at(position)?;
+                removed_close_window = true;
+                if is_file_menu {
+                    submenu.insert(&close_active_pane, position)?;
+                    inserted_close_active_pane = true;
+                }
+            } else if is_redo && is_edit_menu {
+                // Drop the predefined Redo item so it stops claiming the ⇧⌘Z key
+                // equivalent. With Redo gone the key reaches the WebView, where the
+                // shortcut resolver routes ⇧⌘Z to terminal.toggleZoom — honoring any
+                // user rebinding, exactly like every other DOM shortcut. The macOS
+                // menu would otherwise swallow ⇧⌘Z and "Zoom active pane" did nothing
+                // in packaged builds.
+                submenu.remove_at(position)?;
             }
         }
 
