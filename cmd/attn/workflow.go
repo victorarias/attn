@@ -44,6 +44,8 @@ func runWorkflow() {
 		runWorkflowShow(os.Args[3:])
 	case "list":
 		runWorkflowList(os.Args[3:])
+	case "cancel":
+		runWorkflowCancel(os.Args[3:])
 	default:
 		fmt.Fprintf(os.Stderr, "workflow: unknown command %q\n\n", os.Args[2])
 		writeWorkflowHelp(os.Stderr)
@@ -59,6 +61,7 @@ commands:
   result <runId> [--wait]      print a run's terminal result as JSON
   show <runId>                 print the full run + per-call status as JSON
   list [--session <id>]        list runs (default session = ATTN_SESSION_ID)
+  cancel <runId>               request cancellation of a run (cooperative)
 
 run options:
   --args <json>                inline JSON args passed to the script
@@ -687,6 +690,40 @@ func runWorkflowShow(argv []string) {
 	}
 	if run == nil {
 		fmt.Fprintf(os.Stderr, "workflow show: run %q not found\n", runID)
+		os.Exit(1)
+	}
+	printJSON(run)
+}
+
+// --- cancel ----------------------------------------------------------------
+
+// runWorkflowCancel requests cancellation of a run. The daemon marks the run
+// canceled and relays to the engine; the engine process (which polls
+// workflow_run_get every cancelPollInterval) cancels its root context and any
+// in-flight subagent contexts. This is the "moved-on agent halts a run" path
+// from the design — the engine need not be this process. Prints the daemon's
+// post-cancel view of the run.
+func runWorkflowCancel(argv []string) {
+	fs := flag.NewFlagSet("workflow cancel", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	if err := fs.Parse(argv); err != nil {
+		fmt.Fprintf(os.Stderr, "workflow cancel: %v\n", err)
+		os.Exit(2)
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: attn workflow cancel <runId>")
+		os.Exit(2)
+	}
+	runID := fs.Arg(0)
+	c := client.New("")
+
+	run, err := c.WorkflowRunCancel(runID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "workflow cancel: %v\n", err)
+		os.Exit(1)
+	}
+	if run == nil {
+		fmt.Fprintf(os.Stderr, "workflow cancel: run %q not found\n", runID)
 		os.Exit(1)
 	}
 	printJSON(run)
