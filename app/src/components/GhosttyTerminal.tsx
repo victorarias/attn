@@ -46,6 +46,7 @@ import {
   type FilteredBlockLine,
 } from '../utils/terminalBlockFilter';
 import { TerminalContextMenu, type TerminalContextMenuItem } from './TerminalContextMenu';
+import { enableGraphemeClustering, ensureGraphemeClustering } from './terminalGraphemeMode';
 import {
   cleanTerminalLines,
   terminalStyledSelectionToMarkdown,
@@ -1154,6 +1155,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             );
           }
         }
+        // Keep grapheme clustering on so emoji clusters stay whole for the
+        // renderer (see terminalGraphemeMode). A RIS anywhere in this chunk would
+        // otherwise leave the mode off for everything that follows.
+        ensureGraphemeClustering(terminal);
         const responses: string[] = [];
         while (terminal.hasResponse()) {
           const response = terminal.readResponse();
@@ -1497,6 +1502,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           cursorColor: colorNumber(theme.cursor),
           palette: getTerminalAnsiPalette(resolvedTheme),
         });
+        // Enable grapheme clustering up front so emoji clusters render as whole
+        // ligatures from the first frame (see terminalGraphemeMode).
+        enableGraphemeClustering(terminal);
         synchronizedOutputStateRef.current = { active: false, pending: '' };
         clearSynchronizedOutputRenderTimer();
         modelInstanceRef.current += 1;

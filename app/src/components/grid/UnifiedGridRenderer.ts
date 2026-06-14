@@ -19,6 +19,7 @@ import {
   TERMINAL_GLYPH_VERTEX_SHADER,
   isColorGlyphBitmap,
 } from '../terminalGlyphProgram';
+import { terminalGlyphFont } from '../terminalGlyphFont';
 import type { UISessionState } from '../../types/sessionState';
 import type {
   GridRenderer,
@@ -552,7 +553,9 @@ export class UnifiedGridRenderer implements GridRenderer {
 
     const context = this.atlasContext!;
     const scale = this.dpr;
-    context.font = `${style}${this.fontSize * scale}px ${this.fontFamily}`;
+    // Emoji clusters (ZWJ/flag/skin-tone/keycap) must be shaped Apple-Color-Emoji
+    // -first or WKWebView's canvas fallback decomposes them; see terminalGlyphFont.
+    context.font = terminalGlyphFont(style, this.fontSize * scale, this.fontFamily, text);
     const width = Math.max(Math.ceil(context.measureText(text).width) + 4, this.metrics.cellWidth * scale);
     const height = this.metrics.cellHeight * scale;
     if (this.atlasX + width >= ATLAS_SIZE) {

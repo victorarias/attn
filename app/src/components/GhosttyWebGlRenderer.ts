@@ -7,6 +7,7 @@ import {
   TERMINAL_GLYPH_VERTEX_SHADER,
   isColorGlyphBitmap,
 } from './terminalGlyphProgram';
+import { terminalGlyphFont } from './terminalGlyphFont';
 
 interface RendererTheme {
   background: string;
@@ -554,7 +555,9 @@ export class WebGlTerminalRenderer {
 
     const context = this.atlasContext;
     const scale = this.dpr;
-    const font = `${style}${this.fontSize * scale}px ${this.fontFamily}`;
+    // Emoji clusters (ZWJ/flag/skin-tone/keycap) must be shaped Apple-Color-Emoji
+    // -first or WKWebView's canvas fallback decomposes them; see terminalGlyphFont.
+    const font = terminalGlyphFont(style, this.fontSize * scale, this.fontFamily, text);
     context.font = font;
     const width = Math.max(Math.ceil(context.measureText(text).width) + 4, this.cellWidth * scale);
     const height = this.cellHeight * scale;

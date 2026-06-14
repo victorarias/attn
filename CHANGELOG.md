@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-14]
+
+### Fixed
+- **Multi-part emoji now render as a single emoji instead of their separate pieces.** Family and couple emoji (👨‍👩‍👧‍👦), country flags (🇺🇸), skin-tone variants (👍🏽), and keycaps (1️⃣) were splitting into their components — four separate people, two boxed flag letters, a thumb next to a color swatch. They now combine into the one intended glyph.
+
 ## [2026-06-13]
 
 ### Added
