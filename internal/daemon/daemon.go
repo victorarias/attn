@@ -192,6 +192,13 @@ type Daemon struct {
 	workspaceContextJanitorDebounce        time.Duration
 	workspaceContextJanitorTimeout         time.Duration
 	workspaceContextBeforeJanitorApply     func()
+
+	// Dreaming scheduler (notebook consolidation janitor). dreamMu guards the
+	// single-flight dreamRunning guard; dreamSchedulerInterval overrides the tick
+	// cadence in tests (zero = default).
+	dreamMu                sync.Mutex
+	dreamRunning           bool
+	dreamSchedulerInterval time.Duration
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -668,6 +675,10 @@ func (d *Daemon) Start() error {
 
 	// Start branch monitoring
 	go d.monitorBranches()
+
+	// Start the dreaming consolidation scheduler (clears orphaned run locks, then
+	// runs the nightly harvest when due). Off unless notebook.dreaming.enabled.
+	go d.startDreamingScheduler(d.done)
 
 	d.signalStarted()
 	startSucceeded = true
