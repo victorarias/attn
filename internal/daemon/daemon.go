@@ -291,6 +291,17 @@ func (d *Daemon) cachedLoginShellEnv() []string {
 	return env
 }
 
+// ScrubInheritedAgentSessionEnv strips per-session environment variables leaked
+// from a parent agent (e.g. when attn is launched via `make install` from
+// inside a Claude Code session) so they never propagate to spawned sessions or
+// to the captured login-shell env. Call before Start(), which warms the
+// login-shell env cache.
+func (d *Daemon) ScrubInheritedAgentSessionEnv() {
+	if scrubbed := config.ScrubInheritedAgentSessionEnv(); len(scrubbed) > 0 {
+		d.logf("scrubbed inherited agent session env before startup: %v", scrubbed)
+	}
+}
+
 func (d *Daemon) signalStarted() {
 	d.startedOnce.Do(func() {
 		if d.startedCh == nil {
