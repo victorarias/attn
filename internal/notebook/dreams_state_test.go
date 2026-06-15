@@ -51,10 +51,8 @@ func TestDreamRunStateRoundTrip(t *testing.T) {
 	}
 
 	if err := SaveDreamRunState(root, DreamRunState{
-		ScheduledFrom:         "2026-06-14T03:00:00Z",
-		LastRunAt:             "2026-06-14T03:00:00Z",
-		LastRunNewCandidates:  3,
-		LastRunCandidateCount: 10,
+		ScheduledFrom: "2026-06-14T03:00:00Z",
+		LastRunAt:     "2026-06-14T03:00:00Z",
 	}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -65,65 +63,9 @@ func TestDreamRunStateRoundTrip(t *testing.T) {
 	if got.Version != dreamStateVersion {
 		t.Fatalf("expected version stamped to %d, got %d", dreamStateVersion, got.Version)
 	}
-	if got.LastRunCandidateCount != 10 || got.LastRunNewCandidates != 3 {
+	if got.ScheduledFrom != "2026-06-14T03:00:00Z" || got.LastRunAt != "2026-06-14T03:00:00Z" {
 		t.Fatalf("round-trip mismatch: %+v", got)
 	}
-}
-
-func TestDreamLockSingleFlightAndRecovery(t *testing.T) {
-	root := t.TempDir()
-
-	release, err := AcquireDreamLock(root)
-	if err != nil {
-		t.Fatalf("first acquire: %v", err)
-	}
-
-	// A second acquire while held must fail (single writer).
-	if _, err := AcquireDreamLock(root); err == nil {
-		t.Fatal("expected second acquire to fail while lock is held")
-	}
-
-	if err := release(); err != nil {
-		t.Fatalf("release: %v", err)
-	}
-	// Release is idempotent.
-	if err := release(); err != nil {
-		t.Fatalf("second release should be a no-op: %v", err)
-	}
-
-	// After release the lock is free again.
-	release2, err := AcquireDreamLock(root)
-	if err != nil {
-		t.Fatalf("re-acquire after release: %v", err)
-	}
-	_ = release2()
-}
-
-func TestClearOrphanDreamLocks(t *testing.T) {
-	root := t.TempDir()
-
-	// No locks dir yet → nothing to clear, no error.
-	if n, err := ClearOrphanDreamLocks(root); err != nil || n != 0 {
-		t.Fatalf("clear empty: n=%d err=%v", n, err)
-	}
-
-	// A lock left behind by a crashed run is orphaned: clear it, then the lock is
-	// re-acquirable (proving recovery unblocks the next scheduled run).
-	if _, err := AcquireDreamLock(root); err != nil {
-		t.Fatalf("acquire (simulating crash that never released): %v", err)
-	}
-	if _, err := AcquireDreamLock(root); err == nil {
-		t.Fatal("sanity: lock should still be held before recovery")
-	}
-	n, err := ClearOrphanDreamLocks(root)
-	if err != nil || n != 1 {
-		t.Fatalf("clear orphan: n=%d err=%v", n, err)
-	}
-	release, err := AcquireDreamLock(root)
-	if err != nil {
-		t.Fatalf("acquire after recovery: %v", err)
-	}
-	_ = release()
 }
 
 func TestLoadDreamCandidateSetMergesIdempotently(t *testing.T) {

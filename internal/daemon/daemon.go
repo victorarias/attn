@@ -232,11 +232,9 @@ type Daemon struct {
 	) (agentdriver.HeadlessTaskResult, error)
 	narrationNowOverride func() time.Time
 
-	// Dreaming scheduler (notebook consolidation janitor). dreamMu guards the
-	// single-flight dreamRunning guard; dreamSchedulerInterval overrides the tick
-	// cadence in tests (zero = default).
-	dreamMu                sync.Mutex
-	dreamRunning           bool
+	// Notebook cron enqueuer. dreamSchedulerInterval overrides the tick cadence in
+	// tests (zero = default). The harvest itself runs on the durable runner (kind
+	// harvest_dream), so there is no in-daemon single-flight guard here.
 	dreamSchedulerInterval time.Duration
 }
 
@@ -720,12 +718,14 @@ func (d *Daemon) Start() error {
 	// Start branch monitoring
 	go d.monitorBranches()
 
-	// Start the dreaming consolidation scheduler (clears orphaned run locks, then
-	// runs the nightly harvest when due). Off unless notebook.dreaming.enabled.
-	go d.startDreamingScheduler(d.done)
-
-	// Construct + start the durable compaction runner (kind "compact_context").
+	// Construct + start the durable compaction runner (kinds compact_context,
+	// summarize_session, narrate_workspace, harvest_dream).
 	d.startCompactRunner()
+
+	// Start the notebook cron enqueuer (enqueues the nightly dream harvest onto the
+	// durable runner when due; off unless notebook.dreaming.enabled). Launched AFTER
+	// startCompactRunner so harvest_dream is registered before the first tick fires.
+	go d.startNotebookCronEnqueuer(d.done)
 
 	d.signalStarted()
 	startSucceeded = true

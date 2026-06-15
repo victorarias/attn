@@ -16,15 +16,16 @@ import (
 //
 // This file implements the deterministic, LLM-free harvest and the inspection
 // commands that surface it (`attn notebook dream status` / `--dry-run`). It scans
-// the three v1 sources — dated journals, canonical workspace-context snapshots,
-// and closed chief-of-staff dispatches — into deduplicated candidates ordered by
-// durability signal (recurrence across distinct contexts).
+// the two surviving v1 sources — dated journals and closed chief-of-staff
+// dispatches — into deduplicated candidates ordered by durability signal
+// (recurrence across distinct contexts). (Workspace-context re-read, the former
+// source-2, was removed once narration took ownership of distilling context.md
+// into the journal.)
 //
-// Harvest here is preview-only: it never writes candidates.json, never advances a
-// cursor, and never touches durable memory. Persistence, the nightly scheduler,
-// and the gated LLM promote pass arrive in the follow-up dreaming PR; keeping
-// this phase side-effect-free makes the harvest model observable and reviewable
-// before anything runs autonomously.
+// The harvest functions here are read-only previews: they never write
+// candidates.json and never touch durable memory. Persistence is the harvest_dream
+// executor's job (harvestDreamExecutor, on the durable runner), dispatched nightly
+// by the cron enqueuer; the gated LLM promote pass arrives in the follow-up PR.
 
 // topDreamCandidates bounds how many candidates `dream status` returns inline.
 const topDreamCandidates = 10
@@ -33,23 +34,11 @@ const topDreamCandidates = 10
 // returns, so a large notebook can't produce an unbounded response.
 const maxDreamRunCandidates = 200
 
-// harvestDreamCandidates scans all three v1 sources into a fresh merged candidate
-// set. It is read-only: callers decide what to do with the result. Failure to read
-// any single source is logged and skipped — a partial harvest is more useful than
-// none, and the preview is advisory.
-func (d *Daemon) harvestDreamCandidates() (*notebook.DreamCandidateSet, error) {
-	set := notebook.NewDreamCandidateSet()
-	if err := d.harvestInto(set); err != nil {
-		return nil, err
-	}
-	return set, nil
-}
-
 // dreamHarvestUnion loads the persisted candidate set and merges a fresh harvest
 // into it, returning the union and how many candidates were already persisted
 // before the harvest. This is exactly what the next scheduled run would persist,
 // so status and dry-run preview the real accumulated state — not just what one
-// in-the-moment scan happens to see. It never writes; runDreamHarvest persists.
+// in-the-moment scan happens to see. It never writes; harvestDreamExecutor persists.
 func (d *Daemon) dreamHarvestUnion() (set *notebook.DreamCandidateSet, persisted int, err error) {
 	root, err := d.notebookRoot()
 	if err != nil {
@@ -67,8 +56,13 @@ func (d *Daemon) dreamHarvestUnion() (set *notebook.DreamCandidateSet, persisted
 	return set, persisted, nil
 }
 
-// harvestInto scans all three v1 sources into the supplied set, merging with
-// whatever it already holds (re-adding a known source ref is idempotent).
+// harvestInto scans the v1 sources into the supplied set, merging with whatever
+// it already holds (re-adding a known source ref is idempotent).
+//
+// Source 2 (workspace-context Decisions/Constraints re-read) was removed when
+// narration took ownership of distilling context.md into the journal: the journal
+// is now the single durable system of record harvest reads from, so re-reading
+// workspace context would double-count what narration already wrote.
 func (d *Daemon) harvestInto(set *notebook.DreamCandidateSet) error {
 	store, err := d.notebookStoreFor()
 	if err != nil {
@@ -100,19 +94,8 @@ func (d *Daemon) harvestInto(set *notebook.DreamCandidateSet) error {
 		}
 	}
 
-	// 2. Workspace-context snapshots: durable Decisions/Constraints per workspace.
+	// 3. Closed dispatches: a dispatch is closed when its target session is gone.
 	if d.store != nil {
-		contexts, cerr := d.store.ListWorkspaceContexts()
-		if cerr != nil {
-			d.logf("dreaming harvest: list workspace contexts: %v", cerr)
-		}
-		for _, wc := range contexts {
-			for _, sig := range extractContextSignals(wc.WorkspaceID, wc.Content, wc.UpdatedAt) {
-				set.Add(sig)
-			}
-		}
-
-		// 3. Closed dispatches: a dispatch is closed when its target session is gone.
 		for _, disp := range d.store.ListChiefOfStaffDispatches("") {
 			if disp == nil || d.store.Get(disp.SessionID) != nil {
 				continue
@@ -124,78 +107,6 @@ func (d *Daemon) harvestInto(set *notebook.DreamCandidateSet) error {
 	}
 
 	return nil
-}
-
-// contextDurableHeadings are the workspace-context sections whose bullets are
-// durable enough to harvest. Area/Current Picture/Threads are working state;
-// Decisions and Constraints are the facts meant to outlive a workspace.
-var contextDurableHeadings = map[string]bool{
-	"## decisions":   true,
-	"## constraints": true,
-}
-
-// extractContextSignals harvests each Decisions/Constraints bullet from a
-// canonical workspace-context snapshot. The workspace is both the source ref and
-// the distinct-context label, so a decision echoed across several workspaces
-// reads as recurring.
-func extractContextSignals(workspaceID, content, updatedAt string) []notebook.DreamSignal {
-	ref := "context:" + workspaceID
-	ctx := "workspace:" + workspaceID
-	var out []notebook.DreamSignal
-	for _, bullet := range collectBulletsUnderHeadings(content, contextDurableHeadings) {
-		out = append(out, notebook.DreamSignal{
-			Source:    notebook.SignalSourceContext,
-			Text:      bullet,
-			SourceRef: ref,
-			Context:   ctx,
-			Seen:      updatedAt,
-		})
-	}
-	return out
-}
-
-// collectBulletsUnderHeadings returns the list bullets (with their continuation
-// lines) that appear under any of the target "## " headings. A heading toggles
-// the active section; a blank line or new bullet ends the current bullet; any
-// new heading ends the section.
-func collectBulletsUnderHeadings(content string, headings map[string]bool) []string {
-	var bullets []string
-	var cur []string
-	inSection := false
-	flush := func() {
-		if len(cur) > 0 {
-			bullets = append(bullets, strings.Join(cur, "\n"))
-			cur = nil
-		}
-	}
-	for line := range strings.SplitSeq(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(trimmed, "## "):
-			flush()
-			inSection = headings[strings.ToLower(trimmed)]
-			continue
-		case strings.HasPrefix(trimmed, "# "):
-			flush()
-			inSection = false
-			continue
-		}
-		if !inSection {
-			continue
-		}
-		if trimmed == "" {
-			flush()
-			continue
-		}
-		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
-			flush()
-			cur = append(cur, trimmed)
-		} else if len(cur) > 0 {
-			cur = append(cur, trimmed) // continuation of the current bullet
-		}
-	}
-	flush()
-	return bullets
 }
 
 // dispatchSignals harvests the durable outcome of a closed dispatch: its

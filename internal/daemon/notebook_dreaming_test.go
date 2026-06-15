@@ -43,16 +43,20 @@ func findCandidate(cands []protocol.NotebookDreamCandidate, substr string) *prot
 	return nil
 }
 
-// Harvest pulls from all three v1 sources, merges a fact echoed across two
-// workspace contexts into one recurring candidate, and excludes a dispatch whose
-// target session is still live (only closed dispatches are durable).
+// Harvest pulls from the surviving v1 sources — journals (source-1) and closed
+// chief dispatches (source-3) — and excludes a dispatch whose target session is
+// still live (only closed dispatches are durable). Source-2 (workspace-context
+// re-read) was removed once narration took ownership of distilling context.md into
+// the journal, so a workspace context set here must NOT surface as a candidate.
 func TestHarvestDreamCandidatesAcrossSources(t *testing.T) {
 	d := newNotebookDaemon(t)
 
-	appendDreamJournal(t, d, "2026-06-10", "The harvest pass scans journals, context snapshots, and closed dispatches.")
+	appendDreamJournal(t, d, "2026-06-10", "The harvest pass scans journals and closed dispatches.")
 
-	const sharedDecision = "Daemon owns every notebook write through one in-process store."
-	ctxTemplate := "# Workspace Context\n\n## Area\nfoo\n\n## Decisions\n- " + sharedDecision + "\n"
+	// Workspace context is no longer a harvest source: setting one must contribute
+	// nothing (narration distills it into the journal instead).
+	const droppedDecision = "Daemon owns every notebook write through one in-process store."
+	ctxTemplate := "# Workspace Context\n\n## Area\nfoo\n\n## Decisions\n- " + droppedDecision + "\n"
 	setWorkspaceContext(t, d, "ws-a", ctxTemplate)
 	setWorkspaceContext(t, d, "ws-b", ctxTemplate+"- A second decision only in ws-b about hash-CAS edits.\n")
 
@@ -82,30 +86,17 @@ func TestHarvestDreamCandidatesAcrossSources(t *testing.T) {
 		t.Fatal("dreamRun must be preview-only (applied=false)")
 	}
 
-	// The shared decision recurs across both workspaces.
-	shared := findCandidate(res.Candidates, sharedDecision)
-	if shared == nil {
-		t.Fatalf("shared decision not harvested; candidates = %+v", res.Candidates)
-	}
-	if shared.Occurrences != 2 || len(shared.Contexts) != 2 {
-		t.Fatalf("shared decision occurrences=%d contexts=%d, want 2/2", shared.Occurrences, len(shared.Contexts))
-	}
-	if shared.Source != notebook.SignalSourceContext {
-		t.Fatalf("shared decision source = %q, want context", shared.Source)
+	// The journal block (source-1) is harvested.
+	if findCandidate(res.Candidates, "The harvest pass scans journals") == nil {
+		t.Fatalf("journal block not harvested; candidates = %+v", res.Candidates)
 	}
 
-	// Exactly one candidate recurs across multiple contexts (the shared decision);
-	// the journal block, ws-b's second decision, and the dispatch summary are each
-	// single-context. This pins the ">1" multi-context threshold that the user-
-	// facing "N across multiple contexts" count and the promote-phase gate rest on.
-	if res.MultiContextCount != 1 {
-		t.Fatalf("multi-context count = %d, want exactly 1 (only the shared decision recurs); candidates = %+v", res.MultiContextCount, res.Candidates)
-	}
-	if res.CandidateCount <= 1 {
-		t.Fatalf("candidate count = %d, want several so the multi-context subset is meaningful", res.CandidateCount)
+	// Workspace-context decisions (former source-2) are NOT harvested anymore.
+	if findCandidate(res.Candidates, droppedDecision) != nil {
+		t.Fatalf("workspace context must not be harvested (source-2 removed); candidates = %+v", res.Candidates)
 	}
 
-	// The closed dispatch's summary is harvested; the live one is not.
+	// The closed dispatch's summary (source-3) is harvested; the live one is not.
 	if findCandidate(res.Candidates, "Shipped the in-app markdown editor") == nil {
 		t.Fatal("closed dispatch summary should be harvested")
 	}
@@ -113,45 +104,18 @@ func TestHarvestDreamCandidatesAcrossSources(t *testing.T) {
 		t.Fatal("a dispatch whose target session is still live must not be harvested")
 	}
 
-	// All three sources contributed.
+	// Only the journal and dispatch sources contribute now — no context source.
 	srcs := map[string]bool{}
 	for _, sc := range res.SourceCounts {
 		srcs[sc.Source] = true
 	}
-	for _, want := range []string{notebook.SignalSourceJournal, notebook.SignalSourceContext, notebook.SignalSourceDispatch} {
+	for _, want := range []string{notebook.SignalSourceJournal, notebook.SignalSourceDispatch} {
 		if !srcs[want] {
 			t.Fatalf("source %q missing from counts %+v", want, res.SourceCounts)
 		}
 	}
-}
-
-// extractContextSignals harvests only the Decisions/Constraints sections (working
-// state like Area is ignored) and joins a wrapped bullet's continuation lines.
-func TestExtractContextSignals(t *testing.T) {
-	content := "# Workspace Context\n\n" +
-		"## Area\nThis is working context, not durable memory.\n\n" +
-		"## Decisions\n- A decision that wraps\n  onto a second line.\n- A second decision.\n\n" +
-		"## Constraints\n- A hard constraint.\n\n" +
-		"## Threads\n- Not harvested.\n"
-
-	sigs := extractContextSignals("ws-1", content, "2026-06-13T00:00:00Z")
-	if len(sigs) != 3 {
-		t.Fatalf("signals = %d, want 3 (2 decisions + 1 constraint): %+v", len(sigs), sigs)
-	}
-	var joined bool
-	for _, s := range sigs {
-		if s.SourceRef != "context:ws-1" || s.Context != "workspace:ws-1" {
-			t.Fatalf("signal grounding = ref %q ctx %q, want context:ws-1 / workspace:ws-1", s.SourceRef, s.Context)
-		}
-		if strings.Contains(s.Text, "wraps") && strings.Contains(s.Text, "second line") {
-			joined = true
-		}
-		if strings.Contains(s.Text, "Not harvested") || strings.Contains(s.Text, "working context") {
-			t.Fatalf("harvested a non-durable section: %q", s.Text)
-		}
-	}
-	if !joined {
-		t.Fatal("a wrapped bullet's continuation line should be joined into one signal")
+	if srcs[notebook.SignalSourceContext] {
+		t.Fatalf("context source must not appear in harvest (source-2 removed); counts %+v", res.SourceCounts)
 	}
 }
 
