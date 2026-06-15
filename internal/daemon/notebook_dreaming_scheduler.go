@@ -158,12 +158,12 @@ func (d *Daemon) startNotebookCronEnqueuer(done <-chan struct{}) {
 	}
 }
 
-// notebookCronTick is the per-tick fan-out of the single notebook cron. Today it
-// enqueues only the due nightly dream harvest; the daily per-workspace narrate
-// lands here in the follow-up PR.
+// notebookCronTick is the per-tick fan-out of the single notebook cron. It enqueues
+// the due nightly dream harvest and, on the same nightly slot, a per-active-workspace
+// narrate for long-lived (never-removed) workspaces.
 func (d *Daemon) notebookCronTick(now time.Time) {
 	d.enqueueDueDreamHarvest(now)
-	// TODO(daily-narrate): also enqueue per-active-workspace narrate here.
+	d.enqueueDueDailyNarrates(now)
 }
 
 // enqueueDueDreamHarvest decides, from the timezone-aware cron and the persisted
@@ -251,4 +251,116 @@ func (d *Daemon) enqueueDueDreamHarvest(now time.Time) {
 	if _, err := runner.Enqueue(harvestDreamKind, root, tasks.EnqueueOptions{ZeroDebounce: true}); err != nil {
 		d.logf("dreaming: enqueue harvest: %v", err)
 	}
+}
+
+// enqueueDueDailyNarrates decides, from the timezone-aware cron and the persisted
+// NarrateCronState anchor, whether the daily per-workspace narrate pass is due now;
+// when it is, it advances the anchor on a SINGLE state write, then drains the
+// activity set and enqueues a coalesced narrate_workspace for each STILL-LIVE
+// workspace that saw activity since the last fire. This is the backstop for the
+// never-removed long-lived workspace, which gets no session-end narrate on a day it
+// had no session stop.
+//
+// The daily narrate shares the nightly slot defined by the dreaming
+// schedule/timezone SETTINGS (the shared notebook-maintenance slot); a dedicated
+// notebook.cron.* setting can split them later. Unlike the harvest there is NO
+// enabled gate — narration is always on — so this fires on its own anchor regardless
+// of whether dreaming is enabled, which is exactly why it uses a SEPARATE state file
+// (NarrateCronState) from DreamRunState.
+//
+// Activity gate: only workspaces that saw a session end or a content-changing context
+// write since the last fire are in the set, so idle workspaces are skipped and never
+// burn a strong-tier pass. A removed workspace in the set is skipped too — its
+// removal-boundary final retrospective already ran. An empty set still advances the
+// anchor (consumes the day's slot) and enqueues nothing.
+//
+// Anchoring + catch-up semantics mirror enqueueDueDreamHarvest exactly: a first
+// observation with no anchor records "now" and returns (so enabling never fires
+// immediately at startup); a fire advances the anchor to "now" on one write BEFORE
+// draining, so a rare enqueue failure skips one idempotent day rather than re-firing
+// every tick, and missed slots collapse into a single catch-up.
+func (d *Daemon) enqueueDueDailyNarrates(now time.Time) {
+	sched, raw, err := d.dreamingSchedule()
+	if err != nil {
+		d.logf("daily narrate: invalid frequency %q: %v", raw, err)
+		return
+	}
+	root, err := d.notebookRoot()
+	if err != nil {
+		d.logf("daily narrate: resolve root: %v", err)
+		return
+	}
+
+	// Resolve the runner BEFORE touching state, so a missing/disabled runner never
+	// advances the anchor (which would silently skip the day with no work done).
+	runner := d.compactRunnerRef()
+	if runner == nil || runner.Disabled() {
+		return
+	}
+
+	state, err := notebook.LoadNarrateCronState(root)
+	if err != nil {
+		d.logf("daily narrate: load state: %v", err)
+		return
+	}
+
+	anchor, ok := parseDreamTime(state.ScheduledFrom)
+	if !ok {
+		// First observation (or a corrupt anchor): anchor at now so the first pass
+		// lands at the next scheduled slot instead of immediately at startup.
+		state.ScheduledFrom = now.UTC().Format(time.RFC3339)
+		if err := notebook.SaveNarrateCronState(root, state); err != nil {
+			d.logf("daily narrate: anchor schedule: %v", err)
+		}
+		return
+	}
+
+	loc := d.dreamingLocation()
+	next := sched.Next(anchor.In(loc))
+	if next.IsZero() {
+		// An unsatisfiable schedule has no next occurrence. Validation rejects these,
+		// but a value persisted by an older daemon could slip through — treat it as
+		// never-due rather than always-due (which would re-narrate every tick).
+		d.logf("daily narrate: frequency %q never occurs; skipping", raw)
+		return
+	}
+	if next.After(now) {
+		return // not due yet
+	}
+
+	// Due: anchor-FIRST ordering. Advance the anchor on ONE state write, THEN drain
+	// and enqueue. If a rare enqueue fails, the advanced anchor skips one day rather
+	// than re-firing every tick; the daily narrate is idempotent (the next trigger
+	// re-narrates), so a skipped day is benign.
+	state.ScheduledFrom = now.UTC().Format(time.RFC3339)
+	if err := notebook.SaveNarrateCronState(root, state); err != nil {
+		d.logf("daily narrate: advance anchor: %v", err)
+	}
+
+	for _, workspaceID := range d.drainNotebookNarrateActivity() {
+		if d.store.GetWorkspace(workspaceID) == nil {
+			// Removed since it was marked active: its removal-boundary final
+			// retrospective already ran. Skip it.
+			continue
+		}
+		d.enqueueDailyNarrateWorkspace(workspaceID)
+	}
+}
+
+// drainNotebookNarrateActivity atomically snapshots and clears the daily-narrate
+// activity set (swapping in a fresh map under the mutex), returning the workspace ids
+// that saw activity since the last fire. Clearing on drain is what makes a later
+// no-activity day enqueue nothing.
+func (d *Daemon) drainNotebookNarrateActivity() []string {
+	d.notebookNarrateActivityMu.Lock()
+	defer d.notebookNarrateActivityMu.Unlock()
+	if len(d.notebookNarrateActivity) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(d.notebookNarrateActivity))
+	for id := range d.notebookNarrateActivity {
+		ids = append(ids, id)
+	}
+	d.notebookNarrateActivity = make(map[string]struct{})
+	return ids
 }

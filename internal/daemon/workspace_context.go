@@ -269,6 +269,14 @@ func (d *Daemon) updateWorkspaceContext(msg *protocol.WorkspaceContextUpdateMess
 	if changed {
 		d.broadcastWorkspaceContextChanged(canonical)
 		d.enqueueWorkspaceContextCompaction(canonical)
+		// A content-changing context write is a daily-narrate activity event: it marks
+		// the workspace active so the nightly daily-narrate cron narrates it even on a
+		// day with no session end. A no-op update (changed == false) does NOT mark
+		// activity — there is nothing new for the daily backstop to narrate. The
+		// janitor's compaction write is NOT an activity signal (it only reshapes
+		// existing content), so this is hooked at the agent/user write chokepoint, not
+		// the janitor apply path.
+		d.markNotebookWorkspaceActivity(session.WorkspaceID)
 	}
 	return result, changed, nil
 }

@@ -236,6 +236,19 @@ type Daemon struct {
 	// tests (zero = default). The harvest itself runs on the durable runner (kind
 	// harvest_dream), so there is no in-daemon single-flight guard here.
 	dreamSchedulerInterval time.Duration
+
+	// Daily-narrate activity gate. notebookNarrateActivity is the in-memory set of
+	// workspace ids that saw real activity (a session end or a content-changing
+	// context write) since the last daily-narrate cron fire. It is best-effort and
+	// NOT persisted: a restart loses it, which is fine because session-end is the
+	// primary narrate path and the daily cron is only a backstop for long-lived
+	// workspaces that had no session end. The cron drain snapshots and clears it; a
+	// workspace absent from the set is skipped that day so idle workspaces never burn
+	// a strong-tier pass. notebookNarrateActivityMu guards both the map pointer and
+	// its contents; the map is lazily initialized under the mutex (no constructor
+	// edit needed).
+	notebookNarrateActivityMu sync.Mutex
+	notebookNarrateActivity   map[string]struct{}
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -2083,8 +2096,15 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	// executor must carry these inputs rather than re-derive them from a gone row.
 	stopWorkspaceID := d.resolveStopWorkspaceID(msg.ID)
 	d.enqueueSummarizeSession(msg.ID, msg.TranscriptPath, stopWorkspaceID)
-	if stopWorkspaceID != "" && d.store.GetWorkspace(stopWorkspaceID) != nil {
-		d.enqueueNarrateWorkspace(stopWorkspaceID)
+	if stopWorkspaceID != "" {
+		// A session end is a daily-narrate activity event for its workspace: it marks
+		// the workspace active so the nightly daily-narrate cron narrates it even on a
+		// day with no further triggers. (The mark is cheap and harmless even when the
+		// workspace is being torn down — the cron skips a removed workspace at drain.)
+		d.markNotebookWorkspaceActivity(stopWorkspaceID)
+		if d.store.GetWorkspace(stopWorkspaceID) != nil {
+			d.enqueueNarrateWorkspace(stopWorkspaceID)
+		}
 	}
 
 	if d.consumeForcedStopClassification(msg.ID) {

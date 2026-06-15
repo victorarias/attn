@@ -64,6 +64,14 @@ const (
 	// from a live row. The transcript file itself survives under ~/.claude/~/.codex.
 	notebookSummarizeMetaTranscript = "transcript"
 	notebookSummarizeMetaWorkspace  = "workspace"
+	// notebookNarrateMetaDailyPass marks a narrate_workspace task enqueued by the
+	// daily-narrate cron (the long-lived-workspace backstop) rather than by
+	// session-end or the removal boundary. It relaxes the executor's success gate so
+	// a no-op daily refresh (nothing new to narrate) is a CLEAN DONE instead of a
+	// retried failure (see narrateWorkspaceExecutor's dailyPass branch). Session-end
+	// and removal passes carry no daily flag and keep strict "must have written"
+	// gating.
+	notebookNarrateMetaDailyPass = "daily_pass"
 	// notebookSoloSessionBucket is the RawSessionsDir subdir holding digests for
 	// solo (non-workspace) sessions. It is a reserved name (leading underscore) so
 	// it can never collide with a real workspace id bucket, and rawTierSegment
@@ -365,10 +373,30 @@ func (d *Daemon) narrateWorkspaceExecutor(ctx context.Context, task *tasks.Task)
 	if err != nil {
 		return fmt.Errorf("narrate_workspace: verify journal: %w", err)
 	}
+
+	// dailyPass relaxes the success gate for the daily-cron backstop ONLY. A daily
+	// refresh legitimately finds nothing new — the workspace was already narrated
+	// today, or only old material is on disk — and forcing a write would spam the
+	// runner's backoff straight to dead. The raw material persists, so a no-op daily
+	// pass loses nothing: the next trigger re-narrates. So when this is a daily pass
+	// (and NOT a removal pass), "agent left the block absent" and "agent left the
+	// block unchanged" are both a CLEAN DONE. Removal passes (the full retrospective)
+	// and session-end routine passes (no daily flag) keep STRICT gating, which
+	// preserves the retry-until-the-digest-lands property they depend on.
+	dailyPass := !inputs.IsRemovalPass && strings.TrimSpace(task.Meta[notebookNarrateMetaDailyPass]) == "1"
+
 	if !after.present {
+		if dailyPass {
+			d.logf("narrate_workspace: daily pass for %s found nothing new to narrate (no entry written); clean no-op", workspaceID)
+			return nil
+		}
 		return fmt.Errorf("narrate_workspace: agent did not write %s entry to %s (%s)", workspaceNarrationMarker(workspaceID), inputs.JournalPath, result.Diagnostics)
 	}
 	if before.present && after.body == before.body {
+		if dailyPass {
+			d.logf("narrate_workspace: daily pass for %s left the entry unchanged (nothing new to narrate); clean no-op", workspaceID)
+			return nil
+		}
 		return fmt.Errorf("narrate_workspace: agent left %s entry in %s unchanged (%s)", workspaceNarrationMarker(workspaceID), inputs.JournalPath, result.Diagnostics)
 	}
 	d.logf(
@@ -577,6 +605,60 @@ func (d *Daemon) enqueueNarrateWorkspace(workspaceID string) {
 		Debounce: notebookNarrationDebounce,
 	}); err != nil {
 		d.logf("narrate_workspace: enqueue %s: %v", workspaceID, err)
+	}
+}
+
+// markNotebookWorkspaceActivity records that a workspace saw real activity (a
+// session end or a content-changing context write) since the last daily-narrate
+// cron fire. It feeds the daily-narrate activity gate: the cron drains this set and
+// only narrates workspaces that appear in it, so idle long-lived workspaces never
+// burn a strong-tier pass. The set is in-memory, best-effort, and lazily initialized
+// under the mutex (so the Daemon constructor needs no edit); an empty id is ignored.
+func (d *Daemon) markNotebookWorkspaceActivity(workspaceID string) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return
+	}
+	d.notebookNarrateActivityMu.Lock()
+	defer d.notebookNarrateActivityMu.Unlock()
+	if d.notebookNarrateActivity == nil {
+		d.notebookNarrateActivity = make(map[string]struct{})
+	}
+	d.notebookNarrateActivity[workspaceID] = struct{}{}
+}
+
+// enqueueDailyNarrateWorkspace queues the daily-cron per-workspace narrate for a
+// live, active workspace. It mirrors enqueueNarrateWorkspace (nil/Disabled guard,
+// notebookNarrationDebounce so it coalesces with any concurrent session-end narrate)
+// but stamps notebookNarrateMetaDailyPass so the executor's success gate relaxes for
+// a no-op daily refresh (see narrateWorkspaceExecutor). Nil/Disabled-guarded.
+//
+// Known coalescing edge (low severity, self-healing): if a session-end narrate and
+// this daily narrate land on the same narrate_workspace:<ws> task within the debounce
+// window — i.e. a session stops within notebookNarrationDebounce of the nightly slot —
+// the merged record ends up daily-flagged in BOTH enqueue orderings (the runner's Meta
+// is REPLACE-on-non-nil / leave-on-nil, so daily's flag either wins by replacing or
+// survives because session-end carries no Meta). The coalesced run then takes the
+// relaxed gate, so a no-op is marked DONE rather than retried. This only matters if
+// the agent ALSO no-ops on a real session-end digest (a transient flake — real work
+// always writes), and even then nothing is lost: the raw digest persists and the next
+// trigger re-narrates. Closing it fully would require flipping the executor default to
+// relaxed (a sticky "strict-wins" marker), trading this rare timing edge for a less
+// safe default on the primary session-end path; not worth it.
+func (d *Daemon) enqueueDailyNarrateWorkspace(workspaceID string) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return
+	}
+	runner := d.compactRunnerRef()
+	if runner == nil || runner.Disabled() {
+		return
+	}
+	if _, err := runner.Enqueue(notebookNarrateWorkspaceKind, workspaceID, tasks.EnqueueOptions{
+		Debounce: notebookNarrationDebounce,
+		Meta:     map[string]string{notebookNarrateMetaDailyPass: "1"},
+	}); err != nil {
+		d.logf("narrate_workspace: enqueue daily %s: %v", workspaceID, err)
 	}
 }
 
