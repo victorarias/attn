@@ -279,6 +279,24 @@ type HeadlessTaskRequest struct {
 	// ignores this field; its native tooling comes from the workspace-write
 	// sandbox defaults, not a CLI list.)
 	AllowedTools []string
+
+	// ExtraWritableRoots optionally widens the set of directories the agent may
+	// WRITE to, beyond the scratch WorkDir. The notebook narration tasks use this
+	// so a headless agent can write the curated journal / raw tier under the
+	// notebook root (which lives outside the scratch tempdir).
+	//
+	// Provider behavior:
+	//   - Claude: IGNORED. Claude headless runs with --permission-mode dontAsk,
+	//     which is NOT filesystem-sandboxed — it can already write anywhere the OS
+	//     user can, given absolute paths. No widening is needed or applied.
+	//   - Codex: each root is passed as `--add-dir <root>` so the
+	//     workspace-write sandbox (which otherwise confines writes to the cwd
+	//     WorkDir) also permits writes under these roots. Reads are unrestricted
+	//     under workspace-write, so transcript dirs need no widening.
+	//
+	// Empty (the janitor's case) leaves both providers' existing scratch-only
+	// behavior unchanged.
+	ExtraWritableRoots []string
 }
 
 type HeadlessTaskResult struct {

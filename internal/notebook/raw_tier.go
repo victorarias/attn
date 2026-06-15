@@ -16,6 +16,7 @@ const (
 	rawDir                 = "raw"
 	rawContextSnapshotsDir = "context-snapshots"
 	rawDispatchesDir       = "dispatches"
+	rawSessionsDir         = "sessions"
 )
 
 // RawDir returns the absolute .attn/raw directory for a notebook root.
@@ -33,4 +34,12 @@ func RawContextSnapshotsDir(root string) string {
 // files (<dispatchID>.md).
 func RawDispatchesDir(root string) string {
 	return filepath.Join(RawDir(root), rawDispatchesDir)
+}
+
+// RawSessionsDir returns the absolute directory holding per-session digest files
+// (<sessionID>.md), written natively by the summarize_session narration agent and
+// later read by the narrate_workspace agent. Like the other raw-tier subdirs it
+// lives under .attn/raw/ — unreachable through the user-facing notebook APIs.
+func RawSessionsDir(root string) string {
+	return filepath.Join(RawDir(root), rawSessionsDir)
 }

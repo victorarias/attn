@@ -399,6 +399,10 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 	d.forgetWorkspaceContextCompaction(id)
 	d.snapshotWorkspaceContextOnRemove(id, snapshot.Title)
 	d.store.RemoveWorkspace(id)
+	// Removal boundary: the workspace row is now gone, so the final narrate run
+	// derives IS_REMOVAL_PASS=true and writes the retrospective from the snapshot +
+	// digests. ZeroDebounce overrides any pending active-day pass.
+	d.enqueueFinalNarrateWorkspace(id)
 	d.pruneTileContentSubscriptionsForLayout(id, nil)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:     protocol.EventWorkspaceUnregistered,
@@ -437,6 +441,12 @@ func (d *Daemon) loadWorkspacesFromStore() {
 				d.forgetWorkspaceContextCompaction(ws.ID)
 				d.snapshotWorkspaceContextOnRemove(ws.ID, ws.Title)
 				d.store.RemoveWorkspace(ws.ID)
+				// Final-narrate enqueue is a nil-safe no-op here: load runs before
+				// startCompactRunner constructs the runner. A workspace reaped at
+				// startup (no live sessions across a restart) gets no retrospective —
+				// acceptable, since the live removal paths own the common case and the
+				// snapshot above still preserves its context for a future manual read.
+				d.enqueueFinalNarrateWorkspace(ws.ID)
 				continue
 			}
 		}
@@ -553,6 +563,8 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 		d.forgetWorkspaceContextCompaction(workspaceID)
 		d.snapshotWorkspaceContextOnRemove(workspaceID, snapshot.Title)
 		d.store.RemoveWorkspace(workspaceID)
+		// Removal boundary (last session left): final retrospective narrate.
+		d.enqueueFinalNarrateWorkspace(workspaceID)
 		d.pruneTileContentSubscriptionsForLayout(workspaceID, nil)
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:     protocol.EventWorkspaceUnregistered,

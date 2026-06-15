@@ -181,11 +181,20 @@ type Daemon struct {
 	workspaceContextCheckoutMu sync.Mutex
 
 	// compactRunner is the durable task runner that owns the workspace-context
-	// compaction janitor (kind "compact_context"). It replaces the bespoke
-	// time.AfterFunc scheduling + single-flight/cancel/commit-fence guards. New
-	// always returns a non-nil value (disabled when no notebook root resolves), so
-	// the Cancel/Enqueue callsites call it unconditionally.
-	compactRunner *tasks.Runner
+	// compaction janitor (kind "compact_context") and the notebook-narration tasks.
+	// It replaces the bespoke time.AfterFunc scheduling + single-flight/cancel/
+	// commit-fence guards.
+	//
+	// compactRunnerMu guards the POINTER swap only. startCompactRunner runs late in
+	// Start() and replaces the placeholder runner, while Stop()/enqueue/forget read
+	// the field concurrently (the websocket server accepts connections — and can
+	// drive a teardown enqueue — before the runner is rebuilt). Production code
+	// therefore reads via compactRunnerRef() and writes via setCompactRunner(); the
+	// runner itself is internally synchronized. Tests assign the field directly,
+	// which is race-free because they never run Start() concurrently with that
+	// assignment.
+	compactRunnerMu sync.RWMutex
+	compactRunner   *tasks.Runner
 	// The *Threshold/*Debounce/*Timeout fields remain the test-override knobs
 	// feeding the size gate, the Enqueue debounce, and RegisterWithTimeout.
 	workspaceContextJanitorThreshold int
@@ -203,6 +212,25 @@ type Daemon struct {
 		config workspaceContextJanitorConfig,
 		canonical *protocol.WorkspaceContext,
 	) (workspaceContextJanitorExecution, error)
+
+	// Notebook narration test seams. summarizeSessionExecution /
+	// narrateWorkspaceExecution, when set, replace the real RunHeadlessTask spawn so
+	// tests exercise the executor's resolve-inputs / verify-ledger logic against a
+	// fake provider that writes (or refuses to write) the target file — no real LLM.
+	// The file-existence/marker verification, enqueue/coalesce, and IS_REMOVAL_PASS
+	// derivation all stay real. narrationNowOverride pins today's date for the
+	// journal filename so date-boundary behavior is deterministic.
+	summarizeSessionExecution func(
+		ctx context.Context,
+		provider agentdriver.HeadlessTaskProvider,
+		request agentdriver.HeadlessTaskRequest,
+	) (agentdriver.HeadlessTaskResult, error)
+	narrateWorkspaceExecution func(
+		ctx context.Context,
+		provider agentdriver.HeadlessTaskProvider,
+		request agentdriver.HeadlessTaskRequest,
+	) (agentdriver.HeadlessTaskResult, error)
+	narrationNowOverride func() time.Time
 
 	// Dreaming scheduler (notebook consolidation janitor). dreamMu guards the
 	// single-flight dreamRunning guard; dreamSchedulerInterval overrides the tick
@@ -1205,8 +1233,8 @@ func (d *Daemon) Stop() {
 	d.log("daemon stopping")
 	close(d.done)
 	d.stopNotebookWatcher()
-	if d.compactRunner != nil {
-		d.compactRunner.Stop()
+	if runner := d.compactRunnerRef(); runner != nil {
+		runner.Stop()
 	}
 	if d.hubManager != nil {
 		d.hubManager.Stop()
@@ -2039,6 +2067,20 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	}
 	d.store.Touch(msg.ID)
 	d.sendOK(conn)
+
+	// Narration triggers. Resolve the workspace id SYNCHRONOUSLY from the persisted
+	// store row before any async work: a concurrent close can dissociate the session
+	// from the in-memory registry, but the persisted workspace_id survives until the
+	// session row is removed, so it is the authoritative source. The enqueues are
+	// nil/Disabled-safe (no-op when the runner is absent or the notebook is off).
+	//   - summarize_session ALWAYS fires (cheap per-session digest), even for a solo
+	//     session with no workspace — its digest is still useful raw material.
+	//   - narrate_workspace fires (coalesced) only when the stop belongs to a LIVE
+	//     workspace; the removal boundary owns the final retrospective pass instead.
+	d.enqueueSummarizeSession(msg.ID)
+	if wsID := d.resolveStopWorkspaceID(msg.ID); wsID != "" && d.store.GetWorkspace(wsID) != nil {
+		d.enqueueNarrateWorkspace(wsID)
+	}
 
 	if d.consumeForcedStopClassification(msg.ID) {
 		d.logf("handleStop: skipping classification for daemon-terminated session=%s", msg.ID)

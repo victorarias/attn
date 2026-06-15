@@ -147,6 +147,20 @@ func codexHeadlessArgs(request HeadlessTaskRequest) []string {
 		"-m", strings.TrimSpace(request.Model),
 		"-c", `approval_policy="never"`,
 	}
+	// Widen the workspace-write sandbox's writable set beyond the scratch WorkDir
+	// for tasks that must write outside cwd (e.g. the notebook narrator writing the
+	// curated journal under the notebook root). `--add-dir` is the codex exec flag
+	// for "additional directories that should be writable alongside the primary
+	// workspace"; reads stay unrestricted under workspace-write, so this is
+	// write-only widening. Empty (the janitor) appends nothing, preserving the
+	// scratch-tempdir-only behavior.
+	for _, root := range request.ExtraWritableRoots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		args = append(args, "--add-dir", root)
+	}
 	args = append(args, codexFeatureLocks()...)
 	args = append(args, request.Prompt)
 	return args

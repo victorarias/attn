@@ -53,6 +53,16 @@ const (
 	// SettingNotebookDreamingTimezone is the IANA timezone the frequency is
 	// evaluated in. Empty => the machine's local time.
 	SettingNotebookDreamingTimezone = "notebook.dreaming.timezone"
+	// SettingNotebookSummarizeSession configures the per-session digest narrator
+	// (the CHEAP tier). JSON {"agent":"claude"|"codex","model":"<id>"}; empty =>
+	// the built-in cheap default (Claude Haiku). See parseNotebookNarrationConfig.
+	SettingNotebookSummarizeSession = "notebook.summarize_session"
+	// SettingNotebookNarrateWorkspace configures the curated-journal narrator (the
+	// STRONG tier). JSON {"agent":"claude"|"codex","model":"<id>"}; empty => the
+	// built-in strong default (Claude Sonnet). Claude is the default narrator
+	// because its native Write/Edit enforce read-before-write CAS on the shared
+	// journal; see parseNotebookNarrationConfig.
+	SettingNotebookNarrateWorkspace = "notebook.narrate_workspace"
 )
 
 func (d *Daemon) handleGetSettingsWS(client *wsClient) {
@@ -250,6 +260,10 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateBooleanSetting(value)
 	case SettingWorkspaceContextJanitor:
 		return d.validateWorkspaceContextJanitorSetting(value)
+	case SettingNotebookSummarizeSession:
+		return d.validateNotebookNarrationSetting(notebookSummarizeSessionKind, value)
+	case SettingNotebookNarrateWorkspace:
+		return d.validateNotebookNarrationSetting(notebookNarrateWorkspaceKind, value)
 	case SettingNotebookRoot:
 		return validateNotebookRoot(value)
 	case SettingNotebookDreamingEnabled:

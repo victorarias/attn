@@ -45,6 +45,25 @@ import (
 // through the same guard keeps the invariant in one place instead of resting on a
 // per-call-site property a future caller could quietly break.
 func rawTierFilename(id string) (string, error) {
+	return rawTierName(id, ".md")
+}
+
+// rawTierSegment validates a raw-tier id as a single safe path *segment* (no
+// extension), for callers that need a directory name rather than a "<id>.md"
+// file — e.g. partitioning the per-session digest dir by workspace id
+// (RawSessionsDir/<wsID>/). It applies the same containment guard as
+// rawTierFilename so a crafted id (workspace id from register_workspace is
+// accepted verbatim over the socket) can never climb out of the raw tier.
+func rawTierSegment(id string) (string, error) {
+	return rawTierName(id, "")
+}
+
+// rawTierName is the shared single-safe-segment guard. It trims, rejects path
+// separators / dotdir / control characters, optionally appends an extension, and
+// asserts the result round-trips through filepath.Base/Clean so an escaping id
+// cannot slip through. suffix is "" for a bare directory segment or ".md" for a
+// raw-tier file.
+func rawTierName(id, suffix string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("raw-tier id is empty")
@@ -60,7 +79,7 @@ func rawTierFilename(id string) (string, error) {
 			return "", fmt.Errorf("raw-tier id %q contains a control character", id)
 		}
 	}
-	name := id + ".md"
+	name := id + suffix
 	// Belt-and-suspenders: a Clean of the bare name must be the name itself (no
 	// separator, no dotdir reintroduced). filepath.Base of an escaping id would not
 	// round-trip to it.

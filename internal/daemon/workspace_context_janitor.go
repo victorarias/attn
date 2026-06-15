@@ -114,10 +114,30 @@ const compactContextKind = "compact_context"
 // record behind: Cancel alone is a no-op for a queued task and never deletes the
 // record.
 func (d *Daemon) forgetWorkspaceContextCompaction(workspaceID string) {
-	if d.compactRunner == nil {
+	runner := d.compactRunnerRef()
+	if runner == nil {
 		return
 	}
-	d.compactRunner.Remove(tasks.TaskID(compactContextKind, workspaceID))
+	runner.Remove(tasks.TaskID(compactContextKind, workspaceID))
+}
+
+// compactRunnerRef reads the compaction/narration runner pointer under the
+// read lock, so a concurrent startCompactRunner pointer swap is race-free. It
+// returns the same value the field holds (possibly nil before startCompactRunner
+// runs, possibly a disabled runner when no notebook root resolves) — callers keep
+// their existing nil/Disabled guards.
+func (d *Daemon) compactRunnerRef() *tasks.Runner {
+	d.compactRunnerMu.RLock()
+	defer d.compactRunnerMu.RUnlock()
+	return d.compactRunner
+}
+
+// setCompactRunner publishes a freshly built runner under the write lock. Only
+// startCompactRunner calls it; everything else reads via compactRunnerRef.
+func (d *Daemon) setCompactRunner(runner *tasks.Runner) {
+	d.compactRunnerMu.Lock()
+	d.compactRunner = runner
+	d.compactRunnerMu.Unlock()
 }
 
 // startCompactRunner constructs and starts the durable compaction runner. The
@@ -127,17 +147,39 @@ func (d *Daemon) forgetWorkspaceContextCompaction(workspaceID string) {
 // Cancel/Enqueue callsites can call d.compactRunner unconditionally.
 func (d *Daemon) startCompactRunner() {
 	root, _ := d.notebookRoot()
-	d.compactRunner = tasks.New(tasks.Options{Root: root, Log: d.logf})
-	if !d.compactRunner.Disabled() {
-		if err := d.compactRunner.RegisterWithTimeout(
+	// Build and register on a LOCAL pointer, then publish it once under the write
+	// lock. Registering on the local (not the published field) keeps a concurrent
+	// reader from ever observing a half-registered runner, and the single
+	// setCompactRunner swap is what Stop()/enqueue/forget synchronize against.
+	runner := tasks.New(tasks.Options{Root: root, Log: d.logf})
+	if !runner.Disabled() {
+		if err := runner.RegisterWithTimeout(
 			compactContextKind,
 			d.compactContextExecutor,
 			d.workspaceContextJanitorTimeoutDuration(),
 		); err != nil {
 			d.logf("workspace context janitor: register compact_context: %v", err)
 		}
+		// Notebook narration shares the same durable runner (same root, same
+		// disabled-when-no-root gate). Both narration executors run native-tools
+		// agents and verify a written file rather than committing a read-back.
+		if err := runner.RegisterWithTimeout(
+			notebookSummarizeSessionKind,
+			d.summarizeSessionExecutor,
+			notebookSummarizeSessionTimeout,
+		); err != nil {
+			d.logf("notebook narration: register summarize_session: %v", err)
+		}
+		if err := runner.RegisterWithTimeout(
+			notebookNarrateWorkspaceKind,
+			d.narrateWorkspaceExecutor,
+			notebookNarrateWorkspaceTimeout,
+		); err != nil {
+			d.logf("notebook narration: register narrate_workspace: %v", err)
+		}
 	}
-	_ = d.compactRunner.Start()
+	d.setCompactRunner(runner)
+	_ = runner.Start()
 }
 
 // enqueueWorkspaceContextCompaction is THE trigger callsite. It carries the
@@ -161,7 +203,8 @@ func (d *Daemon) enqueueWorkspaceContextCompaction(canonical *protocol.Workspace
 	if len([]byte(canonical.Content)) <= d.workspaceContextJanitorSizeThreshold() {
 		return
 	}
-	if d.compactRunner == nil || d.compactRunner.Disabled() {
+	runner := d.compactRunnerRef()
+	if runner == nil || runner.Disabled() {
 		// Inline fallback: no durable queue, no debounce, no retry. Compaction
 		// still happens, synchronously, on the trigger.
 		// runWorkspaceContextCompactionInline applies the per-run timeout.
@@ -170,7 +213,7 @@ func (d *Daemon) enqueueWorkspaceContextCompaction(canonical *protocol.Workspace
 		}
 		return
 	}
-	if _, err := d.compactRunner.Enqueue(compactContextKind, canonical.WorkspaceID, tasks.EnqueueOptions{
+	if _, err := runner.Enqueue(compactContextKind, canonical.WorkspaceID, tasks.EnqueueOptions{
 		Debounce: d.workspaceContextJanitorDebounceDuration(),
 	}); err != nil {
 		d.logf("workspace context janitor: enqueue %s: %v", canonical.WorkspaceID, err)
