@@ -84,6 +84,20 @@ type Task struct {
 	// so a coalesced trigger that landed mid-run is never lost.
 	Requeued bool `json:"requeued,omitempty"`
 
+	// Meta is a small, kind-specific bag of inputs carried on the durable record.
+	// MOST kinds need none of this: they re-derive everything from Subject at run
+	// time (a workspace id, a session id), which is the deliberate "no Payload"
+	// design above. The single exception is summarize_session: by the time its
+	// debounced run fires AFTER a single-session-workspace teardown, both the
+	// session row and the workspace row are gone from the store, so the executor
+	// can no longer re-derive the transcript path or the workspace bucket from a
+	// live row. The transcript FILE itself survives on disk (under ~/.claude /
+	// ~/.codex), so carrying its path plus the workspace id here lets the digest
+	// still be written to the correct per-workspace bucket post-removal. Kept as a
+	// generic string map (not a typed struct) so the durable record stays
+	// self-describing and forward-compatible like Subject/State.
+	Meta map[string]string `json:"meta,omitempty"`
+
 	// CommitGuard is the commit-fence latch for THIS run, injected by the runner
 	// before it invokes the executor. It is never persisted. The executor calls
 	// CommitGuard.Enter immediately before its single durable write and Leave
@@ -101,11 +115,29 @@ func TaskID(kind, subject string) string {
 }
 
 // clone returns a deep copy so callers (the worker, Cancel, status reads) can
-// hand out records without sharing the runner's mutable internal pointer.
+// hand out records without sharing the runner's mutable internal pointer. The
+// shallow `cp := *t` copies the Meta map HEADER, so a clone handed to a caller
+// would otherwise share — and race — the runner's underlying map; deep-copy it so
+// a caller mutating the clone's Meta never touches the stored record's map.
 func (t *Task) clone() *Task {
 	if t == nil {
 		return nil
 	}
 	cp := *t
+	cp.Meta = cloneStringMap(t.Meta)
 	return &cp
+}
+
+// cloneStringMap returns an independent copy of m (nil for a nil/empty map). It
+// is the deep-copy primitive for Task.Meta: both clone() and Enqueue use it so a
+// carried Meta is never aliased between the stored record and a caller's copy.
+func cloneStringMap(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }

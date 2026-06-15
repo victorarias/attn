@@ -1362,3 +1362,86 @@ func TestRemoveCancelsRunningThenDeletes(t *testing.T) {
 		t.Fatalf("Remove left the record behind after cancelling the run: %+v", got)
 	}
 }
+
+// --- Meta: carried run inputs survive save/load and re-enqueue correctly ------
+
+// TestMetaRoundTripsThroughSaveAndLoad proves Meta persists to disk and reloads
+// intact. summarize_session depends on this: the carried transcript path and
+// workspace id must survive a daemon crash between enqueue and the debounced run.
+func TestMetaRoundTripsThroughSaveAndLoad(t *testing.T) {
+	clock := newFakeClock()
+	r := testRunner(t, clock)
+	_ = r.Register("summarize_session", func(context.Context, *Task) error { return nil })
+
+	meta := map[string]string{"transcript": "/home/u/.claude/t.jsonl", "workspace": "ws-9"}
+	if _, err := r.Enqueue("summarize_session", "session-1", EnqueueOptions{Meta: meta}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	// Reload from disk (Get -> store.load -> json.Unmarshal), bypassing the in-call
+	// clone, so this asserts the on-disk JSON carried Meta, not just an in-memory copy.
+	got := loadTask(t, r, TaskID("summarize_session", "session-1"))
+	if got.Meta["transcript"] != "/home/u/.claude/t.jsonl" || got.Meta["workspace"] != "ws-9" {
+		t.Fatalf("Meta did not round-trip through save/load: %+v", got.Meta)
+	}
+}
+
+// TestEnqueueMetaReplaceAndPreserve proves the Meta application rules: a non-nil
+// Meta REPLACES on re-enqueue (fresh inputs win), and a nil Meta PRESERVES an
+// existing Meta (a bare re-trigger must not wipe inputs a prior enqueue stashed).
+func TestEnqueueMetaReplaceAndPreserve(t *testing.T) {
+	clock := newFakeClock()
+	r := testRunner(t, clock)
+	_ = r.Register("summarize_session", func(context.Context, *Task) error { return nil })
+
+	// First enqueue stashes Meta.
+	if _, err := r.Enqueue("summarize_session", "s", EnqueueOptions{Meta: map[string]string{"transcript": "/a.jsonl", "workspace": "ws-1"}}); err != nil {
+		t.Fatalf("first enqueue: %v", err)
+	}
+
+	// Re-enqueue WITHOUT Meta: the prior Meta must survive untouched.
+	if _, err := r.Enqueue("summarize_session", "s", EnqueueOptions{Debounce: time.Minute}); err != nil {
+		t.Fatalf("bare re-enqueue: %v", err)
+	}
+	got := loadTask(t, r, TaskID("summarize_session", "s"))
+	if got.Meta["transcript"] != "/a.jsonl" || got.Meta["workspace"] != "ws-1" {
+		t.Fatalf("bare re-enqueue wiped Meta: %+v", got.Meta)
+	}
+
+	// Re-enqueue WITH fresh Meta: it replaces the prior Meta entirely.
+	if _, err := r.Enqueue("summarize_session", "s", EnqueueOptions{Meta: map[string]string{"transcript": "/b.jsonl", "workspace": "ws-2"}}); err != nil {
+		t.Fatalf("re-enqueue with fresh Meta: %v", err)
+	}
+	got = loadTask(t, r, TaskID("summarize_session", "s"))
+	if got.Meta["transcript"] != "/b.jsonl" || got.Meta["workspace"] != "ws-2" {
+		t.Fatalf("re-enqueue with Meta did not replace: %+v", got.Meta)
+	}
+}
+
+// TestCloneReturnsIsolatedMeta proves clone() deep-copies Meta: mutating the
+// returned task's map does not reach back into the record the runner returned (and
+// vice-versa). Without the deep copy a caller holding an Enqueue/Get result would
+// race-mutate the worker's underlying map.
+func TestCloneReturnsIsolatedMeta(t *testing.T) {
+	clock := newFakeClock()
+	r := testRunner(t, clock)
+	_ = r.Register("summarize_session", func(context.Context, *Task) error { return nil })
+
+	first, err := r.Enqueue("summarize_session", "s", EnqueueOptions{Meta: map[string]string{"workspace": "ws-1"}})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	// Mutating the returned clone must not affect the stored record.
+	first.Meta["workspace"] = "tampered"
+	if got := loadTask(t, r, TaskID("summarize_session", "s")); got.Meta["workspace"] != "ws-1" {
+		t.Fatalf("mutating a clone's Meta leaked into the stored record: %+v", got.Meta)
+	}
+
+	// And two separate reads return independent maps.
+	a := loadTask(t, r, TaskID("summarize_session", "s"))
+	b := loadTask(t, r, TaskID("summarize_session", "s"))
+	a.Meta["workspace"] = "x"
+	if b.Meta["workspace"] != "ws-1" {
+		t.Fatalf("two reads shared a Meta map: a=%+v b=%+v", a.Meta, b.Meta)
+	}
+}

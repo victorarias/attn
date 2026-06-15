@@ -19,8 +19,9 @@ import (
 // curated daily work-journal.
 //
 //   - summarize_session (cheap tier): per-session. Reads ONE session transcript and
-//     writes a faithful digest to the raw tier (RawSessionsDir/<sessionID>.md). Pure
-//     machine input for the narrator; high frequency, so it runs on the cheap model.
+//     writes a faithful digest to the raw tier, partitioned by workspace
+//     (RawSessionsDir/<wsID>/<sessionID>.md). Pure machine input for the narrator;
+//     high frequency, so it runs on the cheap model.
 //   - narrate_workspace (strong tier): per-workspace, coalesced. Reads the workspace's
 //     digests + context snapshot + dispatch outcomes and writes/refreshes the curated
 //     journal entry for today (journal/<today>.md). The load-bearing product surface.
@@ -54,6 +55,15 @@ const (
 	// stops into one digest run). The removal-boundary final narrate overrides this
 	// with ZeroDebounce.
 	notebookNarrationDebounce = 2 * time.Minute
+	// notebookSummarizeMetaTranscript and notebookSummarizeMetaWorkspace are the
+	// task.Meta keys carrying the summarize_session run's inputs onto the durable
+	// record at enqueue time (handleStop), where BOTH the session row and the
+	// workspace row still exist. They MUST be carried because the debounced run
+	// fires AFTER a single-session-workspace teardown has deleted both rows, so the
+	// executor can no longer re-derive the transcript path or the workspace bucket
+	// from a live row. The transcript file itself survives under ~/.claude/~/.codex.
+	notebookSummarizeMetaTranscript = "transcript"
+	notebookSummarizeMetaWorkspace  = "workspace"
 	// notebookSoloSessionBucket is the RawSessionsDir subdir holding digests for
 	// solo (non-workspace) sessions. It is a reserved name (leading underscore) so
 	// it can never collide with a real workspace id bucket, and rawTierSegment
@@ -74,12 +84,17 @@ var notebookNarrationAllowedTools = []string{"Read", "Write", "Edit", "Grep", "G
 // --- summarize_session ---
 
 // summarizeSessionExecutor is the runner-registered ExecutorFunc for
-// summarize_session. task.Subject is the session id. It resolves the session's
-// transcript at RUN TIME (the transcript path is never persisted on the task
-// record — it is re-derived from the live session row), assembles the digest
-// prompt with absolute paths, runs the agent, and verifies the digest file exists.
-// The written digest is the only success evidence (the file is the ledger): a run
-// that returns without writing it is an error so the runner backs off and retries.
+// summarize_session. task.Subject is the session id. It resolves the transcript path
+// and the workspace bucket PREFERRING the inputs carried on task.Meta (stashed at
+// enqueue time, where both the session row and the workspace row still existed) and
+// falling back to the live session row — so the run stays correct after a
+// single-session-workspace teardown has deleted both rows (the transcript file
+// itself survives under ~/.claude/~/.codex). It assembles the digest prompt with
+// absolute paths, runs the agent, and verifies the digest file was (re)written. The
+// written digest is the only success evidence (the file is the ledger): a run that
+// returns without writing it is an error so the runner backs off and retries. On
+// success, if the workspace has since been removed it re-enqueues the retrospective
+// narrate so the late digest lands in it (see the re-narrate hook below).
 func (d *Daemon) summarizeSessionExecutor(ctx context.Context, task *tasks.Task) error {
 	sessionID := strings.TrimSpace(task.Subject)
 	if sessionID == "" {
@@ -103,26 +118,49 @@ func (d *Daemon) summarizeSessionExecutor(ctx context.Context, task *tasks.Task)
 		return err
 	}
 
-	// Re-resolve the transcript from the live session row at run time. A session
-	// removed during the debounce window leaves nothing to summarize — that is a
-	// no-op success, not a failure (nothing for the runner to retry).
+	// Resolve the transcript path and workspace id, PREFERRING the inputs carried on
+	// the task (stashed at enqueue time, where both the session row and workspace row
+	// still existed) and falling back to the live session row. The carried inputs are
+	// what make this run correct AFTER a single-session-workspace teardown: by the
+	// time the debounced run fires both rows are gone, but the transcript file
+	// survives on disk and the carried workspace id still routes the digest to the
+	// right per-workspace bucket. The fallback covers a manually-enqueued/legacy task
+	// (no Meta) whose row still exists.
+	carriedTranscript := strings.TrimSpace(task.Meta[notebookSummarizeMetaTranscript])
+	carriedWorkspace := strings.TrimSpace(task.Meta[notebookSummarizeMetaWorkspace])
+	_, hasCarriedWorkspace := task.Meta[notebookSummarizeMetaWorkspace]
+
 	session := d.store.Get(sessionID)
-	if session == nil {
-		d.logf("summarize_session: session %s no longer present, skipping", sessionID)
+	if session == nil && carriedTranscript == "" {
+		// No row AND nothing carried: the session is genuinely gone with no transcript
+		// to summarize. That is a no-op success, not a failure (nothing to retry).
+		d.logf("summarize_session: session %s no longer present and no carried transcript, skipping", sessionID)
 		return nil
 	}
-	transcriptPath := d.resolveTranscriptPathForSession(session, "")
+
+	transcriptPath := carriedTranscript
+	if transcriptPath == "" {
+		transcriptPath = d.resolveTranscriptPathForSession(session, "")
+	}
+
+	// Workspace id for the per-session digest bucket: prefer the carried id (which
+	// survives the row deletion) and fall back to the live row's. The carried id is
+	// empty for a genuinely solo session, which keeps the digest in the _solo bucket.
+	workspaceID := carriedWorkspace
+	if !hasCarriedWorkspace && session != nil {
+		workspaceID = strings.TrimSpace(session.WorkspaceID)
+	}
 
 	// Partition the per-session digest dir by the session's workspace so the
 	// narrate pass for a workspace reads ONLY its own members' digests, not a flat
-	// dir holding every workspace's (and every solo session's) digest. The
-	// workspace id is resolved here, at summarize time, while the session row still
-	// carries it — the bucket then survives workspace removal on disk, so the
-	// removal-pass narrate still finds the scoped digests. Both segments route
-	// through the raw-tier guard so a crafted session/workspace id cannot escape the
-	// raw tier and steer the agent's native Write at the curated journal (the hole
-	// the base raw-floor PR closed for the daemon's own snapshot write).
-	digestPath, err := notebookSessionDigestPath(root, strings.TrimSpace(session.WorkspaceID), sessionID)
+	// dir holding every workspace's (and every solo session's) digest. The bucket
+	// survives workspace removal on disk, so the removal-pass narrate still finds the
+	// scoped digests. Both segments route through the raw-tier guard so a crafted
+	// session/workspace id cannot escape the raw tier and steer the agent's native
+	// Write at the curated journal (the hole the base raw-floor PR closed for the
+	// daemon's own snapshot write). The carried wsID is just as client-controlled as
+	// the row's was, so it is guarded identically.
+	digestPath, err := notebookSessionDigestPath(root, workspaceID, sessionID)
 	if err != nil {
 		return fmt.Errorf("summarize_session: %w", err)
 	}
@@ -177,6 +215,23 @@ func (d *Daemon) summarizeSessionExecutor(ctx context.Context, task *tasks.Task)
 		return fmt.Errorf("summarize_session: agent left digest %s unchanged (%s)", digestPath, result.Diagnostics)
 	}
 	d.logf("summarize_session: session=%s agent=%s model=%s digest=%s", sessionID, config.Agent, config.Model, digestPath)
+
+	// Re-narrate hook (closes the removal/debounce timing gap). On a
+	// single-session-workspace teardown the removal-boundary final narrate already
+	// ran almost immediately (zero debounce) over an EMPTY digest bucket, because
+	// this summarize was still debounced. Now that the grounded digest exists, the
+	// removal retrospective is stale (built from the context snapshot alone). If we
+	// know a non-empty workspace id AND its row is gone (the workspace was removed),
+	// re-enqueue a zero-debounce narrate so the retrospective is rewritten WITH the
+	// final session's work — the narrate freshness-guard makes it actually rewrite
+	// the block (the body changes). Only on removal: an active workspace's pending
+	// narrate already covers a fresh digest, and re-narrating it would burn an extra
+	// strong-tier run. LOOP-SAFETY: narrate completion never enqueues summarize, so
+	// there is no cycle; multiple member summaries coalesce to one narrate per wsID.
+	if workspaceID != "" && d.store.GetWorkspace(workspaceID) == nil {
+		d.logf("summarize_session: workspace %s removed, re-narrating retrospective with fresh digest", workspaceID)
+		d.enqueueFinalNarrateWorkspace(workspaceID)
+	}
 	return nil
 }
 
@@ -475,7 +530,17 @@ func fileFingerprintOf(path string) fileFingerprint {
 // session Stop (the cheap tier), coalesced per session so a chatty session does not
 // pile up runs. Nil/Disabled-guarded so it is safe before the runner is constructed
 // and when the notebook root cannot resolve.
-func (d *Daemon) enqueueSummarizeSession(sessionID string) {
+//
+// The transcript path and workspace id are STASHED on the task (via Meta) at enqueue
+// time, where both the session row and the workspace row still exist. They are
+// carried because the debounced run fires AFTER a single-session-workspace teardown
+// has deleted both rows: without the carried inputs the executor would resolve an
+// empty workspace id and write the digest to the _solo bucket (wrong) or find no row
+// at all and no-op, so the removal retrospective's per-workspace dir never sees the
+// final session's grounded digest. The transcript file itself survives on disk, so
+// summarize remains runnable post-removal. wsID is empty for a genuinely solo
+// session, which keeps the digest in the _solo bucket exactly as before.
+func (d *Daemon) enqueueSummarizeSession(sessionID, transcriptPath, workspaceID string) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return
@@ -484,8 +549,13 @@ func (d *Daemon) enqueueSummarizeSession(sessionID string) {
 	if runner == nil || runner.Disabled() {
 		return
 	}
+	meta := map[string]string{
+		notebookSummarizeMetaTranscript: strings.TrimSpace(transcriptPath),
+		notebookSummarizeMetaWorkspace:  strings.TrimSpace(workspaceID),
+	}
 	if _, err := runner.Enqueue(notebookSummarizeSessionKind, sessionID, tasks.EnqueueOptions{
 		Debounce: notebookNarrationDebounce,
+		Meta:     meta,
 	}); err != nil {
 		d.logf("summarize_session: enqueue %s: %v", sessionID, err)
 	}

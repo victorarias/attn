@@ -64,6 +64,12 @@ type EnqueueOptions struct {
 	// overriding any pending forward-pushed debounce already on the record. This is
 	// the explicit override the removal-boundary final task uses.
 	ZeroDebounce bool
+	// Meta carries kind-specific run inputs onto the durable record (see
+	// Task.Meta). A non-nil Meta REPLACES the record's Meta on this Enqueue (a
+	// re-enqueue with fresh inputs updates them); a nil Meta LEAVES an existing
+	// Meta untouched (a bare re-trigger that carries no inputs must not wipe the
+	// ones a prior enqueue stashed). Most callers leave this nil.
+	Meta map[string]string
 }
 
 // Options configures a Runner at construction.
@@ -369,6 +375,16 @@ func (r *Runner) Enqueue(kind, subject string, opts EnqueueOptions) (*Task, erro
 		existing.NextAttemptAt = next
 		existing.UpdatedAt = now
 		task = existing
+	}
+
+	// Apply the carried Meta after the branch settled on `task`, so it lands the
+	// same way on a brand-new record, a mid-run requeue (so the re-run reads the
+	// fresh inputs), and a coalescing re-enqueue. A non-nil Meta REPLACES; a nil
+	// Meta leaves any existing Meta intact (a bare re-trigger must not wipe inputs
+	// a prior enqueue stashed). Store a fresh copy so the runner's record never
+	// aliases the caller's map.
+	if opts.Meta != nil {
+		task.Meta = cloneStringMap(opts.Meta)
 	}
 
 	if err := r.store.save(task); err != nil {

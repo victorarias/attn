@@ -2077,9 +2077,14 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	//     session with no workspace — its digest is still useful raw material.
 	//   - narrate_workspace fires (coalesced) only when the stop belongs to a LIVE
 	//     workspace; the removal boundary owns the final retrospective pass instead.
-	d.enqueueSummarizeSession(msg.ID)
-	if wsID := d.resolveStopWorkspaceID(msg.ID); wsID != "" && d.store.GetWorkspace(wsID) != nil {
-		d.enqueueNarrateWorkspace(wsID)
+	// Resolve the workspace id once and stash it (plus the transcript path) on the
+	// summarize task: a single-session-workspace teardown deletes both the session
+	// row and the workspace row before the debounced summarize runs, so the
+	// executor must carry these inputs rather than re-derive them from a gone row.
+	stopWorkspaceID := d.resolveStopWorkspaceID(msg.ID)
+	d.enqueueSummarizeSession(msg.ID, msg.TranscriptPath, stopWorkspaceID)
+	if stopWorkspaceID != "" && d.store.GetWorkspace(stopWorkspaceID) != nil {
+		d.enqueueNarrateWorkspace(stopWorkspaceID)
 	}
 
 	if d.consumeForcedStopClassification(msg.ID) {

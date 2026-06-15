@@ -318,6 +318,134 @@ func TestSummarizeSessionExecutorSkipsRemovedSession(t *testing.T) {
 	}
 }
 
+// TestSummarizeSessionExecutorUsesCarriedMetaWhenRowGone is the core fix: after a
+// single-session-workspace teardown deletes BOTH the session row and the workspace
+// row, the debounced summarize must still write the digest to the workspace's bucket
+// (RawSessionsDir/<wsID>/<sid>.md), NOT the _solo bucket — using the transcript path
+// and workspace id carried on the task, since neither row exists to re-derive from.
+func TestSummarizeSessionExecutorUsesCarriedMetaWhenRowGone(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	root := installNotebookNarrationRunner(t, d)
+	// NO session row and NO workspace row: the teardown already removed both. Block
+	// any narrate the re-narrate hook enqueues so it cannot race to done/fail.
+	d.narrateWorkspaceExecution = blockingExecution(t)
+
+	carriedTranscript := filepath.Join(t.TempDir(), "final-turn.jsonl")
+	if err := os.WriteFile(carriedTranscript, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("seed transcript: %v", err)
+	}
+	wsBucket := filepath.Join(notebook.RawSessionsDir(root), "ws-gone")
+	digest := filepath.Join(wsBucket, "session-1.md")
+	soloDigest := filepath.Join(notebook.RawSessionsDir(root), notebookSoloSessionBucket, "session-1.md")
+
+	d.summarizeSessionExecution = func(_ context.Context, _ agentdriver.HeadlessTaskProvider, req agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+		// The carried transcript (not a re-derived one) flows into the prompt.
+		if !strings.Contains(req.Prompt, "TRANSCRIPT_PATH: "+carriedTranscript) {
+			t.Fatalf("prompt did not use carried transcript path:\n%s", req.Prompt)
+		}
+		// The carried workspace id routes the digest to the workspace bucket.
+		if !strings.Contains(req.Prompt, "RAW_DIGEST_PATH: "+digest) {
+			t.Fatalf("digest not routed to workspace bucket:\n%s", req.Prompt)
+		}
+		if err := os.WriteFile(digest, []byte("# Final session digest\n"), 0o644); err != nil {
+			t.Fatalf("fake write digest: %v", err)
+		}
+		return agentdriver.HeadlessTaskResult{}, nil
+	}
+
+	if _, err := d.compactRunner.Enqueue(notebookSummarizeSessionKind, "session-1", tasks.EnqueueOptions{
+		Meta: map[string]string{
+			notebookSummarizeMetaTranscript: carriedTranscript,
+			notebookSummarizeMetaWorkspace:  "ws-gone",
+		},
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", tasks.StateDone)
+
+	if _, err := os.Stat(digest); err != nil {
+		t.Fatalf("digest not written to workspace bucket: %v", err)
+	}
+	if _, err := os.Stat(soloDigest); err == nil {
+		t.Fatal("digest leaked into the _solo bucket instead of the workspace bucket")
+	}
+}
+
+// TestSummarizeSessionReNarratesWhenWorkspaceRemoved proves the timing-gap hook: a
+// successful digest write for a session whose workspace ROW IS GONE re-enqueues a
+// zero-debounce narrate_workspace so the removal retrospective is rewritten with the
+// now-available digest.
+func TestSummarizeSessionReNarratesWhenWorkspaceRemoved(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	root := installNotebookNarrationRunner(t, d)
+	// Block narrate so the re-enqueued record stays observable instead of running.
+	d.narrateWorkspaceExecution = blockingExecution(t)
+
+	carriedTranscript := filepath.Join(t.TempDir(), "turn.jsonl")
+	if err := os.WriteFile(carriedTranscript, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("seed transcript: %v", err)
+	}
+	digest := filepath.Join(notebook.RawSessionsDir(root), "ws-gone", "session-1.md")
+	d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+		if err := os.WriteFile(digest, []byte("# digest\n"), 0o644); err != nil {
+			t.Fatalf("fake write digest: %v", err)
+		}
+		return agentdriver.HeadlessTaskResult{}, nil
+	}
+
+	// No workspace row for ws-gone, both rows gone -> the hook should re-narrate.
+	if _, err := d.compactRunner.Enqueue(notebookSummarizeSessionKind, "session-1", tasks.EnqueueOptions{
+		Meta: map[string]string{
+			notebookSummarizeMetaTranscript: carriedTranscript,
+			notebookSummarizeMetaWorkspace:  "ws-gone",
+		},
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", tasks.StateDone)
+
+	if !taskExists(t, d, notebookNarrateWorkspaceKind, "ws-gone") {
+		t.Fatal("digest success for a removed workspace did not re-enqueue a narrate")
+	}
+}
+
+// TestSummarizeSessionDoesNotReNarrateWhenWorkspacePresent proves the hook is scoped
+// to removal: a successful digest for a session whose workspace row STILL EXISTS must
+// NOT burn an extra strong-tier narrate (the active workspace's pending narrate
+// already covers the fresh digest).
+func TestSummarizeSessionDoesNotReNarrateWhenWorkspacePresent(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	setupWorkspaceContextSession(t, d, "session-1", "ws-live")
+	root := installNotebookNarrationRunner(t, d)
+	d.narrateWorkspaceExecution = blockingExecution(t)
+
+	digest := filepath.Join(notebook.RawSessionsDir(root), "ws-live", "session-1.md")
+	d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+		if err := os.WriteFile(digest, []byte("# digest\n"), 0o644); err != nil {
+			t.Fatalf("fake write digest: %v", err)
+		}
+		return agentdriver.HeadlessTaskResult{}, nil
+	}
+
+	if _, err := d.compactRunner.Enqueue(notebookSummarizeSessionKind, "session-1", tasks.EnqueueOptions{
+		Meta: map[string]string{notebookSummarizeMetaWorkspace: "ws-live"},
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", tasks.StateDone)
+
+	// The workspace is alive -> no re-narrate. Give the worker a beat; the narrate
+	// record must never appear.
+	time.Sleep(20 * time.Millisecond)
+	task, err := d.compactRunner.Get(tasks.TaskID(notebookNarrateWorkspaceKind, "ws-live"))
+	if err != nil {
+		t.Fatalf("get narrate: %v", err)
+	}
+	if task != nil {
+		t.Fatalf("live workspace unexpectedly got a re-narrate task: %+v", task)
+	}
+}
+
 // --- narrate_workspace executor ---
 
 func TestNarrateWorkspaceExecutorActiveDayVerifiesMarker(t *testing.T) {
@@ -480,6 +608,40 @@ func TestHandleStopEnqueuesOnlyDigestForSoloSession(t *testing.T) {
 	}
 	if task != nil {
 		t.Fatalf("solo session unexpectedly enqueued a narrate task: %+v", task)
+	}
+}
+
+// TestHandleStopStashesTranscriptAndWorkspaceInMeta proves the Stop trigger carries
+// the transcript path and the workspace id onto the summarize task's Meta, where both
+// the session row and the workspace row still exist — so the debounced run can still
+// resolve them after a teardown deletes both rows.
+func TestHandleStopStashesTranscriptAndWorkspaceInMeta(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	setupWorkspaceContextSession(t, d, "session-1", "ws-1")
+	installNotebookNarrationRunner(t, d)
+	// Block both executors so the enqueued summarize record stays observable.
+	d.summarizeSessionExecution = blockingExecution(t)
+	d.narrateWorkspaceExecution = blockingExecution(t)
+
+	transcript := filepath.Join(t.TempDir(), "turn.jsonl")
+	if err := os.WriteFile(transcript, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("seed transcript: %v", err)
+	}
+
+	d.handleStop(drainingConn(t), &protocol.StopMessage{ID: "session-1", TranscriptPath: transcript})
+
+	if !taskExists(t, d, notebookSummarizeSessionKind, "session-1") {
+		t.Fatal("stop did not enqueue summarize_session")
+	}
+	task, err := d.compactRunner.Get(tasks.TaskID(notebookSummarizeSessionKind, "session-1"))
+	if err != nil || task == nil {
+		t.Fatalf("get summarize task: %v", err)
+	}
+	if task.Meta[notebookSummarizeMetaTranscript] != transcript {
+		t.Fatalf("summarize Meta transcript = %q, want %q", task.Meta[notebookSummarizeMetaTranscript], transcript)
+	}
+	if task.Meta[notebookSummarizeMetaWorkspace] != "ws-1" {
+		t.Fatalf("summarize Meta workspace = %q, want ws-1", task.Meta[notebookSummarizeMetaWorkspace])
 	}
 }
 
