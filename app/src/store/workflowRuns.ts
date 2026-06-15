@@ -48,3 +48,20 @@ export const useWorkflowRunsStore = create<WorkflowRunsStore>((set) => ({
 
   reset: () => set({ workflowRuns: {} }),
 }));
+
+// selectLatestWorkflowRunForSession returns the most recently created run
+// attached to sessionId, or null. created_at is an ISO-8601 string so a
+// lexicographic max is a correct chronological max. Pure and unit-testable so
+// the App.tsx dock panel can stay a thin selector over the slice.
+export function selectLatestWorkflowRunForSession(
+  runs: Record<string, WorkflowRun>,
+  sessionId: string | null | undefined,
+): WorkflowRun | null {
+  if (!sessionId) return null;
+  let latest: WorkflowRun | null = null;
+  for (const run of Object.values(runs)) {
+    if (!run || run.session_id !== sessionId) continue;
+    if (!latest || run.created_at > latest.created_at) latest = run;
+  }
+  return latest;
+}

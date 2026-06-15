@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useWorkflowRunsStore } from './workflowRuns';
+import { useWorkflowRunsStore, selectLatestWorkflowRunForSession } from './workflowRuns';
 import { WorkflowRun } from '../types/generated';
 
 function makeRun(overrides: Partial<WorkflowRun> & { run_id: string }): WorkflowRun {
@@ -54,5 +54,29 @@ describe('useWorkflowRunsStore', () => {
     const runs = useWorkflowRunsStore.getState().workflowRuns;
     expect(runs['wr1']).toBeUndefined();
     expect(runs['wr2']).toBeDefined();
+  });
+});
+
+describe('selectLatestWorkflowRunForSession', () => {
+  it('returns null when sessionId is empty/undefined', () => {
+    const runs = { wr1: makeRun({ run_id: 'wr1', session_id: 's1', created_at: '2026-01-01T00:00:00Z' }) };
+    expect(selectLatestWorkflowRunForSession(runs, null)).toBeNull();
+    expect(selectLatestWorkflowRunForSession(runs, undefined)).toBeNull();
+    expect(selectLatestWorkflowRunForSession(runs, '')).toBeNull();
+  });
+
+  it('returns null when no run matches the session', () => {
+    const runs = { wr1: makeRun({ run_id: 'wr1', session_id: 's1', created_at: '2026-01-01T00:00:00Z' }) };
+    expect(selectLatestWorkflowRunForSession(runs, 's2')).toBeNull();
+  });
+
+  it('picks the most recently created run for the session, ignoring other sessions', () => {
+    const runs = {
+      wr1: makeRun({ run_id: 'wr1', session_id: 's1', created_at: '2026-01-01T00:00:00Z' }),
+      wr2: makeRun({ run_id: 'wr2', session_id: 's1', created_at: '2026-01-03T00:00:00Z' }),
+      wr3: makeRun({ run_id: 'wr3', session_id: 's1', created_at: '2026-01-02T00:00:00Z' }),
+      other: makeRun({ run_id: 'other', session_id: 's2', created_at: '2026-12-31T00:00:00Z' }),
+    };
+    expect(selectLatestWorkflowRunForSession(runs, 's1')?.run_id).toBe('wr2');
   });
 });
