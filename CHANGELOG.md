@@ -6,6 +6,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-15]
+
+### Fixed
+- **A workspace can no longer corrupt your journal or other files when it closes.** The context snapshot taken when a workspace is removed now refuses any workspace identifier that is not a plain name, so a crafted identifier can no longer steer that write out of attn's internal holding area and overwrite your curated journal or another file. Normal workspaces are unaffected.
+
+### Changed
+- **Your curated journal stays curated; raw delegated-work outcomes now feed it behind the scenes.** Auto-captured chief-of-staff dispatch outcomes no longer land directly in your daily `journal/<date>.md`. They are now recorded to an internal holding area the upcoming narration pass reads from, so the journal you read keeps only curated entries instead of machine-raw blocks. Dispatch outcomes are still captured reliably and exactly once; existing journal entries are left untouched.
+- **A workspace's shared context is preserved when the workspace goes away.** Removing a workspace used to discard its shared `context.md` overlay entirely. attn now snapshots that context the moment a workspace is torn down, keeping it as durable raw material for the journal-narration pass — so the decisions and current picture an agent recorded in a workspace are no longer lost when the workspace closes.
+
 ## [2026-06-14]
 
 ### Added

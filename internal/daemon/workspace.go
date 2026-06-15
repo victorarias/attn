@@ -397,6 +397,7 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 		return
 	}
 	d.forgetWorkspaceContextCompaction(id)
+	d.snapshotWorkspaceContextOnRemove(id, snapshot.Title)
 	d.store.RemoveWorkspace(id)
 	d.pruneTileContentSubscriptionsForLayout(id, nil)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
@@ -431,7 +432,10 @@ func (d *Daemon) loadWorkspacesFromStore() {
 				!d.workspaceHasSessionlessContent(ws.ID) {
 				// loadWorkspacesFromStore runs during Start() before the compaction
 				// runner is constructed; forgetWorkspaceContextCompaction is nil-safe.
+				// The snapshot does not touch the runner (it only reads the store and
+				// writes a file), so it is safe to call here with no runner.
 				d.forgetWorkspaceContextCompaction(ws.ID)
+				d.snapshotWorkspaceContextOnRemove(ws.ID, ws.Title)
 				d.store.RemoveWorkspace(ws.ID)
 				continue
 			}
@@ -547,6 +551,7 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 			return
 		}
 		d.forgetWorkspaceContextCompaction(workspaceID)
+		d.snapshotWorkspaceContextOnRemove(workspaceID, snapshot.Title)
 		d.store.RemoveWorkspace(workspaceID)
 		d.pruneTileContentSubscriptionsForLayout(workspaceID, nil)
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
