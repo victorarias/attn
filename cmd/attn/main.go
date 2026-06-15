@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
@@ -975,6 +976,7 @@ commands:
   guide                      print the notebook operating guidance
   dream status               summarize what a consolidation pass would harvest
   dream [--dry-run]          preview the harvested candidates (nothing is written)
+  tasks                      list the durable background task runner's records
 `)
 }
 
@@ -1053,10 +1055,49 @@ func runNotebook() {
 		fmt.Println(res.Guidance)
 	case "dream":
 		runNotebookDream(c, args)
+	case "tasks":
+		runNotebookTasks(c, args)
 	default:
 		fmt.Fprintf(os.Stderr, "notebook: unknown command %q\n\n", action)
 		writeNotebookHelp(os.Stderr)
 		os.Exit(2)
+	}
+}
+
+// runNotebookTasks handles `attn notebook tasks`: a read-only listing of the
+// durable task runner's records. There is no CLI retry — retry is a UI action.
+func runNotebookTasks(c *client.Client, args []string) {
+	if len(args) != 0 {
+		fmt.Fprintln(os.Stderr, "usage: attn notebook tasks")
+		os.Exit(2)
+	}
+	records, err := c.NotebookTasks()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "notebook tasks: %v\n", err)
+		os.Exit(1)
+	}
+	printNotebookTasks(os.Stdout, records)
+}
+
+// printNotebookTasks renders the task records as an aligned table. next_attempt_at
+// is shown in local time; last_error, when present, follows on an indented line so
+// a long message never breaks the column alignment.
+func printNotebookTasks(w io.Writer, records []protocol.NotebookTask) {
+	if len(records) == 0 {
+		fmt.Fprintln(w, "no tasks")
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "STATE\tKIND\tSUBJECT\tATTEMPTS\tNEXT ATTEMPT\tID")
+	for _, t := range records {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n",
+			t.State, t.Kind, t.Subject, t.Attempts, formatDreamTime(t.NextAttemptAt), t.ID)
+	}
+	_ = tw.Flush()
+	for _, t := range records {
+		if msg := strings.TrimSpace(protocol.Deref(t.LastError)); msg != "" {
+			fmt.Fprintf(w, "  %s: %s\n", t.ID, msg)
+		}
 	}
 }
 

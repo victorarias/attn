@@ -1833,6 +1833,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleNotebookDreamStatus(conn)
 	case protocol.CmdNotebookDreamRun:
 		d.handleNotebookDreamRun(conn, msg.(*protocol.NotebookDreamRunMessage))
+	case protocol.CmdNotebookTaskList:
+		d.handleNotebookTaskList(conn)
 	case protocol.CmdUnregister:
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:

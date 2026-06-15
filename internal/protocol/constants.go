@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "109"
+const ProtocolVersion = "110"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -68,6 +68,8 @@ const (
 	CmdNotebookSendToChief                = "notebook_send_to_chief"
 	CmdNotebookDreamStatus                = "notebook_dream_status"
 	CmdNotebookDreamRun                   = "notebook_dream_run"
+	CmdNotebookTaskList                   = "notebook_task_list"
+	CmdNotebookTaskRetry                  = "notebook_task_retry"
 	CmdUnregister                         = "unregister"
 	CmdState                              = "state"
 	CmdSetSessionResumeID                 = "set_session_resume_id"
@@ -191,6 +193,9 @@ const (
 	EventNotebookBacklinksResult       = "notebook_backlinks_result"
 	EventNotebookWriteResult           = "notebook_write_result"
 	EventNotebookSendToChiefResult     = "notebook_send_to_chief_result"
+	EventNotebookTaskListResult        = "notebook_task_list_result"
+	EventNotebookTaskRetryResult       = "notebook_task_retry_result"
+	EventNotebookTasksChanged          = "notebook_tasks_changed"
 	EventPRsUpdated                    = "prs_updated"
 	EventReposUpdated                  = "repos_updated"
 	EventAuthorsUpdated                = "authors_updated"
@@ -515,6 +520,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdNotebookDreamRun:
 		var msg NotebookDreamRunMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdNotebookTaskList:
+		var msg NotebookTaskListMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdNotebookTaskRetry:
+		var msg NotebookTaskRetryMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

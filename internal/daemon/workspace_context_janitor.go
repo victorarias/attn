@@ -184,6 +184,12 @@ func (d *Daemon) startCompactRunner() {
 			d.logf("dreaming: register harvest_dream: %v", err)
 		}
 	}
+	// Surface lifecycle transitions to any open task panel. OnChange fires
+	// SYNCHRONOUSLY inside the runner's single worker goroutine, so the callback
+	// must be cheap and non-blocking: broadcastNotebookTasksChanged ->
+	// broadcastMessage -> wsHub.BroadcastValue uses a non-blocking send that drops
+	// on a full broadcast channel, so it can never stall the worker.
+	runner.OnChange(func() { d.broadcastNotebookTasksChanged() })
 	d.setCompactRunner(runner)
 	_ = runner.Start()
 }

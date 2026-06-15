@@ -672,6 +672,21 @@ model NotebookDreamRunMessage {
   apply?: boolean; // reserved for the promote pass; harvest is preview-only for now
 }
 
+// Task status surface: list the durable task runner's records, and retry a
+// failed/dead one. state and kind are plain strings (not enums) so the on-disk
+// record stays self-describing and a new TypeSpec enum cannot trip the quicktype
+// identical-enum-merge that drops a generated export.
+model NotebookTaskListMessage {
+  cmd: "notebook_task_list";
+  request_id?: string; // set by the WS frontend for result correlation; the unix CLI omits it
+}
+
+model NotebookTaskRetryMessage {
+  cmd: "notebook_task_retry";
+  request_id?: string; // set by the WS frontend for result correlation
+  task_id: string;
+}
+
 model DelegateWorktreeRequest {
   repo?: string;
   branch: string;
@@ -1988,6 +2003,7 @@ model Response {
   notebook_guide?: NotebookGuideResult;
   notebook_dream_status?: NotebookDreamStatusResult;
   notebook_dream_run?: NotebookDreamRunResult;
+  notebook_tasks?: NotebookTask[];
 }
 
 model DelegateResult {
@@ -2119,6 +2135,23 @@ model NotebookDreamRunResult {
   candidates: NotebookDreamCandidate[];
 }
 
+// One durable task-runner record, surfaced read-only for the task status panel.
+// kind and state are plain strings (the runner persists them as self-describing
+// strings, never Go/TypeSpec enums). The runner's internal Meta bag (transcript
+// filesystem paths and other kind-specific inputs) is deliberately omitted — it
+// carries internal inputs that must never reach the user-facing protocol.
+model NotebookTask {
+  id: string;
+  kind: string;
+  subject: string;
+  state: string;
+  attempts: int32;
+  next_attempt_at: string;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // WS result events for the frontend's notebook reads (request/result pattern).
 // The unix CLI uses the synchronous Response fields above; these carry the same
 // payloads back to a websocket client correlated by request_id.
@@ -2171,6 +2204,32 @@ model NotebookSendToChiefResultMessage {
   success: boolean;
   error?: string;
   result?: NotebookSendToChiefResult;
+}
+
+// Result of notebook_task_list: the durable runner's records, newest-updated
+// first. An empty/absent tasks array means the runner is disabled or has no work.
+model NotebookTaskListResultMessage {
+  event: "notebook_task_list_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  tasks?: NotebookTask[];
+}
+
+// Result of notebook_task_retry. task echoes the record after the retry flip
+// (failed/dead -> queued); absent when the runner could not act on the id.
+model NotebookTaskRetryResultMessage {
+  event: "notebook_task_retry_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  task?: NotebookTask;
+}
+
+// Broadcast (no request_id) when any task lifecycle transition occurs, so an open
+// task panel re-lists. Fired from the runner's OnChange callback.
+model NotebookTasksChangedMessage {
+  event: "notebook_tasks_changed";
 }
 
 model WorkspaceContextResultMessage {
@@ -2355,6 +2414,9 @@ alias DaemonEvent =
   | NotebookBacklinksResultMessage
   | NotebookWriteResultMessage
   | NotebookSendToChiefResultMessage
+  | NotebookTaskListResultMessage
+  | NotebookTaskRetryResultMessage
+  | NotebookTasksChangedMessage
   | MarkFileViewedResultMessage
   | AddCommentResultMessage
   | UpdateCommentResultMessage

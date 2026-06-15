@@ -20,6 +20,7 @@ import type {
   ReviewLoopInteraction as GeneratedReviewLoopInteraction,
   WarningElement as GeneratedWarning,
   WorkspaceContext as GeneratedWorkspaceContext,
+  NotebookTask as GeneratedNotebookTask,
   SessionState,
   PRRole,
   HeatState,
@@ -169,7 +170,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '109';
+export const PROTOCOL_VERSION = '110';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -412,6 +413,11 @@ export interface NotebookReadResult {
   hash: string;
 }
 
+// One durable runner task as surfaced by notebook_task_list / notebook_task_retry.
+// Mirrors the daemon's protocol.NotebookTask (which deliberately omits the runner's
+// internal Meta/CommitGuard so transcript paths etc. never reach the UI).
+export type NotebookTask = GeneratedNotebookTask;
+
 // The outcome of a Notebook hash-CAS save. conflict=true means the note changed
 // on disk since the editor loaded it, so the write did NOT apply; currentHash is
 // the hash now on disk, for the editor to reconcile against. Mirrors the daemon's
@@ -437,6 +443,10 @@ interface UseDaemonSocketOptions {
   // Fired when notebook content changes (any client/agent/external write). paths
   // are notebook-relative; origin is agent|dreaming|ui|external.
   onNotebookChanged?: (origin: string, paths: string[]) => void;
+  // Fired when the durable task runner's task set changes (any lifecycle
+  // transition: queue/run/retry/fail/done). Carries no payload — an open Tasks
+  // panel refetches via notebook_task_list to reflect truth.
+  onNotebookTasksChanged?: () => void;
   onChiefOfStaffDispatchesUpdate?: (dispatches: ChiefOfStaffDispatch[]) => void;
   onWorkspacesUpdate: (workspaces: DaemonWorkspace[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
@@ -718,6 +728,7 @@ export async function retryTransientAttachRequest<T>(
 export function useDaemonSocket({
   onSessionsUpdate,
   onNotebookChanged,
+  onNotebookTasksChanged,
   onChiefOfStaffDispatchesUpdate,
   onWorkspacesUpdate,
   onPRsUpdate,
@@ -747,6 +758,7 @@ export function useDaemonSocket({
   const callbacksRef = useRef({
     onSessionsUpdate,
     onNotebookChanged,
+    onNotebookTasksChanged,
     onChiefOfStaffDispatchesUpdate,
     onWorkspacesUpdate,
     onPRsUpdate,
@@ -765,6 +777,7 @@ export function useDaemonSocket({
   callbacksRef.current = {
     onSessionsUpdate,
     onNotebookChanged,
+    onNotebookTasksChanged,
     onChiefOfStaffDispatchesUpdate,
     onWorkspacesUpdate,
     onPRsUpdate,
@@ -1455,6 +1468,12 @@ export function useDaemonSocket({
             );
             break;
 
+          case 'notebook_tasks_changed':
+            // Payload-free broadcast: an open Tasks panel refetches the list so it
+            // reflects the runner's truth (no optimistic mutation here).
+            callbacksRef.current.onNotebookTasksChanged?.();
+            break;
+
           case 'notebook_list_result':
           case 'notebook_backlinks_result': {
             const requestId = data.request_id;
@@ -1491,6 +1510,45 @@ export function useDaemonSocket({
               pending.resolve(data.result);
             } else {
               pending.reject(new Error(data.error || 'Notebook read failed'));
+            }
+            break;
+          }
+
+          case 'notebook_task_list_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `notebook_task_list:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success) {
+              pending.resolve(data.tasks || []);
+            } else {
+              pending.reject(new Error(data.error || 'Notebook task list failed'));
+            }
+            break;
+          }
+
+          case 'notebook_task_retry_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `notebook_task_retry:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success) {
+              // A non-terminal task is a no-op retry (task=null) — still a success.
+              pending.resolve(data.task ?? null);
+            } else {
+              pending.reject(new Error(data.error || 'Notebook task retry failed'));
             }
             break;
           }
@@ -3636,6 +3694,51 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
+  // List the durable runner's tasks (newest-updated first). Resolves with an empty
+  // array when the runner is disabled or has no tasks.
+  const sendNotebookTaskList = useCallback((): Promise<NotebookTask[]> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('notebook_task_list');
+      const key = `notebook_task_list:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'notebook_task_list', request_id: requestId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Notebook task list timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
+  // Force a failed|dead task back to queued (runs immediately). Resolves with the
+  // requeued task, or null when the task was non-terminal (a no-op retry). The
+  // notebook_tasks_changed broadcast then drives the panel's refetch.
+  const sendNotebookTaskRetry = useCallback((taskId: string): Promise<NotebookTask | null> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('notebook_task_retry');
+      const key = `notebook_task_retry:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'notebook_task_retry', request_id: requestId, task_id: taskId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Notebook task retry timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
   // List the notes whose body links to `path` (root-absolute markdown links).
   const sendNotebookBacklinks = useCallback((path: string): Promise<NotebookEntry[]> => {
     return new Promise((resolve, reject) => {
@@ -4405,6 +4508,8 @@ export function useDaemonSocket({
     sendListWorkspaceContexts,
     sendNotebookList,
     sendNotebookRead,
+    sendNotebookTaskList,
+    sendNotebookTaskRetry,
     sendNotebookBacklinks,
     sendNotebookWrite,
     sendNotebookToChief,

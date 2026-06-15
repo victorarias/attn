@@ -528,6 +528,16 @@ func (c *Client) NotebookDreamRun(apply bool) (*protocol.NotebookDreamRunResult,
 	return resp.NotebookDreamRun, nil
 }
 
+// NotebookTasks lists the durable task runner's records (newest-updated first).
+// An empty slice means the runner is disabled or has no work; it is not an error.
+func (c *Client) NotebookTasks() ([]protocol.NotebookTask, error) {
+	resp, err := c.send(protocol.NotebookTaskListMessage{Cmd: protocol.CmdNotebookTaskList})
+	if err != nil {
+		return nil, err
+	}
+	return resp.NotebookTasks, nil
+}
+
 // Query returns sessions matching the filter
 func (c *Client) Query(filter string) ([]protocol.Session, error) {
 	var filterPtr *string

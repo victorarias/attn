@@ -437,6 +437,9 @@ function App() {
   // Bumped on every notebook_changed event so an open Notebook browser re-fetches
   // the tree and the open note (covers agent writes and external edits).
   const [notebookChangeSignal, setNotebookChangeSignal] = useState(0);
+  // Bumped on every notebook_tasks_changed broadcast so an open Tasks panel
+  // re-fetches the durable runner's task list (covers any lifecycle transition).
+  const [notebookTaskChangeSignal, setNotebookTaskChangeSignal] = useState(0);
 
   // Connect to daemon WebSocket
   const {
@@ -470,6 +473,8 @@ function App() {
     sendListWorkspaceContexts,
     sendNotebookList,
     sendNotebookRead,
+    sendNotebookTaskList,
+    sendNotebookTaskRetry,
     sendNotebookBacklinks,
     sendNotebookWrite,
     sendNotebookToChief,
@@ -525,6 +530,9 @@ function App() {
     // there is no self-echo suppression, so a UI save costs one redundant disk
     // read of the bytes it just wrote (harmless). Don't assume otherwise.
     onNotebookChanged: () => setNotebookChangeSignal((n) => n + 1),
+    // A task lifecycle transition broadcast bumps the signal so an open Tasks panel
+    // refetches the runner's list (the broadcast itself is payload-free).
+    onNotebookTasksChanged: () => setNotebookTaskChangeSignal((n) => n + 1),
     onChiefOfStaffDispatchesUpdate: setChiefOfStaffDispatches,
     onWorkspacesUpdate: setDaemonWorkspaces,
     onPRsUpdate: setPRs,
@@ -615,10 +623,13 @@ function App() {
         sendListWorkspaceContexts={sendListWorkspaceContexts}
         sendNotebookList={sendNotebookList}
         sendNotebookRead={sendNotebookRead}
+        sendNotebookTaskList={sendNotebookTaskList}
+        sendNotebookTaskRetry={sendNotebookTaskRetry}
         sendNotebookBacklinks={sendNotebookBacklinks}
         sendNotebookWrite={sendNotebookWrite}
         sendNotebookToChief={sendNotebookToChief}
         notebookChangeSignal={notebookChangeSignal}
+        notebookTaskChangeSignal={notebookTaskChangeSignal}
         sendGetRecentLocations={sendGetRecentLocations}
         sendBrowseDirectory={sendBrowseDirectory}
         sendInspectPath={sendInspectPath}
@@ -720,10 +731,13 @@ interface AppContentProps {
   sendListWorkspaceContexts: ReturnType<typeof useDaemonSocket>['sendListWorkspaceContexts'];
   sendNotebookList: ReturnType<typeof useDaemonSocket>['sendNotebookList'];
   sendNotebookRead: ReturnType<typeof useDaemonSocket>['sendNotebookRead'];
+  sendNotebookTaskList: ReturnType<typeof useDaemonSocket>['sendNotebookTaskList'];
+  sendNotebookTaskRetry: ReturnType<typeof useDaemonSocket>['sendNotebookTaskRetry'];
   sendNotebookBacklinks: ReturnType<typeof useDaemonSocket>['sendNotebookBacklinks'];
   sendNotebookWrite: ReturnType<typeof useDaemonSocket>['sendNotebookWrite'];
   sendNotebookToChief: ReturnType<typeof useDaemonSocket>['sendNotebookToChief'];
   notebookChangeSignal: number;
+  notebookTaskChangeSignal: number;
   sendGetRecentLocations: ReturnType<typeof useDaemonSocket>['sendGetRecentLocations'];
   sendBrowseDirectory: ReturnType<typeof useDaemonSocket>['sendBrowseDirectory'];
   sendInspectPath: ReturnType<typeof useDaemonSocket>['sendInspectPath'];
@@ -819,10 +833,13 @@ function AppContent({
   sendListWorkspaceContexts,
   sendNotebookList,
   sendNotebookRead,
+  sendNotebookTaskList,
+  sendNotebookTaskRetry,
   sendNotebookBacklinks,
   sendNotebookWrite,
   sendNotebookToChief,
   notebookChangeSignal,
+  notebookTaskChangeSignal,
   sendGetRecentLocations,
   sendBrowseDirectory,
 sendInspectPath,
@@ -3698,6 +3715,9 @@ sendFetchPRDetails,
         writeNotebook={sendNotebookWrite}
         sendToChief={sendNotebookToChief}
         changeSignal={notebookChangeSignal}
+        listTasks={sendNotebookTaskList}
+        retryTask={sendNotebookTaskRetry}
+        taskChangeSignal={notebookTaskChangeSignal}
       />
       <ActionMenu
         isOpen={actionMenuOpen}

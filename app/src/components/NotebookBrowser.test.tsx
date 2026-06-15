@@ -1,12 +1,36 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NotebookBrowser, parseNotebookHref } from './NotebookBrowser';
-import type { NotebookEntry, NotebookReadResult, NotebookSendToChiefResult, NotebookWriteResult } from '../hooks/useDaemonSocket';
+import type { NotebookEntry, NotebookReadResult, NotebookSendToChiefResult, NotebookTask, NotebookWriteResult } from '../hooks/useDaemonSocket';
 
 const ENTRIES: NotebookEntry[] = [
   { path: 'memory/index.md', kind: 'memory', title: 'Memory index', size: 10 },
   { path: 'journal/2026-06-13.md', kind: 'journal', title: '2026-06-13', size: 20 },
   { path: 'memory/decisions/foo.md', kind: 'memory', title: 'Foo decision', size: 30 },
+];
+
+const TASKS: NotebookTask[] = [
+  {
+    id: 'task-failed',
+    kind: 'narrate',
+    subject: 'workspace-alpha',
+    state: 'failed',
+    attempts: 2,
+    next_attempt_at: '2026-06-14T12:00:00Z',
+    created_at: '2026-06-14T11:00:00Z',
+    updated_at: '2026-06-14T11:30:00Z',
+    last_error: 'fake narrate failed: nothing new',
+  },
+  {
+    id: 'task-done',
+    kind: 'summarize',
+    subject: 'session-42',
+    state: 'done',
+    attempts: 1,
+    next_attempt_at: '0001-01-01T00:00:00Z',
+    created_at: '2026-06-14T10:00:00Z',
+    updated_at: '2026-06-14T10:05:00Z',
+  },
 ];
 
 function makeProps(overrides: Partial<React.ComponentProps<typeof NotebookBrowser>> = {}) {
@@ -23,6 +47,10 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof NotebookBrowse
   const sendToChief = vi
     .fn<(selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>>()
     .mockResolvedValue({ path: 'inbox.md', nudged: false });
+  const listTasks = vi.fn<() => Promise<NotebookTask[]>>().mockResolvedValue(TASKS);
+  const retryTask = vi
+    .fn<(taskId: string) => Promise<NotebookTask | null>>()
+    .mockImplementation((taskId) => Promise.resolve(TASKS.find((t) => t.id === taskId) ?? null));
   return {
     props: {
       isOpen: true,
@@ -33,6 +61,9 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof NotebookBrowse
       writeNotebook,
       sendToChief,
       changeSignal: 0,
+      listTasks,
+      retryTask,
+      taskChangeSignal: 0,
       ...overrides,
     },
     listNotebook,
@@ -40,6 +71,8 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof NotebookBrowse
     backlinksNotebook,
     writeNotebook,
     sendToChief,
+    listTasks,
+    retryTask,
   };
 }
 
@@ -383,6 +416,55 @@ describe('NotebookBrowser', () => {
       resolveSend({ path: 'inbox.md', nudged: false });
     });
     expect(screen.queryByText("Added to chief's inbox")).not.toBeInTheDocument();
+  });
+
+  // Open the collapsible Tasks section and wait for the seeded rows to fetch.
+  async function openTasks() {
+    fireEvent.click(await screen.findByRole('button', { name: /^Tasks$/ }));
+  }
+
+  it('lists durable runner tasks (kind:subject + state) when the Tasks section is opened', async () => {
+    const { props, listTasks } = makeProps();
+    render(<NotebookBrowser {...props} />);
+
+    // The section is collapsed on open, so no fetch yet.
+    expect(listTasks).not.toHaveBeenCalled();
+    await openTasks();
+
+    // Both seeded rows render their kind:subject and state.
+    expect(await screen.findByText('narrate:workspace-alpha')).toBeInTheDocument();
+    expect(screen.getByText('summarize:session-42')).toBeInTheDocument();
+    expect(screen.getByText('failed')).toBeInTheDocument();
+    expect(screen.getByText('done')).toBeInTheDocument();
+    expect(listTasks).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a Retry button on a failed/dead task but not on a done task', async () => {
+    const { props } = makeProps();
+    render(<NotebookBrowser {...props} />);
+    await openTasks();
+
+    // Exactly one Retry button (the failed task); the done task has none.
+    const retryButtons = await screen.findAllByRole('button', { name: 'Retry' });
+    expect(retryButtons).toHaveLength(1);
+    // It belongs to the failed row, not the done row.
+    const failedRow = screen.getByText('narrate:workspace-alpha').closest('.notebook-browser-task') as HTMLElement;
+    const doneRow = screen.getByText('summarize:session-42').closest('.notebook-browser-task') as HTMLElement;
+    expect(failedRow).toContainElement(retryButtons[0]);
+    expect(doneRow.querySelector('.notebook-browser-task-retry')).toBeNull();
+  });
+
+  it('calls retryTask with the task id when Retry is clicked', async () => {
+    const { props, retryTask } = makeProps();
+    render(<NotebookBrowser {...props} />);
+    await openTasks();
+
+    const retry = await screen.findByRole('button', { name: 'Retry' });
+    fireEvent.click(retry);
+    await waitFor(() => expect(retryTask).toHaveBeenCalledWith('task-failed'));
+    // The in-flight mark clears once retryTask resolves, re-enabling the button —
+    // wait for it so the state update settles inside the test (no act warning).
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled());
   });
 });
 

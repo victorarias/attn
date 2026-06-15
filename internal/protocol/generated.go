@@ -2015,6 +2015,93 @@ type NotebookSendToChiefResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type NotebookTask struct {
+	// Attempts corresponds to the JSON schema field "attempts".
+	Attempts int `json:"attempts"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// LastError corresponds to the JSON schema field "last_error".
+	LastError *string `json:"last_error,omitempty,omitzero"`
+
+	// NextAttemptAt corresponds to the JSON schema field "next_attempt_at".
+	NextAttemptAt string `json:"next_attempt_at"`
+
+	// State corresponds to the JSON schema field "state".
+	State string `json:"state"`
+
+	// Subject corresponds to the JSON schema field "subject".
+	Subject string `json:"subject"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+}
+
+type NotebookTaskListMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type NotebookTaskListResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// Tasks corresponds to the JSON schema field "tasks".
+	Tasks []NotebookTask `json:"tasks,omitempty,omitzero"`
+}
+
+type NotebookTaskRetryMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// TaskID corresponds to the JSON schema field "task_id".
+	TaskID string `json:"task_id"`
+}
+
+type NotebookTaskRetryResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// Task corresponds to the JSON schema field "task".
+	Task *NotebookTask `json:"task,omitempty,omitzero"`
+}
+
+type NotebookTasksChangedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+}
+
 type NotebookWriteMessage struct {
 	// BaseHash corresponds to the JSON schema field "base_hash".
 	BaseHash *string `json:"base_hash,omitempty,omitzero"`
@@ -2708,6 +2795,9 @@ type Response struct {
 
 	// NotebookRead corresponds to the JSON schema field "notebook_read".
 	NotebookRead *NotebookReadResult `json:"notebook_read,omitempty,omitzero"`
+
+	// NotebookTasks corresponds to the JSON schema field "notebook_tasks".
+	NotebookTasks []NotebookTask `json:"notebook_tasks,omitempty,omitzero"`
 
 	// NotebookWrite corresponds to the JSON schema field "notebook_write".
 	NotebookWrite *NotebookWriteResult `json:"notebook_write,omitempty,omitzero"`
