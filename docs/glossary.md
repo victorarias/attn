@@ -127,7 +127,9 @@ narrative; the chief may also reference them in its cross-workspace journaling.
 Machine-internal capture under `.attn/raw/`, the keeper's **input**, never
 user-facing and never part of the curated journal:
 
-- `sessions/<sessionID>.md` — per-session digests (the summarize step's output).
+- `sessions/<wsID>/<sessionID>.md` — per-session digests (the summarize step's
+  output), nested under the owning workspace; a session with no workspace lands in
+  the reserved `sessions/_solo/<sessionID>.md` bucket.
 - `dispatches/<dispatchID>.md` — captured dispatch outcomes.
 - `context-snapshots/<wsID>.md` — the `context.md` snapshot taken synchronously at
   workspace removal (the deterministic data-safety floor, so the editorial overlay
