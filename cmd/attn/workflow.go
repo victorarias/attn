@@ -59,7 +59,8 @@ func writeWorkflowHelp(w io.Writer) {
 commands:
   run <script.js> [options]    run a workflow script (engine runs in this process)
   result <runId> [--wait]      print a run's terminal result as JSON
-  show <runId>                 print the full run + per-call status as JSON
+  show <runId>                 monitor a run: current phase, calls done/running,
+                               and per-call status incl. the in-flight call
   list [--session <id>]        list runs (default session = ATTN_SESSION_ID)
   cancel <runId>               request cancellation of a run (cooperative)
 
@@ -556,9 +557,10 @@ type workflowResultOutput struct {
 	Status     string          `json:"status"`
 	Result     json.RawMessage `json:"result,omitempty"`
 	Error      string          `json:"error,omitempty"`
-	Phase      string          `json:"phase,omitempty"`
-	CallsTotal int             `json:"calls_total"`
-	CallsDone  int             `json:"calls_done"`
+	Phase        string          `json:"phase,omitempty"`
+	CallsTotal   int             `json:"calls_total"`
+	CallsDone    int             `json:"calls_done"`
+	CallsRunning int             `json:"calls_running"`
 }
 
 func runWorkflowResult(argv []string) {
@@ -636,15 +638,18 @@ func buildWorkflowResultOutput(run *protocol.WorkflowRun) workflowResultOutput {
 	if run.LastError != nil {
 		out.Error = *run.LastError
 	}
-	total, done := countWorkflowCalls(run.AgentCalls)
+	total, done, running := countWorkflowCalls(run.AgentCalls)
 	out.CallsTotal = total
 	out.CallsDone = done
+	out.CallsRunning = running
 	return out
 }
 
-// countWorkflowCalls returns (total, done) where done counts calls that have
-// reached a terminal status (ok | errored | skipped). A running call is not done.
-func countWorkflowCalls(calls []protocol.WorkflowAgentCall) (total, done int) {
+// countWorkflowCalls returns (total, done, running) where done counts calls that
+// have reached a terminal status (ok | errored | skipped) and running counts the
+// in-flight calls. A running call is not done; the running count is what lets a
+// polling agent tell "still progressing" from "not yet dispatched".
+func countWorkflowCalls(calls []protocol.WorkflowAgentCall) (total, done, running int) {
 	total = len(calls)
 	for _, call := range calls {
 		switch call.Status {
@@ -652,9 +657,11 @@ func countWorkflowCalls(calls []protocol.WorkflowAgentCall) (total, done int) {
 			protocol.WorkflowAgentCallStatusErrored,
 			protocol.WorkflowAgentCallStatusSkipped:
 			done++
+		case protocol.WorkflowAgentCallStatusRunning:
+			running++
 		}
 	}
-	return total, done
+	return total, done, running
 }
 
 // workflowResultExitCode maps a terminal run status to a process exit code:
@@ -692,7 +699,117 @@ func runWorkflowShow(argv []string) {
 		fmt.Fprintf(os.Stderr, "workflow show: run %q not found\n", runID)
 		os.Exit(1)
 	}
-	printJSON(run)
+	printJSON(buildWorkflowShowOutput(run))
+}
+
+// workflowShowOutput is the `workflow show` projection: a progress-forward view a
+// polling agent can read to tell a healthy long run from a stalled one. The
+// in-flight call appears as a first-class row with a climbing elapsed_seconds, so
+// back-to-back polls visibly advance even while a single call runs for minutes.
+type workflowShowOutput struct {
+	RunID     string             `json:"run_id"`
+	Status    string             `json:"status"`
+	Phase     string             `json:"phase,omitempty"`
+	Script    string             `json:"script"`
+	Progress  workflowProgress   `json:"progress"`
+	Calls     []workflowCallView `json:"calls"`
+	Resumable bool               `json:"resumable"`
+	CreatedAt string             `json:"created_at"`
+	UpdatedAt string             `json:"updated_at"`
+	Error     string             `json:"error,omitempty"`
+}
+
+type workflowProgress struct {
+	CallsTotal   int    `json:"calls_total"`
+	CallsDone    int    `json:"calls_done"`
+	CallsRunning int    `json:"calls_running"`
+	Phase        string `json:"phase,omitempty"`
+	Summary      string `json:"summary"`
+}
+
+type workflowCallView struct {
+	Ordinal        string `json:"ordinal"`
+	Status         string `json:"status"`
+	Label          string `json:"label,omitempty"`
+	Phase          string `json:"phase,omitempty"`
+	Model          string `json:"model,omitempty"`
+	Harness        string `json:"harness,omitempty"`
+	StartedAt      string `json:"started_at,omitempty"`
+	ElapsedSeconds *int   `json:"elapsed_seconds,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
+// buildWorkflowShowOutput projects a hydrated run into the agent-legible progress
+// view. Pure (time.Now only for a running call's elapsed) so it is unit-testable.
+func buildWorkflowShowOutput(run *protocol.WorkflowRun) workflowShowOutput {
+	total, done, running := countWorkflowCalls(run.AgentCalls)
+	phase := protocol.Deref(run.Phase)
+	calls := make([]workflowCallView, 0, len(run.AgentCalls))
+	for _, call := range run.AgentCalls {
+		calls = append(calls, workflowCallView{
+			Ordinal:        call.Ordinal,
+			Status:         string(call.Status),
+			Label:          protocol.Deref(call.Label),
+			Phase:          protocol.Deref(call.Phase),
+			Model:          protocol.Deref(call.ResolvedModel),
+			Harness:        protocol.Deref(call.ResolvedHarness),
+			StartedAt:      protocol.Deref(call.StartedAt),
+			ElapsedSeconds: workflowCallElapsedSeconds(call),
+			Error:          protocol.Deref(call.Error),
+		})
+	}
+	return workflowShowOutput{
+		RunID:  run.RunID,
+		Status: string(run.Status),
+		Phase:  phase,
+		Script: run.ScriptPath,
+		Progress: workflowProgress{
+			CallsTotal:   total,
+			CallsDone:    done,
+			CallsRunning: running,
+			Phase:        phase,
+			Summary:      workflowProgressSummary(total, done, running, phase),
+		},
+		Calls:     calls,
+		Resumable: run.Resumable,
+		CreatedAt: run.CreatedAt,
+		UpdatedAt: run.UpdatedAt,
+		Error:     protocol.Deref(run.LastError),
+	}
+}
+
+// workflowProgressSummary is a one-line human/agent-legible progress string.
+func workflowProgressSummary(total, done, running int, phase string) string {
+	s := fmt.Sprintf("%d/%d done", done, total)
+	if running > 0 {
+		s += fmt.Sprintf(", %d running", running)
+	}
+	if phase != "" {
+		s += fmt.Sprintf(" (phase: %s)", phase)
+	}
+	return s
+}
+
+// workflowCallElapsedSeconds returns the seconds a call has run: started->completed
+// for a finished call, started->now for an in-flight one. It returns nil when no
+// usable started_at is present, so a missing timestamp never renders a bogus value.
+func workflowCallElapsedSeconds(call protocol.WorkflowAgentCall) *int {
+	started := protocol.Timestamp(protocol.Deref(call.StartedAt)).Time()
+	if started.IsZero() {
+		return nil
+	}
+	end := protocol.Timestamp(protocol.Deref(call.CompletedAt)).Time()
+	if end.IsZero() {
+		if call.Status != protocol.WorkflowAgentCallStatusRunning {
+			return nil
+		}
+		end = time.Now()
+	}
+	secs := int(end.Sub(started).Seconds())
+	if secs < 0 {
+		secs = 0
+	}
+	return &secs
 }
 
 // --- cancel ----------------------------------------------------------------

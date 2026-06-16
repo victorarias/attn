@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -551,6 +552,9 @@ func TestWorkflowResultOutputAndExitCode(t *testing.T) {
 	if out.CallsDone != 2 {
 		t.Fatalf("calls_done = %d, want 2 (ok+errored, not running)", out.CallsDone)
 	}
+	if out.CallsRunning != 1 {
+		t.Fatalf("calls_running = %d, want 1", out.CallsRunning)
+	}
 
 	// Exit-code logic is pure and testable.
 	if got := workflowResultExitCode(protocol.WorkflowRunStatusCompleted); got != 0 {
@@ -595,6 +599,92 @@ func TestWorkflowResultOutputJSONShape(t *testing.T) {
 	// No result key when result_json is absent.
 	if _, ok := decoded["result"]; ok {
 		t.Fatalf("result key should be omitted when absent: %s", b)
+	}
+}
+
+func TestBuildWorkflowShowOutput(t *testing.T) {
+	run := &protocol.WorkflowRun{
+		RunID:      "wf-9",
+		Status:     protocol.WorkflowRunStatusRunning,
+		Phase:      protocol.Ptr("review"),
+		ScriptPath: "pipeline.js",
+		Resumable:  true,
+		CreatedAt:  "2026-06-16T22:00:00Z",
+		UpdatedAt:  "2026-06-16T22:05:00Z",
+		AgentCalls: []protocol.WorkflowAgentCall{
+			{
+				Ordinal: "ph1/cs@p.js:1#0", Status: protocol.WorkflowAgentCallStatusOk,
+				Label: protocol.Ptr("plan"), Phase: protocol.Ptr("plan"),
+				ResolvedModel: protocol.Ptr("gpt-5-codex"),
+				StartedAt:     protocol.Ptr("2026-06-16T22:00:00Z"),
+				CompletedAt:   protocol.Ptr("2026-06-16T22:00:41Z"),
+			},
+			{
+				Ordinal: "ph2/cs@p.js:9#0", Status: protocol.WorkflowAgentCallStatusRunning,
+				Label: protocol.Ptr("review changes"), Phase: protocol.Ptr("review"),
+				ResolvedModel: protocol.Ptr("gpt-5-codex"),
+				StartedAt:     protocol.Ptr("2026-06-16T22:04:00Z"),
+			},
+		},
+	}
+
+	out := buildWorkflowShowOutput(run)
+	if out.Status != "running" || out.Phase != "review" || out.Script != "pipeline.js" {
+		t.Fatalf("header = %+v", out)
+	}
+	if out.Progress.CallsTotal != 2 || out.Progress.CallsDone != 1 || out.Progress.CallsRunning != 1 {
+		t.Fatalf("progress = %+v, want total=2 done=1 running=1", out.Progress)
+	}
+	if !strings.Contains(out.Progress.Summary, "running") || !strings.Contains(out.Progress.Summary, "review") {
+		t.Fatalf("summary = %q, want it to mention running + phase", out.Progress.Summary)
+	}
+	if len(out.Calls) != 2 {
+		t.Fatalf("calls = %d, want 2", len(out.Calls))
+	}
+	// Finished call: elapsed is the fixed started->completed span (41s), label/model carried.
+	done := out.Calls[0]
+	if done.Label != "plan" || done.Model != "gpt-5-codex" {
+		t.Fatalf("done call lost display fields: %+v", done)
+	}
+	if done.ElapsedSeconds == nil || *done.ElapsedSeconds != 41 {
+		t.Fatalf("done elapsed = %v, want 41", done.ElapsedSeconds)
+	}
+	// In-flight call: surfaced with label/phase/model and a non-nil elapsed (started->now).
+	running := out.Calls[1]
+	if running.Status != "running" || running.Label != "review changes" || running.Phase != "review" {
+		t.Fatalf("running call = %+v", running)
+	}
+	if running.ElapsedSeconds == nil {
+		t.Fatalf("running elapsed should be non-nil (started->now)")
+	}
+}
+
+func TestBuildWorkflowShowOutputOmitsElapsedWhenNoStart(t *testing.T) {
+	run := &protocol.WorkflowRun{
+		RunID:  "wf-10",
+		Status: protocol.WorkflowRunStatusRunning,
+		AgentCalls: []protocol.WorkflowAgentCall{
+			// Running but no started_at (e.g. timestamps not yet flushed): elapsed omitted.
+			{Ordinal: "x", Status: protocol.WorkflowAgentCallStatusRunning},
+		},
+	}
+	out := buildWorkflowShowOutput(run)
+	if out.Calls[0].ElapsedSeconds != nil {
+		t.Fatalf("elapsed should be omitted when started_at is empty, got %v", out.Calls[0].ElapsedSeconds)
+	}
+}
+
+func TestCountWorkflowCallsRunning(t *testing.T) {
+	calls := []protocol.WorkflowAgentCall{
+		{Status: protocol.WorkflowAgentCallStatusOk},
+		{Status: protocol.WorkflowAgentCallStatusErrored},
+		{Status: protocol.WorkflowAgentCallStatusSkipped},
+		{Status: protocol.WorkflowAgentCallStatusRunning},
+		{Status: protocol.WorkflowAgentCallStatusRunning},
+	}
+	total, done, running := countWorkflowCalls(calls)
+	if total != 5 || done != 3 || running != 2 {
+		t.Fatalf("counts = (%d,%d,%d), want (5,3,2)", total, done, running)
 	}
 }
 
