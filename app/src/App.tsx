@@ -16,7 +16,11 @@ import { ChangesPanel } from './components/ChangesPanel';
 import { DiffDetailPanel } from './components/DiffDetailPanel';
 import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
 import { WorkflowRunView } from './components/WorkflowRunView';
-import { useWorkflowRunsStore, selectLatestWorkflowRunForSession } from './store/workflowRuns';
+import {
+  useWorkflowRunsStore,
+  selectLatestWorkflowRunForSession,
+  workflowRunIdNeedingHydration,
+} from './store/workflowRuns';
 import { OpenPRLauncherProgress } from './components/OpenPRLauncherProgress';
 import { SessionCreationProgress, type SessionCreationPhase } from './components/SessionCreationProgress';
 import { RightDock } from './components/RightDock';
@@ -499,6 +503,7 @@ function App() {
     getReviewLoopRun,
     getReviewLoopState,
     listWorkflowRuns,
+    getWorkflowRun,
     getReviewState,
     markFileViewed,
     sendAddComment,
@@ -636,6 +641,7 @@ function App() {
         getReviewLoopRun={getReviewLoopRun}
         getReviewLoopState={getReviewLoopState}
         listWorkflowRuns={listWorkflowRuns}
+        getWorkflowRun={getWorkflowRun}
         getReviewState={getReviewState}
         markFileViewed={markFileViewed}
         sendAddComment={sendAddComment}
@@ -738,6 +744,7 @@ interface AppContentProps {
   getReviewLoopRun: ReturnType<typeof useDaemonSocket>['getReviewLoopRun'];
   getReviewLoopState: ReturnType<typeof useDaemonSocket>['getReviewLoopState'];
   listWorkflowRuns: ReturnType<typeof useDaemonSocket>['listWorkflowRuns'];
+  getWorkflowRun: ReturnType<typeof useDaemonSocket>['getWorkflowRun'];
   getReviewState: ReturnType<typeof useDaemonSocket>['getReviewState'];
   markFileViewed: ReturnType<typeof useDaemonSocket>['markFileViewed'];
   sendAddComment: ReturnType<typeof useDaemonSocket>['sendAddComment'];
@@ -834,6 +841,7 @@ sendFetchPRDetails,
   getReviewLoopRun,
   getReviewLoopState,
   listWorkflowRuns,
+  getWorkflowRun,
   getReviewState,
   markFileViewed,
   sendAddComment,
@@ -1759,6 +1767,27 @@ sendFetchPRDetails,
     });
   }, [activeSessionId, listWorkflowRuns]);
 
+  // Hydrate the run the panel is actually showing. listWorkflowRuns intentionally
+  // omits each run's agent_calls (the list is a summary surface), so a run sourced
+  // only from that backfill renders "0/0 calls" with no journal. Live runs get
+  // their calls from workflow_run_updated broadcasts, but a completed run sees no
+  // further broadcasts — after a reload it would stay call-less forever. Fetch the
+  // single hydrated run (which includes the journal) the first time the open panel
+  // shows a run with no calls; getWorkflowRun upserts it into the store, and live
+  // broadcasts own freshness from there.
+  const workflowRunIdToHydrate = workflowRunIdNeedingHydration(
+    workflowRunPanelOpen,
+    activeWorkflowRun,
+  );
+  useEffect(() => {
+    if (!workflowRunIdToHydrate) {
+      return;
+    }
+    getWorkflowRun(workflowRunIdToHydrate).catch((error) => {
+      console.error('[App] Failed to hydrate workflow run:', error);
+    });
+  }, [workflowRunIdToHydrate, getWorkflowRun]);
+
   const [utilityFocusRequestToken, setUtilityFocusRequestToken] = useState(0);
 
   // No auto-creation - user clicks "+" to start a session
@@ -2122,6 +2151,7 @@ sendFetchPRDetails,
     closeSession: handleCloseSession,
     reloadSession,
     setSetting: sendSetSetting,
+    openDockPanel: (panelId: string) => openDockPanel(panelId as DockPanelId),
     openShortcutEditor: () => setShortcutEditorOpen(true),
     splitPane: (sessionId, paneId, direction) => {
       return createSplitSession('shell', direction, paneId, { baseSessionId: sessionId });

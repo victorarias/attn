@@ -65,3 +65,22 @@ export function selectLatestWorkflowRunForSession(
   }
   return latest;
 }
+
+// workflowRunIdNeedingHydration returns the run_id whose full journal the detail
+// panel should fetch, or null when no fetch is needed. The run list backfill
+// (workflow_run_list) omits each run's agent_calls because it is a summary
+// surface, so a run that reaches the panel only via that backfill renders with no
+// journal ("0/0 calls"). Live runs get their calls from workflow_run_updated
+// broadcasts, but a completed run sees no further broadcasts and would stay
+// call-less after a reload. We therefore hydrate exactly when the panel is open
+// and the shown run has no calls; once getWorkflowRun upserts the hydrated run,
+// agent_calls is non-empty and this returns null (no refetch loop). Pure and
+// unit-testable so the App.tsx effect stays a thin trigger over this decision.
+export function workflowRunIdNeedingHydration(
+  panelOpen: boolean,
+  run: WorkflowRun | null | undefined,
+): string | null {
+  if (!panelOpen || !run || !run.run_id) return null;
+  if ((run.agent_calls?.length ?? 0) > 0) return null;
+  return run.run_id;
+}

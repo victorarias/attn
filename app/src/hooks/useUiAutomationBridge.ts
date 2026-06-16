@@ -67,6 +67,7 @@ interface UseUiAutomationBridgeArgs {
   closeSession: (sessionId: string) => Promise<void>;
   reloadSession?: (sessionId: string, size?: { cols: number; rows: number }) => Promise<void>;
   setSetting?: (key: string, value: string) => void;
+  openDockPanel?: (panelId: string) => void;
   openShortcutEditor?: () => void;
   splitPane: (sessionId: string, targetPaneId: string, direction: TerminalSplitDirection) => Promise<unknown>;
   closePane: (sessionId: string, paneId: string) => Promise<unknown>;
@@ -339,19 +340,60 @@ function collectPaneDomMetrics(paneElement: Element | null) {
   };
 }
 
-async function captureDomScreenshotData() {
-  const target = document.getElementById('root') || document.body;
-  if (!(target instanceof HTMLElement)) {
-    throw new Error('Screenshot target not found');
+async function captureDomScreenshotData(selector?: string) {
+  // An optional selector scopes the capture to a subtree. This avoids serializing
+  // the whole #root (which holds the WebGL terminal canvas html-to-image cannot
+  // serialize quickly and times out on) when you only need one panel.
+  //
+  // If a selector is given but does not resolve, DO NOT silently fall back to
+  // #root: that fallback re-introduces the terminal-canvas hang while hiding the
+  // real cause (the element you asked for is not mounted). Fail fast with a clear
+  // message instead so the caller learns the panel is not on screen.
+  let target: HTMLElement;
+  if (selector) {
+    const selected = document.querySelector(selector);
+    if (!(selected instanceof HTMLElement)) {
+      throw new Error(`Screenshot selector not found in DOM: ${selector}`);
+    }
+    target = selected;
+  } else {
+    const root = document.getElementById('root') || document.body;
+    if (!(root instanceof HTMLElement)) {
+      throw new Error('Screenshot target not found');
+    }
+    target = root;
   }
 
   const { toPng } = await import('html-to-image');
   const backgroundColor = getComputedStyle(document.body).backgroundColor || '#111111';
-  const dataUrl = await toPng(target, {
-    cacheBust: true,
-    pixelRatio: 1,
-    backgroundColor,
-  });
+
+  // Freeze CSS animations/transitions for the duration of the capture. Two reasons:
+  // (1) WebKit can leave html-to-image's serialized SVG <image> in a never-settled
+  //     load state when the cloned subtree has a running `animation: ... infinite`
+  //     (e.g. the live "Current step" spinner), so toPng hangs until the caller
+  //     times out. A static completed panel captures instantly; a live one stalls.
+  // (2) A screenshot should be a stable frame, not a random mid-animation tick.
+  const freeze = document.createElement('style');
+  freeze.textContent =
+    '*,*::before,*::after{animation:none!important;transition:none!important;}';
+  document.head.appendChild(freeze);
+  // Force a style/layout flush so the freeze takes effect before we serialize.
+  void document.body.offsetHeight;
+
+  let dataUrl: string;
+  try {
+    dataUrl = await toPng(target, {
+      cacheBust: true,
+      pixelRatio: 1,
+      backgroundColor,
+      // Embedding @font-face resources fetches each font and can hang indefinitely
+      // (the capture then times out). Skip it — captured text falls back to system
+      // fonts, which is fine for verification screenshots.
+      skipFonts: true,
+    });
+  } finally {
+    freeze.remove();
+  }
   return {
     source: 'web',
     bounds: rectSnapshot(target),
@@ -1454,6 +1496,7 @@ export function useUiAutomationBridge({
   closeSession,
   reloadSession,
   setSetting,
+  openDockPanel,
   openShortcutEditor,
   splitPane,
   closePane,
@@ -1527,7 +1570,9 @@ export function useUiAutomationBridge({
         return { sent, zoomedId: handle.getState().zoomedId };
       }
       case 'capture_screenshot_data':
-        return captureDomScreenshotData();
+        return captureDomScreenshotData(
+          typeof payload.selector === 'string' ? payload.selector : undefined,
+        );
       case 'get_window_bounds': {
         if (!isTauri()) {
           return null;
@@ -1716,6 +1761,18 @@ export function useUiAutomationBridge({
         selectSession(sessionId);
         await settleUi();
         return { sessionId };
+      }
+      case 'open_dock_panel': {
+        const panelId = typeof payload.panelId === 'string' ? payload.panelId : '';
+        if (!panelId) {
+          throw new Error('open_dock_panel requires panelId');
+        }
+        if (!openDockPanel) {
+          throw new Error('open_dock_panel is not available');
+        }
+        openDockPanel(panelId);
+        await settleUi();
+        return { panelId };
       }
       case 'get_workspace': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : activeSessionId;
@@ -2615,6 +2672,7 @@ export function useUiAutomationBridge({
     getPaneSize,
     getPaneText,
     getPaneBlockState,
+    openDockPanel,
     openShortcutEditor,
     resetSessionPaneTerminal,
     drainSessionPaneTerminal,

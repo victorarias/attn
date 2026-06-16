@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useWorkflowRunsStore, selectLatestWorkflowRunForSession } from './workflowRuns';
+import {
+  useWorkflowRunsStore,
+  selectLatestWorkflowRunForSession,
+  workflowRunIdNeedingHydration,
+} from './workflowRuns';
 import { WorkflowRun } from '../types/generated';
 
 function makeRun(overrides: Partial<WorkflowRun> & { run_id: string }): WorkflowRun {
@@ -78,5 +82,37 @@ describe('selectLatestWorkflowRunForSession', () => {
       other: makeRun({ run_id: 'other', session_id: 's2', created_at: '2026-12-31T00:00:00Z' }),
     };
     expect(selectLatestWorkflowRunForSession(runs, 's1')?.run_id).toBe('wr2');
+  });
+});
+
+describe('workflowRunIdNeedingHydration', () => {
+  it('returns null when the panel is closed', () => {
+    const run = makeRun({ run_id: 'wr1', status: 'completed' as WorkflowRun['status'] });
+    expect(workflowRunIdNeedingHydration(false, run)).toBeNull();
+  });
+
+  it('returns null when there is no run', () => {
+    expect(workflowRunIdNeedingHydration(true, null)).toBeNull();
+    expect(workflowRunIdNeedingHydration(true, undefined)).toBeNull();
+  });
+
+  it('returns null when the run already has agent calls (live broadcasts own freshness)', () => {
+    const run = makeRun({
+      run_id: 'wr1',
+      agent_calls: [{ ordinal: 'a', status: 'ok' }] as WorkflowRun['agent_calls'],
+    });
+    expect(workflowRunIdNeedingHydration(true, run)).toBeNull();
+  });
+
+  it('returns the run_id when the open panel shows a call-less run (the reload bug)', () => {
+    // A completed run sourced only from workflow_run_list has no agent_calls and
+    // sees no further broadcasts; without hydration it renders "0/0 calls" forever.
+    const run = makeRun({ run_id: 'wr1', status: 'completed' as WorkflowRun['status'] });
+    expect(workflowRunIdNeedingHydration(true, run)).toBe('wr1');
+  });
+
+  it('treats an empty agent_calls array as needing hydration', () => {
+    const run = makeRun({ run_id: 'wr1', agent_calls: [] });
+    expect(workflowRunIdNeedingHydration(true, run)).toBe('wr1');
   });
 });
