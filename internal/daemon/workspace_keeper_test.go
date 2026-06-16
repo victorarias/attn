@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	janitorSource = `# Workspace Context
+	keeperSource = `# Workspace Context
 
 ## Area
 
@@ -29,7 +29,7 @@ The current document is longer than it needs to be, but its facts remain useful.
 ### Context model
 - Now: The area-map format is being implemented.
 `
-	janitorCandidate = `# Workspace Context
+	keeperCandidate = `# Workspace Context
 
 ## Area
 
@@ -57,7 +57,7 @@ func installTestCompactRunner(t *testing.T, d *Daemon) {
 	if err := runner.RegisterWithTimeout(
 		compactContextKind,
 		d.compactContextExecutor,
-		d.workspaceContextJanitorTimeoutDuration(),
+		d.keeperCompactTimeoutDuration(),
 	); err != nil {
 		t.Fatalf("register compact_context: %v", err)
 	}
@@ -69,25 +69,25 @@ func installTestCompactRunner(t *testing.T, d *Daemon) {
 }
 
 func fakeCompaction(candidate string) func(
-	context.Context, workspaceContextJanitorConfig, *protocol.WorkspaceContext,
-) (workspaceContextJanitorExecution, error) {
+	context.Context, keeperCompactConfig, *protocol.WorkspaceContext,
+) (keeperCompactExecution, error) {
 	return func(
-		context.Context, workspaceContextJanitorConfig, *protocol.WorkspaceContext,
-	) (workspaceContextJanitorExecution, error) {
-		return workspaceContextJanitorExecution{Candidate: candidate}, nil
+		context.Context, keeperCompactConfig, *protocol.WorkspaceContext,
+	) (keeperCompactExecution, error) {
+		return keeperCompactExecution{Candidate: candidate}, nil
 	}
 }
 
-func TestParseWorkspaceContextJanitorConfig(t *testing.T) {
+func TestParseKeeperCompactConfig(t *testing.T) {
 	t.Run("disabled", func(t *testing.T) {
-		config, err := parseWorkspaceContextJanitorConfig("")
+		config, err := parseKeeperCompactConfig("")
 		if err != nil || config.Agent != "" || config.Model != "" {
 			t.Fatalf("config = %+v, err = %v", config, err)
 		}
 	})
 
 	t.Run("valid", func(t *testing.T) {
-		config, err := parseWorkspaceContextJanitorConfig(`{"agent":"CODEX","model":"gpt-test"}`)
+		config, err := parseKeeperCompactConfig(`{"agent":"CODEX","model":"gpt-test"}`)
 		if err != nil {
 			t.Fatalf("parse config: %v", err)
 		}
@@ -103,27 +103,27 @@ func TestParseWorkspaceContextJanitorConfig(t *testing.T) {
 		"trailing json": `{"agent":"codex","model":"gpt-test"} {}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := parseWorkspaceContextJanitorConfig(raw); err == nil {
-				t.Fatalf("parseWorkspaceContextJanitorConfig(%q) succeeded", raw)
+			if _, err := parseKeeperCompactConfig(raw); err == nil {
+				t.Fatalf("parseKeeperCompactConfig(%q) succeeded", raw)
 			}
 		})
 	}
 }
 
-func TestValidateWorkspaceContextJanitorCandidate(t *testing.T) {
-	if err := validateWorkspaceContextJanitorCandidate(janitorSource, janitorCandidate); err != nil {
+func TestValidateKeeperCompactCandidate(t *testing.T) {
+	if err := validateKeeperCompactCandidate(keeperSource, keeperCandidate); err != nil {
 		t.Fatalf("valid candidate rejected: %v", err)
 	}
-	if err := validateWorkspaceContextJanitorCandidate(janitorSource, janitorSource); err != nil {
+	if err := validateKeeperCompactCandidate(keeperSource, keeperSource); err != nil {
 		t.Fatalf("identical candidate rejected: %v", err)
 	}
 	legacy := "# Goal\n\nDo the work.\n"
-	if err := validateWorkspaceContextJanitorCandidate(legacy, legacy); err == nil {
+	if err := validateKeeperCompactCandidate(legacy, legacy); err == nil {
 		t.Fatal("identical legacy candidate unexpectedly accepted")
 	}
 
 	for name, candidate := range map[string]string{
-		"growth": janitorSource + "\nMore content that makes the result larger.\n",
+		"growth": keeperSource + "\nMore content that makes the result larger.\n",
 		"wrong top heading": `# Context
 
 ## Area
@@ -168,7 +168,7 @@ Other.
 `,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := validateWorkspaceContextJanitorCandidate(janitorSource, candidate); err == nil {
+			if err := validateKeeperCompactCandidate(keeperSource, candidate); err == nil {
 				t.Fatalf("candidate unexpectedly accepted:\n%s", candidate)
 			}
 		})
@@ -183,9 +183,9 @@ func TestWorkspaceContextCompactionAppliesAndLeavesExistingCheckoutsStale(t *tes
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-clean", "workspace-1")
 	setupWorkspaceContextSession(t, d, "session-modified", "workspace-1")
-	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
+	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
 
-	canonical, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-clean", 0)
+	canonical, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-clean", 0)
 	if err != nil {
 		t.Fatalf("seed context: %v", err)
 	}
@@ -197,12 +197,12 @@ func TestWorkspaceContextCompactionAppliesAndLeavesExistingCheckoutsStale(t *tes
 	if err != nil {
 		t.Fatalf("checkout modified session: %v", err)
 	}
-	localEdit := janitorSource + "\nLocal unsaved fact.\n"
+	localEdit := keeperSource + "\nLocal unsaved fact.\n"
 	if err := os.WriteFile(modified.Path, []byte(localEdit), 0o600); err != nil {
 		t.Fatalf("edit modified checkout: %v", err)
 	}
-	d.workspaceContextCompactionExecution = fakeCompaction(janitorCandidate)
-	config, err := d.workspaceContextJanitorConfig()
+	d.workspaceContextCompactionExecution = fakeCompaction(keeperCandidate)
+	config, err := d.keeperCompactConfig()
 	if err != nil {
 		t.Fatalf("config: %v", err)
 	}
@@ -218,14 +218,14 @@ func TestWorkspaceContextCompactionAppliesAndLeavesExistingCheckoutsStale(t *tes
 	if err != nil {
 		t.Fatalf("get compacted context: %v", err)
 	}
-	if current.Content != janitorCandidate || current.UpdatedBySessionID != workspaceContextJanitorUpdater {
+	if current.Content != keeperCandidate || current.UpdatedBySessionID != keeperCompactUpdater {
 		t.Fatalf("current = %+v", current)
 	}
 	cleanContent, err := os.ReadFile(clean.Path)
 	if err != nil {
 		t.Fatalf("read clean checkout: %v", err)
 	}
-	if string(cleanContent) != janitorSource {
+	if string(cleanContent) != keeperSource {
 		t.Fatalf("clean checkout was rewritten: %q", cleanContent)
 	}
 	cleanStatus, err := d.workspaceContextStatus(&protocol.WorkspaceContextStatusMessage{SourceSessionID: "session-clean"})
@@ -251,11 +251,11 @@ func TestWorkspaceContextCompactionAppliesAndLeavesExistingCheckoutsStale(t *tes
 		modifiedStatus.Revision != 1 || modifiedStatus.CanonicalRevision != 2 {
 		t.Fatalf("modified status = %+v", modifiedStatus)
 	}
-	backup, err := d.store.GetWorkspaceContextJanitorBackup("workspace-1")
+	backup, err := d.store.GetKeeperCompactBackup("workspace-1")
 	if err != nil {
 		t.Fatalf("get backup: %v", err)
 	}
-	if backup.SourceContent != janitorSource || backup.SourceRevision != 1 || backup.ResultRevision != 2 {
+	if backup.SourceContent != keeperSource || backup.SourceRevision != 1 || backup.ResultRevision != 2 {
 		t.Fatalf("backup = %+v", backup)
 	}
 
@@ -270,7 +270,7 @@ func TestWorkspaceContextCompactionAppliesAndLeavesExistingCheckoutsStale(t *tes
 	if err != nil {
 		t.Fatalf("get restored context: %v", err)
 	}
-	if current.Content != janitorSource || current.UpdatedBySessionID != "session-clean" {
+	if current.Content != keeperSource || current.UpdatedBySessionID != "session-clean" {
 		t.Fatalf("restored context = %+v", current)
 	}
 }
@@ -280,13 +280,13 @@ func TestWorkspaceContextCompactionAppliesAndLeavesExistingCheckoutsStale(t *tes
 func TestManualWorkspaceContextCompactionCancelsPendingRun(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
-	d.workspaceContextJanitorThreshold = 1
-	d.workspaceContextJanitorDebounce = time.Hour
+	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
+	d.keeperCompactThreshold = 1
+	d.keeperCompactDebounce = time.Hour
 	installTestCompactRunner(t, d)
-	d.workspaceContextCompactionExecution = fakeCompaction(janitorCandidate)
+	d.workspaceContextCompactionExecution = fakeCompaction(keeperCandidate)
 
-	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0); err != nil {
+	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
 		t.Fatalf("seed context: %v", err)
 	}
 	// Enqueue a far-future debounced task that must be cancelled by the manual run.
@@ -319,21 +319,21 @@ func TestManualWorkspaceContextCompactionCancelsPendingRun(t *testing.T) {
 func TestWorkspaceContextCompactionRejectsStaleRevision(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
-	canonical, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0)
+	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
+	canonical, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0)
 	if err != nil {
 		t.Fatalf("seed context: %v", err)
 	}
-	later := janitorSource + "\nA later verified edit.\n"
+	later := keeperSource + "\nA later verified edit.\n"
 	d.workspaceContextCompactionExecution = func(
-		context.Context, workspaceContextJanitorConfig, *protocol.WorkspaceContext,
-	) (workspaceContextJanitorExecution, error) {
+		context.Context, keeperCompactConfig, *protocol.WorkspaceContext,
+	) (keeperCompactExecution, error) {
 		if _, _, updateErr := d.store.UpdateWorkspaceContext("workspace-1", later, "session-1", 1); updateErr != nil {
-			return workspaceContextJanitorExecution{}, updateErr
+			return keeperCompactExecution{}, updateErr
 		}
-		return workspaceContextJanitorExecution{Candidate: janitorCandidate}, nil
+		return keeperCompactExecution{Candidate: keeperCandidate}, nil
 	}
-	config, err := d.workspaceContextJanitorConfig()
+	config, err := d.keeperCompactConfig()
 	if err != nil {
 		t.Fatalf("config: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestWorkspaceContextCompactionRejectsStaleRevision(t *testing.T) {
 	if current.Content != later || current.Revision != 2 {
 		t.Fatalf("current context = %+v", current)
 	}
-	if _, err := d.store.GetWorkspaceContextJanitorBackup("workspace-1"); !errors.Is(err, store.ErrWorkspaceContextJanitorBackupNotFound) {
+	if _, err := d.store.GetKeeperCompactBackup("workspace-1"); !errors.Is(err, store.ErrKeeperCompactBackupNotFound) {
 		t.Fatalf("backup error = %v, want not found", err)
 	}
 }
@@ -363,23 +363,23 @@ func TestCompactRunnerTimeoutAndCancellationProtectContext(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 			setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-			d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
-			d.workspaceContextJanitorThreshold = 1
+			d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
+			d.keeperCompactThreshold = 1
 			if name == "timeout" {
-				d.workspaceContextJanitorTimeout = 20 * time.Millisecond
+				d.keeperCompactTimeout = 20 * time.Millisecond
 			} else {
-				d.workspaceContextJanitorTimeout = time.Second
+				d.keeperCompactTimeout = time.Second
 			}
 			started := make(chan struct{})
 			d.workspaceContextCompactionExecution = func(
-				ctx context.Context, _ workspaceContextJanitorConfig, _ *protocol.WorkspaceContext,
-			) (workspaceContextJanitorExecution, error) {
+				ctx context.Context, _ keeperCompactConfig, _ *protocol.WorkspaceContext,
+			) (keeperCompactExecution, error) {
 				close(started)
 				<-ctx.Done()
-				return workspaceContextJanitorExecution{}, ctx.Err()
+				return keeperCompactExecution{}, ctx.Err()
 			}
 			installTestCompactRunner(t, d)
-			if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0); err != nil {
+			if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
 				t.Fatalf("seed context: %v", err)
 			}
 			if _, err := d.compactRunner.Enqueue(compactContextKind, "workspace-1", tasks.EnqueueOptions{}); err != nil {
@@ -393,7 +393,7 @@ func TestCompactRunnerTimeoutAndCancellationProtectContext(t *testing.T) {
 				if err != nil {
 					t.Fatalf("get current context: %v", err)
 				}
-				if current.Content != janitorSource || current.Revision != 1 {
+				if current.Content != keeperSource || current.Revision != 1 {
 					t.Fatalf("context changed after aborted run: %+v", current)
 				}
 				task, err := d.compactRunner.Get(tasks.TaskID(compactContextKind, "workspace-1"))
@@ -418,17 +418,17 @@ func TestCompactRunnerTimeoutAndCancellationProtectContext(t *testing.T) {
 func TestCompactRunnerCancellationWaitsForAdmittedCommit(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
-	d.workspaceContextJanitorThreshold = 1
-	d.workspaceContextCompactionExecution = fakeCompaction(janitorCandidate)
+	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
+	d.keeperCompactThreshold = 1
+	d.workspaceContextCompactionExecution = fakeCompaction(keeperCandidate)
 	commitStarted := make(chan struct{})
 	releaseCommit := make(chan struct{})
-	d.workspaceContextBeforeJanitorApply = func() {
+	d.workspaceContextBeforeKeeperApply = func() {
 		close(commitStarted)
 		<-releaseCommit
 	}
 	installTestCompactRunner(t, d)
-	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0); err != nil {
+	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
 		t.Fatalf("seed context: %v", err)
 	}
 	if _, err := d.compactRunner.Enqueue(compactContextKind, "workspace-1", tasks.EnqueueOptions{}); err != nil {
@@ -456,7 +456,7 @@ func TestCompactRunnerCancellationWaitsForAdmittedCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get current context: %v", err)
 	}
-	if current.Content != janitorCandidate || current.Revision != 2 {
+	if current.Content != keeperCandidate || current.Revision != 2 {
 		t.Fatalf("admitted commit was not applied: %+v", current)
 	}
 }
@@ -468,18 +468,18 @@ func TestCompactRunnerCancellationWaitsForAdmittedCommit(t *testing.T) {
 func TestWorkspaceDeletionCancelsCompactionBeforeRemovingContext(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
-	d.workspaceContextJanitorThreshold = 1
+	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
+	d.keeperCompactThreshold = 1
 	started := make(chan struct{})
 	d.workspaceContextCompactionExecution = func(
-		ctx context.Context, _ workspaceContextJanitorConfig, _ *protocol.WorkspaceContext,
-	) (workspaceContextJanitorExecution, error) {
+		ctx context.Context, _ keeperCompactConfig, _ *protocol.WorkspaceContext,
+	) (keeperCompactExecution, error) {
 		close(started)
 		<-ctx.Done()
-		return workspaceContextJanitorExecution{}, ctx.Err()
+		return keeperCompactExecution{}, ctx.Err()
 	}
 	installTestCompactRunner(t, d)
-	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0); err != nil {
+	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
 		t.Fatalf("seed context: %v", err)
 	}
 	if _, err := d.compactRunner.Enqueue(compactContextKind, "workspace-1", tasks.EnqueueOptions{}); err != nil {
@@ -491,7 +491,7 @@ func TestWorkspaceDeletionCancelsCompactionBeforeRemovingContext(t *testing.T) {
 	if d.store.GetWorkspace("workspace-1") != nil || d.store.HasWorkspaceContext("workspace-1") {
 		t.Fatal("workspace deletion returned before removing the workspace context")
 	}
-	if _, err := d.store.GetWorkspaceContextJanitorBackup("workspace-1"); !errors.Is(err, store.ErrWorkspaceContextJanitorBackupNotFound) {
+	if _, err := d.store.GetKeeperCompactBackup("workspace-1"); !errors.Is(err, store.ErrKeeperCompactBackupNotFound) {
 		t.Fatalf("backup error = %v, want not found", err)
 	}
 }
@@ -502,18 +502,18 @@ func TestWorkspaceDeletionCancelsCompactionBeforeRemovingContext(t *testing.T) {
 func TestWorkspaceContextCompactionEnqueuesOnThresholdViaTrigger(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
-	d.workspaceContextJanitorThreshold = 1
-	d.workspaceContextJanitorDebounce = 5 * time.Millisecond
+	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
+	d.keeperCompactThreshold = 1
+	d.keeperCompactDebounce = 5 * time.Millisecond
 	calls := make(chan struct{}, 1)
 	d.workspaceContextCompactionExecution = func(
-		context.Context, workspaceContextJanitorConfig, *protocol.WorkspaceContext,
-	) (workspaceContextJanitorExecution, error) {
+		context.Context, keeperCompactConfig, *protocol.WorkspaceContext,
+	) (keeperCompactExecution, error) {
 		select {
 		case calls <- struct{}{}:
 		default:
 		}
-		return workspaceContextJanitorExecution{Candidate: janitorCandidate}, nil
+		return keeperCompactExecution{Candidate: keeperCandidate}, nil
 	}
 	installTestCompactRunner(t, d)
 
@@ -521,7 +521,7 @@ func TestWorkspaceContextCompactionEnqueuesOnThresholdViaTrigger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("checkout context: %v", err)
 	}
-	if err := os.WriteFile(checkout.Path, []byte(janitorSource), 0o600); err != nil {
+	if err := os.WriteFile(checkout.Path, []byte(keeperSource), 0o600); err != nil {
 		t.Fatalf("edit context: %v", err)
 	}
 	if _, changed, err := d.updateWorkspaceContext(&protocol.WorkspaceContextUpdateMessage{SourceSessionID: "session-1"}); err != nil || !changed {
@@ -540,7 +540,7 @@ func TestWorkspaceContextCompactionEnqueuesOnThresholdViaTrigger(t *testing.T) {
 			t.Fatalf("get current context: %v", getErr)
 		}
 		if current.Revision == 2 {
-			if current.Content != janitorCandidate {
+			if current.Content != keeperCandidate {
 				t.Fatalf("compacted content = %q", current.Content)
 			}
 			break
@@ -558,15 +558,15 @@ func TestWorkspaceContextCompactionEnqueuesOnThresholdViaTrigger(t *testing.T) {
 func TestWorkspaceContextCompactionInlineFallbackWhenRunnerDisabled(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
-	d.workspaceContextJanitorThreshold = 1
+	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
+	d.keeperCompactThreshold = 1
 	// NewForTesting installs a disabled runner; keep it.
 	if !d.compactRunner.Disabled() {
 		t.Fatal("expected disabled runner in test")
 	}
-	d.workspaceContextCompactionExecution = fakeCompaction(janitorCandidate)
+	d.workspaceContextCompactionExecution = fakeCompaction(keeperCandidate)
 
-	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0); err != nil {
+	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
 		t.Fatalf("seed context: %v", err)
 	}
 	canonical, err := d.store.GetWorkspaceContext("workspace-1")
@@ -580,7 +580,7 @@ func TestWorkspaceContextCompactionInlineFallbackWhenRunnerDisabled(t *testing.T
 	if err != nil {
 		t.Fatalf("get current context: %v", err)
 	}
-	if current.Revision != 2 || current.Content != janitorCandidate {
+	if current.Revision != 2 || current.Content != keeperCandidate {
 		t.Fatalf("inline fallback did not compact: %+v", current)
 	}
 }
@@ -591,18 +591,18 @@ func TestWorkspaceContextCompactionInlineFallbackWhenRunnerDisabled(t *testing.T
 func TestWorkspaceContextCompactionReChecksThresholdAfterDebounce(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
+	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
 	// Threshold far above the seeded doc size so the run-time re-check no-ops.
-	d.workspaceContextJanitorThreshold = 1 << 20
+	d.keeperCompactThreshold = 1 << 20
 	executed := false
 	d.workspaceContextCompactionExecution = func(
-		context.Context, workspaceContextJanitorConfig, *protocol.WorkspaceContext,
-	) (workspaceContextJanitorExecution, error) {
+		context.Context, keeperCompactConfig, *protocol.WorkspaceContext,
+	) (keeperCompactExecution, error) {
 		executed = true
-		return workspaceContextJanitorExecution{Candidate: janitorCandidate}, nil
+		return keeperCompactExecution{Candidate: keeperCandidate}, nil
 	}
 	installTestCompactRunner(t, d)
-	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0); err != nil {
+	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
 		t.Fatalf("seed context: %v", err)
 	}
 	// Enqueue directly (the trigger would gate it, but a pre-debounce enqueue may
@@ -694,22 +694,22 @@ func TestWorkspaceTeardownDoesNotPanicBeforeCompactRunnerExists(t *testing.T) {
 func TestManualWorkspaceContextCompactionAppliesTimeout(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-	d.store.SetSetting(SettingWorkspaceContextJanitor, `{"agent":"codex","model":"gpt-test"}`)
-	d.workspaceContextJanitorThreshold = 1
-	d.workspaceContextJanitorTimeout = 20 * time.Millisecond
+	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
+	d.keeperCompactThreshold = 1
+	d.keeperCompactTimeout = 20 * time.Millisecond
 
 	gotDeadline := make(chan bool, 1)
 	d.workspaceContextCompactionExecution = func(
-		ctx context.Context, _ workspaceContextJanitorConfig, _ *protocol.WorkspaceContext,
-	) (workspaceContextJanitorExecution, error) {
+		ctx context.Context, _ keeperCompactConfig, _ *protocol.WorkspaceContext,
+	) (keeperCompactExecution, error) {
 		_, hasDeadline := ctx.Deadline()
 		gotDeadline <- hasDeadline
 		// A runaway agent: block until the context aborts. With a deadline the
 		// manual command returns promptly; without one it would hang here forever.
 		<-ctx.Done()
-		return workspaceContextJanitorExecution{}, ctx.Err()
+		return keeperCompactExecution{}, ctx.Err()
 	}
-	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", janitorSource, "session-1", 0); err != nil {
+	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
 		t.Fatalf("seed context: %v", err)
 	}
 
@@ -736,4 +736,59 @@ func TestManualWorkspaceContextCompactionAppliesTimeout(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("manual compaction did not abort within the configured timeout")
 	}
+}
+
+// TestMigrateKeeperCompactSettingKey covers the one-time rename of the persisted
+// "workspace_context_janitor" setting to SettingKeeperCompact: a configured
+// legacy value is carried forward, the legacy row is dropped, and the migration
+// is idempotent — a re-run never clobbers a value the user set under the new key.
+func TestMigrateKeeperCompactSettingKey(t *testing.T) {
+	t.Run("copies legacy value forward and drops the legacy row", func(t *testing.T) {
+		d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+		const value = `{"agent":"codex","model":"gpt-test"}`
+		d.store.SetSetting(legacyKeeperCompactSettingKey, value)
+
+		d.migrateKeeperCompactSettingKey()
+
+		if got := d.store.GetSetting(SettingKeeperCompact); got != value {
+			t.Fatalf("new key = %q, want %q", got, value)
+		}
+		if got := d.store.GetSetting(legacyKeeperCompactSettingKey); got != "" {
+			t.Fatalf("legacy key still present: %q", got)
+		}
+		if _, ok := d.store.GetAllSettings()[legacyKeeperCompactSettingKey]; ok {
+			t.Fatal("legacy key still appears in GetAllSettings")
+		}
+	})
+
+	t.Run("idempotent: re-run is a no-op and never clobbers a user-set new value", func(t *testing.T) {
+		d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+		d.store.SetSetting(legacyKeeperCompactSettingKey, `{"agent":"codex","model":"old"}`)
+
+		d.migrateKeeperCompactSettingKey()
+
+		// User reconfigures under the new key, and (defensively) a stale legacy row reappears.
+		const userValue = `{"agent":"claude","model":"new"}`
+		d.store.SetSetting(SettingKeeperCompact, userValue)
+		d.store.SetSetting(legacyKeeperCompactSettingKey, `{"agent":"codex","model":"old"}`)
+
+		d.migrateKeeperCompactSettingKey()
+
+		if got := d.store.GetSetting(SettingKeeperCompact); got != userValue {
+			t.Fatalf("new key was clobbered: got %q, want %q", got, userValue)
+		}
+		if got := d.store.GetSetting(legacyKeeperCompactSettingKey); got != "" {
+			t.Fatalf("legacy key still present after re-run: %q", got)
+		}
+	})
+
+	t.Run("no legacy value: nothing to migrate", func(t *testing.T) {
+		d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+
+		d.migrateKeeperCompactSettingKey()
+
+		if got := d.store.GetSetting(SettingKeeperCompact); got != "" {
+			t.Fatalf("new key unexpectedly set: %q", got)
+		}
+	})
 }

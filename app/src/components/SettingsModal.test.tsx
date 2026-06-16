@@ -486,7 +486,7 @@ describe('SettingsModal review loop prompts', () => {
     expect(document.getElementById('settings-snipe-exec')).toBeNull();
   });
 
-  it('saves the workspace context janitor agent and model atomically', async () => {
+  it('saves the workspace context keeper agent and model atomically', async () => {
     const onSetSetting = vi.fn();
     render(
       <SettingsModal
@@ -524,38 +524,38 @@ describe('SettingsModal review loop prompts', () => {
 
     fireEvent.click(screen.getByTestId('settings-nav-agents'));
     expect(screen.queryByRole('option', { name: 'Snipe' })).not.toBeInTheDocument();
-    fireEvent.change(await screen.findByTestId('settings-context-janitor-agent'), {
+    fireEvent.change(await screen.findByTestId('settings-context-keeper-agent'), {
       target: { value: 'codex' },
     });
-    expect(screen.getByTestId('settings-context-janitor-model')).toHaveValue('gpt-5.4');
-    expect(screen.queryByTestId('settings-context-janitor-model-custom')).not.toBeInTheDocument();
-    fireEvent.change(screen.getByTestId('settings-context-janitor-model'), {
+    expect(screen.getByTestId('settings-context-keeper-model')).toHaveValue('gpt-5.4');
+    expect(screen.queryByTestId('settings-context-keeper-model-custom')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('settings-context-keeper-model'), {
       target: { value: 'custom' },
     });
-    expect(screen.getByTestId('settings-context-janitor-save')).toBeDisabled();
-    fireEvent.change(screen.getByTestId('settings-context-janitor-model-custom'), {
+    expect(screen.getByTestId('settings-context-keeper-save')).toBeDisabled();
+    fireEvent.change(screen.getByTestId('settings-context-keeper-model-custom'), {
       target: { value: 'gpt-test' },
     });
-    fireEvent.click(screen.getByTestId('settings-context-janitor-save'));
+    fireEvent.click(screen.getByTestId('settings-context-keeper-save'));
 
     expect(onSetSetting).toHaveBeenCalledWith(
-      'workspace_context_janitor',
+      'workspace_keeper_compact',
       '{"agent":"codex","model":"gpt-test"}',
     );
 
-    fireEvent.change(screen.getByTestId('settings-context-janitor-agent'), {
+    fireEvent.change(screen.getByTestId('settings-context-keeper-agent'), {
       target: { value: 'claude' },
     });
-    expect(screen.getByTestId('settings-context-janitor-model')).toHaveValue('opus');
-    expect(screen.getByTestId('settings-context-janitor-save')).toBeEnabled();
-    fireEvent.change(screen.getByTestId('settings-context-janitor-agent'), {
+    expect(screen.getByTestId('settings-context-keeper-model')).toHaveValue('opus');
+    expect(screen.getByTestId('settings-context-keeper-save')).toBeEnabled();
+    fireEvent.change(screen.getByTestId('settings-context-keeper-agent'), {
       target: { value: 'codex' },
     });
-    expect(screen.getByTestId('settings-context-janitor-model')).toHaveValue('gpt-5.4');
-    expect(screen.getByTestId('settings-context-janitor-save')).toBeEnabled();
+    expect(screen.getByTestId('settings-context-keeper-model')).toHaveValue('gpt-5.4');
+    expect(screen.getByTestId('settings-context-keeper-save')).toBeEnabled();
   });
 
-  it('preserves a configured custom janitor model for editing', async () => {
+  it('preserves a configured custom keeper model for editing', async () => {
     render(
       <SettingsModal
         isOpen
@@ -568,7 +568,7 @@ describe('SettingsModal review loop prompts', () => {
         settings={{
           codex_available: 'true',
           codex_cap_headless_task: 'true',
-          workspace_context_janitor: '{"agent":"codex","model":"gpt-custom"}',
+          workspace_keeper_compact: '{"agent":"codex","model":"gpt-custom"}',
         }}
         endpoints={[]}
         plugins={[]}
@@ -588,7 +588,7 @@ describe('SettingsModal review loop prompts', () => {
     );
 
     fireEvent.click(screen.getByTestId('settings-nav-agents'));
-    expect(await screen.findByTestId('settings-context-janitor-model')).toHaveValue('custom');
-    expect(screen.getByTestId('settings-context-janitor-model-custom')).toHaveValue('gpt-custom');
+    expect(await screen.findByTestId('settings-context-keeper-model')).toHaveValue('custom');
+    expect(screen.getByTestId('settings-context-keeper-model-custom')).toHaveValue('gpt-custom');
   });
 });

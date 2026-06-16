@@ -1,17 +1,17 @@
 import type { SessionAgent } from '../types/sessionAgent';
 
-export interface WorkspaceContextJanitorConfig {
+export interface WorkspaceContextKeeperConfig {
   agent: SessionAgent;
   model: string;
 }
 
-export interface WorkspaceContextJanitorModelPreset {
+export interface WorkspaceContextKeeperModelPreset {
   value: string;
   label: string;
 }
 
-const WORKSPACE_CONTEXT_JANITOR_MODEL_PRESETS: Partial<
-  Record<SessionAgent, readonly WorkspaceContextJanitorModelPreset[]>
+const WORKSPACE_CONTEXT_KEEPER_MODEL_PRESETS: Partial<
+  Record<SessionAgent, readonly WorkspaceContextKeeperModelPreset[]>
 > = {
   codex: [
     { value: 'gpt-5.4', label: 'gpt-5.4 (Recommended)' },
@@ -23,31 +23,31 @@ const WORKSPACE_CONTEXT_JANITOR_MODEL_PRESETS: Partial<
   ],
 };
 
-export function workspaceContextJanitorModelPresets(
+export function workspaceContextKeeperModelPresets(
   agent: SessionAgent | '',
-): readonly WorkspaceContextJanitorModelPreset[] {
+): readonly WorkspaceContextKeeperModelPreset[] {
   if (!agent) return [];
-  return WORKSPACE_CONTEXT_JANITOR_MODEL_PRESETS[agent] ?? [];
+  return WORKSPACE_CONTEXT_KEEPER_MODEL_PRESETS[agent] ?? [];
 }
 
-export function defaultWorkspaceContextJanitorModel(agent: SessionAgent | ''): string {
-  return workspaceContextJanitorModelPresets(agent)[0]?.value ?? '';
+export function defaultWorkspaceContextKeeperModel(agent: SessionAgent | ''): string {
+  return workspaceContextKeeperModelPresets(agent)[0]?.value ?? '';
 }
 
-export function isWorkspaceContextJanitorModelPreset(
+export function isWorkspaceContextKeeperModelPreset(
   agent: SessionAgent | '',
   model: string,
 ): boolean {
-  return workspaceContextJanitorModelPresets(agent).some((preset) => preset.value === model);
+  return workspaceContextKeeperModelPresets(agent).some((preset) => preset.value === model);
 }
 
-export function parseWorkspaceContextJanitorConfig(
+export function parseWorkspaceContextKeeperConfig(
   value?: string,
-): WorkspaceContextJanitorConfig | null {
+): WorkspaceContextKeeperConfig | null {
   const raw = value?.trim();
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as Partial<WorkspaceContextJanitorConfig>;
+    const parsed = JSON.parse(raw) as Partial<WorkspaceContextKeeperConfig>;
     const agent = typeof parsed.agent === 'string' ? parsed.agent.trim().toLowerCase() : '';
     const model = typeof parsed.model === 'string' ? parsed.model.trim() : '';
     if (!agent || !model) return null;
@@ -57,8 +57,8 @@ export function parseWorkspaceContextJanitorConfig(
   }
 }
 
-export function serializeWorkspaceContextJanitorConfig(
-  config: WorkspaceContextJanitorConfig,
+export function serializeWorkspaceContextKeeperConfig(
+  config: WorkspaceContextKeeperConfig,
 ): string {
   return JSON.stringify({
     agent: config.agent.trim().toLowerCase(),

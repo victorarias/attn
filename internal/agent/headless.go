@@ -128,7 +128,7 @@ func classifyHeadlessFailure(output string) string {
 	case strings.Contains(lower, "mcp"),
 		strings.Contains(lower, "tool server"),
 		strings.Contains(lower, "server failed"):
-		return "headless agent janitor tools failed"
+		return "headless agent keeper tools failed"
 	default:
 		return "headless agent process failed"
 	}

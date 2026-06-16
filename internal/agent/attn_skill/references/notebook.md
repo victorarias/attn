@@ -26,7 +26,9 @@ Create the notebook once if it does not exist yet (idempotent):
 
 ## Two Kinds Of Notes
 
-- `journal` — dated, append-only entries: the raw record of what happened.
+- `journal` — dated entries: the durable, curated, cross-workspace log of what
+  was done in attn, kept for the user's recall and reviews (not a raw dump — raw
+  machine inputs stay in the raw tier, never the journal).
 - `memory` — distilled, durable notes worth keeping: decisions, gotchas, domain
   knowledge that outlived a single PR. They live under `memory/decisions/`,
   `memory/gotchas/`, and `memory/domain/`.
@@ -71,5 +73,9 @@ otherwise it reports a conflict and you re-read and retry:
 The Notebook is your home. When you are promoted to the role mid-session, attn
 prompts you to run `notebook guide`; follow it. Read `memory/index.md` to orient,
 record durable decisions there as you make them, and keep the day's journal
-current. You remain profile-wide — you may `attn workspace context show
---session <id>` for a specific workspace you step into, but that is opt-in.
+current with your cross-workspace view. The keeper already narrates each
+workspace's own work into the journal, so write at a chief-of-staff altitude —
+what moved across workspaces, what you delegated and decided — not a
+per-workspace play-by-play. You remain profile-wide — you may `attn workspace
+context show --session <id>` for a specific workspace you step into, but that is
+opt-in.

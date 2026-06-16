@@ -82,13 +82,13 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	}
 	// A chief-of-staff launch (NotebookRoot set) gets Notebook guidance instead
 	// of the workspace-context checkout guidance. Every other workspace agent gets
-	// its workspace-context guidance plus the universal journaling directive, so
-	// the work-journal captures notable work across the whole workspace — not only
-	// the chief and delegated dispatches.
+	// its workspace-context guidance. Non-chief agents are NOT nudged to journal:
+	// the keeper narrates each workspace's own work into the journal, and the chief
+	// journals the cross-workspace layer.
 	if guidance := hooks.NotebookGuidance(opts.NotebookRoot); guidance != "" {
 		args = append(args, "--append-system-prompt", guidance)
 	} else if guidance := hooks.WorkspaceContextGuidance(opts.WorkspaceContextPath); guidance != "" {
-		args = append(args, "--append-system-prompt", guidance+"\n\n"+hooks.JournalingDirective())
+		args = append(args, "--append-system-prompt", guidance)
 	}
 
 	if opts.ResumeSessionID != "" {
@@ -123,7 +123,7 @@ func (c *Claude) BuildEnv(opts SpawnOpts) []string {
 
 // claudeNativeDefaultTools is the file-tool allow-list used when a native-tools
 // headless task does not specify AllowedTools. Bash is intentionally omitted:
-// the janitor only needs to read/write/edit files, and Grep/Glob cover
+// the keeper's compaction duty only needs to read/write/edit files, and Grep/Glob cover
 // navigation, so the surface stays minimal.
 var claudeNativeDefaultTools = []string{"Read", "Write", "Edit", "Grep", "Glob"}
 

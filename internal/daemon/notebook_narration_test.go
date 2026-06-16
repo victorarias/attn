@@ -112,7 +112,7 @@ func TestNotebookNarrationConfigForAppliesDefaultsAndSettings(t *testing.T) {
 
 func TestBuildSummarizeSessionPromptEmbedsBriefAndPaths(t *testing.T) {
 	prompt := buildSummarizeSessionPrompt("/t/transcript.jsonl", "session-xyz", "/raw/sessions/session-xyz.md")
-	if !strings.Contains(prompt, "You are the attn session summarizer.") {
+	if !strings.Contains(prompt, "You are the attn keeper, performing your session-summary duty.") {
 		t.Fatal("summarize prompt dropped the verbatim brief")
 	}
 	for _, want := range []string{
@@ -138,7 +138,7 @@ func TestBuildNarrateWorkspacePromptEmbedsBriefPathsAndRemovalFlag(t *testing.T)
 		JournalDir:          "/nb/journal",
 		IsRemovalPass:       true,
 	})
-	if !strings.Contains(prompt, "You are the work-journal narrator for the attn Notebook.") {
+	if !strings.Contains(prompt, "You are the attn keeper, narrating this workspace's work into the journal.") {
 		t.Fatal("narrate prompt dropped the verbatim brief")
 	}
 	for _, want := range []string{
@@ -256,7 +256,7 @@ func TestSummarizeSessionExecutorVerifiesDigestLedger(t *testing.T) {
 		if !strings.Contains(req.Prompt, "RAW_DIGEST_PATH: "+digest) {
 			t.Fatalf("prompt RAW_DIGEST_PATH not the bucketed path:\n%s", req.Prompt)
 		}
-		// The request widens to the digest's bucket dir for a Codex narrator.
+		// The request widens to the digest's bucket dir for a Codex-backed narrate.
 		if len(req.ExtraWritableRoots) != 1 || req.ExtraWritableRoots[0] != soloBucket {
 			t.Fatalf("ExtraWritableRoots = %v, want [%s]", req.ExtraWritableRoots, soloBucket)
 		}
@@ -768,7 +768,7 @@ func TestSummarizeSessionExecutorRejectsTraversalSessionID(t *testing.T) {
 }
 
 // TestNarrateWorkspaceExecutorRejectsTraversalWorkspaceID proves a crafted workspace
-// id is rejected (so the narrator is never handed a CONTEXT_SNAPSHOT_PATH/journal
+// id is rejected (so the narrate pass is never handed a CONTEXT_SNAPSHOT_PATH/journal
 // read target that climbed out of the raw tier) and nothing lands under the journal.
 func TestNarrateWorkspaceExecutorRejectsTraversalWorkspaceID(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
@@ -935,7 +935,7 @@ func TestNarrateWorkspaceScopesSessionsToWorkspace(t *testing.T) {
 
 // --- config-time validation (fail fast, not mid-run hang) ---
 
-// TestDaemon_ValidatesNotebookNarrationAgentAndExecutable mirrors the janitor's
+// TestDaemon_ValidatesNotebookNarrationAgentAndExecutable mirrors the keeper compaction
 // validate test: a valid config passes, a missing configured executable is rejected
 // at config time, a blank value validates (tier default), and invalid JSON is
 // rejected through the handler-facing validateSetting route — for BOTH narration

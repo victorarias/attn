@@ -17,16 +17,16 @@ const (
 	notebookNarrateWorkspaceKind = "narrate_workspace"
 )
 
-// Tier-default model ids. Narration ALWAYS runs (unlike the janitor, which
-// disables on a blank setting): when a setting is unset/blank we fall back to a
+// Tier-default model ids. Narration ALWAYS runs (unlike the keeper's compaction
+// duty, which disables on a blank setting): when a setting is unset/blank we fall back to a
 // built-in default so session-end and removal-boundary narration work out of the
-// box. Claude is the default narrator for BOTH tiers because its native
+// box. Claude is the default agent for BOTH tiers because its native
 // Write/Edit enforce read-before-write CAS, which the shared-journal concurrency
 // story depends on (Codex apply-patch CAS is unverified for the installed
 // version — see notebook_narration.go).
 //
 //   - cheap (summarize_session): Claude Haiku — per-session, high-frequency, only
-//     produces raw input the narrator re-reads.
+//     produces raw input the narrate pass re-reads.
 //   - strong (narrate_workspace): Claude Sonnet — writes the curated journal, the
 //     load-bearing product surface where quality is the point.
 const (
@@ -57,10 +57,10 @@ func narrationTierDefault(kind string) (agent, model string) {
 }
 
 // parseNotebookNarrationConfig parses a narration setting value (the same JSON
-// shape the janitor validates: {"agent":"claude"|"codex","model":"<id>"}) and
+// shape the keeper's compaction duty validates: {"agent":"claude"|"codex","model":"<id>"}) and
 // resolves the provider, validating at config/enqueue time so a misconfigured
 // agent/model fails fast into failed->dead with a surfaced last_error rather than
-// hanging an executor mid-run. Unlike parseWorkspaceContextJanitorConfig, a BLANK
+// hanging an executor mid-run. Unlike parseKeeperCompactConfig, a BLANK
 // value yields the tier DEFAULT (narration is always-on), not a disabled config.
 // A non-blank value must specify both agent and model.
 func parseNotebookNarrationConfig(kind, raw string) (notebookNarrationConfig, error) {
@@ -138,7 +138,7 @@ func (d *Daemon) notebookNarrationConfigFor(kind string) (notebookNarrationConfi
 }
 
 // resolveNotebookNarrationExecutable resolves the agent's executable path on PATH
-// for a parsed narration config, mirroring executeWorkspaceContextJanitor's
+// for a parsed narration config, mirroring executeKeeperCompact's
 // provider resolution. Returns the HeadlessTaskProvider and the absolute path.
 func (d *Daemon) resolveNotebookNarrationExecutable(
 	config notebookNarrationConfig,

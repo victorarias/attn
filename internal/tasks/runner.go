@@ -20,7 +20,7 @@ const (
 	DefaultBackoffBase = time.Minute
 	DefaultBackoffCap  = time.Hour
 	// DefaultExecutorTimeout is the per-executor context.WithTimeout the runner
-	// wraps around every invocation. The janitor uses 5 minutes; a kind can
+	// wraps around every invocation. Keeper compaction uses 5 minutes; a kind can
 	// override it via RegisterWithTimeout.
 	DefaultExecutorTimeout = 5 * time.Minute
 	// defaultPollInterval is how often the worker wakes to re-scan the queue for a
@@ -42,8 +42,8 @@ var ErrUnknownKind = errors.New("tasks: no executor registered for kind")
 // goes done) or an error (the task goes failed and may auto-requeue). The runner
 // owns the context.WithTimeout wrapper around the invocation; the executor body
 // owns the work and calls task.CommitGuard.Enter/Leave around its single durable
-// write. Modeled on workspaceContextJanitorExecutor (the function-pointer type at
-// internal/daemon/workspace_context_janitor.go:41).
+// write. Modeled on the keeper compaction executor in
+// internal/daemon/workspace_keeper.go.
 type ExecutorFunc func(ctx context.Context, task *Task) error
 
 // executor pairs a registered ExecutorFunc with its per-kind timeout.
@@ -139,8 +139,8 @@ type Runner struct {
 }
 
 // activeRun tracks the in-flight task so Cancel can fence its commit and block
-// until its goroutine exits. Ported from the janitor's cancel/done/committing
-// fields (workspace_context_janitor.go:264-269).
+// until its goroutine exits. Ported from the keeper compaction cancel/done/committing
+// fields (workspace_keeper.go).
 type activeRun struct {
 	id     string
 	cancel context.CancelFunc
@@ -436,7 +436,7 @@ func (r *Runner) Retry(id string) (*Task, error) {
 // inside its commit fence, Cancel does not cancel the context — it waits for the
 // goroutine to finish its durable write and exit, so the write is never torn.
 // Cancel of a task that is not currently running returns immediately. Ported in
-// spirit from cancelWorkspaceContextJanitor (workspace_context_janitor.go:310).
+// spirit from the keeper compaction cancel path (workspace_keeper.go).
 func (r *Runner) Cancel(id string) {
 	if r.disabled {
 		return
@@ -637,7 +637,7 @@ func (r *Runner) eligible(t *Task, now time.Time) bool {
 // fences its durable write against a concurrent Cancel AND against the
 // runner-owned timeout: once the executor has entered its commit, neither Cancel
 // nor the deadline cancels the context, so the single durable write is never
-// torn. This mirrors the janitor, whose commit (ApplyWorkspaceContextJanitorResult)
+// torn. This mirrors keeper compaction, whose commit (ApplyKeeperCompactResult)
 // is ctx-free and therefore timeout-immune by construction.
 func (r *Runner) execute(t *Task, exec executor) {
 	// Use WithCancel (not WithTimeout) so the deadline is enforced by a timer we
@@ -688,8 +688,8 @@ func (r *Runner) execute(t *Task, exec executor) {
 	// Record the terminal outcome BEFORE signaling exit, so Cancel's
 	// blocks-until-exit contract holds: when Cancel's <-run.done unblocks, the
 	// goroutine has fully exited AND the durable terminal record is already
-	// written. This mirrors the janitor, where close(done) runs only after the
-	// durable ApplyWorkspaceContextJanitorResult has settled.
+	// written. This mirrors keeper compaction, where close(done) runs only after the
+	// durable ApplyKeeperCompactResult has settled.
 	r.finish(t.ID, runErr)
 
 	// Tear down the active-run registration and signal exit. From here, a Cancel

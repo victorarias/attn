@@ -7,9 +7,9 @@ import (
 
 func TestParseRoundTrip(t *testing.T) {
 	tests := []struct {
-		name    string
-		raw     string
-		wantFM  map[string]any
+		name     string
+		raw      string
+		wantFM   map[string]any
 		wantBody string
 	}{
 		{

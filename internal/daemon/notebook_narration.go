@@ -20,22 +20,22 @@ import (
 //
 //   - summarize_session (cheap tier): per-session. Reads ONE session transcript and
 //     writes a faithful digest to the raw tier, partitioned by workspace
-//     (RawSessionsDir/<wsID>/<sessionID>.md). Pure machine input for the narrator;
+//     (RawSessionsDir/<wsID>/<sessionID>.md). Pure machine input for the narrate duty;
 //     high frequency, so it runs on the cheap model.
 //   - narrate_workspace (strong tier): per-workspace, coalesced. Reads the workspace's
 //     digests + context snapshot + dispatch outcomes and writes/refreshes the curated
 //     journal entry for today (journal/<today>.md). The load-bearing product surface.
 //
 // Both are NATIVE-TOOLS tasks: the agent uses its own file tools and writes the
-// target file itself. Unlike the workspace-context janitor (which reads a candidate
+// target file itself. Unlike the keeper's compaction duty (which reads a candidate
 // back and commits it under a CommitGuard), THE FILE IS THE LEDGER here — the
 // executor's success gate is "did the agent write the target file?" (digest exists /
 // journal contains the workspace marker), not a daemon read-back-and-commit. This is
-// deliberate: the journal is shared and concurrently written by sibling narrators and
+// deliberate: the journal is shared and concurrently written by sibling narrate passes and
 // the human, so the daemon must not own a serialize-and-overwrite commit; the agents'
 // native read-before-write CAS is the concurrency control (see the prompt briefs).
 //
-// CONCURRENCY CAVEAT (Codex narrator): Claude's Write/Edit enforce read-before-write
+// CONCURRENCY CAVEAT (Codex-backed narrate): Claude's Write/Edit enforce read-before-write
 // staleness rejection, which the shared-journal story depends on. Codex's apply-patch
 // CAS is UNVERIFIED for the installed version, so Claude is the built-in default for
 // both tiers (see notebook_narration_config.go). Codex is NOT hard-gated out — a user
@@ -46,7 +46,7 @@ const (
 	// notebookSummarizeSessionTimeout bounds one per-session digest run. Reading and
 	// summarizing a single transcript is cheap; a few minutes is ample headroom.
 	notebookSummarizeSessionTimeout = 4 * time.Minute
-	// notebookNarrateWorkspaceTimeout bounds one curated-journal run. The narrator
+	// notebookNarrateWorkspaceTimeout bounds one curated-journal run. The narrate pass
 	// reads many digests + prior entries and writes prose on the strong model, so it
 	// gets a wider budget than the per-session digest.
 	notebookNarrateWorkspaceTimeout = 8 * time.Minute
@@ -82,11 +82,11 @@ const (
 )
 
 // notebookNarrationAllowedTools is the native tool set both narration agents get.
-// Unlike the janitor (file tools only), the narrators may run read-only shell to
+// Unlike the keeper's compaction duty (file tools only), the narrate duty may run read-only shell to
 // grep large transcripts and locate prior journal markers, so Bash is included
 // (the briefs explicitly tell them to use Read/Grep/Bash). Claude consumes this as
 // --allowedTools; Codex ignores it (its tooling comes from the workspace-write
-// sandbox), so the Codex narrator's writability is governed by ExtraWritableRoots.
+// sandbox), so the Codex-backed narrate's writability is governed by ExtraWritableRoots.
 var notebookNarrationAllowedTools = []string{"Read", "Write", "Edit", "Grep", "Glob", "Bash"}
 
 // --- summarize_session ---
@@ -196,7 +196,7 @@ func (d *Daemon) summarizeSessionExecutor(ctx context.Context, task *tasks.Task)
 		WorkDir:      workDir,
 		AllowedTools: notebookNarrationAllowedTools,
 		// The digest lives under the notebook raw tier, outside the scratch WorkDir,
-		// so a Codex narrator needs that dir made writable (Claude ignores this).
+		// so a Codex-backed narrate needs that dir made writable (Claude ignores this).
 		ExtraWritableRoots: []string{filepath.Dir(digestPath)},
 	}
 
@@ -266,7 +266,7 @@ func notebookSessionDigestPath(root, workspaceID, sessionID string) (string, err
 }
 
 // notebookWorkspaceSessionsDir is the per-workspace digest subdir the narrate pass
-// hands the narrator as RAW_SESSIONS_DIR, so it reads only this workspace's member
+// hands the narrate pass as RAW_SESSIONS_DIR, so it reads only this workspace's member
 // digests. It mirrors the bucket notebookSessionDigestPath writes to.
 func notebookWorkspaceSessionsDir(root, workspaceID string) (string, error) {
 	bucket, err := rawTierSegment(workspaceID)
@@ -282,7 +282,7 @@ func notebookWorkspaceSessionsDir(root, workspaceID string) (string, error) {
 // narrate_workspace. task.Subject is the workspace id. It derives IS_REMOVAL_PASS
 // at RUN TIME from whether the workspace row still exists (an absent row means the
 // workspace was removed and this is the final retrospective pass), gathers the
-// narrator's inputs, runs the agent, and verifies the journal now carries this
+// narrate duty's inputs, runs the agent, and verifies the journal now carries this
 // workspace's marker for today (the file is the ledger).
 func (d *Daemon) narrateWorkspaceExecutor(ctx context.Context, task *tasks.Task) error {
 	workspaceID := strings.TrimSpace(task.Subject)
@@ -315,7 +315,7 @@ func (d *Daemon) narrateWorkspaceExecutor(ctx context.Context, task *tasks.Task)
 	if err := os.MkdirAll(inputs.JournalDir, 0o755); err != nil {
 		return fmt.Errorf("narrate_workspace: create journal dir: %w", err)
 	}
-	// MkdirAll the per-workspace sessions bucket so the narrator's "Read every digest
+	// MkdirAll the per-workspace sessions bucket so the narrate agent's "Read every digest
 	// in RAW_SESSIONS_DIR" step does not fault on a missing dir when no member ever
 	// summarized (e.g. a workspace removed before any session stopped).
 	if err := os.MkdirAll(inputs.RawSessionsDir, 0o755); err != nil {
@@ -420,12 +420,12 @@ func (d *Daemon) gatherNarrateWorkspaceInputs(root, workspaceID string) (narrate
 	// (snapshotWorkspaceContextOnRemove -> writeRawAtomic -> rawTierFilename) uses,
 	// so the read path can never address a different file than the write path and a
 	// crafted workspace id is rejected (failing the run) instead of pointing the
-	// narrator's "read CONTEXT_SNAPSHOT_PATH first" step at an attacker-chosen file.
+	// narrate agent's "read CONTEXT_SNAPSHOT_PATH first" step at an attacker-chosen file.
 	snapshotName, err := rawTierFilename(workspaceID)
 	if err != nil {
 		return narrateWorkspacePromptInputs{}, fmt.Errorf("narrate_workspace: unsafe workspace id: %w", err)
 	}
-	// Per-workspace digest bucket — the narrator reads ONLY this workspace's member
+	// Per-workspace digest bucket — the narrate pass reads ONLY this workspace's member
 	// digests, not a flat dir holding every workspace's and every solo session's.
 	sessionsDir, err := notebookWorkspaceSessionsDir(root, workspaceID)
 	if err != nil {
@@ -475,7 +475,7 @@ func (d *Daemon) narrationToday() string {
 	return now().Format("2006-01-02")
 }
 
-// workspaceNarrationMarker is the FULL hidden HTML-comment marker line the narrator
+// workspaceNarrationMarker is the FULL hidden HTML-comment marker line the narrate agent
 // writes to delimit (and dedup) this workspace's entry in a day's journal file. It
 // MUST match the exact line the prompt brief tells the agent to write
 // (`<!-- attn:wsnarr:<wsID> -->`). The full delimited form is load-bearing for the
@@ -667,7 +667,7 @@ func (d *Daemon) enqueueDailyNarrateWorkspace(workspaceID string) {
 // eligible — the workspace is gone, so this is the last chance to write its
 // retrospective. It must be called AFTER the context snapshot is taken and the
 // workspace row is removed, so the executor derives IS_REMOVAL_PASS=true and the
-// snapshot is on disk for the narrator to read. Nil/Disabled-guarded, so the
+// snapshot is on disk for the narrate pass to read. Nil/Disabled-guarded, so the
 // startup-reconciliation removal site (which runs before the runner exists) is a
 // safe no-op.
 func (d *Daemon) enqueueFinalNarrateWorkspace(workspaceID string) {

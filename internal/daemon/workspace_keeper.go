@@ -18,51 +18,57 @@ import (
 )
 
 const (
-	workspaceContextJanitorUpdater          = "attn-janitor"
-	defaultWorkspaceContextJanitorThreshold = 12 * 1024
-	defaultWorkspaceContextJanitorDebounce  = 10 * time.Minute
-	defaultWorkspaceContextJanitorTimeout   = 5 * time.Minute
+	// keeperCompactUpdater is the updated_by_session_id sentinel written when the
+	// keeper's compaction duty rewrites a workspace context. The STRING VALUE
+	// ("attn-janitor") is a PERSISTED identifier: it is stored in the
+	// workspace_contexts.updated_by_session_id column and string-matched in the
+	// frontend navigator. Renaming the value would orphan existing rows, so only
+	// the Go symbol moves to the keeper persona — the value stays "attn-janitor".
+	keeperCompactUpdater          = "attn-janitor"
+	defaultKeeperCompactThreshold = 12 * 1024
+	defaultKeeperCompactDebounce  = 10 * time.Minute
+	defaultKeeperCompactTimeout   = 5 * time.Minute
 )
 
-type workspaceContextJanitorConfig struct {
+type keeperCompactConfig struct {
 	Agent string `json:"agent"`
 	Model string `json:"model"`
 }
 
-type workspaceContextJanitorExecution struct {
+type keeperCompactExecution struct {
 	Candidate          string
 	ResolvedExecutable string
 	Diagnostics        string
 }
 
-func parseWorkspaceContextJanitorConfig(raw string) (workspaceContextJanitorConfig, error) {
+func parseKeeperCompactConfig(raw string) (keeperCompactConfig, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return workspaceContextJanitorConfig{}, nil
+		return keeperCompactConfig{}, nil
 	}
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	var config workspaceContextJanitorConfig
+	var config keeperCompactConfig
 	if err := decoder.Decode(&config); err != nil {
-		return workspaceContextJanitorConfig{}, fmt.Errorf("invalid workspace context janitor configuration: %w", err)
+		return keeperCompactConfig{}, fmt.Errorf("invalid keeper compact configuration: %w", err)
 	}
 	if err := ensureJSONEOF(decoder); err != nil {
-		return workspaceContextJanitorConfig{}, fmt.Errorf("invalid workspace context janitor configuration: %w", err)
+		return keeperCompactConfig{}, fmt.Errorf("invalid keeper compact configuration: %w", err)
 	}
 	config.Agent = strings.TrimSpace(strings.ToLower(config.Agent))
 	config.Model = strings.TrimSpace(config.Model)
 	if config.Agent == "" || config.Model == "" {
-		return workspaceContextJanitorConfig{}, errors.New("workspace context janitor requires both agent and model")
+		return keeperCompactConfig{}, errors.New("keeper compact requires both agent and model")
 	}
 	driver := agentdriver.Get(config.Agent)
 	if driver == nil {
-		return workspaceContextJanitorConfig{}, fmt.Errorf("workspace context janitor agent is not installed: %s", config.Agent)
+		return keeperCompactConfig{}, fmt.Errorf("keeper compact agent is not installed: %s", config.Agent)
 	}
 	if _, ok := driver.(agentdriver.HeadlessTaskProvider); !ok {
-		return workspaceContextJanitorConfig{}, fmt.Errorf("agent %s does not support headless tasks", config.Agent)
+		return keeperCompactConfig{}, fmt.Errorf("agent %s does not support headless tasks", config.Agent)
 	}
 	if available, reason := agentdriver.HeadlessTaskAvailability(driver); !available {
-		return workspaceContextJanitorConfig{}, fmt.Errorf("agent %s cannot run headless tasks: %s", config.Agent, reason)
+		return keeperCompactConfig{}, fmt.Errorf("agent %s cannot run headless tasks: %s", config.Agent, reason)
 	}
 	return config, nil
 }
@@ -77,8 +83,8 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 	return errors.New("unexpected trailing JSON")
 }
 
-func (d *Daemon) validateWorkspaceContextJanitorSetting(raw string) error {
-	config, err := parseWorkspaceContextJanitorConfig(raw)
+func (d *Daemon) validateKeeperCompactSetting(raw string) error {
+	config, err := parseKeeperCompactConfig(raw)
 	if err != nil || config.Agent == "" {
 		return err
 	}
@@ -89,16 +95,49 @@ func (d *Daemon) validateWorkspaceContextJanitorSetting(raw string) error {
 	}
 	executable := driver.ResolveExecutable(configured)
 	if _, err := exec.LookPath(executable); err != nil {
-		return fmt.Errorf("workspace context janitor executable for %s was not found: %w", config.Agent, err)
+		return fmt.Errorf("keeper compact executable for %s was not found: %w", config.Agent, err)
 	}
 	return nil
 }
 
-func (d *Daemon) workspaceContextJanitorConfig() (workspaceContextJanitorConfig, error) {
+func (d *Daemon) keeperCompactConfig() (keeperCompactConfig, error) {
 	if d.store == nil {
-		return workspaceContextJanitorConfig{}, errors.New("workspace context janitor settings unavailable")
+		return keeperCompactConfig{}, errors.New("keeper compact settings unavailable")
 	}
-	return parseWorkspaceContextJanitorConfig(d.store.GetSetting(SettingWorkspaceContextJanitor))
+	return parseKeeperCompactConfig(d.store.GetSetting(SettingKeeperCompact))
+}
+
+// legacyKeeperCompactSettingKey is the pre-rename persisted settings key. It is
+// retained ONLY so migrateKeeperCompactSettingKey can copy a user's configured
+// agent/model forward to SettingKeeperCompact. Never read it anywhere else.
+const legacyKeeperCompactSettingKey = "workspace_context_janitor"
+
+// migrateKeeperCompactSettingKey performs the one-time rename of the persisted
+// "workspace_context_janitor" setting to "workspace_keeper_compact"
+// (SettingKeeperCompact). It runs at daemon start — and therefore again after
+// every app rebuild, since the daemon survives rebuilds — so it MUST be
+// idempotent. It copies the legacy value forward only when the legacy key holds
+// a non-empty value AND the new key is still empty, so a re-run never clobbers a
+// value the user has since set under the new key. After copying it deletes the
+// stale legacy row so the migration is a true no-op on the next boot (and the
+// dead key never appears in the broadcast settings map). This is a plain
+// settings-value copy, NOT a schema migration — it is unrelated to
+// schema_migrations.
+func (d *Daemon) migrateKeeperCompactSettingKey() {
+	if d.store == nil {
+		return
+	}
+	legacy := d.store.GetSetting(legacyKeeperCompactSettingKey)
+	if strings.TrimSpace(legacy) == "" {
+		return // nothing to migrate (or already migrated + cleaned up)
+	}
+	if strings.TrimSpace(d.store.GetSetting(SettingKeeperCompact)) == "" {
+		// Carry the raw legacy value forward to preserve it exactly.
+		d.store.SetSetting(SettingKeeperCompact, legacy)
+		d.logf("migrated setting %q -> %q", legacyKeeperCompactSettingKey, SettingKeeperCompact)
+	}
+	// Drop the stale row so the migration is a true no-op on the next boot.
+	d.store.DeleteSetting(legacyKeeperCompactSettingKey)
 }
 
 // compactContextKind is the runner task kind for workspace-context compaction.
@@ -156,9 +195,9 @@ func (d *Daemon) startCompactRunner() {
 		if err := runner.RegisterWithTimeout(
 			compactContextKind,
 			d.compactContextExecutor,
-			d.workspaceContextJanitorTimeoutDuration(),
+			d.keeperCompactTimeoutDuration(),
 		); err != nil {
-			d.logf("workspace context janitor: register compact_context: %v", err)
+			d.logf("keeper compact: register compact_context: %v", err)
 		}
 		// Notebook narration shares the same durable runner (same root, same
 		// disabled-when-no-root gate). Both narration executors run native-tools
@@ -196,7 +235,7 @@ func (d *Daemon) startCompactRunner() {
 
 // enqueueWorkspaceContextCompaction is THE trigger callsite. It carries the
 // size-threshold gate, the non-empty-workspaceID guard, and the loaded-config
-// guard that used to live in scheduleWorkspaceContextJanitor. When the runner is
+// guard that used to live in the pre-runner scheduler. When the runner is
 // enabled it coalesces a debounced compaction onto the per-workspace task;
 // otherwise (no notebook root) it runs the compaction inline/synchronously so
 // compaction still happens.
@@ -204,15 +243,15 @@ func (d *Daemon) enqueueWorkspaceContextCompaction(canonical *protocol.Workspace
 	if canonical == nil || strings.TrimSpace(canonical.WorkspaceID) == "" {
 		return
 	}
-	config, err := d.workspaceContextJanitorConfig()
+	config, err := d.keeperCompactConfig()
 	if err != nil {
-		d.logf("workspace context janitor: configuration: %v", err)
+		d.logf("keeper compact: configuration: %v", err)
 		return
 	}
 	if config.Agent == "" {
 		return
 	}
-	if len([]byte(canonical.Content)) <= d.workspaceContextJanitorSizeThreshold() {
+	if len([]byte(canonical.Content)) <= d.keeperCompactSizeThreshold() {
 		return
 	}
 	runner := d.compactRunnerRef()
@@ -221,14 +260,14 @@ func (d *Daemon) enqueueWorkspaceContextCompaction(canonical *protocol.Workspace
 		// still happens, synchronously, on the trigger.
 		// runWorkspaceContextCompactionInline applies the per-run timeout.
 		if _, err := d.runWorkspaceContextCompactionInline(context.Background(), config, canonical); err != nil {
-			d.logf("workspace context janitor: inline compact %s: %v", canonical.WorkspaceID, err)
+			d.logf("keeper compact: inline compact %s: %v", canonical.WorkspaceID, err)
 		}
 		return
 	}
 	if _, err := runner.Enqueue(compactContextKind, canonical.WorkspaceID, tasks.EnqueueOptions{
-		Debounce: d.workspaceContextJanitorDebounceDuration(),
+		Debounce: d.keeperCompactDebounceDuration(),
 	}); err != nil {
-		d.logf("workspace context janitor: enqueue %s: %v", canonical.WorkspaceID, err)
+		d.logf("keeper compact: enqueue %s: %v", canonical.WorkspaceID, err)
 	}
 }
 
@@ -239,12 +278,12 @@ func (d *Daemon) enqueueWorkspaceContextCompaction(canonical *protocol.Workspace
 // compaction, validates, and commits under the guard.
 func (d *Daemon) compactContextExecutor(ctx context.Context, task *tasks.Task) error {
 	workspaceID := task.Subject
-	config, err := d.workspaceContextJanitorConfig()
+	config, err := d.keeperCompactConfig()
 	if err != nil {
 		return err
 	}
 	if config.Agent == "" {
-		return errors.New("workspace context janitor is disabled")
+		return errors.New("keeper compact is disabled")
 	}
 	canonical, err := d.store.GetWorkspaceContext(workspaceID)
 	if err != nil {
@@ -252,7 +291,7 @@ func (d *Daemon) compactContextExecutor(ctx context.Context, task *tasks.Task) e
 	}
 	// Re-check the size gate after the debounce: a doc edited down below the
 	// threshold should not burn an LLM pass. No-op success.
-	if len([]byte(canonical.Content)) <= d.workspaceContextJanitorSizeThreshold() {
+	if len([]byte(canonical.Content)) <= d.keeperCompactSizeThreshold() {
 		return nil
 	}
 	_, err = d.applyWorkspaceContextCompaction(ctx, config, canonical, task.CommitGuard)
@@ -271,10 +310,10 @@ func (d *Daemon) compactContextExecutor(ctx context.Context, task *tasks.Task) e
 // indefinitely. This is the SOLE timeout boundary for both inline callers.
 func (d *Daemon) runWorkspaceContextCompactionInline(
 	ctx context.Context,
-	config workspaceContextJanitorConfig,
+	config keeperCompactConfig,
 	canonical *protocol.WorkspaceContext,
 ) (*protocol.WorkspaceContextMaintenanceResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, d.workspaceContextJanitorTimeoutDuration())
+	ctx, cancel := context.WithTimeout(ctx, d.keeperCompactTimeoutDuration())
 	defer cancel()
 	return d.applyWorkspaceContextCompaction(ctx, config, canonical, &tasks.CommitGuard{})
 }
@@ -286,14 +325,14 @@ func (d *Daemon) runWorkspaceContextCompactionInline(
 // before the durable write or waits for it to finish untorn.
 func (d *Daemon) applyWorkspaceContextCompaction(
 	ctx context.Context,
-	config workspaceContextJanitorConfig,
+	config keeperCompactConfig,
 	canonical *protocol.WorkspaceContext,
 	guard *tasks.CommitGuard,
 ) (*protocol.WorkspaceContextMaintenanceResult, error) {
 	if canonical == nil || strings.TrimSpace(canonical.WorkspaceID) == "" {
 		return nil, errors.New("workspace context is required")
 	}
-	execute := d.executeWorkspaceContextJanitor
+	execute := d.executeKeeperCompact
 	if d.workspaceContextCompactionExecution != nil {
 		execute = d.workspaceContextCompactionExecution
 	}
@@ -302,7 +341,7 @@ func (d *Daemon) applyWorkspaceContextCompaction(
 		return nil, err
 	}
 	candidate := execution.Candidate
-	if err := validateWorkspaceContextJanitorCandidate(canonical.Content, candidate); err != nil {
+	if err := validateKeeperCompactCandidate(canonical.Content, candidate); err != nil {
 		return nil, err
 	}
 
@@ -314,14 +353,14 @@ func (d *Daemon) applyWorkspaceContextCompaction(
 		return nil, context.Canceled
 	}
 	defer guard.Leave()
-	if d.workspaceContextBeforeJanitorApply != nil {
-		d.workspaceContextBeforeJanitorApply()
+	if d.workspaceContextBeforeKeeperApply != nil {
+		d.workspaceContextBeforeKeeperApply()
 	}
 
-	updated, changed, err := d.store.ApplyWorkspaceContextJanitorResult(
+	updated, changed, err := d.store.ApplyKeeperCompactResult(
 		canonical.WorkspaceID,
 		candidate,
-		workspaceContextJanitorUpdater,
+		keeperCompactUpdater,
 		canonical.Revision,
 		config.Agent,
 		config.Model,
@@ -344,7 +383,7 @@ func (d *Daemon) applyWorkspaceContextCompaction(
 	}
 	if execution.ResolvedExecutable != "" {
 		d.logf(
-			"workspace context janitor: workspace=%s agent=%s model=%s executable=%s changed=%t diagnostics=%s",
+			"keeper compact: workspace=%s agent=%s model=%s executable=%s changed=%t diagnostics=%s",
 			canonical.WorkspaceID,
 			config.Agent,
 			config.Model,
@@ -356,56 +395,56 @@ func (d *Daemon) applyWorkspaceContextCompaction(
 	return result, nil
 }
 
-func (d *Daemon) workspaceContextJanitorSizeThreshold() int {
-	if d.workspaceContextJanitorThreshold > 0 {
-		return d.workspaceContextJanitorThreshold
+func (d *Daemon) keeperCompactSizeThreshold() int {
+	if d.keeperCompactThreshold > 0 {
+		return d.keeperCompactThreshold
 	}
-	return defaultWorkspaceContextJanitorThreshold
+	return defaultKeeperCompactThreshold
 }
 
-func (d *Daemon) workspaceContextJanitorDebounceDuration() time.Duration {
-	if d.workspaceContextJanitorDebounce > 0 {
-		return d.workspaceContextJanitorDebounce
+func (d *Daemon) keeperCompactDebounceDuration() time.Duration {
+	if d.keeperCompactDebounce > 0 {
+		return d.keeperCompactDebounce
 	}
-	return defaultWorkspaceContextJanitorDebounce
+	return defaultKeeperCompactDebounce
 }
 
-func (d *Daemon) workspaceContextJanitorTimeoutDuration() time.Duration {
-	if d.workspaceContextJanitorTimeout > 0 {
-		return d.workspaceContextJanitorTimeout
+func (d *Daemon) keeperCompactTimeoutDuration() time.Duration {
+	if d.keeperCompactTimeout > 0 {
+		return d.keeperCompactTimeout
 	}
-	return defaultWorkspaceContextJanitorTimeout
+	return defaultKeeperCompactTimeout
 }
 
-func (d *Daemon) executeWorkspaceContextJanitor(
+func (d *Daemon) executeKeeperCompact(
 	ctx context.Context,
-	config workspaceContextJanitorConfig,
+	config keeperCompactConfig,
 	canonical *protocol.WorkspaceContext,
-) (workspaceContextJanitorExecution, error) {
+) (keeperCompactExecution, error) {
 	driver := agentdriver.Get(config.Agent)
 	if driver == nil {
-		return workspaceContextJanitorExecution{}, fmt.Errorf("workspace context janitor agent not found: %s", config.Agent)
+		return keeperCompactExecution{}, fmt.Errorf("keeper compact agent not found: %s", config.Agent)
 	}
 	provider, ok := driver.(agentdriver.HeadlessTaskProvider)
 	if !ok {
-		return workspaceContextJanitorExecution{}, fmt.Errorf("agent %s does not support headless tasks", config.Agent)
+		return keeperCompactExecution{}, fmt.Errorf("agent %s does not support headless tasks", config.Agent)
 	}
 	configured := d.store.GetSetting(canonicalExecutableSettingKey(config.Agent))
 	resolvedExecutable := driver.ResolveExecutable(configured)
 	executablePath, err := exec.LookPath(resolvedExecutable)
 	if err != nil {
-		return workspaceContextJanitorExecution{}, fmt.Errorf("resolve %s executable: %w", config.Agent, err)
+		return keeperCompactExecution{}, fmt.Errorf("resolve %s executable: %w", config.Agent, err)
 	}
-	tempDir, err := os.MkdirTemp("", "attn-context-janitor-*")
+	tempDir, err := os.MkdirTemp("", "attn-keeper-compact-*")
 	if err != nil {
-		return workspaceContextJanitorExecution{}, fmt.Errorf("create janitor workspace: %w", err)
+		return keeperCompactExecution{}, fmt.Errorf("create keeper compact workspace: %w", err)
 	}
 	defer os.RemoveAll(tempDir)
 
 	sourcePath := filepath.Join(tempDir, "source.md")
 	candidatePath := filepath.Join(tempDir, "candidate.md")
 	if err := os.WriteFile(sourcePath, []byte(canonical.Content), 0o600); err != nil {
-		return workspaceContextJanitorExecution{}, fmt.Errorf("write janitor source: %w", err)
+		return keeperCompactExecution{}, fmt.Errorf("write keeper compact source: %w", err)
 	}
 	// Native-tools mode: the agent gets its own file tools and a writable scratch
 	// dir (WorkDir). It reads the source and writes the candidate itself; the
@@ -413,37 +452,37 @@ func (d *Daemon) executeWorkspaceContextJanitor(
 	request := agentdriver.HeadlessTaskRequest{
 		Executable: executablePath,
 		Model:      config.Model,
-		Prompt:     fmt.Sprintf(workspaceContextJanitorPrompt, sourcePath, candidatePath),
+		Prompt:     fmt.Sprintf(keeperCompactPrompt, sourcePath, candidatePath),
 		WorkDir:    tempDir,
 	}
 	result, err := provider.RunHeadlessTask(ctx, request)
 	if err != nil {
-		return workspaceContextJanitorExecution{
+		return keeperCompactExecution{
 			ResolvedExecutable: executablePath,
 			Diagnostics:        result.Diagnostics,
 		}, err
 	}
 	candidate, err := os.ReadFile(candidatePath)
 	if errors.Is(err, os.ErrNotExist) {
-		return workspaceContextJanitorExecution{
+		return keeperCompactExecution{
 			ResolvedExecutable: executablePath,
 			Diagnostics:        result.Diagnostics,
-		}, errors.New("workspace context janitor completed without replacing the context")
+		}, errors.New("keeper compact completed without replacing the context")
 	} else if err != nil {
-		return workspaceContextJanitorExecution{}, fmt.Errorf("read janitor candidate: %w", err)
+		return keeperCompactExecution{}, fmt.Errorf("read keeper compact candidate: %w", err)
 	}
-	return workspaceContextJanitorExecution{
+	return keeperCompactExecution{
 		Candidate:          string(candidate),
 		ResolvedExecutable: executablePath,
 		Diagnostics:        result.Diagnostics,
 	}, nil
 }
 
-// workspaceContextJanitorPrompt is a format string: the two %s are the absolute
+// keeperCompactPrompt is a format string: the two %s are the absolute
 // source path (to read) and candidate path (to write). Absolute paths are robust
 // regardless of how the agent resolves cwd, and both providers' file tools accept
 // absolute paths inside the writable workspace.
-const workspaceContextJanitorPrompt = `Compact the workspace context file without changing its meaning.
+const keeperCompactPrompt = `Compact the workspace context file without changing its meaning.
 
 Read the file at %s. Write the complete compacted result to %s. Do not modify any other file. Write the candidate file exactly once with the full result; do not leave it empty.
 
@@ -459,26 +498,26 @@ Do not add facts, dates, chronology, causality, ownership, thread structure, or 
 
 The result must contain exactly one "# Workspace Context" heading, a non-empty "## Area", and a non-empty "## Current Picture".`
 
-func validateWorkspaceContextJanitorCandidate(source, candidate string) error {
+func validateKeeperCompactCandidate(source, candidate string) error {
 	if len([]byte(candidate)) > len([]byte(source)) {
-		return fmt.Errorf("workspace context janitor candidate grew from %d to %d bytes", len([]byte(source)), len([]byte(candidate)))
+		return fmt.Errorf("keeper compact candidate grew from %d to %d bytes", len([]byte(source)), len([]byte(candidate)))
 	}
 	lines := splitMarkdownLines(candidate)
 	if firstNonEmptyLine(lines) != "# Workspace Context" {
-		return errors.New(`workspace context janitor candidate must start with "# Workspace Context"`)
+		return errors.New(`keeper compact candidate must start with "# Workspace Context"`)
 	}
 	if countExactLine(lines, "# Workspace Context") != 1 {
-		return errors.New(`workspace context janitor candidate must contain exactly one "# Workspace Context" heading`)
+		return errors.New(`keeper compact candidate must contain exactly one "# Workspace Context" heading`)
 	}
 	if countTopLevelHeadings(lines) != 1 {
-		return errors.New("workspace context janitor candidate must contain exactly one top-level heading")
+		return errors.New("keeper compact candidate must contain exactly one top-level heading")
 	}
 	for _, heading := range []string{"## Area", "## Current Picture"} {
 		if countExactLine(lines, heading) != 1 {
-			return fmt.Errorf("workspace context janitor candidate must contain exactly one %q heading", heading)
+			return fmt.Errorf("keeper compact candidate must contain exactly one %q heading", heading)
 		}
 		if strings.TrimSpace(markdownSectionContent(lines, heading)) == "" {
-			return fmt.Errorf("workspace context janitor candidate section %q is empty", heading)
+			return fmt.Errorf("keeper compact candidate section %q is empty", heading)
 		}
 	}
 	return nil
@@ -576,12 +615,12 @@ func (d *Daemon) compactWorkspaceContextForSession(
 	if strings.TrimSpace(canonical.Content) == "" {
 		return nil, errors.New("workspace context is empty")
 	}
-	config, err := d.workspaceContextJanitorConfig()
+	config, err := d.keeperCompactConfig()
 	if err != nil {
 		return nil, err
 	}
 	if config.Agent == "" {
-		return nil, errors.New("workspace context janitor is disabled")
+		return nil, errors.New("keeper compact is disabled")
 	}
 	// Drop any pending/in-flight debounced run so the manual command is
 	// authoritative, then run the inline execute+validate+apply path synchronously
@@ -603,7 +642,7 @@ func (d *Daemon) rollbackWorkspaceContextForSession(
 	if err != nil {
 		return nil, err
 	}
-	updated, err := d.store.RestoreWorkspaceContextJanitorBackup(session.WorkspaceID, session.ID)
+	updated, err := d.store.RestoreKeeperCompactBackup(session.WorkspaceID, session.ID)
 	if err != nil {
 		return nil, err
 	}

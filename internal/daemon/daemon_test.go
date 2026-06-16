@@ -4183,9 +4183,9 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"custom review_loop_model", "review_loop_model", "claude-opus-4-6", false},
 		{"empty reviewer_model", "reviewer_model", "", false},
 		{"custom reviewer_model", "reviewer_model", "claude-sonnet-4-6", false},
-		{"empty workspace context janitor", "workspace_context_janitor", "", false},
-		{"invalid workspace context janitor json", "workspace_context_janitor", "{", true},
-		{"incomplete workspace context janitor", "workspace_context_janitor", `{"agent":"codex"}`, true},
+		{"empty keeper compact", "workspace_keeper_compact", "", false},
+		{"invalid keeper compact json", "workspace_keeper_compact", "{", true},
+		{"incomplete keeper compact", "workspace_keeper_compact", `{"agent":"codex"}`, true},
 		{"valid tailscale_enabled true", "tailscale_enabled", "true", false},
 		{"valid tailscale_enabled false", "tailscale_enabled", "false", false},
 		{"empty keybindings_config", "keybindings_config", "", false},
@@ -4209,7 +4209,7 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 	}
 }
 
-func TestDaemon_ValidatesWorkspaceContextJanitorAgentAndExecutable(t *testing.T) {
+func TestDaemon_ValidatesKeeperCompactAgentAndExecutable(t *testing.T) {
 	tempDir := t.TempDir()
 	executable := filepath.Join(tempDir, "custom-codex")
 	if err := os.WriteFile(executable, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
@@ -4220,18 +4220,18 @@ func TestDaemon_ValidatesWorkspaceContextJanitorAgentAndExecutable(t *testing.T)
 	d := &Daemon{store: store.New()}
 	d.store.SetSetting(SettingCodexExecutable, "custom-codex")
 	if err := d.validateSetting(
-		SettingWorkspaceContextJanitor,
+		SettingKeeperCompact,
 		`{"agent":"codex","model":"gpt-test"}`,
 	); err != nil {
-		t.Fatalf("valid janitor setting rejected: %v", err)
+		t.Fatalf("valid keeper compact setting rejected: %v", err)
 	}
 
 	d.store.SetSetting(SettingCodexExecutable, "missing-codex")
 	if err := d.validateSetting(
-		SettingWorkspaceContextJanitor,
+		SettingKeeperCompact,
 		`{"agent":"codex","model":"gpt-test"}`,
 	); err == nil {
-		t.Fatal("janitor setting accepted a missing configured executable")
+		t.Fatal("keeper compact setting accepted a missing configured executable")
 	}
 }
 

@@ -244,11 +244,11 @@ func TestClaudeHeadlessTaskAvailabilitySupportsManagedAuthentication(t *testing.
 	}
 }
 
-// TestCodexHeadlessArgsWidensWritableRootsAdditively proves the notebook narrator's
+// TestCodexHeadlessArgsWidensWritableRootsAdditively proves the notebook narrate pass's
 // ExtraWritableRoots map to `--add-dir <root>` entries (so the workspace-write
 // sandbox also permits writes under the notebook root), placed AFTER the base
 // sandbox args and BEFORE the prompt, without disturbing the feature locks. The
-// janitor's empty ExtraWritableRoots must add no --add-dir (regression guard).
+// keeper compaction duty's empty ExtraWritableRoots must add no --add-dir (regression guard).
 func TestCodexHeadlessArgsWidensWritableRootsAdditively(t *testing.T) {
 	t.Run("narration widens", func(t *testing.T) {
 		args := codexHeadlessArgs(HeadlessTaskRequest{
@@ -282,10 +282,10 @@ func TestCodexHeadlessArgsWidensWritableRootsAdditively(t *testing.T) {
 		}
 	})
 
-	t.Run("janitor adds nothing", func(t *testing.T) {
+	t.Run("keeper compaction adds nothing", func(t *testing.T) {
 		args := codexHeadlessArgs(HeadlessTaskRequest{Model: "gpt-test", Prompt: "compact"})
 		if strings.Contains(strings.Join(args, "\x00"), "--add-dir") {
-			t.Fatalf("janitor (no ExtraWritableRoots) unexpectedly added --add-dir:\n%v", args)
+			t.Fatalf("keeper compaction (no ExtraWritableRoots) unexpectedly added --add-dir:\n%v", args)
 		}
 	})
 }

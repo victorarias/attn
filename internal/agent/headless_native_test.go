@@ -60,7 +60,7 @@ func TestClaudeHeadlessArgsUsesFileToolsAndDropsMCPPin(t *testing.T) {
 		"claude-test",
 		"compact the context file",
 	)
-	// The MCP janitor pin must be gone.
+	// The MCP keeper compaction pin must be gone.
 	assertContainsNone(t, "Claude native args", args,
 		"--strict-mcp-config",
 		"--mcp-config",

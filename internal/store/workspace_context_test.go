@@ -130,21 +130,21 @@ func TestRemoveWorkspaceRemovesContext(t *testing.T) {
 	if _, _, err := s.UpdateWorkspaceContext("workspace-1", "context", "session-1", 0); err != nil {
 		t.Fatalf("UpdateWorkspaceContext error: %v", err)
 	}
-	if _, _, err := s.ApplyWorkspaceContextJanitorResult(
+	if _, _, err := s.ApplyKeeperCompactResult(
 		"workspace-1", "compacted", "attn-janitor", 1, "codex", "gpt-test",
 	); err != nil {
-		t.Fatalf("ApplyWorkspaceContextJanitorResult error: %v", err)
+		t.Fatalf("ApplyKeeperCompactResult error: %v", err)
 	}
 	s.RemoveWorkspace("workspace-1")
 	if s.HasWorkspaceContext("workspace-1") {
 		t.Fatal("workspace context survived explicit workspace removal")
 	}
-	if _, err := s.GetWorkspaceContextJanitorBackup("workspace-1"); !errors.Is(err, ErrWorkspaceContextJanitorBackupNotFound) {
+	if _, err := s.GetKeeperCompactBackup("workspace-1"); !errors.Is(err, ErrKeeperCompactBackupNotFound) {
 		t.Fatalf("backup error = %v, want not found", err)
 	}
 }
 
-func TestWorkspaceContextJanitorApplyAndRollback(t *testing.T) {
+func TestKeeperCompactApplyAndRollback(t *testing.T) {
 	s := New()
 	s.AddWorkspace(&protocol.Workspace{ID: "workspace-1", Title: "Workspace", Directory: t.TempDir()})
 	source := "# Workspace Context\n\n## Area\n\nShared work.\n\n## Current Picture\n\nA longer current picture.\n"
@@ -153,7 +153,7 @@ func TestWorkspaceContextJanitorApplyAndRollback(t *testing.T) {
 		t.Fatalf("seed context: %v", err)
 	}
 
-	updated, changed, err := s.ApplyWorkspaceContextJanitorResult(
+	updated, changed, err := s.ApplyKeeperCompactResult(
 		"workspace-1",
 		compacted,
 		"attn-janitor",
@@ -162,36 +162,36 @@ func TestWorkspaceContextJanitorApplyAndRollback(t *testing.T) {
 		"gpt-test",
 	)
 	if err != nil {
-		t.Fatalf("ApplyWorkspaceContextJanitorResult error: %v", err)
+		t.Fatalf("ApplyKeeperCompactResult error: %v", err)
 	}
 	if !changed || updated.Revision != 2 || updated.UpdatedBySessionID != "attn-janitor" {
 		t.Fatalf("updated = %+v, changed=%v", updated, changed)
 	}
-	backup, err := s.GetWorkspaceContextJanitorBackup("workspace-1")
+	backup, err := s.GetKeeperCompactBackup("workspace-1")
 	if err != nil {
-		t.Fatalf("GetWorkspaceContextJanitorBackup error: %v", err)
+		t.Fatalf("GetKeeperCompactBackup error: %v", err)
 	}
 	if backup.SourceRevision != 1 || backup.SourceContent != source ||
 		backup.ResultRevision != 2 || backup.Agent != "codex" || backup.Model != "gpt-test" {
 		t.Fatalf("backup = %+v", backup)
 	}
 
-	restored, err := s.RestoreWorkspaceContextJanitorBackup("workspace-1", "session-1")
+	restored, err := s.RestoreKeeperCompactBackup("workspace-1", "session-1")
 	if err != nil {
-		t.Fatalf("RestoreWorkspaceContextJanitorBackup error: %v", err)
+		t.Fatalf("RestoreKeeperCompactBackup error: %v", err)
 	}
 	if restored.Content != source || restored.Revision != 3 || restored.UpdatedBySessionID != "session-1" {
 		t.Fatalf("restored = %+v", restored)
 	}
 }
 
-func TestWorkspaceContextJanitorRollbackRejectsLaterEdit(t *testing.T) {
+func TestKeeperCompactRollbackRejectsLaterEdit(t *testing.T) {
 	s := New()
 	s.AddWorkspace(&protocol.Workspace{ID: "workspace-1", Title: "Workspace", Directory: t.TempDir()})
 	if _, _, err := s.UpdateWorkspaceContext("workspace-1", "source", "session-1", 0); err != nil {
 		t.Fatalf("seed context: %v", err)
 	}
-	if _, _, err := s.ApplyWorkspaceContextJanitorResult(
+	if _, _, err := s.ApplyKeeperCompactResult(
 		"workspace-1", "compacted", "attn-janitor", 1, "claude", "claude-test",
 	); err != nil {
 		t.Fatalf("compact context: %v", err)
@@ -199,12 +199,12 @@ func TestWorkspaceContextJanitorRollbackRejectsLaterEdit(t *testing.T) {
 	if _, _, err := s.UpdateWorkspaceContext("workspace-1", "later edit", "session-2", 2); err != nil {
 		t.Fatalf("later edit: %v", err)
 	}
-	if _, err := s.RestoreWorkspaceContextJanitorBackup("workspace-1", "session-1"); !errors.Is(err, ErrWorkspaceContextConflict) {
+	if _, err := s.RestoreKeeperCompactBackup("workspace-1", "session-1"); !errors.Is(err, ErrWorkspaceContextConflict) {
 		t.Fatalf("rollback error = %v, want conflict", err)
 	}
 }
 
-func TestWorkspaceContextJanitorBackupSurvivesReopen(t *testing.T) {
+func TestKeeperCompactBackupSurvivesReopen(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := NewWithDB(dbPath)
 	if err != nil {
@@ -216,7 +216,7 @@ func TestWorkspaceContextJanitorBackupSurvivesReopen(t *testing.T) {
 	if _, _, err := s.UpdateWorkspaceContext("workspace-1", source, "session-1", 0); err != nil {
 		t.Fatalf("seed context: %v", err)
 	}
-	if _, _, err := s.ApplyWorkspaceContextJanitorResult(
+	if _, _, err := s.ApplyKeeperCompactResult(
 		"workspace-1", compacted, "attn-janitor", 1, "claude", "sonnet",
 	); err != nil {
 		t.Fatalf("compact context: %v", err)
@@ -228,7 +228,7 @@ func TestWorkspaceContextJanitorBackupSurvivesReopen(t *testing.T) {
 		t.Fatalf("reopen store: %v", err)
 	}
 	defer reopened.Close()
-	backup, err := reopened.GetWorkspaceContextJanitorBackup("workspace-1")
+	backup, err := reopened.GetKeeperCompactBackup("workspace-1")
 	if err != nil {
 		t.Fatalf("get reopened backup: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestWorkspaceContextJanitorBackupSurvivesReopen(t *testing.T) {
 		backup.Agent != "claude" || backup.Model != "sonnet" {
 		t.Fatalf("backup = %+v", backup)
 	}
-	restored, err := reopened.RestoreWorkspaceContextJanitorBackup("workspace-1", "session-1")
+	restored, err := reopened.RestoreKeeperCompactBackup("workspace-1", "session-1")
 	if err != nil {
 		t.Fatalf("restore reopened backup: %v", err)
 	}

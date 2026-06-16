@@ -36,7 +36,7 @@ const (
 	SettingReviewLoopLastIterations = "review_loop_last_iterations"
 	SettingReviewLoopModel          = "review_loop_model"
 	SettingReviewerModel            = "reviewer_model"
-	SettingWorkspaceContextJanitor  = "workspace_context_janitor"
+	SettingKeeperCompact            = "workspace_keeper_compact"
 	SettingTailscaleEnabled         = "tailscale_enabled"
 	SettingKeybindingsConfig        = "keybindings_config"
 	SettingNewSessionYoloPrefix     = "new_session_yolo_"
@@ -53,13 +53,13 @@ const (
 	// SettingNotebookDreamingTimezone is the IANA timezone the frequency is
 	// evaluated in. Empty => the machine's local time.
 	SettingNotebookDreamingTimezone = "notebook.dreaming.timezone"
-	// SettingNotebookSummarizeSession configures the per-session digest narrator
+	// SettingNotebookSummarizeSession configures the per-session summarize pass
 	// (the CHEAP tier). JSON {"agent":"claude"|"codex","model":"<id>"}; empty =>
 	// the built-in cheap default (Claude Haiku). See parseNotebookNarrationConfig.
 	SettingNotebookSummarizeSession = "notebook.summarize_session"
-	// SettingNotebookNarrateWorkspace configures the curated-journal narrator (the
+	// SettingNotebookNarrateWorkspace configures the curated-journal narrate pass (the
 	// STRONG tier). JSON {"agent":"claude"|"codex","model":"<id>"}; empty => the
-	// built-in strong default (Claude Sonnet). Claude is the default narrator
+	// built-in strong default (Claude Sonnet). Claude is the default narrate agent
 	// because its native Write/Edit enforce read-before-write CAS on the shared
 	// journal; see parseNotebookNarrationConfig.
 	SettingNotebookNarrateWorkspace = "notebook.narrate_workspace"
@@ -258,8 +258,8 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateTheme(value)
 	case SettingTailscaleEnabled:
 		return validateBooleanSetting(value)
-	case SettingWorkspaceContextJanitor:
-		return d.validateWorkspaceContextJanitorSetting(value)
+	case SettingKeeperCompact:
+		return d.validateKeeperCompactSetting(value)
 	case SettingNotebookSummarizeSession:
 		return d.validateNotebookNarrationSetting(notebookSummarizeSessionKind, value)
 	case SettingNotebookNarrateWorkspace:

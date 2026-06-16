@@ -1644,8 +1644,11 @@ sendFetchPRDetails,
     return workspaceContexts.map((context) => {
       const workspace = workspacesById.get(context.workspace_id);
       const updatedBy = sessionsById.get(context.updated_by_session_id);
+      // 'attn-janitor' is the keeper's compaction updater sentinel — a PERSISTED
+      // value kept as-is to avoid orphaning existing rows; only the displayed
+      // label moves to the keeper persona.
       const updatedByLabel = context.updated_by_session_id === 'attn-janitor'
-        ? 'Attn Janitor'
+        ? 'Attn Keeper'
         : updatedBy?.label;
       return {
         context,

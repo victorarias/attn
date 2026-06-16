@@ -1050,7 +1050,7 @@ func TestFailedRunHonorsMidRunZeroDebounceRequeue(t *testing.T) {
 	if _, err := r.Enqueue("compact_context", "ws-1", EnqueueOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	<-runs        // first run started
+	<-runs         // first run started
 	<-firstEntered // parked, about to fail when released
 
 	// Inject the removal-boundary final task while the run is in flight: record is

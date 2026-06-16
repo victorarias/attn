@@ -140,17 +140,17 @@ type Daemon struct {
 	notebookWatcherMu   sync.Mutex
 	notebookWatcher     *notebook.Watcher
 	notebookWatchedRoot string
-	pendingInitialWS map[*wsClient]struct{}
-	startedOnce      sync.Once
-	startedCh        chan struct{}
-	tailscale        *tailscaleRuntime
-	plugins          *pluginRegistry
-	pluginProcesses  *pluginProcessRegistry
-	pluginDriverMu   sync.Mutex
-	pluginLaunching  map[string]pluginSessionLaunch
-	pluginReports    map[string][]pendingPluginReport
-	pluginExits      map[string]ptybackend.ExitInfo
-	pluginDir        string
+	pendingInitialWS    map[*wsClient]struct{}
+	startedOnce         sync.Once
+	startedCh           chan struct{}
+	tailscale           *tailscaleRuntime
+	plugins             *pluginRegistry
+	pluginProcesses     *pluginProcessRegistry
+	pluginDriverMu      sync.Mutex
+	pluginLaunching     map[string]pluginSessionLaunch
+	pluginReports       map[string][]pendingPluginReport
+	pluginExits         map[string]ptybackend.ExitInfo
+	pluginDir           string
 
 	worktreePluginCallTimeout         time.Duration
 	worktreeCreateProviderCallTimeout time.Duration
@@ -180,10 +180,10 @@ type Daemon struct {
 
 	workspaceContextCheckoutMu sync.Mutex
 
-	// compactRunner is the durable task runner that owns the workspace-context
-	// compaction janitor (kind "compact_context") and the notebook-narration tasks.
-	// It replaces the bespoke time.AfterFunc scheduling + single-flight/cancel/
-	// commit-fence guards.
+	// compactRunner is the durable task runner that owns the keeper's
+	// workspace-context compaction duty (kind "compact_context") and the
+	// notebook-narration tasks. It replaces the bespoke time.AfterFunc scheduling +
+	// single-flight/cancel/commit-fence guards.
 	//
 	// compactRunnerMu guards the POINTER swap only. startCompactRunner runs late in
 	// Start() and replaces the placeholder runner, while Stop()/enqueue/forget read
@@ -197,21 +197,21 @@ type Daemon struct {
 	compactRunner   *tasks.Runner
 	// The *Threshold/*Debounce/*Timeout fields remain the test-override knobs
 	// feeding the size gate, the Enqueue debounce, and RegisterWithTimeout.
-	workspaceContextJanitorThreshold int
-	workspaceContextJanitorDebounce  time.Duration
-	workspaceContextJanitorTimeout   time.Duration
-	// workspaceContextBeforeJanitorApply is the apply-injection test hook, fired
+	keeperCompactThreshold int
+	keeperCompactDebounce  time.Duration
+	keeperCompactTimeout   time.Duration
+	// workspaceContextBeforeKeeperApply is the apply-injection test hook, fired
 	// inside the executor immediately before the CommitGuard fence + Apply.
-	workspaceContextBeforeJanitorApply func()
+	workspaceContextBeforeKeeperApply func()
 	// workspaceContextCompactionExecution, when set, replaces the agentic
-	// executeWorkspaceContextJanitor spawn with a canned execution. Tests use it
+	// executeKeeperCompact spawn with a canned execution. Tests use it
 	// to return a fixed compacted candidate without spawning a real LLM; the
 	// validate + commit-under-CommitGuard path stays real.
 	workspaceContextCompactionExecution func(
 		ctx context.Context,
-		config workspaceContextJanitorConfig,
+		config keeperCompactConfig,
 		canonical *protocol.WorkspaceContext,
-	) (workspaceContextJanitorExecution, error)
+	) (keeperCompactExecution, error)
 
 	// Notebook narration test seams. summarizeSessionExecution /
 	// narrateWorkspaceExecution, when set, replace the real RunHeadlessTask spawn so
@@ -706,6 +706,7 @@ func (d *Daemon) Start() error {
 	go d.runHTTPServer()
 	d.maybeStartDiagServer()
 	d.removeLegacyEmbeddedTailscaleState()
+	d.migrateKeeperCompactSettingKey() // one-time settings key rename (workspace_context_janitor -> workspace_keeper_compact)
 	go d.ensureTailscaleServeFromSettingsAndBroadcast()
 	d.hubManager.Start(d.doneContext())
 

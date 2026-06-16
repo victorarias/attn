@@ -202,36 +202,11 @@ func TestWorkspaceContextSessionStartOutputWrapsGuidance(t *testing.T) {
 	if output.HookSpecificOutput.HookEventName != "SessionStart" {
 		t.Fatalf("hook event = %q", output.HookSpecificOutput.HookEventName)
 	}
-	want := WorkspaceContextGuidance("/tmp/context.md") + "\n\n" + JournalingDirective()
+	// Non-chief agents are NOT nudged to journal: the SessionStart fallback carries
+	// only the workspace-context guidance, with no journaling directive appended.
+	want := WorkspaceContextGuidance("/tmp/context.md")
 	if output.HookSpecificOutput.AdditionalContext != want {
-		t.Fatal("hook output should wrap the workspace context guidance plus the journaling directive")
-	}
-}
-
-func TestJournalingDirective(t *testing.T) {
-	d := JournalingDirective()
-	for _, expected := range []string{
-		"durable work-journal",
-		"attn notebook journal append --text",
-		"notable moments, not routine steps",
-		"never a place for secrets",
-	} {
-		if !strings.Contains(d, expected) {
-			t.Fatalf("journaling directive missing %q: %q", expected, d)
-		}
-	}
-	// The lite directive must not duplicate the chief's curator-only guidance.
-	// Keep this list in sync with NotebookGuidance: if it gains a new chief-only
-	// concept, add a token here so the lite directive can't silently start echoing it.
-	for _, unwanted := range []string{
-		"chief of staff",
-		"memory write",
-		"--base-hash",
-		"sources:",
-	} {
-		if strings.Contains(d, unwanted) {
-			t.Fatalf("journaling directive should stay lightweight; found chief-only %q in %q", unwanted, d)
-		}
+		t.Fatal("hook output should carry only the workspace context guidance")
 	}
 }
 
@@ -244,9 +219,9 @@ func TestNotebookGuidance(t *testing.T) {
 		"attn notebook journal append",
 		"attn notebook memory write",
 		"--base-hash",
-		"sources:",            // grounding rule
-		"paraphrase",          // grounding rule
-		"root-absolute",       // linking convention
+		"sources:",                              // grounding rule
+		"paraphrase",                            // grounding rule
+		"root-absolute",                         // linking convention
 		"attn workspace context show --session", // opt-in workspace read
 		"load the attn skill's notebook reference",
 	} {

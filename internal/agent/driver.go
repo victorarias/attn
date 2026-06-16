@@ -294,8 +294,8 @@ type HeadlessTaskRequest struct {
 	//     WorkDir) also permits writes under these roots. Reads are unrestricted
 	//     under workspace-write, so transcript dirs need no widening.
 	//
-	// Empty (the janitor's case) leaves both providers' existing scratch-only
-	// behavior unchanged.
+	// Empty (the keeper's compaction case) leaves both providers' existing
+	// scratch-only behavior unchanged.
 	ExtraWritableRoots []string
 }
 

@@ -6,8 +6,8 @@ import "sync"
 // primitive that makes Cancel safe: it draws the line between work the runner may
 // cancel mid-flight and a durable write the runner must never tear.
 //
-// Contract (ported in spirit from cancelWorkspaceContextJanitor's commit fence,
-// internal/daemon/workspace_context_janitor.go:318):
+// Contract (ported in spirit from the keeper compaction commit fence in
+// internal/daemon/workspace_keeper.go):
 //
 //   - The executor does its cancellable work (LLM call, file reads) honoring
 //     ctx.Done() up to the moment it is about to perform its single durable write.

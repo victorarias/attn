@@ -11,7 +11,7 @@ import (
 )
 
 // The raw tier is the deterministic capture floor for the notebook narration
-// pipeline. It holds machine inputs the narrator later consumes, under
+// pipeline. It holds machine inputs the narrate pass later consumes, under
 // <notebook.root>/.attn/raw/ — physically unreachable through the user-facing
 // notebook APIs (CleanPath rejects dotdir segments) and skipped by the watcher,
 // so raw writes emit no external-edit broadcast. Two deterministic daemon writes
@@ -128,8 +128,8 @@ func writeRawAtomic(dir, id string, content []byte) error {
 // context.md) is deleted. It is the deterministic data-safety floor: context.md
 // is erased by store.RemoveWorkspace's DELETE FROM workspace_contexts, which an
 // async writer cannot win, so this MUST run at every removal site AFTER the
-// janitor cancel/forget (commit-fence: no in-flight janitor write is still racing
-// the context row) and BEFORE store.RemoveWorkspace.
+// keeper compaction cancel/forget (commit-fence: no in-flight keeper compaction
+// write is still racing the context row) and BEFORE store.RemoveWorkspace.
 //
 // Best-effort: it never returns an error and never blocks or fails a teardown.
 // Every failure — read error, unresolvable/unconfigured notebook root, write

@@ -958,7 +958,7 @@ commands:
   checkout                         alias for show
   update [--session <id>]          publish local edits if the revision matches
   status [--session <id>]          show local and canonical revision state
-  compact [--session <id>]         compact now with the configured janitor
+  compact [--session <id>]         compact now with the configured keeper
   rollback [--session <id>]        restore the latest pre-compaction snapshot
 `)
 }

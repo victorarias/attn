@@ -24,7 +24,7 @@ import (
 // The harvest merges into the persisted candidate set under .attn/dreams/; the
 // LLM promote pass that turns candidates into durable memory arrives in the
 // follow-up PR. The cron tick granularity of a minute is ample for a daily
-// janitor and keeps catch-up logic trivial.
+// background pass and keeps catch-up logic trivial.
 
 // harvestDreamKind is the runner task kind for the nightly dream harvest. Its
 // subject is the notebook root string (harvest_dream:<root>); the task store's
@@ -37,7 +37,7 @@ const (
 	defaultDreamingFrequency = "0 3 * * *"
 
 	// defaultDreamSchedulerInterval is how often the enqueuer checks whether a
-	// harvest is due. A daily janitor does not need finer granularity.
+	// harvest is due. A daily pass does not need finer granularity.
 	defaultDreamSchedulerInterval = time.Minute
 )
 
@@ -49,8 +49,8 @@ const (
 // .attn/dreams/ — no durable memory and no LLM (that is the promote phase).
 //
 // No CommitGuard: SaveDreamCandidates is an atomic temp+rename, ctx-free write,
-// so a Cancel/timeout cannot tear it (the same property the janitor's ctx-free
-// commit relies on). The ctx is therefore unused.
+// so a Cancel/timeout cannot tear it (the same property the keeper's compaction
+// ctx-free commit relies on). The ctx is therefore unused.
 func (d *Daemon) harvestDreamExecutor(_ context.Context, _ *tasks.Task) error {
 	root, err := d.notebookRoot()
 	if err != nil {
