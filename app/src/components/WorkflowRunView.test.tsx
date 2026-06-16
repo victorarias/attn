@@ -51,6 +51,46 @@ describe('WorkflowRunView', () => {
     expect(callRow).toHaveTextContent('1');
   });
 
+  it('surfaces the in-flight call as a Current step callout with label, phase, and elapsed', () => {
+    const startedAt = new Date(Date.now() - 65_000).toISOString();
+    const run = makeRun({
+      status: 'running' as WorkflowRun['status'],
+      phase: 'review',
+      agent_calls: [
+        makeCall({ ordinal: '1', label: 'plan', status: 'ok' as Call['status'] }),
+        makeCall({
+          ordinal: '2',
+          label: 'review changes',
+          status: 'running' as Call['status'],
+          phase: 'review',
+          resolved_model: 'gpt-5-codex',
+          started_at: startedAt,
+        }),
+      ],
+    });
+    render(<WorkflowRunView run={run} />);
+
+    const callout = screen.getByTestId('workflow-current-step');
+    expect(callout).toHaveTextContent('review changes');
+    expect(callout).toHaveTextContent('gpt-5-codex');
+    // started ~65s ago -> elapsed renders as 1:0X (m:ss), proving the live clock.
+    expect(callout.textContent).toMatch(/1:0\d/);
+
+    // The running row is emphasized for the eye.
+    expect(screen.getByTestId('workflow-call-2')).toHaveAttribute('data-running', 'true');
+    // done still excludes the running call: 1 of 2 terminal.
+    expect(screen.getByText('1/2 calls')).toBeInTheDocument();
+  });
+
+  it('shows no Current step callout when nothing is running', () => {
+    const run = makeRun({
+      status: 'completed' as WorkflowRun['status'],
+      agent_calls: [makeCall({ ordinal: '1', label: 'plan', status: 'ok' as Call['status'] })],
+    });
+    render(<WorkflowRunView run={run} />);
+    expect(screen.queryByTestId('workflow-current-step')).toBeNull();
+  });
+
   it('shows the last_error text for a failed run', () => {
     const run = makeRun({
       status: 'failed' as WorkflowRun['status'],

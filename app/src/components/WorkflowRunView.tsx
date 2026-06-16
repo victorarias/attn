@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { WorkflowRun, WorkflowRunStatus, WorkflowAgentCallStatus, Call } from '../types/generated';
 import './WorkflowRunView.css';
 
@@ -44,6 +45,13 @@ function statusLabel(status: WorkflowRunStatus | null): string {
   }
 }
 
+function formatElapsed(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 function basename(path: string): string {
   const trimmed = path.replace(/\/+$/, '');
   const idx = trimmed.lastIndexOf('/');
@@ -58,6 +66,18 @@ function titleForRun(run: WorkflowRun): string {
 }
 
 export function WorkflowRunView({ run, onClose }: WorkflowRunViewProps) {
+  // Self-driven clock so an in-flight call's elapsed time ticks up between
+  // daemon broadcasts. Gated strictly on a running run and cleaned up on
+  // unmount/status-change so it never leaks a timer past completion. Declared
+  // before the null guard to keep hook order stable.
+  const runStatus = run?.status ?? null;
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (runStatus !== WorkflowRunStatus.Running) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [runStatus]);
+
   if (run === null) {
     return (
       <div className="workflow-run-view" data-testid="workflow-run-view">
@@ -78,6 +98,9 @@ export function WorkflowRunView({ run, onClose }: WorkflowRunViewProps) {
   const calls: Call[] = run.agent_calls ?? [];
   const total = calls.length;
   const done = calls.filter((call) => TERMINAL_CALL_STATUSES.has(call.status)).length;
+  const running = calls.find((call) => call.status === WorkflowAgentCallStatus.Running) ?? null;
+  const runningElapsedMs =
+    running && running.started_at ? Math.max(0, now - Date.parse(running.started_at)) : null;
 
   return (
     <div className="workflow-run-view" data-testid="workflow-run-view">
@@ -105,14 +128,44 @@ export function WorkflowRunView({ run, onClose }: WorkflowRunViewProps) {
       </div>
 
       <div className="workflow-run-view__progress">
-        {done}/{total} calls
+        <span className="workflow-run-view__progress-count">
+          {done}/{total} calls
+        </span>
+        {running && (
+          <span className="workflow-run-view__progress-running">
+            · running #{running.ordinal}
+          </span>
+        )}
       </div>
 
+      {running && (
+        <div className="workflow-run-view__current" data-testid="workflow-current-step">
+          <span className="workflow-run-view__spinner" aria-hidden="true" />
+          <span className="workflow-run-view__current-label">
+            {running.label || `call ${running.ordinal}`}
+          </span>
+          {(running.phase || run.phase) && (
+            <span className="workflow-run-view__current-phase">
+              {running.phase || run.phase}
+            </span>
+          )}
+          {running.resolved_model && (
+            <span className="workflow-run-view__current-model">{running.resolved_model}</span>
+          )}
+          {runningElapsedMs !== null && (
+            <span className="workflow-run-view__elapsed">{formatElapsed(runningElapsedMs)}</span>
+          )}
+        </div>
+      )}
+
       <ul className="workflow-run-view__calls">
-        {calls.map((call) => (
+        {calls.map((call) => {
+          const isRunning = call.status === WorkflowAgentCallStatus.Running;
+          return (
           <li
             key={call.ordinal}
-            className="workflow-run-view__call"
+            className={`workflow-run-view__call${isRunning ? ' is-running' : ''}`}
+            data-running={isRunning ? 'true' : undefined}
             data-testid={`workflow-call-${call.ordinal}`}
           >
             <span className="workflow-run-view__call-ordinal">{call.ordinal}</span>
@@ -129,7 +182,8 @@ export function WorkflowRunView({ run, onClose }: WorkflowRunViewProps) {
               <span className="workflow-run-view__call-error">{call.error}</span>
             )}
           </li>
-        ))}
+          );
+        })}
       </ul>
 
       {run.status === WorkflowRunStatus.Failed && run.last_error && (
