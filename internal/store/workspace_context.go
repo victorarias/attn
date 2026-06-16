@@ -13,10 +13,9 @@ var ErrWorkspaceContextConflict = errors.New("workspace context revision conflic
 var ErrKeeperCompactBackupNotFound = errors.New("keeper compact backup not found")
 
 // KeeperCompactBackup is the source snapshot captured before the keeper's
-// compaction duty rewrites a workspace context, used for direct rollback. The
-// backing SQLite table is still named workspace_context_janitor_backups — a
-// DB-internal identifier kept as-is to avoid a schema migration; only the Go
-// symbols moved to the keeper persona.
+// compaction duty rewrites a workspace context, used for direct rollback. It is
+// stored in the workspace_keeper_compact_backups table (renamed off the retired
+// "janitor" persona by migration 51).
 type KeeperCompactBackup struct {
 	WorkspaceID    string
 	SourceRevision int
@@ -236,7 +235,7 @@ func (s *Store) ApplyKeeperCompactResult(
 		return nil, false, err
 	}
 	if _, err := tx.Exec(`
-		INSERT INTO workspace_context_janitor_backups
+		INSERT INTO workspace_keeper_compact_backups
 			(workspace_id, source_revision, source_content, result_revision, agent, model, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
@@ -272,7 +271,7 @@ func (s *Store) GetKeeperCompactBackup(workspaceID string) (*KeeperCompactBackup
 	err := s.db.QueryRow(`
 		SELECT workspace_id, source_revision, source_content, result_revision,
 			agent, model, created_at
-		FROM workspace_context_janitor_backups
+		FROM workspace_keeper_compact_backups
 		WHERE workspace_id = ?`,
 		workspaceID,
 	).Scan(
@@ -314,7 +313,7 @@ func (s *Store) RestoreKeeperCompactBackup(
 	err = tx.QueryRow(`
 		SELECT workspace_id, source_revision, source_content, result_revision,
 			agent, model, created_at
-		FROM workspace_context_janitor_backups
+		FROM workspace_keeper_compact_backups
 		WHERE workspace_id = ?`,
 		workspaceID,
 	).Scan(
@@ -405,6 +404,6 @@ func (s *Store) RemoveWorkspaceContext(workspaceID string) {
 	if s.db == nil {
 		return
 	}
-	_, _ = s.db.Exec(`DELETE FROM workspace_context_janitor_backups WHERE workspace_id = ?`, workspaceID)
+	_, _ = s.db.Exec(`DELETE FROM workspace_keeper_compact_backups WHERE workspace_id = ?`, workspaceID)
 	_, _ = s.db.Exec(`DELETE FROM workspace_contexts WHERE workspace_id = ?`, workspaceID)
 }

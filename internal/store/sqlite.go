@@ -396,6 +396,10 @@ var migrations = []migration{
 		);
 	`},
 	{48, "drop label from recent_locations", "ALTER TABLE recent_locations DROP COLUMN label"},
+	// Versions 49 and 50 are BURNED on real prod/dev DBs (pre-release builds recorded
+	// them with no matching source migration), so the keeper rename lands at 51 — the
+	// first version above every observed MAX(version). See applyMigration51.
+	{51, "rename workspace context janitor backups to keeper compact backups", ""},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -544,6 +548,11 @@ func migrateDB(db *sql.DB) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
+		} else if m.version == 51 {
+			if err := applyMigration51(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		} else {
 			if _, err := tx.Exec(m.sql); err != nil {
 				tx.Rollback()
@@ -661,6 +670,57 @@ func applyMigration48(tx *sql.Tx) error {
 	}
 	_, err = tx.Exec("ALTER TABLE recent_locations DROP COLUMN label")
 	return err
+}
+
+// applyMigration51 retires the last "janitor" identifiers from the live schema:
+// it renames the keeper's compaction-backup table and realigns the persisted
+// context-updater sentinel. Guarded so it is idempotent and safe on every DB
+// shape, including a migration rewind that re-runs migration 47's
+// CREATE-IF-NOT-EXISTS after the rename already happened:
+//   - only the legacy table exists (normal upgrade): rename it, preserving data.
+//   - both exist (47 recreated an empty legacy table beside the authoritative
+//     keeper-named one): drop the spurious legacy duplicate.
+//   - only the keeper-named table exists (already migrated): no-op.
+//
+// The UPDATE rewrites historical rows the keeper stamped before this rename.
+func applyMigration51(tx *sql.Tx) error {
+	oldExists, err := tableExists(tx, "workspace_context_janitor_backups")
+	if err != nil {
+		return err
+	}
+	newExists, err := tableExists(tx, "workspace_keeper_compact_backups")
+	if err != nil {
+		return err
+	}
+	switch {
+	case oldExists && !newExists:
+		if _, err := tx.Exec(`ALTER TABLE workspace_context_janitor_backups RENAME TO workspace_keeper_compact_backups`); err != nil {
+			return err
+		}
+	case oldExists && newExists:
+		if _, err := tx.Exec(`DROP TABLE workspace_context_janitor_backups`); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(
+		`UPDATE workspace_contexts SET updated_by_session_id = 'attn-keeper' WHERE updated_by_session_id = 'attn-janitor'`,
+	); err != nil {
+		return err
+	}
+	return nil
+}
+
+// tableExists reports whether a table of the given name exists in the schema.
+func tableExists(tx *sql.Tx, name string) (bool, error) {
+	var got string
+	err := tx.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&got)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func applyMigration28(tx *sql.Tx) error {

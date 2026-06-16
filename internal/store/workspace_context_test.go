@@ -131,7 +131,7 @@ func TestRemoveWorkspaceRemovesContext(t *testing.T) {
 		t.Fatalf("UpdateWorkspaceContext error: %v", err)
 	}
 	if _, _, err := s.ApplyKeeperCompactResult(
-		"workspace-1", "compacted", "attn-janitor", 1, "codex", "gpt-test",
+		"workspace-1", "compacted", "attn-keeper", 1, "codex", "gpt-test",
 	); err != nil {
 		t.Fatalf("ApplyKeeperCompactResult error: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestKeeperCompactApplyAndRollback(t *testing.T) {
 	updated, changed, err := s.ApplyKeeperCompactResult(
 		"workspace-1",
 		compacted,
-		"attn-janitor",
+		"attn-keeper",
 		1,
 		"codex",
 		"gpt-test",
@@ -164,7 +164,7 @@ func TestKeeperCompactApplyAndRollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyKeeperCompactResult error: %v", err)
 	}
-	if !changed || updated.Revision != 2 || updated.UpdatedBySessionID != "attn-janitor" {
+	if !changed || updated.Revision != 2 || updated.UpdatedBySessionID != "attn-keeper" {
 		t.Fatalf("updated = %+v, changed=%v", updated, changed)
 	}
 	backup, err := s.GetKeeperCompactBackup("workspace-1")
@@ -192,7 +192,7 @@ func TestKeeperCompactRollbackRejectsLaterEdit(t *testing.T) {
 		t.Fatalf("seed context: %v", err)
 	}
 	if _, _, err := s.ApplyKeeperCompactResult(
-		"workspace-1", "compacted", "attn-janitor", 1, "claude", "claude-test",
+		"workspace-1", "compacted", "attn-keeper", 1, "claude", "claude-test",
 	); err != nil {
 		t.Fatalf("compact context: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestKeeperCompactBackupSurvivesReopen(t *testing.T) {
 		t.Fatalf("seed context: %v", err)
 	}
 	if _, _, err := s.ApplyKeeperCompactResult(
-		"workspace-1", compacted, "attn-janitor", 1, "claude", "sonnet",
+		"workspace-1", compacted, "attn-keeper", 1, "claude", "sonnet",
 	); err != nil {
 		t.Fatalf("compact context: %v", err)
 	}

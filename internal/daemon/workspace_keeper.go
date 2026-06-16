@@ -19,12 +19,11 @@ import (
 
 const (
 	// keeperCompactUpdater is the updated_by_session_id sentinel written when the
-	// keeper's compaction duty rewrites a workspace context. The STRING VALUE
-	// ("attn-janitor") is a PERSISTED identifier: it is stored in the
-	// workspace_contexts.updated_by_session_id column and string-matched in the
-	// frontend navigator. Renaming the value would orphan existing rows, so only
-	// the Go symbol moves to the keeper persona — the value stays "attn-janitor".
-	keeperCompactUpdater          = "attn-janitor"
+	// keeper's compaction duty rewrites a workspace context. It is a PERSISTED
+	// identifier (stored in workspace_contexts.updated_by_session_id and
+	// string-matched in the frontend navigator); migration 51 realigns existing
+	// rows from the old "attn-janitor" value to this one.
+	keeperCompactUpdater          = "attn-keeper"
 	defaultKeeperCompactThreshold = 12 * 1024
 	defaultKeeperCompactDebounce  = 10 * time.Minute
 	defaultKeeperCompactTimeout   = 5 * time.Minute
