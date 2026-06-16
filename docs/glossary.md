@@ -81,16 +81,22 @@ URLs); we do not author one from paraphrase alone.
 
 ## Dreaming (the harvest pass)
 
-The pass that **distills durable facts into memory notes** — the `harvest_dream` task
-kind. Today it is a **read-only preview**: `attn notebook dream` (and `--dry-run`)
-surfaces candidate facts gathered from the journal, workspace decisions, and dispatch
-outcomes, without writing anything. The scheduler and candidate persistence exist;
-the distillation that would actually *write* memory notes is **deferred**, so memory
-notes are authored by hand (`notebook memory write`) for now.
+The pass that gathers durable raw material toward memory notes — the `harvest_dream`
+task kind. It is **gated off by default** (`notebook.dreaming.enabled`). When enabled,
+a nightly cron runs the harvest on the durable runner: it scans the journal and closed
+dispatches into a deduplicated **candidate set**, ranked by recurrence across distinct
+contexts, and atomically accumulates it (monotonically) in `candidates.json` under
+`.attn/dreams/`. `attn notebook dream status` / `--dry-run` are **read-only previews**
+of that accumulated-plus-fresh union — they write nothing themselves.
+
+What dreaming does **not** yet do is *promote* candidates into memory notes: the gated
+LLM distillation that would write durable notes is **deferred** to a follow-up. So
+today the harvest produces raw candidates only, and memory notes are authored by hand
+(`notebook memory write`).
 
 The keeper's two duties (below) are scoped to compaction and journal narration;
 whether the harvest is eventually a third keeper duty or a distinct entity is left
-open here deliberately, until the distillation is actually built.
+open here deliberately, until the promote pass is actually built.
 
 ## The keeper
 
