@@ -43,13 +43,13 @@ const (
 	// SettingNotebookRoot overrides the notebook's filesystem root. Empty =>
 	// the profile-derived default (~/attn-notebook[-profile]).
 	SettingNotebookRoot = "notebook.root"
-	// SettingNotebookDreamingFrequency is the 5-field cron expression for the
+	// SettingNotebookCronFrequency is the 5-field cron expression for the
 	// notebook's nightly maintenance slot (currently the daily-narrate backstop).
 	// Empty => the default ("0 3 * * *").
-	SettingNotebookDreamingFrequency = "notebook.dreaming.frequency"
-	// SettingNotebookDreamingTimezone is the IANA timezone the frequency is
+	SettingNotebookCronFrequency = "notebook.cron.frequency"
+	// SettingNotebookCronTimezone is the IANA timezone the frequency is
 	// evaluated in. Empty => the machine's local time.
-	SettingNotebookDreamingTimezone = "notebook.dreaming.timezone"
+	SettingNotebookCronTimezone = "notebook.cron.timezone"
 	// SettingNotebookSummarizeSession configures the per-session summarize pass
 	// (the CHEAP tier). JSON {"agent":"claude"|"codex","model":"<id>"}; empty =>
 	// the built-in cheap default (Claude Haiku). See parseNotebookNarrationConfig.
@@ -263,10 +263,10 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return d.validateNotebookNarrationSetting(notebookNarrateWorkspaceKind, value)
 	case SettingNotebookRoot:
 		return validateNotebookRoot(value)
-	case SettingNotebookDreamingFrequency:
-		return validateNotebookDreamingFrequency(value)
-	case SettingNotebookDreamingTimezone:
-		return validateNotebookDreamingTimezone(value)
+	case SettingNotebookCronFrequency:
+		return validateNotebookCronFrequency(value)
+	case SettingNotebookCronTimezone:
+		return validateNotebookCronTimezone(value)
 	case SettingKeybindingsConfig:
 		return validateKeybindingsConfig(value)
 	case SettingReviewLoopPresets, SettingReviewLoopLastPreset, SettingReviewLoopLastPrompt, SettingReviewLoopLastIterations, SettingReviewLoopModel, SettingReviewerModel:
@@ -339,27 +339,27 @@ func validateNotebookRoot(value string) error {
 	return nil
 }
 
-// validateNotebookDreamingFrequency accepts an empty value (use the default) or a
+// validateNotebookCronFrequency accepts an empty value (use the default) or a
 // cron expression the scheduler can fire. It rejects two parseable-but-wrong
 // forms: an embedded CRON_TZ=/TZ= prefix (a second timezone source that would
-// silently compete with notebook.dreaming.timezone) and a schedule whose date can
+// silently compete with notebook.cron.timezone) and a schedule whose date can
 // never occur (e.g. "0 0 30 2 *", Feb 30) — robfig cron returns the zero time for
-// those, which the scheduler would treat as perpetually due and re-harvest in a
+// those, which the scheduler would treat as perpetually due and re-fire in a
 // tight loop.
-func validateNotebookDreamingFrequency(value string) error {
+func validateNotebookCronFrequency(value string) error {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return nil
 	}
 	if hasCronTZPrefix(trimmed) {
-		return fmt.Errorf("notebook.dreaming.frequency must not embed a CRON_TZ=/TZ= prefix; set notebook.dreaming.timezone instead")
+		return fmt.Errorf("notebook.cron.frequency must not embed a CRON_TZ=/TZ= prefix; set notebook.cron.timezone instead")
 	}
 	sched, err := cron.ParseStandard(trimmed)
 	if err != nil {
-		return fmt.Errorf("notebook.dreaming.frequency must be a cron expression (5 fields, or a descriptor like @daily): %w", err)
+		return fmt.Errorf("notebook.cron.frequency must be a cron expression (5 fields, or a descriptor like @daily): %w", err)
 	}
 	if sched.Next(time.Now()).IsZero() {
-		return fmt.Errorf("notebook.dreaming.frequency %q describes a time that never occurs", trimmed)
+		return fmt.Errorf("notebook.cron.frequency %q describes a time that never occurs", trimmed)
 	}
 	return nil
 }
@@ -370,14 +370,14 @@ func hasCronTZPrefix(expr string) bool {
 	return strings.HasPrefix(expr, "TZ=") || strings.HasPrefix(expr, "CRON_TZ=")
 }
 
-// validateNotebookDreamingTimezone accepts an empty value (local time) or an IANA
+// validateNotebookCronTimezone accepts an empty value (local time) or an IANA
 // timezone name loadable on this machine.
-func validateNotebookDreamingTimezone(value string) error {
+func validateNotebookCronTimezone(value string) error {
 	if strings.TrimSpace(value) == "" {
 		return nil
 	}
 	if _, err := time.LoadLocation(strings.TrimSpace(value)); err != nil {
-		return fmt.Errorf("notebook.dreaming.timezone must be an IANA timezone: %w", err)
+		return fmt.Errorf("notebook.cron.timezone must be an IANA timezone: %w", err)
 	}
 	return nil
 }

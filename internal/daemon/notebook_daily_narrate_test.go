@@ -19,7 +19,7 @@ import (
 // time. The frequency default ("0 3 * * *") is used; only the timezone is pinned.
 func pinUTCSlot(t *testing.T, d *Daemon) {
 	t.Helper()
-	d.store.SetSetting(SettingNotebookDreamingTimezone, "UTC")
+	d.store.SetSetting(SettingNotebookCronTimezone, "UTC")
 }
 
 // --- enqueueDueDailyNarrates cron due-math ---

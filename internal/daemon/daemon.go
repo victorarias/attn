@@ -232,10 +232,10 @@ type Daemon struct {
 	) (agentdriver.HeadlessTaskResult, error)
 	narrationNowOverride func() time.Time
 
-	// Notebook cron enqueuer. dreamSchedulerInterval overrides the tick cadence in
+	// Notebook cron enqueuer. notebookCronInterval overrides the tick cadence in
 	// tests (zero = default). The enqueued work runs on the durable runner, so there
 	// is no in-daemon single-flight guard here.
-	dreamSchedulerInterval time.Duration
+	notebookCronInterval time.Duration
 
 	// Daily-narrate activity gate. notebookNarrateActivity is the in-memory set of
 	// workspace ids that saw real activity (a session end or a content-changing
@@ -707,6 +707,7 @@ func (d *Daemon) Start() error {
 	d.maybeStartDiagServer()
 	d.removeLegacyEmbeddedTailscaleState()
 	d.migrateKeeperCompactSettingKey() // one-time settings key rename (workspace_context_janitor -> workspace_keeper_compact)
+	d.migrateNotebookCronSettingKeys() // one-time settings key rename (notebook.dreaming.* -> notebook.cron.*)
 	go d.ensureTailscaleServeFromSettingsAndBroadcast()
 	d.hubManager.Start(d.doneContext())
 

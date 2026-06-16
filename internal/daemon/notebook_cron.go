@@ -18,30 +18,75 @@ import (
 // granularity is ample for a nightly pass and keeps catch-up logic trivial.
 
 const (
-	// defaultDreamingFrequency is the nightly slot (03:00 in the configured
+	// defaultNotebookCronFrequency is the nightly slot (03:00 in the configured
 	// timezone — quiet hours, after a day's journals and dispatches have landed)
 	// the notebook cron fires on by default.
-	defaultDreamingFrequency = "0 3 * * *"
+	defaultNotebookCronFrequency = "0 3 * * *"
 
-	// defaultDreamSchedulerInterval is how often the cron checks whether work is
+	// defaultNotebookCronInterval is how often the cron checks whether work is
 	// due. A daily pass does not need finer granularity.
-	defaultDreamSchedulerInterval = time.Minute
+	defaultNotebookCronInterval = time.Minute
 )
 
-// dreamingFrequency returns the configured cron frequency or the default.
-func (d *Daemon) dreamingFrequency() string {
+// legacyNotebookDreaming*Key are the pre-rename persisted settings keys.
+// frequency/timezone are retained ONLY so migrateNotebookCronSettingKeys can copy a
+// user's configured schedule forward to the notebook.cron.* keys; the enabled gate
+// has no cron successor (it died with the dreaming feature) and is only reaped.
+// Never read any of these anywhere else.
+const (
+	legacyNotebookDreamingFrequencyKey = "notebook.dreaming.frequency"
+	legacyNotebookDreamingTimezoneKey  = "notebook.dreaming.timezone"
+	legacyNotebookDreamingEnabledKey   = "notebook.dreaming.enabled"
+)
+
+// migrateNotebookCronSettingKeys performs the one-time rename of the persisted
+// notebook.dreaming.{frequency,timezone} settings to notebook.cron.* (the schedule
+// outlived the removed dreaming feature) and reaps the orphaned
+// notebook.dreaming.enabled gate (which has no successor). Like
+// migrateKeeperCompactSettingKey it runs at daemon start — and therefore again after
+// every app rebuild, since the daemon survives rebuilds — so it MUST be idempotent.
+// It copies each renamed legacy value forward only when the legacy key holds a
+// non-empty value AND the new key is still empty, so a re-run never clobbers a value
+// set under the new key, then deletes the stale legacy row so the migration is a
+// true no-op on the next boot. This is a plain settings-value copy, NOT a schema
+// migration.
+func (d *Daemon) migrateNotebookCronSettingKeys() {
+	if d.store == nil {
+		return
+	}
+	for _, m := range []struct{ legacy, current string }{
+		{legacyNotebookDreamingFrequencyKey, SettingNotebookCronFrequency},
+		{legacyNotebookDreamingTimezoneKey, SettingNotebookCronTimezone},
+	} {
+		legacy := d.store.GetSetting(m.legacy)
+		if strings.TrimSpace(legacy) == "" {
+			continue // nothing to migrate (or already migrated + cleaned up)
+		}
+		if strings.TrimSpace(d.store.GetSetting(m.current)) == "" {
+			d.store.SetSetting(m.current, legacy)
+			d.logf("migrated setting %q -> %q", m.legacy, m.current)
+		}
+		d.store.DeleteSetting(m.legacy)
+	}
+	// The enabled gate has no cron equivalent — just drop any stale row so it stops
+	// being broadcast in the settings map. DeleteSetting is a no-op when absent.
+	d.store.DeleteSetting(legacyNotebookDreamingEnabledKey)
+}
+
+// notebookCronFrequency returns the configured cron frequency or the default.
+func (d *Daemon) notebookCronFrequency() string {
 	if d.store != nil {
-		if f := strings.TrimSpace(d.store.GetSetting(SettingNotebookDreamingFrequency)); f != "" {
+		if f := strings.TrimSpace(d.store.GetSetting(SettingNotebookCronFrequency)); f != "" {
 			return f
 		}
 	}
-	return defaultDreamingFrequency
+	return defaultNotebookCronFrequency
 }
 
-// dreamingSchedule parses the configured frequency into a cron schedule, also
+// notebookCronSchedule parses the configured frequency into a cron schedule, also
 // returning the raw expression for display/logging.
-func (d *Daemon) dreamingSchedule() (cron.Schedule, string, error) {
-	raw := d.dreamingFrequency()
+func (d *Daemon) notebookCronSchedule() (cron.Schedule, string, error) {
+	raw := d.notebookCronFrequency()
 	sched, err := cron.ParseStandard(raw)
 	if err != nil {
 		return nil, raw, err
@@ -49,14 +94,14 @@ func (d *Daemon) dreamingSchedule() (cron.Schedule, string, error) {
 	return sched, raw, nil
 }
 
-// dreamingLocation returns the configured IANA timezone, falling back to the
+// notebookCronLocation returns the configured IANA timezone, falling back to the
 // machine's local time when unset or unparseable (so a bad setting degrades to a
 // sensible default rather than disabling the scheduler).
-func (d *Daemon) dreamingLocation() *time.Location {
+func (d *Daemon) notebookCronLocation() *time.Location {
 	if d.store == nil {
 		return time.Local
 	}
-	tz := strings.TrimSpace(d.store.GetSetting(SettingNotebookDreamingTimezone))
+	tz := strings.TrimSpace(d.store.GetSetting(SettingNotebookCronTimezone))
 	if tz == "" {
 		return time.Local
 	}
@@ -67,8 +112,8 @@ func (d *Daemon) dreamingLocation() *time.Location {
 	return time.Local
 }
 
-// parseDreamTime parses a persisted RFC3339 timestamp.
-func parseDreamTime(s string) (time.Time, bool) {
+// parseNotebookCronTime parses a persisted RFC3339 timestamp.
+func parseNotebookCronTime(s string) (time.Time, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return time.Time{}, false
@@ -91,9 +136,9 @@ func parseDreamTime(s string) (time.Time, bool) {
 // machinery — it only dispatches onto the durable runner, which owns single-flight
 // and crash recovery — so there is nothing to drain on stop.
 func (d *Daemon) startNotebookCronEnqueuer(done <-chan struct{}) {
-	interval := d.dreamSchedulerInterval
+	interval := d.notebookCronInterval
 	if interval <= 0 {
-		interval = defaultDreamSchedulerInterval
+		interval = defaultNotebookCronInterval
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -139,7 +184,7 @@ func (d *Daemon) notebookCronTick(now time.Time) {
 // day rather than re-firing every tick, and missed slots collapse into a single
 // catch-up.
 func (d *Daemon) enqueueDueDailyNarrates(now time.Time) {
-	sched, raw, err := d.dreamingSchedule()
+	sched, raw, err := d.notebookCronSchedule()
 	if err != nil {
 		d.logf("daily narrate: invalid frequency %q: %v", raw, err)
 		return
@@ -163,7 +208,7 @@ func (d *Daemon) enqueueDueDailyNarrates(now time.Time) {
 		return
 	}
 
-	anchor, ok := parseDreamTime(state.ScheduledFrom)
+	anchor, ok := parseNotebookCronTime(state.ScheduledFrom)
 	if !ok {
 		// First observation (or a corrupt anchor): anchor at now so the first pass
 		// lands at the next scheduled slot instead of immediately at startup.
@@ -174,7 +219,7 @@ func (d *Daemon) enqueueDueDailyNarrates(now time.Time) {
 		return
 	}
 
-	loc := d.dreamingLocation()
+	loc := d.notebookCronLocation()
 	next := sched.Next(anchor.In(loc))
 	if next.IsZero() {
 		// An unsatisfiable schedule has no next occurrence. Validation rejects these,
