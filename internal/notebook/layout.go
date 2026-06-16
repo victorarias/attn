@@ -8,9 +8,9 @@ import (
 )
 
 // Reserved layout (OKF-derived). index.md and log.md carry no frontmatter, like
-// OKF's bundle root. The .attn/ dotdir holds machine state (dreaming candidates,
-// locks, run reports) and is never surfaced by List nor touched by a
-// dotfile-skipping external sync scanner.
+// OKF's bundle root. The .attn/ dotdir holds machine state (the durable task
+// runner, raw tier, narrate-cron anchor) and is never surfaced by List nor touched
+// by a dotfile-skipping external sync scanner.
 const (
 	FileIndex = "index.md"
 	FileLog   = "log.md"

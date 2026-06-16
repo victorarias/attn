@@ -215,12 +215,6 @@ func (d *Daemon) startCompactRunner() {
 		); err != nil {
 			d.logf("notebook narration: register narrate_workspace: %v", err)
 		}
-		// Dreaming's nightly harvest folds onto the same runner. The default 5-min
-		// timeout is ample for the harvest's file I/O; the cron enqueuer
-		// (startNotebookCronEnqueuer) dispatches the harvest_dream task when due.
-		if err := runner.Register(harvestDreamKind, d.harvestDreamExecutor); err != nil {
-			d.logf("dreaming: register harvest_dream: %v", err)
-		}
 	}
 	// Surface lifecycle transitions to any open task panel. OnChange fires
 	// SYNCHRONOUSLY inside the runner's single worker goroutine, so the callback

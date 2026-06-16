@@ -34,7 +34,7 @@ func TestNarrateCronStateRoundTrip(t *testing.T) {
 		t.Fatalf("round-trip mismatch: %+v", got)
 	}
 
-	// The state lives under the .attn narrate dir, separate from the dreams dir.
+	// The state lives under the .attn narrate dir.
 	if _, err := os.Stat(filepath.Join(NarrateCronStateDir(root), narrateStateFile)); err != nil {
 		t.Fatalf("narrate state file not written: %v", err)
 	}

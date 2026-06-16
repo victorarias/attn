@@ -70,7 +70,7 @@ func newStore(root string) *store {
 	return &store{root: root, log: func(string, ...interface{}) {}}
 }
 
-// init creates the tasks dir. Ported from the dreaming idiom of MkdirAll-on-init.
+// init creates the tasks dir (MkdirAll-on-init).
 func (s *store) init() error {
 	return os.MkdirAll(stateDir(s.root), 0o755)
 }
@@ -153,8 +153,8 @@ func (s *store) list() ([]*Task, error) {
 
 // recoverOrphans resets any task left in StateRunning back to StateQueued: a
 // running record at startup means a crash interrupted that task mid-run, so it is
-// re-eligible. Ported from the dreaming orphan-lock recovery idiom (reset, don't
-// drop). NextAttemptAt is pulled forward to now so recovery is immediate.
+// re-eligible (reset, don't drop). NextAttemptAt is pulled forward to now so
+// recovery is immediate.
 func (s *store) recoverOrphans(now time.Time) (int, error) {
 	all, err := s.list()
 	if err != nil {

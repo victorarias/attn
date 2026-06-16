@@ -79,25 +79,6 @@ a task tracker — capture what is *known*, not what is *to do*. Every memory no
 be **grounded** with resolvable `sources:` (journal anchors, `dispatch:<id>`, or
 URLs); we do not author one from paraphrase alone.
 
-## Dreaming (the harvest pass)
-
-The pass that gathers durable raw material toward memory notes — the `harvest_dream`
-task kind. It is **gated off by default** (`notebook.dreaming.enabled`). When enabled,
-a nightly cron runs the harvest on the durable runner: it scans the journal and closed
-dispatches into a deduplicated **candidate set**, ranked by recurrence across distinct
-contexts, and atomically accumulates it (monotonically) in `candidates.json` under
-`.attn/dreams/`. `attn notebook dream status` / `--dry-run` are **read-only previews**
-of that accumulated-plus-fresh union — they write nothing themselves.
-
-What dreaming does **not** yet do is *promote* candidates into memory notes: the gated
-LLM distillation that would write durable notes is **deferred** to a follow-up. So
-today the harvest produces raw candidates only, and memory notes are authored by hand
-(`notebook memory write`).
-
-The keeper's two duties (below) are scoped to compaction and journal narration;
-whether the harvest is eventually a third keeper duty or a distinct entity is left
-open here deliberately, until the promote pass is actually built.
-
 ## The keeper
 
 The single automated entity that **tends each workspace**. One persona, two duties:

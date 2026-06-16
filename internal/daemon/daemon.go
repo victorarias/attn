@@ -233,8 +233,8 @@ type Daemon struct {
 	narrationNowOverride func() time.Time
 
 	// Notebook cron enqueuer. dreamSchedulerInterval overrides the tick cadence in
-	// tests (zero = default). The harvest itself runs on the durable runner (kind
-	// harvest_dream), so there is no in-daemon single-flight guard here.
+	// tests (zero = default). The enqueued work runs on the durable runner, so there
+	// is no in-daemon single-flight guard here.
 	dreamSchedulerInterval time.Duration
 
 	// Daily-narrate activity gate. notebookNarrateActivity is the in-memory set of
@@ -733,12 +733,12 @@ func (d *Daemon) Start() error {
 	go d.monitorBranches()
 
 	// Construct + start the durable compaction runner (kinds compact_context,
-	// summarize_session, narrate_workspace, harvest_dream).
+	// summarize_session, narrate_workspace).
 	d.startCompactRunner()
 
-	// Start the notebook cron enqueuer (enqueues the nightly dream harvest onto the
-	// durable runner when due; off unless notebook.dreaming.enabled). Launched AFTER
-	// startCompactRunner so harvest_dream is registered before the first tick fires.
+	// Start the notebook cron enqueuer (enqueues the nightly daily-narrate backstop
+	// onto the durable runner when due). Launched AFTER startCompactRunner so the
+	// narrate executor is registered before the first tick fires.
 	go d.startNotebookCronEnqueuer(d.done)
 
 	d.signalStarted()
@@ -1830,10 +1830,6 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleNotebookGuide(conn, msg.(*protocol.NotebookGuideMessage))
 	case protocol.CmdNotebookBacklinks:
 		d.handleNotebookBacklinks(conn, msg.(*protocol.NotebookBacklinksMessage))
-	case protocol.CmdNotebookDreamStatus:
-		d.handleNotebookDreamStatus(conn)
-	case protocol.CmdNotebookDreamRun:
-		d.handleNotebookDreamRun(conn, msg.(*protocol.NotebookDreamRunMessage))
 	case protocol.CmdNotebookTaskList:
 		d.handleNotebookTaskList(conn)
 	case protocol.CmdUnregister:

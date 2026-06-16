@@ -5,13 +5,12 @@ import "path/filepath"
 // Raw tier machine paths.
 //
 // The narration pipeline feeds the curated journal from a separate "raw tier"
-// of machine inputs under <root>/.attn/raw/. Like the dreaming state dir, the raw
-// tier lives in the .attn dotdir: it is skipped by List, by the watcher, and by
-// any dotfile-aware external sync scanner, and CleanPath rejects dotdir segments
-// so Store.Write/Read/AppendJournalEntryOnce cannot address it. Daemon and agent
-// code therefore writes the raw tier with direct filesystem I/O, never through
-// notebook.Store. These helpers keep the ".attn"/"raw"/... literals in one place
-// (mirroring DreamsStateDir) so callers do not hardcode the layout.
+// of machine inputs under <root>/.attn/raw/. The raw tier lives in the .attn
+// dotdir: it is skipped by List, by the watcher, and by any dotfile-aware external
+// sync scanner, and CleanPath rejects dotdir segments so Store.Write/Read cannot
+// address it. Daemon and agent code therefore writes the raw tier with direct
+// filesystem I/O, never through notebook.Store. These helpers keep the
+// ".attn"/"raw"/... literals in one place so callers do not hardcode the layout.
 const (
 	rawDir                 = "raw"
 	rawContextSnapshotsDir = "context-snapshots"

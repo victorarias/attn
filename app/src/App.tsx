@@ -525,7 +525,7 @@ function App() {
   } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     // The daemon tags each notebook_changed with an origin ("ui"/"agent"/
-    // "external"/"dreaming"), but every origin is treated the same here: bump a
+    // "external"), but every origin is treated the same here: bump a
     // signal so an open browser re-fetches. The origin is intentionally unused —
     // there is no self-echo suppression, so a UI save costs one redundant disk
     // read of the bytes it just wrote (harmless). Don't assume otherwise.

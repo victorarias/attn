@@ -7,9 +7,8 @@
 // and MUST NOT import internal/daemon (the daemon imports this package, so the
 // reverse would be an import cycle).
 //
-// The persistence, atomic temp+rename, and orphan-recovery idioms are ported from
-// internal/notebook/dreams_state.go; the cancel-blocks-until-exit + commit-fence
-// contract is ported from internal/daemon/workspace_keeper.go.
+// The cancel-blocks-until-exit + commit-fence contract is ported from
+// internal/daemon/workspace_keeper.go.
 //
 // What this package is NOT: there are no priorities, no DAG, no cron generality,
 // no worker pool, no SQLite, no per-task lock file, and no heartbeat beyond the

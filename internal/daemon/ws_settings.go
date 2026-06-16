@@ -43,12 +43,9 @@ const (
 	// SettingNotebookRoot overrides the notebook's filesystem root. Empty =>
 	// the profile-derived default (~/attn-notebook[-profile]).
 	SettingNotebookRoot = "notebook.root"
-	// SettingNotebookDreamingEnabled gates the nightly dreaming consolidation
-	// pass. Default false; `attn notebook dream status`/`--dry-run` inspect the
-	// harvest regardless (the gate only governs autonomous runs).
-	SettingNotebookDreamingEnabled = "notebook.dreaming.enabled"
 	// SettingNotebookDreamingFrequency is the 5-field cron expression for the
-	// nightly pass. Empty => the default ("0 3 * * *").
+	// notebook's nightly maintenance slot (currently the daily-narrate backstop).
+	// Empty => the default ("0 3 * * *").
 	SettingNotebookDreamingFrequency = "notebook.dreaming.frequency"
 	// SettingNotebookDreamingTimezone is the IANA timezone the frequency is
 	// evaluated in. Empty => the machine's local time.
@@ -266,8 +263,6 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return d.validateNotebookNarrationSetting(notebookNarrateWorkspaceKind, value)
 	case SettingNotebookRoot:
 		return validateNotebookRoot(value)
-	case SettingNotebookDreamingEnabled:
-		return validateBooleanSetting(value)
 	case SettingNotebookDreamingFrequency:
 		return validateNotebookDreamingFrequency(value)
 	case SettingNotebookDreamingTimezone:

@@ -37,7 +37,7 @@ func TestCleanPath(t *testing.T) {
 		{"/", "", true},
 		{"memory/foo.txt", "", true},               // not .md
 		{"memory/foo", "", true},                   // no extension
-		{".attn/dreams/x.md", "", true},            // dotdir segment
+		{".attn/raw/x.md", "", true},               // dotdir segment
 		{"memory/.hidden.md", "", true},            // dotfile segment
 		{"memory//foo.md", "memory/foo.md", false}, // doubled slash collapses to a valid path
 	}

@@ -16,10 +16,9 @@ import (
 // List and by any dotfile-aware external sync scanner) and never goes through
 // Store.Write, whose CleanPath rejects dotdir and non-.md paths.
 //
-// It is deliberately SEPARATE from DreamRunState (.attn/dreams/state.json) so the
-// daily narrate's schedule anchor never couples to the dreaming-enabled gate or the
-// harvest's run bookkeeping. The two share only the nightly cadence/timezone
-// SETTINGS (a deliberate "notebook-maintenance slot"), not a state file.
+// It is its own small state file so the daily narrate's schedule anchor stays
+// decoupled from any other cron bookkeeping; it carries only the nightly schedule
+// anchor.
 //
 // The write reuses the package's atomic temp+rename writer so a crash mid-write
 // never leaves a half-written state file.
@@ -40,9 +39,9 @@ func NarrateCronStateDir(root string) string {
 }
 
 // NarrateCronState is the persisted schedule anchor for the daily per-workspace
-// narrate cron. It is deliberately tiny and separate from DreamRunState: the cron
-// enqueuer (enqueueDueDailyNarrates) is its SOLE writer, so there is no two-writer
-// race on state.json.
+// narrate cron. It is deliberately tiny: the cron enqueuer
+// (enqueueDueDailyNarrates) is its SOLE writer, so there is no two-writer race on
+// state.json.
 type NarrateCronState struct {
 	Version int `json:"version"`
 	// ScheduledFrom is the anchor the next daily-narrate pass is computed from

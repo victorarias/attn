@@ -17,8 +17,8 @@ import (
 )
 
 // originAgent labels notebook changes that arrive over the unix-socket CLI —
-// agents (and the user) drive that path. The UI (origin "ui"), the dreaming
-// pass ("dreaming"), and external edits ("external") arrive on other paths.
+// agents (and the user) drive that path. The UI (origin "ui") and external
+// edits ("external") arrive on other paths.
 const originAgent = "agent"
 
 // originExternal labels notebook changes the watcher detects on disk that attn

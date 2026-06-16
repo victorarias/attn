@@ -26,8 +26,8 @@ func pinUTCSlot(t *testing.T, d *Daemon) {
 
 // The first tick anchors the schedule at "now" and does NOT enqueue, so daemon
 // startup never fires an immediate daily narrate; the first real pass lands at the
-// next scheduled slot. NOTE: this fires WITHOUT dreaming enabled — the daily narrate
-// has no enabled gate and uses its own state file.
+// next scheduled slot. NOTE: the daily narrate has no enabled gate and uses its own
+// state file.
 func TestEnqueueDueDailyNarratesFirstObservationAnchorsWithoutFiring(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	root := installNotebookNarrationRunner(t, d)

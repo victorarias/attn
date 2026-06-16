@@ -450,10 +450,10 @@ func TestList(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Machine state under .attn/ must never be surfaced.
-	if err := os.MkdirAll(filepath.Join(s.Root(), ".attn", "dreams"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(s.Root(), ".attn", "raw"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(s.Root(), ".attn", "dreams", "note.md"), []byte("x"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(s.Root(), ".attn", "raw", "note.md"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

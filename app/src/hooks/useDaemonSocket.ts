@@ -170,7 +170,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '110';
+export const PROTOCOL_VERSION = '111';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -441,7 +441,7 @@ export interface NotebookSendToChiefResult {
 interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   // Fired when notebook content changes (any client/agent/external write). paths
-  // are notebook-relative; origin is agent|dreaming|ui|external.
+  // are notebook-relative; origin is agent|ui|external.
   onNotebookChanged?: (origin: string, paths: string[]) => void;
   // Fired when the durable task runner's task set changes (any lifecycle
   // transition: queue/run/retry/fail/done). Carries no payload — an open Tasks

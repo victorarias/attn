@@ -974,8 +974,6 @@ commands:
   memory write --path P      write/edit a durable note; content from --file or stdin
                              (--base-hash H for a safe hash-CAS edit)
   guide                      print the notebook operating guidance
-  dream status               summarize what a consolidation pass would harvest
-  dream [--dry-run]          preview the harvested candidates (nothing is written)
   tasks                      list the durable background task runner's records
 `)
 }
@@ -1053,8 +1051,6 @@ func runNotebook() {
 			os.Exit(1)
 		}
 		fmt.Println(res.Guidance)
-	case "dream":
-		runNotebookDream(c, args)
 	case "tasks":
 		runNotebookTasks(c, args)
 	default:
@@ -1091,7 +1087,7 @@ func printNotebookTasks(w io.Writer, records []protocol.NotebookTask) {
 	fmt.Fprintln(tw, "STATE\tKIND\tSUBJECT\tATTEMPTS\tNEXT ATTEMPT\tID")
 	for _, t := range records {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n",
-			t.State, t.Kind, t.Subject, t.Attempts, formatDreamTime(t.NextAttemptAt), t.ID)
+			t.State, t.Kind, t.Subject, t.Attempts, formatTaskTime(t.NextAttemptAt), t.ID)
 	}
 	_ = tw.Flush()
 	for _, t := range records {
@@ -1226,123 +1222,15 @@ func runNotebookMemory(c *client.Client, args []string) {
 	fmt.Printf("wrote %s (%s)\n", res.Path, hash)
 }
 
-// runNotebookDream handles `attn notebook dream status` and `attn notebook dream
-// [--dry-run]`. Both are read-only: status summarizes the harvest, the bare/
-// --dry-run form previews the candidates. Nothing is written — the promote phase
-// is not yet available, so --apply is rejected with a clear message.
-func runNotebookDream(c *client.Client, args []string) {
-	sub := ""
-	if len(args) > 0 {
-		sub = args[0]
-	}
-	switch sub {
-	case "status":
-		if len(args) != 1 {
-			fmt.Fprintln(os.Stderr, "usage: attn notebook dream status")
-			os.Exit(2)
-		}
-		res, err := c.NotebookDreamStatus()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "notebook dream status: %v\n", err)
-			os.Exit(1)
-		}
-		printDreamStatus(os.Stdout, res)
-	case "", "--dry-run":
-		if len(args) > 1 {
-			fmt.Fprintln(os.Stderr, "usage: attn notebook dream [--dry-run]")
-			os.Exit(2)
-		}
-		res, err := c.NotebookDreamRun(false)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "notebook dream: %v\n", err)
-			os.Exit(1)
-		}
-		printDreamRun(os.Stdout, res)
-	case "--apply":
-		fmt.Fprintln(os.Stderr, "notebook dream: --apply is not available yet — the consolidation pass that promotes candidates to durable memory lands in a follow-up. Use `--dry-run` to preview.")
-		os.Exit(2)
-	default:
-		fmt.Fprintf(os.Stderr, "notebook dream: unknown argument %q (want: status, --dry-run)\n", sub)
-		os.Exit(2)
-	}
-}
-
-func dreamEnabledLabel(enabled bool) string {
-	if enabled {
-		return "enabled"
-	}
-	return "disabled"
-}
-
-func printDreamSourceCounts(w io.Writer, counts []protocol.NotebookDreamSourceCount) {
-	for _, sc := range counts {
-		fmt.Fprintf(w, "  %-9s %d\n", sc.Source+":", sc.Count)
-	}
-}
-
-// printDreamCandidate renders one candidate line plus its snippet, e.g.
-//
-//	[3× ·2 ctx] journal  2026-06-13
-//	    we decided to split the dreaming PR along the LLM seam …
-func printDreamCandidate(w io.Writer, cand protocol.NotebookDreamCandidate) {
-	label := strings.TrimSpace(protocol.Deref(cand.Title))
-	header := fmt.Sprintf("  [%d× ·%d ctx] %-8s", cand.Occurrences, len(cand.Contexts), cand.Source)
-	if label != "" {
-		header += "  " + label
-	}
-	fmt.Fprintln(w, header)
-	if snippet := strings.TrimSpace(cand.Snippet); snippet != "" {
-		fmt.Fprintf(w, "      %s\n", snippet)
-	}
-}
-
-// formatDreamTime renders a persisted RFC3339 timestamp in local time for
-// display, falling back to the raw string if it cannot be parsed.
-func formatDreamTime(s string) string {
+// formatTaskTime renders a persisted RFC3339 timestamp in local time for display,
+// falling back to the raw string if it cannot be parsed.
+func formatTaskTime(s string) string {
 	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t.Local().Format("2006-01-02 15:04")
 		}
 	}
 	return s
-}
-
-func printDreamStatus(w io.Writer, res *protocol.NotebookDreamStatusResult) {
-	fmt.Fprintf(w, "dreaming: %s\n", dreamEnabledLabel(res.Enabled))
-	if sched := strings.TrimSpace(protocol.Deref(res.Schedule)); sched != "" {
-		line := "schedule: " + sched
-		if tz := strings.TrimSpace(protocol.Deref(res.Timezone)); tz != "" {
-			line += " (" + tz + ")"
-		}
-		if next := strings.TrimSpace(protocol.Deref(res.NextRunAt)); next != "" {
-			line += ", next run " + formatDreamTime(next)
-		}
-		fmt.Fprintln(w, line)
-	}
-	if last := strings.TrimSpace(protocol.Deref(res.LastRunAt)); last != "" {
-		fmt.Fprintf(w, "last run: %s\n", formatDreamTime(last))
-	}
-	fmt.Fprintf(w, "candidates: %d (%d across multiple contexts), %d persisted\n",
-		res.CandidateCount, res.MultiContextCount, res.PersistedCount)
-	printDreamSourceCounts(w, res.SourceCounts)
-	if len(res.Top) > 0 {
-		fmt.Fprintln(w, "top candidates:")
-		for _, cand := range res.Top {
-			printDreamCandidate(w, cand)
-		}
-	}
-}
-
-func printDreamRun(w io.Writer, res *protocol.NotebookDreamRunResult) {
-	fmt.Fprintf(w, "harvested %d candidates (%d across multiple contexts) — preview only, nothing written\n",
-		res.CandidateCount, res.MultiContextCount)
-	printDreamSourceCounts(w, res.SourceCounts)
-	if len(res.Candidates) > 0 {
-		fmt.Fprintf(w, "\ncandidates (showing %d):\n", len(res.Candidates))
-		for _, cand := range res.Candidates {
-			printDreamCandidate(w, cand)
-		}
-	}
 }
 
 func workspaceContextSourceSession(args []string, allowForce bool) (string, bool, error) {

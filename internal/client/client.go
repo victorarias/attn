@@ -497,37 +497,6 @@ func (c *Client) NotebookGuide(sessionID string) (*protocol.NotebookGuideResult,
 	return resp.NotebookGuide, nil
 }
 
-// NotebookDreamStatus returns a summary of what the dreaming pass would
-// consolidate now (the deterministic harvest preview; nothing is written).
-func (c *Client) NotebookDreamStatus() (*protocol.NotebookDreamStatusResult, error) {
-	resp, err := c.send(protocol.NotebookDreamStatusMessage{Cmd: protocol.CmdNotebookDreamStatus})
-	if err != nil {
-		return nil, err
-	}
-	if resp.NotebookDreamStatus == nil {
-		return nil, errors.New("daemon returned no notebook dream status result")
-	}
-	return resp.NotebookDreamStatus, nil
-}
-
-// NotebookDreamRun runs a dreaming harvest and returns the candidate preview.
-// apply is reserved for the promote phase; this phase is preview-only and writes
-// nothing.
-func (c *Client) NotebookDreamRun(apply bool) (*protocol.NotebookDreamRunResult, error) {
-	msg := protocol.NotebookDreamRunMessage{Cmd: protocol.CmdNotebookDreamRun}
-	if apply {
-		msg.Apply = protocol.Ptr(true)
-	}
-	resp, err := c.send(msg)
-	if err != nil {
-		return nil, err
-	}
-	if resp.NotebookDreamRun == nil {
-		return nil, errors.New("daemon returned no notebook dream run result")
-	}
-	return resp.NotebookDreamRun, nil
-}
-
 // NotebookTasks lists the durable task runner's records (newest-updated first).
 // An empty slice means the runner is disabled or has no work; it is not an error.
 func (c *Client) NotebookTasks() ([]protocol.NotebookTask, error) {

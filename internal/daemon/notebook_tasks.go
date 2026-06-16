@@ -119,10 +119,10 @@ func (d *Daemon) broadcastNotebookTasksChanged() {
 func (d *Daemon) handleNotebookTaskList(conn net.Conn) {
 	var list []*tasks.Task
 	if runner := d.compactRunnerRef(); runner != nil {
-		// A List error is degraded to an empty list here: the unix CLI path mirrors
-		// handleNotebookDreamStatus's synchronous Response, and an empty task list is
-		// the same observable outcome as a disabled runner. WS clients still get the
-		// explicit error via sendNotebookTaskListWSResult.
+		// A List error is degraded to an empty list here: the unix CLI path returns a
+		// synchronous Response, and an empty task list is the same observable outcome
+		// as a disabled runner. WS clients still get the explicit error via
+		// sendNotebookTaskListWSResult.
 		list, _ = runner.List()
 	}
 	_ = json.NewEncoder(conn).Encode(protocol.Response{

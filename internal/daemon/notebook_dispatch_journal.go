@@ -228,6 +228,27 @@ func neutralizeJournalMarkers(s string) string {
 	return strings.ReplaceAll(s, "<!--", "<! --")
 }
 
+// dispatchDecisionText renders a resolved decision request as a single durable
+// line ("Decision: <question> → <answer>"). An unanswered request carries no
+// durable outcome yet, so it is skipped.
+func dispatchDecisionText(req *protocol.DispatchDecisionRequest) string {
+	if req == nil {
+		return ""
+	}
+	question := strings.TrimSpace(req.Question)
+	answer := ""
+	if req.Response != nil {
+		answer = strings.TrimSpace(*req.Response)
+	}
+	if answer == "" && req.Recommendation != nil {
+		answer = strings.TrimSpace(*req.Recommendation)
+	}
+	if question == "" || answer == "" {
+		return ""
+	}
+	return fmt.Sprintf("Decision: %s → %s", question, answer)
+}
+
 // dispatchVerificationLine condenses verification evidence into one scannable line
 // ("<result> (<target>); ..."), bounded so a noisy report cannot bloat the block.
 func dispatchVerificationLine(evidence []protocol.DispatchVerification) string {
