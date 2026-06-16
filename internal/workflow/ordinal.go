@@ -97,6 +97,13 @@ type pathStack struct {
 	callCounter map[string]int
 
 	phaseSeq int // monotonic phase sequence number
+
+	// phaseTitle is the DISPLAY title of the current phase. It rides alongside
+	// phaseSeq across await boundaries (so a post-await agent() reads the phase
+	// in effect at its structural position) but is NEVER part of the ordinal:
+	// identity stays positional/sequential, so renaming a phase cannot invalidate
+	// a cached call.
+	phaseTitle string
 }
 
 func newPathStack() *pathStack {
@@ -171,9 +178,10 @@ func (ps *pathStack) snapshot() []segment {
 // post-await agent() ordinal a pure function of structural position, not of
 // promise-resolution timing.
 type stackState struct {
-	segs     []segment
-	counters map[string]int
-	phaseSeq int
+	segs       []segment
+	counters   map[string]int
+	phaseSeq   int
+	phaseTitle string
 }
 
 // captureState returns a deep copy of the full stack state for the tracker to
@@ -185,7 +193,7 @@ func (ps *pathStack) captureState() stackState {
 	for k, v := range ps.callCounter {
 		counters[k] = v
 	}
-	return stackState{segs: segs, counters: counters, phaseSeq: ps.phaseSeq}
+	return stackState{segs: segs, counters: counters, phaseSeq: ps.phaseSeq, phaseTitle: ps.phaseTitle}
 }
 
 // restoreState installs a previously-captured state. It deep-copies the captured
@@ -201,6 +209,7 @@ func (ps *pathStack) restoreState(s stackState) {
 	ps.segs = segs
 	ps.callCounter = counters
 	ps.phaseSeq = s.phaseSeq
+	ps.phaseTitle = s.phaseTitle
 }
 
 // ordinalFor reads the current path SYNCHRONOUSLY and appends the call-site
@@ -218,14 +227,24 @@ func (ps *pathStack) ordinalFor(site string) OrdinalPath {
 }
 
 // setPhase replaces (or sets) the leading phase segment with the next sequence
-// number. Phases live at the top of the path. The title is intentionally NOT
-// stored: identity is positional/sequential, not label-based.
-func (ps *pathStack) setPhase() {
+// number. Phases live at the top of the path. The title is stored for DISPLAY
+// only (phaseTitle) and is intentionally NOT part of the ordinal: identity is
+// positional/sequential, not label-based, so renaming a phase never invalidates
+// a cached call.
+func (ps *pathStack) setPhase(title string) {
 	ps.phaseSeq++
 	seq := ps.phaseSeq
+	ps.phaseTitle = title
 	if len(ps.segs) > 0 && ps.segs[0].kind == segPhase {
 		ps.segs[0].index = seq
 		return
 	}
 	ps.segs = append([]segment{{kind: segPhase, index: seq}}, ps.segs...)
+}
+
+// currentPhase returns the DISPLAY title of the phase currently in effect (""
+// before any phase() call). Read synchronously at agent() dispatch so each call
+// records the phase active at its structural position.
+func (ps *pathStack) currentPhase() string {
+	return ps.phaseTitle
 }

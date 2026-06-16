@@ -3,9 +3,17 @@ package workflow
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/dop251/goja"
 )
+
+// nowRFC3339Nano stamps a display-only wall-clock time for a call's StartedAt/
+// CompletedAt. It matches the protocol's RFC3339Nano format so the CLI and UI can
+// parse it. These timestamps are NEVER part of the resume cache identity.
+func nowRFC3339Nano() string {
+	return time.Now().UTC().Format(time.RFC3339Nano)
+}
 
 // runState holds everything mutated during a single Run/Resume. It lives on the
 // loop goroutine; only the agent worker goroutines touch the parts explicitly
@@ -95,8 +103,12 @@ func installHostFns(rs *runState, args any) error {
 	if err := vm.Set("log", func(goja.FunctionCall) goja.Value { return goja.Undefined() }); err != nil {
 		return err
 	}
-	if err := vm.Set("phase", func(goja.FunctionCall) goja.Value {
-		rs.stack.setPhase()
+	if err := vm.Set("phase", func(call goja.FunctionCall) goja.Value {
+		title := ""
+		if len(call.Arguments) > 0 {
+			title = call.Argument(0).String()
+		}
+		rs.stack.setPhase(title)
 		return goja.Undefined()
 	}); err != nil {
 		return err
@@ -143,6 +155,9 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 		isolation := validateIsolation(extractAgentString(rs.vm, call.Argument(1), "isolation"))
 		model := extractAgentString(rs.vm, call.Argument(1), "model")
 		agentType := extractAgentString(rs.vm, call.Argument(1), "agentType")
+		// label is DISPLAY metadata (shown in `workflow show` and the UI). Like
+		// model it is NOT part of the cache identity.
+		label := extractAgentString(rs.vm, call.Argument(1), "label")
 
 		// --- fix the ordinal synchronously, before anything async ---
 		site := rs.callsiteKey()
@@ -150,6 +165,9 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 		ordKey := ordinal.String()
 		promptHash := hashPrompt(prompt)
 		schemaHash := hashSchema(schema)
+		// Capture the current phase title synchronously, on the loop goroutine, so
+		// it reflects THIS call's structural position (display only, not identity).
+		phaseTitle := rs.stack.currentPhase()
 
 		p, resolve, _ := vm.NewPromise()
 
@@ -173,6 +191,19 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 			panic(vm.ToValue((&ErrAgentCap{Cap: rs.agentLifetimeCap}).Error()))
 		}
 
+		// Emit an in-flight "running" record at DISPATCH (on the loop goroutine,
+		// before the worker spawns) so `workflow show` and the UI can see the call
+		// that is currently executing — without this the run looks frozen while a
+		// multi-minute call is in flight. IsCacheHit rejects non-terminal entries,
+		// so this row reaches the daemon store but never serves a resume cache hit;
+		// the terminal Upsert below overwrites it in place at the same ordinal.
+		startedAt := nowRFC3339Nano()
+		rs.jour.Upsert(JournalEntry{
+			Ordinal: ordKey, PromptHash: promptHash, SchemaHash: schemaHash,
+			Status: "running", Label: label, Phase: phaseTitle, Model: model,
+			StartedAt: startedAt,
+		})
+
 		ordSnapshot := ordinal.clone()
 		go func() {
 			// Concurrency cap (correctness semaphore).
@@ -194,9 +225,13 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 				rs.liveCalls++
 				if runErr != nil {
 					// Terminal failure: resolve null (never reject), journal errored.
+					// Carry the same display fields + StartedAt so the terminal row
+					// keeps them after overwriting the "running" record at this ordinal.
 					rs.jour.Upsert(JournalEntry{
 						Ordinal: ordKey, PromptHash: promptHash, SchemaHash: schemaHash,
 						Result: nil, Status: "errored", Err: runErr.Error(),
+						Label: label, Phase: phaseTitle, Model: model,
+						StartedAt: startedAt, CompletedAt: nowRFC3339Nano(),
 					})
 					mustResolve(resolve, rs.nullValue)
 					return
@@ -204,6 +239,8 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 				rs.jour.Upsert(JournalEntry{
 					Ordinal: ordKey, PromptHash: promptHash, SchemaHash: schemaHash,
 					Result: res, Status: "ok",
+					Label: label, Phase: phaseTitle, Model: model,
+					StartedAt: startedAt, CompletedAt: nowRFC3339Nano(),
 				})
 				mustResolve(resolve, rs.resultToValue(res))
 			})

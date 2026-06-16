@@ -92,18 +92,26 @@ func (d *DurableJournal) Err() error {
 	return d.lastErr
 }
 
-// rowFromEntry maps a JournalEntry to a store row for the fixed runID. Only the six
-// JournalEntry fields are round-tripped; the richer columns (label, phase, model,
-// harness, etc.) are owned by other (out-of-scope) write paths and left nil here.
+// rowFromEntry maps a JournalEntry to a store row for the fixed runID. The
+// identity/replay fields and the engine-owned display metadata (label, phase,
+// resolved model, dispatch/completion timestamps) are all carried through, so a
+// "running" record and the terminal record that overwrites it both surface to
+// `workflow show` and the UI. This is the in-daemon twin of callFromEntry
+// (cmd/attn/workflow_ipcjournal.go) and must stay behaviorally consistent.
 func rowFromEntry(runID string, e JournalEntry) *store.WorkflowAgentCallRow {
 	return &store.WorkflowAgentCallRow{
-		RunID:      runID,
-		Ordinal:    e.Ordinal,
-		PromptHash: ptrIfNonEmpty(e.PromptHash),
-		SchemaHash: ptrIfNonEmpty(e.SchemaHash),
-		ResultJSON: rawMessageToPtr(e.Result),
-		Status:     e.Status,
-		Error:      ptrIfNonEmpty(e.Err),
+		RunID:         runID,
+		Ordinal:       e.Ordinal,
+		Label:         ptrIfNonEmpty(e.Label),
+		Phase:         ptrIfNonEmpty(e.Phase),
+		ResolvedModel: ptrIfNonEmpty(e.Model),
+		PromptHash:    ptrIfNonEmpty(e.PromptHash),
+		SchemaHash:    ptrIfNonEmpty(e.SchemaHash),
+		ResultJSON:    rawMessageToPtr(e.Result),
+		Status:        e.Status,
+		Error:         ptrIfNonEmpty(e.Err),
+		StartedAt:     ptrIfNonEmpty(e.StartedAt),
+		CompletedAt:   ptrIfNonEmpty(e.CompletedAt),
 	}
 }
 

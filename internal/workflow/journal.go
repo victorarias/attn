@@ -30,13 +30,37 @@ func hashSchema(schema json.RawMessage) string {
 }
 
 // JournalEntry is one recorded agent() call.
+//
+// Ordinal, PromptHash, SchemaHash, Result and Status are the resume-identity and
+// replay fields. Label, Phase, Model, StartedAt and CompletedAt are DISPLAY
+// metadata: they travel to the daemon so `workflow show` and the UI can render
+// the in-flight call, but they are deliberately NOT part of the cache-hit
+// predicate (IsCacheHit) and are never folded into hashPrompt/hashSchema — so
+// renaming a phase or relabelling a call never invalidates a cached result.
 type JournalEntry struct {
-	Ordinal    string          // OrdinalPath.String()
-	PromptHash string          // sha256 of the resolved prompt
-	SchemaHash string          // sha256 of schema bytes, or "none" sentinel
-	Result     json.RawMessage // canned fake result; null on skipped/errored
-	Status     string          // "ok" | "skipped" | "errored"
-	Err        string          // diagnostics for skipped/errored
+	Ordinal     string          // OrdinalPath.String()
+	PromptHash  string          // sha256 of the resolved prompt
+	SchemaHash  string          // sha256 of schema bytes, or "none" sentinel
+	Result      json.RawMessage // canned fake result; null on skipped/errored
+	Status      string          // "running" | "ok" | "skipped" | "errored"
+	Err         string          // diagnostics for skipped/errored
+	Label       string          // display: agent() label option
+	Phase       string          // display: current phase() title
+	Model       string          // display: resolved model
+	StartedAt   string          // display: RFC3339Nano dispatch time ("running")
+	CompletedAt string          // display: RFC3339Nano terminal time (ok/errored)
+}
+
+// isTerminalEntryStatus reports whether a journaled status is a settled result
+// that may serve a cache hit on resume. A "running" (in-flight) or empty status
+// is NOT terminal: it is a progress marker that must never replay as a result.
+func isTerminalEntryStatus(status string) bool {
+	switch status {
+	case "ok", "skipped", "errored":
+		return true
+	default:
+		return false
+	}
 }
 
 // Journal is the durable-swappable persistence interface. E1 ships MemJournal; a
@@ -54,10 +78,17 @@ type Journal interface {
 	Entries() []JournalEntry
 }
 
-// IsCacheHit is the resume match predicate: a journaled entry is a hit iff its
-// ordinal, prompt hash, and schema hash all match the live call. The model is
-// deliberately OUT of the predicate (R-spec §3).
+// IsCacheHit is the resume match predicate: a journaled entry is a hit iff it is
+// TERMINAL and its ordinal, prompt hash, and schema hash all match the live call.
+// The terminal guard is load-bearing: both DurableJournal and the IPC journal
+// seed their mirror from ALL persisted rows, including a "running" row left by a
+// process that crashed mid-call; without this guard such a row would false-hit
+// and replay a null/partial result on resume. The model is deliberately OUT of
+// the predicate (R-spec §3), as are the other display-only fields.
 func IsCacheHit(e JournalEntry, ordinal, promptHash, schemaHash string) bool {
+	if !isTerminalEntryStatus(e.Status) {
+		return false
+	}
 	return e.Ordinal == ordinal && e.PromptHash == promptHash && e.SchemaHash == schemaHash
 }
 

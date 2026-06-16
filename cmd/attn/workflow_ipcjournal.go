@@ -102,17 +102,24 @@ func (j *ipcJournal) proxy(e workflow.JournalEntry) {
 }
 
 // callFromEntry maps a JournalEntry to the protocol WorkflowAgentCall the daemon
-// persists. Only the six JournalEntry fields are round-tripped; the richer columns
-// (label, phase, model, harness) are owned by out-of-band write paths and left nil.
+// persists. The identity/replay fields (ordinal/hashes/result/status/error) and
+// the engine-owned display metadata (label/phase/resolved model + dispatch and
+// completion timestamps) are all carried through, so a "running" record and the
+// terminal record that overwrites it both surface in `workflow show` and the UI.
 func callFromEntry(runID string, e workflow.JournalEntry) protocol.WorkflowAgentCall {
 	return protocol.WorkflowAgentCall{
-		RunID:      runID,
-		Ordinal:    e.Ordinal,
-		PromptHash: ptrIfNonEmpty(e.PromptHash),
-		SchemaHash: ptrIfNonEmpty(e.SchemaHash),
-		ResultJson: rawResultToPtr(e.Result),
-		Status:     protocol.WorkflowAgentCallStatus(callStatusOrOk(e.Status)),
-		Error:      ptrIfNonEmpty(e.Err),
+		RunID:         runID,
+		Ordinal:       e.Ordinal,
+		Label:         ptrIfNonEmpty(e.Label),
+		Phase:         ptrIfNonEmpty(e.Phase),
+		ResolvedModel: ptrIfNonEmpty(e.Model),
+		PromptHash:    ptrIfNonEmpty(e.PromptHash),
+		SchemaHash:    ptrIfNonEmpty(e.SchemaHash),
+		ResultJson:    rawResultToPtr(e.Result),
+		Status:        protocol.WorkflowAgentCallStatus(callStatusOrOk(e.Status)),
+		Error:         ptrIfNonEmpty(e.Err),
+		StartedAt:     ptrIfNonEmpty(e.StartedAt),
+		CompletedAt:   ptrIfNonEmpty(e.CompletedAt),
 	}
 }
 

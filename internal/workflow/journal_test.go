@@ -27,6 +27,28 @@ func TestIsCacheHitTruthTable(t *testing.T) {
 			}
 		})
 	}
+
+	// Non-terminal status never hits, even with every hash matching: a "running"
+	// (or empty) row is an in-flight progress marker seeded from the store on
+	// resume; replaying it as a result would yield a null/partial value.
+	for _, status := range []string{"running", ""} {
+		t.Run("non-terminal status "+status, func(t *testing.T) {
+			e := JournalEntry{Ordinal: "ord", PromptHash: "ph", SchemaHash: "sh", Status: status}
+			if IsCacheHit(e, "ord", "ph", "sh") {
+				t.Errorf("IsCacheHit=true for non-terminal status %q, want false", status)
+			}
+		})
+	}
+
+	// Terminal statuses other than "ok" still hit when hashes match.
+	for _, status := range []string{"ok", "skipped", "errored"} {
+		t.Run("terminal status "+status, func(t *testing.T) {
+			e := JournalEntry{Ordinal: "ord", PromptHash: "ph", SchemaHash: "sh", Status: status}
+			if !IsCacheHit(e, "ord", "ph", "sh") {
+				t.Errorf("IsCacheHit=false for terminal status %q, want true", status)
+			}
+		})
+	}
 }
 
 func TestHashSchemaSentinel(t *testing.T) {
