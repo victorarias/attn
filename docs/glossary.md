@@ -29,6 +29,18 @@ Picture, Decisions, Constraints.
 It is SQLite-canonical (the coordination layer), distinct from the Notebook, which
 is filesystem-canonical.
 
+## The Notebook
+
+attn's durable, **profile-wide, filesystem-canonical** markdown memory layer. The
+`.md` files on disk are the source of truth (unlike the workspace context, which is
+SQLite-canonical), and the Notebook outlives any single session, workspace, or PR.
+
+The daemon owns every write: callers go through `attn notebook …` so writes stay
+atomic, serialized, and observable — agents never edit notebook files directly on
+disk. It holds **two kinds of notes** — the journal (a dated log) and memory notes
+(distilled, timeless knowledge) — alongside the machine-internal raw tier the keeper
+reads from.
+
 ## The journal
 
 The durable, **curated, cross-workspace log of what was done in attn** —
@@ -53,6 +65,32 @@ abstraction level — we simply say nothing about it.
 
 The journal is **curated**: nothing machine-raw lands in it. Raw machine inputs
 live in the raw tier and are consumed by the keeper, never pasted into the journal.
+
+## Memory note
+
+A **distilled, durable note worth keeping** beyond a single PR — a decision, a
+gotcha, or a piece of domain knowledge. Memory notes live under `memory/` in the
+Notebook (`memory/decisions/`, `memory/gotchas/`, `memory/domain/`) and are indexed
+by `memory/index.md`.
+
+Distinct from the journal along one axis: the journal is a **dated log of what
+happened**; a memory note is a **timeless statement of what is known**. Memory is not
+a task tracker — capture what is *known*, not what is *to do*. Every memory note must
+be **grounded** with resolvable `sources:` (journal anchors, `dispatch:<id>`, or
+URLs); we do not author one from paraphrase alone.
+
+## Dreaming (the harvest pass)
+
+The pass that **distills durable facts into memory notes** — the `harvest_dream` task
+kind. Today it is a **read-only preview**: `attn notebook dream` (and `--dry-run`)
+surfaces candidate facts gathered from the journal, workspace decisions, and dispatch
+outcomes, without writing anything. The scheduler and candidate persistence exist;
+the distillation that would actually *write* memory notes is **deferred**, so memory
+notes are authored by hand (`notebook memory write`) for now.
+
+The keeper's two duties (below) are scoped to compaction and journal narration;
+whether the harvest is eventually a third keeper duty or a distinct entity is left
+open here deliberately, until the distillation is actually built.
 
 ## The keeper
 
