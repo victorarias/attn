@@ -1988,11 +1988,11 @@ export interface NotebookBacklinksResultMessage {
 }
 
 export interface NotebookEntryElement {
-    kind?:    string;
     path:     string;
     size:     number;
     summary?: string;
     title?:   string;
+    type?:    string;
     updated?: string;
     [property: string]: any;
 }
@@ -2013,11 +2013,11 @@ export enum NotebookChangedMessageEvent {
 }
 
 export interface NotebookEntry {
-    kind?:    string;
     path:     string;
     size:     number;
     summary?: string;
     title?:   string;
+    type?:    string;
     updated?: string;
     [property: string]: any;
 }
@@ -7365,11 +7365,11 @@ const typeMap: any = {
         { json: "success", js: "success", typ: true },
     ], "any"),
     "NotebookEntryElement": o([
-        { json: "kind", js: "kind", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
         { json: "size", js: "size", typ: 0 },
         { json: "summary", js: "summary", typ: u(undefined, "") },
         { json: "title", js: "title", typ: u(undefined, "") },
+        { json: "type", js: "type", typ: u(undefined, "") },
         { json: "updated", js: "updated", typ: u(undefined, "") },
     ], "any"),
     "NotebookChangedMessage": o([
@@ -7378,11 +7378,11 @@ const typeMap: any = {
         { json: "paths", js: "paths", typ: a("") },
     ], "any"),
     "NotebookEntry": o([
-        { json: "kind", js: "kind", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
         { json: "size", js: "size", typ: 0 },
         { json: "summary", js: "summary", typ: u(undefined, "") },
         { json: "title", js: "title", typ: u(undefined, "") },
+        { json: "type", js: "type", typ: u(undefined, "") },
         { json: "updated", js: "updated", typ: u(undefined, "") },
     ], "any"),
     "NotebookGuideMessage": o([

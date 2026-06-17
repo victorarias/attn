@@ -4,7 +4,7 @@ A code-grounded map of every automated process behind the Notebook: who writes
 what, when it fires, and where the state lives. This is the "how it actually
 works" companion to [glossary.md](glossary.md) (which defines the vocabulary).
 Vocabulary terms below — *the keeper*, *the chief of staff*, *the journal*,
-*memory notes*, *the raw tier* — are defined there.
+*the knowledge base*, *the raw tier* — are defined there.
 
 The dreaming/`harvest_dream` feature described in older plan docs has been
 **removed**; nothing in this document depends on it.
@@ -17,12 +17,12 @@ serve:
 | Author | Scope | Writes |
 | --- | --- | --- |
 | **The keeper** | one workspace | the journal (narration) + compacts `context.md` |
-| **The chief of staff** | cross-workspace | the journal (altitude), memory notes, `inbox.md` |
+| **The chief of staff** | cross-workspace | the journal (altitude), the knowledge base, `inbox.md` |
 
 | Product | Audience | How it is written |
 | --- | --- | --- |
 | **The journal** (`journal/<date>.md`) | humans | curated narrative, machine-raw never lands in it |
-| **Memory notes** (`memory/…`) | agents (the chief) | hand-authored, grounded, timeless |
+| **The knowledge base** (`knowledge/…`) | agents (the chief) | hand-authored, grounded, timeless |
 
 Everything machine-raw the keeper needs lives in the **raw tier**
 (`.attn/raw/`), which is the keeper's *input* and is physically unreachable
@@ -36,8 +36,9 @@ Reserved layout (`internal/notebook/layout.go`):
 - `log.md` — change history.
 - `inbox.md` — chief selections.
 - `journal/<date>.md` — the curated, dated journal (append-only narrative).
-- `memory/{decisions,gotchas,domain}/` — distilled memory notes, indexed by
-  `memory/index.md`.
+- `knowledge/{projects,areas,resources,archive}/` — the distilled knowledge base
+  (PARA), indexed by `knowledge/index.md` (each PARA dir also carries its own
+  `index.md`). Notes carry OKF frontmatter with an open `type` field.
 - `.attn/` — machine state (the durable task runner, the raw tier, the
   narrate-cron anchor). Skipped by `List`, by the watcher, and by any
   dotfile-aware external sync scanner; `CleanPath` rejects dotdir segments
@@ -202,24 +203,27 @@ outcomes into the curated journal.
 > path. `dispatchDecisionText` / `dispatchVerificationLine` render the decision
 > and verification lines inside the raw dispatch block.
 
-## Memory notes
+## The knowledge base
 
-Distilled, timeless, agent-facing knowledge under `memory/{decisions,gotchas,
-domain}/`, indexed by `memory/index.md`.
+Distilled, timeless, agent-facing knowledge under `knowledge/`, organized
+PARA-style into `knowledge/{projects,areas,resources,archive}/` and indexed by
+`knowledge/index.md` (each PARA dir also carries its own `index.md`). Notes carry
+OKF frontmatter with an open `type` field — the store no longer validates a closed
+set of kinds.
 
 - **Hand-authored only.** There is no automated writer or promote pass today —
-  the dreaming harvest that would have fed one was removed. The sole write path
-  is the user-facing `attn notebook memory write` CLI →
-  `handleNotebookWrite`/`Store.Write` (`cmd/attn/main.go`,
-  `internal/daemon/notebook.go`).
+  the dreaming harvest that would have fed one was removed. Notes are written
+  through the daemon (`handleNotebookWrite`/`Store.Write`,
+  `internal/daemon/notebook.go`) and via native file edits on disk. (A
+  `attn notebook …` CLI write path still exists today but is slated for retirement
+  in a follow-up PR; treat the daemon/WS and native edits as the durable paths.)
 - **Grounding is a hard rule.** Every note must carry resolvable `sources:`
   (journal anchors, `dispatch:<id>`, or URLs) — enforced in the notebook
-  guidance (`internal/hooks/hooks.go`) and the `memory/index.md` scaffold
+  guidance (`internal/hooks/hooks.go`) and the `knowledge/index.md` scaffold
   (`internal/notebook/layout.go`). No authoring from paraphrase alone.
-- **The chief of staff consumes them.** The activation guidance directs the
-  chief to orient via `memory/index.md` and `attn notebook list memory` before
-  substantive work.
+- **The chief of staff consumes it.** The activation guidance directs the
+  chief to orient via `knowledge/index.md` before substantive work.
 
 The split is deliberate: the **journal** is a dated log of *what happened* (for
-humans); a **memory note** is a timeless statement of *what is known* (for
+humans); a **knowledge note** is a timeless statement of *what is known* (for
 agents).

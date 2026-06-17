@@ -2034,7 +2034,7 @@ model WorkspaceContextMaintenanceResult {
 // One notebook note as surfaced by notebook_list (metadata only, no body).
 model NotebookEntry {
   path: string;
-  kind?: string;
+  type?: string;
   title?: string;
   summary?: string;
   updated?: string;

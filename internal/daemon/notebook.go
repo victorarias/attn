@@ -609,8 +609,8 @@ func notebookEntriesToProtocol(entries []notebook.Entry) []protocol.NotebookEntr
 	out := make([]protocol.NotebookEntry, 0, len(entries))
 	for _, e := range entries {
 		pe := protocol.NotebookEntry{Path: e.Path, Size: int(e.Size)}
-		if e.Kind != "" {
-			pe.Kind = protocol.Ptr(e.Kind)
+		if e.Type != "" {
+			pe.Type = protocol.Ptr(e.Type)
 		}
 		if e.Title != "" {
 			pe.Title = protocol.Ptr(e.Title)

@@ -25,21 +25,21 @@ func TestCleanPath(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{"memory/decisions/foo.md", "memory/decisions/foo.md", false},
-		{"/memory/decisions/foo.md", "memory/decisions/foo.md", false}, // root-absolute normalized
+		{"knowledge/areas/foo.md", "knowledge/areas/foo.md", false},
+		{"/knowledge/areas/foo.md", "knowledge/areas/foo.md", false}, // root-absolute normalized
 		{"  /index.md  ", "index.md", false},
-		{"memory/./foo.md", "memory/foo.md", false},
+		{"knowledge/./foo.md", "knowledge/foo.md", false},
 		// escapes are neutralized to within the root, never outside
 		{"../../etc/passwd.md", "etc/passwd.md", false},
-		{"memory/../journal/x.md", "journal/x.md", false},
+		{"knowledge/../journal/x.md", "journal/x.md", false},
 		// rejections
 		{"", "", true},
 		{"/", "", true},
-		{"memory/foo.txt", "", true},               // not .md
-		{"memory/foo", "", true},                   // no extension
-		{".attn/raw/x.md", "", true},               // dotdir segment
-		{"memory/.hidden.md", "", true},            // dotfile segment
-		{"memory//foo.md", "memory/foo.md", false}, // doubled slash collapses to a valid path
+		{"knowledge/foo.txt", "", true},                  // not .md
+		{"knowledge/foo", "", true},                      // no extension
+		{".attn/raw/x.md", "", true},                     // dotdir segment
+		{"knowledge/.hidden.md", "", true},               // dotfile segment
+		{"knowledge//foo.md", "knowledge/foo.md", false}, // doubled slash collapses to a valid path
 	}
 	for _, tc := range tests {
 		got, err := CleanPath(tc.in)

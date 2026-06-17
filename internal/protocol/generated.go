@@ -1759,9 +1759,6 @@ type NotebookChangedMessage struct {
 }
 
 type NotebookEntry struct {
-	// Kind corresponds to the JSON schema field "kind".
-	Kind *string `json:"kind,omitempty,omitzero"`
-
 	// Path corresponds to the JSON schema field "path".
 	Path string `json:"path"`
 
@@ -1773,6 +1770,9 @@ type NotebookEntry struct {
 
 	// Title corresponds to the JSON schema field "title".
 	Title *string `json:"title,omitempty,omitzero"`
+
+	// Type corresponds to the JSON schema field "type".
+	Type *string `json:"type,omitempty,omitzero"`
 
 	// Updated corresponds to the JSON schema field "updated".
 	Updated *string `json:"updated,omitempty,omitzero"`

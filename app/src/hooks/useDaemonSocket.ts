@@ -170,7 +170,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '111';
+export const PROTOCOL_VERSION = '112';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -399,7 +399,9 @@ export interface SessionExitInfo {
 // (no body). Mirrors the daemon's protocol.NotebookEntry.
 export interface NotebookEntry {
   path: string;
-  kind?: string;
+  // Open key frontmatter (OKF) document type, e.g. "note" or "journal". Optional
+  // because the types are open-ended and an entry may omit it.
+  type?: string;
   title?: string;
   summary?: string;
   updated?: string;

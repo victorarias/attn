@@ -20,20 +20,20 @@ func TestParseRoundTrip(t *testing.T) {
 		},
 		{
 			name:     "frontmatter and body",
-			raw:      "---\nkind: memory\ntitle: Foo\n---\n# Foo\n\nbody\n",
-			wantFM:   map[string]any{"kind": "memory", "title": "Foo"},
+			raw:      "---\ntype: note\ntitle: Foo\n---\n# Foo\n\nbody\n",
+			wantFM:   map[string]any{"type": "note", "title": "Foo"},
 			wantBody: "# Foo\n\nbody\n",
 		},
 		{
 			name:     "frontmatter preserves blank line before body",
-			raw:      "---\nkind: memory\n---\n\n# Foo\n",
-			wantFM:   map[string]any{"kind": "memory"},
+			raw:      "---\ntype: note\n---\n\n# Foo\n",
+			wantFM:   map[string]any{"type": "note"},
 			wantBody: "\n# Foo\n",
 		},
 		{
 			name:     "empty body",
-			raw:      "---\nkind: journal\n---\n",
-			wantFM:   map[string]any{"kind": "journal"},
+			raw:      "---\ntype: journal\n---\n",
+			wantFM:   map[string]any{"type": "journal"},
 			wantBody: "",
 		},
 	}
@@ -65,7 +65,7 @@ func TestParseRoundTrip(t *testing.T) {
 // Unknown keys (e.g. written by Obsidian or an external sync tool) must survive
 // a parse + serialize cycle, not be dropped.
 func TestUnknownKeysPreserved(t *testing.T) {
-	raw := "---\nkind: memory\ntitle: T\nobsidian-tags: [a, b]\ncustom: 42\n---\nbody\n"
+	raw := "---\ntype: note\ntitle: T\nobsidian-tags: [a, b]\ncustom: 42\n---\nbody\n"
 	doc, err := Parse([]byte(raw))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -86,7 +86,7 @@ func TestUnknownKeysPreserved(t *testing.T) {
 
 // The read/list path must never fail on malformed frontmatter.
 func TestParsePermissiveOnMalformedYAML(t *testing.T) {
-	raw := "---\nkind: memory\n  bad: : indentation\n: nope\n---\nbody\n"
+	raw := "---\ntype: note\n  bad: : indentation\n: nope\n---\nbody\n"
 	if _, err := Parse([]byte(raw)); err == nil {
 		t.Fatal("Parse should report malformed YAML as an error")
 	}
@@ -100,13 +100,27 @@ func TestParsePermissiveOnMalformedYAML(t *testing.T) {
 }
 
 func TestDocumentAccessors(t *testing.T) {
-	doc, _ := Parse([]byte("---\nkind: memory\ntitle: T\nsummary: S\nupdated: 2026-06-13T00:00:00Z\n---\n"))
-	if doc.Kind() != "memory" || doc.Title() != "T" || doc.Summary() != "S" || doc.Updated() != "2026-06-13T00:00:00Z" {
-		t.Fatalf("accessors = (%q,%q,%q,%q)", doc.Kind(), doc.Title(), doc.Summary(), doc.Updated())
+	doc, _ := Parse([]byte("---\ntype: note\ntitle: T\nsummary: S\nupdated: 2026-06-13T00:00:00Z\n---\n"))
+	if doc.Type() != "note" || doc.Title() != "T" || doc.Summary() != "S" || doc.Updated() != "2026-06-13T00:00:00Z" {
+		t.Fatalf("accessors = (%q,%q,%q,%q)", doc.Type(), doc.Title(), doc.Summary(), doc.Updated())
 	}
 	empty := Document{}
-	if empty.Kind() != "" || empty.Title() != "" {
+	if empty.Type() != "" || empty.Title() != "" {
 		t.Fatal("accessors on empty document should return empty strings")
+	}
+}
+
+// Type() falls back to a legacy `kind` field so a note an external tool wrote
+// before the field was renamed still resolves. attn always writes `type`, and a
+// present `type` wins over a stray `kind`.
+func TestTypeReadsLegacyKind(t *testing.T) {
+	legacy, _ := Parse([]byte("---\nkind: memory\n---\n"))
+	if legacy.Type() != "memory" {
+		t.Fatalf("Type() should fall back to legacy kind, got %q", legacy.Type())
+	}
+	both, _ := Parse([]byte("---\ntype: note\nkind: memory\n---\n"))
+	if both.Type() != "note" {
+		t.Fatalf("Type() should prefer type over legacy kind, got %q", both.Type())
 	}
 }
 
@@ -130,13 +144,13 @@ func TestNoClosingFenceIsBody(t *testing.T) {
 // are all preserved. This is the preserve-verbatim round-trip the design
 // requires for Obsidian/sync/user-authored fields.
 func TestParseRoundTripIsByteFaithful(t *testing.T) {
-	raw := "---\nkind: memory\nticket: 007\nver: 1.10\n# a human note\nzeta: last\nalpha: first\n---\n\n# Body\n"
+	raw := "---\ntype: note\nticket: 007\nver: 1.10\n# a human note\nzeta: last\nalpha: first\n---\n\n# Body\n"
 	doc, err := Parse([]byte(raw))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if doc.Kind() != "memory" {
-		t.Fatalf("Kind = %q, want memory", doc.Kind())
+	if doc.Type() != "note" {
+		t.Fatalf("Type = %q, want note", doc.Type())
 	}
 	if out := string(doc.Bytes()); out != raw {
 		t.Fatalf("round-trip not byte-faithful:\n got: %q\nwant: %q", out, raw)
