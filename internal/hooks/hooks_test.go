@@ -193,20 +193,6 @@ func TestWorkspaceContextGuidance(t *testing.T) {
 	}
 }
 
-func TestWorkspaceContextSessionStartOutputWrapsGuidance(t *testing.T) {
-	raw := WorkspaceContextSessionStartOutput("/tmp/context.md")
-	var output sessionStartHookOutput
-	if err := json.Unmarshal([]byte(raw), &output); err != nil {
-		t.Fatalf("WorkspaceContextSessionStartOutput returned invalid JSON: %v", err)
-	}
-	if output.HookSpecificOutput.HookEventName != "SessionStart" {
-		t.Fatalf("hook event = %q", output.HookSpecificOutput.HookEventName)
-	}
-	if output.HookSpecificOutput.AdditionalContext != WorkspaceContextGuidance("/tmp/context.md") {
-		t.Fatal("hook output should wrap the shared workspace context guidance")
-	}
-}
-
 // NOTE: AskUserQuestion PostToolUse hook was removed because it fires
 // AFTER the user responds, not when the question is displayed.
 // See: https://github.com/anthropics/claude-code/issues/10168

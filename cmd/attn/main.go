@@ -25,7 +25,6 @@ import (
 	"github.com/victorarias/attn/internal/contextjanitor"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/daemonctl"
-	"github.com/victorarias/attn/internal/hooks"
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptyworker"
@@ -2126,36 +2125,15 @@ func runHookSessionStart() {
 	_ = json.NewDecoder(os.Stdin).Decode(&input)
 
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
+	// The SessionStart hook exists solely to sync the agent's native session ID
+	// back to attn for resume. Workspace-context guidance is injected directly at
+	// launch (--append-system-prompt / developer_instructions), so there is no
+	// guidance fallback to emit here.
 	syncSessionResumeID(c, sessionID, input.SessionID)
-	output, err := workspaceContextSessionStartOutput(c, sessionID, 40, 25*time.Millisecond)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not load workspace context guidance: %v\n", err)
-		return
-	}
-	if output != "" && !workspaceContextGuidanceProvidedAtLaunch() {
-		fmt.Fprintln(os.Stdout, output)
-	}
-}
-
-func workspaceContextGuidanceProvidedAtLaunch() bool {
-	return strings.TrimSpace(os.Getenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE")) != ""
 }
 
 type workspaceContextCheckoutClient interface {
 	CheckoutWorkspaceContext(sourceSessionID string, force bool) (*protocol.WorkspaceContextResult, error)
-}
-
-func workspaceContextSessionStartOutput(
-	c workspaceContextCheckoutClient,
-	sessionID string,
-	attempts int,
-	retryDelay time.Duration,
-) (string, error) {
-	path, err := workspaceContextCheckoutPath(c, sessionID, attempts, retryDelay)
-	if err != nil {
-		return "", err
-	}
-	return hooks.WorkspaceContextSessionStartOutput(path), nil
 }
 
 func workspaceContextCheckoutPath(

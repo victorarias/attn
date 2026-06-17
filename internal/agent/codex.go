@@ -89,9 +89,6 @@ func (c *Codex) BuildEnv(opts SpawnOpts) []string {
 		"ATTN_SESSION_ID=" + opts.SessionID,
 		"ATTN_AGENT=codex",
 	}
-	if strings.TrimSpace(opts.WorkspaceContextPath) != "" {
-		env = append(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=developer_instructions")
-	}
 	if opts.SocketPath != "" {
 		env = append(env, "ATTN_SOCKET_PATH="+opts.SocketPath)
 	}

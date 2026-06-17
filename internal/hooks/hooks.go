@@ -24,15 +24,6 @@ type SettingsConfig struct {
 	Hooks map[string][]HookEntry `json:"hooks"`
 }
 
-type sessionStartHookSpecificOutput struct {
-	HookEventName     string `json:"hookEventName"`
-	AdditionalContext string `json:"additionalContext"`
-}
-
-type sessionStartHookOutput struct {
-	HookSpecificOutput sessionStartHookSpecificOutput `json:"hookSpecificOutput"`
-}
-
 // WorkspaceContextGuidance teaches an agent how to use this session's checkout
 // without embedding the shared context itself.
 func WorkspaceContextGuidance(path string) string {
@@ -49,23 +40,6 @@ func WorkspaceContextGuidance(path string) string {
 - Update durable facts materially changed by your work. Remove only facts your current work directly proves stale or superseded; attn handles occasional broad compaction. Avoid duplication, transcripts, raw command output, routine narration, update timestamps, and repository facts that are easy to recover.
 - Edit the checkout when durable shared state changes. Before publishing or at a natural handoff boundary, load the attn skill's workspace-context reference and follow its status, update, and conflict workflow.
 - Use only this session's checkout. Do not pass --session unless the user explicitly asks you to operate on another session.`, strconv.Quote(path))
-}
-
-// WorkspaceContextSessionStartOutput returns hook output used when an agent
-// could not receive workspace context guidance at launch.
-func WorkspaceContextSessionStartOutput(path string) string {
-	guidance := WorkspaceContextGuidance(path)
-	if guidance == "" {
-		return ""
-	}
-	output := sessionStartHookOutput{
-		HookSpecificOutput: sessionStartHookSpecificOutput{
-			HookEventName:     "SessionStart",
-			AdditionalContext: guidance,
-		},
-	}
-	data, _ := json.Marshal(output)
-	return string(data)
 }
 
 // Generate generates settings configuration with hooks for a session
