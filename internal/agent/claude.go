@@ -82,8 +82,8 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	if strings.TrimSpace(opts.SettingsPath) != "" {
 		args = append(args, "--settings", opts.SettingsPath)
 	}
-	if guidance := hooks.WorkspaceContextGuidance(opts.WorkspaceContextPath); guidance != "" {
-		args = append(args, "--append-system-prompt", guidance)
+	if instructions := hooks.AgentInstructions(opts.WorkspaceContextPath, opts.InjectWorkflowGuidance); instructions != "" {
+		args = append(args, "--append-system-prompt", instructions)
 	}
 
 	if opts.ResumeSessionID != "" {

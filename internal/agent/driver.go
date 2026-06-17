@@ -239,6 +239,12 @@ type SpawnOpts struct {
 	// shared context. It may become stale after launch.
 	WorkspaceContextPath string
 
+	// InjectWorkflowGuidance, when true, appends the workflow-trigger guidance to
+	// this session's launch instructions (system prompt / developer instructions).
+	// It is gated by the daemon's workflow_guidance_enabled setting and is never
+	// set for workflow subagents, which spawn through the headless path instead.
+	InjectWorkflowGuidance bool
+
 	// ConfigOverrides are agent CLI config overrides generated for this launch.
 	ConfigOverrides []string
 }

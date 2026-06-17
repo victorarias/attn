@@ -296,6 +296,7 @@ func (c *Codex) GenerateConfigOverrides(opts SpawnOpts) []string {
 		opts.SocketPath,
 		opts.WrapperPath,
 		opts.WorkspaceContextPath,
+		opts.InjectWorkflowGuidance,
 	)
 }
 

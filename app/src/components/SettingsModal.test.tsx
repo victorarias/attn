@@ -355,6 +355,76 @@ describe('SettingsModal review loop prompts', () => {
     expect(screen.getByText(/does not register a second tailnet device/i)).toBeInTheDocument();
   });
 
+  it('enables workflow guidance when off and disables it when on', async () => {
+    const onSetSetting = vi.fn();
+
+    const { rerender } = render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        githubHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{ workflow_guidance_enabled: 'false' }}
+        endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={onSetSetting}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+    const toggle = await screen.findByTestId('settings-workflow-guidance-toggle');
+    expect(toggle).toHaveTextContent('Enable');
+    fireEvent.click(toggle);
+    expect(onSetSetting).toHaveBeenCalledWith('workflow_guidance_enabled', 'true');
+
+    rerender(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        githubHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{ workflow_guidance_enabled: 'true' }}
+        endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={onSetSetting}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+    const toggleOn = await screen.findByTestId('settings-workflow-guidance-toggle');
+    expect(toggleOn).toHaveTextContent('Disable');
+    fireEvent.click(toggleOn);
+    expect(onSetSetting).toHaveBeenCalledWith('workflow_guidance_enabled', 'false');
+  });
+
   it('toggles remote web access for a connected endpoint', async () => {
     const onSetEndpointRemoteWeb = vi.fn().mockResolvedValue({ success: true });
 

@@ -68,6 +68,96 @@ resume replays identically. These THROW:
 Pass anything time- or randomness-dependent in as `args`, and vary per-item work
 by its index rather than by chance.
 
+## Designing a workflow
+
+Reach for a workflow when the task is too big for one context, benefits from
+independent perspectives, or applies the same step across many items. Match the
+script's shape to the shape of the work:
+
+- **Fan-out / cover ground** — split the work into independent slices and run them
+  in `parallel`. Use when slices don't depend on each other (audit N files,
+  summarize N docs).
+- **Pipeline** — flow each item through ordered stages with `pipeline`. The default
+  for multi-stage per-item work; there is no barrier between stages, so item A can
+  reach stage 3 while item B is still in stage 1.
+- **Verify / adversarial** — after a producing step, spawn one or more independent
+  checkers that try to REFUTE the result before you trust it. A finding that
+  survives several skeptics is far stronger than one unreviewed pass.
+- **Judge panel** — generate several independent attempts from different angles,
+  score them, and synthesize from the winner. Use when the solution space is wide
+  and a single attempt is likely to be only locally good.
+
+Keep the data flow explicit: pass each step's output forward as a value, guard
+`null` results (a failed `agent()` resolves to `null`), and label phases so the
+run reads clearly in `workflow show`.
+
+Pitfalls:
+
+- Don't add a synchronization barrier (`await parallel(...)` between stages) unless
+  a stage genuinely needs ALL prior results at once (dedup, merge, count-zero
+  early-exit). Otherwise prefer `pipeline` — a barrier makes fast items wait on the
+  slowest one.
+- Don't fan out wider than the work warrants: each `agent()` call is a real
+  headless run costing minutes and tokens.
+- Don't depend on a single result without a guard or a verifier.
+
+### Picking a model
+
+`--model` (the run default) and the per-call `model` option both take a harness
+model id; omit it to let the harness pick its default — the right choice unless you
+have a reason to override. Choose by the *job each call does*, not by habit:
+
+- **Hard reasoning, synthesis, adversarial review, ambiguous specs** — the most
+  capable model. These steps set the quality ceiling of the whole run; underpowering
+  them is a false economy.
+- **Broad, mechanical, well-specified fan-out** (extract a field, classify,
+  grep-and-summarize, transform one item) — a smaller, faster model. You run many of
+  these, so a cheaper model keeps a wide fan-out affordable and is usually enough.
+- **Mixed runs** — set a sensible run default with `--model`, then override only the
+  few calls that need more (or less) horsepower via the per-call `model` option.
+  Phase-level reasoning steps justify the upgrade; per-item workers usually don't.
+
+When unsure, start with the harness default and pin a model only once you've seen a
+step underperform.
+
+Worked example — fan out cheap, judge expensive:
+
+```js
+export const meta = {
+  name: "triage-and-deep-dive",
+  description: "Classify many items cheaply, then deep-dive the risky ones.",
+  phases: ["triage", "deep-dive"],
+};
+
+phase("triage");
+// Many mechanical classifications: each runs on a small, fast model.
+const triaged = await parallel(
+  args.items.map((item) => () =>
+    agent(`Classify this item as high|low risk: ${JSON.stringify(item)}`, {
+      label: `triage:${item.id}`,
+      model: "<small-fast-model>",
+      schema: { type: "object", properties: { risk: { type: "string" } } },
+    })
+  )
+);
+
+phase("deep-dive");
+// Only the high-risk items, reviewed on the most capable model.
+const risky = args.items.filter((item, i) => triaged[i]?.risk === "high");
+const reviews = await parallel(
+  risky.map((item) => () =>
+    agent(`Deep-dive the risk in: ${JSON.stringify(item)}`, {
+      label: `review:${item.id}`,
+      model: "<most-capable-model>",
+    })
+  )
+);
+return { triaged, reviews };
+```
+
+The placeholders stand in for whatever model ids your harness exposes; the point is
+the *split* — cheap and wide for triage, capable and narrow for the deep dive.
+
 ## CLI
 
 The engine runs in the `attn workflow run` process and reports to the daemon over

@@ -13,7 +13,7 @@ import (
 // attn-managed terminals without mutating user or project Codex config.
 // attn has always owned the resize-reflow value for its embedded renderer:
 // xterm needed it disabled, while Ghostty correctly renders the enabled redraw.
-func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath, workspaceContextPath string) []string {
+func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath, workspaceContextPath string, injectWorkflow bool) []string {
 	_ = sessionID  // Commands read ATTN_SESSION_ID from the Codex process env.
 	_ = socketPath // Hook commands inherit ATTN_SOCKET_PATH from the Codex process env.
 	wrapper := strings.TrimSpace(wrapperPath)
@@ -66,8 +66,8 @@ func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath, workspaceC
 		"hooks.PostToolUse=" + group("*", postToolUse),
 		"hooks.Stop=" + group("", stop),
 	}
-	if guidance := WorkspaceContextGuidance(workspaceContextPath); guidance != "" {
-		overrides = append(overrides, "developer_instructions="+strconv.Quote(guidance))
+	if instructions := AgentInstructions(workspaceContextPath, injectWorkflow); instructions != "" {
+		overrides = append(overrides, "developer_instructions="+strconv.Quote(instructions))
 	}
 	return overrides
 }

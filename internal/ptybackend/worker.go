@@ -476,6 +476,9 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 		}()
 	}
 	workerEnv := append(os.Environ(), "ATTN_PTY_WORKER=1")
+	if opts.WorkflowGuidanceEnabled {
+		workerEnv = append(workerEnv, "ATTN_WORKFLOW_GUIDANCE_ENABLED=1")
+	}
 	if len(opts.LoginShellEnv) > 0 {
 		if envJSON, err := json.Marshal(opts.LoginShellEnv); err == nil {
 			workerEnv = append(workerEnv, "ATTN_CACHED_SHELL_ENV="+string(envJSON))

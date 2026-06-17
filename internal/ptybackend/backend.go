@@ -39,6 +39,11 @@ type SpawnOptions struct {
 	// LoginShellEnv, when non-nil, is a pre-computed login shell environment
 	// from the daemon's cache. Skips the ~130ms readLoginShellEnv in workers.
 	LoginShellEnv []string
+
+	// WorkflowGuidanceEnabled mirrors the daemon's workflow_guidance_enabled
+	// setting. When true the worker exports ATTN_WORKFLOW_GUIDANCE_ENABLED so the
+	// launched agent's instructions include the workflow-trigger guidance.
+	WorkflowGuidanceEnabled bool
 }
 
 type AttachInfo struct {
