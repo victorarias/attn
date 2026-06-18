@@ -6,15 +6,15 @@ import (
 )
 
 func TestLinks(t *testing.T) {
-	body := `See [the decision](/memory/decisions/foo.md) and
-[a gotcha](/memory/gotchas/bar.md#section) for context.
+	body := `See [the decision](/knowledge/areas/foo.md) and
+[a gotcha](/knowledge/resources/bar.md#section) for context.
 External [link](https://example.com/x.md) and a [relative](foo.md) one are ignored,
-as is an [anchor](#top). The decision is referenced [again](/memory/decisions/foo.md).`
+as is an [anchor](#top). The decision is referenced [again](/knowledge/areas/foo.md).`
 
 	got := Links(body)
 	want := []string{
-		"/memory/decisions/foo.md",
-		"/memory/gotchas/bar.md#section",
+		"/knowledge/areas/foo.md",
+		"/knowledge/resources/bar.md#section",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Links = %#v, want %#v", got, want)

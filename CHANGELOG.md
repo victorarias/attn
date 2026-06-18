@@ -6,6 +6,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-18]
+
+### Changed
+- **The Notebook's "memory" became a knowledge base the chief keeps by editing files directly.** The durable Notebook's distilled-notes layer is reframed from "memory" into a **knowledge base** organized the PARA way — `projects/`, `areas/`, `resources/`, and `archive/` under `knowledge/`, each with its own index. Notes now carry an open `type:` label instead of a fixed set of kinds, so you (or any markdown tool, like Obsidian) can organize them however you like. The chief of staff maintains the knowledge base and the journal the same way it writes everything else: by reading and editing the markdown files on disk with native tools.
+
+### Removed
+- **The `attn notebook` command line was removed.** The browsable Notebook in the app, sending a selection to the chief, and the background-task panel are all unchanged. Agents and the chief now read and write the notebook as plain files on disk instead of through `attn notebook init/show/list/journal/memory/tasks/guide`.
+
 ## [2026-06-15]
 
 ### Added

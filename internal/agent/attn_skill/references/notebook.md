@@ -1,69 +1,85 @@
 # Notebook
 
-Load this reference when you read or write the attn Notebook — the durable,
-profile-wide markdown memory — especially when your session is the chief of
-staff. The Notebook outlives any single workspace; per-workspace shared context
-(see the workspace-context reference) does not.
+Load this reference when you read or maintain the attn Notebook — the durable,
+profile-wide markdown store — especially when your session is the chief of staff.
+The Notebook outlives any single workspace; per-workspace shared context (see the
+workspace-context reference) does not.
 
-The daemon owns every attn write. Never edit notebook files directly on disk:
-go through `"$ATTN_WRAPPER_PATH" notebook …` so writes stay atomic, serialized,
-and observable.
+The Notebook is plain markdown on disk, and you maintain it by **editing the files
+directly with native tools** (Read/Write/Edit, plus `ls`/`grep` over the tree).
+There is no `attn notebook` CLI. The notebook root is given to you in your
+operating guidance (the chief-of-staff launch injection); it is
+`~/attn-notebook` by default (per-profile variants append the profile name). Paths
+below are written relative to that `<root>`.
 
 ## Orient First
 
-Print the operating rules and your notebook root:
+Load what is already known before adding anything — read the index files:
 
-    "$ATTN_WRAPPER_PATH" notebook guide
+    <root>/index.md             # the bundle guide
+    <root>/knowledge/index.md   # the knowledge-base nav
 
-Load what is already known before adding anything:
+Then browse the relevant subtree (`ls`/`grep` under `<root>/knowledge/...` or
+`<root>/journal/`).
 
-    "$ATTN_WRAPPER_PATH" notebook show /memory/index.md
-    "$ATTN_WRAPPER_PATH" notebook list memory
+## Two Layers
 
-Create the notebook once if it does not exist yet (idempotent):
+- **The journal** — `<root>/journal/<date>.md`, dated entries: the durable,
+  curated, cross-workspace log of what was done in attn, kept for the user's
+  recall and reviews (not a raw dump — raw machine inputs stay in the raw tier,
+  never the journal). Entries carry `type: journal`.
+- **The knowledge base** — `<root>/knowledge/`, distilled, timeless notes worth
+  keeping: decisions, gotchas, domain knowledge that outlived a single PR. It is
+  organized **PARA-style**: `projects/` (bounded efforts, roughly one per
+  workspace/epic), `areas/` (ongoing responsibilities and subsystems),
+  `resources/` (reference material), `archive/` (inactive items). As a project
+  finishes, promote its durable knowledge up into `areas/`.
 
-    "$ATTN_WRAPPER_PATH" notebook init
-
-## Two Kinds Of Notes
-
-- `journal` — dated entries: the durable, curated, cross-workspace log of what
-  was done in attn, kept for the user's recall and reviews (not a raw dump — raw
-  machine inputs stay in the raw tier, never the journal).
-- `memory` — distilled, durable notes worth keeping: decisions, gotchas, domain
-  knowledge that outlived a single PR. They live under `memory/decisions/`,
-  `memory/gotchas/`, and `memory/domain/`.
-
-Memory is not a task tracker. Capture what is *known*, not what is *to do*.
+The knowledge base is not a task tracker. Capture what is *known*, not what is
+*to do*.
 
 ## Append A Journal Entry
 
-    "$ATTN_WRAPPER_PATH" notebook journal append --text "Shipped PR 318; chief now reads the notebook at launch."
+Open today's file (`<root>/journal/<YYYY-MM-DD>.md`), creating it if absent, and
+append your entry. A new file carries OKF frontmatter:
 
-Defaults to today; pass `--date YYYY-MM-DD` to backfill a specific day.
+    ---
+    type: journal
+    title: 2026-06-18
+    ---
 
-## Write Or Edit A Durable Note
+Then add a short, dated, prose entry. Backfill a specific day by editing that
+day's file directly.
 
-Content comes from `--file` or stdin. To create a note:
+## Write Or Edit A Knowledge Note
 
-    "$ATTN_WRAPPER_PATH" notebook memory write --path /memory/decisions/notebook-canonical.md --file /tmp/note.md
+Create a file under the right PARA directory, e.g.
+`<root>/knowledge/areas/notebook.md`, with OKF frontmatter and a tight body:
 
-To edit safely, read first to get the current hash, then pass it as
-`--base-hash`. The write applies only if the file is unchanged on disk;
-otherwise it reports a conflict and you re-read and retry:
+    ---
+    type: note
+    title: Notebook is filesystem-canonical
+    summary: The .md files on disk are the source of truth.
+    sources:
+      - /journal/2026-06-18.md
+    ---
 
-    "$ATTN_WRAPPER_PATH" notebook show /memory/decisions/foo.md
-    # edit, then:
-    "$ATTN_WRAPPER_PATH" notebook memory write --path /memory/decisions/foo.md --base-hash <hash> --file /tmp/foo.md
+    The Notebook's markdown files are canonical; edits are plain file writes.
 
-## Rules That Make Memory Trustworthy
+To edit, just Read then Edit the file — ordinary on-disk edits. The daemon's
+filesystem watcher notices your change and refreshes any open in-app browser.
 
-- **Grounding is required.** Every durable `memory` note must carry resolvable
+## Rules That Make The Knowledge Base Trustworthy
+
+- **Grounding is required.** Every durable knowledge note must carry resolvable
   `sources:` in its frontmatter — journal anchors, `dispatch:<id>`, or URLs. Do
-  not author memory from paraphrase alone.
-- **Frontmatter:** `kind:` is the one required field (`journal` or `memory`).
-  `title`, `summary`, `tags`, `created`, `updated`, and `sources` are
-  recommended. Unknown keys are preserved untouched.
-- **Links are root-absolute markdown:** `[label](/memory/decisions/foo.md)`, not
+  not author a note from paraphrase alone.
+- **Frontmatter is OKF.** `type:` is the one required field — an open,
+  author-chosen string (e.g. `note`), not a fixed enum. `title`, `summary`,
+  `tags`, `created`, `updated`, and `sources` are recommended. Unknown keys are
+  preserved untouched. The reserved files `index.md` and `log.md` carry no
+  frontmatter.
+- **Links are root-absolute markdown:** `[label](/knowledge/areas/foo.md)`, not
   `[[wikilinks]]`. Keep the relationship kind (supersedes, relates-to) in prose.
 - **Be concise.** Notes are read by future agents under a token budget; prefer a
   tight summary plus a `sources:` pointer over a transcript.
@@ -71,11 +87,11 @@ otherwise it reports a conflict and you re-read and retry:
 ## As Chief Of Staff
 
 The Notebook is your home. When you are promoted to the role mid-session, attn
-prompts you to run `notebook guide`; follow it. Read `memory/index.md` to orient,
-record durable decisions there as you make them, and keep the day's journal
-current with your cross-workspace view. The keeper already narrates each
-workspace's own work into the journal, so write at a chief-of-staff altitude —
-what moved across workspaces, what you delegated and decided — not a
-per-workspace play-by-play. You remain profile-wide — you may `attn workspace
-context show --session <id>` for a specific workspace you step into, but that is
-opt-in.
+points you at `<root>/index.md` — read it to orient. Read `<root>/knowledge/index.md`,
+record durable decisions in the knowledge base as you make them, and keep the
+day's journal current with your cross-workspace view. The keeper already narrates
+each workspace's own work into the journal, so write at a chief-of-staff
+altitude — what moved across workspaces, what you delegated and decided — not a
+per-workspace play-by-play. You remain profile-wide — you may `"$ATTN_WRAPPER_PATH"
+workspace context show --session <id>` for a specific workspace you step into, but
+that is opt-in.

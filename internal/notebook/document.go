@@ -157,8 +157,15 @@ func (d Document) frontmatterString(key string) string {
 	return v
 }
 
-// Kind returns the declared kind ("" if absent or non-string).
-func (d Document) Kind() string { return d.frontmatterString("kind") }
+// Type returns the declared OKF `type` ("" if absent or non-string). For
+// read-compatibility with notes an external tool wrote before the field was
+// renamed, it falls back to a legacy `kind` value; attn always writes `type`.
+func (d Document) Type() string {
+	if t := d.frontmatterString("type"); t != "" {
+		return t
+	}
+	return d.frontmatterString("kind")
+}
 
 // Title returns the declared title ("" if absent).
 func (d Document) Title() string { return d.frontmatterString("title") }

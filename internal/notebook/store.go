@@ -108,14 +108,9 @@ func (s *Store) Write(p string, content []byte, baseHash string) (newHash string
 	if int64(len(content)) > MaxFileSize {
 		return "", nil, fmt.Errorf("notebook: content for %q exceeds %d bytes", p, MaxFileSize)
 	}
-	// Reject an explicitly-declared but invalid kind; absent kind is allowed
-	// (permissive). Malformed frontmatter is tolerated here — Write stores
-	// bytes; the read/list path is the permissive consumer.
-	if doc, perr := Parse(content); perr == nil {
-		if k := doc.Kind(); k != "" && !ValidKind(k) {
-			return "", nil, fmt.Errorf("notebook: invalid kind %q (want %q or %q)", k, KindJournal, KindMemory)
-		}
-	}
+	// No type validation: OKF leaves the `type` vocabulary open, so the store is
+	// a permissive writer (it stores bytes) and the read/list path is the
+	// permissive consumer. The guidance, not the store, asks authors for a type.
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -187,7 +182,7 @@ func (s *Store) AppendJournalEntryOnce(dateISO, dedupeMarker, entry string) (rel
 func newJournalDoc(dateISO string) func() Document {
 	return func() Document {
 		return Document{
-			Frontmatter: map[string]any{"kind": KindJournal, "title": dateISO},
+			Frontmatter: map[string]any{"type": TypeJournal, "title": dateISO},
 			Body:        "# " + dateISO + "\n",
 		}
 	}
@@ -269,7 +264,7 @@ const listFrontmatterScanLimit = 64 << 10 // 64 KiB
 
 func (s *Store) List(prefix string) ([]Entry, error) {
 	// A non-empty prefix scopes a subtree on path-segment boundaries (so
-	// "memory/decisions" does NOT match the sibling "memory/decisions-archive").
+	// "knowledge/areas" does NOT match the sibling "knowledge/areas-archive").
 	want := strings.Trim(strings.TrimSpace(prefix), "/")
 	var entries []Entry
 	walkErr := filepath.WalkDir(s.root, func(p string, dirent fs.DirEntry, err error) error {
@@ -319,7 +314,7 @@ func (s *Store) List(prefix string) ([]Entry, error) {
 		}
 		entries = append(entries, Entry{
 			Path:    rel,
-			Kind:    doc.Kind(),
+			Type:    doc.Type(),
 			Title:   doc.Title(),
 			Summary: doc.Summary(),
 			Updated: updated,

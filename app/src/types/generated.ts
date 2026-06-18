@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchesMessage, ListDispatchMessagesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookAppendJournalMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookInitMessage, NotebookInitResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, ReportDispatchMessage, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchesMessage, ListDispatchMessagesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, ReportDispatchMessage, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const acknowledgeDispatchMessage = Convert.toAcknowledgeDispatchMessage(json);
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
@@ -116,15 +116,12 @@
 //   const mutePRMessage = Convert.toMutePRMessage(json);
 //   const muteRepoMessage = Convert.toMuteRepoMessage(json);
 //   const muteWorkspaceMessage = Convert.toMuteWorkspaceMessage(json);
-//   const notebookAppendJournalMessage = Convert.toNotebookAppendJournalMessage(json);
 //   const notebookBacklinksMessage = Convert.toNotebookBacklinksMessage(json);
 //   const notebookBacklinksResultMessage = Convert.toNotebookBacklinksResultMessage(json);
 //   const notebookChangedMessage = Convert.toNotebookChangedMessage(json);
 //   const notebookEntry = Convert.toNotebookEntry(json);
 //   const notebookGuideMessage = Convert.toNotebookGuideMessage(json);
 //   const notebookGuideResult = Convert.toNotebookGuideResult(json);
-//   const notebookInitMessage = Convert.toNotebookInitMessage(json);
-//   const notebookInitResult = Convert.toNotebookInitResult(json);
 //   const notebookListMessage = Convert.toNotebookListMessage(json);
 //   const notebookListResultMessage = Convert.toNotebookListResultMessage(json);
 //   const notebookReadMessage = Convert.toNotebookReadMessage(json);
@@ -1956,17 +1953,6 @@ export enum MuteWorkspaceMessageCmd {
     MuteWorkspace = "mute_workspace",
 }
 
-export interface NotebookAppendJournalMessage {
-    cmd:   NotebookAppendJournalMessageCmd;
-    date?: string;
-    entry: string;
-    [property: string]: any;
-}
-
-export enum NotebookAppendJournalMessageCmd {
-    NotebookAppendJournal = "notebook_append_journal",
-}
-
 export interface NotebookBacklinksMessage {
     cmd:         NotebookBacklinksMessageCmd;
     path:        string;
@@ -1988,11 +1974,11 @@ export interface NotebookBacklinksResultMessage {
 }
 
 export interface NotebookEntryElement {
-    kind?:    string;
     path:     string;
     size:     number;
     summary?: string;
     title?:   string;
+    type?:    string;
     updated?: string;
     [property: string]: any;
 }
@@ -2013,11 +1999,11 @@ export enum NotebookChangedMessageEvent {
 }
 
 export interface NotebookEntry {
-    kind?:    string;
     path:     string;
     size:     number;
     summary?: string;
     title?:   string;
+    type?:    string;
     updated?: string;
     [property: string]: any;
 }
@@ -2036,21 +2022,6 @@ export interface NotebookGuideResult {
     guidance:         string;
     root:             string;
     session_is_chief: boolean;
-    [property: string]: any;
-}
-
-export interface NotebookInitMessage {
-    cmd: NotebookInitMessageCmd;
-    [property: string]: any;
-}
-
-export enum NotebookInitMessageCmd {
-    NotebookInit = "notebook_init",
-}
-
-export interface NotebookInitResult {
-    created: boolean;
-    root:    string;
     [property: string]: any;
 }
 
@@ -2781,7 +2752,6 @@ export interface Response {
     error?:                                string;
     notebook_entries?:                     NotebookEntryElement[];
     notebook_guide?:                       NotebookGuide;
-    notebook_init?:                        NotebookInit;
     notebook_read?:                        NotebookReadObject;
     notebook_tasks?:                       Task[];
     notebook_write?:                       NotebookWriteObject;
@@ -2813,12 +2783,6 @@ export interface NotebookGuide {
     guidance:         string;
     root:             string;
     session_is_chief: boolean;
-    [property: string]: any;
-}
-
-export interface NotebookInit {
-    created: boolean;
-    root:    string;
     [property: string]: any;
 }
 
@@ -4933,14 +4897,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("MuteWorkspaceMessage")), null, 2);
     }
 
-    public static toNotebookAppendJournalMessage(json: string): NotebookAppendJournalMessage {
-        return cast(JSON.parse(json), r("NotebookAppendJournalMessage"));
-    }
-
-    public static notebookAppendJournalMessageToJson(value: NotebookAppendJournalMessage): string {
-        return JSON.stringify(uncast(value, r("NotebookAppendJournalMessage")), null, 2);
-    }
-
     public static toNotebookBacklinksMessage(json: string): NotebookBacklinksMessage {
         return cast(JSON.parse(json), r("NotebookBacklinksMessage"));
     }
@@ -4987,22 +4943,6 @@ export class Convert {
 
     public static notebookGuideResultToJson(value: NotebookGuideResult): string {
         return JSON.stringify(uncast(value, r("NotebookGuideResult")), null, 2);
-    }
-
-    public static toNotebookInitMessage(json: string): NotebookInitMessage {
-        return cast(JSON.parse(json), r("NotebookInitMessage"));
-    }
-
-    public static notebookInitMessageToJson(value: NotebookInitMessage): string {
-        return JSON.stringify(uncast(value, r("NotebookInitMessage")), null, 2);
-    }
-
-    public static toNotebookInitResult(json: string): NotebookInitResult {
-        return cast(JSON.parse(json), r("NotebookInitResult"));
-    }
-
-    public static notebookInitResultToJson(value: NotebookInitResult): string {
-        return JSON.stringify(uncast(value, r("NotebookInitResult")), null, 2);
     }
 
     public static toNotebookListMessage(json: string): NotebookListMessage {
@@ -7347,11 +7287,6 @@ const typeMap: any = {
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
-    "NotebookAppendJournalMessage": o([
-        { json: "cmd", js: "cmd", typ: r("NotebookAppendJournalMessageCmd") },
-        { json: "date", js: "date", typ: u(undefined, "") },
-        { json: "entry", js: "entry", typ: "" },
-    ], "any"),
     "NotebookBacklinksMessage": o([
         { json: "cmd", js: "cmd", typ: r("NotebookBacklinksMessageCmd") },
         { json: "path", js: "path", typ: "" },
@@ -7365,11 +7300,11 @@ const typeMap: any = {
         { json: "success", js: "success", typ: true },
     ], "any"),
     "NotebookEntryElement": o([
-        { json: "kind", js: "kind", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
         { json: "size", js: "size", typ: 0 },
         { json: "summary", js: "summary", typ: u(undefined, "") },
         { json: "title", js: "title", typ: u(undefined, "") },
+        { json: "type", js: "type", typ: u(undefined, "") },
         { json: "updated", js: "updated", typ: u(undefined, "") },
     ], "any"),
     "NotebookChangedMessage": o([
@@ -7378,11 +7313,11 @@ const typeMap: any = {
         { json: "paths", js: "paths", typ: a("") },
     ], "any"),
     "NotebookEntry": o([
-        { json: "kind", js: "kind", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
         { json: "size", js: "size", typ: 0 },
         { json: "summary", js: "summary", typ: u(undefined, "") },
         { json: "title", js: "title", typ: u(undefined, "") },
+        { json: "type", js: "type", typ: u(undefined, "") },
         { json: "updated", js: "updated", typ: u(undefined, "") },
     ], "any"),
     "NotebookGuideMessage": o([
@@ -7393,13 +7328,6 @@ const typeMap: any = {
         { json: "guidance", js: "guidance", typ: "" },
         { json: "root", js: "root", typ: "" },
         { json: "session_is_chief", js: "session_is_chief", typ: true },
-    ], "any"),
-    "NotebookInitMessage": o([
-        { json: "cmd", js: "cmd", typ: r("NotebookInitMessageCmd") },
-    ], "any"),
-    "NotebookInitResult": o([
-        { json: "created", js: "created", typ: true },
-        { json: "root", js: "root", typ: "" },
     ], "any"),
     "NotebookListMessage": o([
         { json: "cmd", js: "cmd", typ: r("NotebookListMessageCmd") },
@@ -7814,7 +7742,6 @@ const typeMap: any = {
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "notebook_entries", js: "notebook_entries", typ: u(undefined, a(r("NotebookEntryElement"))) },
         { json: "notebook_guide", js: "notebook_guide", typ: u(undefined, r("NotebookGuide")) },
-        { json: "notebook_init", js: "notebook_init", typ: u(undefined, r("NotebookInit")) },
         { json: "notebook_read", js: "notebook_read", typ: u(undefined, r("NotebookReadObject")) },
         { json: "notebook_tasks", js: "notebook_tasks", typ: u(undefined, a(r("Task"))) },
         { json: "notebook_write", js: "notebook_write", typ: u(undefined, r("NotebookWriteObject")) },
@@ -7842,10 +7769,6 @@ const typeMap: any = {
         { json: "guidance", js: "guidance", typ: "" },
         { json: "root", js: "root", typ: "" },
         { json: "session_is_chief", js: "session_is_chief", typ: true },
-    ], "any"),
-    "NotebookInit": o([
-        { json: "created", js: "created", typ: true },
-        { json: "root", js: "root", typ: "" },
     ], "any"),
     "ReviewLoopRunObject": o([
         { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
@@ -8888,9 +8811,6 @@ const typeMap: any = {
     "MuteWorkspaceMessageCmd": [
         "mute_workspace",
     ],
-    "NotebookAppendJournalMessageCmd": [
-        "notebook_append_journal",
-    ],
     "NotebookBacklinksMessageCmd": [
         "notebook_backlinks",
     ],
@@ -8902,9 +8822,6 @@ const typeMap: any = {
     ],
     "NotebookGuideMessageCmd": [
         "notebook_guide",
-    ],
-    "NotebookInitMessageCmd": [
-        "notebook_init",
     ],
     "NotebookListMessageCmd": [
         "notebook_list",

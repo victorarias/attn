@@ -16,17 +16,20 @@ const (
 	FileLog   = "log.md"
 	// FileInbox is the reserved note where "send to chief" messages accumulate.
 	// It is created on the first send (not scaffolded) and lives at the root so
-	// it groups under "Notebook" in the browser, distinct from journal/memory.
+	// it groups under "Notebook" in the browser, distinct from journal/knowledge.
 	FileInbox = "inbox.md"
 
-	DirJournal = "journal"
-	DirMemory  = "memory"
+	DirJournal   = "journal"
+	DirKnowledge = "knowledge"
 
 	machineDir = ".attn"
 )
 
-// memorySubdirs are organizational groupings under memory/ (not kinds).
-var memorySubdirs = []string{"decisions", "gotchas", "domain"}
+// paraSubdirs are the PARA-method groupings under knowledge/ (the directory
+// axis). They are organizational, orthogonal to a note's OKF `type`. Knowledge
+// is nested under projects/ and areas/; resources/ and archive/ hold reference
+// and inactive material respectively.
+var paraSubdirs = []string{"projects", "areas", "resources", "archive"}
 
 // DefaultRoot returns the default notebook root for a profile, derived from the
 // user's home directory. The default profile ("" or "default") maps to
@@ -43,8 +46,8 @@ func DefaultRoot(home, profile string) string {
 }
 
 // CleanPath validates and normalizes a notebook path. The input may be
-// root-absolute ("/memory/foo.md", matching the link convention) or relative
-// ("memory/foo.md"); the result is always a clean, slash-separated relative
+// root-absolute ("/knowledge/areas/foo.md", matching the link convention) or
+// relative ("knowledge/areas/foo.md"); the result is always a clean, slash-separated relative
 // path. It rejects empty paths, the root itself, parent-directory escapes,
 // dotfile/dotdir segments, and any extension other than .md.
 func CleanPath(p string) (string, error) {
@@ -78,19 +81,26 @@ type scaffoldFile struct {
 }
 
 func scaffoldDirs() []string {
-	dirs := []string{DirJournal, DirMemory}
-	for _, sub := range memorySubdirs {
-		dirs = append(dirs, path.Join(DirMemory, sub))
+	dirs := []string{DirJournal, DirKnowledge}
+	for _, sub := range paraSubdirs {
+		dirs = append(dirs, path.Join(DirKnowledge, sub))
 	}
 	return dirs
 }
 
 func scaffoldFiles() []scaffoldFile {
-	return []scaffoldFile{
+	files := []scaffoldFile{
 		{FileIndex, indexTemplate},
 		{FileLog, logTemplate},
-		{path.Join(DirMemory, FileIndex), memoryIndexTemplate},
+		{path.Join(DirKnowledge, FileIndex), knowledgeIndexTemplate},
 	}
+	for _, sub := range paraSubdirs {
+		files = append(files, scaffoldFile{
+			relPath: path.Join(DirKnowledge, sub, FileIndex),
+			content: paraIndexTemplates[sub],
+		})
+	}
+	return files
 }
 
 // ScaffoldPaths returns the notebook-relative paths of the reserved files that
@@ -106,15 +116,17 @@ func ScaffoldPaths() []string {
 
 const indexTemplate = `# Notebook
 
-Durable, profile-wide markdown memory — written by attn on behalf of agents, a
-nightly consolidation pass, and you. It outlives any single workspace.
+A durable, profile-wide markdown bundle — the journal attn writes on your behalf
+and the knowledge base the chief of staff maintains. It outlives any single
+workspace and is yours to read, edit, and sync.
 
-- ` + "`journal/`" + ` — dated, append-only entries (the raw system of record).
-- ` + "`memory/`" + ` — durable distilled notes: decisions, gotchas, domain knowledge.
+- ` + "`journal/`" + ` — dated narrative of what was done, newest entries appended per day.
+- ` + "`knowledge/`" + ` — the PARA-organized knowledge base (projects, areas, resources, archive).
 - ` + "`log.md`" + ` — global change history, newest first.
 
-Kinds: ` + "`journal`" + `, ` + "`memory`" + `. Links are root-absolute markdown, e.g.
-[a decision](/memory/decisions/example.md) — not wikilinks.
+This is one OKF bundle (Open Knowledge Format): every note carries a ` + "`type`" + `
+frontmatter field, and links are root-absolute markdown, e.g.
+[an area note](/knowledge/areas/example.md) — not wikilinks.
 
 <!-- okf_version: 0.1 -->
 `
@@ -124,19 +136,28 @@ const logTemplate = `# Log
 Change history, newest first.
 `
 
-// inboxTemplate seeds inbox.md on the first "send to chief". It has no kind: it
-// is an append-only delivery log, not durable distilled memory.
+// inboxTemplate seeds inbox.md on the first "send to chief". It has no type: it
+// is an append-only delivery log, not durable knowledge.
 const inboxTemplate = `# Chief inbox
 
 Selections sent to the chief of staff from the Notebook, oldest first.
 `
 
-const memoryIndexTemplate = `# Memory
+const knowledgeIndexTemplate = `# Knowledge base
 
-Durable distilled notes. Every note carries resolvable ` + "`sources:`" + ` — there is
-no ungrounded memory.
+The chief of staff's durable knowledge, organized by the PARA method (the
+directory axis) with an OKF ` + "`type`" + ` on every note (the frontmatter axis).
 
-- ` + "`decisions/`" + ` — cross-workspace decisions that outlived a single PR.
-- ` + "`gotchas/`" + ` — repeated surprises worth remembering.
-- ` + "`domain/`" + ` — glossary and business rules.
+- ` + "`projects/`" + ` — bounded efforts with an end (one folder per project/epic).
+- ` + "`areas/`" + ` — ongoing responsibilities and subsystems, with no end.
+- ` + "`resources/`" + ` — reference material worth keeping.
+- ` + "`archive/`" + ` — finished or inactive items, moved here when a project closes.
 `
+
+// paraIndexTemplates seeds each PARA directory's reserved index.md.
+var paraIndexTemplates = map[string]string{
+	"projects":  "# Projects\n\nBounded efforts with an end. One folder per project or epic; a\nproject's `index.md` links the workspace that produced it with\n`resource: attn:workspace/<id>`.\n",
+	"areas":     "# Areas\n\nOngoing responsibilities and subsystems, with no end. Durable knowledge\npromoted out of finished projects lands here.\n",
+	"resources": "# Resources\n\nReference material worth keeping across projects and areas.\n",
+	"archive":   "# Archive\n\nFinished or inactive items. A project folder is moved here when its\nworkspace closes.\n",
+}

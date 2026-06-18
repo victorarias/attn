@@ -27,7 +27,9 @@ func newNotebookDaemon(t *testing.T) *Daemon {
 
 // sendNotebookCmd drives one command through the full unix-socket path
 // (handleConnection -> ParseMessage -> handler -> Response) over an in-memory
-// pipe, returning the decoded Response.
+// pipe, returning the decoded Response. notebook_guide is the only notebook
+// command still served on the unix socket; the rest moved to the WS path (the
+// WS-result helpers and writeNote/listNotes below) when the CLI was removed.
 func sendNotebookCmd(t *testing.T, d *Daemon, cmd any) protocol.Response {
 	t.Helper()
 	server, clientConn := net.Pipe()
@@ -51,110 +53,43 @@ func sendNotebookCmd(t *testing.T, d *Daemon, cmd any) protocol.Response {
 	return resp
 }
 
-func TestNotebookInitListReadOverSocket(t *testing.T) {
-	d := newNotebookDaemon(t)
-	wantRoot := d.store.GetSetting(SettingNotebookRoot)
-
-	init := sendNotebookCmd(t, d, protocol.NotebookInitMessage{Cmd: protocol.CmdNotebookInit})
-	if init.NotebookInit == nil || init.NotebookInit.Root != wantRoot || !init.NotebookInit.Created {
-		t.Fatalf("init result = %+v, want root=%q created=true", init.NotebookInit, wantRoot)
-	}
-
-	list := sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
-	found := map[string]bool{}
-	for _, e := range list.NotebookEntries {
-		found[e.Path] = true
-	}
-	for _, want := range []string{"index.md", "log.md", "memory/index.md"} {
-		if !found[want] {
-			t.Fatalf("list missing scaffold file %q; got %v", want, list.NotebookEntries)
-		}
-	}
-
-	read := sendNotebookCmd(t, d, protocol.NotebookReadMessage{Cmd: protocol.CmdNotebookRead, Path: "/index.md"})
-	if read.NotebookRead == nil || read.NotebookRead.Content == "" || read.NotebookRead.Hash == "" {
-		t.Fatalf("read result = %+v", read.NotebookRead)
+// writeNote populates a note through the surviving WS write path (the in-app
+// editor's path) and fails the test if the write did not apply. The former
+// unix-socket write command was removed, so tests set up notebook content here.
+func writeNote(t *testing.T, d *Daemon, path, content string) {
+	t.Helper()
+	res := writeNoteCAS(t, d, path, content, "")
+	if !res.Success || res.Result == nil || res.Result.Conflict {
+		t.Fatalf("setup write %q failed: %+v (err %v)", path, res.Result, res.Error)
 	}
 }
 
-func TestNotebookWriteReadAndCASConflict(t *testing.T) {
-	d := newNotebookDaemon(t)
-	const path = "memory/decisions/foo.md"
-	v1 := "---\nkind: memory\n---\nv1\n"
-
-	create := sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: path, Content: v1})
-	if create.NotebookWrite == nil || create.NotebookWrite.Conflict || create.NotebookWrite.Hash == nil {
-		t.Fatalf("create result = %+v", create.NotebookWrite)
-	}
-	h1 := *create.NotebookWrite.Hash
-
-	read := sendNotebookCmd(t, d, protocol.NotebookReadMessage{Cmd: protocol.CmdNotebookRead, Path: path})
-	if read.NotebookRead.Content != v1 || read.NotebookRead.Hash != h1 {
-		t.Fatalf("read after create = %+v, want content=%q hash=%q", read.NotebookRead, v1, h1)
-	}
-
-	// Stale base hash => conflict carrying the current hash, no write.
-	stale := sendNotebookCmd(t, d, protocol.NotebookWriteMessage{
-		Cmd: protocol.CmdNotebookWrite, Path: path, Content: "v2", BaseHash: protocol.Ptr("deadbeef"),
-	})
-	if stale.NotebookWrite == nil || !stale.NotebookWrite.Conflict ||
-		stale.NotebookWrite.CurrentHash == nil || *stale.NotebookWrite.CurrentHash != h1 {
-		t.Fatalf("stale write = %+v, want conflict with current hash %q", stale.NotebookWrite, h1)
-	}
-
-	// Correct base hash => applies.
-	v2 := "---\nkind: memory\n---\nv2\n"
-	ok := sendNotebookCmd(t, d, protocol.NotebookWriteMessage{
-		Cmd: protocol.CmdNotebookWrite, Path: path, Content: v2, BaseHash: protocol.Ptr(h1),
-	})
-	if ok.NotebookWrite == nil || ok.NotebookWrite.Conflict || ok.NotebookWrite.Hash == nil {
-		t.Fatalf("CAS edit = %+v", ok.NotebookWrite)
-	}
-	read = sendNotebookCmd(t, d, protocol.NotebookReadMessage{Cmd: protocol.CmdNotebookRead, Path: path})
-	if read.NotebookRead.Content != v2 {
-		t.Fatalf("content after CAS edit = %q, want %q", read.NotebookRead.Content, v2)
-	}
-}
-
-func TestNotebookAppendJournalBroadcastsChange(t *testing.T) {
-	d := newNotebookDaemon(t)
+// writeNoteCAS performs a hash-CAS write over the WS path and returns the decoded
+// result event (a successful result may carry conflict=true), so a test can drive
+// a deliberate conflict. Uses a throwaway client; the originUI broadcast goes to
+// the hub (not this client), so only the synchronous result is delivered here.
+func writeNoteCAS(t *testing.T, d *Daemon, path, content, baseHash string) protocol.NotebookWriteResultMessage {
+	t.Helper()
 	client := &wsClient{send: make(chan outboundMessage, 4)}
-	d.wsHub.clients[client] = true
-	go d.wsHub.run()
-
-	resp := sendNotebookCmd(t, d, protocol.NotebookAppendJournalMessage{
-		Cmd: protocol.CmdNotebookAppendJournal, Entry: "did a thing", Date: protocol.Ptr("2026-06-13"),
-	})
-	if resp.NotebookWrite == nil || resp.NotebookWrite.Path != "journal/2026-06-13.md" {
-		t.Fatalf("append result = %+v", resp.NotebookWrite)
-	}
-
-	select {
-	case message := <-client.send:
-		var event protocol.NotebookChangedMessage
-		if err := json.Unmarshal(message.payload, &event); err != nil {
-			t.Fatalf("decode notebook_changed: %v", err)
-		}
-		if event.Event != protocol.EventNotebookChanged || event.Origin != originAgent ||
-			len(event.Paths) != 1 || event.Paths[0] != "journal/2026-06-13.md" {
-			t.Fatalf("notebook_changed event = %+v", event)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("notebook_changed was not broadcast")
-	}
+	d.sendNotebookWriteWSResult(client, "setup-write", path, content, baseHash)
+	var res protocol.NotebookWriteResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	return res
 }
 
-func TestNotebookBacklinksOverSocket(t *testing.T) {
-	d := newNotebookDaemon(t)
-	const target = "memory/decisions/target.md"
-	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: target, Content: "---\nkind: memory\ntitle: Target\n---\nbody\n"})
-	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: "memory/decisions/linker.md", Content: "---\nkind: memory\n---\nsee [t](/memory/decisions/target.md#why)\n"})
-	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: "memory/gotchas/other.md", Content: "---\nkind: memory\n---\nno link here\n"})
-
-	resp := sendNotebookCmd(t, d, protocol.NotebookBacklinksMessage{Cmd: protocol.CmdNotebookBacklinks, Path: "/memory/decisions/target.md"})
-	if len(resp.NotebookEntries) != 1 || resp.NotebookEntries[0].Path != "memory/decisions/linker.md" {
-		t.Fatalf("backlinks = %+v, want [memory/decisions/linker.md]", resp.NotebookEntries)
+// listNotes lists notes over the WS path (the only surviving list path) and
+// returns the entries. Like any notebook operation it lazily starts the
+// external-edit watcher, so watcher tests use it to "touch" the notebook.
+func listNotes(t *testing.T, d *Daemon, prefix string) []protocol.NotebookEntry {
+	t.Helper()
+	client := &wsClient{send: make(chan outboundMessage, 8)}
+	d.sendNotebookListWSResult(client, "setup-list", prefix)
+	var res protocol.NotebookListResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if !res.Success {
+		t.Fatalf("list(%q) failed: %v", prefix, res.Error)
 	}
+	return res.Entries
 }
 
 // readNotebookWSEvent reads one outbound message from a client's send channel and
@@ -201,8 +136,8 @@ func TestNotebookReadWSResultCorrelatesRequest(t *testing.T) {
 
 func TestNotebookListAndBacklinksWSResults(t *testing.T) {
 	d := newNotebookDaemon(t)
-	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: "memory/decisions/a.md", Content: "---\nkind: memory\n---\nbody\n"})
-	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: "memory/decisions/b.md", Content: "---\nkind: memory\n---\nsee [a](/memory/decisions/a.md)\n"})
+	writeNote(t, d, "knowledge/areas/a.md", "---\ntype: note\n---\nbody\n")
+	writeNote(t, d, "knowledge/areas/b.md", "---\ntype: note\n---\nsee [a](/knowledge/areas/a.md)\n")
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 
 	d.sendNotebookListWSResult(client, "list-1", "")
@@ -212,12 +147,12 @@ func TestNotebookListAndBacklinksWSResults(t *testing.T) {
 		t.Fatalf("list result = %+v, want >=2 entries for list-1", list)
 	}
 
-	d.sendNotebookBacklinksWSResult(client, "back-1", "/memory/decisions/a.md")
+	d.sendNotebookBacklinksWSResult(client, "back-1", "/knowledge/areas/a.md")
 	var back protocol.NotebookBacklinksResultMessage
 	readNotebookWSEvent(t, client.send, &back)
 	if back.Event != protocol.EventNotebookBacklinksResult || back.RequestID != "back-1" || !back.Success ||
-		len(back.Entries) != 1 || back.Entries[0].Path != "memory/decisions/b.md" {
-		t.Fatalf("backlinks result = %+v, want [memory/decisions/b.md] for back-1", back)
+		len(back.Entries) != 1 || back.Entries[0].Path != "knowledge/areas/b.md" {
+		t.Fatalf("backlinks result = %+v, want [knowledge/areas/b.md] for back-1", back)
 	}
 }
 
@@ -228,7 +163,7 @@ func TestNotebookWriteWSResultSaveAndConflict(t *testing.T) {
 	d := newNotebookDaemon(t)
 	client := &wsClient{send: make(chan outboundMessage, 8)}
 
-	d.sendNotebookWriteWSResult(client, "w1", "memory/decisions/foo.md", "---\nkind: memory\n---\nv1\n", "")
+	d.sendNotebookWriteWSResult(client, "w1", "knowledge/areas/foo.md", "---\ntype: note\n---\nv1\n", "")
 	var create protocol.NotebookWriteResultMessage
 	readNotebookWSEvent(t, client.send, &create)
 	if create.Event != protocol.EventNotebookWriteResult || create.RequestID != "w1" || !create.Success ||
@@ -238,7 +173,7 @@ func TestNotebookWriteWSResultSaveAndConflict(t *testing.T) {
 	h1 := *create.Result.Hash
 
 	// Stale base hash => success with conflict=true carrying the current hash.
-	d.sendNotebookWriteWSResult(client, "w2", "memory/decisions/foo.md", "v2", "deadbeef")
+	d.sendNotebookWriteWSResult(client, "w2", "knowledge/areas/foo.md", "v2", "deadbeef")
 	var conflict protocol.NotebookWriteResultMessage
 	readNotebookWSEvent(t, client.send, &conflict)
 	if !conflict.Success || conflict.Result == nil || !conflict.Result.Conflict ||
@@ -247,7 +182,7 @@ func TestNotebookWriteWSResultSaveAndConflict(t *testing.T) {
 	}
 
 	// Correct base hash => the edit applies.
-	d.sendNotebookWriteWSResult(client, "w3", "memory/decisions/foo.md", "---\nkind: memory\n---\nv2\n", h1)
+	d.sendNotebookWriteWSResult(client, "w3", "knowledge/areas/foo.md", "---\ntype: note\n---\nv2\n", h1)
 	var ok protocol.NotebookWriteResultMessage
 	readNotebookWSEvent(t, client.send, &ok)
 	if !ok.Success || ok.Result == nil || ok.Result.Conflict || ok.Result.Hash == nil {
@@ -261,45 +196,45 @@ func TestNotebookWriteWSResultSaveAndConflict(t *testing.T) {
 // websocket switch (a swapped Deref on notebook_list would compile and ship).
 func TestNotebookReadsDispatchThroughClientMessage(t *testing.T) {
 	d := newNotebookDaemon(t)
-	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: "memory/decisions/a.md", Content: "---\nkind: memory\n---\nbody\n"})
-	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: "memory/decisions/b.md", Content: "---\nkind: memory\n---\nsee [a](/memory/decisions/a.md)\n"})
-	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: "journal/2026-06-13.md", Content: "---\nkind: journal\n---\nentry\n"})
+	writeNote(t, d, "knowledge/areas/a.md", "---\ntype: note\n---\nbody\n")
+	writeNote(t, d, "knowledge/areas/b.md", "---\ntype: note\n---\nsee [a](/knowledge/areas/a.md)\n")
+	writeNote(t, d, "journal/2026-06-13.md", "---\ntype: journal\n---\nentry\n")
 
 	client := newWorkspaceProtocolTestClient()
 	client.setIdentity("test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 
 	// notebook_list with BOTH request_id and prefix set: a swapped Deref would
 	// put the prefix in request_id (and vice versa), so we assert the result is
-	// correlated to "rl" AND the prefix actually scoped the result to memory/.
-	d.handleClientMessage(client, []byte(`{"cmd":"notebook_list","request_id":"rl","prefix":"/memory"}`))
+	// correlated to "rl" AND the prefix actually scoped the result to knowledge/.
+	d.handleClientMessage(client, []byte(`{"cmd":"notebook_list","request_id":"rl","prefix":"/knowledge"}`))
 	var list protocol.NotebookListResultMessage
 	readNotebookWSEvent(t, client.send, &list)
 	if list.Event != protocol.EventNotebookListResult || list.RequestID != "rl" || !list.Success {
 		t.Fatalf("list result = %+v, want success notebook_list_result for rl", list)
 	}
 	for _, e := range list.Entries {
-		if !strings.HasPrefix(e.Path, "memory/") {
-			t.Fatalf("prefix not applied: list returned %q outside memory/", e.Path)
+		if !strings.HasPrefix(e.Path, "knowledge/") {
+			t.Fatalf("prefix not applied: list returned %q outside knowledge/", e.Path)
 		}
 	}
 	if len(list.Entries) != 2 {
-		t.Fatalf("list entries = %d, want 2 under memory/", len(list.Entries))
+		t.Fatalf("list entries = %d, want 2 under knowledge/", len(list.Entries))
 	}
 
-	d.handleClientMessage(client, []byte(`{"cmd":"notebook_read","request_id":"rr","path":"/memory/decisions/a.md"}`))
+	d.handleClientMessage(client, []byte(`{"cmd":"notebook_read","request_id":"rr","path":"/knowledge/areas/a.md"}`))
 	var read protocol.NotebookReadResultMessage
 	readNotebookWSEvent(t, client.send, &read)
 	if read.Event != protocol.EventNotebookReadResult || read.RequestID != "rr" || !read.Success ||
-		read.Result == nil || read.Result.Path != "/memory/decisions/a.md" {
+		read.Result == nil || read.Result.Path != "/knowledge/areas/a.md" {
 		t.Fatalf("read result = %+v, want success notebook_read_result for rr", read)
 	}
 
-	d.handleClientMessage(client, []byte(`{"cmd":"notebook_backlinks","request_id":"rb","path":"/memory/decisions/a.md"}`))
+	d.handleClientMessage(client, []byte(`{"cmd":"notebook_backlinks","request_id":"rb","path":"/knowledge/areas/a.md"}`))
 	var back protocol.NotebookBacklinksResultMessage
 	readNotebookWSEvent(t, client.send, &back)
 	if back.Event != protocol.EventNotebookBacklinksResult || back.RequestID != "rb" || !back.Success ||
-		len(back.Entries) != 1 || back.Entries[0].Path != "memory/decisions/b.md" {
-		t.Fatalf("backlinks result = %+v, want [memory/decisions/b.md] for rb", back)
+		len(back.Entries) != 1 || back.Entries[0].Path != "knowledge/areas/b.md" {
+		t.Fatalf("backlinks result = %+v, want [knowledge/areas/b.md] for rb", back)
 	}
 }
 
@@ -312,7 +247,7 @@ func TestNotebookWriteDispatchesThroughClientMessage(t *testing.T) {
 	client := newWorkspaceProtocolTestClient()
 	client.setIdentity("test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 
-	d.handleClientMessage(client, []byte(`{"cmd":"notebook_write","request_id":"w1","path":"/memory/decisions/a.md","content":"---\nkind: memory\n---\nbody\n"}`))
+	d.handleClientMessage(client, []byte(`{"cmd":"notebook_write","request_id":"w1","path":"/knowledge/areas/a.md","content":"---\ntype: note\n---\nbody\n"}`))
 	var res protocol.NotebookWriteResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if res.Event != protocol.EventNotebookWriteResult || res.RequestID != "w1" || !res.Success ||
@@ -321,12 +256,12 @@ func TestNotebookWriteDispatchesThroughClientMessage(t *testing.T) {
 	}
 	// The echoed result path is normalized (not the raw leading-slash input), so
 	// it matches the form notebook_list/notebook_changed key on.
-	if res.Result.Path != "memory/decisions/a.md" {
-		t.Fatalf("result path = %q, want normalized memory/decisions/a.md", res.Result.Path)
+	if res.Result.Path != "knowledge/areas/a.md" {
+		t.Fatalf("result path = %q, want normalized knowledge/areas/a.md", res.Result.Path)
 	}
 
 	// The note is readable with the hash the write returned.
-	d.handleClientMessage(client, []byte(`{"cmd":"notebook_read","request_id":"r1","path":"/memory/decisions/a.md"}`))
+	d.handleClientMessage(client, []byte(`{"cmd":"notebook_read","request_id":"r1","path":"/knowledge/areas/a.md"}`))
 	var read protocol.NotebookReadResultMessage
 	readNotebookWSEvent(t, client.send, &read)
 	if !read.Success || read.Result == nil || read.Result.Hash != *res.Result.Hash {
@@ -334,7 +269,7 @@ func TestNotebookWriteDispatchesThroughClientMessage(t *testing.T) {
 	}
 
 	// A stale base_hash exercises base_hash extraction and returns a conflict.
-	d.handleClientMessage(client, []byte(`{"cmd":"notebook_write","request_id":"w2","path":"/memory/decisions/a.md","content":"x","base_hash":"deadbeef"}`))
+	d.handleClientMessage(client, []byte(`{"cmd":"notebook_write","request_id":"w2","path":"/knowledge/areas/a.md","content":"x","base_hash":"deadbeef"}`))
 	var conflict protocol.NotebookWriteResultMessage
 	readNotebookWSEvent(t, client.send, &conflict)
 	if !conflict.Success || conflict.Result == nil || !conflict.Result.Conflict {
@@ -353,18 +288,15 @@ func TestNotebookWatcherReportsExternalEditsNotSelfWrites(t *testing.T) {
 
 	// Touch the notebook so the lazy watcher starts (root already exists), then
 	// let the watch registration settle before mutating the tree.
-	sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
+	listNotes(t, d, "")
 	time.Sleep(80 * time.Millisecond)
 
 	// attn's own write records the path as a self-write before it lands, so the
 	// resulting filesystem event must not be reported as external.
-	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{
-		Cmd: protocol.CmdNotebookWrite, Path: "own.md",
-		Content: "---\nkind: memory\n---\nattn wrote this\n",
-	})
+	writeNote(t, d, "own.md", "---\ntype: note\n---\nattn wrote this\n")
 	// An edit straight to disk (bypassing the daemon) must surface as external.
 	if err := os.WriteFile(filepath.Join(root, "ext.md"),
-		[]byte("---\nkind: memory\n---\nedited externally\n"), 0o644); err != nil {
+		[]byte("---\ntype: note\n---\nedited externally\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -386,20 +318,18 @@ func TestNotebookWatcherReportsExternalEditAfterConflictingWrite(t *testing.T) {
 	d.wsHub.clients[client] = true
 	go d.wsHub.run()
 
-	sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
+	listNotes(t, d, "")
 	time.Sleep(80 * time.Millisecond)
 
 	// CAS write against a missing file => conflict, no write, no event.
-	resp := sendNotebookCmd(t, d, protocol.NotebookWriteMessage{
-		Cmd: protocol.CmdNotebookWrite, Path: "doc.md", Content: "x", BaseHash: protocol.Ptr("deadbeef"),
-	})
-	if resp.NotebookWrite == nil || !resp.NotebookWrite.Conflict {
-		t.Fatalf("expected a conflict, got %+v", resp.NotebookWrite)
+	resp := writeNoteCAS(t, d, "doc.md", "x", "deadbeef")
+	if resp.Result == nil || !resp.Result.Conflict {
+		t.Fatalf("expected a conflict, got %+v (err %v)", resp.Result, resp.Error)
 	}
 
 	// The external edit of that same path must still surface as external.
 	if err := os.WriteFile(filepath.Join(root, "doc.md"),
-		[]byte("---\nkind: memory\n---\nexternally created\n"), 0o644); err != nil {
+		[]byte("---\ntype: note\n---\nexternally created\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	ext := waitForExternalNotebookChange(t, client.send)
@@ -418,12 +348,12 @@ func TestNotebookWatcherFollowsRootChange(t *testing.T) {
 	d.wsHub.clients[client] = true
 	go d.wsHub.run()
 
-	sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
+	listNotes(t, d, "")
 	time.Sleep(80 * time.Millisecond)
 
 	// Repoint the root and drive an op so ensureNotebookWatcher restarts on B.
 	d.store.SetSetting(SettingNotebookRoot, rootB)
-	sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
+	listNotes(t, d, "")
 	time.Sleep(80 * time.Millisecond)
 
 	// An edit under the new root is reported.
@@ -453,18 +383,15 @@ func TestNotebookWatcherSurfacesSameWindowExternalEdit(t *testing.T) {
 	d.wsHub.clients[client] = true
 	go d.wsHub.run()
 
-	sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
+	listNotes(t, d, "")
 	time.Sleep(80 * time.Millisecond)
 
 	// attn writes the note (handler records a content-aware self-write)...
-	sendNotebookCmd(t, d, protocol.NotebookWriteMessage{
-		Cmd: protocol.CmdNotebookWrite, Path: "race.md",
-		Content: "---\nkind: memory\n---\nattn wrote this\n",
-	})
+	writeNote(t, d, "race.md", "---\ntype: note\n---\nattn wrote this\n")
 	// ...and an external tool immediately overwrites the SAME path with different
 	// bytes, within the same debounce window.
 	if err := os.WriteFile(filepath.Join(root, "race.md"),
-		[]byte("---\nkind: memory\n---\nexternal overwrote it\n"), 0o644); err != nil {
+		[]byte("---\ntype: note\n---\nexternal overwrote it\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -483,7 +410,7 @@ func TestEnsureNotebookWatcherDoesNotResurrectAfterShutdown(t *testing.T) {
 	root := d.store.GetSetting(SettingNotebookRoot)
 
 	// A notebook op on an existing root starts the watcher lazily.
-	sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
+	listNotes(t, d, "")
 	d.notebookWatcherMu.Lock()
 	started := d.notebookWatcher != nil
 	d.notebookWatcherMu.Unlock()
@@ -578,10 +505,16 @@ func TestNotebookGuideChiefVsNonChief(t *testing.T) {
 		t.Fatalf("chief guide = %+v, want root=%q and non-empty guidance", chief.NotebookGuide, wantRoot)
 	}
 
-	// The chief request ensured the scaffold exists.
-	list := sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
-	if len(list.NotebookEntries) == 0 {
-		t.Fatal("chief guide should have ensured the notebook scaffold")
+	// The chief request ensured the scaffold exists, including the reserved files.
+	entries := listNotes(t, d, "")
+	found := map[string]bool{}
+	for _, e := range entries {
+		found[e.Path] = true
+	}
+	for _, want := range []string{"index.md", "log.md", "knowledge/index.md"} {
+		if !found[want] {
+			t.Fatalf("chief guide should have scaffolded %q; got %v", want, entries)
+		}
 	}
 
 	worker := sendNotebookCmd(t, d, protocol.NotebookGuideMessage{Cmd: protocol.CmdNotebookGuide, SessionID: protocol.Ptr("worker")})
@@ -603,9 +536,8 @@ func TestNotebookGuideNonChiefDoesNotScaffold(t *testing.T) {
 	if res.NotebookGuide == nil || res.NotebookGuide.SessionIsChief {
 		t.Fatalf("guide = %+v, want session_is_chief=false", res.NotebookGuide)
 	}
-	list := sendNotebookCmd(t, d, protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList})
-	if len(list.NotebookEntries) != 0 {
-		t.Fatalf("non-chief guide should not scaffold; got %v", list.NotebookEntries)
+	if entries := listNotes(t, d, ""); len(entries) != 0 {
+		t.Fatalf("non-chief guide should not scaffold; got %v", entries)
 	}
 }
 
@@ -618,10 +550,11 @@ func recordingBackend(inputs *[]string, mu *sync.Mutex) *fakeSpawnBackend {
 	}}
 }
 
-// Live activation types a bounded "run `attn notebook guide`" doorbell + Enter
-// into a just-promoted chief session's PTY only when it is idle or waiting for
-// input — never into a busy/parked agent (working, pending_approval typing Enter
-// would answer a prompt, scheduled would disrupt auto-resume, etc.).
+// Live activation types a bounded doorbell + Enter pointing the agent at its
+// notebook index file into a just-promoted chief session's PTY only when it is
+// idle or waiting for input — never into a busy/parked agent (working,
+// pending_approval typing Enter would answer a prompt, scheduled would disrupt
+// auto-resume, etc.).
 func TestActivateNotebookGuidanceLiveInjectStates(t *testing.T) {
 	inject := []protocol.SessionState{protocol.SessionStateIdle, protocol.SessionStateWaitingInput}
 	skip := []protocol.SessionState{
@@ -630,6 +563,7 @@ func TestActivateNotebookGuidanceLiveInjectStates(t *testing.T) {
 	}
 	run := func(t *testing.T, state protocol.SessionState, wantInputs int) {
 		d := newNotebookDaemon(t)
+		root := d.store.GetSetting(SettingNotebookRoot)
 		var mu sync.Mutex
 		var inputs []string
 		d.ptyBackend = recordingBackend(&inputs, &mu)
@@ -645,9 +579,9 @@ func TestActivateNotebookGuidanceLiveInjectStates(t *testing.T) {
 		if len(inputs) != wantInputs {
 			t.Fatalf("state %s: PTY inputs = %q, want %d", state, inputs, wantInputs)
 		}
-		if wantInputs == 2 && (inputs[0] != notebookActivationPrompt || inputs[1] != "\r" ||
-			!strings.Contains(inputs[0], "attn notebook guide")) {
-			t.Fatalf("state %s: doorbell inputs = %q, want [prompt with `attn notebook guide`, \\r]", state, inputs)
+		if wantInputs == 2 && (inputs[0] != notebookActivationPrompt(root) || inputs[1] != "\r" ||
+			!strings.Contains(inputs[0], "index.md")) {
+			t.Fatalf("state %s: doorbell inputs = %q, want [activation prompt pointing at index.md, \\r]", state, inputs)
 		}
 	}
 	for _, state := range inject {
@@ -710,23 +644,23 @@ func TestNotebookRootResolution(t *testing.T) {
 }
 
 // A root-absolute (or otherwise un-normalized) write path must still broadcast
-// the normalized relative form, matching notebook_list/append.
+// the normalized relative form, matching notebook_list.
 func TestNotebookWriteBroadcastsNormalizedPath(t *testing.T) {
 	d := newNotebookDaemon(t)
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.wsHub.clients[client] = true
 	go d.wsHub.run()
 
-	resp := sendNotebookCmd(t, d, protocol.NotebookWriteMessage{
-		Cmd: protocol.CmdNotebookWrite, Path: "/memory/decisions/foo.md", Content: "---\nkind: memory\n---\nx\n",
-	})
-	if resp.NotebookWrite == nil || resp.NotebookWrite.Conflict {
-		t.Fatalf("write = %+v", resp.NotebookWrite)
+	// The write goes through a throwaway client; its originUI broadcast reaches the
+	// hub-registered client above, which is what asserts the normalized path.
+	res := writeNoteCAS(t, d, "/knowledge/areas/foo.md", "---\ntype: note\n---\nx\n", "")
+	if !res.Success || res.Result == nil || res.Result.Conflict {
+		t.Fatalf("write = %+v (err %v)", res.Result, res.Error)
 	}
 	// The echoed result path must be normalized too (not the raw leading-slash
 	// input), so any consumer keying on it matches notebook_list/changed paths.
-	if resp.NotebookWrite.Path != "memory/decisions/foo.md" {
-		t.Fatalf("result path = %q, want normalized memory/decisions/foo.md", resp.NotebookWrite.Path)
+	if res.Result.Path != "knowledge/areas/foo.md" {
+		t.Fatalf("result path = %q, want normalized knowledge/areas/foo.md", res.Result.Path)
 	}
 	select {
 	case message := <-client.send:
@@ -734,8 +668,8 @@ func TestNotebookWriteBroadcastsNormalizedPath(t *testing.T) {
 		if err := json.Unmarshal(message.payload, &event); err != nil {
 			t.Fatal(err)
 		}
-		if len(event.Paths) != 1 || event.Paths[0] != "memory/decisions/foo.md" {
-			t.Fatalf("broadcast paths = %v, want normalized [memory/decisions/foo.md]", event.Paths)
+		if len(event.Paths) != 1 || event.Paths[0] != "knowledge/areas/foo.md" {
+			t.Fatalf("broadcast paths = %v, want normalized [knowledge/areas/foo.md]", event.Paths)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("notebook_changed was not broadcast")
@@ -789,7 +723,7 @@ func TestNotebookSendToChiefAppendsAndNudges(t *testing.T) {
 	}
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 
-	d.sendNotebookToChiefWSResult(client, "c1", "/memory/index.md", "remember this decision")
+	d.sendNotebookToChiefWSResult(client, "c1", "/knowledge/index.md", "remember this decision")
 
 	var res protocol.NotebookSendToChiefResultMessage
 	readNotebookWSEvent(t, client.send, &res)
@@ -803,12 +737,13 @@ func TestNotebookSendToChiefAppendsAndNudges(t *testing.T) {
 	mu.Lock()
 	got := append([]string(nil), inputs...)
 	mu.Unlock()
-	if len(got) != 2 || got[0] != chiefInboxNudgePrompt || got[1] != "\r" {
+	wantNudge := chiefInboxNudgePrompt(d.store.GetSetting(SettingNotebookRoot))
+	if len(got) != 2 || got[0] != wantNudge || got[1] != "\r" {
 		t.Fatalf("PTY inputs = %q, want [nudge prompt, \\r]", got)
 	}
 
 	body := readInboxNote(t, d)
-	if !strings.Contains(body, "> remember this decision") || !strings.Contains(body, "(/memory/index.md)") {
+	if !strings.Contains(body, "> remember this decision") || !strings.Contains(body, "(/knowledge/index.md)") {
 		t.Fatalf("inbox note = %q, want blockquoted selection + backlink to the source", body)
 	}
 }
@@ -911,10 +846,10 @@ func TestNotebookSendToChiefRejectsOversizeSelection(t *testing.T) {
 // control chars and CRLF are neutralized.
 func TestFormatChiefInboxEntry(t *testing.T) {
 	// A clean path yields a real, resolvable backlink.
-	clean := formatChiefInboxEntry("/memory/decisions/x.md", "a decision")
+	clean := formatChiefInboxEntry("/knowledge/areas/x.md", "a decision")
 	links := notebook.Links(clean)
-	if len(links) != 1 || links[0] != "/memory/decisions/x.md" {
-		t.Fatalf("clean-path links = %v, want [/memory/decisions/x.md]", links)
+	if len(links) != 1 || links[0] != "/knowledge/areas/x.md" {
+		t.Fatalf("clean-path links = %v, want [/knowledge/areas/x.md]", links)
 	}
 	if !strings.Contains(clean, "> a decision") {
 		t.Fatalf("clean entry missing blockquoted selection:\n%s", clean)
@@ -922,11 +857,11 @@ func TestFormatChiefInboxEntry(t *testing.T) {
 
 	// A name with spaces/parens renders as inline code — no broken link syntax,
 	// and the link parser finds nothing to (mis)resolve.
-	special := formatChiefInboxEntry("/memory/Q3 (draft).md", "x")
+	special := formatChiefInboxEntry("/knowledge/areas/Q3 (draft).md", "x")
 	if strings.Contains(special, "](") {
 		t.Fatalf("special-name heading must not emit link syntax:\n%s", special)
 	}
-	if !strings.Contains(special, "`/memory/Q3 (draft).md`") {
+	if !strings.Contains(special, "`/knowledge/areas/Q3 (draft).md`") {
 		t.Fatalf("special-name heading should show the path as inline code:\n%s", special)
 	}
 	if len(notebook.Links(special)) != 0 {
@@ -934,7 +869,7 @@ func TestFormatChiefInboxEntry(t *testing.T) {
 	}
 
 	// A newline in the source path cannot inject a second heading line.
-	inject := formatChiefInboxEntry("/memory/a.md\n## INJECTED\nb.md", "x")
+	inject := formatChiefInboxEntry("/knowledge/areas/a.md\n## INJECTED\nb.md", "x")
 	if strings.Contains(inject, "\n## ") {
 		t.Fatalf("source path must not inject a heading line:\n%s", inject)
 	}
@@ -957,7 +892,7 @@ func TestNotebookSendToChiefDispatchesThroughClientMessage(t *testing.T) {
 	client := newWorkspaceProtocolTestClient()
 	client.setIdentity("test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 
-	d.handleClientMessage(client, []byte(`{"cmd":"notebook_send_to_chief","request_id":"d1","selection":"dispatched selection","source_path":"/memory/index.md"}`))
+	d.handleClientMessage(client, []byte(`{"cmd":"notebook_send_to_chief","request_id":"d1","selection":"dispatched selection","source_path":"/knowledge/index.md"}`))
 	var res protocol.NotebookSendToChiefResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if res.Event != protocol.EventNotebookSendToChiefResult || res.RequestID != "d1" || !res.Success ||
