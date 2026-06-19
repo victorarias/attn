@@ -181,8 +181,26 @@ func (d *Daemon) applyWorkflowRunUpsert(run *protocol.WorkflowRun) (*protocol.Wo
 	if err != nil {
 		return nil, err
 	}
+	// A terminal upsert is the engine reporting its finish, so drop its sink from
+	// the registry (bounds the map; the engine process is exiting).
+	if isTerminalWorkflowRunStatus(run.Status) {
+		d.unregisterWorkflowEngine(run.RunID)
+	}
 	d.markWorkflowRunDirty(run.RunID)
 	return hydrated, nil
+}
+
+// isTerminalWorkflowRunStatus reports whether a run status is final (no further
+// engine activity), so the run's engine sink can be dropped from the registry.
+func isTerminalWorkflowRunStatus(status protocol.WorkflowRunStatus) bool {
+	switch status {
+	case protocol.WorkflowRunStatusCompleted,
+		protocol.WorkflowRunStatusFailed,
+		protocol.WorkflowRunStatusCanceled:
+		return true
+	default:
+		return false
+	}
 }
 
 // applyWorkflowCallUpsert persists a single agent call (ON CONFLICT(run_id,
@@ -229,6 +247,9 @@ func (d *Daemon) cancelWorkflowRun(runID string) (*protocol.WorkflowRun, bool, e
 	}
 
 	relayed := d.relayWorkflowCancel(runID)
+	// The run is now terminal (canceled); drop its sink whether or not a relay
+	// target was still registered (the engine also observes cancel via polling).
+	d.unregisterWorkflowEngine(runID)
 
 	hydrated, err := d.getWorkflowRunHydrated(runID)
 	if err != nil {

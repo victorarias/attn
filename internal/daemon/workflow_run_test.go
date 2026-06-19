@@ -549,3 +549,74 @@ func TestWorkflowAttentionSurfacesFinishedRuns(t *testing.T) {
 		}
 	}
 }
+
+// fakeWorkflowSink is a no-op engine sink for registry-lifecycle tests.
+type fakeWorkflowSink struct{}
+
+func (fakeWorkflowSink) sendWorkflowControl(interface{}) error { return nil }
+
+// TestWorkflowEngineSinkUnregisteredAtTerminalBoundary proves the engine-sink
+// registry is bounded: both a terminal upsert (engine finished) and a cancel drop
+// the run's sink, so the workflowEngineConn map does not grow for the daemon's life.
+func TestWorkflowEngineSinkUnregisteredAtTerminalBoundary(t *testing.T) {
+	registered := func(d *Daemon, runID string) bool {
+		d.workflowEngineMu.Lock()
+		defer d.workflowEngineMu.Unlock()
+		_, ok := d.workflowEngineConn[runID]
+		return ok
+	}
+
+	t.Run("terminal upsert drops the sink", func(t *testing.T) {
+		d := newWorkflowTestDaemon(t)
+		const runID = "run-term"
+		if _, err := d.applyWorkflowRunUpsert(sampleWorkflowRun(runID)); err != nil {
+			t.Fatalf("seed running run: %v", err)
+		}
+		d.registerWorkflowEngine(runID, fakeWorkflowSink{})
+		if !registered(d, runID) {
+			t.Fatal("sink should be registered after registerWorkflowEngine")
+		}
+
+		finished := sampleWorkflowRun(runID)
+		finished.Status = protocol.WorkflowRunStatusCompleted
+		if _, err := d.applyWorkflowRunUpsert(finished); err != nil {
+			t.Fatalf("terminal upsert: %v", err)
+		}
+		if registered(d, runID) {
+			t.Fatal("engine sink must be unregistered after a terminal upsert")
+		}
+	})
+
+	t.Run("cancel drops the sink", func(t *testing.T) {
+		d := newWorkflowTestDaemon(t)
+		const runID = "run-cancel"
+		if _, err := d.applyWorkflowRunUpsert(sampleWorkflowRun(runID)); err != nil {
+			t.Fatalf("seed running run: %v", err)
+		}
+		d.registerWorkflowEngine(runID, fakeWorkflowSink{})
+
+		if _, _, err := d.cancelWorkflowRun(runID); err != nil {
+			t.Fatalf("cancel: %v", err)
+		}
+		if registered(d, runID) {
+			t.Fatal("engine sink must be unregistered after cancel")
+		}
+	})
+
+	t.Run("running upsert keeps the sink", func(t *testing.T) {
+		d := newWorkflowTestDaemon(t)
+		const runID = "run-keep"
+		if _, err := d.applyWorkflowRunUpsert(sampleWorkflowRun(runID)); err != nil {
+			t.Fatalf("seed running run: %v", err)
+		}
+		d.registerWorkflowEngine(runID, fakeWorkflowSink{})
+
+		// A non-terminal (progress) upsert must NOT drop the sink mid-run.
+		if _, err := d.applyWorkflowRunUpsert(sampleWorkflowRun(runID)); err != nil {
+			t.Fatalf("progress upsert: %v", err)
+		}
+		if !registered(d, runID) {
+			t.Fatal("engine sink must survive a running-status upsert")
+		}
+	})
+}
