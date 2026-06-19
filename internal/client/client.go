@@ -408,77 +408,6 @@ func (c *Client) workspaceContextMaintenanceResult(msg interface{}) (*protocol.W
 	return resp.WorkspaceContextMaintenanceResult, nil
 }
 
-// NotebookInit scaffolds the notebook (idempotent) and returns its root.
-func (c *Client) NotebookInit() (*protocol.NotebookInitResult, error) {
-	resp, err := c.send(protocol.NotebookInitMessage{Cmd: protocol.CmdNotebookInit})
-	if err != nil {
-		return nil, err
-	}
-	if resp.NotebookInit == nil {
-		return nil, errors.New("daemon returned no notebook init result")
-	}
-	return resp.NotebookInit, nil
-}
-
-// NotebookList returns the notes under the optional prefix.
-func (c *Client) NotebookList(prefix string) ([]protocol.NotebookEntry, error) {
-	msg := protocol.NotebookListMessage{Cmd: protocol.CmdNotebookList}
-	if prefix != "" {
-		msg.Prefix = protocol.Ptr(prefix)
-	}
-	resp, err := c.send(msg)
-	if err != nil {
-		return nil, err
-	}
-	return resp.NotebookEntries, nil
-}
-
-// NotebookRead returns a note's content and content hash.
-func (c *Client) NotebookRead(path string) (*protocol.NotebookReadResult, error) {
-	resp, err := c.send(protocol.NotebookReadMessage{Cmd: protocol.CmdNotebookRead, Path: path})
-	if err != nil {
-		return nil, err
-	}
-	if resp.NotebookRead == nil {
-		return nil, errors.New("daemon returned no notebook read result")
-	}
-	return resp.NotebookRead, nil
-}
-
-// NotebookWrite creates (empty baseHash) or hash-CAS edits a note. A returned
-// result with Conflict=true means the write did not apply.
-func (c *Client) NotebookWrite(path, content, baseHash string) (*protocol.NotebookWriteResult, error) {
-	msg := protocol.NotebookWriteMessage{Cmd: protocol.CmdNotebookWrite, Path: path, Content: content}
-	if baseHash != "" {
-		msg.BaseHash = protocol.Ptr(baseHash)
-	}
-	resp, err := c.send(msg)
-	if err != nil {
-		return nil, err
-	}
-	if resp.NotebookWrite == nil {
-		return nil, errors.New("daemon returned no notebook write result")
-	}
-	return resp.NotebookWrite, nil
-}
-
-// NotebookAppendJournal appends an entry to the dated journal (empty date =
-// daemon's local date).
-func (c *Client) NotebookAppendJournal(entry, date string) (*protocol.NotebookWriteResult, error) {
-	msg := protocol.NotebookAppendJournalMessage{Cmd: protocol.CmdNotebookAppendJournal, Entry: entry}
-	if date != "" {
-		msg.Date = protocol.Ptr(date)
-	}
-	resp, err := c.send(msg)
-	if err != nil {
-		return nil, err
-	}
-	if resp.NotebookWrite == nil {
-		return nil, errors.New("daemon returned no notebook write result")
-	}
-	return resp.NotebookWrite, nil
-}
-
 // NotebookGuide pulls the canonical notebook operating guidance. When sessionID
 // is non-empty, the result's SessionIsChief reflects whether that session holds
 // the chief-of-staff role (used by the launch path to choose guidance).
@@ -495,37 +424,6 @@ func (c *Client) NotebookGuide(sessionID string) (*protocol.NotebookGuideResult,
 		return nil, errors.New("daemon returned no notebook guide result")
 	}
 	return resp.NotebookGuide, nil
-}
-
-// NotebookDreamStatus returns a summary of what the dreaming pass would
-// consolidate now (the deterministic harvest preview; nothing is written).
-func (c *Client) NotebookDreamStatus() (*protocol.NotebookDreamStatusResult, error) {
-	resp, err := c.send(protocol.NotebookDreamStatusMessage{Cmd: protocol.CmdNotebookDreamStatus})
-	if err != nil {
-		return nil, err
-	}
-	if resp.NotebookDreamStatus == nil {
-		return nil, errors.New("daemon returned no notebook dream status result")
-	}
-	return resp.NotebookDreamStatus, nil
-}
-
-// NotebookDreamRun runs a dreaming harvest and returns the candidate preview.
-// apply is reserved for the promote phase; this phase is preview-only and writes
-// nothing.
-func (c *Client) NotebookDreamRun(apply bool) (*protocol.NotebookDreamRunResult, error) {
-	msg := protocol.NotebookDreamRunMessage{Cmd: protocol.CmdNotebookDreamRun}
-	if apply {
-		msg.Apply = protocol.Ptr(true)
-	}
-	resp, err := c.send(msg)
-	if err != nil {
-		return nil, err
-	}
-	if resp.NotebookDreamRun == nil {
-		return nil, errors.New("daemon returned no notebook dream run result")
-	}
-	return resp.NotebookDreamRun, nil
 }
 
 // Query returns sessions matching the filter

@@ -22,7 +22,6 @@ import (
 	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
-	"github.com/victorarias/attn/internal/contextjanitor"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/daemonctl"
 	"github.com/victorarias/attn/internal/hooks"
@@ -157,11 +156,6 @@ func applyLegacyBuildInfoOverrides() {
 }
 
 func main() {
-	if len(os.Args) >= 2 && os.Args[1] == "_workspace-context-janitor-mcp" {
-		runWorkspaceContextJanitorMCP(os.Args[2:])
-		return
-	}
-
 	if isProtocolVersionCommand(os.Args) {
 		runProtocolVersion()
 		return
@@ -227,9 +221,6 @@ func main() {
 	case "workspace":
 		maybePrintProfileBanner()
 		runWorkspace()
-	case "notebook":
-		maybePrintProfileBanner()
-		runNotebook()
 	case "profile":
 		// No banner: `attn profile resolve --field …` must print only the
 		// value so the Makefile / harness can consume it cleanly.
@@ -260,28 +251,6 @@ func main() {
 			writeHelp(os.Stderr)
 			os.Exit(1)
 		}
-	}
-}
-
-func runWorkspaceContextJanitorMCP(args []string) {
-	fs := flag.NewFlagSet("_workspace-context-janitor-mcp", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	sourcePath := fs.String("source-file", "", "captured context file")
-	candidatePath := fs.String("candidate-file", "", "candidate output file")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 ||
-		strings.TrimSpace(*sourcePath) == "" || strings.TrimSpace(*candidatePath) == "" {
-		fmt.Fprintln(os.Stderr, "invalid workspace context janitor MCP arguments")
-		os.Exit(2)
-	}
-	if err := contextjanitor.ServeToolServer(
-		context.Background(),
-		*sourcePath,
-		*candidatePath,
-		os.Stdin,
-		os.Stdout,
-	); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
 	}
 }
 
@@ -509,7 +478,6 @@ commands:
   delegate --brief-file <path>      start another agent with a delegated brief
   dispatch <command>                 list or report chief-of-staff dispatches
   workspace context <command>       edit shared workspace context
-  notebook <command>                browse the durable markdown notebook
   open <file.md> [--session <id>]   show a markdown file in attn
   browser <command>                 open and control the in-app browser
   review-loop <command>             manage an autonomous review loop
@@ -985,107 +953,9 @@ commands:
   checkout                         alias for show
   update [--session <id>]          publish local edits if the revision matches
   status [--session <id>]          show local and canonical revision state
-  compact [--session <id>]         compact now with the configured janitor
+  compact [--session <id>]         compact now with the configured keeper
   rollback [--session <id>]        restore the latest pre-compaction snapshot
 `)
-}
-
-func writeNotebookHelp(w io.Writer) {
-	fmt.Fprint(w, `usage: attn notebook <command>
-
-commands:
-  init                       create the notebook (idempotent); prints its root
-  show <path>                print a note's contents (path may be root-absolute)
-  list [prefix]              list notes, optionally under a path prefix
-  journal append --text T    append an entry to today's journal (--date YYYY-MM-DD to override)
-  memory write --path P      write/edit a durable note; content from --file or stdin
-                             (--base-hash H for a safe hash-CAS edit)
-  guide                      print the notebook operating guidance
-  dream status               summarize what a consolidation pass would harvest
-  dream [--dry-run]          preview the harvested candidates (nothing is written)
-`)
-}
-
-func runNotebook() {
-	if len(os.Args) < 3 || os.Args[2] == "-h" || os.Args[2] == "--help" {
-		writeNotebookHelp(os.Stdout)
-		return
-	}
-	warnIfDaemonVersionMismatch()
-	action := os.Args[2]
-	args := os.Args[3:]
-	c := client.New("")
-	switch action {
-	case "init":
-		if len(args) != 0 {
-			fmt.Fprintln(os.Stderr, "usage: attn notebook init")
-			os.Exit(2)
-		}
-		res, err := c.NotebookInit()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "notebook init: %v\n", err)
-			os.Exit(1)
-		}
-		if res.Created {
-			fmt.Printf("initialized notebook at %s\n", res.Root)
-		} else {
-			fmt.Printf("notebook already initialized at %s\n", res.Root)
-		}
-	case "show":
-		if len(args) != 1 {
-			fmt.Fprintln(os.Stderr, "usage: attn notebook show <path>")
-			os.Exit(2)
-		}
-		res, err := c.NotebookRead(args[0])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "notebook show: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Print(res.Content)
-	case "list":
-		prefix := ""
-		switch len(args) {
-		case 0:
-		case 1:
-			prefix = args[0]
-		default:
-			fmt.Fprintln(os.Stderr, "usage: attn notebook list [prefix]")
-			os.Exit(2)
-		}
-		entries, err := c.NotebookList(prefix)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "notebook list: %v\n", err)
-			os.Exit(1)
-		}
-		for _, e := range entries {
-			if e.Title != nil && *e.Title != "" {
-				fmt.Printf("%s\t%s\n", e.Path, *e.Title)
-			} else {
-				fmt.Println(e.Path)
-			}
-		}
-	case "journal":
-		runNotebookJournal(c, args)
-	case "memory":
-		runNotebookMemory(c, args)
-	case "guide":
-		if len(args) != 0 {
-			fmt.Fprintln(os.Stderr, "usage: attn notebook guide")
-			os.Exit(2)
-		}
-		res, err := c.NotebookGuide(strings.TrimSpace(os.Getenv("ATTN_SESSION_ID")))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "notebook guide: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println(res.Guidance)
-	case "dream":
-		runNotebookDream(c, args)
-	default:
-		fmt.Fprintf(os.Stderr, "notebook: unknown command %q\n\n", action)
-		writeNotebookHelp(os.Stderr)
-		os.Exit(2)
-	}
 }
 
 // notebookGuideClient is the slice of the daemon client the launch-guidance
@@ -1105,231 +975,6 @@ func resolveChiefNotebookRoot(c notebookGuideClient, sessionID string) string {
 		return ""
 	}
 	return guide.Root
-}
-
-type notebookJournalArgs struct {
-	text string
-	date string
-}
-
-func parseNotebookJournalArgs(args []string) (notebookJournalArgs, error) {
-	if len(args) == 0 || args[0] != "append" {
-		return notebookJournalArgs{}, errors.New("usage: attn notebook journal append --text T [--date YYYY-MM-DD]")
-	}
-	fs := flag.NewFlagSet("notebook journal append", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	text := fs.String("text", "", "journal entry text (required)")
-	date := fs.String("date", "", "journal date YYYY-MM-DD (defaults to today)")
-	if err := fs.Parse(args[1:]); err != nil {
-		return notebookJournalArgs{}, err
-	}
-	if fs.NArg() != 0 {
-		return notebookJournalArgs{}, fmt.Errorf("unexpected arguments: %v", fs.Args())
-	}
-	if strings.TrimSpace(*text) == "" {
-		return notebookJournalArgs{}, errors.New("--text is required")
-	}
-	return notebookJournalArgs{text: *text, date: strings.TrimSpace(*date)}, nil
-}
-
-type notebookMemoryArgs struct {
-	path     string
-	baseHash string
-	file     string
-}
-
-func parseNotebookMemoryArgs(args []string) (notebookMemoryArgs, error) {
-	if len(args) == 0 || args[0] != "write" {
-		return notebookMemoryArgs{}, errors.New("usage: attn notebook memory write --path P [--base-hash H] [--file F]")
-	}
-	fs := flag.NewFlagSet("notebook memory write", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	path := fs.String("path", "", "note path, e.g. /memory/decisions/foo.md (required)")
-	baseHash := fs.String("base-hash", "", "expected current hash for a safe edit (omit to create)")
-	file := fs.String("file", "", "read content from this file instead of stdin")
-	if err := fs.Parse(args[1:]); err != nil {
-		return notebookMemoryArgs{}, err
-	}
-	if fs.NArg() != 0 {
-		return notebookMemoryArgs{}, fmt.Errorf("unexpected arguments: %v", fs.Args())
-	}
-	if strings.TrimSpace(*path) == "" {
-		return notebookMemoryArgs{}, errors.New("--path is required")
-	}
-	return notebookMemoryArgs{path: *path, baseHash: strings.TrimSpace(*baseHash), file: strings.TrimSpace(*file)}, nil
-}
-
-// runNotebookJournal handles `attn notebook journal append --text … [--date …]`.
-func runNotebookJournal(c *client.Client, args []string) {
-	parsed, err := parseNotebookJournalArgs(args)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	res, err := c.NotebookAppendJournal(parsed.text, parsed.date)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "notebook journal append: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("appended to %s\n", res.Path)
-}
-
-// runNotebookMemory handles `attn notebook memory write --path P [--base-hash H]
-// [--file F]`. Content comes from --file, else stdin.
-func runNotebookMemory(c *client.Client, args []string) {
-	parsed, err := parseNotebookMemoryArgs(args)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	var content []byte
-	var readErr error
-	if parsed.file != "" {
-		content, readErr = os.ReadFile(parsed.file)
-	} else {
-		content, readErr = io.ReadAll(os.Stdin)
-	}
-	if readErr != nil {
-		fmt.Fprintf(os.Stderr, "notebook memory write: read content: %v\n", readErr)
-		os.Exit(1)
-	}
-	res, err := c.NotebookWrite(parsed.path, string(content), parsed.baseHash)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "notebook memory write: %v\n", err)
-		os.Exit(1)
-	}
-	if res.Conflict {
-		current := ""
-		if res.CurrentHash != nil {
-			current = *res.CurrentHash
-		}
-		fmt.Fprintf(os.Stderr, "notebook memory write: conflict — %s changed on disk (current hash %s); re-read and retry\n", res.Path, current)
-		os.Exit(1)
-	}
-	hash := ""
-	if res.Hash != nil {
-		hash = *res.Hash
-	}
-	fmt.Printf("wrote %s (%s)\n", res.Path, hash)
-}
-
-// runNotebookDream handles `attn notebook dream status` and `attn notebook dream
-// [--dry-run]`. Both are read-only: status summarizes the harvest, the bare/
-// --dry-run form previews the candidates. Nothing is written — the promote phase
-// is not yet available, so --apply is rejected with a clear message.
-func runNotebookDream(c *client.Client, args []string) {
-	sub := ""
-	if len(args) > 0 {
-		sub = args[0]
-	}
-	switch sub {
-	case "status":
-		if len(args) != 1 {
-			fmt.Fprintln(os.Stderr, "usage: attn notebook dream status")
-			os.Exit(2)
-		}
-		res, err := c.NotebookDreamStatus()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "notebook dream status: %v\n", err)
-			os.Exit(1)
-		}
-		printDreamStatus(os.Stdout, res)
-	case "", "--dry-run":
-		if len(args) > 1 {
-			fmt.Fprintln(os.Stderr, "usage: attn notebook dream [--dry-run]")
-			os.Exit(2)
-		}
-		res, err := c.NotebookDreamRun(false)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "notebook dream: %v\n", err)
-			os.Exit(1)
-		}
-		printDreamRun(os.Stdout, res)
-	case "--apply":
-		fmt.Fprintln(os.Stderr, "notebook dream: --apply is not available yet — the consolidation pass that promotes candidates to durable memory lands in a follow-up. Use `--dry-run` to preview.")
-		os.Exit(2)
-	default:
-		fmt.Fprintf(os.Stderr, "notebook dream: unknown argument %q (want: status, --dry-run)\n", sub)
-		os.Exit(2)
-	}
-}
-
-func dreamEnabledLabel(enabled bool) string {
-	if enabled {
-		return "enabled"
-	}
-	return "disabled"
-}
-
-func printDreamSourceCounts(w io.Writer, counts []protocol.NotebookDreamSourceCount) {
-	for _, sc := range counts {
-		fmt.Fprintf(w, "  %-9s %d\n", sc.Source+":", sc.Count)
-	}
-}
-
-// printDreamCandidate renders one candidate line plus its snippet, e.g.
-//
-//	[3× ·2 ctx] journal  2026-06-13
-//	    we decided to split the dreaming PR along the LLM seam …
-func printDreamCandidate(w io.Writer, cand protocol.NotebookDreamCandidate) {
-	label := strings.TrimSpace(protocol.Deref(cand.Title))
-	header := fmt.Sprintf("  [%d× ·%d ctx] %-8s", cand.Occurrences, len(cand.Contexts), cand.Source)
-	if label != "" {
-		header += "  " + label
-	}
-	fmt.Fprintln(w, header)
-	if snippet := strings.TrimSpace(cand.Snippet); snippet != "" {
-		fmt.Fprintf(w, "      %s\n", snippet)
-	}
-}
-
-// formatDreamTime renders a persisted RFC3339 timestamp in local time for
-// display, falling back to the raw string if it cannot be parsed.
-func formatDreamTime(s string) string {
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t.Local().Format("2006-01-02 15:04")
-		}
-	}
-	return s
-}
-
-func printDreamStatus(w io.Writer, res *protocol.NotebookDreamStatusResult) {
-	fmt.Fprintf(w, "dreaming: %s\n", dreamEnabledLabel(res.Enabled))
-	if sched := strings.TrimSpace(protocol.Deref(res.Schedule)); sched != "" {
-		line := "schedule: " + sched
-		if tz := strings.TrimSpace(protocol.Deref(res.Timezone)); tz != "" {
-			line += " (" + tz + ")"
-		}
-		if next := strings.TrimSpace(protocol.Deref(res.NextRunAt)); next != "" {
-			line += ", next run " + formatDreamTime(next)
-		}
-		fmt.Fprintln(w, line)
-	}
-	if last := strings.TrimSpace(protocol.Deref(res.LastRunAt)); last != "" {
-		fmt.Fprintf(w, "last run: %s\n", formatDreamTime(last))
-	}
-	fmt.Fprintf(w, "candidates: %d (%d across multiple contexts), %d persisted\n",
-		res.CandidateCount, res.MultiContextCount, res.PersistedCount)
-	printDreamSourceCounts(w, res.SourceCounts)
-	if len(res.Top) > 0 {
-		fmt.Fprintln(w, "top candidates:")
-		for _, cand := range res.Top {
-			printDreamCandidate(w, cand)
-		}
-	}
-}
-
-func printDreamRun(w io.Writer, res *protocol.NotebookDreamRunResult) {
-	fmt.Fprintf(w, "harvested %d candidates (%d across multiple contexts) — preview only, nothing written\n",
-		res.CandidateCount, res.MultiContextCount)
-	printDreamSourceCounts(w, res.SourceCounts)
-	if len(res.Candidates) > 0 {
-		fmt.Fprintf(w, "\ncandidates (showing %d):\n", len(res.Candidates))
-		for _, cand := range res.Candidates {
-			printDreamCandidate(w, cand)
-		}
-	}
 }
 
 func workspaceContextSourceSession(args []string, allowForce bool) (string, bool, error) {

@@ -6,12 +6,43 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-19]
+
+### Changed
+- **A finished workspace's knowledge-base project is filed away automatically.** When you remove a workspace, the keeper now moves that workspace's linked knowledge-base project folder into `knowledge/archive/`, so your active `knowledge/projects/` view stays focused on work that's still live. Anything promoted into `areas/` stays put and nothing is deleted — the project is just archived.
+
+## [2026-06-18]
+
+### Changed
+- **The Notebook's "memory" became a knowledge base the chief keeps by editing files directly.** The durable Notebook's distilled-notes layer is reframed from "memory" into a **knowledge base** organized the PARA way — `projects/`, `areas/`, `resources/`, and `archive/` under `knowledge/`, each with its own index. Notes now carry an open `type:` label instead of a fixed set of kinds, so you (or any markdown tool, like Obsidian) can organize them however you like. The chief of staff maintains the knowledge base and the journal the same way it writes everything else: by reading and editing the markdown files on disk with native tools.
+
+### Removed
+- **The `attn notebook` command line was removed.** The browsable Notebook in the app, sending a selection to the chief, and the background-task panel are all unchanged. Agents and the chief now read and write the notebook as plain files on disk instead of through `attn notebook init/show/list/journal/memory/tasks/guide`.
+
+## [2026-06-15]
+
+### Added
+- **See what attn's background work is doing, from the app or `attn notebook tasks`.** A new Tasks section in the Notebook browser — and a matching command — lists attn's durable background tasks — the context-compaction, session-digest, and journal-narration jobs — showing each one's state, what it's working on, how many attempts it has taken, when it next runs, and the last error if it failed. The panel refreshes live as tasks change, and a stuck (failed or dead) task gets a Retry button to run it again now. It's a window into work that used to be invisible, so you can tell at a glance whether something is queued, running, retrying, or stuck.
+- **Your work-journal now writes itself from the work your agents actually do.** As sessions finish, attn quietly digests each one, and when a workspace is active — or the moment it's removed — it composes a curated, dated journal entry for that workspace: the real decisions and why, the fights and how they resolved, what shipped, the dead-ends, and what's still open. It grounds the story in what actually happened (passing tests, real commits) rather than what an agent claimed, surfaces silent wins and abandoned plans, and continues the narrative across days instead of repeating itself. A removed workspace gets a final retrospective so the whole effort is captured before it's gone. Entries are written safely, one per workspace per day, and never include secrets.
+- **Active long-lived workspaces now get a daily journal entry even when no session ends that day.** A nightly pass writes a fresh entry for any workspace you actually worked in that day — a session finished or its shared context changed — so a workspace that runs for weeks stays journaled day to day instead of only being written up when it's removed. Workspaces you didn't touch are skipped, so the pass never spends effort on idle ones.
+
+### Fixed
+- **A workspace or session can no longer corrupt your journal or other files.** Every internal narration path — the context snapshot taken at removal, each per-session digest, and the journal-narration pass itself — now refuses any workspace or session identifier that is not a plain name, so a crafted identifier can no longer steer a write out of attn's internal holding area and overwrite your curated journal or another file, nor point an internal narration pass at a file outside its sandbox. Normal workspaces and sessions are unaffected.
+- **The journal-narration pass no longer skips or drops entries.** Each session's digest is now kept under its own workspace, so a workspace's journal entry is composed only from its own sessions instead of being contaminated by unrelated work. The pass also no longer falsely reports success when a run leaves the journal untouched (so a removal-day retrospective is retried instead of silently dropped when an earlier entry already exists that day), and one workspace's entry can no longer be mistaken for a differently-named workspace whose id shares its prefix.
+- **A removed single-session workspace's retrospective now includes that session's actual work.** When a workspace was torn down right after its only session finished, the final journal entry could be written from the leftover context overlay alone, missing the grounded digest of what that last session really did. attn now carries the finished session's work into its digest even after the workspace is gone and rewrites the retrospective once it lands, so the closing entry reflects the real work rather than just the aspirational context.
+
+### Changed
+- **Your curated journal stays curated; raw delegated-work outcomes now feed it behind the scenes.** Auto-captured chief-of-staff dispatch outcomes no longer land directly in your daily `journal/<date>.md`. They are now recorded to an internal holding area the upcoming narration pass reads from, so the journal you read keeps only curated entries instead of machine-raw blocks. Dispatch outcomes are still captured reliably and exactly once; existing journal entries are left untouched.
+- **A workspace's shared context is preserved when the workspace goes away.** Removing a workspace used to discard its shared `context.md` overlay entirely. attn now snapshots that context the moment a workspace is torn down, keeping it as durable raw material for the journal-narration pass — so the decisions and current picture an agent recorded in a workspace are no longer lost when the workspace closes.
+
 ## [2026-06-14]
 
 ### Added
 - **Every agent now helps keep your work-journal, not just the chief of staff.** Whenever attn launches an agent in a workspace, it now teaches it to jot a short journal entry when something is worth remembering — a decision and why, a hard-won fix, something meaningful it finished, or a durable gotcha — so your journal reflects work across the whole workspace, not only delegated chief-of-staff dispatches. Entries stay short and factual, are written through attn (so they're safe and observable), and never include secrets.
 - **Your Notebook journal now writes itself when delegated work finishes.** When a chief-of-staff dispatch completes or fails — or its session simply ends — attn automatically records it in that day's journal: a dated, human-readable entry with what was done, any decision that was reached, and how it was verified. You get a durable history of what was built and decided without anyone having to remember to write it down, and each entry links back to the dispatch it came from. Entries are recorded once, even if attn restarts.
-- **Preview what the Notebook's nightly memory pass would keep.** A new `attn notebook dream` command shows the recurring, durable facts attn could distill into lasting memory — gathered from your journals, your workspaces' decisions and constraints, and finished chief-of-staff dispatches, with the ones that recur across several places ranked first. `attn notebook dream status` is a quick summary; `attn notebook dream --dry-run` lists the candidates. It's read-only — nothing is written yet — so you can see the raw material before the automatic consolidation pass that acts on it arrives in an upcoming release.
+
+### Changed
+- **Automatic workspace-context compaction is now durable across restarts.** When a workspace's shared context grows large enough to compact, the pending compaction is now queued on attn's durable task engine instead of an in-memory timer, so it survives a daemon restart and is no longer lost if attn closes during the wait. The compaction agent now works with ordinary file tools instead of a constrained tool pair; what you see is unchanged — oversized context still gets compacted, validated, and applied safely, and is cancelled cleanly when its workspace goes away.
 
 ## [2026-06-13]
 

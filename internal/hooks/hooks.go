@@ -52,10 +52,9 @@ func WorkspaceContextGuidance(path string) string {
 }
 
 // WorkspaceContextSessionStartOutput returns hook output used when an agent
-// could not receive workspace context guidance at launch. It carries the same
-// pair the launch path injects for a non-chief agent: the workspace-context
-// guidance plus the universal journaling directive, so the SessionStart fallback
-// stays consistent with the launch injection.
+// could not receive workspace context guidance at launch. It carries the
+// workspace-context guidance the launch path injects for a non-chief agent, so
+// the SessionStart fallback stays consistent with the launch injection.
 func WorkspaceContextSessionStartOutput(path string) string {
 	guidance := WorkspaceContextGuidance(path)
 	if guidance == "" {
@@ -64,47 +63,32 @@ func WorkspaceContextSessionStartOutput(path string) string {
 	output := sessionStartHookOutput{
 		HookSpecificOutput: sessionStartHookSpecificOutput{
 			HookEventName:     "SessionStart",
-			AdditionalContext: guidance + "\n\n" + JournalingDirective(),
+			AdditionalContext: guidance,
 		},
 	}
 	data, _ := json.Marshal(output)
 	return string(data)
 }
 
-// JournalingDirective is the concise, universal instruction that teaches ANY
-// agent — not just the chief of staff — to contribute to the durable work-journal
-// as it works. The chief receives the fuller NotebookGuidance instead (which
-// already covers journaling); this lite directive goes to every other workspace
-// agent so the journal captures notable work across the whole workspace, not only
-// delegated dispatches. The agent writes through the daemon-owned CLI, so no
-// notebook root is embedded here.
-func JournalingDirective() string {
-	return "This workspace keeps a durable work-journal in the attn Notebook — the user's lasting record of what was decided, built, fixed, and learned, revisited later for recall and reviews. Help keep it as you work.\n" +
-		"\n" +
-		"- Journal notable moments, not routine steps: a decision and why, a hard-won fix or root cause, something meaningful you completed, or a durable gotcha worth remembering. Skip play-by-play and trivia.\n" +
-		"- Write through the daemon, never by editing files directly: `attn notebook journal append --text \"…\"`. Keep each entry short, factual, and self-contained — the reader is a human coming back to it weeks later.\n" +
-		"- The journal is a record, not a task tracker, and never a place for secrets or credentials."
-}
-
 // NotebookGuidance teaches a chief-of-staff agent that its durable home is the
-// profile-wide Notebook, not any single workspace's shared context. It is the
-// single source of notebook operating guidance: both the at-launch injection
-// and the live `attn notebook guide` pull resolve to this text, so guidance is
-// versioned in one place. root is the resolved notebook root (empty disables).
+// profile-wide Notebook, not any single workspace's shared context, and that it
+// maintains the notebook by editing files directly. It is the single source of
+// notebook operating guidance, injected into the system prompt at launch. root is
+// the resolved notebook root (empty disables).
 func NotebookGuidance(root string) string {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		return ""
 	}
-	return fmt.Sprintf(`The attn Notebook at %s is attn's durable, profile-wide markdown memory: it outlives any single workspace and is the chief of staff's home, used in place of a per-workspace shared context. If you are the chief of staff, it is your durable memory; either way, read it to orient and contribute through the daemon.
+	return fmt.Sprintf(`You are the chief of staff. The attn Notebook at %[1]s is your durable, profile-wide home — plain markdown on disk that outlives any single workspace, used in place of a per-workspace shared context. Read it to orient, and maintain it as you work. It is yours to read and edit directly with native file tools (Read/Write/Edit); there is no notebook CLI.
 
-- Orient first: run `+"`"+`attn notebook show /memory/index.md`+"`"+` (and `+"`"+`attn notebook list memory`+"`"+`) to load what is already known. Run `+"`"+`attn notebook init`+"`"+` once if the notebook does not exist yet.
-- Two kinds of notes: dated `+"`"+`journal`+"`"+` entries (the raw record) and distilled `+"`"+`memory`+"`"+` notes (decisions, gotchas, domain knowledge that outlived a single PR). Memory ≠ tasks; the notebook is not a task tracker.
-- Write through the daemon, never by editing files directly: append the day's log with `+"`"+`attn notebook journal append --text "…"`+"`"+`, and write or hash-CAS-edit a durable note with `+"`"+`attn notebook memory write --path /memory/decisions/<slug>.md`+"`"+` (pass `+"`"+`--base-hash`+"`"+` from the value you read to edit safely).
-- Grounding is a hard rule: every durable `+"`"+`memory`+"`"+` note must carry resolvable `+"`"+`sources:`+"`"+` (journal anchors, `+"`"+`dispatch:<id>`+"`"+`, or URLs). Do not author memory from paraphrase alone.
-- Link with root-absolute markdown links like `+"`"+`[label](/memory/decisions/foo.md)`+"`"+`, not wikilinks. Keep relationship kind (supersedes, relates-to) in prose.
-- You remain profile-wide. You may still `+"`"+`attn workspace context show --session <id>`+"`"+` for a specific workspace you step into, but that is opt-in — the notebook is your primary surface.
-- For the full workflow, load the attn skill's notebook reference.`, strconv.Quote(root))
+- Orient first: read %[1]s/index.md and %[1]s/knowledge/index.md to load what is already known.
+- Two layers. The journal (%[1]s/journal/<date>.md) is the dated, curated, cross-workspace log of what was done in attn — the user's lasting record for recall and reviews. The keeper already narrates each workspace's own work into it, so journal from your chief-of-staff altitude: what moved across workspaces, what you delegated, what was decided — not the per-workspace play-by-play the keeper already covers. The knowledge base (%[1]s/knowledge/) is the distilled, timeless layer.
+- The knowledge base is organized PARA-style: `+"`"+`projects/`+"`"+` (bounded efforts, roughly one per workspace/epic), `+"`"+`areas/`+"`"+` (ongoing responsibilities and subsystems), `+"`"+`resources/`+"`"+` (reference material), `+"`"+`archive/`+"`"+` (inactive items). As a project finishes, promote its durable knowledge up into `+"`"+`areas/`+"`"+`. When a `+"`"+`projects/<slug>/`+"`"+` corresponds to a workspace, stamp its `+"`"+`index.md`+"`"+` with `+"`"+`resource: attn:workspace/<id>`+"`"+` so the keeper files it under `+"`"+`archive/`+"`"+` automatically when that workspace is removed. Every non-reserved note carries OKF frontmatter with a non-empty `+"`"+`type:`+"`"+` (an open, author-chosen string such as `+"`"+`note`+"`"+`); `+"`"+`index.md`+"`"+` and `+"`"+`log.md`+"`"+` are reserved and carry none. Knowledge ≠ tasks — capture what is known, not what is to do.
+- Ground durable knowledge: a knowledge note should carry resolvable `+"`"+`sources:`+"`"+` (journal anchors, `+"`"+`dispatch:<id>`+"`"+`, or URLs), not paraphrase alone.
+- Link with root-absolute markdown links like `+"`"+`[label](/knowledge/areas/foo.md)`+"`"+`, not wikilinks. Keep relationship kind (supersedes, relates-to) in prose.
+- You remain profile-wide. You may still consult a specific workspace's shared context when you step into it, but that is opt-in — the notebook is your primary surface.
+- For the full workflow, load the attn skill's notebook reference.`, root)
 }
 
 // Generate generates settings configuration with hooks for a session
