@@ -29,8 +29,6 @@ type fakeWorkflowClient struct {
 	// getStatusOverride, when set for a runID, forces WorkflowRunGet to report that
 	// status (used to drive the cancel watcher deterministically).
 	getStatusOverride map[string]protocol.WorkflowRunStatus
-
-	getErr error
 }
 
 func newFakeWorkflowClient() *fakeWorkflowClient {
@@ -81,9 +79,6 @@ func (f *fakeWorkflowClient) WorkflowCallUpsert(runID string, call *protocol.Wor
 func (f *fakeWorkflowClient) WorkflowRunGet(runID string) (*protocol.WorkflowRun, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.getErr != nil {
-		return nil, f.getErr
-	}
 	return f.hydrateLocked(runID), nil
 }
 
@@ -342,10 +337,14 @@ return a;`
 		wait:    true,
 	}
 
-	// Drive the engine directly with the fake client + stub. We mirror what
-	// executeWorkflowRun does but inject the stub (no driverAgent / no codex).
+	// Seed the initial running row exactly as executeWorkflowRun does, then drive the
+	// REAL engine path (runWorkflowEngine) with a fake stub — no driverAgent and no
+	// codex spawned, and no reimplementation of the engine/finalize wiring in the test.
+	if _, err := fake.WorkflowRunUpsert(buildInitialWorkflowRun(parsed, runID, sha256Hex([]byte(script)), parsed.argsJSON)); err != nil {
+		t.Fatalf("initial upsert: %v", err)
+	}
 	stub := fixedStub{result: json.RawMessage(`{"ok":true}`)}
-	exit := runWorkflowEngineForTest(t, fake, parsed, runID, script, stub)
+	exit := runWorkflowEngine(fake, parsed, runID, script, parsed.argsJSON, stub)
 
 	if exit != 0 {
 		t.Fatalf("exit = %d, want 0", exit)
@@ -366,39 +365,6 @@ return a;`
 	if last.ResultJson == nil || *last.ResultJson != `{"ok":true}` {
 		t.Fatalf("final result_json = %v", last.ResultJson)
 	}
-}
-
-// runWorkflowEngineForTest reproduces executeWorkflowRun's engine wiring with an
-// injected stub (so no driverAgent/codex is spawned). It seeds the initial run
-// upsert, runs the engine through the IPC journal, finalizes, and returns the
-// exit code — exercising the same finalize + result-projection code paths.
-func runWorkflowEngineForTest(t *testing.T, c workflowClient, parsed workflowRunArgs, runID, source string, stub workflow.AgentStub) int {
-	t.Helper()
-	now := string(protocol.TimestampNow())
-	initial := &protocol.WorkflowRun{
-		RunID:      runID,
-		ScriptPath: parsed.script,
-		ScriptHash: sha256Hex([]byte(source)),
-		Status:     protocol.WorkflowRunStatusRunning,
-		Resumable:  true,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	}
-	applyOptionalRunFields(initial, parsed, parsed.argsJSON)
-	if _, err := c.WorkflowRunUpsert(initial); err != nil {
-		t.Fatalf("initial upsert: %v", err)
-	}
-
-	journal := NewIPCJournal(c, runID)
-	engine := workflow.New(workflow.Config{Stub: stub, Journal: journal})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	result, _ := engine.Run(ctx, source, nil)
-
-	final := finishWorkflowRun(c, runID, result)
-	_ = buildWorkflowResultOutput(final)
-	return workflowResultExitCode(final.Status)
 }
 
 // --- cancel watcher --------------------------------------------------------

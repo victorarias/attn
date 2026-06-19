@@ -241,7 +241,7 @@ func runWorkflowRun(argv []string) {
 	if !parsed.wait {
 		// Foreground caller without --wait: detach a self re-exec that runs the
 		// engine to completion in the background, print the run id, and return.
-		if err := detachWorkflowChild(c, parsed, runID, string(source), scriptHash, argsJSON); err != nil {
+		if err := detachWorkflowChild(c, parsed, runID, scriptHash, argsJSON); err != nil {
 			fmt.Fprintf(os.Stderr, "workflow run: %v\n", err)
 			os.Exit(1)
 		}
@@ -253,6 +253,25 @@ func runWorkflowRun(argv []string) {
 	os.Exit(exitCode)
 }
 
+// buildInitialWorkflowRun constructs the running-status run row sent at run start.
+// The store's ON CONFLICT upsert replaces every column, so this carries the full
+// header. Shared by the foreground run, the detached child, and the engine test so
+// the initial-row shape has a single source of truth.
+func buildInitialWorkflowRun(parsed workflowRunArgs, runID, scriptHash, argsJSON string) *protocol.WorkflowRun {
+	now := string(protocol.TimestampNow())
+	run := &protocol.WorkflowRun{
+		RunID:      runID,
+		ScriptPath: parsed.script,
+		ScriptHash: scriptHash,
+		Status:     protocol.WorkflowRunStatusRunning,
+		Resumable:  true,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	applyOptionalRunFields(run, parsed, argsJSON)
+	return run
+}
+
 // executeWorkflowRun runs the engine to completion in the FOREGROUND, reporting
 // progress to the daemon (initial + final run upserts, per-call upserts via the
 // IPC journal), and prints the terminal result. It returns the process exit code.
@@ -262,30 +281,9 @@ func executeWorkflowRun(
 	runID, source, scriptHash, argsJSON string,
 	skipInitialUpsert bool,
 ) int {
-	now := string(protocol.TimestampNow())
-
 	if !skipInitialUpsert {
-		initial := &protocol.WorkflowRun{
-			RunID:      runID,
-			ScriptPath: parsed.script,
-			ScriptHash: scriptHash,
-			Status:     protocol.WorkflowRunStatusRunning,
-			Resumable:  true,
-			CreatedAt:  now,
-			UpdatedAt:  now,
-		}
-		applyOptionalRunFields(initial, parsed, argsJSON)
-		if _, err := c.WorkflowRunUpsert(initial); err != nil {
+		if _, err := c.WorkflowRunUpsert(buildInitialWorkflowRun(parsed, runID, scriptHash, argsJSON)); err != nil {
 			fmt.Fprintf(os.Stderr, "workflow run: report run start: %v\n", err)
-			return 1
-		}
-	}
-
-	// Parse args JSON into an `any` for the engine; keep argsJSON as the raw form.
-	var argsAny any
-	if strings.TrimSpace(argsJSON) != "" {
-		if err := json.Unmarshal([]byte(argsJSON), &argsAny); err != nil {
-			finishWorkflowRunFailure(c, runID, fmt.Sprintf("decode args: %v", err))
 			return 1
 		}
 	}
@@ -294,6 +292,24 @@ func executeWorkflowRun(
 	if err != nil {
 		finishWorkflowRunFailure(c, runID, err.Error())
 		return 1
+	}
+
+	return runWorkflowEngine(c, parsed, runID, source, argsJSON, stub)
+}
+
+// runWorkflowEngine drives the engine to completion against an already-built stub:
+// it decodes args, wires the IPC journal + cancel watcher, runs (or resumes), sends
+// the terminal upsert, prints the result, and returns the exit code. executeWorkflowRun
+// supplies the real driver stub; tests inject a fake — so neither the engine wiring
+// nor the finalize path is reimplemented outside this function.
+func runWorkflowEngine(c workflowClient, parsed workflowRunArgs, runID, source, argsJSON string, stub workflow.AgentStub) int {
+	// Parse args JSON into an `any` for the engine; keep argsJSON as the raw form.
+	var argsAny any
+	if strings.TrimSpace(argsJSON) != "" {
+		if err := json.Unmarshal([]byte(argsJSON), &argsAny); err != nil {
+			finishWorkflowRunFailure(c, runID, fmt.Sprintf("decode args: %v", err))
+			return 1
+		}
 	}
 
 	journal := NewIPCJournal(c, runID)
@@ -495,19 +511,8 @@ func observeCanceled(c workflowClient, runID string) bool {
 // --wait --run-id <runID>` child in a new session (Setsid) so the engine runs to
 // completion after the parent returns. The parent creates the initial run upsert
 // so the run is visible immediately, then leaves; the child skips re-creating it.
-func detachWorkflowChild(c workflowClient, parsed workflowRunArgs, runID, source, scriptHash, argsJSON string) error {
-	now := string(protocol.TimestampNow())
-	initial := &protocol.WorkflowRun{
-		RunID:      runID,
-		ScriptPath: parsed.script,
-		ScriptHash: scriptHash,
-		Status:     protocol.WorkflowRunStatusRunning,
-		Resumable:  true,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	}
-	applyOptionalRunFields(initial, parsed, argsJSON)
-	if _, err := c.WorkflowRunUpsert(initial); err != nil {
+func detachWorkflowChild(c workflowClient, parsed workflowRunArgs, runID, scriptHash, argsJSON string) error {
+	if _, err := c.WorkflowRunUpsert(buildInitialWorkflowRun(parsed, runID, scriptHash, argsJSON)); err != nil {
 		return fmt.Errorf("report run start: %w", err)
 	}
 
@@ -733,7 +738,6 @@ type workflowCallView struct {
 	Label          string `json:"label,omitempty"`
 	Phase          string `json:"phase,omitempty"`
 	Model          string `json:"model,omitempty"`
-	Harness        string `json:"harness,omitempty"`
 	StartedAt      string `json:"started_at,omitempty"`
 	ElapsedSeconds *int   `json:"elapsed_seconds,omitempty"`
 	Error          string `json:"error,omitempty"`
@@ -752,7 +756,6 @@ func buildWorkflowShowOutput(run *protocol.WorkflowRun) workflowShowOutput {
 			Label:          protocol.Deref(call.Label),
 			Phase:          protocol.Deref(call.Phase),
 			Model:          protocol.Deref(call.ResolvedModel),
-			Harness:        protocol.Deref(call.ResolvedHarness),
 			StartedAt:      protocol.Deref(call.StartedAt),
 			ElapsedSeconds: workflowCallElapsedSeconds(call),
 			Error:          protocol.Deref(call.Error),
