@@ -141,7 +141,7 @@ func (s *Store) Write(p string, content []byte, baseHash string) (newHash string
 var journalDateRE = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 // AppendJournal appends an entry to the dated journal file (journal/<date>.md),
-// creating it with kind:journal frontmatter on first write. Appends are
+// creating it with type:journal frontmatter on first write. Appends are
 // serialized and never conflict. dateISO must be YYYY-MM-DD.
 func (s *Store) AppendJournal(dateISO, entry string) (relPath string, hash string, err error) {
 	if !journalDateRE.MatchString(dateISO) {

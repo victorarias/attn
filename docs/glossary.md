@@ -31,7 +31,8 @@ is filesystem-canonical.
 
 ## The Notebook
 
-attn's durable, **profile-wide, filesystem-canonical** markdown memory layer. The
+attn's durable, **profile-wide, filesystem-canonical** markdown layer — a dated
+journal plus a PARA knowledge base. The
 `.md` files on disk are the source of truth (unlike the workspace context, which is
 SQLite-canonical), and the Notebook outlives any single session, workspace, or PR.
 

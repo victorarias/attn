@@ -223,7 +223,7 @@ set of kinds.
   native file edits on disk (the chief and the user edit files directly with
   Read/Write/Edit). The former `attn notebook …` CLI write path was removed.
 - **Grounding is a hard rule.** Every note must carry resolvable `sources:`
-  (journal anchors, `dispatch:<id>`, or URLs) — enforced in the notebook
+  (journal anchors, `dispatch:<id>`, or URLs) — stated in the notebook
   guidance (`internal/hooks/hooks.go`) and the `knowledge/index.md` scaffold
   (`internal/notebook/layout.go`). No authoring from paraphrase alone.
 - **The chief of staff consumes it.** The launch guidance

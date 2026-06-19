@@ -72,8 +72,10 @@ personal vault (e.g. `~/exo/attn`). attn is prescriptive about its skeleton:
 1. **`memory` → `knowledge`** everywhere: directory, scaffold, frontmatter
    semantics, protocol field, frontend grouping, glossary, guidance. The word
    "memory" is retired from the domain.
-2. **`kind` → `type`** (OKF). The frontmatter field renames; validation relaxes
-   from a closed enum to "present `type` must be non-empty". **Read-compat:** the
+2. **`kind` → `type`** (OKF). The frontmatter field renames; the closed
+   `journal|memory` enum check is removed and the store becomes a permissive writer
+   that does no `type` validation (a non-empty `type:` is an author/chief
+   convention, not a store-enforced rule). **Read-compat:** the
    document accessor reads `type`, falling back to `kind`, so any stray
    externally-authored `kind:` still resolves (byte-faithful round-trip means we
    never rewrite a user's key silently). attn writes `type:`.
