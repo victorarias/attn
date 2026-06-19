@@ -18,15 +18,20 @@ func TestEnsureScaffold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureScaffold: %v", err)
 	}
-	if !reflect.DeepEqual(created, []string{"index.md", "log.md", "memory/index.md"}) {
+	wantFiles := []string{
+		"index.md", "log.md", "knowledge/index.md",
+		"knowledge/projects/index.md", "knowledge/areas/index.md",
+		"knowledge/resources/index.md", "knowledge/archive/index.md",
+	}
+	if !reflect.DeepEqual(created, wantFiles) {
 		t.Fatalf("first EnsureScaffold created = %v, want all reserved files", created)
 	}
-	for _, rel := range []string{"index.md", "log.md", "memory/index.md"} {
+	for _, rel := range wantFiles {
 		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
 			t.Fatalf("scaffold file %s missing: %v", rel, err)
 		}
 	}
-	for _, rel := range []string{"journal", "memory/decisions", "memory/gotchas", "memory/domain"} {
+	for _, rel := range []string{"journal", "knowledge", "knowledge/projects", "knowledge/areas", "knowledge/resources", "knowledge/archive"} {
 		info, err := os.Stat(filepath.Join(root, rel))
 		if err != nil || !info.IsDir() {
 			t.Fatalf("scaffold dir %s missing: %v", rel, err)
@@ -53,44 +58,51 @@ func TestEnsureScaffold(t *testing.T) {
 func TestEnsureScaffoldReturnsPartialWritesOnFailure(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "nb")
 	// Pre-create the full dir layout so EnsureScaffold's MkdirAll calls are no-ops,
-	// then make memory/ read-only so the memory/index.md write (the last reserved
-	// file) fails while index.md and log.md (in the writable root) succeed.
-	for _, d := range []string{"journal", "memory/decisions", "memory/gotchas", "memory/domain"} {
+	// then make knowledge/archive/ read-only so the knowledge/archive/index.md
+	// write (the LAST reserved file) fails while every earlier reserved file
+	// (in writable dirs) succeeds.
+	for _, d := range []string{"journal", "knowledge/projects", "knowledge/areas", "knowledge/resources", "knowledge/archive"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	mem := filepath.Join(root, "memory")
-	if err := os.Chmod(mem, 0o555); err != nil {
+	archive := filepath.Join(root, "knowledge", "archive")
+	if err := os.Chmod(archive, 0o555); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(mem, 0o755) })
+	t.Cleanup(func() { _ = os.Chmod(archive, 0o755) })
 
 	s := NewStore(root)
 	created, err := s.EnsureScaffold()
 	if err == nil {
-		t.Skip("write into read-only memory/ unexpectedly succeeded (likely running as root)")
+		t.Skip("write into read-only knowledge/archive/ unexpectedly succeeded (likely running as root)")
 	}
 	// The files written before the failure must be returned so the caller can
 	// account for attn's own partial writes (and not later mis-surface them as
-	// external edits), rather than discarding them with the error.
-	if !reflect.DeepEqual(created, []string{"index.md", "log.md"}) {
-		t.Fatalf("partial EnsureScaffold created = %v, want [index.md log.md]", created)
+	// external edits), rather than discarding them with the error. Only the final
+	// reserved file (knowledge/archive/index.md) fails.
+	wantPartial := []string{
+		"index.md", "log.md", "knowledge/index.md",
+		"knowledge/projects/index.md", "knowledge/areas/index.md",
+		"knowledge/resources/index.md",
+	}
+	if !reflect.DeepEqual(created, wantPartial) {
+		t.Fatalf("partial EnsureScaffold created = %v, want %v", created, wantPartial)
 	}
 }
 
 func TestReadNotFound(t *testing.T) {
 	s := NewStore(t.TempDir())
-	if _, _, err := s.Read("memory/missing.md"); !IsNotFound(err) {
+	if _, _, err := s.Read("knowledge/areas/missing.md"); !IsNotFound(err) {
 		t.Fatalf("Read missing = %v, want NotFoundError", err)
 	}
 }
 
 func TestWriteCreateAndConflict(t *testing.T) {
 	s := NewStore(t.TempDir())
-	content := []byte("---\nkind: memory\n---\nhello\n")
+	content := []byte("---\ntype: note\n---\nhello\n")
 
-	hash, conflict, err := s.Write("memory/decisions/foo.md", content, "")
+	hash, conflict, err := s.Write("knowledge/areas/foo.md", content, "")
 	if err != nil || conflict != nil {
 		t.Fatalf("create: err=%v conflict=%v", err, conflict)
 	}
@@ -99,14 +111,14 @@ func TestWriteCreateAndConflict(t *testing.T) {
 	}
 
 	// Create-only against an existing file is a conflict, not an overwrite.
-	_, conflict, err = s.Write("memory/decisions/foo.md", []byte("other"), "")
+	_, conflict, err = s.Write("knowledge/areas/foo.md", []byte("other"), "")
 	if err != nil {
 		t.Fatalf("create-conflict err: %v", err)
 	}
 	if conflict == nil || conflict.CurrentHash != Hash(content) {
 		t.Fatalf("expected create conflict carrying current hash, got %#v", conflict)
 	}
-	got, _, _ := s.Read("memory/decisions/foo.md")
+	got, _, _ := s.Read("knowledge/areas/foo.md")
 	if string(got) != string(content) {
 		t.Fatalf("create-conflict overwrote the file: %q", got)
 	}
@@ -114,15 +126,15 @@ func TestWriteCreateAndConflict(t *testing.T) {
 
 func TestWriteCASEdit(t *testing.T) {
 	s := NewStore(t.TempDir())
-	v1 := []byte("---\nkind: memory\n---\nv1\n")
-	h1, _, err := s.Write("memory/decisions/foo.md", v1, "")
+	v1 := []byte("---\ntype: note\n---\nv1\n")
+	h1, _, err := s.Write("knowledge/areas/foo.md", v1, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Stale base hash => conflict, no write.
-	v2 := []byte("---\nkind: memory\n---\nv2\n")
-	_, conflict, err := s.Write("memory/decisions/foo.md", v2, "deadbeef")
+	v2 := []byte("---\ntype: note\n---\nv2\n")
+	_, conflict, err := s.Write("knowledge/areas/foo.md", v2, "deadbeef")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,25 +143,13 @@ func TestWriteCASEdit(t *testing.T) {
 	}
 
 	// Matching base hash => applies.
-	h2, conflict, err := s.Write("memory/decisions/foo.md", v2, h1)
+	h2, conflict, err := s.Write("knowledge/areas/foo.md", v2, h1)
 	if err != nil || conflict != nil {
 		t.Fatalf("CAS edit: err=%v conflict=%v", err, conflict)
 	}
-	got, gotHash, _ := s.Read("memory/decisions/foo.md")
+	got, gotHash, _ := s.Read("knowledge/areas/foo.md")
 	if string(got) != string(v2) || gotHash != h2 {
 		t.Fatalf("CAS edit did not apply: content=%q hash=%q", got, gotHash)
-	}
-}
-
-func TestWriteRejectsInvalidKind(t *testing.T) {
-	s := NewStore(t.TempDir())
-	_, _, err := s.Write("memory/foo.md", []byte("---\nkind: bogus\n---\nx\n"), "")
-	if err == nil {
-		t.Fatal("Write should reject an explicitly-declared invalid kind")
-	}
-	// Absent kind is permitted.
-	if _, _, err := s.Write("memory/bar.md", []byte("# no frontmatter\n"), ""); err != nil {
-		t.Fatalf("Write without a kind should be allowed: %v", err)
 	}
 }
 
@@ -170,8 +170,8 @@ func TestAppendJournal(t *testing.T) {
 
 	content, _, _ := s.Read(rel)
 	doc := ParsePermissive(content)
-	if doc.Kind() != KindJournal {
-		t.Fatalf("journal kind = %q, want %q", doc.Kind(), KindJournal)
+	if doc.Type() != TypeJournal {
+		t.Fatalf("journal type = %q, want %q", doc.Type(), TypeJournal)
 	}
 	if !strings.Contains(doc.Body, "first entry") || !strings.Contains(doc.Body, "second entry") {
 		t.Fatalf("journal body missing entries:\n%s", doc.Body)
@@ -331,7 +331,7 @@ func TestStoreRejectsSymlinkEscape(t *testing.T) {
 	if _, _, err := s.Read("evil/secret.md"); err == nil {
 		t.Fatal("Read through a symlinked dir should be rejected")
 	}
-	if _, _, err := s.Write("evil/secret.md", []byte("---\nkind: memory\n---\nx\n"), ""); err == nil {
+	if _, _, err := s.Write("evil/secret.md", []byte("---\ntype: note\n---\nx\n"), ""); err == nil {
 		t.Fatal("Write through a symlinked dir should be rejected")
 	}
 	if got, _ := os.ReadFile(secret); string(got) != "TOP SECRET\n" {
@@ -355,7 +355,7 @@ func TestStoreAllowsSymlinkedRoot(t *testing.T) {
 	if _, err := s.EnsureScaffold(); err != nil {
 		t.Fatalf("EnsureScaffold on a symlinked root: %v", err)
 	}
-	if _, _, err := s.Write("memory/foo.md", []byte("---\nkind: memory\n---\nx\n"), ""); err != nil {
+	if _, _, err := s.Write("knowledge/areas/foo.md", []byte("---\ntype: note\n---\nx\n"), ""); err != nil {
 		t.Fatalf("write under a symlinked root should work: %v", err)
 	}
 }
@@ -363,31 +363,31 @@ func TestStoreAllowsSymlinkedRoot(t *testing.T) {
 // The prefix scopes a subtree on path-segment boundaries, not raw substring.
 func TestListPrefixIsPathSegmentBoundary(t *testing.T) {
 	s := NewStore(t.TempDir())
-	body := []byte("---\nkind: memory\n---\nx\n")
-	if _, _, err := s.Write("memory/decisions/foo.md", body, ""); err != nil {
+	body := []byte("---\ntype: note\n---\nx\n")
+	if _, _, err := s.Write("knowledge/areas/foo.md", body, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Write("memory/decisions-archive/bar.md", body, ""); err != nil {
+	if _, _, err := s.Write("knowledge/areas-archive/bar.md", body, ""); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := s.List("memory/decisions")
+	entries, err := s.List("knowledge/areas")
 	if err != nil {
 		t.Fatal(err)
 	}
 	foundFoo, foundArchive := false, false
 	for _, e := range entries {
 		switch e.Path {
-		case "memory/decisions/foo.md":
+		case "knowledge/areas/foo.md":
 			foundFoo = true
-		case "memory/decisions-archive/bar.md":
+		case "knowledge/areas-archive/bar.md":
 			foundArchive = true
 		}
 	}
 	if !foundFoo {
-		t.Fatalf("prefix should include memory/decisions/foo.md; got %+v", entries)
+		t.Fatalf("prefix should include knowledge/areas/foo.md; got %+v", entries)
 	}
 	if foundArchive {
-		t.Fatalf("prefix must NOT leak the sibling memory/decisions-archive/bar.md; got %+v", entries)
+		t.Fatalf("prefix must NOT leak the sibling knowledge/areas-archive/bar.md; got %+v", entries)
 	}
 }
 
@@ -395,15 +395,15 @@ func TestListPrefixIsPathSegmentBoundary(t *testing.T) {
 // and still reports the full size.
 func TestListReadsFrontmatterFromLargeFile(t *testing.T) {
 	s := NewStore(t.TempDir())
-	big := "---\nkind: memory\ntitle: Big\n---\n" + strings.Repeat("x\n", 100<<10) // ~200 KiB body
-	if _, _, err := s.Write("memory/big.md", []byte(big), ""); err != nil {
+	big := "---\ntype: note\ntitle: Big\n---\n" + strings.Repeat("x\n", 100<<10) // ~200 KiB body
+	if _, _, err := s.Write("knowledge/areas/big.md", []byte(big), ""); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := s.List("memory/big.md")
+	entries, err := s.List("knowledge/areas/big.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Kind != "memory" || entries[0].Title != "Big" {
+	if len(entries) != 1 || entries[0].Type != "note" || entries[0].Title != "Big" {
 		t.Fatalf("List did not extract frontmatter from a large file: %+v", entries)
 	}
 	if entries[0].Size != int64(len(big)) {
@@ -415,7 +415,7 @@ func TestListReadsFrontmatterFromLargeFile(t *testing.T) {
 // key order, ambiguous scalars all survive the next attn append).
 func TestAppendJournalPreservesExistingFrontmatter(t *testing.T) {
 	s := NewStore(t.TempDir())
-	existing := "---\nkind: journal\n# external note\nobsidian_id: 007\nzeta: z\ntitle: jrnl\n---\n# entries\n\nfirst\n"
+	existing := "---\ntype: journal\n# external note\nobsidian_id: 007\nzeta: z\ntitle: jrnl\n---\n# entries\n\nfirst\n"
 	if _, _, err := s.Write("journal/2026-06-13.md", []byte(existing), ""); err != nil {
 		t.Fatal(err)
 	}
@@ -446,14 +446,14 @@ func TestList(t *testing.T) {
 	if _, err := s.EnsureScaffold(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Write("memory/decisions/foo.md", []byte("---\nkind: memory\ntitle: Foo\nsummary: a decision\n---\nbody\n"), ""); err != nil {
+	if _, _, err := s.Write("knowledge/areas/foo.md", []byte("---\ntype: note\ntitle: Foo\nsummary: a decision\n---\nbody\n"), ""); err != nil {
 		t.Fatal(err)
 	}
 	// Machine state under .attn/ must never be surfaced.
-	if err := os.MkdirAll(filepath.Join(s.Root(), ".attn", "dreams"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(s.Root(), ".attn", "raw"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(s.Root(), ".attn", "dreams", "note.md"), []byte("x"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(s.Root(), ".attn", "raw", "note.md"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -468,21 +468,21 @@ func TestList(t *testing.T) {
 		}
 		paths[e.Path] = e
 	}
-	foo, ok := paths["memory/decisions/foo.md"]
+	foo, ok := paths["knowledge/areas/foo.md"]
 	if !ok {
 		t.Fatalf("List missing the written note; got %v", entries)
 	}
-	if foo.Kind != "memory" || foo.Title != "Foo" || foo.Summary != "a decision" {
+	if foo.Type != "note" || foo.Title != "Foo" || foo.Summary != "a decision" {
 		t.Fatalf("List entry metadata = %+v", foo)
 	}
 
 	// Prefix filters to a subtree.
-	mem, err := s.List("/memory/decisions")
+	mem, err := s.List("/knowledge/areas")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, e := range mem {
-		if !strings.HasPrefix(e.Path, "memory/decisions") {
+		if !strings.HasPrefix(e.Path, "knowledge/areas") {
 			t.Fatalf("prefixed List returned out-of-subtree entry %q", e.Path)
 		}
 	}
@@ -498,18 +498,18 @@ func TestBacklinks(t *testing.T) {
 	}
 
 	// target is the note we want backlinks for.
-	mustWrite(t, s, "memory/decisions/target.md", "---\nkind: memory\ntitle: Target\n---\nthe decision\n")
+	mustWrite(t, s, "knowledge/areas/target.md", "---\ntype: note\ntitle: Target\n---\nthe decision\n")
 	// linker references target with a trailing #anchor — the anchor must be
 	// ignored when matching.
-	mustWrite(t, s, "memory/decisions/linker.md", "---\nkind: memory\ntitle: Linker\n---\nsee [the call](/memory/decisions/target.md#why) for context\n")
+	mustWrite(t, s, "knowledge/areas/linker.md", "---\ntype: note\ntitle: Linker\n---\nsee [the call](/knowledge/areas/target.md#why) for context\n")
 	// journal references target with a plain root-absolute link.
-	mustWrite(t, s, "journal/2026-06-13.md", "---\nkind: journal\n---\nfollowed [target](/memory/decisions/target.md) today\n")
+	mustWrite(t, s, "journal/2026-06-13.md", "---\ntype: journal\n---\nfollowed [target](/knowledge/areas/target.md) today\n")
 	// unrelated links elsewhere and must not appear.
-	mustWrite(t, s, "memory/gotchas/unrelated.md", "---\nkind: memory\n---\nlinks [elsewhere](/memory/decisions/other.md) only\n")
+	mustWrite(t, s, "knowledge/resources/unrelated.md", "---\ntype: note\n---\nlinks [elsewhere](/knowledge/areas/other.md) only\n")
 	// self-link: target links to itself and must be excluded from its own backlinks.
-	mustWrite(t, s, "memory/decisions/target.md", "---\nkind: memory\ntitle: Target\n---\nthe decision; see [self](/memory/decisions/target.md)\n")
+	mustWrite(t, s, "knowledge/areas/target.md", "---\ntype: note\ntitle: Target\n---\nthe decision; see [self](/knowledge/areas/target.md)\n")
 
-	got, err := s.Backlinks("/memory/decisions/target.md")
+	got, err := s.Backlinks("/knowledge/areas/target.md")
 	if err != nil {
 		t.Fatalf("Backlinks: %v", err)
 	}
@@ -517,25 +517,25 @@ func TestBacklinks(t *testing.T) {
 	for i, e := range got {
 		gotPaths[i] = e.Path
 	}
-	want := []string{"journal/2026-06-13.md", "memory/decisions/linker.md"} // sorted by path
+	want := []string{"journal/2026-06-13.md", "knowledge/areas/linker.md"} // sorted by path
 	if !reflect.DeepEqual(gotPaths, want) {
 		t.Fatalf("Backlinks paths = %v, want %v", gotPaths, want)
 	}
 	// Metadata (title) should ride along so the UI can render a label.
 	for _, e := range got {
-		if e.Path == "memory/decisions/linker.md" && e.Title != "Linker" {
+		if e.Path == "knowledge/areas/linker.md" && e.Title != "Linker" {
 			t.Fatalf("backlink entry lost metadata: %+v", e)
 		}
 	}
 
 	// Dangling-link discovery: a target that does not exist still surfaces its
 	// linkers, so the UI can show what points at a not-yet-created note.
-	dangling, err := s.Backlinks("/memory/decisions/other.md")
+	dangling, err := s.Backlinks("/knowledge/areas/other.md")
 	if err != nil {
 		t.Fatalf("Backlinks(dangling): %v", err)
 	}
-	if len(dangling) != 1 || dangling[0].Path != "memory/gotchas/unrelated.md" {
-		t.Fatalf("dangling Backlinks = %v, want [memory/gotchas/unrelated.md]", dangling)
+	if len(dangling) != 1 || dangling[0].Path != "knowledge/resources/unrelated.md" {
+		t.Fatalf("dangling Backlinks = %v, want [knowledge/resources/unrelated.md]", dangling)
 	}
 
 	// A note nobody links to has no backlinks.
@@ -556,18 +556,18 @@ func TestBacklinksSkipsOversizedExternalFiles(t *testing.T) {
 	}
 
 	// A normal note that links to the target is a real backlink.
-	mustWrite(t, s, "memory/decisions/linker.md", "---\nkind: memory\n---\nsee [the call](/memory/decisions/target.md) here\n")
+	mustWrite(t, s, "knowledge/areas/linker.md", "---\ntype: note\n---\nsee [the call](/knowledge/areas/target.md) here\n")
 
 	// An oversized file (larger than attn ever writes) is synced in externally,
 	// bypassing Write's MaxFileSize guard. It also links to the target, but
 	// Backlinks must not pull its whole body into memory — so it is skipped.
-	big := append([]byte("---\nkind: memory\n---\nlinks [target](/memory/decisions/target.md)\n"), make([]byte, MaxFileSize+1)...)
-	bigPath := filepath.Join(dir, "memory", "decisions", "oversized.md")
+	big := append([]byte("---\ntype: note\n---\nlinks [target](/knowledge/areas/target.md)\n"), make([]byte, MaxFileSize+1)...)
+	bigPath := filepath.Join(dir, "knowledge", "areas", "oversized.md")
 	if err := os.WriteFile(bigPath, big, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := s.Backlinks("/memory/decisions/target.md")
+	got, err := s.Backlinks("/knowledge/areas/target.md")
 	if err != nil {
 		t.Fatalf("Backlinks: %v", err)
 	}
@@ -575,7 +575,7 @@ func TestBacklinksSkipsOversizedExternalFiles(t *testing.T) {
 	for i, e := range got {
 		gotPaths[i] = e.Path
 	}
-	want := []string{"memory/decisions/linker.md"}
+	want := []string{"knowledge/areas/linker.md"}
 	if !reflect.DeepEqual(gotPaths, want) {
 		t.Fatalf("Backlinks skipped/included the wrong files: got %v, want %v", gotPaths, want)
 	}

@@ -61,16 +61,16 @@ func expectNoChange(t *testing.T, ch chan []string) {
 
 func TestWatcherDetectsExternalWrite(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "memory"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "knowledge"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	_, changes := newTestWatcher(t, root)
 
-	writeFile(t, filepath.Join(root, "memory", "foo.md"), "# foo\n")
+	writeFile(t, filepath.Join(root, "knowledge", "foo.md"), "# foo\n")
 
 	got := waitChange(t, changes)
-	if !reflect.DeepEqual(got, []string{"memory/foo.md"}) {
-		t.Fatalf("change = %v, want [memory/foo.md]", got)
+	if !reflect.DeepEqual(got, []string{"knowledge/foo.md"}) {
+		t.Fatalf("change = %v, want [knowledge/foo.md]", got)
 	}
 }
 
@@ -164,7 +164,7 @@ func TestWatcherCoalescesBurst(t *testing.T) {
 
 func TestWatcherIgnoresDotDirsTempAndNonMarkdown(t *testing.T) {
 	root := t.TempDir()
-	for _, dir := range []string{".attn", "memory"} {
+	for _, dir := range []string{".attn", "knowledge"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -177,7 +177,7 @@ func TestWatcherIgnoresDotDirsTempAndNonMarkdown(t *testing.T) {
 	writeFile(t, filepath.Join(root, ".attn", "locks.md"), "x")
 	writeFile(t, filepath.Join(root, "notes.txt"), "x")
 	writeFile(t, filepath.Join(root, ".hidden.md"), "x")
-	writeFile(t, filepath.Join(root, "memory", "foo.md.tmp.123.456"), "x")
+	writeFile(t, filepath.Join(root, "knowledge", "foo.md.tmp.123.456"), "x")
 
 	expectNoChange(t, changes)
 }
@@ -228,11 +228,11 @@ func TestWatcherWatchesNewSubdir(t *testing.T) {
 
 	// A directory created after the watcher started must be watched so a note
 	// written inside it is still observed.
-	writeFile(t, filepath.Join(root, "memory", "decisions", "x.md"), "# x\n")
+	writeFile(t, filepath.Join(root, "knowledge", "areas", "x.md"), "# x\n")
 
 	got := waitChange(t, changes)
-	if !reflect.DeepEqual(got, []string{"memory/decisions/x.md"}) {
-		t.Fatalf("change = %v, want [memory/decisions/x.md]", got)
+	if !reflect.DeepEqual(got, []string{"knowledge/areas/x.md"}) {
+		t.Fatalf("change = %v, want [knowledge/areas/x.md]", got)
 	}
 }
 

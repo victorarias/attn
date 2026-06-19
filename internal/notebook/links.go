@@ -3,7 +3,7 @@ package notebook
 import "regexp"
 
 // rootAbsoluteLinkRE matches markdown links whose target is a root-absolute
-// notebook path, e.g. [a decision](/memory/decisions/foo.md). External
+// notebook path, e.g. [an area note](/knowledge/areas/foo.md). External
 // (http://…), relative (foo.md), and anchor-only (#section) targets are
 // intentionally not matched: the Notebook linking convention is root-absolute
 // markdown only — no [[wikilinks]] — so the targets resolve without an external

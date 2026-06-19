@@ -1,7 +1,7 @@
 // Package notebook implements the Notebook on-disk format and a
-// filesystem-canonical store: a durable, profile-wide markdown memory layer
-// (dated journals + distilled memory notes + cross-workspace decisions) that
-// outlives any single workspace.
+// filesystem-canonical store: a durable, profile-wide markdown layer (dated
+// journals + a PARA-organized knowledge base) that outlives any single
+// workspace.
 //
 // The package is deliberately free of daemon dependencies so the format and the
 // store can be unit-tested in isolation. The daemon wraps a Store, resolves the
@@ -15,7 +15,7 @@
 //   - Plain files, paths-as-identity, root-absolute markdown links (no
 //     wikilinks), machine state under a .attn/ dotdir — so an external markdown
 //     sync tool or Obsidian can point at the root without attn precluding it.
-//   - Permissive reader: never reject a file on unknown kind, extra frontmatter
+//   - Permissive reader: never reject a file on unknown type, extra frontmatter
 //     keys, broken links, or a missing index; preserve unknown keys on
 //     round-trip so fields written by other tools survive.
 package notebook
@@ -27,22 +27,15 @@ import (
 	"fmt"
 )
 
-// Document kinds. The Notebook recognizes exactly two (OKF discipline: one
-// required frontmatter field). The subdirectories under memory/ (decisions,
-// gotchas, domain) are organizational groupings, not kinds.
-const (
-	KindJournal = "journal"
-	KindMemory  = "memory"
-)
+// TypeJournal is the OKF `type` value attn writes onto dated journal notes. It
+// is the one type attn authors itself; every other note's `type` is author- or
+// chief-chosen (OKF leaves the vocabulary open), so the store does not enforce a
+// closed set — it stays a permissive reader/writer.
+const TypeJournal = "journal"
 
 // MaxFileSize bounds a single note so the store stays sync-friendly; journals
 // rotate daily to stay well under it.
 const MaxFileSize = 2 << 20 // 2 MiB
-
-// ValidKind reports whether k is a recognized Notebook kind.
-func ValidKind(k string) bool {
-	return k == KindJournal || k == KindMemory
-}
 
 // Hash returns the canonical content hash used for hash-CAS edits.
 func Hash(content []byte) string {
@@ -53,8 +46,8 @@ func Hash(content []byte) string {
 // Entry is a single note as surfaced by List: enough to render a tree without
 // reading every file's full body.
 type Entry struct {
-	Path    string // notebook-relative, slash-separated, e.g. "memory/decisions/foo.md"
-	Kind    string // "" when the file declares no kind (permissive)
+	Path    string // notebook-relative, slash-separated, e.g. "knowledge/areas/foo.md"
+	Type    string // OKF `type` ("" when the file declares none; permissive)
 	Title   string
 	Summary string
 	Updated string // frontmatter `updated`, else the file mtime (RFC3339)
