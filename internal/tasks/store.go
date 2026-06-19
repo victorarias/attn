@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,29 +34,22 @@ func trimRoot(root string) string {
 	return strings.TrimSpace(root)
 }
 
-// taskPath returns the absolute JSON path for a task id. The id is sanitized so a
-// subject containing a path separator can never escape the tasks dir.
+// taskPath returns the absolute JSON path for a task id.
 func taskPath(root, id string) string {
-	return filepath.Join(stateDir(root), sanitizeID(id)+".json")
+	return filepath.Join(stateDir(root), taskFilename(id)+".json")
 }
 
-// sanitizeID makes a derived id safe as a single filename component. Subjects are
-// workspace/session ids in practice, but a stray "/" or ".." must not let a task
-// id address a file outside the tasks dir.
-func sanitizeID(id string) string {
-	replacer := strings.NewReplacer(
-		string(os.PathSeparator), "_",
-		"/", "_",
-		"\\", "_",
-		":", "__", // keep the kind:subject boundary visible while staying flat
-	)
-	cleaned := replacer.Replace(id)
-	cleaned = strings.ReplaceAll(cleaned, "..", "__")
-	cleaned = strings.TrimSpace(cleaned)
-	if cleaned == "" {
-		return "_"
-	}
-	return cleaned
+// taskFilename encodes a task id as a single, collision-free filename component.
+// The id is hex-encoded rather than character-replaced: the old "replace every
+// unsafe rune with _" scheme was LOSSY, so distinct ids that differed only in a
+// replaced rune (e.g. "k:a/b" vs "k:a_b", or "k:a:b" vs "k:a..b") collapsed onto
+// the same file and silently clobbered each other's record. Hex is injective and
+// emits only [0-9a-f], so it can never contain a path separator or ".." and is
+// safe on macOS's case-insensitive default filesystem (no two ids can produce
+// names that differ only by case). The name is opaque, but nothing reads the id
+// back out of it — the human-readable id lives in the JSON body.
+func taskFilename(id string) string {
+	return hex.EncodeToString([]byte(id))
 }
 
 // store is the file-backed persistence layer for tasks. It holds no in-memory
@@ -88,7 +82,22 @@ func (s *store) save(t *Task) error {
 // load reads a single task by id. A missing file yields (nil, nil) — a coalesced
 // re-enqueue must distinguish "no record yet" from a read error.
 func (s *store) load(id string) (*Task, error) {
-	return s.loadPath(taskPath(s.root, id))
+	t, err := s.loadPath(taskPath(s.root, id))
+	if err != nil {
+		return nil, err
+	}
+	if t != nil && t.ID != id {
+		// Defense in depth: taskFilename is an injective encoding of the id, so a
+		// record whose stored ID differs from the one requested should be
+		// impossible. If it ever happens (a hand-edited file, a future encoding
+		// change, a filesystem that folds the name), treat it as "no record"
+		// rather than return the wrong task — a wrong-task return would corrupt
+		// the coalescing/retry state keyed on that id.
+		s.log("tasks: ignoring record %s: stored id %q != requested %q",
+			filepath.Base(taskPath(s.root, id)), t.ID, id)
+		return nil, nil
+	}
+	return t, nil
 }
 
 func (s *store) loadPath(path string) (*Task, error) {
