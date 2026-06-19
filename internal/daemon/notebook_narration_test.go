@@ -136,6 +136,7 @@ func TestBuildNarrateWorkspacePromptEmbedsBriefPathsAndRemovalFlag(t *testing.T)
 		TranscriptPaths:     []string{"/t/a.jsonl", "/t/b.jsonl"},
 		JournalPath:         "/nb/journal/2026-06-15.md",
 		JournalDir:          "/nb/journal",
+		KnowledgeDir:        "/nb/knowledge",
 		IsRemovalPass:       true,
 	})
 	if !strings.Contains(prompt, "You are the attn keeper, narrating this workspace's work into the journal.") {
@@ -151,7 +152,11 @@ func TestBuildNarrateWorkspacePromptEmbedsBriefPathsAndRemovalFlag(t *testing.T)
 		"- /t/b.jsonl",
 		"JOURNAL_PATH: /nb/journal/2026-06-15.md",
 		"JOURNAL_DIR: /nb/journal",
+		"KNOWLEDGE_DIR: /nb/knowledge",
 		"IS_REMOVAL_PASS: true",
+		// The removal-pass knowledge-base archive step and its workspace-link hook.
+		"ARCHIVE THE WORKSPACE'S PROJECT FOLDER (removal pass only)",
+		"resource: attn:workspace/<WORKSPACE_ID>",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("narrate prompt missing %q", want)

@@ -93,7 +93,11 @@ The single automated entity that **tends each workspace**. One persona, two duti
    grows past threshold.
 2. **Narrates the workspace's work into the journal** — turns the workspace's
    sessions (and delegated dispatch outcomes) into the curated per-workspace
-   journal narrative.
+   journal narrative. On a workspace's final removal pass it also files that
+   workspace's linked `knowledge/projects/<slug>/` folder (the one whose `index.md`
+   carries `resource: attn:workspace/<id>`) under `knowledge/archive/` — a
+   mechanical tidy-up that keeps the active `projects/` view focused; the chief
+   keeps the higher-judgment promotion into `areas/`.
 
 These two duties are **causally coupled**, which is why they are one entity: the
 keeper can safely prune `context.md` *because* it has already preserved the story

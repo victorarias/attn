@@ -35,6 +35,12 @@ Then browse the relevant subtree (`ls`/`grep` under `<root>/knowledge/...` or
   `resources/` (reference material), `archive/` (inactive items). As a project
   finishes, promote its durable knowledge up into `areas/`.
 
+When a `projects/<slug>/` folder corresponds to a workspace, stamp its `index.md`
+frontmatter with `resource: attn:workspace/<id>`. That link lets the keeper file
+the folder under `archive/` automatically when the workspace is removed — so
+promote anything durable into `areas/` before then, since archived notes drop out
+of the active view.
+
 The knowledge base is not a task tracker. Capture what is *known*, not what is
 *to do*.
 

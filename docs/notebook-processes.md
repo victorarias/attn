@@ -136,7 +136,12 @@ narrative.
     stamps `Meta` `daily_pass=1`, which relaxes the success gate so a no-op
     refresh is `done`, not a retried failure.
   - `enqueueFinalNarrateWorkspace` — the removal-boundary retrospective
-    (`ZeroDebounce`, so it writes immediately even over a pending debounce).
+    (`ZeroDebounce`, so it writes immediately even over a pending debounce). On
+    this removal pass only, after writing the retrospective the keeper also files
+    the workspace's linked `knowledge/projects/<slug>/` folder (the one whose
+    `index.md` carries `resource: attn:workspace/<id>`) under `knowledge/archive/`
+    — a mechanical, literal whole-line match tidy-up; promotion into `areas/`
+    stays the chief's higher-judgment call.
 - **Settings**: `notebook.summarize_session` / `notebook.narrate_workspace`
   (`{agent,model}` JSON; blank uses the tier default). Narration is always on.
 

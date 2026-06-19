@@ -147,10 +147,13 @@ with your fresh, faithful version), and write again. Do not append duplicate
 digests; this file holds exactly one digest for this session. The written file is
 the only evidence that you succeeded — make sure the write lands.`
 
-// narrateWorkspacePromptBrief is prompt 8B (narrate_workspace, strong tier),
-// verbatim. The absolute INPUT/OUTPUT path block (WORKSPACE_TITLE, WORKSPACE_ID,
+// narrateWorkspacePromptBrief is prompt 8B (narrate_workspace, strong tier). The
+// session-narration text is verbatim from docs/plans/2026-06-14-notebook-narration.md
+// section 8; the removal-pass knowledge-base archive step is added from
+// docs/plans/2026-06-18-knowledge-base.md (PR3) and is the source of truth for its
+// exact wording. The absolute INPUT/OUTPUT path block (WORKSPACE_TITLE, WORKSPACE_ID,
 // CONTEXT_SNAPSHOT_PATH, RAW_SESSIONS_DIR, RAW_DISPATCHES_DIR, TRANSCRIPT_PATHS,
-// JOURNAL_PATH, JOURNAL_DIR, IS_REMOVAL_PASS) is appended by
+// JOURNAL_PATH, JOURNAL_DIR, KNOWLEDGE_DIR, IS_REMOVAL_PASS) is appended by
 // buildNarrateWorkspacePrompt.
 const narrateWorkspacePromptBrief = `You are the attn keeper, narrating this workspace's work into the journal. The
 Notebook is a durable HUMAN work-journal: the user's lasting record of what they
@@ -179,6 +182,10 @@ INPUTS (absolute paths, given to you below this brief):
   write to.
 - JOURNAL_DIR: the directory of dated journal files (journal/<date>.md), so you can
   read your own prior entries across days.
+- KNOWLEDGE_DIR: the Notebook's knowledge-base root (knowledge/), holding the PARA
+  subtree projects/ areas/ resources/ archive/. You touch it ONLY on a removal pass,
+  to file this workspace's project folder away (see ARCHIVE THE WORKSPACE'S PROJECT
+  FOLDER below). On an active-day pass, ignore it entirely.
 - IS_REMOVAL_PASS: true if this is the workspace's final removal-day narration (the
   full retrospective), false for a routine active-day pass.
 
@@ -313,7 +320,43 @@ When a write is rejected as stale:
 
 Operate only inside your own marker block. The journal is the only durable surface
 and prior days are immutable — a careless overwrite erases the user's real history,
-so when in doubt, read again and write less.`
+so when in doubt, read again and write less.
+
+== ARCHIVE THE WORKSPACE'S PROJECT FOLDER (removal pass only) ==
+
+This step runs ONLY when IS_REMOVAL_PASS = true, and ONLY after the retrospective
+above has been written. It is a mechanical tidy-up of the knowledge base, not a
+narration task — on an active-day pass, skip it entirely and do not touch
+KNOWLEDGE_DIR.
+
+A finished workspace may have a knowledge-base project folder under
+KNOWLEDGE_DIR/projects/ whose index.md frontmatter links it back to this workspace
+with the line ` + "`resource: attn:workspace/<WORKSPACE_ID>`" + `. The workspace is now gone,
+so that project is over — file it under archive/:
+
+1. Find the link with a LITERAL, WHOLE-LINE match — treat WORKSPACE_ID as a fixed
+   string, never a pattern, and require the entire frontmatter line to equal the link:
+       grep -lFx 'resource: attn:workspace/<WORKSPACE_ID>' KNOWLEDGE_DIR/projects/*/index.md
+   (-F keeps any regex/glob characters in the id inert; -x forces a whole-line match,
+   so a longer id like ` + "`auth-v2`" + ` can never match a removed ` + "`auth`" + `, and a line that
+   merely contains the id is not a match.) If nothing matches — or the glob matches no
+   files — there is no linked project: do nothing and stop. A workspace with no project
+   folder is the common case, not an error; a near-but-inexact line (extra characters
+   before or after the id, a quoted or commented value) is NOT a match, so do nothing
+   rather than guess.
+2. If exactly one project folder matches, move that whole folder to
+   KNOWLEDGE_DIR/archive/<same-folder-name>/ (e.g. ` + "`mv`" + ` via Bash). If a folder of
+   that name already exists under archive/, do NOT overwrite it — instead move the
+   folder to ` + "`<same-folder-name> (removed <date>)`" + `, where <date> is the YYYY-MM-DD
+   that JOURNAL_PATH is named for, so no archived history is clobbered.
+3. Do not edit the project's contents, rename the notes inside it, or touch any
+   other project. Promoting durable knowledge up into areas/ is the chief's
+   judgment call, not yours — you only file the closed project away.
+
+This is reversible bookkeeping: the folder still exists, just under archive/. If the
+match is ambiguous (more than one candidate folder, or you are unsure of the
+WORKSPACE_ID), do nothing and leave the knowledge base untouched rather than risk a
+wrong move.`
 
 // buildSummarizeSessionPrompt assembles the full positional prompt for the
 // summarize_session agent: the verbatim brief followed by the concrete absolute
@@ -339,6 +382,7 @@ type narrateWorkspacePromptInputs struct {
 	TranscriptPaths     []string
 	JournalPath         string
 	JournalDir          string
+	KnowledgeDir        string
 	IsRemovalPass       bool
 }
 
@@ -364,6 +408,7 @@ func buildNarrateWorkspacePrompt(in narrateWorkspacePromptInputs) string {
 	}
 	fmt.Fprintf(&b, "JOURNAL_PATH: %s\n", in.JournalPath)
 	fmt.Fprintf(&b, "JOURNAL_DIR: %s\n", in.JournalDir)
+	fmt.Fprintf(&b, "KNOWLEDGE_DIR: %s\n", in.KnowledgeDir)
 	fmt.Fprintf(&b, "IS_REMOVAL_PASS: %t\n", in.IsRemovalPass)
 	return b.String()
 }

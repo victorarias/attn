@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-19]
+
+### Changed
+- **A finished workspace's knowledge-base project is filed away automatically.** When you remove a workspace, the keeper now moves that workspace's linked knowledge-base project folder into `knowledge/archive/`, so your active `knowledge/projects/` view stays focused on work that's still live. Anything promoted into `areas/` stays put and nothing is deleted — the project is just archived.
+
 ## [2026-06-18]
 
 ### Changed

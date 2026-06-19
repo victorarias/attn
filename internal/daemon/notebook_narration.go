@@ -439,6 +439,7 @@ func (d *Daemon) gatherNarrateWorkspaceInputs(root, workspaceID string) (narrate
 		RawDispatchesDir:    notebook.RawDispatchesDir(root),
 		JournalDir:          filepath.Join(root, notebook.DirJournal),
 		JournalPath:         filepath.Join(root, notebook.DirJournal, today+".md"),
+		KnowledgeDir:        filepath.Join(root, notebook.DirKnowledge),
 	}
 
 	ws := d.store.GetWorkspace(workspaceID)
