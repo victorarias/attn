@@ -1708,17 +1708,6 @@ type MuteWorkspaceMessage struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
-type NotebookAppendJournalMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Date corresponds to the JSON schema field "date".
-	Date *string `json:"date,omitempty,omitzero"`
-
-	// Entry corresponds to the JSON schema field "entry".
-	Entry string `json:"entry"`
-}
-
 type NotebookBacklinksMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1758,109 +1747,7 @@ type NotebookChangedMessage struct {
 	Paths []string `json:"paths"`
 }
 
-type NotebookDreamCandidate struct {
-	// Contexts corresponds to the JSON schema field "contexts".
-	Contexts []string `json:"contexts"`
-
-	// FirstSeen corresponds to the JSON schema field "first_seen".
-	FirstSeen *string `json:"first_seen,omitempty,omitzero"`
-
-	// LastSeen corresponds to the JSON schema field "last_seen".
-	LastSeen *string `json:"last_seen,omitempty,omitzero"`
-
-	// Occurrences corresponds to the JSON schema field "occurrences".
-	Occurrences int `json:"occurrences"`
-
-	// SignalKey corresponds to the JSON schema field "signal_key".
-	SignalKey string `json:"signal_key"`
-
-	// Snippet corresponds to the JSON schema field "snippet".
-	Snippet string `json:"snippet"`
-
-	// Source corresponds to the JSON schema field "source".
-	Source string `json:"source"`
-
-	// Sources corresponds to the JSON schema field "sources".
-	Sources []string `json:"sources"`
-
-	// Title corresponds to the JSON schema field "title".
-	Title *string `json:"title,omitempty,omitzero"`
-}
-
-type NotebookDreamRunMessage struct {
-	// Apply corresponds to the JSON schema field "apply".
-	Apply *bool `json:"apply,omitempty,omitzero"`
-
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-}
-
-type NotebookDreamRunResult struct {
-	// Applied corresponds to the JSON schema field "applied".
-	Applied bool `json:"applied"`
-
-	// CandidateCount corresponds to the JSON schema field "candidate_count".
-	CandidateCount int `json:"candidate_count"`
-
-	// Candidates corresponds to the JSON schema field "candidates".
-	Candidates []NotebookDreamCandidate `json:"candidates"`
-
-	// MultiContextCount corresponds to the JSON schema field "multi_context_count".
-	MultiContextCount int `json:"multi_context_count"`
-
-	// SourceCounts corresponds to the JSON schema field "source_counts".
-	SourceCounts []NotebookDreamSourceCount `json:"source_counts"`
-}
-
-type NotebookDreamSourceCount struct {
-	// Count corresponds to the JSON schema field "count".
-	Count int `json:"count"`
-
-	// Source corresponds to the JSON schema field "source".
-	Source string `json:"source"`
-}
-
-type NotebookDreamStatusMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-}
-
-type NotebookDreamStatusResult struct {
-	// CandidateCount corresponds to the JSON schema field "candidate_count".
-	CandidateCount int `json:"candidate_count"`
-
-	// Enabled corresponds to the JSON schema field "enabled".
-	Enabled bool `json:"enabled"`
-
-	// LastRunAt corresponds to the JSON schema field "last_run_at".
-	LastRunAt *string `json:"last_run_at,omitempty,omitzero"`
-
-	// MultiContextCount corresponds to the JSON schema field "multi_context_count".
-	MultiContextCount int `json:"multi_context_count"`
-
-	// NextRunAt corresponds to the JSON schema field "next_run_at".
-	NextRunAt *string `json:"next_run_at,omitempty,omitzero"`
-
-	// PersistedCount corresponds to the JSON schema field "persisted_count".
-	PersistedCount int `json:"persisted_count"`
-
-	// Schedule corresponds to the JSON schema field "schedule".
-	Schedule *string `json:"schedule,omitempty,omitzero"`
-
-	// SourceCounts corresponds to the JSON schema field "source_counts".
-	SourceCounts []NotebookDreamSourceCount `json:"source_counts"`
-
-	// Timezone corresponds to the JSON schema field "timezone".
-	Timezone *string `json:"timezone,omitempty,omitzero"`
-
-	// Top corresponds to the JSON schema field "top".
-	Top []NotebookDreamCandidate `json:"top"`
-}
-
 type NotebookEntry struct {
-	// Kind corresponds to the JSON schema field "kind".
-	Kind *string `json:"kind,omitempty,omitzero"`
-
 	// Path corresponds to the JSON schema field "path".
 	Path string `json:"path"`
 
@@ -1872,6 +1759,9 @@ type NotebookEntry struct {
 
 	// Title corresponds to the JSON schema field "title".
 	Title *string `json:"title,omitempty,omitzero"`
+
+	// Type corresponds to the JSON schema field "type".
+	Type *string `json:"type,omitempty,omitzero"`
 
 	// Updated corresponds to the JSON schema field "updated".
 	Updated *string `json:"updated,omitempty,omitzero"`
@@ -1894,19 +1784,6 @@ type NotebookGuideResult struct {
 
 	// SessionIsChief corresponds to the JSON schema field "session_is_chief".
 	SessionIsChief bool `json:"session_is_chief"`
-}
-
-type NotebookInitMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-}
-
-type NotebookInitResult struct {
-	// Created corresponds to the JSON schema field "created".
-	Created bool `json:"created"`
-
-	// Root corresponds to the JSON schema field "root".
-	Root string `json:"root"`
 }
 
 type NotebookListMessage struct {
@@ -2013,6 +1890,93 @@ type NotebookSendToChiefResultMessage struct {
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
+}
+
+type NotebookTask struct {
+	// Attempts corresponds to the JSON schema field "attempts".
+	Attempts int `json:"attempts"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// LastError corresponds to the JSON schema field "last_error".
+	LastError *string `json:"last_error,omitempty,omitzero"`
+
+	// NextAttemptAt corresponds to the JSON schema field "next_attempt_at".
+	NextAttemptAt string `json:"next_attempt_at"`
+
+	// State corresponds to the JSON schema field "state".
+	State string `json:"state"`
+
+	// Subject corresponds to the JSON schema field "subject".
+	Subject string `json:"subject"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+}
+
+type NotebookTaskListMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type NotebookTaskListResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// Tasks corresponds to the JSON schema field "tasks".
+	Tasks []NotebookTask `json:"tasks,omitempty,omitzero"`
+}
+
+type NotebookTaskRetryMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// TaskID corresponds to the JSON schema field "task_id".
+	TaskID string `json:"task_id"`
+}
+
+type NotebookTaskRetryResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// Task corresponds to the JSON schema field "task".
+	Task *NotebookTask `json:"task,omitempty,omitzero"`
+}
+
+type NotebookTasksChangedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
 }
 
 type NotebookWriteMessage struct {
@@ -2690,24 +2654,17 @@ type Response struct {
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
 
-	// NotebookDreamRun corresponds to the JSON schema field "notebook_dream_run".
-	NotebookDreamRun *NotebookDreamRunResult `json:"notebook_dream_run,omitempty,omitzero"`
-
-	// NotebookDreamStatus corresponds to the JSON schema field
-	// "notebook_dream_status".
-	NotebookDreamStatus *NotebookDreamStatusResult `json:"notebook_dream_status,omitempty,omitzero"`
-
 	// NotebookEntries corresponds to the JSON schema field "notebook_entries".
 	NotebookEntries []NotebookEntry `json:"notebook_entries,omitempty,omitzero"`
 
 	// NotebookGuide corresponds to the JSON schema field "notebook_guide".
 	NotebookGuide *NotebookGuideResult `json:"notebook_guide,omitempty,omitzero"`
 
-	// NotebookInit corresponds to the JSON schema field "notebook_init".
-	NotebookInit *NotebookInitResult `json:"notebook_init,omitempty,omitzero"`
-
 	// NotebookRead corresponds to the JSON schema field "notebook_read".
 	NotebookRead *NotebookReadResult `json:"notebook_read,omitempty,omitzero"`
+
+	// NotebookTasks corresponds to the JSON schema field "notebook_tasks".
+	NotebookTasks []NotebookTask `json:"notebook_tasks,omitempty,omitzero"`
 
 	// NotebookWrite corresponds to the JSON schema field "notebook_write".
 	NotebookWrite *NotebookWriteResult `json:"notebook_write,omitempty,omitzero"`

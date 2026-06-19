@@ -16,9 +16,9 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// originAgent labels notebook changes that arrive over the unix-socket CLI —
-// agents (and the user) drive that path. The UI (origin "ui"), the dreaming
-// pass ("dreaming"), and external edits ("external") arrive on other paths.
+// originAgent labels notebook changes attn itself makes outside the in-app editor
+// — today only scaffold creation. The UI (origin "ui") and external edits
+// ("external", incl. agents editing files directly on disk) arrive on other paths.
 const originAgent = "agent"
 
 // originExternal labels notebook changes the watcher detects on disk that attn
@@ -170,18 +170,6 @@ func (d *Daemon) ensureNotebookScaffold() (root string, created bool, err error)
 	return store.Root(), len(createdPaths) > 0, nil
 }
 
-func (d *Daemon) handleNotebookInit(conn net.Conn) {
-	root, created, err := d.ensureNotebookScaffold()
-	if err != nil {
-		d.sendError(conn, "notebook init: "+err.Error())
-		return
-	}
-	_ = json.NewEncoder(conn).Encode(protocol.Response{
-		Ok:           true,
-		NotebookInit: &protocol.NotebookInitResult{Root: root, Created: created},
-	})
-}
-
 // handleNotebookGuide returns the canonical notebook operating guidance (the
 // single source for both the at-launch injection and the live pull). When the
 // requesting session currently holds the chief role, it also ensures the
@@ -209,145 +197,16 @@ func (d *Daemon) handleNotebookGuide(conn net.Conn, msg *protocol.NotebookGuideM
 	})
 }
 
-func (d *Daemon) handleNotebookList(conn net.Conn, msg *protocol.NotebookListMessage) {
-	store, err := d.notebookStoreFor()
-	if err != nil {
-		d.sendError(conn, "notebook: "+err.Error())
-		return
-	}
-	prefix := ""
-	if msg.Prefix != nil {
-		prefix = *msg.Prefix
-	}
-	entries, err := store.List(prefix)
-	if err != nil {
-		d.sendError(conn, "notebook list: "+err.Error())
-		return
-	}
-	_ = json.NewEncoder(conn).Encode(protocol.Response{
-		Ok:              true,
-		NotebookEntries: notebookEntriesToProtocol(entries),
-	})
-}
-
-func (d *Daemon) handleNotebookBacklinks(conn net.Conn, msg *protocol.NotebookBacklinksMessage) {
-	store, err := d.notebookStoreFor()
-	if err != nil {
-		d.sendError(conn, "notebook: "+err.Error())
-		return
-	}
-	entries, err := store.Backlinks(msg.Path)
-	if err != nil {
-		d.sendError(conn, "notebook backlinks: "+err.Error())
-		return
-	}
-	_ = json.NewEncoder(conn).Encode(protocol.Response{
-		Ok:              true,
-		NotebookEntries: notebookEntriesToProtocol(entries),
-	})
-}
-
-func (d *Daemon) handleNotebookRead(conn net.Conn, msg *protocol.NotebookReadMessage) {
-	store, err := d.notebookStoreFor()
-	if err != nil {
-		d.sendError(conn, "notebook: "+err.Error())
-		return
-	}
-	content, hash, err := store.Read(msg.Path)
-	if err != nil {
-		d.sendError(conn, "notebook read: "+err.Error())
-		return
-	}
-	_ = json.NewEncoder(conn).Encode(protocol.Response{
-		Ok: true,
-		NotebookRead: &protocol.NotebookReadResult{
-			Path:    msg.Path,
-			Content: string(content),
-			Hash:    hash,
-		},
-	})
-}
-
-func (d *Daemon) handleNotebookWrite(conn net.Conn, msg *protocol.NotebookWriteMessage) {
-	store, err := d.notebookStoreFor()
-	if err != nil {
-		d.sendError(conn, "notebook: "+err.Error())
-		return
-	}
-	baseHash := ""
-	if msg.BaseHash != nil {
-		baseHash = *msg.BaseHash
-	}
-	// The normalized relative path is the form notebook_list/append/watcher all
-	// key on, so the self-write record and the broadcast agree.
-	changed := msg.Path
-	if rel, cerr := notebook.CleanPath(msg.Path); cerr == nil {
-		changed = rel
-	}
-	hash, conflict, err := store.Write(msg.Path, []byte(msg.Content), baseHash)
-	if err != nil {
-		d.sendError(conn, "notebook write: "+err.Error())
-		return
-	}
-	// A conflict is a successful response (conflict:true) the caller reconciles,
-	// not a daemon error. Echo the normalized path so result.path matches the
-	// form notebook_list/notebook_changed key on (a root-absolute input like
-	// "/memory/a.md" would otherwise leak back with its leading slash).
-	res := &protocol.NotebookWriteResult{Path: changed}
-	if conflict != nil {
-		res.Conflict = true
-		if conflict.CurrentHash != "" {
-			res.CurrentHash = protocol.Ptr(conflict.CurrentHash)
-		}
-	} else {
-		res.Hash = protocol.Ptr(hash)
-		// Record the self-write only after a real write. The watcher coalesces
-		// events over a debounce window before acting, so this record lands well
-		// before suppression runs; recording on a conflict (no write) would leave
-		// a stale record that wrongly suppresses a later real external edit. The
-		// hash makes suppression content-aware, so an external edit racing this
-		// write to the same path within the window is still surfaced.
-		d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: changed, Hash: hash})
-		d.broadcastNotebookChanged(originAgent, changed)
-	}
-	_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, NotebookWrite: res})
-}
-
-func (d *Daemon) handleNotebookAppendJournal(conn net.Conn, msg *protocol.NotebookAppendJournalMessage) {
-	store, err := d.notebookStoreFor()
-	if err != nil {
-		d.sendError(conn, "notebook: "+err.Error())
-		return
-	}
-	date := ""
-	if msg.Date != nil {
-		date = strings.TrimSpace(*msg.Date)
-	}
-	if date == "" {
-		date = time.Now().Format("2006-01-02")
-	}
-	relPath, hash, err := store.AppendJournal(date, msg.Entry)
-	if err != nil {
-		d.sendError(conn, "notebook append: "+err.Error())
-		return
-	}
-	// Record the self-write for the path the append actually wrote so the watcher
-	// does not report attn's own journal write as an external edit. The hash keeps
-	// suppression content-aware against a same-window external edit.
-	d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: relPath, Hash: hash})
-	d.broadcastNotebookChanged(originAgent, relPath)
-	_ = json.NewEncoder(conn).Encode(protocol.Response{
-		Ok:            true,
-		NotebookWrite: &protocol.NotebookWriteResult{Path: relPath, Hash: protocol.Ptr(hash)},
-	})
-}
-
 // notebookActivationPrompt is the bounded doorbell typed into a freshly-promoted
-// chief session's PTY. It carries only an instruction to pull guidance from the
-// daemon-owned CLI — never guidance content itself. This is the safe exception
-// to the chief-of-staff "no arbitrary PTY content" boundary: a fixed trigger,
-// content pulled deterministically from `attn notebook guide`.
-const notebookActivationPrompt = "You are now the chief of staff. Run `attn notebook guide` and follow it: your durable memory is the attn Notebook, not this workspace's shared context."
+// chief session's PTY. It carries only a pointer to the chief's notebook on disk
+// — never guidance content itself. This is the safe exception to the
+// chief-of-staff "no arbitrary PTY content" boundary: a fixed trigger pointing at
+// a deterministic, attn-authored file. The full operating guidance still flows
+// into the system prompt at launch via hooks.NotebookGuidance; a live promotion
+// can't reach the system prompt, so it points the agent at the notebook's index.
+func notebookActivationPrompt(root string) string {
+	return fmt.Sprintf("You are now the chief of staff. Your durable home is the attn Notebook, not this workspace's shared context — read %s to get oriented.", filepath.Join(root, "index.md"))
+}
 
 // activateNotebookGuidanceLive types the bounded notebook-activation doorbell
 // into a just-promoted chief session's PTY, but only when that session is idle
@@ -358,8 +217,13 @@ func (d *Daemon) activateNotebookGuidanceLive(sessionID string) {
 	if sessionID == "" || d.ptyBackend == nil || d.store == nil {
 		return
 	}
-	if _, _, err := d.ensureNotebookScaffold(); err != nil {
-		d.logf("notebook activation: ensure scaffold failed: %v", err)
+	root, err := d.notebookRoot()
+	if err != nil {
+		d.logf("notebook activation: resolve root failed for %s: %v", sessionID, err)
+		return
+	}
+	if _, _, serr := d.ensureNotebookScaffold(); serr != nil {
+		d.logf("notebook activation: ensure scaffold failed: %v", serr)
 	}
 	session := d.store.Get(sessionID)
 	if session == nil {
@@ -378,7 +242,7 @@ func (d *Daemon) activateNotebookGuidanceLive(sessionID string) {
 		d.logf("notebook activation: session %s no longer holds the chief role; skipping live trigger", sessionID)
 		return
 	}
-	if err := d.ptyBackend.Input(context.Background(), sessionID, []byte(notebookActivationPrompt)); err != nil {
+	if err := d.ptyBackend.Input(context.Background(), sessionID, []byte(notebookActivationPrompt(root))); err != nil {
 		d.logf("notebook activation: input prompt failed for %s: %v", sessionID, err)
 		return
 	}
@@ -389,8 +253,8 @@ func (d *Daemon) activateNotebookGuidanceLive(sessionID string) {
 }
 
 // sendNotebookListWSResult lists notes and replies to a websocket client with a
-// notebook_list_result event correlated by requestID. The unix-socket CLI uses
-// handleNotebookList (a synchronous Response) instead.
+// notebook_list_result event correlated by requestID. This WS path is the only
+// notebook list path; the former unix-socket CLI list command was removed.
 func (d *Daemon) sendNotebookListWSResult(client *wsClient, requestID, prefix string) {
 	var entries []protocol.NotebookEntry
 	store, err := d.notebookStoreFor()
@@ -487,7 +351,8 @@ func (d *Daemon) sendNotebookWriteWSResult(client *wsClient, requestID, path, co
 			} else {
 				result.Hash = protocol.Ptr(hash)
 				// Content-aware self-write so the watcher does not echo this UI edit
-				// as an external one (see handleNotebookWrite for the rationale).
+				// as an external one: the recorded hash lets a racing external edit of
+				// the same path within the debounce window still surface.
 				d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: changed, Hash: hash})
 				d.broadcastNotebookChanged(originUI, changed)
 			}
@@ -512,9 +377,11 @@ const maxInboxSelection = 32 << 10 // 32 KiB
 
 // chiefInboxNudgePrompt is the bounded doorbell typed into a live chief session
 // when a selection lands in its inbox. Like the activation prompt, it carries only
-// a pointer to the daemon-owned CLI — never the selection content itself (that is
+// a pointer to the inbox note on disk — never the selection content itself (that is
 // written to the inbox note, the daemon's job, never streamed into the PTY).
-const chiefInboxNudgePrompt = "A new selection was added to your Notebook inbox. Run `attn notebook show /inbox.md` to read it."
+func chiefInboxNudgePrompt(root string) string {
+	return fmt.Sprintf("A new selection was added to your Notebook inbox. Read %s to see it.", filepath.Join(root, notebook.FileInbox))
+}
 
 // sendNotebookToChiefWSResult delivers a Notebook selection to the chief of staff:
 // it appends the selection to the chief inbox note (the daemon is the sole writer)
@@ -540,7 +407,7 @@ func (d *Daemon) sendNotebookToChiefWSResult(client *wsClient, requestID, source
 			d.broadcastNotebookChanged(originUI, relPath)
 			result = &protocol.NotebookSendToChiefResult{
 				Path:   relPath,
-				Nudged: d.nudgeChiefOfStaff(chiefInboxNudgePrompt),
+				Nudged: d.nudgeChiefOfStaff(chiefInboxNudgePrompt(store.Root())),
 			}
 		}
 	}
@@ -609,8 +476,8 @@ func notebookEntriesToProtocol(entries []notebook.Entry) []protocol.NotebookEntr
 	out := make([]protocol.NotebookEntry, 0, len(entries))
 	for _, e := range entries {
 		pe := protocol.NotebookEntry{Path: e.Path, Size: int(e.Size)}
-		if e.Kind != "" {
-			pe.Kind = protocol.Ptr(e.Kind)
+		if e.Type != "" {
+			pe.Type = protocol.Ptr(e.Type)
 		}
 		if e.Title != "" {
 			pe.Title = protocol.Ptr(e.Title)

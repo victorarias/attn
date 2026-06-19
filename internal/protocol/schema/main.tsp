@@ -600,25 +600,23 @@ model WorkspaceContextRollbackMessage {
 }
 
 // ============================================================================
-// Notebook (durable, profile-wide markdown memory).
-// See docs/plans/2026-06-13-notebook.md. Filesystem-canonical: edits use
-// hash-CAS on file bytes, not a revision table.
+// Notebook (durable, profile-wide markdown: a dated journal + a PARA knowledge
+// base). See docs/plans/2026-06-13-notebook.md and 2026-06-18-knowledge-base.md.
+// Filesystem-canonical: edits use hash-CAS on file bytes, not a revision table.
+// These messages are the frontend's WebSocket path; the user-facing `attn
+// notebook …` CLI was removed (only notebook_guide remains, for the launcher).
 // ============================================================================
-
-model NotebookInitMessage {
-  cmd: "notebook_init";
-}
 
 model NotebookListMessage {
   cmd: "notebook_list";
   prefix?: string;
-  request_id?: string; // set by the WS frontend for result correlation; the unix CLI omits it
+  request_id?: string; // set by the WS frontend to correlate the result event
 }
 
 model NotebookReadMessage {
   cmd: "notebook_read";
   path: string;
-  request_id?: string; // set by the WS frontend for result correlation; the unix CLI omits it
+  request_id?: string; // set by the WS frontend to correlate the result event
 }
 
 // List the notes whose body links to `path` (root-absolute markdown links).
@@ -633,13 +631,7 @@ model NotebookWriteMessage {
   path: string;
   content: string;
   base_hash?: string; // omitted = create-only; present = hash-CAS edit
-  request_id?: string; // set by the WS frontend for result correlation; the unix CLI omits it
-}
-
-model NotebookAppendJournalMessage {
-  cmd: "notebook_append_journal";
-  entry: string;
-  date?: string; // YYYY-MM-DD; defaults to the daemon's local date
+  request_id?: string; // set by the WS frontend to correlate the result event
 }
 
 // Send a Notebook selection to the chief of staff. The daemon appends it to the
@@ -652,24 +644,29 @@ model NotebookSendToChiefMessage {
   request_id?: string; // set by the WS frontend for result correlation
 }
 
-// Pull the canonical notebook operating guidance (single source, daemon-owned).
-// Both the at-launch injection and the live "run `attn notebook guide`" path
-// resolve to this, so guidance is versioned in one place.
+// Resolve a session's notebook role and root for the agent-launch wrapper. The
+// daemon answers whether the session is the chief of staff and where the notebook
+// root is; the launcher injects the canonical operating guidance from that. This
+// is the one surviving unix-socket notebook command after the user-facing
+// `attn notebook …` subcommands were removed.
 model NotebookGuideMessage {
   cmd: "notebook_guide";
   session_id?: string; // when set, session_is_chief reflects this session's role
 }
 
-// Dreaming inspection (phase one): a deterministic, LLM-free harvest surfaced
-// read-only. notebook_dream_status returns a summary; notebook_dream_run returns
-// the candidate preview. Neither writes durable memory.
-model NotebookDreamStatusMessage {
-  cmd: "notebook_dream_status";
+// Task status surface: list the durable task runner's records, and retry a
+// failed/dead one. state and kind are plain strings (not enums) so the on-disk
+// record stays self-describing and a new TypeSpec enum cannot trip the quicktype
+// identical-enum-merge that drops a generated export.
+model NotebookTaskListMessage {
+  cmd: "notebook_task_list";
+  request_id?: string; // set by the WS frontend to correlate the result event
 }
 
-model NotebookDreamRunMessage {
-  cmd: "notebook_dream_run";
-  apply?: boolean; // reserved for the promote pass; harvest is preview-only for now
+model NotebookTaskRetryMessage {
+  cmd: "notebook_task_retry";
+  request_id?: string; // set by the WS frontend for result correlation
+  task_id: string;
 }
 
 model DelegateWorktreeRequest {
@@ -1382,7 +1379,7 @@ model WorkspaceContextChangedMessage {
   updated_at: string;
 }
 
-// Broadcast when notebook content changes. origin is agent|dreaming|ui|external.
+// Broadcast when notebook content changes. origin is agent|ui|external.
 model NotebookChangedMessage {
   event: "notebook_changed";
   paths: string[];
@@ -1981,13 +1978,11 @@ model Response {
   repos?: RepoState[];
   authors?: AuthorState[];
   review_loop_run?: ReviewLoopRun;
-  notebook_init?: NotebookInitResult;
   notebook_entries?: NotebookEntry[];
   notebook_read?: NotebookReadResult;
   notebook_write?: NotebookWriteResult;
   notebook_guide?: NotebookGuideResult;
-  notebook_dream_status?: NotebookDreamStatusResult;
-  notebook_dream_run?: NotebookDreamRunResult;
+  notebook_tasks?: NotebookTask[];
 }
 
 model DelegateResult {
@@ -2032,16 +2027,11 @@ model WorkspaceContextMaintenanceResult {
 // One notebook note as surfaced by notebook_list (metadata only, no body).
 model NotebookEntry {
   path: string;
-  kind?: string;
+  type?: string;
   title?: string;
   summary?: string;
   updated?: string;
   size: int32;
-}
-
-model NotebookInitResult {
-  root: string;
-  created: boolean;
 }
 
 model NotebookReadResult {
@@ -2050,8 +2040,8 @@ model NotebookReadResult {
   hash: string;
 }
 
-// Result of notebook_write / notebook_append_journal. When conflict is true the
-// write did not apply; current_hash is the hash now on disk (empty if gone).
+// Result of notebook_write. When conflict is true the write did not apply;
+// current_hash is the hash now on disk (empty if gone).
 model NotebookWriteResult {
   path: string;
   hash?: string;
@@ -2068,55 +2058,21 @@ model NotebookGuideResult {
   session_is_chief: boolean;
 }
 
-// One deduplicated dreaming harvest candidate. occurrences is the number of
-// distinct source units carrying the fact; contexts are the distinct context
-// labels (workspaces, journal dates) — recurrence across contexts is the
-// promote phase's strongest durability signal. sources are resolvable
-// provenance pointers; snippet is word-bounded.
-model NotebookDreamCandidate {
-  signal_key: string;
-  source: string;
-  title?: string;
-  snippet: string;
-  occurrences: int32;
-  contexts: string[];
-  sources: string[];
-  first_seen?: string;
-  last_seen?: string;
-}
-
-model NotebookDreamSourceCount {
-  source: string;
-  count: int32;
-}
-
-// Summary of what a dream would consolidate now. enabled reflects the
-// notebook.dreaming.enabled gate; multi_context_count is the subset of
-// candidates seen in more than one distinct context. candidate_count is the live
-// preview (persisted candidates merged with a fresh harvest); persisted_count is
-// how many are durably saved on disk from prior scheduled runs. schedule/timezone
-// describe the cron; last_run_at/next_run_at bracket the scheduled runs.
-model NotebookDreamStatusResult {
-  enabled: boolean;
-  candidate_count: int32;
-  multi_context_count: int32;
-  persisted_count: int32;
-  source_counts: NotebookDreamSourceCount[];
-  top: NotebookDreamCandidate[];
-  schedule?: string;
-  timezone?: string;
-  last_run_at?: string;
-  next_run_at?: string;
-}
-
-// Result of notebook_dream_run. applied is false in the preview-only phase (the
-// run wrote nothing); candidates is the bounded harvested preview.
-model NotebookDreamRunResult {
-  applied: boolean;
-  candidate_count: int32;
-  multi_context_count: int32;
-  source_counts: NotebookDreamSourceCount[];
-  candidates: NotebookDreamCandidate[];
+// One durable task-runner record, surfaced read-only for the task status panel.
+// kind and state are plain strings (the runner persists them as self-describing
+// strings, never Go/TypeSpec enums). The runner's internal Meta bag (transcript
+// filesystem paths and other kind-specific inputs) is deliberately omitted — it
+// carries internal inputs that must never reach the user-facing protocol.
+model NotebookTask {
+  id: string;
+  kind: string;
+  subject: string;
+  state: string;
+  attempts: int32;
+  next_attempt_at: string;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // WS result events for the frontend's notebook reads (request/result pattern).
@@ -2171,6 +2127,32 @@ model NotebookSendToChiefResultMessage {
   success: boolean;
   error?: string;
   result?: NotebookSendToChiefResult;
+}
+
+// Result of notebook_task_list: the durable runner's records, newest-updated
+// first. An empty/absent tasks array means the runner is disabled or has no work.
+model NotebookTaskListResultMessage {
+  event: "notebook_task_list_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  tasks?: NotebookTask[];
+}
+
+// Result of notebook_task_retry. task echoes the record after the retry flip
+// (failed/dead -> queued); absent when the runner could not act on the id.
+model NotebookTaskRetryResultMessage {
+  event: "notebook_task_retry_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  task?: NotebookTask;
+}
+
+// Broadcast (no request_id) when any task lifecycle transition occurs, so an open
+// task panel re-lists. Fired from the runner's OnChange callback.
+model NotebookTasksChangedMessage {
+  event: "notebook_tasks_changed";
 }
 
 model WorkspaceContextResultMessage {
@@ -2355,6 +2337,9 @@ alias DaemonEvent =
   | NotebookBacklinksResultMessage
   | NotebookWriteResultMessage
   | NotebookSendToChiefResultMessage
+  | NotebookTaskListResultMessage
+  | NotebookTaskRetryResultMessage
+  | NotebookTasksChangedMessage
   | MarkFileViewedResultMessage
   | AddCommentResultMessage
   | UpdateCommentResultMessage

@@ -33,6 +33,7 @@ import (
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
+	"github.com/victorarias/attn/internal/tasks"
 	"github.com/victorarias/attn/internal/transcript"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
@@ -139,17 +140,17 @@ type Daemon struct {
 	notebookWatcherMu   sync.Mutex
 	notebookWatcher     *notebook.Watcher
 	notebookWatchedRoot string
-	pendingInitialWS map[*wsClient]struct{}
-	startedOnce      sync.Once
-	startedCh        chan struct{}
-	tailscale        *tailscaleRuntime
-	plugins          *pluginRegistry
-	pluginProcesses  *pluginProcessRegistry
-	pluginDriverMu   sync.Mutex
-	pluginLaunching  map[string]pluginSessionLaunch
-	pluginReports    map[string][]pendingPluginReport
-	pluginExits      map[string]ptybackend.ExitInfo
-	pluginDir        string
+	pendingInitialWS    map[*wsClient]struct{}
+	startedOnce         sync.Once
+	startedCh           chan struct{}
+	tailscale           *tailscaleRuntime
+	plugins             *pluginRegistry
+	pluginProcesses     *pluginProcessRegistry
+	pluginDriverMu      sync.Mutex
+	pluginLaunching     map[string]pluginSessionLaunch
+	pluginReports       map[string][]pendingPluginReport
+	pluginExits         map[string]ptybackend.ExitInfo
+	pluginDir           string
 
 	worktreePluginCallTimeout         time.Duration
 	worktreeCreateProviderCallTimeout time.Duration
@@ -179,26 +180,75 @@ type Daemon struct {
 
 	workspaceContextCheckoutMu sync.Mutex
 
-	workspaceContextJanitorMu              sync.Mutex
-	workspaceContextJanitorTimers          map[string]*workspaceContextJanitorTimer
-	workspaceContextJanitorRunning         bool
-	workspaceContextJanitorActiveWorkspace string
-	workspaceContextJanitorCancel          context.CancelFunc
-	workspaceContextJanitorDone            chan struct{}
-	workspaceContextJanitorCanceled        bool
-	workspaceContextJanitorCommitting      bool
-	workspaceContextJanitorExecutor        workspaceContextJanitorExecutor
-	workspaceContextJanitorThreshold       int
-	workspaceContextJanitorDebounce        time.Duration
-	workspaceContextJanitorTimeout         time.Duration
-	workspaceContextBeforeJanitorApply     func()
+	// compactRunner is the durable task runner that owns the keeper's
+	// workspace-context compaction duty (kind "compact_context") and the
+	// notebook-narration tasks. It replaces the bespoke time.AfterFunc scheduling +
+	// single-flight/cancel/commit-fence guards.
+	//
+	// compactRunnerMu guards the POINTER swap only. startCompactRunner runs late in
+	// Start() and replaces the placeholder runner, while Stop()/enqueue/forget read
+	// the field concurrently (the websocket server accepts connections — and can
+	// drive a teardown enqueue — before the runner is rebuilt). Production code
+	// therefore reads via compactRunnerRef() and writes via setCompactRunner(); the
+	// runner itself is internally synchronized. Tests assign the field directly,
+	// which is race-free because they never run Start() concurrently with that
+	// assignment.
+	compactRunnerMu sync.RWMutex
+	compactRunner   *tasks.Runner
+	// The *Threshold/*Debounce/*Timeout fields remain the test-override knobs
+	// feeding the size gate, the Enqueue debounce, and RegisterWithTimeout.
+	keeperCompactThreshold int
+	keeperCompactDebounce  time.Duration
+	keeperCompactTimeout   time.Duration
+	// workspaceContextBeforeKeeperApply is the apply-injection test hook, fired
+	// inside the executor immediately before the CommitGuard fence + Apply.
+	workspaceContextBeforeKeeperApply func()
+	// workspaceContextCompactionExecution, when set, replaces the agentic
+	// executeKeeperCompact spawn with a canned execution. Tests use it
+	// to return a fixed compacted candidate without spawning a real LLM; the
+	// validate + commit-under-CommitGuard path stays real.
+	workspaceContextCompactionExecution func(
+		ctx context.Context,
+		config keeperCompactConfig,
+		canonical *protocol.WorkspaceContext,
+	) (keeperCompactExecution, error)
 
-	// Dreaming scheduler (notebook consolidation janitor). dreamMu guards the
-	// single-flight dreamRunning guard; dreamSchedulerInterval overrides the tick
-	// cadence in tests (zero = default).
-	dreamMu                sync.Mutex
-	dreamRunning           bool
-	dreamSchedulerInterval time.Duration
+	// Notebook narration test seams. summarizeSessionExecution /
+	// narrateWorkspaceExecution, when set, replace the real RunHeadlessTask spawn so
+	// tests exercise the executor's resolve-inputs / verify-ledger logic against a
+	// fake provider that writes (or refuses to write) the target file — no real LLM.
+	// The file-existence/marker verification, enqueue/coalesce, and IS_REMOVAL_PASS
+	// derivation all stay real. narrationNowOverride pins today's date for the
+	// journal filename so date-boundary behavior is deterministic.
+	summarizeSessionExecution func(
+		ctx context.Context,
+		provider agentdriver.HeadlessTaskProvider,
+		request agentdriver.HeadlessTaskRequest,
+	) (agentdriver.HeadlessTaskResult, error)
+	narrateWorkspaceExecution func(
+		ctx context.Context,
+		provider agentdriver.HeadlessTaskProvider,
+		request agentdriver.HeadlessTaskRequest,
+	) (agentdriver.HeadlessTaskResult, error)
+	narrationNowOverride func() time.Time
+
+	// Notebook cron enqueuer. notebookCronInterval overrides the tick cadence in
+	// tests (zero = default). The enqueued work runs on the durable runner, so there
+	// is no in-daemon single-flight guard here.
+	notebookCronInterval time.Duration
+
+	// Daily-narrate activity gate. notebookNarrateActivity is the in-memory set of
+	// workspace ids that saw real activity (a session end or a content-changing
+	// context write) since the last daily-narrate cron fire. It is best-effort and
+	// NOT persisted: a restart loses it, which is fine because session-end is the
+	// primary narrate path and the daily cron is only a backstop for long-lived
+	// workspaces that had no session end. The cron drain snapshots and clears it; a
+	// workspace absent from the set is skipped that day so idle workspaces never burn
+	// a strong-tier pass. notebookNarrateActivityMu guards both the map pointer and
+	// its contents; the map is lazily initialized under the mutex (no constructor
+	// edit needed).
+	notebookNarrateActivityMu sync.Mutex
+	notebookNarrateActivity   map[string]struct{}
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -447,6 +497,10 @@ func NewForTesting(socketPath string) *Daemon {
 		plugins:          newPluginRegistry(),
 		pluginProcesses:  newPluginProcessRegistry(),
 		workspaces:       newWorkspaceRegistry(),
+		// A disabled runner (no root) keeps the unconditional Cancel/Enqueue
+		// callsites nil-safe in tests; tests that exercise a live compaction
+		// override this with an enabled runner (see newTestCompactRunner).
+		compactRunner: tasks.New(tasks.Options{}),
 	}
 }
 
@@ -486,6 +540,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		plugins:          newPluginRegistry(),
 		pluginProcesses:  newPluginProcessRegistry(),
 		workspaces:       newWorkspaceRegistry(),
+		compactRunner:    tasks.New(tasks.Options{}),
 	}
 }
 
@@ -651,6 +706,8 @@ func (d *Daemon) Start() error {
 	go d.runHTTPServer()
 	d.maybeStartDiagServer()
 	d.removeLegacyEmbeddedTailscaleState()
+	d.migrateKeeperCompactSettingKey() // one-time settings key rename (workspace_context_janitor -> workspace_keeper_compact)
+	d.migrateNotebookCronSettingKeys() // one-time settings key rename (notebook.dreaming.* -> notebook.cron.*)
 	go d.ensureTailscaleServeFromSettingsAndBroadcast()
 	d.hubManager.Start(d.doneContext())
 
@@ -676,9 +733,14 @@ func (d *Daemon) Start() error {
 	// Start branch monitoring
 	go d.monitorBranches()
 
-	// Start the dreaming consolidation scheduler (clears orphaned run locks, then
-	// runs the nightly harvest when due). Off unless notebook.dreaming.enabled.
-	go d.startDreamingScheduler(d.done)
+	// Construct + start the durable compaction runner (kinds compact_context,
+	// summarize_session, narrate_workspace).
+	d.startCompactRunner()
+
+	// Start the notebook cron enqueuer (enqueues the nightly daily-narrate backstop
+	// onto the durable runner when due). Launched AFTER startCompactRunner so the
+	// narrate executor is registered before the first tick fires.
+	go d.startNotebookCronEnqueuer(d.done)
 
 	d.signalStarted()
 	startSucceeded = true
@@ -1186,7 +1248,9 @@ func (d *Daemon) Stop() {
 	d.log("daemon stopping")
 	close(d.done)
 	d.stopNotebookWatcher()
-	d.stopWorkspaceContextJanitor()
+	if runner := d.compactRunnerRef(); runner != nil {
+		runner.Stop()
+	}
 	if d.hubManager != nil {
 		d.hubManager.Stop()
 	}
@@ -1753,24 +1817,13 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleWorkspaceContextCompact(conn, msg.(*protocol.WorkspaceContextCompactMessage))
 	case protocol.CmdWorkspaceContextRollback:
 		d.handleWorkspaceContextRollback(conn, msg.(*protocol.WorkspaceContextRollbackMessage))
-	case protocol.CmdNotebookInit:
-		d.handleNotebookInit(conn)
-	case protocol.CmdNotebookList:
-		d.handleNotebookList(conn, msg.(*protocol.NotebookListMessage))
-	case protocol.CmdNotebookRead:
-		d.handleNotebookRead(conn, msg.(*protocol.NotebookReadMessage))
-	case protocol.CmdNotebookWrite:
-		d.handleNotebookWrite(conn, msg.(*protocol.NotebookWriteMessage))
-	case protocol.CmdNotebookAppendJournal:
-		d.handleNotebookAppendJournal(conn, msg.(*protocol.NotebookAppendJournalMessage))
 	case protocol.CmdNotebookGuide:
+		// notebook_guide is the one surviving unix-socket notebook command: the
+		// agent-launch wrapper uses it to learn whether a session is the chief of
+		// staff and where the notebook root is. The former user-facing
+		// `attn notebook …` subcommands were removed; the frontend reads and writes
+		// the notebook over the WebSocket path instead.
 		d.handleNotebookGuide(conn, msg.(*protocol.NotebookGuideMessage))
-	case protocol.CmdNotebookBacklinks:
-		d.handleNotebookBacklinks(conn, msg.(*protocol.NotebookBacklinksMessage))
-	case protocol.CmdNotebookDreamStatus:
-		d.handleNotebookDreamStatus(conn)
-	case protocol.CmdNotebookDreamRun:
-		d.handleNotebookDreamRun(conn, msg.(*protocol.NotebookDreamRunMessage))
 	case protocol.CmdUnregister:
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:
@@ -2018,6 +2071,32 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	}
 	d.store.Touch(msg.ID)
 	d.sendOK(conn)
+
+	// Narration triggers. Resolve the workspace id SYNCHRONOUSLY from the persisted
+	// store row before any async work: a concurrent close can dissociate the session
+	// from the in-memory registry, but the persisted workspace_id survives until the
+	// session row is removed, so it is the authoritative source. The enqueues are
+	// nil/Disabled-safe (no-op when the runner is absent or the notebook is off).
+	//   - summarize_session ALWAYS fires (cheap per-session digest), even for a solo
+	//     session with no workspace — its digest is still useful raw material.
+	//   - narrate_workspace fires (coalesced) only when the stop belongs to a LIVE
+	//     workspace; the removal boundary owns the final retrospective pass instead.
+	// Resolve the workspace id once and stash it (plus the transcript path) on the
+	// summarize task: a single-session-workspace teardown deletes both the session
+	// row and the workspace row before the debounced summarize runs, so the
+	// executor must carry these inputs rather than re-derive them from a gone row.
+	stopWorkspaceID := d.resolveStopWorkspaceID(msg.ID)
+	d.enqueueSummarizeSession(msg.ID, msg.TranscriptPath, stopWorkspaceID)
+	if stopWorkspaceID != "" {
+		// A session end is a daily-narrate activity event for its workspace: it marks
+		// the workspace active so the nightly daily-narrate cron narrates it even on a
+		// day with no further triggers. (The mark is cheap and harmless even when the
+		// workspace is being torn down — the cron skips a removed workspace at drain.)
+		d.markNotebookWorkspaceActivity(stopWorkspaceID)
+		if d.store.GetWorkspace(stopWorkspaceID) != nil {
+			d.enqueueNarrateWorkspace(stopWorkspaceID)
+		}
+	}
 
 	if d.consumeForcedStopClassification(msg.ID) {
 		d.logf("handleStop: skipping classification for daemon-terminated session=%s", msg.ID)

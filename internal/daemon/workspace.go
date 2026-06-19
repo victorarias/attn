@@ -396,8 +396,13 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 	if !removed {
 		return
 	}
-	d.cancelWorkspaceContextJanitor(id)
+	d.forgetWorkspaceContextCompaction(id)
+	d.snapshotWorkspaceContextOnRemove(id, snapshot.Title)
 	d.store.RemoveWorkspace(id)
+	// Removal boundary: the workspace row is now gone, so the final narrate run
+	// derives IS_REMOVAL_PASS=true and writes the retrospective from the snapshot +
+	// digests. ZeroDebounce overrides any pending active-day pass.
+	d.enqueueFinalNarrateWorkspace(id)
 	d.pruneTileContentSubscriptionsForLayout(id, nil)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:     protocol.EventWorkspaceUnregistered,
@@ -429,7 +434,19 @@ func (d *Daemon) loadWorkspacesFromStore() {
 			if !registered &&
 				!d.workspaceHasPendingSpawn(ws.ID) &&
 				!d.workspaceHasSessionlessContent(ws.ID) {
+				// loadWorkspacesFromStore runs during Start() before the compaction
+				// runner is constructed; forgetWorkspaceContextCompaction is nil-safe.
+				// The snapshot does not touch the runner (it only reads the store and
+				// writes a file), so it is safe to call here with no runner.
+				d.forgetWorkspaceContextCompaction(ws.ID)
+				d.snapshotWorkspaceContextOnRemove(ws.ID, ws.Title)
 				d.store.RemoveWorkspace(ws.ID)
+				// Final-narrate enqueue is a nil-safe no-op here: load runs before
+				// startCompactRunner constructs the runner. A workspace reaped at
+				// startup (no live sessions across a restart) gets no retrospective —
+				// acceptable, since the live removal paths own the common case and the
+				// snapshot above still preserves its context for a future manual read.
+				d.enqueueFinalNarrateWorkspace(ws.ID)
 				continue
 			}
 		}
@@ -543,8 +560,11 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 		if !removed {
 			return
 		}
-		d.cancelWorkspaceContextJanitor(workspaceID)
+		d.forgetWorkspaceContextCompaction(workspaceID)
+		d.snapshotWorkspaceContextOnRemove(workspaceID, snapshot.Title)
 		d.store.RemoveWorkspace(workspaceID)
+		// Removal boundary (last session left): final retrospective narrate.
+		d.enqueueFinalNarrateWorkspace(workspaceID)
 		d.pruneTileContentSubscriptionsForLayout(workspaceID, nil)
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:     protocol.EventWorkspaceUnregistered,
