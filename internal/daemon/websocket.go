@@ -978,6 +978,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleSetReviewLoopIterationsWS(client, msg.(*protocol.SetReviewLoopIterationLimitMessage))
 	case protocol.CmdAnswerReviewLoop:
 		d.handleAnswerReviewLoopWS(client, msg.(*protocol.AnswerReviewLoopMessage))
+	case protocol.CmdWorkflowRunGet:
+		d.handleWorkflowRunGetWS(client, msg.(*protocol.WorkflowRunGetMessage))
+	case protocol.CmdWorkflowRunList:
+		d.handleWorkflowRunListWS(client, msg.(*protocol.WorkflowRunListMessage))
+	case protocol.CmdWorkflowRunCancel:
+		d.handleWorkflowRunCancelWS(client, msg.(*protocol.WorkflowRunCancelMessage))
 	case protocol.CmdMarkFileViewed:
 		d.handleMarkFileViewed(client, msg.(*protocol.MarkFileViewedMessage))
 	case protocol.CmdAddComment:

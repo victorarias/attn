@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchesMessage, ListDispatchMessagesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, ReportDispatchMessage, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchesMessage, ListDispatchMessagesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, ReportDispatchMessage, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const acknowledgeDispatchMessage = Convert.toAcknowledgeDispatchMessage(json);
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
@@ -208,6 +208,17 @@
 //   const wakeDispatchAgentMessage = Convert.toWakeDispatchAgentMessage(json);
 //   const wakeDispatchAgentResultMessage = Convert.toWakeDispatchAgentResultMessage(json);
 //   const webSocketEvent = Convert.toWebSocketEvent(json);
+//   const workflowActionResultMessage = Convert.toWorkflowActionResultMessage(json);
+//   const workflowAgentCall = Convert.toWorkflowAgentCall(json);
+//   const workflowAgentCallStatus = Convert.toWorkflowAgentCallStatus(json);
+//   const workflowCallUpsertMessage = Convert.toWorkflowCallUpsertMessage(json);
+//   const workflowRun = Convert.toWorkflowRun(json);
+//   const workflowRunCancelMessage = Convert.toWorkflowRunCancelMessage(json);
+//   const workflowRunGetMessage = Convert.toWorkflowRunGetMessage(json);
+//   const workflowRunListMessage = Convert.toWorkflowRunListMessage(json);
+//   const workflowRunStatus = Convert.toWorkflowRunStatus(json);
+//   const workflowRunUpdatedMessage = Convert.toWorkflowRunUpdatedMessage(json);
+//   const workflowRunUpsertMessage = Convert.toWorkflowRunUpsertMessage(json);
 //   const workspace = Convert.toWorkspace(json);
 //   const workspaceContext = Convert.toWorkspaceContext(json);
 //   const workspaceContextChangedMessage = Convert.toWorkspaceContextChangedMessage(json);
@@ -3197,6 +3208,175 @@ export interface WebSocketEvent {
     [property: string]: any;
 }
 
+export interface WorkflowActionResultMessage {
+    action:  string;
+    error?:  string;
+    event:   WorkflowActionResultMessageEvent;
+    run?:    Run;
+    run_id?: string;
+    runs?:   Run[];
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum WorkflowActionResultMessageEvent {
+    WorkflowActionResult = "workflow_action_result",
+}
+
+export interface Run {
+    agent_calls?:  Call[];
+    args_json?:    string;
+    completed_at?: string;
+    created_at:    string;
+    harness?:      string;
+    last_error?:   string;
+    phase?:        string;
+    result_json?:  string;
+    resumable:     boolean;
+    run_id:        string;
+    script_hash:   string;
+    script_path:   string;
+    session_id?:   string;
+    status:        WorkflowRunStatus;
+    updated_at:    string;
+    workspace_id?: string;
+    [property: string]: any;
+}
+
+export interface Call {
+    agent_type?:       string;
+    completed_at?:     string;
+    error?:            string;
+    label?:            string;
+    ordinal:           string;
+    phase?:            string;
+    prompt_hash?:      string;
+    resolved_harness?: string;
+    resolved_model?:   string;
+    result_json?:      string;
+    result_path?:      string;
+    run_id:            string;
+    schema_hash?:      string;
+    started_at?:       string;
+    status:            WorkflowAgentCallStatus;
+    [property: string]: any;
+}
+
+export enum WorkflowAgentCallStatus {
+    Errored = "errored",
+    Ok = "ok",
+    Running = "running",
+    Skipped = "skipped",
+}
+
+export enum WorkflowRunStatus {
+    Canceled = "canceled",
+    Completed = "completed",
+    Failed = "failed",
+    Running = "running",
+}
+
+export interface WorkflowAgentCall {
+    agent_type?:       string;
+    completed_at?:     string;
+    error?:            string;
+    label?:            string;
+    ordinal:           string;
+    phase?:            string;
+    prompt_hash?:      string;
+    resolved_harness?: string;
+    resolved_model?:   string;
+    result_json?:      string;
+    result_path?:      string;
+    run_id:            string;
+    schema_hash?:      string;
+    started_at?:       string;
+    status:            WorkflowAgentCallStatus;
+    [property: string]: any;
+}
+
+export interface WorkflowCallUpsertMessage {
+    call:   Call;
+    cmd:    WorkflowCallUpsertMessageCmd;
+    run_id: string;
+    [property: string]: any;
+}
+
+export enum WorkflowCallUpsertMessageCmd {
+    WorkflowCallUpsert = "workflow_call_upsert",
+}
+
+export interface WorkflowRun {
+    agent_calls?:  Call[];
+    args_json?:    string;
+    completed_at?: string;
+    created_at:    string;
+    harness?:      string;
+    last_error?:   string;
+    phase?:        string;
+    result_json?:  string;
+    resumable:     boolean;
+    run_id:        string;
+    script_hash:   string;
+    script_path:   string;
+    session_id?:   string;
+    status:        WorkflowRunStatus;
+    updated_at:    string;
+    workspace_id?: string;
+    [property: string]: any;
+}
+
+export interface WorkflowRunCancelMessage {
+    cmd:    WorkflowRunCancelMessageCmd;
+    run_id: string;
+    [property: string]: any;
+}
+
+export enum WorkflowRunCancelMessageCmd {
+    WorkflowRunCancel = "workflow_run_cancel",
+}
+
+export interface WorkflowRunGetMessage {
+    cmd:    WorkflowRunGetMessageCmd;
+    run_id: string;
+    [property: string]: any;
+}
+
+export enum WorkflowRunGetMessageCmd {
+    WorkflowRunGet = "workflow_run_get",
+}
+
+export interface WorkflowRunListMessage {
+    cmd:           WorkflowRunListMessageCmd;
+    session_id?:   string;
+    workspace_id?: string;
+    [property: string]: any;
+}
+
+export enum WorkflowRunListMessageCmd {
+    WorkflowRunList = "workflow_run_list",
+}
+
+export interface WorkflowRunUpdatedMessage {
+    event: WorkflowRunUpdatedMessageEvent;
+    run:   Run;
+    [property: string]: any;
+}
+
+export enum WorkflowRunUpdatedMessageEvent {
+    WorkflowRunUpdated = "workflow_run_updated",
+}
+
+export interface WorkflowRunUpsertMessage {
+    cmd: WorkflowRunUpsertMessageCmd;
+    run: Run;
+    [property: string]: any;
+}
+
+export enum WorkflowRunUpsertMessageCmd {
+    WorkflowRunUpsert = "workflow_run_upsert",
+}
+
 export interface Workspace {
     directory: string;
     id:        string;
@@ -5322,6 +5502,94 @@ export class Convert {
 
     public static webSocketEventToJson(value: WebSocketEvent): string {
         return JSON.stringify(uncast(value, r("WebSocketEvent")), null, 2);
+    }
+
+    public static toWorkflowActionResultMessage(json: string): WorkflowActionResultMessage {
+        return cast(JSON.parse(json), r("WorkflowActionResultMessage"));
+    }
+
+    public static workflowActionResultMessageToJson(value: WorkflowActionResultMessage): string {
+        return JSON.stringify(uncast(value, r("WorkflowActionResultMessage")), null, 2);
+    }
+
+    public static toWorkflowAgentCall(json: string): WorkflowAgentCall {
+        return cast(JSON.parse(json), r("WorkflowAgentCall"));
+    }
+
+    public static workflowAgentCallToJson(value: WorkflowAgentCall): string {
+        return JSON.stringify(uncast(value, r("WorkflowAgentCall")), null, 2);
+    }
+
+    public static toWorkflowAgentCallStatus(json: string): WorkflowAgentCallStatus {
+        return cast(JSON.parse(json), r("WorkflowAgentCallStatus"));
+    }
+
+    public static workflowAgentCallStatusToJson(value: WorkflowAgentCallStatus): string {
+        return JSON.stringify(uncast(value, r("WorkflowAgentCallStatus")), null, 2);
+    }
+
+    public static toWorkflowCallUpsertMessage(json: string): WorkflowCallUpsertMessage {
+        return cast(JSON.parse(json), r("WorkflowCallUpsertMessage"));
+    }
+
+    public static workflowCallUpsertMessageToJson(value: WorkflowCallUpsertMessage): string {
+        return JSON.stringify(uncast(value, r("WorkflowCallUpsertMessage")), null, 2);
+    }
+
+    public static toWorkflowRun(json: string): WorkflowRun {
+        return cast(JSON.parse(json), r("WorkflowRun"));
+    }
+
+    public static workflowRunToJson(value: WorkflowRun): string {
+        return JSON.stringify(uncast(value, r("WorkflowRun")), null, 2);
+    }
+
+    public static toWorkflowRunCancelMessage(json: string): WorkflowRunCancelMessage {
+        return cast(JSON.parse(json), r("WorkflowRunCancelMessage"));
+    }
+
+    public static workflowRunCancelMessageToJson(value: WorkflowRunCancelMessage): string {
+        return JSON.stringify(uncast(value, r("WorkflowRunCancelMessage")), null, 2);
+    }
+
+    public static toWorkflowRunGetMessage(json: string): WorkflowRunGetMessage {
+        return cast(JSON.parse(json), r("WorkflowRunGetMessage"));
+    }
+
+    public static workflowRunGetMessageToJson(value: WorkflowRunGetMessage): string {
+        return JSON.stringify(uncast(value, r("WorkflowRunGetMessage")), null, 2);
+    }
+
+    public static toWorkflowRunListMessage(json: string): WorkflowRunListMessage {
+        return cast(JSON.parse(json), r("WorkflowRunListMessage"));
+    }
+
+    public static workflowRunListMessageToJson(value: WorkflowRunListMessage): string {
+        return JSON.stringify(uncast(value, r("WorkflowRunListMessage")), null, 2);
+    }
+
+    public static toWorkflowRunStatus(json: string): WorkflowRunStatus {
+        return cast(JSON.parse(json), r("WorkflowRunStatus"));
+    }
+
+    public static workflowRunStatusToJson(value: WorkflowRunStatus): string {
+        return JSON.stringify(uncast(value, r("WorkflowRunStatus")), null, 2);
+    }
+
+    public static toWorkflowRunUpdatedMessage(json: string): WorkflowRunUpdatedMessage {
+        return cast(JSON.parse(json), r("WorkflowRunUpdatedMessage"));
+    }
+
+    public static workflowRunUpdatedMessageToJson(value: WorkflowRunUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("WorkflowRunUpdatedMessage")), null, 2);
+    }
+
+    public static toWorkflowRunUpsertMessage(json: string): WorkflowRunUpsertMessage {
+        return cast(JSON.parse(json), r("WorkflowRunUpsertMessage"));
+    }
+
+    public static workflowRunUpsertMessageToJson(value: WorkflowRunUpsertMessage): string {
+        return JSON.stringify(uncast(value, r("WorkflowRunUpsertMessage")), null, 2);
     }
 
     public static toWorkspace(json: string): Workspace {
@@ -7579,6 +7847,111 @@ const typeMap: any = {
         { json: "workspaces", js: "workspaces", typ: u(undefined, a(r("WorkspaceElement"))) },
         { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
     ], "any"),
+    "WorkflowActionResultMessage": o([
+        { json: "action", js: "action", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("WorkflowActionResultMessageEvent") },
+        { json: "run", js: "run", typ: u(undefined, r("Run")) },
+        { json: "run_id", js: "run_id", typ: u(undefined, "") },
+        { json: "runs", js: "runs", typ: u(undefined, a(r("Run"))) },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "Run": o([
+        { json: "agent_calls", js: "agent_calls", typ: u(undefined, a(r("Call"))) },
+        { json: "args_json", js: "args_json", typ: u(undefined, "") },
+        { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "harness", js: "harness", typ: u(undefined, "") },
+        { json: "last_error", js: "last_error", typ: u(undefined, "") },
+        { json: "phase", js: "phase", typ: u(undefined, "") },
+        { json: "result_json", js: "result_json", typ: u(undefined, "") },
+        { json: "resumable", js: "resumable", typ: true },
+        { json: "run_id", js: "run_id", typ: "" },
+        { json: "script_hash", js: "script_hash", typ: "" },
+        { json: "script_path", js: "script_path", typ: "" },
+        { json: "session_id", js: "session_id", typ: u(undefined, "") },
+        { json: "status", js: "status", typ: r("WorkflowRunStatus") },
+        { json: "updated_at", js: "updated_at", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+    ], "any"),
+    "Call": o([
+        { json: "agent_type", js: "agent_type", typ: u(undefined, "") },
+        { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "label", js: "label", typ: u(undefined, "") },
+        { json: "ordinal", js: "ordinal", typ: "" },
+        { json: "phase", js: "phase", typ: u(undefined, "") },
+        { json: "prompt_hash", js: "prompt_hash", typ: u(undefined, "") },
+        { json: "resolved_harness", js: "resolved_harness", typ: u(undefined, "") },
+        { json: "resolved_model", js: "resolved_model", typ: u(undefined, "") },
+        { json: "result_json", js: "result_json", typ: u(undefined, "") },
+        { json: "result_path", js: "result_path", typ: u(undefined, "") },
+        { json: "run_id", js: "run_id", typ: "" },
+        { json: "schema_hash", js: "schema_hash", typ: u(undefined, "") },
+        { json: "started_at", js: "started_at", typ: u(undefined, "") },
+        { json: "status", js: "status", typ: r("WorkflowAgentCallStatus") },
+    ], "any"),
+    "WorkflowAgentCall": o([
+        { json: "agent_type", js: "agent_type", typ: u(undefined, "") },
+        { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "label", js: "label", typ: u(undefined, "") },
+        { json: "ordinal", js: "ordinal", typ: "" },
+        { json: "phase", js: "phase", typ: u(undefined, "") },
+        { json: "prompt_hash", js: "prompt_hash", typ: u(undefined, "") },
+        { json: "resolved_harness", js: "resolved_harness", typ: u(undefined, "") },
+        { json: "resolved_model", js: "resolved_model", typ: u(undefined, "") },
+        { json: "result_json", js: "result_json", typ: u(undefined, "") },
+        { json: "result_path", js: "result_path", typ: u(undefined, "") },
+        { json: "run_id", js: "run_id", typ: "" },
+        { json: "schema_hash", js: "schema_hash", typ: u(undefined, "") },
+        { json: "started_at", js: "started_at", typ: u(undefined, "") },
+        { json: "status", js: "status", typ: r("WorkflowAgentCallStatus") },
+    ], "any"),
+    "WorkflowCallUpsertMessage": o([
+        { json: "call", js: "call", typ: r("Call") },
+        { json: "cmd", js: "cmd", typ: r("WorkflowCallUpsertMessageCmd") },
+        { json: "run_id", js: "run_id", typ: "" },
+    ], "any"),
+    "WorkflowRun": o([
+        { json: "agent_calls", js: "agent_calls", typ: u(undefined, a(r("Call"))) },
+        { json: "args_json", js: "args_json", typ: u(undefined, "") },
+        { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "harness", js: "harness", typ: u(undefined, "") },
+        { json: "last_error", js: "last_error", typ: u(undefined, "") },
+        { json: "phase", js: "phase", typ: u(undefined, "") },
+        { json: "result_json", js: "result_json", typ: u(undefined, "") },
+        { json: "resumable", js: "resumable", typ: true },
+        { json: "run_id", js: "run_id", typ: "" },
+        { json: "script_hash", js: "script_hash", typ: "" },
+        { json: "script_path", js: "script_path", typ: "" },
+        { json: "session_id", js: "session_id", typ: u(undefined, "") },
+        { json: "status", js: "status", typ: r("WorkflowRunStatus") },
+        { json: "updated_at", js: "updated_at", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+    ], "any"),
+    "WorkflowRunCancelMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorkflowRunCancelMessageCmd") },
+        { json: "run_id", js: "run_id", typ: "" },
+    ], "any"),
+    "WorkflowRunGetMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorkflowRunGetMessageCmd") },
+        { json: "run_id", js: "run_id", typ: "" },
+    ], "any"),
+    "WorkflowRunListMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorkflowRunListMessageCmd") },
+        { json: "session_id", js: "session_id", typ: u(undefined, "") },
+        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+    ], "any"),
+    "WorkflowRunUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("WorkflowRunUpdatedMessageEvent") },
+        { json: "run", js: "run", typ: r("Run") },
+    ], "any"),
+    "WorkflowRunUpsertMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorkflowRunUpsertMessageCmd") },
+        { json: "run", js: "run", typ: r("Run") },
+    ], "any"),
     "Workspace": o([
         { json: "directory", js: "directory", typ: "" },
         { json: "id", js: "id", typ: "" },
@@ -8401,6 +8774,39 @@ const typeMap: any = {
     ],
     "WakeDispatchAgentResultMessageEvent": [
         "wake_dispatch_agent_result",
+    ],
+    "WorkflowActionResultMessageEvent": [
+        "workflow_action_result",
+    ],
+    "WorkflowAgentCallStatus": [
+        "errored",
+        "ok",
+        "running",
+        "skipped",
+    ],
+    "WorkflowRunStatus": [
+        "canceled",
+        "completed",
+        "failed",
+        "running",
+    ],
+    "WorkflowCallUpsertMessageCmd": [
+        "workflow_call_upsert",
+    ],
+    "WorkflowRunCancelMessageCmd": [
+        "workflow_run_cancel",
+    ],
+    "WorkflowRunGetMessageCmd": [
+        "workflow_run_get",
+    ],
+    "WorkflowRunListMessageCmd": [
+        "workflow_run_list",
+    ],
+    "WorkflowRunUpdatedMessageEvent": [
+        "workflow_run_updated",
+    ],
+    "WorkflowRunUpsertMessageCmd": [
+        "workflow_run_upsert",
     ],
     "WorkspaceContextChangedMessageEvent": [
         "workspace_context_changed",

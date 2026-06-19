@@ -399,7 +399,54 @@ var migrations = []migration{
 	`},
 	{48, "drop label from recent_locations", "ALTER TABLE recent_locations DROP COLUMN label"},
 	{49, "add rank to workspaces", `ALTER TABLE workspaces ADD COLUMN rank TEXT NOT NULL DEFAULT ''`},
-	{50, "repair missing workspace rank", `ALTER TABLE workspaces ADD COLUMN rank TEXT NOT NULL DEFAULT ''`},
+	// Migration 50 is dispatched to applyMigration49 (see the version==49||50 branch),
+	// so this SQL is never executed; it is a harmless no-op kept only so the slice
+	// length stays equal to the schema version. A literal ADD COLUMN here would be a
+	// duplicate-column landmine if the routing ever changed.
+	{50, "repair missing workspace rank", `SELECT 1`},
+	{51, "create workflow engine journal tables", `CREATE TABLE IF NOT EXISTS workflow_runs (
+    run_id TEXT PRIMARY KEY,
+    script_path TEXT NOT NULL,
+    script_hash TEXT NOT NULL,
+    args_json TEXT,
+    session_id TEXT,
+    workspace_id TEXT,
+    status TEXT NOT NULL,
+    phase TEXT,
+    harness TEXT,
+    result_json TEXT,
+    last_error TEXT,
+    resumable INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_status
+    ON workflow_runs(status);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_created_at
+    ON workflow_runs(created_at DESC);
+CREATE TABLE IF NOT EXISTS workflow_agent_calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    ordinal TEXT NOT NULL,
+    label TEXT,
+    phase TEXT,
+    prompt_hash TEXT,
+    schema_hash TEXT,
+    resolved_model TEXT,
+    resolved_harness TEXT,
+    agent_type TEXT,
+    result_json TEXT,
+    status TEXT NOT NULL,
+    error TEXT,
+    result_path TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    UNIQUE(run_id, ordinal),
+    FOREIGN KEY (run_id) REFERENCES workflow_runs(run_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_agent_calls_run_id
+    ON workflow_agent_calls(run_id, id ASC);`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

@@ -262,6 +262,17 @@ export function ReviewLoopIcon() {
   );
 }
 
+export function WorkflowIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="1.5" y="6" width="3.5" height="4" rx="1" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="11" y="2.5" width="3.5" height="3.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="11" y="10" width="3.5" height="3.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M5 8h3v-3.75h3M8 8v3.75h3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function EditorIcon() {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true">

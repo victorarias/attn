@@ -143,6 +143,7 @@ export function SettingsModal({
   // Sync with settings when modal opens
   const actualProjectsDir = settings.projects_directory || '';
   const tailscaleEnabled = (settings.tailscale_enabled || 'false') === 'true';
+  const workflowsEnabled = (settings.workflows_enabled || 'false') === 'true';
   const tailscaleStatus = settings.tailscale_status || 'disabled';
   const tailscaleURL = settings.tailscale_url || '';
   const tailscaleDomain = settings.tailscale_domain || '';
@@ -289,6 +290,10 @@ export function SettingsModal({
   const handleToggleTailscale = useCallback(() => {
     onSetSetting('tailscale_enabled', tailscaleEnabled ? 'false' : 'true');
   }, [onSetSetting, tailscaleEnabled]);
+
+  const handleToggleWorkflows = useCallback(() => {
+    onSetSetting('workflows_enabled', workflowsEnabled ? 'false' : 'true');
+  }, [onSetSetting, workflowsEnabled]);
 
   const handleInputBlur = useCallback(() => {
     if (projectsDir !== actualProjectsDir) {
@@ -1492,6 +1497,37 @@ export function SettingsModal({
             Runs after a 10-minute debounce when canonical context exceeds 12 KiB.
             Recommended models mirror the agents' memory-management behavior. Use
             `attn workspace context compact` to run it immediately.
+          </div>
+        </div>
+      </section>
+
+      <section className="settings-block">
+        <div className="settings-block-intro">
+          <div className="settings-kicker">Agents</div>
+          <h3>Workflows</h3>
+          <p className="settings-description">
+            Lets managed agents run durable multi-agent workflows. Off by default. When on,
+            agents learn how and when to use workflows and only start one when you opt in per
+            task ("attn workflow") or for the session ("hypercode").
+          </p>
+        </div>
+        <div className="settings-block-body">
+          <div className="settings-row-card">
+            <div>
+              <p className="settings-row-title">Enable workflows</p>
+              <p className="settings-row-copy">
+                While off, "attn workflow run" is refused and agents aren't told about
+                workflows. Turning it off won't interrupt a run already in flight.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="settings-action"
+              data-testid="settings-workflows-toggle"
+              onClick={handleToggleWorkflows}
+            >
+              {workflowsEnabled ? 'Disable' : 'Enable'}
+            </button>
           </div>
         </div>
       </section>

@@ -406,23 +406,6 @@ func TestReadInitialPromptFileRemovesFile(t *testing.T) {
 	}
 }
 
-func TestWorkspaceContextSessionStartOutputRetriesUntilSessionIsRegistered(t *testing.T) {
-	c := &fakeWorkspaceContextCheckoutClient{
-		failures: 2,
-		path:     "/tmp/context.md",
-	}
-	output, err := workspaceContextSessionStartOutput(c, "session-1", 3, 0)
-	if err != nil {
-		t.Fatalf("workspaceContextSessionStartOutput error: %v", err)
-	}
-	if c.calls != 3 {
-		t.Fatalf("checkout calls = %d, want 3", c.calls)
-	}
-	if !strings.Contains(output, "/tmp/context.md") {
-		t.Fatalf("hook output = %q", output)
-	}
-}
-
 func TestWorkspaceContextCheckoutPathReturnsCheckoutPath(t *testing.T) {
 	c := &fakeWorkspaceContextCheckoutClient{
 		failures: 1,
@@ -434,29 +417,6 @@ func TestWorkspaceContextCheckoutPathReturnsCheckoutPath(t *testing.T) {
 	}
 	if path != "/tmp/context.md" {
 		t.Fatalf("path = %q, want /tmp/context.md", path)
-	}
-}
-
-func TestWorkspaceContextGuidanceProvidedAtLaunch(t *testing.T) {
-	t.Setenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE", "developer_instructions")
-	if !workspaceContextGuidanceProvidedAtLaunch() {
-		t.Fatal("launch guidance should suppress hook guidance output")
-	}
-
-	t.Setenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE", "")
-	if workspaceContextGuidanceProvidedAtLaunch() {
-		t.Fatal("missing launch guidance should preserve hook fallback output")
-	}
-}
-
-func TestWorkspaceContextSessionStartOutputReturnsLastCheckoutError(t *testing.T) {
-	c := &fakeWorkspaceContextCheckoutClient{failures: 2}
-	output, err := workspaceContextSessionStartOutput(c, "session-1", 2, 0)
-	if err == nil || !strings.Contains(err.Error(), "source session not found") {
-		t.Fatalf("workspaceContextSessionStartOutput error = %v", err)
-	}
-	if output != "" {
-		t.Fatalf("hook output = %q, want empty", output)
 	}
 }
 

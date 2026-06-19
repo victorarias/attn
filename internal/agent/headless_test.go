@@ -73,6 +73,142 @@ func TestCodexRunHeadlessTaskScopesToolsAndConfiguration(t *testing.T) {
 	}
 }
 
+func TestCodexRunHeadlessTaskScopesSingleToolNameAndCapturesLastMessage(t *testing.T) {
+	executable, logPath := writeHeadlessArgsRecorder(t)
+	_, err := (&Codex{}).RunHeadlessTask(context.Background(), HeadlessTaskRequest{
+		Executable:       executable,
+		Model:            "gpt-test",
+		Prompt:           "answer",
+		WorkDir:          t.TempDir(),
+		MCPServerName:    "attn_workflow_result",
+		MCPServerCommand: "/tmp/attn",
+		ToolName:         "return_result",
+		MCPServerArgs:    []string{"_workflow-result-mcp", "--result-file", "/tmp/result"},
+	})
+	if err != nil {
+		t.Fatalf("RunHeadlessTask error: %v", err)
+	}
+	args, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	got := string(args)
+	for _, want := range []string{
+		"--output-last-message",
+		`mcp_servers.attn_workflow_result.enabled_tools=["return_result"]`,
+		"mcp_servers.attn_workflow_result.required=true",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Codex args missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "read_context") || strings.Contains(got, "replace_context") {
+		t.Fatalf("single-tool Codex args leaked the janitor default tools:\n%s", got)
+	}
+}
+
+func TestCodexRunHeadlessTaskCapturesFinalTextFromLastMessageFile(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "agent")
+	// Parse our own argv to find --output-last-message <path> and write to it.
+	script := "#!/bin/sh\n" +
+		"next=0\n" +
+		"for a in \"$@\"; do\n" +
+		"  if [ \"$next\" = \"1\" ]; then printf 'PONG' > \"$a\"; next=0; fi\n" +
+		"  if [ \"$a\" = \"--output-last-message\" ]; then next=1; fi\n" +
+		"done\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake agent: %v", err)
+	}
+	result, err := (&Codex{}).RunHeadlessTask(context.Background(), HeadlessTaskRequest{
+		Executable:    scriptPath,
+		Model:         "gpt-test",
+		Prompt:        "ping",
+		WorkDir:       dir,
+		MCPServerName: "attn_workflow_result",
+		ToolName:      "return_result",
+	})
+	if err != nil {
+		t.Fatalf("RunHeadlessTask error: %v", err)
+	}
+	if result.Text != "PONG" {
+		t.Fatalf("captured text = %q, want PONG", result.Text)
+	}
+}
+
+func TestCodexParseFinalTextFromStdoutFallback(t *testing.T) {
+	stdout := []byte(strings.Join([]string{
+		`{"type":"thread.started","thread_id":"t"}`,
+		`{"type":"item.completed","item":{"id":"i0","type":"agent_message","text":"first"}}`,
+		`{"type":"item.completed","item":{"id":"i1","type":"agent_message","text":"FINAL"}}`,
+		`{"type":"turn.completed","usage":{}}`,
+	}, "\n"))
+	if got := parseCodexFinalText(stdout); got != "FINAL" {
+		t.Fatalf("parseCodexFinalText = %q, want FINAL", got)
+	}
+}
+
+func TestParseClaudeFinalText(t *testing.T) {
+	t.Run("single result object", func(t *testing.T) {
+		got := parseClaudeFinalText([]byte(`{"type":"result","subtype":"success","result":"hello"}`))
+		if got != "hello" {
+			t.Fatalf("got %q, want hello", got)
+		}
+	})
+	t.Run("stream array last result wins", func(t *testing.T) {
+		stdout := []byte(`[{"type":"assistant","message":{"content":[{"type":"text","text":"thinking"}]}},{"type":"result","result":"final-answer"}]`)
+		if got := parseClaudeFinalText(stdout); got != "final-answer" {
+			t.Fatalf("got %q, want final-answer", got)
+		}
+	})
+	t.Run("stream array falls back to assistant text", func(t *testing.T) {
+		stdout := []byte(`[{"type":"assistant","message":{"content":[{"type":"text","text":"only-text"}]}}]`)
+		if got := parseClaudeFinalText(stdout); got != "only-text" {
+			t.Fatalf("got %q, want only-text", got)
+		}
+	})
+}
+
+func TestClaudeRunHeadlessTaskScopesSingleToolName(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "agent")
+	logPath := filepath.Join(dir, "args.log")
+	// Record argv AND emit a Claude result object so text capture is exercised.
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + shellSingleQuote(logPath) +
+		"\nprintf '{\"type\":\"result\",\"result\":\"done\"}\\n'\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake agent: %v", err)
+	}
+	result, err := (&Claude{}).RunHeadlessTask(context.Background(), HeadlessTaskRequest{
+		Executable:       scriptPath,
+		Model:            "claude-test",
+		Prompt:           "answer",
+		WorkDir:          dir,
+		MCPServerName:    "attn_workflow_result",
+		MCPServerCommand: "/tmp/attn",
+		ToolName:         "return_result",
+		MCPServerArgs:    []string{"_workflow-result-mcp", "--result-file", "/tmp/result"},
+	})
+	if err != nil {
+		t.Fatalf("RunHeadlessTask error: %v", err)
+	}
+	if result.Text != "done" {
+		t.Fatalf("captured text = %q, want done", result.Text)
+	}
+	args, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	got := string(args)
+	if !strings.Contains(got, "mcp__attn_workflow_result__return_result") {
+		t.Fatalf("Claude single-tool args missing the prefixed tool:\n%s", got)
+	}
+	if strings.Contains(got, "read_context") || strings.Contains(got, "replace_context") {
+		t.Fatalf("single-tool Claude args leaked the janitor default tools:\n%s", got)
+	}
+}
+
 func TestClaudeRunHeadlessTaskExcludesNonManagedSettingsWithoutExplicitAuthentication(t *testing.T) {
 	for _, name := range []string{
 		"ANTHROPIC_API_KEY",
@@ -171,7 +307,7 @@ func TestRunHeadlessCommandUsesMinimalEnvironmentAndDiscardsOutput(t *testing.T)
 	t.Setenv("ANTHROPIC_API_KEY", "auth-kept")
 	t.Setenv("OPENAI_API_KEY", "other-provider-secret")
 
-	result, err := runHeadlessCommand(context.Background(), scriptPath, nil, dir, "claude")
+	result, _, err := runHeadlessCommand(context.Background(), scriptPath, nil, dir, "claude")
 	if err != nil {
 		t.Fatalf("runHeadlessCommand error: %v", err)
 	}
@@ -206,7 +342,7 @@ func TestRunHeadlessCommandClassifiesFailureWithoutLeakingOutput(t *testing.T) {
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake agent: %v", err)
 	}
-	result, err := runHeadlessCommand(context.Background(), scriptPath, nil, dir, "claude")
+	result, _, err := runHeadlessCommand(context.Background(), scriptPath, nil, dir, "claude")
 	if err == nil {
 		t.Fatal("runHeadlessCommand unexpectedly succeeded")
 	}

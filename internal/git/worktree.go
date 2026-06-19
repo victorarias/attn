@@ -166,6 +166,19 @@ func GetMainRepoFromWorktree(worktreePath string) string {
 	return gitdir[:idx]
 }
 
+// IsWorktreeClean reports whether the worktree at path has no uncommitted
+// changes, mirroring `git status --porcelain --untracked-files=all` (empty
+// output == clean). Untracked files count as changes so a worktree where an agent
+// only created new files is correctly seen as dirty. The path itself is used as
+// the git CWD, so it works for both the main repo and a linked worktree.
+func IsWorktreeClean(path string) (bool, error) {
+	out, err := runGitOutput(OpStatus, CanonicalizePath(path), "status", "--porcelain", "--untracked-files=all")
+	if err != nil {
+		return false, err
+	}
+	return len(strings.TrimSpace(string(out))) == 0, nil
+}
+
 // GenerateWorktreePath generates a worktree path as sibling to main repo
 func GenerateWorktreePath(mainRepo, branch string) string {
 	repoName := filepath.Base(mainRepo)

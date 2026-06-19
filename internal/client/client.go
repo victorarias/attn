@@ -697,6 +697,111 @@ func (c *Client) IsRunning() bool {
 	return true
 }
 
+// sendWorkflow sends a workflow command and decodes the daemon's
+// WorkflowActionResultMessage reply (the shared reply shape the workflow socket
+// handlers write — protocol.Response has no workflow field, so the workflow
+// transport uses its own envelope). It is the workflow analogue of send().
+func (c *Client) sendWorkflow(msg interface{}) (*protocol.WorkflowActionResultMessage, error) {
+	conn, err := net.Dial("unix", c.socketPath)
+	if err != nil {
+		return nil, explainConnectError(c.socketPath, err)
+	}
+	defer conn.Close()
+
+	if err := json.NewEncoder(conn).Encode(msg); err != nil {
+		return nil, fmt.Errorf("send message: %w", err)
+	}
+
+	var result protocol.WorkflowActionResultMessage
+	if err := json.NewDecoder(conn).Decode(&result); err != nil {
+		return nil, fmt.Errorf("receive response: %w", err)
+	}
+
+	if !result.Success {
+		errMsg := ""
+		if result.Error != nil {
+			errMsg = *result.Error
+		}
+		return nil, fmt.Errorf("daemon error: %s", errMsg)
+	}
+
+	return &result, nil
+}
+
+// WorkflowRunUpsert persists (creates or updates) a workflow run row and returns
+// the daemon's hydrated view of it.
+func (c *Client) WorkflowRunUpsert(run *protocol.WorkflowRun) (*protocol.WorkflowRun, error) {
+	if run == nil {
+		return nil, errors.New("workflow run upsert: run is nil")
+	}
+	result, err := c.sendWorkflow(protocol.WorkflowRunUpsertMessage{
+		Cmd: protocol.CmdWorkflowRunUpsert,
+		Run: *run,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Run, nil
+}
+
+// WorkflowCallUpsert persists a single agent call (ON CONFLICT(run_id, ordinal)
+// updates in place) and returns the daemon's hydrated view of the owning run.
+func (c *Client) WorkflowCallUpsert(runID string, call *protocol.WorkflowAgentCall) (*protocol.WorkflowRun, error) {
+	if call == nil {
+		return nil, errors.New("workflow call upsert: call is nil")
+	}
+	result, err := c.sendWorkflow(protocol.WorkflowCallUpsertMessage{
+		Cmd:   protocol.CmdWorkflowCallUpsert,
+		RunID: runID,
+		Call:  *call,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Run, nil
+}
+
+// WorkflowRunGet returns the hydrated run (run header + journaled agent calls),
+// or (nil, nil) when the run is absent.
+func (c *Client) WorkflowRunGet(runID string) (*protocol.WorkflowRun, error) {
+	result, err := c.sendWorkflow(protocol.WorkflowRunGetMessage{
+		Cmd:   protocol.CmdWorkflowRunGet,
+		RunID: runID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Run, nil
+}
+
+// WorkflowRunList returns the runs for a session (empty sessionID lists all),
+// newest-first. Agent calls are intentionally omitted from list entries.
+func (c *Client) WorkflowRunList(sessionID string) ([]protocol.WorkflowRun, error) {
+	msg := protocol.WorkflowRunListMessage{
+		Cmd: protocol.CmdWorkflowRunList,
+	}
+	if sessionID != "" {
+		msg.SessionID = protocol.Ptr(sessionID)
+	}
+	result, err := c.sendWorkflow(msg)
+	if err != nil {
+		return nil, err
+	}
+	return result.Runs, nil
+}
+
+// WorkflowRunCancel marks a run canceled and returns its hydrated view.
+func (c *Client) WorkflowRunCancel(runID string) (*protocol.WorkflowRun, error) {
+	result, err := c.sendWorkflow(protocol.WorkflowRunCancelMessage{
+		Cmd:   protocol.CmdWorkflowRunCancel,
+		RunID: runID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Run, nil
+}
+
 // explainConnectError wraps a dial failure with profile context and — if
 // the *other* profile's daemon happens to be running — a concrete hint
 // on how to reach it. This is the single foot-gun everyone hits when

@@ -25,10 +25,10 @@ import (
 	"github.com/victorarias/attn/internal/contextjanitor"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/daemonctl"
-	"github.com/victorarias/attn/internal/hooks"
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptyworker"
+	"github.com/victorarias/attn/internal/workflowresult"
 	"github.com/victorarias/attn/internal/wrapper"
 )
 
@@ -162,6 +162,11 @@ func main() {
 		return
 	}
 
+	if len(os.Args) >= 2 && os.Args[1] == "_workflow-result-mcp" {
+		runWorkflowResultMCP(os.Args[2:])
+		return
+	}
+
 	if isProtocolVersionCommand(os.Args) {
 		runProtocolVersion()
 		return
@@ -210,6 +215,9 @@ func main() {
 		runPTYWorker()
 	case "review-loop":
 		runReviewLoop()
+	case "workflow":
+		maybePrintProfileBanner()
+		runWorkflow()
 	case "plugin":
 		maybePrintProfileBanner()
 		runPluginCommand()
@@ -274,6 +282,42 @@ func runWorkspaceContextJanitorMCP(args []string) {
 		context.Background(),
 		*sourcePath,
 		*candidatePath,
+		os.Stdin,
+		os.Stdout,
+	); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+// runWorkflowResultMCP serves the workflow engine's schema-validating result
+// sink (one return_result tool). The schema is passed as a file path (not inline
+// argv) to avoid shell/argv quoting traps for arbitrary JSON Schemas.
+func runWorkflowResultMCP(args []string) {
+	fs := flag.NewFlagSet("_workflow-result-mcp", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	toolName := fs.String("tool-name", "return_result", "the single MCP tool name")
+	schemaPath := fs.String("schema-file", "", "JSON Schema file for the tool inputSchema (empty => permissive)")
+	resultPath := fs.String("result-file", "", "atomic result output file")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 ||
+		strings.TrimSpace(*resultPath) == "" || strings.TrimSpace(*toolName) == "" {
+		fmt.Fprintln(os.Stderr, "invalid workflow result MCP arguments")
+		os.Exit(2)
+	}
+	var schema json.RawMessage
+	if p := strings.TrimSpace(*schemaPath); p != "" {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		schema = b
+	}
+	if err := workflowresult.ServeResultSink(
+		context.Background(),
+		*toolName,
+		schema,
+		*resultPath,
 		os.Stdin,
 		os.Stdout,
 	); err != nil {
@@ -520,6 +564,7 @@ commands:
   open <file.md> [--session <id>]   show a markdown file in attn
   browser <command>                 open and control the in-app browser
   review-loop <command>             manage an autonomous review loop
+  workflow <command>                run, inspect, and resume durable workflows
   list                              list sessions
   daemon <command>                  manage the daemon
   profile <status|resolve|list>     show / resolve the active profile's resources
@@ -1895,6 +1940,10 @@ func runAgentDirectly(requestedAgent string) {
 			opts.WorkspaceContextPath = contextPath
 		}
 	}
+	// The daemon's worker exports ATTN_WORKFLOW_GUIDANCE_ENABLED when the
+	// workflows_enabled setting is on. This launch path is the worker process, so
+	// the env var (not a store read) carries the gate here.
+	opts.InjectWorkflowGuidance = strings.TrimSpace(os.Getenv("ATTN_WORKFLOW_GUIDANCE_ENABLED")) == "1"
 	if cp, ok := agentdriver.GetConfigOverrideProvider(driver); ok {
 		opts.ConfigOverrides = cp.GenerateConfigOverrides(opts)
 	}
@@ -2080,36 +2129,15 @@ func runHookSessionStart() {
 	_ = json.NewDecoder(os.Stdin).Decode(&input)
 
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
+	// The SessionStart hook exists solely to sync the agent's native session ID
+	// back to attn for resume. Workspace-context guidance is injected directly at
+	// launch (--append-system-prompt / developer_instructions), so there is no
+	// guidance fallback to emit here.
 	syncSessionResumeID(c, sessionID, input.SessionID)
-	output, err := workspaceContextSessionStartOutput(c, sessionID, 40, 25*time.Millisecond)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not load workspace context guidance: %v\n", err)
-		return
-	}
-	if output != "" && !workspaceContextGuidanceProvidedAtLaunch() {
-		fmt.Fprintln(os.Stdout, output)
-	}
-}
-
-func workspaceContextGuidanceProvidedAtLaunch() bool {
-	return strings.TrimSpace(os.Getenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE")) != ""
 }
 
 type workspaceContextCheckoutClient interface {
 	CheckoutWorkspaceContext(sourceSessionID string, force bool) (*protocol.WorkspaceContextResult, error)
-}
-
-func workspaceContextSessionStartOutput(
-	c workspaceContextCheckoutClient,
-	sessionID string,
-	attempts int,
-	retryDelay time.Duration,
-) (string, error) {
-	path, err := workspaceContextCheckoutPath(c, sessionID, attempts, retryDelay)
-	if err != nil {
-		return "", err
-	}
-	return hooks.WorkspaceContextSessionStartOutput(path), nil
 }
 
 func workspaceContextCheckoutPath(

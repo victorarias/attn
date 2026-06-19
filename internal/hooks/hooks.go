@@ -24,15 +24,6 @@ type SettingsConfig struct {
 	Hooks map[string][]HookEntry `json:"hooks"`
 }
 
-type sessionStartHookSpecificOutput struct {
-	HookEventName     string `json:"hookEventName"`
-	AdditionalContext string `json:"additionalContext"`
-}
-
-type sessionStartHookOutput struct {
-	HookSpecificOutput sessionStartHookSpecificOutput `json:"hookSpecificOutput"`
-}
-
 // WorkspaceContextGuidance teaches an agent how to use this session's checkout
 // without embedding the shared context itself.
 func WorkspaceContextGuidance(path string) string {
@@ -51,21 +42,36 @@ func WorkspaceContextGuidance(path string) string {
 - Use only this session's checkout. Do not pass --session unless the user explicitly asks you to operate on another session.`, strconv.Quote(path))
 }
 
-// WorkspaceContextSessionStartOutput returns hook output used when an agent
-// could not receive workspace context guidance at launch.
-func WorkspaceContextSessionStartOutput(path string) string {
-	guidance := WorkspaceContextGuidance(path)
-	if guidance == "" {
-		return ""
+// WorkflowTriggerGuidance teaches an agent when it is allowed to author and run
+// a durable multi-agent workflow. Running one fans out many subagents and can
+// burn a large amount of tokens, so it is strictly opt-in: the agent watches its
+// OWN user messages for the trigger keywords and otherwise never reaches for one.
+func WorkflowTriggerGuidance() string {
+	return `You can author and run durable, resumable multi-agent **workflows** through the ` + "`attn workflow`" + ` CLI (load the attn skill's workflow reference for the authoring contract before writing one). A workflow orchestrates many subagents deterministically — to fan out and cover ground in parallel, to cross-check work with independent verifiers before committing, or to take on scale a single context can't hold.
+
+Running a workflow spawns multiple subagents and can consume a large amount of tokens, so treat it as an explicit, opt-in tool — never the default for an ordinary task. Run one ONLY when the user has opted in, which means one of:
+
+- **"attn workflow"** appears in the user's message — run exactly ONE workflow scoped to that task, then stop. Use it when the task genuinely benefits from parallel fan-out or adversarial verification.
+- **"hypercode"** appears — a standing, session-wide opt-in. While it is in effect, default to authoring and running a workflow for every substantive task, and aim for the most exhaustive, correct result you can produce; token cost is not a constraint. Solo only on trivial or conversational turns.
+
+If neither keyword is present, do NOT run a workflow: use ordinary tools, or briefly note that a workflow could help and ask whether to run one (mention they can opt in with "attn workflow"). The opt-in must be in the user's own words — never infer it from a task that would merely benefit from one.`
+}
+
+// AgentInstructions composes the launch-time instruction blocks injected as a
+// system prompt (Claude --append-system-prompt) or developer instructions
+// (Codex developer_instructions): the workspace-context guidance when this
+// session has a checkout, and the workflow-trigger guidance when the workflow
+// machinery is enabled. Either block may be empty; non-empty blocks are joined
+// with a blank line. Returns "" when nothing applies.
+func AgentInstructions(workspaceContextPath string, injectWorkflow bool) string {
+	blocks := make([]string, 0, 2)
+	if guidance := WorkspaceContextGuidance(workspaceContextPath); guidance != "" {
+		blocks = append(blocks, guidance)
 	}
-	output := sessionStartHookOutput{
-		HookSpecificOutput: sessionStartHookSpecificOutput{
-			HookEventName:     "SessionStart",
-			AdditionalContext: guidance,
-		},
+	if injectWorkflow {
+		blocks = append(blocks, WorkflowTriggerGuidance())
 	}
-	data, _ := json.Marshal(output)
-	return string(data)
+	return strings.Join(blocks, "\n\n")
 }
 
 // Generate generates settings configuration with hooks for a session

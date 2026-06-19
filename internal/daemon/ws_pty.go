@@ -528,6 +528,8 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		CodexExecutable:   protocol.Deref(msg.CodexExecutable),
 		CopilotExecutable: protocol.Deref(msg.CopilotExecutable),
 		LoginShellEnv:     d.cachedLoginShellEnv(),
+
+		WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)),
 	}
 	if existingSession != nil {
 		for _, liveID := range d.ptyBackend.SessionIDs(context.Background()) {

@@ -68,7 +68,7 @@ func TestAggregator_Aggregate(t *testing.T) {
 	}
 
 	agg := NewAggregator(repos, nil)
-	result := agg.Aggregate(sessions, prs)
+	result := agg.Aggregate(sessions, prs, nil)
 
 	// Should have 3 items needing attention: two sessions and github.com:owner/repo#1.
 	if result.TotalCount != 3 {
@@ -100,7 +100,7 @@ func TestAggregator_Aggregate(t *testing.T) {
 
 func TestAggregator_EmptyInput(t *testing.T) {
 	agg := NewAggregator(nil, nil)
-	result := agg.Aggregate(nil, nil)
+	result := agg.Aggregate(nil, nil, nil)
 
 	if result.TotalCount != 0 {
 		t.Errorf("TotalCount = %d, want 0", result.TotalCount)
@@ -124,7 +124,7 @@ func TestAggregator_AllPRsMuted(t *testing.T) {
 	}
 
 	agg := NewAggregator(nil, nil)
-	result := agg.Aggregate(nil, prs)
+	result := agg.Aggregate(nil, prs, nil)
 
 	if result.TotalCount != 0 {
 		t.Errorf("TotalCount = %d, want 0 (all PRs muted)", result.TotalCount)

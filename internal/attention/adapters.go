@@ -1,6 +1,7 @@
 package attention
 
 import (
+	"strings"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -86,4 +87,72 @@ func (p PRAdapter) AttentionSince() time.Time {
 
 func (p PRAdapter) AttentionMuted() bool {
 	return p.PR.Muted || p.RepoMuted || p.AuthorMuted
+}
+
+// WorkflowRunAdapter wraps a protocol.WorkflowRun to implement Source. The
+// engine runs out-of-process; the daemon surfaces a finished run the user should
+// notice (completed or failed) in the attention aggregator. A still-running run
+// needs no notice, and a canceled run was dismissed by the user, so neither
+// raises attention.
+type WorkflowRunAdapter struct {
+	Run *protocol.WorkflowRun
+}
+
+func (w WorkflowRunAdapter) AttentionID() string {
+	return w.Run.RunID
+}
+
+func (w WorkflowRunAdapter) AttentionKind() string {
+	return "workflow"
+}
+
+func (w WorkflowRunAdapter) AttentionLabel() string {
+	if base := workflowScriptBaseName(w.Run.ScriptPath); base != "" {
+		return base
+	}
+	return w.Run.RunID
+}
+
+func (w WorkflowRunAdapter) NeedsAttention() bool {
+	switch w.Run.Status {
+	case protocol.WorkflowRunStatusCompleted, protocol.WorkflowRunStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func (w WorkflowRunAdapter) AttentionReason() string {
+	if w.NeedsAttention() {
+		return string(w.Run.Status)
+	}
+	return ""
+}
+
+func (w WorkflowRunAdapter) AttentionSince() time.Time {
+	if w.Run.CompletedAt != nil {
+		if t := protocol.Timestamp(*w.Run.CompletedAt).Time(); !t.IsZero() {
+			return t
+		}
+	}
+	return protocol.Timestamp(w.Run.UpdatedAt).Time()
+}
+
+func (w WorkflowRunAdapter) AttentionMuted() bool {
+	return false
+}
+
+// workflowScriptBaseName returns the final path segment of a script path, used as
+// a short attention label. It avoids importing path/filepath for one trim (and so
+// keeps filepath.Base's empty/root/trailing-slash returns out of the AttentionLabel
+// RunID fallback). attn is macOS-only, so only "/" is handled.
+func workflowScriptBaseName(scriptPath string) string {
+	trimmed := strings.TrimRight(scriptPath, "/")
+	if trimmed == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(trimmed, "/"); idx >= 0 {
+		return trimmed[idx+1:]
+	}
+	return trimmed
 }

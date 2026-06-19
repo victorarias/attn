@@ -30,6 +30,7 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"references/chief-of-staff.md",
 		"references/workspace-context.md",
 		"references/review-loops.md",
+		"references/workflow.md",
 		"references/markdown.md",
 		"references/browser.md",
 		"Load more than one reference only when",
@@ -194,6 +195,7 @@ func TestAttnSkillInstallsAreIdentical(t *testing.T) {
 		"references/delegation.md",
 		"references/workspace-context.md",
 		"references/review-loops.md",
+		"references/workflow.md",
 		"references/markdown.md",
 		"references/browser.md",
 	} {

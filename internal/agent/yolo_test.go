@@ -54,16 +54,6 @@ func TestCodexBuildCommand_IncludesConfigOverridesBeforeResume(t *testing.T) {
 	}
 }
 
-func TestCodexBuildEnvMarksDeveloperInstructionGuidance(t *testing.T) {
-	env := (&Codex{}).BuildEnv(SpawnOpts{
-		SessionID:            "sess-1",
-		WorkspaceContextPath: "/tmp/context.md",
-	})
-	if !slices.Contains(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=developer_instructions") {
-		t.Fatalf("env = %#v, want developer instruction guidance marker", env)
-	}
-}
-
 func TestClaudeBuildCommand_AppendsWorkspaceContextSystemPrompt(t *testing.T) {
 	cmd := (&Claude{}).BuildCommand(SpawnOpts{
 		SessionID:            "sess-1",
@@ -76,15 +66,6 @@ func TestClaudeBuildCommand_AppendsWorkspaceContextSystemPrompt(t *testing.T) {
 	}
 	if !strings.Contains(cmd.Args[flagIndex+1], "/tmp/context.md") {
 		t.Fatalf("system prompt = %q, want workspace context path", cmd.Args[flagIndex+1])
-	}
-}
-
-func TestClaudeBuildEnvMarksAppendSystemPromptGuidance(t *testing.T) {
-	env := (&Claude{}).BuildEnv(SpawnOpts{
-		WorkspaceContextPath: "/tmp/context.md",
-	})
-	if !slices.Contains(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=append_system_prompt") {
-		t.Fatalf("env = %#v, want append system prompt guidance marker", env)
 	}
 }
 

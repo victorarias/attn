@@ -135,6 +135,20 @@ enum GitOperationStatus {
   failed,
 }
 
+enum WorkflowRunStatus {
+  running,
+  completed,
+  failed,
+  canceled,
+}
+
+enum WorkflowAgentCallStatus {
+  running,
+  ok,
+  skipped,
+  errored,
+}
+
 // ============================================================================
 // Core Entities
 // ============================================================================
@@ -944,6 +958,33 @@ model AnswerReviewLoopMessage {
   answer: string;
 }
 
+model WorkflowRunUpsertMessage {
+  cmd: "workflow_run_upsert";
+  run: WorkflowRun;
+}
+
+model WorkflowCallUpsertMessage {
+  cmd: "workflow_call_upsert";
+  run_id: string;
+  call: WorkflowAgentCall;
+}
+
+model WorkflowRunGetMessage {
+  cmd: "workflow_run_get";
+  run_id: string;
+}
+
+model WorkflowRunListMessage {
+  cmd: "workflow_run_list";
+  session_id?: string;
+  workspace_id?: string;
+}
+
+model WorkflowRunCancelMessage {
+  cmd: "workflow_run_cancel";
+  run_id: string;
+}
+
 model MarkFileViewedMessage {
   cmd: "mark_file_viewed";
   review_id: string;
@@ -1740,6 +1781,43 @@ model ReviewLoopInteraction {
   consumed_at?: string;
 }
 
+model WorkflowAgentCall {
+  run_id: string;
+  ordinal: string;
+  label?: string;
+  phase?: string;
+  prompt_hash?: string;
+  schema_hash?: string;
+  resolved_model?: string;
+  resolved_harness?: string;
+  agent_type?: string;
+  result_json?: string;
+  status: WorkflowAgentCallStatus;
+  error?: string;
+  result_path?: string;
+  started_at?: string;
+  completed_at?: string;
+}
+
+model WorkflowRun {
+  run_id: string;
+  script_path: string;
+  script_hash: string;
+  args_json?: string;
+  session_id?: string;
+  workspace_id?: string;
+  status: WorkflowRunStatus;
+  phase?: string;
+  harness?: string;
+  result_json?: string;
+  last_error?: string;
+  resumable: boolean;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+  agent_calls?: WorkflowAgentCall[];
+}
+
 model ReviewComment {
   id: string;
   review_id: string;
@@ -1775,6 +1853,21 @@ model ReviewLoopUpdatedMessage {
   event: "review_loop_updated";
   session_id: string;
   review_loop_run?: ReviewLoopRun;
+}
+
+model WorkflowRunUpdatedMessage {
+  event: "workflow_run_updated";
+  run: WorkflowRun;
+}
+
+model WorkflowActionResultMessage {
+  event: "workflow_action_result";
+  action: string;
+  run_id?: string;
+  run?: WorkflowRun;
+  runs?: WorkflowRun[];
+  success: boolean;
+  error?: string;
 }
 
 model MarkFileViewedResultMessage {
@@ -2147,6 +2240,8 @@ alias DaemonEvent =
   | GetReviewStateResultMessage
   | ReviewLoopResultMessage
   | ReviewLoopUpdatedMessage
+  | WorkflowRunUpdatedMessage
+  | WorkflowActionResultMessage
   | WorkspaceContextResultMessage
   | WorkspaceContextListResultMessage
   | MarkFileViewedResultMessage

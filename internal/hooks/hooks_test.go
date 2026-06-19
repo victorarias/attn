@@ -117,7 +117,7 @@ func TestGenerateHooks_DefaultsWrapperToAttn(t *testing.T) {
 }
 
 func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {
-	overrides := GenerateCodexConfigOverrides("session-1", "/tmp/attn.sock", "/tmp/attn", "/tmp/context.md")
+	overrides := GenerateCodexConfigOverrides("session-1", "/tmp/attn.sock", "/tmp/attn", "/tmp/context.md", false)
 	joined := strings.Join(overrides, "\n")
 
 	if !strings.Contains(joined, "hooks.SessionStart=") {
@@ -193,17 +193,76 @@ func TestWorkspaceContextGuidance(t *testing.T) {
 	}
 }
 
-func TestWorkspaceContextSessionStartOutputWrapsGuidance(t *testing.T) {
-	raw := WorkspaceContextSessionStartOutput("/tmp/context.md")
-	var output sessionStartHookOutput
-	if err := json.Unmarshal([]byte(raw), &output); err != nil {
-		t.Fatalf("WorkspaceContextSessionStartOutput returned invalid JSON: %v", err)
+func TestWorkflowTriggerGuidance(t *testing.T) {
+	guidance := WorkflowTriggerGuidance()
+	for _, expected := range []string{
+		"attn workflow",
+		"hypercode",
+		"opt-in",
+		"exactly ONE workflow",
+		"session-wide opt-in",
+		"do NOT run a workflow",
+		"user's own words",
+	} {
+		if !strings.Contains(guidance, expected) {
+			t.Fatalf("workflow guidance missing %q: %q", expected, guidance)
+		}
 	}
-	if output.HookSpecificOutput.HookEventName != "SessionStart" {
-		t.Fatalf("hook event = %q", output.HookSpecificOutput.HookEventName)
+}
+
+func TestAgentInstructionsComposition(t *testing.T) {
+	workflow := WorkflowTriggerGuidance()
+	context := WorkspaceContextGuidance("/tmp/context.md")
+
+	// Nothing applies => empty.
+	if got := AgentInstructions("", false); got != "" {
+		t.Fatalf("AgentInstructions(empty, false) = %q, want \"\"", got)
 	}
-	if output.HookSpecificOutput.AdditionalContext != WorkspaceContextGuidance("/tmp/context.md") {
-		t.Fatal("hook output should wrap the shared workspace context guidance")
+
+	// Workspace context only.
+	contextOnly := AgentInstructions("/tmp/context.md", false)
+	if !strings.Contains(contextOnly, "/tmp/context.md") {
+		t.Fatalf("context-only instructions missing the path: %q", contextOnly)
+	}
+	if strings.Contains(contextOnly, "hypercode") {
+		t.Fatalf("context-only instructions leaked workflow guidance: %q", contextOnly)
+	}
+
+	// Workflow guidance only (no checkout).
+	workflowOnly := AgentInstructions("", true)
+	if workflowOnly != workflow {
+		t.Fatalf("workflow-only instructions = %q, want exactly the workflow guidance", workflowOnly)
+	}
+
+	// Both, joined with a blank line, context first.
+	both := AgentInstructions("/tmp/context.md", true)
+	if want := context + "\n\n" + workflow; both != want {
+		t.Fatalf("combined instructions = %q, want %q", both, want)
+	}
+}
+
+func TestGenerateCodexConfigOverrides_InjectsWorkflowGuidanceWhenEnabled(t *testing.T) {
+	off := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", "/tmp/context.md", false), "\n")
+	if strings.Contains(off, "hypercode") {
+		t.Fatalf("workflow guidance injected while disabled: %q", off)
+	}
+
+	on := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", "/tmp/context.md", true), "\n")
+	if !strings.Contains(on, "developer_instructions=") {
+		t.Fatal("enabled overrides dropped developer_instructions")
+	}
+	if !strings.Contains(on, "hypercode") {
+		t.Fatalf("enabled overrides missing workflow guidance: %q", on)
+	}
+	// The workspace context still rides alongside the workflow guidance.
+	if !strings.Contains(on, "/tmp/context.md") {
+		t.Fatalf("enabled overrides dropped the workspace context: %q", on)
+	}
+
+	// Workflow guidance is injected even without a workspace checkout.
+	noCtx := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", "", true), "\n")
+	if !strings.Contains(noCtx, "developer_instructions=") || !strings.Contains(noCtx, "hypercode") {
+		t.Fatalf("workflow guidance not injected without a checkout: %q", noCtx)
 	}
 }
 

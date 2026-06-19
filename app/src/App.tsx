@@ -3,7 +3,7 @@ import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sidebar, type SidebarHeaderAction, type DockItem, ReviewLoopIcon, EditorIcon, DiffIcon, PRsIcon } from './components/Sidebar';
+import { Sidebar, type SidebarHeaderAction, type DockItem, ReviewLoopIcon, WorkflowIcon, EditorIcon, DiffIcon, PRsIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
@@ -15,6 +15,12 @@ import { ChiefOfStaffTransferPrompt } from './components/ChiefOfStaffTransferPro
 import { ChangesPanel } from './components/ChangesPanel';
 import { DiffDetailPanel } from './components/DiffDetailPanel';
 import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
+import { WorkflowRunView } from './components/WorkflowRunView';
+import {
+  useWorkflowRunsStore,
+  selectLatestWorkflowRunForSession,
+  workflowRunIdNeedingHydration,
+} from './store/workflowRuns';
 import { OpenPRLauncherProgress } from './components/OpenPRLauncherProgress';
 import { SessionCreationProgress, type SessionCreationPhase } from './components/SessionCreationProgress';
 import { RightDock } from './components/RightDock';
@@ -496,6 +502,8 @@ function App() {
     getRepoInfo,
     getReviewLoopRun,
     getReviewLoopState,
+    listWorkflowRuns,
+    getWorkflowRun,
     getReviewState,
     markFileViewed,
     sendAddComment,
@@ -632,6 +640,8 @@ function App() {
         getRepoInfo={getRepoInfo}
         getReviewLoopRun={getReviewLoopRun}
         getReviewLoopState={getReviewLoopState}
+        listWorkflowRuns={listWorkflowRuns}
+        getWorkflowRun={getWorkflowRun}
         getReviewState={getReviewState}
         markFileViewed={markFileViewed}
         sendAddComment={sendAddComment}
@@ -733,6 +743,8 @@ interface AppContentProps {
   getRepoInfo: ReturnType<typeof useDaemonSocket>['getRepoInfo'];
   getReviewLoopRun: ReturnType<typeof useDaemonSocket>['getReviewLoopRun'];
   getReviewLoopState: ReturnType<typeof useDaemonSocket>['getReviewLoopState'];
+  listWorkflowRuns: ReturnType<typeof useDaemonSocket>['listWorkflowRuns'];
+  getWorkflowRun: ReturnType<typeof useDaemonSocket>['getWorkflowRun'];
   getReviewState: ReturnType<typeof useDaemonSocket>['getReviewState'];
   markFileViewed: ReturnType<typeof useDaemonSocket>['markFileViewed'];
   sendAddComment: ReturnType<typeof useDaemonSocket>['sendAddComment'];
@@ -828,6 +840,8 @@ sendFetchPRDetails,
   getRepoInfo,
   getReviewLoopRun,
   getReviewLoopState,
+  listWorkflowRuns,
+  getWorkflowRun,
   getReviewState,
   markFileViewed,
   sendAddComment,
@@ -1190,7 +1204,7 @@ sendFetchPRDetails,
     void connect();
   }, [connect]);
 
-  type DockPanelId = 'diff' | 'reviewLoop' | 'attention' | 'diffDetail';
+  type DockPanelId = 'diff' | 'reviewLoop' | 'workflowRun' | 'attention' | 'diffDetail';
 
   // Muted section expansion (controlled by Dashboard click)
   const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
@@ -1204,6 +1218,7 @@ sendFetchPRDetails,
     openPanels: {
         diff: false,
         reviewLoop: false,
+        workflowRun: false,
         attention: false,
         diffDetail: false,
     },
@@ -1538,6 +1553,14 @@ sendFetchPRDetails,
     () => (activeSessionId ? reviewLoopsBySessionId[activeSessionId] ?? null : null),
     [activeSessionId, reviewLoopsBySessionId],
   );
+  // Read-only workflow runs: the slice is hydrated by useDaemonSocket on the
+  // workflow_run_updated broadcast; listWorkflowRuns backfills the active
+  // session's existing runs on selection (broadcasts only fire on change).
+  const workflowRunsMap = useWorkflowRunsStore((s) => s.workflowRuns);
+  const activeWorkflowRun = useMemo(
+    () => selectLatestWorkflowRunForSession(workflowRunsMap, activeSessionId),
+    [workflowRunsMap, activeSessionId],
+  );
   const activeLocalSession = useMemo(
     () => (activeSessionId ? sessions.find((s) => s.id === activeSessionId) ?? null : null),
     [activeSessionId, sessions],
@@ -1571,6 +1594,7 @@ sendFetchPRDetails,
   const dockPanelStack = dockState.stack;
   const diffPanelOpen = openDockPanels.diff;
   const reviewLoopPanelOpen = openDockPanels.reviewLoop;
+  const workflowRunPanelOpen = openDockPanels.workflowRun;
   const attentionPanelOpen = openDockPanels.attention;
   const diffDetailPanelOpen = openDockPanels.diffDetail;
   const changesPanelVisible = view === 'session' && diffPanelOpen && Boolean(activeRepoDaemonSession?.directory);
@@ -1730,6 +1754,39 @@ sendFetchPRDetails,
       cancelled = true;
     };
   }, [activeSessionId, getReviewLoopState, setReviewLoopStateForSession]);
+
+  // Backfill the active session's workflow runs into the global slice. The
+  // useDaemonSocket workflow_run_updated handler keeps it fresh after this; the
+  // store is the single source the read-only WorkflowRunView renders from.
+  useEffect(() => {
+    if (!activeSessionId) {
+      return;
+    }
+    listWorkflowRuns(activeSessionId).catch((error) => {
+      console.error('[App] Failed to list workflow runs:', error);
+    });
+  }, [activeSessionId, listWorkflowRuns]);
+
+  // Hydrate the run the panel is actually showing. listWorkflowRuns intentionally
+  // omits each run's agent_calls (the list is a summary surface), so a run sourced
+  // only from that backfill renders "0/0 calls" with no journal. Live runs get
+  // their calls from workflow_run_updated broadcasts, but a completed run sees no
+  // further broadcasts — after a reload it would stay call-less forever. Fetch the
+  // single hydrated run (which includes the journal) the first time the open panel
+  // shows a run with no calls; getWorkflowRun upserts it into the store, and live
+  // broadcasts own freshness from there.
+  const workflowRunIdToHydrate = workflowRunIdNeedingHydration(
+    workflowRunPanelOpen,
+    activeWorkflowRun,
+  );
+  useEffect(() => {
+    if (!workflowRunIdToHydrate) {
+      return;
+    }
+    getWorkflowRun(workflowRunIdToHydrate).catch((error) => {
+      console.error('[App] Failed to hydrate workflow run:', error);
+    });
+  }, [workflowRunIdToHydrate, getWorkflowRun]);
 
   const [utilityFocusRequestToken, setUtilityFocusRequestToken] = useState(0);
 
@@ -2094,6 +2151,7 @@ sendFetchPRDetails,
     closeSession: handleCloseSession,
     reloadSession,
     setSetting: sendSetSetting,
+    openDockPanel: (panelId: string) => openDockPanel(panelId as DockPanelId),
     openShortcutEditor: () => setShortcutEditorOpen(true),
     splitPane: (sessionId, paneId, direction) => {
       return createSplitSession('shell', direction, paneId, { baseSessionId: sessionId });
@@ -3038,6 +3096,14 @@ sendFetchPRDetails,
       onClick: () => toggleDockPanel('reviewLoop'),
     },
     {
+      id: 'workflowRun',
+      title: activeSessionId ? 'Workflow Runs' : 'Workflow Runs (No active session)',
+      icon: <WorkflowIcon />,
+      active: workflowRunPanelOpen,
+      disabled: !activeSessionId,
+      onClick: () => toggleDockPanel('workflowRun'),
+    },
+    {
       id: 'diff',
       title: diffPanelOpen ? 'Hide Diff Panel' : 'Show Diff Panel',
       icon: <DiffIcon />,
@@ -3063,6 +3129,7 @@ sendFetchPRDetails,
     diffPanelOpen,
     handleOpenEditorForSession,
     reviewLoopPanelOpen,
+    workflowRunPanelOpen,
     toggleDockPanel,
   ]);
 
@@ -3505,6 +3572,19 @@ sendFetchPRDetails,
                   onStop={handleStopReviewLoop}
                   onSetIterations={handleSetReviewLoopIterations}
                   onAnswer={handleAnswerReviewLoop}
+                />
+              ) : null,
+            },
+            {
+              id: 'workflowRun',
+              isOpen: workflowRunPanelOpen && Boolean(activeSessionId),
+              width: 'clamp(420px, 50vw, 680px)',
+              tone: activeWorkflowRun ? toneForDockPanel(activeWorkflowRun.status) : 'default',
+              className: 'dock-panel dock-panel--workflow-run',
+              children: activeSessionId ? (
+                <WorkflowRunView
+                  run={activeWorkflowRun}
+                  onClose={() => closeDockPanel('workflowRun')}
                 />
               ) : null,
             },
