@@ -194,8 +194,7 @@ func (d *driverAgent) defaultRunCWD() string {
 //
 // call.Model overrides d.model for this call when non-empty. call.AgentType is
 // carried for native parity but currently unused.
-func (d *driverAgent) Run(call AgentCall) (json.RawMessage, error) {
-	ctx := context.Background()
+func (d *driverAgent) Run(ctx context.Context, call AgentCall) (json.RawMessage, error) {
 	model := d.model
 	if call.Model != "" {
 		model = call.Model

@@ -23,7 +23,7 @@ type recordingStub struct {
 	result json.RawMessage
 }
 
-func (s *recordingStub) Run(call AgentCall) (json.RawMessage, error) {
+func (s *recordingStub) Run(_ context.Context, call AgentCall) (json.RawMessage, error) {
 	s.mu.Lock()
 	s.calls = append(s.calls, call)
 	s.mu.Unlock()
@@ -188,7 +188,7 @@ func TestWorktreeIsolationKeepsMutatedWorktree(t *testing.T) {
 	}}
 	da := newIsolationTestDriverAgent(t, repo, runner)
 
-	got, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "do work", Schema: json.RawMessage(testSchema), Isolation: "worktree"})
+	got, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "do work", Schema: json.RawMessage(testSchema), Isolation: "worktree"})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestWorktreeIsolationRemovesCleanWorktree(t *testing.T) {
 	}}
 	da := newIsolationTestDriverAgent(t, repo, runner)
 
-	got, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "read only", Schema: json.RawMessage(testSchema), Isolation: "worktree"})
+	got, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "read only", Schema: json.RawMessage(testSchema), Isolation: "worktree"})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestWorktreeIsolationNoneRunsInWorkingTree(t *testing.T) {
 	}}
 	da := newIsolationTestDriverAgent(t, repo, runner)
 
-	if _, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "shared tree", Schema: json.RawMessage(testSchema)}); err != nil {
+	if _, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "shared tree", Schema: json.RawMessage(testSchema)}); err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
 	after := worktreePaths(t, repo)
@@ -278,7 +278,7 @@ func TestWorktreeIsolationFailedRunKeepsMutatedWorktree(t *testing.T) {
 	}}
 	da := newIsolationTestDriverAgent(t, repo, runner)
 
-	got, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "will fail", Schema: json.RawMessage(testSchema), Isolation: "worktree"})
+	got, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "will fail", Schema: json.RawMessage(testSchema), Isolation: "worktree"})
 	if err == nil {
 		t.Fatalf("expected a terminal error (engine maps to null), got result %s", got)
 	}
@@ -303,7 +303,7 @@ func TestWorktreeIsolationModelOverride(t *testing.T) {
 	}}
 	da := newIsolationTestDriverAgent(t, repo, runner) // default model "test-model"
 
-	if _, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "x", Schema: json.RawMessage(testSchema), Isolation: "worktree", Model: "override-model"}); err != nil {
+	if _, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "x", Schema: json.RawMessage(testSchema), Isolation: "worktree", Model: "override-model"}); err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
 }

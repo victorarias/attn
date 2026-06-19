@@ -323,7 +323,7 @@ type fixedStub struct {
 	result json.RawMessage
 }
 
-func (s fixedStub) Run(_ workflow.AgentCall) (json.RawMessage, error) {
+func (s fixedStub) Run(_ context.Context, _ workflow.AgentCall) (json.RawMessage, error) {
 	return s.result, nil
 }
 
@@ -403,19 +403,19 @@ func runWorkflowEngineForTest(t *testing.T, c workflowClient, parsed workflowRun
 
 // --- cancel watcher --------------------------------------------------------
 
-// ctxAwareBlockingStub blocks in Run until the test releases it. The engine does
-// not pass ctx to AgentStub, so the test closes `release` once it has canceled the
-// run context, proving the watcher's cancellation actually reaches in-flight work.
+// ctxAwareBlockingStub blocks in Run until the run context is canceled. Because the
+// engine threads the run ctx into AgentStub.Run, a canceled run tears the in-flight
+// subagent down directly: Run wakes on ctx.Done() and returns. `started` lets the
+// test observe the dispatch is genuinely in flight before it triggers the cancel.
 type ctxAwareBlockingStub struct {
 	started chan struct{}
-	release chan struct{}
 	once    sync.Once
 }
 
-func (s *ctxAwareBlockingStub) Run(_ workflow.AgentCall) (json.RawMessage, error) {
+func (s *ctxAwareBlockingStub) Run(ctx context.Context, _ workflow.AgentCall) (json.RawMessage, error) {
 	s.once.Do(func() { close(s.started) })
-	<-s.release
-	return nil, context.Canceled
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 func TestWorkflowCancelWatcherInterruptsRun(t *testing.T) {
@@ -423,7 +423,7 @@ func TestWorkflowCancelWatcherInterruptsRun(t *testing.T) {
 	runID := "wf-cancel"
 	fake.seedRun(protocol.WorkflowRun{RunID: runID, Status: protocol.WorkflowRunStatusRunning})
 
-	stub := &ctxAwareBlockingStub{started: make(chan struct{}), release: make(chan struct{})}
+	stub := &ctxAwareBlockingStub{started: make(chan struct{})}
 
 	const script = `const a = await agent('hi'); return a;`
 
@@ -448,8 +448,9 @@ func TestWorkflowCancelWatcherInterruptsRun(t *testing.T) {
 	}()
 
 	// Wait for the subagent to be in flight, then mark the run canceled at the
-	// daemon. The watcher polls, observes canceled, cancels ctx; the engine's
-	// watchdog interrupts the in-flight await; we release the stub so it returns.
+	// daemon. The watcher polls, observes canceled, and cancels ctx; the canceled
+	// ctx both wakes the engine's event loop (parked on the await) and tears down the
+	// in-flight stub, which honors ctx.Done() directly.
 	select {
 	case <-stub.started:
 	case <-time.After(2 * time.Second):
@@ -458,12 +459,6 @@ func TestWorkflowCancelWatcherInterruptsRun(t *testing.T) {
 	if _, err := fake.WorkflowRunCancel(runID); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
-
-	// Once ctx is canceled by the watcher, unblock the stub so its goroutine exits.
-	go func() {
-		<-ctx.Done()
-		close(stub.release)
-	}()
 
 	select {
 	case res := <-resultCh:

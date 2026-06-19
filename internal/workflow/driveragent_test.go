@@ -64,7 +64,7 @@ func TestDriverAgentHappySchemaPath(t *testing.T) {
 	}}
 	da := newTestDriverAgent(t, runner, 2)
 
-	got, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "do it", Schema: json.RawMessage(testSchema)})
+	got, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "do it", Schema: json.RawMessage(testSchema)})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestDriverAgentDetectMissingThenRetrySucceeds(t *testing.T) {
 	}}
 	da := newTestDriverAgent(t, runner, 2)
 
-	got, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "do it", Schema: json.RawMessage(testSchema)})
+	got, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "do it", Schema: json.RawMessage(testSchema)})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestDriverAgentRetriesExhaustedResolvesNull(t *testing.T) {
 	}}
 	da := newTestDriverAgent(t, runner, 2)
 
-	got, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "do it", Schema: json.RawMessage(testSchema)})
+	got, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "do it", Schema: json.RawMessage(testSchema)})
 	if err == nil {
 		t.Fatalf("expected a terminal error (engine maps to null), got result %s", got)
 	}
@@ -139,7 +139,7 @@ func TestDriverAgentNonZeroExitButFileWrittenIsSuccess(t *testing.T) {
 	}}
 	da := newTestDriverAgent(t, runner, 2)
 
-	got, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "do it", Schema: json.RawMessage(testSchema)})
+	got, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "do it", Schema: json.RawMessage(testSchema)})
 	if err != nil {
 		t.Fatalf("Run error despite a written result: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestDriverAgentTerminalExitWithNoFileResolvesNull(t *testing.T) {
 	}}
 	da := newTestDriverAgent(t, runner, 1)
 
-	got, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "do it", Schema: json.RawMessage(testSchema)})
+	got, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "do it", Schema: json.RawMessage(testSchema)})
 	if err == nil {
 		t.Fatalf("expected a terminal error (engine maps to null), got %s", got)
 	}
@@ -185,7 +185,7 @@ func TestDriverAgentNoSchemaReturnsCapturedText(t *testing.T) {
 	}}
 	da := newTestDriverAgent(t, runner, 2)
 
-	got, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "just answer"})
+	got, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "just answer"})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestDriverAgentNoSchemaTerminalFailureResolvesNull(t *testing.T) {
 	}}
 	da := newTestDriverAgent(t, runner, 2)
 
-	got, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "answer"})
+	got, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "answer"})
 	if err == nil {
 		t.Fatalf("expected a terminal error, got %s", got)
 	}
@@ -317,7 +317,7 @@ func TestDriverAgentSchemaPathIsWritableWithCWDAndExtraServers(t *testing.T) {
 	}}
 	da := newWritableTestDriverAgent(t, runner, tree, servers)
 
-	if _, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "do it", Schema: json.RawMessage(testSchema)}); err != nil {
+	if _, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "do it", Schema: json.RawMessage(testSchema)}); err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
 	req := runner.calls[0]
@@ -358,7 +358,7 @@ func TestDriverAgentNoSchemaPathIsWritableWithCWDAndExtraServers(t *testing.T) {
 	}}
 	da := newWritableTestDriverAgent(t, runner, tree, servers)
 
-	if _, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "answer"}); err != nil {
+	if _, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "answer"}); err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
 	req := runner.calls[0]
@@ -389,14 +389,14 @@ func TestDriverAgentCWDFallsBackToRunTmpDirWhenNoWorkingTree(t *testing.T) {
 	}}
 	da := newWritableTestDriverAgent(t, runner, "" /* no working tree */, nil)
 
-	if _, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "answer"}); err != nil {
+	if _, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "answer"}); err != nil {
 		t.Fatalf("no-schema Run error: %v", err)
 	}
 	if got := runner.calls[0].CWD; got != da.runTmpDir {
 		t.Fatalf("no-schema CWD = %q, want runTmpDir %q", got, da.runTmpDir)
 	}
 
-	if _, err := da.Run(AgentCall{Ordinal: ordForTest(), Prompt: "do it", Schema: json.RawMessage(testSchema)}); err != nil {
+	if _, err := da.Run(context.Background(), AgentCall{Ordinal: ordForTest(), Prompt: "do it", Schema: json.RawMessage(testSchema)}); err != nil {
 		t.Fatalf("schema Run error: %v", err)
 	}
 	if got := runner.calls[1].CWD; got != da.runTmpDir {

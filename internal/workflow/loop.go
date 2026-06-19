@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"context"
+
 	"github.com/dop251/goja"
 )
 
@@ -58,14 +60,26 @@ func (el *eventLoop) runJS(fn func()) {
 // continuations, and leave() drains the synchronous microtask tail. When all
 // async work is done the top-level promise settles and we stop.
 //
+// The select also wakes on ctx cancellation. This is load-bearing for cancel:
+// while the script is parked on `await agent(...)`, the loop is blocked HERE on a
+// Go channel receive, not in goja, so the watchdog's vm.Interrupt cannot reach it
+// (vm.Interrupt only interrupts bytecode execution). Returning an *ErrInterrupted
+// on ctx.Done() makes `attn workflow cancel` actually settle a run that is waiting
+// on a live agent() — in-flight subagents are torn down separately via the run ctx
+// threaded into AgentStub.Run.
+//
 // A recovered panic (interrupt) is returned via the panicVal so the caller can map
 // it to RunStatus interrupted.
-func (el *eventLoop) pump(topLevel *goja.Promise) (state goja.PromiseState, result goja.Value, panicVal interface{}) {
+func (el *eventLoop) pump(ctx context.Context, topLevel *goja.Promise) (state goja.PromiseState, result goja.Value, panicVal interface{}) {
 	for topLevel.State() == goja.PromiseStatePending {
-		job := <-el.jobs
-		caught := el.safeRunJS(job)
-		if caught != nil {
-			return topLevel.State(), topLevel.Result(), caught
+		select {
+		case job := <-el.jobs:
+			caught := el.safeRunJS(job)
+			if caught != nil {
+				return topLevel.State(), topLevel.Result(), caught
+			}
+		case <-ctx.Done():
+			return topLevel.State(), topLevel.Result(), &ErrInterrupted{Reason: "workflow cancelled"}
 		}
 	}
 	return topLevel.State(), topLevel.Result(), nil

@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -45,24 +46,29 @@ type AgentStub interface {
 	// Run returns the result for call. A returned error models a terminal subagent
 	// failure: the engine resolves the agent() promise to null and journals status
 	// "errored" (never rejects).
-	Run(call AgentCall) (json.RawMessage, error)
+	//
+	// ctx is the run's cancellation context: it is canceled when the run is canceled
+	// (attn workflow cancel) or hits the watchdog. A live driver MUST honor it so the
+	// headless subprocess is actually torn down; the fakes ignore it.
+	Run(ctx context.Context, call AgentCall) (json.RawMessage, error)
 }
 
 // DefaultStub returns a deterministic result derived from the prompt:
 // JSON string of sha256(prompt)[:12].
 type DefaultStub struct{}
 
-func (DefaultStub) Run(call AgentCall) (json.RawMessage, error) {
+func (DefaultStub) Run(_ context.Context, call AgentCall) (json.RawMessage, error) {
 	sum := sha256.Sum256([]byte(call.Prompt))
 	h := hex.EncodeToString(sum[:])[:12]
 	b, _ := json.Marshal(h)
 	return b, nil
 }
 
-// StubFunc adapts a plain function to AgentStub.
+// StubFunc adapts a plain function to AgentStub. The adapted func keeps the
+// ctx-free shape (the fakes never need it); only the interface method carries ctx.
 type StubFunc func(call AgentCall) (json.RawMessage, error)
 
-func (f StubFunc) Run(call AgentCall) (json.RawMessage, error) {
+func (f StubFunc) Run(_ context.Context, call AgentCall) (json.RawMessage, error) {
 	return f(call)
 }
 
@@ -110,9 +116,13 @@ func (s *ScriptedStub) gate(ordinal string) chan struct{} {
 	return ch
 }
 
-func (s *ScriptedStub) Run(call AgentCall) (json.RawMessage, error) {
-	<-s.gate(call.Ordinal.String())
-	return s.resultFor(call.Ordinal, call.Prompt)
+func (s *ScriptedStub) Run(ctx context.Context, call AgentCall) (json.RawMessage, error) {
+	select {
+	case <-s.gate(call.Ordinal.String()):
+		return s.resultFor(call.Ordinal, call.Prompt)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // Release opens the gate for a single ordinal (by its String()), unblocking that

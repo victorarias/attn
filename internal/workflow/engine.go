@@ -157,6 +157,7 @@ func (e *Engine) runOnLoopGoroutine(ctx context.Context, src string, args any, m
 		el:               el,
 		stub:             e.cfg.Stub,
 		jour:             jour,
+		ctx:              ctx,
 		stack:            newPathStack(),
 		agentLifetimeCap: e.cfg.AgentLifetimeCap,
 		maxItemsPerCall:  e.cfg.MaxItemsPerCall,
@@ -210,7 +211,7 @@ func (e *Engine) runOnLoopGoroutine(ctx context.Context, src string, args any, m
 		return
 	}
 
-	state, result, pumpPanic := el.pump(topLevel)
+	state, result, pumpPanic := el.pump(ctx, topLevel)
 	if pumpPanic != nil {
 		out.res = e.mapPanic(pumpPanic, rs, jour, meta)
 		out.err = out.res.Err
@@ -269,6 +270,14 @@ func (e *Engine) mapPanic(p interface{}, rs *runState, jour Journal, meta *Meta)
 		}
 		base.Status = StatusInterrupted
 		base.Err = &ErrInterrupted{Reason: reason}
+		return base
+	}
+	// pump returns a bare *ErrInterrupted when it wakes on ctx.Done() while parked
+	// on the jobs channel (cancel arriving during an await of a live agent()). That
+	// path never enters goja, so it is not wrapped in a goja.InterruptedError.
+	if ie, ok := p.(*ErrInterrupted); ok {
+		base.Status = StatusInterrupted
+		base.Err = ie
 		return base
 	}
 	if gerr, ok := p.(error); ok {

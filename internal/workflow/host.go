@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -25,6 +26,10 @@ type runState struct {
 	stub  AgentStub
 	jour  Journal
 	stack *pathStack
+
+	// ctx is the run's cancellation context, passed to every live agent() dispatch
+	// so canceling the run (attn workflow cancel / watchdog) tears the subagent down.
+	ctx context.Context
 
 	agentLifetimeCap int
 	maxItemsPerCall  int
@@ -208,7 +213,7 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 		go func() {
 			// Concurrency cap (correctness semaphore).
 			rs.sem <- struct{}{}
-			res, runErr := rs.stub.Run(AgentCall{
+			res, runErr := rs.stub.Run(rs.ctx, AgentCall{
 				Ordinal:   ordSnapshot,
 				Prompt:    prompt,
 				Schema:    schema,

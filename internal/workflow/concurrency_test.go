@@ -47,7 +47,7 @@ func newBlockingStub(resultFor func(prompt string) json.RawMessage) *blockingStu
 	}
 }
 
-func (s *blockingStub) Run(call AgentCall) (json.RawMessage, error) {
+func (s *blockingStub) Run(ctx context.Context, call AgentCall) (json.RawMessage, error) {
 	s.calls.Add(1)
 	cur := s.inFlight.Add(1)
 	// Raise the high-water-mark to cur (monotonic CAS loop).
@@ -57,9 +57,13 @@ func (s *blockingStub) Run(call AgentCall) (json.RawMessage, error) {
 			break
 		}
 	}
-	<-s.release
-	s.inFlight.Add(-1)
-	return s.resultFor(call.Prompt), nil
+	defer s.inFlight.Add(-1)
+	select {
+	case <-s.release:
+		return s.resultFor(call.Prompt), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // releaseAll lets every currently-parked and future Run proceed.
@@ -216,7 +220,7 @@ type raceStub struct {
 	resultFor func(prompt string) json.RawMessage
 }
 
-func (s *raceStub) Run(call AgentCall) (json.RawMessage, error) {
+func (s *raceStub) Run(_ context.Context, call AgentCall) (json.RawMessage, error) {
 	// Yield to the scheduler so resolution order is genuinely nondeterministic
 	// across runs and across goroutines. No sleep duration is prescribed; runtime
 	// scheduling decides who finishes first.
