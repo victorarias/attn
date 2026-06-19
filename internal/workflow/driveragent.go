@@ -340,16 +340,16 @@ func (d *driverAgent) runWithSchema(ctx context.Context, ordinal OrdinalPath, pr
 		}
 
 		req := agentdriver.HeadlessTaskRequest{
-			Executable:    d.executable,
-			Model:         model,
-			Prompt:        fullPrompt,
-			WorkDir:       d.runTmpDir,
-			CWD:           cwd,
-			Sandbox:       "workspace-write",
-			MCPServerName: "attn_workflow_result",
-			ToolName:      resultToolName,
-			Schema:        schema,
-			ResultPath:    resultPath,
+			Executable:       d.executable,
+			Model:            model,
+			Prompt:           fullPrompt,
+			WorkDir:          d.runTmpDir,
+			CWD:              cwd,
+			Sandbox:          "workspace-write",
+			MCPServerName:    "attn_workflow_result",
+			ToolName:         resultToolName,
+			Schema:           schema,
+			ResultPath:       resultPath,
 			MCPServerCommand: d.attnExec,
 			// Scratch (schema/result) paths are absolute under runTmpDir; keep them
 			// absolute so the sink resolves them regardless of the writable CWD.

@@ -554,9 +554,9 @@ func detachWorkflowChild(c workflowClient, parsed workflowRunArgs, runID, source
 // workflowResultOutput is the frozen `workflow result` JSON shape. Field order is
 // part of the agent-facing contract; keep it stable.
 type workflowResultOutput struct {
-	Status     string          `json:"status"`
-	Result     json.RawMessage `json:"result,omitempty"`
-	Error      string          `json:"error,omitempty"`
+	Status       string          `json:"status"`
+	Result       json.RawMessage `json:"result,omitempty"`
+	Error        string          `json:"error,omitempty"`
 	Phase        string          `json:"phase,omitempty"`
 	CallsTotal   int             `json:"calls_total"`
 	CallsDone    int             `json:"calls_done"`

@@ -178,7 +178,7 @@ type Daemon struct {
 	workflowEngineMu      sync.Mutex
 	workflowEngineConn    map[string]workflowEngineSink
 	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
-	workflowAttentionHook func(attention.Result)                   // optional, tests only
+	workflowAttentionHook func(attention.Result)                    // optional, tests only
 
 	workspaceContextCheckoutMu sync.Mutex
 
