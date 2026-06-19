@@ -1549,6 +1549,20 @@ func (s *Store) SetSetting(key, value string) {
 		key, value)
 }
 
+// DeleteSetting removes a setting row. No-op if the key is absent or the store
+// has no live DB. Used by one-time settings-key migrations to drop the stale
+// row after copying its value to the renamed key.
+func (s *Store) DeleteSetting(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	s.execLog(`DELETE FROM settings WHERE key = ?`, key)
+}
+
 // GetAllSettings returns all settings as a map
 func (s *Store) GetAllSettings() map[string]string {
 	s.mu.RLock()
