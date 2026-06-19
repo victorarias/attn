@@ -355,7 +355,7 @@ describe('SettingsModal review loop prompts', () => {
     expect(screen.getByText(/does not register a second tailnet device/i)).toBeInTheDocument();
   });
 
-  it('enables workflow guidance when off and disables it when on', async () => {
+  it('enables workflows when off and disables them when on', async () => {
     const onSetSetting = vi.fn();
 
     const { rerender } = render(
@@ -367,7 +367,7 @@ describe('SettingsModal review loop prompts', () => {
         onUnmuteRepo={vi.fn()}
         mutedAuthors={[]}
         onUnmuteAuthor={vi.fn()}
-        settings={{ workflow_guidance_enabled: 'false' }}
+        settings={{ workflows_enabled: 'false' }}
         endpoints={[]}
         plugins={[]}
         pluginIssues={[]}
@@ -386,10 +386,10 @@ describe('SettingsModal review loop prompts', () => {
     );
 
     fireEvent.click(screen.getByTestId('settings-nav-agents'));
-    const toggle = await screen.findByTestId('settings-workflow-guidance-toggle');
+    const toggle = await screen.findByTestId('settings-workflows-toggle');
     expect(toggle).toHaveTextContent('Enable');
     fireEvent.click(toggle);
-    expect(onSetSetting).toHaveBeenCalledWith('workflow_guidance_enabled', 'true');
+    expect(onSetSetting).toHaveBeenCalledWith('workflows_enabled', 'true');
 
     rerender(
       <SettingsModal
@@ -400,7 +400,7 @@ describe('SettingsModal review loop prompts', () => {
         onUnmuteRepo={vi.fn()}
         mutedAuthors={[]}
         onUnmuteAuthor={vi.fn()}
-        settings={{ workflow_guidance_enabled: 'true' }}
+        settings={{ workflows_enabled: 'true' }}
         endpoints={[]}
         plugins={[]}
         pluginIssues={[]}
@@ -419,10 +419,10 @@ describe('SettingsModal review loop prompts', () => {
     );
 
     fireEvent.click(screen.getByTestId('settings-nav-agents'));
-    const toggleOn = await screen.findByTestId('settings-workflow-guidance-toggle');
+    const toggleOn = await screen.findByTestId('settings-workflows-toggle');
     expect(toggleOn).toHaveTextContent('Disable');
     fireEvent.click(toggleOn);
-    expect(onSetSetting).toHaveBeenCalledWith('workflow_guidance_enabled', 'false');
+    expect(onSetSetting).toHaveBeenCalledWith('workflows_enabled', 'false');
   });
 
   it('toggles remote web access for a connected endpoint', async () => {

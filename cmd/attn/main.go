@@ -1941,8 +1941,8 @@ func runAgentDirectly(requestedAgent string) {
 		}
 	}
 	// The daemon's worker exports ATTN_WORKFLOW_GUIDANCE_ENABLED when the
-	// workflow_guidance_enabled setting is on. This launch path is the worker
-	// process, so the env var (not a store read) carries the gate here.
+	// workflows_enabled setting is on. This launch path is the worker process, so
+	// the env var (not a store read) carries the gate here.
 	opts.InjectWorkflowGuidance = strings.TrimSpace(os.Getenv("ATTN_WORKFLOW_GUIDANCE_ENABLED")) == "1"
 	if cp, ok := agentdriver.GetConfigOverrideProvider(driver); ok {
 		opts.ConfigOverrides = cp.GenerateConfigOverrides(opts)

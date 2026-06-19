@@ -1,6 +1,9 @@
 package daemon
 
 import (
+	"encoding/json"
+	"net"
+	"strings"
 	"sync"
 	"testing"
 
@@ -45,6 +48,81 @@ func sampleWorkflowCall(runID, ordinal string, status protocol.WorkflowAgentCall
 		ResultJson:    protocol.Ptr(`{"ok":true}`),
 		Status:        status,
 		StartedAt:     protocol.Ptr("2026-06-14T10:00:01Z"),
+	}
+}
+
+// upsertOverPipe drives handleWorkflowRunUpsert across an in-memory pipe and
+// returns the decoded action result, mirroring the daemon's socket dispatch so the
+// test exercises the real handler (guard + persist + reply), not just the core.
+func upsertOverPipe(t *testing.T, d *Daemon, run *protocol.WorkflowRun) *protocol.WorkflowActionResultMessage {
+	t.Helper()
+	serverConn, clientConn := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.handleWorkflowRunUpsert(serverConn, &protocol.WorkflowRunUpsertMessage{Run: *run})
+		_ = serverConn.Close()
+	}()
+	var resp protocol.WorkflowActionResultMessage
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode workflow action result: %v", err)
+	}
+	_ = clientConn.Close()
+	<-done
+	return &resp
+}
+
+func TestGuardWorkflowRunStartEnforcesWorkflowsEnabled(t *testing.T) {
+	d := newWorkflowTestDaemon(t)
+
+	// Default (unset) is disabled: a running-status start is refused.
+	if err := d.guardWorkflowRunStart(sampleWorkflowRun("run-1")); err == nil {
+		t.Fatal("expected start to be refused when workflows are disabled")
+	}
+
+	// A terminal-status upsert is never a start, so it passes even while disabled —
+	// an in-flight run must record its result after the switch flips off.
+	finished := sampleWorkflowRun("run-1")
+	finished.Status = protocol.WorkflowRunStatusCompleted
+	if err := d.guardWorkflowRunStart(finished); err != nil {
+		t.Fatalf("terminal upsert should never be gated: %v", err)
+	}
+
+	// Enabling the switch lets a start through.
+	d.store.SetSetting(SettingWorkflowsEnabled, "true")
+	if err := d.guardWorkflowRunStart(sampleWorkflowRun("run-1")); err != nil {
+		t.Fatalf("expected start to be allowed when workflows are enabled: %v", err)
+	}
+}
+
+func TestHandleWorkflowRunUpsertRefusesStartWhenWorkflowsDisabled(t *testing.T) {
+	d := newWorkflowTestDaemon(t)
+
+	// Workflows disabled (default): the socket handler rejects the start, returns an
+	// error to the client, and persists nothing.
+	resp := upsertOverPipe(t, d, sampleWorkflowRun("run-1"))
+	if resp.Success {
+		t.Fatal("expected upsert to fail when workflows are disabled")
+	}
+	if resp.Error == nil || !strings.Contains(*resp.Error, "disabled") {
+		t.Fatalf("expected a 'disabled' error, got %v", resp.Error)
+	}
+	if got, err := d.getWorkflowRunHydrated("run-1"); err != nil {
+		t.Fatalf("getWorkflowRunHydrated: %v", err)
+	} else if got != nil {
+		t.Fatal("refused run must not be persisted")
+	}
+
+	// Enable workflows: the same start now succeeds and persists.
+	d.store.SetSetting(SettingWorkflowsEnabled, "true")
+	resp = upsertOverPipe(t, d, sampleWorkflowRun("run-1"))
+	if !resp.Success {
+		t.Fatalf("expected upsert to succeed when enabled, error=%v", protocol.Deref(resp.Error))
+	}
+	if got, err := d.getWorkflowRunHydrated("run-1"); err != nil {
+		t.Fatalf("getWorkflowRunHydrated: %v", err)
+	} else if got == nil {
+		t.Fatal("expected run to be persisted when enabled")
 	}
 }
 

@@ -143,7 +143,7 @@ export function SettingsModal({
   // Sync with settings when modal opens
   const actualProjectsDir = settings.projects_directory || '';
   const tailscaleEnabled = (settings.tailscale_enabled || 'false') === 'true';
-  const workflowGuidanceEnabled = (settings.workflow_guidance_enabled || 'false') === 'true';
+  const workflowsEnabled = (settings.workflows_enabled || 'false') === 'true';
   const tailscaleStatus = settings.tailscale_status || 'disabled';
   const tailscaleURL = settings.tailscale_url || '';
   const tailscaleDomain = settings.tailscale_domain || '';
@@ -291,9 +291,9 @@ export function SettingsModal({
     onSetSetting('tailscale_enabled', tailscaleEnabled ? 'false' : 'true');
   }, [onSetSetting, tailscaleEnabled]);
 
-  const handleToggleWorkflowGuidance = useCallback(() => {
-    onSetSetting('workflow_guidance_enabled', workflowGuidanceEnabled ? 'false' : 'true');
-  }, [onSetSetting, workflowGuidanceEnabled]);
+  const handleToggleWorkflows = useCallback(() => {
+    onSetSetting('workflows_enabled', workflowsEnabled ? 'false' : 'true');
+  }, [onSetSetting, workflowsEnabled]);
 
   const handleInputBlur = useCallback(() => {
     if (projectsDir !== actualProjectsDir) {
@@ -1504,29 +1504,29 @@ export function SettingsModal({
       <section className="settings-block">
         <div className="settings-block-intro">
           <div className="settings-kicker">Agents</div>
-          <h3>Workflow Guidance</h3>
+          <h3>Workflows</h3>
           <p className="settings-description">
-            Teaches managed agents how to run durable multi-agent workflows and when they're
-            allowed to. Off by default; agents only start a workflow when you opt in per task
-            ("attn workflow") or for the session ("hypercode").
+            Lets managed agents run durable multi-agent workflows. Off by default. When on,
+            agents learn how and when to use workflows and only start one when you opt in per
+            task ("attn workflow") or for the session ("hypercode").
           </p>
         </div>
         <div className="settings-block-body">
           <div className="settings-row-card">
             <div>
-              <p className="settings-row-title">Workflow trigger guidance</p>
+              <p className="settings-row-title">Enable workflows</p>
               <p className="settings-row-copy">
-                Injected into new agent sessions. Workflow subagents never receive it, so
-                workflows can't nest.
+                While off, "attn workflow run" is refused and agents aren't told about
+                workflows. Turning it off won't interrupt a run already in flight.
               </p>
             </div>
             <button
               type="button"
               className="settings-action"
-              data-testid="settings-workflow-guidance-toggle"
-              onClick={handleToggleWorkflowGuidance}
+              data-testid="settings-workflows-toggle"
+              onClick={handleToggleWorkflows}
             >
-              {workflowGuidanceEnabled ? 'Disable' : 'Enable'}
+              {workflowsEnabled ? 'Disable' : 'Enable'}
             </button>
           </div>
         </div>

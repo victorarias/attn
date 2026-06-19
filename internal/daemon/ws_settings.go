@@ -35,7 +35,7 @@ const (
 	SettingReviewerModel            = "reviewer_model"
 	SettingWorkspaceContextJanitor  = "workspace_context_janitor"
 	SettingTailscaleEnabled         = "tailscale_enabled"
-	SettingWorkflowGuidanceEnabled  = "workflow_guidance_enabled"
+	SettingWorkflowsEnabled         = "workflows_enabled"
 	SettingKeybindingsConfig        = "keybindings_config"
 	SettingNewSessionYoloPrefix     = "new_session_yolo_"
 )
@@ -179,7 +179,7 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	}
 	settings[SettingPTYBackendMode] = d.ptyBackendMode()
 	settings[SettingTailscaleEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingTailscaleEnabled]))
-	settings[SettingWorkflowGuidanceEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingWorkflowGuidanceEnabled]))
+	settings[SettingWorkflowsEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingWorkflowsEnabled]))
 
 	tailscale := d.tailscaleStateSnapshot()
 	if tailscale.status != "" {
@@ -232,7 +232,7 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return d.validateNewSessionAgent(value)
 	case SettingTheme:
 		return validateTheme(value)
-	case SettingTailscaleEnabled, SettingWorkflowGuidanceEnabled:
+	case SettingTailscaleEnabled, SettingWorkflowsEnabled:
 		return validateBooleanSetting(value)
 	case SettingWorkspaceContextJanitor:
 		return d.validateWorkspaceContextJanitorSetting(value)

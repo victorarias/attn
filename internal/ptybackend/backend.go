@@ -40,9 +40,9 @@ type SpawnOptions struct {
 	// from the daemon's cache. Skips the ~130ms readLoginShellEnv in workers.
 	LoginShellEnv []string
 
-	// WorkflowGuidanceEnabled mirrors the daemon's workflow_guidance_enabled
-	// setting. When true the worker exports ATTN_WORKFLOW_GUIDANCE_ENABLED so the
-	// launched agent's instructions include the workflow-trigger guidance.
+	// WorkflowGuidanceEnabled mirrors the daemon's workflows_enabled setting. When
+	// true the worker exports ATTN_WORKFLOW_GUIDANCE_ENABLED so the launched agent's
+	// instructions include the workflow-trigger guidance.
 	WorkflowGuidanceEnabled bool
 }
 

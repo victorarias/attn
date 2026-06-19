@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"strings"
 
@@ -278,7 +279,28 @@ func buildWorkflowActionResult(action string, run *protocol.WorkflowRun, runs []
 	return result
 }
 
+// guardWorkflowRunStart enforces the workflows_enabled master switch. A run-level
+// upsert carrying running status is the one and only run START (fresh or resume) —
+// progress is reported via call upserts, and the finish carries a terminal status.
+// Rejecting running-status starts here, at the CLI/engine socket entry (the sole
+// run-creation path), blocks new runs when the feature is off while keeping the
+// persistence core policy-free and still letting a run that was already in flight
+// when the switch flipped off record its terminal result.
+func (d *Daemon) guardWorkflowRunStart(run *protocol.WorkflowRun) error {
+	if run == nil || run.Status != protocol.WorkflowRunStatusRunning {
+		return nil
+	}
+	if parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)) {
+		return nil
+	}
+	return fmt.Errorf("workflows are disabled; enable Workflows in attn Settings (Agents) to run one")
+}
+
 func (d *Daemon) handleWorkflowRunUpsert(conn net.Conn, msg *protocol.WorkflowRunUpsertMessage) {
+	if err := d.guardWorkflowRunStart(&msg.Run); err != nil {
+		d.sendWorkflowActionResult(conn, "upsert", nil, nil, msg.Run.RunID, err)
+		return
+	}
 	d.registerWorkflowEngine(msg.Run.RunID, connWorkflowEngineSink{conn: conn})
 	run, err := d.applyWorkflowRunUpsert(&msg.Run)
 	d.sendWorkflowActionResult(conn, "upsert", run, nil, msg.Run.RunID, err)
