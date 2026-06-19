@@ -2,7 +2,7 @@ import { createElement, useCallback, useEffect, useMemo, useRef, useState, type 
 import FocusTrap from 'focus-trap-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { NotebookEntry, NotebookReadResult, NotebookSendToChiefResult, NotebookWriteResult } from '../hooks/useDaemonSocket';
+import type { NotebookEntry, NotebookReadResult, NotebookSendToChiefResult, NotebookTask, NotebookWriteResult } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import './NotebookBrowser.css';
 
@@ -22,11 +22,20 @@ interface NotebookBrowserProps {
   // Increments whenever a notebook_changed event arrives, so an open browser
   // re-fetches the tree and the open note (covering agent and external writes).
   changeSignal?: number;
+  // List the durable runner's tasks (newest-updated first). Resolves empty when
+  // the runner is disabled or has no tasks.
+  listTasks: () => Promise<NotebookTask[]>;
+  // Force a failed|dead task back to queued. Resolves with the requeued task, or
+  // null when the task was non-terminal (a no-op retry).
+  retryTask: (taskId: string) => Promise<NotebookTask | null>;
+  // Increments whenever a notebook_tasks_changed broadcast arrives, so an open
+  // Tasks panel re-fetches the list (any runner lifecycle transition).
+  taskChangeSignal?: number;
 }
 
 // The note shown first when the browser opens with nothing selected, in order of
-// preference. /memory/index.md is the distilled map an agent is told to read.
-const PREFERRED_FIRST = ['memory/index.md', 'index.md'];
+// preference. knowledge/index.md is the distilled map an agent is told to read.
+const PREFERRED_FIRST = ['knowledge/index.md', 'index.md'];
 
 export function NotebookBrowser({
   isOpen,
@@ -37,6 +46,9 @@ export function NotebookBrowser({
   writeNotebook,
   sendToChief,
   changeSignal = 0,
+  listTasks,
+  retryTask,
+  taskChangeSignal = 0,
 }: NotebookBrowserProps) {
   const [entries, setEntries] = useState<NotebookEntry[]>([]);
   const [listError, setListError] = useState<string | null>(null);
@@ -46,6 +58,19 @@ export function NotebookBrowser({
   const [noteError, setNoteError] = useState<string | null>(null);
   const [noteLoading, setNoteLoading] = useState(false);
   const [backlinks, setBacklinks] = useState<NotebookEntry[]>([]);
+  // --- Tasks panel (durable runner) ---
+  const [tasks, setTasks] = useState<NotebookTask[]>([]);
+  const [tasksError, setTasksError] = useState<string | null>(null);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  // The Tasks section is collapsible; collapsed by default so it doesn't crowd the
+  // note list. Opening it (or a taskChangeSignal bump) triggers a refetch.
+  const [tasksOpen, setTasksOpen] = useState(false);
+  // Task ids whose Retry click is in flight, so their button can disable without
+  // optimistically mutating the row (the broadcast-driven refetch reflects truth).
+  const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
+  // Monotonic load token for the tasks fetch: a slow response from a superseded
+  // fetch (panel closed/refetched) is dropped instead of stamping stale rows.
+  const tasksSeqRef = useRef(0);
   // selectedPath drives loads; this ref lets the change-signal effect reload the
   // current note without depending on (and re-running for) selectedPath itself.
   const selectedPathRef = useRef<string | null>(null);
@@ -78,6 +103,48 @@ export function NotebookBrowser({
       setListLoading(false);
     }
   }, [listNotebook]);
+
+  // Fetch the durable runner's task list. A transient WS failure surfaces an error
+  // rather than silently wiping the rows (mirrors refreshList). The stale-guard
+  // drops a response that resolved after a newer fetch (or a panel close).
+  const refreshTasks = useCallback(async () => {
+    const seq = ++tasksSeqRef.current;
+    setTasksLoading(true);
+    try {
+      const next = await listTasks();
+      if (tasksSeqRef.current !== seq) return;
+      setTasks(next);
+      setTasksError(null);
+    } catch (err) {
+      if (tasksSeqRef.current !== seq) return;
+      setTasksError(err instanceof Error ? err.message : 'Could not load tasks');
+    } finally {
+      if (tasksSeqRef.current === seq) setTasksLoading(false);
+    }
+  }, [listTasks]);
+
+  // Force a failed|dead task back to queued. The button is disabled while in
+  // flight; on resolve/reject we only clear the in-flight mark — the
+  // notebook_tasks_changed broadcast drives the refetch that reflects the truth,
+  // so we never optimistically mutate the row here.
+  const handleRetry = useCallback(async (taskId: string) => {
+    setRetryingIds((prev) => {
+      const next = new Set(prev);
+      next.add(taskId);
+      return next;
+    });
+    try {
+      await retryTask(taskId);
+    } catch {
+      // A failed retry leaves the row as-is; the next broadcast/refetch reconciles.
+    } finally {
+      setRetryingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(taskId);
+        return next;
+      });
+    }
+  }, [retryTask]);
 
   const loadNote = useCallback(async (path: string) => {
     const seq = ++loadSeqRef.current;
@@ -311,6 +378,29 @@ export function NotebookBrowser({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [changeSignal]);
 
+  // Fetch tasks when the Tasks section is opened (and the browser is open). A bump
+  // of taskChangeSignal while it's open refetches via the effect below.
+  useEffect(() => {
+    if (!isOpen || !tasksOpen) return;
+    void refreshTasks();
+  }, [isOpen, tasksOpen, refreshTasks]);
+
+  // Live refresh: a notebook_tasks_changed broadcast refetches the task list while
+  // the section is open so runner transitions show without reopening it.
+  useEffect(() => {
+    if (!isOpen || !tasksOpen || taskChangeSignal === 0) return;
+    void refreshTasks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskChangeSignal]);
+
+  // Drop the staleness token when the browser closes so an in-flight tasks fetch
+  // can't stamp rows onto a reopened panel.
+  useEffect(() => {
+    if (isOpen) return;
+    tasksSeqRef.current += 1;
+    setTasksLoading(false);
+  }, [isOpen]);
+
   // Navigating to another note discards any in-progress edit and clears its
   // status. Keyed on selectedPath, so it fires on navigation but not on a
   // same-note live reload (which keeps selectedPath unchanged).
@@ -375,7 +465,7 @@ export function NotebookBrowser({
             <div className="notebook-browser-heading">
               <NotebookIcon />
               <div>
-                <span className="notebook-browser-eyebrow">Durable memory</span>
+                <span className="notebook-browser-eyebrow">Knowledge base</span>
                 <h1 id="notebook-browser-title">Notebook</h1>
               </div>
             </div>
@@ -412,7 +502,7 @@ export function NotebookBrowser({
                       onClick={() => void loadNote(entry.path)}
                       title={entry.path}
                     >
-                      <span className="notebook-browser-list-marker" data-kind={entry.kind || 'note'} />
+                      <span className="notebook-browser-list-marker" data-type={entry.type || 'note'} />
                       <span className="notebook-browser-list-copy">
                         <strong>{entry.title || basename(entry.path)}</strong>
                         <span>{entry.path}</span>
@@ -421,6 +511,81 @@ export function NotebookBrowser({
                   ))}
                 </div>
               ))}
+
+              <section className="notebook-browser-tasks" aria-label="Tasks">
+                <button
+                  type="button"
+                  className="notebook-browser-tasks-toggle"
+                  aria-expanded={tasksOpen}
+                  onClick={() => setTasksOpen((open) => !open)}
+                >
+                  <span className={`notebook-browser-tasks-caret${tasksOpen ? ' is-open' : ''}`} aria-hidden="true" />
+                  <span className="notebook-browser-tasks-title">Tasks</span>
+                  {tasksOpen && tasks.length > 0 && (
+                    <span className="notebook-browser-tasks-count">{tasks.length}</span>
+                  )}
+                </button>
+                {tasksOpen && (
+                  <div className="notebook-browser-tasks-body">
+                    {tasksError && (
+                      <div className="notebook-browser-tasks-state">
+                        <span>{tasksError}</span>
+                        <button type="button" onClick={() => void refreshTasks()}>Try again</button>
+                      </div>
+                    )}
+                    {!tasksError && tasksLoading && tasks.length === 0 && (
+                      <div className="notebook-browser-tasks-state">Loading tasks…</div>
+                    )}
+                    {!tasksError && !tasksLoading && tasks.length === 0 && (
+                      <p className="notebook-browser-tasks-empty">No tasks.</p>
+                    )}
+                    {tasks.length > 0 && (
+                      <ul className="notebook-browser-tasks-list">
+                        {tasks.map((task) => {
+                          const nextAttempt = TASK_TERMINAL_STATES.has(task.state)
+                            ? ''
+                            : formatNextAttempt(task.next_attempt_at);
+                          const canRetry = task.state === 'failed' || task.state === 'dead';
+                          return (
+                            <li className="notebook-browser-task" key={task.id}>
+                              <div className="notebook-browser-task-head">
+                                <span
+                                  className={`notebook-browser-task-badge is-${task.state}`}
+                                  title={task.state}
+                                >
+                                  {task.state}
+                                </span>
+                                <span className="notebook-browser-task-subject" title={`${task.kind}:${task.subject}`}>
+                                  {task.kind}:{task.subject}
+                                </span>
+                                {canRetry && (
+                                  <button
+                                    type="button"
+                                    className="notebook-browser-task-retry"
+                                    onClick={() => void handleRetry(task.id)}
+                                    disabled={retryingIds.has(task.id)}
+                                  >
+                                    {retryingIds.has(task.id) ? 'Retrying…' : 'Retry'}
+                                  </button>
+                                )}
+                              </div>
+                              <div className="notebook-browser-task-meta">
+                                <span>attempts: {task.attempts}</span>
+                                {nextAttempt && <span>next: {nextAttempt}</span>}
+                              </div>
+                              {task.last_error && (
+                                <p className="notebook-browser-task-error" title={task.last_error}>
+                                  {task.last_error}
+                                </p>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </section>
             </aside>
 
             <main className="notebook-browser-document">
@@ -565,16 +730,21 @@ interface NoteGroup {
   entries: NotebookEntry[];
 }
 
-const GROUP_ORDER = ['Journal', 'Memory', 'Notebook'];
+const GROUP_ORDER = ['Journal', 'Projects', 'Areas', 'Resources', 'Archive', 'Knowledge', 'Notebook'];
 
-// groupEntries buckets notes by their top-level directory for the sidebar:
-// journal/* -> Journal, memory/* -> Memory, root files -> Notebook.
+// groupEntries buckets notes for the sidebar by their top-level path, mapping the
+// PARA knowledge layout to section labels:
+//   journal/*             -> Journal
+//   knowledge/projects/*  -> Projects
+//   knowledge/areas/*     -> Areas
+//   knowledge/resources/* -> Resources
+//   knowledge/archive/*   -> Archive
+//   knowledge/*           -> Knowledge (e.g. knowledge/index.md, no PARA subdir)
+//   root files            -> Notebook
 function groupEntries(entries: NotebookEntry[]): NoteGroup[] {
   const buckets = new Map<string, NotebookEntry[]>();
   for (const entry of entries) {
-    const slash = entry.path.indexOf('/');
-    const top = slash === -1 ? '' : entry.path.slice(0, slash);
-    const label = top === 'journal' ? 'Journal' : top === 'memory' ? 'Memory' : top === '' ? 'Notebook' : capitalize(top);
+    const label = groupLabel(entry.path);
     const list = buckets.get(label) || [];
     list.push(entry);
     buckets.set(label, list);
@@ -584,6 +754,16 @@ function groupEntries(entries: NotebookEntry[]): NoteGroup[] {
     .sort((a, b) => groupRank(a.label) - groupRank(b.label) || a.label.localeCompare(b.label));
 }
 
+function groupLabel(path: string): string {
+  if (path.startsWith('journal/')) return 'Journal';
+  if (path.startsWith('knowledge/projects/')) return 'Projects';
+  if (path.startsWith('knowledge/areas/')) return 'Areas';
+  if (path.startsWith('knowledge/resources/')) return 'Resources';
+  if (path.startsWith('knowledge/archive/')) return 'Archive';
+  if (path.startsWith('knowledge/')) return 'Knowledge';
+  return 'Notebook';
+}
+
 function groupRank(label: string): number {
   const idx = GROUP_ORDER.indexOf(label);
   return idx === -1 ? GROUP_ORDER.length : idx;
@@ -591,7 +771,7 @@ function groupRank(label: string): number {
 
 export interface NotebookHref {
   kind: 'note' | 'fragment' | 'external';
-  // For 'note': the notebook-relative path (no leading slash, e.g. "memory/foo.md").
+  // For 'note': the notebook-relative path (no leading slash, e.g. "knowledge/areas/foo.md").
   path?: string;
   // For 'fragment': the bare anchor without '#'. For 'note': an optional anchor.
   anchor?: string;
@@ -686,8 +866,23 @@ function basename(path: string): string {
   return name.endsWith('.md') ? name.slice(0, -3) : name;
 }
 
-function capitalize(s: string): string {
-  return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1);
+// A terminal task isn't waiting on a next attempt, so its scheduled time is noise.
+const TASK_TERMINAL_STATES = new Set(['done', 'dead']);
+
+// formatNextAttempt renders an RFC3339 next_attempt_at as a short relative phrase
+// ("in 2m", "5s ago", "now"). Returns '' for an unparseable/zero timestamp so the
+// row can omit it. now is injectable for deterministic tests.
+function formatNextAttempt(iso: string, now: number = Date.now()): string {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  // The runner stamps a zero time (year <= 1) when there is no scheduled attempt.
+  if (new Date(t).getUTCFullYear() <= 1) return '';
+  const deltaSec = Math.round((t - now) / 1000);
+  const abs = Math.abs(deltaSec);
+  if (abs < 5) return 'now';
+  const unit = abs < 60 ? `${abs}s` : abs < 3600 ? `${Math.round(abs / 60)}m` : `${Math.round(abs / 3600)}h`;
+  return deltaSec >= 0 ? `in ${unit}` : `${unit} ago`;
 }
 
 function NotebookIcon() {

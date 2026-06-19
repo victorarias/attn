@@ -518,6 +518,184 @@
   border-color: var(--color-border);
 }
 
+/* --- Tasks panel (durable runner), sits at the bottom of the note list --- */
+.notebook-browser-tasks {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.notebook-browser-tasks-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px 8px;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: 700 9px/1 ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.notebook-browser-tasks-caret {
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  transition: transform 120ms ease;
+}
+
+.notebook-browser-tasks-caret.is-open {
+  transform: rotate(90deg);
+}
+
+.notebook-browser-tasks-title {
+  flex: 1;
+  text-align: left;
+}
+
+.notebook-browser-tasks-count {
+  padding: 1px 6px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border-radius: 8px;
+  font-size: 9px;
+}
+
+.notebook-browser-tasks-body {
+  padding: 0 4px;
+}
+
+.notebook-browser-tasks-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 6px 10px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.notebook-browser-tasks-state button {
+  padding: 4px 8px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.notebook-browser-tasks-empty {
+  margin: 0;
+  padding: 2px 6px 8px;
+  color: var(--color-text-dimmed);
+  font-size: 11px;
+}
+
+.notebook-browser-tasks-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notebook-browser-task {
+  padding: 8px 9px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 55%, transparent);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+}
+
+.notebook-browser-task-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.notebook-browser-task-badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font: 700 9px/1.6 ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--color-text-muted) 18%, transparent);
+}
+
+.notebook-browser-task-badge.is-running {
+  color: #0b1220;
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.notebook-browser-task-badge.is-queued {
+  color: var(--color-text-primary);
+  background: color-mix(in srgb, var(--color-text-muted) 28%, transparent);
+}
+
+.notebook-browser-task-badge.is-done {
+  color: #06281a;
+  background: color-mix(in srgb, #3fbf7f 65%, transparent);
+}
+
+.notebook-browser-task-badge.is-failed,
+.notebook-browser-task-badge.is-dead {
+  color: #2a0b0b;
+  background: color-mix(in srgb, #e26565 70%, transparent);
+}
+
+.notebook-browser-task-subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-primary);
+  font-size: 11px;
+}
+
+.notebook-browser-task-retry {
+  flex: none;
+  padding: 3px 8px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.notebook-browser-task-retry:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.notebook-browser-task-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 5px;
+  color: var(--color-text-muted);
+  font: 10px/1.2 ui-monospace, 'SFMono-Regular', monospace;
+}
+
+.notebook-browser-task-error {
+  margin: 6px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  color: color-mix(in srgb, #e26565 80%, var(--color-text-secondary));
+  font-size: 10px;
+}
+
 .notebook-browser-document-state {
   display: flex;
   flex-direction: column;
