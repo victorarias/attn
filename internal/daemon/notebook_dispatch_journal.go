@@ -9,27 +9,35 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// Auto-journaling of chief-of-staff dispatch outcomes.
+// Deterministic capture of chief-of-staff dispatch outcomes to the raw tier.
 //
 // A dispatch is delegated agent work, and its terminal report (completed/failed)
 // — or, as a fallback, its session simply ending — is exactly the "what was
 // decided / built / failed" signal the durable work-journal exists to capture.
 // This file renders that already-structured DispatchReport into a human-readable
-// journal block and appends it to the daily journal:
+// block and writes it to the notebook's raw tier
+// (.attn/raw/dispatches/<dispatchID>.md), where the later narration pass reads it.
+// It deliberately does NOT write the curated journal — the journal stays curated.
 //
 //   - deterministic: the daemon renders structured fields, no LLM is involved;
-//   - idempotent: a hidden per-dispatch marker means the terminal-report path, the
-//     session-gone fallback, and a daemon restart together write exactly one block;
-//   - grounded by construction: every block cites source: dispatch:<id>.
+//   - exactly-once: one file per dispatch id; a replay atomically overwrites that
+//     one file, so the report path, the session-gone fallback, and a daemon restart
+//     together leave exactly one entry. The overwrite is byte-identical when the
+//     dispatch carries a server ReportedAt; when it does not (a worker that ended
+//     with no structured report), the "## HH:MM" header is stamped from the wall
+//     clock at render time, so two replays in different minutes overwrite with an
+//     equivalent — not byte-identical — block. Still one file, one marker;
+//   - grounded by construction: every block cites source: dispatch:<id> and carries
+//     a hidden attn:dispatch:<id> marker.
 //
-// This is the capture half of the notebook-as-work-journal: reliable, low-noise
-// entries land without any agent having to remember to journal. LLM curation of
-// these raw entries is a separate, later pass.
+// This is the deterministic capture floor of the notebook-as-work-journal:
+// reliable, low-noise entries land without any agent having to remember to journal.
+// LLM curation of these raw entries is a separate, later pass.
 
-// journalDispatchMarker is the stable, hidden per-dispatch dedupe marker embedded
-// in each auto-journaled block. It is an HTML comment so it renders invisibly in a
-// markdown viewer while keeping the journal file self-describing — dedup needs no
-// separate ledger and survives a daemon restart.
+// journalDispatchMarker is the stable, hidden per-dispatch marker embedded in each
+// rendered block. It is an HTML comment so it renders invisibly in a markdown
+// viewer while keeping the raw dispatch file self-describing — the marker is the
+// greppable ledger the narration pass keys off, and it survives a daemon restart.
 func journalDispatchMarker(dispatchID string) string {
 	return fmt.Sprintf("<!-- attn:dispatch:%s -->", strings.TrimSpace(dispatchID))
 }
@@ -44,68 +52,84 @@ func isTerminalDispatchReport(report *protocol.DispatchReport) bool {
 			report.WorkState == protocol.DispatchWorkStateFailed)
 }
 
-// journalDispatchOutcome renders a dispatch's outcome into the daily journal,
-// exactly once. It is best-effort and safe to call from any dispatch-end path: a
-// missing/unconfigured notebook, an empty dispatch, or an already-journaled
-// dispatch is a silent no-op. Capture must never disrupt the dispatch lifecycle,
-// so every failure is logged and swallowed.
+// journalDispatchOutcome captures a dispatch's outcome to the raw tier, exactly
+// once. It is best-effort and safe to call from any dispatch-end path: a
+// missing/unconfigured notebook or an empty dispatch is a silent no-op. Capture
+// must never disrupt the dispatch lifecycle, so every failure is logged and
+// swallowed.
 //
-// Best-effort has one accepted edge: if the write itself cannot land — an
-// unwritable notebook root, or a day's journal that has reached notebook.MaxFileSize
-// — the entry is logged and dropped, and since the marker was never written the
-// later removal-path retry re-fails identically. So "exactly once" degrades to "at
-// most once" precisely when the journal cannot be written at all. Given a block is
-// a few KiB and fields are clamped, hitting the daily ceiling needs an implausible
-// per-day dispatch volume; we accept that over carrying an overflow-spill mechanism.
+// The destination is the raw tier (.attn/raw/dispatches/<dispatchID>.md), not the
+// curated journal: one file per dispatch, keyed 1:1 on the dispatch id. Existence
+// of that file plus the attn:dispatch:<id> marker embedded in the rendered block
+// is the exactly-once ledger, so a replayed trigger (report path, session-gone
+// fallback, restart) re-renders the block and atomically overwrites that one file —
+// harmless. The re-rendered block is byte-identical when the dispatch has a server
+// ReportedAt; without one, its wall-clock header can drift across minutes, so the
+// overwrite is equivalent rather than byte-identical (still one file, one marker).
+// If the write cannot land (an unwritable notebook
+// root), the entry is logged and dropped; a later removal-path retry re-attempts
+// the same write, so "exactly once" degrades to "at most once" only while the raw
+// tier itself is unwritable.
 func (d *Daemon) journalDispatchOutcome(dispatch *protocol.ChiefOfStaffDispatch) {
 	if dispatch == nil {
 		return
 	}
-	dateISO, block, ok := renderDispatchJournalEntry(dispatch, time.Now())
+	_, block, ok := renderDispatchJournalEntry(dispatch, time.Now())
 	if !ok {
 		return // nothing meaningful to record
 	}
-	store, err := d.notebookStoreFor()
+	// Redirect the deterministic dispatch capture to the raw tier
+	// (.attn/raw/dispatches/<dispatchID>.md) instead of the curated journal, so the
+	// curated journal/<date>.md never accumulates machine-raw blocks. The raw tier
+	// lives under .attn/, which CleanPath rejects and the watcher skips, so this is
+	// written with direct filesystem I/O (not notebook.Store) and emits no
+	// notebook_changed broadcast — there is no watcher echo to suppress.
+	//
+	// One file per dispatch: its existence + the attn:dispatch:<id> marker already
+	// embedded in `block` is the exactly-once ledger, so the prior in-file
+	// marker-scan dedup (AppendJournalEntryOnce) is no longer needed here. A
+	// replayed trigger re-renders the identical block and atomically overwrites the
+	// identical file — harmless.
+	root, err := d.notebookRoot()
 	if err != nil {
-		d.logf("dispatch auto-journal: store unavailable: %v", err)
+		d.logf("dispatch auto-journal %s: notebook root unavailable: %v", dispatch.ID, err)
 		return
 	}
-	rel, written, hash, err := store.AppendJournalEntryOnce(dateISO, journalDispatchMarker(dispatch.ID), block)
-	if err != nil {
+	if strings.TrimSpace(root) == "" {
+		return // notebook disabled — silent no-op
+	}
+	if err := writeRawAtomic(notebook.RawDispatchesDir(root), dispatch.ID, []byte(block)); err != nil {
 		d.logf("dispatch auto-journal %s: %v", dispatch.ID, err)
 		return
 	}
-	if !written {
-		return // already journaled — idempotent
-	}
-	// Suppress the watcher echo and surface the write like the CLI append path does.
-	d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: rel, Hash: hash})
-	d.broadcastNotebookChanged(originAgent, rel)
 }
 
-// journalDispatchOnSessionGone journals the outcome of a dispatch whose target
+// journalDispatchOnSessionGone captures the outcome of a dispatch whose target
 // session is being removed — the reliability backstop for a worker that ended
-// without a terminal report. It always attempts the write and lets the journal
-// file's per-dispatch marker (checked under the notebook store lock in
-// AppendJournalEntryOnce) be the sole dedup authority. That keying-off-the-file,
-// not off store state, is deliberate:
+// without a terminal report. It always attempts the write; the per-dispatch raw
+// file (one file per dispatch id) is the exactly-once ledger. Keying off the file
+// rather than off store state is deliberate:
 //
-//   - it no-ops when the report path already journaled (marker present);
 //   - it RECOVERS a dispatch whose report-path write failed transiently — the
 //     store still holds the terminal report at removal time, so the recovered
 //     entry is the rich completed/failed block, not a degraded one. (Keying the
 //     skip off the store's terminal-state instead would strand that dispatch
-//     unjournaled forever, since the marker was never written.)
+//     uncaptured forever, since the file was never written.)
+//   - a replay (report path already captured) re-renders the block and atomically
+//     overwrites that one file — harmless (byte-identical with a server ReportedAt;
+//     with only the wall-clock fallback the header can drift across minutes, so the
+//     overwrite is equivalent rather than byte-identical).
 //
 // Non-dispatch sessions resolve to no dispatch and are ignored.
 //
 // One narrow, accepted race remains: if a teardown reads this dispatch in the
 // sub-millisecond window after a terminal report is rendered but before it commits
-// to the store, AND the teardown's append wins the marker before the report path's,
-// the journal records the lower-fidelity "(ended)" block. Exactly-once still holds
-// (the marker admits a single entry); only the fidelity of that one entry degrades,
-// and only in that window. Closing it fully would require cross-subsystem per-
-// dispatch locking — not worth it for a best-effort capture.
+// to the store, the teardown may write the lower-fidelity "(ended)" block and the
+// report path may then overwrite it with the rich block (or vice versa). Either
+// way the single per-dispatch file holds exactly one entry; only the fidelity of
+// that one entry can briefly differ, and only in that window. Closing it fully
+// would require cross-subsystem per-dispatch locking — not worth it for a
+// best-effort capture.
 func (d *Daemon) journalDispatchOnSessionGone(sessionID string) {
 	dispatch := d.store.GetChiefOfStaffDispatchBySession(strings.TrimSpace(sessionID))
 	if dispatch == nil {
@@ -202,6 +226,27 @@ func renderDispatchJournalEntry(dispatch *protocol.ChiefOfStaffDispatch, now tim
 // is unaffected.
 func neutralizeJournalMarkers(s string) string {
 	return strings.ReplaceAll(s, "<!--", "<! --")
+}
+
+// dispatchDecisionText renders a resolved decision request as a single durable
+// line ("Decision: <question> → <answer>"). An unanswered request carries no
+// durable outcome yet, so it is skipped.
+func dispatchDecisionText(req *protocol.DispatchDecisionRequest) string {
+	if req == nil {
+		return ""
+	}
+	question := strings.TrimSpace(req.Question)
+	answer := ""
+	if req.Response != nil {
+		answer = strings.TrimSpace(*req.Response)
+	}
+	if answer == "" && req.Recommendation != nil {
+		answer = strings.TrimSpace(*req.Recommendation)
+	}
+	if question == "" || answer == "" {
+		return ""
+	}
+	return fmt.Sprintf("Decision: %s → %s", question, answer)
 }
 
 // dispatchVerificationLine condenses verification evidence into one scannable line

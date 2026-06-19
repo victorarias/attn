@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -28,18 +29,74 @@ func readJournalFile(t *testing.T, d *Daemon, dateISO string) string {
 	return string(data)
 }
 
-// waitForJournal polls the dated journal until it contains substr — the journal
-// write on the dispatch-report path is a side effect that runs after the socket
-// response is sent, so socket-level tests assert it eventually, not synchronously.
-func waitForJournal(t *testing.T, d *Daemon, dateISO, substr string) string {
+// readRawDispatchFile returns the per-dispatch raw-tier file
+// (.attn/raw/dispatches/<dispatchID>.md), or "" if it does not exist. Dispatch
+// outcomes now land here, redirected out of the curated journal.
+func readRawDispatchFile(t *testing.T, d *Daemon, dispatchID string) string {
+	t.Helper()
+	root, err := d.notebookRoot()
+	if err != nil {
+		t.Fatalf("notebook root: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(notebook.RawDispatchesDir(root), dispatchID+".md"))
+	if errors.Is(err, os.ErrNotExist) {
+		return ""
+	}
+	if err != nil {
+		t.Fatalf("read raw dispatch %s: %v", dispatchID, err)
+	}
+	return string(data)
+}
+
+// waitForRawDispatch polls the per-dispatch raw file until it contains substr —
+// the redirect on the dispatch-report path is a side effect that runs after the
+// socket response is sent, so socket-level tests assert it eventually.
+func waitForRawDispatch(t *testing.T, d *Daemon, dispatchID, substr string) string {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if body := readJournalFile(t, d, dateISO); strings.Contains(body, substr) {
+		if body := readRawDispatchFile(t, d, dispatchID); strings.Contains(body, substr) {
 			return body
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("journal %s never contained %q:\n%s", dateISO, substr, readJournalFile(t, d, dateISO))
+			t.Fatalf("raw dispatch %s never contained %q:\n%s", dispatchID, substr, readRawDispatchFile(t, d, dispatchID))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// waitForRawDispatchesQuiescent polls until the dispatches dir holds exactly the
+// expected settled .md files with no in-flight atomic-writer temp (.tmp.) sibling.
+// The report-path capture runs as a post-response side effect, so a socket-level
+// idempotency check must wait for the in-flight overwrite to settle — otherwise a
+// lingering temp file races t.TempDir() cleanup.
+func waitForRawDispatchesQuiescent(t *testing.T, d *Daemon, wantMD int) {
+	t.Helper()
+	root, err := d.notebookRoot()
+	if err != nil {
+		t.Fatalf("notebook root: %v", err)
+	}
+	dir := notebook.RawDispatchesDir(root)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		entries, err := os.ReadDir(dir)
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatalf("read dispatches dir: %v", err)
+		}
+		md, temp := 0, 0
+		for _, e := range entries {
+			switch {
+			case strings.Contains(e.Name(), ".tmp."):
+				temp++
+			case strings.HasSuffix(e.Name(), ".md"):
+				md++
+			}
+		}
+		if temp == 0 && md == wantMD {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("dispatches dir not quiescent: md=%d (want %d) temp=%d", md, wantMD, temp)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -228,12 +285,16 @@ func TestRemoveReapedSessionJournalsOnce(t *testing.T) {
 
 	d.removeReapedSession("worker-reap")
 
-	body := readJournalFile(t, d, "2026-06-14")
+	body := readRawDispatchFile(t, d, "dsp-reap")
 	if !strings.Contains(body, "Made progress before the worker was reaped.") {
-		t.Fatalf("reaped dispatch was not journaled:\n%s", body)
+		t.Fatalf("reaped dispatch was not captured:\n%s", body)
 	}
 	if n := strings.Count(body, "<!-- attn:dispatch:dsp-reap -->"); n != 1 {
-		t.Fatalf("reaped dispatch journaled %d times, want 1:\n%s", n, body)
+		t.Fatalf("reaped dispatch captured %d markers, want 1:\n%s", n, body)
+	}
+	// The redirect keeps the raw block OUT of the curated journal.
+	if j := readJournalFile(t, d, "2026-06-14"); strings.Contains(j, "dsp-reap") {
+		t.Fatalf("dispatch block leaked into the curated journal:\n%s", j)
 	}
 }
 
@@ -258,19 +319,21 @@ func TestJournalDispatchOnSessionGoneRecoversTerminal(t *testing.T) {
 		t.Fatalf("add dispatch: %v", err)
 	}
 
-	// No prior journal write exists (marker absent) — the fallback recovers it.
+	// No prior raw file exists — the fallback recovers it.
 	d.journalDispatchOnSessionGone("worker-term")
-	d.journalDispatchOnSessionGone("worker-term") // idempotent: marker now present
+	d.journalDispatchOnSessionGone("worker-term") // idempotent: identical overwrite
 
-	body := readJournalFile(t, d, "2026-06-14")
+	body := readRawDispatchFile(t, d, "dsp-term")
 	if !strings.Contains(body, "(completed)") || !strings.Contains(body, "Finished cleanly.") {
 		t.Fatalf("recovered entry should be the rich completed block, not degraded:\n%s", body)
 	}
 	if strings.Contains(body, "(ended)") {
 		t.Fatalf("recovered entry must not use the degraded (ended) label:\n%s", body)
 	}
+	// The 1:1 <dispatchID>.md keying means a replay is an identical overwrite, so the
+	// single file holds exactly one marker regardless of how many times it is called.
 	if n := strings.Count(body, "<!-- attn:dispatch:dsp-term -->"); n != 1 {
-		t.Fatalf("terminal dispatch recovered %d times, want 1:\n%s", n, body)
+		t.Fatalf("terminal dispatch recovered %d markers, want 1:\n%s", n, body)
 	}
 }
 
@@ -293,12 +356,66 @@ func TestJournalDispatchOutcomeIdempotent(t *testing.T) {
 	d.journalDispatchOutcome(dispatch)
 	d.journalDispatchOutcome(dispatch)
 
-	body := readJournalFile(t, d, "2026-06-14")
+	body := readRawDispatchFile(t, d, "dsp-once")
 	if n := strings.Count(body, "<!-- attn:dispatch:dsp-once -->"); n != 1 {
-		t.Fatalf("dispatch journaled %d times, want 1:\n%s", n, body)
+		t.Fatalf("dispatch captured %d markers, want 1:\n%s", n, body)
 	}
 	if !strings.Contains(body, "source: dispatch:dsp-once") {
 		t.Fatalf("entry not grounded:\n%s", body)
+	}
+}
+
+// A replay of a dispatch that carries a server ReportedAt re-renders a
+// byte-identical block, but a dispatch WITHOUT a ReportedAt stamps its "## HH:MM"
+// header from the wall clock at render time, so two replays in different minutes
+// produce an equivalent — not byte-identical — block. The exactly-once ledger still
+// holds (one file, one marker); only the header timestamp can drift. This pins the
+// softened "equivalent, not byte-identical" claim in the package comments.
+func TestRenderDispatchJournalEntryWallClockHeaderDrifts(t *testing.T) {
+	withReportedAt := &protocol.ChiefOfStaffDispatch{
+		ID:         "dsp-stamped",
+		Label:      "stamped",
+		ReportedAt: protocol.Ptr("2026-06-15T10:30:00Z"),
+		StructuredReport: &protocol.DispatchReport{
+			ReportType: protocol.DispatchReportTypeCompletion,
+			WorkState:  protocol.DispatchWorkStateCompleted,
+			Summary:    "done",
+		},
+	}
+	noReportedAt := &protocol.ChiefOfStaffDispatch{
+		ID:           "dsp-bare",
+		Label:        "bare",
+		LatestReport: protocol.Ptr("ended without a structured report"),
+		// ReportedAt deliberately absent -> wall-clock fallback for the header.
+	}
+
+	t1 := time.Date(2026, 6, 15, 10, 30, 0, 0, time.UTC)
+	t2 := time.Date(2026, 6, 15, 10, 31, 0, 0, time.UTC)
+
+	// With a server ReportedAt the render ignores the passed clock entirely, so the
+	// block is byte-identical across replays.
+	if _, a, _ := renderDispatchJournalEntry(withReportedAt, t1); true {
+		if _, b, _ := renderDispatchJournalEntry(withReportedAt, t2); a != b {
+			t.Fatalf("ReportedAt dispatch should render identically across clocks:\n%s\n---\n%s", a, b)
+		}
+	}
+
+	// Without one the header tracks the wall clock, so the two blocks differ — but
+	// only in the header line; the body and the dedup marker are unchanged.
+	_, first, ok1 := renderDispatchJournalEntry(noReportedAt, t1)
+	_, second, ok2 := renderDispatchJournalEntry(noReportedAt, t2)
+	if !ok1 || !ok2 {
+		t.Fatal("bare dispatch should still be renderable")
+	}
+	if first == second {
+		t.Fatalf("wall-clock header should drift across minutes:\n%s", first)
+	}
+	if !strings.Contains(first, "## 10:30 —") || !strings.Contains(second, "## 10:31 —") {
+		t.Fatalf("headers not stamped from the passed clock:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+	marker := "<!-- attn:dispatch:dsp-bare -->"
+	if !strings.Contains(first, marker) || !strings.Contains(second, marker) {
+		t.Fatalf("dedup marker missing despite header drift")
 	}
 }
 
@@ -326,17 +443,21 @@ func TestReportDispatchAutoJournals(t *testing.T) {
 	}
 	sendNotebookCmd(t, d, report)
 
-	today := time.Now().Format("2006-01-02")
-	body := waitForJournal(t, d, today, "Wired the auto-journal into the report path.")
+	body := waitForRawDispatch(t, d, "dsp-int", "Wired the auto-journal into the report path.")
 	if !strings.Contains(body, "source: dispatch:dsp-int") {
 		t.Fatalf("entry not grounded:\n%s", body)
 	}
+	// The redirect keeps the raw block OUT of the curated journal.
+	if j := readJournalFile(t, d, time.Now().Format("2006-01-02")); strings.Contains(j, "dsp-int") {
+		t.Fatalf("dispatch block leaked into the curated journal:\n%s", j)
+	}
 
-	// A second identical report must not double-write.
+	// A second identical report is a harmless identical overwrite — one file, one marker.
 	sendNotebookCmd(t, d, report)
-	body = waitForJournal(t, d, today, "<!-- attn:dispatch:dsp-int -->")
+	waitForRawDispatchesQuiescent(t, d, 1) // the in-flight overwrite settled; still one file
+	body = readRawDispatchFile(t, d, "dsp-int")
 	if n := strings.Count(body, "<!-- attn:dispatch:dsp-int -->"); n != 1 {
-		t.Fatalf("dispatch journaled %d times after re-report, want 1:\n%s", n, body)
+		t.Fatalf("dispatch captured %d markers after re-report, want 1:\n%s", n, body)
 	}
 }
 
@@ -365,8 +486,8 @@ func TestReportDispatchNonTerminalDoesNotJournal(t *testing.T) {
 
 	// Give any (incorrect) async write a chance to land before asserting absence.
 	time.Sleep(50 * time.Millisecond)
-	if body := readJournalFile(t, d, time.Now().Format("2006-01-02")); strings.Contains(body, "dsp-mid") {
-		t.Fatalf("non-terminal report should not journal:\n%s", body)
+	if body := readRawDispatchFile(t, d, "dsp-mid"); body != "" {
+		t.Fatalf("non-terminal report should not capture a dispatch file:\n%s", body)
 	}
 }
 
@@ -384,16 +505,15 @@ func TestJournalDispatchOnSessionGoneFallback(t *testing.T) {
 	}
 
 	d.journalDispatchOnSessionGone("worker-gone")
-	body := readJournalFile(t, d, "2026-06-14")
+	body := readRawDispatchFile(t, d, "dsp-gone")
 	if !strings.Contains(body, "Got partway before the session closed.") || !strings.Contains(body, "(ended)") {
-		t.Fatalf("session-gone fallback did not journal:\n%s", body)
+		t.Fatalf("session-gone fallback did not capture:\n%s", body)
 	}
 
-	// A session that is not a tracked dispatch is a silent no-op.
-	before := body
+	// A session that is not a tracked dispatch is a silent no-op — it writes no file.
 	d.journalDispatchOnSessionGone("not-a-dispatch")
-	if after := readJournalFile(t, d, "2026-06-14"); after != before {
-		t.Fatalf("non-dispatch session changed the journal:\nbefore:\n%s\nafter:\n%s", before, after)
+	if after := readRawDispatchFile(t, d, "dsp-gone"); after != body {
+		t.Fatalf("non-dispatch session changed the captured file:\nbefore:\n%s\nafter:\n%s", body, after)
 	}
 }
 
@@ -415,9 +535,9 @@ func TestUnregisterSessionJournals(t *testing.T) {
 
 	d.unregisterSession("worker-close", syscall.SIGTERM)
 
-	body := readJournalFile(t, d, "2026-06-14")
+	body := readRawDispatchFile(t, d, "dsp-close")
 	if !strings.Contains(body, "Worked until the pane was closed.") {
-		t.Fatalf("orderly-close path did not journal:\n%s", body)
+		t.Fatalf("orderly-close path did not capture:\n%s", body)
 	}
 	if d.store.Get("worker-close") != nil {
 		t.Fatal("session record should be removed after unregister")
@@ -441,9 +561,9 @@ func TestCleanupDeletedWorktreeSessionsJournals(t *testing.T) {
 	// addIdleNotebookSession sets Directory to "/tmp/<id>"; match it.
 	d.cleanupDeletedWorktreeSessions("/tmp/worker-wt")
 
-	body := readJournalFile(t, d, "2026-06-14")
+	body := readRawDispatchFile(t, d, "dsp-wt")
 	if !strings.Contains(body, "Ran inside a worktree that was deleted.") {
-		t.Fatalf("worktree-cleanup path did not journal:\n%s", body)
+		t.Fatalf("worktree-cleanup path did not capture:\n%s", body)
 	}
 	if d.store.Get("worker-wt") != nil {
 		t.Fatal("session record should be removed after worktree cleanup")
@@ -467,9 +587,9 @@ func TestClearAllSessionsJournals(t *testing.T) {
 
 	d.clearAllSessions()
 
-	body := readJournalFile(t, d, "2026-06-14")
+	body := readRawDispatchFile(t, d, "dsp-clear")
 	if !strings.Contains(body, "Was mid-run when sessions were cleared.") {
-		t.Fatalf("clear-all path did not journal:\n%s", body)
+		t.Fatalf("clear-all path did not capture:\n%s", body)
 	}
 	if d.store.Get("worker-clear") != nil {
 		t.Fatal("session record should be removed after clear-all")
@@ -505,8 +625,11 @@ func TestDropSessionRecordSwallowsJournalFailure(t *testing.T) {
 }
 
 // A free-text field that contains a literal dispatch marker must not be able to
-// poison another dispatch's dedup. The renderer neutralizes HTML-comment openers in
-// the body, so dispatch B's real entry still writes even after A embedded B's marker.
+// forge another dispatch's marker. With the raw-tier redirect each dispatch is a
+// distinct 1:1 file, so A cannot suppress B's separate file; what the neutralize
+// guarantee still protects is that A's OWN file never contains a genuine
+// (un-neutralized) copy of B's marker that a marker-scanner could mistake for B's
+// real entry.
 func TestForgedMarkerDoesNotPoisonDedup(t *testing.T) {
 	d := newNotebookDaemon(t)
 
@@ -521,7 +644,7 @@ func TestForgedMarkerDoesNotPoisonDedup(t *testing.T) {
 			Summary:    "Embedding " + journalDispatchMarker("dsp-B") + " in my summary.",
 		},
 	})
-	// B's real entry must still land — its marker was not pre-written by A.
+	// B's real entry lands in its own file regardless.
 	d.journalDispatchOutcome(&protocol.ChiefOfStaffDispatch{
 		ID:         "dsp-B",
 		Label:      "Victim",
@@ -533,13 +656,21 @@ func TestForgedMarkerDoesNotPoisonDedup(t *testing.T) {
 		},
 	})
 
-	body := readJournalFile(t, d, "2026-06-14")
-	if !strings.Contains(body, "B's genuine outcome.") {
-		t.Fatalf("dispatch B was suppressed by a forged marker in A:\n%s", body)
+	bBody := readRawDispatchFile(t, d, "dsp-B")
+	if !strings.Contains(bBody, "B's genuine outcome.") {
+		t.Fatalf("dispatch B's own file is missing its outcome:\n%s", bBody)
 	}
-	// B's real marker appears exactly once (A's embedded copy was neutralized).
-	if n := strings.Count(body, journalDispatchMarker("dsp-B")); n != 1 {
-		t.Fatalf("B's marker count = %d, want 1 (A's copy should be neutralized):\n%s", n, body)
+	if n := strings.Count(bBody, journalDispatchMarker("dsp-B")); n != 1 {
+		t.Fatalf("B's file marker count = %d, want 1:\n%s", n, bBody)
+	}
+	// A's file embedded B's marker text in free prose; it must have been neutralized
+	// so A's file holds ZERO genuine B markers.
+	aBody := readRawDispatchFile(t, d, "dsp-A")
+	if n := strings.Count(aBody, journalDispatchMarker("dsp-B")); n != 0 {
+		t.Fatalf("A's file holds %d genuine B markers, want 0 (the forged copy must be neutralized):\n%s", n, aBody)
+	}
+	if !strings.Contains(aBody, "<! -- attn:dispatch:dsp-B -->") {
+		t.Fatalf("A's forged marker should be neutralized to a non-opener:\n%s", aBody)
 	}
 }
 
