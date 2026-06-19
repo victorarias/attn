@@ -993,7 +993,7 @@ func (d *Daemon) recomputeAndBroadcastWorkspace(workspaceID string) {
 func (d *Daemon) handleWorkspaceLayoutAddSessionPane(client *wsClient, msg *protocol.WorkspaceLayoutAddSessionPaneMessage) {
 	snapshot, err := d.currentOrEmptyWorkspaceLayout(msg.WorkspaceID)
 	if err != nil {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, nil, err)
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, msg.PaneID, err)
 		return
 	}
 

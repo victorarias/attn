@@ -399,7 +399,8 @@ var migrations = []migration{
 	`},
 	{48, "drop label from recent_locations", "ALTER TABLE recent_locations DROP COLUMN label"},
 	{49, "add rank to workspaces", `ALTER TABLE workspaces ADD COLUMN rank TEXT NOT NULL DEFAULT ''`},
-	{50, "create workflow engine journal tables", `CREATE TABLE IF NOT EXISTS workflow_runs (
+	{50, "repair missing workspace rank", `ALTER TABLE workspaces ADD COLUMN rank TEXT NOT NULL DEFAULT ''`},
+	{51, "create workflow engine journal tables", `CREATE TABLE IF NOT EXISTS workflow_runs (
     run_id TEXT PRIMARY KEY,
     script_path TEXT NOT NULL,
     script_hash TEXT NOT NULL,
@@ -590,7 +591,7 @@ func migrateDB(db *sql.DB) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
-		} else if m.version == 49 {
+		} else if m.version == 49 || m.version == 50 {
 			if err := applyMigration49(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)

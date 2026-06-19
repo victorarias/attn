@@ -656,15 +656,14 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 	})
 }
 
-// decorateSessionWithWorkspace fills in WorkspaceID on a session about to be
-// broadcast, if an in-memory association exists. Called from sessionForBroadcast.
+// decorateSessionWithWorkspace refreshes WorkspaceID on a session about to be
+// broadcast when an in-memory association exists. The persisted value remains
+// authoritative during startup while the workspace registry is being rebuilt.
 func (d *Daemon) decorateSessionWithWorkspace(session *protocol.Session) {
 	if session == nil || d.workspaces == nil {
 		return
 	}
 	if id := d.workspaces.workspaceIDForSession(session.ID); id != "" {
 		session.WorkspaceID = id
-	} else {
-		session.WorkspaceID = ""
 	}
 }

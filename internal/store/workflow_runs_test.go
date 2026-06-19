@@ -6,7 +6,7 @@ import (
 
 func strptr(s string) *string { return &s }
 
-// TestWorkflowRunCRUD exercises migration 50 plus the full workflow journal CRUD:
+// TestWorkflowRunCRUD exercises migration 51 plus the full workflow journal CRUD:
 // run upsert/get round-trip, update-on-conflict for runs and calls, the composite
 // UNIQUE(run_id, ordinal) upsert, id-ASC list ordering, the optional session
 // filter, created_at DESC list ordering, manual child-delete cascade, and nullable
@@ -14,13 +14,13 @@ func strptr(s string) *string { return &s }
 func TestWorkflowRunCRUD(t *testing.T) {
 	s := New()
 
-	// Migration smoke: tables must exist after New(), and version must be 50.
+	// Migration smoke: tables must exist after New(), and version must be 51.
 	var maxVersion int
 	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&maxVersion); err != nil {
 		t.Fatalf("read schema_migrations: %v", err)
 	}
-	if maxVersion != 50 {
-		t.Fatalf("schema version = %d, want 50", maxVersion)
+	if maxVersion != 51 {
+		t.Fatalf("schema version = %d, want 51", maxVersion)
 	}
 
 	// 1. Insert a fully-populated run.
@@ -197,7 +197,7 @@ func TestWorkflowRunCRUD(t *testing.T) {
 	}
 }
 
-// TestWorkflowMigrationIdempotentOnReopen proves migration 50 is idempotent: a
+// TestWorkflowMigrationIdempotentOnReopen proves migration 51 is idempotent: a
 // second OpenDB over the same on-disk DB re-runs migrateDB without error and leaves
 // the schema intact.
 func TestWorkflowMigrationIdempotentOnReopen(t *testing.T) {
@@ -242,7 +242,7 @@ func TestWorkflowMigrationIdempotentOnReopen(t *testing.T) {
 	if err := db2.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&maxVersion); err != nil {
 		t.Fatalf("read schema_migrations after reopen: %v", err)
 	}
-	if maxVersion != 50 {
-		t.Fatalf("schema version after reopen = %d, want 50", maxVersion)
+	if maxVersion != 51 {
+		t.Fatalf("schema version after reopen = %d, want 51", maxVersion)
 	}
 }
