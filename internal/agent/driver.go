@@ -290,12 +290,6 @@ type HeadlessTaskRequest struct {
 	// ResultPath is the per-call file the sink writes the validated payload to.
 	// Like Schema, the caller bakes it into MCPServerArgs; drivers ignore it.
 	ResultPath string
-	// Label / Phase / CallID are journaling/diagnostic identifiers for the call.
-	// Drivers ignore them; they exist so the engine boundary can thread identity
-	// without a second struct.
-	Label  string
-	Phase  string
-	CallID string
 
 	// --- E3 additive (all optional; the janitor sets none of these) ---
 
@@ -338,9 +332,6 @@ type MCPServerSpec struct {
 
 type HeadlessTaskResult struct {
 	Diagnostics string
-	// Result is reserved for the engine boundary, which populates it after
-	// reading ResultPath. Drivers leave it nil.
-	Result json.RawMessage
 	// Text is the child's captured final assistant text (the no-schema path).
 	// Drivers populate this on a successful run.
 	Text string

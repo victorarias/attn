@@ -263,36 +263,6 @@ func (s *Store) ListWorkflowAgentCalls(runID string) ([]*WorkflowAgentCallRow, e
 	return calls, rows.Err()
 }
 
-// GetLatestWorkflowAgentCall returns the last-appended call for a run (highest
-// id), or (nil, nil) if the run has no calls.
-func (s *Store) GetLatestWorkflowAgentCall(runID string) (*WorkflowAgentCallRow, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.db == nil {
-		return nil, nil
-	}
-
-	row := s.db.QueryRow(`
-		SELECT id, run_id, ordinal, label, phase, prompt_hash, schema_hash,
-			resolved_model, resolved_harness, agent_type, result_json, status,
-			error, result_path, started_at, completed_at
-		FROM workflow_agent_calls
-		WHERE run_id = ?
-		ORDER BY id DESC
-		LIMIT 1
-	`, runID)
-
-	call, err := scanWorkflowAgentCall(row)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return call, nil
-}
-
 // DeleteWorkflowRun removes a run and its journaled calls. The store never enables
 // PRAGMA foreign_keys, so the ON DELETE CASCADE clause is inert; child rows are
 // deleted explicitly, mirroring DeleteReviewLoopRun.

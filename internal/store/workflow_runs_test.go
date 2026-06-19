@@ -138,17 +138,7 @@ func TestWorkflowRunCRUD(t *testing.T) {
 		t.Fatalf("ordinal 1 Error = %v, want boom", calls[1].Error)
 	}
 
-	// 4. GetLatestWorkflowAgentCall = highest id = ordinal "1" (re-upsert of "0"
-	// does not change its id).
-	latest, err := s.GetLatestWorkflowAgentCall("run-1")
-	if err != nil {
-		t.Fatalf("GetLatestWorkflowAgentCall: %v", err)
-	}
-	if latest == nil || latest.Ordinal != "1" {
-		t.Fatalf("latest call ordinal = %v, want 1", latest)
-	}
-
-	// 5. Session filter + created_at DESC ordering. Add a second run, newer, with a
+	// 4. Session filter + created_at DESC ordering. Add a second run, newer, with a
 	// different session.
 	run2 := &WorkflowRunRow{
 		RunID:      "run-2",
@@ -179,7 +169,7 @@ func TestWorkflowRunCRUD(t *testing.T) {
 		t.Fatalf("session filter = %v, want only run-1", filtered)
 	}
 
-	// 6. Delete cascade (manual child delete).
+	// 5. Delete cascade (manual child delete).
 	if err := s.DeleteWorkflowRun("run-1"); err != nil {
 		t.Fatalf("DeleteWorkflowRun: %v", err)
 	}
