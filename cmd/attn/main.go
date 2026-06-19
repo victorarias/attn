@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"text/tabwriter"
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
@@ -222,9 +221,6 @@ func main() {
 	case "workspace":
 		maybePrintProfileBanner()
 		runWorkspace()
-	case "notebook":
-		maybePrintProfileBanner()
-		runNotebook()
 	case "profile":
 		// No banner: `attn profile resolve --field …` must print only the
 		// value so the Makefile / harness can consume it cleanly.
@@ -482,7 +478,6 @@ commands:
   delegate --brief-file <path>      start another agent with a delegated brief
   dispatch <command>                 list or report chief-of-staff dispatches
   workspace context <command>       edit shared workspace context
-  notebook <command>                browse the durable markdown notebook
   open <file.md> [--session <id>]   show a markdown file in attn
   browser <command>                 open and control the in-app browser
   review-loop <command>             manage an autonomous review loop
@@ -963,140 +958,6 @@ commands:
 `)
 }
 
-func writeNotebookHelp(w io.Writer) {
-	fmt.Fprint(w, `usage: attn notebook <command>
-
-commands:
-  init                       create the notebook (idempotent); prints its root
-  show <path>                print a note's contents (path may be root-absolute)
-  list [prefix]              list notes, optionally under a path prefix
-  journal append --text T    append an entry to today's journal (--date YYYY-MM-DD to override)
-  memory write --path P      write/edit a durable note; content from --file or stdin
-                             (--base-hash H for a safe hash-CAS edit)
-  guide                      print the notebook operating guidance
-  tasks                      list the durable background task runner's records
-`)
-}
-
-func runNotebook() {
-	if len(os.Args) < 3 || os.Args[2] == "-h" || os.Args[2] == "--help" {
-		writeNotebookHelp(os.Stdout)
-		return
-	}
-	warnIfDaemonVersionMismatch()
-	action := os.Args[2]
-	args := os.Args[3:]
-	c := client.New("")
-	switch action {
-	case "init":
-		if len(args) != 0 {
-			fmt.Fprintln(os.Stderr, "usage: attn notebook init")
-			os.Exit(2)
-		}
-		res, err := c.NotebookInit()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "notebook init: %v\n", err)
-			os.Exit(1)
-		}
-		if res.Created {
-			fmt.Printf("initialized notebook at %s\n", res.Root)
-		} else {
-			fmt.Printf("notebook already initialized at %s\n", res.Root)
-		}
-	case "show":
-		if len(args) != 1 {
-			fmt.Fprintln(os.Stderr, "usage: attn notebook show <path>")
-			os.Exit(2)
-		}
-		res, err := c.NotebookRead(args[0])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "notebook show: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Print(res.Content)
-	case "list":
-		prefix := ""
-		switch len(args) {
-		case 0:
-		case 1:
-			prefix = args[0]
-		default:
-			fmt.Fprintln(os.Stderr, "usage: attn notebook list [prefix]")
-			os.Exit(2)
-		}
-		entries, err := c.NotebookList(prefix)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "notebook list: %v\n", err)
-			os.Exit(1)
-		}
-		for _, e := range entries {
-			if e.Title != nil && *e.Title != "" {
-				fmt.Printf("%s\t%s\n", e.Path, *e.Title)
-			} else {
-				fmt.Println(e.Path)
-			}
-		}
-	case "journal":
-		runNotebookJournal(c, args)
-	case "memory":
-		runNotebookMemory(c, args)
-	case "guide":
-		if len(args) != 0 {
-			fmt.Fprintln(os.Stderr, "usage: attn notebook guide")
-			os.Exit(2)
-		}
-		res, err := c.NotebookGuide(strings.TrimSpace(os.Getenv("ATTN_SESSION_ID")))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "notebook guide: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println(res.Guidance)
-	case "tasks":
-		runNotebookTasks(c, args)
-	default:
-		fmt.Fprintf(os.Stderr, "notebook: unknown command %q\n\n", action)
-		writeNotebookHelp(os.Stderr)
-		os.Exit(2)
-	}
-}
-
-// runNotebookTasks handles `attn notebook tasks`: a read-only listing of the
-// durable task runner's records. There is no CLI retry — retry is a UI action.
-func runNotebookTasks(c *client.Client, args []string) {
-	if len(args) != 0 {
-		fmt.Fprintln(os.Stderr, "usage: attn notebook tasks")
-		os.Exit(2)
-	}
-	records, err := c.NotebookTasks()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "notebook tasks: %v\n", err)
-		os.Exit(1)
-	}
-	printNotebookTasks(os.Stdout, records)
-}
-
-// printNotebookTasks renders the task records as an aligned table. next_attempt_at
-// is shown in local time; last_error, when present, follows on an indented line so
-// a long message never breaks the column alignment.
-func printNotebookTasks(w io.Writer, records []protocol.NotebookTask) {
-	if len(records) == 0 {
-		fmt.Fprintln(w, "no tasks")
-		return
-	}
-	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "STATE\tKIND\tSUBJECT\tATTEMPTS\tNEXT ATTEMPT\tID")
-	for _, t := range records {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n",
-			t.State, t.Kind, t.Subject, t.Attempts, formatTaskTime(t.NextAttemptAt), t.ID)
-	}
-	_ = tw.Flush()
-	for _, t := range records {
-		if msg := strings.TrimSpace(protocol.Deref(t.LastError)); msg != "" {
-			fmt.Fprintf(w, "  %s: %s\n", t.ID, msg)
-		}
-	}
-}
-
 // notebookGuideClient is the slice of the daemon client the launch-guidance
 // decision needs; narrowed so it can be faked in tests.
 type notebookGuideClient interface {
@@ -1114,123 +975,6 @@ func resolveChiefNotebookRoot(c notebookGuideClient, sessionID string) string {
 		return ""
 	}
 	return guide.Root
-}
-
-type notebookJournalArgs struct {
-	text string
-	date string
-}
-
-func parseNotebookJournalArgs(args []string) (notebookJournalArgs, error) {
-	if len(args) == 0 || args[0] != "append" {
-		return notebookJournalArgs{}, errors.New("usage: attn notebook journal append --text T [--date YYYY-MM-DD]")
-	}
-	fs := flag.NewFlagSet("notebook journal append", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	text := fs.String("text", "", "journal entry text (required)")
-	date := fs.String("date", "", "journal date YYYY-MM-DD (defaults to today)")
-	if err := fs.Parse(args[1:]); err != nil {
-		return notebookJournalArgs{}, err
-	}
-	if fs.NArg() != 0 {
-		return notebookJournalArgs{}, fmt.Errorf("unexpected arguments: %v", fs.Args())
-	}
-	if strings.TrimSpace(*text) == "" {
-		return notebookJournalArgs{}, errors.New("--text is required")
-	}
-	return notebookJournalArgs{text: *text, date: strings.TrimSpace(*date)}, nil
-}
-
-type notebookMemoryArgs struct {
-	path     string
-	baseHash string
-	file     string
-}
-
-func parseNotebookMemoryArgs(args []string) (notebookMemoryArgs, error) {
-	if len(args) == 0 || args[0] != "write" {
-		return notebookMemoryArgs{}, errors.New("usage: attn notebook memory write --path P [--base-hash H] [--file F]")
-	}
-	fs := flag.NewFlagSet("notebook memory write", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	path := fs.String("path", "", "note path, e.g. /memory/decisions/foo.md (required)")
-	baseHash := fs.String("base-hash", "", "expected current hash for a safe edit (omit to create)")
-	file := fs.String("file", "", "read content from this file instead of stdin")
-	if err := fs.Parse(args[1:]); err != nil {
-		return notebookMemoryArgs{}, err
-	}
-	if fs.NArg() != 0 {
-		return notebookMemoryArgs{}, fmt.Errorf("unexpected arguments: %v", fs.Args())
-	}
-	if strings.TrimSpace(*path) == "" {
-		return notebookMemoryArgs{}, errors.New("--path is required")
-	}
-	return notebookMemoryArgs{path: *path, baseHash: strings.TrimSpace(*baseHash), file: strings.TrimSpace(*file)}, nil
-}
-
-// runNotebookJournal handles `attn notebook journal append --text … [--date …]`.
-func runNotebookJournal(c *client.Client, args []string) {
-	parsed, err := parseNotebookJournalArgs(args)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	res, err := c.NotebookAppendJournal(parsed.text, parsed.date)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "notebook journal append: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("appended to %s\n", res.Path)
-}
-
-// runNotebookMemory handles `attn notebook memory write --path P [--base-hash H]
-// [--file F]`. Content comes from --file, else stdin.
-func runNotebookMemory(c *client.Client, args []string) {
-	parsed, err := parseNotebookMemoryArgs(args)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	var content []byte
-	var readErr error
-	if parsed.file != "" {
-		content, readErr = os.ReadFile(parsed.file)
-	} else {
-		content, readErr = io.ReadAll(os.Stdin)
-	}
-	if readErr != nil {
-		fmt.Fprintf(os.Stderr, "notebook memory write: read content: %v\n", readErr)
-		os.Exit(1)
-	}
-	res, err := c.NotebookWrite(parsed.path, string(content), parsed.baseHash)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "notebook memory write: %v\n", err)
-		os.Exit(1)
-	}
-	if res.Conflict {
-		current := ""
-		if res.CurrentHash != nil {
-			current = *res.CurrentHash
-		}
-		fmt.Fprintf(os.Stderr, "notebook memory write: conflict — %s changed on disk (current hash %s); re-read and retry\n", res.Path, current)
-		os.Exit(1)
-	}
-	hash := ""
-	if res.Hash != nil {
-		hash = *res.Hash
-	}
-	fmt.Printf("wrote %s (%s)\n", res.Path, hash)
-}
-
-// formatTaskTime renders a persisted RFC3339 timestamp in local time for display,
-// falling back to the raw string if it cannot be parsed.
-func formatTaskTime(s string) string {
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t.Local().Format("2006-01-02 15:04")
-		}
-	}
-	return s
 }
 
 func workspaceContextSourceSession(args []string, allowForce bool) (string, bool, error) {

@@ -34,8 +34,8 @@ interface NotebookBrowserProps {
 }
 
 // The note shown first when the browser opens with nothing selected, in order of
-// preference. /memory/index.md is the distilled map an agent is told to read.
-const PREFERRED_FIRST = ['memory/index.md', 'index.md'];
+// preference. knowledge/index.md is the distilled map an agent is told to read.
+const PREFERRED_FIRST = ['knowledge/index.md', 'index.md'];
 
 export function NotebookBrowser({
   isOpen,
@@ -465,7 +465,7 @@ export function NotebookBrowser({
             <div className="notebook-browser-heading">
               <NotebookIcon />
               <div>
-                <span className="notebook-browser-eyebrow">Durable memory</span>
+                <span className="notebook-browser-eyebrow">Knowledge base</span>
                 <h1 id="notebook-browser-title">Notebook</h1>
               </div>
             </div>
@@ -502,7 +502,7 @@ export function NotebookBrowser({
                       onClick={() => void loadNote(entry.path)}
                       title={entry.path}
                     >
-                      <span className="notebook-browser-list-marker" data-kind={entry.kind || 'note'} />
+                      <span className="notebook-browser-list-marker" data-type={entry.type || 'note'} />
                       <span className="notebook-browser-list-copy">
                         <strong>{entry.title || basename(entry.path)}</strong>
                         <span>{entry.path}</span>
@@ -730,16 +730,21 @@ interface NoteGroup {
   entries: NotebookEntry[];
 }
 
-const GROUP_ORDER = ['Journal', 'Memory', 'Notebook'];
+const GROUP_ORDER = ['Journal', 'Projects', 'Areas', 'Resources', 'Archive', 'Knowledge', 'Notebook'];
 
-// groupEntries buckets notes by their top-level directory for the sidebar:
-// journal/* -> Journal, memory/* -> Memory, root files -> Notebook.
+// groupEntries buckets notes for the sidebar by their top-level path, mapping the
+// PARA knowledge layout to section labels:
+//   journal/*             -> Journal
+//   knowledge/projects/*  -> Projects
+//   knowledge/areas/*     -> Areas
+//   knowledge/resources/* -> Resources
+//   knowledge/archive/*   -> Archive
+//   knowledge/*           -> Knowledge (e.g. knowledge/index.md, no PARA subdir)
+//   root files            -> Notebook
 function groupEntries(entries: NotebookEntry[]): NoteGroup[] {
   const buckets = new Map<string, NotebookEntry[]>();
   for (const entry of entries) {
-    const slash = entry.path.indexOf('/');
-    const top = slash === -1 ? '' : entry.path.slice(0, slash);
-    const label = top === 'journal' ? 'Journal' : top === 'memory' ? 'Memory' : top === '' ? 'Notebook' : capitalize(top);
+    const label = groupLabel(entry.path);
     const list = buckets.get(label) || [];
     list.push(entry);
     buckets.set(label, list);
@@ -749,6 +754,16 @@ function groupEntries(entries: NotebookEntry[]): NoteGroup[] {
     .sort((a, b) => groupRank(a.label) - groupRank(b.label) || a.label.localeCompare(b.label));
 }
 
+function groupLabel(path: string): string {
+  if (path.startsWith('journal/')) return 'Journal';
+  if (path.startsWith('knowledge/projects/')) return 'Projects';
+  if (path.startsWith('knowledge/areas/')) return 'Areas';
+  if (path.startsWith('knowledge/resources/')) return 'Resources';
+  if (path.startsWith('knowledge/archive/')) return 'Archive';
+  if (path.startsWith('knowledge/')) return 'Knowledge';
+  return 'Notebook';
+}
+
 function groupRank(label: string): number {
   const idx = GROUP_ORDER.indexOf(label);
   return idx === -1 ? GROUP_ORDER.length : idx;
@@ -756,7 +771,7 @@ function groupRank(label: string): number {
 
 export interface NotebookHref {
   kind: 'note' | 'fragment' | 'external';
-  // For 'note': the notebook-relative path (no leading slash, e.g. "memory/foo.md").
+  // For 'note': the notebook-relative path (no leading slash, e.g. "knowledge/areas/foo.md").
   path?: string;
   // For 'fragment': the bare anchor without '#'. For 'note': an optional anchor.
   anchor?: string;
@@ -849,10 +864,6 @@ function slug(text: string): string {
 function basename(path: string): string {
   const name = path.slice(path.lastIndexOf('/') + 1);
   return name.endsWith('.md') ? name.slice(0, -3) : name;
-}
-
-function capitalize(s: string): string {
-  return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1);
 }
 
 // A terminal task isn't waiting on a next attempt, so its scheduled time is noise.

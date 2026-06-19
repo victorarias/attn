@@ -128,13 +128,13 @@ func TestNotebookTasksToProtocolSkipsNil(t *testing.T) {
 	}
 }
 
-// TestHandleNotebookTaskListReflectsRunnerRecords drives the unix-socket list path
-// end to end (handleConnection -> ParseMessage -> handler -> Response) against a
-// started runner with real enqueued records.
-func TestHandleNotebookTaskListReflectsRunnerRecords(t *testing.T) {
+// TestSendNotebookTaskListWSResult exercises the websocket list path (the only
+// list path after the unix-socket CLI was removed): a started runner's records
+// come back as a notebook_task_list_result correlated by request, with each
+// record's id/kind/state mapped through.
+func TestSendNotebookTaskListWSResult(t *testing.T) {
 	d := newNotebookDaemon(t)
 	runner, _ := installInstrumentedTaskRunner(t, d)
-
 	if _, err := runner.Enqueue(testTaskKind, "ws-a", tasks.EnqueueOptions{}); err != nil {
 		t.Fatalf("enqueue ws-a: %v", err)
 	}
@@ -145,51 +145,6 @@ func TestHandleNotebookTaskListReflectsRunnerRecords(t *testing.T) {
 	waitForTaskState(t, d, testTaskKind, "ws-a", tasks.StateDone)
 	waitForTaskState(t, d, testTaskKind, "ws-b", tasks.StateDone)
 
-	resp := sendNotebookCmd(t, d, protocol.NotebookTaskListMessage{Cmd: protocol.CmdNotebookTaskList})
-
-	got := map[string]protocol.NotebookTask{}
-	for _, task := range resp.NotebookTasks {
-		got[task.Subject] = task
-	}
-	if len(got) != 2 {
-		t.Fatalf("listed %d tasks, want 2: %+v", len(resp.NotebookTasks), resp.NotebookTasks)
-	}
-	for _, subject := range []string{"ws-a", "ws-b"} {
-		task, ok := got[subject]
-		if !ok {
-			t.Fatalf("subject %q missing from list: %+v", subject, resp.NotebookTasks)
-		}
-		if task.Kind != testTaskKind || task.State != string(tasks.StateDone) {
-			t.Fatalf("task %q = %+v, want kind=%s state=done", subject, task, testTaskKind)
-		}
-		if task.ID != tasks.TaskID(testTaskKind, subject) {
-			t.Fatalf("task %q id = %q, want %q", subject, task.ID, tasks.TaskID(testTaskKind, subject))
-		}
-	}
-}
-
-// TestHandleNotebookTaskListNilRunnerIsEmptyOk confirms the disabled/absent-runner
-// path is a successful empty list, never an error.
-func TestHandleNotebookTaskListNilRunnerIsEmptyOk(t *testing.T) {
-	d := newNotebookDaemon(t)
-	d.compactRunner = nil // explicit: no runner built yet
-
-	resp := sendNotebookCmd(t, d, protocol.NotebookTaskListMessage{Cmd: protocol.CmdNotebookTaskList})
-	if !resp.Ok || len(resp.NotebookTasks) != 0 {
-		t.Fatalf("nil-runner list = ok:%v tasks:%+v, want ok with empty tasks", resp.Ok, resp.NotebookTasks)
-	}
-}
-
-// TestSendNotebookTaskListWSResult exercises the websocket list path: a started
-// runner's records come back as a notebook_task_list_result correlated by request.
-func TestSendNotebookTaskListWSResult(t *testing.T) {
-	d := newNotebookDaemon(t)
-	runner, _ := installInstrumentedTaskRunner(t, d)
-	if _, err := runner.Enqueue(testTaskKind, "ws-x", tasks.EnqueueOptions{}); err != nil {
-		t.Fatalf("enqueue ws-x: %v", err)
-	}
-	waitForTaskState(t, d, testTaskKind, "ws-x", tasks.StateDone)
-
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.sendNotebookTaskListWSResult(client, "list-1")
 
@@ -198,8 +153,24 @@ func TestSendNotebookTaskListWSResult(t *testing.T) {
 	if msg.Event != protocol.EventNotebookTaskListResult || msg.RequestID != "list-1" || !msg.Success {
 		t.Fatalf("list result = %+v, want success notebook_task_list_result for list-1", msg)
 	}
-	if len(msg.Tasks) != 1 || msg.Tasks[0].Subject != "ws-x" {
-		t.Fatalf("list result tasks = %+v, want one ws-x task", msg.Tasks)
+	got := map[string]protocol.NotebookTask{}
+	for _, task := range msg.Tasks {
+		got[task.Subject] = task
+	}
+	if len(got) != 2 {
+		t.Fatalf("listed %d tasks, want 2: %+v", len(msg.Tasks), msg.Tasks)
+	}
+	for _, subject := range []string{"ws-a", "ws-b"} {
+		task, ok := got[subject]
+		if !ok {
+			t.Fatalf("subject %q missing from list: %+v", subject, msg.Tasks)
+		}
+		if task.Kind != testTaskKind || task.State != string(tasks.StateDone) {
+			t.Fatalf("task %q = %+v, want kind=%s state=done", subject, task, testTaskKind)
+		}
+		if task.ID != tasks.TaskID(testTaskKind, subject) {
+			t.Fatalf("task %q id = %q, want %q", subject, task.ID, tasks.TaskID(testTaskKind, subject))
+		}
 	}
 }
 

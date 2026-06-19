@@ -1,8 +1,6 @@
 package daemon
 
 import (
-	"encoding/json"
-	"net"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -49,7 +47,8 @@ func notebookTasksToProtocol(ts []*tasks.Task) []protocol.NotebookTask {
 // sendNotebookTaskListWSResult lists the durable runner's records and replies to
 // a websocket client with a notebook_task_list_result event correlated by
 // requestID. A nil runner (disabled / not yet built) is a successful empty list,
-// not an error. The unix-socket CLI uses handleNotebookTaskList instead.
+// not an error. This WS path is the only task-list path; the former unix-socket
+// CLI task-list command was removed.
 func (d *Daemon) sendNotebookTaskListWSResult(client *wsClient, requestID string) {
 	runner := d.compactRunnerRef()
 	if runner == nil {
@@ -111,22 +110,5 @@ func (d *Daemon) sendNotebookTaskRetryWSResult(client *wsClient, requestID, task
 func (d *Daemon) broadcastNotebookTasksChanged() {
 	d.broadcastMessage(protocol.NotebookTasksChangedMessage{
 		Event: protocol.EventNotebookTasksChanged,
-	})
-}
-
-// handleNotebookTaskList serves `attn notebook tasks` over the unix socket
-// (synchronous Response). A nil runner is an empty list, not an error.
-func (d *Daemon) handleNotebookTaskList(conn net.Conn) {
-	var list []*tasks.Task
-	if runner := d.compactRunnerRef(); runner != nil {
-		// A List error is degraded to an empty list here: the unix CLI path returns a
-		// synchronous Response, and an empty task list is the same observable outcome
-		// as a disabled runner. WS clients still get the explicit error via
-		// sendNotebookTaskListWSResult.
-		list, _ = runner.List()
-	}
-	_ = json.NewEncoder(conn).Encode(protocol.Response{
-		Ok:            true,
-		NotebookTasks: notebookTasksToProtocol(list),
 	})
 }

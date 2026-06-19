@@ -215,23 +215,27 @@ func TestNotebookGuidance(t *testing.T) {
 	for _, expected := range []string{
 		"/home/u/attn-notebook",
 		"chief of staff",
-		"attn notebook show /memory/index.md",
-		"attn notebook journal append",
-		"attn notebook memory write",
-		"--base-hash",
-		"sources:",                              // grounding rule
-		"paraphrase",                            // grounding rule
-		"root-absolute",                         // linking convention
-		"attn workspace context show --session", // opt-in workspace read
+		"/home/u/attn-notebook/knowledge/index.md", // orient by reading files directly
+		"native file tools",                        // edit-directly mandate
+		"PARA",                                     // knowledge-base structure
+		"type:",                                    // OKF frontmatter
+		"areas/",                                   // promote target
+		"sources:",                                 // grounding rule
+		"paraphrase",                               // grounding rule
+		"root-absolute",                            // linking convention
+		"[label](/knowledge/areas/foo.md)",         // knowledge link path
 		"load the attn skill's notebook reference",
 	} {
 		if !strings.Contains(guidance, expected) {
 			t.Fatalf("notebook guidance missing %q: %q", expected, guidance)
 		}
 	}
-	// Wikilinks are explicitly not the convention.
-	if strings.Contains(guidance, "[[") {
-		t.Fatalf("notebook guidance should not suggest wikilinks: %q", guidance)
+	// The notebook CLI was removed; guidance must not tell agents to run it, and
+	// the "memory" vocabulary was retired in favor of the knowledge base.
+	for _, unwanted := range []string{"attn notebook", "/memory/", "[["} {
+		if strings.Contains(guidance, unwanted) {
+			t.Fatalf("notebook guidance should not contain %q: %q", unwanted, guidance)
+		}
 	}
 }
 

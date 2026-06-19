@@ -31,15 +31,15 @@ is filesystem-canonical.
 
 ## The Notebook
 
-attn's durable, **profile-wide, filesystem-canonical** markdown memory layer. The
+attn's durable, **profile-wide, filesystem-canonical** markdown layer — a dated
+journal plus a PARA knowledge base. The
 `.md` files on disk are the source of truth (unlike the workspace context, which is
 SQLite-canonical), and the Notebook outlives any single session, workspace, or PR.
 
-The daemon owns every write: callers go through `attn notebook …` so writes stay
-atomic, serialized, and observable — agents never edit notebook files directly on
-disk. It holds **two kinds of notes** — the journal (a dated log) and memory notes
-(distilled, timeless knowledge) — alongside the machine-internal raw tier the keeper
-reads from.
+The write paths are the daemon (over the WebSocket protocol) and native file edits
+on disk — both land in the same filesystem-canonical tree. It holds **the journal
+and the knowledge base** — the journal a dated log, the knowledge base distilled,
+timeless knowledge — alongside the machine-internal raw tier the keeper reads from.
 
 ## The journal
 
@@ -57,27 +57,34 @@ Who writes the journal:
 | **The chief of staff** | a cross-workspace, chief-of-staff-altitude log (what moved across workspaces, what was delegated and decided) |
 | **The human** | direct edits — corrections, additions, curation |
 
-Other agents *can* write to the journal (the `attn notebook journal append` CLI
-stays available), but we do not ask them to and do not nudge them. In practice they
-do not, and that is fine: automated capture (the keeper) is what keeps the journal
-good. We do not try to prevent other writes — that is not enforceable at this
-abstraction level — we simply say nothing about it.
+Other agents *can* write to the journal, but we do not ask them to and do not nudge
+them. In practice they do not, and that is fine: automated capture (the keeper) is
+what keeps the journal good. We do not try to prevent other writes — that is not
+enforceable at this abstraction level — we simply say nothing about it.
 
 The journal is **curated**: nothing machine-raw lands in it. Raw machine inputs
 live in the raw tier and are consumed by the keeper, never pasted into the journal.
 
-## Memory note
+## Knowledge base
 
-A **distilled, durable note worth keeping** beyond a single PR — a decision, a
-gotcha, or a piece of domain knowledge. Memory notes live under `memory/` in the
-Notebook (`memory/decisions/`, `memory/gotchas/`, `memory/domain/`) and are indexed
-by `memory/index.md`.
+The Notebook's **distilled, durable knowledge subtree** — `knowledge/` — holding
+notes worth keeping beyond a single PR: decisions, gotchas, and domain knowledge. It
+is organized PARA-style into `knowledge/projects/`, `knowledge/areas/`,
+`knowledge/resources/`, and `knowledge/archive/`, and indexed by `knowledge/index.md`
+(each PARA dir also carries its own `index.md`). A note carries OKF frontmatter with a
+`type` field (`type: note`), an open vocabulary rather than a closed set the store
+validates.
+
+Maintained by the **chief of staff** and the **user**, edited directly as files (over
+the daemon/WS write path or as native file edits on disk) — there is no closed-kind
+gate.
 
 Distinct from the journal along one axis: the journal is a **dated log of what
-happened**; a memory note is a **timeless statement of what is known**. Memory is not
-a task tracker — capture what is *known*, not what is *to do*. Every memory note must
-be **grounded** with resolvable `sources:` (journal anchors, `dispatch:<id>`, or
-URLs); we do not author one from paraphrase alone.
+happened**; a knowledge note is a **timeless statement of what is known**. The
+knowledge base is not a task tracker — capture what is *known*, not what is *to do*.
+Chief-authored knowledge is **grounded** with resolvable `sources:` (journal
+anchors, `dispatch:<id>`, or URLs) rather than written from paraphrase alone; the
+user's own notes in the same space are theirs to keep however they like.
 
 ## The keeper
 
@@ -87,7 +94,11 @@ The single automated entity that **tends each workspace**. One persona, two duti
    grows past threshold.
 2. **Narrates the workspace's work into the journal** — turns the workspace's
    sessions (and delegated dispatch outcomes) into the curated per-workspace
-   journal narrative.
+   journal narrative. On a workspace's final removal pass it also files that
+   workspace's linked `knowledge/projects/<slug>/` folder (the one whose `index.md`
+   carries `resource: attn:workspace/<id>`) under `knowledge/archive/` — a
+   mechanical tidy-up that keeps the active `projects/` view focused; the chief
+   keeps the higher-judgment promotion into `areas/`.
 
 These two duties are **causally coupled**, which is why they are one entity: the
 keeper can safely prune `context.md` *because* it has already preserved the story

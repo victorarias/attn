@@ -1817,22 +1817,13 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleWorkspaceContextCompact(conn, msg.(*protocol.WorkspaceContextCompactMessage))
 	case protocol.CmdWorkspaceContextRollback:
 		d.handleWorkspaceContextRollback(conn, msg.(*protocol.WorkspaceContextRollbackMessage))
-	case protocol.CmdNotebookInit:
-		d.handleNotebookInit(conn)
-	case protocol.CmdNotebookList:
-		d.handleNotebookList(conn, msg.(*protocol.NotebookListMessage))
-	case protocol.CmdNotebookRead:
-		d.handleNotebookRead(conn, msg.(*protocol.NotebookReadMessage))
-	case protocol.CmdNotebookWrite:
-		d.handleNotebookWrite(conn, msg.(*protocol.NotebookWriteMessage))
-	case protocol.CmdNotebookAppendJournal:
-		d.handleNotebookAppendJournal(conn, msg.(*protocol.NotebookAppendJournalMessage))
 	case protocol.CmdNotebookGuide:
+		// notebook_guide is the one surviving unix-socket notebook command: the
+		// agent-launch wrapper uses it to learn whether a session is the chief of
+		// staff and where the notebook root is. The former user-facing
+		// `attn notebook …` subcommands were removed; the frontend reads and writes
+		// the notebook over the WebSocket path instead.
 		d.handleNotebookGuide(conn, msg.(*protocol.NotebookGuideMessage))
-	case protocol.CmdNotebookBacklinks:
-		d.handleNotebookBacklinks(conn, msg.(*protocol.NotebookBacklinksMessage))
-	case protocol.CmdNotebookTaskList:
-		d.handleNotebookTaskList(conn)
 	case protocol.CmdUnregister:
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:

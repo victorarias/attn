@@ -1708,17 +1708,6 @@ type MuteWorkspaceMessage struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
-type NotebookAppendJournalMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Date corresponds to the JSON schema field "date".
-	Date *string `json:"date,omitempty,omitzero"`
-
-	// Entry corresponds to the JSON schema field "entry".
-	Entry string `json:"entry"`
-}
-
 type NotebookBacklinksMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1759,9 +1748,6 @@ type NotebookChangedMessage struct {
 }
 
 type NotebookEntry struct {
-	// Kind corresponds to the JSON schema field "kind".
-	Kind *string `json:"kind,omitempty,omitzero"`
-
 	// Path corresponds to the JSON schema field "path".
 	Path string `json:"path"`
 
@@ -1773,6 +1759,9 @@ type NotebookEntry struct {
 
 	// Title corresponds to the JSON schema field "title".
 	Title *string `json:"title,omitempty,omitzero"`
+
+	// Type corresponds to the JSON schema field "type".
+	Type *string `json:"type,omitempty,omitzero"`
 
 	// Updated corresponds to the JSON schema field "updated".
 	Updated *string `json:"updated,omitempty,omitzero"`
@@ -1795,19 +1784,6 @@ type NotebookGuideResult struct {
 
 	// SessionIsChief corresponds to the JSON schema field "session_is_chief".
 	SessionIsChief bool `json:"session_is_chief"`
-}
-
-type NotebookInitMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-}
-
-type NotebookInitResult struct {
-	// Created corresponds to the JSON schema field "created".
-	Created bool `json:"created"`
-
-	// Root corresponds to the JSON schema field "root".
-	Root string `json:"root"`
 }
 
 type NotebookListMessage struct {
@@ -2683,9 +2659,6 @@ type Response struct {
 
 	// NotebookGuide corresponds to the JSON schema field "notebook_guide".
 	NotebookGuide *NotebookGuideResult `json:"notebook_guide,omitempty,omitzero"`
-
-	// NotebookInit corresponds to the JSON schema field "notebook_init".
-	NotebookInit *NotebookInitResult `json:"notebook_init,omitempty,omitzero"`
 
 	// NotebookRead corresponds to the JSON schema field "notebook_read".
 	NotebookRead *NotebookReadResult `json:"notebook_read,omitempty,omitzero"`
