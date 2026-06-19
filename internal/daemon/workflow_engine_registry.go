@@ -10,10 +10,9 @@ import (
 
 // workflowEngineSink is a destination the daemon can push a workflow control
 // frame to. The engine runs in a SEPARATE process (the `attn workflow run` CLI)
-// and connects over the unix socket, so the production sink wraps that
-// net.Conn. A *wsClient sink (UI-driven engine, future) and a fake sink (tests)
-// also satisfy this interface, mirroring the reviewLoopCancel registry where a
-// single registry serves every transport.
+// and connects over the unix socket, so the production sink wraps that net.Conn;
+// a fake sink (tests) also satisfies this interface, mirroring the reviewLoopCancel
+// registry where a single registry serves every transport.
 type workflowEngineSink interface {
 	sendWorkflowControl(msg interface{}) error
 }
@@ -28,17 +27,6 @@ type connWorkflowEngineSink struct {
 
 func (s connWorkflowEngineSink) sendWorkflowControl(msg interface{}) error {
 	return json.NewEncoder(s.conn).Encode(msg)
-}
-
-// wsWorkflowEngineSink adapts a *wsClient into a sink (a UI-hosted engine).
-type wsWorkflowEngineSink struct {
-	daemon *Daemon
-	client *wsClient
-}
-
-func (s wsWorkflowEngineSink) sendWorkflowControl(msg interface{}) error {
-	s.daemon.sendToClient(s.client, msg)
-	return nil
 }
 
 // registerWorkflowEngine records the sink that owns a run so a later cancel can

@@ -4,26 +4,15 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// WS wrappers for the durable workflow engine, mirroring ws_review.go. The
-// read-only UI mainly reads (get/list) and cancels; upsert/call_upsert variants
-// exist for symmetry and testability. Each delegates to the shared core in
-// workflow_run.go and replies with a WorkflowActionResultMessage via
-// sendToClient.
+// WS wrappers for the durable workflow engine, mirroring ws_review.go. The UI is
+// read-only over the WebSocket: it reads (get/list) and cancels. Run/call mutation
+// is owned by the engine process over the unix socket (see workflow_run.go, which
+// also gates starts on the workflows_enabled master switch), so there is no WS
+// upsert path. Each handler delegates to the shared core in workflow_run.go and
+// replies with a WorkflowActionResultMessage via sendToClient.
 
 func (d *Daemon) sendWorkflowActionResultWS(client *wsClient, action string, run *protocol.WorkflowRun, runs []*protocol.WorkflowRun, runID string, err error) {
 	d.sendToClient(client, buildWorkflowActionResult(action, run, runs, runID, err))
-}
-
-func (d *Daemon) handleWorkflowRunUpsertWS(client *wsClient, msg *protocol.WorkflowRunUpsertMessage) {
-	d.registerWorkflowEngine(msg.Run.RunID, wsWorkflowEngineSink{daemon: d, client: client})
-	run, err := d.applyWorkflowRunUpsert(&msg.Run)
-	d.sendWorkflowActionResultWS(client, "upsert", run, nil, msg.Run.RunID, err)
-}
-
-func (d *Daemon) handleWorkflowCallUpsertWS(client *wsClient, msg *protocol.WorkflowCallUpsertMessage) {
-	d.registerWorkflowEngine(msg.RunID, wsWorkflowEngineSink{daemon: d, client: client})
-	run, err := d.applyWorkflowCallUpsert(msg.RunID, &msg.Call)
-	d.sendWorkflowActionResultWS(client, "call_upsert", run, nil, msg.RunID, err)
 }
 
 func (d *Daemon) handleWorkflowRunGetWS(client *wsClient, msg *protocol.WorkflowRunGetMessage) {
