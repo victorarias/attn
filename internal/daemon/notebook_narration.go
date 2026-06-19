@@ -255,14 +255,17 @@ func notebookSessionDigestPath(root, workspaceID, sessionID string) (string, err
 	if err != nil {
 		return "", fmt.Errorf("unsafe session id: %w", err)
 	}
-	bucket := notebookSoloSessionBucket
-	if workspaceID != "" {
-		bucket, err = rawTierSegment(workspaceID)
-		if err != nil {
-			return "", fmt.Errorf("unsafe workspace id: %w", err)
-		}
+	if workspaceID == "" {
+		return filepath.Join(notebook.RawSessionsDir(root), notebookSoloSessionBucket, name), nil
 	}
-	return filepath.Join(notebook.RawSessionsDir(root), bucket, name), nil
+	// Non-solo sessions land in the same per-workspace bucket the narrate pass reads;
+	// notebookWorkspaceSessionsDir is the single source of that bucket path (and it
+	// already returns the identical "unsafe workspace id" error, so pass it through).
+	dir, err := notebookWorkspaceSessionsDir(root, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, name), nil
 }
 
 // notebookWorkspaceSessionsDir is the per-workspace digest subdir the narrate pass
@@ -668,9 +671,10 @@ func (d *Daemon) enqueueDailyNarrateWorkspace(workspaceID string) {
 // eligible — the workspace is gone, so this is the last chance to write its
 // retrospective. It must be called AFTER the context snapshot is taken and the
 // workspace row is removed, so the executor derives IS_REMOVAL_PASS=true and the
-// snapshot is on disk for the narrate pass to read. Nil/Disabled-guarded, so the
-// startup-reconciliation removal site (which runs before the runner exists) is a
-// safe no-op.
+// snapshot is on disk for the narrate pass to read. Nil/Disabled-guarded: a caller
+// that runs before startCompactRunner constructs the runner is a safe no-op, which
+// is why the startup-reconciliation reaper defers its enqueue to Start (after the
+// runner exists) rather than calling this inline.
 func (d *Daemon) enqueueFinalNarrateWorkspace(workspaceID string) {
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {

@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// Tuning defaults. Kept as package vars (not consts) so a kind config or a test
-// can override them through Options without changing the source.
+// Tuning defaults. Each is overridable per-runner through the matching Options
+// field (a zero value falls back to the default, resolved in New).
 const (
 	// DefaultMaxAttempts is the attempt cap: a task that has failed this many
 	// times goes dead instead of auto-requeuing.
@@ -447,15 +447,21 @@ func (r *Runner) Cancel(id string) {
 		r.mu.Unlock()
 		return
 	}
-	// Only cancel the context if the run has not yet entered its commit fence.
-	// If it is already committing, leave the context alone and just wait — the
-	// blocks-until-exit contract finishes an in-progress durable write untorn.
+	r.fenceAndWait(run)
+}
+
+// fenceAndWait performs the shared cancel-and-block core for Cancel and cancelActive.
+// The CALLER must hold r.mu and pass the currently-running run (non-nil); fenceAndWait
+// RELEASES r.mu before it blocks on the done channel. It cancels the run's context
+// only if the run has not yet entered its commit fence — if the run is already
+// committing, it leaves the context alone and just waits, so the blocks-until-exit
+// contract finishes an in-progress durable write untorn.
+func (r *Runner) fenceAndWait(run *activeRun) {
 	if run.guard.tryFence() {
 		run.cancel()
 	}
 	done := run.done
 	r.mu.Unlock()
-
 	<-done
 }
 
@@ -829,12 +835,7 @@ func (r *Runner) cancelActive() {
 		r.mu.Unlock()
 		return
 	}
-	if run.guard.tryFence() {
-		run.cancel()
-	}
-	done := run.done
-	r.mu.Unlock()
-	<-done
+	r.fenceAndWait(run)
 }
 
 // --- helpers ---------------------------------------------------------------

@@ -720,9 +720,10 @@ func blockingExecution(t *testing.T) func(context.Context, agentdriver.HeadlessT
 
 // --- path-traversal guard (the load-bearing security property) ---
 
-// journalDirHasUnexpectedFiles fails the test if anything other than the allowed
-// files appears under <root>/journal/, so a path-traversal write that escaped the
-// raw tier into the curated journal dir is caught.
+// assertJournalUntouched fails the test if ANY entry appears under <root>/journal/
+// (the curated journal must stay empty in these raw-tier traversal tests), so a
+// path-traversal write that escaped the raw tier into the journal dir is caught. An
+// absent journal dir is fine — nothing escaped into it.
 func assertJournalUntouched(t *testing.T, root string) {
 	t.Helper()
 	journalDir := filepath.Join(root, notebook.DirJournal)

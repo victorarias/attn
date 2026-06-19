@@ -256,22 +256,14 @@ func TestCodexHeadlessArgsWidensWritableRootsAdditively(t *testing.T) {
 			Prompt:             "narrate",
 			ExtraWritableRoots: []string{"/notebook/root", "  ", "/notebook/raw"},
 		})
+		// Both writable roots map to --add-dir, plus the base sandbox + feature locks + prompt.
+		assertContainsAll(t, "codex narrate args", args,
+			"--add-dir\x00/notebook/root", "--add-dir\x00/notebook/raw",
+			"workspace-write", "features.apps=false", "narrate")
 		joined := strings.Join(args, "\x00")
-		if !strings.Contains(joined, "--add-dir\x00/notebook/root") {
-			t.Fatalf("missing --add-dir for notebook root:\n%v", args)
-		}
-		if !strings.Contains(joined, "--add-dir\x00/notebook/raw") {
-			t.Fatalf("missing --add-dir for raw root:\n%v", args)
-		}
 		// The blank entry is skipped.
 		if strings.Count(joined, "--add-dir") != 2 {
 			t.Fatalf("expected exactly 2 --add-dir entries, got:\n%v", args)
-		}
-		// Still the base sandbox + feature locks + prompt.
-		for _, want := range []string{"workspace-write", "features.apps=false", "narrate"} {
-			if !strings.Contains(joined, want) {
-				t.Fatalf("missing base arg %q:\n%v", want, args)
-			}
 		}
 		// --add-dir must precede the feature locks and the prompt.
 		addDirIdx := strings.Index(joined, "--add-dir")
@@ -284,9 +276,7 @@ func TestCodexHeadlessArgsWidensWritableRootsAdditively(t *testing.T) {
 
 	t.Run("keeper compaction adds nothing", func(t *testing.T) {
 		args := codexHeadlessArgs(HeadlessTaskRequest{Model: "gpt-test", Prompt: "compact"})
-		if strings.Contains(strings.Join(args, "\x00"), "--add-dir") {
-			t.Fatalf("keeper compaction (no ExtraWritableRoots) unexpectedly added --add-dir:\n%v", args)
-		}
+		assertContainsNone(t, "codex compaction args", args, "--add-dir")
 	})
 }
 
@@ -301,16 +291,8 @@ func TestClaudeHeadlessArgsIgnoreWritableRoots(t *testing.T) {
 		AllowedTools:       []string{"Read", "Write", "Edit", "Grep", "Glob", "Bash"},
 		ExtraWritableRoots: []string{"/notebook/root"},
 	})
-	joined := strings.Join(withRoots, "\x00")
-	if strings.Contains(joined, "--add-dir") || strings.Contains(joined, "/notebook/root") {
-		t.Fatalf("Claude args leaked ExtraWritableRoots:\n%v", withRoots)
-	}
-	if !strings.Contains(joined, "Read,Write,Edit,Grep,Glob,Bash") {
-		t.Fatalf("Claude args dropped the explicit Bash-inclusive allow-list:\n%v", withRoots)
-	}
-	for _, want := range []string{"--permission-mode", "dontAsk", "claude-test", "narrate"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("Claude args missing %q:\n%v", want, withRoots)
-		}
-	}
+	assertContainsNone(t, "claude args", withRoots, "--add-dir", "/notebook/root")
+	assertContainsAll(t, "claude args", withRoots,
+		"Read,Write,Edit,Grep,Glob,Bash",
+		"--permission-mode", "dontAsk", "claude-test", "narrate")
 }

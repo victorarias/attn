@@ -824,16 +824,9 @@ func (d *Daemon) unregisterWorkspaceIfEmptyAfterMove(workspaceID string) {
 	if !removed {
 		return
 	}
-	d.forgetWorkspaceContextCompaction(workspaceID)
-	d.snapshotWorkspaceContextOnRemove(workspaceID, snapshot.Title)
-	d.store.RemoveWorkspace(workspaceID)
-	// Removal boundary (layout teardown): final retrospective narrate.
-	d.enqueueFinalNarrateWorkspace(workspaceID)
-	d.pruneTileContentSubscriptionsForLayout(workspaceID, nil)
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorkspaceUnregistered,
-		Workspace: &snapshot,
-	})
+	// Layout teardown (last visible pane/tile removed): tear down and write the
+	// removal-boundary retrospective.
+	d.tearDownRemovedWorkspace(snapshot)
 }
 
 func (d *Daemon) recomputeAndBroadcastWorkspace(workspaceID string) {

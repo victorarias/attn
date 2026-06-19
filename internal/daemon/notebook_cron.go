@@ -42,32 +42,17 @@ const (
 // migrateNotebookCronSettingKeys performs the one-time rename of the persisted
 // notebook.dreaming.{frequency,timezone} settings to notebook.cron.* (the schedule
 // outlived the removed dreaming feature) and reaps the orphaned
-// notebook.dreaming.enabled gate (which has no successor). Like
-// migrateKeeperCompactSettingKey it runs at daemon start — and therefore again after
-// every app rebuild, since the daemon survives rebuilds — so it MUST be idempotent.
-// It copies each renamed legacy value forward only when the legacy key holds a
-// non-empty value AND the new key is still empty, so a re-run never clobbers a value
-// set under the new key, then deletes the stale legacy row so the migration is a
-// true no-op on the next boot. This is a plain settings-value copy, NOT a schema
-// migration.
+// notebook.dreaming.enabled gate (which has no successor). Each rename uses
+// renameSettingKey for the idempotent copy-forward-then-reap contract; it runs at
+// daemon start (and thus again after every app rebuild, since the daemon survives
+// them), so it MUST stay idempotent. This is a plain settings-value copy, NOT a
+// schema migration.
 func (d *Daemon) migrateNotebookCronSettingKeys() {
 	if d.store == nil {
 		return
 	}
-	for _, m := range []struct{ legacy, current string }{
-		{legacyNotebookDreamingFrequencyKey, SettingNotebookCronFrequency},
-		{legacyNotebookDreamingTimezoneKey, SettingNotebookCronTimezone},
-	} {
-		legacy := d.store.GetSetting(m.legacy)
-		if strings.TrimSpace(legacy) == "" {
-			continue // nothing to migrate (or already migrated + cleaned up)
-		}
-		if strings.TrimSpace(d.store.GetSetting(m.current)) == "" {
-			d.store.SetSetting(m.current, legacy)
-			d.logf("migrated setting %q -> %q", m.legacy, m.current)
-		}
-		d.store.DeleteSetting(m.legacy)
-	}
+	d.renameSettingKey(legacyNotebookDreamingFrequencyKey, SettingNotebookCronFrequency)
+	d.renameSettingKey(legacyNotebookDreamingTimezoneKey, SettingNotebookCronTimezone)
 	// The enabled gate has no cron equivalent — just drop any stale row so it stops
 	// being broadcast in the settings map. DeleteSetting is a no-op when absent.
 	d.store.DeleteSetting(legacyNotebookDreamingEnabledKey)
@@ -136,11 +121,7 @@ func parseNotebookCronTime(s string) (time.Time, bool) {
 // machinery — it only dispatches onto the durable runner, which owns single-flight
 // and crash recovery — so there is nothing to drain on stop.
 func (d *Daemon) startNotebookCronEnqueuer(done <-chan struct{}) {
-	interval := d.notebookCronInterval
-	if interval <= 0 {
-		interval = defaultNotebookCronInterval
-	}
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(defaultNotebookCronInterval)
 	defer ticker.Stop()
 	for {
 		select {

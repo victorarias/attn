@@ -232,11 +232,6 @@ type Daemon struct {
 	) (agentdriver.HeadlessTaskResult, error)
 	narrationNowOverride func() time.Time
 
-	// Notebook cron enqueuer. notebookCronInterval overrides the tick cadence in
-	// tests (zero = default). The enqueued work runs on the durable runner, so there
-	// is no in-daemon single-flight guard here.
-	notebookCronInterval time.Duration
-
 	// Daily-narrate activity gate. notebookNarrateActivity is the in-memory set of
 	// workspace ids that saw real activity (a session end or a content-changing
 	// context write) since the last daily-narrate cron fire. It is best-effort and
@@ -585,7 +580,7 @@ func (d *Daemon) Start() error {
 	if d.pluginProcesses == nil {
 		d.pluginProcesses = newPluginProcessRegistry()
 	}
-	d.loadWorkspacesFromStore()
+	reapedWorkspaceIDs := d.loadWorkspacesFromStore()
 	if d.daemonInstanceID == "" {
 		instanceID, err := ensureDaemonInstanceID(d.dataRoot)
 		if err != nil {
@@ -736,6 +731,15 @@ func (d *Daemon) Start() error {
 	// Construct + start the durable compaction runner (kinds compact_context,
 	// summarize_session, narrate_workspace).
 	d.startCompactRunner()
+
+	// Now that the runner exists, enqueue the deferred removal-boundary retrospectives
+	// for any workspaces reaped during startup reconciliation. loadWorkspacesFromStore
+	// ran before startCompactRunner, so enqueuing inline there would have been a
+	// nil-runner no-op; deferring to here gives a startup-reaped workspace its final
+	// narrate, matching the live removal paths.
+	for _, wsID := range reapedWorkspaceIDs {
+		d.enqueueFinalNarrateWorkspace(wsID)
+	}
 
 	// Start the notebook cron enqueuer (enqueues the nightly daily-narrate backstop
 	// onto the durable runner when due). Launched AFTER startCompactRunner so the

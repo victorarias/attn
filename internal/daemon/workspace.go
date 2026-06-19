@@ -362,6 +362,29 @@ func (d *Daemon) toggleWorkspaceMute(workspaceID string) (protocol.Workspace, st
 	return snapshot, ""
 }
 
+// tearDownRemovedWorkspace runs the shared removal sequence for a workspace whose
+// registry entry was just unregistered. The caller owns the unregister + !removed
+// guard and any site-specific rationale, and passes the resulting snapshot. It drops
+// any pending compaction, snapshots context.md into the raw tier (the synchronous
+// data-safety floor, before the row delete), deletes the store row, enqueues the
+// zero-debounce final retrospective narrate (which derives IS_REMOVAL_PASS=true now
+// that the row is gone), prunes the workspace's tile-content subscriptions, and
+// broadcasts workspace_unregistered. The startup-reconciliation reaper deliberately
+// does NOT use this helper: it runs before the runner exists and omits the prune +
+// broadcast.
+func (d *Daemon) tearDownRemovedWorkspace(snapshot protocol.Workspace) {
+	id := snapshot.ID
+	d.forgetWorkspaceContextCompaction(id)
+	d.snapshotWorkspaceContextOnRemove(id, snapshot.Title)
+	d.store.RemoveWorkspace(id)
+	d.enqueueFinalNarrateWorkspace(id)
+	d.pruneTileContentSubscriptionsForLayout(id, nil)
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:     protocol.EventWorkspaceUnregistered,
+		Workspace: &snapshot,
+	})
+}
+
 // handleUnregisterWorkspace closes the workspace AND every session that
 // belongs to it. Sessions get a graceful SIGTERM through unregisterSession
 // (same path as the unix-socket "unregister" command), so transcripts flush
@@ -396,18 +419,9 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 	if !removed {
 		return
 	}
-	d.forgetWorkspaceContextCompaction(id)
-	d.snapshotWorkspaceContextOnRemove(id, snapshot.Title)
-	d.store.RemoveWorkspace(id)
-	// Removal boundary: the workspace row is now gone, so the final narrate run
-	// derives IS_REMOVAL_PASS=true and writes the retrospective from the snapshot +
-	// digests. ZeroDebounce overrides any pending active-day pass.
-	d.enqueueFinalNarrateWorkspace(id)
-	d.pruneTileContentSubscriptionsForLayout(id, nil)
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorkspaceUnregistered,
-		Workspace: &snapshot,
-	})
+	// Explicit unregister (workspace closed along with its sessions): tear down and
+	// write the removal-boundary retrospective.
+	d.tearDownRemovedWorkspace(snapshot)
 }
 
 // loadWorkspacesFromStore rebuilds the in-memory registry from SQLite at
@@ -415,10 +429,11 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 // associateSession has somewhere to land), then walk persisted sessions and
 // re-bind those that have a workspace_id. Status is recomputed last from the
 // loaded session states.
-func (d *Daemon) loadWorkspacesFromStore() {
+func (d *Daemon) loadWorkspacesFromStore() []string {
 	if d.workspaces == nil {
 		d.workspaces = newWorkspaceRegistry()
 	}
+	var reaped []string
 	for _, ws := range d.store.ListWorkspaces() {
 		if ws == nil {
 			continue
@@ -435,18 +450,16 @@ func (d *Daemon) loadWorkspacesFromStore() {
 				!d.workspaceHasPendingSpawn(ws.ID) &&
 				!d.workspaceHasSessionlessContent(ws.ID) {
 				// loadWorkspacesFromStore runs during Start() before the compaction
-				// runner is constructed; forgetWorkspaceContextCompaction is nil-safe.
-				// The snapshot does not touch the runner (it only reads the store and
-				// writes a file), so it is safe to call here with no runner.
+				// runner is constructed; forgetWorkspaceContextCompaction is nil-safe
+				// and the snapshot only reads the store and writes a file, so both are
+				// safe here with no runner. The final-narrate enqueue, however, needs
+				// the runner, so we DEFER it: collect the reaped id and return it for
+				// Start to enqueue once startCompactRunner has run, so a startup-reaped
+				// workspace still gets its removal-boundary retrospective.
 				d.forgetWorkspaceContextCompaction(ws.ID)
 				d.snapshotWorkspaceContextOnRemove(ws.ID, ws.Title)
 				d.store.RemoveWorkspace(ws.ID)
-				// Final-narrate enqueue is a nil-safe no-op here: load runs before
-				// startCompactRunner constructs the runner. A workspace reaped at
-				// startup (no live sessions across a restart) gets no retrospective —
-				// acceptable, since the live removal paths own the common case and the
-				// snapshot above still preserves its context for a future manual read.
-				d.enqueueFinalNarrateWorkspace(ws.ID)
+				reaped = append(reaped, ws.ID)
 				continue
 			}
 		}
@@ -465,6 +478,7 @@ func (d *Daemon) loadWorkspacesFromStore() {
 	for _, ws := range d.workspaces.list() {
 		d.recomputeWorkspaceStatus(ws.ID)
 	}
+	return reaped
 }
 
 func (d *Daemon) workspaceHasPendingSpawn(workspaceID string) bool {
@@ -560,16 +574,9 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 		if !removed {
 			return
 		}
-		d.forgetWorkspaceContextCompaction(workspaceID)
-		d.snapshotWorkspaceContextOnRemove(workspaceID, snapshot.Title)
-		d.store.RemoveWorkspace(workspaceID)
-		// Removal boundary (last session left): final retrospective narrate.
-		d.enqueueFinalNarrateWorkspace(workspaceID)
-		d.pruneTileContentSubscriptionsForLayout(workspaceID, nil)
-		d.wsHub.Broadcast(&protocol.WebSocketEvent{
-			Event:     protocol.EventWorkspaceUnregistered,
-			Workspace: &snapshot,
-		})
+		// Natural last-session departure (the common path): tear down and write the
+		// removal-boundary retrospective.
+		d.tearDownRemovedWorkspace(snapshot)
 		return
 	}
 	updated, changed := d.recomputeWorkspaceStatus(workspaceID)

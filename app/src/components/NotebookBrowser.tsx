@@ -378,20 +378,13 @@ export function NotebookBrowser({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [changeSignal]);
 
-  // Fetch tasks when the Tasks section is opened (and the browser is open). A bump
-  // of taskChangeSignal while it's open refetches via the effect below.
+  // Fetch tasks while the Tasks section is open (and the browser is open): once on
+  // open, and again whenever a notebook_tasks_changed broadcast bumps taskChangeSignal
+  // so runner transitions show without reopening the section.
   useEffect(() => {
     if (!isOpen || !tasksOpen) return;
     void refreshTasks();
-  }, [isOpen, tasksOpen, refreshTasks]);
-
-  // Live refresh: a notebook_tasks_changed broadcast refetches the task list while
-  // the section is open so runner transitions show without reopening it.
-  useEffect(() => {
-    if (!isOpen || !tasksOpen || taskChangeSignal === 0) return;
-    void refreshTasks();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskChangeSignal]);
+  }, [isOpen, tasksOpen, refreshTasks, taskChangeSignal]);
 
   // Drop the staleness token when the browser closes so an in-flight tasks fetch
   // can't stamp rows onto a reopened panel.
@@ -871,13 +864,14 @@ const TASK_TERMINAL_STATES = new Set(['done', 'dead']);
 
 // formatNextAttempt renders an RFC3339 next_attempt_at as a short relative phrase
 // ("in 2m", "5s ago", "now"). Returns '' for an unparseable/zero timestamp so the
-// row can omit it. now is injectable for deterministic tests.
-function formatNextAttempt(iso: string, now: number = Date.now()): string {
+// row can omit it.
+function formatNextAttempt(iso: string): string {
   if (!iso) return '';
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return '';
   // The runner stamps a zero time (year <= 1) when there is no scheduled attempt.
   if (new Date(t).getUTCFullYear() <= 1) return '';
+  const now = Date.now();
   const deltaSec = Math.round((t - now) / 1000);
   const abs = Math.abs(deltaSec);
   if (abs < 5) return 'now';

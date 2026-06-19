@@ -111,32 +111,35 @@ func (d *Daemon) keeperCompactConfig() (keeperCompactConfig, error) {
 // agent/model forward to SettingKeeperCompact. Never read it anywhere else.
 const legacyKeeperCompactSettingKey = "workspace_context_janitor"
 
-// migrateKeeperCompactSettingKey performs the one-time rename of the persisted
-// "workspace_context_janitor" setting to "workspace_keeper_compact"
-// (SettingKeeperCompact). It runs at daemon start — and therefore again after
-// every app rebuild, since the daemon survives rebuilds — so it MUST be
-// idempotent. It copies the legacy value forward only when the legacy key holds
-// a non-empty value AND the new key is still empty, so a re-run never clobbers a
-// value the user has since set under the new key. After copying it deletes the
-// stale legacy row so the migration is a true no-op on the next boot (and the
-// dead key never appears in the broadcast settings map). This is a plain
-// settings-value copy, NOT a schema migration — it is unrelated to
-// schema_migrations.
-func (d *Daemon) migrateKeeperCompactSettingKey() {
+// renameSettingKey performs a one-time settings-value rename: it copies the legacy
+// key's value forward to current ONLY when legacy is non-empty AND current is still
+// empty (so a re-run never clobbers a value the user has since set under the new
+// key), then deletes the stale legacy row so the migration is a true no-op on the
+// next boot (and the dead key never appears in the broadcast settings map). It is
+// nil-store-safe and idempotent — required because the daemon runs these renames at
+// every start, including after each app rebuild. This is a plain settings-value
+// copy, NOT a schema migration; it is unrelated to schema_migrations.
+func (d *Daemon) renameSettingKey(legacy, current string) {
 	if d.store == nil {
 		return
 	}
-	legacy := d.store.GetSetting(legacyKeeperCompactSettingKey)
-	if strings.TrimSpace(legacy) == "" {
+	value := d.store.GetSetting(legacy)
+	if strings.TrimSpace(value) == "" {
 		return // nothing to migrate (or already migrated + cleaned up)
 	}
-	if strings.TrimSpace(d.store.GetSetting(SettingKeeperCompact)) == "" {
+	if strings.TrimSpace(d.store.GetSetting(current)) == "" {
 		// Carry the raw legacy value forward to preserve it exactly.
-		d.store.SetSetting(SettingKeeperCompact, legacy)
-		d.logf("migrated setting %q -> %q", legacyKeeperCompactSettingKey, SettingKeeperCompact)
+		d.store.SetSetting(current, value)
+		d.logf("migrated setting %q -> %q", legacy, current)
 	}
-	// Drop the stale row so the migration is a true no-op on the next boot.
-	d.store.DeleteSetting(legacyKeeperCompactSettingKey)
+	d.store.DeleteSetting(legacy)
+}
+
+// migrateKeeperCompactSettingKey performs the one-time rename of the persisted
+// "workspace_context_janitor" setting to SettingKeeperCompact. See renameSettingKey
+// for the idempotent copy-forward-then-reap contract.
+func (d *Daemon) migrateKeeperCompactSettingKey() {
+	d.renameSettingKey(legacyKeeperCompactSettingKey, SettingKeeperCompact)
 }
 
 // compactContextKind is the runner task kind for workspace-context compaction.
@@ -371,7 +374,11 @@ func (d *Daemon) applyWorkspaceContextCompaction(
 		AgentModel:     protocol.Ptr(config.Model),
 	}
 	if changed {
-		d.refreshCleanWorkspaceContextCheckouts(updated)
+		// Existing checkout files are agent-owned working copies; we deliberately do
+		// NOT rewrite them. Replacing one could discard a write from an editor still
+		// holding the old inode open. Their prior metadata makes them stale against
+		// the new canonical revision, so the normal refresh/conflict workflow
+		// preserves both clean and modified local state.
 		d.broadcastWorkspaceContextChanged(updated)
 	}
 	if execution.ResolvedExecutable != "" {
@@ -575,14 +582,6 @@ func markdownSectionContent(lines []string, heading string) string {
 	return strings.Join(content, "\n")
 }
 
-func (d *Daemon) refreshCleanWorkspaceContextCheckouts(canonical *protocol.WorkspaceContext) {
-	// Existing checkout files are agent-owned working copies. Replacing one can
-	// discard a write from an editor that still holds the old inode open. Leave
-	// all checkouts untouched; their prior metadata makes them stale against the
-	// new canonical revision, so the normal refresh/conflict workflow preserves
-	// both clean and modified local state.
-}
-
 func (d *Daemon) broadcastWorkspaceContextChanged(canonical *protocol.WorkspaceContext) {
 	d.broadcastMessage(protocol.WorkspaceContextChangedMessage{
 		Event:              protocol.EventWorkspaceContextChanged,
@@ -639,7 +638,9 @@ func (d *Daemon) rollbackWorkspaceContextForSession(
 	if err != nil {
 		return nil, err
 	}
-	d.refreshCleanWorkspaceContextCheckouts(updated)
+	// Checkouts are agent-owned; we deliberately leave them untouched (see the note
+	// in the compact path) so the normal refresh/conflict workflow reconciles them
+	// against the restored revision rather than risking a lost local write.
 	d.broadcastWorkspaceContextChanged(updated)
 	return &protocol.WorkspaceContextMaintenanceResult{
 		Action:         protocol.WorkspaceContextMaintenanceActionRollback,

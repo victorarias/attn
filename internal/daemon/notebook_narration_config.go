@@ -49,9 +49,8 @@ func narrationTierDefault(kind string) (agent, model string) {
 	switch kind {
 	case notebookSummarizeSessionKind:
 		return notebookSummarizeDefaultAgent, notebookSummarizeDefaultModel
-	case notebookNarrateWorkspaceKind:
-		return notebookNarrateDefaultAgent, notebookNarrateDefaultModel
 	default:
+		// notebookNarrateWorkspaceKind (and any future narrate kind) uses the strong tier.
 		return notebookNarrateDefaultAgent, notebookNarrateDefaultModel
 	}
 }

@@ -24,7 +24,7 @@ import "sync"
 // of the contract ("cancel a not-yet-committing run cleanly"); a true return is
 // the (b) branch ("an already-committing run finishes its write untorn").
 //
-// The runner drives the coordination via tryFence / committed; an executor only
+// The runner drives the coordination via tryFence; an executor only
 // ever touches Enter/Leave.
 type CommitGuard struct {
 	mu         sync.Mutex
