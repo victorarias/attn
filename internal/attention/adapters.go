@@ -142,15 +142,16 @@ func (w WorkflowRunAdapter) AttentionMuted() bool {
 	return false
 }
 
-// workflowScriptBaseName returns the final path segment of a script path, used
-// as a short attention label. It avoids importing path/filepath for one trim and
-// tolerates both "/" and "\" separators defensively.
+// workflowScriptBaseName returns the final path segment of a script path, used as
+// a short attention label. It avoids importing path/filepath for one trim (and so
+// keeps filepath.Base's empty/root/trailing-slash returns out of the AttentionLabel
+// RunID fallback). attn is macOS-only, so only "/" is handled.
 func workflowScriptBaseName(scriptPath string) string {
-	trimmed := strings.TrimRight(scriptPath, "/\\")
+	trimmed := strings.TrimRight(scriptPath, "/")
 	if trimmed == "" {
 		return ""
 	}
-	if idx := strings.LastIndexAny(trimmed, "/\\"); idx >= 0 {
+	if idx := strings.LastIndex(trimmed, "/"); idx >= 0 {
 		return trimmed[idx+1:]
 	}
 	return trimmed

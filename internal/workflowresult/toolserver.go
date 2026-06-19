@@ -13,7 +13,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -154,7 +153,7 @@ func ServeResultSink(
 			return fmt.Errorf("write MCP response: %w", err)
 		}
 	}
-	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
+	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("read MCP request: %w", err)
 	}
 	return nil

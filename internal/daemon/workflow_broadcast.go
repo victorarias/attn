@@ -123,8 +123,6 @@ func (d *Daemon) startWorkflowBroadcastLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-d.done:
-			return
 		case <-ticker.C:
 			d.flushWorkflowBroadcasts()
 		}

@@ -399,7 +399,11 @@ var migrations = []migration{
 	`},
 	{48, "drop label from recent_locations", "ALTER TABLE recent_locations DROP COLUMN label"},
 	{49, "add rank to workspaces", `ALTER TABLE workspaces ADD COLUMN rank TEXT NOT NULL DEFAULT ''`},
-	{50, "repair missing workspace rank", `ALTER TABLE workspaces ADD COLUMN rank TEXT NOT NULL DEFAULT ''`},
+	// Migration 50 is dispatched to applyMigration49 (see the version==49||50 branch),
+	// so this SQL is never executed; it is a harmless no-op kept only so the slice
+	// length stays equal to the schema version. A literal ADD COLUMN here would be a
+	// duplicate-column landmine if the routing ever changed.
+	{50, "repair missing workspace rank", `SELECT 1`},
 	{51, "create workflow engine journal tables", `CREATE TABLE IF NOT EXISTS workflow_runs (
     run_id TEXT PRIMARY KEY,
     script_path TEXT NOT NULL,

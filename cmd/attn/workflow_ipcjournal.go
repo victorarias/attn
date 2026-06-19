@@ -66,11 +66,11 @@ func (j *ipcJournal) Lookup(ordinal string) (workflow.JournalEntry, bool) {
 // lastErr (so a flaky socket does not crash the run) but the mirror is still
 // updated — the mirror stays authoritative for in-run reads regardless.
 func (j *ipcJournal) Append(e workflow.JournalEntry) error {
-	if _, exists := j.mirror.Lookup(e.Ordinal); exists {
-		return j.mirror.Append(e) // returns the duplicate-ordinal error
+	// The mirror enforces one-entry-per-ordinal and returns the duplicate-ordinal
+	// error before mutating, so we proxy only on a genuinely fresh entry.
+	if err := j.mirror.Append(e); err != nil {
+		return err
 	}
-	// Mirror invariant already checked above, so Append cannot fail here.
-	_ = j.mirror.Append(e)
 	j.proxy(e)
 	return nil
 }
