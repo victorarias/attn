@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-19]
+
+### Added
+- **attn can now run durable multi-agent workflows — off by default.** When you turn it on (Settings → Agents → Workflows), a managed agent can orchestrate a *workflow*: a script that fans work out across several sub-agents — in parallel or in ordered stages — and records every step, so you can watch it run, come back to it later, and resume it where it left off. It's opt-in twice over: the feature ships off, and even with it on an agent only starts a workflow when you ask for one per task ("attn workflow …") or hand it the whole session ("hypercode"). While it's off, attn won't start a workflow and agents aren't told the capability exists — and turning it off never interrupts a run that's already going.
+
 ## [2026-06-14]
 
 ### Fixed
