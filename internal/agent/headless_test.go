@@ -27,13 +27,10 @@ func shellSingleQuote(value string) string {
 func TestCodexRunHeadlessTaskScopesToolsAndConfiguration(t *testing.T) {
 	executable, logPath := writeHeadlessArgsRecorder(t)
 	_, err := (&Codex{}).RunHeadlessTask(context.Background(), HeadlessTaskRequest{
-		Executable:       executable,
-		Model:            "gpt-test",
-		Prompt:           "compact",
-		WorkDir:          t.TempDir(),
-		MCPServerName:    "attn_context",
-		MCPServerCommand: "/tmp/attn",
-		MCPServerArgs:    []string{"_workspace-context-janitor-mcp", "--source-file", "/tmp/source"},
+		Executable: executable,
+		Model:      "gpt-test",
+		Prompt:     "compact",
+		WorkDir:    t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("RunHeadlessTask error: %v", err)
@@ -49,10 +46,9 @@ func TestCodexRunHeadlessTaskScopesToolsAndConfiguration(t *testing.T) {
 		"--ignore-user-config",
 		"--ignore-rules",
 		"--strict-config",
-		"read-only",
+		"--skip-git-repo-check",
+		"workspace-write",
 		`approval_policy="never"`,
-		"features.shell_tool=false",
-		"features.unified_exec=false",
 		"features.apps=false",
 		"features.hooks=false",
 		"features.plugins=false",
@@ -60,15 +56,25 @@ func TestCodexRunHeadlessTaskScopesToolsAndConfiguration(t *testing.T) {
 		"features.memories=false",
 		"features.multi_agent=false",
 		"features.standalone_web_search=false",
-		"mcp_servers.attn_context.command=\"/tmp/attn\"",
-		"mcp_servers.attn_context.required=true",
-		`mcp_servers.attn_context.enabled_tools=["read_context","replace_context"]`,
-		`mcp_servers.attn_context.default_tools_approval_mode="approve"`,
 		"gpt-test",
 		"compact",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Codex args missing %q:\n%s", want, got)
+		}
+	}
+	// The constrained-MCP read-only sandbox and read_context/replace_context pin
+	// must be gone: native mode gives Codex its own file tools.
+	for _, forbidden := range []string{
+		"read-only",
+		"features.shell_tool=false",
+		"features.unified_exec=false",
+		"mcp_servers.attn_context",
+		"read_context",
+		"replace_context",
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("Codex args unexpectedly contained %q:\n%s", forbidden, got)
 		}
 	}
 }
@@ -84,13 +90,10 @@ func TestClaudeRunHeadlessTaskExcludesNonManagedSettingsWithoutExplicitAuthentic
 	}
 	executable, logPath := writeHeadlessArgsRecorder(t)
 	_, err := (&Claude{}).RunHeadlessTask(context.Background(), HeadlessTaskRequest{
-		Executable:       executable,
-		Model:            "claude-test",
-		Prompt:           "compact",
-		WorkDir:          t.TempDir(),
-		MCPServerName:    "attn_context",
-		MCPServerCommand: "/tmp/attn",
-		MCPServerArgs:    []string{"_workspace-context-janitor-mcp", "--candidate-file", "/tmp/candidate"},
+		Executable: executable,
+		Model:      "claude-test",
+		Prompt:     "compact",
+		WorkDir:    t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("RunHeadlessTask error: %v", err)
@@ -104,13 +107,12 @@ func TestClaudeRunHeadlessTaskExcludesNonManagedSettingsWithoutExplicitAuthentic
 		"--print",
 		"--setting-sources",
 		"--no-session-persistence",
-		"--strict-mcp-config",
 		"--disable-slash-commands",
 		"--no-chrome",
-		"--tools",
-		"mcp__attn_context__read_context,mcp__attn_context__replace_context",
 		"--allowedTools",
-		"mcp__attn_context__read_context,mcp__attn_context__replace_context",
+		"Read,Write,Edit,Grep,Glob",
+		"--permission-mode",
+		"dontAsk",
 		"claude-test",
 		"compact",
 	} {
@@ -121,11 +123,17 @@ func TestClaudeRunHeadlessTaskExcludesNonManagedSettingsWithoutExplicitAuthentic
 	if !strings.Contains(got, "--setting-sources\n\n--model") {
 		t.Fatalf("Claude args did not pass an empty setting source list:\n%s", got)
 	}
-	if strings.Contains(got, "--safe-mode") {
-		t.Fatalf("Claude args unexpectedly contained --safe-mode, which disables explicit MCP servers:\n%s", got)
-	}
-	if strings.Contains(got, "--bare") {
-		t.Fatalf("Claude managed-auth args unexpectedly contained --bare:\n%s", got)
+	// The constrained-MCP pin must be gone in native mode.
+	for _, forbidden := range []string{
+		"--strict-mcp-config",
+		"--mcp-config",
+		"--tools",
+		"mcp__attn_context__read_context,mcp__attn_context__replace_context",
+		"--bare",
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("Claude managed-auth args unexpectedly contained %q:\n%s", forbidden, got)
+		}
 	}
 }
 
@@ -133,13 +141,10 @@ func TestClaudeRunHeadlessTaskUsesBareModeWithExplicitAuthentication(t *testing.
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	executable, logPath := writeHeadlessArgsRecorder(t)
 	_, err := (&Claude{}).RunHeadlessTask(context.Background(), HeadlessTaskRequest{
-		Executable:       executable,
-		Model:            "claude-test",
-		Prompt:           "compact",
-		WorkDir:          t.TempDir(),
-		MCPServerName:    "attn_context",
-		MCPServerCommand: "/tmp/attn",
-		MCPServerArgs:    []string{"_workspace-context-janitor-mcp"},
+		Executable: executable,
+		Model:      "claude-test",
+		Prompt:     "compact",
+		WorkDir:    t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("RunHeadlessTask error: %v", err)
@@ -236,5 +241,76 @@ func TestClaudeHeadlessTaskAvailabilitySupportsManagedAuthentication(t *testing.
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	if got := claudeHeadlessIsolationArgs(); len(got) != 1 || got[0] != "--bare" {
 		t.Fatalf("isolation args = %#v, want --bare", got)
+	}
+}
+
+// TestCodexHeadlessArgsWidensWritableRootsAdditively proves the notebook narrate pass's
+// ExtraWritableRoots map to `--add-dir <root>` entries (so the workspace-write
+// sandbox also permits writes under the notebook root), placed AFTER the base
+// sandbox args and BEFORE the prompt, without disturbing the feature locks. The
+// keeper compaction duty's empty ExtraWritableRoots must add no --add-dir (regression guard).
+func TestCodexHeadlessArgsWidensWritableRootsAdditively(t *testing.T) {
+	t.Run("narration widens", func(t *testing.T) {
+		args := codexHeadlessArgs(HeadlessTaskRequest{
+			Model:              "gpt-test",
+			Prompt:             "narrate",
+			ExtraWritableRoots: []string{"/notebook/root", "  ", "/notebook/raw"},
+		})
+		joined := strings.Join(args, "\x00")
+		if !strings.Contains(joined, "--add-dir\x00/notebook/root") {
+			t.Fatalf("missing --add-dir for notebook root:\n%v", args)
+		}
+		if !strings.Contains(joined, "--add-dir\x00/notebook/raw") {
+			t.Fatalf("missing --add-dir for raw root:\n%v", args)
+		}
+		// The blank entry is skipped.
+		if strings.Count(joined, "--add-dir") != 2 {
+			t.Fatalf("expected exactly 2 --add-dir entries, got:\n%v", args)
+		}
+		// Still the base sandbox + feature locks + prompt.
+		for _, want := range []string{"workspace-write", "features.apps=false", "narrate"} {
+			if !strings.Contains(joined, want) {
+				t.Fatalf("missing base arg %q:\n%v", want, args)
+			}
+		}
+		// --add-dir must precede the feature locks and the prompt.
+		addDirIdx := strings.Index(joined, "--add-dir")
+		lockIdx := strings.Index(joined, "features.apps=false")
+		promptIdx := strings.LastIndex(joined, "narrate")
+		if !(addDirIdx < lockIdx && lockIdx < promptIdx) {
+			t.Fatalf("arg ordering wrong (add-dir=%d lock=%d prompt=%d):\n%v", addDirIdx, lockIdx, promptIdx, args)
+		}
+	})
+
+	t.Run("keeper compaction adds nothing", func(t *testing.T) {
+		args := codexHeadlessArgs(HeadlessTaskRequest{Model: "gpt-test", Prompt: "compact"})
+		if strings.Contains(strings.Join(args, "\x00"), "--add-dir") {
+			t.Fatalf("keeper compaction (no ExtraWritableRoots) unexpectedly added --add-dir:\n%v", args)
+		}
+	})
+}
+
+// TestClaudeHeadlessArgsIgnoreWritableRoots proves Claude never gains an --add-dir
+// (or any sandbox-widening flag) from ExtraWritableRoots: dontAsk is not
+// filesystem-sandboxed, so the field is a no-op for Claude. The allow-list and the
+// model/prompt are unchanged whether or not the roots are present.
+func TestClaudeHeadlessArgsIgnoreWritableRoots(t *testing.T) {
+	withRoots := claudeHeadlessArgs(HeadlessTaskRequest{
+		Model:              "claude-test",
+		Prompt:             "narrate",
+		AllowedTools:       []string{"Read", "Write", "Edit", "Grep", "Glob", "Bash"},
+		ExtraWritableRoots: []string{"/notebook/root"},
+	})
+	joined := strings.Join(withRoots, "\x00")
+	if strings.Contains(joined, "--add-dir") || strings.Contains(joined, "/notebook/root") {
+		t.Fatalf("Claude args leaked ExtraWritableRoots:\n%v", withRoots)
+	}
+	if !strings.Contains(joined, "Read,Write,Edit,Grep,Glob,Bash") {
+		t.Fatalf("Claude args dropped the explicit Bash-inclusive allow-list:\n%v", withRoots)
+	}
+	for _, want := range []string{"--permission-mode", "dontAsk", "claude-test", "narrate"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("Claude args missing %q:\n%v", want, withRoots)
+		}
 	}
 }

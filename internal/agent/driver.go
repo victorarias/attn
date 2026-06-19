@@ -263,17 +263,40 @@ type ConfigOverrideProvider interface {
 	GenerateConfigOverrides(opts SpawnOpts) []string
 }
 
-// HeadlessTaskRequest describes a daemon-owned non-interactive task. The
-// provider must expose only the supplied MCP server and must not create an
-// interactive attn session.
+// HeadlessTaskRequest describes a daemon-owned non-interactive task. The task
+// must not create an interactive attn session. The agent runs in native-tools
+// mode: it gets its OWN file tools and a writable working dir (WorkDir). The
+// daemon writes inputs into WorkDir and reads the agent's output file back;
+// validation + commit stay daemon-owned.
 type HeadlessTaskRequest struct {
-	Executable       string
-	Model            string
-	Prompt           string
-	WorkDir          string
-	MCPServerName    string
-	MCPServerCommand string
-	MCPServerArgs    []string
+	Executable string
+	Model      string
+	Prompt     string
+	WorkDir    string
+
+	// AllowedTools optionally overrides the default native tool set
+	// (Claude: Read,Write,Edit,Grep,Glob). Empty => provider default. (Codex
+	// ignores this field; its native tooling comes from the workspace-write
+	// sandbox defaults, not a CLI list.)
+	AllowedTools []string
+
+	// ExtraWritableRoots optionally widens the set of directories the agent may
+	// WRITE to, beyond the scratch WorkDir. The notebook narration tasks use this
+	// so a headless agent can write the curated journal / raw tier under the
+	// notebook root (which lives outside the scratch tempdir).
+	//
+	// Provider behavior:
+	//   - Claude: IGNORED. Claude headless runs with --permission-mode dontAsk,
+	//     which is NOT filesystem-sandboxed — it can already write anywhere the OS
+	//     user can, given absolute paths. No widening is needed or applied.
+	//   - Codex: each root is passed as `--add-dir <root>` so the
+	//     workspace-write sandbox (which otherwise confines writes to the cwd
+	//     WorkDir) also permits writes under these roots. Reads are unrestricted
+	//     under workspace-write, so transcript dirs need no widening.
+	//
+	// Empty (the keeper's compaction case) leaves both providers' existing
+	// scratch-only behavior unchanged.
+	ExtraWritableRoots []string
 }
 
 type HeadlessTaskResult struct {
