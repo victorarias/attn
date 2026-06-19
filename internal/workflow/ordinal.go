@@ -111,16 +111,12 @@ func newPathStack() *pathStack {
 }
 
 // prefix returns the canonical encoding of the current descent (without any
-// trailing callsite segment).
+// trailing callsite segment). It delegates to OrdinalPath.String() so the
+// canonical "/"-joined encoding has a single authority: a divergence between the
+// two would silently corrupt journal cache identity. String() only reads ps.segs,
+// so this stays zero-copy.
 func (ps *pathStack) prefix() string {
-	if len(ps.segs) == 0 {
-		return ""
-	}
-	parts := make([]string, len(ps.segs))
-	for i, s := range ps.segs {
-		parts[i] = s.String()
-	}
-	return strings.Join(parts, "/")
+	return OrdinalPath{segs: ps.segs}.String()
 }
 
 // pushPop is the marker handle returned by push; calling it restores the stack

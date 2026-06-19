@@ -437,18 +437,7 @@ func containsSeg(ordinal, seg string) bool {
 }
 
 func splitOrdinal(ordinal string) []string {
-	var parts []string
-	cur := ""
-	for _, r := range ordinal {
-		if r == '/' {
-			parts = append(parts, cur)
-			cur = ""
-			continue
-		}
-		cur += string(r)
-	}
-	parts = append(parts, cur)
-	return parts
+	return strings.Split(ordinal, "/")
 }
 
 func counterOf(t *testing.T, ordinal string) int {

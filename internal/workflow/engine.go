@@ -121,37 +121,28 @@ func (e *Engine) execute(ctx context.Context, script string, args any) (RunResul
 	}
 
 	// The whole run executes on ONE goroutine (the loop goroutine). We marshal the
-	// result back to the caller via a channel.
-	type outcome struct {
-		res RunResult
-		err error
-	}
-	outCh := make(chan outcome, 1)
-
+	// result back to the caller via a channel; the returned error is always res.Err,
+	// so a single RunResult carries everything.
+	outCh := make(chan RunResult, 1)
 	go func() {
 		outCh <- e.runOnLoopGoroutine(ctx, stripped, args, meta, jour)
 	}()
 
-	out := <-outCh
-	return out.res, out.err
+	res := <-outCh
+	return res, res.Err
 }
 
 // runOnLoopGoroutine owns the runtime for its entire lifetime. It builds the
 // realm, installs host fns, arms the watchdog, runs the wrapped async script, and
 // pumps the event loop until the top-level promise settles.
-func (e *Engine) runOnLoopGoroutine(ctx context.Context, src string, args any, meta *Meta, jour Journal) (out struct {
-	res RunResult
-	err error
-}) {
+func (e *Engine) runOnLoopGoroutine(ctx context.Context, src string, args any, meta *Meta, jour Journal) RunResult {
 	vm := goja.New()
 
 	if err := installDeterminismBans(vm); err != nil {
-		out.res = RunResult{Status: StatusErrored, Err: err, Journal: jour, Meta: meta}
-		out.err = err
-		return
+		return RunResult{Status: StatusErrored, Err: err, Journal: jour, Meta: meta}
 	}
 
-	el := newEventLoop(vm)
+	el := newEventLoop()
 	rs := &runState{
 		vm:               vm,
 		el:               el,
@@ -164,9 +155,7 @@ func (e *Engine) runOnLoopGoroutine(ctx context.Context, src string, args any, m
 		sem:              make(chan struct{}, e.cfg.ConcurrencyCap),
 	}
 	if err := installHostFns(rs, args); err != nil {
-		out.res = RunResult{Status: StatusErrored, Err: err, Journal: jour, Meta: meta}
-		out.err = err
-		return
+		return RunResult{Status: StatusErrored, Err: err, Journal: jour, Meta: meta}
 	}
 
 	// Carry the structural path across every await/.then boundary so a post-await
@@ -206,21 +195,17 @@ func (e *Engine) runOnLoopGoroutine(ctx context.Context, src string, args any, m
 	})
 
 	if initPanic != nil {
-		out.res = e.mapPanic(initPanic, rs, jour, meta)
-		out.err = out.res.Err
-		return
+		return e.mapPanic(initPanic, rs, jour, meta)
 	}
 
 	state, result, pumpPanic := el.pump(ctx, topLevel)
 	if pumpPanic != nil {
-		out.res = e.mapPanic(pumpPanic, rs, jour, meta)
-		out.err = out.res.Err
-		return
+		return e.mapPanic(pumpPanic, rs, jour, meta)
 	}
 
 	switch state {
 	case goja.PromiseStateFulfilled:
-		out.res = RunResult{
+		return RunResult{
 			Value:       exportValue(result),
 			Meta:        meta,
 			Status:      StatusCompleted,
@@ -229,24 +214,19 @@ func (e *Engine) runOnLoopGoroutine(ctx context.Context, src string, args any, m
 			Journal:     jour,
 		}
 	case goja.PromiseStateRejected:
-		rerr := &scriptError{value: exportValue(result), text: stringify(result)}
-		out.res = RunResult{
+		return RunResult{
 			Meta:        meta,
 			Status:      StatusErrored,
-			Err:         rerr,
+			Err:         &scriptError{text: stringify(result)},
 			CachedCalls: rs.cachedCalls,
 			LiveCalls:   rs.liveCalls,
 			Journal:     jour,
 		}
-		out.err = rerr
 	default:
 		// Still pending after the pump returned (e.g. interrupted mid-await).
-		ierr := &ErrInterrupted{Reason: "workflow did not settle"}
-		out.res = RunResult{Meta: meta, Status: StatusInterrupted, Err: ierr, Journal: jour,
+		return RunResult{Meta: meta, Status: StatusInterrupted, Err: &ErrInterrupted{Reason: "workflow did not settle"}, Journal: jour,
 			CachedCalls: rs.cachedCalls, LiveCalls: rs.liveCalls}
-		out.err = ierr
 	}
-	return
 }
 
 // mapPanic classifies a recovered panic from the loop into a RunResult. An
@@ -317,10 +297,10 @@ func stringifyAny(v interface{}) string {
 	return string(b)
 }
 
-// scriptError carries a JS-thrown rejection value back to the Go caller.
+// scriptError carries a JS-thrown rejection's stringified message back to the Go
+// caller.
 type scriptError struct {
-	value any
-	text  string
+	text string
 }
 
 func (e *scriptError) Error() string {

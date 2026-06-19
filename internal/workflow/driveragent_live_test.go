@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	agentdriver "github.com/victorarias/attn/internal/agent"
 )
 
 // TestDriverAgentLiveCodexRoundTrip drives ONE real `codex exec` round-trip
@@ -160,5 +158,3 @@ func codexLiveModel() string {
 	}
 	return "gpt-5-codex"
 }
-
-var _ = agentdriver.Get

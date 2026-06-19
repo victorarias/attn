@@ -40,7 +40,6 @@ const defaultDriverAgentRetries = 2
 // the engine boundary.
 type driverAgent struct {
 	runner     headlessRunner
-	provider   string // "codex" | "claude" — diagnostics only
 	executable string // resolved agent binary path
 	model      string
 	attnExec   string // path to the attn binary (hosts the result-sink subcommand)
@@ -95,9 +94,8 @@ type DriverAgentOptions struct {
 
 var _ AgentStub = (*driverAgent)(nil)
 
-// NewDriverAgent constructs a driverAgent that spawns real subagents. No
-// production caller wires it yet (that is E4's `attn workflow run`); E2 delivers
-// the constructable agent + its tests.
+// NewDriverAgent constructs a driverAgent that spawns real subagents. It is wired
+// in production by `attn workflow run` via buildWorkflowStub.
 func NewDriverAgent(opts DriverAgentOptions) (*driverAgent, error) {
 	provider := strings.TrimSpace(opts.Provider)
 	if provider == "" {
@@ -105,6 +103,7 @@ func NewDriverAgent(opts DriverAgentOptions) (*driverAgent, error) {
 	}
 
 	runner := opts.Runner
+	executable := strings.TrimSpace(opts.Executable)
 	if runner == nil {
 		driver := agentdriver.Get(provider)
 		if driver == nil {
@@ -115,19 +114,18 @@ func NewDriverAgent(opts DriverAgentOptions) (*driverAgent, error) {
 			return nil, fmt.Errorf("driver agent: provider %q does not support headless tasks", provider)
 		}
 		runner = headlessProviderRunner{provider: hp}
-	}
 
-	executable := strings.TrimSpace(opts.Executable)
-	if executable == "" && opts.Runner == nil {
-		// Resolve a real binary only when using the real runner; tests inject a
-		// fake runner and may pass any (or no) executable.
-		driver := agentdriver.Get(provider)
-		resolved := driver.ResolveExecutable("")
-		path, err := exec.LookPath(resolved)
-		if err != nil {
-			return nil, fmt.Errorf("driver agent: resolve %s executable: %w", provider, err)
+		// Resolve a real binary only when using the real runner (tests inject a
+		// fake runner and may pass any or no executable). Reuse the driver we just
+		// looked up rather than fetching it a second time.
+		if executable == "" {
+			resolved := driver.ResolveExecutable("")
+			path, err := exec.LookPath(resolved)
+			if err != nil {
+				return nil, fmt.Errorf("driver agent: resolve %s executable: %w", provider, err)
+			}
+			executable = path
 		}
-		executable = path
 	}
 
 	attnExec := strings.TrimSpace(opts.AttnExecutable)
@@ -157,7 +155,6 @@ func NewDriverAgent(opts DriverAgentOptions) (*driverAgent, error) {
 
 	return &driverAgent{
 		runner:            runner,
-		provider:          provider,
 		executable:        executable,
 		model:             strings.TrimSpace(opts.Model),
 		attnExec:          attnExec,

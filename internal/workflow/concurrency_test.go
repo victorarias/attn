@@ -90,6 +90,19 @@ func echoPrompt(prompt string) json.RawMessage {
 	return b
 }
 
+// boomOrEchoStub errors on any prompt containing "boom" (a terminal subagent
+// failure -> null slot/item; the engine never rejects) and echoes otherwise. It
+// yields so the good and bad slots truly race under concurrent dispatch.
+func boomOrEchoStub() AgentStub {
+	return StubFunc(func(call AgentCall) (json.RawMessage, error) {
+		runtime.Gosched()
+		if strings.Contains(call.Prompt, "boom") {
+			return nil, fmt.Errorf("subagent crashed on %q", call.Prompt)
+		}
+		return echoPrompt(call.Prompt), nil
+	})
+}
+
 // assertCapSaturatedAndBounded runs script (which must dispatch N live agents
 // concurrently, N strictly greater than cap), proves the cap is both REACHED and
 // never EXCEEDED, and returns the completed result for further assertions.
@@ -316,16 +329,7 @@ func dumpSorted(m map[string]string) string {
 // of throwing thunks, stub-error thunks, and good thunks all run concurrently; the
 // barrier resolves, throwing/errored slots are null, good slots carry their value.
 func TestParallelNeverRejectsNullSlotUnderConcurrency(t *testing.T) {
-	// boomStub errors on prompts containing "boom" (terminal subagent failure ->
-	// null slot, never reject); otherwise echoes. It yields so the good and bad
-	// slots truly race.
-	boomStub := StubFunc(func(call AgentCall) (json.RawMessage, error) {
-		runtime.Gosched()
-		if strings.Contains(call.Prompt, "boom") {
-			return nil, fmt.Errorf("subagent crashed on %q", call.Prompt)
-		}
-		return echoPrompt(call.Prompt), nil
-	})
+	boomStub := boomOrEchoStub()
 	script := `
 		const out = await parallel([
 			() => agent("ok0"),
@@ -360,13 +364,7 @@ func TestParallelNeverRejectsNullSlotUnderConcurrency(t *testing.T) {
 // item to null for the rest of the pipeline, surviving items flow through both
 // stages, and the pipeline never rejects.
 func TestPipelineNeverRejectsNullItemUnderConcurrency(t *testing.T) {
-	boomStub := StubFunc(func(call AgentCall) (json.RawMessage, error) {
-		runtime.Gosched()
-		if strings.Contains(call.Prompt, "boom") {
-			return nil, fmt.Errorf("subagent crashed on %q", call.Prompt)
-		}
-		return echoPrompt(call.Prompt), nil
-	})
+	boomStub := boomOrEchoStub()
 	script := `
 		const out = await pipeline(["keep", "throw", "boom"],
 			(prev, item, i) => {

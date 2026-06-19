@@ -15,8 +15,7 @@ import (
 // This is the load-bearing thread-safety invariant: vm.Interrupt is the only goja
 // call permitted off the loop goroutine.
 type eventLoop struct {
-	runtime *goja.Runtime
-	jobs    chan func() // cross-goroutine mailbox: closures to run ON the loop goroutine
+	jobs chan func() // cross-goroutine mailbox: closures to run ON the loop goroutine
 
 	// onEnterJS / onLeaveJS arm/disarm the watchdog around any segment that
 	// re-enters the bytecode interpreter (initial script run and each resolve()).
@@ -24,9 +23,8 @@ type eventLoop struct {
 	onLeaveJS func()
 }
 
-func newEventLoop(rt *goja.Runtime) *eventLoop {
+func newEventLoop() *eventLoop {
 	return &eventLoop{
-		runtime: rt,
 		// Buffered generously so a burst of worker completions never blocks a
 		// worker goroutine trying to hand back a result.
 		jobs: make(chan func(), 4096),

@@ -151,18 +151,18 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 		// the real driver can advertise it through the return_result sink. E1
 		// callers pass no opts => schema nil => schemaHash "none" => behavior
 		// unchanged.
-		schema := extractAgentSchema(rs.vm, call.Argument(1))
+		schema := extractAgentSchema(call.Argument(1))
 		// isolation/model/agentType select the live call's execution context. They
 		// are threaded to the stub but NOT folded into the cache identity: the
 		// predicate stays ordinal+prompt_hash+schema_hash (§6). isolation is
 		// validated to "" | "worktree" (unknown => "") so a typo can't silently run
 		// in an unexpected mode.
-		isolation := validateIsolation(extractAgentString(rs.vm, call.Argument(1), "isolation"))
-		model := extractAgentString(rs.vm, call.Argument(1), "model")
-		agentType := extractAgentString(rs.vm, call.Argument(1), "agentType")
+		isolation := validateIsolation(extractAgentString(call.Argument(1), "isolation"))
+		model := extractAgentString(call.Argument(1), "model")
+		agentType := extractAgentString(call.Argument(1), "agentType")
 		// label is DISPLAY metadata (shown in `workflow show` and the UI). Like
 		// model it is NOT part of the cache identity.
-		label := extractAgentString(rs.vm, call.Argument(1), "label")
+		label := extractAgentString(call.Argument(1), "label")
 
 		// --- fix the ordinal synchronously, before anything async ---
 		site := rs.callsiteKey()
@@ -260,7 +260,7 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 // absent, not an object, or carries no schema — keeping the no-schema path
 // (schemaHash "none") exact. The schema is canonicalized via Go's json.Marshal
 // so the same logical schema hashes identically across runs.
-func extractAgentSchema(vm *goja.Runtime, optsVal goja.Value) json.RawMessage {
+func extractAgentSchema(optsVal goja.Value) json.RawMessage {
 	if optsVal == nil || goja.IsUndefined(optsVal) || goja.IsNull(optsVal) {
 		return nil
 	}
@@ -288,7 +288,7 @@ func extractAgentSchema(vm *goja.Runtime, optsVal goja.Value) json.RawMessage {
 // absent opts object, a missing key, or a non-string value yields "". Numbers and
 // other non-strings are deliberately ignored rather than coerced, so a malformed
 // opt never silently becomes a meaningful value.
-func extractAgentString(vm *goja.Runtime, optsVal goja.Value, key string) string {
+func extractAgentString(optsVal goja.Value, key string) string {
 	if optsVal == nil || goja.IsUndefined(optsVal) || goja.IsNull(optsVal) {
 		return ""
 	}
@@ -364,7 +364,7 @@ func (rs *runState) makeParallelFn() func(goja.FunctionCall) goja.Value {
 			// positional ordinal, independent of resolution timing.
 			pop := rs.stack.push(segParallelSlot, i)
 			slotPath := rs.stack.snapshot()
-			childPromises[i] = rs.invokeNullable(thunk, goja.Undefined(), nil, slotPath)
+			childPromises[i] = rs.invokeNullable(thunk, slotPath)
 			pop()
 		}
 
@@ -469,9 +469,9 @@ func (rs *runState) buildPipelineItem(j int, item goja.Value, stages []goja.Call
 }
 
 // invokeNullable invokes a thunk under the given captured path, wrapping the
-// result so a throw/rejection becomes a null slot (parallel never rejects). For
-// parallel, the thunk takes no args; for symmetry we pass through optional args.
-func (rs *runState) invokeNullable(fn goja.Callable, this goja.Value, args []goja.Value, capturedPath []segment) goja.Value {
+// result so a throw/rejection becomes a null slot (parallel never rejects). The
+// parallel thunk takes no args.
+func (rs *runState) invokeNullable(fn goja.Callable, capturedPath []segment) goja.Value {
 	vm := rs.vm
 	// Re-establish the captured path so any synchronous agent() inside the thunk
 	// reads the positional ordinal. (Synchronous calls already see it via the live
@@ -485,7 +485,7 @@ func (rs *runState) invokeNullable(fn goja.Callable, this goja.Value, args []goj
 				thrown = true
 			}
 		}()
-		v, err := fn(this, args...)
+		v, err := fn(goja.Undefined())
 		if err != nil {
 			thrown = true
 			return
