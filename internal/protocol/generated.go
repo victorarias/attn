@@ -2663,9 +2663,6 @@ type Response struct {
 	// NotebookRead corresponds to the JSON schema field "notebook_read".
 	NotebookRead *NotebookReadResult `json:"notebook_read,omitempty,omitzero"`
 
-	// NotebookTasks corresponds to the JSON schema field "notebook_tasks".
-	NotebookTasks []NotebookTask `json:"notebook_tasks,omitempty,omitzero"`
-
 	// NotebookWrite corresponds to the JSON schema field "notebook_write".
 	NotebookWrite *NotebookWriteResult `json:"notebook_write,omitempty,omitzero"`
 

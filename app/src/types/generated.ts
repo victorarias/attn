@@ -2753,7 +2753,6 @@ export interface Response {
     notebook_entries?:                     NotebookEntryElement[];
     notebook_guide?:                       NotebookGuide;
     notebook_read?:                        NotebookReadObject;
-    notebook_tasks?:                       Task[];
     notebook_write?:                       NotebookWriteObject;
     ok:                                    boolean;
     prs?:                                  PRElement[];
@@ -7743,7 +7742,6 @@ const typeMap: any = {
         { json: "notebook_entries", js: "notebook_entries", typ: u(undefined, a(r("NotebookEntryElement"))) },
         { json: "notebook_guide", js: "notebook_guide", typ: u(undefined, r("NotebookGuide")) },
         { json: "notebook_read", js: "notebook_read", typ: u(undefined, r("NotebookReadObject")) },
-        { json: "notebook_tasks", js: "notebook_tasks", typ: u(undefined, a(r("Task"))) },
         { json: "notebook_write", js: "notebook_write", typ: u(undefined, r("NotebookWriteObject")) },
         { json: "ok", js: "ok", typ: true },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },

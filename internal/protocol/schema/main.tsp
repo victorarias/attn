@@ -1982,7 +1982,6 @@ model Response {
   notebook_read?: NotebookReadResult;
   notebook_write?: NotebookWriteResult;
   notebook_guide?: NotebookGuideResult;
-  notebook_tasks?: NotebookTask[];
 }
 
 model DelegateResult {
