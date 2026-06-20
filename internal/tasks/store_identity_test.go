@@ -1,6 +1,10 @@
 package tasks
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 // TestTaskFilenamesAreInjective is a regression test for a storage-identity bug:
 // the original filename scheme replaced "/", ":", and ".." with "_", so two
@@ -66,5 +70,47 @@ func TestLoadRejectsMismatchedRecord(t *testing.T) {
 	}
 	if got != nil {
 		t.Fatalf("expected nil for a mismatched record, got %+v", got)
+	}
+}
+
+// TestListIgnoresNonCanonicalRecord is a regression test for a hot-loop bug. The
+// original lossy naming scheme wrote "kind:subject" as "kind__subject"; after the
+// switch to hex(id), those old files linger in the tasks dir with names that are
+// NOT taskFilename(id), so the store can never write back to them. list() used to
+// return such a record anyway: the worker would claim it (state=running persisted
+// to the CANONICAL file, leaving the orphan's own file untouched and still
+// queued), so the orphan was re-selected every poll — an infinite loop, observed
+// in prod as thousands of identical "skipping" log lines, that also starved the
+// real canonically-named tasks. list() must skip any record whose filename is not
+// its canonical encoding.
+func TestListIgnoresNonCanonicalRecord(t *testing.T) {
+	root := t.TempDir()
+	s := newStore(root)
+
+	// A real, canonically-named task (s.save writes to taskFilename(id).json).
+	if err := s.save(&Task{ID: "summarize_session:real", Kind: "summarize_session", Subject: "real", State: StateQueued}); err != nil {
+		t.Fatalf("save canonical: %v", err)
+	}
+
+	// An orphan from the pre-hex scheme dropped straight into the dir under a
+	// non-canonical name the store can never address by id.
+	orphanName := "summarize_session__orphan.json"
+	if orphanName == taskFilename("summarize_session:orphan")+".json" {
+		t.Fatal("test bug: orphan name is actually canonical")
+	}
+	orphan := []byte(`{"id":"summarize_session:orphan","kind":"summarize_session","subject":"orphan","state":"queued"}`)
+	if err := os.WriteFile(filepath.Join(stateDir(root), orphanName), orphan, 0o644); err != nil {
+		t.Fatalf("seed orphan: %v", err)
+	}
+
+	got, err := s.list()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("list returned %d records, want 1 (the orphan must be skipped): %+v", len(got), got)
+	}
+	if got[0].ID != "summarize_session:real" {
+		t.Fatalf("surviving record id = %q, want the canonical summarize_session:real", got[0].ID)
 	}
 }
