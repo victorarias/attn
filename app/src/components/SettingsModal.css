@@ -499,6 +499,31 @@
   overflow-wrap: anywhere;
 }
 
+.settings-keeper-duties {
+  display: grid;
+  gap: 10px;
+}
+
+/* When the master switch is off the per-duty pickers stay usable (configurable while
+   disabled), but dim to signal that nothing runs until the toggle is back on. */
+.settings-keeper-duties.is-disabled {
+  opacity: 0.6;
+}
+
+.settings-keeper-duty {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-bg-elevated);
+  padding: 12px 14px;
+}
+
+.settings-keeper-duty-head {
+  display: grid;
+  gap: 4px;
+}
+
 .settings-token-list {
   display: flex;
   flex-wrap: wrap;

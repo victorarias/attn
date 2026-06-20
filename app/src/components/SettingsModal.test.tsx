@@ -740,3 +740,118 @@ describe('SettingsModal notebook folder', () => {
     expect(onSetSetting).toHaveBeenCalledWith('notebook.root', '');
   });
 });
+
+describe('SettingsModal keeper', () => {
+  function renderModal(
+    settings: Record<string, string>,
+    onSetSetting = vi.fn(),
+  ) {
+    render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        githubHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{
+          claude_available: 'true',
+          claude_cap_headless_task: 'true',
+          codex_available: 'true',
+          codex_cap_headless_task: 'true',
+          ...settings,
+        }}
+        endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={onSetSetting}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />,
+    );
+    return onSetSetting;
+  }
+
+  it('treats the master switch as on by default and toggles it off', async () => {
+    const onSetSetting = renderModal({});
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    // Unset notebook.tasks_enabled reads as ON, so the action offers to disable.
+    const toggle = await screen.findByTestId('settings-keeper-tasks-toggle');
+    expect(toggle).toHaveTextContent('Disable');
+    fireEvent.click(toggle);
+    expect(onSetSetting).toHaveBeenCalledWith('notebook.tasks_enabled', 'false');
+  });
+
+  it('re-enables the master switch when it is off', async () => {
+    const onSetSetting = renderModal({ 'notebook.tasks_enabled': 'false' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const toggle = await screen.findByTestId('settings-keeper-tasks-toggle');
+    expect(toggle).toHaveTextContent('Enable');
+    fireEvent.click(toggle);
+    expect(onSetSetting).toHaveBeenCalledWith('notebook.tasks_enabled', 'true');
+  });
+
+  it('seeds always-on duties with their tier default and saves an override', async () => {
+    const onSetSetting = renderModal({});
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    // Session summaries default to Claude Haiku; narration to Claude Sonnet.
+    expect(await screen.findByTestId('settings-keeper-summarize-agent')).toHaveValue('claude');
+    expect(screen.getByTestId('settings-keeper-summarize-model')).toHaveValue('haiku');
+    expect(screen.getByTestId('settings-keeper-narrate-model')).toHaveValue('sonnet');
+
+    // Switching the summarize agent re-seeds the model to that agent's recommended.
+    fireEvent.change(screen.getByTestId('settings-keeper-summarize-agent'), {
+      target: { value: 'codex' },
+    });
+    expect(screen.getByTestId('settings-keeper-summarize-model')).toHaveValue('gpt-5.4-mini');
+
+    fireEvent.click(screen.getByTestId('settings-keeper-summarize-save'));
+    expect(onSetSetting).toHaveBeenCalledWith(
+      'notebook.summarize_session',
+      '{"agent":"codex","model":"gpt-5.4-mini"}',
+    );
+  });
+
+  it('offers no Disabled agent for always-on duties but does for compaction', async () => {
+    renderModal({});
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const summarizeAgent = await screen.findByTestId('settings-keeper-summarize-agent');
+    expect(
+      Array.from(summarizeAgent.querySelectorAll('option')).map((o) => o.textContent),
+    ).not.toContain('Disabled');
+
+    const compactAgent = screen.getByTestId('settings-context-keeper-agent');
+    expect(
+      Array.from(compactAgent.querySelectorAll('option')).map((o) => o.textContent),
+    ).toContain('Disabled');
+  });
+
+  it('reverts an always-on duty to its default by clearing the override', async () => {
+    const onSetSetting = renderModal({
+      'notebook.narrate_workspace': '{"agent":"claude","model":"opus"}',
+    });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    // The saved override is shown, and "Use default" is enabled because one exists.
+    expect(await screen.findByTestId('settings-keeper-narrate-model')).toHaveValue('opus');
+    const useDefault = screen.getByTestId('settings-keeper-narrate-clear');
+    expect(useDefault).toHaveTextContent('Use default');
+    expect(useDefault).toBeEnabled();
+
+    fireEvent.click(useDefault);
+    expect(onSetSetting).toHaveBeenCalledWith('notebook.narrate_workspace', '');
+  });
+});

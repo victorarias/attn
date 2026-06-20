@@ -106,6 +106,25 @@ func (d *Daemon) keeperCompactConfig() (keeperCompactConfig, error) {
 	return parseKeeperCompactConfig(d.store.GetSetting(SettingKeeperCompact))
 }
 
+// notebookTasksEnabled reports whether the keeper's async background duties
+// (summarize_session, narrate_workspace, compact_context) are enabled. This is
+// the single master switch behind SettingNotebookTasksEnabled. Default ON: a
+// nil store or a blank/unset value means enabled, so existing installs keep
+// running the keeper without an opt-in; only an explicit "false" disables the
+// whole group. It gates the BACKGROUND enqueue and executor paths only — the
+// user-triggered inline/manual compaction command is an explicit action and is
+// never gated by this toggle.
+func (d *Daemon) notebookTasksEnabled() bool {
+	if d.store == nil {
+		return true
+	}
+	raw := strings.TrimSpace(d.store.GetSetting(SettingNotebookTasksEnabled))
+	if raw == "" {
+		return true
+	}
+	return parseBooleanSetting(raw)
+}
+
 // legacyKeeperCompactSettingKey is the pre-rename persisted settings key. It is
 // retained ONLY so migrateKeeperCompactSettingKey can copy a user's configured
 // agent/model forward to SettingKeeperCompact. Never read it anywhere else.
@@ -239,6 +258,9 @@ func (d *Daemon) enqueueWorkspaceContextCompaction(canonical *protocol.Workspace
 	if canonical == nil || strings.TrimSpace(canonical.WorkspaceID) == "" {
 		return
 	}
+	if !d.notebookTasksEnabled() {
+		return
+	}
 	config, err := d.keeperCompactConfig()
 	if err != nil {
 		d.logf("keeper compact: configuration: %v", err)
@@ -273,6 +295,13 @@ func (d *Daemon) enqueueWorkspaceContextCompaction(canonical *protocol.Workspace
 // (the doc may have shrunk during the debounce window), runs the agentic
 // compaction, validates, and commits under the guard.
 func (d *Daemon) compactContextExecutor(ctx context.Context, task *tasks.Task) error {
+	// Master switch: a run queued before the user disabled the keeper must not fire
+	// background work after the toggle is off. No-op success so the stale record is
+	// retired rather than retried. The user-triggered inline/manual compaction path
+	// does not route through here and stays ungated.
+	if !d.notebookTasksEnabled() {
+		return nil
+	}
 	workspaceID := task.Subject
 	config, err := d.keeperCompactConfig()
 	if err != nil {

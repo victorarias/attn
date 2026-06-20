@@ -104,6 +104,11 @@ var notebookNarrationAllowedTools = []string{"Read", "Write", "Edit", "Grep", "G
 // success, if the workspace has since been removed it re-enqueues the retrospective
 // narrate so the late digest lands in it (see the re-narrate hook below).
 func (d *Daemon) summarizeSessionExecutor(ctx context.Context, task *tasks.Task) error {
+	// Master switch: a run queued before the keeper was disabled must not fire
+	// background work after the toggle is off. No-op success retires the record.
+	if !d.notebookTasksEnabled() {
+		return nil
+	}
 	sessionID := strings.TrimSpace(task.Subject)
 	if sessionID == "" {
 		return errors.New("summarize_session requires a session id")
@@ -288,6 +293,11 @@ func notebookWorkspaceSessionsDir(root, workspaceID string) (string, error) {
 // narrate duty's inputs, runs the agent, and verifies the journal now carries this
 // workspace's marker for today (the file is the ledger).
 func (d *Daemon) narrateWorkspaceExecutor(ctx context.Context, task *tasks.Task) error {
+	// Master switch: a run queued before the keeper was disabled must not fire
+	// background work after the toggle is off. No-op success retires the record.
+	if !d.notebookTasksEnabled() {
+		return nil
+	}
 	workspaceID := strings.TrimSpace(task.Subject)
 	if workspaceID == "" {
 		return errors.New("narrate_workspace requires a workspace id")
@@ -577,6 +587,9 @@ func (d *Daemon) enqueueSummarizeSession(sessionID, transcriptPath, workspaceID 
 	if sessionID == "" {
 		return
 	}
+	if !d.notebookTasksEnabled() {
+		return
+	}
 	runner := d.compactRunnerRef()
 	if runner == nil || runner.Disabled() {
 		return
@@ -599,6 +612,9 @@ func (d *Daemon) enqueueSummarizeSession(sessionID, transcriptPath, workspaceID 
 func (d *Daemon) enqueueNarrateWorkspace(workspaceID string) {
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {
+		return
+	}
+	if !d.notebookTasksEnabled() {
 		return
 	}
 	runner := d.compactRunnerRef()
@@ -654,6 +670,9 @@ func (d *Daemon) enqueueDailyNarrateWorkspace(workspaceID string) {
 	if workspaceID == "" {
 		return
 	}
+	if !d.notebookTasksEnabled() {
+		return
+	}
 	runner := d.compactRunnerRef()
 	if runner == nil || runner.Disabled() {
 		return
@@ -678,6 +697,9 @@ func (d *Daemon) enqueueDailyNarrateWorkspace(workspaceID string) {
 func (d *Daemon) enqueueFinalNarrateWorkspace(workspaceID string) {
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {
+		return
+	}
+	if !d.notebookTasksEnabled() {
 		return
 	}
 	runner := d.compactRunnerRef()

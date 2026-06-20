@@ -66,6 +66,14 @@ const (
 	// because its native Write/Edit enforce read-before-write CAS on the shared
 	// journal; see parseNotebookNarrationConfig.
 	SettingNotebookNarrateWorkspace = "notebook.narrate_workspace"
+	// SettingNotebookTasksEnabled is the master switch for ALL keeper async
+	// background duties (per-session summarize, workspace narrate, context
+	// compaction). Default ON: a blank/unset value means enabled, so existing
+	// installs keep running the keeper without an opt-in. Only an explicit "false"
+	// disables the whole group; the per-duty agent/model settings stay configurable
+	// but produce no background work while off. See notebookTasksEnabled and the
+	// enqueue/executor gates that honor it.
+	SettingNotebookTasksEnabled = "notebook.tasks_enabled"
 )
 
 func (d *Daemon) handleGetSettingsWS(client *wsClient) {
@@ -211,6 +219,10 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	}
 	settings[SettingTailscaleEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingTailscaleEnabled]))
 	settings[SettingWorkflowsEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingWorkflowsEnabled]))
+	// Normalize the keeper master switch to its EFFECTIVE value so the UI toggle
+	// reflects the default-ON semantics (blank/unset => "true") rather than an
+	// absent key the frontend would read as off.
+	settings[SettingNotebookTasksEnabled] = strconv.FormatBool(d.notebookTasksEnabled())
 
 	tailscale := d.tailscaleStateSnapshot()
 	if tailscale.status != "" {
@@ -263,7 +275,7 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return d.validateNewSessionAgent(value)
 	case SettingTheme:
 		return validateTheme(value)
-	case SettingTailscaleEnabled, SettingWorkflowsEnabled:
+	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingNotebookTasksEnabled:
 		return validateBooleanSetting(value)
 	case SettingKeeperCompact:
 		return d.validateKeeperCompactSetting(value)
