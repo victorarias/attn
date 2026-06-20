@@ -67,6 +67,12 @@ export function NotebookBrowser({
   const [noteError, setNoteError] = useState<string | null>(null);
   const [noteLoading, setNoteLoading] = useState(false);
   const [backlinks, setBacklinks] = useState<NotebookEntry[]>([]);
+  // Backlinks load INDEPENDENTLY from (and far slower than) the note content, so the
+  // panel needs its own loading flag: without it, a newly selected note would keep
+  // showing the PREVIOUS note's "Linked from" list — or worse, falsely assert "No
+  // other note links here." — until the slow walk resolves. While true, the panel
+  // renders a neutral loading line instead of stale or misleading metadata.
+  const [backlinksLoading, setBacklinksLoading] = useState(false);
   // --- Tasks panel (durable runner) ---
   const [tasks, setTasks] = useState<NotebookTask[]>([]);
   const [tasksError, setTasksError] = useState<string | null>(null);
@@ -192,25 +198,48 @@ export function NotebookBrowser({
     // it. (Navigation also clears it via the [selectedPath] effect, but a
     // same-path reload does not change selectedPath, so clear here too.)
     setChiefSel(null);
-    // Fetch content and backlinks together; a backlinks failure must not blank
-    // the note, so it is tolerated independently.
-    const [readResult, backlinkResult] = await Promise.allSettled([
-      readNotebook(path),
-      backlinksNotebook(path),
-    ]);
-    // Ignore a stale response if a newer navigation superseded this one.
-    if (loadSeqRef.current !== seq) return;
-    if (readResult.status === 'fulfilled') {
-      setNote(readResult.value);
-      // Seed the live editor buffer from disk; a fresh load is never dirty.
-      setDraft(readResult.value.content);
-    } else {
-      setNote(null);
-      setDraft('');
-      setNoteError(readResult.reason instanceof Error ? readResult.reason.message : 'Could not read this note');
-    }
-    setBacklinks(backlinkResult.status === 'fulfilled' ? backlinkResult.value : []);
-    setNoteLoading(false);
+    // Drop the outgoing note's backlinks the moment a new load starts (not when the
+    // new walk resolves), so the panel never shows the previous selection's "Linked
+    // from" list — the same stale-context bug the content decouple fixed, one panel
+    // over. backlinksLoading keeps the empty state from reading as a definitive "no
+    // backlinks" while the walk is still running.
+    setBacklinks([]);
+    setBacklinksLoading(true);
+    // Content and backlinks load INDEPENDENTLY — never gated together. The note
+    // content is a single fast file read; backlinks walks every note in the
+    // notebook (reading each body to find links) and is far slower. Awaiting both
+    // before rendering is what left a clicked file showing the *previous* file's
+    // content until the backlinks walk caught up — the selection updated instantly
+    // (above) but the editor lagged. Apply the content the moment its read resolves;
+    // let backlinks fill in whenever it lands. Each guards on the load token so a
+    // superseded navigation is dropped.
+    void readNotebook(path)
+      .then((value) => {
+        if (loadSeqRef.current !== seq) return;
+        setNote(value);
+        // Seed the live editor buffer from disk; a fresh load is never dirty.
+        setDraft(value.content);
+        setNoteLoading(false);
+      })
+      .catch((err) => {
+        if (loadSeqRef.current !== seq) return;
+        setNote(null);
+        setDraft('');
+        setNoteError(err instanceof Error ? err.message : 'Could not read this note');
+        setNoteLoading(false);
+      });
+    // A backlinks failure must not blank the note — it just yields no backlinks.
+    void backlinksNotebook(path)
+      .then((entries) => {
+        if (loadSeqRef.current !== seq) return;
+        setBacklinks(entries);
+        setBacklinksLoading(false);
+      })
+      .catch(() => {
+        if (loadSeqRef.current !== seq) return;
+        setBacklinks([]);
+        setBacklinksLoading(false);
+      });
   }, [readNotebook, backlinksNotebook]);
 
   // Drop the current selection and return the document pane to its empty state.
@@ -224,6 +253,7 @@ export function NotebookBrowser({
     setNoteError(null);
     setNoteLoading(false);
     setBacklinks([]);
+    setBacklinksLoading(false);
   }, []);
 
   // --- Editing (single live surface; no view/edit toggle) ---
@@ -722,8 +752,10 @@ export function NotebookBrowser({
                     </div>
                   </div>
                   <section className="notebook-browser-backlinks" aria-label="Backlinks">
-                    <h3>Linked from {backlinks.length > 0 ? `(${backlinks.length})` : ''}</h3>
-                    {backlinks.length === 0 ? (
+                    <h3>Linked from {!backlinksLoading && backlinks.length > 0 ? `(${backlinks.length})` : ''}</h3>
+                    {backlinksLoading ? (
+                      <p className="notebook-browser-backlinks-empty">Finding backlinks…</p>
+                    ) : backlinks.length === 0 ? (
                       <p className="notebook-browser-backlinks-empty">No other note links here.</p>
                     ) : (
                       <ul>
