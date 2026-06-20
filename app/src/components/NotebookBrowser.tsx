@@ -1,25 +1,33 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
-import type { NotebookEntry, NotebookReadResult, NotebookSendToChiefResult, NotebookTask, NotebookWriteResult } from '../hooks/useDaemonSocket';
+import type { FsEntry, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult, NotebookTask } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
+import { FileTree } from './notebook/FileTree';
+import { fileKind, isBinaryPath, isMarkdownPath } from './notebook/fileKind';
 import { LiveMarkdownEditor, type LiveSelection } from './notebook/LiveMarkdownEditor';
 import './NotebookBrowser.css';
 
 interface NotebookBrowserProps {
   isOpen: boolean;
   onClose: () => void;
-  listNotebook: () => Promise<NotebookEntry[]>;
-  readNotebook: (path: string) => Promise<NotebookReadResult>;
-  backlinksNotebook: (path: string) => Promise<NotebookEntry[]>;
-  // Save an edited note (hash-CAS). Omit baseHash to create-only; pass the note's
+  // List one directory's immediate children over the daemon's generic filesystem
+  // surface. '' = the notebook root. Drives the lazy folder tree in the sidebar.
+  listDir: (path: string) => Promise<FsEntry[]>;
+  // Read one file's full bytes + content hash (for hash-CAS edits).
+  readFile: (path: string) => Promise<FsReadResult>;
+  // Save an edited file (hash-CAS). Omit baseHash to create-only; pass the file's
   // loaded hash to edit. Resolves with the outcome, including a conflict to reconcile.
-  writeNotebook: (path: string, content: string, baseHash?: string) => Promise<NotebookWriteResult>;
+  writeFile: (path: string, content: string, baseHash?: string) => Promise<FsWriteResult>;
+  // Backlinks ("Linked from") for a markdown note. Notebook-specific (walks .md link
+  // graphs), so it is only consulted for .md files.
+  backlinksNotebook: (path: string) => Promise<NotebookEntry[]>;
   // Hand a highlighted selection to the daemon to deliver to the chief of staff
   // (appends to the chief inbox note + best-effort live PTY nudge). The UI never
   // messages the chief directly. sourcePath is the note the selection came from.
   sendToChief: (selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>;
-  // Increments whenever a notebook_changed event arrives, so an open browser
-  // re-fetches the tree and the open note (covering agent and external writes).
+  // Increments whenever an fs_changed event arrives, so an open browser re-lists the
+  // tree (handled by FileTree) and reloads the open file (covering agent and external
+  // writes).
   changeSignal?: number;
   // List the durable runner's tasks (newest-updated first). Resolves empty when
   // the runner is disabled or has no tasks.
@@ -32,8 +40,10 @@ interface NotebookBrowserProps {
   taskChangeSignal?: number;
 }
 
-// The note shown first when the browser opens with nothing selected, in order of
-// preference. knowledge/index.md is the distilled map an agent is told to read.
+// The file shown first when the browser opens with nothing selected, in order of
+// preference. knowledge/index.md is the distilled map an agent is told to read. We
+// probe these directly (a cheap read) rather than walking the whole tree, since the
+// sidebar lists lazily and has no flat catalogue to scan.
 const PREFERRED_FIRST = ['knowledge/index.md', 'index.md'];
 
 // How long the buffer must be idle before an autosave fires. Short enough that
@@ -49,21 +59,18 @@ type PersistOutcome = 'saved' | 'conflict' | 'error' | 'noop';
 export function NotebookBrowser({
   isOpen,
   onClose,
-  listNotebook,
-  readNotebook,
+  listDir,
+  readFile,
+  writeFile,
   backlinksNotebook,
-  writeNotebook,
   sendToChief,
   changeSignal = 0,
   listTasks,
   retryTask,
   taskChangeSignal = 0,
 }: NotebookBrowserProps) {
-  const [entries, setEntries] = useState<NotebookEntry[]>([]);
-  const [listError, setListError] = useState<string | null>(null);
-  const [listLoading, setListLoading] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [note, setNote] = useState<NotebookReadResult | null>(null);
+  const [note, setNote] = useState<FsReadResult | null>(null);
   const [noteError, setNoteError] = useState<string | null>(null);
   const [noteLoading, setNoteLoading] = useState(false);
   const [backlinks, setBacklinks] = useState<NotebookEntry[]>([]);
@@ -78,7 +85,7 @@ export function NotebookBrowser({
   const [tasksError, setTasksError] = useState<string | null>(null);
   const [tasksLoading, setTasksLoading] = useState(false);
   // The Tasks section is collapsible; collapsed by default so it doesn't crowd the
-  // note list. Opening it (or a taskChangeSignal bump) triggers a refetch.
+  // file tree. Opening it (or a taskChangeSignal bump) triggers a refetch.
   const [tasksOpen, setTasksOpen] = useState(false);
   // Task ids whose Retry click is in flight, so their button can disable without
   // optimistically mutating the row (the broadcast-driven refetch reflects truth).
@@ -87,16 +94,16 @@ export function NotebookBrowser({
   // fetch (panel closed/refetched) is dropped instead of stamping stale rows.
   const tasksSeqRef = useRef(0);
   // selectedPath drives loads; this ref lets the change-signal effect reload the
-  // current note without depending on (and re-running for) selectedPath itself.
+  // current file without depending on (and re-running for) selectedPath itself.
   const selectedPathRef = useRef<string | null>(null);
   selectedPathRef.current = selectedPath;
-  // Monotonic load token, bumped synchronously at the start of every loadNote so
+  // Monotonic load token, bumped synchronously at the start of every loadFile so
   // a slow response from a superseded navigation is dropped. (A render-synced ref
   // can't do this — it only updates on commit, after the await may have resolved.)
   const loadSeqRef = useRef(0);
-  // Persists the outgoing note's unsaved buffer before a navigation/close replaces or
+  // Persists the outgoing file's unsaved buffer before a navigation/close replaces or
   // hides it — surfacing a CAS conflict rather than dropping it. Assigned below (after
-  // the editing state/refs exist) and invoked via a ref so loadNote — declared above
+  // the editing state/refs exist) and invoked via a ref so loadFile — declared above
   // the editing block — doesn't depend on declaration order. A no-op until assigned.
   const persistRef = useRef<() => Promise<PersistOutcome>>(async () => 'noop');
   // The dialog container is the deliberate initial focus target so keyboard/AT
@@ -119,27 +126,9 @@ export function NotebookBrowser({
 
   useEscapeStack(handleEscape, isOpen);
 
-  // Returns the fetched entries, or null if the fetch FAILED (distinct from an
-  // empty notebook). Callers must not treat a failed refresh as "the notebook is
-  // now empty" — that would, e.g., clear the open note on a transient WS hiccup.
-  const refreshList = useCallback(async (): Promise<NotebookEntry[] | null> => {
-    setListLoading(true);
-    try {
-      const next = await listNotebook();
-      setEntries(next);
-      setListError(null);
-      return next;
-    } catch (err) {
-      setListError(err instanceof Error ? err.message : 'Could not load the notebook');
-      return null;
-    } finally {
-      setListLoading(false);
-    }
-  }, [listNotebook]);
-
   // Fetch the durable runner's task list. A transient WS failure surfaces an error
-  // rather than silently wiping the rows (mirrors refreshList). The stale-guard
-  // drops a response that resolved after a newer fetch (or a panel close).
+  // rather than silently wiping the rows. The stale-guard drops a response that
+  // resolved after a newer fetch (or a panel close).
   const refreshTasks = useCallback(async () => {
     const seq = ++tasksSeqRef.current;
     setTasksLoading(true);
@@ -179,10 +168,12 @@ export function NotebookBrowser({
     }
   }, [retryTask]);
 
-  const loadNote = useCallback(async (path: string) => {
-    // Persist any unsaved buffer on the note we're leaving before we replace it
+  // Load `path` into the document pane. `prefetched` lets a caller that already read
+  // the file (the on-open existence probe) seed the editor without a second read.
+  const loadFile = useCallback(async (path: string, prefetched?: FsReadResult) => {
+    // Persist any unsaved buffer on the file we're leaving before we replace it
     // (covers an edit made in the <debounce window of the autosave timer). If that
-    // write conflicts (the note changed on disk) we ABORT the navigation and stay
+    // write conflicts (the file changed on disk) we ABORT the navigation and stay
     // put so the conflict banner can be reconciled — navigating away would discard
     // the buffer and the user's edits would vanish silently.
     if (dirtyRef.current && selectedPathRef.current && selectedPathRef.current !== path) {
@@ -191,60 +182,79 @@ export function NotebookBrowser({
     }
     const seq = ++loadSeqRef.current;
     setSelectedPath(path);
-    setNoteLoading(true);
-    setNoteError(null);
-    // Loading replaces the rendered content (navigation or a same-note live
-    // reload), so any floating "Send to chief" button is now mispositioned — drop
-    // it. (Navigation also clears it via the [selectedPath] effect, but a
-    // same-path reload does not change selectedPath, so clear here too.)
+    // Loading replaces the rendered content (navigation or a same-file live reload),
+    // so any floating "Send to chief" button is now mispositioned — drop it.
     setChiefSel(null);
-    // Drop the outgoing note's backlinks the moment a new load starts (not when the
+    // Drop the outgoing file's backlinks the moment a new load starts (not when the
     // new walk resolves), so the panel never shows the previous selection's "Linked
     // from" list — the same stale-context bug the content decouple fixed, one panel
-    // over. backlinksLoading keeps the empty state from reading as a definitive "no
-    // backlinks" while the walk is still running.
+    // over.
     setBacklinks([]);
-    setBacklinksLoading(true);
-    // Content and backlinks load INDEPENDENTLY — never gated together. The note
-    // content is a single fast file read; backlinks walks every note in the
-    // notebook (reading each body to find links) and is far slower. Awaiting both
-    // before rendering is what left a clicked file showing the *previous* file's
-    // content until the backlinks walk caught up — the selection updated instantly
-    // (above) but the editor lagged. Apply the content the moment its read resolves;
-    // let backlinks fill in whenever it lands. Each guards on the load token so a
-    // superseded navigation is dropped.
-    void readNotebook(path)
-      .then((value) => {
-        if (loadSeqRef.current !== seq) return;
-        setNote(value);
-        // Seed the live editor buffer from disk; a fresh load is never dirty.
-        setDraft(value.content);
-        setNoteLoading(false);
-      })
-      .catch((err) => {
-        if (loadSeqRef.current !== seq) return;
-        setNote(null);
-        setDraft('');
-        setNoteError(err instanceof Error ? err.message : 'Could not read this note');
-        setNoteLoading(false);
-      });
-    // A backlinks failure must not blank the note — it just yields no backlinks.
-    void backlinksNotebook(path)
-      .then((entries) => {
-        if (loadSeqRef.current !== seq) return;
-        setBacklinks(entries);
-        setBacklinksLoading(false);
-      })
-      .catch(() => {
-        if (loadSeqRef.current !== seq) return;
-        setBacklinks([]);
-        setBacklinksLoading(false);
-      });
-  }, [readNotebook, backlinksNotebook]);
+    setBacklinksLoading(false);
+
+    // Binary files have no text editor: don't even read them (fs_read returns a
+    // string, meaningless for binary bytes). Show the unsupported placeholder, which
+    // the render derives from the selected path's kind. Clear note/draft so a prior
+    // file's content doesn't linger behind the placeholder.
+    if (isBinaryPath(path)) {
+      setNote(null);
+      setDraft('');
+      setNoteError(null);
+      setNoteLoading(false);
+      return;
+    }
+
+    setNoteError(null);
+    if (prefetched) {
+      // Already read by the caller; seed the buffer directly. A fresh load is never
+      // dirty.
+      setNote(prefetched);
+      setDraft(prefetched.content);
+      setNoteLoading(false);
+    } else {
+      setNoteLoading(true);
+      // Content and backlinks load INDEPENDENTLY — never gated together. The file
+      // content is a single fast read; backlinks walks every note in the notebook
+      // (reading each body to find links) and is far slower. Apply the content the
+      // moment its read resolves; let backlinks fill in whenever it lands. Each guards
+      // on the load token so a superseded navigation is dropped.
+      void readFile(path)
+        .then((value) => {
+          if (loadSeqRef.current !== seq) return;
+          setNote(value);
+          // Seed the live editor buffer from disk; a fresh load is never dirty.
+          setDraft(value.content);
+          setNoteLoading(false);
+        })
+        .catch((err) => {
+          if (loadSeqRef.current !== seq) return;
+          setNote(null);
+          setDraft('');
+          setNoteError(err instanceof Error ? err.message : 'Could not read this file');
+          setNoteLoading(false);
+        });
+    }
+    // Backlinks are a markdown-note concept; only walk the link graph for .md files.
+    // A backlinks failure must not blank the file — it just yields no backlinks.
+    if (isMarkdownPath(path)) {
+      setBacklinksLoading(true);
+      void backlinksNotebook(path)
+        .then((entries) => {
+          if (loadSeqRef.current !== seq) return;
+          setBacklinks(entries);
+          setBacklinksLoading(false);
+        })
+        .catch(() => {
+          if (loadSeqRef.current !== seq) return;
+          setBacklinks([]);
+          setBacklinksLoading(false);
+        });
+    }
+  }, [readFile, backlinksNotebook]);
 
   // Drop the current selection and return the document pane to its empty state.
-  // Bumping loadSeqRef invalidates any in-flight loadNote so a response that
-  // resolves after this clear cannot resurrect the just-cleared note's content.
+  // Bumping loadSeqRef invalidates any in-flight loadFile so a response that
+  // resolves after this clear cannot resurrect the just-cleared file's content.
   const clearSelection = useCallback(() => {
     loadSeqRef.current += 1;
     setSelectedPath(null);
@@ -258,12 +268,12 @@ export function NotebookBrowser({
 
   // --- Editing (single live surface; no view/edit toggle) ---
   // `draft` is the live editor buffer; `note` holds the value last synced from disk
-  // (its content + hash). The note is "dirty" when draft diverges from note.content;
+  // (its content + hash). The file is "dirty" when draft diverges from note.content;
   // dirty edits autosave (debounced) via hash-CAS against note.hash.
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  // Set when an autosave's hash-CAS rejected because the note changed on disk since
+  // Set when an autosave's hash-CAS rejected because the file changed on disk since
   // it was loaded; carries the current on-disk hash so the user can overwrite it.
   const [conflict, setConflict] = useState<{ currentHash?: string } | null>(null);
   const [justSaved, setJustSaved] = useState(false);
@@ -271,7 +281,7 @@ export function NotebookBrowser({
   // draft / synced note / dirty state without re-subscribing every effect to them.
   const draftRef = useRef('');
   draftRef.current = draft;
-  const noteRef = useRef<NotebookReadResult | null>(null);
+  const noteRef = useRef<FsReadResult | null>(null);
   noteRef.current = note;
   // Dirty = the buffer diverges from the last synced content. Gates autosave and the
   // live-refresh reload (an unsaved buffer must not be clobbered by a disk reload).
@@ -290,24 +300,24 @@ export function NotebookBrowser({
   // Core write: persist `content` against `baseHash` (hash-CAS) and reconcile the
   // result. Returns the outcome so on-demand callers (navigate/close) can react —
   // a 'conflict'/'error' must NOT be silently dropped. An empty baseHash is a
-  // create-only write, used to recreate a note deleted on disk while it was edited.
+  // create-only write, used to recreate a file deleted on disk while it was edited.
   const writeBuffer = useCallback(async (baseHash: string, content: string): Promise<PersistOutcome> => {
     const path = selectedPathRef.current;
     if (!path) return 'noop';
     // Freeze the load token so a navigation that lands while this write is in flight
-    // is detected on resolve (mirrors loadNote's staleness guard; loadNote/
+    // is detected on resolve (mirrors loadFile's staleness guard; loadFile/
     // clearSelection bump loadSeqRef, writeBuffer does not). The bytes still reach
-    // disk either way — we just don't stamp this note's result onto whatever note is
+    // disk either way — we just don't stamp this file's result onto whatever file is
     // now shown. The OUTCOME still returns so the caller can react.
     const seq = loadSeqRef.current;
     setSaving(true);
     setSaveError(null);
     try {
-      const res = await writeNotebook(path, content, baseHash || undefined);
+      const res = await writeFile(path, content, baseHash || undefined);
       const superseded = loadSeqRef.current !== seq || selectedPathRef.current !== path;
       if (res.conflict) {
-        // The note diverged on disk; let the user reconcile rather than clobber.
-        // (Only surface it if this note is still shown — see `superseded`.)
+        // The file diverged on disk; let the user reconcile rather than clobber.
+        // (Only surface it if this file is still shown — see `superseded`.)
         if (!superseded) setConflict({ currentHash: res.currentHash });
         return 'conflict';
       }
@@ -322,13 +332,13 @@ export function NotebookBrowser({
       return 'saved';
     } catch (err) {
       if (loadSeqRef.current === seq && selectedPathRef.current === path) {
-        setSaveError(err instanceof Error ? err.message : 'Could not save this note');
+        setSaveError(err instanceof Error ? err.message : 'Could not save this file');
       }
       return 'error';
     } finally {
       setSaving(false);
     }
-  }, [writeNotebook]);
+  }, [writeFile]);
 
   // Persist the current dirty buffer against its synced base. Drives the debounced
   // autosave and — crucially — the navigate/close flush, so an outgoing edit that
@@ -341,7 +351,7 @@ export function NotebookBrowser({
     if (content === current.content) return 'noop'; // in sync — nothing to persist
     return writeBuffer(current.hash, content);
   }, [writeBuffer]);
-  // Indirection so loadNote/requestClose (declared above the editing block) can invoke
+  // Indirection so loadFile/requestClose (declared above the editing block) can invoke
   // the latest persist without a forward declaration.
   persistRef.current = persist;
 
@@ -351,21 +361,21 @@ export function NotebookBrowser({
     const path = selectedPathRef.current;
     if (!path) return;
     // Freeze the load token so a navigation that lands while this read is in flight
-    // is detected on resolve (mirrors loadNote/writeBuffer). Without it, a slow reload
-    // of note A could stamp A's content/hash onto note B after the user moved on.
+    // is detected on resolve (mirrors loadFile/writeBuffer). Without it, a slow reload
+    // of file A could stamp A's content/hash onto file B after the user moved on.
     const seq = loadSeqRef.current;
     setConflict(null);
     setSaveError(null);
     try {
-      const fresh = await readNotebook(path);
+      const fresh = await readFile(path);
       if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
       setNote(fresh);
       setDraft(fresh.content);
     } catch (err) {
       if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
-      setSaveError(err instanceof Error ? err.message : 'Could not reload this note');
+      setSaveError(err instanceof Error ? err.message : 'Could not reload this file');
     }
-  }, [readNotebook]);
+  }, [readFile]);
 
   // Hand the captured selection to the daemon for the chief of staff. The daemon
   // appends it to the chief inbox note and best-effort nudges a live chief; the
@@ -374,7 +384,7 @@ export function NotebookBrowser({
     if (!chiefSel) return;
     const path = selectedPathRef.current ?? undefined;
     // Freeze the load token (as writeBuffer does) so an outcome that resolves after
-    // the user navigated away doesn't flash on the now-selected note.
+    // the user navigated away doesn't flash on the now-selected file.
     const seq = loadSeqRef.current;
     setSendingToChief(true);
     try {
@@ -390,62 +400,76 @@ export function NotebookBrowser({
     }
   }, [chiefSel, sendToChief]);
 
-  // On open, load the tree and select a sensible first note.
+  // On open, select a sensible first file: keep the prior selection if it still
+  // reads, else probe the preferred entry points, else fall back to the first file
+  // at the root. The lazy sidebar lists itself; this only chooses what to show.
   useEffect(() => {
     if (!isOpen) return;
     // Start clean: a transient outcome/selection from a prior session must not
     // reappear on reopen. The [selectedPath] reset can't cover a reopen on the
-    // same note (selectedPath doesn't change), so clear it here.
+    // same file (selectedPath doesn't change), so clear it here.
     setChiefStatus(null);
     setChiefSel(null);
     setJustSaved(false);
     let cancelled = false;
     void (async () => {
-      const next = await refreshList();
-      if (cancelled || next === null) return;
+      // Keep the current selection if it still exists (a reopen on the same file).
+      // The probe read is reused to seed the editor (no second read).
       const current = selectedPathRef.current;
-      if (current && next.some((e) => e.path === current)) {
-        void loadNote(current);
-        return;
+      if (current) {
+        try {
+          const res = await readFile(current);
+          if (!cancelled) void loadFile(current, res);
+          return;
+        } catch {
+          // Fell away while closed; fall through to pick a fresh entry point.
+        }
       }
-      const preferred = PREFERRED_FIRST.find((p) => next.some((e) => e.path === p));
-      const first = preferred ?? next[0]?.path ?? null;
-      if (first) {
-        void loadNote(first);
-      } else {
-        clearSelection();
+      // Probe the preferred entry points in order; the first that reads wins, and its
+      // read seeds the editor. (A cheap 1–2 reads, vs. walking the whole tree the lazy
+      // sidebar never materializes.)
+      for (const candidate of PREFERRED_FIRST) {
+        if (cancelled) return;
+        try {
+          const res = await readFile(candidate);
+          if (!cancelled) void loadFile(candidate, res);
+          return;
+        } catch {
+          // Not present; try the next candidate.
+        }
+      }
+      // Last resort: the first file directly under the root.
+      try {
+        const root = await listDir('');
+        if (cancelled) return;
+        const firstFile = root.find((e) => !e.isDir);
+        if (firstFile) void loadFile(firstFile.path);
+        else clearSelection();
+      } catch {
+        if (!cancelled) clearSelection();
       }
     })();
     return () => { cancelled = true; };
-    // Only re-run when opening; navigation is driven by loadNote directly.
+    // Only re-run when opening; navigation is driven by loadFile directly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
-  // Live refresh: a notebook_changed event re-fetches the tree and the open note
-  // so agent/external writes show up without reopening.
+  // Live refresh: an fs_changed event reloads the open file so agent/external writes
+  // show up without reopening. The sidebar tree re-lists itself via its own
+  // changeSignal prop; here we only refresh the open document.
   useEffect(() => {
     if (!isOpen || changeSignal === 0) return;
-    let cancelled = false;
-    void (async () => {
-      const next = await refreshList();
-      // A failed refresh (null) is NOT an empty notebook: leave the open note
-      // alone rather than mistaking a transient WS hiccup for a deletion.
-      if (cancelled || next === null) return;
-      // With unsaved edits, refresh the tree but never reload or clear the open
-      // note — that would clobber the buffer. On-disk divergence surfaces as a
-      // save-time conflict instead. (A clean buffer reloads to pick up the change.)
-      if (dirtyRef.current) return;
-      const current = selectedPathRef.current;
-      if (current && next.some((e) => e.path === current)) {
-        void loadNote(current);
-      } else if (current) {
-        // The open note vanished from the tree — an external delete (the watcher
-        // surfaces those). Don't keep rendering its now-stale content; clear the
-        // selection so the document pane returns to the empty state.
-        clearSelection();
-      }
-    })();
-    return () => { cancelled = true; };
+    // With unsaved edits, never reload — that would clobber the buffer. On-disk
+    // divergence surfaces as a save-time conflict instead.
+    if (dirtyRef.current) return;
+    const current = selectedPathRef.current;
+    if (!current) return;
+    // A binary selection shows a placeholder we never read; nothing to reload.
+    if (isBinaryPath(current)) return;
+    // Re-read content (and, for .md, backlinks). If the file was deleted on disk the
+    // read fails and the document pane shows "unavailable" — honest, and the tree
+    // drops the node on its own re-list.
+    void loadFile(current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [changeSignal]);
 
@@ -465,8 +489,8 @@ export function NotebookBrowser({
     setTasksLoading(false);
   }, [isOpen]);
 
-  // Navigating to another note clears the previous note's edit status. Keyed on
-  // selectedPath, so it fires on navigation but not on a same-note live reload
+  // Navigating to another file clears the previous file's edit status. Keyed on
+  // selectedPath, so it fires on navigation but not on a same-file live reload
   // (which keeps selectedPath unchanged).
   useEffect(() => {
     setConflict(null);
@@ -476,8 +500,8 @@ export function NotebookBrowser({
     setChiefStatus(null);
   }, [selectedPath]);
 
-  // Debounced autosave: once the buffer diverges from the synced note, persist it
-  // via hash-CAS against note.hash after a short idle. Gated off while a note is
+  // Debounced autosave: once the buffer diverges from the synced file, persist it
+  // via hash-CAS against note.hash after a short idle. Gated off while a file is
   // loading (the buffer is being re-seeded), while a save is already in flight, and
   // while a conflict is unresolved (the user must reconcile first). Every dep change
   // clears the pending timer, so navigation can't leave a stale write scheduled.
@@ -515,27 +539,25 @@ export function NotebookBrowser({
   }, [chiefSel]);
 
   // The "Saved" badge is a transient confirmation, not a persistent status. Clear
-  // it on a timer so it doesn't linger while the user keeps reading the same note
+  // it on a timer so it doesn't linger while the user keeps reading the same file
   // (the navigation-reset effect above only fires on a path change, not on a
-  // same-note live reload, so without this the badge would stick indefinitely).
+  // same-file live reload, so without this the badge would stick indefinitely).
   useEffect(() => {
     if (!justSaved) return;
     const timer = window.setTimeout(() => setJustSaved(false), 2500);
     return () => window.clearTimeout(timer);
   }, [justSaved]);
 
-  const grouped = useMemo(() => groupEntries(entries), [entries]);
-
   // Mod-click on a rendered link: in-notebook .md targets navigate; external
   // targets open in the browser; fragments are ignored (no in-editor anchor jump).
   const handleFollowLink = useCallback((href: string) => {
     const target = parseNotebookHref(href);
     if (target.kind === 'note' && target.path) {
-      void loadNote(target.path);
+      void loadFile(target.path);
     } else if (target.kind === 'external' && target.href) {
       window.open(target.href, '_blank', 'noreferrer');
     }
-  }, [loadNote]);
+  }, [loadFile]);
 
   // The editor reports its current selection (or null when collapsed); float the
   // "Send to chief" action over it.
@@ -545,7 +567,8 @@ export function NotebookBrowser({
 
   if (!isOpen) return null;
 
-  const selectedEntry = entries.find((e) => e.path === selectedPath) || null;
+  const selectedKind = selectedPath ? fileKind(selectedPath) : null;
+  const showBinaryPlaceholder = selectedPath !== null && selectedKind === 'binary';
   // A single live save indicator (the error itself is surfaced by its own banner).
   const saveStatus = saveError
     ? null
@@ -575,42 +598,13 @@ export function NotebookBrowser({
           </header>
 
           <div className="notebook-browser-body">
-            <aside className="notebook-browser-list" aria-label="Notebook notes">
-              {listLoading && entries.length === 0 && (
-                <div className="notebook-browser-list-state">Loading notes…</div>
-              )}
-              {listError && (
-                <div className="notebook-browser-list-state">
-                  <span>{listError}</span>
-                  <button type="button" onClick={() => void refreshList()}>Try again</button>
-                </div>
-              )}
-              {!listError && entries.length === 0 && !listLoading && (
-                <div className="notebook-browser-list-state">
-                  <span>No notes yet.</span>
-                  <span className="notebook-browser-list-hint">The chief of staff and agents write here.</span>
-                </div>
-              )}
-              {grouped.map((group) => (
-                <div className="notebook-browser-group" key={group.label}>
-                  <div className="notebook-browser-group-label">{group.label}</div>
-                  {group.entries.map((entry) => (
-                    <button
-                      type="button"
-                      key={entry.path}
-                      className={`notebook-browser-list-item${entry.path === selectedPath ? ' is-selected' : ''}`}
-                      onClick={() => void loadNote(entry.path)}
-                      title={entry.path}
-                    >
-                      <span className="notebook-browser-list-marker" data-type={entry.type || 'note'} />
-                      <span className="notebook-browser-list-copy">
-                        <strong>{entry.title || basename(entry.path)}</strong>
-                        <span>{entry.path}</span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ))}
+            <aside className="notebook-browser-list" aria-label="Notebook files">
+              <FileTree
+                listDir={listDir}
+                selectedPath={selectedPath}
+                onSelectFile={(path) => void loadFile(path)}
+                changeSignal={changeSignal}
+              />
 
               <section className="notebook-browser-tasks" aria-label="Tasks">
                 <button
@@ -690,20 +684,28 @@ export function NotebookBrowser({
 
             <main className="notebook-browser-document">
               {noteLoading && !note && (
-                <div className="notebook-browser-document-state">Loading note…</div>
+                <div className="notebook-browser-document-state">Loading…</div>
               )}
               {!noteLoading && noteError && (
                 <div className="notebook-browser-document-state">
                   <NotebookIcon />
-                  <h2>Note unavailable</h2>
+                  <h2>File unavailable</h2>
                   <p>{noteError}</p>
                 </div>
               )}
-              {!noteError && note && (
+              {!noteLoading && !noteError && showBinaryPlaceholder && (
+                <div className="notebook-browser-document-state">
+                  <NotebookIcon />
+                  <h2>Preview not available</h2>
+                  <p>{basename(selectedPath)} can't be opened here yet.</p>
+                  <p className="notebook-browser-document-subtle">{selectedPath}</p>
+                </div>
+              )}
+              {!noteError && !showBinaryPlaceholder && note && (
                 <>
                   <div className="notebook-browser-document-meta">
                     <div className="notebook-browser-document-titles">
-                      <h2>{selectedEntry?.title || basename(note.path)}</h2>
+                      <h2>{basename(note.path)}</h2>
                       <p>{note.path}</p>
                     </div>
                     <div className="notebook-browser-document-actions">
@@ -725,8 +727,8 @@ export function NotebookBrowser({
                       <div className="notebook-browser-editor-conflict" role="alert">
                         <span>
                           {conflict.currentHash
-                            ? 'This note changed on disk since you opened it.'
-                            : 'This note was deleted on disk since you opened it.'}
+                            ? 'This file changed on disk since you opened it.'
+                            : 'This file was deleted on disk since you opened it.'}
                         </span>
                         <div className="notebook-browser-editor-conflict-actions">
                           <button type="button" onClick={() => void reloadFromDisk()} disabled={saving}>
@@ -742,40 +744,52 @@ export function NotebookBrowser({
                       <p className="notebook-browser-editor-error" role="alert">{saveError}</p>
                     )}
                     <div className="notebook-browser-live-editor">
-                      <LiveMarkdownEditor
-                        value={draft}
-                        onChange={setDraft}
-                        onFollowLink={handleFollowLink}
-                        onSelectionChange={handleSelectionChange}
-                        ariaLabel="Note"
-                      />
+                      {selectedKind === 'markdown' ? (
+                        <LiveMarkdownEditor
+                          value={draft}
+                          onChange={setDraft}
+                          onFollowLink={handleFollowLink}
+                          onSelectionChange={handleSelectionChange}
+                          ariaLabel="Note"
+                        />
+                      ) : (
+                        <textarea
+                          className="notebook-browser-plain-editor"
+                          value={draft}
+                          onChange={(event) => setDraft(event.target.value)}
+                          spellCheck={false}
+                          aria-label="File contents"
+                        />
+                      )}
                     </div>
                   </div>
-                  <section className="notebook-browser-backlinks" aria-label="Backlinks">
-                    <h3>Linked from {!backlinksLoading && backlinks.length > 0 ? `(${backlinks.length})` : ''}</h3>
-                    {backlinksLoading ? (
-                      <p className="notebook-browser-backlinks-empty">Finding backlinks…</p>
-                    ) : backlinks.length === 0 ? (
-                      <p className="notebook-browser-backlinks-empty">No other note links here.</p>
-                    ) : (
-                      <ul>
-                        {backlinks.map((entry) => (
-                          <li key={entry.path}>
-                            <button type="button" onClick={() => void loadNote(entry.path)} title={entry.path}>
-                              {entry.title || basename(entry.path)}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </section>
+                  {selectedKind === 'markdown' && (
+                    <section className="notebook-browser-backlinks" aria-label="Backlinks">
+                      <h3>Linked from {!backlinksLoading && backlinks.length > 0 ? `(${backlinks.length})` : ''}</h3>
+                      {backlinksLoading ? (
+                        <p className="notebook-browser-backlinks-empty">Finding backlinks…</p>
+                      ) : backlinks.length === 0 ? (
+                        <p className="notebook-browser-backlinks-empty">No other note links here.</p>
+                      ) : (
+                        <ul>
+                          {backlinks.map((entry) => (
+                            <li key={entry.path}>
+                              <button type="button" onClick={() => void loadFile(entry.path)} title={entry.path}>
+                                {entry.title || basename(entry.path)}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </section>
+                  )}
                 </>
               )}
-              {!noteLoading && !noteError && !note && (
+              {!noteLoading && !noteError && !showBinaryPlaceholder && !note && (
                 <div className="notebook-browser-document-state">
                   <NotebookIcon />
                   <h2>Nothing selected</h2>
-                  <p>Choose a note from the list to read it.</p>
+                  <p>Choose a file from the tree to read it.</p>
                 </div>
               )}
             </main>
@@ -798,50 +812,6 @@ export function NotebookBrowser({
       </FocusTrap>
     </div>
   );
-}
-
-interface NoteGroup {
-  label: string;
-  entries: NotebookEntry[];
-}
-
-const GROUP_ORDER = ['Journal', 'Projects', 'Areas', 'Resources', 'Archive', 'Knowledge', 'Notebook'];
-
-// groupEntries buckets notes for the sidebar by their top-level path, mapping the
-// PARA knowledge layout to section labels:
-//   journal/*             -> Journal
-//   knowledge/projects/*  -> Projects
-//   knowledge/areas/*     -> Areas
-//   knowledge/resources/* -> Resources
-//   knowledge/archive/*   -> Archive
-//   knowledge/*           -> Knowledge (e.g. knowledge/index.md, no PARA subdir)
-//   root files            -> Notebook
-function groupEntries(entries: NotebookEntry[]): NoteGroup[] {
-  const buckets = new Map<string, NotebookEntry[]>();
-  for (const entry of entries) {
-    const label = groupLabel(entry.path);
-    const list = buckets.get(label) || [];
-    list.push(entry);
-    buckets.set(label, list);
-  }
-  return [...buckets.entries()]
-    .map(([label, list]) => ({ label, entries: list }))
-    .sort((a, b) => groupRank(a.label) - groupRank(b.label) || a.label.localeCompare(b.label));
-}
-
-function groupLabel(path: string): string {
-  if (path.startsWith('journal/')) return 'Journal';
-  if (path.startsWith('knowledge/projects/')) return 'Projects';
-  if (path.startsWith('knowledge/areas/')) return 'Areas';
-  if (path.startsWith('knowledge/resources/')) return 'Resources';
-  if (path.startsWith('knowledge/archive/')) return 'Archive';
-  if (path.startsWith('knowledge/')) return 'Knowledge';
-  return 'Notebook';
-}
-
-function groupRank(label: string): number {
-  const idx = GROUP_ORDER.indexOf(label);
-  return idx === -1 ? GROUP_ORDER.length : idx;
 }
 
 export interface NotebookHref {
