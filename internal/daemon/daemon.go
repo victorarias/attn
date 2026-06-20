@@ -24,6 +24,7 @@ import (
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/diag"
+	"github.com/victorarias/attn/internal/fsdoc"
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/hub"
@@ -141,17 +142,22 @@ type Daemon struct {
 	notebookWatcherMu   sync.Mutex
 	notebookWatcher     *notebook.Watcher
 	notebookWatchedRoot string
-	pendingInitialWS    map[*wsClient]struct{}
-	startedOnce         sync.Once
-	startedCh           chan struct{}
-	tailscale           *tailscaleRuntime
-	plugins             *pluginRegistry
-	pluginProcesses     *pluginProcessRegistry
-	pluginDriverMu      sync.Mutex
-	pluginLaunching     map[string]pluginSessionLaunch
-	pluginReports       map[string][]pendingPluginReport
-	pluginExits         map[string]ptybackend.ExitInfo
-	pluginDir           string
+	// fsStore is the generic filesystem view over the SAME root as the notebook
+	// (notebook.root). It is the raw layer beneath the curated notebook surface;
+	// both share the one root watcher started by ensureNotebookWatcher.
+	fsMu             sync.Mutex
+	fsStore          *fsdoc.Store
+	pendingInitialWS map[*wsClient]struct{}
+	startedOnce      sync.Once
+	startedCh        chan struct{}
+	tailscale        *tailscaleRuntime
+	plugins          *pluginRegistry
+	pluginProcesses  *pluginProcessRegistry
+	pluginDriverMu   sync.Mutex
+	pluginLaunching  map[string]pluginSessionLaunch
+	pluginReports    map[string][]pendingPluginReport
+	pluginExits      map[string]ptybackend.ExitInfo
+	pluginDir        string
 
 	worktreePluginCallTimeout         time.Duration
 	worktreeCreateProviderCallTimeout time.Duration

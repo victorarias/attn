@@ -899,6 +899,15 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdNotebookTaskRetry:
 		nbTaskRetry := msg.(*protocol.NotebookTaskRetryMessage)
 		go d.sendNotebookTaskRetryWSResult(client, protocol.Deref(nbTaskRetry.RequestID), nbTaskRetry.TaskID)
+	case protocol.CmdFsList:
+		fsList := msg.(*protocol.FsListMessage)
+		go d.sendFsListWSResult(client, protocol.Deref(fsList.RequestID), protocol.Deref(fsList.Path))
+	case protocol.CmdFsRead:
+		fsRead := msg.(*protocol.FsReadMessage)
+		go d.sendFsReadWSResult(client, protocol.Deref(fsRead.RequestID), fsRead.Path)
+	case protocol.CmdFsWrite:
+		fsWrite := msg.(*protocol.FsWriteMessage)
+		go d.sendFsWriteWSResult(client, protocol.Deref(fsWrite.RequestID), fsWrite.Path, fsWrite.Content, protocol.Deref(fsWrite.BaseHash))
 	case protocol.CmdApprovePR:
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
 	case protocol.CmdMergePR:
