@@ -329,6 +329,29 @@
   overflow: auto;
 }
 
+/* Plain text editor for non-markdown text files: a bare monospace textarea that
+   fills the same editor cell as the markdown editor. No preview, no decorations —
+   just edit + autosave, sharing the document pane's chrome. */
+.notebook-browser-plain-editor {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
+  line-height: 1.55;
+  overflow: auto;
+}
+
+.notebook-browser-plain-editor:focus {
+  outline: none;
+}
+
 .notebook-browser-editor-conflict {
   display: flex;
   align-items: center;
@@ -633,6 +656,13 @@
 .notebook-browser-document-state p {
   max-width: 360px;
   font-size: 12px;
+}
+
+.notebook-browser-document-state .notebook-browser-document-subtle {
+  margin-top: 4px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--color-text-dimmed);
+  opacity: 0.8;
 }
 
 @keyframes notebook-browser-reveal {

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NotebookBrowser, parseNotebookHref } from './NotebookBrowser';
-import type { NotebookEntry, NotebookReadResult, NotebookSendToChiefResult, NotebookTask, NotebookWriteResult } from '../hooks/useDaemonSocket';
+import type { FsEntry, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult, NotebookTask } from '../hooks/useDaemonSocket';
 
 // The live editor is CodeMirror-backed, which cannot mount under happy-dom (its
 // async measure pass throws). The real editing experience (live preview, typing,
@@ -40,11 +40,23 @@ vi.mock('./notebook/LiveMarkdownEditor', () => ({
   },
 }));
 
-const ENTRIES: NotebookEntry[] = [
-  { path: 'knowledge/index.md', type: 'note', title: 'Knowledge index', size: 10 },
-  { path: 'journal/2026-06-13.md', type: 'journal', title: '2026-06-13', size: 20 },
-  { path: 'knowledge/areas/foo.md', type: 'note', title: 'Foo decision', size: 30 },
-];
+// A fixture filesystem the lazy sidebar tree lists per-directory ('' = root). The root
+// holds two folders plus a plain-text file and a binary file directly (so a single
+// click selects them without expanding); knowledge/ holds the preferred index.
+const TREE: Record<string, FsEntry[]> = {
+  '': [
+    { path: 'knowledge', name: 'knowledge', isDir: true, size: 0 },
+    { path: 'journal', name: 'journal', isDir: true, size: 0 },
+    { path: 'notes.txt', name: 'notes.txt', isDir: false, size: 64 },
+    { path: 'cover.png', name: 'cover.png', isDir: false, size: 4096 },
+  ],
+  knowledge: [
+    { path: 'knowledge/index.md', name: 'index.md', isDir: false, size: 128 },
+    { path: 'knowledge/areas', name: 'areas', isDir: true, size: 0 },
+  ],
+  'knowledge/areas': [{ path: 'knowledge/areas/foo.md', name: 'foo.md', isDir: false, size: 30 }],
+  journal: [{ path: 'journal/2026-06-13.md', name: '2026-06-13.md', isDir: false, size: 20 }],
+};
 
 const TASKS: NotebookTask[] = [
   {
@@ -71,15 +83,17 @@ const TASKS: NotebookTask[] = [
 ];
 
 function makeProps(overrides: Partial<React.ComponentProps<typeof NotebookBrowser>> = {}) {
-  const listNotebook = vi.fn<() => Promise<NotebookEntry[]>>().mockResolvedValue(ENTRIES);
-  const readNotebook = vi.fn<(path: string) => Promise<NotebookReadResult>>().mockImplementation((path) =>
+  const listDir = vi
+    .fn<(path: string) => Promise<FsEntry[]>>()
+    .mockImplementation((path) => Promise.resolve(TREE[path] ?? []));
+  const readFile = vi.fn<(path: string) => Promise<FsReadResult>>().mockImplementation((path) =>
     Promise.resolve({ path, content: `# ${path}\n\nSee [the decision](/knowledge/areas/foo.md) for why.`, hash: 'h1' }),
   );
   const backlinksNotebook = vi.fn<(path: string) => Promise<NotebookEntry[]>>().mockResolvedValue([
     { path: 'journal/2026-06-13.md', type: 'journal', title: '2026-06-13', size: 20 },
   ]);
-  const writeNotebook = vi
-    .fn<(path: string, content: string, baseHash?: string) => Promise<NotebookWriteResult>>()
+  const writeFile = vi
+    .fn<(path: string, content: string, baseHash?: string) => Promise<FsWriteResult>>()
     .mockImplementation((path) => Promise.resolve({ path, hash: 'h2', conflict: false }));
   const sendToChief = vi
     .fn<(selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>>()
@@ -92,10 +106,10 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof NotebookBrowse
     props: {
       isOpen: true,
       onClose: vi.fn(),
-      listNotebook,
-      readNotebook,
+      listDir,
+      readFile,
       backlinksNotebook,
-      writeNotebook,
+      writeFile,
       sendToChief,
       changeSignal: 0,
       listTasks,
@@ -103,17 +117,17 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof NotebookBrowse
       taskChangeSignal: 0,
       ...overrides,
     },
-    listNotebook,
-    readNotebook,
+    listDir,
+    readFile,
     backlinksNotebook,
-    writeNotebook,
+    writeFile,
     sendToChief,
     listTasks,
     retryTask,
   };
 }
 
-// The single live editor surface (mocked to a textarea).
+// The single live markdown editor surface (mocked to a textarea, aria-label 'Note').
 function editor() {
   return screen.getByRole('textbox', { name: 'Note' }) as HTMLTextAreaElement;
 }
@@ -122,6 +136,15 @@ function editor() {
 async function waitForNoteLoaded() {
   await waitFor(() => expect(editor().value).toContain('# knowledge/index.md'));
 }
+
+// Follow an in-notebook link to navigate (the editor reports a mod-click via
+// onFollowLink). Used in place of a sidebar click, which would require expanding the
+// lazy tree to reach a nested note.
+function followLink(href: string) {
+  act(() => editorMock.current!.onFollowLink!(href));
+}
+
+const FOO = '/knowledge/areas/foo.md';
 
 describe('NotebookBrowser', () => {
   afterEach(() => {
@@ -135,65 +158,88 @@ describe('NotebookBrowser', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('lists notes, opens the preferred note, and shows backlinks', async () => {
-    const { props, listNotebook, readNotebook, backlinksNotebook } = makeProps();
+  it('opens the preferred note and shows its content + backlinks', async () => {
+    const { props, readFile, backlinksNotebook } = makeProps();
     render(<NotebookBrowser {...props} />);
 
-    // The sidebar lists every note, grouped. ('Foo decision' is unique to the
-    // sidebar; the open note's title shows in the document header instead.)
-    expect(await screen.findByText('Foo decision')).toBeInTheDocument();
-    expect(screen.getByText('knowledge/areas/foo.md')).toBeInTheDocument();
-    expect(listNotebook).toHaveBeenCalledTimes(1);
-
     // knowledge/index.md is the preferred first selection and is read + loaded.
-    await waitFor(() => expect(readNotebook).toHaveBeenCalledWith('knowledge/index.md'));
+    await waitFor(() => expect(readFile).toHaveBeenCalledWith('knowledge/index.md'));
     expect(backlinksNotebook).toHaveBeenCalledWith('knowledge/index.md');
-    // The document header shows the note's title, and its content loads into the editor.
-    expect(await screen.findByRole('heading', { level: 2, name: 'Knowledge index' })).toBeInTheDocument();
+    // The document header shows the file's basename, and its content loads into the editor.
+    expect(await screen.findByRole('heading', { level: 2, name: 'index' })).toBeInTheDocument();
     await waitForNoteLoaded();
     // The backlink entry is shown.
     expect(await screen.findByRole('button', { name: '2026-06-13' })).toBeInTheDocument();
   });
 
-  it('buckets notes into PARA sidebar groups by their top-level path', async () => {
-    const { props } = makeProps({
-      listNotebook: vi.fn<() => Promise<NotebookEntry[]>>().mockResolvedValue([
-        { path: 'journal/2026-06-13.md', type: 'journal', title: 'A journal day', size: 20 },
-        { path: 'knowledge/projects/launch/index.md', type: 'note', title: 'Launch project', size: 30 },
-        { path: 'knowledge/areas/infra.md', type: 'note', title: 'Infra area', size: 30 },
-        { path: 'knowledge/index.md', type: 'note', title: 'Knowledge root', size: 10 },
-      ]),
-    });
+  it('renders the filesystem tree in the sidebar and opens a clicked text file in a plain editor', async () => {
+    const { props, readFile } = makeProps();
     render(<NotebookBrowser {...props} />);
 
-    // Each note falls under its PARA group header (knowledge/projects -> Projects,
-    // knowledge/areas -> Areas, journal -> Journal, knowledge/index.md -> Knowledge).
-    expect(await screen.findByText('Launch project')).toBeInTheDocument();
-    for (const label of ['Journal', 'Projects', 'Areas', 'Knowledge']) {
-      expect(screen.getByText(label)).toBeInTheDocument();
-    }
+    // The sidebar lists the root's immediate children as a lazy tree.
+    expect(await screen.findByRole('treeitem', { name: 'knowledge' })).toBeInTheDocument();
+    expect(screen.getByRole('treeitem', { name: 'journal' })).toBeInTheDocument();
+    const notes = screen.getByRole('treeitem', { name: 'notes.txt' });
+
+    // Clicking a non-markdown text file opens it in the plain text editor (no markdown
+    // editor, no backlinks) — exercising the FileTree -> loadFile wiring.
+    fireEvent.click(notes);
+    await waitFor(() => expect(readFile).toHaveBeenCalledWith('notes.txt'));
+    const plain = (await screen.findByRole('textbox', { name: 'File contents' })) as HTMLTextAreaElement;
+    expect(plain.value).toContain('# notes.txt');
+    expect(screen.getByRole('heading', { level: 2, name: 'notes.txt' })).toBeInTheDocument();
+    expect(screen.queryByText('Linked from')).not.toBeInTheDocument();
+  });
+
+  it('opens a binary file as a read-only placeholder without reading it', async () => {
+    const { props, readFile } = makeProps();
+    render(<NotebookBrowser {...props} />);
+    await screen.findByRole('treeitem', { name: 'cover.png' });
+
+    fireEvent.click(screen.getByRole('treeitem', { name: 'cover.png' }));
+
+    expect(await screen.findByText('Preview not available')).toBeInTheDocument();
+    expect(screen.getByText("cover.png can't be opened here yet.")).toBeInTheDocument();
+    // A binary file is never read (fs_read returns a string, meaningless for bytes).
+    expect(readFile).not.toHaveBeenCalledWith('cover.png');
+  });
+
+  it('does not read a binary file when the Notebook is reopened with one selected', async () => {
+    const { props, readFile } = makeProps();
+    const { rerender } = render(<NotebookBrowser {...props} />);
+    await screen.findByRole('treeitem', { name: 'cover.png' });
+
+    // Select the binary file, then close and reopen the Notebook.
+    fireEvent.click(screen.getByRole('treeitem', { name: 'cover.png' }));
+    expect(await screen.findByText('Preview not available')).toBeInTheDocument();
+    rerender(<NotebookBrowser {...props} isOpen={false} />);
+    rerender(<NotebookBrowser {...props} isOpen />);
+
+    // The reopen "keep current selection" probe must preserve the placeholder WITHOUT
+    // reading the binary — fs_read is never called for binary bytes, on click or reopen.
+    expect(await screen.findByText('Preview not available')).toBeInTheDocument();
+    expect(readFile).not.toHaveBeenCalledWith('cover.png');
   });
 
   it('navigates when an in-notebook link is followed', async () => {
-    const { props, readNotebook } = makeProps();
+    const { props, readFile } = makeProps();
     render(<NotebookBrowser {...props} />);
-    await screen.findByRole('heading', { level: 2, name: 'Knowledge index' });
+    await screen.findByRole('heading', { level: 2, name: 'index' });
 
-    // The editor reports a mod-click on an in-notebook link via onFollowLink.
-    act(() => editorMock.current!.onFollowLink!('/knowledge/areas/foo.md'));
+    followLink(FOO);
 
-    await waitFor(() => expect(readNotebook).toHaveBeenCalledWith('knowledge/areas/foo.md'));
+    await waitFor(() => expect(readFile).toHaveBeenCalledWith('knowledge/areas/foo.md'));
+    expect(await screen.findByRole('heading', { level: 2, name: 'foo' })).toBeInTheDocument();
   });
 
   it('navigates when a backlink is clicked', async () => {
-    const { props, readNotebook } = makeProps();
+    const { props, readFile } = makeProps();
     render(<NotebookBrowser {...props} />);
-    await screen.findByRole('heading', { level: 2, name: 'Knowledge index' });
+    await screen.findByRole('heading', { level: 2, name: 'index' });
 
-    const backlink = await screen.findByRole('button', { name: '2026-06-13' });
-    fireEvent.click(backlink);
+    fireEvent.click(await screen.findByRole('button', { name: '2026-06-13' }));
 
-    await waitFor(() => expect(readNotebook).toHaveBeenCalledWith('journal/2026-06-13.md'));
+    await waitFor(() => expect(readFile).toHaveBeenCalledWith('journal/2026-06-13.md'));
   });
 
   it('renders the clicked note immediately without waiting on the slower backlinks fetch', async () => {
@@ -208,13 +254,13 @@ describe('NotebookBrowser', () => {
 
     // The preferred note's content renders even though its backlinks are still pending.
     await waitForNoteLoaded();
-    expect(await screen.findByRole('heading', { level: 2, name: 'Knowledge index' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name: 'index' })).toBeInTheDocument();
 
-    // Click another note: its content appears before its backlinks resolve — no stale
-    // previous-file content stranded under the new selection.
-    fireEvent.click(screen.getByRole('button', { name: /Foo decision/ }));
+    // Follow a link to another note: its content appears before its backlinks resolve —
+    // no stale previous-file content stranded under the new selection.
+    followLink(FOO);
     await waitFor(() => expect(editor().value).toContain('# knowledge/areas/foo.md'));
-    expect(screen.getByRole('heading', { level: 2, name: 'Foo decision' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'foo' })).toBeInTheDocument();
 
     // Backlinks fills in later, independently.
     await act(async () => {
@@ -223,11 +269,10 @@ describe('NotebookBrowser', () => {
     expect(await screen.findByRole('button', { name: '2026-06-13' })).toBeInTheDocument();
   });
 
-  it("clears the previous note's backlinks the moment a new note is clicked, not after the slow walk", async () => {
+  it("clears the previous note's backlinks the moment a new note is opened, not after the slow walk", async () => {
     const { props, backlinksNotebook } = makeProps();
     // Resolve note A's backlinks but DEFER note B's, so we can prove A's "Linked from"
     // list never lingers under B while B's (intentionally slow) backlink walk runs.
-    // Distinct titles avoid colliding with the sidebar's own labels for these paths.
     let resolveB: (e: NotebookEntry[]) => void = () => {};
     let calls = 0;
     backlinksNotebook.mockImplementation(() => {
@@ -243,12 +288,11 @@ describe('NotebookBrowser', () => {
     });
     render(<NotebookBrowser {...props} />);
 
-    // Note A's backlink renders. Its title is unique to the panel — the sidebar lists
-    // this path under its own label ('2026-06-13') — so an unscoped query is precise.
+    // Note A's backlink renders.
     expect(await screen.findByRole('button', { name: 'Backlink to A' })).toBeInTheDocument();
 
     // Navigate to note B; its backlinks are still pending.
-    fireEvent.click(screen.getByRole('button', { name: /Foo decision/ }));
+    followLink(FOO);
     await waitFor(() => expect(editor().value).toContain('# knowledge/areas/foo.md'));
 
     // A's backlink is gone immediately — replaced by a loading line, NOT the misleading
@@ -265,69 +309,87 @@ describe('NotebookBrowser', () => {
     expect(screen.queryByText('Finding backlinks…')).not.toBeInTheDocument();
   });
 
-  it('re-fetches the tree and open note when the change signal bumps', async () => {
-    const { props, listNotebook, readNotebook } = makeProps();
+  it('re-lists the tree and reloads the open note when the change signal bumps', async () => {
+    const { props, listDir, readFile } = makeProps();
     const { rerender } = render(<NotebookBrowser {...props} />);
-    await waitFor(() => expect(readNotebook).toHaveBeenCalledWith('knowledge/index.md'));
-    const listCallsBefore = listNotebook.mock.calls.length;
-    const openNoteReadsBefore = readNotebook.mock.calls.filter((c) => c[0] === 'knowledge/index.md').length;
+    await waitFor(() => expect(readFile).toHaveBeenCalledWith('knowledge/index.md'));
+    // The sidebar tree lists the root on mount.
+    await waitFor(() => expect(listDir.mock.calls.some((c) => c[0] === '')).toBe(true));
+    const rootListsBefore = listDir.mock.calls.filter((c) => c[0] === '').length;
+    const openNoteReadsBefore = readFile.mock.calls.filter((c) => c[0] === 'knowledge/index.md').length;
 
     rerender(<NotebookBrowser {...props} changeSignal={1} />);
 
-    await waitFor(() => expect(listNotebook.mock.calls.length).toBeGreaterThan(listCallsBefore));
-    // The open note must be re-read, not just the tree — this is what makes the
-    // live view reflect edits to the note the user is currently viewing.
+    // The tree re-lists its root (FileTree's own changeSignal-driven refresh)...
     await waitFor(() =>
-      expect(readNotebook.mock.calls.filter((c) => c[0] === 'knowledge/index.md').length).toBeGreaterThan(
+      expect(listDir.mock.calls.filter((c) => c[0] === '').length).toBeGreaterThan(rootListsBefore),
+    );
+    // ...and the open note is re-read — this is what makes the live view reflect edits
+    // to the note the user is currently viewing.
+    await waitFor(() =>
+      expect(readFile.mock.calls.filter((c) => c[0] === 'knowledge/index.md').length).toBeGreaterThan(
         openNoteReadsBefore,
       ),
     );
   });
 
-  it('clears the open note when a change signal shows it was deleted on disk', async () => {
-    const { props, listNotebook } = makeProps();
-    // First list (initial open) has the note; after the change signal it is gone
-    // (an external delete the watcher surfaced).
-    listNotebook.mockResolvedValue(ENTRIES.filter((e) => e.path !== 'knowledge/index.md'));
-    listNotebook.mockResolvedValueOnce(ENTRIES);
+  it('shows the file as unavailable when a change-signal reload finds it deleted', async () => {
+    const { props, readFile } = makeProps();
+    // The open note reads fine initially (the probe), then its reload (triggered by the
+    // change signal) rejects — an external delete the watcher surfaced.
+    let indexReads = 0;
+    readFile.mockImplementation((path) => {
+      if (path === 'knowledge/index.md') {
+        indexReads += 1;
+        if (indexReads >= 2) return Promise.reject(new Error('fs: knowledge/index.md not found'));
+      }
+      return Promise.resolve({ path, content: `# ${path}\n\nbody`, hash: 'h1' });
+    });
     const { rerender } = render(<NotebookBrowser {...props} />);
-
-    // The preferred note opens and shows its title.
-    expect(await screen.findByRole('heading', { level: 2, name: 'Knowledge index' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name: 'index' })).toBeInTheDocument();
 
     rerender(<NotebookBrowser {...props} changeSignal={1} />);
 
-    // The deleted note is gone; the document returns to the empty state.
-    expect(await screen.findByText('Nothing selected')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { level: 2, name: 'Knowledge index' })).not.toBeInTheDocument();
+    // The reload failed: the document pane honestly reports the file is gone.
+    expect(await screen.findByText('File unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 2, name: 'index' })).not.toBeInTheDocument();
   });
 
-  it('keeps the open note when a change-signal refresh fails transiently', async () => {
-    const { props, listNotebook } = makeProps();
+  it('keeps the open note when the tree refresh fails transiently', async () => {
+    const { props, listDir } = makeProps();
+    // The tree lists fine on mount; its change-signal refresh then rejects (a transient
+    // WS hiccup). The open note still reloads independently via readFile.
+    let rootLists = 0;
+    listDir.mockImplementation((path) => {
+      if (path === '') {
+        rootLists += 1;
+        if (rootLists >= 2) return Promise.reject(new Error('socket closed'));
+      }
+      return Promise.resolve(TREE[path] ?? []);
+    });
     const { rerender } = render(<NotebookBrowser {...props} />);
+    expect(await screen.findByRole('heading', { level: 2, name: 'index' })).toBeInTheDocument();
 
-    expect(await screen.findByRole('heading', { level: 2, name: 'Knowledge index' })).toBeInTheDocument();
-
-    // The initial open succeeded; the refresh triggered by the change signal now
-    // rejects (a transient WS hiccup, not a deletion).
-    listNotebook.mockRejectedValueOnce(new Error('socket closed'));
     rerender(<NotebookBrowser {...props} changeSignal={1} />);
 
-    // A failed refresh must NOT be mistaken for an empty/deleted tree: the open
-    // note stays put and the document does not fall back to the empty state.
-    await waitFor(() => expect(listNotebook.mock.calls.length).toBeGreaterThan(1));
-    expect(screen.getByRole('heading', { level: 2, name: 'Knowledge index' })).toBeInTheDocument();
-    expect(screen.queryByText('Nothing selected')).not.toBeInTheDocument();
+    // A failed tree refresh is isolated to the sidebar: the open document stays put and
+    // does not fall back to an error/empty state.
+    await waitFor(() => expect(rootLists).toBeGreaterThan(1));
+    expect(screen.getByRole('heading', { level: 2, name: 'index' })).toBeInTheDocument();
+    expect(screen.queryByText('File unavailable')).not.toBeInTheDocument();
   });
 
-  it('shows the empty state and reads nothing when the notebook has no notes', async () => {
-    const emptyList = vi.fn<() => Promise<NotebookEntry[]>>().mockResolvedValue([]);
-    const { props, readNotebook } = makeProps({ listNotebook: emptyList });
+  it('shows the empty state and selects nothing when the root is empty', async () => {
+    const { props, readFile } = makeProps({
+      listDir: vi.fn<(path: string) => Promise<FsEntry[]>>().mockResolvedValue([]),
+    });
+    // No preferred entry point exists, so every probe read rejects.
+    readFile.mockRejectedValue(new Error('fs: not found'));
     render(<NotebookBrowser {...props} />);
 
-    expect(await screen.findByText('No notes yet.')).toBeInTheDocument();
-    // No phantom first-note read against a null/empty path.
-    expect(readNotebook).not.toHaveBeenCalled();
+    // The document pane falls back to the empty state; the tree shows its own empty line.
+    expect(await screen.findByText('Nothing selected')).toBeInTheDocument();
+    expect(await screen.findByText('This folder is empty.')).toBeInTheDocument();
   });
 
   it('moves focus into the dialog on open so the focus trap engages', async () => {
@@ -338,18 +400,26 @@ describe('NotebookBrowser', () => {
     await waitFor(() => expect(dialog).toHaveFocus());
   });
 
-  it('shows an error state when a note cannot be read but keeps the list', async () => {
-    const { props, readNotebook } = makeProps();
-    readNotebook.mockRejectedValueOnce(new Error('notebook: knowledge/index.md not found'));
+  it('shows an error state when a navigated-to file cannot be read but keeps the tree', async () => {
+    const { props, readFile } = makeProps();
+    // The preferred note opens fine, but foo.md fails to read when navigated to.
+    readFile.mockImplementation((path) =>
+      path === 'knowledge/areas/foo.md'
+        ? Promise.reject(new Error('fs: knowledge/areas/foo.md not found'))
+        : Promise.resolve({ path, content: `# ${path}\n\nbody`, hash: 'h1' }),
+    );
     render(<NotebookBrowser {...props} />);
+    await screen.findByRole('heading', { level: 2, name: 'index' });
 
-    expect(await screen.findByText('Note unavailable')).toBeInTheDocument();
-    // The sidebar still lists notes so the user can pick another.
-    expect(screen.getByText('Foo decision')).toBeInTheDocument();
+    followLink(FOO);
+
+    expect(await screen.findByText('File unavailable')).toBeInTheDocument();
+    // The sidebar tree still lists files so the user can pick another.
+    expect(screen.getByRole('treeitem', { name: 'knowledge' })).toBeInTheDocument();
   });
 
   it('autosaves an edited note via hash-CAS and shows a Saved indicator', async () => {
-    const { props, writeNotebook } = makeProps();
+    const { props, writeFile } = makeProps();
     render(<NotebookBrowser {...props} />);
     await waitForNoteLoaded();
 
@@ -358,7 +428,7 @@ describe('NotebookBrowser', () => {
 
     // The debounced autosave persists against the loaded hash (h1); no Save button.
     await waitFor(
-      () => expect(writeNotebook).toHaveBeenCalledWith('knowledge/index.md', '# edited\n', 'h1'),
+      () => expect(writeFile).toHaveBeenCalledWith('knowledge/index.md', '# edited\n', 'h1'),
       { timeout: 2000 },
     );
     expect(await screen.findByText('Saved')).toBeInTheDocument();
@@ -377,9 +447,9 @@ describe('NotebookBrowser', () => {
   });
 
   it('surfaces an autosave conflict and lets the user overwrite the on-disk version', async () => {
-    const { props, writeNotebook } = makeProps();
+    const { props, writeFile } = makeProps();
     // First autosave conflicts (note changed on disk); the overwrite then succeeds.
-    writeNotebook
+    writeFile
       .mockResolvedValueOnce({ path: 'knowledge/index.md', conflict: true, currentHash: 'hX' })
       .mockResolvedValueOnce({ path: 'knowledge/index.md', hash: 'h3', conflict: false });
     render(<NotebookBrowser {...props} />);
@@ -393,67 +463,68 @@ describe('NotebookBrowser', () => {
 
     // Overwrite saves the buffer against the current on-disk hash.
     fireEvent.click(screen.getByRole('button', { name: 'Overwrite anyway' }));
-    await waitFor(() => expect(writeNotebook).toHaveBeenLastCalledWith('knowledge/index.md', '# mine\n', 'hX'));
+    await waitFor(() => expect(writeFile).toHaveBeenLastCalledWith('knowledge/index.md', '# mine\n', 'hX'));
     await waitFor(() => expect(screen.queryByText(/changed on disk/i)).not.toBeInTheDocument());
   });
 
   it('flushes an unsaved buffer when navigating away before autosave fires', async () => {
-    const { props, writeNotebook, readNotebook } = makeProps();
+    const { props, writeFile, readFile } = makeProps();
     render(<NotebookBrowser {...props} />);
     await waitForNoteLoaded();
 
     // Type, then immediately navigate away (faster than the 700ms autosave debounce).
     fireEvent.change(editor(), { target: { value: '# quick edit\n' } });
-    fireEvent.click(screen.getByRole('button', { name: /Foo decision/ }));
+    followLink(FOO);
 
     // The outgoing buffer is flushed against its loaded hash, so the edit isn't lost,
     // and (the flush having succeeded) the navigation lands on the new note.
-    await waitFor(() => expect(writeNotebook).toHaveBeenCalledWith('knowledge/index.md', '# quick edit\n', 'h1'));
-    await waitFor(() => expect(readNotebook).toHaveBeenCalledWith('knowledge/areas/foo.md'));
-    expect(await screen.findByRole('heading', { level: 2, name: 'Foo decision' })).toBeInTheDocument();
+    await waitFor(() => expect(writeFile).toHaveBeenCalledWith('knowledge/index.md', '# quick edit\n', 'h1'));
+    await waitFor(() => expect(readFile).toHaveBeenCalledWith('knowledge/areas/foo.md'));
+    expect(await screen.findByRole('heading', { level: 2, name: 'foo' })).toBeInTheDocument();
   });
 
   it('aborts navigation and surfaces the conflict when the navigate flush conflicts', async () => {
-    const { props, writeNotebook, readNotebook } = makeProps();
+    const { props, writeFile, readFile } = makeProps();
     // The flush triggered by navigating away conflicts (the note changed on disk).
-    writeNotebook.mockResolvedValueOnce({ path: 'knowledge/index.md', conflict: true, currentHash: 'hX' });
+    writeFile.mockResolvedValueOnce({ path: 'knowledge/index.md', conflict: true, currentHash: 'hX' });
     render(<NotebookBrowser {...props} />);
     await waitForNoteLoaded();
 
     // Type, then navigate away before the autosave fires; the flush hits the conflict.
     fireEvent.change(editor(), { target: { value: '# mine\n' } });
-    fireEvent.click(screen.getByRole('button', { name: /Foo decision/ }));
+    followLink(FOO);
 
     // The flush wrote against the loaded hash and came back conflicted, so the
     // navigation is abandoned: we stay on the current note, the conflict banner shows,
     // and the buffer is intact — the edit is NOT lost behind a silent navigation.
-    await waitFor(() => expect(writeNotebook).toHaveBeenCalledWith('knowledge/index.md', '# mine\n', 'h1'));
+    await waitFor(() => expect(writeFile).toHaveBeenCalledWith('knowledge/index.md', '# mine\n', 'h1'));
     expect(await screen.findByText(/changed on disk/i)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 2, name: 'Knowledge index' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { level: 2, name: 'Foo decision' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'index' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 2, name: 'foo' })).not.toBeInTheDocument();
     expect(editor().value).toBe('# mine\n');
-    expect(readNotebook).not.toHaveBeenCalledWith('knowledge/areas/foo.md');
+    expect(readFile).not.toHaveBeenCalledWith('knowledge/areas/foo.md');
   });
 
   it('does not stamp a stale reload-from-disk onto a note navigated to mid-reload', async () => {
-    const { props, writeNotebook, readNotebook } = makeProps();
+    const { props, writeFile, readFile } = makeProps();
     // Autosave conflicts (so the "Reload from disk" affordance appears); the later
     // navigate flush then succeeds, superseding the in-flight reload.
-    writeNotebook
+    writeFile
       .mockResolvedValueOnce({ path: 'knowledge/index.md', conflict: true, currentHash: 'hX' })
       .mockResolvedValueOnce({ path: 'knowledge/index.md', hash: 'h2', conflict: false });
-    // Defer the SECOND read of index (the reload) so navigation can outrun it.
+    // Defer the reload read of index (the on-open probe is read #1; the reload is #2) so
+    // navigation can outrun it.
     let indexReads = 0;
-    let resolveReload: (r: NotebookReadResult) => void = () => {};
-    readNotebook.mockImplementation((path) => {
+    let resolveReload: (r: FsReadResult) => void = () => {};
+    readFile.mockImplementation((path) => {
       if (path === 'knowledge/index.md') {
         indexReads += 1;
-        if (indexReads === 2) return new Promise<NotebookReadResult>((resolve) => { resolveReload = resolve; });
+        if (indexReads === 2) return new Promise<FsReadResult>((resolve) => { resolveReload = resolve; });
       }
       return Promise.resolve({ path, content: `# ${path}\n\nbody`, hash: 'h1' });
     });
     render(<NotebookBrowser {...props} />);
-    await waitForNoteLoaded();
+    await waitFor(() => expect(editor().value).toContain('# knowledge/index.md'));
 
     // Edit → the debounced autosave conflicts → the reconcile banner appears.
     fireEvent.change(editor(), { target: { value: '# mine\n' } });
@@ -462,8 +533,8 @@ describe('NotebookBrowser', () => {
     // Start a reload from disk (its read is deferred), then navigate away before it
     // resolves; the navigate flush succeeds and lands us on the new note.
     fireEvent.click(screen.getByRole('button', { name: 'Reload from disk' }));
-    fireEvent.click(screen.getByRole('button', { name: /Foo decision/ }));
-    await screen.findByRole('heading', { level: 2, name: 'Foo decision' });
+    followLink(FOO);
+    await screen.findByRole('heading', { level: 2, name: 'foo' });
     await waitFor(() => expect(editor().value).toContain('# knowledge/areas/foo.md'));
 
     // The stale reload of index now resolves — it must NOT stamp its content over the
@@ -476,29 +547,31 @@ describe('NotebookBrowser', () => {
   });
 
   it('keeps the buffer when a change signal arrives with unsaved edits (no clobber)', async () => {
-    const { props, readNotebook, listNotebook } = makeProps();
+    const { props, readFile, listDir } = makeProps();
     const { rerender } = render(<NotebookBrowser {...props} />);
     await waitForNoteLoaded();
 
     fireEvent.change(editor(), { target: { value: '# my draft\n' } });
 
-    const listBefore = listNotebook.mock.calls.length;
-    const readsBefore = readNotebook.mock.calls.length;
+    const rootListsBefore = listDir.mock.calls.filter((c) => c[0] === '').length;
+    const readsBefore = readFile.mock.calls.length;
     rerender(<NotebookBrowser {...props} changeSignal={1} />);
 
-    // The change-signal effect runs (tree refreshed)...
-    await waitFor(() => expect(listNotebook.mock.calls.length).toBeGreaterThan(listBefore));
+    // The change-signal effect runs (tree re-listed by FileTree)...
+    await waitFor(() =>
+      expect(listDir.mock.calls.filter((c) => c[0] === '').length).toBeGreaterThan(rootListsBefore),
+    );
     // ...but the open note is NOT reloaded under the buffer, and the edit survives.
     expect(editor().value).toBe('# my draft\n');
-    expect(readNotebook.mock.calls.length).toBe(readsBefore);
+    expect(readFile.mock.calls.length).toBe(readsBefore);
   });
 
   it('does not stamp a mid-autosave result onto a note the user navigated to', async () => {
-    const { props, writeNotebook } = makeProps();
+    const { props, writeFile } = makeProps();
     // Defer the first write so the user can navigate before it resolves.
-    let resolveWrite: (r: NotebookWriteResult) => void = () => {};
-    writeNotebook.mockImplementationOnce(
-      () => new Promise<NotebookWriteResult>((resolve) => { resolveWrite = resolve; }),
+    let resolveWrite: (r: FsWriteResult) => void = () => {};
+    writeFile.mockImplementationOnce(
+      () => new Promise<FsWriteResult>((resolve) => { resolveWrite = resolve; }),
     );
     render(<NotebookBrowser {...props} />);
     await waitForNoteLoaded();
@@ -506,13 +579,13 @@ describe('NotebookBrowser', () => {
     // Edit note A (knowledge/index.md); its autosave is now in flight.
     fireEvent.change(editor(), { target: { value: '# A edited\n' } });
     await waitFor(
-      () => expect(writeNotebook).toHaveBeenCalledWith('knowledge/index.md', '# A edited\n', 'h1'),
+      () => expect(writeFile).toHaveBeenCalledWith('knowledge/index.md', '# A edited\n', 'h1'),
       { timeout: 2000 },
     );
 
     // Navigate to note B (foo.md) before A's save resolves. B loads.
-    fireEvent.click(screen.getByRole('button', { name: /Foo decision/ }));
-    await screen.findByRole('heading', { level: 2, name: 'Foo decision' });
+    followLink(FOO);
+    await screen.findByRole('heading', { level: 2, name: 'foo' });
     await waitFor(() => expect(editor().value).toContain('# knowledge/areas/foo.md'));
 
     // A's stale save resolves. It must NOT overwrite B's pane (no A body under B,
@@ -541,7 +614,7 @@ describe('NotebookBrowser', () => {
   it('sends an editor selection to the chief and shows the outcome', async () => {
     const { props, sendToChief } = makeProps();
     render(<NotebookBrowser {...props} />);
-    await screen.findByRole('heading', { level: 2, name: 'Knowledge index' });
+    await screen.findByRole('heading', { level: 2, name: 'index' });
 
     // The editor reports a non-empty selection; the floating action appears.
     act(() => editorMock.current!.onSelectionChange!({ text: 'a key decision', top: 40, left: 60 }));
@@ -557,7 +630,7 @@ describe('NotebookBrowser', () => {
   it('shows no send-to-chief action for a collapsed selection', async () => {
     const { props, sendToChief } = makeProps();
     render(<NotebookBrowser {...props} />);
-    await screen.findByRole('heading', { level: 2, name: 'Knowledge index' });
+    await screen.findByRole('heading', { level: 2, name: 'index' });
 
     act(() => editorMock.current!.onSelectionChange!(null));
 
@@ -569,7 +642,7 @@ describe('NotebookBrowser', () => {
     const { props, sendToChief } = makeProps();
     sendToChief.mockRejectedValueOnce(new Error('no chief reachable'));
     render(<NotebookBrowser {...props} />);
-    await screen.findByRole('heading', { level: 2, name: 'Knowledge index' });
+    await screen.findByRole('heading', { level: 2, name: 'index' });
 
     act(() => editorMock.current!.onSelectionChange!({ text: 'something', top: 40, left: 60 }));
     fireEvent.click(await screen.findByRole('button', { name: 'Send to chief' }));
@@ -585,7 +658,7 @@ describe('NotebookBrowser', () => {
       () => new Promise<NotebookSendToChiefResult>((resolve) => { resolveSend = resolve; }),
     );
     render(<NotebookBrowser {...props} />);
-    await screen.findByRole('heading', { level: 2, name: 'Knowledge index' });
+    await screen.findByRole('heading', { level: 2, name: 'index' });
 
     // Select + send from note A; the send is now in flight.
     act(() => editorMock.current!.onSelectionChange!({ text: 'from A', top: 40, left: 60 }));
@@ -593,8 +666,8 @@ describe('NotebookBrowser', () => {
     await waitFor(() => expect(sendToChief).toHaveBeenCalledWith('from A', 'knowledge/index.md'));
 
     // Navigate to note B before A's send resolves; B loads.
-    fireEvent.click(screen.getByRole('button', { name: /Foo decision/ }));
-    await screen.findByRole('heading', { level: 2, name: 'Foo decision' });
+    followLink(FOO);
+    await screen.findByRole('heading', { level: 2, name: 'foo' });
 
     // A's stale send resolves — its outcome must NOT flash on note B.
     await act(async () => {
