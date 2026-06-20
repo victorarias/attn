@@ -20,8 +20,9 @@ test.describe('NotebookBrowser (fs surface)', () => {
     // There is no mode toggle — the surface is always editable.
     await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Save' })).toHaveCount(0);
-    // Backlinks render in their strip (markdown only).
-    await expect(page.getByRole('heading', { name: /Linked from/ })).toBeVisible();
+    // Backlinks render in the right context rail as a card (markdown only).
+    const rail = page.locator('.notebook-browser-rail');
+    await expect(rail.getByRole('button', { name: '2026-06-20' })).toBeVisible();
     await page.screenshot({ path: 'test-results/notebook-browser-open.png' });
 
     // Type at the end of the document; the debounced autosave persists via hash-CAS.
@@ -51,9 +52,30 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await page.getByRole('treeitem', { name: 'notes.txt' }).click();
 
     await expect(page.getByRole('heading', { level: 2, name: 'notes.txt' })).toBeVisible();
-    // A plain textarea, not the CodeMirror markdown surface; no backlinks strip.
+    // A plain textarea, not the CodeMirror markdown surface; the context rail (outline
+    // + backlinks) is a markdown affordance, so a text file shows no rail.
     await expect(page.getByRole('textbox', { name: 'File contents' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: /Linked from/ })).toHaveCount(0);
+    await expect(page.locator('.notebook-browser-rail')).toHaveCount(0);
+  });
+
+  test('lists the note outline in the context rail and scrolls the editor to a heading on click', async ({ page }) => {
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.getByRole('heading', { level: 2, name: 'index' }).waitFor();
+    await page.waitForSelector('.cm-content');
+
+    // The rail's Outline lists the note's ATX headings, indented by level.
+    const rail = page.locator('.notebook-browser-rail');
+    await expect(rail.getByRole('button', { name: 'Knowledge index' })).toBeVisible();
+    await expect(rail.getByRole('button', { name: 'Sections' })).toBeVisible();
+    await expect(rail.getByRole('button', { name: 'Subsection detail' })).toBeVisible();
+
+    // The editor starts at the top; clicking a lower heading scrolls it into view.
+    const scrollTop = () =>
+      page.locator('.cm-scroller').evaluate((el) => (el as HTMLElement).scrollTop);
+    expect(await scrollTop()).toBeLessThan(40);
+    await rail.getByRole('button', { name: 'Subsection detail' }).click();
+    await expect.poll(scrollTop, { timeout: 2000 }).toBeGreaterThan(150);
   });
 
   test('shows a read-only placeholder for a binary file', async ({ page }) => {

@@ -40,16 +40,29 @@ const TREE: Record<string, FsEntry[]> = {
   'knowledge/areas': [{ path: 'knowledge/areas/foo.md', name: 'foo.md', isDir: false, size: 30 }],
 };
 
+// A deliberately long body so the second/third headings sit well below the fold —
+// the outline-jump e2e can then assert a real scroll when it clicks a lower heading.
+const INDEX_FILLER = Array.from(
+  { length: 30 },
+  (_, i) => `Line ${i + 1}: distilled context the agent keeps around for later recall.`,
+).join('\n');
+
 const CONTENT: Record<string, string> = {
   'knowledge/index.md': `# Knowledge index
 
 The distilled map of the notebook. A paragraph with **bold**, *italic*,
 \`inline code\`, and a [wiki link](/knowledge/areas/foo.md) to another note.
 
+${INDEX_FILLER}
+
 ## Sections
 
 - areas — long-lived responsibilities
 - resources — reference material
+
+### Subsection detail
+
+${INDEX_FILLER}
 `,
   'notes.txt': 'Plain text scratch file.\nNo markdown affordances here — just edit and autosave.\n',
 };

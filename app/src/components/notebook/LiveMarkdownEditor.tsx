@@ -4,8 +4,8 @@
 // cursor's line. The parent owns persistence (hash-CAS autosave); this component only
 // emits value changes, link follows, and the current selection (for "send to chief").
 
-import { useMemo } from 'react';
-import CodeMirror from '@uiw/react-codemirror';
+import { forwardRef, useImperativeHandle, useMemo, useRef } from 'react';
+import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { EditorView, type ViewUpdate } from '@codemirror/view';
 import { liveMarkdownPreview } from './liveMarkdownPreview';
@@ -15,6 +15,16 @@ export interface LiveSelection {
   // Viewport coordinates of the selection start, for floating UI.
   top: number;
   left: number;
+}
+
+// Imperative surface the parent drives for navigation that originates OUTSIDE the
+// editor (the context rail's outline). The editor still owns its own scroll for
+// typing; this only lets the outline jump to a heading.
+export interface LiveMarkdownEditorHandle {
+  // Scroll the given character offset to the top of the viewport, place the cursor
+  // there, and take focus. A no-op until the view has mounted, or if the offset is
+  // out of range for the current document.
+  scrollToPos: (pos: number) => void;
 }
 
 interface LiveMarkdownEditorProps {
@@ -67,14 +77,31 @@ const editorTheme = EditorView.theme({
   },
 });
 
-export function LiveMarkdownEditor({
+export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkdownEditorProps>(function LiveMarkdownEditor({
   value,
   onChange,
   onFollowLink,
   onSelectionChange,
   ariaLabel,
   autoFocus,
-}: LiveMarkdownEditorProps) {
+}, ref) {
+  const cmRef = useRef<ReactCodeMirrorRef>(null);
+
+  useImperativeHandle(ref, () => ({
+    scrollToPos: (pos: number) => {
+      const view = cmRef.current?.view;
+      if (!view) return;
+      // Clamp into range: the outline is parsed from the same draft, but a click can
+      // race a keystroke that shortened the doc. Out-of-range dispatch would throw.
+      const target = Math.max(0, Math.min(pos, view.state.doc.length));
+      view.dispatch({
+        selection: { anchor: target },
+        effects: EditorView.scrollIntoView(target, { y: 'start' }),
+      });
+      view.focus();
+    },
+  }), []);
+
   const extensions = useMemo(
     () => [
       markdown({ base: markdownLanguage }),
@@ -112,6 +139,7 @@ export function LiveMarkdownEditor({
 
   return (
     <CodeMirror
+      ref={cmRef}
       value={value}
       onChange={onChange}
       onUpdate={handleUpdate}
@@ -141,4 +169,4 @@ export function LiveMarkdownEditor({
       }}
     />
   );
-}
+});
