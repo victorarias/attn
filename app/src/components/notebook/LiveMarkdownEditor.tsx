@@ -102,6 +102,10 @@ export function LiveMarkdownEditor({
       autoFocus={autoFocus}
       height="100%"
       aria-label={ariaLabel}
+      // Skip @uiw/react-codemirror's built-in theme (default "light" paints a white
+      // background). Our editorTheme keeps the surface transparent so it inherits the
+      // app's dark document pane and tracks light/dark via CSS variables.
+      theme="none"
       basicSetup={{
         lineNumbers: false,
         foldGutter: false,
