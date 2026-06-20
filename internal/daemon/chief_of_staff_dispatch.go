@@ -264,18 +264,23 @@ func (d *Daemon) handleReportDispatch(conn net.Conn, msg *protocol.ReportDispatc
 		d.sendError(conn, "dispatch report: "+err.Error())
 		return
 	}
+	// Capture finished delegated work in the durable journal BEFORE acking the
+	// report, so a successful response means the outcome is recorded (durable
+	// before ack), not merely queued. The stored record carries the server-stamped
+	// report time; the embedded marker keeps this idempotent against the
+	// session-gone fallback. Running it synchronously also makes the raw-tier write
+	// observable to the caller — when the response returns the per-dispatch file is
+	// on disk — so a socket-level test never races t.TempDir() cleanup against a
+	// still-pending post-response write.
+	if isTerminalDispatchReport(msg.StructuredReport) {
+		d.journalDispatchOutcome(dispatch)
+	}
 	decorated := d.decorateChiefOfStaffDispatch(dispatch)
 	_ = json.NewEncoder(conn).Encode(protocol.Response{
 		Ok:                   true,
 		ChiefOfStaffDispatch: decorated,
 	})
 	d.broadcastChiefOfStaffDispatchesUpdated()
-	// Capture finished delegated work in the durable journal. The stored record
-	// carries the server-stamped report time; the embedded marker keeps this
-	// idempotent against the session-gone fallback.
-	if isTerminalDispatchReport(msg.StructuredReport) {
-		d.journalDispatchOutcome(dispatch)
-	}
 }
 
 func (d *Daemon) handleGetDispatch(conn net.Conn, msg *protocol.GetDispatchMessage) {

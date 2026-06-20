@@ -48,9 +48,11 @@ func readRawDispatchFile(t *testing.T, d *Daemon, dispatchID string) string {
 	return string(data)
 }
 
-// waitForRawDispatch polls the per-dispatch raw file until it contains substr —
-// the redirect on the dispatch-report path is a side effect that runs after the
-// socket response is sent, so socket-level tests assert it eventually.
+// waitForRawDispatch reads the per-dispatch raw file and asserts it contains
+// substr. The report path now journals the outcome durable-before-ack — the write
+// completes before the socket response returns — so the file is already on disk
+// when sendNotebookCmd returns; the short poll is a defensive tolerance, not a
+// dependency on async timing.
 func waitForRawDispatch(t *testing.T, d *Daemon, dispatchID, substr string) string {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -65,11 +67,11 @@ func waitForRawDispatch(t *testing.T, d *Daemon, dispatchID, substr string) stri
 	}
 }
 
-// waitForRawDispatchesQuiescent polls until the dispatches dir holds exactly the
+// waitForRawDispatchesQuiescent asserts the dispatches dir holds exactly the
 // expected settled .md files with no in-flight atomic-writer temp (.tmp.) sibling.
-// The report-path capture runs as a post-response side effect, so a socket-level
-// idempotency check must wait for the in-flight overwrite to settle — otherwise a
-// lingering temp file races t.TempDir() cleanup.
+// The report-path capture is now synchronous (durable before ack), so after
+// sendNotebookCmd returns the overwrite has already settled; this remains as an
+// explicit no-temp/no-leak guard against t.TempDir() cleanup.
 func waitForRawDispatchesQuiescent(t *testing.T, d *Daemon, wantMD int) {
 	t.Helper()
 	root, err := d.notebookRoot()
