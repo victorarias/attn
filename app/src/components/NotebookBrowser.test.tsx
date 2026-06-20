@@ -204,6 +204,23 @@ describe('NotebookBrowser', () => {
     expect(readFile).not.toHaveBeenCalledWith('cover.png');
   });
 
+  it('does not read a binary file when the Notebook is reopened with one selected', async () => {
+    const { props, readFile } = makeProps();
+    const { rerender } = render(<NotebookBrowser {...props} />);
+    await screen.findByRole('treeitem', { name: 'cover.png' });
+
+    // Select the binary file, then close and reopen the Notebook.
+    fireEvent.click(screen.getByRole('treeitem', { name: 'cover.png' }));
+    expect(await screen.findByText('Preview not available')).toBeInTheDocument();
+    rerender(<NotebookBrowser {...props} isOpen={false} />);
+    rerender(<NotebookBrowser {...props} isOpen />);
+
+    // The reopen "keep current selection" probe must preserve the placeholder WITHOUT
+    // reading the binary — fs_read is never called for binary bytes, on click or reopen.
+    expect(await screen.findByText('Preview not available')).toBeInTheDocument();
+    expect(readFile).not.toHaveBeenCalledWith('cover.png');
+  });
+
   it('navigates when an in-notebook link is followed', async () => {
     const { props, readFile } = makeProps();
     render(<NotebookBrowser {...props} />);

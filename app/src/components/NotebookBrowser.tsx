@@ -414,9 +414,18 @@ export function NotebookBrowser({
     let cancelled = false;
     void (async () => {
       // Keep the current selection if it still exists (a reopen on the same file).
-      // The probe read is reused to seed the editor (no second read).
       const current = selectedPathRef.current;
       if (current) {
+        // A binary selection is preserved WITHOUT reading it — fs_read is never called
+        // for binary files (it returns a string, meaningless for bytes). loadFile
+        // re-renders the placeholder. (Probing it with a read here would leak the very
+        // fs_read the binary gate exists to prevent.)
+        if (isBinaryPath(current)) {
+          if (!cancelled) void loadFile(current);
+          return;
+        }
+        // Otherwise probe by reading; the read is reused to seed the editor (no second
+        // read), and a rejection means the file fell away while closed.
         try {
           const res = await readFile(current);
           if (!cancelled) void loadFile(current, res);
