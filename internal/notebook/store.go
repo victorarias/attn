@@ -27,6 +27,13 @@ type Store struct {
 // NewStore returns a Store rooted at the given absolute directory. The directory
 // need not exist yet; EnsureScaffold creates it.
 func NewStore(root string) *Store {
+	// Normalize the root so containment checks compare against a canonical path.
+	// A root entered with a trailing slash (e.g. "~/Notebook/") would otherwise
+	// make abs's `HasPrefix(abs, root+separator)` test expect a doubled separator
+	// ("/Notebook//"), rejecting a perfectly valid "index.md" as escaping the root.
+	if root != "" {
+		root = filepath.Clean(root)
+	}
 	return &Store{root: root}
 }
 
@@ -303,6 +310,14 @@ func (s *Store) List(prefix string) ([]Entry, error) {
 		if ierr != nil {
 			return nil
 		}
+		// The root is externally syncable/user-editable, so a note entry can be a
+		// symlink pointing outside the root (e.g. linked.md -> /outside/private.md).
+		// Read/Write defend against this via checkWithinResolvedRoot; List must too,
+		// or it would read and expose an outside file's frontmatter (title/summary)
+		// over the websocket. Skip any entry that resolves outside the root.
+		if err := s.checkWithinResolvedRoot(p); err != nil {
+			return nil
+		}
 		raw, rerr := readPrefix(p, listFrontmatterScanLimit)
 		if rerr != nil {
 			return nil
@@ -418,7 +433,19 @@ func (s *Store) abs(p string) (string, error) {
 // A residual TOCTOU remains (a symlink could be planted between the check and
 // the syscall); for a single-user local app that is an accepted limit.
 func (s *Store) checkWithinResolvedRoot(abs string) error {
-	realRoot, err := filepath.EvalSymlinks(s.root)
+	return EnsureWithinResolvedRoot(s.root, abs)
+}
+
+// EnsureWithinResolvedRoot is the package-level symlink-containment check that
+// Store.checkWithinResolvedRoot delegates to, exported so daemon-side writers
+// that build paths under the same notebook root (e.g. the raw tier) can apply
+// the identical guard. It resolves the deepest existing ancestor of abs and
+// requires it to stay within the resolved root; a symlinked ancestor pointing
+// outside is rejected, while a legitimately symlinked root is allowed because
+// the root is resolved too. abs is expected to be lexically contained already;
+// this is the symlink layer on top. The same TOCTOU caveat as above applies.
+func EnsureWithinResolvedRoot(root, abs string) error {
+	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // root not created yet; nothing to traverse through

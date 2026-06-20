@@ -597,3 +597,62 @@ func mustWrite(t *testing.T, s *Store, relPath, content string) {
 		}
 	}
 }
+
+// A root configured with a trailing slash must not break containment for an
+// ordinary relative path. Before NewStore cleaned the root, abs compared against
+// "<root>//" and rejected "index.md" as escaping the notebook root.
+func TestNewStoreNormalizesTrailingSlashRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "nb")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(root + string(filepath.Separator))
+	if got := s.Root(); got != root {
+		t.Fatalf("Root() = %q, want cleaned %q", got, root)
+	}
+	if _, _, err := s.Write("index.md", []byte("# hi\n"), ""); err != nil {
+		t.Fatalf("Write under a trailing-slash root: %v", err)
+	}
+	content, _, err := s.Read("index.md")
+	if err != nil {
+		t.Fatalf("Read under a trailing-slash root: %v", err)
+	}
+	if string(content) != "# hi\n" {
+		t.Fatalf("round-trip content = %q", content)
+	}
+}
+
+// The notebook root is externally syncable, so a note entry can be a symlink
+// pointing outside the root. List must not read and expose such a file's
+// frontmatter (title/summary) over the websocket; it should skip it while still
+// listing the legitimate in-root notes.
+func TestListSkipsSymlinkResolvingOutsideRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "nb")
+	s := NewStore(root)
+	if _, _, err := s.Write("real.md", []byte("---\ntype: note\ntitle: Real\n---\n# Real\n"), ""); err != nil {
+		t.Fatalf("seed real note: %v", err)
+	}
+	outside := filepath.Join(t.TempDir(), "secret.md")
+	if err := os.WriteFile(outside, []byte("---\ntype: note\ntitle: Secret\n---\nclassified\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "linked.md")); err != nil {
+		t.Skipf("symlink unsupported on this platform: %v", err)
+	}
+	entries, err := s.List("")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var sawReal bool
+	for _, e := range entries {
+		if e.Path == "linked.md" || e.Title == "Secret" {
+			t.Fatalf("List exposed an out-of-root symlink: %+v", e)
+		}
+		if e.Path == "real.md" {
+			sawReal = true
+		}
+	}
+	if !sawReal {
+		t.Fatalf("List dropped the legitimate in-root note; entries=%+v", entries)
+	}
+}

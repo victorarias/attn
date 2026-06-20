@@ -121,7 +121,9 @@ func (d *Daemon) notebookRoot() (string, error) {
 			}
 			return filepath.Join(home, configured[2:]), nil
 		}
-		return configured, nil
+		// Clean so a settings value with a trailing slash or redundant separators
+		// resolves to the same canonical root the store's containment checks expect.
+		return filepath.Clean(configured), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

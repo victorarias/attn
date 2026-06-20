@@ -98,7 +98,7 @@ func (d *Daemon) journalDispatchOutcome(dispatch *protocol.ChiefOfStaffDispatch)
 	if strings.TrimSpace(root) == "" {
 		return // notebook disabled — silent no-op
 	}
-	if err := writeRawAtomic(notebook.RawDispatchesDir(root), dispatch.ID, []byte(block)); err != nil {
+	if err := writeRawAtomic(root, notebook.RawDispatchesDir(root), dispatch.ID, []byte(block)); err != nil {
 		d.logf("dispatch auto-journal %s: %v", dispatch.ID, err)
 		return
 	}

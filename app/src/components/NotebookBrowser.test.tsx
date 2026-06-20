@@ -348,25 +348,24 @@ describe('NotebookBrowser', () => {
   });
 
   it('auto-dismisses the Saved badge after a successful save', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const { props } = makeProps();
-      render(<NotebookBrowser {...props} />);
+    // Real timers throughout: the editor-open path (loadNote -> setNote -> the
+    // textarea) does not settle under fake timers, so opening the editor and saving
+    // must run on real timers (the adjacent "stale save" test relies on the same).
+    // The auto-dismiss is a real-time behavior, so we wait it out with a bounded
+    // waitFor rather than advancing a fake clock.
+    const { props } = makeProps();
+    render(<NotebookBrowser {...props} />);
 
-      await screen.findByRole('heading', { level: 1, name: 'knowledge/index.md' });
-      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-      fireEvent.change(await screen.findByRole('textbox', { name: 'Edit note' }), { target: { value: '# edited\n' } });
-      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByRole('heading', { level: 1, name: 'knowledge/index.md' });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Edit note' }), { target: { value: '# edited\n' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-      // The badge appears on save success...
-      expect(await screen.findByText('Saved')).toBeInTheDocument();
-      // ...and clears itself rather than lingering while the user keeps reading.
-      act(() => { vi.advanceTimersByTime(2600); });
-      await waitFor(() => expect(screen.queryByText('Saved')).not.toBeInTheDocument());
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+    // The badge appears on save success...
+    expect(await screen.findByText('Saved')).toBeInTheDocument();
+    // ...and clears itself rather than lingering while the user keeps reading.
+    await waitFor(() => expect(screen.queryByText('Saved')).not.toBeInTheDocument(), { timeout: 4000 });
+  }, 10000);
 
   it('sends a highlighted selection to the chief and shows the outcome', async () => {
     const { props, sendToChief } = makeProps();

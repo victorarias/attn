@@ -284,7 +284,8 @@ func TestSnapshotWorkspaceContextRejectsPathTraversal(t *testing.T) {
 // directly, independent of the snapshot call site, so a future caller cannot
 // reintroduce the escape.
 func TestWriteRawAtomicRejectsUnsafeID(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "raw", "context-snapshots")
+	root := t.TempDir()
+	dir := filepath.Join(root, "raw", "context-snapshots")
 
 	for _, id := range []string{
 		"",
@@ -302,13 +303,13 @@ func TestWriteRawAtomicRejectsUnsafeID(t *testing.T) {
 		"ws\x00null",
 		"ws\x7fdel",
 	} {
-		if err := writeRawAtomic(dir, id, []byte("x")); err == nil {
+		if err := writeRawAtomic(root, dir, id, []byte("x")); err == nil {
 			t.Fatalf("writeRawAtomic accepted unsafe id %q", id)
 		}
 	}
 
 	// A normal id still writes to exactly dir/<id>.md and nowhere else.
-	if err := writeRawAtomic(dir, "ws-ok", []byte("ok")); err != nil {
+	if err := writeRawAtomic(root, dir, "ws-ok", []byte("ok")); err != nil {
 		t.Fatalf("writeRawAtomic rejected a safe id: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "ws-ok.md"))
@@ -317,5 +318,28 @@ func TestWriteRawAtomicRejectsUnsafeID(t *testing.T) {
 	}
 	if string(data) != "ok" {
 		t.Fatalf("safe write produced wrong content: %q", string(data))
+	}
+}
+
+// The raw tier lives under the externally-syncable notebook root, so a user/sync
+// client could turn a raw-tier subdir (e.g. .attn/raw/dispatches) into a symlink
+// pointing outside the root. The lexical id/parent checks cannot catch that;
+// writeRawAtomic must resolve ancestors and refuse to write through the symlink.
+func TestWriteRawAtomicRejectsSymlinkedAncestor(t *testing.T) {
+	root := t.TempDir()
+	rawParent := filepath.Join(root, "raw")
+	if err := os.MkdirAll(rawParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	dir := filepath.Join(rawParent, "dispatches")
+	if err := os.Symlink(outside, dir); err != nil {
+		t.Skipf("symlink unsupported on this platform: %v", err)
+	}
+	if err := writeRawAtomic(root, dir, "evil", []byte("x")); err == nil {
+		t.Fatalf("writeRawAtomic wrote through a symlinked ancestor pointing outside the root")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "evil.md")); !os.IsNotExist(err) {
+		t.Fatalf("a raw-tier file leaked outside the notebook root: stat err=%v", err)
 	}
 }

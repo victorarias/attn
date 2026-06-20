@@ -98,7 +98,7 @@ func rawTierName(id, suffix string) (string, error) {
 // intended subdir, and the path is only ever dir/<safe-name> — never a join that
 // ".." could climb out of. A second containment assertion verifies the final path
 // stays under dir even if rawTierFilename is ever weakened.
-func writeRawAtomic(dir, id string, content []byte) error {
+func writeRawAtomic(root, dir, id string, content []byte) error {
 	name, err := rawTierFilename(id)
 	if err != nil {
 		return err
@@ -107,6 +107,15 @@ func writeRawAtomic(dir, id string, content []byte) error {
 	cleanDir := filepath.Clean(dir)
 	if filepath.Dir(absPath) != cleanDir {
 		return fmt.Errorf("raw-tier write for %q escapes %q", id, dir)
+	}
+	// The lexical checks above only prove the string join stayed under dir. The
+	// root is externally syncable, so a user/sync client could turn a raw-tier
+	// ancestor (e.g. .attn/raw/dispatches) into a symlink pointing outside the
+	// notebook root, and MkdirAll/Rename would then write through it. Resolve the
+	// deepest existing ancestor and require it within the resolved root before we
+	// create any directory or write — the same guard Store.Read/Write/List apply.
+	if err := notebook.EnsureWithinResolvedRoot(root, absPath); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(cleanDir, 0o755); err != nil {
 		return err
@@ -173,7 +182,7 @@ func (d *Daemon) snapshotWorkspaceContextOnRemove(id, title string) {
 	fmt.Fprintf(&doc, "\nsource: workspace-context:%s@%d\n", id, canonical.Revision)
 
 	dir := notebook.RawContextSnapshotsDir(root)
-	if err := writeRawAtomic(dir, id, []byte(doc.String())); err != nil {
+	if err := writeRawAtomic(root, dir, id, []byte(doc.String())); err != nil {
 		d.logf("context snapshot %s (%s): write under %s: %v", id, title, dir, err)
 		return
 	}
