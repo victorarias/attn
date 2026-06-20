@@ -9,6 +9,8 @@ import { DiffDetailPanelHarness } from './DiffDetailPanelHarness';
 import { DiffViewHarness } from './DiffViewHarness';
 import { GridLayoutControlHarness } from './GridLayoutControlHarness';
 import { GridViewHarness } from './GridViewHarness';
+import { LiveMarkdownEditorHarness } from './LiveMarkdownEditorHarness';
+import { NotebookBrowserHarness } from './NotebookBrowserHarness';
 import { SessionReviewLoopBarHarness } from './SessionReviewLoopBarHarness';
 
 export const harnesses: Record<string, React.ComponentType<HarnessProps>> = {
@@ -17,5 +19,7 @@ export const harnesses: Record<string, React.ComponentType<HarnessProps>> = {
   DiffView: DiffViewHarness,
   GridLayoutControl: GridLayoutControlHarness,
   GridView: GridViewHarness,
+  LiveMarkdownEditor: LiveMarkdownEditorHarness,
+  NotebookBrowser: NotebookBrowserHarness,
   SessionReviewLoopBar: SessionReviewLoopBarHarness,
 };

@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-06-20]
 
+### Changed
+- **Read and edit Notebook notes in one place — the Edit mode is gone.** Opening a note now shows it as rendered markdown you can type straight into, the way Obsidian's live preview works: headings, **bold**, *italic*, `inline code`, and links render as you read, and the raw markdown of the line your cursor is on reveals itself so you can edit it. There's no more View/Edit toggle, and your changes save automatically (no Save button) — you still get a heads-up if the note changed on disk underneath you, and notes stay plain `.md` files.
+
 ### Added
 - **Choose where your Notebook folder lives.** Settings → General now has a Notebook Folder picker, so you can point attn's durable Notebook — your dated journals and knowledge base — at any folder you own instead of the default `~/attn-notebook` (separate per profile). Browse to a folder or type a path, and the picker shows where the Notebook currently resolves to; leave it blank to fall back to the default. attn starts using the new folder right away — your existing notes aren't moved, so move or sync the folder yourself if you want the current contents to come along.
 - **Configure the keeper's background work — and switch it off with one toggle.** Settings → Agents now has a single Keeper section that gathers all of the keeper's background duties: session summaries, journal narration, and workspace-context compaction. Each duty has its own agent and model picker (with recommended defaults — Haiku for summaries, Sonnet for narration), so you can dial cost and quality per duty. A new **Background tasks** master switch at the top turns every keeper duty on or off together; while it's off the keeper queues and runs no background work, though your picks stay saved, and turning it off won't interrupt a run already in flight.
