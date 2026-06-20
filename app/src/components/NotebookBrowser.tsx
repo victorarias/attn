@@ -1,9 +1,8 @@
-import { createElement, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
-import ReactMarkdown, { type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import type { NotebookEntry, NotebookReadResult, NotebookSendToChiefResult, NotebookTask, NotebookWriteResult } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
+import { LiveMarkdownEditor, type LiveSelection } from './notebook/LiveMarkdownEditor';
 import './NotebookBrowser.css';
 
 interface NotebookBrowserProps {
@@ -36,6 +35,11 @@ interface NotebookBrowserProps {
 // The note shown first when the browser opens with nothing selected, in order of
 // preference. knowledge/index.md is the distilled map an agent is told to read.
 const PREFERRED_FIRST = ['knowledge/index.md', 'index.md'];
+
+// How long the buffer must be idle before an autosave fires. Short enough that
+// edits persist promptly, long enough to coalesce a burst of keystrokes into one
+// write (and one origin=ui broadcast).
+const AUTOSAVE_DELAY_MS = 700;
 
 export function NotebookBrowser({
   isOpen,
@@ -79,6 +83,11 @@ export function NotebookBrowser({
   // a slow response from a superseded navigation is dropped. (A render-synced ref
   // can't do this — it only updates on commit, after the await may have resolved.)
   const loadSeqRef = useRef(0);
+  // Persists the outgoing note's unsaved buffer when navigation/close happens before
+  // the debounced autosave fires. Assigned below (after the editing refs exist) and
+  // invoked here via a ref so loadNote/clearSelection don't depend on declaration
+  // order. A no-op until assigned.
+  const flushSaveRef = useRef<() => void>(() => {});
   // The dialog container is the deliberate initial focus target so keyboard/AT
   // users land inside the modal (engaging the focus trap) without auto-selecting
   // the Close button. Tab from here moves to the first interactive control.
@@ -147,6 +156,9 @@ export function NotebookBrowser({
   }, [retryTask]);
 
   const loadNote = useCallback(async (path: string) => {
+    // Persist any unsaved buffer on the note we're leaving before we replace it
+    // (covers an edit made in the <debounce window of the autosave timer).
+    flushSaveRef.current();
     const seq = ++loadSeqRef.current;
     setSelectedPath(path);
     setNoteLoading(true);
@@ -166,8 +178,12 @@ export function NotebookBrowser({
     if (loadSeqRef.current !== seq) return;
     if (readResult.status === 'fulfilled') {
       setNote(readResult.value);
+      // Seed the live editor buffer from disk; a fresh load is never dirty.
+      setDraft(readResult.value.content);
+      lastFlushedRef.current = null;
     } else {
       setNote(null);
+      setDraft('');
       setNoteError(readResult.reason instanceof Error ? readResult.reason.message : 'Could not read this note');
     }
     setBacklinks(backlinkResult.status === 'fulfilled' ? backlinkResult.value : []);
@@ -178,96 +194,104 @@ export function NotebookBrowser({
   // Bumping loadSeqRef invalidates any in-flight loadNote so a response that
   // resolves after this clear cannot resurrect the just-cleared note's content.
   const clearSelection = useCallback(() => {
+    flushSaveRef.current();
     loadSeqRef.current += 1;
     setSelectedPath(null);
     setNote(null);
+    setDraft('');
     setNoteError(null);
     setNoteLoading(false);
     setBacklinks([]);
   }, []);
 
-  // --- Editing ---
-  const [editing, setEditing] = useState(false);
+  // --- Editing (single live surface; no view/edit toggle) ---
+  // `draft` is the live editor buffer; `note` holds the value last synced from disk
+  // (its content + hash). The note is "dirty" when draft diverges from note.content;
+  // dirty edits autosave (debounced) via hash-CAS against note.hash.
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  // Set when the on-disk note changed since the editor loaded it; carries the
-  // current on-disk hash so the user can choose to overwrite it.
+  // Set when an autosave's hash-CAS rejected because the note changed on disk since
+  // it was loaded; carries the current on-disk hash so the user can overwrite it.
   const [conflict, setConflict] = useState<{ currentHash?: string } | null>(null);
   const [justSaved, setJustSaved] = useState(false);
-  // The hash the draft is edited against, captured on entering edit mode and held
-  // independently of live `note` updates so an external change during editing is
-  // detected as a save-time conflict rather than silently overwritten.
-  const editBaseHashRef = useRef('');
-  // Lets the live-refresh effect see "are we editing?" without re-subscribing.
-  const editingRef = useRef(false);
-  editingRef.current = editing;
+  // Refs let the navigation/close flush and the live-refresh guard read the latest
+  // draft / synced note / dirty state without re-subscribing every effect to them.
+  const draftRef = useRef('');
+  draftRef.current = draft;
+  const noteRef = useRef<NotebookReadResult | null>(null);
+  noteRef.current = note;
+  // Dirty = the buffer diverges from the last synced content. Gates autosave and the
+  // live-refresh reload (an unsaved buffer must not be clobbered by a disk reload).
+  const dirty = note ? draft !== note.content : false;
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+  // The content last flushed on navigate/close, so a follow-up flush doesn't re-write
+  // identical bytes (e.g. close right after navigating away from the same edit).
+  const lastFlushedRef = useRef<string | null>(null);
 
   // --- Send to chief ---
-  // The current rendered-markdown selection and where to float its action button
-  // (viewport coords from the selection rect). Cleared on navigation/scroll/edit.
-  const [chiefSel, setChiefSel] = useState<{ text: string; top: number; left: number } | null>(null);
+  // The current editor selection and where to float its action button (viewport
+  // coords from the selection start). Cleared on navigation/scroll/collapse.
+  const [chiefSel, setChiefSel] = useState<LiveSelection | null>(null);
   const [sendingToChief, setSendingToChief] = useState(false);
   // A transient outcome line ("Added to chief's inbox" / an error), auto-dismissed.
   const [chiefStatus, setChiefStatus] = useState<{ text: string; error: boolean } | null>(null);
 
-  const startEditing = useCallback(() => {
-    if (!note) return;
-    setDraft(note.content);
-    editBaseHashRef.current = note.hash;
-    setConflict(null);
-    setSaveError(null);
-    setJustSaved(false);
-    // The rendered article (and its selection) is replaced by the textarea, so
-    // drop any floating "Send to chief" button left over from the view.
-    setChiefSel(null);
-    setEditing(true);
-  }, [note]);
+  // Persist the outgoing note's unsaved buffer when navigation/close pre-empts the
+  // debounced autosave. Reassigned every render so it closes over the current refs;
+  // fire-and-forget (the view has already moved on) and best-effort (a flush-time
+  // conflict is dropped rather than surfaced on a note no longer shown).
+  flushSaveRef.current = () => {
+    const path = selectedPathRef.current;
+    const current = noteRef.current;
+    if (!path || !current) return;
+    const content = draftRef.current;
+    if (content === current.content) return;        // in sync — nothing to flush
+    if (content === lastFlushedRef.current) return; // these bytes already flushed
+    lastFlushedRef.current = content;
+    void writeNotebook(path, content, current.hash || undefined).catch(() => {});
+  };
 
-  const cancelEditing = useCallback(() => {
-    setEditing(false);
-    setConflict(null);
-    setSaveError(null);
-  }, []);
-
-  // Save the draft against baseHash (hash-CAS). An empty baseHash is a create-only
-  // write — used to recreate a note that was deleted on disk while being edited.
-  const saveDraft = useCallback(async (baseHash: string) => {
+  // Save `content` against `baseHash` (hash-CAS). An empty baseHash is a create-only
+  // write — used to recreate a note deleted on disk while it was being edited.
+  const saveDraft = useCallback(async (baseHash: string, content: string) => {
     const path = selectedPathRef.current;
     if (!path) return;
     // Freeze the load token so a navigation that happens while this save is in
-    // flight can be detected when it resolves (mirrors loadNote's staleness
-    // guard; loadNote/clearSelection both bump loadSeqRef, saveDraft does not).
+    // flight can be detected when it resolves (mirrors loadNote's staleness guard;
+    // loadNote/clearSelection both bump loadSeqRef, saveDraft does not).
     const seq = loadSeqRef.current;
     setSaving(true);
     setSaveError(null);
     try {
-      const res = await writeNotebook(path, draft, baseHash || undefined);
-      // The write to `path` completed correctly against its own bytes, but if the
-      // user navigated away (or cleared the selection) while it was in flight, the
-      // result now applies to a note that is no longer shown. Bail before stamping
-      // this note's content/conflict/status onto the now-selected note.
+      const res = await writeNotebook(path, content, baseHash || undefined);
+      // The write to `path` completed against its own bytes, but if the user
+      // navigated away (or cleared the selection) while it was in flight, the result
+      // now applies to a note no longer shown. Bail before stamping this note's
+      // content/conflict/status onto the now-selected note.
       if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
       if (res.conflict) {
         // The note diverged on disk; let the user reconcile rather than clobber.
         setConflict({ currentHash: res.currentHash });
         return;
       }
-      // Saved: reflect the new content+hash locally and leave edit mode. The
-      // origin=ui broadcast also refreshes the view, so this is just immediacy.
+      // Saved: advance the synced base to the bytes just written. If the user kept
+      // typing during the save, draft is now ahead of `content` → still dirty → the
+      // autosave effect fires again. The origin=ui broadcast also refreshes.
       setConflict(null);
-      setNote({ path, content: draft, hash: res.hash ?? '' });
-      editBaseHashRef.current = res.hash ?? '';
-      setEditing(false);
+      setNote({ path, content, hash: res.hash ?? '' });
+      lastFlushedRef.current = null;
       setJustSaved(true);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Could not save this note');
     } finally {
       setSaving(false);
     }
-  }, [draft, writeNotebook]);
+  }, [writeNotebook]);
 
-  // Discard the draft and load the current on-disk version into the editor.
+  // Discard the local buffer and reload the current on-disk version (the conflict
+  // reconcile "reload from disk" path).
   const reloadFromDisk = useCallback(async () => {
     const path = selectedPathRef.current;
     if (!path) return;
@@ -275,26 +299,13 @@ export function NotebookBrowser({
     setSaveError(null);
     try {
       const fresh = await readNotebook(path);
-      setDraft(fresh.content);
-      editBaseHashRef.current = fresh.hash;
       setNote(fresh);
+      setDraft(fresh.content);
+      lastFlushedRef.current = null;
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Could not reload this note');
     }
   }, [readNotebook]);
-
-  // Capture the rendered-markdown selection on mouseup so the "Send to chief"
-  // button can float over it. An empty/collapsed selection clears the button.
-  const captureSelection = useCallback(() => {
-    const sel = window.getSelection();
-    const text = sel ? sel.toString().trim() : '';
-    if (!text || !sel || sel.rangeCount === 0) {
-      setChiefSel(null);
-      return;
-    }
-    const rect = sel.getRangeAt(0).getBoundingClientRect();
-    setChiefSel({ text, top: rect.top, left: rect.left + rect.width / 2 });
-  }, []);
 
   // Hand the captured selection to the daemon for the chief of staff. The daemon
   // appends it to the chief inbox note and best-effort nudges a live chief; the
@@ -360,10 +371,10 @@ export function NotebookBrowser({
       // A failed refresh (null) is NOT an empty notebook: leave the open note
       // alone rather than mistaking a transient WS hiccup for a deletion.
       if (cancelled || next === null) return;
-      // While the user is editing, refresh the tree but never reload or clear the
-      // open note — that would clobber the draft or yank the editor away. On-disk
-      // divergence is surfaced as a save-time conflict instead.
-      if (editingRef.current) return;
+      // With unsaved edits, refresh the tree but never reload or clear the open
+      // note — that would clobber the buffer. On-disk divergence surfaces as a
+      // save-time conflict instead. (A clean buffer reloads to pick up the change.)
+      if (dirtyRef.current) return;
       const current = selectedPathRef.current;
       if (current && next.some((e) => e.path === current)) {
         void loadNote(current);
@@ -394,17 +405,38 @@ export function NotebookBrowser({
     setTasksLoading(false);
   }, [isOpen]);
 
-  // Navigating to another note discards any in-progress edit and clears its
-  // status. Keyed on selectedPath, so it fires on navigation but not on a
-  // same-note live reload (which keeps selectedPath unchanged).
+  // Navigating to another note clears the previous note's edit status. Keyed on
+  // selectedPath, so it fires on navigation but not on a same-note live reload
+  // (which keeps selectedPath unchanged).
   useEffect(() => {
-    setEditing(false);
     setConflict(null);
     setSaveError(null);
     setJustSaved(false);
     setChiefSel(null);
     setChiefStatus(null);
   }, [selectedPath]);
+
+  // Debounced autosave: once the buffer diverges from the synced note, persist it
+  // via hash-CAS against note.hash after a short idle. Gated off while a note is
+  // loading (the buffer is being re-seeded), while a save is already in flight, and
+  // while a conflict is unresolved (the user must reconcile first). Every dep change
+  // clears the pending timer, so navigation can't leave a stale write scheduled.
+  useEffect(() => {
+    if (!note || noteLoading || saving || conflict) return;
+    if (draft === note.content) return; // in sync — nothing to save
+    const timer = window.setTimeout(() => {
+      void saveDraft(note.hash, draft);
+    }, AUTOSAVE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [draft, note, noteLoading, saving, conflict, saveDraft]);
+
+  // Flush an unsaved buffer when the browser closes (or unmounts) so edits made in
+  // the last <debounce window aren't lost. flushSaveRef is a no-op when not dirty.
+  useEffect(() => {
+    if (isOpen) return;
+    flushSaveRef.current();
+  }, [isOpen]);
+  useEffect(() => () => flushSaveRef.current(), []);
 
   // The "Send to chief" outcome line is a transient confirmation; auto-dismiss it
   // (errors linger a little longer than the success acknowledgement).
@@ -441,14 +473,37 @@ export function NotebookBrowser({
   }, [justSaved]);
 
   const grouped = useMemo(() => groupEntries(entries), [entries]);
-  const markdownComponents = useMemo(
-    () => notebookMarkdownComponents((path) => void loadNote(path)),
-    [loadNote],
-  );
+
+  // Mod-click on a rendered link: in-notebook .md targets navigate; external
+  // targets open in the browser; fragments are ignored (no in-editor anchor jump).
+  const handleFollowLink = useCallback((href: string) => {
+    const target = parseNotebookHref(href);
+    if (target.kind === 'note' && target.path) {
+      void loadNote(target.path);
+    } else if (target.kind === 'external' && target.href) {
+      window.open(target.href, '_blank', 'noreferrer');
+    }
+  }, [loadNote]);
+
+  // The editor reports its current selection (or null when collapsed); float the
+  // "Send to chief" action over it.
+  const handleSelectionChange = useCallback((selection: LiveSelection | null) => {
+    setChiefSel(selection);
+  }, []);
 
   if (!isOpen) return null;
 
   const selectedEntry = entries.find((e) => e.path === selectedPath) || null;
+  // A single live save indicator (the error itself is surfaced by its own banner).
+  const saveStatus = saveError
+    ? null
+    : saving
+      ? 'Saving…'
+      : dirty
+        ? 'Unsaved…'
+        : justSaved
+          ? 'Saved'
+          : null;
 
   return (
     <div className="notebook-browser-shell">
@@ -600,7 +655,7 @@ export function NotebookBrowser({
                       <p>{note.path}</p>
                     </div>
                     <div className="notebook-browser-document-actions">
-                      {!editing && chiefStatus && (
+                      {chiefStatus && (
                         <span
                           className={`notebook-browser-chief-status${chiefStatus.error ? ' is-error' : ''}`}
                           role="status"
@@ -608,85 +663,58 @@ export function NotebookBrowser({
                           {chiefStatus.text}
                         </span>
                       )}
-                      {!editing && justSaved && (
-                        <span className="notebook-browser-saved" role="status">Saved</span>
-                      )}
-                      {!editing && (
-                        <button type="button" className="notebook-browser-edit-btn" onClick={startEditing}>
-                          Edit
-                        </button>
+                      {saveStatus && (
+                        <span className="notebook-browser-save-status" role="status">{saveStatus}</span>
                       )}
                     </div>
                   </div>
-                  {editing ? (
-                    <div className="notebook-browser-editor">
-                      <textarea
-                        className="notebook-browser-editor-area"
-                        aria-label="Edit note"
-                        value={draft}
-                        onChange={(event) => setDraft(event.target.value)}
-                        spellCheck={false}
-                        autoFocus
-                      />
-                      {conflict && (
-                        <div className="notebook-browser-editor-conflict" role="alert">
-                          <span>
-                            {conflict.currentHash
-                              ? 'This note changed on disk since you opened it.'
-                              : 'This note was deleted on disk since you opened it.'}
-                          </span>
-                          <div className="notebook-browser-editor-conflict-actions">
-                            <button type="button" onClick={() => void reloadFromDisk()} disabled={saving}>
-                              Reload from disk
-                            </button>
-                            <button type="button" onClick={() => void saveDraft(conflict.currentHash ?? '')} disabled={saving}>
-                              Overwrite anyway
-                            </button>
-                          </div>
+                  <div className="notebook-browser-live">
+                    {conflict && (
+                      <div className="notebook-browser-editor-conflict" role="alert">
+                        <span>
+                          {conflict.currentHash
+                            ? 'This note changed on disk since you opened it.'
+                            : 'This note was deleted on disk since you opened it.'}
+                        </span>
+                        <div className="notebook-browser-editor-conflict-actions">
+                          <button type="button" onClick={() => void reloadFromDisk()} disabled={saving}>
+                            Reload from disk
+                          </button>
+                          <button type="button" onClick={() => void saveDraft(conflict.currentHash ?? '', draft)} disabled={saving}>
+                            Overwrite anyway
+                          </button>
                         </div>
-                      )}
-                      {saveError && (
-                        <p className="notebook-browser-editor-error" role="alert">{saveError}</p>
-                      )}
-                      <div className="notebook-browser-editor-actions">
-                        <button
-                          type="button"
-                          className="notebook-browser-editor-save"
-                          onClick={() => void saveDraft(editBaseHashRef.current)}
-                          disabled={saving}
-                        >
-                          {saving ? 'Saving…' : 'Save'}
-                        </button>
-                        <button type="button" onClick={cancelEditing} disabled={saving}>
-                          Cancel
-                        </button>
                       </div>
+                    )}
+                    {saveError && (
+                      <p className="notebook-browser-editor-error" role="alert">{saveError}</p>
+                    )}
+                    <div className="notebook-browser-live-editor">
+                      <LiveMarkdownEditor
+                        value={draft}
+                        onChange={setDraft}
+                        onFollowLink={handleFollowLink}
+                        onSelectionChange={handleSelectionChange}
+                        ariaLabel="Note"
+                      />
                     </div>
-                  ) : (
-                    <>
-                      <article className="notebook-browser-markdown" onMouseUp={captureSelection}>
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                          {note.content || '_This note is empty._'}
-                        </ReactMarkdown>
-                      </article>
-                      <section className="notebook-browser-backlinks" aria-label="Backlinks">
-                        <h3>Linked from {backlinks.length > 0 ? `(${backlinks.length})` : ''}</h3>
-                        {backlinks.length === 0 ? (
-                          <p className="notebook-browser-backlinks-empty">No other note links here.</p>
-                        ) : (
-                          <ul>
-                            {backlinks.map((entry) => (
-                              <li key={entry.path}>
-                                <button type="button" onClick={() => void loadNote(entry.path)} title={entry.path}>
-                                  {entry.title || basename(entry.path)}
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </section>
-                    </>
-                  )}
+                  </div>
+                  <section className="notebook-browser-backlinks" aria-label="Backlinks">
+                    <h3>Linked from {backlinks.length > 0 ? `(${backlinks.length})` : ''}</h3>
+                    {backlinks.length === 0 ? (
+                      <p className="notebook-browser-backlinks-empty">No other note links here.</p>
+                    ) : (
+                      <ul>
+                        {backlinks.map((entry) => (
+                          <li key={entry.path}>
+                            <button type="button" onClick={() => void loadNote(entry.path)} title={entry.path}>
+                              {entry.title || basename(entry.path)}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
                 </>
               )}
               {!noteLoading && !noteError && !note && (
@@ -789,69 +817,6 @@ export function parseNotebookHref(href: string): NotebookHref {
     }
   }
   return { kind: 'external', href: trimmed };
-}
-
-// notebookMarkdownComponents renders headings with slug ids (so #anchors resolve)
-// and routes link clicks: in-notebook links navigate via onNavigate, external
-// links open in a new tab, fragments scroll.
-function notebookMarkdownComponents(onNavigate: (path: string) => void): Components {
-  const slugCounts = new Map<string, number>();
-  const heading = (level: number) => ({ children }: { children?: ReactNode }) => {
-    const base = slug(textOf(children));
-    const count = slugCounts.get(base) ?? 0;
-    slugCounts.set(base, count + 1);
-    const id = count === 0 ? base : `${base}-${count}`;
-    return createElement(`h${level}`, { id }, children);
-  };
-  return {
-    h1: heading(1),
-    h2: heading(2),
-    h3: heading(3),
-    h4: heading(4),
-    h5: heading(5),
-    h6: heading(6),
-    a({ href, children }) {
-      if (!href) return <span>{children}</span>;
-      const target = parseNotebookHref(href);
-      if (target.kind === 'note' && target.path) {
-        const path = target.path;
-        return (
-          <a
-            href={href}
-            className="notebook-link"
-            title={`/${path}`}
-            onClick={(event) => {
-              event.preventDefault();
-              onNavigate(path);
-            }}
-          >
-            {children}
-          </a>
-        );
-      }
-      if (target.kind === 'fragment') {
-        return <a href={href}>{children}</a>;
-      }
-      return (
-        <a href={href} target="_blank" rel="noreferrer">{children}</a>
-      );
-    },
-  };
-}
-
-function textOf(node: ReactNode): string {
-  if (node == null || typeof node === 'boolean') return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(textOf).join('');
-  if (typeof node === 'object' && 'props' in node) {
-    const props = (node as { props?: { children?: ReactNode } }).props;
-    return textOf(props?.children);
-  }
-  return '';
-}
-
-function slug(text: string): string {
-  return text.toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
 }
 
 function basename(path: string): string {

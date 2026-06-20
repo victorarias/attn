@@ -213,10 +213,13 @@
 
 .notebook-browser-document {
   min-width: 0;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .notebook-browser-document-meta {
+  flex: none;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -249,24 +252,10 @@
   flex-shrink: 0;
 }
 
-.notebook-browser-saved {
+.notebook-browser-save-status {
   font-size: 12px;
-  color: var(--accent);
-}
-
-.notebook-browser-edit-btn {
-  padding: 6px 14px;
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  cursor: pointer;
-}
-
-.notebook-browser-edit-btn:hover {
-  color: var(--color-text-primary);
-  border-color: var(--accent);
+  color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
 .notebook-browser-chief-status {
@@ -306,30 +295,38 @@
   cursor: default;
 }
 
-/* Editor */
-.notebook-browser-editor {
+/* Live editor surface — read and type in one. The pane scrolls inside the editor
+   (CM owns its scroller); the meta header and backlinks strip stay fixed. */
+.notebook-browser-live {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 22px clamp(28px, 6vw, 90px) 28px;
+  padding: 18px clamp(28px, 6vw, 90px) 0;
 }
 
-.notebook-browser-editor-area {
-  width: 100%;
-  min-height: 320px;
-  resize: vertical;
-  padding: 16px;
-  color: var(--color-text-primary);
-  background: var(--color-bg-app);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  font: 13px/1.6 ui-monospace, 'SFMono-Regular', monospace;
-  tab-size: 2;
+.notebook-browser-live-editor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.notebook-browser-editor-area:focus {
-  outline: none;
-  border-color: var(--accent);
+/* The @uiw/react-codemirror wrapper and the CM editor both fill the flex cell so
+   the editor owns the vertical scroll (CM keeps the cursor in view as you type). */
+.notebook-browser-live-editor > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.notebook-browser-live-editor .cm-editor {
+  height: 100%;
+}
+
+.notebook-browser-live-editor .cm-scroller {
+  overflow: auto;
 }
 
 .notebook-browser-editor-conflict {
@@ -351,8 +348,7 @@
   flex-shrink: 0;
 }
 
-.notebook-browser-editor-conflict-actions button,
-.notebook-browser-editor-actions button {
+.notebook-browser-editor-conflict-actions button {
   padding: 6px 14px;
   font-size: 13px;
   color: var(--color-text-secondary);
@@ -362,29 +358,11 @@
   cursor: pointer;
 }
 
-.notebook-browser-editor-conflict-actions button:hover:not(:disabled),
-.notebook-browser-editor-actions button:hover:not(:disabled) {
+.notebook-browser-editor-conflict-actions button:hover:not(:disabled) {
   color: var(--color-text-primary);
   border-color: var(--accent);
 }
 
-.notebook-browser-editor-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.notebook-browser-editor-save {
-  color: var(--color-bg-app) !important;
-  background: var(--accent) !important;
-  border-color: var(--accent) !important;
-  font-weight: 600;
-}
-
-.notebook-browser-editor-save:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-
-.notebook-browser-editor-actions button:disabled,
 .notebook-browser-editor-conflict-actions button:disabled {
   opacity: 0.55;
   cursor: default;
@@ -396,86 +374,14 @@
   color: var(--color-danger, #e5484d);
 }
 
-.notebook-browser-markdown {
-  max-width: 900px;
-  padding: 30px clamp(28px, 6vw, 90px) 24px;
-  color: var(--color-text-secondary);
-  font-size: 14px;
-  line-height: 1.65;
-}
-
-.notebook-browser-markdown h1,
-.notebook-browser-markdown h2,
-.notebook-browser-markdown h3 {
-  color: var(--color-text-primary);
-  letter-spacing: -0.02em;
-}
-
-.notebook-browser-markdown h1 { margin: 0 0 24px; font-size: 28px; }
-
-.notebook-browser-markdown h2 {
-  margin: 34px 0 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--color-border-subtle);
-  font-size: 18px;
-}
-
-.notebook-browser-markdown h3 { margin: 24px 0 8px; font-size: 15px; }
-
-.notebook-browser-markdown p,
-.notebook-browser-markdown ul,
-.notebook-browser-markdown ol,
-.notebook-browser-markdown pre,
-.notebook-browser-markdown blockquote {
-  margin: 0 0 16px;
-}
-
-.notebook-browser-markdown ul,
-.notebook-browser-markdown ol { padding-left: 22px; }
-
-.notebook-browser-markdown code {
-  padding: 2px 5px;
-  color: color-mix(in srgb, var(--accent) 75%, var(--color-text-primary));
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 4px;
-  font: 0.9em/1.4 ui-monospace, 'SFMono-Regular', monospace;
-}
-
-.notebook-browser-markdown pre {
-  overflow-x: auto;
-  padding: 14px;
-  background: var(--color-bg-app);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-}
-
-.notebook-browser-markdown pre code {
-  padding: 0;
-  color: var(--color-text-secondary);
-  background: transparent;
-  border: 0;
-}
-
-.notebook-browser-markdown blockquote {
-  padding-left: 14px;
-  color: var(--color-text-tertiary);
-  border-left: 3px solid var(--accent);
-}
-
-.notebook-browser-markdown a { color: var(--accent); }
-
-/* An in-notebook link reads as a wiki cross-reference. */
-.notebook-browser-markdown a.notebook-link {
-  color: color-mix(in srgb, var(--accent) 88%, var(--color-text-primary));
-  text-decoration-style: dotted;
-  text-underline-offset: 2px;
-}
-
+/* Backlinks sit in a fixed strip at the foot of the document pane (stage 3 moves
+   them to the right context rail). It scrolls on its own if there are many. */
 .notebook-browser-backlinks {
-  max-width: 900px;
-  margin: 0 clamp(28px, 6vw, 90px) 70px;
-  padding-top: 18px;
+  flex: none;
+  max-height: 132px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 14px clamp(28px, 6vw, 90px) 18px;
   border-top: 1px solid var(--color-border-subtle);
 }
 
