@@ -45,6 +45,12 @@ describe('parseOutline', () => {
     ]);
   });
 
+  it('keeps a hash that touches the text (the closing sequence needs preceding space)', () => {
+    // CommonMark: only a whitespace-separated trailing run of '#'s closes the heading.
+    const md = ['## C#', '### F# notes ##', '# a # b #'].join('\n');
+    expect(parseOutline(md).map((h) => h.text)).toEqual(['C#', 'F# notes', 'a # b']);
+  });
+
   it('skips empty headings and tolerates an empty document', () => {
     expect(parseOutline('')).toEqual([]);
     expect(parseOutline('## \n#   \ntext')).toEqual([]);

@@ -21,10 +21,12 @@ export interface OutlineHeading {
 }
 
 // A heading is up to three leading spaces (CommonMark's limit before it becomes an
-// indented code block), 1–6 '#', then at least one space and the text. The trailing
-// run of '#'s (an optional closing sequence) is stripped. Requiring the space after
-// the hashes excludes `#hashtag`, which is not a heading.
-const ATX_HEADING = /^ {0,3}(#{1,6})[ \t]+(.*?)[ \t]*#*[ \t]*$/;
+// indented code block), 1–6 '#', then at least one space and the text. Requiring the
+// space after the hashes excludes `#hashtag`, which is not a heading. The optional
+// closing '#' sequence must be PRECEDED by whitespace (CommonMark), so a '#' that
+// touches the text — `## C#` → "C#" — stays part of the heading; only a
+// space-separated trailing run of '#'s is stripped.
+const ATX_HEADING = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
 // A fenced code block opens/closes on a line of 3+ backticks or 3+ tildes. A `#`
 // line inside a fence is code, not a heading, so we must track fence state.
 const FENCE = /^[ \t]*(`{3,}|~{3,})/;
