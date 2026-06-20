@@ -196,6 +196,33 @@ describe('NotebookBrowser', () => {
     await waitFor(() => expect(readNotebook).toHaveBeenCalledWith('journal/2026-06-13.md'));
   });
 
+  it('renders the clicked note immediately without waiting on the slower backlinks fetch', async () => {
+    const { props, backlinksNotebook } = makeProps();
+    // Backlinks walks every note in the daemon and is far slower than a single file
+    // read; defer it so we can prove the editor content does NOT wait on it.
+    let resolveBacklinks: (e: NotebookEntry[]) => void = () => {};
+    backlinksNotebook.mockImplementation(
+      () => new Promise<NotebookEntry[]>((resolve) => { resolveBacklinks = resolve; }),
+    );
+    render(<NotebookBrowser {...props} />);
+
+    // The preferred note's content renders even though its backlinks are still pending.
+    await waitForNoteLoaded();
+    expect(await screen.findByRole('heading', { level: 2, name: 'Knowledge index' })).toBeInTheDocument();
+
+    // Click another note: its content appears before its backlinks resolve — no stale
+    // previous-file content stranded under the new selection.
+    fireEvent.click(screen.getByRole('button', { name: /Foo decision/ }));
+    await waitFor(() => expect(editor().value).toContain('# knowledge/areas/foo.md'));
+    expect(screen.getByRole('heading', { level: 2, name: 'Foo decision' })).toBeInTheDocument();
+
+    // Backlinks fills in later, independently.
+    await act(async () => {
+      resolveBacklinks([{ path: 'journal/2026-06-13.md', type: 'journal', title: '2026-06-13', size: 20 }]);
+    });
+    expect(await screen.findByRole('button', { name: '2026-06-13' })).toBeInTheDocument();
+  });
+
   it('re-fetches the tree and open note when the change signal bumps', async () => {
     const { props, listNotebook, readNotebook } = makeProps();
     const { rerender } = render(<NotebookBrowser {...props} />);
