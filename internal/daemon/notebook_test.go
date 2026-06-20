@@ -696,6 +696,37 @@ func TestValidateNotebookRoot(t *testing.T) {
 	}
 }
 
+// The settings payload must surface the daemon-resolved notebook root under the
+// read-only notebook.root.effective key so the UI can show where the notebook
+// lives even when the override is blank. The key is computed, not stored, and
+// must never be accepted by set_setting.
+func TestNotebookRootEffectiveSurfacedReadOnly(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+
+	custom := t.TempDir()
+	d.store.SetSetting(SettingNotebookRoot, custom)
+	settings := d.settingsWithAgentAvailability()
+	if got := settings[SettingNotebookRootEffective]; got != custom {
+		t.Fatalf("notebook.root.effective = %v, want resolved root %q", got, custom)
+	}
+
+	// Blank override still resolves to (and surfaces) the profile default.
+	d.store.SetSetting(SettingNotebookRoot, "")
+	resolved, err := d.notebookRoot()
+	if err != nil {
+		t.Fatalf("notebookRoot: %v", err)
+	}
+	settings = d.settingsWithAgentAvailability()
+	if got := settings[SettingNotebookRootEffective]; got != resolved {
+		t.Fatalf("notebook.root.effective with default = %v, want %q", got, resolved)
+	}
+
+	// The computed key is read-only: set_setting must reject it.
+	if err := d.validateSetting(SettingNotebookRootEffective, "/tmp/whatever"); err == nil {
+		t.Fatal("notebook.root.effective must not be settable")
+	}
+}
+
 // readInboxNote returns the inbox note body for assertions.
 func readInboxNote(t *testing.T, d *Daemon) string {
 	t.Helper()

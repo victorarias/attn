@@ -106,6 +106,7 @@ export function SettingsModal({
   onSetTheme,
 }: SettingsModalProps) {
   const [projectsDir, setProjectsDir] = useState(settings.projects_directory || '');
+  const [notebookRoot, setNotebookRoot] = useState(settings['notebook.root'] || '');
   const [agentExecutables, setAgentExecutables] = useState<Record<SessionAgent, string>>({});
   const [editorExecutable, setEditorExecutable] = useState(settings.editor_executable || '');
   const [defaultAgent, setDefaultAgent] = useState<SessionAgent>('claude');
@@ -142,6 +143,10 @@ export function SettingsModal({
 
   // Sync with settings when modal opens
   const actualProjectsDir = settings.projects_directory || '';
+  // notebook.root is the user override (blank => default); notebook.root.effective is
+  // the daemon-resolved absolute folder the notebook actually lives in right now.
+  const actualNotebookRoot = settings['notebook.root'] || '';
+  const effectiveNotebookRoot = settings['notebook.root.effective'] || '';
   const tailscaleEnabled = (settings.tailscale_enabled || 'false') === 'true';
   const workflowsEnabled = (settings.workflows_enabled || 'false') === 'true';
   const tailscaleStatus = settings.tailscale_status || 'disabled';
@@ -227,6 +232,7 @@ export function SettingsModal({
   useEffect(() => {
     if (!isOpen) return;
     setProjectsDir(actualProjectsDir);
+    setNotebookRoot(actualNotebookRoot);
     setAgentExecutables(actualAgentExecutables);
     setEditorExecutable(actualEditorExecutable);
     setDefaultAgent(resolvedDefaultAgent);
@@ -249,7 +255,7 @@ export function SettingsModal({
     setPluginSourcePath('');
     setPluginError(null);
     setPluginActionName(null);
-  }, [isOpen, actualProjectsDir, actualAgentExecutables, actualEditorExecutable, resolvedDefaultAgent, actualReviewLoopPresets, actualReviewLoopModel, actualReviewerModel, actualWorkspaceContextKeeper]);
+  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualEditorExecutable, resolvedDefaultAgent, actualReviewLoopPresets, actualReviewLoopModel, actualReviewerModel, actualWorkspaceContextKeeper]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -308,6 +314,36 @@ export function SettingsModal({
       }
     }
   }, [projectsDir, actualProjectsDir, onSetSetting]);
+
+  const handleBrowseNotebookRoot = useCallback(async () => {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: 'Select Notebook Folder',
+    });
+    if (selected && typeof selected === 'string') {
+      setNotebookRoot(selected);
+      onSetSetting('notebook.root', selected);
+    }
+  }, [onSetSetting]);
+
+  const handleNotebookRootChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setNotebookRoot(e.target.value);
+  }, []);
+
+  // Blank commits as an empty override, which the daemon resolves back to the
+  // per-profile default (~/attn-notebook).
+  const commitNotebookRoot = useCallback(() => {
+    if (notebookRoot !== actualNotebookRoot) {
+      onSetSetting('notebook.root', notebookRoot);
+    }
+  }, [notebookRoot, actualNotebookRoot, onSetSetting]);
+
+  const handleNotebookRootKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      commitNotebookRoot();
+    }
+  }, [commitNotebookRoot]);
 
   const handleExecutableChange = useCallback((agent: SessionAgent, value: string) => {
     setAgentExecutables((prev) => ({ ...prev, [agent]: value }));
@@ -655,10 +691,10 @@ export function SettingsModal({
         {
           id: 'general',
           label: 'Appearance and projects',
-          title: 'Appearance and project roots',
-          description: 'Theme selection and the directory attn uses when opening repositories and worktrees.',
-          count: 2,
-          keywords: 'theme appearance dark light system projects directory worktrees roots',
+          title: 'Appearance, project roots, and Notebook',
+          description: 'Theme selection, the directory attn uses when opening repositories and worktrees, and where your Notebook lives.',
+          count: 3,
+          keywords: 'theme appearance dark light system projects directory worktrees roots notebook folder knowledge base journal location',
         },
       ],
     },
@@ -886,6 +922,44 @@ export function SettingsModal({
               Browse
             </button>
           </div>
+        </div>
+      </section>
+
+      <section className="settings-block">
+        <div className="settings-block-intro">
+          <div className="settings-kicker">Notebook</div>
+          <h3>Notebook Folder</h3>
+          <p className="settings-description">
+            Where attn keeps your durable Notebook — dated journals and the knowledge base — as plain
+            markdown you own. Leave blank to use the default (<code>~/attn-notebook</code>, separate per
+            profile). Changing this points attn at the new folder; your existing notes are not moved, so
+            move or sync the folder yourself if you want the current contents to come along.
+          </p>
+        </div>
+        <div className="settings-block-body">
+          <div className="settings-inline-form projects-dir-input">
+            <input
+              data-testid="settings-notebook-root-input"
+              type="text"
+              value={notebookRoot}
+              onChange={handleNotebookRootChange}
+              onBlur={commitNotebookRoot}
+              onKeyDown={handleNotebookRootKeyDown}
+              placeholder={effectiveNotebookRoot || '~/attn-notebook'}
+              className="settings-input"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            <button className="settings-action" onClick={handleBrowseNotebookRoot}>
+              Browse
+            </button>
+          </div>
+          {effectiveNotebookRoot && (
+            <p className="settings-description" data-testid="settings-notebook-root-effective">
+              Currently: <code>{effectiveNotebookRoot}</code>
+            </p>
+          )}
         </div>
       </section>
     </>

@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-20]
+
+### Added
+- **Choose where your Notebook folder lives.** Settings → General now has a Notebook Folder picker, so you can point attn's durable Notebook — your dated journals and knowledge base — at any folder you own instead of the default `~/attn-notebook` (separate per profile). Browse to a folder or type a path, and the picker shows where the Notebook currently resolves to; leave it blank to fall back to the default. attn starts using the new folder right away — your existing notes aren't moved, so move or sync the folder yourself if you want the current contents to come along.
+
 ## [2026-06-19]
 
 ### Added

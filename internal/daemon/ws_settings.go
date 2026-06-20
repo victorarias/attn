@@ -44,6 +44,11 @@ const (
 	// SettingNotebookRoot overrides the notebook's filesystem root. Empty =>
 	// the profile-derived default (~/attn-notebook[-profile]).
 	SettingNotebookRoot = "notebook.root"
+	// SettingNotebookRootEffective is a READ-ONLY, daemon-computed key surfaced in
+	// the settings payload (never stored, never accepted by set_setting): the
+	// absolute folder the notebook currently resolves to, so the UI can show where
+	// the notebook lives even when SettingNotebookRoot is blank (the default).
+	SettingNotebookRootEffective = "notebook.root.effective"
 	// SettingNotebookCronFrequency is the 5-field cron expression for the
 	// notebook's nightly maintenance slot (currently the daily-narrate backstop).
 	// Empty => the default ("0 3 * * *").
@@ -201,6 +206,9 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 		settings[SettingCopilotAvailable] = settings[availabilitySettingKey(string(protocol.SessionAgentCopilot))]
 	}
 	settings[SettingPTYBackendMode] = d.ptyBackendMode()
+	if root, err := d.notebookRoot(); err == nil {
+		settings[SettingNotebookRootEffective] = root
+	}
 	settings[SettingTailscaleEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingTailscaleEnabled]))
 	settings[SettingWorkflowsEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingWorkflowsEnabled]))
 
