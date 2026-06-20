@@ -2905,3 +2905,156 @@ describe('useDaemonSocket workflow runs', () => {
     unmount();
   });
 });
+
+describe('useDaemonSocket fs surface', () => {
+  let originalWebSocket: typeof WebSocket;
+
+  beforeEach(() => {
+    originalWebSocket = globalThis.WebSocket;
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+  });
+  afterEach(() => {
+    globalThis.WebSocket = originalWebSocket;
+    vi.clearAllMocks();
+  });
+
+  function renderFsHook(extra: Record<string, unknown> = {}) {
+    return renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+        ...extra,
+      }),
+    );
+  }
+
+  // The last command the daemon would have received, parsed (request_id correlates
+  // the result event the test then emits).
+  function lastSent(ws: FakeWebSocket): { cmd: string; request_id: string; [k: string]: unknown } {
+    return JSON.parse(ws.sent[ws.sent.length - 1]);
+  }
+
+  it('sends fs_list and resolves entries, converting is_dir to isDir', async () => {
+    const { result, unmount } = renderFsHook();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.sendFsList('knowledge');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent.cmd).toBe('fs_list');
+    expect(sent.path).toBe('knowledge');
+
+    ws.emit({
+      event: 'fs_list_result',
+      request_id: sent.request_id,
+      success: true,
+      entries: [
+        { path: 'knowledge/areas', name: 'areas', is_dir: true, size: 0 },
+        { path: 'knowledge/index.md', name: 'index.md', is_dir: false, size: 12, modified: '2026-06-20T00:00:00Z' },
+      ],
+    });
+
+    await expect(promise).resolves.toEqual([
+      { path: 'knowledge/areas', name: 'areas', isDir: true, size: 0, modified: undefined },
+      { path: 'knowledge/index.md', name: 'index.md', isDir: false, size: 12, modified: '2026-06-20T00:00:00Z' },
+    ]);
+    unmount();
+  });
+
+  it('omits path from fs_list when listing the root', async () => {
+    const { result, unmount } = renderFsHook();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.sendFsList();
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent.cmd).toBe('fs_list');
+    expect('path' in sent).toBe(false);
+
+    ws.emit({ event: 'fs_list_result', request_id: sent.request_id, success: true, entries: [] });
+    await expect(promise).resolves.toEqual([]);
+    unmount();
+  });
+
+  it('resolves fs_read with the file content and hash', async () => {
+    const { result, unmount } = renderFsHook();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.sendFsRead('notes/todo.txt');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent).toMatchObject({ cmd: 'fs_read', path: 'notes/todo.txt' });
+
+    ws.emit({
+      event: 'fs_read_result',
+      request_id: sent.request_id,
+      success: true,
+      result: { path: 'notes/todo.txt', content: 'buy milk', hash: 'h1' },
+    });
+    await expect(promise).resolves.toEqual({ path: 'notes/todo.txt', content: 'buy milk', hash: 'h1' });
+    unmount();
+  });
+
+  it('rejects fs_read on a failed result', async () => {
+    const { result, unmount } = renderFsHook();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.sendFsRead('gone.txt');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    ws.emit({ event: 'fs_read_result', request_id: sent.request_id, success: false, error: 'fsdoc: gone.txt not found' });
+
+    await expect(promise).rejects.toThrow(/not found/);
+    unmount();
+  });
+
+  it('resolves fs_write, mapping current_hash to currentHash on a conflict', async () => {
+    const { result, unmount } = renderFsHook();
+    const ws = await waitForOpenSocket();
+
+    // A successful (non-conflict) write.
+    const ok = result.current.sendFsWrite('a.txt', 'v1');
+    await Promise.resolve();
+    let sent = lastSent(ws);
+    expect(sent).toMatchObject({ cmd: 'fs_write', path: 'a.txt', content: 'v1' });
+    expect('base_hash' in sent).toBe(false);
+    ws.emit({
+      event: 'fs_write_result',
+      request_id: sent.request_id,
+      success: true,
+      result: { path: 'a.txt', hash: 'h2', conflict: false },
+    });
+    await expect(ok).resolves.toEqual({ path: 'a.txt', hash: 'h2', conflict: false, currentHash: undefined });
+
+    // A stale-base conflict: still a resolved result, with current_hash mapped.
+    const conflicting = result.current.sendFsWrite('a.txt', 'v2', 'deadbeef');
+    await Promise.resolve();
+    sent = lastSent(ws);
+    expect(sent.base_hash).toBe('deadbeef');
+    ws.emit({
+      event: 'fs_write_result',
+      request_id: sent.request_id,
+      success: true,
+      result: { path: 'a.txt', conflict: true, current_hash: 'h2' },
+    });
+    await expect(conflicting).resolves.toMatchObject({ conflict: true, currentHash: 'h2' });
+    unmount();
+  });
+
+  it('invokes onFsChanged with origin and paths', async () => {
+    const onFsChanged = vi.fn();
+    const { unmount } = renderFsHook({ onFsChanged });
+    const ws = await waitForOpenSocket();
+
+    act(() => {
+      ws.emit({ event: 'fs_changed', origin: 'ui', paths: ['notes/todo.txt'] });
+    });
+    expect(onFsChanged).toHaveBeenCalledWith('ui', ['notes/todo.txt']);
+    unmount();
+  });
+});

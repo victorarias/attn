@@ -1,0 +1,85 @@
+/* Lazy filesystem tree. Tracks the app's light/dark mode through the same design
+   tokens the notebook browser uses (--accent, --color-*), so it sits seamlessly in
+   the same pane. Indentation is applied inline per depth (see indent() in the TSX);
+   these rules own only the row chrome. */
+
+.file-tree {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.file-tree-group {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.file-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 10px 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-tree-row:hover {
+  background: color-mix(in srgb, var(--color-bg-elevated) 60%, transparent);
+}
+
+.file-tree-file.is-selected {
+  background: var(--color-bg-elevated);
+  border-color: var(--color-border);
+}
+
+.file-tree-chevron {
+  display: inline-block;
+  width: 12px;
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+  transition: transform 0.12s ease;
+  transform: rotate(0deg);
+}
+
+.file-tree-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.file-tree-dir .file-tree-name {
+  font-weight: 550;
+}
+
+.file-tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-file.is-selected .file-tree-name {
+  color: var(--accent);
+}
+
+.file-tree-state {
+  list-style: none;
+  padding: 4px 10px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.file-tree-error {
+  color: var(--color-danger, #e5484d);
+}
+
+.file-tree-empty {
+  font-style: italic;
+  opacity: 0.8;
+}

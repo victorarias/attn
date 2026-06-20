@@ -442,6 +442,35 @@ export interface NotebookSendToChiefResult {
   nudged: boolean;
 }
 
+// One child of a listed directory in the generic filesystem surface (fs_list).
+// isDir distinguishes a subdirectory (expand with another fs_list) from a file
+// (open with fs_read). Mirrors the daemon's protocol.FsEntry (is_dir on the wire).
+export interface FsEntry {
+  path: string;
+  name: string;
+  isDir: boolean;
+  size: number;
+  modified?: string;
+}
+
+// The full bytes of one file plus its content hash (for hash-CAS edits). Mirrors
+// the daemon's protocol.FsReadResult.
+export interface FsReadResult {
+  path: string;
+  content: string;
+  hash: string;
+}
+
+// The outcome of a filesystem hash-CAS save. conflict=true means the file changed
+// on disk since it was loaded, so the write did NOT apply; currentHash is the hash
+// now on disk. Same contract as NotebookWriteResult; mirrors protocol.FsWriteResult.
+export interface FsWriteResult {
+  path: string;
+  hash?: string;
+  conflict: boolean;
+  currentHash?: string;
+}
+
 interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   // Fired when notebook content changes (any client/agent/external write). paths
@@ -451,6 +480,10 @@ interface UseDaemonSocketOptions {
   // transition: queue/run/retry/fail/done). Carries no payload — an open Tasks
   // panel refetches via notebook_task_list to reflect truth.
   onNotebookTasksChanged?: () => void;
+  // Fired when files under the root change (any client/agent/external write). paths
+  // are root-relative; origin is agent|ui|external. Mirrors onNotebookChanged for
+  // the generic filesystem surface (fs_changed).
+  onFsChanged?: (origin: string, paths: string[]) => void;
   onChiefOfStaffDispatchesUpdate?: (dispatches: ChiefOfStaffDispatch[]) => void;
   onWorkspacesUpdate: (workspaces: DaemonWorkspace[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
@@ -733,6 +766,7 @@ export function useDaemonSocket({
   onSessionsUpdate,
   onNotebookChanged,
   onNotebookTasksChanged,
+  onFsChanged,
   onChiefOfStaffDispatchesUpdate,
   onWorkspacesUpdate,
   onPRsUpdate,
@@ -763,6 +797,7 @@ export function useDaemonSocket({
     onSessionsUpdate,
     onNotebookChanged,
     onNotebookTasksChanged,
+    onFsChanged,
     onChiefOfStaffDispatchesUpdate,
     onWorkspacesUpdate,
     onPRsUpdate,
@@ -782,6 +817,7 @@ export function useDaemonSocket({
     onSessionsUpdate,
     onNotebookChanged,
     onNotebookTasksChanged,
+    onFsChanged,
     onChiefOfStaffDispatchesUpdate,
     onWorkspacesUpdate,
     onPRsUpdate,
@@ -1477,6 +1513,93 @@ export function useDaemonSocket({
             // reflects the runner's truth (no optimistic mutation here).
             callbacksRef.current.onNotebookTasksChanged?.();
             break;
+
+          case 'fs_changed':
+            callbacksRef.current.onFsChanged?.(
+              typeof data.origin === 'string' ? data.origin : '',
+              Array.isArray(data.paths) ? data.paths : [],
+            );
+            break;
+
+          case 'fs_list_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `fs_list:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success) {
+              // Convert the wire's is_dir to the camelCase public FsEntry shape.
+              const rawEntries = (data.entries || []) as Array<{
+                path: string;
+                name: string;
+                is_dir?: boolean;
+                size?: number;
+                modified?: string;
+              }>;
+              pending.resolve(
+                rawEntries.map((e) => ({
+                  path: e.path,
+                  name: e.name,
+                  isDir: !!e.is_dir,
+                  size: typeof e.size === 'number' ? e.size : 0,
+                  modified: e.modified,
+                })),
+              );
+            } else {
+              pending.reject(new Error(data.error || 'Filesystem list failed'));
+            }
+            break;
+          }
+
+          case 'fs_read_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `fs_read:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success && data.result) {
+              pending.resolve(data.result);
+            } else {
+              pending.reject(new Error(data.error || 'Filesystem read failed'));
+            }
+            break;
+          }
+
+          case 'fs_write_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `fs_write:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success && data.result) {
+              // A conflict is a SUCCESSFUL result the editor reconciles, not a
+              // rejection — only a transport/daemon error rejects.
+              pending.resolve({
+                path: data.result.path,
+                hash: data.result.hash,
+                conflict: !!data.result.conflict,
+                currentHash: data.result.current_hash,
+              });
+            } else {
+              pending.reject(new Error(data.error || 'Filesystem write failed'));
+            }
+            break;
+          }
 
           case 'notebook_list_result':
           case 'notebook_backlinks_result': {
@@ -3893,6 +4016,73 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
+  // List one directory's immediate children over the generic filesystem surface.
+  // Omit/empty path = the root directory. Shallow: a tree expands lazily, one call
+  // per node.
+  const sendFsList = useCallback((path?: string): Promise<FsEntry[]> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('fs_list');
+      const key = `fs_list:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'fs_list', request_id: requestId, ...(path ? { path } : {}) }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Filesystem list timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
+  // Read one file's full bytes + content hash.
+  const sendFsRead = useCallback((path: string): Promise<FsReadResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('fs_read');
+      const key = `fs_read:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'fs_read', request_id: requestId, path }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Filesystem read timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
+  // Save one file via the daemon (hash-CAS). Omit baseHash to create-only; pass the
+  // file's loaded hash to edit. Resolves with the outcome — including a conflict
+  // (resolve, not reject) the editor reconciles; rejects only on a transport error.
+  const sendFsWrite = useCallback((path: string, content: string, baseHash?: string): Promise<FsWriteResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('fs_write');
+      const key = `fs_write:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'fs_write', request_id: requestId, path, content, ...(baseHash ? { base_hash: baseHash } : {}) }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Filesystem save timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
   // Get recent locations from daemon
   const sendGetRecentLocations = useCallback((endpointId?: string, limit?: number): Promise<RecentLocationsResult> => {
     return new Promise((resolve, reject) => {
@@ -4636,6 +4826,9 @@ export function useDaemonSocket({
     sendNotebookBacklinks,
     sendNotebookWrite,
     sendNotebookToChief,
+    sendFsList,
+    sendFsRead,
+    sendFsWrite,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,
