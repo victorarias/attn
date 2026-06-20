@@ -169,7 +169,7 @@ const baseTheme = EditorView.baseTheme({
     borderRadius: '4px',
     background: 'var(--color-bg-elevated, rgba(127,127,127,0.16))',
   },
-  '.cm-md-link': { color: 'var(--color-accent, #7c9cff)', cursor: 'pointer' },
+  '.cm-md-link': { color: 'var(--accent, #ff6b35)', cursor: 'pointer' },
 });
 
 export function liveMarkdownPreview(options: LiveMarkdownOptions = {}): Extension {

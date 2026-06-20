@@ -7,6 +7,10 @@
  * every change, and link-follow / selection callbacks are recorded too.
  */
 import { useCallback, useEffect, useState } from 'react';
+// Pull in the app's design tokens so the transparent editor renders over the real
+// dark pane (otherwise it sits on the browser's default white page, which is exactly
+// the kind of theme mismatch this editor is supposed to avoid).
+import '../../src/App.css';
 import { LiveMarkdownEditor, type LiveSelection } from '../../src/components/notebook/LiveMarkdownEditor';
 import type { HarnessProps } from '../types';
 
@@ -40,13 +44,14 @@ export function LiveMarkdownEditorHarness({ onReady, setTriggerRerender }: Harne
   }, []);
 
   useEffect(() => {
+    document.documentElement.setAttribute('data-theme', 'dark');
     setTriggerRerender(() => force((n) => n + 1));
     onReady();
   }, [onReady, setTriggerRerender]);
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', padding: 24 }}>
-      <div style={{ flex: 1, minHeight: 0, border: '1px solid #2a2a30', borderRadius: 8 }}>
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', padding: 24, background: 'var(--color-bg-app)' }}>
+      <div style={{ flex: 1, minHeight: 0, border: '1px solid var(--color-border)', borderRadius: 8 }}>
         <LiveMarkdownEditor
           value={value}
           onChange={handleChange}

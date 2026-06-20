@@ -26,13 +26,19 @@ interface LiveMarkdownEditorProps {
   autoFocus?: boolean;
 }
 
-// Match the surrounding document pane: transparent background, inherit the app's
-// theme colors via CSS variables so it tracks light/dark without a CM theme swap.
+// Themed entirely through the app's CSS variables so it tracks the app's light/dark
+// mode automatically — no CodeMirror dark/light flag to keep in sync. The catch:
+// CodeMirror's *base* theme styles the cursor/selection/caret from `&light`/`&dark`
+// rules that only activate when a theme sets the `darkTheme` facet (which we don't,
+// on purpose — the CSS variables already track the mode). So a complete app theme
+// must OWN every surface CM would otherwise pick a light-biased default for:
+// background, foreground, the cursor, and the selection. Get this wrong and you get
+// a black caret / lavender selection on a dark pane.
 const editorTheme = EditorView.theme({
   '&': {
     height: '100%',
     backgroundColor: 'transparent',
-    color: 'var(--color-text-secondary, inherit)',
+    color: 'var(--color-text-primary, inherit)',
     fontSize: '14px',
   },
   '.cm-content': {
@@ -40,13 +46,24 @@ const editorTheme = EditorView.theme({
       "ui-serif, Georgia, 'Times New Roman', var(--font-sans, system-ui), serif",
     lineHeight: '1.65',
     padding: '4px 0 80px',
-    caretColor: 'var(--color-accent, #7c9cff)',
   },
   '.cm-scroller': { overflow: 'auto' },
   '&.cm-focused': { outline: 'none' },
   '.cm-line': { padding: '0 2px' },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
-    backgroundColor: 'var(--color-accent-soft, rgba(124,156,255,0.22))',
+  // basicSetup's drawSelection hides the native caret (`caret-color: transparent`)
+  // and renders its OWN `.cm-cursor` element, so the caret color is that element's
+  // left border — NOT `.cm-content { caretColor }`. This selector is deep enough to
+  // outrank CM's base `&light/&dark .cm-cursor` rule (theme beats baseTheme on a
+  // specificity tie), so the app's text color wins in both themes.
+  '.cm-cursorLayer .cm-cursor, .cm-dropCursor': {
+    borderLeftColor: 'var(--color-text-primary, #e8e8e8)',
+    borderLeftWidth: '2px',
+  },
+  // CM's base focused-selection rule is highly specific (`&dark.cm-focused > … >
+  // .cm-selectionLayer .cm-selectionBackground`), more than a theme can match, so
+  // !important is the clean way to assert the app accent over it in both themes.
+  '.cm-selectionLayer .cm-selectionBackground': {
+    backgroundColor: 'color-mix(in srgb, var(--accent, #ff6b35) 30%, transparent) !important',
   },
 });
 

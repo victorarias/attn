@@ -36,6 +36,23 @@ test.describe('LiveMarkdownEditor (live preview)', () => {
     await page.screenshot({ path: 'test-results/live-editor-active-line.png' });
   });
 
+  test('renders a visible caret in the app theme (not CodeMirror\'s default black)', async ({ page }) => {
+    // Regression: basicSetup's drawSelection hides the native caret and draws its own
+    // .cm-cursor, whose default border is solid black — invisible on the dark pane.
+    // Our editorTheme must paint it the app's text color (a CM theme without {dark}
+    // otherwise inherits the light base default).
+    await page.goto('/test-harness/?component=LiveMarkdownEditor');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.locator('.cm-content').click(); // focus → the cursor layer renders
+
+    const cursor = page.locator('.cm-cursor').first();
+    await cursor.waitFor();
+    const borderColor = await cursor.evaluate((el) => getComputedStyle(el).borderLeftColor);
+    // The bug was a black caret; ours uses --color-text-primary (dark theme #e8e8e8).
+    expect(borderColor).not.toBe('rgb(0, 0, 0)');
+    expect(borderColor).toBe('rgb(232, 232, 232)');
+  });
+
   test('typing edits the document and reports changes', async ({ page }) => {
     await page.goto('/test-harness/?component=LiveMarkdownEditor&empty=1');
     await page.waitForFunction(() => window.__HARNESS__?.ready === true);

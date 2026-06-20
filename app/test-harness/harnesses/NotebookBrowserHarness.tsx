@@ -7,6 +7,10 @@
  * via the writeNotebook mock so the autosave path is observable.
  */
 import { useCallback, useEffect } from 'react';
+// Pull in the app's design tokens (--color-*, --accent) so the harness renders with
+// the real theme — without this the editor/modal fall back to undefined variables and
+// the screenshot isn't color-representative.
+import '../../src/App.css';
 import { NotebookBrowser } from '../../src/components/NotebookBrowser';
 import type {
   NotebookEntry,
@@ -56,6 +60,9 @@ export function NotebookBrowserHarness({ onReady, setTriggerRerender }: HarnessP
   const retryTask = useCallback(async (): Promise<NotebookTask | null> => null, []);
 
   useEffect(() => {
+    // The app defaults to the dark theme (useTheme DEFAULT_PREFERENCE); force it here
+    // so the harness is deterministic regardless of the runner's OS color scheme.
+    document.documentElement.setAttribute('data-theme', 'dark');
     setTriggerRerender(() => {});
     onReady();
   }, [onReady, setTriggerRerender]);
