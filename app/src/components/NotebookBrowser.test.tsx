@@ -329,7 +329,7 @@ describe('NotebookBrowser', () => {
   });
 
   it('flushes an unsaved buffer when navigating away before autosave fires', async () => {
-    const { props, writeNotebook } = makeProps();
+    const { props, writeNotebook, readNotebook } = makeProps();
     render(<NotebookBrowser {...props} />);
     await waitForNoteLoaded();
 
@@ -337,8 +337,73 @@ describe('NotebookBrowser', () => {
     fireEvent.change(editor(), { target: { value: '# quick edit\n' } });
     fireEvent.click(screen.getByRole('button', { name: /Foo decision/ }));
 
-    // The outgoing buffer is flushed against its loaded hash, so the edit isn't lost.
+    // The outgoing buffer is flushed against its loaded hash, so the edit isn't lost,
+    // and (the flush having succeeded) the navigation lands on the new note.
     await waitFor(() => expect(writeNotebook).toHaveBeenCalledWith('knowledge/index.md', '# quick edit\n', 'h1'));
+    await waitFor(() => expect(readNotebook).toHaveBeenCalledWith('knowledge/areas/foo.md'));
+    expect(await screen.findByRole('heading', { level: 2, name: 'Foo decision' })).toBeInTheDocument();
+  });
+
+  it('aborts navigation and surfaces the conflict when the navigate flush conflicts', async () => {
+    const { props, writeNotebook, readNotebook } = makeProps();
+    // The flush triggered by navigating away conflicts (the note changed on disk).
+    writeNotebook.mockResolvedValueOnce({ path: 'knowledge/index.md', conflict: true, currentHash: 'hX' });
+    render(<NotebookBrowser {...props} />);
+    await waitForNoteLoaded();
+
+    // Type, then navigate away before the autosave fires; the flush hits the conflict.
+    fireEvent.change(editor(), { target: { value: '# mine\n' } });
+    fireEvent.click(screen.getByRole('button', { name: /Foo decision/ }));
+
+    // The flush wrote against the loaded hash and came back conflicted, so the
+    // navigation is abandoned: we stay on the current note, the conflict banner shows,
+    // and the buffer is intact — the edit is NOT lost behind a silent navigation.
+    await waitFor(() => expect(writeNotebook).toHaveBeenCalledWith('knowledge/index.md', '# mine\n', 'h1'));
+    expect(await screen.findByText(/changed on disk/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Knowledge index' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 2, name: 'Foo decision' })).not.toBeInTheDocument();
+    expect(editor().value).toBe('# mine\n');
+    expect(readNotebook).not.toHaveBeenCalledWith('knowledge/areas/foo.md');
+  });
+
+  it('does not stamp a stale reload-from-disk onto a note navigated to mid-reload', async () => {
+    const { props, writeNotebook, readNotebook } = makeProps();
+    // Autosave conflicts (so the "Reload from disk" affordance appears); the later
+    // navigate flush then succeeds, superseding the in-flight reload.
+    writeNotebook
+      .mockResolvedValueOnce({ path: 'knowledge/index.md', conflict: true, currentHash: 'hX' })
+      .mockResolvedValueOnce({ path: 'knowledge/index.md', hash: 'h2', conflict: false });
+    // Defer the SECOND read of index (the reload) so navigation can outrun it.
+    let indexReads = 0;
+    let resolveReload: (r: NotebookReadResult) => void = () => {};
+    readNotebook.mockImplementation((path) => {
+      if (path === 'knowledge/index.md') {
+        indexReads += 1;
+        if (indexReads === 2) return new Promise<NotebookReadResult>((resolve) => { resolveReload = resolve; });
+      }
+      return Promise.resolve({ path, content: `# ${path}\n\nbody`, hash: 'h1' });
+    });
+    render(<NotebookBrowser {...props} />);
+    await waitForNoteLoaded();
+
+    // Edit → the debounced autosave conflicts → the reconcile banner appears.
+    fireEvent.change(editor(), { target: { value: '# mine\n' } });
+    expect(await screen.findByText(/changed on disk/i, undefined, { timeout: 2500 })).toBeInTheDocument();
+
+    // Start a reload from disk (its read is deferred), then navigate away before it
+    // resolves; the navigate flush succeeds and lands us on the new note.
+    fireEvent.click(screen.getByRole('button', { name: 'Reload from disk' }));
+    fireEvent.click(screen.getByRole('button', { name: /Foo decision/ }));
+    await screen.findByRole('heading', { level: 2, name: 'Foo decision' });
+    await waitFor(() => expect(editor().value).toContain('# knowledge/areas/foo.md'));
+
+    // The stale reload of index now resolves — it must NOT stamp its content over the
+    // note the user navigated to.
+    await act(async () => {
+      resolveReload({ path: 'knowledge/index.md', content: '# reloaded index\n', hash: 'hX' });
+    });
+    expect(editor().value).not.toContain('# reloaded index');
+    expect(editor().value).toContain('# knowledge/areas/foo.md');
   });
 
   it('keeps the buffer when a change signal arrives with unsaved edits (no clobber)', async () => {

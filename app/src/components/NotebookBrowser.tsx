@@ -41,6 +41,11 @@ const PREFERRED_FIRST = ['knowledge/index.md', 'index.md'];
 // write (and one origin=ui broadcast).
 const AUTOSAVE_DELAY_MS = 700;
 
+// Outcome of persisting the buffer. On-demand callers (navigate/close) MUST react
+// to 'conflict'/'error' — a CAS conflict cannot be silently dropped, or the user's
+// edits vanish behind a navigation/close without the banner ever showing.
+type PersistOutcome = 'saved' | 'conflict' | 'error' | 'noop';
+
 export function NotebookBrowser({
   isOpen,
   onClose,
@@ -83,17 +88,30 @@ export function NotebookBrowser({
   // a slow response from a superseded navigation is dropped. (A render-synced ref
   // can't do this — it only updates on commit, after the await may have resolved.)
   const loadSeqRef = useRef(0);
-  // Persists the outgoing note's unsaved buffer when navigation/close happens before
-  // the debounced autosave fires. Assigned below (after the editing refs exist) and
-  // invoked here via a ref so loadNote/clearSelection don't depend on declaration
-  // order. A no-op until assigned.
-  const flushSaveRef = useRef<() => void>(() => {});
+  // Persists the outgoing note's unsaved buffer before a navigation/close replaces or
+  // hides it — surfacing a CAS conflict rather than dropping it. Assigned below (after
+  // the editing state/refs exist) and invoked via a ref so loadNote — declared above
+  // the editing block — doesn't depend on declaration order. A no-op until assigned.
+  const persistRef = useRef<() => Promise<PersistOutcome>>(async () => 'noop');
   // The dialog container is the deliberate initial focus target so keyboard/AT
   // users land inside the modal (engaging the focus trap) without auto-selecting
   // the Close button. Tab from here moves to the first interactive control.
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  useEscapeStack(onClose, isOpen);
+  // Closing with unsaved edits persists them first; if that write conflicts (or
+  // errors) we keep the modal open so the conflict banner can be reconciled, rather
+  // than losing the buffer behind the close. dirtyRef short-circuits the clean case
+  // to an immediate close (no write, no await).
+  const requestClose = useCallback(async () => {
+    if (dirtyRef.current) {
+      const outcome = await persistRef.current();
+      if (outcome === 'conflict' || outcome === 'error') return;
+    }
+    onClose();
+  }, [onClose]);
+  const handleEscape = useCallback(() => void requestClose(), [requestClose]);
+
+  useEscapeStack(handleEscape, isOpen);
 
   // Returns the fetched entries, or null if the fetch FAILED (distinct from an
   // empty notebook). Callers must not treat a failed refresh as "the notebook is
@@ -157,8 +175,14 @@ export function NotebookBrowser({
 
   const loadNote = useCallback(async (path: string) => {
     // Persist any unsaved buffer on the note we're leaving before we replace it
-    // (covers an edit made in the <debounce window of the autosave timer).
-    flushSaveRef.current();
+    // (covers an edit made in the <debounce window of the autosave timer). If that
+    // write conflicts (the note changed on disk) we ABORT the navigation and stay
+    // put so the conflict banner can be reconciled — navigating away would discard
+    // the buffer and the user's edits would vanish silently.
+    if (dirtyRef.current && selectedPathRef.current && selectedPathRef.current !== path) {
+      const outcome = await persistRef.current();
+      if (outcome === 'conflict' || outcome === 'error') return;
+    }
     const seq = ++loadSeqRef.current;
     setSelectedPath(path);
     setNoteLoading(true);
@@ -180,7 +204,6 @@ export function NotebookBrowser({
       setNote(readResult.value);
       // Seed the live editor buffer from disk; a fresh load is never dirty.
       setDraft(readResult.value.content);
-      lastFlushedRef.current = null;
     } else {
       setNote(null);
       setDraft('');
@@ -194,7 +217,6 @@ export function NotebookBrowser({
   // Bumping loadSeqRef invalidates any in-flight loadNote so a response that
   // resolves after this clear cannot resurrect the just-cleared note's content.
   const clearSelection = useCallback(() => {
-    flushSaveRef.current();
     loadSeqRef.current += 1;
     setSelectedPath(null);
     setNote(null);
@@ -215,7 +237,7 @@ export function NotebookBrowser({
   // it was loaded; carries the current on-disk hash so the user can overwrite it.
   const [conflict, setConflict] = useState<{ currentHash?: string } | null>(null);
   const [justSaved, setJustSaved] = useState(false);
-  // Refs let the navigation/close flush and the live-refresh guard read the latest
+  // Refs let the navigation/close persist and the live-refresh guard read the latest
   // draft / synced note / dirty state without re-subscribing every effect to them.
   const draftRef = useRef('');
   draftRef.current = draft;
@@ -226,9 +248,6 @@ export function NotebookBrowser({
   const dirty = note ? draft !== note.content : false;
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
-  // The content last flushed on navigate/close, so a follow-up flush doesn't re-write
-  // identical bytes (e.g. close right after navigating away from the same edit).
-  const lastFlushedRef = useRef<string | null>(null);
 
   // --- Send to chief ---
   // The current editor selection and where to float its action button (viewport
@@ -238,71 +257,82 @@ export function NotebookBrowser({
   // A transient outcome line ("Added to chief's inbox" / an error), auto-dismissed.
   const [chiefStatus, setChiefStatus] = useState<{ text: string; error: boolean } | null>(null);
 
-  // Persist the outgoing note's unsaved buffer when navigation/close pre-empts the
-  // debounced autosave. Reassigned every render so it closes over the current refs;
-  // fire-and-forget (the view has already moved on) and best-effort (a flush-time
-  // conflict is dropped rather than surfaced on a note no longer shown).
-  flushSaveRef.current = () => {
+  // Core write: persist `content` against `baseHash` (hash-CAS) and reconcile the
+  // result. Returns the outcome so on-demand callers (navigate/close) can react —
+  // a 'conflict'/'error' must NOT be silently dropped. An empty baseHash is a
+  // create-only write, used to recreate a note deleted on disk while it was edited.
+  const writeBuffer = useCallback(async (baseHash: string, content: string): Promise<PersistOutcome> => {
     const path = selectedPathRef.current;
-    const current = noteRef.current;
-    if (!path || !current) return;
-    const content = draftRef.current;
-    if (content === current.content) return;        // in sync — nothing to flush
-    if (content === lastFlushedRef.current) return; // these bytes already flushed
-    lastFlushedRef.current = content;
-    void writeNotebook(path, content, current.hash || undefined).catch(() => {});
-  };
-
-  // Save `content` against `baseHash` (hash-CAS). An empty baseHash is a create-only
-  // write — used to recreate a note deleted on disk while it was being edited.
-  const saveDraft = useCallback(async (baseHash: string, content: string) => {
-    const path = selectedPathRef.current;
-    if (!path) return;
-    // Freeze the load token so a navigation that happens while this save is in
-    // flight can be detected when it resolves (mirrors loadNote's staleness guard;
-    // loadNote/clearSelection both bump loadSeqRef, saveDraft does not).
+    if (!path) return 'noop';
+    // Freeze the load token so a navigation that lands while this write is in flight
+    // is detected on resolve (mirrors loadNote's staleness guard; loadNote/
+    // clearSelection bump loadSeqRef, writeBuffer does not). The bytes still reach
+    // disk either way — we just don't stamp this note's result onto whatever note is
+    // now shown. The OUTCOME still returns so the caller can react.
     const seq = loadSeqRef.current;
     setSaving(true);
     setSaveError(null);
     try {
       const res = await writeNotebook(path, content, baseHash || undefined);
-      // The write to `path` completed against its own bytes, but if the user
-      // navigated away (or cleared the selection) while it was in flight, the result
-      // now applies to a note no longer shown. Bail before stamping this note's
-      // content/conflict/status onto the now-selected note.
-      if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
+      const superseded = loadSeqRef.current !== seq || selectedPathRef.current !== path;
       if (res.conflict) {
         // The note diverged on disk; let the user reconcile rather than clobber.
-        setConflict({ currentHash: res.currentHash });
-        return;
+        // (Only surface it if this note is still shown — see `superseded`.)
+        if (!superseded) setConflict({ currentHash: res.currentHash });
+        return 'conflict';
       }
-      // Saved: advance the synced base to the bytes just written. If the user kept
-      // typing during the save, draft is now ahead of `content` → still dirty → the
-      // autosave effect fires again. The origin=ui broadcast also refreshes.
-      setConflict(null);
-      setNote({ path, content, hash: res.hash ?? '' });
-      lastFlushedRef.current = null;
-      setJustSaved(true);
+      if (!superseded) {
+        // Saved: advance the synced base to the bytes just written. If the user kept
+        // typing during the save, draft is now ahead of `content` → still dirty → the
+        // autosave effect fires again. The origin=ui broadcast also refreshes.
+        setConflict(null);
+        setNote({ path, content, hash: res.hash ?? '' });
+        setJustSaved(true);
+      }
+      return 'saved';
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Could not save this note');
+      if (loadSeqRef.current === seq && selectedPathRef.current === path) {
+        setSaveError(err instanceof Error ? err.message : 'Could not save this note');
+      }
+      return 'error';
     } finally {
       setSaving(false);
     }
   }, [writeNotebook]);
+
+  // Persist the current dirty buffer against its synced base. Drives the debounced
+  // autosave and — crucially — the navigate/close flush, so an outgoing edit that
+  // conflicts surfaces the banner (and blocks the navigation/close) instead of being
+  // dropped. A no-op when the buffer is in sync. Reads refs, so it stays stable.
+  const persist = useCallback(async (): Promise<PersistOutcome> => {
+    const current = noteRef.current;
+    if (!current) return 'noop';
+    const content = draftRef.current;
+    if (content === current.content) return 'noop'; // in sync — nothing to persist
+    return writeBuffer(current.hash, content);
+  }, [writeBuffer]);
+  // Indirection so loadNote/requestClose (declared above the editing block) can invoke
+  // the latest persist without a forward declaration.
+  persistRef.current = persist;
 
   // Discard the local buffer and reload the current on-disk version (the conflict
   // reconcile "reload from disk" path).
   const reloadFromDisk = useCallback(async () => {
     const path = selectedPathRef.current;
     if (!path) return;
+    // Freeze the load token so a navigation that lands while this read is in flight
+    // is detected on resolve (mirrors loadNote/writeBuffer). Without it, a slow reload
+    // of note A could stamp A's content/hash onto note B after the user moved on.
+    const seq = loadSeqRef.current;
     setConflict(null);
     setSaveError(null);
     try {
       const fresh = await readNotebook(path);
+      if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
       setNote(fresh);
       setDraft(fresh.content);
-      lastFlushedRef.current = null;
     } catch (err) {
+      if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
       setSaveError(err instanceof Error ? err.message : 'Could not reload this note');
     }
   }, [readNotebook]);
@@ -313,7 +343,7 @@ export function NotebookBrowser({
   const sendSelectionToChief = useCallback(async () => {
     if (!chiefSel) return;
     const path = selectedPathRef.current ?? undefined;
-    // Freeze the load token (as saveDraft does) so an outcome that resolves after
+    // Freeze the load token (as writeBuffer does) so an outcome that resolves after
     // the user navigated away doesn't flash on the now-selected note.
     const seq = loadSeqRef.current;
     setSendingToChief(true);
@@ -425,18 +455,10 @@ export function NotebookBrowser({
     if (!note || noteLoading || saving || conflict) return;
     if (draft === note.content) return; // in sync — nothing to save
     const timer = window.setTimeout(() => {
-      void saveDraft(note.hash, draft);
+      void persist();
     }, AUTOSAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [draft, note, noteLoading, saving, conflict, saveDraft]);
-
-  // Flush an unsaved buffer when the browser closes (or unmounts) so edits made in
-  // the last <debounce window aren't lost. flushSaveRef is a no-op when not dirty.
-  useEffect(() => {
-    if (isOpen) return;
-    flushSaveRef.current();
-  }, [isOpen]);
-  useEffect(() => () => flushSaveRef.current(), []);
+  }, [draft, note, noteLoading, saving, conflict, persist]);
 
   // The "Send to chief" outcome line is a transient confirmation; auto-dismiss it
   // (errors linger a little longer than the success acknowledgement).
@@ -517,7 +539,7 @@ export function NotebookBrowser({
                 <h1 id="notebook-browser-title">Notebook</h1>
               </div>
             </div>
-            <button type="button" className="notebook-browser-close" onClick={onClose}>
+            <button type="button" className="notebook-browser-close" onClick={() => void requestClose()}>
               <span>Close</span><kbd>esc</kbd>
             </button>
           </header>
@@ -680,7 +702,7 @@ export function NotebookBrowser({
                           <button type="button" onClick={() => void reloadFromDisk()} disabled={saving}>
                             Reload from disk
                           </button>
-                          <button type="button" onClick={() => void saveDraft(conflict.currentHash ?? '', draft)} disabled={saving}>
+                          <button type="button" onClick={() => void writeBuffer(conflict.currentHash ?? '', draft)} disabled={saving}>
                             Overwrite anyway
                           </button>
                         </div>
