@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchesMessage, ListDispatchMessagesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, ReportDispatchMessage, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchesMessage, ListDispatchMessagesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, ReportDispatchMessage, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const acknowledgeDispatchMessage = Convert.toAcknowledgeDispatchMessage(json);
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
@@ -67,6 +67,16 @@
 //   const fetchRemotesMessage = Convert.toFetchRemotesMessage(json);
 //   const fetchRemotesResultMessage = Convert.toFetchRemotesResultMessage(json);
 //   const fileDiffResultMessage = Convert.toFileDiffResultMessage(json);
+//   const fSChangedMessage = Convert.toFSChangedMessage(json);
+//   const fSEntry = Convert.toFSEntry(json);
+//   const fSListMessage = Convert.toFSListMessage(json);
+//   const fSListResultMessage = Convert.toFSListResultMessage(json);
+//   const fSReadMessage = Convert.toFSReadMessage(json);
+//   const fSReadResult = Convert.toFSReadResult(json);
+//   const fSReadResultMessage = Convert.toFSReadResultMessage(json);
+//   const fSWriteMessage = Convert.toFSWriteMessage(json);
+//   const fSWriteResult = Convert.toFSWriteResult(json);
+//   const fSWriteResultMessage = Convert.toFSWriteResultMessage(json);
 //   const getBranchDiffFilesMessage = Convert.toGetBranchDiffFilesMessage(json);
 //   const getCommentsMessage = Convert.toGetCommentsMessage(json);
 //   const getCommentsResultMessage = Convert.toGetCommentsResultMessage(json);
@@ -1306,6 +1316,139 @@ export interface FileDiffResultMessage {
 
 export enum FileDiffResultMessageEvent {
     FileDiffResult = "file_diff_result",
+}
+
+export interface FSChangedMessage {
+    event:  FSChangedMessageEvent;
+    origin: string;
+    paths:  string[];
+    [property: string]: any;
+}
+
+export enum FSChangedMessageEvent {
+    FSChanged = "fs_changed",
+}
+
+export interface FSEntry {
+    is_dir:    boolean;
+    modified?: string;
+    name:      string;
+    path:      string;
+    size:      number;
+    [property: string]: any;
+}
+
+export interface FSListMessage {
+    cmd:         FSListMessageCmd;
+    path?:       string;
+    request_id?: string;
+    [property: string]: any;
+}
+
+export enum FSListMessageCmd {
+    FSList = "fs_list",
+}
+
+export interface FSListResultMessage {
+    entries?:   EntryObject[];
+    error?:     string;
+    event:      FSListResultMessageEvent;
+    request_id: string;
+    success:    boolean;
+    [property: string]: any;
+}
+
+export interface EntryObject {
+    is_dir:    boolean;
+    modified?: string;
+    name:      string;
+    path:      string;
+    size:      number;
+    [property: string]: any;
+}
+
+export enum FSListResultMessageEvent {
+    FSListResult = "fs_list_result",
+}
+
+export interface FSReadMessage {
+    cmd:         FSReadMessageCmd;
+    path:        string;
+    request_id?: string;
+    [property: string]: any;
+}
+
+export enum FSReadMessageCmd {
+    FSRead = "fs_read",
+}
+
+export interface FSReadResult {
+    content: string;
+    hash:    string;
+    path:    string;
+    [property: string]: any;
+}
+
+export interface FSReadResultMessage {
+    error?:     string;
+    event:      FSReadResultMessageEvent;
+    request_id: string;
+    result?:    FSReadResultMessageResult;
+    success:    boolean;
+    [property: string]: any;
+}
+
+export enum FSReadResultMessageEvent {
+    FSReadResult = "fs_read_result",
+}
+
+export interface FSReadResultMessageResult {
+    content: string;
+    hash:    string;
+    path:    string;
+    [property: string]: any;
+}
+
+export interface FSWriteMessage {
+    base_hash?:  string;
+    cmd:         FSWriteMessageCmd;
+    content:     string;
+    path:        string;
+    request_id?: string;
+    [property: string]: any;
+}
+
+export enum FSWriteMessageCmd {
+    FSWrite = "fs_write",
+}
+
+export interface FSWriteResult {
+    conflict:      boolean;
+    current_hash?: string;
+    hash?:         string;
+    path:          string;
+    [property: string]: any;
+}
+
+export interface FSWriteResultMessage {
+    error?:     string;
+    event:      FSWriteResultMessageEvent;
+    request_id: string;
+    result?:    FSWriteResultMessageResult;
+    success:    boolean;
+    [property: string]: any;
+}
+
+export enum FSWriteResultMessageEvent {
+    FSWriteResult = "fs_write_result",
+}
+
+export interface FSWriteResultMessageResult {
+    conflict:      boolean;
+    current_hash?: string;
+    hash?:         string;
+    path:          string;
+    [property: string]: any;
 }
 
 export interface GetBranchDiffFilesMessage {
@@ -4705,6 +4848,86 @@ export class Convert {
         return JSON.stringify(uncast(value, r("FileDiffResultMessage")), null, 2);
     }
 
+    public static toFSChangedMessage(json: string): FSChangedMessage {
+        return cast(JSON.parse(json), r("FSChangedMessage"));
+    }
+
+    public static fSChangedMessageToJson(value: FSChangedMessage): string {
+        return JSON.stringify(uncast(value, r("FSChangedMessage")), null, 2);
+    }
+
+    public static toFSEntry(json: string): FSEntry {
+        return cast(JSON.parse(json), r("FSEntry"));
+    }
+
+    public static fSEntryToJson(value: FSEntry): string {
+        return JSON.stringify(uncast(value, r("FSEntry")), null, 2);
+    }
+
+    public static toFSListMessage(json: string): FSListMessage {
+        return cast(JSON.parse(json), r("FSListMessage"));
+    }
+
+    public static fSListMessageToJson(value: FSListMessage): string {
+        return JSON.stringify(uncast(value, r("FSListMessage")), null, 2);
+    }
+
+    public static toFSListResultMessage(json: string): FSListResultMessage {
+        return cast(JSON.parse(json), r("FSListResultMessage"));
+    }
+
+    public static fSListResultMessageToJson(value: FSListResultMessage): string {
+        return JSON.stringify(uncast(value, r("FSListResultMessage")), null, 2);
+    }
+
+    public static toFSReadMessage(json: string): FSReadMessage {
+        return cast(JSON.parse(json), r("FSReadMessage"));
+    }
+
+    public static fSReadMessageToJson(value: FSReadMessage): string {
+        return JSON.stringify(uncast(value, r("FSReadMessage")), null, 2);
+    }
+
+    public static toFSReadResult(json: string): FSReadResult {
+        return cast(JSON.parse(json), r("FSReadResult"));
+    }
+
+    public static fSReadResultToJson(value: FSReadResult): string {
+        return JSON.stringify(uncast(value, r("FSReadResult")), null, 2);
+    }
+
+    public static toFSReadResultMessage(json: string): FSReadResultMessage {
+        return cast(JSON.parse(json), r("FSReadResultMessage"));
+    }
+
+    public static fSReadResultMessageToJson(value: FSReadResultMessage): string {
+        return JSON.stringify(uncast(value, r("FSReadResultMessage")), null, 2);
+    }
+
+    public static toFSWriteMessage(json: string): FSWriteMessage {
+        return cast(JSON.parse(json), r("FSWriteMessage"));
+    }
+
+    public static fSWriteMessageToJson(value: FSWriteMessage): string {
+        return JSON.stringify(uncast(value, r("FSWriteMessage")), null, 2);
+    }
+
+    public static toFSWriteResult(json: string): FSWriteResult {
+        return cast(JSON.parse(json), r("FSWriteResult"));
+    }
+
+    public static fSWriteResultToJson(value: FSWriteResult): string {
+        return JSON.stringify(uncast(value, r("FSWriteResult")), null, 2);
+    }
+
+    public static toFSWriteResultMessage(json: string): FSWriteResultMessage {
+        return cast(JSON.parse(json), r("FSWriteResultMessage"));
+    }
+
+    public static fSWriteResultMessageToJson(value: FSWriteResultMessage): string {
+        return JSON.stringify(uncast(value, r("FSWriteResultMessage")), null, 2);
+    }
+
     public static toGetBranchDiffFilesMessage(json: string): GetBranchDiffFilesMessage {
         return cast(JSON.parse(json), r("GetBranchDiffFilesMessage"));
     }
@@ -7248,6 +7471,85 @@ const typeMap: any = {
         { json: "path", js: "path", typ: "" },
         { json: "success", js: "success", typ: true },
     ], "any"),
+    "FSChangedMessage": o([
+        { json: "event", js: "event", typ: r("FSChangedMessageEvent") },
+        { json: "origin", js: "origin", typ: "" },
+        { json: "paths", js: "paths", typ: a("") },
+    ], "any"),
+    "FSEntry": o([
+        { json: "is_dir", js: "is_dir", typ: true },
+        { json: "modified", js: "modified", typ: u(undefined, "") },
+        { json: "name", js: "name", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "size", js: "size", typ: 0 },
+    ], "any"),
+    "FSListMessage": o([
+        { json: "cmd", js: "cmd", typ: r("FSListMessageCmd") },
+        { json: "path", js: "path", typ: u(undefined, "") },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+    ], "any"),
+    "FSListResultMessage": o([
+        { json: "entries", js: "entries", typ: u(undefined, a(r("EntryObject"))) },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("FSListResultMessageEvent") },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "EntryObject": o([
+        { json: "is_dir", js: "is_dir", typ: true },
+        { json: "modified", js: "modified", typ: u(undefined, "") },
+        { json: "name", js: "name", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "size", js: "size", typ: 0 },
+    ], "any"),
+    "FSReadMessage": o([
+        { json: "cmd", js: "cmd", typ: r("FSReadMessageCmd") },
+        { json: "path", js: "path", typ: "" },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+    ], "any"),
+    "FSReadResult": o([
+        { json: "content", js: "content", typ: "" },
+        { json: "hash", js: "hash", typ: "" },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
+    "FSReadResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("FSReadResultMessageEvent") },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "result", js: "result", typ: u(undefined, r("FSReadResultMessageResult")) },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "FSReadResultMessageResult": o([
+        { json: "content", js: "content", typ: "" },
+        { json: "hash", js: "hash", typ: "" },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
+    "FSWriteMessage": o([
+        { json: "base_hash", js: "base_hash", typ: u(undefined, "") },
+        { json: "cmd", js: "cmd", typ: r("FSWriteMessageCmd") },
+        { json: "content", js: "content", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+    ], "any"),
+    "FSWriteResult": o([
+        { json: "conflict", js: "conflict", typ: true },
+        { json: "current_hash", js: "current_hash", typ: u(undefined, "") },
+        { json: "hash", js: "hash", typ: u(undefined, "") },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
+    "FSWriteResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("FSWriteResultMessageEvent") },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "result", js: "result", typ: u(undefined, r("FSWriteResultMessageResult")) },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "FSWriteResultMessageResult": o([
+        { json: "conflict", js: "conflict", typ: true },
+        { json: "current_hash", js: "current_hash", typ: u(undefined, "") },
+        { json: "hash", js: "hash", typ: u(undefined, "") },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
     "GetBranchDiffFilesMessage": o([
         { json: "base_ref", js: "base_ref", typ: u(undefined, "") },
         { json: "cmd", js: "cmd", typ: r("GetBranchDiffFilesMessageCmd") },
@@ -9081,6 +9383,27 @@ const typeMap: any = {
     ],
     "FileDiffResultMessageEvent": [
         "file_diff_result",
+    ],
+    "FSChangedMessageEvent": [
+        "fs_changed",
+    ],
+    "FSListMessageCmd": [
+        "fs_list",
+    ],
+    "FSListResultMessageEvent": [
+        "fs_list_result",
+    ],
+    "FSReadMessageCmd": [
+        "fs_read",
+    ],
+    "FSReadResultMessageEvent": [
+        "fs_read_result",
+    ],
+    "FSWriteMessageCmd": [
+        "fs_write",
+    ],
+    "FSWriteResultMessageEvent": [
+        "fs_write_result",
     ],
     "GetBranchDiffFilesMessageCmd": [
         "get_branch_diff_files",

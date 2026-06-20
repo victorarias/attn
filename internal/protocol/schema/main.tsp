@@ -689,6 +689,38 @@ model NotebookTaskRetryMessage {
   task_id: string;
 }
 
+// ============================================================================
+// Generic filesystem surface (fs_*). A plain view over the configurable root
+// (the notebook.root setting): list a directory, read a file, write a file with
+// the same hash-CAS contract as notebook_write. Unlike the notebook_* commands
+// this is NOT .md-aware or PARA-aware — it surfaces every file and directory as
+// it is on disk, so the UI can render a real folder tree over arbitrary content.
+// The notebook_* surface remains the curated, markdown-only view of the same
+// root; fs_* is the raw filesystem underneath it.
+// ============================================================================
+
+// List the immediate children (files and subdirectories) of one directory under
+// the root. SHALLOW by design: a tree UI expands lazily, one readdir per node.
+model FsListMessage {
+  cmd: "fs_list";
+  path?: string; // omitted/"" = the root directory itself
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+model FsReadMessage {
+  cmd: "fs_read";
+  path: string;
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+model FsWriteMessage {
+  cmd: "fs_write";
+  path: string;
+  content: string;
+  base_hash?: string; // omitted = create-only; present = hash-CAS edit
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
 model DelegateWorktreeRequest {
   repo?: string;
   branch: string;
@@ -2276,6 +2308,72 @@ model NotebookTaskRetryResultMessage {
 // task panel re-lists. Fired from the runner's OnChange callback.
 model NotebookTasksChangedMessage {
   event: "notebook_tasks_changed";
+}
+
+// ---- Generic filesystem surface results (fs_*) ----
+
+// One child of a listed directory. is_dir distinguishes a subdirectory (which the
+// UI expands with another fs_list) from a file (which fs_read opens). size is the
+// byte size for a file (0 for a directory). modified is the file mtime (RFC3339).
+model FsEntry {
+  path: string; // root-relative, slash-separated, e.g. "knowledge/areas/foo.md"
+  name: string; // the base name, e.g. "foo.md"
+  is_dir: boolean;
+  size: int32;
+  modified?: string;
+}
+
+model FsReadResult {
+  path: string;
+  content: string;
+  hash: string;
+}
+
+// Result of fs_write. When conflict is true the write did not apply; current_hash
+// is the hash now on disk (empty if the target is gone). Same contract as
+// NotebookWriteResult.
+model FsWriteResult {
+  path: string;
+  hash?: string;
+  conflict: boolean;
+  current_hash?: string;
+}
+
+model FsListResultMessage {
+  event: "fs_list_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  entries?: FsEntry[];
+}
+
+model FsReadResultMessage {
+  event: "fs_read_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  result?: FsReadResult;
+}
+
+// Result of fs_write (hash-CAS). A conflict is a successful response the UI
+// reconciles, carried in result.conflict — not a transport error.
+model FsWriteResultMessage {
+  event: "fs_write_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  result?: FsWriteResult;
+}
+
+// Broadcast when files under the root change. origin is agent|ui|external, the
+// same vocabulary as notebook_changed. NOTE: today this rides the notebook
+// watcher, which only surfaces .md paths, so a non-.md external edit does not yet
+// emit fs_changed; generalizing the watcher to all files lands with the non-text
+// editor work.
+model FsChangedMessage {
+  event: "fs_changed";
+  paths: string[];
+  origin: string;
 }
 
 model WorkspaceContextResultMessage {

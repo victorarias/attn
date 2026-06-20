@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "115"
+const ProtocolVersion = "116"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -66,6 +66,9 @@ const (
 	CmdNotebookSendToChief                   = "notebook_send_to_chief"
 	CmdNotebookTaskList                      = "notebook_task_list"
 	CmdNotebookTaskRetry                     = "notebook_task_retry"
+	CmdFsList                                = "fs_list"
+	CmdFsRead                                = "fs_read"
+	CmdFsWrite                               = "fs_write"
 	CmdUnregister                            = "unregister"
 	CmdState                                 = "state"
 	CmdSetSessionResumeID                    = "set_session_resume_id"
@@ -199,6 +202,10 @@ const (
 	EventNotebookTaskListResult        = "notebook_task_list_result"
 	EventNotebookTaskRetryResult       = "notebook_task_retry_result"
 	EventNotebookTasksChanged          = "notebook_tasks_changed"
+	EventFsListResult                  = "fs_list_result"
+	EventFsReadResult                  = "fs_read_result"
+	EventFsWriteResult                 = "fs_write_result"
+	EventFsChanged                     = "fs_changed"
 	EventPRsUpdated                    = "prs_updated"
 	EventReposUpdated                  = "repos_updated"
 	EventAuthorsUpdated                = "authors_updated"
@@ -511,6 +518,27 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdNotebookTaskRetry:
 		var msg NotebookTaskRetryMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdFsList:
+		var msg FsListMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdFsRead:
+		var msg FsReadMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdFsWrite:
+		var msg FsWriteMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
