@@ -32,12 +32,16 @@ import {
 } from '../utils/reviewLoopPresets';
 import { BUILD_PROFILE } from '../utils/buildProfile';
 import {
-  defaultWorkspaceContextKeeperModel,
-  isWorkspaceContextKeeperModelPreset,
-  parseWorkspaceContextKeeperConfig,
-  serializeWorkspaceContextKeeperConfig,
-  workspaceContextKeeperModelPresets,
-} from '../utils/workspaceContextKeeper';
+  defaultKeeperDutyModel,
+  keeperDutyModelSelection,
+  KEEPER_DUTIES,
+  KEEPER_DUTY_BY_KEY,
+  parseKeeperConfig,
+  serializeKeeperConfig,
+  type KeeperConfig,
+  type KeeperDutyDescriptor,
+  type KeeperDutyKey,
+} from '../utils/keeperDuties';
 import './SettingsModal.css';
 
 interface SettingsModalProps {
@@ -81,6 +85,32 @@ interface SettingsNavGroup {
   items: SettingsNavItem[];
 }
 
+interface KeeperDraft {
+  agent: SessionAgent | '';
+  model: string;
+}
+
+const emptyKeeperDrafts: Record<KeeperDutyKey, KeeperDraft> = {
+  summarize: { agent: '', model: '' },
+  narrate: { agent: '', model: '' },
+  compact: { agent: '', model: '' },
+};
+
+// initialKeeperDraft seeds a row's editable draft from the saved config. An always-on
+// duty with no override pre-selects its built-in default agent (or the first eligible
+// one) plus that agent's recommended model, so the row shows what "unset" resolves to;
+// an opt-in duty with no override starts blank (the Disabled state).
+function initialKeeperDraft(
+  duty: KeeperDutyDescriptor,
+  saved: KeeperConfig | null,
+  agents: readonly SessionAgent[],
+): KeeperDraft {
+  if (saved) return { agent: saved.agent, model: saved.model };
+  if (duty.optInOnly) return { agent: '', model: '' };
+  const agent = agents.includes('claude') ? 'claude' : agents[0] ?? '';
+  return { agent, model: agent ? defaultKeeperDutyModel(duty.key, agent) : '' };
+}
+
 export function SettingsModal({
   isOpen,
   onClose,
@@ -117,8 +147,10 @@ export function SettingsModal({
   const [selectedReviewLoopPresetID, setSelectedReviewLoopPresetID] = useState('');
   const [reviewLoopModel, setReviewLoopModel] = useState(settings.review_loop_model || '');
   const [reviewerModel, setReviewerModel] = useState(settings.reviewer_model || '');
-  const [workspaceContextKeeperAgent, setWorkspaceContextKeeperAgent] = useState<SessionAgent | ''>('');
-  const [workspaceContextKeeperModel, setWorkspaceContextKeeperModel] = useState('');
+  // One draft (agent + model) per keeper duty, edited locally and committed per-row.
+  const [keeperDrafts, setKeeperDrafts] = useState<Record<KeeperDutyKey, KeeperDraft>>(
+    emptyKeeperDrafts,
+  );
   const [newEndpointName, setNewEndpointName] = useState('');
   const [newEndpointTarget, setNewEndpointTarget] = useState('');
   const [newEndpointProfile, setNewEndpointProfile] = useState(BUILD_PROFILE);
@@ -170,10 +202,18 @@ export function SettingsModal({
   );
   const actualReviewLoopModel = settings.review_loop_model || '';
   const actualReviewerModel = settings.reviewer_model || '';
-  const actualWorkspaceContextKeeper = useMemo(
-    () => parseWorkspaceContextKeeperConfig(settings.workspace_keeper_compact),
-    [settings.workspace_keeper_compact],
-  );
+  // The saved (persisted) config for every keeper duty, keyed by duty. A null entry
+  // means the setting is blank (default for always-on duties, disabled for opt-in).
+  const actualKeeperConfigs = useMemo(() => {
+    const configs = {} as Record<KeeperDutyKey, KeeperConfig | null>;
+    for (const duty of KEEPER_DUTIES) {
+      configs[duty.key] = parseKeeperConfig(settings[duty.settingKey]);
+    }
+    return configs;
+  }, [settings]);
+  // The keeper master switch is daemon-normalized to its effective value (default ON),
+  // so a missing key reads as enabled rather than off.
+  const keeperTasksEnabled = (settings['notebook.tasks_enabled'] ?? 'true') !== 'false';
   const resolvedDefaultAgent = resolvePreferredAgent(actualDefaultAgent, agentAvailability, 'codex');
   const orderedAgentList = useMemo(
     () => orderedAgents(agentAvailability, resolvedDefaultAgent, 'codex'),
@@ -183,30 +223,23 @@ export function SettingsModal({
     () => orderedAgentList.filter((agent) => ['codex', 'claude', 'copilot'].includes(agent)),
     [orderedAgentList],
   );
-  const workspaceContextKeeperAgents = useMemo(() => {
+  // Agents eligible to run any keeper duty: installed, headless-task capable, and one
+  // of claude/codex. Any agent already configured on a duty is kept in the list even
+  // if it has since become unavailable, so its row still shows the saved selection.
+  const keeperAgents = useMemo(() => {
     const eligible = orderedAgentList.filter((agent) => (
       ['codex', 'claude'].includes(agent)
       && isAgentAvailable(agentAvailability, agent)
       && actualAgentCapabilities[agent]?.headless_task === true
     ));
-    const configured = actualWorkspaceContextKeeper?.agent;
-    if (configured && ['codex', 'claude'].includes(configured) && !eligible.includes(configured)) {
-      eligible.push(configured);
+    for (const duty of KEEPER_DUTIES) {
+      const configured = actualKeeperConfigs[duty.key]?.agent;
+      if (configured && ['codex', 'claude'].includes(configured) && !eligible.includes(configured)) {
+        eligible.push(configured);
+      }
     }
     return eligible;
-  }, [actualAgentCapabilities, actualWorkspaceContextKeeper?.agent, agentAvailability, orderedAgentList]);
-  const workspaceContextKeeperModelPresetsForAgent = useMemo(
-    () => workspaceContextKeeperModelPresets(workspaceContextKeeperAgent),
-    [workspaceContextKeeperAgent],
-  );
-  const workspaceContextKeeperModelSelection = !workspaceContextKeeperAgent
-    ? ''
-    : isWorkspaceContextKeeperModelPreset(
-      workspaceContextKeeperAgent,
-      workspaceContextKeeperModel,
-    )
-      ? workspaceContextKeeperModel
-      : 'custom';
+  }, [actualAgentCapabilities, actualKeeperConfigs, agentAvailability, orderedAgentList]);
   const agentCapabilityOrder = useMemo(
     () => AGENT_CAPABILITY_ORDER.map((cap) => cap as string),
     [],
@@ -243,8 +276,11 @@ export function SettingsModal({
     setReviewLoopIterations(actualReviewLoopPresets[0]?.iterationLimit || 3);
     setReviewLoopModel(actualReviewLoopModel);
     setReviewerModel(actualReviewerModel);
-    setWorkspaceContextKeeperAgent(actualWorkspaceContextKeeper?.agent || '');
-    setWorkspaceContextKeeperModel(actualWorkspaceContextKeeper?.model || '');
+    setKeeperDrafts({
+      summarize: initialKeeperDraft(KEEPER_DUTY_BY_KEY.summarize, actualKeeperConfigs.summarize, keeperAgents),
+      narrate: initialKeeperDraft(KEEPER_DUTY_BY_KEY.narrate, actualKeeperConfigs.narrate, keeperAgents),
+      compact: initialKeeperDraft(KEEPER_DUTY_BY_KEY.compact, actualKeeperConfigs.compact, keeperAgents),
+    });
     setNewEndpointName('');
     setNewEndpointTarget('');
     setEditingEndpointID(null);
@@ -255,7 +291,7 @@ export function SettingsModal({
     setPluginSourcePath('');
     setPluginError(null);
     setPluginActionName(null);
-  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualEditorExecutable, resolvedDefaultAgent, actualReviewLoopPresets, actualReviewLoopModel, actualReviewerModel, actualWorkspaceContextKeeper]);
+  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualEditorExecutable, resolvedDefaultAgent, actualReviewLoopPresets, actualReviewLoopModel, actualReviewerModel, actualKeeperConfigs, keeperAgents]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -383,32 +419,57 @@ export function SettingsModal({
     }
   }, [actualDefaultAgent, agentAvailability, onSetSetting]);
 
-  const handleWorkspaceContextKeeperAgentChange = useCallback((agent: SessionAgent | '') => {
-    setWorkspaceContextKeeperAgent(agent);
-    setWorkspaceContextKeeperModel(defaultWorkspaceContextKeeperModel(agent));
+  const handleToggleKeeperTasks = useCallback(() => {
+    onSetSetting('notebook.tasks_enabled', keeperTasksEnabled ? 'false' : 'true');
+  }, [keeperTasksEnabled, onSetSetting]);
+
+  // Switching a duty's agent resets its model to that agent's recommended default
+  // (the first preset); choosing the empty "Disabled" agent (opt-in duties only)
+  // clears the model so Save stays disabled.
+  const handleKeeperAgentChange = useCallback((dutyKey: KeeperDutyKey, agent: SessionAgent | '') => {
+    setKeeperDrafts((prev) => ({
+      ...prev,
+      [dutyKey]: { agent, model: agent ? defaultKeeperDutyModel(dutyKey, agent) : '' },
+    }));
   }, []);
 
-  const handleWorkspaceContextKeeperModelSelection = useCallback((model: string) => {
-    setWorkspaceContextKeeperModel(model === 'custom' ? '' : model);
+  // The model <select> emits a preset value or the 'custom' sentinel; 'custom' blanks
+  // the model so the free-form input takes over and Save waits for it to be filled.
+  const handleKeeperModelSelection = useCallback((dutyKey: KeeperDutyKey, model: string) => {
+    setKeeperDrafts((prev) => ({
+      ...prev,
+      [dutyKey]: { ...prev[dutyKey], model: model === 'custom' ? '' : model },
+    }));
   }, []);
 
-  const saveWorkspaceContextKeeper = useCallback(() => {
-    const model = workspaceContextKeeperModel.trim();
-    if (!workspaceContextKeeperAgent || !model) return;
+  const handleKeeperCustomModelChange = useCallback((dutyKey: KeeperDutyKey, model: string) => {
+    setKeeperDrafts((prev) => ({
+      ...prev,
+      [dutyKey]: { ...prev[dutyKey], model },
+    }));
+  }, []);
+
+  const saveKeeperDuty = useCallback((dutyKey: KeeperDutyKey) => {
+    const draft = keeperDrafts[dutyKey];
+    const model = draft.model.trim();
+    if (!draft.agent || !model) return;
     onSetSetting(
-      'workspace_keeper_compact',
-      serializeWorkspaceContextKeeperConfig({
-        agent: workspaceContextKeeperAgent,
-        model,
-      }),
+      KEEPER_DUTY_BY_KEY[dutyKey].settingKey,
+      serializeKeeperConfig({ agent: draft.agent, model }),
     );
-  }, [onSetSetting, workspaceContextKeeperAgent, workspaceContextKeeperModel]);
+  }, [keeperDrafts, onSetSetting]);
 
-  const disableWorkspaceContextKeeper = useCallback(() => {
-    setWorkspaceContextKeeperAgent('');
-    setWorkspaceContextKeeperModel('');
-    onSetSetting('workspace_keeper_compact', '');
-  }, [onSetSetting]);
+  // Clearing writes a blank override. For an opt-in duty that disables it; for an
+  // always-on duty it reverts to the built-in tier default. Either way the draft
+  // re-seeds to its unset starting point.
+  const clearKeeperDuty = useCallback((dutyKey: KeeperDutyKey) => {
+    const duty = KEEPER_DUTY_BY_KEY[dutyKey];
+    onSetSetting(duty.settingKey, '');
+    setKeeperDrafts((prev) => ({
+      ...prev,
+      [dutyKey]: initialKeeperDraft(duty, null, keeperAgents),
+    }));
+  }, [keeperAgents, onSetSetting]);
 
   const persistReviewLoopPresets = useCallback((nextPresets: ReviewLoopPreset[]) => {
     setReviewLoopPresets(nextPresets);
@@ -822,7 +883,7 @@ export function SettingsModal({
               {availableAgentCount}/{orderedAgentList.length} available
             </span>
             <span className="settings-pill">
-              {actualWorkspaceContextKeeper ? `${agentLabel(actualWorkspaceContextKeeper.agent)} keeper` : 'keeper off'}
+              {keeperTasksEnabled ? 'keeper on' : 'keeper off'}
             </span>
           </>
         );
@@ -1484,93 +1545,133 @@ export function SettingsModal({
 
       <section className="settings-block">
         <div className="settings-block-intro">
-          <div className="settings-kicker">Context</div>
-          <h3>Workspace Context Keeper</h3>
+          <div className="settings-kicker">Notebook</div>
+          <h3>Keeper</h3>
           <p className="settings-description">
-            Compacts large shared contexts in the background with one non-interactive agent and model.
-            Empty configuration disables it.
+            The keeper runs three background duties off the notebook: it summarizes finished
+            sessions, curates the work journal, and compacts large shared workspace contexts.
+            Each duty picks its own non-interactive agent and model.
           </p>
         </div>
         <div className="settings-block-body">
-          {workspaceContextKeeperAgents.length === 0 && (
+          <div className="settings-row-card">
+            <div>
+              <p className="settings-row-title">Background tasks</p>
+              <p className="settings-row-copy">
+                Master switch for every keeper duty below. While off, the keeper queues and
+                runs no background work; the per-duty agent and model stay configurable.
+                Turning it off won't interrupt a run already in flight.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="settings-action"
+              data-testid="settings-keeper-tasks-toggle"
+              onClick={handleToggleKeeperTasks}
+            >
+              {keeperTasksEnabled ? 'Disable' : 'Enable'}
+            </button>
+          </div>
+          {keeperAgents.length === 0 && (
             <div className="settings-warning">No installed agent supports scoped headless tasks.</div>
           )}
-          <div className="settings-field-grid two-column">
-            <div className="settings-field">
-              <label className="settings-label" htmlFor="settings-context-keeper-agent">Agent</label>
-              <select
-                id="settings-context-keeper-agent"
-                data-testid="settings-context-keeper-agent"
-                className="settings-input"
-                value={workspaceContextKeeperAgent}
-                onChange={(event) => handleWorkspaceContextKeeperAgentChange(event.target.value as SessionAgent | '')}
-              >
-                <option value="">Disabled</option>
-                {workspaceContextKeeperAgents.map((agent) => (
-                  <option key={agent} value={agent}>{agentLabel(agent)}</option>
-                ))}
-              </select>
-            </div>
-            <div className="settings-field">
-              <label className="settings-label" htmlFor="settings-context-keeper-model">Model</label>
-              <select
-                id="settings-context-keeper-model"
-                data-testid="settings-context-keeper-model"
-                value={workspaceContextKeeperModelSelection}
-                onChange={(event) => handleWorkspaceContextKeeperModelSelection(event.target.value)}
-                className="settings-input"
-                disabled={!workspaceContextKeeperAgent}
-              >
-                {!workspaceContextKeeperAgent && <option value="">Select an agent</option>}
-                {workspaceContextKeeperModelPresetsForAgent.map((preset) => (
-                  <option key={preset.value} value={preset.value}>{preset.label}</option>
-                ))}
-                <option value="custom">Custom...</option>
-              </select>
-            </div>
-          </div>
-          {workspaceContextKeeperAgent && workspaceContextKeeperModelSelection === 'custom' && (
-            <div className="settings-field">
-              <label className="settings-label" htmlFor="settings-context-keeper-model-custom">
-                Custom model
-              </label>
-              <input
-                id="settings-context-keeper-model-custom"
-                data-testid="settings-context-keeper-model-custom"
-                type="text"
-                value={workspaceContextKeeperModel}
-                onChange={(event) => setWorkspaceContextKeeperModel(event.target.value)}
-                placeholder={workspaceContextKeeperAgent === 'claude' ? 'claude-opus-4-6' : 'model ID'}
-                className="settings-input"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-            </div>
-          )}
-          <div className="settings-row-inline">
-            <button
-              type="button"
-              className="settings-action"
-              data-testid="settings-context-keeper-save"
-              onClick={saveWorkspaceContextKeeper}
-              disabled={!workspaceContextKeeperAgent || !workspaceContextKeeperModel.trim()}
-            >
-              Save
-            </button>
-            <button
-              type="button"
-              className="settings-action"
-              onClick={disableWorkspaceContextKeeper}
-              disabled={!actualWorkspaceContextKeeper}
-            >
-              Disable
-            </button>
-          </div>
-          <div className="settings-hint">
-            Runs after a 10-minute debounce when canonical context exceeds 12 KiB.
-            Recommended models mirror the agents' memory-management behavior. Use
-            `attn workspace context compact` to run it immediately.
+          <div className={`settings-keeper-duties${keeperTasksEnabled ? '' : ' is-disabled'}`}>
+            {KEEPER_DUTIES.map((duty) => {
+              const draft = keeperDrafts[duty.key];
+              const presets = duty.modelPresets(draft.agent);
+              const modelSelection = keeperDutyModelSelection(duty.key, draft.agent, draft.model);
+              const hasOverride = actualKeeperConfigs[duty.key] !== null;
+              const agentId = `${duty.testIdPrefix}-agent`;
+              const modelId = `${duty.testIdPrefix}-model`;
+              const customId = `${duty.testIdPrefix}-model-custom`;
+              return (
+                <div className="settings-keeper-duty" key={duty.key}>
+                  <div className="settings-keeper-duty-head">
+                    <p className="settings-row-title">{duty.title}</p>
+                    <p className="settings-row-copy">{duty.description}</p>
+                  </div>
+                  <div className="settings-field-grid two-column">
+                    <div className="settings-field">
+                      <label className="settings-label" htmlFor={agentId}>Agent</label>
+                      <select
+                        id={agentId}
+                        data-testid={agentId}
+                        className="settings-input"
+                        value={draft.agent}
+                        onChange={(event) => handleKeeperAgentChange(duty.key, event.target.value as SessionAgent | '')}
+                      >
+                        {duty.optInOnly && <option value="">Disabled</option>}
+                        {keeperAgents.map((agent) => (
+                          <option key={agent} value={agent}>{agentLabel(agent)}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="settings-field">
+                      <label className="settings-label" htmlFor={modelId}>Model</label>
+                      <select
+                        id={modelId}
+                        data-testid={modelId}
+                        value={modelSelection}
+                        onChange={(event) => handleKeeperModelSelection(duty.key, event.target.value)}
+                        className="settings-input"
+                        disabled={!draft.agent}
+                      >
+                        {!draft.agent && <option value="">Select an agent</option>}
+                        {presets.map((preset) => (
+                          <option key={preset.value} value={preset.value}>{preset.label}</option>
+                        ))}
+                        <option value="custom">Custom...</option>
+                      </select>
+                    </div>
+                  </div>
+                  {draft.agent && modelSelection === 'custom' && (
+                    <div className="settings-field">
+                      <label className="settings-label" htmlFor={customId}>Custom model</label>
+                      <input
+                        id={customId}
+                        data-testid={customId}
+                        type="text"
+                        value={draft.model}
+                        onChange={(event) => handleKeeperCustomModelChange(duty.key, event.target.value)}
+                        placeholder={draft.agent === 'claude' ? 'claude-opus-4-6' : 'model ID'}
+                        className="settings-input"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                      />
+                    </div>
+                  )}
+                  <div className="settings-row-inline">
+                    <button
+                      type="button"
+                      className="settings-action"
+                      data-testid={`${duty.testIdPrefix}-save`}
+                      onClick={() => saveKeeperDuty(duty.key)}
+                      disabled={!draft.agent || !draft.model.trim()}
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-action"
+                      data-testid={`${duty.testIdPrefix}-clear`}
+                      onClick={() => clearKeeperDuty(duty.key)}
+                      disabled={!hasOverride}
+                    >
+                      {duty.optInOnly ? 'Disable' : 'Use default'}
+                    </button>
+                  </div>
+                  {duty.optInOnly ? (
+                    <div className="settings-hint">
+                      Runs after a 10-minute debounce when canonical context exceeds 12 KiB. Use
+                      `attn workspace context compact` to run it immediately.
+                    </div>
+                  ) : (
+                    <div className="settings-hint">Defaults to {duty.defaultLabel} when unset.</div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>
