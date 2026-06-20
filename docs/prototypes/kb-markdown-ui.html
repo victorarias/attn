@@ -1,0 +1,1570 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>attn · knowledge base</title>
+<style>
+/* ============================================================
+   PALETTE + BASE
+   Calm dark, Obsidian-ish. System UI for chrome, mono for editor.
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#1e1e22;
+  --panel:#26262b;
+  --panel-2:#2c2c32;
+  --panel-3:#323239;
+  --border:#3a3a42;
+  --border-soft:#33333a;
+  --text:#d6d6dd;
+  --muted:#8a8a96;
+  --dim:#65656f;
+  --accent:#7c9cff;
+  --accent-soft:rgba(124,156,255,0.16);
+  --warm:#e0a458;
+  --warm-soft:rgba(224,164,88,0.16);
+  --journal:#e0a458;   /* journal kind dot */
+  --memory:#7c9cff;    /* memory kind dot */
+  --green:#6fcf8e;
+  --red:#e0746b;
+  --shadow:rgba(0,0,0,0.45);
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--sans);
+}
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-size:13px;
+  line-height:1.5;
+  overflow:hidden;
+}
+button,input,textarea{font:inherit;color:inherit;}
+::selection{background:rgba(124,156,255,0.32);}
+.muted{color:var(--muted);}
+
+/* ============================================================
+   TOP BAR
+   ============================================================ */
+.topbar{
+  height:42px;
+  display:flex;align-items:center;gap:12px;
+  padding:0 14px;
+  background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent),var(--panel);
+  border-bottom:1px solid var(--border);
+  position:relative;z-index:40;
+}
+.brand{display:flex;align-items:center;gap:8px;font-weight:600;letter-spacing:.2px;}
+.brand .glyph{
+  width:18px;height:18px;border-radius:5px;
+  background:linear-gradient(135deg,var(--accent),var(--warm));
+  display:inline-block;
+}
+.brand .sub{color:var(--muted);font-weight:500;}
+.spacer{flex:1;}
+
+/* segmented control for display mode */
+.seg{display:inline-flex;background:var(--panel-3);border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px;}
+.seg button{
+  border:0;background:transparent;color:var(--muted);
+  padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;
+  transition:background .12s,color .12s;
+}
+.seg button.active{background:var(--accent-soft);color:#cdd8ff;box-shadow:inset 0 0 0 1px rgba(124,156,255,0.35);}
+.seg button:hover:not(.active){color:var(--text);}
+
+.chief{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;}
+.pulse{
+  width:9px;height:9px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 0 0 rgba(111,207,142,0.6);animation:pulse 2.4s infinite;
+}
+@keyframes pulse{
+  0%{box-shadow:0 0 0 0 rgba(111,207,142,0.5);}
+  70%{box-shadow:0 0 0 6px rgba(111,207,142,0);}
+  100%{box-shadow:0 0 0 0 rgba(111,207,142,0);}
+}
+.iconbtn{
+  border:1px solid var(--border);background:var(--panel-3);color:var(--muted);
+  width:26px;height:26px;border-radius:7px;cursor:pointer;font-weight:700;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.iconbtn:hover{color:var(--text);border-color:var(--accent);}
+
+/* ============================================================
+   STAGE / DISPLAY MODES
+   .stage.tile -> workspace grid w/ terminals + KB tile
+   .stage.full -> KB fills viewport
+   ============================================================ */
+.stage{position:absolute;inset:42px 0 0 0;}
+
+/* TILE: workspace grid. terminals top row, KB tile bottom row full width */
+.stage.tile{
+  padding:12px;
+  display:grid;
+  grid-template-rows: 200px 1fr;
+  grid-template-columns: 1fr 1fr;
+  gap:12px;
+  background:
+    radial-gradient(circle at 80% 0%, rgba(124,156,255,0.05), transparent 30rem),
+    var(--bg);
+}
+.stage.tile .term{grid-row:1;}
+.stage.tile .term:nth-of-type(1){grid-column:1;}
+.stage.tile .term:nth-of-type(2){grid-column:2;}
+
+/* row 2 wraps the KB tile + a draggable splitter so the tile can be squeezed
+   horizontally live; the ResizeObserver on .kb reacts to the new width. */
+.kb-row{grid-row:2;grid-column:1 / -1;display:flex;align-items:stretch;min-height:0;min-width:0;}
+/* default: fill the row minus the 18px splitter gutter. dragging sets an
+   explicit --kb-tilew which then wins. */
+.stage.tile .kb{flex:0 0 auto;width:var(--kb-tilew,calc(100% - 26px));min-width:160px;}
+.kb-splitter{display:none;}
+.stage.tile .kb-splitter{
+  display:flex;align-items:center;justify-content:center;
+  flex:0 0 auto;width:20px;margin-left:4px;cursor:col-resize;
+  color:var(--muted);background:var(--panel-2);
+  border:1px solid var(--border);border-radius:9px;
+  user-select:none;box-shadow:0 2px 8px var(--shadow);
+  transition:background .12s,color .12s,border-color .12s;
+}
+.stage.tile .kb-splitter:hover,.kb-splitter.dragging{
+  color:var(--bg);background:var(--accent);border-color:var(--accent);
+}
+.kb-splitter .grip{font-size:15px;line-height:1;letter-spacing:-3px;pointer-events:none;}
+
+/* FULL: KB only. The wrapper collapses; .kb is absolutely positioned so the
+   tile-mode width var and splitter no longer apply. */
+.stage.full{padding:0;}
+.stage.full .term{display:none;}
+.stage.full .kb-row{display:contents;}
+.stage.full .kb{position:absolute;inset:0;width:auto;border-radius:0;border-left:0;border-right:0;border-bottom:0;}
+.stage.full .kb-splitter{display:none;}
+
+/* mock terminal tile */
+.term{
+  background:#161619;border:1px solid var(--border);border-radius:10px;overflow:hidden;
+  display:flex;flex-direction:column;min-height:0;box-shadow:0 6px 22px var(--shadow);
+}
+.term-bar{
+  height:28px;display:flex;align-items:center;gap:7px;padding:0 10px;
+  background:#1d1d21;border-bottom:1px solid var(--border-soft);font-size:11px;color:var(--muted);
+}
+.tdot{width:9px;height:9px;border-radius:50%;}
+.tdot.r{background:#ff6159;}.tdot.y{background:#ffbd2e;}.tdot.g{background:#28c840;}
+.term-bar .ttitle{margin-left:6px;}
+.term-body{
+  flex:1;overflow:auto;padding:8px 10px;font-family:var(--mono);font-size:11.5px;
+  line-height:1.55;color:#c4c8c4;white-space:pre-wrap;
+}
+.term-body .agent{color:var(--accent);}
+.term-body .ok{color:var(--green);}
+.term-body .warn{color:var(--warm);}
+.cursor-blk{display:inline-block;width:8px;height:14px;background:#c4c8c4;vertical-align:-2px;animation:blink 1.1s steps(1) infinite;}
+@keyframes blink{50%{opacity:0;}}
+
+/* ============================================================
+   KB TILE — three panes
+   ============================================================ */
+.kb{
+  background:var(--panel);
+  border:1px solid var(--border);border-radius:10px;overflow:hidden;
+  display:grid;
+  grid-template-columns: var(--treew,236px) 1fr var(--rightw,260px);
+  grid-template-rows: 1fr auto;
+  min-height:0;min-width:0;
+  box-shadow:0 6px 22px var(--shadow);
+}
+.kb.tree-collapsed{--treew:0px;}
+.kb.right-collapsed{--rightw:0px;}
+
+/* footer spans all columns */
+.kb-footer{
+  grid-column:1 / -1;
+  display:flex;align-items:center;gap:10px;
+  height:26px;padding:0 12px;
+  background:var(--panel);border-top:1px solid var(--border-soft);
+  color:var(--dim);font-size:11px;
+}
+.kb-footer .lock{color:var(--muted);}
+
+/* ---------- LEFT: file tree ---------- */
+.tree{
+  background:linear-gradient(180deg,rgba(255,255,255,0.012),transparent),var(--panel-2);
+  border-right:1px solid var(--border);
+  overflow:auto;min-width:0;
+  transition:opacity .12s;
+}
+.kb.tree-collapsed .tree{opacity:0;pointer-events:none;}
+.tree-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:9px 11px 7px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6px;
+}
+.tree ul{list-style:none;margin:0;padding:0;}
+.folder>.row{font-weight:600;}
+.row{
+  display:flex;align-items:center;gap:7px;
+  padding:3px 10px 3px 12px;cursor:pointer;white-space:nowrap;border-radius:6px;
+  margin:1px 6px;color:var(--text);user-select:none;
+}
+.row:hover{background:var(--panel-3);}
+.row.active{background:var(--accent-soft);box-shadow:inset 0 0 0 1px rgba(124,156,255,0.3);}
+.row .chev{width:10px;color:var(--dim);font-size:10px;transition:transform .12s;}
+.folder.collapsed .chev{transform:rotate(-90deg);}
+.folder.collapsed>ul{display:none;}
+.row .name{overflow:hidden;text-overflow:ellipsis;}
+.kind-dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;}
+.kind-dot.journal{background:var(--journal);}
+.kind-dot.memory{background:var(--memory);}
+.kind-dot.plain{background:var(--dim);}
+.ico{width:13px;color:var(--muted);flex:0 0 auto;text-align:center;}
+.nest{padding-left:10px;}
+
+/* ---------- CENTER: note ---------- */
+.note{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg);}
+.note-head{
+  display:flex;align-items:center;gap:10px;
+  padding:8px 14px;border-bottom:1px solid var(--border);background:var(--panel);
+  min-height:0;
+}
+.path{
+  font-family:var(--mono);font-size:11.5px;color:var(--muted);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.path b{color:var(--text);}
+.badge{
+  font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.4px;
+  flex:0 0 auto;
+}
+.badge.journal{background:var(--warm-soft);color:var(--warm);box-shadow:inset 0 0 0 1px rgba(224,164,88,0.3);}
+.badge.memory{background:var(--accent-soft);color:#9fb4ff;box-shadow:inset 0 0 0 1px rgba(124,156,255,0.3);}
+.badge.plain{background:var(--panel-3);color:var(--muted);box-shadow:inset 0 0 0 1px var(--border);}
+
+.viewedit{display:inline-flex;background:var(--panel-3);border:1px solid var(--border);border-radius:7px;padding:2px;gap:2px;flex:0 0 auto;}
+.viewedit button{border:0;background:transparent;color:var(--muted);padding:4px 11px;border-radius:5px;cursor:pointer;font-size:12px;}
+.viewedit button.active{background:var(--accent-soft);color:#cdd8ff;}
+
+.note-body{flex:1;overflow:auto;min-height:0;position:relative;}
+
+/* rendered markdown */
+.md{max-width:780px;margin:0 auto;padding:26px 30px 80px;}
+.md h1{font-size:24px;margin:.2em 0 .5em;font-weight:650;letter-spacing:-.2px;}
+.md h2{font-size:18px;margin:1.4em 0 .5em;font-weight:620;border-bottom:1px solid var(--border-soft);padding-bottom:.25em;}
+.md h3{font-size:15px;margin:1.2em 0 .4em;font-weight:600;color:#c8c8d2;}
+.md p{margin:.6em 0;}
+.md ul,.md ol{margin:.5em 0;padding-left:1.5em;}
+.md li{margin:.22em 0;}
+.md code{font-family:var(--mono);font-size:12px;background:var(--panel-3);padding:1.5px 5px;border-radius:4px;color:#e6c896;}
+.md pre{background:#161619;border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;margin:.8em 0;}
+.md pre code{background:none;padding:0;color:#c4c8c4;font-size:12px;}
+.md a{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(124,156,255,0.3);cursor:pointer;}
+.md a:hover{border-bottom-color:var(--accent);}
+.md a.broken{color:var(--red);border-bottom:1px dashed rgba(224,116,107,0.5);}
+.md a.broken::after{content:" ⚠";font-size:10px;}
+.md strong{color:#e8e8ef;font-weight:650;}
+.md em{color:#c8c8d2;}
+.md blockquote{border-left:3px solid var(--border);margin:.7em 0;padding:.1em 0 .1em 14px;color:var(--muted);}
+.md hr{border:0;border-top:1px solid var(--border-soft);margin:1.4em 0;}
+
+/* frontmatter card */
+.fm-card{
+  background:linear-gradient(180deg,rgba(124,156,255,0.05),transparent),var(--panel);
+  border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:22px;
+}
+.fm-title{font-size:17px;font-weight:650;margin:0 0 2px;display:flex;align-items:center;gap:9px;}
+.fm-summary{color:var(--muted);font-size:12.5px;margin:4px 0 10px;}
+.fm-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;}
+.fm-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);width:62px;flex:0 0 auto;}
+.chip{font-size:11px;background:var(--panel-3);border:1px solid var(--border);border-radius:999px;padding:2px 9px;color:var(--muted);}
+.chip.tag{color:#b6c3ff;border-color:rgba(124,156,255,0.25);background:var(--accent-soft);}
+.src{font-size:11.5px;font-family:var(--mono);color:var(--accent);cursor:pointer;border-bottom:1px solid rgba(124,156,255,0.25);}
+.src:hover{border-bottom-color:var(--accent);}
+.src.ext{color:var(--warm);border-bottom-color:rgba(224,164,88,0.3);}
+.fm-meta{display:flex;gap:16px;margin-top:10px;font-size:11px;color:var(--dim);}
+
+/* editor */
+.editor-wrap{position:absolute;inset:0;display:flex;flex-direction:column;}
+textarea.editor{
+  flex:1;width:100%;border:0;outline:0;resize:none;
+  background:var(--bg);color:var(--text);
+  font-family:var(--mono);font-size:12.5px;line-height:1.65;
+  padding:20px 30px;tab-size:2;
+}
+.editor-bar{
+  display:flex;align-items:center;gap:10px;
+  padding:8px 14px;border-top:1px solid var(--border);background:var(--panel);
+}
+.btn{
+  border:1px solid var(--border);background:var(--panel-3);color:var(--text);
+  padding:5px 13px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:500;
+}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#10131f;font-weight:600;}
+.btn.primary:hover{filter:brightness(1.08);}
+.btn:hover{border-color:var(--accent);}
+.btn.ghost{background:transparent;color:var(--muted);}
+.save-status{font-size:11.5px;color:var(--dim);display:flex;align-items:center;gap:6px;}
+.save-status.ok{color:var(--green);}
+.save-status.conflict{color:var(--red);}
+.save-status .sdot{width:7px;height:7px;border-radius:50%;background:currentColor;}
+
+/* ---------- RIGHT: context panel ---------- */
+.context{
+  background:linear-gradient(180deg,rgba(255,255,255,0.012),transparent),var(--panel-2);
+  border-left:1px solid var(--border);overflow:auto;min-width:0;
+  transition:opacity .12s;
+}
+.kb.right-collapsed .context{opacity:0;pointer-events:none;}
+.ctx-sec{border-bottom:1px solid var(--border-soft);}
+.ctx-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 12px;cursor:pointer;user-select:none;
+  font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);
+}
+.ctx-head .chev{font-size:10px;color:var(--dim);transition:transform .12s;}
+.ctx-sec.collapsed .chev{transform:rotate(-90deg);}
+.ctx-sec.collapsed .ctx-body{display:none;}
+.ctx-body{padding:2px 8px 12px;}
+.outline-item{
+  padding:3px 9px;margin:1px 0;border-radius:6px;cursor:pointer;color:var(--muted);
+  font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.outline-item:hover{background:var(--panel-3);color:var(--text);}
+.outline-item.h2{padding-left:9px;}
+.outline-item.h3{padding-left:22px;font-size:11.5px;}
+.outline-item.h1{font-weight:600;color:var(--text);}
+.backlink{
+  display:block;padding:6px 9px;margin:3px 0;border-radius:7px;cursor:pointer;
+  background:var(--panel);border:1px solid var(--border-soft);
+}
+.backlink:hover{border-color:var(--accent);}
+.backlink .bl-path{font-family:var(--mono);font-size:10.5px;color:var(--accent);}
+.backlink .bl-ctx{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.4;}
+.empty{color:var(--dim);font-size:11.5px;padding:6px 9px;font-style:italic;}
+
+/* ---------- header controls added for tile responsiveness ---------- */
+/* live responsive-mode indicator — visible only in tile mode */
+.rmode{
+  display:none;flex:0 0 auto;font-family:var(--mono);font-size:10px;letter-spacing:.5px;
+  text-transform:uppercase;color:var(--muted);background:var(--panel-3);
+  border:1px solid var(--border);border-radius:999px;padding:2px 8px;
+}
+.stage.tile .rmode{display:inline-block;}
+.rmode[data-w="narrow"]{color:var(--warm);border-color:rgba(224,164,88,0.35);}
+
+/* context-panel toggle — shown only when the panel is hidden in tile mode */
+.ctx-toggle{
+  display:none;flex:0 0 auto;border:1px solid var(--border);background:var(--panel-3);
+  color:var(--muted);width:26px;height:24px;border-radius:7px;cursor:pointer;font-size:13px;
+  align-items:center;justify-content:center;
+}
+.ctx-toggle:hover{color:var(--text);border-color:var(--accent);}
+/* show the toggle only when context is collapsed in tile mode (medium/narrow) */
+.stage.tile .kb.right-collapsed .ctx-toggle{display:inline-flex;}
+
+/* compact file picker — replaces the tree in narrow tile mode */
+.file-picker{
+  display:none;flex:1 1 auto;min-width:0;max-width:100%;
+  background:var(--panel-3);border:1px solid var(--border);border-radius:7px;
+  color:var(--text);padding:3px 8px;font-size:11.5px;font-family:var(--mono);cursor:pointer;
+}
+.file-picker:hover{border-color:var(--accent);}
+/* ===== FOLDABLE SIDEBARS (left tree + right context) =====
+   Folding is expressed by the .tree-collapsed / .right-collapsed classes. In TILE mode
+   the JS auto-folds by the tile's OWN width — the RIGHT folds EARLY, the LEFT folds LATE —
+   and the edge rails override each sidebar; in FULLSCREEN folding is purely manual.
+   These tile-scoped (0,3,0) rules beat the `.stage.tile .kb` density defaults so the
+   columns actually collapse; .tree/.context opacity is hidden by the shared rules above. */
+.kb{position:relative;}                         /* anchor the absolutely-positioned rails */
+.stage.tile .kb.tree-collapsed  {--treew:0px;}
+.stage.tile .kb.right-collapsed {--rightw:0px;}
+.stage.tile .kb .context{overflow:hidden;min-width:0;transition:opacity .12s;}
+/* a folded tree becomes the compact file-picker; path + outline hide with it */
+.stage.tile .kb.tree-collapsed .file-picker{display:inline-block;}
+.stage.tile .kb.tree-collapsed .path{display:none;}
+.stage.tile .kb.tree-collapsed #secOutline{display:none;}
+/* the in-header context toggle is superseded by the right rail */
+.stage.tile .ctx-toggle{display:none!important;}
+
+/* SHORT tile height: drop header subtitle + frontmatter chrome to keep body usable */
+.stage.tile .kb[data-h="short"] .fm-card{
+  background:none;border:0;border-radius:0;padding:0;margin-bottom:12px;
+}
+.stage.tile .kb[data-h="short"] .fm-summary,
+.stage.tile .kb[data-h="short"] .fm-meta{display:none;}
+.stage.tile .kb[data-h="short"] .tree-head .muted{display:none;}
+
+/* ---------- TILE DENSITY (CHANGE 2): tighter than fullscreen ---------- */
+/* scoped to .stage.tile only — fullscreen keeps its spacious sizing. */
+.stage.tile .kb{--treew:188px;--rightw:220px;font-size:12px;}
+.stage.tile .note-head{padding:5px 10px;gap:7px;}
+.stage.tile .note-head .badge{font-size:9.5px;padding:1.5px 6px;}
+.stage.tile .path{font-size:10.5px;}
+.stage.tile .viewedit button{padding:3px 9px;font-size:11px;}
+.stage.tile .tree-head{padding:7px 9px 5px;}
+.stage.tile .row{padding:2px 8px 2px 10px;margin:1px 4px;}
+.stage.tile .md{padding:14px 18px 48px;max-width:680px;}
+.stage.tile .md h1{font-size:20px;}
+.stage.tile .md h2{font-size:16px;}
+.stage.tile .md h3{font-size:14px;}
+.stage.tile .fm-card{padding:10px 12px;margin-bottom:14px;}
+.stage.tile textarea.editor{padding:12px 16px;font-size:12px;}
+.stage.tile .editor-bar,.stage.tile .note-head{min-height:0;}
+.stage.tile .editor-bar{padding:6px 10px;}
+.stage.tile .kb-footer{height:22px;font-size:10px;}
+.stage.tile .ctx-head{padding:8px 10px;}
+.stage.tile .ctx-body{padding:2px 6px 8px;}
+
+/* collapse rails (little tabs to toggle panes in tile mode) */
+.rail{
+  position:absolute;top:50%;transform:translateY(-50%);
+  width:17px;height:54px;background:var(--panel-3);border:1px solid var(--border);
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  color:var(--muted);font-size:12px;line-height:1;z-index:5;
+  box-shadow:0 2px 8px var(--shadow);transition:color .12s,border-color .12s,background .12s;
+}
+.rail:hover{color:var(--accent);border-color:var(--accent);background:var(--panel-2);}
+.rail.left{left:0;border-left:0;border-radius:0 7px 7px 0;}
+.rail.right{right:0;border-right:0;border-radius:7px 0 0 7px;}
+
+/* ============================================================
+   SELECTION CONTEXT MENU + TOAST
+   ============================================================ */
+.sel-menu{
+  position:fixed;z-index:60;min-width:210px;
+  background:var(--panel);border:1px solid var(--border);border-radius:10px;
+  box-shadow:0 12px 36px var(--shadow);padding:5px;
+  opacity:0;transform:translateY(4px) scale(.98);pointer-events:none;
+  transition:opacity .12s,transform .12s;
+}
+.sel-menu.show{opacity:1;transform:translateY(0) scale(1);pointer-events:auto;}
+.sel-menu .mi{
+  display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:7px;cursor:pointer;font-size:12.5px;
+}
+.sel-menu .mi:hover{background:var(--accent-soft);color:#cdd8ff;}
+.sel-menu .mi .k{margin-left:auto;color:var(--dim);font-size:11px;}
+.sel-menu .mi.primary{color:#cdd8ff;}
+.sel-menu .mi.primary .micon{color:var(--accent);}
+.sel-menu .sep{height:1px;background:var(--border-soft);margin:4px 6px;}
+.sel-menu .mhint{padding:6px 10px 4px;font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;}
+.micon{width:16px;text-align:center;}
+
+/* floating "send" button near selection */
+.float-send{
+  position:fixed;z-index:55;
+  background:var(--accent);color:#10131f;border:0;border-radius:8px;
+  padding:6px 11px;font-size:12px;font-weight:600;cursor:pointer;
+  box-shadow:0 6px 18px rgba(124,156,255,0.4);
+  display:none;align-items:center;gap:6px;
+}
+.float-send.show{display:inline-flex;animation:popin .14s ease;}
+@keyframes popin{from{opacity:0;transform:translateY(5px) scale(.94);}to{opacity:1;transform:none;}}
+
+/* toast stack bottom-right */
+.toast-stack{position:fixed;right:18px;bottom:18px;z-index:70;display:flex;flex-direction:column;gap:10px;align-items:flex-end;}
+.toast{
+  background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--accent);
+  border-radius:10px;padding:11px 14px;max-width:340px;
+  box-shadow:0 12px 36px var(--shadow);
+  transform:translateX(20px);opacity:0;transition:transform .26s cubic-bezier(.2,.9,.3,1),opacity .26s;
+}
+.toast.in{transform:none;opacity:1;}
+.toast.out{transform:translateX(20px);opacity:0;}
+.toast .t-title{font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:7px;margin-bottom:3px;}
+.toast .t-title .tg{width:9px;height:9px;border-radius:50%;background:var(--accent);}
+.toast .t-snip{color:var(--text);font-size:12px;font-style:italic;margin:2px 0;line-height:1.45;}
+.toast .t-sub{color:var(--muted);font-size:11px;margin-top:4px;display:flex;align-items:center;gap:5px;}
+.toast.warm{border-left-color:var(--warm);}
+.toast.warm .tg{background:var(--warm);}
+
+/* ============================================================
+   HELP MODAL
+   ============================================================ */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:80;display:none;align-items:center;justify-content:center;}
+.scrim.show{display:flex;}
+.help{
+  background:var(--panel);border:1px solid var(--border);border-radius:14px;
+  width:min(520px,92vw);padding:22px 24px;box-shadow:0 20px 60px var(--shadow);
+}
+.help h2{margin:0 0 4px;font-size:16px;}
+.help .hsub{color:var(--muted);font-size:12px;margin-bottom:14px;}
+.help ul{margin:0;padding:0;list-style:none;}
+.help li{display:flex;gap:12px;padding:7px 0;border-top:1px solid var(--border-soft);align-items:baseline;}
+.help li:first-child{border-top:0;}
+.help kbd{
+  font-family:var(--mono);font-size:11px;background:var(--panel-3);border:1px solid var(--border);
+  border-radius:5px;padding:2px 7px;color:var(--text);flex:0 0 auto;min-width:120px;
+}
+.help .hclose{float:right;margin-top:-2px;}
+</style>
+</head>
+<body>
+
+<!-- ===================== TOP BAR ===================== -->
+<div class="topbar">
+  <div class="brand"><span class="glyph"></span> attn <span class="sub">· knowledge base</span></div>
+  <div class="spacer"></div>
+  <div class="seg" id="modeSeg">
+    <button data-mode="tile" class="active">Tile (workspace)</button>
+    <button data-mode="full">Fullscreen</button>
+  </div>
+  <div class="spacer"></div>
+  <div class="chief"><span class="pulse"></span> chief: active</div>
+  <button class="iconbtn" id="helpBtn" title="Demo help">?</button>
+</div>
+
+<!-- ===================== STAGE ===================== -->
+<div class="stage tile" id="stage">
+
+  <!-- two mock terminal tiles (visible in tile mode only) -->
+  <div class="term">
+    <div class="term-bar"><span class="tdot r"></span><span class="tdot y"></span><span class="tdot g"></span><span class="ttitle">chief-of-staff · dispatch</span></div>
+    <div class="term-body"><span class="agent">chief▸</span> scanning inbox… 2 new dispatches
+<span class="agent">chief▸</span> dsp_abc123 routed → memory/gotchas/
+<span class="ok">  ✓ wrote pr-ci-skips-on-dirty-merge.md</span>
+<span class="agent">chief▸</span> appending journal/2026-06-13.md
+<span class="ok">  ✓ saved to vault</span>
+<span class="agent">chief▸</span> idle — watching vault<span class="cursor-blk"></span></div>
+  </div>
+
+  <div class="term">
+    <div class="term-bar"><span class="tdot r"></span><span class="tdot y"></span><span class="tdot g"></span><span class="ttitle">worker · session 7f3a</span></div>
+    <div class="term-body">$ make test-frontend
+<span class="warn">  vitest: 142 passed (1.9s)</span>
+$ git status
+  On branch feat/chifplace
+  nothing to commit, working tree clean
+$ attn list
+  chifplace        idle
+  kb-markdown-ui   working<span class="cursor-blk"></span></div>
+  </div>
+
+  <!-- ===================== KB TILE (three panes) ===================== -->
+  <div class="kb-row" id="kbRow">
+  <div class="kb" id="kb">
+    <!-- collapse rails -->
+    <div class="rail left" id="railLeft" title="Toggle file tree">‹</div>
+    <div class="rail right" id="railRight" title="Toggle context">›</div>
+
+    <!-- LEFT: file tree -->
+    <nav class="tree" id="tree">
+      <div class="tree-head"><span>vault</span><span class="muted">~/attn-vault</span></div>
+      <ul id="treeRoot"></ul>
+    </nav>
+
+    <!-- CENTER: note -->
+    <section class="note">
+      <div class="note-head">
+        <!-- compact file picker (shown only in narrow tile mode) -->
+        <select class="file-picker" id="filePicker" title="Open note"></select>
+        <span class="badge" id="noteBadge">memory</span>
+        <span class="path" id="notePath"></span>
+        <div class="spacer"></div>
+        <!-- live responsive-mode indicator (tile mode only) -->
+        <span class="rmode" id="rmode" title="Tile responsive mode">wide</span>
+        <!-- context toggle for medium/narrow tile mode -->
+        <button class="ctx-toggle" id="ctxToggle" title="Toggle context panel">☰</button>
+        <div class="viewedit" id="viewEdit">
+          <button data-ve="view" class="active">View</button>
+          <button data-ve="edit">Edit</button>
+        </div>
+      </div>
+      <div class="note-body" id="noteBody"><!-- rendered or editor injected here --></div>
+    </section>
+
+    <!-- RIGHT: context (outline + backlinks) -->
+    <aside class="context" id="context">
+      <div class="ctx-sec" id="secOutline">
+        <div class="ctx-head"><span>Outline</span><span class="chev">▾</span></div>
+        <div class="ctx-body" id="outline"></div>
+      </div>
+      <div class="ctx-sec" id="secBacklinks">
+        <div class="ctx-head"><span>Backlinks</span><span class="chev">▾</span></div>
+        <div class="ctx-body" id="backlinks"></div>
+      </div>
+    </aside>
+
+    <!-- footer: vault status -->
+    <div class="kb-footer">
+      <span class="lock">🔒 saved to the attn vault</span>
+      <div class="spacer" style="flex:1"></div>
+      <span id="footStatus">vault · ~/attn-vault · 8 notes</span>
+    </div>
+  </div>
+  <!-- drag handle: squeeze the KB tile horizontally to feel the responsiveness -->
+  <div class="kb-splitter" id="kbSplitter" title="Drag to resize the KB tile"><span class="grip">⋮⋮</span></div>
+  </div>
+</div>
+
+<!-- selection context menu -->
+<div class="sel-menu" id="selMenu">
+  <div class="mhint">Selection</div>
+  <div class="mi primary" data-act="chief"><span class="micon">➤</span> Send to chief <span class="k">⌘⏎</span></div>
+  <div class="mi" data-act="newnote"><span class="micon">＋</span> New memory note from selection</div>
+  <div class="sep"></div>
+  <div class="mi" data-act="copylink"><span class="micon">🔗</span> Copy link to note</div>
+</div>
+<button class="float-send" id="floatSend">➤ Send to chief</button>
+
+<!-- toast stack -->
+<div class="toast-stack" id="toastStack"></div>
+
+<!-- help modal -->
+<div class="scrim" id="scrim">
+  <div class="help">
+    <button class="iconbtn hclose" id="helpClose">✕</button>
+    <h2>Demo interactions</h2>
+    <div class="hsub">A prototype of the attn durable markdown vault. Try these:</div>
+    <ul>
+      <li><kbd>Click a file</kbd> Open any note in the file tree (left). Kind dots: amber = journal, blue = memory.</li>
+      <li><kbd>View / Edit</kbd> Toggle the center header. Edit gives raw markdown + Save / save status.</li>
+      <li><kbd>Select text</kbd> Right-click selected text (or use the floating button) → <b>Send to chief</b>.</li>
+      <li><kbd>Tile / Fullscreen</kbd> Top-bar segmented control. Tile shows the KB beside agent terminals.</li>
+      <li><kbd>Click a /link</kbd> Root-absolute links and frontmatter sources navigate the tree.</li>
+      <li><kbd>Outline / Backlinks</kbd> Right panel — jump to headings, see who links here.</li>
+      <li><kbd>‹  ›  rails</kbd> Collapse the tree / context panes (great in tile mode).</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   MOCK VAULT — path -> raw markdown (with YAML frontmatter)
+   This is the on-disk shape the chief-of-staff + user share.
+   ============================================================ */
+const VAULT = {
+"index.md":
+`# attn knowledge base
+
+This is the durable vault root. It is **not** the same as a session's
+\`context.md\` — see [the layering decision](/memory/decisions/kb-distinct-layer.md).
+
+## What lives here
+
+- \`journal/\` — append-only dated entries, written by the user and the chief.
+- \`memory/\` — distilled, long-lived notes: decisions, gotchas, domain terms.
+- \`workspaces/\` — per-workspace bundles (e.g. [chifplace](/workspaces/chifplace/index.md)).
+- \`log.md\` — the [change history](/log.md), newest first.
+
+## How writes happen
+
+Every change lands in the attn vault. The chief-of-staff agent
+appends to journals and promotes recurring observations into \`memory/\`.
+You can edit any note directly; attn reconciles and saves.
+
+> The vault is the shared brain. Terminals are where work happens;
+> the KB is what survives the session.
+`,
+
+"log.md":
+`# Change log
+
+## 2026-06-13
+- chief promoted a recurring CI observation into [pr-ci-skips-on-dirty-merge](/memory/gotchas/pr-ci-skips-on-dirty-merge.md).
+- recorded the [KB-is-a-distinct-layer](/memory/decisions/kb-distinct-layer.md) decision.
+- appended dock + dispatch notes to [today's journal](/journal/2026-06-13.md).
+
+## 2026-06-12
+- seeded [glossary](/memory/domain/glossary.md) with core attn terms.
+- opened the [chifplace workspace](/workspaces/chifplace/index.md) bundle.
+- backfilled [yesterday's journal](/journal/2026-06-12.md).
+`,
+
+"journal/2026-06-13.md":
+`---
+kind: journal
+---
+
+# 2026-06-13
+
+- Shipped the **config-driven collapsible sidebar dock** (PR #312). The detail
+  chip now routes to the diff-detail panel, not the editor.
+- Chief processed dispatch \`dsp_abc123\` and promoted a CI gotcha into memory —
+  see [pr-ci-skips-on-dirty-merge](/memory/gotchas/pr-ci-skips-on-dirty-merge.md).
+- Decided the KB is a **distinct durable layer** from \`context.md\`. Wrote it up:
+  [kb-distinct-layer](/memory/decisions/kb-distinct-layer.md).
+- Started this prototype: an Obsidian-style viewer for the vault, living as a
+  tile inside a [workspace](/workspaces/chifplace/index.md).
+`,
+
+"journal/2026-06-12.md":
+`---
+kind: journal
+---
+
+# 2026-06-12
+
+- Sketched the chief-of-staff inbox: dispatches arrive as \`dsp_*\` ids and get
+  routed to \`journal/\` or promoted to \`memory/\`.
+- Defined initial vault layout (\`index.md\`, \`log.md\`, \`journal/\`, \`memory/\`).
+- Noted: parallel packaged-app harness runs are invalid — single-tenant only.
+- Opened [chifplace](/workspaces/chifplace/index.md) as the first real workspace bundle.
+`,
+
+"memory/index.md":
+`---
+kind: memory
+title: Memory index
+summary: Entry point for distilled, long-lived notes.
+tags: [index, memory]
+created: 2026-06-12
+updated: 2026-06-13
+sources:
+  - /journal/2026-06-12.md
+---
+
+# Memory index
+
+Distilled notes that outlive any single session. Grouped by type:
+
+## Decisions
+- [KB is a distinct durable layer](/memory/decisions/kb-distinct-layer.md)
+
+## Gotchas
+- [PR CI skips on dirty merge](/memory/gotchas/pr-ci-skips-on-dirty-merge.md)
+
+## Domain
+- [Glossary](/memory/domain/glossary.md)
+
+Promotion rule: when the chief sees an observation **three times** across
+journals or dispatches, it proposes a memory note and links the sources.
+`,
+
+"memory/decisions/kb-distinct-layer.md":
+`---
+kind: memory
+title: KB is a distinct durable layer from context.md
+summary: The shared vault and a session's working context.md serve different lifetimes and owners.
+tags: [architecture, memory, context, decision]
+created: 2026-06-13
+updated: 2026-06-13
+sources:
+  - /journal/2026-06-13.md
+  - dispatch:dsp_abc123
+  - https://github.com/victorarias/attn/pull/312
+---
+
+# KB is a distinct durable layer from context.md
+
+## Decision
+
+The knowledge base (\`~/attn-vault\`) is a **separate layer** from a session's
+\`context.md\`. They are not merged and must not drift into each other.
+
+## Why
+
+| layer | lifetime | owner | scope |
+| --- | --- | --- | --- |
+| \`context.md\` | one session | the working agent | the task at hand |
+| \`kb/\` (vault) | indefinite | chief-of-staff + user | the whole product |
+
+\`context.md\` is *working memory* — cheap, disposable, rewritten constantly.
+The vault is *long-term memory* — curated, linked, and reviewed.
+
+## Consequences
+
+- The chief **promotes** durable findings from sessions into the vault; it does
+  not dump raw \`context.md\` in.
+- A note in \`memory/\` always carries \`sources:\` so its provenance survives.
+- See the related gotcha: [PR CI skips on dirty merge](/memory/gotchas/pr-ci-skips-on-dirty-merge.md).
+
+\`\`\`text
+session ──context.md──▶ (ephemeral)
+   │  chief promotes
+   ▼
+ kb/memory/*.md ──▶ (durable, linked)
+\`\`\`
+`,
+
+"memory/gotchas/pr-ci-skips-on-dirty-merge.md":
+`---
+kind: memory
+title: PR CI skips on dirty merge
+summary: Zero CI checks on a PR usually means a merge conflict with main, not slow CI.
+tags: [ci, github, gotcha]
+created: 2026-06-13
+updated: 2026-06-13
+sources:
+  - dispatch:dsp_abc123
+  - /journal/2026-06-13.md
+---
+
+# PR CI skips on dirty merge
+
+## Symptom
+
+A pull request shows **zero** CI checks — not pending, not failing, just
+*nothing*. It looks like CI is slow or hasn't triggered.
+
+## Root cause
+
+GitHub will not run required workflows when the PR's merge with \`main\` is
+*dirty* (conflicting). The merge commit can't be computed, so checks never start.
+
+## Fix
+
+\`\`\`bash
+git fetch origin main
+git rebase origin/main   # resolve conflicts
+git push --force-with-lease
+\`\`\`
+
+Once the merge is clean, checks appear within a few seconds.
+
+## Notes
+
+- Don't wait on "slow CI" when you see *zero* checks — inspect the mergeability first.
+- This was promoted from \`dispatch:dsp_abc123\` after recurring across sessions.
+- Related decision: [KB is a distinct durable layer](/memory/decisions/kb-distinct-layer.md).
+`,
+
+"memory/domain/glossary.md":
+`---
+kind: memory
+title: Glossary
+summary: Core attn domain terms shared across the vault.
+tags: [glossary, domain]
+created: 2026-06-12
+updated: 2026-06-13
+sources:
+  - /journal/2026-06-12.md
+---
+
+# Glossary
+
+- **vault** — the durable markdown knowledge base under \`~/attn-vault\`.
+- **chief-of-staff** — the agent that watches the inbox, appends journals, and
+  promotes findings into \`memory/\`.
+- **dispatch** — a routed work item (\`dsp_*\`) the chief processes.
+- **workspace** — a grid of tiles (terminals + panels) for one piece of work;
+  see [chifplace](/workspaces/chifplace/index.md).
+- **promotion** — moving a recurring observation from a journal into a memory note.
+- **durable layer** — the vault outlives any single session, unlike a session's
+  working \`context.md\`; see the [layering decision](/memory/decisions/kb-distinct-layer.md).
+
+> All terms here are intentionally narrow. If a word means two things, split it.
+`,
+
+"workspaces/chifplace/index.md":
+`---
+kind: memory
+title: chifplace workspace
+summary: Bundle for the chief-of-staff vault prototype work.
+tags: [workspace, chifplace]
+created: 2026-06-12
+updated: 2026-06-13
+sources:
+  - /journal/2026-06-13.md
+  - /journal/2026-06-12.md
+---
+
+# chifplace workspace
+
+The workspace where the **chief-of-staff** + durable vault are being built.
+
+## Layout
+
+Two terminal tiles (chief dispatch loop + a worker session) sit above the
+knowledge-base tile. The KB is a first-class panel, not a popup.
+
+## Open threads
+
+- Markdown viewer/editor prototype (this very tile).
+- "Send to chief" from any selection → chief inbox.
+- Backlink graph across [memory](/memory/index.md) notes.
+
+## Related
+
+- [Memory index](/memory/index.md)
+- [Today's journal](/journal/2026-06-13.md)
+`
+};
+
+/* ============================================================
+   TREE STRUCTURE (ordered, with folders)
+   ============================================================ */
+const TREE = [
+  {file:"index.md"},
+  {file:"log.md"},
+  {folder:"journal", children:[
+    {file:"journal/2026-06-13.md"},
+    {file:"journal/2026-06-12.md"},
+  ]},
+  {folder:"memory", children:[
+    {file:"memory/index.md"},
+    {folder:"memory/decisions", label:"decisions", children:[
+      {file:"memory/decisions/kb-distinct-layer.md"},
+    ]},
+    {folder:"memory/gotchas", label:"gotchas", children:[
+      {file:"memory/gotchas/pr-ci-skips-on-dirty-merge.md"},
+    ]},
+    {folder:"memory/domain", label:"domain", children:[
+      {file:"memory/domain/glossary.md"},
+    ]},
+  ]},
+  {folder:"workspaces", children:[
+    {file:"workspaces/chifplace/index.md"},
+  ]},
+];
+
+/* ============================================================
+   FRONTMATTER + MARKDOWN HELPERS
+   ============================================================ */
+// split YAML frontmatter from body. returns {fm:{}, body:""}
+function parseFrontmatter(raw){
+  const m = raw.match(/^---\n([\s\S]*?)\n---\n?/);
+  if(!m) return {fm:null, body:raw};
+  const yaml = m[1], body = raw.slice(m[0].length);
+  const fm = {}; let curKey=null;
+  yaml.split("\n").forEach(line=>{
+    if(/^\s+-\s/.test(line) && curKey){       // list item under a key
+      const v = line.replace(/^\s+-\s/,"").trim();
+      (fm[curKey] = fm[curKey]||[]).push(v);
+      return;
+    }
+    const kv = line.match(/^([A-Za-z_]+):\s*(.*)$/);
+    if(kv){
+      curKey = kv[1];
+      let v = kv[2].trim();
+      if(v==="" ){ fm[curKey]=[]; }            // block list follows
+      else if(v.startsWith("[")){              // inline list [a, b]
+        fm[curKey]=v.replace(/^\[|\]$/g,"").split(",").map(s=>s.trim()).filter(Boolean);
+      } else { fm[curKey]=v; }
+    }
+  });
+  return {fm, body};
+}
+
+function kindOf(path){
+  const {fm}=parseFrontmatter(VAULT[path]||"");
+  if(fm&&fm.kind) return fm.kind;
+  return "plain";
+}
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+
+// resolve a link target ("/memory/x.md" or "memory/x.md") to a vault key
+function resolvePath(href){
+  let p = href.replace(/^\//,"");
+  if(VAULT[p]!==undefined) return p;
+  return null; // broken
+}
+
+// inline markdown: code, bold, italic, links
+function inline(s){
+  s = esc(s);
+  // inline code first (protect contents)
+  const codes=[];
+  s = s.replace(/`([^`]+)`/g,(m,c)=>{codes.push(c);return " "+(codes.length-1)+" ";});
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,(m,txt,href)=>{
+    if(/^https?:/.test(href)){
+      return `<a href="${href}" target="_blank" rel="noopener">${txt}</a>`;
+    }
+    const resolved = resolvePath(href);
+    if(resolved) return `<a class="navlink" data-target="${resolved}">${txt}</a>`;
+    return `<a class="broken" title="unresolved link: ${esc(href)}">${txt}</a>`;
+  });
+  s = s.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>");
+  s = s.replace(/(^|[^*])\*([^*]+)\*/g,"$1<em>$2</em>");
+  s = s.replace(/ (\d+) /g,(m,i)=>`<code>${esc(codes[+i])}</code>`);
+  return s;
+}
+
+// block-level markdown -> HTML. Compact, handles the constructs we use.
+function renderMarkdown(body){
+  const lines = body.split("\n");
+  let out=[], i=0;
+  const headings=[]; // collected for outline {level,text,id}
+  function slug(t){return "h-"+t.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");}
+  while(i<lines.length){
+    let line = lines[i];
+    // fenced code
+    if(/^```/.test(line)){
+      const lang=line.slice(3).trim();
+      let buf=[]; i++;
+      while(i<lines.length && !/^```/.test(lines[i])){buf.push(lines[i]); i++;}
+      i++; // closing fence
+      out.push(`<pre><code data-lang="${esc(lang)}">${esc(buf.join("\n"))}</code></pre>`);
+      continue;
+    }
+    // table (simple: header | --- | rows)
+    if(/^\|/.test(line) && i+1<lines.length && /^\|[\s:-]+\|/.test(lines[i+1])){
+      const rows=[];
+      while(i<lines.length && /^\|/.test(lines[i])){rows.push(lines[i]); i++;}
+      const cells = r => r.replace(/^\||\|$/g,"").split("|").map(c=>c.trim());
+      const head = cells(rows[0]);
+      let html="<table style='border-collapse:collapse;margin:.8em 0;font-size:12.5px'>";
+      html+="<thead><tr>"+head.map(h=>`<th style='text-align:left;padding:5px 12px;border-bottom:1px solid var(--border)'>${inline(h)}</th>`).join("")+"</tr></thead><tbody>";
+      for(let r=2;r<rows.length;r++){
+        html+="<tr>"+cells(rows[r]).map(c=>`<td style='padding:5px 12px;border-bottom:1px solid var(--border-soft)'>${inline(c)}</td>`).join("")+"</tr>";
+      }
+      html+="</tbody></table>";
+      out.push(html);
+      continue;
+    }
+    // headings
+    let h = line.match(/^(#{1,6})\s+(.*)$/);
+    if(h){
+      const lvl=h[1].length, txt=h[2], id=slug(txt);
+      headings.push({level:lvl, text:txt, id});
+      out.push(`<h${lvl} id="${id}">${inline(txt)}</h${lvl}>`);
+      i++; continue;
+    }
+    // hr
+    if(/^---+$/.test(line)){out.push("<hr>"); i++; continue;}
+    // blockquote
+    if(/^>\s?/.test(line)){
+      let buf=[];
+      while(i<lines.length && /^>\s?/.test(lines[i])){buf.push(lines[i].replace(/^>\s?/,"")); i++;}
+      out.push(`<blockquote>${inline(buf.join(" "))}</blockquote>`);
+      continue;
+    }
+    // unordered list (with nested via indent)
+    if(/^\s*[-*]\s+/.test(line)){
+      out.push(parseList(lines,i,/^\s*[-*]\s+/, "ul"));
+      i = LIST_END; continue;
+    }
+    // ordered list
+    if(/^\s*\d+\.\s+/.test(line)){
+      out.push(parseList(lines,i,/^\s*\d+\.\s+/, "ol"));
+      i = LIST_END; continue;
+    }
+    // blank
+    if(line.trim()===""){i++; continue;}
+    // paragraph (gather until blank)
+    let buf=[line]; i++;
+    while(i<lines.length && lines[i].trim()!=="" && !/^(#{1,6}\s|```|>|\s*[-*]\s|\s*\d+\.\s|---+$|\|)/.test(lines[i])){
+      buf.push(lines[i]); i++;
+    }
+    out.push(`<p>${inline(buf.join(" "))}</p>`);
+  }
+  return {html:out.join("\n"), headings};
+}
+
+// list parser supporting one level of nesting; sets module-level LIST_END
+let LIST_END=0;
+function parseList(lines, start, re, tag){
+  const baseIndent = lines[start].match(/^\s*/)[0].length;
+  let items=[], i=start;
+  while(i<lines.length && re.test(lines[i])){
+    const indent = lines[i].match(/^\s*/)[0].length;
+    if(indent < baseIndent) break;
+    if(indent > baseIndent){           // nested list -> recurse, attach to last item
+      const sub = parseList(lines,i,re,tag);
+      items[items.length-1] += sub;
+      i = LIST_END; continue;
+    }
+    const text = lines[i].replace(re,"");
+    items.push(inline(text));
+    i++;
+  }
+  LIST_END=i;
+  return `<${tag}>`+items.map(t=>`<li>${t}</li>`).join("")+`</${tag}>`;
+}
+
+/* ============================================================
+   FRONTMATTER CARD (rendered above the body in View mode)
+   ============================================================ */
+function frontmatterCard(path, fm){
+  if(!fm) return "";
+  const kind = fm.kind||"plain";
+  let h = `<div class="fm-card">`;
+  h += `<div class="fm-title"><span class="badge ${kind}">${kind}</span>${esc(fm.title||path)}</div>`;
+  if(fm.summary) h+=`<div class="fm-summary">${esc(fm.summary)}</div>`;
+  if(fm.tags && fm.tags.length){
+    h+=`<div class="fm-row"><span class="fm-label">tags</span>`+
+       fm.tags.map(t=>`<span class="chip tag">${esc(t)}</span>`).join("")+`</div>`;
+  }
+  if(fm.sources && fm.sources.length){
+    h+=`<div class="fm-row"><span class="fm-label">sources</span>`+
+       fm.sources.map(s=>renderSource(s)).join("")+`</div>`;
+  }
+  let meta=[];
+  if(fm.created) meta.push(`created ${esc(fm.created)}`);
+  if(fm.updated) meta.push(`updated ${esc(fm.updated)}`);
+  if(meta.length) h+=`<div class="fm-meta"><span>${meta.join("</span><span>")}</span></div>`;
+  h+=`</div>`;
+  return h;
+}
+function renderSource(s){
+  if(/^https?:/.test(s)) return `<a class="src ext" href="${s}" target="_blank" rel="noopener">${esc(s.replace(/^https?:\/\//,""))}</a>`;
+  if(/^dispatch:/.test(s)) return `<span class="src" title="chief dispatch">${esc(s)}</span>`;
+  const resolved = resolvePath(s);
+  if(resolved) return `<span class="src navsrc" data-target="${resolved}">${esc(s)}</span>`;
+  return `<span class="src" style="color:var(--red);border-bottom-style:dashed" title="unresolved">${esc(s)}</span>`;
+}
+
+/* ============================================================
+   BACKLINK GRAPH — who links to a given path
+   ============================================================ */
+function buildLinkGraph(){
+  const graph={}; // target -> [{from, ctx}]
+  Object.keys(VAULT).forEach(from=>{
+    const raw=VAULT[from];
+    const re=/\[([^\]]+)\]\(([^)]+)\)/g; let m;
+    while((m=re.exec(raw))){
+      const target=resolvePath(m[2]);
+      if(target && target!==from){
+        (graph[target]=graph[target]||[]).push({from, ctx:m[1]});
+      }
+    }
+    // sources: links also count as backlinks
+    const {fm}=parseFrontmatter(raw);
+    if(fm&&fm.sources){
+      fm.sources.forEach(s=>{
+        const t=resolvePath(s);
+        if(t&&t!==from){(graph[t]=graph[t]||[]).push({from, ctx:"(source)"});}
+      });
+    }
+  });
+  return graph;
+}
+const LINK_GRAPH = buildLinkGraph();
+
+/* ============================================================
+   APP STATE + RENDER
+   ============================================================ */
+const state = { current:"memory/decisions/kb-distinct-layer.md", mode:"view", draft:{} };
+
+const els = {
+  treeRoot:document.getElementById("treeRoot"),
+  noteBody:document.getElementById("noteBody"),
+  notePath:document.getElementById("notePath"),
+  noteBadge:document.getElementById("noteBadge"),
+  outline:document.getElementById("outline"),
+  backlinks:document.getElementById("backlinks"),
+  viewEdit:document.getElementById("viewEdit"),
+  footStatus:document.getElementById("footStatus"),
+  filePicker:document.getElementById("filePicker"),
+  rmode:document.getElementById("rmode"),
+  kb:document.getElementById("kb"),
+  kbRow:document.getElementById("kbRow"),
+  kbSplitter:document.getElementById("kbSplitter"),
+  ctxToggle:document.getElementById("ctxToggle"),
+};
+
+// ---- file tree ----
+function renderTree(){
+  els.treeRoot.innerHTML="";
+  TREE.forEach(node=>els.treeRoot.appendChild(renderNode(node)));
+  renderFilePicker();
+}
+// compact file picker (narrow tile mode): flat list of every note, kept in
+// sync with the active file. Same openFile() path as the tree.
+function renderFilePicker(){
+  const sel=els.filePicker; if(!sel) return;
+  const opts=[];
+  (function walk(nodes){
+    nodes.forEach(n=>{
+      if(n.file){ opts.push(n.file); }
+      else if(n.children){ walk(n.children); }
+    });
+  })(TREE);
+  sel.innerHTML=opts.map(f=>`<option value="${f}">${f}</option>`).join("");
+  sel.value=state.current;
+}
+function renderNode(node){
+  if(node.file){
+    const li=document.createElement("li");
+    const kind=kindOf(node.file);
+    const name=node.file.split("/").pop();
+    li.innerHTML=`<div class="row file ${state.current===node.file?'active':''}" data-file="${node.file}">
+      <span class="ico">📄</span>
+      <span class="kind-dot ${kind}"></span>
+      <span class="name">${name}</span>
+    </div>`;
+    li.querySelector(".row").addEventListener("click",()=>openFile(node.file));
+    return li;
+  }
+  // folder
+  const li=document.createElement("li");
+  li.className="folder";
+  const label=node.label||node.folder;
+  const ul=document.createElement("ul");
+  ul.className="nest";
+  node.children.forEach(c=>ul.appendChild(renderNode(c)));
+  const head=document.createElement("div");
+  head.className="row";
+  head.innerHTML=`<span class="chev">▾</span><span class="ico">📁</span><span class="name">${label}/</span>`;
+  head.addEventListener("click",()=>li.classList.toggle("collapsed"));
+  li.appendChild(head); li.appendChild(ul);
+  return li;
+}
+
+// ---- open a file ----
+function openFile(path){
+  if(VAULT[path]===undefined){ toast("Note not found", path, true); return; }
+  state.current=path;
+  state.mode="view";
+  setViewEditButtons();
+  renderTree();
+  renderNote();
+}
+
+function setViewEditButtons(){
+  els.viewEdit.querySelectorAll("button").forEach(b=>{
+    b.classList.toggle("active", b.dataset.ve===state.mode);
+  });
+}
+
+// ---- center note ----
+function renderNote(){
+  const path=state.current;
+  const raw = state.draft[path]!==undefined ? state.draft[path] : VAULT[path];
+  const {fm, body}=parseFrontmatter(raw);
+  const kind = (fm&&fm.kind)||"plain";
+
+  // header
+  const parts=path.split("/");
+  els.notePath.innerHTML = parts.map((p,idx)=> idx===parts.length-1?`<b>${p}</b>`:p ).join(" / ");
+  els.noteBadge.className="badge "+kind;
+  els.noteBadge.textContent=kind;
+
+  if(state.mode==="view"){
+    renderViewMode(path, raw, fm, body);
+  } else {
+    renderEditMode(path, raw);
+  }
+  renderOutlineAndBacklinks(path, body);
+}
+
+function renderViewMode(path, raw, fm, body){
+  const {html, headings}=renderMarkdown(body);
+  els.noteBody.innerHTML=`<div class="md">${frontmatterCard(path,fm)}${html}</div>`;
+  els.noteBody._headings=headings;
+  // wire internal nav links
+  els.noteBody.querySelectorAll(".navlink, .navsrc").forEach(a=>{
+    a.addEventListener("click",e=>{e.preventDefault(); openFile(a.dataset.target);});
+  });
+}
+
+function renderEditMode(path, raw){
+  els.noteBody.innerHTML=`
+    <div class="editor-wrap">
+      <textarea class="editor" id="editor" spellcheck="false"></textarea>
+      <div class="editor-bar">
+        <button class="btn primary" id="saveBtn">Save</button>
+        <button class="btn ghost" id="revertBtn">Revert</button>
+        <div class="spacer" style="flex:1"></div>
+        <span class="save-status" id="saveStatus">Unsaved draft</span>
+        <button class="btn ghost" id="conflictBtn" title="Demo a conflict response">simulate conflict</button>
+      </div>
+    </div>`;
+  const ta=document.getElementById("editor");
+  ta.value=raw;
+  ta.addEventListener("input",()=>{ state.draft[path]=ta.value; setStatus("editing","Unsaved draft"); });
+
+  document.getElementById("saveBtn").addEventListener("click",()=>{
+    VAULT[path]=ta.value; delete state.draft[path];
+    setStatus("ok","Saved");
+    // recompute graph-derived UI since content changed
+    renderOutlineAndBacklinks(path, parseFrontmatter(ta.value).body);
+  });
+  document.getElementById("revertBtn").addEventListener("click",()=>{
+    delete state.draft[path]; ta.value=VAULT[path];
+    setStatus("editing","reverted to last saved");
+  });
+  document.getElementById("conflictBtn").addEventListener("click",()=>{
+    // demo conflict: an out-of-band write was detected, so the note reloaded from disk
+    setStatus("conflict","Reloaded — file changed on disk");
+    ta.value=VAULT[path]; delete state.draft[path];
+    toast("Reloaded — file changed on disk", "another writer touched "+path+" — your draft was set aside.", true);
+  });
+}
+function setStatus(cls,text){
+  const s=document.getElementById("saveStatus"); if(!s) return;
+  s.className="save-status "+ (cls==="ok"?"ok":cls==="conflict"?"conflict":"");
+  s.innerHTML = (cls==="ok"||cls==="conflict") ? `<span class="sdot"></span>${text}` : text;
+}
+
+// ---- right panel: outline + backlinks ----
+function renderOutlineAndBacklinks(path, body){
+  const {headings}=renderMarkdown(body);
+  els.outline.innerHTML = headings.length
+    ? headings.map(h=>`<div class="outline-item h${h.level}" data-id="${h.id}">${esc(h.text)}</div>`).join("")
+    : `<div class="empty">No headings.</div>`;
+  els.outline.querySelectorAll(".outline-item").forEach(it=>{
+    it.addEventListener("click",()=>{
+      if(state.mode!=="view"){ state.mode="view"; setViewEditButtons(); renderNote(); }
+      const t=document.getElementById(it.dataset.id);
+      if(t) t.scrollIntoView({behavior:"smooth",block:"start"});
+    });
+  });
+
+  const links=LINK_GRAPH[path]||[];
+  els.backlinks.innerHTML = links.length
+    ? links.map(l=>`<div class="backlink" data-file="${l.from}">
+        <div class="bl-path">/${l.from}</div>
+        <div class="bl-ctx">${esc(l.ctx)}</div></div>`).join("")
+    : `<div class="empty">No backlinks yet.</div>`;
+  els.backlinks.querySelectorAll(".backlink").forEach(b=>{
+    b.addEventListener("click",()=>openFile(b.dataset.file));
+  });
+}
+
+// view/edit toggle
+els.viewEdit.querySelectorAll("button").forEach(b=>{
+  b.addEventListener("click",()=>{ state.mode=b.dataset.ve; setViewEditButtons(); renderNote(); });
+});
+
+// compact file picker (narrow tile mode) opens notes through the same path
+els.filePicker.addEventListener("change",()=>openFile(els.filePicker.value));
+
+/* ============================================================
+   DISPLAY MODE (tile / fullscreen)
+   ============================================================ */
+const stage=document.getElementById("stage");
+const kb=els.kb;
+const railLeft =document.getElementById("railLeft");
+const railRight=document.getElementById("railRight");
+
+/* Sidebar fold state. null = AUTO (width-driven; tile only). true = folded, false = open.
+   A rail click sets a manual override that wins until toggled again; switching display
+   mode clears overrides so each mode starts from a clean auto/default state. */
+let treeOverride=null, ctxOverride=null;
+
+/* Fold thresholds, measured against the tile's OWN width (tile mode only).
+   ASYMMETRIC by request: the RIGHT (context) folds EARLY at a generous width; the
+   LEFT (tree) folds LATE, only when the tile is genuinely cramped. */
+const CTX_FOLD_BELOW=1000;   // context auto-folds when the tile is narrower than this
+const TREE_FOLD_BELOW=440;   // tree auto-folds to the picker only when quite narrow
+const SHORT_MAX=360;
+
+function applyFold(){
+  const tile=stage.classList.contains("tile");
+  const r=kb.getBoundingClientRect(), w=r.width;
+  const ctxAuto  = tile ? w < CTX_FOLD_BELOW  : false;   // fullscreen never auto-folds
+  const treeAuto = tile ? w < TREE_FOLD_BELOW : false;
+  const ctxFolded  = ctxOverride  === null ? ctxAuto  : ctxOverride;
+  const treeFolded = treeOverride === null ? treeAuto : treeOverride;
+  kb.classList.toggle("right-collapsed", ctxFolded);
+  kb.classList.toggle("tree-collapsed",  treeFolded);
+  railLeft.textContent  = treeFolded ? "›" : "‹";   // ‹ collapse · › expand
+  railRight.textContent = ctxFolded  ? "‹" : "›";
+  railLeft.title  = treeFolded ? "Show file tree"     : "Hide file tree";
+  railRight.title = ctxFolded  ? "Show context panel" : "Hide context panel";
+  if(tile){
+    const label = w>=CTX_FOLD_BELOW ? "wide" : (w<TREE_FOLD_BELOW ? "narrow" : "medium");
+    els.rmode.textContent=label;
+    els.rmode.setAttribute("data-w", label);
+    kb.setAttribute("data-w", label);
+    kb.setAttribute("data-h", r.height < SHORT_MAX ? "short" : "tall");
+  }
+}
+// the ResizeObserver and the splitter drag both call measureTile(); keep it as an alias.
+function measureTile(){ applyFold(); }
+
+function applyMode(mode){
+  document.querySelectorAll("#modeSeg button").forEach(x=>x.classList.toggle("active",x.dataset.mode===mode));
+  stage.classList.toggle("tile", mode==="tile");
+  stage.classList.toggle("full", mode==="full");
+  if(mode!=="tile"){ kb.removeAttribute("data-w"); kb.removeAttribute("data-h"); }
+  treeOverride=null; ctxOverride=null;   // each mode starts fresh (auto in tile, open in full)
+  applyFold();
+}
+document.getElementById("modeSeg").querySelectorAll("button").forEach(b=>{
+  b.addEventListener("click",()=>applyMode(b.dataset.mode));
+});
+
+// edge rails double as fold / unfold buttons — active in BOTH tile and fullscreen.
+// clicking sets a manual override to the opposite of the current rendered state.
+railLeft.addEventListener("click",()=>{ treeOverride=!kb.classList.contains("tree-collapsed"); applyFold(); });
+railRight.addEventListener("click",()=>{ ctxOverride =!kb.classList.contains("right-collapsed"); applyFold(); });
+
+// context section collapse (Outline / Backlinks headers)
+document.querySelectorAll(".ctx-head").forEach(h=>{
+  h.addEventListener("click",()=>h.parentElement.classList.toggle("collapsed"));
+});
+
+/* ============================================================
+   TILE RESPONSIVENESS
+   Auto-fold is driven by the TILE's OWN measured width (ResizeObserver on the
+   .kb element), not window media queries — so it adapts live when the splitter
+   is dragged or the window resizes. Rails override auto per sidebar.
+   ============================================================ */
+if(window.ResizeObserver){
+  const ro=new ResizeObserver(()=>applyFold());
+  ro.observe(kb);
+}
+window.addEventListener("resize",()=>applyFold());
+
+/* ---- draggable splitter: squeeze the KB tile horizontally live ---- */
+(function(){
+  const splitter=els.kbSplitter, row=els.kbRow;
+  let dragging=false;
+  function widthFromPointer(clientX){
+    const rowRect=row.getBoundingClientRect();
+    // leave room for the splitter (≈18px) so the handle stays reachable
+    const min=160, max=rowRect.width-18;
+    let w=clientX-rowRect.left;
+    return Math.max(min, Math.min(max, w));
+  }
+  function onMove(e){
+    if(!dragging) return;
+    const cx=(e.touches?e.touches[0].clientX:e.clientX);
+    kb.style.setProperty("--kb-tilew", widthFromPointer(cx)+"px");
+    // measureTile also fires via ResizeObserver, but call directly for snappy label updates
+    measureTile();
+    e.preventDefault();
+  }
+  function onUp(){
+    if(!dragging) return;
+    dragging=false; splitter.classList.remove("dragging");
+    document.body.style.userSelect="";
+    window.removeEventListener("mousemove",onMove);
+    window.removeEventListener("mouseup",onUp);
+    window.removeEventListener("touchmove",onMove);
+    window.removeEventListener("touchend",onUp);
+  }
+  function onDown(e){
+    if(!stage.classList.contains("tile")) return;
+    dragging=true; splitter.classList.add("dragging");
+    document.body.style.userSelect="none";
+    window.addEventListener("mousemove",onMove);
+    window.addEventListener("mouseup",onUp);
+    window.addEventListener("touchmove",onMove,{passive:false});
+    window.addEventListener("touchend",onUp);
+    e.preventDefault();
+  }
+  splitter.addEventListener("mousedown",onDown);
+  splitter.addEventListener("touchstart",onDown,{passive:false});
+  // double-click the handle to reset the tile to full width
+  splitter.addEventListener("dblclick",()=>{ kb.style.removeProperty("--kb-tilew"); measureTile(); });
+})();
+
+/* ============================================================
+   SELECTION → CONTEXT MENU → "SEND TO CHIEF"
+   Works in both rendered View text and the EDIT textarea.
+   ============================================================ */
+const selMenu=document.getElementById("selMenu");
+const floatSend=document.getElementById("floatSend");
+let lastSelection="";
+
+function getActiveSelection(){
+  // editor textarea selection
+  const ta=document.getElementById("editor");
+  if(ta && document.activeElement===ta){
+    return ta.value.substring(ta.selectionStart, ta.selectionEnd).trim();
+  }
+  const s=window.getSelection();
+  if(s && s.rangeCount && s.toString().trim() &&
+     els.noteBody.contains(s.anchorNode)){
+    return s.toString().trim();
+  }
+  return "";
+}
+
+// show floating "send" button when there's a selection inside the note body
+function refreshFloatButton(){
+  const sel=getActiveSelection();
+  if(sel.length>1){
+    lastSelection=sel;
+    // anchor near the selection
+    let rect;
+    const ta=document.getElementById("editor");
+    if(ta && document.activeElement===ta){
+      rect=ta.getBoundingClientRect();
+      floatSend.style.left=(rect.left+16)+"px";
+      floatSend.style.top=(rect.top+12)+"px";
+    } else {
+      const r=window.getSelection().getRangeAt(0).getBoundingClientRect();
+      rect=r;
+      floatSend.style.left=Math.max(12, r.left)+"px";
+      floatSend.style.top=Math.max(52, r.top-40)+"px";
+    }
+    floatSend.classList.add("show");
+  } else {
+    floatSend.classList.remove("show");
+  }
+}
+document.addEventListener("mouseup", ()=>setTimeout(refreshFloatButton,0));
+document.addEventListener("keyup", e=>{ if(e.shiftKey||e.key==="Shift") setTimeout(refreshFloatButton,0); });
+
+floatSend.addEventListener("click",()=>{ sendToChief(lastSelection); hideSelUI(); });
+
+// right-click context menu inside note body
+els.noteBody.addEventListener("contextmenu", e=>{
+  const sel=getActiveSelection();
+  if(!sel){ return; } // let native menu through when nothing selected
+  e.preventDefault();
+  lastSelection=sel;
+  selMenu.style.left=Math.min(e.clientX, window.innerWidth-230)+"px";
+  selMenu.style.top=Math.min(e.clientY, window.innerHeight-180)+"px";
+  selMenu.classList.add("show");
+});
+selMenu.querySelectorAll(".mi").forEach(mi=>{
+  mi.addEventListener("click",()=>{ handleSelAction(mi.dataset.act); selMenu.classList.remove("show"); });
+});
+document.addEventListener("mousedown", e=>{
+  if(!selMenu.contains(e.target)) selMenu.classList.remove("show");
+});
+// keyboard: Cmd+Enter sends current selection to chief
+document.addEventListener("keydown", e=>{
+  if((e.metaKey||e.ctrlKey) && e.key==="Enter"){
+    const sel=getActiveSelection();
+    if(sel){ e.preventDefault(); sendToChief(sel); hideSelUI(); }
+  }
+  if(e.key==="Escape"){ hideSelUI(); document.getElementById("scrim").classList.remove("show"); }
+});
+
+function hideSelUI(){ selMenu.classList.remove("show"); floatSend.classList.remove("show"); }
+
+function handleSelAction(act){
+  const sel=lastSelection;
+  if(act==="chief"){ sendToChief(sel); }
+  else if(act==="newnote"){
+    toast("New memory note drafted", '"'+truncate(sel,60)+'" → memory/inbox/ (pending chief review)', false, "warm");
+  }
+  else if(act==="copylink"){
+    toast("Link copied", "/"+state.current, false);
+  }
+}
+
+function truncate(s,n){ s=s.replace(/\s+/g," ").trim(); return s.length>n? s.slice(0,n-1)+"…" : s; }
+
+// THE headline interaction
+function sendToChief(sel){
+  if(!sel) return;
+  const snip=truncate(sel, 90);
+  toast(`Sent to chief`, `"${snip}"`, false, "accent", "added to chief's inbox");
+}
+
+/* ============================================================
+   TOASTS (animated in / out)
+   ============================================================ */
+const toastStack=document.getElementById("toastStack");
+function toast(title, snip, warn, variant, sub){
+  const t=document.createElement("div");
+  t.className="toast"+(warn||variant==="warm"?" warm":"");
+  let inner=`<div class="t-title"><span class="tg"></span>${esc(title)}</div>`;
+  if(snip) inner+=`<div class="t-snip">${esc(snip)}</div>`;
+  if(sub) inner+=`<div class="t-sub">🛰 ${esc(sub)}</div>`;
+  t.innerHTML=inner;
+  toastStack.appendChild(t);
+  requestAnimationFrame(()=>t.classList.add("in"));
+  setTimeout(()=>{
+    t.classList.remove("in"); t.classList.add("out");
+    setTimeout(()=>t.remove(),300);
+  }, 3800);
+}
+
+/* ============================================================
+   HELP MODAL
+   ============================================================ */
+const scrim=document.getElementById("scrim");
+document.getElementById("helpBtn").addEventListener("click",()=>scrim.classList.add("show"));
+document.getElementById("helpClose").addEventListener("click",()=>scrim.classList.remove("show"));
+scrim.addEventListener("click",e=>{ if(e.target===scrim) scrim.classList.remove("show"); });
+
+/* ============================================================
+   BOOT
+   ============================================================ */
+els.footStatus.textContent = `vault · ~/attn-vault · ${Object.keys(VAULT).length} notes`;
+renderTree();
+renderNote();
+// start in tile mode (compact): collapses the right panel + classifies the tile
+applyMode("tile");
+</script>
+</body>
+</html>

@@ -117,7 +117,7 @@ func TestGenerateHooks_DefaultsWrapperToAttn(t *testing.T) {
 }
 
 func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {
-	overrides := GenerateCodexConfigOverrides("session-1", "/tmp/attn.sock", "/tmp/attn", "/tmp/context.md", false)
+	overrides := GenerateCodexConfigOverrides("session-1", "/tmp/attn.sock", "/tmp/attn", "/tmp/context.md", "", false)
 	joined := strings.Join(overrides, "\n")
 
 	if !strings.Contains(joined, "hooks.SessionStart=") {
@@ -242,12 +242,12 @@ func TestAgentInstructionsComposition(t *testing.T) {
 }
 
 func TestGenerateCodexConfigOverrides_InjectsWorkflowGuidanceWhenEnabled(t *testing.T) {
-	off := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", "/tmp/context.md", false), "\n")
+	off := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", "/tmp/context.md", "", false), "\n")
 	if strings.Contains(off, "hypercode") {
 		t.Fatalf("workflow guidance injected while disabled: %q", off)
 	}
 
-	on := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", "/tmp/context.md", true), "\n")
+	on := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", "/tmp/context.md", "", true), "\n")
 	if !strings.Contains(on, "developer_instructions=") {
 		t.Fatal("enabled overrides dropped developer_instructions")
 	}
@@ -260,9 +260,64 @@ func TestGenerateCodexConfigOverrides_InjectsWorkflowGuidanceWhenEnabled(t *test
 	}
 
 	// Workflow guidance is injected even without a workspace checkout.
-	noCtx := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", "", true), "\n")
+	noCtx := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", "", "", true), "\n")
 	if !strings.Contains(noCtx, "developer_instructions=") || !strings.Contains(noCtx, "hypercode") {
 		t.Fatalf("workflow guidance not injected without a checkout: %q", noCtx)
+	}
+}
+
+func TestWorkspaceContextSessionStartOutputWrapsGuidance(t *testing.T) {
+	raw := WorkspaceContextSessionStartOutput("/tmp/context.md")
+	var output sessionStartHookOutput
+	if err := json.Unmarshal([]byte(raw), &output); err != nil {
+		t.Fatalf("WorkspaceContextSessionStartOutput returned invalid JSON: %v", err)
+	}
+	if output.HookSpecificOutput.HookEventName != "SessionStart" {
+		t.Fatalf("hook event = %q", output.HookSpecificOutput.HookEventName)
+	}
+	// Non-chief agents are NOT nudged to journal: the SessionStart fallback carries
+	// only the workspace-context guidance, with no journaling directive appended.
+	want := WorkspaceContextGuidance("/tmp/context.md")
+	if output.HookSpecificOutput.AdditionalContext != want {
+		t.Fatal("hook output should carry only the workspace context guidance")
+	}
+}
+
+func TestNotebookGuidance(t *testing.T) {
+	guidance := NotebookGuidance("/home/u/attn-notebook")
+	for _, expected := range []string{
+		"/home/u/attn-notebook",
+		"chief of staff",
+		"/home/u/attn-notebook/knowledge/index.md", // orient by reading files directly
+		"native file tools",                        // edit-directly mandate
+		"PARA",                                     // knowledge-base structure
+		"type:",                                    // OKF frontmatter
+		"areas/",                                   // promote target
+		"sources:",                                 // grounding rule
+		"paraphrase",                               // grounding rule
+		"root-absolute",                            // linking convention
+		"[label](/knowledge/areas/foo.md)",         // knowledge link path
+		"load the attn skill's notebook reference",
+	} {
+		if !strings.Contains(guidance, expected) {
+			t.Fatalf("notebook guidance missing %q: %q", expected, guidance)
+		}
+	}
+	// The notebook CLI was removed; guidance must not tell agents to run it, and
+	// the "memory" vocabulary was retired in favor of the knowledge base.
+	for _, unwanted := range []string{"attn notebook", "/memory/", "[["} {
+		if strings.Contains(guidance, unwanted) {
+			t.Fatalf("notebook guidance should not contain %q: %q", unwanted, guidance)
+		}
+	}
+}
+
+func TestNotebookGuidanceEmptyWithoutRoot(t *testing.T) {
+	if got := NotebookGuidance(""); got != "" {
+		t.Fatalf("NotebookGuidance(\"\") = %q, want empty", got)
+	}
+	if got := NotebookGuidance("   "); got != "" {
+		t.Fatalf("NotebookGuidance(whitespace) = %q, want empty", got)
 	}
 }
 

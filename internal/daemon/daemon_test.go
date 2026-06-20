@@ -4237,9 +4237,9 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"custom review_loop_model", "review_loop_model", "claude-opus-4-6", false},
 		{"empty reviewer_model", "reviewer_model", "", false},
 		{"custom reviewer_model", "reviewer_model", "claude-sonnet-4-6", false},
-		{"empty workspace context janitor", "workspace_context_janitor", "", false},
-		{"invalid workspace context janitor json", "workspace_context_janitor", "{", true},
-		{"incomplete workspace context janitor", "workspace_context_janitor", `{"agent":"codex"}`, true},
+		{"empty keeper compact", "workspace_keeper_compact", "", false},
+		{"invalid keeper compact json", "workspace_keeper_compact", "{", true},
+		{"incomplete keeper compact", "workspace_keeper_compact", `{"agent":"codex"}`, true},
 		{"valid tailscale_enabled true", "tailscale_enabled", "true", false},
 		{"valid tailscale_enabled false", "tailscale_enabled", "false", false},
 		{"empty keybindings_config", "keybindings_config", "", false},
@@ -4263,7 +4263,7 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 	}
 }
 
-func TestDaemon_ValidatesWorkspaceContextJanitorAgentAndExecutable(t *testing.T) {
+func TestDaemon_ValidatesKeeperCompactAgentAndExecutable(t *testing.T) {
 	tempDir := t.TempDir()
 	executable := filepath.Join(tempDir, "custom-codex")
 	if err := os.WriteFile(executable, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
@@ -4274,18 +4274,18 @@ func TestDaemon_ValidatesWorkspaceContextJanitorAgentAndExecutable(t *testing.T)
 	d := &Daemon{store: store.New()}
 	d.store.SetSetting(SettingCodexExecutable, "custom-codex")
 	if err := d.validateSetting(
-		SettingWorkspaceContextJanitor,
+		SettingKeeperCompact,
 		`{"agent":"codex","model":"gpt-test"}`,
 	); err != nil {
-		t.Fatalf("valid janitor setting rejected: %v", err)
+		t.Fatalf("valid keeper compact setting rejected: %v", err)
 	}
 
 	d.store.SetSetting(SettingCodexExecutable, "missing-codex")
 	if err := d.validateSetting(
-		SettingWorkspaceContextJanitor,
+		SettingKeeperCompact,
 		`{"agent":"codex","model":"gpt-test"}`,
 	); err == nil {
-		t.Fatal("janitor setting accepted a missing configured executable")
+		t.Fatal("keeper compact setting accepted a missing configured executable")
 	}
 }
 
@@ -4808,15 +4808,8 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 	}
 	defer wsConn.Close(websocket.StatusNormalClosure, "")
 
-	// Read initial state
-	_, initialData, err := wsConn.Read(ctx)
-	if err != nil {
-		t.Fatalf("Read initial state error: %v", err)
-	}
-
-	// Verify PR is not muted in initial state
-	var initialState protocol.WebSocketEvent
-	json.Unmarshal(initialData, &initialState)
+	// Read initial state (other background broadcasts may arrive first).
+	initialState := waitForProtocolWebSocketEvent(t, wsConn, protocol.EventInitialState)
 	if len(initialState.Prs) != 1 {
 		t.Fatalf("Expected 1 PR in initial state, got %d", len(initialState.Prs))
 	}
@@ -4901,17 +4894,8 @@ func TestDaemon_MuteRepo_ViaWebSocket(t *testing.T) {
 	}
 	defer wsConn.Close(websocket.StatusNormalClosure, "")
 
-	// Read initial state
-	_, initialData, err := wsConn.Read(ctx)
-	if err != nil {
-		t.Fatalf("Read initial state error: %v", err)
-	}
-
-	// Verify repos array exists in initial state (will be empty since no repos muted yet)
-	var initialState protocol.WebSocketEvent
-	json.Unmarshal(initialData, &initialState)
-	// Note: Repos can be empty but should be present (may be nil if JSON doesn't include empty arrays)
-	// This is fine - we just test that after muting, we get updates
+	// Read initial state (other background broadcasts may arrive first).
+	waitForProtocolWebSocketEvent(t, wsConn, protocol.EventInitialState)
 	sendWorkspaceClientHello(t, wsConn)
 
 	// Send mute_repo command
@@ -4920,22 +4904,12 @@ func TestDaemon_MuteRepo_ViaWebSocket(t *testing.T) {
 		"repo": "owner/test-repo",
 	}
 	muteJSON, _ := json.Marshal(muteCmd)
-	err = wsConn.Write(ctx, websocket.MessageText, muteJSON)
-	if err != nil {
+	if err := wsConn.Write(ctx, websocket.MessageText, muteJSON); err != nil {
 		t.Fatalf("Write mute_repo command error: %v", err)
 	}
 
-	// Read repos_updated broadcast
-	_, updateData, err := wsConn.Read(ctx)
-	if err != nil {
-		t.Fatalf("Read update error: %v", err)
-	}
-
-	var updateEvent protocol.WebSocketEvent
-	json.Unmarshal(updateData, &updateEvent)
-	if updateEvent.Event != protocol.EventReposUpdated {
-		t.Errorf("Expected event=%s, got event=%s", protocol.EventReposUpdated, updateEvent.Event)
-	}
+	// Read repos_updated broadcast (skipping unrelated background broadcasts).
+	updateEvent := waitForProtocolWebSocketEvent(t, wsConn, protocol.EventReposUpdated)
 	if len(updateEvent.Repos) != 1 {
 		t.Fatalf("Expected 1 repo state in update, got %d", len(updateEvent.Repos))
 	}
@@ -4947,19 +4921,12 @@ func TestDaemon_MuteRepo_ViaWebSocket(t *testing.T) {
 	}
 
 	// Send mute_repo again to toggle back
-	err = wsConn.Write(ctx, websocket.MessageText, muteJSON)
-	if err != nil {
+	if err := wsConn.Write(ctx, websocket.MessageText, muteJSON); err != nil {
 		t.Fatalf("Write second mute_repo command error: %v", err)
 	}
 
-	// Read second repos_updated broadcast
-	_, updateData2, err := wsConn.Read(ctx)
-	if err != nil {
-		t.Fatalf("Read second update error: %v", err)
-	}
-
-	var updateEvent2 protocol.WebSocketEvent
-	json.Unmarshal(updateData2, &updateEvent2)
+	// Read second repos_updated broadcast.
+	updateEvent2 := waitForProtocolWebSocketEvent(t, wsConn, protocol.EventReposUpdated)
 	if updateEvent2.Repos[0].Muted {
 		t.Error("Expected repo to be unmuted after second mute_repo command (toggle)")
 	}
@@ -5016,19 +4983,10 @@ func TestDaemon_InitialState_IncludesRepoStates(t *testing.T) {
 	}
 	defer wsConn.Close(websocket.StatusNormalClosure, "")
 
-	// Read initial state
-	_, initialData, err := wsConn.Read(ctx)
-	if err != nil {
-		t.Fatalf("Read initial state error: %v", err)
-	}
-
-	var initialState protocol.WebSocketEvent
-	json.Unmarshal(initialData, &initialState)
+	// Read initial state (other background broadcasts may arrive first).
+	initialState := waitForProtocolWebSocketEvent(t, wsConn, protocol.EventInitialState)
 
 	// Verify initial state includes repos
-	if initialState.Event != protocol.EventInitialState {
-		t.Errorf("Expected event=%s, got event=%s", protocol.EventInitialState, initialState.Event)
-	}
 	if initialState.Repos == nil {
 		t.Fatal("Expected Repos array in initial state")
 	}
@@ -5094,11 +5052,8 @@ func TestDaemon_StateChange_BroadcastsToWebSocket(t *testing.T) {
 	}
 	defer wsConn.Close(websocket.StatusNormalClosure, "")
 
-	// Read initial state
-	_, _, err = wsConn.Read(ctx)
-	if err != nil {
-		t.Fatalf("Read initial state error: %v", err)
-	}
+	// Read initial state (other background broadcasts may arrive first).
+	waitForProtocolWebSocketEvent(t, wsConn, protocol.EventInitialState)
 
 	// Update state to waiting_input via unix socket
 	err = c.UpdateState("test-session", protocol.StateWaitingInput)
@@ -5106,18 +5061,8 @@ func TestDaemon_StateChange_BroadcastsToWebSocket(t *testing.T) {
 		t.Fatalf("UpdateState error: %v", err)
 	}
 
-	// Read WebSocket event - should be session_state_changed
-	_, eventData, err := wsConn.Read(ctx)
-	if err != nil {
-		t.Fatalf("Read event error: %v", err)
-	}
-
-	var event protocol.WebSocketEvent
-	json.Unmarshal(eventData, &event)
-
-	if event.Event != protocol.EventSessionStateChanged {
-		t.Errorf("Expected event=%s, got event=%s", protocol.EventSessionStateChanged, event.Event)
-	}
+	// Read WebSocket event - should be session_state_changed (skipping unrelated broadcasts).
+	event := waitForProtocolWebSocketEvent(t, wsConn, protocol.EventSessionStateChanged)
 	if event.Session == nil {
 		t.Fatal("Expected Session in event")
 	}

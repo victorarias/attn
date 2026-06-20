@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -417,6 +418,74 @@ func TestWorkspaceContextCheckoutPathReturnsCheckoutPath(t *testing.T) {
 	}
 	if path != "/tmp/context.md" {
 		t.Fatalf("path = %q, want /tmp/context.md", path)
+	}
+}
+
+func TestWorkspaceContextGuidanceProvidedAtLaunch(t *testing.T) {
+	t.Setenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE", "developer_instructions")
+	t.Setenv("ATTN_NOTEBOOK_GUIDANCE", "")
+	if !workspaceContextGuidanceProvidedAtLaunch() {
+		t.Fatal("workspace launch guidance should suppress hook guidance output")
+	}
+
+	// A chief launch injects Notebook guidance (not workspace context); its
+	// marker must equally suppress the SessionStart hook's workspace guidance.
+	t.Setenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE", "")
+	t.Setenv("ATTN_NOTEBOOK_GUIDANCE", "append_system_prompt")
+	if !workspaceContextGuidanceProvidedAtLaunch() {
+		t.Fatal("notebook launch guidance should suppress hook guidance output")
+	}
+
+	t.Setenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE", "")
+	t.Setenv("ATTN_NOTEBOOK_GUIDANCE", "")
+	if workspaceContextGuidanceProvidedAtLaunch() {
+		t.Fatal("missing launch guidance should preserve hook fallback output")
+	}
+}
+
+type fakeNotebookGuideClient struct {
+	result *protocol.NotebookGuideResult
+	err    error
+	gotID  string
+}
+
+func (f *fakeNotebookGuideClient) NotebookGuide(sessionID string) (*protocol.NotebookGuideResult, error) {
+	f.gotID = sessionID
+	return f.result, f.err
+}
+
+func TestResolveChiefNotebookRoot(t *testing.T) {
+	t.Run("chief returns root", func(t *testing.T) {
+		c := &fakeNotebookGuideClient{result: &protocol.NotebookGuideResult{Root: "/nb", SessionIsChief: true}}
+		if got := resolveChiefNotebookRoot(c, "s1"); got != "/nb" {
+			t.Fatalf("root = %q, want /nb", got)
+		}
+		if c.gotID != "s1" {
+			t.Fatalf("session id = %q, want s1", c.gotID)
+		}
+	})
+	t.Run("non-chief returns empty", func(t *testing.T) {
+		c := &fakeNotebookGuideClient{result: &protocol.NotebookGuideResult{Root: "/nb", SessionIsChief: false}}
+		if got := resolveChiefNotebookRoot(c, "s1"); got != "" {
+			t.Fatalf("root = %q, want empty for non-chief", got)
+		}
+	})
+	t.Run("lookup error returns empty (falls back to workspace context)", func(t *testing.T) {
+		c := &fakeNotebookGuideClient{err: errors.New("daemon down")}
+		if got := resolveChiefNotebookRoot(c, "s1"); got != "" {
+			t.Fatalf("root = %q, want empty on error", got)
+		}
+	})
+}
+
+func TestWorkspaceContextSessionStartOutputReturnsLastCheckoutError(t *testing.T) {
+	c := &fakeWorkspaceContextCheckoutClient{failures: 2}
+	output, err := workspaceContextSessionStartOutput(c, "session-1", 2, 0)
+	if err == nil || !strings.Contains(err.Error(), "source session not found") {
+		t.Fatalf("workspaceContextSessionStartOutput error = %v", err)
+	}
+	if output != "" {
+		t.Fatalf("hook output = %q, want empty", output)
 	}
 }
 

@@ -32,12 +32,12 @@ import {
 } from '../utils/reviewLoopPresets';
 import { BUILD_PROFILE } from '../utils/buildProfile';
 import {
-  defaultWorkspaceContextJanitorModel,
-  isWorkspaceContextJanitorModelPreset,
-  parseWorkspaceContextJanitorConfig,
-  serializeWorkspaceContextJanitorConfig,
-  workspaceContextJanitorModelPresets,
-} from '../utils/workspaceContextJanitor';
+  defaultWorkspaceContextKeeperModel,
+  isWorkspaceContextKeeperModelPreset,
+  parseWorkspaceContextKeeperConfig,
+  serializeWorkspaceContextKeeperConfig,
+  workspaceContextKeeperModelPresets,
+} from '../utils/workspaceContextKeeper';
 import './SettingsModal.css';
 
 interface SettingsModalProps {
@@ -116,8 +116,8 @@ export function SettingsModal({
   const [selectedReviewLoopPresetID, setSelectedReviewLoopPresetID] = useState('');
   const [reviewLoopModel, setReviewLoopModel] = useState(settings.review_loop_model || '');
   const [reviewerModel, setReviewerModel] = useState(settings.reviewer_model || '');
-  const [workspaceContextJanitorAgent, setWorkspaceContextJanitorAgent] = useState<SessionAgent | ''>('');
-  const [workspaceContextJanitorModel, setWorkspaceContextJanitorModel] = useState('');
+  const [workspaceContextKeeperAgent, setWorkspaceContextKeeperAgent] = useState<SessionAgent | ''>('');
+  const [workspaceContextKeeperModel, setWorkspaceContextKeeperModel] = useState('');
   const [newEndpointName, setNewEndpointName] = useState('');
   const [newEndpointTarget, setNewEndpointTarget] = useState('');
   const [newEndpointProfile, setNewEndpointProfile] = useState(BUILD_PROFILE);
@@ -165,9 +165,9 @@ export function SettingsModal({
   );
   const actualReviewLoopModel = settings.review_loop_model || '';
   const actualReviewerModel = settings.reviewer_model || '';
-  const actualWorkspaceContextJanitor = useMemo(
-    () => parseWorkspaceContextJanitorConfig(settings.workspace_context_janitor),
-    [settings.workspace_context_janitor],
+  const actualWorkspaceContextKeeper = useMemo(
+    () => parseWorkspaceContextKeeperConfig(settings.workspace_keeper_compact),
+    [settings.workspace_keeper_compact],
   );
   const resolvedDefaultAgent = resolvePreferredAgent(actualDefaultAgent, agentAvailability, 'codex');
   const orderedAgentList = useMemo(
@@ -178,29 +178,29 @@ export function SettingsModal({
     () => orderedAgentList.filter((agent) => ['codex', 'claude', 'copilot'].includes(agent)),
     [orderedAgentList],
   );
-  const workspaceContextJanitorAgents = useMemo(() => {
+  const workspaceContextKeeperAgents = useMemo(() => {
     const eligible = orderedAgentList.filter((agent) => (
       ['codex', 'claude'].includes(agent)
       && isAgentAvailable(agentAvailability, agent)
       && actualAgentCapabilities[agent]?.headless_task === true
     ));
-    const configured = actualWorkspaceContextJanitor?.agent;
+    const configured = actualWorkspaceContextKeeper?.agent;
     if (configured && ['codex', 'claude'].includes(configured) && !eligible.includes(configured)) {
       eligible.push(configured);
     }
     return eligible;
-  }, [actualAgentCapabilities, actualWorkspaceContextJanitor?.agent, agentAvailability, orderedAgentList]);
-  const workspaceContextJanitorModelPresetsForAgent = useMemo(
-    () => workspaceContextJanitorModelPresets(workspaceContextJanitorAgent),
-    [workspaceContextJanitorAgent],
+  }, [actualAgentCapabilities, actualWorkspaceContextKeeper?.agent, agentAvailability, orderedAgentList]);
+  const workspaceContextKeeperModelPresetsForAgent = useMemo(
+    () => workspaceContextKeeperModelPresets(workspaceContextKeeperAgent),
+    [workspaceContextKeeperAgent],
   );
-  const workspaceContextJanitorModelSelection = !workspaceContextJanitorAgent
+  const workspaceContextKeeperModelSelection = !workspaceContextKeeperAgent
     ? ''
-    : isWorkspaceContextJanitorModelPreset(
-      workspaceContextJanitorAgent,
-      workspaceContextJanitorModel,
+    : isWorkspaceContextKeeperModelPreset(
+      workspaceContextKeeperAgent,
+      workspaceContextKeeperModel,
     )
-      ? workspaceContextJanitorModel
+      ? workspaceContextKeeperModel
       : 'custom';
   const agentCapabilityOrder = useMemo(
     () => AGENT_CAPABILITY_ORDER.map((cap) => cap as string),
@@ -237,8 +237,8 @@ export function SettingsModal({
     setReviewLoopIterations(actualReviewLoopPresets[0]?.iterationLimit || 3);
     setReviewLoopModel(actualReviewLoopModel);
     setReviewerModel(actualReviewerModel);
-    setWorkspaceContextJanitorAgent(actualWorkspaceContextJanitor?.agent || '');
-    setWorkspaceContextJanitorModel(actualWorkspaceContextJanitor?.model || '');
+    setWorkspaceContextKeeperAgent(actualWorkspaceContextKeeper?.agent || '');
+    setWorkspaceContextKeeperModel(actualWorkspaceContextKeeper?.model || '');
     setNewEndpointName('');
     setNewEndpointTarget('');
     setEditingEndpointID(null);
@@ -249,7 +249,7 @@ export function SettingsModal({
     setPluginSourcePath('');
     setPluginError(null);
     setPluginActionName(null);
-  }, [isOpen, actualProjectsDir, actualAgentExecutables, actualEditorExecutable, resolvedDefaultAgent, actualReviewLoopPresets, actualReviewLoopModel, actualReviewerModel, actualWorkspaceContextJanitor]);
+  }, [isOpen, actualProjectsDir, actualAgentExecutables, actualEditorExecutable, resolvedDefaultAgent, actualReviewLoopPresets, actualReviewLoopModel, actualReviewerModel, actualWorkspaceContextKeeper]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -347,31 +347,31 @@ export function SettingsModal({
     }
   }, [actualDefaultAgent, agentAvailability, onSetSetting]);
 
-  const handleWorkspaceContextJanitorAgentChange = useCallback((agent: SessionAgent | '') => {
-    setWorkspaceContextJanitorAgent(agent);
-    setWorkspaceContextJanitorModel(defaultWorkspaceContextJanitorModel(agent));
+  const handleWorkspaceContextKeeperAgentChange = useCallback((agent: SessionAgent | '') => {
+    setWorkspaceContextKeeperAgent(agent);
+    setWorkspaceContextKeeperModel(defaultWorkspaceContextKeeperModel(agent));
   }, []);
 
-  const handleWorkspaceContextJanitorModelSelection = useCallback((model: string) => {
-    setWorkspaceContextJanitorModel(model === 'custom' ? '' : model);
+  const handleWorkspaceContextKeeperModelSelection = useCallback((model: string) => {
+    setWorkspaceContextKeeperModel(model === 'custom' ? '' : model);
   }, []);
 
-  const saveWorkspaceContextJanitor = useCallback(() => {
-    const model = workspaceContextJanitorModel.trim();
-    if (!workspaceContextJanitorAgent || !model) return;
+  const saveWorkspaceContextKeeper = useCallback(() => {
+    const model = workspaceContextKeeperModel.trim();
+    if (!workspaceContextKeeperAgent || !model) return;
     onSetSetting(
-      'workspace_context_janitor',
-      serializeWorkspaceContextJanitorConfig({
-        agent: workspaceContextJanitorAgent,
+      'workspace_keeper_compact',
+      serializeWorkspaceContextKeeperConfig({
+        agent: workspaceContextKeeperAgent,
         model,
       }),
     );
-  }, [onSetSetting, workspaceContextJanitorAgent, workspaceContextJanitorModel]);
+  }, [onSetSetting, workspaceContextKeeperAgent, workspaceContextKeeperModel]);
 
-  const disableWorkspaceContextJanitor = useCallback(() => {
-    setWorkspaceContextJanitorAgent('');
-    setWorkspaceContextJanitorModel('');
-    onSetSetting('workspace_context_janitor', '');
+  const disableWorkspaceContextKeeper = useCallback(() => {
+    setWorkspaceContextKeeperAgent('');
+    setWorkspaceContextKeeperModel('');
+    onSetSetting('workspace_keeper_compact', '');
   }, [onSetSetting]);
 
   const persistReviewLoopPresets = useCallback((nextPresets: ReviewLoopPreset[]) => {
@@ -697,7 +697,7 @@ export function SettingsModal({
           title: 'Agent runtime',
           description: 'Agent executable paths, defaults, context maintenance, capabilities, and PTY runtime mode.',
           count: orderedAgentList.length + 4,
-          keywords: 'agents executables claude codex cursor default capabilities pty backend editor context janitor compact model',
+          keywords: 'agents executables claude codex cursor default capabilities pty backend editor context keeper compact model',
         },
       ],
     },
@@ -786,7 +786,7 @@ export function SettingsModal({
               {availableAgentCount}/{orderedAgentList.length} available
             </span>
             <span className="settings-pill">
-              {actualWorkspaceContextJanitor ? `${agentLabel(actualWorkspaceContextJanitor.agent)} janitor` : 'janitor off'}
+              {actualWorkspaceContextKeeper ? `${agentLabel(actualWorkspaceContextKeeper.agent)} keeper` : 'keeper off'}
             </span>
           </>
         );
@@ -1411,62 +1411,62 @@ export function SettingsModal({
       <section className="settings-block">
         <div className="settings-block-intro">
           <div className="settings-kicker">Context</div>
-          <h3>Workspace Context Janitor</h3>
+          <h3>Workspace Context Keeper</h3>
           <p className="settings-description">
             Compacts large shared contexts in the background with one non-interactive agent and model.
             Empty configuration disables it.
           </p>
         </div>
         <div className="settings-block-body">
-          {workspaceContextJanitorAgents.length === 0 && (
+          {workspaceContextKeeperAgents.length === 0 && (
             <div className="settings-warning">No installed agent supports scoped headless tasks.</div>
           )}
           <div className="settings-field-grid two-column">
             <div className="settings-field">
-              <label className="settings-label" htmlFor="settings-context-janitor-agent">Agent</label>
+              <label className="settings-label" htmlFor="settings-context-keeper-agent">Agent</label>
               <select
-                id="settings-context-janitor-agent"
-                data-testid="settings-context-janitor-agent"
+                id="settings-context-keeper-agent"
+                data-testid="settings-context-keeper-agent"
                 className="settings-input"
-                value={workspaceContextJanitorAgent}
-                onChange={(event) => handleWorkspaceContextJanitorAgentChange(event.target.value as SessionAgent | '')}
+                value={workspaceContextKeeperAgent}
+                onChange={(event) => handleWorkspaceContextKeeperAgentChange(event.target.value as SessionAgent | '')}
               >
                 <option value="">Disabled</option>
-                {workspaceContextJanitorAgents.map((agent) => (
+                {workspaceContextKeeperAgents.map((agent) => (
                   <option key={agent} value={agent}>{agentLabel(agent)}</option>
                 ))}
               </select>
             </div>
             <div className="settings-field">
-              <label className="settings-label" htmlFor="settings-context-janitor-model">Model</label>
+              <label className="settings-label" htmlFor="settings-context-keeper-model">Model</label>
               <select
-                id="settings-context-janitor-model"
-                data-testid="settings-context-janitor-model"
-                value={workspaceContextJanitorModelSelection}
-                onChange={(event) => handleWorkspaceContextJanitorModelSelection(event.target.value)}
+                id="settings-context-keeper-model"
+                data-testid="settings-context-keeper-model"
+                value={workspaceContextKeeperModelSelection}
+                onChange={(event) => handleWorkspaceContextKeeperModelSelection(event.target.value)}
                 className="settings-input"
-                disabled={!workspaceContextJanitorAgent}
+                disabled={!workspaceContextKeeperAgent}
               >
-                {!workspaceContextJanitorAgent && <option value="">Select an agent</option>}
-                {workspaceContextJanitorModelPresetsForAgent.map((preset) => (
+                {!workspaceContextKeeperAgent && <option value="">Select an agent</option>}
+                {workspaceContextKeeperModelPresetsForAgent.map((preset) => (
                   <option key={preset.value} value={preset.value}>{preset.label}</option>
                 ))}
                 <option value="custom">Custom...</option>
               </select>
             </div>
           </div>
-          {workspaceContextJanitorAgent && workspaceContextJanitorModelSelection === 'custom' && (
+          {workspaceContextKeeperAgent && workspaceContextKeeperModelSelection === 'custom' && (
             <div className="settings-field">
-              <label className="settings-label" htmlFor="settings-context-janitor-model-custom">
+              <label className="settings-label" htmlFor="settings-context-keeper-model-custom">
                 Custom model
               </label>
               <input
-                id="settings-context-janitor-model-custom"
-                data-testid="settings-context-janitor-model-custom"
+                id="settings-context-keeper-model-custom"
+                data-testid="settings-context-keeper-model-custom"
                 type="text"
-                value={workspaceContextJanitorModel}
-                onChange={(event) => setWorkspaceContextJanitorModel(event.target.value)}
-                placeholder={workspaceContextJanitorAgent === 'claude' ? 'claude-opus-4-6' : 'model ID'}
+                value={workspaceContextKeeperModel}
+                onChange={(event) => setWorkspaceContextKeeperModel(event.target.value)}
+                placeholder={workspaceContextKeeperAgent === 'claude' ? 'claude-opus-4-6' : 'model ID'}
                 className="settings-input"
                 autoCapitalize="none"
                 autoCorrect="off"
@@ -1478,17 +1478,17 @@ export function SettingsModal({
             <button
               type="button"
               className="settings-action"
-              data-testid="settings-context-janitor-save"
-              onClick={saveWorkspaceContextJanitor}
-              disabled={!workspaceContextJanitorAgent || !workspaceContextJanitorModel.trim()}
+              data-testid="settings-context-keeper-save"
+              onClick={saveWorkspaceContextKeeper}
+              disabled={!workspaceContextKeeperAgent || !workspaceContextKeeperModel.trim()}
             >
               Save
             </button>
             <button
               type="button"
               className="settings-action"
-              onClick={disableWorkspaceContextJanitor}
-              disabled={!actualWorkspaceContextJanitor}
+              onClick={disableWorkspaceContextKeeper}
+              disabled={!actualWorkspaceContextKeeper}
             >
               Disable
             </button>

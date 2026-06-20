@@ -46,7 +46,7 @@ func (s *Store) RemoveWorkspace(id string) {
 	}
 	_, _ = s.db.Exec(`DELETE FROM workspace_layout_panes WHERE workspace_id = ?`, id)
 	_, _ = s.db.Exec(`DELETE FROM workspace_layouts WHERE workspace_id = ?`, id)
-	_, _ = s.db.Exec(`DELETE FROM workspace_context_janitor_backups WHERE workspace_id = ?`, id)
+	_, _ = s.db.Exec(`DELETE FROM workspace_keeper_compact_backups WHERE workspace_id = ?`, id)
 	_, _ = s.db.Exec(`DELETE FROM workspace_contexts WHERE workspace_id = ?`, id)
 	if _, err := s.db.Exec(`DELETE FROM workspaces WHERE id = ?`, id); err != nil {
 		log.Printf("[store] RemoveWorkspace: failed to delete workspace %s: %v", id, err)

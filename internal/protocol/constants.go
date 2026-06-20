@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "106"
+const ProtocolVersion = "115"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -58,6 +58,14 @@ const (
 	CmdWorkspaceContextList                  = "workspace_context_list"
 	CmdWorkspaceContextCompact               = "workspace_context_compact"
 	CmdWorkspaceContextRollback              = "workspace_context_rollback"
+	CmdNotebookList                          = "notebook_list"
+	CmdNotebookRead                          = "notebook_read"
+	CmdNotebookWrite                         = "notebook_write"
+	CmdNotebookGuide                         = "notebook_guide"
+	CmdNotebookBacklinks                     = "notebook_backlinks"
+	CmdNotebookSendToChief                   = "notebook_send_to_chief"
+	CmdNotebookTaskList                      = "notebook_task_list"
+	CmdNotebookTaskRetry                     = "notebook_task_retry"
 	CmdUnregister                            = "unregister"
 	CmdState                                 = "state"
 	CmdSetSessionResumeID                    = "set_session_resume_id"
@@ -173,6 +181,7 @@ const (
 	EventWorkspaceUnregistered         = "workspace_unregistered"
 	EventWorkspaceStateChanged         = "workspace_state_changed"
 	EventWorkspaceContextChanged       = "workspace_context_changed"
+	EventNotebookChanged               = "notebook_changed"
 	EventSessionTodosUpdated           = "session_todos_updated"
 	EventSessionsUpdated               = "sessions_updated"
 	EventRenameResult                  = "rename_result"
@@ -182,6 +191,14 @@ const (
 	EventDelegateResult                = "delegate_result"
 	EventWorkspaceContextResult        = "workspace_context_result"
 	EventWorkspaceContextListResult    = "workspace_context_list_result"
+	EventNotebookListResult            = "notebook_list_result"
+	EventNotebookReadResult            = "notebook_read_result"
+	EventNotebookBacklinksResult       = "notebook_backlinks_result"
+	EventNotebookWriteResult           = "notebook_write_result"
+	EventNotebookSendToChiefResult     = "notebook_send_to_chief_result"
+	EventNotebookTaskListResult        = "notebook_task_list_result"
+	EventNotebookTaskRetryResult       = "notebook_task_retry_result"
+	EventNotebookTasksChanged          = "notebook_tasks_changed"
 	EventPRsUpdated                    = "prs_updated"
 	EventReposUpdated                  = "repos_updated"
 	EventAuthorsUpdated                = "authors_updated"
@@ -438,6 +455,62 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdWorkspaceContextRollback:
 		var msg WorkspaceContextRollbackMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdNotebookList:
+		var msg NotebookListMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdNotebookRead:
+		var msg NotebookReadMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdNotebookWrite:
+		var msg NotebookWriteMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdNotebookGuide:
+		var msg NotebookGuideMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdNotebookBacklinks:
+		var msg NotebookBacklinksMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdNotebookSendToChief:
+		var msg NotebookSendToChiefMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdNotebookTaskList:
+		var msg NotebookTaskListMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdNotebookTaskRetry:
+		var msg NotebookTaskRetryMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

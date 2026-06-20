@@ -878,6 +878,27 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		}()
 	case protocol.CmdWorkspaceContextList:
 		go d.sendWorkspaceContextListWSResult(client, msg.(*protocol.WorkspaceContextListMessage).RequestID)
+	case protocol.CmdNotebookList:
+		nbList := msg.(*protocol.NotebookListMessage)
+		go d.sendNotebookListWSResult(client, protocol.Deref(nbList.RequestID), protocol.Deref(nbList.Prefix))
+	case protocol.CmdNotebookRead:
+		nbRead := msg.(*protocol.NotebookReadMessage)
+		go d.sendNotebookReadWSResult(client, protocol.Deref(nbRead.RequestID), nbRead.Path)
+	case protocol.CmdNotebookBacklinks:
+		nbBack := msg.(*protocol.NotebookBacklinksMessage)
+		go d.sendNotebookBacklinksWSResult(client, protocol.Deref(nbBack.RequestID), nbBack.Path)
+	case protocol.CmdNotebookWrite:
+		nbWrite := msg.(*protocol.NotebookWriteMessage)
+		go d.sendNotebookWriteWSResult(client, protocol.Deref(nbWrite.RequestID), nbWrite.Path, nbWrite.Content, protocol.Deref(nbWrite.BaseHash))
+	case protocol.CmdNotebookSendToChief:
+		nbChief := msg.(*protocol.NotebookSendToChiefMessage)
+		go d.sendNotebookToChiefWSResult(client, protocol.Deref(nbChief.RequestID), protocol.Deref(nbChief.SourcePath), nbChief.Selection)
+	case protocol.CmdNotebookTaskList:
+		nbTaskList := msg.(*protocol.NotebookTaskListMessage)
+		go d.sendNotebookTaskListWSResult(client, protocol.Deref(nbTaskList.RequestID))
+	case protocol.CmdNotebookTaskRetry:
+		nbTaskRetry := msg.(*protocol.NotebookTaskRetryMessage)
+		go d.sendNotebookTaskRetryWSResult(client, protocol.Deref(nbTaskRetry.RequestID), nbTaskRetry.TaskID)
 	case protocol.CmdApprovePR:
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
 	case protocol.CmdMergePR:

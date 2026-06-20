@@ -82,7 +82,15 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	if strings.TrimSpace(opts.SettingsPath) != "" {
 		args = append(args, "--settings", opts.SettingsPath)
 	}
-	if instructions := hooks.AgentInstructions(opts.WorkspaceContextPath, opts.InjectWorkflowGuidance); instructions != "" {
+	// A chief-of-staff launch (NotebookRoot set) gets Notebook guidance instead
+	// of the workspace-context checkout guidance. Every other workspace agent gets
+	// its workspace-context guidance (plus workflow-trigger guidance when enabled,
+	// folded in by hooks.AgentInstructions). Non-chief agents are NOT nudged to
+	// journal: the keeper narrates each workspace's own work into the journal, and
+	// the chief journals the cross-workspace layer.
+	if guidance := hooks.NotebookGuidance(opts.NotebookRoot); guidance != "" {
+		args = append(args, "--append-system-prompt", guidance)
+	} else if instructions := hooks.AgentInstructions(opts.WorkspaceContextPath, opts.InjectWorkflowGuidance); instructions != "" {
 		args = append(args, "--append-system-prompt", instructions)
 	}
 
@@ -103,21 +111,44 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 
 func (c *Claude) BuildEnv(opts SpawnOpts) []string {
 	var env []string
+	if strings.TrimSpace(opts.NotebookRoot) != "" {
+		// A chief launch injected Notebook guidance at launch; mark it so the
+		// SessionStart hook does not also emit workspace-context guidance.
+		env = append(env, "ATTN_NOTEBOOK_GUIDANCE=append_system_prompt")
+	} else if strings.TrimSpace(opts.WorkspaceContextPath) != "" {
+		env = append(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=append_system_prompt")
+	}
 	if opts.Executable != "" && opts.Executable != c.DefaultExecutable() {
 		env = append(env, c.ExecutableEnvVar()+"="+opts.Executable)
 	}
 	return env
 }
 
+// claudeNativeDefaultTools is the file-tool allow-list used when a native-tools
+// headless task does not specify AllowedTools. Bash is intentionally omitted:
+// the keeper's compaction duty only needs to read/write/edit files, and Grep/Glob cover
+// navigation, so the surface stays minimal.
+var claudeNativeDefaultTools = []string{"Read", "Write", "Edit", "Grep", "Glob"}
+
 func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest) (HeadlessTaskResult, error) {
-	args, err := buildClaudeHeadlessArgs(request)
-	if err != nil {
-		return HeadlessTaskResult{}, err
+	// Dispatch: the keeper/notebook tasks wire NO MCP server and run in
+	// native-tools mode; the workflow engine sets a writable CWD+Sandbox (and an
+	// MCP result sink when schema-validated) and runs the MCP-config path. Any
+	// MCP-server, CWD, or Sandbox marker selects the MCP-config path.
+	var args []string
+	if request.usesNativeToolsPath() {
+		args = claudeHeadlessArgs(request)
+	} else {
+		built, err := buildClaudeHeadlessArgs(request)
+		if err != nil {
+			return HeadlessTaskResult{}, err
+		}
+		args = built
 	}
 
 	// The process working directory is CWD when set (the writable engine path
 	// points it at the run's working tree), else WorkDir (back-compat: the
-	// janitor's throwaway temp dir).
+	// keeper's throwaway temp dir).
 	runDir := strings.TrimSpace(request.CWD)
 	if runDir == "" {
 		runDir = request.WorkDir
@@ -131,10 +162,10 @@ func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskReques
 	return result, nil
 }
 
-// buildClaudeHeadlessArgs builds the `claude --print` argv for a headless run.
-// It is pure except for the env-dependent isolation arg (--bare vs
-// --setting-sources), so a table test can assert the tool allowlist and
-// --mcp-config wiring without spawning claude.
+// buildClaudeHeadlessArgs builds the `claude --print` argv for the MCP-config
+// (workflow-engine) headless path. It is pure except for the env-dependent
+// isolation arg (--bare vs --setting-sources), so a table test can assert the
+// tool allowlist and --mcp-config wiring without spawning claude.
 //
 // Sandbox posture:
 //   - request.Sandbox == "workspace-write" => the writable tool set adds Edit,
@@ -146,8 +177,7 @@ func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskReques
 //     seatbelt here, so the allowlist itself is the boundary — only edit/write
 //     and bash are added, nothing else; no MCP/network features beyond the
 //     attached servers, and no --dangerously-skip-permissions.
-//   - any other value (including "") => the locked MCP-tool-only allowlist,
-//     byte-identical to the janitor.
+//   - any other value (including "") => the locked MCP-tool-only allowlist.
 func buildClaudeHeadlessArgs(request HeadlessTaskRequest) ([]string, error) {
 	serverName := strings.TrimSpace(request.MCPServerName)
 	if serverName == "" {
@@ -219,6 +249,35 @@ func buildClaudeHeadlessArgs(request HeadlessTaskRequest) ([]string, error) {
 		request.Prompt,
 	)
 	return args, nil
+}
+
+// claudeHeadlessArgs builds the native-tools arg set (the keeper/notebook path):
+// the agent gets its own file tools and writes into cmd.Dir (the scratch
+// WorkDir). Only the allow-list and permission mode let it read/write its cwd
+// unprompted.
+func claudeHeadlessArgs(request HeadlessTaskRequest) []string {
+	tools := request.AllowedTools
+	if len(tools) == 0 {
+		tools = claudeNativeDefaultTools
+	}
+	args := []string{"--print"}
+	args = append(args, claudeHeadlessIsolationArgs()...)
+	// Only pin the model when one is requested; an empty "--model" is rejected as
+	// an invalid model. Omitting it lets Claude use its own default (the faithful
+	// "harness decides" default when agent() has no model override).
+	if model := strings.TrimSpace(request.Model); model != "" {
+		args = append(args, "--model", model)
+	}
+	args = append(args,
+		"--no-session-persistence",
+		"--disable-slash-commands",
+		"--no-chrome",
+		"--allowedTools", strings.Join(tools, ","),
+		"--permission-mode", "dontAsk",
+		"--output-format", "json",
+		request.Prompt,
+	)
+	return args
 }
 
 // claudePrefixedTools maps an MCP server's tool names to their mcp__<server>__

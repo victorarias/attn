@@ -619,6 +619,76 @@ model WorkspaceContextRollbackMessage {
   source_session_id: string;
 }
 
+// ============================================================================
+// Notebook (durable, profile-wide markdown: a dated journal + a PARA knowledge
+// base). See docs/plans/2026-06-13-notebook.md and 2026-06-18-knowledge-base.md.
+// Filesystem-canonical: edits use hash-CAS on file bytes, not a revision table.
+// These messages are the frontend's WebSocket path; the user-facing `attn
+// notebook …` CLI was removed (only notebook_guide remains, for the launcher).
+// ============================================================================
+
+model NotebookListMessage {
+  cmd: "notebook_list";
+  prefix?: string;
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+model NotebookReadMessage {
+  cmd: "notebook_read";
+  path: string;
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+// List the notes whose body links to `path` (root-absolute markdown links).
+model NotebookBacklinksMessage {
+  cmd: "notebook_backlinks";
+  path: string;
+  request_id?: string; // set by the WS frontend for result correlation
+}
+
+model NotebookWriteMessage {
+  cmd: "notebook_write";
+  path: string;
+  content: string;
+  base_hash?: string; // omitted = create-only; present = hash-CAS edit
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+// Send a Notebook selection to the chief of staff. The daemon appends it to the
+// chief inbox note and, when a chief session is live and idle/waiting, fires a
+// bounded PTY nudge. The UI never messages the chief directly.
+model NotebookSendToChiefMessage {
+  cmd: "notebook_send_to_chief";
+  selection: string;
+  source_path?: string; // the note the selection came from (root-absolute or relative)
+  request_id?: string; // set by the WS frontend for result correlation
+}
+
+// Resolve a session's notebook role and root for the agent-launch wrapper. The
+// daemon answers whether the session is the chief of staff and where the notebook
+// root is; the launcher injects the canonical operating guidance from that. This
+// is the one surviving unix-socket notebook command after the user-facing
+// `attn notebook …` subcommands were removed.
+model NotebookGuideMessage {
+  cmd: "notebook_guide";
+  session_id?: string; // when set, session_is_chief reflects this session's role
+}
+
+// Task status surface: list the durable task runner's records, and retry a
+// failed/dead one. state and kind are plain strings (not enums) so the on-disk
+// record stays self-describing and a new TypeSpec enum cannot trip the quicktype
+// identical-enum-merge that drops a generated export.
+model NotebookTaskListMessage {
+  cmd: "notebook_task_list";
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+model NotebookTaskRetryMessage {
+  cmd: "notebook_task_retry";
+  request_id?: string; // set by the WS frontend for result correlation
+  task_id: string;
+}
+
 model DelegateWorktreeRequest {
   repo?: string;
   branch: string;
@@ -1381,6 +1451,13 @@ model WorkspaceContextChangedMessage {
   updated_at: string;
 }
 
+// Broadcast when notebook content changes. origin is agent|ui|external.
+model NotebookChangedMessage {
+  event: "notebook_changed";
+  paths: string[];
+  origin: string;
+}
+
 model SessionTodosUpdatedMessage {
   event: "session_todos_updated";
   session: Session;
@@ -2025,6 +2102,10 @@ model Response {
   repos?: RepoState[];
   authors?: AuthorState[];
   review_loop_run?: ReviewLoopRun;
+  notebook_entries?: NotebookEntry[];
+  notebook_read?: NotebookReadResult;
+  notebook_write?: NotebookWriteResult;
+  notebook_guide?: NotebookGuideResult;
 }
 
 model DelegateResult {
@@ -2064,6 +2145,137 @@ model WorkspaceContextMaintenanceResult {
   changed: boolean;
   agent?: string;
   agent_model?: string;
+}
+
+// One notebook note as surfaced by notebook_list (metadata only, no body).
+model NotebookEntry {
+  path: string;
+  type?: string;
+  title?: string;
+  summary?: string;
+  updated?: string;
+  size: int32;
+}
+
+model NotebookReadResult {
+  path: string;
+  content: string;
+  hash: string;
+}
+
+// Result of notebook_write. When conflict is true the write did not apply;
+// current_hash is the hash now on disk (empty if gone).
+model NotebookWriteResult {
+  path: string;
+  hash?: string;
+  conflict: boolean;
+  current_hash?: string;
+}
+
+// Result of notebook_guide. guidance is the operating rules text; root is the
+// resolved notebook root; session_is_chief is true only when the request's
+// session_id currently holds the chief-of-staff role.
+model NotebookGuideResult {
+  guidance: string;
+  root: string;
+  session_is_chief: boolean;
+}
+
+// One durable task-runner record, surfaced read-only for the task status panel.
+// kind and state are plain strings (the runner persists them as self-describing
+// strings, never Go/TypeSpec enums). The runner's internal Meta bag (transcript
+// filesystem paths and other kind-specific inputs) is deliberately omitted — it
+// carries internal inputs that must never reach the user-facing protocol.
+model NotebookTask {
+  id: string;
+  kind: string;
+  subject: string;
+  state: string;
+  attempts: int32;
+  next_attempt_at: string;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// WS result events for the frontend's notebook reads (request/result pattern).
+// The unix CLI uses the synchronous Response fields above; these carry the same
+// payloads back to a websocket client correlated by request_id.
+model NotebookListResultMessage {
+  event: "notebook_list_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  entries?: NotebookEntry[];
+}
+
+model NotebookReadResultMessage {
+  event: "notebook_read_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  result?: NotebookReadResult;
+}
+
+model NotebookBacklinksResultMessage {
+  event: "notebook_backlinks_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  entries?: NotebookEntry[];
+}
+
+// Result of a WS notebook_write (the in-app editor's hash-CAS save). A conflict
+// (the file changed on disk since the editor loaded it) is a successful response
+// the UI reconciles, carried in result.conflict — not a transport error.
+model NotebookWriteResultMessage {
+  event: "notebook_write_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  result?: NotebookWriteResult;
+}
+
+// Result of notebook_send_to_chief. path is the inbox note the selection was
+// appended to; nudged is true when a live chief session was pinged in its PTY
+// (false when no chief is set or it was busy — the inbox delivery still happened).
+model NotebookSendToChiefResult {
+  path: string;
+  nudged: boolean;
+}
+
+model NotebookSendToChiefResultMessage {
+  event: "notebook_send_to_chief_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  result?: NotebookSendToChiefResult;
+}
+
+// Result of notebook_task_list: the durable runner's records, newest-updated
+// first. An empty/absent tasks array means the runner is disabled or has no work.
+model NotebookTaskListResultMessage {
+  event: "notebook_task_list_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  tasks?: NotebookTask[];
+}
+
+// Result of notebook_task_retry. task echoes the record after the retry flip
+// (failed/dead -> queued); absent when the runner could not act on the id.
+model NotebookTaskRetryResultMessage {
+  event: "notebook_task_retry_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  task?: NotebookTask;
+}
+
+// Broadcast (no request_id) when any task lifecycle transition occurs, so an open
+// task panel re-lists. Fired from the runner's OnChange callback.
+model NotebookTasksChangedMessage {
+  event: "notebook_tasks_changed";
 }
 
 model WorkspaceContextResultMessage {
@@ -2197,6 +2409,7 @@ alias DaemonEvent =
   | WorkspaceUnregisteredMessage
   | WorkspaceStateChangedMessage
   | WorkspaceContextChangedMessage
+  | NotebookChangedMessage
   | SessionTodosUpdatedMessage
   | SessionsUpdatedMessage
   | WorkspaceLayoutMessage
@@ -2244,6 +2457,14 @@ alias DaemonEvent =
   | WorkflowActionResultMessage
   | WorkspaceContextResultMessage
   | WorkspaceContextListResultMessage
+  | NotebookListResultMessage
+  | NotebookReadResultMessage
+  | NotebookBacklinksResultMessage
+  | NotebookWriteResultMessage
+  | NotebookSendToChiefResultMessage
+  | NotebookTaskListResultMessage
+  | NotebookTaskRetryResultMessage
+  | NotebookTasksChangedMessage
   | MarkFileViewedResultMessage
   | AddCommentResultMessage
   | UpdateCommentResultMessage

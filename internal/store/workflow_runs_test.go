@@ -14,13 +14,14 @@ func strptr(s string) *string { return &s }
 func TestWorkflowRunCRUD(t *testing.T) {
 	s := New()
 
-	// Migration smoke: tables must exist after New(), and version must be 51.
+	// Migration smoke: tables must exist after New(), and the DB must be at the
+	// latest schema version (the workflow-tables migration is part of that chain).
 	var maxVersion int
 	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&maxVersion); err != nil {
 		t.Fatalf("read schema_migrations: %v", err)
 	}
-	if maxVersion != 51 {
-		t.Fatalf("schema version = %d, want 51", maxVersion)
+	if maxVersion != latestSchemaVersion() {
+		t.Fatalf("schema version = %d, want %d", maxVersion, latestSchemaVersion())
 	}
 
 	// 1. Insert a fully-populated run.
@@ -232,7 +233,7 @@ func TestWorkflowMigrationIdempotentOnReopen(t *testing.T) {
 	if err := db2.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&maxVersion); err != nil {
 		t.Fatalf("read schema_migrations after reopen: %v", err)
 	}
-	if maxVersion != 51 {
-		t.Fatalf("schema version after reopen = %d, want 51", maxVersion)
+	if maxVersion != latestSchemaVersion() {
+		t.Fatalf("schema version after reopen = %d, want %d", maxVersion, latestSchemaVersion())
 	}
 }
