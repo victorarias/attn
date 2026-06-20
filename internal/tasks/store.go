@@ -153,9 +153,23 @@ func (s *store) list() ([]*Task, error) {
 			s.log("tasks: skipping undecodable record %s: %v", e.Name(), err)
 			continue
 		}
-		if t != nil {
-			out = append(out, t)
+		if t == nil {
+			continue
 		}
+		// Defense symmetric with load(): the store addresses a record ONLY by its
+		// canonical taskFilename(id) name, so a task file named anything else is
+		// unreachable — save/delete/load by id all target taskFilename(id), never
+		// this file. The dangerous case is a leftover from the old lossy
+		// rune-replacement naming (pre-hex): list() would return it, runNext would
+		// claim it and persist the claim to the CANONICAL file, leaving the
+		// orphan's own file untouched and still queued — so it is re-selected every
+		// cycle. Because its NextAttemptAt is in the past it wins selection forever,
+		// a hot loop that also starves the real, canonically-named tasks. Skip it.
+		if e.Name() != taskFilename(t.ID)+".json" {
+			s.log("tasks: ignoring non-canonical record %s (stored id %q)", e.Name(), t.ID)
+			continue
+		}
+		out = append(out, t)
 	}
 	return out, nil
 }

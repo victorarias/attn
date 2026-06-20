@@ -11,6 +11,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **Choose where your Notebook folder lives.** Settings → General now has a Notebook Folder picker, so you can point attn's durable Notebook — your dated journals and knowledge base — at any folder you own instead of the default `~/attn-notebook` (separate per profile). Browse to a folder or type a path, and the picker shows where the Notebook currently resolves to; leave it blank to fall back to the default. attn starts using the new folder right away — your existing notes aren't moved, so move or sync the folder yourself if you want the current contents to come along.
 
+### Fixed
+- **Background work (journal entries, summaries, context compaction) no longer stalls behind a stuck task.** A leftover task record from an earlier version of attn could be picked up by the background worker but never completed, so it was re-run on a tight endless loop — spiking CPU, flooding logs, and starving every other queued job behind it. attn now ignores these stale, unrunnable records so the queue drains and your journal and summary jobs run again.
+
 ## [2026-06-19]
 
 ### Added
