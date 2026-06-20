@@ -89,6 +89,13 @@ func (c *Codex) BuildEnv(opts SpawnOpts) []string {
 		"ATTN_SESSION_ID=" + opts.SessionID,
 		"ATTN_AGENT=codex",
 	}
+	if strings.TrimSpace(opts.NotebookRoot) != "" {
+		// A chief launch injected Notebook guidance at launch; mark it so the
+		// SessionStart hook does not also emit workspace-context guidance.
+		env = append(env, "ATTN_NOTEBOOK_GUIDANCE=developer_instructions")
+	} else if strings.TrimSpace(opts.WorkspaceContextPath) != "" {
+		env = append(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=developer_instructions")
+	}
 	if opts.SocketPath != "" {
 		env = append(env, "ATTN_SOCKET_PATH="+opts.SocketPath)
 	}
@@ -103,6 +110,18 @@ func (c *Codex) PrepareLaunch(opts SpawnOpts) error {
 }
 
 func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest) (HeadlessTaskResult, error) {
+	// Dispatch: the keeper/notebook tasks wire NO MCP server and run in
+	// native-tools mode; the workflow engine sets a writable CWD+Sandbox (and an
+	// MCP result sink when schema-validated) and runs the MCP-config path.
+	if request.usesNativeToolsPath() {
+		result, stdout, err := runHeadlessCommand(ctx, request.Executable, codexHeadlessArgs(request), request.WorkDir, "codex")
+		if err != nil {
+			return result, err
+		}
+		result.Text = parseCodexFinalText(stdout)
+		return result, nil
+	}
+
 	// Capture the child's final message to a file. This is the parser-free,
 	// robust no-schema text path (codex -o, --output-last-message <FILE>). We
 	// create the file ourselves so cleanup is deterministic; codex overwrites it.
@@ -119,7 +138,7 @@ func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest
 
 	// The process working directory is CWD when set (the writable engine path
 	// points it at the run's working tree), else WorkDir (back-compat: the
-	// janitor's throwaway temp dir).
+	// keeper's throwaway temp dir).
 	runDir := strings.TrimSpace(request.CWD)
 	if runDir == "" {
 		runDir = request.WorkDir
@@ -133,10 +152,10 @@ func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest
 	return result, nil
 }
 
-// buildCodexHeadlessArgs builds the `codex exec` argv for a headless run. It is
-// pure (no process spawn, no filesystem access beyond the caller-provided
-// lastMsgPath string) so a table test can assert the sandbox/feature flags and
-// MCP-server wiring without running codex.
+// buildCodexHeadlessArgs builds the `codex exec` argv for the MCP-config
+// (workflow-engine) headless run. It is pure (no process spawn, no filesystem
+// access beyond the caller-provided lastMsgPath string) so a table test can
+// assert the sandbox/feature flags and MCP-server wiring without running codex.
 //
 // Sandbox posture:
 //   - request.Sandbox == "workspace-write" => `--sandbox workspace-write` and
@@ -192,21 +211,9 @@ func buildCodexHeadlessArgs(request HeadlessTaskRequest, lastMsgPath string) []s
 		// Every other feature stays OFF on BOTH paths. Writable re-enables only the
 		// shell tool above; nothing else here changes between read-only and writable.
 		"-c", "features.unified_exec=false",
-		"-c", "features.apps=false",
-		"-c", "features.hooks=false",
-		"-c", "features.plugins=false",
-		"-c", "features.browser_use=false",
-		"-c", "features.in_app_browser=false",
-		"-c", "features.computer_use=false",
-		"-c", "features.image_generation=false",
-		"-c", "features.memories=false",
-		"-c", "features.multi_agent=false",
-		"-c", "features.goals=false",
-		"-c", "features.shell_snapshot=false",
-		"-c", "features.standalone_web_search=false",
-		"-c", "features.tool_suggest=false",
-		"-c", "features.workspace_dependencies=false",
 	)
+	// Shared non-file feature locks (identical to the native-tools path).
+	args = append(args, codexFeatureLocks()...)
 	args = append(args, codexMCPServerArgs(serverName, request.MCPServerCommand, request.MCPServerArgs, toolNames)...)
 	// Attach any additional MCP servers IN ADDITION to the primary one, mirroring
 	// its emission exactly (command/args/required/enabled_tools/approval-mode).
@@ -221,6 +228,28 @@ func buildCodexHeadlessArgs(request HeadlessTaskRequest, lastMsgPath string) []s
 	return args
 }
 
+// codexFeatureLocks are the non-file feature locks. They keep the agent surface
+// minimal (no apps/hooks/plugins/browser/etc.) and are independent of the
+// file/exec tooling enabled by the workspace-write sandbox.
+func codexFeatureLocks() []string {
+	return []string{
+		"-c", "features.apps=false",
+		"-c", "features.hooks=false",
+		"-c", "features.plugins=false",
+		"-c", "features.browser_use=false",
+		"-c", "features.in_app_browser=false",
+		"-c", "features.computer_use=false",
+		"-c", "features.image_generation=false",
+		"-c", "features.memories=false",
+		"-c", "features.multi_agent=false",
+		"-c", "features.goals=false",
+		"-c", "features.shell_snapshot=false",
+		"-c", "features.standalone_web_search=false",
+		"-c", "features.tool_suggest=false",
+		"-c", "features.workspace_dependencies=false",
+	}
+}
+
 // codexMCPServerArgs emits the `-c mcp_servers.<name>.*` argv pairs for one MCP
 // server. Both the primary server and each ExtraMCPServers entry go through here
 // so their wiring is identical by construction.
@@ -232,6 +261,16 @@ func codexMCPServerArgs(name, command string, cmdArgs, enabledTools []string) []
 		"-c", fmt.Sprintf("mcp_servers.%s.enabled_tools=%s", name, tomlStringArray(enabledTools)),
 		"-c", fmt.Sprintf(`mcp_servers.%s.default_tools_approval_mode="approve"`, name),
 	}
+}
+
+// tomlStringArray renders a Go string slice as a TOML inline array literal with
+// each element double-quoted, for `codex -c key=[...]` overrides.
+func tomlStringArray(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, strconv.Quote(value))
+	}
+	return "[" + strings.Join(quoted, ",") + "]"
 }
 
 // codexFinalText returns the child's final assistant message. It prefers the
@@ -280,12 +319,40 @@ func parseCodexFinalText(stdout []byte) string {
 	return last
 }
 
-func tomlStringArray(values []string) string {
-	quoted := make([]string, 0, len(values))
-	for _, value := range values {
-		quoted = append(quoted, strconv.Quote(value))
+// codexHeadlessArgs builds the native-tools arg set: a workspace-write sandbox
+// makes cwd (the scratch WorkDir via cmd.Dir) writable, and Codex's default
+// file/exec tooling is active. approval_policy="never" keeps writes autonomous
+// and the run non-interactive.
+func codexHeadlessArgs(request HeadlessTaskRequest) []string {
+	args := []string{
+		"exec",
+		"--json",
+		"--ephemeral",
+		"--ignore-user-config",
+		"--ignore-rules",
+		"--strict-config",
+		"--skip-git-repo-check",
+		"--sandbox", "workspace-write",
+		"-m", strings.TrimSpace(request.Model),
+		"-c", `approval_policy="never"`,
 	}
-	return "[" + strings.Join(quoted, ",") + "]"
+	// Widen the workspace-write sandbox's writable set beyond the scratch WorkDir
+	// for tasks that must write outside cwd (e.g. the notebook narrate pass writing the
+	// curated journal under the notebook root). `--add-dir` is the codex exec flag
+	// for "additional directories that should be writable alongside the primary
+	// workspace"; reads stay unrestricted under workspace-write, so this is
+	// write-only widening. Empty (the keeper's compaction duty) appends nothing,
+	// preserving the scratch-tempdir-only behavior.
+	for _, root := range request.ExtraWritableRoots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		args = append(args, "--add-dir", root)
+	}
+	args = append(args, codexFeatureLocks()...)
+	args = append(args, request.Prompt)
+	return args
 }
 
 // --- ConfigOverrideProvider ---
@@ -296,6 +363,7 @@ func (c *Codex) GenerateConfigOverrides(opts SpawnOpts) []string {
 		opts.SocketPath,
 		opts.WrapperPath,
 		opts.WorkspaceContextPath,
+		opts.NotebookRoot,
 		opts.InjectWorkflowGuidance,
 	)
 }

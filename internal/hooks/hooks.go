@@ -24,6 +24,15 @@ type SettingsConfig struct {
 	Hooks map[string][]HookEntry `json:"hooks"`
 }
 
+type sessionStartHookSpecificOutput struct {
+	HookEventName     string `json:"hookEventName"`
+	AdditionalContext string `json:"additionalContext"`
+}
+
+type sessionStartHookOutput struct {
+	HookSpecificOutput sessionStartHookSpecificOutput `json:"hookSpecificOutput"`
+}
+
 // WorkspaceContextGuidance teaches an agent how to use this session's checkout
 // without embedding the shared context itself.
 func WorkspaceContextGuidance(path string) string {
@@ -72,6 +81,46 @@ func AgentInstructions(workspaceContextPath string, injectWorkflow bool) string 
 		blocks = append(blocks, WorkflowTriggerGuidance())
 	}
 	return strings.Join(blocks, "\n\n")
+}
+
+// WorkspaceContextSessionStartOutput returns hook output used when an agent
+// could not receive workspace context guidance at launch. It carries the
+// workspace-context guidance the launch path injects for a non-chief agent, so
+// the SessionStart fallback stays consistent with the launch injection.
+func WorkspaceContextSessionStartOutput(path string) string {
+	guidance := WorkspaceContextGuidance(path)
+	if guidance == "" {
+		return ""
+	}
+	output := sessionStartHookOutput{
+		HookSpecificOutput: sessionStartHookSpecificOutput{
+			HookEventName:     "SessionStart",
+			AdditionalContext: guidance,
+		},
+	}
+	data, _ := json.Marshal(output)
+	return string(data)
+}
+
+// NotebookGuidance teaches a chief-of-staff agent that its durable home is the
+// profile-wide Notebook, not any single workspace's shared context, and that it
+// maintains the notebook by editing files directly. It is the single source of
+// notebook operating guidance, injected into the system prompt at launch. root is
+// the resolved notebook root (empty disables).
+func NotebookGuidance(root string) string {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return ""
+	}
+	return fmt.Sprintf(`You are the chief of staff. The attn Notebook at %[1]s is your durable, profile-wide home — plain markdown on disk that outlives any single workspace, used in place of a per-workspace shared context. Read it to orient, and maintain it as you work. It is yours to read and edit directly with native file tools (Read/Write/Edit); there is no notebook CLI.
+
+- Orient first: read %[1]s/index.md and %[1]s/knowledge/index.md to load what is already known.
+- Two layers. The journal (%[1]s/journal/<date>.md) is the dated, curated, cross-workspace log of what was done in attn — the user's lasting record for recall and reviews. The keeper already narrates each workspace's own work into it, so journal from your chief-of-staff altitude: what moved across workspaces, what you delegated, what was decided — not the per-workspace play-by-play the keeper already covers. The knowledge base (%[1]s/knowledge/) is the distilled, timeless layer.
+- The knowledge base is organized PARA-style: `+"`"+`projects/`+"`"+` (bounded efforts, roughly one per workspace/epic), `+"`"+`areas/`+"`"+` (ongoing responsibilities and subsystems), `+"`"+`resources/`+"`"+` (reference material), `+"`"+`archive/`+"`"+` (inactive items). As a project finishes, promote its durable knowledge up into `+"`"+`areas/`+"`"+`. When a `+"`"+`projects/<slug>/`+"`"+` corresponds to a workspace, stamp its `+"`"+`index.md`+"`"+` with `+"`"+`resource: attn:workspace/<id>`+"`"+` so the keeper files it under `+"`"+`archive/`+"`"+` automatically when that workspace is removed. Every non-reserved note carries OKF frontmatter with a non-empty `+"`"+`type:`+"`"+` (an open, author-chosen string such as `+"`"+`note`+"`"+`); `+"`"+`index.md`+"`"+` and `+"`"+`log.md`+"`"+` are reserved and carry none. Knowledge ≠ tasks — capture what is known, not what is to do.
+- Ground durable knowledge: a knowledge note should carry resolvable `+"`"+`sources:`+"`"+` (journal anchors, `+"`"+`dispatch:<id>`+"`"+`, or URLs), not paraphrase alone.
+- Link with root-absolute markdown links like `+"`"+`[label](/knowledge/areas/foo.md)`+"`"+`, not wikilinks. Keep relationship kind (supersedes, relates-to) in prose.
+- You remain profile-wide. You may still consult a specific workspace's shared context when you step into it, but that is opt-in — the notebook is your primary surface.
+- For the full workflow, load the attn skill's notebook reference.`, root)
 }
 
 // Generate generates settings configuration with hooks for a session

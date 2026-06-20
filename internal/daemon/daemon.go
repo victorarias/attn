@@ -28,11 +28,13 @@ import (
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/hub"
 	"github.com/victorarias/attn/internal/logging"
+	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
+	"github.com/victorarias/attn/internal/tasks"
 	"github.com/victorarias/attn/internal/transcript"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
@@ -131,17 +133,25 @@ type Daemon struct {
 	pendingInputSrc  map[string]string
 	recoveryMu       sync.RWMutex
 	recovering       bool
-	pendingInitialWS map[*wsClient]struct{}
-	startedOnce      sync.Once
-	startedCh        chan struct{}
-	tailscale        *tailscaleRuntime
-	plugins          *pluginRegistry
-	pluginProcesses  *pluginProcessRegistry
-	pluginDriverMu   sync.Mutex
-	pluginLaunching  map[string]pluginSessionLaunch
-	pluginReports    map[string][]pendingPluginReport
-	pluginExits      map[string]ptybackend.ExitInfo
-	pluginDir        string
+	notebookMu       sync.Mutex
+	notebookStore    *notebook.Store
+	// notebookWatcher observes notebook.root for external edits; guarded by its
+	// own mutex (distinct from notebookMu) so notebookStoreFor can start it
+	// without nesting locks. Lazily started on first notebook use.
+	notebookWatcherMu   sync.Mutex
+	notebookWatcher     *notebook.Watcher
+	notebookWatchedRoot string
+	pendingInitialWS    map[*wsClient]struct{}
+	startedOnce         sync.Once
+	startedCh           chan struct{}
+	tailscale           *tailscaleRuntime
+	plugins             *pluginRegistry
+	pluginProcesses     *pluginProcessRegistry
+	pluginDriverMu      sync.Mutex
+	pluginLaunching     map[string]pluginSessionLaunch
+	pluginReports       map[string][]pendingPluginReport
+	pluginExits         map[string]ptybackend.ExitInfo
+	pluginDir           string
 
 	worktreePluginCallTimeout         time.Duration
 	worktreeCreateProviderCallTimeout time.Duration
@@ -182,19 +192,70 @@ type Daemon struct {
 
 	workspaceContextCheckoutMu sync.Mutex
 
-	workspaceContextJanitorMu              sync.Mutex
-	workspaceContextJanitorTimers          map[string]*workspaceContextJanitorTimer
-	workspaceContextJanitorRunning         bool
-	workspaceContextJanitorActiveWorkspace string
-	workspaceContextJanitorCancel          context.CancelFunc
-	workspaceContextJanitorDone            chan struct{}
-	workspaceContextJanitorCanceled        bool
-	workspaceContextJanitorCommitting      bool
-	workspaceContextJanitorExecutor        workspaceContextJanitorExecutor
-	workspaceContextJanitorThreshold       int
-	workspaceContextJanitorDebounce        time.Duration
-	workspaceContextJanitorTimeout         time.Duration
-	workspaceContextBeforeJanitorApply     func()
+	// compactRunner is the durable task runner that owns the keeper's
+	// workspace-context compaction duty (kind "compact_context") and the
+	// notebook-narration tasks. It replaces the bespoke time.AfterFunc scheduling +
+	// single-flight/cancel/commit-fence guards.
+	//
+	// compactRunnerMu guards the POINTER swap only. startCompactRunner runs late in
+	// Start() and replaces the placeholder runner, while Stop()/enqueue/forget read
+	// the field concurrently (the websocket server accepts connections — and can
+	// drive a teardown enqueue — before the runner is rebuilt). Production code
+	// therefore reads via compactRunnerRef() and writes via setCompactRunner(); the
+	// runner itself is internally synchronized. Tests assign the field directly,
+	// which is race-free because they never run Start() concurrently with that
+	// assignment.
+	compactRunnerMu sync.RWMutex
+	compactRunner   *tasks.Runner
+	// The *Threshold/*Debounce/*Timeout fields remain the test-override knobs
+	// feeding the size gate, the Enqueue debounce, and RegisterWithTimeout.
+	keeperCompactThreshold int
+	keeperCompactDebounce  time.Duration
+	keeperCompactTimeout   time.Duration
+	// workspaceContextBeforeKeeperApply is the apply-injection test hook, fired
+	// inside the executor immediately before the CommitGuard fence + Apply.
+	workspaceContextBeforeKeeperApply func()
+	// workspaceContextCompactionExecution, when set, replaces the agentic
+	// executeKeeperCompact spawn with a canned execution. Tests use it
+	// to return a fixed compacted candidate without spawning a real LLM; the
+	// validate + commit-under-CommitGuard path stays real.
+	workspaceContextCompactionExecution func(
+		ctx context.Context,
+		config keeperCompactConfig,
+		canonical *protocol.WorkspaceContext,
+	) (keeperCompactExecution, error)
+
+	// Notebook narration test seams. summarizeSessionExecution /
+	// narrateWorkspaceExecution, when set, replace the real RunHeadlessTask spawn so
+	// tests exercise the executor's resolve-inputs / verify-ledger logic against a
+	// fake provider that writes (or refuses to write) the target file — no real LLM.
+	// The file-existence/marker verification, enqueue/coalesce, and IS_REMOVAL_PASS
+	// derivation all stay real. narrationNowOverride pins today's date for the
+	// journal filename so date-boundary behavior is deterministic.
+	summarizeSessionExecution func(
+		ctx context.Context,
+		provider agentdriver.HeadlessTaskProvider,
+		request agentdriver.HeadlessTaskRequest,
+	) (agentdriver.HeadlessTaskResult, error)
+	narrateWorkspaceExecution func(
+		ctx context.Context,
+		provider agentdriver.HeadlessTaskProvider,
+		request agentdriver.HeadlessTaskRequest,
+	) (agentdriver.HeadlessTaskResult, error)
+	narrationNowOverride func() time.Time
+
+	// Daily-narrate activity gate. notebookNarrateActivity is the in-memory set of
+	// workspace ids that saw real activity (a session end or a content-changing
+	// context write) since the last daily-narrate cron fire. It is best-effort and
+	// NOT persisted: a restart loses it, which is fine because session-end is the
+	// primary narrate path and the daily cron is only a backstop for long-lived
+	// workspaces that had no session end. The cron drain snapshots and clears it; a
+	// workspace absent from the set is skipped that day so idle workspaces never burn
+	// a strong-tier pass. notebookNarrateActivityMu guards both the map pointer and
+	// its contents; the map is lazily initialized under the mutex (no constructor
+	// edit needed).
+	notebookNarrateActivityMu sync.Mutex
+	notebookNarrateActivity   map[string]struct{}
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -458,6 +519,10 @@ func NewForTesting(socketPath string) *Daemon {
 		workspaces:         newWorkspaceRegistry(),
 		workflowDirty:      make(map[string]bool),
 		workflowEngineConn: make(map[string]workflowEngineSink),
+		// A disabled runner (no root) keeps the unconditional Cancel/Enqueue
+		// callsites nil-safe in tests; tests that exercise a live compaction
+		// override this with an enabled runner (see newTestCompactRunner).
+		compactRunner: tasks.New(tasks.Options{}),
 	}
 }
 
@@ -499,6 +564,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		workspaces:         newWorkspaceRegistry(),
 		workflowDirty:      make(map[string]bool),
 		workflowEngineConn: make(map[string]workflowEngineSink),
+		compactRunner:      tasks.New(tasks.Options{}),
 	}
 }
 
@@ -543,7 +609,7 @@ func (d *Daemon) Start() error {
 	if d.pluginProcesses == nil {
 		d.pluginProcesses = newPluginProcessRegistry()
 	}
-	d.loadWorkspacesFromStore()
+	reapedWorkspaceIDs := d.loadWorkspacesFromStore()
 	if d.daemonInstanceID == "" {
 		instanceID, err := ensureDaemonInstanceID(d.dataRoot)
 		if err != nil {
@@ -667,6 +733,8 @@ func (d *Daemon) Start() error {
 	go d.runHTTPServer()
 	d.maybeStartDiagServer()
 	d.removeLegacyEmbeddedTailscaleState()
+	d.migrateKeeperCompactSettingKey() // one-time settings key rename (workspace_context_janitor -> workspace_keeper_compact)
+	d.migrateNotebookCronSettingKeys() // one-time settings key rename (notebook.dreaming.* -> notebook.cron.*)
 	go d.ensureTailscaleServeFromSettingsAndBroadcast()
 	d.hubManager.Start(d.doneContext())
 
@@ -691,6 +759,24 @@ func (d *Daemon) Start() error {
 
 	// Start branch monitoring
 	go d.monitorBranches()
+
+	// Construct + start the durable compaction runner (kinds compact_context,
+	// summarize_session, narrate_workspace).
+	d.startCompactRunner()
+
+	// Now that the runner exists, enqueue the deferred removal-boundary retrospectives
+	// for any workspaces reaped during startup reconciliation. loadWorkspacesFromStore
+	// ran before startCompactRunner, so enqueuing inline there would have been a
+	// nil-runner no-op; deferring to here gives a startup-reaped workspace its final
+	// narrate, matching the live removal paths.
+	for _, wsID := range reapedWorkspaceIDs {
+		d.enqueueFinalNarrateWorkspace(wsID)
+	}
+
+	// Start the notebook cron enqueuer (enqueues the nightly daily-narrate backstop
+	// onto the durable runner when due). Launched AFTER startCompactRunner so the
+	// narrate executor is registered before the first tick fires.
+	go d.startNotebookCronEnqueuer(d.done)
 
 	d.signalStarted()
 	startSucceeded = true
@@ -1203,7 +1289,10 @@ func sessionStateFromRecoveredInfo(info ptybackend.SessionInfo) protocol.Session
 func (d *Daemon) Stop() {
 	d.log("daemon stopping")
 	close(d.done)
-	d.stopWorkspaceContextJanitor()
+	d.stopNotebookWatcher()
+	if runner := d.compactRunnerRef(); runner != nil {
+		runner.Stop()
+	}
 	if d.hubManager != nil {
 		d.hubManager.Stop()
 	}
@@ -1351,7 +1440,7 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 	d.terminateSession(sessionID, sig)
 	d.handleReviewLoopSourceSessionExit(sessionID)
 	d.setPendingInputSource(sessionID, "")
-	d.store.Remove(sessionID)
+	d.dropSessionRecord(sessionID)
 	d.clearChiefOfStaffIfSession(sessionID)
 	if d.hubManager != nil {
 		d.hubManager.ForgetSession(sessionID)
@@ -1363,10 +1452,22 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 }
 
 func (d *Daemon) removeReapedSession(sessionID string) {
-	d.store.Remove(sessionID)
+	d.dropSessionRecord(sessionID)
 	d.clearChiefOfStaffIfSession(sessionID)
 	d.dissociateSessionFromWorkspace(sessionID)
 	d.removeWorkspaceLayoutPaneForSession(sessionID)
+}
+
+// dropSessionRecord removes a session's store record, first capturing the outcome
+// of any chief-of-staff dispatch it was running. Routing every session-removal
+// path through here means a delegated worker's result is journaled no matter how
+// its session ends — cleanly unregistered, reaped on restart/liveness sweep, or
+// torn down with its worktree — and not just on the orderly close path. The
+// capture is idempotent (a prior terminal-report write wins via the per-dispatch
+// marker) and a no-op for non-dispatch sessions.
+func (d *Daemon) dropSessionRecord(sessionID string) {
+	d.journalDispatchOnSessionGone(sessionID)
+	d.store.Remove(sessionID)
 }
 
 func (d *Daemon) handlePTYState(sessionID, state string) {
@@ -1758,6 +1859,13 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleWorkspaceContextCompact(conn, msg.(*protocol.WorkspaceContextCompactMessage))
 	case protocol.CmdWorkspaceContextRollback:
 		d.handleWorkspaceContextRollback(conn, msg.(*protocol.WorkspaceContextRollbackMessage))
+	case protocol.CmdNotebookGuide:
+		// notebook_guide is the one surviving unix-socket notebook command: the
+		// agent-launch wrapper uses it to learn whether a session is the chief of
+		// staff and where the notebook root is. The former user-facing
+		// `attn notebook …` subcommands were removed; the frontend reads and writes
+		// the notebook over the WebSocket path instead.
+		d.handleNotebookGuide(conn, msg.(*protocol.NotebookGuideMessage))
 	case protocol.CmdUnregister:
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:
@@ -2020,6 +2128,32 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	}
 	d.store.Touch(msg.ID)
 	d.sendOK(conn)
+
+	// Narration triggers. Resolve the workspace id SYNCHRONOUSLY from the persisted
+	// store row before any async work: a concurrent close can dissociate the session
+	// from the in-memory registry, but the persisted workspace_id survives until the
+	// session row is removed, so it is the authoritative source. The enqueues are
+	// nil/Disabled-safe (no-op when the runner is absent or the notebook is off).
+	//   - summarize_session ALWAYS fires (cheap per-session digest), even for a solo
+	//     session with no workspace — its digest is still useful raw material.
+	//   - narrate_workspace fires (coalesced) only when the stop belongs to a LIVE
+	//     workspace; the removal boundary owns the final retrospective pass instead.
+	// Resolve the workspace id once and stash it (plus the transcript path) on the
+	// summarize task: a single-session-workspace teardown deletes both the session
+	// row and the workspace row before the debounced summarize runs, so the
+	// executor must carry these inputs rather than re-derive them from a gone row.
+	stopWorkspaceID := d.resolveStopWorkspaceID(msg.ID)
+	d.enqueueSummarizeSession(msg.ID, msg.TranscriptPath, stopWorkspaceID)
+	if stopWorkspaceID != "" {
+		// A session end is a daily-narrate activity event for its workspace: it marks
+		// the workspace active so the nightly daily-narrate cron narrates it even on a
+		// day with no further triggers. (The mark is cheap and harmless even when the
+		// workspace is being torn down — the cron skips a removed workspace at drain.)
+		d.markNotebookWorkspaceActivity(stopWorkspaceID)
+		if d.store.GetWorkspace(stopWorkspaceID) != nil {
+			d.enqueueNarrateWorkspace(stopWorkspaceID)
+		}
+	}
 
 	if d.consumeForcedStopClassification(msg.ID) {
 		d.logf("handleStop: skipping classification for daemon-terminated session=%s", msg.ID)

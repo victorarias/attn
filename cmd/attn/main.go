@@ -22,9 +22,9 @@ import (
 	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
-	"github.com/victorarias/attn/internal/contextjanitor"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/daemonctl"
+	"github.com/victorarias/attn/internal/hooks"
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptyworker"
@@ -157,11 +157,6 @@ func applyLegacyBuildInfoOverrides() {
 }
 
 func main() {
-	if len(os.Args) >= 2 && os.Args[1] == "_workspace-context-janitor-mcp" {
-		runWorkspaceContextJanitorMCP(os.Args[2:])
-		return
-	}
-
 	if len(os.Args) >= 2 && os.Args[1] == "_workflow-result-mcp" {
 		runWorkflowResultMCP(os.Args[2:])
 		return
@@ -265,28 +260,6 @@ func main() {
 			writeHelp(os.Stderr)
 			os.Exit(1)
 		}
-	}
-}
-
-func runWorkspaceContextJanitorMCP(args []string) {
-	fs := flag.NewFlagSet("_workspace-context-janitor-mcp", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	sourcePath := fs.String("source-file", "", "captured context file")
-	candidatePath := fs.String("candidate-file", "", "candidate output file")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 ||
-		strings.TrimSpace(*sourcePath) == "" || strings.TrimSpace(*candidatePath) == "" {
-		fmt.Fprintln(os.Stderr, "invalid workspace context janitor MCP arguments")
-		os.Exit(2)
-	}
-	if err := contextjanitor.ServeToolServer(
-		context.Background(),
-		*sourcePath,
-		*candidatePath,
-		os.Stdin,
-		os.Stdout,
-	); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
 	}
 }
 
@@ -1037,9 +1010,28 @@ commands:
   checkout                         alias for show
   update [--session <id>]          publish local edits if the revision matches
   status [--session <id>]          show local and canonical revision state
-  compact [--session <id>]         compact now with the configured janitor
+  compact [--session <id>]         compact now with the configured keeper
   rollback [--session <id>]        restore the latest pre-compaction snapshot
 `)
+}
+
+// notebookGuideClient is the slice of the daemon client the launch-guidance
+// decision needs; narrowed so it can be faked in tests.
+type notebookGuideClient interface {
+	NotebookGuide(sessionID string) (*protocol.NotebookGuideResult, error)
+}
+
+// resolveChiefNotebookRoot returns the notebook root to use as chief-of-staff
+// launch guidance for sessionID, or "" when the session is not the chief or the
+// lookup fails — callers then fall back to the workspace-context checkout. A
+// lookup error is deliberately treated as "not chief" so a transient daemon
+// hiccup degrades to workspace guidance rather than failing the launch.
+func resolveChiefNotebookRoot(c notebookGuideClient, sessionID string) string {
+	guide, err := c.NotebookGuide(sessionID)
+	if err != nil || guide == nil || !guide.SessionIsChief {
+		return ""
+	}
+	return guide.Root
 }
 
 func workspaceContextSourceSession(args []string, allowForce bool) (string, bool, error) {
@@ -1933,11 +1925,20 @@ func runAgentDirectly(requestedAgent string) {
 
 	hasHooks := false
 	if agentdriver.EffectiveCapabilities(driver).HasWorkspaceContext {
-		contextPath, checkoutErr := workspaceContextCheckoutPath(c, sessionID, 40, 25*time.Millisecond)
-		if checkoutErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not prepare workspace context guidance: %v\n", checkoutErr)
+		// A chief-of-staff session gets Notebook guidance (its profile-wide
+		// durable home) in place of the workspace-context checkout. A fresh
+		// session is never the chief, so this only fires on relaunch/recovery of
+		// an already-chief session; otherwise (incl. a lookup error) we fall
+		// through to the workspace-context checkout.
+		if root := resolveChiefNotebookRoot(c, sessionID); root != "" {
+			opts.NotebookRoot = root
 		} else {
-			opts.WorkspaceContextPath = contextPath
+			contextPath, checkoutErr := workspaceContextCheckoutPath(c, sessionID, 40, 25*time.Millisecond)
+			if checkoutErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not prepare workspace context guidance: %v\n", checkoutErr)
+			} else {
+				opts.WorkspaceContextPath = contextPath
+			}
 		}
 	}
 	// The daemon's worker exports ATTN_WORKFLOW_GUIDANCE_ENABLED when the
@@ -2129,11 +2130,45 @@ func runHookSessionStart() {
 	_ = json.NewDecoder(os.Stdin).Decode(&input)
 
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
-	// The SessionStart hook exists solely to sync the agent's native session ID
-	// back to attn for resume. Workspace-context guidance is injected directly at
-	// launch (--append-system-prompt / developer_instructions), so there is no
-	// guidance fallback to emit here.
+	// The SessionStart hook syncs the agent's native session ID back to attn for
+	// resume, then emits workspace-context guidance as a fallback for sessions that
+	// did not receive it at launch (--append-system-prompt / developer_instructions).
+	// The launch path sets ATTN_WORKSPACE_CONTEXT_GUIDANCE / ATTN_NOTEBOOK_GUIDANCE so
+	// workspaceContextGuidanceProvidedAtLaunch suppresses the fallback when guidance
+	// was already injected.
 	syncSessionResumeID(c, sessionID, input.SessionID)
+	output, err := workspaceContextSessionStartOutput(c, sessionID, 40, 25*time.Millisecond)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not load workspace context guidance: %v\n", err)
+		return
+	}
+	if output != "" && !workspaceContextGuidanceProvidedAtLaunch() {
+		fmt.Fprintln(os.Stdout, output)
+	}
+}
+
+// workspaceContextSessionStartOutput checks out this session's workspace context
+// and wraps it as SessionStart hook JSON, used as the launch-independent fallback
+// path. Returns "" with no error when the session has no checkout.
+func workspaceContextSessionStartOutput(
+	c workspaceContextCheckoutClient,
+	sessionID string,
+	attempts int,
+	retryDelay time.Duration,
+) (string, error) {
+	path, err := workspaceContextCheckoutPath(c, sessionID, attempts, retryDelay)
+	if err != nil {
+		return "", err
+	}
+	return hooks.WorkspaceContextSessionStartOutput(path), nil
+}
+
+func workspaceContextGuidanceProvidedAtLaunch() bool {
+	// Either marker means launch-time guidance was already injected, so the
+	// SessionStart hook must not also emit workspace-context guidance. A chief
+	// session is launched with Notebook guidance in place of workspace context.
+	return strings.TrimSpace(os.Getenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE")) != "" ||
+		strings.TrimSpace(os.Getenv("ATTN_NOTEBOOK_GUIDANCE")) != ""
 }
 
 type workspaceContextCheckoutClient interface {

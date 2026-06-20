@@ -447,6 +447,14 @@ CREATE TABLE IF NOT EXISTS workflow_agent_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_agent_calls_run_id
     ON workflow_agent_calls(run_id, id ASC);`},
+	// The keeper rename originally targeted 51 (versions 49/50 were burned on early
+	// keeper pre-release DBs). The merge onto main reclaimed 49/50/51 for the
+	// workspace-rank (applyMigration49) and workflow-engine migrations above, so the
+	// keeper rename now lands at 52 — the first version above main's migration 51.
+	// applyMigration52 is idempotent, so it stays safe on a DB that already recorded a
+	// phantom 51 or 52. NOTE: confirm MAX(version) on the real prod/dev DBs before
+	// install — if either build burned 51/52 there, these may need to move higher.
+	{52, "rename workspace context janitor backups to keeper compact backups", ""},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -597,6 +605,11 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 49 || m.version == 50 {
 			if err := applyMigration49(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 52 {
+			if err := applyMigration52(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -764,6 +777,66 @@ func applyMigration49(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// applyMigration52 retires the last "janitor" identifiers from the live schema:
+// it renames the keeper's compaction-backup table and realigns the persisted
+// context-updater sentinel. Guarded so it is idempotent and safe on every DB
+// shape, including a migration rewind that re-runs migration 47's
+// CREATE-IF-NOT-EXISTS after the rename already happened:
+//   - only the legacy table exists (normal upgrade): rename it, preserving data.
+//   - both exist (47 recreated an empty legacy table beside the authoritative
+//     keeper-named one): drop the spurious legacy duplicate.
+//   - only the keeper-named table exists (already migrated): no-op.
+//
+// The UPDATE rewrites historical rows the keeper stamped before this rename.
+func applyMigration52(tx *sql.Tx) error {
+	oldExists, err := tableExists(tx, "workspace_context_janitor_backups")
+	if err != nil {
+		return err
+	}
+	newExists, err := tableExists(tx, "workspace_keeper_compact_backups")
+	if err != nil {
+		return err
+	}
+	switch {
+	case oldExists && !newExists:
+		if _, err := tx.Exec(`ALTER TABLE workspace_context_janitor_backups RENAME TO workspace_keeper_compact_backups`); err != nil {
+			return err
+		}
+	case oldExists && newExists:
+		if _, err := tx.Exec(`DROP TABLE workspace_context_janitor_backups`); err != nil {
+			return err
+		}
+	}
+	// Realign the persisted updater sentinel, but only if workspace_contexts is
+	// present. In a real DB it always is; guarding keeps the migration safe on a
+	// partial schema (e.g. an isolated test DB that seeds only the workspaces table).
+	contextsExist, err := tableExists(tx, "workspace_contexts")
+	if err != nil {
+		return err
+	}
+	if contextsExist {
+		if _, err := tx.Exec(
+			`UPDATE workspace_contexts SET updated_by_session_id = 'attn-keeper' WHERE updated_by_session_id = 'attn-janitor'`,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// tableExists reports whether a table of the given name exists in the schema.
+func tableExists(tx *sql.Tx, name string) (bool, error) {
+	var got string
+	err := tx.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&got)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func applyMigration28(tx *sql.Tx) error {

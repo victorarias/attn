@@ -8,8 +8,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/robfig/cron/v3"
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
@@ -33,11 +36,31 @@ const (
 	SettingReviewLoopLastIterations = "review_loop_last_iterations"
 	SettingReviewLoopModel          = "review_loop_model"
 	SettingReviewerModel            = "reviewer_model"
-	SettingWorkspaceContextJanitor  = "workspace_context_janitor"
+	SettingKeeperCompact            = "workspace_keeper_compact"
 	SettingTailscaleEnabled         = "tailscale_enabled"
 	SettingWorkflowsEnabled         = "workflows_enabled"
 	SettingKeybindingsConfig        = "keybindings_config"
 	SettingNewSessionYoloPrefix     = "new_session_yolo_"
+	// SettingNotebookRoot overrides the notebook's filesystem root. Empty =>
+	// the profile-derived default (~/attn-notebook[-profile]).
+	SettingNotebookRoot = "notebook.root"
+	// SettingNotebookCronFrequency is the 5-field cron expression for the
+	// notebook's nightly maintenance slot (currently the daily-narrate backstop).
+	// Empty => the default ("0 3 * * *").
+	SettingNotebookCronFrequency = "notebook.cron.frequency"
+	// SettingNotebookCronTimezone is the IANA timezone the frequency is
+	// evaluated in. Empty => the machine's local time.
+	SettingNotebookCronTimezone = "notebook.cron.timezone"
+	// SettingNotebookSummarizeSession configures the per-session summarize pass
+	// (the CHEAP tier). JSON {"agent":"claude"|"codex","model":"<id>"}; empty =>
+	// the built-in cheap default (Claude Haiku). See parseNotebookNarrationConfig.
+	SettingNotebookSummarizeSession = "notebook.summarize_session"
+	// SettingNotebookNarrateWorkspace configures the curated-journal narrate pass (the
+	// STRONG tier). JSON {"agent":"claude"|"codex","model":"<id>"}; empty => the
+	// built-in strong default (Claude Sonnet). Claude is the default narrate agent
+	// because its native Write/Edit enforce read-before-write CAS on the shared
+	// journal; see parseNotebookNarrationConfig.
+	SettingNotebookNarrateWorkspace = "notebook.narrate_workspace"
 )
 
 func (d *Daemon) handleGetSettingsWS(client *wsClient) {
@@ -234,8 +257,18 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateTheme(value)
 	case SettingTailscaleEnabled, SettingWorkflowsEnabled:
 		return validateBooleanSetting(value)
-	case SettingWorkspaceContextJanitor:
-		return d.validateWorkspaceContextJanitorSetting(value)
+	case SettingKeeperCompact:
+		return d.validateKeeperCompactSetting(value)
+	case SettingNotebookSummarizeSession:
+		return d.validateNotebookNarrationSetting(notebookSummarizeSessionKind, value)
+	case SettingNotebookNarrateWorkspace:
+		return d.validateNotebookNarrationSetting(notebookNarrateWorkspaceKind, value)
+	case SettingNotebookRoot:
+		return validateNotebookRoot(value)
+	case SettingNotebookCronFrequency:
+		return validateNotebookCronFrequency(value)
+	case SettingNotebookCronTimezone:
+		return validateNotebookCronTimezone(value)
 	case SettingKeybindingsConfig:
 		return validateKeybindingsConfig(value)
 	case SettingReviewLoopPresets, SettingReviewLoopLastPreset, SettingReviewLoopLastPrompt, SettingReviewLoopLastIterations, SettingReviewLoopModel, SettingReviewerModel:
@@ -276,6 +309,77 @@ func validateUIScale(value string) error {
 	}
 	if scale < 0.5 || scale > 2.0 {
 		return fmt.Errorf("scale must be between 0.5 and 2.0")
+	}
+	return nil
+}
+
+// validateNotebookRoot accepts an empty value (meaning the profile-derived
+// default) or an absolute path (a leading ~/ is expanded). It refuses a path
+// inside the attn data dir: the notebook must live OUTSIDE ~/.attn[-profile] so
+// it stays a plain, externally-syncable directory a dotfile-skipping scanner
+// won't miss.
+func validateNotebookRoot(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	path := value
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("cannot determine home directory: %w", err)
+		}
+		path = filepath.Join(home, path[2:])
+	}
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("notebook.root must be an absolute path")
+	}
+	dataDir := config.DataDir()
+	clean := filepath.Clean(path)
+	if clean == dataDir || strings.HasPrefix(clean, dataDir+string(filepath.Separator)) {
+		return fmt.Errorf("notebook.root must be outside the attn data dir (%s)", dataDir)
+	}
+	return nil
+}
+
+// validateNotebookCronFrequency accepts an empty value (use the default) or a
+// cron expression the scheduler can fire. It rejects two parseable-but-wrong
+// forms: an embedded CRON_TZ=/TZ= prefix (a second timezone source that would
+// silently compete with notebook.cron.timezone) and a schedule whose date can
+// never occur (e.g. "0 0 30 2 *", Feb 30) — robfig cron returns the zero time for
+// those, which the scheduler would treat as perpetually due and re-fire in a
+// tight loop.
+func validateNotebookCronFrequency(value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	if hasCronTZPrefix(trimmed) {
+		return fmt.Errorf("notebook.cron.frequency must not embed a CRON_TZ=/TZ= prefix; set notebook.cron.timezone instead")
+	}
+	sched, err := cron.ParseStandard(trimmed)
+	if err != nil {
+		return fmt.Errorf("notebook.cron.frequency must be a cron expression (5 fields, or a descriptor like @daily): %w", err)
+	}
+	if sched.Next(time.Now()).IsZero() {
+		return fmt.Errorf("notebook.cron.frequency %q describes a time that never occurs", trimmed)
+	}
+	return nil
+}
+
+// hasCronTZPrefix reports whether a cron string carries a leading TZ=/CRON_TZ=
+// timezone prefix (the form robfig/cron's ParseStandard honors).
+func hasCronTZPrefix(expr string) bool {
+	return strings.HasPrefix(expr, "TZ=") || strings.HasPrefix(expr, "CRON_TZ=")
+}
+
+// validateNotebookCronTimezone accepts an empty value (local time) or an IANA
+// timezone name loadable on this machine.
+func validateNotebookCronTimezone(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	if _, err := time.LoadLocation(strings.TrimSpace(value)); err != nil {
+		return fmt.Errorf("notebook.cron.timezone must be an IANA timezone: %w", err)
 	}
 	return nil
 }

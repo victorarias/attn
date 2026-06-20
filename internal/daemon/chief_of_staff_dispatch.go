@@ -270,6 +270,12 @@ func (d *Daemon) handleReportDispatch(conn net.Conn, msg *protocol.ReportDispatc
 		ChiefOfStaffDispatch: decorated,
 	})
 	d.broadcastChiefOfStaffDispatchesUpdated()
+	// Capture finished delegated work in the durable journal. The stored record
+	// carries the server-stamped report time; the embedded marker keeps this
+	// idempotent against the session-gone fallback.
+	if isTerminalDispatchReport(msg.StructuredReport) {
+		d.journalDispatchOutcome(dispatch)
+	}
 }
 
 func (d *Daemon) handleGetDispatch(conn net.Conn, msg *protocol.GetDispatchMessage) {

@@ -5,7 +5,22 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/victorarias/attn/internal/protocol"
 )
+
+// latestSchemaVersion is the highest version in the migrations slice. It is NOT
+// the same as len(migrations): versions 49 and 50 are burned (see sqlite.go), so
+// there is a gap and the max version exceeds the migration count.
+func latestSchemaVersion() int {
+	max := 0
+	for _, m := range migrations {
+		if m.version > max {
+			max = m.version
+		}
+	}
+	return max
+}
 
 func TestOpenDB_CreatesSchema(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -18,7 +33,7 @@ func TestOpenDB_CreatesSchema(t *testing.T) {
 	defer db.Close()
 
 	// Verify tables exist by querying them
-	tables := []string{"sessions", "prs", "repos", "review_loop_runs", "review_loop_iterations", "review_loop_interactions", "workspace_contexts", "workspace_context_janitor_backups", "profile_roles", "chief_of_staff_dispatches", "chief_of_staff_dispatch_messages"}
+	tables := []string{"sessions", "prs", "repos", "review_loop_runs", "review_loop_iterations", "review_loop_interactions", "workspace_contexts", "workspace_keeper_compact_backups", "profile_roles", "chief_of_staff_dispatches", "chief_of_staff_dispatch_messages"}
 	for _, table := range tables {
 		var count int
 		err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)
@@ -86,8 +101,8 @@ func TestMigrations_AppliedOnNewDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSchemaVersion() error = %v", err)
 	}
-	if version != len(migrations) {
-		t.Errorf("schema version = %d, want %d", version, len(migrations))
+	if version != latestSchemaVersion() {
+		t.Errorf("schema version = %d, want %d", version, latestSchemaVersion())
 	}
 
 	// Verify all migrations recorded
@@ -563,8 +578,8 @@ func TestMigration20_IdempotentWhenHostColumnAlreadyExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSchemaVersion() error = %v", err)
 	}
-	if version != len(migrations) {
-		t.Fatalf("schema version = %d, want %d", version, len(migrations))
+	if version != latestSchemaVersion() {
+		t.Fatalf("schema version = %d, want %d", version, latestSchemaVersion())
 	}
 
 	// Unique index from migration 20 should exist.
@@ -625,8 +640,8 @@ func TestMigration21_IdempotentWhenAgentColumnAlreadyExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSchemaVersion() error = %v", err)
 	}
-	if version != len(migrations) {
-		t.Fatalf("schema version = %d, want %d", version, len(migrations))
+	if version != latestSchemaVersion() {
+		t.Fatalf("schema version = %d, want %d", version, latestSchemaVersion())
 	}
 
 	var count int
@@ -672,8 +687,8 @@ func TestMigration31_IdempotentWhenEndpointIDColumnAlreadyExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSchemaVersion() error = %v", err)
 	}
-	if version != len(migrations) {
-		t.Fatalf("schema version = %d, want %d", version, len(migrations))
+	if version != latestSchemaVersion() {
+		t.Fatalf("schema version = %d, want %d", version, latestSchemaVersion())
 	}
 
 	var count int
@@ -683,4 +698,77 @@ func TestMigration31_IdempotentWhenEndpointIDColumnAlreadyExists(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("migration 31 marker count = %d, want 1", count)
 	}
+}
+
+// TestMigration52RenamesKeeperBackupsAndRealignsSentinel proves the keeper rename
+// migration actually transforms a LEGACY DB: it renames the janitor-named backup
+// table to the keeper-named one and rewrites the persisted 'attn-janitor' sentinel
+// to 'attn-keeper' on existing workspace_contexts rows. (The fresh-DB happy path is
+// already covered by the table-existence test; this exercises the legacy data path.)
+func TestMigration52RenamesKeeperBackupsAndRealignsSentinel(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewWithDB error: %v", err)
+	}
+	defer s.Close()
+
+	// Seed a context row, then roll the DB back to a pre-52 shape: plant the legacy
+	// 'attn-janitor' sentinel, drop the keeper-named table, recreate the legacy
+	// janitor-named one, and unrecord migration 52 so migrateDB re-applies it.
+	s.AddWorkspace(&protocol.Workspace{ID: "workspace-1", Title: "W", Directory: t.TempDir()})
+	if _, _, err := s.UpdateWorkspaceContext("workspace-1", "ctx", "session-1", 0); err != nil {
+		t.Fatalf("seed context: %v", err)
+	}
+	if _, err := s.db.Exec(`UPDATE workspace_contexts SET updated_by_session_id = 'attn-janitor' WHERE workspace_id = 'workspace-1'`); err != nil {
+		t.Fatalf("plant legacy sentinel: %v", err)
+	}
+	if _, err := s.db.Exec(`DROP TABLE workspace_keeper_compact_backups`); err != nil {
+		t.Fatalf("drop keeper table: %v", err)
+	}
+	if _, err := s.db.Exec(`CREATE TABLE workspace_context_janitor_backups (
+		workspace_id TEXT PRIMARY KEY,
+		source_revision INTEGER NOT NULL,
+		source_content TEXT NOT NULL,
+		result_revision INTEGER NOT NULL,
+		agent TEXT NOT NULL,
+		model TEXT NOT NULL,
+		created_at TEXT NOT NULL
+	)`); err != nil {
+		t.Fatalf("recreate legacy table: %v", err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version = 52`); err != nil {
+		t.Fatalf("unrecord migration 52: %v", err)
+	}
+
+	if err := migrateDB(s.db); err != nil {
+		t.Fatalf("migrateDB error: %v", err)
+	}
+
+	if !tableExistsForTest(t, s.db, "workspace_keeper_compact_backups") {
+		t.Fatal("workspace_keeper_compact_backups missing after migration 52")
+	}
+	if tableExistsForTest(t, s.db, "workspace_context_janitor_backups") {
+		t.Fatal("legacy workspace_context_janitor_backups still present after migration 52")
+	}
+	var updater string
+	if err := s.db.QueryRow(`SELECT updated_by_session_id FROM workspace_contexts WHERE workspace_id = 'workspace-1'`).Scan(&updater); err != nil {
+		t.Fatalf("read sentinel: %v", err)
+	}
+	if updater != "attn-keeper" {
+		t.Fatalf("sentinel = %q, want attn-keeper", updater)
+	}
+}
+
+func tableExistsForTest(t *testing.T, db *sql.DB, name string) bool {
+	t.Helper()
+	var got string
+	err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&got)
+	if err == sql.ErrNoRows {
+		return false
+	}
+	if err != nil {
+		t.Fatalf("tableExists(%s): %v", name, err)
+	}
+	return got == name
 }

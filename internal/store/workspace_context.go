@@ -10,9 +10,13 @@ import (
 )
 
 var ErrWorkspaceContextConflict = errors.New("workspace context revision conflict")
-var ErrWorkspaceContextJanitorBackupNotFound = errors.New("workspace context janitor backup not found")
+var ErrKeeperCompactBackupNotFound = errors.New("keeper compact backup not found")
 
-type WorkspaceContextJanitorBackup struct {
+// KeeperCompactBackup is the source snapshot captured before the keeper's
+// compaction duty rewrites a workspace context, used for direct rollback. It is
+// stored in the workspace_keeper_compact_backups table (renamed off the retired
+// "janitor" persona by migration 52).
+type KeeperCompactBackup struct {
 	WorkspaceID    string
 	SourceRevision int
 	SourceContent  string
@@ -175,9 +179,9 @@ func (s *Store) HasWorkspaceContext(workspaceID string) bool {
 	return s.db.QueryRow(`SELECT 1 FROM workspace_contexts WHERE workspace_id = ?`, workspaceID).Scan(&exists) == nil
 }
 
-// ApplyWorkspaceContextJanitorResult atomically stores the compacted context
+// ApplyKeeperCompactResult atomically stores the compacted context
 // and the source snapshot needed for direct rollback.
-func (s *Store) ApplyWorkspaceContextJanitorResult(
+func (s *Store) ApplyKeeperCompactResult(
 	workspaceID string,
 	content string,
 	updatedBySessionID string,
@@ -193,7 +197,7 @@ func (s *Store) ApplyWorkspaceContextJanitorResult(
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
-		return nil, false, fmt.Errorf("begin workspace context janitor update: %w", err)
+		return nil, false, fmt.Errorf("begin keeper compact update: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -214,7 +218,7 @@ func (s *Store) ApplyWorkspaceContextJanitorResult(
 	}
 	if current.Content == content {
 		if err := tx.Commit(); err != nil {
-			return nil, false, fmt.Errorf("commit unchanged workspace context janitor update: %w", err)
+			return nil, false, fmt.Errorf("commit unchanged keeper compact update: %w", err)
 		}
 		return current, false, nil
 	}
@@ -231,7 +235,7 @@ func (s *Store) ApplyWorkspaceContextJanitorResult(
 		return nil, false, err
 	}
 	if _, err := tx.Exec(`
-		INSERT INTO workspace_context_janitor_backups
+		INSERT INTO workspace_keeper_compact_backups
 			(workspace_id, source_revision, source_content, result_revision, agent, model, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
@@ -249,25 +253,25 @@ func (s *Store) ApplyWorkspaceContextJanitorResult(
 		model,
 		now,
 	); err != nil {
-		return nil, false, fmt.Errorf("store workspace context janitor backup %s: %w", workspaceID, err)
+		return nil, false, fmt.Errorf("store keeper compact backup %s: %w", workspaceID, err)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, false, fmt.Errorf("commit workspace context janitor update: %w", err)
+		return nil, false, fmt.Errorf("commit keeper compact update: %w", err)
 	}
 	return updated, true, nil
 }
 
-func (s *Store) GetWorkspaceContextJanitorBackup(workspaceID string) (*WorkspaceContextJanitorBackup, error) {
+func (s *Store) GetKeeperCompactBackup(workspaceID string) (*KeeperCompactBackup, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.db == nil {
-		return nil, ErrWorkspaceContextJanitorBackupNotFound
+		return nil, ErrKeeperCompactBackupNotFound
 	}
-	var backup WorkspaceContextJanitorBackup
+	var backup KeeperCompactBackup
 	err := s.db.QueryRow(`
 		SELECT workspace_id, source_revision, source_content, result_revision,
 			agent, model, created_at
-		FROM workspace_context_janitor_backups
+		FROM workspace_keeper_compact_backups
 		WHERE workspace_id = ?`,
 		workspaceID,
 	).Scan(
@@ -280,17 +284,17 @@ func (s *Store) GetWorkspaceContextJanitorBackup(workspaceID string) (*Workspace
 		&backup.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrWorkspaceContextJanitorBackupNotFound
+		return nil, ErrKeeperCompactBackupNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get workspace context janitor backup %s: %w", workspaceID, err)
+		return nil, fmt.Errorf("get keeper compact backup %s: %w", workspaceID, err)
 	}
 	return &backup, nil
 }
 
-// RestoreWorkspaceContextJanitorBackup restores only when the compacted
+// RestoreKeeperCompactBackup restores only when the compacted
 // revision is still canonical, so later user edits are never overwritten.
-func (s *Store) RestoreWorkspaceContextJanitorBackup(
+func (s *Store) RestoreKeeperCompactBackup(
 	workspaceID string,
 	updatedBySessionID string,
 ) (*protocol.WorkspaceContext, error) {
@@ -301,15 +305,15 @@ func (s *Store) RestoreWorkspaceContextJanitorBackup(
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
-		return nil, fmt.Errorf("begin workspace context janitor rollback: %w", err)
+		return nil, fmt.Errorf("begin keeper compact rollback: %w", err)
 	}
 	defer tx.Rollback()
 
-	var backup WorkspaceContextJanitorBackup
+	var backup KeeperCompactBackup
 	err = tx.QueryRow(`
 		SELECT workspace_id, source_revision, source_content, result_revision,
 			agent, model, created_at
-		FROM workspace_context_janitor_backups
+		FROM workspace_keeper_compact_backups
 		WHERE workspace_id = ?`,
 		workspaceID,
 	).Scan(
@@ -322,10 +326,10 @@ func (s *Store) RestoreWorkspaceContextJanitorBackup(
 		&backup.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrWorkspaceContextJanitorBackupNotFound
+		return nil, ErrKeeperCompactBackupNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read workspace context janitor backup %s: %w", workspaceID, err)
+		return nil, fmt.Errorf("read keeper compact backup %s: %w", workspaceID, err)
 	}
 	current, err := readWorkspaceContextTx(tx, workspaceID)
 	if err != nil {
@@ -345,7 +349,7 @@ func (s *Store) RestoreWorkspaceContextJanitorBackup(
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit workspace context janitor rollback: %w", err)
+		return nil, fmt.Errorf("commit keeper compact rollback: %w", err)
 	}
 	return updated, nil
 }
@@ -400,6 +404,6 @@ func (s *Store) RemoveWorkspaceContext(workspaceID string) {
 	if s.db == nil {
 		return
 	}
-	_, _ = s.db.Exec(`DELETE FROM workspace_context_janitor_backups WHERE workspace_id = ?`, workspaceID)
+	_, _ = s.db.Exec(`DELETE FROM workspace_keeper_compact_backups WHERE workspace_id = ?`, workspaceID)
 	_, _ = s.db.Exec(`DELETE FROM workspace_contexts WHERE workspace_id = ?`, workspaceID)
 }
