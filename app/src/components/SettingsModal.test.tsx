@@ -662,3 +662,81 @@ describe('SettingsModal review loop prompts', () => {
     expect(screen.getByTestId('settings-context-keeper-model-custom')).toHaveValue('gpt-custom');
   });
 });
+
+describe('SettingsModal notebook folder', () => {
+  function renderModal(
+    settings: Record<string, string>,
+    onSetSetting = vi.fn(),
+  ) {
+    render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        githubHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={settings}
+        endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={onSetSetting}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />,
+    );
+    return onSetSetting;
+  }
+
+  it('shows the override value and the daemon-resolved effective folder', async () => {
+    renderModal({
+      'notebook.root': '~/my-notes',
+      'notebook.root.effective': '/Users/me/my-notes',
+    });
+
+    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    const input = await screen.findByTestId('settings-notebook-root-input');
+    expect(input).toHaveValue('~/my-notes');
+    expect(screen.getByTestId('settings-notebook-root-effective')).toHaveTextContent(
+      'Currently: /Users/me/my-notes',
+    );
+  });
+
+  it('falls back to the effective default as placeholder when no override is set', async () => {
+    renderModal({ 'notebook.root.effective': '/Users/me/attn-notebook' });
+
+    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    const input = await screen.findByTestId('settings-notebook-root-input');
+    expect(input).toHaveValue('');
+    expect(input).toHaveAttribute('placeholder', '/Users/me/attn-notebook');
+  });
+
+  it('persists a new folder on blur and an empty value to restore the default', async () => {
+    const onSetSetting = renderModal({
+      'notebook.root': '~/my-notes',
+      'notebook.root.effective': '/Users/me/my-notes',
+    });
+
+    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    const input = await screen.findByTestId('settings-notebook-root-input');
+
+    fireEvent.change(input, { target: { value: '/Users/me/elsewhere' } });
+    fireEvent.blur(input);
+    expect(onSetSetting).toHaveBeenCalledWith('notebook.root', '/Users/me/elsewhere');
+
+    // Clearing the override commits an empty value, which the daemon resolves
+    // back to the per-profile default.
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+    expect(onSetSetting).toHaveBeenCalledWith('notebook.root', '');
+  });
+});
