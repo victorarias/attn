@@ -24,6 +24,11 @@ func (d *Daemon) handleSessionVisualizedWS(msg *protocol.SessionVisualizedMessag
 }
 
 func (d *Daemon) handleUnregisterWS(client *wsClient, msg *protocol.UnregisterMessage) {
+	if d.isChiefOfStaffSession(msg.ID) {
+		d.logf("refusing to unregister chief-of-staff session %s; unset the chief role first", msg.ID)
+		d.sendCommandError(client, protocol.CmdUnregister, chiefOfStaffProtectedError)
+		return
+	}
 	d.logf("Unregistering session %s via WebSocket", msg.ID)
 	d.detachSession(client, msg.ID)
 	endpointID := ""

@@ -18,6 +18,23 @@ func (d *Daemon) chiefOfStaffSessionID() string {
 	return strings.TrimSpace(d.store.GetProfileRole(profileRoleChiefOfStaff))
 }
 
+// isChiefOfStaffSession reports whether sessionID currently holds the
+// profile-wide chief-of-staff role. The chief is protected from being closed:
+// the close handlers consult this so an accidental ⌘W or close action cannot
+// tear down the orchestrator session. To close it deliberately, unset the chief
+// role first (set_chief_of_staff false).
+func (d *Daemon) isChiefOfStaffSession(sessionID string) bool {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return false
+	}
+	return d.chiefOfStaffSessionID() == sessionID
+}
+
+// chiefOfStaffProtectedError is the shared message returned to clients that try
+// to close the chief-of-staff session.
+const chiefOfStaffProtectedError = "chief of staff is protected from closing; unset the chief role first"
+
 func (d *Daemon) decorateChiefOfStaffWithSessionID(session *protocol.Session, chiefOfStaffSessionID string) {
 	if session == nil {
 		return

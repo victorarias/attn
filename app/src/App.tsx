@@ -89,6 +89,10 @@ const RELEASES_LATEST_WEB = 'https://github.com/victorarias/attn/releases/latest
 const RELEASE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_BANNER_DISMISSED_STORAGE_KEY = 'attn.update_banner.dismissed_version';
 const DOCK_PANEL_EXIT_MS = 260;
+// The chief-of-staff session is the profile-wide orchestrator and is protected
+// from accidental close. ⌘W and the close action no-op on it; this hint tells the
+// user how to close it deliberately (demote it first).
+const CHIEF_OF_STAFF_CLOSE_HINT = 'Chief of staff is protected — unset the chief role to close it.';
 const CHANGES_BRANCH_DIFF_INTERVAL_MS = 30_000;
 const CHANGES_BRANCH_DIFF_STATUS_DEBOUNCE_MS = 750;
 const CHANGES_BRANCH_DIFF_SLOW_THRESHOLD_MS = 5_000;
@@ -2143,8 +2147,22 @@ sendFetchPRDetails,
     setClosedWorktree({ id: cleanupRequestId, path: session.cwd, branch: session.branch });
   }, [alwaysKeepWorktrees, enrichedLocalSessions]);
 
+  // The chief-of-staff session is protected from accidental close. Every
+  // user-initiated close path (⌘W and the close action) funnels through
+  // handleClosePane / handleCloseSession, so guarding both here short-circuits
+  // them before any side effects (worktree-cleanup prompt, focus churn, daemon
+  // round-trip). The daemon enforces the same rule authoritatively as a backstop.
+  const isChiefOfStaffSession = useCallback(
+    (id: string) => daemonSessions.some((ds) => ds.id === id && ds.chief_of_staff === true),
+    [daemonSessions]
+  );
+
   const handleCloseSession = useCallback(
     async (id: string) => {
+      if (isChiefOfStaffSession(id)) {
+        showError(CHIEF_OF_STAFF_CLOSE_HINT);
+        return;
+      }
       const session = enrichedLocalSessions.find(s => s.id === id);
       prepareWorktreeCleanupPrompt(session);
 
@@ -2159,10 +2177,14 @@ sendFetchPRDetails,
         removeWorkspaceRef(session.workspaceId);
       }
     },
-    [closeSession, daemonSessions, enrichedLocalSessions, prepareWorktreeCleanupPrompt, removeWorkspaceRef, sendUnregisterSession]
+    [closeSession, daemonSessions, enrichedLocalSessions, isChiefOfStaffSession, prepareWorktreeCleanupPrompt, removeWorkspaceRef, sendUnregisterSession, showError]
   );
 
   const handleClosePane = useCallback((sessionId: string, paneId: string) => {
+    if (isChiefOfStaffSession(sessionId)) {
+      showError(CHIEF_OF_STAFF_CLOSE_HINT);
+      return Promise.resolve();
+    }
     const session = enrichedLocalSessions.find((entry) => entry.id === sessionId);
     prepareWorktreeCleanupPrompt(session);
     const fallbackPaneId = prepareClosePaneFocus(sessionId, paneId);
@@ -2184,7 +2206,7 @@ sendFetchPRDetails,
         clearPreparedClosePaneFocus(sessionId);
         throw error;
       });
-  }, [clearPreparedClosePaneFocus, enrichedLocalSessions, prepareClosePaneFocus, prepareWorktreeCleanupPrompt, sendWorkspaceClosePane, sessions, setActiveSession]);
+  }, [clearPreparedClosePaneFocus, enrichedLocalSessions, isChiefOfStaffSession, prepareClosePaneFocus, prepareWorktreeCleanupPrompt, sendWorkspaceClosePane, sessions, setActiveSession, showError]);
 
   const handleRequestCloseSession = useCallback((id: string) => {
     const session = sessions.find((entry) => entry.id === id);
