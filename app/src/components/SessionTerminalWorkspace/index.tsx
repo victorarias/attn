@@ -546,9 +546,24 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       onClosePane(paneId);
     }, [onClosePane]);
 
-    const handleCloseActivePane = useCallback(() => {
+    // Cmd+W closes the focused leaf. A docked tile (e.g. a notebook tile beside a
+    // terminal) lives inside .session-terminal-workspace, so the global dispatcher
+    // routes its Cmd+W to terminal.close — but the tile is not a terminal pane and
+    // `activePaneId` still points at the terminal that was last focused. Without the
+    // tile check below, Cmd+W from inside the notebook would kill that previous pane
+    // (the reported bug). When focus is inside a tile, undock THAT tile instead.
+    const handleCloseFocusedLeaf = useCallback(() => {
+      const focused = document.activeElement;
+      const tileEl = focused instanceof HTMLElement
+        ? focused.closest('[data-pane-kind="tile"]')
+        : null;
+      const tileId = tileEl?.getAttribute('data-pane-id');
+      if (tileId) {
+        onUndockTile?.(tileId);
+        return;
+      }
       handleClosePane(activePaneId);
-    }, [activePaneId, handleClosePane]);
+    }, [activePaneId, handleClosePane, onUndockTile]);
 
     const toggleMaximizeActivePane = useCallback(() => {
       setZoomedPaneId(null);
@@ -599,7 +614,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     useShortcut('terminal.splitHorizontal', () => { handleSplit('horizontal'); }, sessionVisible);
     useShortcut('terminal.toggleZoom', toggleZoomActivePane, sessionVisible);
     useShortcut('terminal.toggleMaximize', toggleMaximizeActivePane, sessionVisible);
-    useShortcut('terminal.close', handleCloseActivePane, sessionVisible && splitLayoutActive);
+    useShortcut('terminal.close', handleCloseFocusedLeaf, sessionVisible && splitLayoutActive);
     useShortcut('terminal.focusLeft', () => handleMovePane('left'), sessionVisible);
     useShortcut('terminal.focusRight', () => handleMovePane('right'), sessionVisible);
     useShortcut('terminal.focusUp', () => handleMovePane('up'), sessionVisible);
