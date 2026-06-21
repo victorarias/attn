@@ -491,6 +491,7 @@ function App() {
     sendNotebookTaskRetry,
     sendNotebookBacklinks,
     sendNotebookToChief,
+    sendNotebookList,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,
@@ -645,6 +646,7 @@ function App() {
         sendNotebookTaskRetry={sendNotebookTaskRetry}
         sendNotebookBacklinks={sendNotebookBacklinks}
         sendNotebookToChief={sendNotebookToChief}
+        sendNotebookList={sendNotebookList}
         fsChangeSignal={fsChangeSignal}
         notebookTaskChangeSignal={notebookTaskChangeSignal}
         sendGetRecentLocations={sendGetRecentLocations}
@@ -759,6 +761,7 @@ interface AppContentProps {
   sendNotebookTaskRetry: ReturnType<typeof useDaemonSocket>['sendNotebookTaskRetry'];
   sendNotebookBacklinks: ReturnType<typeof useDaemonSocket>['sendNotebookBacklinks'];
   sendNotebookToChief: ReturnType<typeof useDaemonSocket>['sendNotebookToChief'];
+  sendNotebookList: ReturnType<typeof useDaemonSocket>['sendNotebookList'];
   fsChangeSignal: number;
   notebookTaskChangeSignal: number;
   sendGetRecentLocations: ReturnType<typeof useDaemonSocket>['sendGetRecentLocations'];
@@ -867,6 +870,7 @@ function AppContent({
   sendNotebookTaskRetry,
   sendNotebookBacklinks,
   sendNotebookToChief,
+  sendNotebookList,
   fsChangeSignal,
   notebookTaskChangeSignal,
   sendGetRecentLocations,
@@ -3418,6 +3422,8 @@ sendFetchPRDetails,
     sendToChief: sendNotebookToChief,
     listTasks: sendNotebookTaskList,
     retryTask: sendNotebookTaskRetry,
+    // Argless walk = empty prefix = the whole vault, for the in-tile finder index.
+    listFiles: sendNotebookList,
     changeSignal: fsChangeSignal,
     taskChangeSignal: notebookTaskChangeSignal,
   }), [
@@ -3429,6 +3435,7 @@ sendFetchPRDetails,
     sendNotebookToChief,
     sendNotebookTaskList,
     sendNotebookTaskRetry,
+    sendNotebookList,
     fsChangeSignal,
     notebookTaskChangeSignal,
   ]);
