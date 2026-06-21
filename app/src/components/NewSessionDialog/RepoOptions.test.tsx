@@ -281,6 +281,56 @@ describe('RepoOptions', () => {
     });
   });
 
+  it('defaults a new worktree to origin/<defaultBranch>', async () => {
+    const onCreateWorktree = vi.fn(async () => {});
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo--feature"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={onCreateWorktree}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('repo-option-2'));
+    fireEvent.change(screen.getByTestId('repo-new-worktree-input'), { target: { value: 'feature-2' } });
+
+    expect(screen.getByTestId('repo-new-worktree-start-default')).toBeChecked();
+    expect(screen.getByTestId('repo-new-worktree-start-current')).not.toBeChecked();
+
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+    await waitFor(() => expect(onCreateWorktree).toHaveBeenCalledWith('feature-2', 'origin/main'));
+  });
+
+  it('starts from the selected destination branch when "current" is chosen', async () => {
+    const onCreateWorktree = vi.fn(async () => {});
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo--feature"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={onCreateWorktree}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('repo-option-2'));
+    fireEvent.change(screen.getByTestId('repo-new-worktree-input'), { target: { value: 'feature-2' } });
+    fireEvent.click(screen.getByTestId('repo-new-worktree-start-current'));
+
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+    await waitFor(() => expect(onCreateWorktree).toHaveBeenCalledWith('feature-2', 'feature'));
+  });
+
   it('shows row-local progress while deleting a worktree', async () => {
     const deleteGate = deferred<void>();
     const onDeleteWorktree = vi.fn(() => deleteGate.promise);

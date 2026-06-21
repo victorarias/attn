@@ -14,6 +14,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **The Notebook header tells you more at a glance.** A small "chief" indicator lights up while your chief-of-staff agent is working, and each note's title now carries a kind badge (note or journal).
 - **Broken Notebook links are flagged as you write.** When a note links to another note that doesn't exist — a typo in the path, or a note you haven't created yet — the link now shows in red with a ⚠ instead of looking like a working link. Links to real notes stay normal, and external links (http/https, email) are never flagged. If an agent or you create the missing note, its links clear their flag once the Notebook refreshes.
 
+### Changed
+- **New worktrees start from the latest origin/main by default.** When you create a worktree in the new-session dialog, "Start from origin/&lt;default branch&gt;" is now the pre-selected, leading choice — so your new branch is cut from a freshly-fetched upstream main, not from whatever branch the source location happened to be sitting on (which could be days stale). You can still pick "Start from &lt;current branch&gt;" to branch off your in-progress work. A repo with no matching remote branch falls back to the current checkout instead of failing.
+
 ### Fixed
 - **A finished session now ends cleanly instead of looking like a crash.** When a session is stopped, closed, or wraps up its work, attn tears it down with a normal termination signal — but the terminal used to report that as a bare `[Process exited with code 143]`, which reads like something broke. Expected endings (a clean exit, or a normal stop/close) now show a calm `[Session ended]`. Genuine failures — a non-zero exit code, or a crash/force-kill — still show the exit code so real problems stay visible.
 
