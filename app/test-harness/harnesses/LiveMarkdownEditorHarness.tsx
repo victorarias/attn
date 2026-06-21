@@ -23,6 +23,17 @@ A paragraph with **bold**, *italic*, \`inline code\`, and a
 
 - a list item
 - another item
+
+## Tasks
+
+- [ ] an open task
+- [x] a done task
+
+## Code
+
+\`\`\`ts
+const answer = 42;
+\`\`\`
 `;
 
 export function LiveMarkdownEditorHarness({ onReady, setTriggerRerender }: HarnessProps) {

@@ -16,6 +16,7 @@ import {
   EditorView,
   ViewPlugin,
   type ViewUpdate,
+  WidgetType,
 } from '@codemirror/view';
 
 export interface LiveMarkdownOptions {
@@ -40,12 +41,61 @@ const INLINE_CODE = Decoration.mark({ class: 'cm-md-code' });
 const STRIKE = Decoration.mark({ class: 'cm-md-strike' });
 const HEADING_MARK = [1, 2, 3, 4, 5, 6].map((n) => Decoration.mark({ class: `cm-md-h${n}` }));
 const HIDE = Decoration.replace({});
+const CODEFENCE = Decoration.mark({ class: 'cm-md-codefence' });
+const CODEINFO = Decoration.mark({ class: 'cm-md-codeinfo' });
+// A line decoration applied to every row of a fenced code block, giving the block a
+// contiguous monospace panel (the fences stay visible but dimmed, so nothing shifts).
+const CODEBLOCK_LINE = Decoration.line({ class: 'cm-md-codeblock' });
 
 function linkMark(href: string): Decoration {
   return Decoration.mark({
     class: 'cm-md-link',
     attributes: { 'data-href': href },
   });
+}
+
+// A static glyph that replaces a list marker (a bullet for `-`/`*`/`+`). `cls` lets
+// the headless decoration tests identify the widget from its spec without a DOM.
+class GlyphWidget extends WidgetType {
+  constructor(readonly glyph: string, readonly cls: string) {
+    super();
+  }
+  eq(other: GlyphWidget) {
+    return other.glyph === this.glyph && other.cls === this.cls;
+  }
+  toDOM() {
+    const span = document.createElement('span');
+    span.className = this.cls;
+    span.textContent = this.glyph;
+    span.setAttribute('aria-hidden', 'true');
+    return span;
+  }
+}
+
+// Replaces a GFM task marker (`[ ]`/`[x]`) with a checkbox glyph. Carries the marker's
+// source position so the editor-level click handler can toggle it, and its checked
+// state so CM reuses the right widget. `cls` is the test/handler hook.
+class CheckboxWidget extends WidgetType {
+  readonly cls = 'cm-md-checkbox';
+  constructor(readonly checked: boolean, readonly pos: number) {
+    super();
+  }
+  eq(other: CheckboxWidget) {
+    return other.checked === this.checked && other.pos === this.pos;
+  }
+  toDOM() {
+    const span = document.createElement('span');
+    span.className = `cm-md-checkbox${this.checked ? ' is-checked' : ''}`;
+    span.textContent = this.checked ? '☑' : '☐';
+    span.dataset.pos = String(this.pos);
+    span.setAttribute('role', 'checkbox');
+    span.setAttribute('aria-checked', this.checked ? 'true' : 'false');
+    return span;
+  }
+  // Let the mousedown reach the editor-level handler so a click toggles the task.
+  ignoreEvent() {
+    return false;
+  }
 }
 
 // Build the set of line numbers any selection range touches. A node rendered on one
@@ -83,6 +133,53 @@ export function buildDecorations(state: EditorState, focused = true): Decoration
       if (level) {
         // Size the whole heading line; sizing persists even on the active line.
         decos.push(HEADING_MARK[level - 1].range(node.from, node.to));
+        return;
+      }
+
+      // ---- block: fenced code ----
+      if (name === 'FencedCode') {
+        // Give every row of the block the code panel (monospace + background). Using
+        // node.to - 1 avoids grabbing the blank line after a block that ends on a
+        // newline boundary. Styling persists on the active line (it never hides text).
+        const firstLine = doc.lineAt(node.from).number;
+        const lastLine = doc.lineAt(Math.max(node.from, node.to - 1)).number;
+        for (let n = firstLine; n <= lastLine; n += 1) {
+          decos.push(CODEBLOCK_LINE.range(doc.line(n).from));
+        }
+        return;
+      }
+      if (name === 'CodeInfo') {
+        // The language tag after the opening fence (```ts) — dim it like the fence.
+        decos.push(CODEINFO.range(node.from, node.to));
+        return;
+      }
+
+      // ---- lists: bullets and task checkboxes ----
+      if (name === 'ListMark') {
+        // The leading marker of a list item. Ordered-list numbers (`1.`) are meaningful
+        // and stay as written; only bullet markers are prettified.
+        const marker = doc.sliceString(node.from, node.to);
+        if (marker !== '-' && marker !== '*' && marker !== '+') return;
+        if (onActiveLine(node.from)) return; // reveal the raw marker for editing
+        // A task item ('- [ ] …') renders just the checkbox; hide its bullet marker
+        // (and the following space) so nothing sits before the box.
+        if (node.node.parent?.getChild('Task')) {
+          let to = node.to;
+          if (doc.sliceString(to, to + 1) === ' ') to += 1;
+          decos.push(HIDE.range(node.from, to));
+        } else {
+          decos.push(
+            Decoration.replace({ widget: new GlyphWidget('•', 'cm-md-bullet') }).range(node.from, node.to),
+          );
+        }
+        return;
+      }
+      if (name === 'TaskMarker') {
+        if (onActiveLine(node.from)) return; // reveal the raw '[ ]' for editing
+        const checked = /\[[xX]\]/.test(doc.sliceString(node.from, node.to));
+        decos.push(
+          Decoration.replace({ widget: new CheckboxWidget(checked, node.from) }).range(node.from, node.to),
+        );
         return;
       }
 
@@ -130,9 +227,14 @@ export function buildDecorations(state: EditorState, focused = true): Decoration
         return;
       }
       if (name === 'CodeMark') {
-        // Inline-code backticks only — never the ``` fences of a code block.
-        if (node.node.parent?.name !== 'InlineCode') return;
-        if (!onActiveLine(node.from)) decos.push(HIDE.range(node.from, node.to));
+        if (node.node.parent?.name === 'InlineCode') {
+          // Inline-code backticks: hidden off the active line like other inline markers.
+          if (!onActiveLine(node.from)) decos.push(HIDE.range(node.from, node.to));
+        } else {
+          // The ``` fences of a code block: dimmed in place (not hidden), so the block
+          // keeps its line count and the fences read as quiet chrome.
+          decos.push(CODEFENCE.range(node.from, node.to));
+        }
         return;
       }
       if (name === 'LinkMark') {
@@ -170,6 +272,22 @@ const baseTheme = EditorView.baseTheme({
     background: 'var(--color-bg-elevated, rgba(127,127,127,0.16))',
   },
   '.cm-md-link': { color: 'var(--accent, #ff6b35)', cursor: 'pointer' },
+  // List bullet glyph replacing a `-`/`*`/`+` marker.
+  '.cm-md-bullet': { color: 'var(--accent, #ff6b35)' },
+  // Task checkbox glyph (off the active line); clickable to toggle the task.
+  '.cm-md-checkbox': { cursor: 'pointer', color: 'var(--color-text-secondary, #b8b8b8)' },
+  '.cm-md-checkbox.is-checked': { color: 'var(--accent, #ff6b35)' },
+  // Fenced code block: a contiguous monospace panel across its rows.
+  '.cm-md-codeblock': {
+    fontFamily:
+      "ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontSize: '0.9em',
+    background: 'var(--color-bg-elevated, rgba(127,127,127,0.1))',
+    borderLeft: '2px solid var(--color-border, rgba(127,127,127,0.35))',
+  },
+  // The ``` fences and the language tag: quiet chrome, not prose.
+  '.cm-md-codefence': { opacity: '0.5' },
+  '.cm-md-codeinfo': { opacity: '0.5', fontStyle: 'italic' },
 });
 
 export function liveMarkdownPreview(options: LiveMarkdownOptions = {}): Extension {
@@ -205,5 +323,24 @@ export function liveMarkdownPreview(options: LiveMarkdownOptions = {}): Extensio
     },
   });
 
-  return [plugin, baseTheme, followLinks];
+  // Click a rendered task checkbox to toggle its `[ ]`/`[x]` at the source. The widget
+  // carries the marker's position; the state char sits at pos+1 (just inside the
+  // brackets). preventDefault keeps the click from moving the cursor onto the line
+  // (which would reveal the raw marker and unmount the checkbox mid-click).
+  const toggleCheckbox = EditorView.domEventHandlers({
+    mousedown: (event, view) => {
+      const target = (event.target as HTMLElement | null)?.closest('.cm-md-checkbox');
+      const pos = target?.getAttribute('data-pos');
+      if (pos == null) return false;
+      const stateFrom = Number(pos) + 1;
+      if (Number.isNaN(stateFrom) || stateFrom >= view.state.doc.length) return false;
+      const current = view.state.doc.sliceString(stateFrom, stateFrom + 1);
+      const next = current.toLowerCase() === 'x' ? ' ' : 'x';
+      event.preventDefault();
+      view.dispatch({ changes: { from: stateFrom, to: stateFrom + 1, insert: next } });
+      return true;
+    },
+  });
+
+  return [plugin, baseTheme, followLinks, toggleCheckbox];
 }

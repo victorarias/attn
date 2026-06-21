@@ -105,4 +105,30 @@ test.describe('LiveMarkdownEditor (live preview)', () => {
     });
     expect(last.text).toContain('Notebook heading');
   });
+
+  test('renders list bullets, task checkboxes, and a fenced code block, and toggles a checkbox on click', async ({ page }) => {
+    await page.goto('/test-harness/?component=LiveMarkdownEditor');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.waitForSelector('.cm-content');
+
+    // Bullet markers render as bullets; the two `- [ ]/[x]` items render as checkboxes
+    // (one checked), and the fenced block renders as a panel with a dimmed fence +
+    // language tag.
+    await expect(page.locator('.cm-md-bullet').first()).toBeVisible();
+    await expect(page.locator('.cm-md-checkbox')).toHaveCount(2);
+    await expect(page.locator('.cm-md-checkbox.is-checked')).toHaveCount(1);
+    await expect(page.locator('.cm-md-codeblock').first()).toBeVisible();
+    await expect(page.locator('.cm-md-codefence').first()).toBeVisible();
+    await expect(page.locator('.cm-md-codeinfo').first()).toBeVisible();
+    await page.screenshot({ path: 'test-results/live-editor-polish.png' });
+
+    // Clicking the open checkbox toggles its source `[ ]` → `[x]`.
+    await page.locator('.cm-md-checkbox:not(.is-checked)').first().click();
+    await page.waitForFunction(() => {
+      const calls = window.__HARNESS__.getCalls('change');
+      const last = calls[calls.length - 1]?.[0] as string | undefined;
+      return !!last && last.includes('- [x] an open task');
+    });
+    await expect(page.locator('.cm-md-checkbox.is-checked')).toHaveCount(2);
+  });
 });
