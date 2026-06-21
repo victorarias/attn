@@ -483,6 +483,65 @@ export function NotebookSurface({
     }
   }, [readFile]);
 
+  // Live refresh of the OPEN file after an fs_changed event. Unlike loadFile (a
+  // navigation: full reset, fresh editor, scroll to top), this keeps the reader in
+  // place. Two properties matter:
+  //   - It bails WITHOUT touching any state when the file is byte-identical on disk.
+  //     fs_changed fires for ANY file under the notebook root, so the open note is
+  //     re-read on every unrelated write only to check it — skipping all the setState
+  //     when nothing changed is what stops an unrelated edit from disturbing (and
+  //     re-scrolling) the note you're reading, and flashing its backlinks.
+  //   - On a GENUINE change it applies the new bytes as a minimal edit through the
+  //     editor handle, so CodeMirror keeps its scroll/selection anchored instead of
+  //     snapping to the top, and re-walks backlinks (the links may have moved).
+  const refreshOpenFile = useCallback(async () => {
+    const path = selectedPathRef.current;
+    // A binary selection shows a placeholder we never read; nothing to reload.
+    if (!path || isBinaryPath(path)) return;
+    // Freeze (do NOT bump) the load token: a navigation that lands mid-read bumps it,
+    // and we then drop this stale refresh rather than stamp it over the new selection.
+    const seq = loadSeqRef.current;
+    let fresh: FsReadResult;
+    try {
+      fresh = await readFile(path);
+    } catch (err) {
+      if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
+      // Deleted on disk: report it honestly (the tree drops the node on its own re-list).
+      setNote(null);
+      setDraft('');
+      setNoteError(err instanceof Error ? err.message : 'Could not read this file');
+      return;
+    }
+    if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
+    // Unchanged on disk → nothing to apply. Skipping every setState here is the whole
+    // point: the editor's scroll position and selection are never touched.
+    if (noteRef.current && fresh.hash === noteRef.current.hash) return;
+    // Genuine change: apply it preserving the reader's viewport. A markdown note takes a
+    // minimal edit via the editor handle (CM keeps its scroll anchored); a plain-text
+    // file — or a not-yet-mounted editor — falls through to the direct value set below.
+    if (isMarkdownPath(path)) {
+      editorRef.current?.applyExternalContent(fresh.content);
+    }
+    setNote(fresh);
+    setDraft(fresh.content);
+    setNoteError(null);
+    // Content moved, so links may have too — re-walk backlinks for a markdown note.
+    if (isMarkdownPath(path)) {
+      setBacklinksLoading(true);
+      void backlinksNotebook(path)
+        .then((entries) => {
+          if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
+          setBacklinks(entries);
+          setBacklinksLoading(false);
+        })
+        .catch(() => {
+          if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
+          setBacklinks([]);
+          setBacklinksLoading(false);
+        });
+    }
+  }, [readFile, backlinksNotebook]);
+
   // Hand the captured selection to the daemon for the chief of staff. The daemon
   // appends it to the chief inbox note and best-effort nudges a live chief; the
   // UI only surfaces the outcome and never messages the chief directly.
@@ -593,22 +652,17 @@ export function NotebookSurface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
-  // Live refresh: an fs_changed event reloads the open file so agent/external writes
+  // Live refresh: an fs_changed event refreshes the open file so agent/external writes
   // show up without reopening. The sidebar tree re-lists itself via its own
-  // changeSignal prop; here we only refresh the open document.
+  // changeSignal prop; here we only refresh the open document — and only when its bytes
+  // actually changed (refreshOpenFile no-ops on an unrelated write), keeping the reader
+  // anchored where they were.
   useEffect(() => {
     if (!active || changeSignal === 0) return;
     // With unsaved edits, never reload — that would clobber the buffer. On-disk
     // divergence surfaces as a save-time conflict instead.
     if (dirtyRef.current) return;
-    const current = selectedPathRef.current;
-    if (!current) return;
-    // A binary selection shows a placeholder we never read; nothing to reload.
-    if (isBinaryPath(current)) return;
-    // Re-read content (and, for .md, backlinks). If the file was deleted on disk the
-    // read fails and the document pane shows "unavailable" — honest, and the tree
-    // drops the node on its own re-list.
-    void loadFile(current);
+    void refreshOpenFile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [changeSignal]);
 

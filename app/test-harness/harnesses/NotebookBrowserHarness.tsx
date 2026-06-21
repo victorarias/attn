@@ -6,7 +6,7 @@
  * layout and the CodeMirror live editor can be exercised and eyeballed together.
  * Edits are recorded via the writeFile mock so the autosave path is observable.
  */
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 // Pull in the app's design tokens (--color-*, --accent) so the harness renders with
 // the real theme — without this the editor/modal fall back to undefined variables and
 // the screenshot isn't color-representative.
@@ -68,9 +68,32 @@ ${INDEX_FILLER}
   'notes.txt': 'Plain text scratch file.\nNo markdown affordances here — just edit and autosave.\n',
 };
 
+// Drive an external file change the way the daemon's fs_changed would: override a
+// file's bytes/hash, then bump the changeSignal so the open browser re-reads it. Kept
+// off the typed HarnessAPI (a fixed shape); the e2e casts window to reach it.
+interface NotebookHarnessControls {
+  // Stage new bytes for `path` (so the next read returns them) and bump changeSignal.
+  // Omit content to fire a no-op fs_changed (the open file re-reads unchanged).
+  fsChanged: (path?: string, content?: string, hash?: string) => void;
+  // The bytes a path currently reads as, so the e2e can derive a minimally-edited
+  // version (an agent appending a line) rather than guessing the fixture body.
+  getContent: (path: string) => string;
+}
+declare global {
+  interface Window {
+    __NB_HARNESS__?: NotebookHarnessControls;
+  }
+}
+
 export function NotebookBrowserHarness({ onReady, setTriggerRerender }: HarnessProps) {
+  const [changeSignal, setChangeSignal] = useState(0);
+  // Per-path byte/hash overrides the e2e stages to simulate an on-disk change.
+  const overridesRef = useRef<Record<string, { content: string; hash: string }>>({});
+
   const listDir = useCallback(async (path: string): Promise<FsEntry[]> => TREE[path] ?? [], []);
   const readFile = useCallback(async (path: string): Promise<FsReadResult> => {
+    const override = overridesRef.current[path];
+    if (override) return { path, content: override.content, hash: override.hash };
     return { path, content: CONTENT[path] ?? `# ${path}\n\nSample body.`, hash: 'h1' };
   }, []);
   const backlinksNotebook = useCallback(async (): Promise<NotebookEntry[]> => [
@@ -97,6 +120,16 @@ export function NotebookBrowserHarness({ onReady, setTriggerRerender }: HarnessP
     // so the harness is deterministic regardless of the runner's OS color scheme.
     document.documentElement.setAttribute('data-theme', 'dark');
     setTriggerRerender(() => {});
+    window.__NB_HARNESS__ = {
+      fsChanged: (path?: string, content?: string, hash?: string) => {
+        if (path && content !== undefined) {
+          overridesRef.current[path] = { content, hash: hash ?? `h-${content.length}` };
+        }
+        setChangeSignal((n) => n + 1);
+      },
+      getContent: (path: string) =>
+        overridesRef.current[path]?.content ?? CONTENT[path] ?? `# ${path}\n\nSample body.`,
+    };
     onReady();
   }, [onReady, setTriggerRerender]);
 
@@ -110,7 +143,7 @@ export function NotebookBrowserHarness({ onReady, setTriggerRerender }: HarnessP
       writeFile={writeFile}
       existsFile={existsFile}
       sendToChief={sendToChief}
-      changeSignal={0}
+      changeSignal={changeSignal}
       listTasks={listTasks}
       retryTask={retryTask}
       taskChangeSignal={0}

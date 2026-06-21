@@ -1,5 +1,15 @@
 import { test, expect } from '@playwright/test';
 
+// Editing controls the LiveMarkdownEditor harness exposes for the scroll tests below.
+declare global {
+  interface Window {
+    __EDITOR_HARNESS__?: {
+      applyExternal: (next: string) => void;
+      swapValue: (next: string) => void;
+    };
+  }
+}
+
 // The notebook's single read-and-type surface (CodeMirror live preview), rendered
 // in isolation by the component harness in a real browser — CM cannot mount under
 // happy-dom, so this is where its rendering and interactions are verified.
@@ -104,6 +114,67 @@ test.describe('LiveMarkdownEditor (live preview)', () => {
       return calls[calls.length - 1][0] as { text: string; top: number; left: number };
     });
     expect(last.text).toContain('Notebook heading');
+  });
+
+  test('keeps the reader scrolled in place when an on-disk change is applied (minimal edit)', async ({ page }) => {
+    // The bug: a note that changes on disk while you read it (an agent edit, or an
+    // unrelated fs event that re-read it) was pushed in via a full document swap, which
+    // snaps CodeMirror's scroller back to the top. applyExternalContent applies it as a
+    // minimal edit so the viewport stays anchored. This is a real-browser behavior
+    // (CM can't mount under happy-dom), so it's verified here.
+    await page.goto('/test-harness/?component=LiveMarkdownEditor&long=1');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.waitForSelector('.cm-content');
+
+    const scroller = page.locator('.cm-scroller');
+    // Scroll well down into the long note.
+    await scroller.evaluate((el) => { el.scrollTop = 600; });
+    const before = await scroller.evaluate((el) => el.scrollTop);
+    expect(before).toBeGreaterThan(400);
+
+    // An agent rewrites a line near the END of the note (below the fold). Applied as a
+    // minimal edit, the reader's scroll position is preserved exactly.
+    await page.evaluate(() => {
+      // Replace the last paragraph's text; everything above the change is untouched.
+      const doc = Array.from({ length: 80 }, (_, i) => `Paragraph line number ${i + 1} of the long note.`);
+      doc[79] = 'Paragraph line number 80 of the long note — EDITED BY AGENT.';
+      window.__EDITOR_HARNESS__!.applyExternal(`# Long note\n\n${doc.join('\n\n')}\n`);
+    });
+
+    // The edit landed (the document text changed) ...
+    await page.waitForFunction(() => {
+      const calls = window.__HARNESS__.getCalls('change');
+      const last = calls[calls.length - 1]?.[0] as string | undefined;
+      return !!last && last.includes('EDITED BY AGENT');
+    });
+    // ... and the scroller did NOT jump (allow a couple px for re-measure rounding).
+    const after = await scroller.evaluate((el) => el.scrollTop);
+    expect(Math.abs(after - before)).toBeLessThanOrEqual(4);
+  });
+
+  test('contrast: a full value swap snaps the scroller to the top (the bug the fix avoids)', async ({ page }) => {
+    // Proves the harness actually detects a scroll reset, and documents WHY the minimal
+    // edit is necessary: replacing the whole controlled value — react-codemirror's
+    // default reconciliation — resets CodeMirror's scroll to the top.
+    await page.goto('/test-harness/?component=LiveMarkdownEditor&long=1');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.waitForSelector('.cm-content');
+
+    const scroller = page.locator('.cm-scroller');
+    await scroller.evaluate((el) => { el.scrollTop = 600; });
+    expect(await scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(400);
+
+    await page.evaluate(() => {
+      const doc = Array.from({ length: 80 }, (_, i) => `Paragraph line number ${i + 1} of the long note.`);
+      doc[79] = 'Paragraph line number 80 of the long note — EDITED BY AGENT.';
+      window.__EDITOR_HARNESS__!.swapValue(`# Long note\n\n${doc.join('\n\n')}\n`);
+    });
+
+    // react-codemirror reconciles the changed controlled value as a full-document
+    // replace, which snaps the viewport back to the top. (That replace is tagged as an
+    // external change, so it deliberately does NOT re-fire onChange — hence we observe
+    // the scroller directly rather than waiting on a change call.)
+    await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeLessThan(50);
   });
 
   test('renders list bullets, task checkboxes, and a fenced code block, and toggles a checkbox on click', async ({ page }) => {

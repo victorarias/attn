@@ -1,5 +1,16 @@
 import { test, expect } from '@playwright/test';
 
+// Drives an external file change through the harness, the way the daemon's fs_changed
+// broadcast would (see NotebookBrowserHarness).
+declare global {
+  interface Window {
+    __NB_HARNESS__?: {
+      fsChanged: (path?: string, content?: string, hash?: string) => void;
+      getContent: (path: string) => string;
+    };
+  }
+}
+
 // The full notebook modal (lazy filesystem tree sidebar + single live-editor document
 // pane), rendered by the component harness with mocked daemon functions in a real
 // browser. Verifies the fs-backed layout end-to-end and that the always-live editor
@@ -76,6 +87,53 @@ test.describe('NotebookBrowser (fs surface)', () => {
     expect(await scrollTop()).toBeLessThan(40);
     await rail.getByRole('button', { name: 'Subsection detail' }).click();
     await expect.poll(scrollTop, { timeout: 2000 }).toBeGreaterThan(150);
+  });
+
+  test('keeps the reader scrolled in place when the open note changes on disk (and ignores unrelated changes)', async ({ page }) => {
+    // The reported bug, end-to-end through the real NotebookSurface: reading a note
+    // while files change scrolled it back to the top. Verified against the actual
+    // component + CodeMirror (the packaged app runs this same code).
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.getByRole('heading', { level: 2, name: 'index' }).waitFor();
+    await page.waitForSelector('.cm-content');
+
+    const scrollTop = () => page.locator('.cm-scroller').evaluate((el) => (el as HTMLElement).scrollTop);
+    // Scroll down into the note.
+    await page.locator('.cm-scroller').evaluate((el) => { (el as HTMLElement).scrollTop = 300; });
+    const parked = await scrollTop();
+    expect(parked).toBeGreaterThan(150);
+
+    // 1) An UNRELATED file changes: fs_changed fires, the open note is re-read but its
+    //    bytes are identical, so nothing is applied and the reader does not move.
+    await page.evaluate(() => window.__NB_HARNESS__!.fsChanged('journal/2026-06-20.md', '# touched\n', 'h-x'));
+    await page.waitForTimeout(150);
+    expect(Math.abs((await scrollTop()) - parked)).toBeLessThanOrEqual(4);
+
+    // 2) The OPEN note itself changes on disk (an agent appends a line below the fold).
+    //    The new content is applied as a minimal edit, so the reader stays parked.
+    await page.evaluate(() => {
+      const current = window.__NB_HARNESS__!.getContent('knowledge/index.md');
+      window.__NB_HARNESS__!.fsChanged('knowledge/index.md', `${current}\nAppended by an agent while you were reading.\n`, 'h-appended');
+    });
+    // The append landed in the document (scroll to the bottom to prove it's there) ...
+    await expect.poll(async () => {
+      // Scroll to the very bottom to prove the appended line is in the document.
+      await page.locator('.cm-scroller').evaluate((el) => { (el as HTMLElement).scrollTop = (el as HTMLElement).scrollHeight; });
+      return (await page.locator('.cm-content').textContent()) ?? '';
+    }, { timeout: 2000 }).toContain('Appended by an agent');
+
+    // ... and crucially, the apply itself did NOT jump the viewport: re-park and confirm
+    // a fresh genuine change leaves scrollTop where the reader left it.
+    await page.locator('.cm-scroller').evaluate((el) => { (el as HTMLElement).scrollTop = 300; });
+    const reparked = await scrollTop();
+    expect(reparked).toBeGreaterThan(150);
+    await page.evaluate(() => {
+      const current = window.__NB_HARNESS__!.getContent('knowledge/index.md');
+      window.__NB_HARNESS__!.fsChanged('knowledge/index.md', `${current}\nA second agent edit.\n`, 'h-appended-2');
+    });
+    await page.waitForTimeout(200);
+    expect(Math.abs((await scrollTop()) - reparked)).toBeLessThanOrEqual(4);
   });
 
   test('shows a read-only placeholder for a binary file', async ({ page }) => {

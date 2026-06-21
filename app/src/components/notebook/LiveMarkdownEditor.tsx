@@ -11,6 +11,7 @@ import { EditorView, type ViewUpdate } from '@codemirror/view';
 import { brokenLinks, revalidateBrokenLinks, type ExistsCheck } from './brokenLinks';
 import { frontmatterCard } from './frontmatterCard';
 import { liveMarkdownPreview } from './liveMarkdownPreview';
+import { computeMinimalEdit } from './minimalEdit';
 
 export interface LiveSelection {
   text: string;
@@ -27,6 +28,13 @@ export interface LiveMarkdownEditorHandle {
   // there, and take focus. A no-op until the view has mounted, or if the offset is
   // out of range for the current document.
   scrollToPos: (pos: number) => void;
+  // Replace the document with `next` as a MINIMAL edit (shared prefix/suffix trimmed)
+  // so the reader's scroll position and selection stay anchored. Used to push an
+  // on-disk change into an open note: the default controlled-value path swaps the whole
+  // document, which snaps the viewport to the top — exactly what we must avoid while
+  // someone is reading. No-op until the view mounts, or when `next` is already current.
+  // Does NOT focus or scroll into view (the reader may be elsewhere on the page).
+  applyExternalContent: (next: string) => void;
 }
 
 interface LiveMarkdownEditorProps {
@@ -110,6 +118,21 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
         effects: EditorView.scrollIntoView(target, { y: 'start' }),
       });
       view.focus();
+    },
+    applyExternalContent: (next: string) => {
+      const view = cmRef.current?.view;
+      if (!view) return;
+      const edit = computeMinimalEdit(view.state.doc.toString(), next);
+      if (!edit) return; // unchanged → no transaction, scroll/selection untouched
+      // Dispatch only the changed range. CodeMirror maps the scroll anchor and the
+      // selection through a minimal change, so the reader stays put; scrollIntoView is
+      // left off (we don't chase a cursor we didn't move) and we don't take focus. The
+      // resulting docChanged fires onChange, so the parent's `value` catches up and its
+      // next controlled-value pass is a no-op.
+      view.dispatch({
+        changes: { from: edit.from, to: edit.to, insert: edit.insert },
+        scrollIntoView: false,
+      });
     },
   }), []);
 
