@@ -195,6 +195,18 @@ func ListRemotes(repoDir string) ([]string, error) {
 	return remotes, nil
 }
 
+// RefExists reports whether ref resolves to a commit in repoDir (e.g. a local
+// branch, a remote-tracking ref like "origin/main", or a SHA). Used to decide
+// whether a requested worktree start point is usable before handing it to
+// `git worktree add`, which errors hard on an unknown ref.
+func RefExists(repoDir, ref string) bool {
+	resolvedDir, err := ResolveRepoDir(repoDir)
+	if err != nil {
+		return false
+	}
+	return runGitNoOutput(OpMetadata, resolvedDir, "rev-parse", "--verify", "--quiet", ref+"^{commit}") == nil
+}
+
 // FetchRemoteBranch fetches a single branch from a remote.
 // remote should be e.g. "origin", branch should be e.g. "main".
 func FetchRemoteBranch(repoDir, remote, branch string) error {

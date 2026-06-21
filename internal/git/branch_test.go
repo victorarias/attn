@@ -58,6 +58,27 @@ func TestCheckoutRemoteBranch(t *testing.T) {
 	}
 }
 
+func TestRefExists(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init", "-b", "main")
+	runGit(t, dir, "commit", "--allow-empty", "-m", "init")
+
+	cases := []struct {
+		ref  string
+		want bool
+	}{
+		{"HEAD", true},
+		{"main", true},
+		{"origin/main", false}, // no remote configured
+		{"does-not-exist", false},
+	}
+	for _, tc := range cases {
+		if got := RefExists(dir, tc.ref); got != tc.want {
+			t.Errorf("RefExists(%q) = %v, want %v", tc.ref, got, tc.want)
+		}
+	}
+}
+
 func TestGetCurrentBranchEmptyRepo(t *testing.T) {
 	dir := t.TempDir()
 	runGit(t, dir, "init", "-b", "main")
