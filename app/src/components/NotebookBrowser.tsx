@@ -30,6 +30,9 @@ interface NotebookBrowserProps {
   // tree (handled by FileTree) and reloads the open file (covering agent and external
   // writes).
   changeSignal?: number;
+  // List the whole notebook vault (recursive, .md only) for the Cmd+P finder. The
+  // fullscreen surface gets the same finder as a tile; omit to disable it.
+  listFiles: () => Promise<NotebookEntry[]>;
   // List the durable runner's tasks (newest-updated first). Resolves empty when
   // the runner is disabled or has no tasks.
   listTasks: () => Promise<NotebookTask[]>;

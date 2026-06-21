@@ -3,7 +3,7 @@ import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sidebar, type SidebarHeaderAction, type DockItem, ReviewLoopIcon, WorkflowIcon, EditorIcon, DiffIcon, PRsIcon } from './components/Sidebar';
+import { Sidebar, type SidebarHeaderAction, type DockItem, ReviewLoopIcon, WorkflowIcon, EditorIcon, DiffIcon, PRsIcon, NotebookIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
@@ -1758,15 +1758,6 @@ sendFetchPRDetails,
       run: handleOpenNotebookTile,
     },
     {
-      id: 'notebook',
-      title: 'Browse the Notebook',
-      description: 'Read the durable, profile-wide markdown knowledge base',
-      keywords: ['notebook', 'knowledge', 'journal', 'decisions', 'chief', 'fullscreen'],
-      icon: <ContextActionIcon />,
-      shortcut: [shortcutTokens('notebook.openFullscreen')],
-      run: openNotebookBrowser,
-    },
-    {
       id: 'workspace-contexts',
       title: 'Browse workspace contexts',
       description: 'Navigate shared contexts stored on this Mac',
@@ -1791,7 +1782,7 @@ sendFetchPRDetails,
       icon: <KeyboardActionIcon />,
       run: () => setShortcutEditorOpen(true),
     },
-  ], [openDockPanel, openWorkspaceContextNavigator, openNotebookBrowser, handleOpenNotebookTile]);
+  ], [openDockPanel, openWorkspaceContextNavigator, handleOpenNotebookTile]);
 
   const handleToggleActionMenu = useCallback(() => {
     if (actionMenuOpen) {
@@ -3236,6 +3227,13 @@ sendFetchPRDetails,
       badge: attentionCount > 0 ? attentionCount : undefined,
       onClick: () => toggleDockPanel('attention'),
     },
+    {
+      id: 'notebook',
+      title: 'Open Notebook (⌘⌥⇧N)',
+      icon: <NotebookIcon />,
+      active: notebookOpen,
+      onClick: openNotebookBrowser,
+    },
   ]), [
     activeReviewLoopAvailable,
     activeReviewLoopState?.status,
@@ -3248,6 +3246,8 @@ sendFetchPRDetails,
     reviewLoopPanelOpen,
     workflowRunPanelOpen,
     toggleDockPanel,
+    notebookOpen,
+    openNotebookBrowser,
   ]);
 
   const activeSessionZoomed = activeWorkspaceId ? Boolean(zoomModeBySessionId[activeWorkspaceId]) : false;
@@ -3880,6 +3880,7 @@ sendFetchPRDetails,
         existsFile={sendFsExists}
         backlinksNotebook={sendNotebookBacklinks}
         sendToChief={sendNotebookToChief}
+        listFiles={sendNotebookList}
         changeSignal={fsChangeSignal}
         listTasks={sendNotebookTaskList}
         retryTask={sendNotebookTaskRetry}

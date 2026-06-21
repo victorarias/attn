@@ -12,6 +12,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative; /* positioning context for the Cmd+P finder overlay */
   color: var(--color-text-primary);
   background:
     radial-gradient(circle at 80% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 32%),
