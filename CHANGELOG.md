@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-06-21]
 
+### Fixed
+- **The last line of a terminal is no longer cut off at the bottom of the window.** When a session's terminal was sized one row taller than the window could actually show — for example after the window's height landed on an awkward boundary, or when the session was opened at a size different from where its grid was last set — the bottom line (your prompt, or attn's `auto mode on` status line) got clipped at the window edge. The terminal now re-asserts a row count that fits the visible area, so the last line stays fully on screen at any window size.
+
 ### Added
 - **Broken Notebook links are flagged as you write.** When a note links to another note that doesn't exist — a typo in the path, or a note you haven't created yet — the link now shows in red with a ⚠ instead of looking like a working link. Links to real notes stay normal, and external links (http/https, email) are never flagged. If an agent or you create the missing note, its links clear their flag once the Notebook refreshes.
 

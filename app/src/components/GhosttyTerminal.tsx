@@ -261,6 +261,29 @@ export function fitRequiresTerminalResize(
   return current.cols !== next.cols || current.rows !== next.rows;
 }
 
+// True when a grid of `rows` rows of `cellHeight` px is taller than the
+// container that displays it — i.e. the rendered canvas would spill below the
+// visible viewport and the bottom row(s) would be clipped.
+//
+// `fit()` derives rows from `Math.floor(clientHeight / cellHeight)`, so it can
+// never overflow. But the daemon's authoritative PTY geometry (delivered via
+// `resizeLocal`, source `pty_resized`) is NOT bounded by this client's window:
+// when another client — or a prior, taller layout — left the PTY one row taller
+// than this window fits, the canvas ends up taller than the container and the
+// last line is cut at the window edge. Detecting that lets the active client
+// re-assert its own (floored) geometry. A 1px slack absorbs sub-pixel
+// fractional container heights so we only act on a genuine extra row.
+export function geometryOverflowsContainer(
+  rows: number,
+  cellHeight: number,
+  clientHeight: number,
+): boolean {
+  if (rows <= 0 || cellHeight <= 0 || clientHeight <= 0) {
+    return false;
+  }
+  return rows * cellHeight > clientHeight + 1;
+}
+
 // Geometry the queued (not yet applied) historical replay will end at.
 // `resizes` counts replay resize operations still on the write chain.
 export interface PendingReplayGeometry extends TerminalDimensions {
@@ -449,6 +472,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // Used to detect that a generation bump actually discarded history.
     const pendingReplayOpsRef = useRef(0);
     const fitResizeCoalescerRef = useRef<ResizeCoalescer | null>(null);
+    // `fit` is defined far below; resizeLocal needs to re-assert local geometry
+    // when the daemon's PTY size overflows this window, so reach it via a ref.
+    const fitRef = useRef<() => void>(() => undefined);
+    const overflowRefitRafRef = useRef<number | null>(null);
     const applyFitDimensionsRef = useRef<(dimensions: TerminalDimensions) => void>(() => undefined);
     const osc52StateRef = useRef<Osc52State>({ pending: '' });
     const synchronizedOutputStateRef = useRef<SynchronizedOutputState>({ active: false, pending: '' });
@@ -1373,6 +1400,26 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         });
         if (!options?.historicalReplay) {
           renderSurface(true);
+          // The daemon's authoritative PTY rows are not bounded by this
+          // client's window. If they leave the canvas taller than the
+          // container (another client, or a prior taller layout, set the PTY
+          // one row too tall), the bottom line is clipped at the window edge.
+          // Re-assert this client's own floored geometry. `fit()` bails when
+          // inactive / mid-replay, so this never fights the geometry authority;
+          // it only corrects a live overflow the active client can actually see.
+          const container = containerRef.current;
+          if (
+            container
+            && geometryOverflowsContainer(rows, renderer.cellHeight, container.clientHeight)
+          ) {
+            if (overflowRefitRafRef.current !== null) {
+              cancelAnimationFrame(overflowRefitRafRef.current);
+            }
+            overflowRefitRafRef.current = requestAnimationFrame(() => {
+              overflowRefitRafRef.current = null;
+              fitRef.current();
+            });
+          }
         }
       });
     }, [enqueueOperation, reconcileBlocksAfterResize, renderSurface]);
@@ -1455,6 +1502,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       }
       fitResizeCoalescerRef.current.submit(dims, isWorkspaceResizeDragActive(container));
     }, []);
+
+    fitRef.current = fit;
 
     useImperativeHandle(ref, () => ({
       fit,
@@ -1676,6 +1725,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         });
         disposePaneDiagnostics(diagKeyRef.current);
         observer?.disconnect();
+        if (overflowRefitRafRef.current !== null) {
+          cancelAnimationFrame(overflowRefitRafRef.current);
+          overflowRefitRafRef.current = null;
+        }
         canvas.removeEventListener('webglcontextlost', handleContextLost);
         unregister();
         clearSynchronizedOutputRenderTimer();

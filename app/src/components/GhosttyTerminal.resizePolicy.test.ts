@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   fitRequiresTerminalResize,
+  geometryOverflowsContainer,
   isWorkspaceResizeDragActive,
   liveResizeConflictsWithQueuedReplay,
 } from './GhosttyTerminal';
@@ -35,6 +36,35 @@ describe('GhosttyTerminal resize policy', () => {
       { cols: 120, rows: 40 },
       { cols: 121, rows: 40 },
     )).toBe(true);
+  });
+});
+
+describe('geometryOverflowsContainer', () => {
+  // The clipped-bottom-row bug: the daemon left the PTY one row taller than this
+  // window fits, so the canvas spilled below the viewport. cellHeight 21.
+  it('flags a grid one row taller than the container (the bug)', () => {
+    // window fits floor(540/21)=25 rows, but the model is 26.
+    expect(geometryOverflowsContainer(26, 21, 540)).toBe(true);
+  });
+
+  it('does not flag a grid that fits, including the floor() remainder gap', () => {
+    // 25 rows * 21 = 525 <= 540 (a harmless 15px gap below the last row).
+    expect(geometryOverflowsContainer(25, 21, 540)).toBe(false);
+    // Exact fit.
+    expect(geometryOverflowsContainer(25, 21, 525)).toBe(false);
+  });
+
+  it('tolerates a 1px sub-pixel container height without a spurious refit', () => {
+    // 27 * 21 = 567; a 566px container is within the 1px slack.
+    expect(geometryOverflowsContainer(27, 21, 566)).toBe(false);
+    // Two px short is a genuine overflow.
+    expect(geometryOverflowsContainer(27, 21, 565)).toBe(true);
+  });
+
+  it('never flags degenerate/zero dimensions (pre-measure, hidden pane)', () => {
+    expect(geometryOverflowsContainer(27, 21, 0)).toBe(false);
+    expect(geometryOverflowsContainer(0, 21, 540)).toBe(false);
+    expect(geometryOverflowsContainer(27, 0, 540)).toBe(false);
   });
 });
 
