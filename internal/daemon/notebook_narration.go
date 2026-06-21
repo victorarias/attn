@@ -11,9 +11,33 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/tasks"
 )
+
+// headlessScratchCwd returns a stable, attn-owned working directory used as the
+// cwd for the utility headless agent runs (summarize_session, narrate_workspace).
+//
+// Why a shared stable dir instead of a fresh os.MkdirTemp per run: Claude maps a
+// run's cwd to a ~/.claude/projects/<cwd-hash> entry and, even under
+// --no-session-persistence (which suppresses the .jsonl transcript), still spills
+// large tool outputs there. A unique temp cwd per run therefore minted a new
+// orphaned project dir + tool-results spill on every summarize — they accumulate
+// unboundedly and attn must never reach into ~/.claude to clean them. Reusing one
+// cwd collapses all of these runs onto a single reused project dir.
+//
+// This is collision-free under concurrent runs because these tasks never write
+// into the cwd: their inputs and outputs are all absolute paths (the transcript,
+// the raw digest, the journal — see ExtraWritableRoots at the call sites), and
+// each Claude run still gets its own session-scoped subdir under the project dir.
+func headlessScratchCwd() (string, error) {
+	dir := filepath.Join(config.DataDir(), "headless-cwd")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
 
 // Notebook narration: two headless agent tasks that turn raw session work into a
 // curated daily work-journal.
@@ -181,11 +205,10 @@ func (d *Daemon) summarizeSessionExecutor(ctx context.Context, task *tasks.Task)
 		return fmt.Errorf("summarize_session: create raw sessions dir: %w", err)
 	}
 
-	workDir, err := os.MkdirTemp("", "attn-summarize-session-*")
+	workDir, err := headlessScratchCwd()
 	if err != nil {
-		return fmt.Errorf("summarize_session: create scratch dir: %w", err)
+		return fmt.Errorf("summarize_session: resolve scratch cwd: %w", err)
 	}
-	defer os.RemoveAll(workDir)
 
 	// Snapshot the digest's pre-run identity so the success gate can require the run
 	// to have actually (re)written it. A coalesced re-run (Enqueue resets a done
@@ -346,11 +369,10 @@ func (d *Daemon) narrateWorkspaceExecutor(ctx context.Context, task *tasks.Task)
 		return fmt.Errorf("narrate_workspace: read journal: %w", err)
 	}
 
-	workDir, err := os.MkdirTemp("", "attn-narrate-workspace-*")
+	workDir, err := headlessScratchCwd()
 	if err != nil {
-		return fmt.Errorf("narrate_workspace: create scratch dir: %w", err)
+		return fmt.Errorf("narrate_workspace: resolve scratch cwd: %w", err)
 	}
-	defer os.RemoveAll(workDir)
 
 	request := agentdriver.HeadlessTaskRequest{
 		Executable:   executablePath,
