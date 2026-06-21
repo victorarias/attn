@@ -180,46 +180,51 @@ export function NotebookSurface({
   const { treeAutoFold, railAutoFold } = useTileAutoFold(bodyRef, variant === 'tile');
   const treeFolded = treeOverride === null ? treeAutoFold : treeOverride;
   const railFolded = railOverride === null ? railAutoFold : railOverride;
-  // --- In-tile fuzzy finder (Cmd+P) ---
-  // The finder lists the whole vault; only a tile gets one (the modal navigates via
-  // the tree, so listFiles is omitted there). The index walks on mount and refreshes
-  // on fs changes; gating on the tile having listFiles keeps a modal from ever walking.
-  const finderEnabled = variant === 'tile' && !!listFiles;
+  // --- Fuzzy finder (Cmd+P) ---
+  // The finder lists the whole vault. Both surfaces get one as long as listFiles is
+  // provided (a tile reads it from context; the fullscreen modal is handed it
+  // explicitly) — omitting listFiles disables the finder entirely. The index walks on
+  // mount and refreshes on fs changes, but only while the surface is actually showing:
+  // a tile is always live, a modal only when open, so a closed-but-mounted modal never
+  // walks the vault.
+  const finderEnabled = !!listFiles;
+  const finderActive = variant === 'tile' || active;
   const [finderOpen, setFinderOpen] = useState(false);
-  const { files: finderFiles, loading: finderLoading } = useNotebookFileIndex(listFiles, changeSignal, finderEnabled);
+  const { files: finderFiles, loading: finderLoading } = useNotebookFileIndex(listFiles, changeSignal, finderEnabled && finderActive);
   // Where to return focus when the finder closes. Captured on open so closing the
   // finder lands focus back where it was (the editor, usually) rather than letting
   // it fall to <body> — which would strand Cmd+P, since the re-summon keydown is
-  // scoped to the tile container and only fires when focus is inside the tile.
+  // scoped to the surface container and only fires when focus is inside it.
   const finderReturnFocusRef = useRef<HTMLElement | null>(null);
   const openFinder = useCallback(() => {
     finderReturnFocusRef.current = document.activeElement as HTMLElement | null;
     setFinderOpen(true);
   }, []);
-  // Re-summon the finder with Cmd+P from inside the tile. Scoped to this container's
-  // keydown so it only fires when focus is in THIS tile (two tiles don't fight over
-  // one global binding); preventDefault stops the WebView's print dialog. Shift is
-  // excluded — Cmd+Shift+P is the global attention dock.
-  const handleTileKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+  // Summon the finder with Cmd+P from inside the surface. Scoped to this container's
+  // keydown so a tile only responds when focus is in THIS tile (two tiles don't fight
+  // over one global binding), and the modal responds only while it's the focused
+  // surface; preventDefault stops the WebView's print dialog. Shift is excluded —
+  // Cmd+Shift+P is the global attention dock.
+  const handleSurfaceKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.metaKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'p') {
       event.preventDefault();
       event.stopPropagation();
       if (finderEnabled) openFinder();
     }
   }, [finderEnabled, openFinder]);
-  // On close, restore focus inside the tile so Cmd+P keeps working: back to the
-  // element the finder opened over if it's still in this tile, else the tile
+  // On close, restore focus inside the surface so Cmd+P keeps working: back to the
+  // element the finder opened over if it's still in this surface, else the surface
   // container itself. (Runs only on a true→false transition, never on mount.)
   const finderWasOpenRef = useRef(false);
   useEffect(() => {
     if (finderWasOpenRef.current && !finderOpen) {
       const prev = finderReturnFocusRef.current;
       finderReturnFocusRef.current = null;
-      const tile = dialogRef.current;
-      if (prev && tile?.contains(prev)) {
+      const container = dialogRef.current;
+      if (prev && container?.contains(prev)) {
         prev.focus();
       } else {
-        tile?.focus();
+        container?.focus();
       }
     }
     finderWasOpenRef.current = finderOpen;
@@ -252,8 +257,14 @@ export function NotebookSurface({
   }, [onClose]);
   const handleEscape = useCallback(() => void requestClose(), [requestClose]);
 
-  // Esc closes the modal only; a tile's Esc is owned by its in-tile finder (later PR).
+  // Esc closes the modal. The finder, when open over the modal, needs a higher-
+  // priority Esc that closes the finder FIRST: the escape stack is a capture-phase
+  // window listener, so it beats the finder input's own onKeyDown and would otherwise
+  // collapse the whole modal. A second entry (pushed after, so LIFO puts it on top)
+  // closes just the finder while it's open. (A tile isn't modal — its finder's Esc is
+  // handled by the finder input's onKeyDown directly, no stack involved.)
   useEscapeStack(handleEscape, variant === 'modal' && active);
+  useEscapeStack(() => setFinderOpen(false), variant === 'modal' && active && finderOpen);
 
   // Fetch the durable runner's task list. A transient WS failure surfaces an error
   // rather than silently wiping the rows. The stale-guard drops a response that
@@ -1110,7 +1121,7 @@ export function NotebookSurface({
         ref={dialogRef}
         tabIndex={-1}
         className="notebook-surface notebook-surface-tile"
-        onKeyDown={handleTileKeyDown}
+        onKeyDown={handleSurfaceKeyDown}
       >
         {body}
         {floatingChief}
@@ -1130,7 +1141,7 @@ export function NotebookSurface({
   return (
     <div className="notebook-browser-shell">
       <FocusTrap focusTrapOptions={{ escapeDeactivates: false, initialFocus: () => dialogRef.current ?? false }}>
-        <div ref={dialogRef} tabIndex={-1} className="notebook-browser" role="dialog" aria-modal="true" aria-labelledby="notebook-browser-title">
+        <div ref={dialogRef} tabIndex={-1} className="notebook-browser" role="dialog" aria-modal="true" aria-labelledby="notebook-browser-title" onKeyDown={handleSurfaceKeyDown}>
           <header className="notebook-browser-header">
             <div className="notebook-browser-heading">
               <NotebookIcon />
@@ -1156,6 +1167,14 @@ export function NotebookSurface({
           </header>
           {body}
           {floatingChief}
+          {finderOpen && (
+            <NotebookFinder
+              files={finderFiles}
+              loading={finderLoading}
+              onPick={(path) => { void loadFile(path); setFinderOpen(false); }}
+              onClose={() => setFinderOpen(false)}
+            />
+          )}
         </div>
       </FocusTrap>
     </div>

@@ -89,6 +89,60 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await expect(page.getByRole('textbox')).toHaveCount(0);
   });
 
+  test('Cmd+P summons the fuzzy finder over the modal; typing filters; Enter opens the note', async ({ page }) => {
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.waitForSelector('.cm-content');
+
+    // No finder until summoned — the modal navigates via the tree by default.
+    await expect(page.locator('.notebook-finder')).toHaveCount(0);
+
+    // Cmd+P from inside the modal (focus the editor first, as a user would) opens it.
+    await page.locator('.cm-content').click();
+    await page.keyboard.press('Meta+p');
+    await expect(page.locator('.notebook-finder')).toBeVisible();
+    await expect(page.locator('.notebook-finder-input')).toBeFocused();
+
+    // The empty query lists the whole (mocked) vault; typing narrows by path/title.
+    await expect(page.locator('.notebook-finder-option')).toHaveCount(3);
+    await page.locator('.notebook-finder-input').fill('journal');
+    await expect(page.locator('.notebook-finder-option')).toHaveCount(1);
+    await expect(page.locator('.notebook-finder-option-path')).toHaveText('journal/2026-06-20.md');
+
+    // Enter opens the highlighted note in the modal's editor and closes the finder.
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.notebook-finder')).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 2, name: '2026-06-20' })).toBeVisible();
+  });
+
+  test('Esc closes the finder before the modal, and Cmd+P re-summons it', async ({ page }) => {
+    // The modal's Esc is a capture-phase escape-stack entry; the finder must register a
+    // higher-priority entry so the first Esc closes the finder, not the whole modal.
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.waitForSelector('.cm-content');
+
+    await page.locator('.cm-content').click();
+    await page.keyboard.press('Meta+p');
+    await expect(page.locator('.notebook-finder')).toBeVisible();
+
+    // First Esc closes only the finder — the modal stays open (no onClose), and focus
+    // is restored into the dialog so Cmd+P re-summons without a re-click.
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.notebook-finder')).toHaveCount(0);
+    await expect(page.locator('.cm-content')).toBeVisible();
+    expect(await page.evaluate(() => window.__HARNESS__.getCalls('close').length)).toBe(0);
+
+    await page.keyboard.press('Meta+p');
+    await expect(page.locator('.notebook-finder')).toBeVisible();
+
+    // Close the finder, then a second Esc (no finder open) closes the modal itself.
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.notebook-finder')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    expect(await page.evaluate(() => window.__HARNESS__.getCalls('close').length)).toBeGreaterThan(0);
+  });
+
   test('renders stage-5 chrome and folds the tree to zero width via the edge handle', async ({ page }) => {
     await page.goto('/test-harness/?component=NotebookBrowser');
     await page.waitForFunction(() => window.__HARNESS__?.ready === true);
