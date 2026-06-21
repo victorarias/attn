@@ -134,6 +134,14 @@ func (d *Daemon) doCreateWorktree(msg *protocol.CreateWorktreeMessage) (string, 
 			}
 		}
 	}
+	// If the requested start ref can't be resolved (e.g. "origin/main" in a repo
+	// with no matching remote branch), fall back to the repo's current HEAD so
+	// creation succeeds instead of erroring on an unknown ref. The fetch above
+	// has already run, so a resolvable remote ref is up to date by this point.
+	if startingFrom != "" && !git.RefExists(mainRepo, startingFrom) {
+		d.logf("Worktree start ref %q not resolvable in %s; falling back to current HEAD", startingFrom, mainRepo)
+		startingFrom = ""
+	}
 	var createErr error
 	if startingFrom != "" {
 		createErr = git.CreateWorktreeFromPoint(mainRepo, msg.Branch, path, startingFrom)

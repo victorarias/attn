@@ -114,6 +114,13 @@ export function NotebookBrowserHarness({ onReady, setTriggerRerender }: HarnessP
   }, []);
   const listTasks = useCallback(async (): Promise<NotebookTask[]> => [], []);
   const retryTask = useCallback(async (): Promise<NotebookTask | null> => null, []);
+  // The whole vault (recursive, .md only) for the Cmd+P finder — the same shape
+  // notebook_list returns. Titles let the finder rank/label by heading.
+  const listFiles = useCallback(async (): Promise<NotebookEntry[]> => [
+    { path: 'knowledge/index.md', type: 'note', title: 'Knowledge index', size: 128 },
+    { path: 'journal/2026-06-20.md', type: 'journal', title: '2026-06-20', size: 20 },
+    { path: 'knowledge/areas/foo.md', type: 'note', title: 'Foo area', size: 30 },
+  ], []);
 
   useEffect(() => {
     // The app defaults to the dark theme (useTheme DEFAULT_PREFERENCE); force it here
@@ -143,6 +150,7 @@ export function NotebookBrowserHarness({ onReady, setTriggerRerender }: HarnessP
       writeFile={writeFile}
       existsFile={existsFile}
       sendToChief={sendToChief}
+      listFiles={listFiles}
       changeSignal={changeSignal}
       listTasks={listTasks}
       retryTask={retryTask}

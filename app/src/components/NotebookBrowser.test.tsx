@@ -124,6 +124,7 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof NotebookBrowse
   const sendToChief = vi
     .fn<(selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>>()
     .mockResolvedValue({ path: 'inbox.md', nudged: false });
+  const listFiles = vi.fn<() => Promise<NotebookEntry[]>>().mockResolvedValue([]);
   const listTasks = vi.fn<() => Promise<NotebookTask[]>>().mockResolvedValue(TASKS);
   const retryTask = vi
     .fn<(taskId: string) => Promise<NotebookTask | null>>()
@@ -138,6 +139,7 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof NotebookBrowse
       writeFile,
       existsFile,
       sendToChief,
+      listFiles,
       changeSignal: 0,
       listTasks,
       retryTask,

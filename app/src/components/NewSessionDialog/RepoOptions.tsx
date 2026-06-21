@@ -128,7 +128,11 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   const [focusIndex, setFocusIndex] = useState(committedDestinationIndex);
   const [showNewWorktree, setShowNewWorktree] = useState(false);
   const [newWorktreeName, setNewWorktreeName] = useState('');
-  const [startingBranch, setStartingBranch] = useState<'current' | 'default'>('current');
+  // Default to origin/<defaultBranch> so a new worktree starts fresh from the
+  // latest upstream main (fetched first daemon-side), not from whatever local
+  // branch the selected destination happens to be sitting on — which can be
+  // arbitrarily stale. Users can still opt into "current" via the radio/Tab.
+  const [startingBranch, setStartingBranch] = useState<'current' | 'default'>('default');
   const [pendingDeletePath, setPendingDeletePath] = useState<string | null>(null);
   const [deleteFailure, setDeleteFailure] = useState<DeleteFailure | null>(null);
   const [creatingWorktree, setCreatingWorktree] = useState(false);
@@ -528,17 +532,6 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
                 />
               </div>
               <div className="new-worktree-radio-row">
-                <label className={startingBranch === 'current' ? 'selected' : ''}>
-                  <input
-                    type="radio"
-                    name="startingBranch"
-                    value="current"
-                    data-testid="repo-new-worktree-start-current"
-                    checked={startingBranch === 'current'}
-                    onChange={() => setStartingBranch('current')}
-                  />
-                  Start from {selectedDestination?.branch || repoInfo.currentBranch}
-                </label>
                 <label className={startingBranch === 'default' ? 'selected' : ''}>
                   <input
                     type="radio"
@@ -549,6 +542,17 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
                     onChange={() => setStartingBranch('default')}
                   />
                   Start from origin/{repoInfo.defaultBranch}
+                </label>
+                <label className={startingBranch === 'current' ? 'selected' : ''}>
+                  <input
+                    type="radio"
+                    name="startingBranch"
+                    value="current"
+                    data-testid="repo-new-worktree-start-current"
+                    checked={startingBranch === 'current'}
+                    onChange={() => setStartingBranch('current')}
+                  />
+                  Start from {selectedDestination?.branch || repoInfo.currentBranch}
                 </label>
               </div>
               <div className={`new-worktree-hint ${creatingWorktree ? 'operation-running' : ''}`}>

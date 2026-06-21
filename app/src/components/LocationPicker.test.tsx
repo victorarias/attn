@@ -589,6 +589,9 @@ describe('LocationPicker', () => {
 
     fireEvent.click(screen.getByTestId('repo-option-2'));
     fireEvent.change(screen.getByTestId('repo-new-worktree-input'), { target: { value: 'feat-more' } });
+    // Worktrees now default to origin/<defaultBranch>; opt into the selected
+    // worktree's current branch to exercise that path.
+    fireEvent.click(screen.getByTestId('repo-new-worktree-start-current'));
     fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
 
     await waitFor(() => {
