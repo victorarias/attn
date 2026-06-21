@@ -13,23 +13,24 @@ import { LiveMarkdownEditor } from '../../src/components/notebook/LiveMarkdownEd
 import type { HarnessProps } from '../types';
 
 const SAMPLE = `---
-title: Context rail
 type: area
 summary: The right rail that shows outline and backlinks.
 tags: [notebook, ui, codemirror]
 sources:
   - /knowledge/areas/notebook.md
 created: 2026-06-20
+updated: 2026-06-21
 ---
 
-# Body heading
+# Context rail
 
-A paragraph of body text below the frontmatter card.
+A paragraph of body text below the frontmatter card. The note's title is the
+heading above, not a frontmatter field.
 `;
 
 const SAMPLE_NO_BODY = `---
-title: Just properties
 type: area
+summary: A note that is only properties, with no body.
 ---
 `;
 

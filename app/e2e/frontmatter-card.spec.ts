@@ -13,16 +13,16 @@ test.describe('FrontmatterCard', () => {
 
     const card = page.locator('.cm-md-frontmatter');
     await expect(card).toBeVisible();
-    // The card surfaces the parsed fields...
-    await expect(card.locator('.cm-md-fm-title')).toHaveText('Context rail');
+    // The card surfaces PROPERTIES — type, tags, sources, dates — but never a title.
     await expect(card.locator('.cm-md-fm-type')).toHaveText('area');
     await expect(card.locator('.cm-md-fm-tag')).toHaveCount(3);
     await expect(card.locator('.cm-md-fm-source')).toHaveText('/knowledge/areas/notebook.md');
-    // ...and the raw fence/keys are not shown as text while the card is up.
-    await expect(page.locator('.cm-content')).not.toContainText('title: Context rail');
-
-    // The body below the card still renders as live-preview markdown.
-    await expect(page.locator('.cm-md-h1').first()).toBeVisible();
+    await expect(card.locator('.cm-md-fm-dates')).toContainText('created');
+    await expect(card.locator('.cm-md-fm-title')).toHaveCount(0);
+    // The title is the `# H1` rendered below the card.
+    await expect(page.locator('.cm-md-h1').first()).toHaveText('Context rail');
+    // The raw fence/keys are not shown as text while the card is up.
+    await expect(page.locator('.cm-content')).not.toContainText('type: area');
     await page.screenshot({ path: 'test-results/frontmatter-card.png' });
   });
 
@@ -34,13 +34,13 @@ test.describe('FrontmatterCard', () => {
     // Click the card → it hands off to raw YAML editing (cursor moves into the block).
     await page.locator('.cm-md-frontmatter').click();
     await expect(page.locator('.cm-md-frontmatter')).toHaveCount(0);
-    await expect(page.locator('.cm-content')).toContainText('title: Context rail');
+    await expect(page.locator('.cm-content')).toContainText('type: area');
     await page.screenshot({ path: 'test-results/frontmatter-revealed.png' });
 
     // Click into the body heading → the cursor leaves the block, the card returns.
-    await page.locator('.cm-line', { hasText: 'Body heading' }).click();
+    await page.locator('.cm-line', { hasText: 'Context rail' }).click();
     await expect(page.locator('.cm-md-frontmatter')).toBeVisible();
-    await expect(page.locator('.cm-content')).not.toContainText('title: Context rail');
+    await expect(page.locator('.cm-content')).not.toContainText('type: area');
   });
 
   test('a frontmatter-only note stays raw (no body line to anchor the cursor)', async ({ page }) => {
@@ -50,6 +50,6 @@ test.describe('FrontmatterCard', () => {
 
     // The guard keeps the whole document from being swallowed by a block widget.
     await expect(page.locator('.cm-md-frontmatter')).toHaveCount(0);
-    await expect(page.locator('.cm-content')).toContainText('title: Just properties');
+    await expect(page.locator('.cm-content')).toContainText('type: area');
   });
 });

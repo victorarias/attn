@@ -20,7 +20,7 @@ function stateAt(doc: string, cursor: number): EditorState {
   return EditorState.create({ doc, selection: EditorSelection.cursor(cursor) });
 }
 
-const NOTE = ['---', 'title: Context rail', 'type: area', '---', '# Body', 'text'].join('\n');
+const NOTE = ['---', 'type: area', 'tags: [a, b]', '---', '# Body', 'text'].join('\n');
 
 describe('frontmatterCardDecorations', () => {
   it('renders a block-replace card over the whole frontmatter range when unfocused', () => {
@@ -37,7 +37,7 @@ describe('frontmatterCardDecorations', () => {
   });
 
   it('reveals raw YAML (no card) when focused with the cursor inside the block', () => {
-    const got = ranges(frontmatterCardDecorations(stateAt(NOTE, 6), true)); // inside `title:`
+    const got = ranges(frontmatterCardDecorations(stateAt(NOTE, 6), true)); // inside `type:`
     expect(got).toHaveLength(0);
   });
 

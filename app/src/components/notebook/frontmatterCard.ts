@@ -1,7 +1,13 @@
 // The in-editor frontmatter card (notebook UI stage 4b, "Option A"). A note's leading
-// `---…---` YAML renders as a compact card in place of the raw block; when the editor
-// is focused and the cursor enters the block, the card yields to the raw YAML so it
-// can be edited — the same reveal model the inline live-preview uses, at block level.
+// `---…---` YAML renders as a compact properties strip in place of the raw block; when
+// the editor is focused and the cursor enters the block, the card yields to the raw
+// YAML so it can be edited — the same reveal model the inline live-preview uses, at
+// block level.
+//
+// The card shows PROPERTIES only (type, summary, tags, sources, dates) — never a
+// title. A note's title is its leading `# H1` (the single canonical title; the keeper
+// no longer writes a frontmatter `title:`). So the card sits as a metadata header
+// directly above the rendered H1.
 //
 // CM constraint that shapes this file: decorations that affect vertical layout (block
 // widgets, replacements spanning line breaks) MUST come directly from a StateField via
@@ -27,9 +33,10 @@ const focusedField = StateField.define<boolean>({
   },
 });
 
-// Fields the card surfaces prominently, in render order. Everything else parsed from
-// the block is ignored by the card (but still lives in the file).
-const META_KEYS = ['type', 'created', 'updated'];
+// Date-ish fields shown on the card's meta line (type gets its own pill; title is
+// never shown — the `# H1` is the title). Everything else parsed from the block is
+// ignored by the card but still lives in the file.
+const META_KEYS = ['created', 'updated'];
 
 function asText(value: FrontmatterValue | undefined): string {
   if (value == null) return '';
@@ -51,12 +58,11 @@ class FrontmatterCardWidget extends WidgetType {
   // doesn't jump the scroll position. CM re-measures the real height after mount.
   get estimatedHeight() {
     const f = this.fm.fields;
-    let h = 30; // title row
+    let h = 22; // header row (type pill + dates)
     if (f.summary) h += 22;
     if (f.tags) h += 24;
     if (f.sources) h += 22;
-    if (META_KEYS.some((k) => f[k])) h += 20;
-    return h + 24; // padding
+    return h + 24 + 16; // padding + hint
   }
 
   // Clicks must reach the editor so the card can hand off to raw editing.
@@ -71,19 +77,24 @@ class FrontmatterCardWidget extends WidgetType {
     card.setAttribute('role', 'group');
     card.setAttribute('aria-label', 'Note properties');
 
-    const titleRow = document.createElement('div');
-    titleRow.className = 'cm-md-fm-titlerow';
-    const title = document.createElement('span');
-    title.className = 'cm-md-fm-title';
-    title.textContent = asText(f.title) || '(untitled)';
-    titleRow.appendChild(title);
+    // Header row: the type pill and the dates — the card's compact identity line.
+    // No title: the note's `# H1` below the card is the title.
+    const header = document.createElement('div');
+    header.className = 'cm-md-fm-header';
     if (f.type) {
       const pill = document.createElement('span');
       pill.className = 'cm-md-fm-type';
       pill.textContent = asText(f.type);
-      titleRow.appendChild(pill);
+      header.appendChild(pill);
     }
-    card.appendChild(titleRow);
+    const dateParts = META_KEYS.filter((k) => f[k]).map((k) => `${k} ${asText(f[k])}`);
+    if (dateParts.length) {
+      const dates = document.createElement('span');
+      dates.className = 'cm-md-fm-dates';
+      dates.textContent = dateParts.join('  ·  ');
+      header.appendChild(dates);
+    }
+    if (header.childNodes.length) card.appendChild(header);
 
     if (f.summary) {
       const summary = document.createElement('p');
@@ -115,14 +126,6 @@ class FrontmatterCardWidget extends WidgetType {
         sources.appendChild(item);
       }
       card.appendChild(sources);
-    }
-
-    const metaParts = META_KEYS.filter((k) => f[k]).map((k) => `${k}: ${asText(f[k])}`);
-    if (metaParts.length) {
-      const meta = document.createElement('div');
-      meta.className = 'cm-md-fm-meta';
-      meta.textContent = metaParts.join('  ·  ');
-      card.appendChild(meta);
     }
 
     const hint = document.createElement('span');
@@ -206,8 +209,12 @@ const cardTheme = EditorView.baseTheme({
     cursor: 'text',
     fontFamily: 'var(--font-sans, system-ui), sans-serif',
   },
-  '.cm-md-fm-titlerow': { display: 'flex', alignItems: 'center', gap: '8px' },
-  '.cm-md-fm-title': { fontWeight: '650', fontSize: '1.05em', color: 'var(--color-text-primary, #e8e8e8)' },
+  '.cm-md-fm-header': { display: 'flex', alignItems: 'center', gap: '10px' },
+  '.cm-md-fm-dates': {
+    fontFamily: "ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace",
+    fontSize: '0.72em',
+    color: 'var(--color-text-muted, #888)',
+  },
   '.cm-md-fm-type': {
     padding: '1px 7px',
     borderRadius: '6px',
@@ -232,12 +239,6 @@ const cardTheme = EditorView.baseTheme({
     fontFamily: "ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace",
     fontSize: '0.72em',
     color: 'var(--accent, #ff6b35)',
-  },
-  '.cm-md-fm-meta': {
-    marginTop: '8px',
-    fontFamily: "ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace",
-    fontSize: '0.72em',
-    color: 'var(--color-text-muted, #888)',
   },
   '.cm-md-fm-hint': {
     display: 'block',
