@@ -1,7 +1,9 @@
 # Notebook UI — Prototype vs. Shipped: Gap Map
 
-Status: analysis (pre-plan). Maps every material difference between the **target**
-prototype and the **currently shipped** notebook UI, so a rebuild can be scoped.
+Status: ✅ **Rebuilt — all stages shipped (stage 6 cut).** See the staged list below
+for what landed. The gap analysis and "Shipped (current)" snapshot that follow describe
+the *pre-rebuild* baseline this map was scoped against — kept as the historical reference
+point, not the current state.
 
 **Target (prototype):** `docs/prototypes/kb-markdown-ui.html` — self-contained
 interactive mock. Open in a browser to see it rendered.
@@ -133,26 +135,42 @@ dependency + "address the loudest wrongness first", not by the prototype's phasi
    unit test, and the surrounding orchestration is unit-tested with the editor mocked.
    *Verify:* open a note → it renders **and** you can click anywhere and type → edits
    persist; there is no mode toggle.
-2. **Left becomes a file tree.** Replace the flat category list with a nested folder
-   tree (expand/collapse) + kind dots.
+2. **Left becomes a file tree.** ✅ **Done.** Replaced the flat category list with a
+   lazy nested folder tree, and repivoted the surface off `notebook_*` onto the generic
+   filesystem API (`fs_list`/`fs_read`/`fs_write`) so any text file is editable. (#366
+   daemon, #367 FE/FileTree, #368 rewire.)
    *Verify:* folders nest and fold; clicking a file opens it; dots reflect kind.
-3. **Three-pane shell + right context rail.** Add the third pane; move backlinks into
-   it; add an **outline** (jump-to-heading).
+3. **Three-pane shell + right context rail.** ✅ **Done.** Added the context rail with an
+   **outline** (jump-to-heading, parsed from the live draft) + backlinks moved into it.
+   (#370.)
    *Verify:* outline lists the note's headings and scrolls to them on click;
    backlinks now live in the rail; three columns render.
-4. **Frontmatter card + broken-link flags + markdown polish.**
-   *Verify:* a card shows title/summary/tags/sources/meta; an in-notebook link to a
+4. **Frontmatter card + broken-link flags + markdown polish.** ✅ **Done.** Markdown
+   polish — list bullets, task checkboxes, fenced code (#371); an in-editor frontmatter
+   card (#372); the title = first-H1 rule, retiring frontmatter `title:` (#373); and
+   broken-link flags via a new `fs_exists` primitive (#375).
+   *Verify:* a card shows summary/tags/sources/meta; an in-notebook link to a
    missing note is flagged.
-5. **Collapsible rails + width responsiveness + footer + top-bar chrome.**
-   *Verify:* fold the tree/rail via the edge rails; narrow the window → panes fold and
-   the file-picker fallback appears; brand/mode/chief chrome + footer are present.
-6. **Selection menu + toasts.**
-   *Verify:* select text → menu (Send to chief / New note / Copy link) → a toast
-   confirms.
-7. **Tile mode (the one architectural piece).** Notebook as a workspace pane beside
-   terminals + tile/full toggle.
-   *Verify:* open the notebook as a pane inside a workspace; resize it; toggle to
-   fullscreen.
+5. **Collapsible rails + width responsiveness + footer + top-bar chrome.** ✅ **Done.**
+   Foldable tree/rail (folded panes go `inert`, stay mounted; grid column animates to 0)
+   + header chrome (chief pulse + kind badge). (#376.) **Trimmed after testing:** the
+   footer, the disabled fullscreen/tile-mode control, and the `?` help popover were
+   removed — they only advertised pre-tiling features.
+   *Verify:* fold the tree/rail via the edge handles; narrow the window → panes fold.
+6. **Selection menu + toasts.** ❌ **Cut (2026-06-21).** The selection context menu
+   (menu-ified Send to chief / New note from selection / Copy link) was dropped as
+   unnecessary: the floating "Send to chief" pill already covers the real need, and
+   "new note from selection" conflicts with the chief-curated knowledge base (promotion
+   is a keeper job, not a reader action). The bottom-right toast stack was deferred — the
+   existing inline "Saved"/status indicator stays as-is. No code change.
+7. **Tile mode (the one architectural piece).** ✅ **Done.** Notebook as a workspace tile
+   (reuses attn's tile split-tree / dock / resize / persist, no protocol bump) — 5 PRs
+   (#378–#383): `notebook` TileKind, NotebookSurface `modal|tile` variant, width
+   auto-fold, render + entry (⌘⌥N tile / ⌘⌥⇧N fullscreen), and a tile-local ⌘P fuzzy
+   finder. Follow-ups: #384 (packaged finder scenario + ⌘P-after-Esc focus fix), #386
+   (⌘P finder in the fullscreen modal + a sidebar button; dropped the fullscreen entry
+   from ⌘K).
+   *Verify:* open the notebook as a tile inside a workspace; resize it; ⌘⌥⇧N for fullscreen.
 
 Tasks runner panel (item 18) stays through all stages; it gets a final home in stage
 3 or 5 (left pane vs right-rail third section) — decide when the rail exists.
