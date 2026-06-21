@@ -11,6 +11,9 @@ interface Deco {
   from: number;
   to: number;
   class?: string;
+  // The `cls` of a widget-replace (bullet/checkbox), so widgets are distinguishable
+  // from plain hides in the headless test (their spec has no `class`).
+  widget?: string;
   attributes?: Record<string, string>;
 }
 
@@ -23,16 +26,27 @@ function decosFor(doc: string, cursor: number, focused = true): Deco[] {
   const out: Deco[] = [];
   const iter = buildDecorations(state, focused).iter();
   while (iter.value) {
-    const spec = iter.value.spec as { class?: string; attributes?: Record<string, string> };
-    out.push({ from: iter.from, to: iter.to, class: spec.class, attributes: spec.attributes });
+    const spec = iter.value.spec as {
+      class?: string;
+      attributes?: Record<string, string>;
+      widget?: { cls?: string };
+    };
+    out.push({
+      from: iter.from,
+      to: iter.to,
+      class: spec.class,
+      widget: spec.widget?.cls,
+      attributes: spec.attributes,
+    });
     iter.next();
   }
   return out;
 }
 
-// A hide decoration is a replace with no class (Decoration.replace({})).
-const isHide = (d: Deco) => d.class === undefined;
+// A hide decoration is a replace with no class AND no widget (Decoration.replace({})).
+const isHide = (d: Deco) => d.class === undefined && d.widget === undefined;
 const hasClass = (decos: Deco[], cls: string) => decos.some((d) => d.class === cls);
+const hasWidget = (decos: Deco[], cls: string) => decos.some((d) => d.widget === cls);
 const hideAt = (decos: Deco[], from: number, to: number) =>
   decos.some((d) => isHide(d) && d.from === from && d.to === to);
 
@@ -105,6 +119,55 @@ describe('liveMarkdownPreview decorations', () => {
 
     // Fenced code is not inline code: no cm-md-code styling is applied to the fence,
     // and the backtick fence rows are not treated as inline-code markers to hide.
+    expect(hasClass(decos, 'cm-md-code')).toBe(false);
+  });
+
+  it('replaces a bullet marker with a bullet widget off the active line', () => {
+    const doc = '- item\n\nbody';
+    const decos = decosFor(doc, doc.length); // cursor on "body"
+    // The "-" marker (0..1) is replaced by the bullet widget.
+    expect(decos.some((d) => d.widget === 'cm-md-bullet' && d.from === 0 && d.to === 1)).toBe(true);
+  });
+
+  it('reveals the raw bullet marker on the active line', () => {
+    const doc = '- item\n\nbody';
+    const decos = decosFor(doc, 2); // cursor inside the list line
+    expect(hasWidget(decos, 'cm-md-bullet')).toBe(false);
+  });
+
+  it('leaves an ordered-list number as written', () => {
+    const doc = '1. item\n\nbody';
+    const decos = decosFor(doc, doc.length);
+    // No bullet widget and no hide over the "1." marker — numbers are meaningful.
+    expect(hasWidget(decos, 'cm-md-bullet')).toBe(false);
+    expect(decos.some((d) => isHide(d) && d.from === 0)).toBe(false);
+  });
+
+  it('renders a task checkbox (hiding its bullet) and reflects checked state', () => {
+    const unchecked = decosFor('- [ ] todo\n\nbody', '- [ ] todo\n\nbody'.length);
+    // The "- " bullet+space is hidden; the "[ ]" marker becomes a checkbox widget.
+    expect(hideAt(unchecked, 0, 2)).toBe(true);
+    expect(hasWidget(unchecked, 'cm-md-bullet')).toBe(false);
+    expect(unchecked.some((d) => d.widget === 'cm-md-checkbox' && d.from === 2 && d.to === 5)).toBe(true);
+
+    const checked = decosFor('- [x] done\n\nbody', '- [x] done\n\nbody'.length);
+    expect(checked.some((d) => d.widget === 'cm-md-checkbox' && d.from === 2 && d.to === 5)).toBe(true);
+  });
+
+  it('reveals the raw task marker on the active line', () => {
+    const doc = '- [ ] todo\n\nbody';
+    const decos = decosFor(doc, 3); // cursor inside the task line
+    expect(hasWidget(decos, 'cm-md-checkbox')).toBe(false);
+  });
+
+  it('paints a fenced code block (lines + dimmed fences + language tag)', () => {
+    const doc = '```ts\ncode\n```\n\nbody';
+    const decos = decosFor(doc, doc.length); // cursor on "body"
+    // Each of the three fenced rows (starts at 0, 6, 11) gets the code-panel line deco.
+    expect(decos.filter((d) => d.class === 'cm-md-codeblock').map((d) => d.from)).toEqual([0, 6, 11]);
+    // The fences are dimmed, the language tag styled, and it is NOT inline code.
+    expect(hasClass(decos, 'cm-md-codefence')).toBe(true);
+    expect(hasClass(decos, 'cm-md-codeinfo')).toBe(true);
     expect(hasClass(decos, 'cm-md-code')).toBe(false);
   });
 });
