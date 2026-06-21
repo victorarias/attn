@@ -8,6 +8,7 @@ import { forwardRef, useImperativeHandle, useMemo, useRef } from 'react';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { EditorView, type ViewUpdate } from '@codemirror/view';
+import { frontmatterCard } from './frontmatterCard';
 import { liveMarkdownPreview } from './liveMarkdownPreview';
 
 export interface LiveSelection {
@@ -106,6 +107,7 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
     () => [
       markdown({ base: markdownLanguage }),
       EditorView.lineWrapping,
+      frontmatterCard(),
       liveMarkdownPreview({ onFollowLink }),
       editorTheme,
     ],
