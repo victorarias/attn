@@ -1231,6 +1231,12 @@ sendFetchPRDetails,
 
   const visibleEnrichedSessions = filterSessionsRepresentedInWorkspaceLayouts(daemonWorkspaces, enrichedLocalSessions);
 
+  // The Notebook top-bar chief pulse: undefined when no chief-of-staff session exists
+  // (indicator hidden), else true while it is working. Derived locally from sessions
+  // already in hand — no extra socket call or threaded daemon function.
+  const notebookChiefSession = enrichedLocalSessions.find((session) => session.chiefOfStaff);
+  const notebookChiefActive = notebookChiefSession ? notebookChiefSession.state === 'working' : undefined;
+
   const {
     eventRouter: paneRuntimeEventRouter,
     getActivePaneIdForSession,
@@ -3806,6 +3812,7 @@ sendFetchPRDetails,
         listTasks={sendNotebookTaskList}
         retryTask={sendNotebookTaskRetry}
         taskChangeSignal={notebookTaskChangeSignal}
+        chiefActive={notebookChiefActive}
       />
       <ActionMenu
         isOpen={actionMenuOpen}
