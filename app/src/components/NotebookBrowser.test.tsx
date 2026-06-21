@@ -820,14 +820,18 @@ describe('NotebookBrowser stage 5 chrome', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Hide file tree' }));
     expect(body().className).toContain('tree-folded');
     // Folded, not removed: the editor still works, and the tree pane stays in the DOM
-    // (aria-hidden so it leaves the a11y tree, but never unmounted — its state lives on).
+    // (aria-hidden + inert so it leaves the a11y tree AND the tab order — a keyboard
+    // user can't land on the invisible file controls — but it's never unmounted).
     expect(editor()).toBeInTheDocument();
     const list = document.querySelector('.notebook-browser-list');
     expect(list).not.toBeNull();
     expect(list?.getAttribute('aria-hidden')).toBe('true');
+    expect(list?.hasAttribute('inert')).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: 'Show file tree' }));
     expect(body().className).not.toContain('tree-folded');
+    // Reopened: focusable again.
+    expect(list?.hasAttribute('inert')).toBe(false);
   });
 
   it('folds the context rail (present only for a markdown note)', async () => {
@@ -837,8 +841,12 @@ describe('NotebookBrowser stage 5 chrome', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Hide context rail' }));
     expect(body().className).toContain('rail-folded');
+    // Folded rail is taken out of the tab order too (not just the a11y tree).
+    const rail = document.querySelector('.notebook-browser-rail');
+    expect(rail?.hasAttribute('inert')).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Show context rail' }));
     expect(body().className).not.toContain('rail-folded');
+    expect(rail?.hasAttribute('inert')).toBe(false);
   });
 
   it('shows the chief pulse as active / idle, and hides it when there is no chief', () => {

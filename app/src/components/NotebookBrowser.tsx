@@ -717,7 +717,15 @@ export function NotebookBrowser({
           <div
             className={`notebook-browser-body${showRail ? ' has-rail' : ''}${treeFolded ? ' tree-folded' : ''}${showRail && railFolded ? ' rail-folded' : ''}`}
           >
-            <aside className="notebook-browser-list" aria-label="Notebook files" aria-hidden={treeFolded}>
+            {/* `inert` while folded removes the whole pane from the tab order and the
+                a11y tree, so a keyboard user can't Tab into the invisible file/task
+                controls of a collapsed pane (aria-hidden alone leaves them focusable). */}
+            <aside
+              className="notebook-browser-list"
+              aria-label="Notebook files"
+              aria-hidden={treeFolded}
+              inert={treeFolded}
+            >
               <FileTree
                 listDir={listDir}
                 selectedPath={selectedPath}
@@ -904,7 +912,12 @@ export function NotebookBrowser({
             </main>
 
             {showRail && (
-              <aside className="notebook-browser-rail" aria-label="Context" aria-hidden={railFolded}>
+              <aside
+                className="notebook-browser-rail"
+                aria-label="Context"
+                aria-hidden={railFolded}
+                inert={railFolded}
+              >
                 <section className="notebook-browser-rail-section">
                   <button
                     type="button"
