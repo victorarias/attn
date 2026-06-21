@@ -212,6 +212,29 @@ func (s *Store) Write(p string, content []byte, baseHash string) (newHash string
 	return notebook.Hash(content), nil, nil
 }
 
+// Exists reports whether a path exists under the root (file or directory),
+// without reading it. Used to flag in-notebook markdown links that point at a
+// missing note. A path that escapes the root or is otherwise invalid returns an
+// error, so the caller leaves such a link unflagged rather than guessing; only a
+// genuine "not there" returns (false, nil).
+func (s *Store) Exists(p string) (bool, error) {
+	rel, err := cleanRel(p, false)
+	if err != nil {
+		return false, err
+	}
+	abs, err := s.abs(rel)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(abs); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // CleanPath normalizes a file path (root-absolute or relative) to its clean,
 // slash-separated root-relative form — the same form List returns — or errors if
 // it escapes the root or names the root itself. The daemon uses it to echo and

@@ -908,6 +908,9 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdFsWrite:
 		fsWrite := msg.(*protocol.FsWriteMessage)
 		go d.sendFsWriteWSResult(client, protocol.Deref(fsWrite.RequestID), fsWrite.Path, fsWrite.Content, protocol.Deref(fsWrite.BaseHash))
+	case protocol.CmdFsExists:
+		fsExists := msg.(*protocol.FsExistsMessage)
+		go d.sendFsExistsWSResult(client, protocol.Deref(fsExists.RequestID), fsExists.Path)
 	case protocol.CmdApprovePR:
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
 	case protocol.CmdMergePR:

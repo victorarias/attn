@@ -4,10 +4,11 @@
 // cursor's line. The parent owns persistence (hash-CAS autosave); this component only
 // emits value changes, link follows, and the current selection (for "send to chief").
 
-import { forwardRef, useImperativeHandle, useMemo, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { EditorView, type ViewUpdate } from '@codemirror/view';
+import { brokenLinks, revalidateBrokenLinks, type ExistsCheck } from './brokenLinks';
 import { frontmatterCard } from './frontmatterCard';
 import { liveMarkdownPreview } from './liveMarkdownPreview';
 
@@ -33,6 +34,13 @@ interface LiveMarkdownEditorProps {
   onChange: (value: string) => void;
   onFollowLink?: (href: string) => void;
   onSelectionChange?: (selection: LiveSelection | null) => void;
+  // Check whether an in-notebook link target exists, to flag broken links. Omit to
+  // disable the flagging (e.g. the test harness, which has no daemon).
+  existsFile?: (path: string) => Promise<ExistsCheck>;
+  // Bumped whenever the notebook changed on disk; clears the broken-link cache's
+  // "missing" verdicts so a link to a just-created note re-checks. (A change counter,
+  // not data — only its identity change matters.)
+  revalidateSignal?: number;
   ariaLabel?: string;
   autoFocus?: boolean;
 }
@@ -83,6 +91,8 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
   onChange,
   onFollowLink,
   onSelectionChange,
+  existsFile,
+  revalidateSignal,
   ariaLabel,
   autoFocus,
 }, ref) {
@@ -109,10 +119,23 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
       EditorView.lineWrapping,
       frontmatterCard(),
       liveMarkdownPreview({ onFollowLink }),
+      brokenLinks({ existsFile }),
       editorTheme,
     ],
-    [onFollowLink],
+    [onFollowLink, existsFile],
   );
+
+  // When the notebook changed on disk, ask the broken-link checker to re-verify any
+  // links it had flagged missing — a just-created target should clear its flag. The
+  // initial mount is skipped (nothing cached yet); only later bumps revalidate.
+  const didMountRef = useRef(false);
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+    cmRef.current?.view?.dispatch({ effects: revalidateBrokenLinks.of(null) });
+  }, [revalidateSignal]);
 
   const handleUpdate = useMemo(
     () =>

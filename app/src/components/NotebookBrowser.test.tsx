@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NotebookBrowser, parseNotebookHref } from './NotebookBrowser';
-import type { FsEntry, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult, NotebookTask } from '../hooks/useDaemonSocket';
+import type { FsEntry, FsExistsResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult, NotebookTask } from '../hooks/useDaemonSocket';
 
 // The live editor is CodeMirror-backed, which cannot mount under happy-dom (its
 // async measure pass throws). The real editing experience (live preview, typing,
@@ -106,6 +106,9 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof NotebookBrowse
   const writeFile = vi
     .fn<(path: string, content: string, baseHash?: string) => Promise<FsWriteResult>>()
     .mockImplementation((path) => Promise.resolve({ path, hash: 'h2', conflict: false }));
+  const existsFile = vi
+    .fn<(path: string) => Promise<FsExistsResult>>()
+    .mockImplementation((path) => Promise.resolve({ path, exists: true }));
   const sendToChief = vi
     .fn<(selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>>()
     .mockResolvedValue({ path: 'inbox.md', nudged: false });
@@ -121,6 +124,7 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof NotebookBrowse
       readFile,
       backlinksNotebook,
       writeFile,
+      existsFile,
       sendToChief,
       changeSignal: 0,
       listTasks,
@@ -132,6 +136,7 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof NotebookBrowse
     readFile,
     backlinksNotebook,
     writeFile,
+    existsFile,
     sendToChief,
     listTasks,
     retryTask,

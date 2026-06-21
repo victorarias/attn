@@ -4,6 +4,7 @@
  * Register all component harnesses here for the test harness router.
  */
 import type { HarnessProps } from '../types';
+import { BrokenLinksHarness } from './BrokenLinksHarness';
 import { DashboardPRsHarness } from './DashboardPRsHarness';
 import { DiffDetailPanelHarness } from './DiffDetailPanelHarness';
 import { DiffViewHarness } from './DiffViewHarness';
@@ -16,6 +17,7 @@ import { NotebookBrowserHarness } from './NotebookBrowserHarness';
 import { SessionReviewLoopBarHarness } from './SessionReviewLoopBarHarness';
 
 export const harnesses: Record<string, React.ComponentType<HarnessProps>> = {
+  BrokenLinks: BrokenLinksHarness,
   DashboardPRs: DashboardPRsHarness,
   DiffDetailPanel: DiffDetailPanelHarness,
   DiffView: DiffViewHarness,
