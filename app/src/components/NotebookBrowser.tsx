@@ -4,6 +4,7 @@ import type { FsEntry, FsExistsResult, FsReadResult, FsWriteResult, NotebookEntr
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import { FileTree } from './notebook/FileTree';
 import { fileKind, isBinaryPath, isMarkdownPath } from './notebook/fileKind';
+import { parseFrontmatter } from './notebook/frontmatter';
 import { LiveMarkdownEditor, type LiveMarkdownEditorHandle, type LiveSelection } from './notebook/LiveMarkdownEditor';
 import { parseOutline } from './notebook/outline';
 import './NotebookBrowser.css';
@@ -42,6 +43,10 @@ interface NotebookBrowserProps {
   // Increments whenever a notebook_tasks_changed broadcast arrives, so an open
   // Tasks panel re-fetches the list (any runner lifecycle transition).
   taskChangeSignal?: number;
+  // The chief-pulse state for the top-bar indicator: true = a chief-of-staff session
+  // is working, false = a chief exists but is idle, undefined = no chief session at
+  // all (the indicator is hidden). Derived locally by the parent, not a socket call.
+  chiefActive?: boolean;
 }
 
 // The file shown first when the browser opens with nothing selected, in order of
@@ -73,6 +78,7 @@ export function NotebookBrowser({
   listTasks,
   retryTask,
   taskChangeSignal = 0,
+  chiefActive,
 }: NotebookBrowserProps) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [note, setNote] = useState<FsReadResult | null>(null);
@@ -122,6 +128,33 @@ export function NotebookBrowser({
   // the outline and backlinks are visible without a click. Local UI state only.
   const [outlineOpen, setOutlineOpen] = useState(true);
   const [backlinksOpen, setBacklinksOpen] = useState(true);
+  // Whole-pane edge-rail folds (manual). Tri-state per side: null = follow the auto
+  // default, true/false = an explicit user override. The auto default is a hardcoded
+  // `false` in the modal — stage 7 (tile mode) swaps it for a width-driven value, so
+  // the fold derivation changes but the toggle handlers never do. Folded panes drop
+  // to 0 width but stay mounted (CodeMirror/scroll state survives).
+  const [treeOverride, setTreeOverride] = useState<boolean | null>(null);
+  const [railOverride, setRailOverride] = useState<boolean | null>(null);
+  const autoFold = false;
+  const treeFolded = treeOverride === null ? autoFold : treeOverride;
+  const railFolded = railOverride === null ? autoFold : railOverride;
+  // The header help popover; Escape-dismissible (above the modal on the escape stack).
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpWrapRef = useRef<HTMLDivElement>(null);
+  // The kind/type pill in the note header: a markdown note's frontmatter `type`
+  // (defaulting to "note"), or "text" for a plain-text file. Parsed off the loaded
+  // content (not the live draft) so it doesn't churn on every keystroke. Self-
+  // contained (calls fileKind itself) so it can sit above the !isOpen early return.
+  const noteType = useMemo(() => {
+    if (!note || !selectedPath) return null;
+    const kind = fileKind(selectedPath);
+    if (kind === 'markdown') {
+      const type = parseFrontmatter(note.content)?.fields.type;
+      return typeof type === 'string' && type.trim() ? type.trim() : 'note';
+    }
+    if (kind === 'text') return 'text';
+    return null;
+  }, [note, selectedPath]);
 
   // Closing with unsaved edits persists them first; if that write conflicts (or
   // errors) we keep the modal open so the conflict banner can be reconciled, rather
@@ -137,6 +170,20 @@ export function NotebookBrowser({
   const handleEscape = useCallback(() => void requestClose(), [requestClose]);
 
   useEscapeStack(handleEscape, isOpen);
+  // Help popover gets its own escape registration; pushed after the modal's, so when
+  // help is open Escape closes IT first (LIFO) and the modal stays open.
+  useEscapeStack(() => setHelpOpen(false), isOpen && helpOpen);
+
+  // Close the help popover on a pointer down outside it (a click on the toggle is
+  // handled by the toggle itself).
+  useEffect(() => {
+    if (!helpOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!helpWrapRef.current?.contains(event.target as Node)) setHelpOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [helpOpen]);
 
   // Fetch the durable runner's task list. A transient WS failure surfaces an error
   // rather than silently wiping the rows. The stale-guard drops a response that
@@ -626,13 +673,51 @@ export function NotebookBrowser({
                 <h1 id="notebook-browser-title">Notebook</h1>
               </div>
             </div>
-            <button type="button" className="notebook-browser-close" onClick={() => void requestClose()}>
-              <span>Close</span><kbd>esc</kbd>
-            </button>
+            <div className="notebook-browser-chrome">
+              <div className="notebook-browser-mode" role="group" aria-label="View mode">
+                <button type="button" className="is-active" aria-pressed="true">Fullscreen</button>
+                <button type="button" disabled title="Coming with workspace tiles">Tile</button>
+              </div>
+              {chiefActive !== undefined && (
+                <span
+                  className={`notebook-browser-chief-pulse${chiefActive ? ' is-active' : ''}`}
+                  role="status"
+                >
+                  <span className="notebook-browser-chief-dot" aria-hidden="true" />
+                  chief: {chiefActive ? 'active' : 'idle'}
+                </span>
+              )}
+              <div className="notebook-browser-help-wrap" ref={helpWrapRef}>
+                <button
+                  type="button"
+                  className="notebook-browser-help-btn"
+                  aria-label="Keyboard help"
+                  aria-expanded={helpOpen}
+                  onClick={() => setHelpOpen((open) => !open)}
+                >
+                  ?
+                </button>
+                {helpOpen && (
+                  <div className="notebook-browser-help-pop" role="dialog" aria-label="Keyboard help">
+                    <p>Keyboard</p>
+                    <ul>
+                      <li><kbd>Esc</kbd> close the notebook</li>
+                      <li><kbd>⌘</kbd> + click a link to follow it</li>
+                      <li>Click the ‹ › edges to fold a pane</li>
+                    </ul>
+                  </div>
+                )}
+              </div>
+              <button type="button" className="notebook-browser-close" onClick={() => void requestClose()}>
+                <span>Close</span><kbd>esc</kbd>
+              </button>
+            </div>
           </header>
 
-          <div className={`notebook-browser-body${showRail ? ' has-rail' : ''}`}>
-            <aside className="notebook-browser-list" aria-label="Notebook files">
+          <div
+            className={`notebook-browser-body${showRail ? ' has-rail' : ''}${treeFolded ? ' tree-folded' : ''}${showRail && railFolded ? ' rail-folded' : ''}`}
+          >
+            <aside className="notebook-browser-list" aria-label="Notebook files" aria-hidden={treeFolded}>
               <FileTree
                 listDir={listDir}
                 selectedPath={selectedPath}
@@ -739,7 +824,14 @@ export function NotebookBrowser({
                 <>
                   <div className="notebook-browser-document-meta">
                     <div className="notebook-browser-document-titles">
-                      <h2>{basename(note.path)}</h2>
+                      <div className="notebook-browser-document-titlerow">
+                        <h2>{basename(note.path)}</h2>
+                        {noteType && (
+                          <span className={`notebook-browser-kind-badge${noteType === 'journal' ? ' is-journal' : ' is-note'}`}>
+                            {noteType}
+                          </span>
+                        )}
+                      </div>
                       <p>{note.path}</p>
                     </div>
                     <div className="notebook-browser-document-actions">
@@ -812,7 +904,7 @@ export function NotebookBrowser({
             </main>
 
             {showRail && (
-              <aside className="notebook-browser-rail" aria-label="Context">
+              <aside className="notebook-browser-rail" aria-label="Context" aria-hidden={railFolded}>
                 <section className="notebook-browser-rail-section">
                   <button
                     type="button"
@@ -896,6 +988,40 @@ export function NotebookBrowser({
                 </section>
               </aside>
             )}
+
+            <button
+              type="button"
+              className="notebook-browser-fold notebook-browser-fold-tree"
+              aria-label={treeFolded ? 'Show file tree' : 'Hide file tree'}
+              aria-expanded={!treeFolded}
+              // Keep focus on the editor — a fold should never pull the caret away.
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setTreeOverride(!treeFolded)}
+            >
+              {treeFolded ? '›' : '‹'}
+            </button>
+            {showRail && (
+              <button
+                type="button"
+                className="notebook-browser-fold notebook-browser-fold-rail"
+                aria-label={railFolded ? 'Show context rail' : 'Hide context rail'}
+                aria-expanded={!railFolded}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setRailOverride(!railFolded)}
+              >
+                {railFolded ? '‹' : '›'}
+              </button>
+            )}
+
+            <footer className="notebook-browser-footer">
+              <span className="notebook-browser-footer-vault">
+                <LockIcon />
+                stored in the attn vault
+              </span>
+              <span className="notebook-browser-footer-path" title={selectedPath ?? undefined}>
+                {selectedPath || 'no file open'}
+              </span>
+            </footer>
           </div>
           {chiefSel && (
             <button
@@ -969,6 +1095,17 @@ function formatNextAttempt(iso: string): string {
   if (abs < 5) return 'now';
   const unit = abs < 60 ? `${abs}s` : abs < 3600 ? `${Math.round(abs / 60)}m` : `${Math.round(abs / 3600)}h`;
   return deltaSec >= 0 ? `in ${unit}` : `${unit} ago`;
+}
+
+// A small padlock for the footer's "saved to the attn vault" line. Purely decorative
+// (it does not imply encryption) — an inline SVG, not the 🔒 emoji, for crispness.
+function LockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </svg>
+  );
 }
 
 function NotebookIcon() {

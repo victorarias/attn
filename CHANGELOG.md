@@ -9,6 +9,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-06-21]
 
 ### Added
+- **Fold the Notebook's side panels away to focus on a note.** The file tree and a note's context rail each gained an edge handle — click it to collapse that panel to nothing so the note fills the width, and click again to bring it back. Folding keeps your place: the editor and your scroll position are preserved and nothing reloads.
+- **The Notebook header and a new footer show more at a glance.** A small "chief" indicator in the header lights up while your chief-of-staff agent is working, a "?" reveals a few keyboard tips (close, follow a link, fold a pane), and each note's title now carries a kind badge (note or journal). A slim status bar along the bottom shows the open note's path and that it's stored in the attn vault.
 - **Broken Notebook links are flagged as you write.** When a note links to another note that doesn't exist — a typo in the path, or a note you haven't created yet — the link now shows in red with a ⚠ instead of looking like a working link. Links to real notes stay normal, and external links (http/https, email) are never flagged. If an agent or you create the missing note, its links clear their flag once the Notebook refreshes.
 
 ## [2026-06-20]

@@ -97,17 +97,203 @@
   font: 600 9px/1.2 ui-monospace, monospace;
 }
 
+/* The header's right cluster: a (placeholder) mode control, the chief pulse, a help
+   button, and Close. Folded into the existing 72px header rather than a second bar. */
+.notebook-browser-chrome {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Segmented mode control. Stage 5 renders it as a visibly-disabled placeholder:
+   Fullscreen is the only mode until stage 7 adds workspace tiles. No keyboard
+   shortcut (that would risk colliding with a native menu accelerator). */
+.notebook-browser-mode {
+  display: flex;
+  padding: 2px;
+  background: var(--color-bg-app);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+}
+
+.notebook-browser-mode button {
+  padding: 4px 10px;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font: 600 11px/1.2 var(--font-sans, system-ui);
+  cursor: pointer;
+}
+
+.notebook-browser-mode button.is-active {
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
+  cursor: default;
+}
+
+.notebook-browser-mode button:disabled {
+  color: var(--color-text-dimmed);
+  cursor: not-allowed;
+}
+
+/* Chief pulse: a live two-state indicator — a pulsing green dot + "chief: active"
+   while a chief-of-staff session is working, a dim dot + "chief: idle" otherwise.
+   Rendered only when a chief session exists at all. */
+.notebook-browser-chief-pulse {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-muted);
+  font: 600 11px/1.2 ui-monospace, 'SFMono-Regular', monospace;
+  white-space: nowrap;
+}
+
+.notebook-browser-chief-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-text-dimmed);
+}
+
+.notebook-browser-chief-pulse.is-active {
+  color: var(--color-text-secondary);
+}
+
+.notebook-browser-chief-pulse.is-active .notebook-browser-chief-dot {
+  background: #3fb950;
+  box-shadow: 0 0 0 0 color-mix(in srgb, #3fb950 70%, transparent);
+  animation: notebook-browser-chief-pulse 1.8s ease-out infinite;
+}
+
+@keyframes notebook-browser-chief-pulse {
+  to { box-shadow: 0 0 0 7px transparent; }
+}
+
+.notebook-browser-help-wrap {
+  position: relative;
+  display: flex;
+}
+
+.notebook-browser-help-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 50%;
+  font: 700 12px/1 var(--font-sans, system-ui);
+  cursor: pointer;
+}
+
+.notebook-browser-help-btn:hover,
+.notebook-browser-help-btn[aria-expanded='true'] {
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+
+.notebook-browser-help-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  width: 232px;
+  padding: 12px 14px;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.4);
+}
+
+.notebook-browser-help-pop p {
+  margin: 0 0 8px;
+  color: var(--color-text-muted);
+  font: 700 9px/1 ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.notebook-browser-help-pop ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.notebook-browser-help-pop li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.notebook-browser-help-pop kbd {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-app);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font: 600 10px/1.3 ui-monospace, monospace;
+}
+
+/* Registered length custom properties so a fold can ANIMATE the column width to 0
+   (an unregistered custom property would jump). The tree/rail panes stay MOUNTED at
+   0 width — folding never unmounts them, so CodeMirror/scroll state survives. Where
+   @property is unsupported the layout is still correct; only the animation is lost. */
+@property --nb-treew {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 280px;
+}
+@property --nb-railw {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 280px;
+}
+
 .notebook-browser-body {
+  position: relative;
   min-height: 0;
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(230px, 320px) minmax(0, 1fr);
+  /* Row 1 holds the panes; row 2 is the footer, spanning every column. */
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-columns: var(--nb-treew) minmax(0, 1fr);
+  --nb-treew: 280px;
+  --nb-railw: 280px;
+  transition: --nb-treew 180ms ease, --nb-railw 180ms ease;
 }
 
 /* A markdown note adds the right context rail (outline + backlinks) as a third
    column; text/binary files keep the two-column layout, so the document widens. */
 .notebook-browser-body.has-rail {
-  grid-template-columns: minmax(230px, 320px) minmax(0, 1fr) minmax(232px, 296px);
+  grid-template-columns: var(--nb-treew) minmax(0, 1fr) var(--nb-railw);
+}
+
+/* Manual edge-rail folds: the column collapses to 0 and its pane fades out, but the
+   pane stays in the DOM (editor/scroll state survives a fold/unfold). */
+.notebook-browser-body.tree-folded { --nb-treew: 0px; }
+.notebook-browser-body.rail-folded { --nb-railw: 0px; }
+.notebook-browser-body.tree-folded .notebook-browser-list,
+.notebook-browser-body.rail-folded .notebook-browser-rail {
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /* Grid items default to min-width:auto (their content's min-content width), which
+     keeps the box from collapsing into the 0px track. Force it to 0 so the pane
+     actually shrinks to nothing when folded. With border-box, padding + border are a
+     floor the 0px track can't compress either, so zero them too — otherwise the pane
+     stays ~21px (10+10 padding + 1px border) wide. */
+  min-width: 0;
+  padding: 0;
+  border-width: 0;
 }
 
 .notebook-browser-list {
@@ -238,8 +424,43 @@
   min-width: 0;
 }
 
+.notebook-browser-document-titlerow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.notebook-browser-document-titlerow h2 {
+  margin: 0;
+}
+
+/* Kind/type pill in the note header (item 19): the frontmatter type for a note,
+   amber for journals, accent for everything else. */
+.notebook-browser-kind-badge {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  font: 700 9px/1.3 ui-monospace, 'SFMono-Regular', monospace;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.notebook-browser-kind-badge.is-journal {
+  color: #d9a441;
+  border-color: color-mix(in srgb, #d9a441 42%, transparent);
+}
+
+.notebook-browser-kind-badge.is-note {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
 .notebook-browser-document-meta h2 {
-  margin: 0 0 4px;
+  margin: 0;
   font-size: 24px;
   font-weight: 680;
   letter-spacing: -0.035em;
@@ -786,6 +1007,88 @@
   opacity: 0.8;
 }
 
+/* --- Manual edge-rail fold handles (‹ ›) --- */
+/* Small controls pinned at each pane's inner seam; they track the fold via the
+   width custom property, so they slide with the animation and stay reachable even
+   when the pane is fully folded. onMouseDown is prevented in the markup so a click
+   never steals focus from the editor (focus-ownership invariant). */
+.notebook-browser-fold {
+  position: absolute;
+  top: 50%;
+  z-index: 6;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 46px;
+  padding: 0;
+  color: var(--color-text-muted);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.5;
+  cursor: pointer;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+
+.notebook-browser-fold:hover {
+  opacity: 1;
+  color: var(--color-text-primary);
+}
+
+.notebook-browser-fold-tree {
+  left: var(--nb-treew);
+  margin-left: 4px;
+}
+
+.notebook-browser-fold-rail {
+  right: var(--nb-railw);
+  margin-right: 4px;
+}
+
+/* --- Footer: spans every body column (grid row 2), reflows flush as panes fold --- */
+.notebook-browser-footer {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px clamp(14px, 3vw, 22px);
+  background: color-mix(in srgb, var(--color-bg-app) 58%, transparent);
+  border-top: 1px solid var(--color-border-subtle);
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.notebook-browser-footer-vault {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.notebook-browser-footer-vault svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.notebook-browser-footer-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-tertiary);
+  font: 10px/1.4 ui-monospace, 'SFMono-Regular', monospace;
+}
+
 @keyframes notebook-browser-reveal {
   from { opacity: 0; transform: scale(0.995); }
 }
@@ -793,14 +1096,9 @@
 @media (max-width: 760px) {
   .notebook-browser-shell { padding: 0; }
   .notebook-browser { border: 0; border-radius: 0; }
-  .notebook-browser-body,
-  .notebook-browser-body.has-rail { grid-template-columns: 200px minmax(0, 1fr); }
-  /* The context rail folds away on narrow widths until stage 5 adds real
-     width-responsive pane folding; the outline/backlinks aren't lost — they
-     return when the window widens. */
-  .notebook-browser-rail { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .notebook-browser-shell { animation: none; }
+  .notebook-browser-body { transition: none; }
 }

@@ -796,3 +796,87 @@ describe('parseNotebookHref', () => {
     expect(parseNotebookHref('/etc/passwd').kind).toBe('external');
   });
 });
+
+// Stage 5 chrome: the manual edge-rail folds, the top-bar chief pulse, the footer,
+// and the note kind badge. The fold ANIMATION and grid collapse are a real-browser
+// concern (covered by the Playwright harness); here we assert the state wiring with
+// the mocked editor — that handles toggle the body's fold classes (panes stay
+// mounted), that the pulse reflects the prop, and that the footer/badge read right.
+describe('NotebookBrowser stage 5 chrome', () => {
+  afterEach(() => {
+    editorMock.current = null;
+    editorMock.scrollCalls.length = 0;
+    vi.restoreAllMocks();
+  });
+
+  const body = () => document.querySelector('.notebook-browser-body') as HTMLElement;
+
+  it('folds and unfolds the file tree via its edge handle, without unmounting the pane', async () => {
+    const { props } = makeProps();
+    render(<NotebookBrowser {...props} />);
+    await waitForNoteLoaded();
+
+    expect(body().className).not.toContain('tree-folded');
+    fireEvent.click(screen.getByRole('button', { name: 'Hide file tree' }));
+    expect(body().className).toContain('tree-folded');
+    // Folded, not removed: the editor still works, and the tree pane stays in the DOM
+    // (aria-hidden so it leaves the a11y tree, but never unmounted — its state lives on).
+    expect(editor()).toBeInTheDocument();
+    const list = document.querySelector('.notebook-browser-list');
+    expect(list).not.toBeNull();
+    expect(list?.getAttribute('aria-hidden')).toBe('true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show file tree' }));
+    expect(body().className).not.toContain('tree-folded');
+  });
+
+  it('folds the context rail (present only for a markdown note)', async () => {
+    const { props } = makeProps();
+    render(<NotebookBrowser {...props} />);
+    await waitForNoteLoaded();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide context rail' }));
+    expect(body().className).toContain('rail-folded');
+    fireEvent.click(screen.getByRole('button', { name: 'Show context rail' }));
+    expect(body().className).not.toContain('rail-folded');
+  });
+
+  it('shows the chief pulse as active / idle, and hides it when there is no chief', () => {
+    const { unmount } = render(<NotebookBrowser {...makeProps({ chiefActive: true }).props} />);
+    expect(screen.getByText('chief: active')).toBeInTheDocument();
+    unmount();
+
+    const idle = render(<NotebookBrowser {...makeProps({ chiefActive: false }).props} />);
+    expect(screen.getByText('chief: idle')).toBeInTheDocument();
+    idle.unmount();
+
+    render(<NotebookBrowser {...makeProps().props} />);
+    expect(screen.queryByText(/chief:/)).not.toBeInTheDocument();
+  });
+
+  it('renders the footer with the open note path', async () => {
+    const { props } = makeProps();
+    render(<NotebookBrowser {...props} />);
+    await waitForNoteLoaded();
+
+    expect(screen.getByText('stored in the attn vault')).toBeInTheDocument();
+    expect(
+      screen.getByText('knowledge/index.md', { selector: '.notebook-browser-footer-path' }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders a kind badge from the note frontmatter type', async () => {
+    const { props } = makeProps({
+      readFile: vi.fn<(path: string) => Promise<FsReadResult>>().mockResolvedValue({
+        path: 'knowledge/index.md',
+        content: '---\ntype: journal\n---\n# Friday\n\nbody',
+        hash: 'h1',
+      }),
+    });
+    render(<NotebookBrowser {...props} />);
+
+    // Scope to the badge so the FileTree's "journal" folder item doesn't match.
+    const badge = await screen.findByText('journal', { selector: '.notebook-browser-kind-badge' });
+    expect(badge.className).toContain('is-journal');
+  });
+});

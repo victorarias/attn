@@ -88,4 +88,31 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await expect(page.getByRole('heading', { level: 2, name: 'Preview not available' })).toBeVisible();
     await expect(page.getByRole('textbox')).toHaveCount(0);
   });
+
+  test('renders stage-5 chrome and folds the tree to zero width via the edge handle', async ({ page }) => {
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.waitForSelector('.cm-content');
+
+    // Top-bar chrome (folded into the header): mode control, chief pulse, footer.
+    await expect(page.locator('.notebook-browser-mode')).toBeVisible();
+    await expect(page.locator('.notebook-browser-chief-pulse')).toContainText('chief: active');
+    await expect(page.locator('.notebook-browser-footer')).toContainText('stored in the attn vault');
+    await expect(page.locator('.notebook-browser-footer')).toContainText('knowledge/index.md');
+    // Kind badge in the note header.
+    await expect(page.locator('.notebook-browser-kind-badge')).toBeVisible();
+    await page.screenshot({ path: 'test-results/notebook-stage5-chrome.png' });
+
+    // The tree column has real width, then folds to 0 — the pane stays in the DOM.
+    const tree = page.locator('.notebook-browser-list');
+    expect(await tree.evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(100);
+    await page.getByRole('button', { name: 'Hide file tree' }).click();
+    await expect(page.locator('.notebook-browser-body')).toHaveClass(/tree-folded/);
+    await expect.poll(() => tree.evaluate((el) => el.getBoundingClientRect().width)).toBeLessThan(2);
+    await expect(tree).toBeAttached(); // folded, not unmounted
+
+    // The handle now reopens it.
+    await page.getByRole('button', { name: 'Show file tree' }).click();
+    await expect.poll(() => tree.evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(100);
+  });
 });

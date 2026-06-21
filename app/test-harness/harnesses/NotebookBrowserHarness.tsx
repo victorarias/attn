@@ -14,6 +14,7 @@ import '../../src/App.css';
 import { NotebookBrowser } from '../../src/components/NotebookBrowser';
 import type {
   FsEntry,
+  FsExistsResult,
   FsReadResult,
   FsWriteResult,
   NotebookEntry,
@@ -79,6 +80,11 @@ export function NotebookBrowserHarness({ onReady, setTriggerRerender }: HarnessP
     window.__HARNESS__.recordCall('writeFile', [path, content, baseHash]);
     return { path, hash: 'h2', conflict: false };
   }, []);
+  const existsFile = useCallback(async (path: string): Promise<FsExistsResult> => {
+    // Everything in the fixture tree exists; the index's wiki link resolves, so no
+    // broken-link flag fires here (broken links have their own dedicated harness).
+    return { path, exists: true };
+  }, []);
   const sendToChief = useCallback(async (selection: string, sourcePath?: string): Promise<NotebookSendToChiefResult> => {
     window.__HARNESS__.recordCall('sendToChief', [selection, sourcePath]);
     return { path: 'inbox.md', nudged: false };
@@ -102,11 +108,13 @@ export function NotebookBrowserHarness({ onReady, setTriggerRerender }: HarnessP
       readFile={readFile}
       backlinksNotebook={backlinksNotebook}
       writeFile={writeFile}
+      existsFile={existsFile}
       sendToChief={sendToChief}
       changeSignal={0}
       listTasks={listTasks}
       retryTask={retryTask}
       taskChangeSignal={0}
+      chiefActive
     />
   );
 }
