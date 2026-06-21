@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
 import type { FsEntry, FsExistsResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult, NotebookTask } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
+import { useTileAutoFold } from '../hooks/useTileAutoFold';
 import { FileTree } from './notebook/FileTree';
 import { fileKind, isBinaryPath, isMarkdownPath } from './notebook/fileKind';
 import { parseFrontmatter } from './notebook/frontmatter';
@@ -147,6 +148,10 @@ export function NotebookSurface({
   // users land inside the modal (engaging the focus trap) without auto-selecting
   // the Close button. Tab from here moves to the first interactive control.
   const dialogRef = useRef<HTMLDivElement>(null);
+  // The body container, observed by the tile's responsive auto-fold. Its width is
+  // independent of how the inner panes fold, so folding can't shrink the observed
+  // box and oscillate.
+  const bodyRef = useRef<HTMLDivElement>(null);
   // Imperative handle to the live editor, so the context rail's outline can scroll
   // the editor to a heading (navigation that originates outside the editor).
   const editorRef = useRef<LiveMarkdownEditorHandle>(null);
@@ -161,9 +166,12 @@ export function NotebookSurface({
   // to 0 width but stay mounted (CodeMirror/scroll state survives).
   const [treeOverride, setTreeOverride] = useState<boolean | null>(null);
   const [railOverride, setRailOverride] = useState<boolean | null>(null);
-  const autoFold = false;
-  const treeFolded = treeOverride === null ? autoFold : treeOverride;
-  const railFolded = railOverride === null ? autoFold : railOverride;
+  // The auto side of the fold seam. A modal folds nothing automatically (manual
+  // only, unchanged); a tile folds its rail then its tree as it narrows. A manual
+  // override still wins (`override ?? auto`), so this only changes what auto means.
+  const { treeAutoFold, railAutoFold } = useTileAutoFold(bodyRef, variant === 'tile');
+  const treeFolded = treeOverride === null ? treeAutoFold : treeOverride;
+  const railFolded = railOverride === null ? railAutoFold : railOverride;
   // The kind/type pill in the note header: a markdown note's frontmatter `type`
   // (defaulting to "note"), or "text" for a plain-text file. Parsed off the loaded
   // content (not the live draft) so it doesn't churn on every keystroke. Self-
@@ -698,6 +706,7 @@ export function NotebookSurface({
 
   const body = (
     <div
+      ref={bodyRef}
       className={`notebook-browser-body${showRail ? ' has-rail' : ''}${treeFolded ? ' tree-folded' : ''}${showRail && railFolded ? ' rail-folded' : ''}`}
     >
       {/* `inert` while folded removes the whole pane from the tab order and the
