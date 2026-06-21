@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-06-21]
 
 ### Fixed
+- **`⌘W` in a docked Notebook tile now closes the Notebook, not the terminal beside it.** When a Notebook tile sat next to a terminal pane, pressing `⌘W` while reading or editing a note closed the previously-focused terminal pane (ending that session) instead of the note you were looking at. `⌘W` now closes the focused tile.
 - **The last line of a terminal is no longer cut off at the bottom of the window.** When a session's terminal was sized one row taller than the window could actually show — for example after the window's height landed on an awkward boundary, or when the session was opened at a size different from where its grid was last set — the bottom line (your prompt, or attn's `auto mode on` status line) got clipped at the window edge. The terminal now re-asserts a row count that fits the visible area, so the last line stays fully on screen at any window size.
 
 ### Added

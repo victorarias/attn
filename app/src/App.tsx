@@ -2884,6 +2884,20 @@ sendFetchPRDetails,
   }, [handleNextWorkspace, handlePrevWorkspace]);
 
   const handleCloseCurrentSessionShortcut = useCallback(() => {
+    // Cmd+W closes the focused leaf. In the packaged app the native "Close Pane"
+    // menu item claims Cmd+W and dispatches session.close (this handler), so when
+    // focus is inside a docked tile — e.g. a notebook tile beside a terminal — we
+    // must close THAT tile here, not the active session's terminal pane. Without
+    // this, Cmd+W while reading a note kills the previously-focused terminal/session.
+    // (Native browser tiles are handled natively before session.close ever fires.)
+    const focused = document.activeElement;
+    const tileEl = focused instanceof HTMLElement ? focused.closest('[data-pane-kind="tile"]') : null;
+    const tileId = tileEl?.getAttribute('data-pane-id');
+    if (tileId && activeWorkspaceId) {
+      handleCloseTile(activeWorkspaceId, tileId);
+      return;
+    }
+
     if (!activeSessionId) {
       return;
     }
@@ -2900,7 +2914,7 @@ sendFetchPRDetails,
     }
 
     handleRequestCloseSession(activeSessionId);
-  }, [activeSessionId, getActivePaneIdForSession, handleClosePane, handleRequestCloseSession, sessions]);
+  }, [activeSessionId, activeWorkspaceId, getActivePaneIdForSession, handleCloseTile, handleClosePane, handleRequestCloseSession, sessions]);
 
   const handleReloadSession = useCallback((id: string) => {
     const session = sessions.find((entry) => entry.id === id);
