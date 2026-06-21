@@ -8,6 +8,7 @@ import { DashboardPRsHarness } from './DashboardPRsHarness';
 import { DiffDetailPanelHarness } from './DiffDetailPanelHarness';
 import { DiffViewHarness } from './DiffViewHarness';
 import { FileTreeHarness } from './FileTreeHarness';
+import { FrontmatterCardHarness } from './FrontmatterCardHarness';
 import { GridLayoutControlHarness } from './GridLayoutControlHarness';
 import { GridViewHarness } from './GridViewHarness';
 import { LiveMarkdownEditorHarness } from './LiveMarkdownEditorHarness';
@@ -19,6 +20,7 @@ export const harnesses: Record<string, React.ComponentType<HarnessProps>> = {
   DiffDetailPanel: DiffDetailPanelHarness,
   DiffView: DiffViewHarness,
   FileTree: FileTreeHarness,
+  FrontmatterCard: FrontmatterCardHarness,
   GridLayoutControl: GridLayoutControlHarness,
   GridView: GridViewHarness,
   LiveMarkdownEditor: LiveMarkdownEditorHarness,
