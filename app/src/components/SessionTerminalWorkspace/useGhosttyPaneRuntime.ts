@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { ptyAttach, ptyDetach, ptyResize, ptyWrite, type PtyEventPayload } from '../../pty/bridge';
+import { formatExitNotice } from '../../pty/exitNotice';
 import { isSuspiciousTerminalSize } from '../../utils/terminalDebug';
 import { recordFocus } from '../../utils/terminalDiagnosticsLog';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
@@ -141,7 +142,7 @@ export function useGhosttyPaneRuntime(
         terminal.reset();
         break;
       case 'exit':
-        void terminal.write(`\r\n[Process exited with code ${event.code}]\r\n`);
+        void terminal.write(`\r\n${formatExitNotice(event.code, event.signal)}\r\n`);
         break;
       case 'error':
         void terminal.write(`\r\n[Error: ${event.error}]\r\n`);

@@ -11,6 +11,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **Broken Notebook links are flagged as you write.** When a note links to another note that doesn't exist — a typo in the path, or a note you haven't created yet — the link now shows in red with a ⚠ instead of looking like a working link. Links to real notes stay normal, and external links (http/https, email) are never flagged. If an agent or you create the missing note, its links clear their flag once the Notebook refreshes.
 
+### Fixed
+- **A finished session now ends cleanly instead of looking like a crash.** When a session is stopped, closed, or wraps up its work, attn tears it down with a normal termination signal — but the terminal used to report that as a bare `[Process exited with code 143]`, which reads like something broke. Expected endings (a clean exit, or a normal stop/close) now show a calm `[Session ended]`. Genuine failures — a non-zero exit code, or a crash/force-kill — still show the exit code so real problems stay visible.
+
 ## [2026-06-20]
 
 ### Changed
