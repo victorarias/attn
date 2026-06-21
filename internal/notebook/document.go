@@ -3,6 +3,7 @@ package notebook
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -167,8 +168,44 @@ func (d Document) Type() string {
 	return d.frontmatterString("kind")
 }
 
-// Title returns the declared title ("" if absent).
-func (d Document) Title() string { return d.frontmatterString("title") }
+// Title returns the note's title: the text of the first level-1 ATX heading
+// ("# Heading") in the body. A note's title is its `# H1` — attn does not read a
+// frontmatter `title:`. Returns "" when the body has no H1, in which case callers
+// fall back to the note's filename (its stable address).
+func (d Document) Title() string { return firstH1(d.Body) }
+
+var (
+	atxH1Re   = regexp.MustCompile(`^ {0,3}#[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$`)
+	mdFenceRe = regexp.MustCompile("^[ \t]*(`{3,}|~{3,})")
+)
+
+// firstH1 returns the text of the first level-1 ATX heading in a markdown body,
+// or "" when there is none. It skips fenced code blocks (a "# " line inside ``` or
+// ~~~ is not a heading) and follows CommonMark's ATX rules: up to three leading
+// spaces, a single "#" then whitespace, and an optional trailing "#"-sequence that
+// is stripped from the returned title (so "# F# notes ##" → "F# notes").
+func firstH1(body string) string {
+	var fence byte // 0 outside a code fence; otherwise the marker rune ('`' or '~')
+	for line := range strings.SplitSeq(body, "\n") {
+		if mdFenceRe.MatchString(line) {
+			marker := strings.TrimLeft(line, " \t")[0]
+			switch {
+			case fence == 0:
+				fence = marker
+			case marker == fence:
+				fence = 0
+			}
+			continue
+		}
+		if fence != 0 {
+			continue
+		}
+		if m := atxH1Re.FindStringSubmatch(line); m != nil {
+			return strings.TrimSpace(m[1])
+		}
+	}
+	return ""
+}
 
 // Summary returns the declared summary ("" if absent).
 func (d Document) Summary() string { return d.frontmatterString("summary") }

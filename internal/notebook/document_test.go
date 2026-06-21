@@ -100,13 +100,58 @@ func TestParsePermissiveOnMalformedYAML(t *testing.T) {
 }
 
 func TestDocumentAccessors(t *testing.T) {
-	doc, _ := Parse([]byte("---\ntype: note\ntitle: T\nsummary: S\nupdated: 2026-06-13T00:00:00Z\n---\n"))
+	// Type/summary/updated come from frontmatter; the title comes from the body's
+	// first `# H1`, not a frontmatter field.
+	doc, _ := Parse([]byte("---\ntype: note\nsummary: S\nupdated: 2026-06-13T00:00:00Z\n---\n# T\n\nbody\n"))
 	if doc.Type() != "note" || doc.Title() != "T" || doc.Summary() != "S" || doc.Updated() != "2026-06-13T00:00:00Z" {
 		t.Fatalf("accessors = (%q,%q,%q,%q)", doc.Type(), doc.Title(), doc.Summary(), doc.Updated())
 	}
 	empty := Document{}
 	if empty.Type() != "" || empty.Title() != "" {
 		t.Fatal("accessors on empty document should return empty strings")
+	}
+}
+
+// Title is the body's first level-1 ATX heading. A frontmatter `title:` is NOT a
+// title source (the canonical title is the `# H1`); the filename is the fallback,
+// supplied by callers when Title() is "".
+func TestTitleFromH1(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"first line heading", "# Hello world\n\nbody", "Hello world"},
+		{"heading after prose", "intro line\n\n# The title\n\nmore", "The title"},
+		{"no h1 returns empty", "## Only an h2\n\nbody", ""},
+		{"empty body", "", ""},
+		{"trailing hashes stripped", "# F# notes ##\n", "F# notes"},
+		{"hash without space is not a heading", "#nope\n# yes\n", "yes"},
+		{"up to three leading spaces", "   # Indented\n", "Indented"},
+		{"four spaces is a code block, not a heading", "    # Not a heading\n# Real\n", "Real"},
+		{"h1 inside a fenced block is skipped", "```\n# fake\n```\n# Real one\n", "Real one"},
+		{"tilde fence is also skipped", "~~~\n# fake\n~~~\n# Real\n", "Real"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			doc := Document{Body: c.body}
+			if got := doc.Title(); got != c.want {
+				t.Fatalf("Title() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// A frontmatter `title:` does not leak into the title — the body's H1 wins, and a
+// note with a frontmatter title but no H1 has no title (callers use the filename).
+func TestFrontmatterTitleIsNotATitleSource(t *testing.T) {
+	withH1, _ := Parse([]byte("---\ntitle: From frontmatter\n---\n# From heading\n"))
+	if got := withH1.Title(); got != "From heading" {
+		t.Fatalf("Title() = %q, want the body H1 %q", got, "From heading")
+	}
+	noH1, _ := Parse([]byte("---\ntitle: From frontmatter\n---\n\nbody, no heading\n"))
+	if got := noH1.Title(); got != "" {
+		t.Fatalf("Title() = %q, want empty (frontmatter title is ignored)", got)
 	}
 }
 

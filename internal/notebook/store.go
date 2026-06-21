@@ -189,7 +189,9 @@ func (s *Store) AppendJournalEntryOnce(dateISO, dedupeMarker, entry string) (rel
 func newJournalDoc(dateISO string) func() Document {
 	return func() Document {
 		return Document{
-			Frontmatter: map[string]any{"type": TypeJournal, "title": dateISO},
+			// The `# <date>` H1 in the body is the journal's title (Document.Title
+			// reads it); no redundant frontmatter `title:`.
+			Frontmatter: map[string]any{"type": TypeJournal},
 			Body:        "# " + dateISO + "\n",
 		}
 	}
@@ -203,10 +205,9 @@ func (s *Store) AppendInbox(entry string) (relPath string, hash string, err erro
 		return "", "", fmt.Errorf("notebook: empty inbox entry")
 	}
 	hash, err = s.appendToNote(FileInbox, entry, func() Document {
-		return Document{
-			Frontmatter: map[string]any{"title": "Chief inbox"},
-			Body:        inboxTemplate,
-		}
+		// The `# Chief inbox` H1 in the template is the title; the note needs no
+		// frontmatter.
+		return Document{Body: inboxTemplate}
 	})
 	return FileInbox, hash, err
 }

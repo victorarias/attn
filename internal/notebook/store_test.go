@@ -395,7 +395,7 @@ func TestListPrefixIsPathSegmentBoundary(t *testing.T) {
 // and still reports the full size.
 func TestListReadsFrontmatterFromLargeFile(t *testing.T) {
 	s := NewStore(t.TempDir())
-	big := "---\ntype: note\ntitle: Big\n---\n" + strings.Repeat("x\n", 100<<10) // ~200 KiB body
+	big := "---\ntype: note\n---\n# Big\n" + strings.Repeat("x\n", 100<<10) // ~200 KiB body
 	if _, _, err := s.Write("knowledge/areas/big.md", []byte(big), ""); err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +446,7 @@ func TestList(t *testing.T) {
 	if _, err := s.EnsureScaffold(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Write("knowledge/areas/foo.md", []byte("---\ntype: note\ntitle: Foo\nsummary: a decision\n---\nbody\n"), ""); err != nil {
+	if _, _, err := s.Write("knowledge/areas/foo.md", []byte("---\ntype: note\nsummary: a decision\n---\n# Foo\n\nbody\n"), ""); err != nil {
 		t.Fatal(err)
 	}
 	// Machine state under .attn/ must never be surfaced.
@@ -498,16 +498,16 @@ func TestBacklinks(t *testing.T) {
 	}
 
 	// target is the note we want backlinks for.
-	mustWrite(t, s, "knowledge/areas/target.md", "---\ntype: note\ntitle: Target\n---\nthe decision\n")
+	mustWrite(t, s, "knowledge/areas/target.md", "---\ntype: note\n---\n# Target\n\nthe decision\n")
 	// linker references target with a trailing #anchor — the anchor must be
 	// ignored when matching.
-	mustWrite(t, s, "knowledge/areas/linker.md", "---\ntype: note\ntitle: Linker\n---\nsee [the call](/knowledge/areas/target.md#why) for context\n")
+	mustWrite(t, s, "knowledge/areas/linker.md", "---\ntype: note\n---\n# Linker\n\nsee [the call](/knowledge/areas/target.md#why) for context\n")
 	// journal references target with a plain root-absolute link.
 	mustWrite(t, s, "journal/2026-06-13.md", "---\ntype: journal\n---\nfollowed [target](/knowledge/areas/target.md) today\n")
 	// unrelated links elsewhere and must not appear.
 	mustWrite(t, s, "knowledge/resources/unrelated.md", "---\ntype: note\n---\nlinks [elsewhere](/knowledge/areas/other.md) only\n")
 	// self-link: target links to itself and must be excluded from its own backlinks.
-	mustWrite(t, s, "knowledge/areas/target.md", "---\ntype: note\ntitle: Target\n---\nthe decision; see [self](/knowledge/areas/target.md)\n")
+	mustWrite(t, s, "knowledge/areas/target.md", "---\ntype: note\n---\n# Target\n\nthe decision; see [self](/knowledge/areas/target.md)\n")
 
 	got, err := s.Backlinks("/knowledge/areas/target.md")
 	if err != nil {

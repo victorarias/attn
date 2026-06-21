@@ -86,6 +86,18 @@ Chief-authored knowledge is **grounded** with resolvable `sources:` (journal
 anchors, `dispatch:<id>`, or URLs) rather than written from paraphrase alone; the
 user's own notes in the same space are theirs to keep however they like.
 
+## Note title
+
+A note's title is its **first `# H1` heading** — the single canonical title. attn
+does **not** read a frontmatter `title:` field (`Document.Title()` parses the body's
+first level-1 ATX heading, skipping fenced code). When a note has no `# H1`, callers
+fall back to the note's **filename**, which is its stable address (links point at the
+path, so the filename is an ID, not a competing title). Frontmatter carries
+*properties* (`type`, `summary`, `tags`, `sources`, dates) and is rendered as a
+properties card in the editor — never a title. Journals (`# <date>`) and the chief
+inbox (`# Chief inbox`) follow the same rule; they carry their title as the body H1
+and write no frontmatter `title:`.
+
 ## The keeper
 
 The single automated entity that **tends each workspace**. One persona, two duties:
