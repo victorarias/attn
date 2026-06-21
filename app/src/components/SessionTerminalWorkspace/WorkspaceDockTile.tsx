@@ -14,6 +14,7 @@ import { browserHostLabel, claimBrowserHostFocus, controlBrowserHost } from '../
 import type { TileContentState, TileLeaf } from '../../types/workspace';
 import { deriveTileTitle, tilePathBasename } from '../../utils/tilePresentation';
 import { BrowserTileBody } from './BrowserTileBody';
+import { NotebookTile } from '../notebook/NotebookTile';
 import './WorkspaceDockTile.css';
 
 type MarkdownTarget =
@@ -120,6 +121,15 @@ function openMarkdownTarget(target: MarkdownTarget): void {
   void action.catch((error) => {
     console.warn('[WorkspaceDockTile] Failed to open Markdown target:', error);
   });
+}
+
+// Browser and notebook tiles manage their own scroll + chrome, so their body
+// drops the markdown padding/overflow and fills the frame. Markdown keeps the
+// default (padded, scrollable) body.
+function bodyKindModifier(tileKind: string): string {
+  if (tileKind === 'browser') return 'workspace-dock-tile-body--browser';
+  if (tileKind === 'notebook') return 'workspace-dock-tile-body--notebook';
+  return '';
 }
 
 export function normalizeBrowserAddress(value: string): string {
@@ -380,7 +390,7 @@ export function WorkspaceDockTile({
         </div>
       </div>
       <div
-        className={`workspace-dock-tile-body ${tile.tileKind === 'browser' ? 'workspace-dock-tile-body--browser' : ''}`.trim()}
+        className={`workspace-dock-tile-body ${bodyKindModifier(tile.tileKind)}`.trim()}
         ref={bodyRef}
         tabIndex={-1}
       >
@@ -394,6 +404,17 @@ export function WorkspaceDockTile({
             dragging={dragging}
             visible={visible}
             onClose={onClose}
+          />
+        ) : tile.tileKind === 'notebook' ? (
+          // The notebook tile self-serves its content over the fs surface (via
+          // context); the only tile→params write is the opened file's path.
+          <NotebookTile
+            initialPath={tile.tileParams || null}
+            onOpenFile={(openedPath) => {
+              void Promise.resolve(onUpdateParams?.(openedPath)).catch((error) => {
+                console.warn('[WorkspaceDockTile] Failed to persist notebook path:', error);
+              });
+            }}
           />
         ) : (
           <div className="workspace-dock-tile-message">Unsupported tile: {tile.tileKind}</div>

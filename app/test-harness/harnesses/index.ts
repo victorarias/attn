@@ -14,6 +14,7 @@ import { GridLayoutControlHarness } from './GridLayoutControlHarness';
 import { GridViewHarness } from './GridViewHarness';
 import { LiveMarkdownEditorHarness } from './LiveMarkdownEditorHarness';
 import { NotebookBrowserHarness } from './NotebookBrowserHarness';
+import { NotebookTileHarness } from './NotebookTileHarness';
 import { SessionReviewLoopBarHarness } from './SessionReviewLoopBarHarness';
 
 export const harnesses: Record<string, React.ComponentType<HarnessProps>> = {
@@ -27,5 +28,6 @@ export const harnesses: Record<string, React.ComponentType<HarnessProps>> = {
   GridView: GridViewHarness,
   LiveMarkdownEditor: LiveMarkdownEditorHarness,
   NotebookBrowser: NotebookBrowserHarness,
+  NotebookTile: NotebookTileHarness,
   SessionReviewLoopBar: SessionReviewLoopBarHarness,
 };

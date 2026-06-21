@@ -100,6 +100,10 @@ export const SHORTCUTS = {
   'ui.increaseFontSize': { key: '=', meta: true },
   'ui.decreaseFontSize': { key: '-', meta: true },
   'ui.resetFontSize': { key: '0', meta: true },
+
+  // Notebook (meta+alt+N is free — the only meta+alt combos are the pane-focus arrows)
+  'notebook.openTile': { key: 'n', meta: true, alt: true },
+  'notebook.openFullscreen': { key: 'n', meta: true, alt: true, shift: true },
 } as const;
 
 export type ShortcutId = keyof typeof SHORTCUTS;

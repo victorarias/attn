@@ -36,6 +36,7 @@ import { NotebookBrowser } from './components/NotebookBrowser';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { ChordLeaderHud } from './components/ChordLeaderHud';
 import { DaemonProvider } from './contexts/DaemonContext';
+import { NotebookSurfaceProvider } from './contexts/NotebookSurfaceContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { KeybindingsProvider, useKeybindings } from './contexts/KeybindingsContext';
 import { useSessionStore, type Session, type TerminalWorkspaceState } from './store/sessions';
@@ -505,6 +506,7 @@ function App() {
     sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
     sendWorkspaceSetSplitRatio,
+    sendWorkspaceDockTile,
     sendWorkspaceUndockTile,
     sendWorkspaceUpdateTile,
     sendWorkspaceMoveLeaf,
@@ -660,6 +662,7 @@ function App() {
         sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
         sendWorkspaceSetSplitRatio={sendWorkspaceSetSplitRatio}
+        sendWorkspaceDockTile={sendWorkspaceDockTile}
         sendWorkspaceUndockTile={sendWorkspaceUndockTile}
         sendWorkspaceUpdateTile={sendWorkspaceUpdateTile}
         sendWorkspaceMoveLeaf={sendWorkspaceMoveLeaf}
@@ -773,6 +776,7 @@ interface AppContentProps {
   sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
   sendWorkspaceSetSplitRatio: ReturnType<typeof useDaemonSocket>['sendWorkspaceSetSplitRatio'];
+  sendWorkspaceDockTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceDockTile'];
   sendWorkspaceUndockTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceUndockTile'];
   sendWorkspaceUpdateTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceUpdateTile'];
   sendWorkspaceMoveLeaf: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeaf'];
@@ -880,6 +884,7 @@ sendFetchPRDetails,
   sendWorkspaceAddSessionPane,
   sendWorkspaceClosePane,
   sendWorkspaceSetSplitRatio,
+  sendWorkspaceDockTile,
   sendWorkspaceUndockTile,
   sendWorkspaceUpdateTile,
   sendWorkspaceMoveLeaf,
@@ -1719,13 +1724,42 @@ sendFetchPRDetails,
     setNotebookOpen(true);
   }, []);
 
+  // Holds the active workspace id for callbacks that must read it without
+  // re-subscribing to every selection change (assigned by an effect below, once
+  // activeWorkspaceId is derived). Declared here so the notebook-tile dock handler
+  // and the ActionMenu items — both above that derivation — can use it.
+  const activeWorkspaceIdRef = useRef<string | null>(null);
+
+  // Dock a fresh Notebook tile into the active workspace. A unique tile id every
+  // time: the daemon treats a duplicate id as a move, so a shared id would just
+  // relocate the first tile instead of opening a second.
+  const handleOpenNotebookTile = useCallback(() => {
+    const workspaceId = activeWorkspaceIdRef.current;
+    if (!workspaceId) return;
+    const tileId = `notebook-tile-${crypto.randomUUID()}`;
+    void sendWorkspaceDockTile(workspaceId, tileId, 'notebook', { edge: 'right', ratio: 0.4 })
+      .catch((error) => {
+        console.warn('[App] Failed to dock notebook tile:', error);
+      });
+  }, [sendWorkspaceDockTile]);
+
   const actionMenuItems = useMemo<ActionMenuItem[]>(() => [
+    {
+      id: 'notebook-tile',
+      title: 'Open Notebook tile',
+      description: 'Dock the notebook beside your terminals in this workspace',
+      keywords: ['notebook', 'tile', 'knowledge', 'journal', 'dock', 'split'],
+      icon: <ContextActionIcon />,
+      shortcut: [shortcutTokens('notebook.openTile')],
+      run: handleOpenNotebookTile,
+    },
     {
       id: 'notebook',
       title: 'Browse the Notebook',
       description: 'Read the durable, profile-wide markdown knowledge base',
-      keywords: ['notebook', 'knowledge', 'journal', 'decisions', 'chief'],
+      keywords: ['notebook', 'knowledge', 'journal', 'decisions', 'chief', 'fullscreen'],
       icon: <ContextActionIcon />,
+      shortcut: [shortcutTokens('notebook.openFullscreen')],
       run: openNotebookBrowser,
     },
     {
@@ -1753,7 +1787,7 @@ sendFetchPRDetails,
       icon: <KeyboardActionIcon />,
       run: () => setShortcutEditorOpen(true),
     },
-  ], [openDockPanel, openWorkspaceContextNavigator, openNotebookBrowser]);
+  ], [openDockPanel, openWorkspaceContextNavigator, openNotebookBrowser, handleOpenNotebookTile]);
 
   const handleToggleActionMenu = useCallback(() => {
     if (actionMenuOpen) {
@@ -2550,7 +2584,8 @@ sendFetchPRDetails,
     selectedSessionlessWorkspaceId,
   );
   const activeWorkspaceId = workspaceSelection.activeWorkspaceId;
-  const activeWorkspaceIdRef = useRef<string | null>(null);
+  // activeWorkspaceIdRef is declared earlier (near the ActionMenu items); keep it in
+  // sync here, where activeWorkspaceId is derived.
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId;
   }, [activeWorkspaceId]);
@@ -3360,6 +3395,8 @@ sendFetchPRDetails,
     onIncreaseFontSize: increaseScale,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
+    onOpenNotebookTile: handleOpenNotebookTile,
+    onOpenNotebookFullscreen: openNotebookBrowser,
     onQuit: handleQuitApp,
     enabled: !locationPickerOpen
       && !whatsNew.isOpen
@@ -3369,8 +3406,36 @@ sendFetchPRDetails,
       && !notebookOpen,
   });
 
+  // The daemon surface shared by the fullscreen Notebook and every notebook tile.
+  // Memoized so tiles re-render only when a callback identity or a change signal
+  // actually moves.
+  const notebookSurfaceDaemon = useMemo(() => ({
+    listDir: sendFsList,
+    readFile: sendFsRead,
+    writeFile: sendFsWrite,
+    existsFile: sendFsExists,
+    backlinksNotebook: sendNotebookBacklinks,
+    sendToChief: sendNotebookToChief,
+    listTasks: sendNotebookTaskList,
+    retryTask: sendNotebookTaskRetry,
+    changeSignal: fsChangeSignal,
+    taskChangeSignal: notebookTaskChangeSignal,
+  }), [
+    sendFsList,
+    sendFsRead,
+    sendFsWrite,
+    sendFsExists,
+    sendNotebookBacklinks,
+    sendNotebookToChief,
+    sendNotebookTaskList,
+    sendNotebookTaskRetry,
+    fsChangeSignal,
+    notebookTaskChangeSignal,
+  ]);
+
   return (
     <DaemonProvider sendPRAction={sendPRAction} sendMutePR={sendMutePR} sendMuteRepo={sendMuteRepo} sendMuteAuthor={sendMuteAuthor} sendPRVisited={sendPRVisited}>
+    <NotebookSurfaceProvider value={notebookSurfaceDaemon}>
     <div className="app" onPointerDownCapture={handleAppPointerDownCapture}>
       {/* Error banner for version mismatch */}
       {connectionError && (
@@ -3864,6 +3929,7 @@ sendFetchPRDetails,
         onSetTheme={setTheme}
       />
     </div>
+    </NotebookSurfaceProvider>
     </DaemonProvider>
   );
 }

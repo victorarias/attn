@@ -102,7 +102,8 @@
   line-height: 1.55;
 }
 
-.workspace-dock-tile-body--browser {
+.workspace-dock-tile-body--browser,
+.workspace-dock-tile-body--notebook {
   position: relative;
   overflow: hidden;
   padding: 0;

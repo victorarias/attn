@@ -153,6 +153,22 @@
   initial-value: 280px;
 }
 
+/* Tile variant: the surface fills its workspace tile (no overlay/header), with the
+   body grid taking all of the height. The shell + dialog frame is modal-only. */
+.notebook-surface-tile {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  background: var(--color-bg-panel);
+}
+.notebook-surface-tile:focus,
+.notebook-surface-tile:focus-visible {
+  outline: none;
+}
+
 .notebook-browser-body {
   position: relative;
   min-height: 0;
