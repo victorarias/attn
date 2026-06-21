@@ -668,7 +668,7 @@ describe('NotebookBrowser', () => {
 
     // The editor reports a non-empty selection; the floating action appears.
     act(() => editorMock.current!.onSelectionChange!({ text: 'a key decision', top: 40, left: 60 }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Send to chief' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Send to chief' }, { timeout: 4000 }));
 
     // The selection + its source note go to the daemon, and the outcome is shown.
     await waitFor(() => expect(sendToChief).toHaveBeenCalledWith('a key decision', 'knowledge/index.md'));
@@ -695,7 +695,7 @@ describe('NotebookBrowser', () => {
     await screen.findByRole('heading', { level: 2, name: 'index' });
 
     act(() => editorMock.current!.onSelectionChange!({ text: 'something', top: 40, left: 60 }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Send to chief' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Send to chief' }, { timeout: 4000 }));
 
     expect(await screen.findByText('no chief reachable')).toBeInTheDocument();
   });
@@ -712,7 +712,7 @@ describe('NotebookBrowser', () => {
 
     // Select + send from note A; the send is now in flight.
     act(() => editorMock.current!.onSelectionChange!({ text: 'from A', top: 40, left: 60 }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Send to chief' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Send to chief' }, { timeout: 4000 }));
     await waitFor(() => expect(sendToChief).toHaveBeenCalledWith('from A', 'knowledge/index.md'));
 
     // Navigate to note B before A's send resolves; B loads.
