@@ -58,6 +58,11 @@ const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-tile-only-workspace-select'],
   },
   {
+    id: 'notebook-tile-finder',
+    label: 'Notebook tile finder (native Cmd+Opt+N dock, Cmd+P re-summon)',
+    command: ['pnpm', 'run', 'real-app:scenario-notebook-tile-finder'],
+  },
+  {
     id: 'autoclose-on-exit',
     label: 'Auto-close on clean exit, keep failed exits',
     command: ['pnpm', 'run', 'real-app:scenario-autoclose-on-exit'],

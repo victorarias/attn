@@ -187,6 +187,15 @@ export function NotebookSurface({
   const finderEnabled = variant === 'tile' && !!listFiles;
   const [finderOpen, setFinderOpen] = useState(false);
   const { files: finderFiles, loading: finderLoading } = useNotebookFileIndex(listFiles, changeSignal, finderEnabled);
+  // Where to return focus when the finder closes. Captured on open so closing the
+  // finder lands focus back where it was (the editor, usually) rather than letting
+  // it fall to <body> — which would strand Cmd+P, since the re-summon keydown is
+  // scoped to the tile container and only fires when focus is inside the tile.
+  const finderReturnFocusRef = useRef<HTMLElement | null>(null);
+  const openFinder = useCallback(() => {
+    finderReturnFocusRef.current = document.activeElement as HTMLElement | null;
+    setFinderOpen(true);
+  }, []);
   // Re-summon the finder with Cmd+P from inside the tile. Scoped to this container's
   // keydown so it only fires when focus is in THIS tile (two tiles don't fight over
   // one global binding); preventDefault stops the WebView's print dialog. Shift is
@@ -195,9 +204,26 @@ export function NotebookSurface({
     if (event.metaKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'p') {
       event.preventDefault();
       event.stopPropagation();
-      if (finderEnabled) setFinderOpen(true);
+      if (finderEnabled) openFinder();
     }
-  }, [finderEnabled]);
+  }, [finderEnabled, openFinder]);
+  // On close, restore focus inside the tile so Cmd+P keeps working: back to the
+  // element the finder opened over if it's still in this tile, else the tile
+  // container itself. (Runs only on a true→false transition, never on mount.)
+  const finderWasOpenRef = useRef(false);
+  useEffect(() => {
+    if (finderWasOpenRef.current && !finderOpen) {
+      const prev = finderReturnFocusRef.current;
+      finderReturnFocusRef.current = null;
+      const tile = dialogRef.current;
+      if (prev && tile?.contains(prev)) {
+        prev.focus();
+      } else {
+        tile?.focus();
+      }
+    }
+    finderWasOpenRef.current = finderOpen;
+  }, [finderOpen]);
   // The kind/type pill in the note header: a markdown note's frontmatter `type`
   // (defaulting to "note"), or "text" for a plain-text file. Parsed off the loaded
   // content (not the live draft) so it doesn't churn on every keystroke. Self-
@@ -933,7 +959,7 @@ export function NotebookSurface({
                 <button
                   type="button"
                   className="notebook-finder-open-button"
-                  onClick={() => setFinderOpen(true)}
+                  onClick={openFinder}
                 >
                   <span>Find a note</span><kbd>⌘P</kbd>
                 </button>

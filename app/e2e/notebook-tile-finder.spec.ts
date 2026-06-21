@@ -50,6 +50,23 @@ test.describe('NotebookTile finder', () => {
     await expect(page.locator('.cm-editor')).toBeVisible();
   });
 
+  test('Cmd+P re-summons the finder after Esc without re-focusing the tile', async ({ page }) => {
+    // Regression: after Esc closes the finder, focus must stay inside the tile so a
+    // follow-up Cmd+P re-summons it. (Without focus restoration, focus falls to
+    // <body> and the tile-scoped keydown never fires.)
+    await page.goto('/test-harness/?component=NotebookTile&initialPath=');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+
+    // Fresh tile auto-opens the finder; Esc closes it.
+    await expect(page.locator('.notebook-finder')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.notebook-finder')).toHaveCount(0);
+
+    // Cmd+P alone (no click into the tile) must bring it back.
+    await page.keyboard.press('Meta+p');
+    await expect(page.locator('.notebook-finder')).toBeVisible();
+  });
+
   test('a fresh tile (no seed) auto-opens the finder on its empty screen', async ({ page }) => {
     // Empty initialPath → no seed → the no-selection screen with the finder open.
     await page.goto('/test-harness/?component=NotebookTile&initialPath=');
