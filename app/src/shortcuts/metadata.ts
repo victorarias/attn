@@ -99,6 +99,8 @@ export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
   'ui.increaseFontSize': { label: 'Increase font size', category: 'app' },
   'ui.decreaseFontSize': { label: 'Decrease font size', category: 'app' },
   'ui.resetFontSize': { label: 'Reset font size', category: 'app' },
+  'notebook.openTile': { label: 'Open Notebook tile', category: 'app' },
+  'notebook.openFullscreen': { label: 'Open Notebook fullscreen', category: 'app' },
   'app.quit': { label: 'Quit attn', category: 'app', protected: true },
 };
 

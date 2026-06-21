@@ -33,9 +33,10 @@ export interface NotebookSurfaceProps {
   initialPath?: string | null;
   // Modal close (persist-then-close). A tile has no Close button, so it omits this.
   onClose?: () => void;
-  // Called when a tile opens a file, so the parent can persist the path to the
-  // tile's params. Modal ignores it (its selection isn't persisted).
-  onOpenFile?: (path: string | null) => void;
+  // Called when a tile opens a file (a real path — never the cleared/no-selection
+  // state), so the parent can persist the path to the tile's params. Modal ignores
+  // it (its selection isn't persisted).
+  onOpenFile?: (path: string) => void;
   // List one directory's immediate children over the daemon's generic filesystem
   // surface. '' = the notebook root. Drives the lazy folder tree in the sidebar.
   listDir: (path: string) => Promise<FsEntry[]>;

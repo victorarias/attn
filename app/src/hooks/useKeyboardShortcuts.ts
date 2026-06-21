@@ -26,6 +26,8 @@ interface KeyboardShortcutsConfig {
   onIncreaseFontSize?: () => void;
   onDecreaseFontSize?: () => void;
   onResetFontSize?: () => void;
+  onOpenNotebookTile?: () => void;
+  onOpenNotebookFullscreen?: () => void;
   onQuit?: () => void;
   enabled: boolean;
 }
@@ -53,6 +55,8 @@ export function useKeyboardShortcuts({
   onIncreaseFontSize,
   onDecreaseFontSize,
   onResetFontSize,
+  onOpenNotebookTile,
+  onOpenNotebookFullscreen,
   onQuit,
   enabled,
 }: KeyboardShortcutsConfig) {
@@ -97,6 +101,10 @@ export function useKeyboardShortcuts({
   useShortcut('ui.increaseFontSize', onIncreaseFontSize ?? (() => {}), !!onIncreaseFontSize);
   useShortcut('ui.decreaseFontSize', onDecreaseFontSize ?? (() => {}), !!onDecreaseFontSize);
   useShortcut('ui.resetFontSize', onResetFontSize ?? (() => {}), !!onResetFontSize);
+
+  // Notebook: dock a tile into the active workspace, or open the fullscreen modal.
+  useShortcut('notebook.openTile', onOpenNotebookTile ?? (() => {}), enabled && !!onOpenNotebookTile);
+  useShortcut('notebook.openFullscreen', onOpenNotebookFullscreen ?? (() => {}), enabled && !!onOpenNotebookFullscreen);
 
   useEffect(() => {
     const preventWindowCloseShortcut = (e: KeyboardEvent) => {

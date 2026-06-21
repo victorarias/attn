@@ -50,6 +50,11 @@ export function deriveTileTitle(tile: TileLeaf, content?: TileContentState): str
     const fromContent = markdownTitle(content.content);
     if (fromContent) return fromContent;
   }
+  // A notebook tile self-serves its content, so there's no `content` to title from:
+  // show the open file's name, or a plain label before anything is opened.
+  if (tile.tileKind === 'notebook') {
+    return tile.tileParams ? tilePathBasename(tile.tileParams) : 'Notebook';
+  }
   const path = content?.path || tile.tileParams || '';
   return path ? tilePathBasename(path) : tile.tileKind;
 }
