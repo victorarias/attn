@@ -721,6 +721,14 @@ model FsWriteMessage {
   request_id?: string; // set by the WS frontend to correlate the result event
 }
 
+// Check whether a path exists under the root, without reading it. Used to flag
+// in-notebook markdown links that point at a missing note.
+model FsExistsMessage {
+  cmd: "fs_exists";
+  path: string;
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
 model DelegateWorktreeRequest {
   repo?: string;
   branch: string;
@@ -2363,6 +2371,19 @@ model FsWriteResultMessage {
   success: boolean;
   error?: string;
   result?: FsWriteResult;
+}
+
+model FsExistsResult {
+  path: string;
+  exists: boolean;
+}
+
+model FsExistsResultMessage {
+  event: "fs_exists_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  result?: FsExistsResult;
 }
 
 // Broadcast when files under the root change. origin is agent|ui|external, the

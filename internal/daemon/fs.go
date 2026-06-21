@@ -135,6 +135,32 @@ func (d *Daemon) sendFsWriteWSResult(client *wsClient, requestID, path, content,
 	d.sendToClient(client, msg)
 }
 
+// sendFsExistsWSResult reports whether a path exists under the root and replies
+// with an fs_exists_result event correlated by requestID. It does not read the
+// file — the frontend uses it to flag an in-notebook link whose target note is
+// missing. A path that fails to validate (escapes the root, dotfile) is an error
+// the frontend treats as "unknown, leave the link unflagged", not as "missing".
+func (d *Daemon) sendFsExistsWSResult(client *wsClient, requestID, path string) {
+	var result *protocol.FsExistsResult
+	store, err := d.fsStoreFor()
+	if err == nil {
+		var exists bool
+		if exists, err = store.Exists(path); err == nil {
+			result = &protocol.FsExistsResult{Path: path, Exists: exists}
+		}
+	}
+	msg := protocol.FsExistsResultMessage{
+		Event:     protocol.EventFsExistsResult,
+		RequestID: requestID,
+		Success:   err == nil,
+		Result:    result,
+	}
+	if err != nil {
+		msg.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, msg)
+}
+
 // fsEntriesToProtocol converts store entries to their protocol shape.
 func fsEntriesToProtocol(entries []fsdoc.Entry) []protocol.FsEntry {
 	out := make([]protocol.FsEntry, len(entries))

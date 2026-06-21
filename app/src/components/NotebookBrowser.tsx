@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
-import type { FsEntry, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult, NotebookTask } from '../hooks/useDaemonSocket';
+import type { FsEntry, FsExistsResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult, NotebookTask } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import { FileTree } from './notebook/FileTree';
 import { fileKind, isBinaryPath, isMarkdownPath } from './notebook/fileKind';
@@ -19,6 +19,9 @@ interface NotebookBrowserProps {
   // Save an edited file (hash-CAS). Omit baseHash to create-only; pass the file's
   // loaded hash to edit. Resolves with the outcome, including a conflict to reconcile.
   writeFile: (path: string, content: string, baseHash?: string) => Promise<FsWriteResult>;
+  // Check whether an in-notebook link target exists (no read), to flag broken links
+  // in the editor. Only consulted for markdown notes.
+  existsFile: (path: string) => Promise<FsExistsResult>;
   // Backlinks ("Linked from") for a markdown note. Notebook-specific (walks .md link
   // graphs), so it is only consulted for .md files.
   backlinksNotebook: (path: string) => Promise<NotebookEntry[]>;
@@ -63,6 +66,7 @@ export function NotebookBrowser({
   listDir,
   readFile,
   writeFile,
+  existsFile,
   backlinksNotebook,
   sendToChief,
   changeSignal = 0,
@@ -781,6 +785,8 @@ export function NotebookBrowser({
                           onChange={setDraft}
                           onFollowLink={handleFollowLink}
                           onSelectionChange={handleSelectionChange}
+                          existsFile={existsFile}
+                          revalidateSignal={changeSignal}
                           ariaLabel="Note"
                         />
                       ) : (

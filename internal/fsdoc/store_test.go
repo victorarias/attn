@@ -180,6 +180,46 @@ func TestWriteRejectsOversizeContent(t *testing.T) {
 	}
 }
 
+// Exists reports presence without reading: true for a real file or directory,
+// false for a genuinely absent path (no error — that's the "broken link" signal).
+func TestExists(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "knowledge", "areas", "foo.md"), "x")
+	s := NewStore(root)
+
+	for _, tc := range []struct {
+		path string
+		want bool
+	}{
+		{"knowledge/areas/foo.md", true},  // a real file
+		{"/knowledge/areas/foo.md", true}, // root-absolute form resolves the same
+		{"knowledge/areas", true},         // a directory exists too
+		{"knowledge/areas/missing.md", false},
+		{"nope/at/all.md", false},
+	} {
+		got, err := s.Exists(tc.path)
+		if err != nil {
+			t.Fatalf("Exists(%q) err = %v", tc.path, err)
+		}
+		if got != tc.want {
+			t.Fatalf("Exists(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+}
+
+// A path the rules reject outright (the root itself, or a dotfile/dotdir segment)
+// is an error, not a false — the caller leaves such a link unflagged rather than
+// calling it broken. (A `..` escape is not an error: cleanRel clamps it back inside
+// the root, where it is simply checked for existence like any other path.)
+func TestExistsInvalidPathErrors(t *testing.T) {
+	s := NewStore(t.TempDir())
+	for _, p := range []string{"", ".secret", "dir/.git/config"} {
+		if _, err := s.Exists(p); err == nil {
+			t.Fatalf("Exists(%q) err = nil, want an error", p)
+		}
+	}
+}
+
 // Lexical escapes (.. above the root) are rejected by every operation.
 func TestPathEscapesRejected(t *testing.T) {
 	s := NewStore(t.TempDir())

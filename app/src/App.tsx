@@ -485,6 +485,7 @@ function App() {
     sendFsList,
     sendFsRead,
     sendFsWrite,
+    sendFsExists,
     sendNotebookTaskList,
     sendNotebookTaskRetry,
     sendNotebookBacklinks,
@@ -637,6 +638,7 @@ function App() {
         sendFsList={sendFsList}
         sendFsRead={sendFsRead}
         sendFsWrite={sendFsWrite}
+        sendFsExists={sendFsExists}
         sendNotebookTaskList={sendNotebookTaskList}
         sendNotebookTaskRetry={sendNotebookTaskRetry}
         sendNotebookBacklinks={sendNotebookBacklinks}
@@ -749,6 +751,7 @@ interface AppContentProps {
   sendFsList: ReturnType<typeof useDaemonSocket>['sendFsList'];
   sendFsRead: ReturnType<typeof useDaemonSocket>['sendFsRead'];
   sendFsWrite: ReturnType<typeof useDaemonSocket>['sendFsWrite'];
+  sendFsExists: ReturnType<typeof useDaemonSocket>['sendFsExists'];
   sendNotebookTaskList: ReturnType<typeof useDaemonSocket>['sendNotebookTaskList'];
   sendNotebookTaskRetry: ReturnType<typeof useDaemonSocket>['sendNotebookTaskRetry'];
   sendNotebookBacklinks: ReturnType<typeof useDaemonSocket>['sendNotebookBacklinks'];
@@ -855,6 +858,7 @@ function AppContent({
   sendFsList,
   sendFsRead,
   sendFsWrite,
+  sendFsExists,
   sendNotebookTaskList,
   sendNotebookTaskRetry,
   sendNotebookBacklinks,
@@ -3795,6 +3799,7 @@ sendFetchPRDetails,
         listDir={sendFsList}
         readFile={sendFsRead}
         writeFile={sendFsWrite}
+        existsFile={sendFsExists}
         backlinksNotebook={sendNotebookBacklinks}
         sendToChief={sendNotebookToChief}
         changeSignal={fsChangeSignal}

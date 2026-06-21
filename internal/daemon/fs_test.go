@@ -45,6 +45,16 @@ func listFs(t *testing.T, d *Daemon, dir string) []protocol.FsEntry {
 	return res.Entries
 }
 
+// fsExists checks one path over the WS fs path and returns the decoded result event.
+func fsExists(t *testing.T, d *Daemon, path string) protocol.FsExistsResultMessage {
+	t.Helper()
+	client := &wsClient{send: make(chan outboundMessage, 8)}
+	d.sendFsExistsWSResult(client, "setup-fs-exists", path)
+	var res protocol.FsExistsResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	return res
+}
+
 // waitForFsChange returns the paths of the first fs_changed broadcast matching the
 // given origin, ignoring other events (notebook_changed, other origins).
 func waitForFsChange(t *testing.T, ch chan outboundMessage, origin string) []string {
@@ -112,6 +122,32 @@ func TestFsWriteListReadWSResults(t *testing.T) {
 	}
 }
 
+// fs_exists answers presence without reading: a present file is exists=true, a
+// genuinely absent path is a successful exists=false (the broken-link signal), and a
+// path the rules reject (a dotfile) is a failed result the UI leaves unflagged.
+func TestFsExistsWSResults(t *testing.T) {
+	d := newFsDaemon(t)
+	if c := fsWriteCAS(t, d, "knowledge/areas/foo.md", "x", ""); !c.Success || c.Result == nil {
+		t.Fatalf("seed write = %+v", c.Result)
+	}
+
+	present := fsExists(t, d, "/knowledge/areas/foo.md")
+	if present.Event != protocol.EventFsExistsResult || present.RequestID != "setup-fs-exists" ||
+		!present.Success || present.Result == nil || !present.Result.Exists {
+		t.Fatalf("exists(present) = %+v", present)
+	}
+
+	absent := fsExists(t, d, "/knowledge/areas/missing.md")
+	if !absent.Success || absent.Result == nil || absent.Result.Exists {
+		t.Fatalf("exists(absent) = %+v, want a successful exists=false", absent)
+	}
+
+	bad := fsExists(t, d, ".secret")
+	if bad.Success || bad.Error == nil {
+		t.Fatalf("exists(dotfile) = %+v, want a failed result with error", bad)
+	}
+}
+
 // fs_write is hash-CAS: a stale base hash comes back as a successful result
 // carrying conflict=true (for the UI to reconcile), and a matching base applies.
 func TestFsWriteWSResultSaveAndConflict(t *testing.T) {
@@ -167,6 +203,16 @@ func TestFsDispatchThroughClientMessage(t *testing.T) {
 	readNotebookWSEvent(t, client.send, &read)
 	if read.RequestID != "r1" || !read.Success || read.Result == nil || read.Result.Content != "# hi\n" {
 		t.Fatalf("read dispatch = %+v", read.Result)
+	}
+
+	// fs_exists with request_id AND path set: assert both correlation and that the
+	// just-written note resolves as present (a swapped Deref would misroute either).
+	d.handleClientMessage(client, []byte(`{"cmd":"fs_exists","request_id":"e1","path":"docs/readme.md"}`))
+	var exists protocol.FsExistsResultMessage
+	readNotebookWSEvent(t, client.send, &exists)
+	if exists.RequestID != "e1" || !exists.Success || exists.Result == nil ||
+		exists.Result.Path != "docs/readme.md" || !exists.Result.Exists {
+		t.Fatalf("exists dispatch = %+v", exists)
 	}
 }
 

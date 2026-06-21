@@ -172,7 +172,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '116';
+export const PROTOCOL_VERSION = '117';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -469,6 +469,14 @@ export interface FsWriteResult {
   hash?: string;
   conflict: boolean;
   currentHash?: string;
+}
+
+// Whether a path exists under the notebook root, without reading it. Used to flag
+// an in-notebook markdown link whose target note is missing. Mirrors the daemon's
+// protocol.FsExistsResult.
+export interface FsExistsResult {
+  path: string;
+  exists: boolean;
 }
 
 interface UseDaemonSocketOptions {
@@ -1597,6 +1605,28 @@ export function useDaemonSocket({
               });
             } else {
               pending.reject(new Error(data.error || 'Filesystem write failed'));
+            }
+            break;
+          }
+
+          case 'fs_exists_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `fs_exists:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success && data.result) {
+              pending.resolve({
+                path: data.result.path,
+                exists: !!data.result.exists,
+              });
+            } else {
+              pending.reject(new Error(data.error || 'Filesystem exists check failed'));
             }
             break;
           }
@@ -4083,6 +4113,29 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
+  // Check whether a path exists under the notebook root, without reading it. Used
+  // to flag in-notebook markdown links whose target note is missing. Rejects on a
+  // transport/daemon error (the caller leaves the link unflagged in that case).
+  const sendFsExists = useCallback((path: string): Promise<FsExistsResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('fs_exists');
+      const key = `fs_exists:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'fs_exists', request_id: requestId, path }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Filesystem exists check timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
   // Get recent locations from daemon
   const sendGetRecentLocations = useCallback((endpointId?: string, limit?: number): Promise<RecentLocationsResult> => {
     return new Promise((resolve, reject) => {
@@ -4829,6 +4882,7 @@ export function useDaemonSocket({
     sendFsList,
     sendFsRead,
     sendFsWrite,
+    sendFsExists,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,

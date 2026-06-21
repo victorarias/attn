@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-21]
+
+### Added
+- **Broken Notebook links are flagged as you write.** When a note links to another note that doesn't exist — a typo in the path, or a note you haven't created yet — the link now shows in red with a ⚠ instead of looking like a working link. Links to real notes stay normal, and external links (http/https, email) are never flagged. If an agent or you create the missing note, its links clear their flag once the Notebook refreshes.
+
 ## [2026-06-20]
 
 ### Changed
