@@ -541,6 +541,26 @@ func TestWorkspaceLayoutDockTilePersistsAndMoves(t *testing.T) {
 		t.Fatalf("browser tile params after rejected URL = (%q, %v), want (%q, true)", params, ok, "https://example.com/docs")
 	}
 
+	// A notebook tile docks empty (its no-selection picker) and accepts a later
+	// file-path update through the same client path the user's file pick uses.
+	if err := d.dockTile(workspaceID, "pane-1", "tile-notebook", string(workspacelayout.TileKindNotebook), "", protocol.WorkspaceLayoutDockEdgeLeft, nil); err != nil {
+		t.Fatalf("dock notebook tile: %v", err)
+	}
+	if params, ok := workspacelayout.TileParamsByID(d.store.GetWorkspaceLayout(workspaceID).Layout, "tile-notebook"); !ok || params != "" {
+		t.Fatalf("fresh notebook tile params = (%q, %v), want empty", params, ok)
+	}
+	d.handleWorkspaceLayoutUpdateTile(client, &protocol.WorkspaceLayoutUpdateTileMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutUpdateTile,
+		WorkspaceID: workspaceID,
+		TileID:      "tile-notebook",
+		TileParams:  "/notes/knowledge/decisions.md",
+		RequestID:   "request-update-notebook",
+	})
+	expectWorkspaceLayoutActionResultIDsAndRequestID(t, client, protocol.CmdWorkspaceLayoutUpdateTile, workspaceID, "", "", "tile-notebook", "request-update-notebook", true)
+	if params, ok := workspacelayout.TileParamsByID(d.store.GetWorkspaceLayout(workspaceID).Layout, "tile-notebook"); !ok || params != "/notes/knowledge/decisions.md" {
+		t.Fatalf("notebook tile params after update = (%q, %v), want the opened path", params, ok)
+	}
+
 	// Undock removes the tile and collapses its split; the panes are untouched.
 	d.handleWorkspaceLayoutUndockTile(client, &protocol.WorkspaceLayoutUndockTileMessage{
 		Cmd:         protocol.CmdWorkspaceLayoutUndockTile,

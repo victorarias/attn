@@ -580,7 +580,27 @@ func (d *Daemon) handleWorkspaceLayoutUpdateTile(client *wsClient, msg *protocol
 		)
 		return
 	}
-	if tileKind != string(workspacelayout.TileKindBrowser) {
+	// Only tiles whose content is client-retargetable accept param updates.
+	// Browser tiles carry a validated URL; notebook tiles carry an opaque file
+	// path the Notebook surface resolves itself, so it passes through as-is.
+	// Markdown tiles are assigned once at dock time and never updated here.
+	switch tileKind {
+	case string(workspacelayout.TileKindBrowser):
+		tileParams, err = validateBrowserURL(tileParams)
+		if err != nil {
+			d.sendWorkspaceLayoutTileActionResultWithRequest(
+				client,
+				protocol.CmdWorkspaceLayoutUpdateTile,
+				msg.WorkspaceID,
+				tileID,
+				requestID,
+				err,
+			)
+			return
+		}
+	case string(workspacelayout.TileKindNotebook):
+		// tileParams is the open file's path — opaque here, already trimmed.
+	default:
 		d.sendWorkspaceLayoutTileActionResultWithRequest(
 			client,
 			protocol.CmdWorkspaceLayoutUpdateTile,
@@ -588,18 +608,6 @@ func (d *Daemon) handleWorkspaceLayoutUpdateTile(client *wsClient, msg *protocol
 			tileID,
 			requestID,
 			fmt.Errorf("tile parameters cannot be updated for tile kind %q", tileKind),
-		)
-		return
-	}
-	tileParams, err = validateBrowserURL(tileParams)
-	if err != nil {
-		d.sendWorkspaceLayoutTileActionResultWithRequest(
-			client,
-			protocol.CmdWorkspaceLayoutUpdateTile,
-			msg.WorkspaceID,
-			tileID,
-			requestID,
-			err,
 		)
 		return
 	}
