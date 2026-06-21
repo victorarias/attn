@@ -3000,6 +3000,34 @@ export function useDaemonSocket({
     );
   }, [nextRequestID, sendWorkspaceCommand]);
 
+  // Dock a new tile into a workspace layout beside an anchor leaf. Unlike the
+  // daemon-initiated markdown/browser docks (the `attn open` unix path), this is
+  // the in-app entry used by notebook tile mode. Each dock MUST pass a unique
+  // tileId: the daemon treats a duplicate id as a move, so a repeated id would
+  // relocate the existing tile instead of adding a second one. anchorPaneId
+  // defaults to '' (the daemon falls back to the active leaf, then the first).
+  const sendWorkspaceDockTile = useCallback((
+    workspaceId: string,
+    tileId: string,
+    tileKind: string,
+    options: { anchorPaneId?: string; edge?: TerminalDockEdge; ratio?: number } = {},
+  ) => {
+    return sendWorkspaceCommand(
+      'workspace_layout_dock_tile',
+      workspaceId,
+      {
+        cmd: 'workspace_layout_dock_tile',
+        workspace_id: workspaceId,
+        anchor_pane_id: options.anchorPaneId ?? '',
+        tile_id: tileId,
+        tile_kind: tileKind,
+        edge: options.edge ?? 'right',
+        ...(options.ratio != null ? { ratio: options.ratio } : {}),
+      },
+      tileId,
+    );
+  }, [sendWorkspaceCommand]);
+
   const sendWorkspaceUndockTile = useCallback((workspaceId: string, tileId: string) => {
     return sendWorkspaceCommand(
       'workspace_layout_undock_tile',
@@ -4900,6 +4928,7 @@ export function useDaemonSocket({
     sendWorkspaceFocusPane,
     sendWorkspaceRenamePane,
     sendWorkspaceSetSplitRatio,
+    sendWorkspaceDockTile,
     sendWorkspaceUndockTile,
     sendWorkspaceUpdateTile,
     sendWorkspaceMoveLeaf,
