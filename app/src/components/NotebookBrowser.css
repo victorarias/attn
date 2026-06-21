@@ -104,6 +104,12 @@
   grid-template-columns: minmax(230px, 320px) minmax(0, 1fr);
 }
 
+/* A markdown note adds the right context rail (outline + backlinks) as a third
+   column; text/binary files keep the two-column layout, so the document widens. */
+.notebook-browser-body.has-rail {
+  grid-template-columns: minmax(230px, 320px) minmax(0, 1fr) minmax(232px, 296px);
+}
+
 .notebook-browser-list {
   min-height: 0;
   overflow-y: auto;
@@ -397,32 +403,126 @@
   color: var(--color-danger, #e5484d);
 }
 
-/* Backlinks sit in a fixed strip at the foot of the document pane (stage 3 moves
-   them to the right context rail). It scrolls on its own if there are many. */
-.notebook-browser-backlinks {
-  flex: none;
-  max-height: 132px;
+/* --- Right context rail: outline + backlinks for the open markdown note --- */
+.notebook-browser-rail {
+  min-height: 0;
   overflow-y: auto;
-  margin: 0;
-  padding: 14px clamp(28px, 6vw, 90px) 18px;
+  padding: 16px 12px;
+  background: color-mix(in srgb, var(--color-bg-app) 58%, transparent);
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+.notebook-browser-rail-section + .notebook-browser-rail-section {
+  margin-top: 16px;
+  padding-top: 12px;
   border-top: 1px solid var(--color-border-subtle);
 }
 
-.notebook-browser-backlinks h3 {
-  margin: 0 0 10px;
+.notebook-browser-rail-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 6px 8px;
   color: var(--color-text-muted);
-  font: 700 10px/1 ui-monospace, monospace;
-  letter-spacing: 0.09em;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: 700 9px/1 ui-monospace, monospace;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
-.notebook-browser-backlinks-empty {
-  margin: 0;
-  color: var(--color-text-dimmed);
-  font-size: 12px;
+.notebook-browser-rail-caret {
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  transition: transform 120ms ease;
 }
 
-.notebook-browser-backlinks ul {
+.notebook-browser-rail-caret.is-open {
+  transform: rotate(90deg);
+}
+
+.notebook-browser-rail-title {
+  flex: 1;
+  text-align: left;
+}
+
+.notebook-browser-rail-count {
+  padding: 1px 6px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border-radius: 8px;
+  font-size: 9px;
+}
+
+.notebook-browser-rail-body {
+  padding: 0 2px;
+}
+
+.notebook-browser-rail-empty {
+  margin: 0;
+  padding: 2px 6px 4px;
+  color: var(--color-text-dimmed);
+  font-size: 11px;
+}
+
+/* Outline: indented jump-to-heading list. Indent grows with heading depth. */
+.notebook-browser-outline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notebook-browser-outline-item {
+  width: 100%;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 8px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.notebook-browser-outline-item:hover {
+  color: var(--color-text-primary);
+  background: color-mix(in srgb, var(--color-bg-elevated) 60%, transparent);
+}
+
+.notebook-browser-outline-item.is-h1 {
+  font-weight: 620;
+  color: var(--color-text-primary);
+}
+
+.notebook-browser-outline-item.is-h2 {
+  padding-left: 18px;
+}
+
+.notebook-browser-outline-item.is-h3 {
+  padding-left: 30px;
+  font-size: 11.5px;
+}
+
+.notebook-browser-outline-item.is-h4,
+.notebook-browser-outline-item.is-h5,
+.notebook-browser-outline-item.is-h6 {
+  padding-left: 42px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+
+/* Backlinks: a card per source note — title over its mono path. */
+.notebook-browser-backlinks {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -431,20 +531,41 @@
   gap: 6px;
 }
 
-.notebook-browser-backlinks button {
-  padding: 6px 10px;
-  color: var(--color-text-secondary);
+.notebook-browser-backlink {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 10px;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-subtle);
   border-radius: 7px;
   cursor: pointer;
-  font-size: 12px;
   text-align: left;
 }
 
-.notebook-browser-backlinks button:hover {
+.notebook-browser-backlink:hover {
+  border-color: var(--accent);
+}
+
+.notebook-browser-backlink-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.notebook-browser-backlink:hover .notebook-browser-backlink-title {
   color: var(--color-text-primary);
-  border-color: var(--color-border);
+}
+
+.notebook-browser-backlink-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+  font: 10px/1.3 ui-monospace, 'SFMono-Regular', monospace;
 }
 
 /* --- Tasks panel (durable runner), sits at the bottom of the note list --- */
@@ -672,7 +793,12 @@
 @media (max-width: 760px) {
   .notebook-browser-shell { padding: 0; }
   .notebook-browser { border: 0; border-radius: 0; }
-  .notebook-browser-body { grid-template-columns: 200px minmax(0, 1fr); }
+  .notebook-browser-body,
+  .notebook-browser-body.has-rail { grid-template-columns: 200px minmax(0, 1fr); }
+  /* The context rail folds away on narrow widths until stage 5 adds real
+     width-responsive pane folding; the outline/backlinks aren't lost — they
+     return when the window widens. */
+  .notebook-browser-rail { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

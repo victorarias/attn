@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
 import type { FsEntry, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult, NotebookTask } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import { FileTree } from './notebook/FileTree';
 import { fileKind, isBinaryPath, isMarkdownPath } from './notebook/fileKind';
-import { LiveMarkdownEditor, type LiveSelection } from './notebook/LiveMarkdownEditor';
+import { LiveMarkdownEditor, type LiveMarkdownEditorHandle, type LiveSelection } from './notebook/LiveMarkdownEditor';
+import { parseOutline } from './notebook/outline';
 import './NotebookBrowser.css';
 
 interface NotebookBrowserProps {
@@ -110,6 +111,13 @@ export function NotebookBrowser({
   // users land inside the modal (engaging the focus trap) without auto-selecting
   // the Close button. Tab from here moves to the first interactive control.
   const dialogRef = useRef<HTMLDivElement>(null);
+  // Imperative handle to the live editor, so the context rail's outline can scroll
+  // the editor to a heading (navigation that originates outside the editor).
+  const editorRef = useRef<LiveMarkdownEditorHandle>(null);
+  // The right context rail's two sections fold independently; both open by default so
+  // the outline and backlinks are visible without a click. Local UI state only.
+  const [outlineOpen, setOutlineOpen] = useState(true);
+  const [backlinksOpen, setBacklinksOpen] = useState(true);
 
   // Closing with unsaved edits persists them first; if that write conflicts (or
   // errors) we keep the modal open so the conflict banner can be reconciled, rather
@@ -574,10 +582,23 @@ export function NotebookBrowser({
     setChiefSel(selection);
   }, []);
 
+  // The outline is a markdown affordance only, derived from the LIVE buffer so it
+  // tracks edits as you type. Indexing into `draft` keeps heading positions aligned
+  // with what the editor holds, so a jump lands on the right line. (Hook: must run
+  // before the isOpen early return, so it is gated by the path kind, not by render.)
+  const selectedIsMarkdown = selectedPath ? isMarkdownPath(selectedPath) : false;
+  const outline = useMemo(
+    () => (selectedIsMarkdown ? parseOutline(draft) : []),
+    [selectedIsMarkdown, draft],
+  );
+
   if (!isOpen) return null;
 
   const selectedKind = selectedPath ? fileKind(selectedPath) : null;
   const showBinaryPlaceholder = selectedPath !== null && selectedKind === 'binary';
+  // The context rail (outline + backlinks) is a markdown-document affordance; a text
+  // or binary file shows neither, so it keeps the two-pane layout (no empty rail).
+  const showRail = selectedKind === 'markdown' && !!note;
   // A single live save indicator (the error itself is surfaced by its own banner).
   const saveStatus = saveError
     ? null
@@ -606,7 +627,7 @@ export function NotebookBrowser({
             </button>
           </header>
 
-          <div className="notebook-browser-body">
+          <div className={`notebook-browser-body${showRail ? ' has-rail' : ''}`}>
             <aside className="notebook-browser-list" aria-label="Notebook files">
               <FileTree
                 listDir={listDir}
@@ -755,6 +776,7 @@ export function NotebookBrowser({
                     <div className="notebook-browser-live-editor">
                       {selectedKind === 'markdown' ? (
                         <LiveMarkdownEditor
+                          ref={editorRef}
                           value={draft}
                           onChange={setDraft}
                           onFollowLink={handleFollowLink}
@@ -772,26 +794,6 @@ export function NotebookBrowser({
                       )}
                     </div>
                   </div>
-                  {selectedKind === 'markdown' && (
-                    <section className="notebook-browser-backlinks" aria-label="Backlinks">
-                      <h3>Linked from {!backlinksLoading && backlinks.length > 0 ? `(${backlinks.length})` : ''}</h3>
-                      {backlinksLoading ? (
-                        <p className="notebook-browser-backlinks-empty">Finding backlinks…</p>
-                      ) : backlinks.length === 0 ? (
-                        <p className="notebook-browser-backlinks-empty">No other note links here.</p>
-                      ) : (
-                        <ul>
-                          {backlinks.map((entry) => (
-                            <li key={entry.path}>
-                              <button type="button" onClick={() => void loadFile(entry.path)} title={entry.path}>
-                                {entry.title || basename(entry.path)}
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </section>
-                  )}
                 </>
               )}
               {!noteLoading && !noteError && !showBinaryPlaceholder && !note && (
@@ -802,6 +804,92 @@ export function NotebookBrowser({
                 </div>
               )}
             </main>
+
+            {showRail && (
+              <aside className="notebook-browser-rail" aria-label="Context">
+                <section className="notebook-browser-rail-section">
+                  <button
+                    type="button"
+                    className="notebook-browser-rail-toggle"
+                    aria-expanded={outlineOpen}
+                    onClick={() => setOutlineOpen((open) => !open)}
+                  >
+                    <span className={`notebook-browser-rail-caret${outlineOpen ? ' is-open' : ''}`} aria-hidden="true" />
+                    <span className="notebook-browser-rail-title">Outline</span>
+                    {outlineOpen && outline.length > 0 && (
+                      <span className="notebook-browser-rail-count">{outline.length}</span>
+                    )}
+                  </button>
+                  {outlineOpen && (
+                    <div className="notebook-browser-rail-body">
+                      {outline.length === 0 ? (
+                        <p className="notebook-browser-rail-empty">No headings.</p>
+                      ) : (
+                        <ul className="notebook-browser-outline">
+                          {outline.map((heading) => (
+                            <li key={`${heading.line}:${heading.pos}`}>
+                              <button
+                                type="button"
+                                className={`notebook-browser-outline-item is-h${heading.level}`}
+                                onClick={() => editorRef.current?.scrollToPos(heading.pos)}
+                                title={heading.text}
+                              >
+                                {heading.text}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </section>
+
+                <section className="notebook-browser-rail-section">
+                  <button
+                    type="button"
+                    className="notebook-browser-rail-toggle"
+                    aria-expanded={backlinksOpen}
+                    onClick={() => setBacklinksOpen((open) => !open)}
+                  >
+                    <span className={`notebook-browser-rail-caret${backlinksOpen ? ' is-open' : ''}`} aria-hidden="true" />
+                    <span className="notebook-browser-rail-title">Backlinks</span>
+                    {backlinksOpen && !backlinksLoading && backlinks.length > 0 && (
+                      <span className="notebook-browser-rail-count">{backlinks.length}</span>
+                    )}
+                  </button>
+                  {backlinksOpen && (
+                    <div className="notebook-browser-rail-body">
+                      {backlinksLoading ? (
+                        <p className="notebook-browser-rail-empty">Finding backlinks…</p>
+                      ) : backlinks.length === 0 ? (
+                        <p className="notebook-browser-rail-empty">No other note links here.</p>
+                      ) : (
+                        <ul className="notebook-browser-backlinks">
+                          {backlinks.map((entry) => (
+                            <li key={entry.path}>
+                              <button
+                                type="button"
+                                className="notebook-browser-backlink"
+                                onClick={() => void loadFile(entry.path)}
+                                title={entry.path}
+                                // The visible card shows title over a mono path; the
+                                // accessible name is just the title (the path is visual
+                                // detail), so AT announces which note links here, not a
+                                // path read out character by character.
+                                aria-label={entry.title || basename(entry.path)}
+                              >
+                                <span className="notebook-browser-backlink-title">{entry.title || basename(entry.path)}</span>
+                                <span className="notebook-browser-backlink-path">{entry.path}</span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </section>
+              </aside>
+            )}
           </div>
           {chiefSel && (
             <button

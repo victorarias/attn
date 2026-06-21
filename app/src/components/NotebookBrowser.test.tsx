@@ -13,32 +13,43 @@ const editorMock = vi.hoisted(() => ({
     onFollowLink?: (href: string) => void;
     onSelectionChange?: (sel: { text: string; top: number; left: number } | null) => void;
   },
+  // Character offsets passed to the editor's imperative scrollToPos handle, so a test
+  // can assert the outline jumped the editor to a heading (the real scroll is a CM
+  // browser behavior, covered by the Playwright harness).
+  scrollCalls: [] as number[],
 }));
 
-vi.mock('./notebook/LiveMarkdownEditor', () => ({
-  LiveMarkdownEditor: ({
-    value,
-    onChange,
-    onFollowLink,
-    onSelectionChange,
-    ariaLabel,
-  }: {
-    value: string;
-    onChange: (value: string) => void;
-    onFollowLink?: (href: string) => void;
-    onSelectionChange?: (sel: { text: string; top: number; left: number } | null) => void;
-    ariaLabel?: string;
-  }) => {
-    editorMock.current = { onFollowLink, onSelectionChange };
-    return (
-      <textarea
-        aria-label={ariaLabel ?? 'Note'}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    );
-  },
-}));
+vi.mock('./notebook/LiveMarkdownEditor', async () => {
+  const { forwardRef, useImperativeHandle } = await import('react');
+  return {
+    LiveMarkdownEditor: forwardRef(function MockLiveMarkdownEditor(
+      {
+        value,
+        onChange,
+        onFollowLink,
+        onSelectionChange,
+        ariaLabel,
+      }: {
+        value: string;
+        onChange: (value: string) => void;
+        onFollowLink?: (href: string) => void;
+        onSelectionChange?: (sel: { text: string; top: number; left: number } | null) => void;
+        ariaLabel?: string;
+      },
+      ref: React.Ref<{ scrollToPos: (pos: number) => void }>,
+    ) {
+      editorMock.current = { onFollowLink, onSelectionChange };
+      useImperativeHandle(ref, () => ({ scrollToPos: (pos: number) => editorMock.scrollCalls.push(pos) }), []);
+      return (
+        <textarea
+          aria-label={ariaLabel ?? 'Note'}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      );
+    }),
+  };
+});
 
 // A fixture filesystem the lazy sidebar tree lists per-directory ('' = root). The root
 // holds two folders plus a plain-text file and a binary file directly (so a single
@@ -149,6 +160,7 @@ const FOO = '/knowledge/areas/foo.md';
 describe('NotebookBrowser', () => {
   afterEach(() => {
     editorMock.current = null;
+    editorMock.scrollCalls.length = 0;
     vi.restoreAllMocks();
   });
 
@@ -188,7 +200,40 @@ describe('NotebookBrowser', () => {
     const plain = (await screen.findByRole('textbox', { name: 'File contents' })) as HTMLTextAreaElement;
     expect(plain.value).toContain('# notes.txt');
     expect(screen.getByRole('heading', { level: 2, name: 'notes.txt' })).toBeInTheDocument();
-    expect(screen.queryByText('Linked from')).not.toBeInTheDocument();
+    // The context rail (outline + backlinks) is a markdown affordance; a text file
+    // shows neither section.
+    expect(screen.queryByText('Outline')).not.toBeInTheDocument();
+    expect(screen.queryByText('Backlinks')).not.toBeInTheDocument();
+  });
+
+  it('shows the note outline in the context rail and jumps to a heading on click', async () => {
+    const { props, readFile } = makeProps();
+    const body = '# Top\n\nintro\n\n## Middle\n\ntext\n\n### Deep\n';
+    readFile.mockImplementation((path) => Promise.resolve({ path, content: body, hash: 'h1' }));
+    render(<NotebookBrowser {...props} />);
+
+    // The rail lists the note's ATX headings in document order.
+    expect(await screen.findByRole('button', { name: 'Top' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Middle' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Deep' })).toBeInTheDocument();
+
+    // Clicking a heading scrolls the editor to that heading's character offset.
+    fireEvent.click(screen.getByRole('button', { name: 'Middle' }));
+    expect(editorMock.scrollCalls).toContain(body.indexOf('## Middle'));
+  });
+
+  it('collapses the outline section when its header is toggled', async () => {
+    const { props, readFile } = makeProps();
+    readFile.mockImplementation((path) =>
+      Promise.resolve({ path, content: '# Only heading\n\nbody', hash: 'h1' }),
+    );
+    render(<NotebookBrowser {...props} />);
+
+    expect(await screen.findByRole('button', { name: 'Only heading' })).toBeInTheDocument();
+    // The section header (named "Outline" + its count badge) toggles the body closed;
+    // the heading item disappears.
+    fireEvent.click(screen.getByRole('button', { name: /^Outline/ }));
+    expect(screen.queryByRole('button', { name: 'Only heading' })).not.toBeInTheDocument();
   });
 
   it('opens a binary file as a read-only placeholder without reading it', async () => {
