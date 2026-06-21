@@ -22,6 +22,8 @@ export interface NotebookSurfaceDaemon {
   sendToChief: (selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>;
   listTasks: () => Promise<NotebookTask[]>;
   retryTask: (taskId: string) => Promise<NotebookTask | null>;
+  // Walk the whole vault (flat list of notes, with titles) for a tile's fuzzy finder.
+  listFiles: () => Promise<NotebookEntry[]>;
   // Bumps when an fs_changed / notebook_tasks_changed broadcast arrives, so an open
   // tile reloads its file / refetches its task list.
   changeSignal: number;

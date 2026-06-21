@@ -29,6 +29,7 @@ export function NotebookTile({
       listTasks={daemon.listTasks}
       retryTask={daemon.retryTask}
       taskChangeSignal={daemon.taskChangeSignal}
+      listFiles={daemon.listFiles}
     />
   );
 }

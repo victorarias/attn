@@ -35,6 +35,12 @@ The distilled map of the notebook, with a [wiki link](/journal/2026-06-20.md).
 `,
 };
 
+// The flat vault index the in-tile finder searches (notebook_list, .md only).
+const FILES: NotebookEntry[] = [
+  { path: 'knowledge/index.md', title: 'Knowledge index', type: 'note', updated: '2026-06-20', size: 128 },
+  { path: 'journal/2026-06-20.md', title: 'Journal — 2026-06-20', type: 'journal', updated: '2026-06-20', size: 20 },
+];
+
 declare global {
   interface Window {
     __setTileWidth?: (px: number) => void;
@@ -43,6 +49,11 @@ declare global {
 
 export function NotebookTileHarness({ onReady, setTriggerRerender }: HarnessProps) {
   const [width, setWidth] = useState(1100);
+  // The tile's seed file, controllable from the URL so an e2e can exercise both a
+  // seeded tile (?initialPath=knowledge/index.md, the default) and a fresh tile
+  // (?initialPath= empty → no seed → the finder auto-opens on the empty screen).
+  const initialPathParam = new URLSearchParams(window.location.search).get('initialPath');
+  const initialPath = initialPathParam === null ? 'knowledge/index.md' : (initialPathParam || null);
 
   const listDir = useCallback(async (path: string): Promise<FsEntry[]> => TREE[path] ?? [], []);
   const readFile = useCallback(async (path: string): Promise<FsReadResult> => ({
@@ -62,6 +73,7 @@ export function NotebookTileHarness({ onReady, setTriggerRerender }: HarnessProp
   }, []);
   const listTasks = useCallback(async (): Promise<NotebookTask[]> => [], []);
   const retryTask = useCallback(async (): Promise<NotebookTask | null> => null, []);
+  const listFiles = useCallback(async (): Promise<NotebookEntry[]> => FILES, []);
 
   const daemon = useMemo<NotebookSurfaceDaemon>(() => ({
     listDir,
@@ -72,9 +84,10 @@ export function NotebookTileHarness({ onReady, setTriggerRerender }: HarnessProp
     sendToChief,
     listTasks,
     retryTask,
+    listFiles,
     changeSignal: 0,
     taskChangeSignal: 0,
-  }), [listDir, readFile, writeFile, existsFile, backlinksNotebook, sendToChief, listTasks, retryTask]);
+  }), [listDir, readFile, writeFile, existsFile, backlinksNotebook, sendToChief, listTasks, retryTask, listFiles]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', 'dark');
@@ -88,7 +101,7 @@ export function NotebookTileHarness({ onReady, setTriggerRerender }: HarnessProp
       <div style={{ width, height: '100%', overflow: 'hidden' }} data-testid="notebook-tile-frame">
         <NotebookSurfaceProvider value={daemon}>
           <NotebookTile
-            initialPath="knowledge/index.md"
+            initialPath={initialPath}
             onOpenFile={(path) => window.__HARNESS__.recordCall('openFile', [path])}
           />
         </NotebookSurfaceProvider>

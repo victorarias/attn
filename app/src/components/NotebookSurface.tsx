@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
 import type { FsEntry, FsExistsResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult, NotebookTask } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
+import { useNotebookFileIndex } from '../hooks/useNotebookFileIndex';
 import { useTileAutoFold } from '../hooks/useTileAutoFold';
 import { FileTree } from './notebook/FileTree';
 import { fileKind, isBinaryPath, isMarkdownPath } from './notebook/fileKind';
 import { parseFrontmatter } from './notebook/frontmatter';
 import { LiveMarkdownEditor, type LiveMarkdownEditorHandle, type LiveSelection } from './notebook/LiveMarkdownEditor';
+import { NotebookFinder } from './notebook/NotebookFinder';
 import { parseOutline } from './notebook/outline';
 import './NotebookBrowser.css';
 
@@ -68,6 +70,10 @@ export interface NotebookSurfaceProps {
   // Increments whenever a notebook_tasks_changed broadcast arrives, so an open
   // Tasks panel re-fetches the list (any runner lifecycle transition).
   taskChangeSignal?: number;
+  // Walk the whole vault (flat list of notes, with titles) for the in-tile fuzzy
+  // finder. Tile-only: when provided, a tile gains its Cmd+P finder; the modal
+  // omits it (it navigates via the tree), so it's optional.
+  listFiles?: () => Promise<NotebookEntry[]>;
   // The chief-pulse state for the modal top-bar indicator: true = a chief-of-staff
   // session is working, false = a chief exists but is idle, undefined = no chief
   // session at all (the indicator is hidden). Modal-only chrome; tiles omit it.
@@ -106,6 +112,7 @@ export function NotebookSurface({
   listTasks,
   retryTask,
   taskChangeSignal = 0,
+  listFiles,
   chiefActive,
 }: NotebookSurfaceProps) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -173,6 +180,24 @@ export function NotebookSurface({
   const { treeAutoFold, railAutoFold } = useTileAutoFold(bodyRef, variant === 'tile');
   const treeFolded = treeOverride === null ? treeAutoFold : treeOverride;
   const railFolded = railOverride === null ? railAutoFold : railOverride;
+  // --- In-tile fuzzy finder (Cmd+P) ---
+  // The finder lists the whole vault; only a tile gets one (the modal navigates via
+  // the tree, so listFiles is omitted there). The index walks on mount and refreshes
+  // on fs changes; gating on the tile having listFiles keeps a modal from ever walking.
+  const finderEnabled = variant === 'tile' && !!listFiles;
+  const [finderOpen, setFinderOpen] = useState(false);
+  const { files: finderFiles, loading: finderLoading } = useNotebookFileIndex(listFiles, changeSignal, finderEnabled);
+  // Re-summon the finder with Cmd+P from inside the tile. Scoped to this container's
+  // keydown so it only fires when focus is in THIS tile (two tiles don't fight over
+  // one global binding); preventDefault stops the WebView's print dialog. Shift is
+  // excluded — Cmd+Shift+P is the global attention dock.
+  const handleTileKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.metaKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'p') {
+      event.preventDefault();
+      event.stopPropagation();
+      if (finderEnabled) setFinderOpen(true);
+    }
+  }, [finderEnabled]);
   // The kind/type pill in the note header: a markdown note's frontmatter `type`
   // (defaulting to "note"), or "text" for a plain-text file. Parsed off the loaded
   // content (not the live draft) so it doesn't churn on every keystroke. Self-
@@ -496,11 +521,14 @@ export function NotebookSurface({
     let cancelled = false;
     void (async () => {
       if (variant === 'tile') {
-        // A tile reopens to its persisted file (if any). With none, it shows the
-        // no-selection screen — the tile-local finder (later PR) fills the gap.
+        // A tile reopens to its persisted file (if any). A fresh tile (no seed) opens
+        // straight into the finder so you can pick a note without hunting the tree.
         const seed = initialPath ?? null;
         if (!seed) {
-          if (!cancelled) clearSelection();
+          if (!cancelled) {
+            clearSelection();
+            if (finderEnabled) setFinderOpen(true);
+          }
           return;
         }
         if (isBinaryPath(seed)) {
@@ -899,7 +927,20 @@ export function NotebookSurface({
           <div className="notebook-browser-document-state">
             <NotebookIcon />
             <h2>Nothing selected</h2>
-            <p>Choose a file from the tree to read it.</p>
+            {finderEnabled ? (
+              <>
+                <p>Find a note, or pick one from the tree.</p>
+                <button
+                  type="button"
+                  className="notebook-finder-open-button"
+                  onClick={() => setFinderOpen(true)}
+                >
+                  <span>Find a note</span><kbd>⌘P</kbd>
+                </button>
+              </>
+            ) : (
+              <p>Choose a file from the tree to read it.</p>
+            )}
           </div>
         )}
       </main>
@@ -1039,9 +1080,22 @@ export function NotebookSurface({
   // Tile: a bare surface that fills its workspace tile (no overlay/focus-trap/header).
   if (variant === 'tile') {
     return (
-      <div ref={dialogRef} tabIndex={-1} className="notebook-surface notebook-surface-tile">
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        className="notebook-surface notebook-surface-tile"
+        onKeyDown={handleTileKeyDown}
+      >
         {body}
         {floatingChief}
+        {finderOpen && (
+          <NotebookFinder
+            files={finderFiles}
+            loading={finderLoading}
+            onPick={(path) => { void loadFile(path); setFinderOpen(false); }}
+            onClose={() => setFinderOpen(false)}
+          />
+        )}
       </div>
     );
   }
