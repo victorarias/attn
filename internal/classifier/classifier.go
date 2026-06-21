@@ -447,6 +447,10 @@ func ClassifyWithClaude(text string, timeout time.Duration) (string, error) {
 		types.WithModel(model),
 		types.WithOutputFormat(classifierOutputFormat),
 		types.WithMaxTurns(2),
+		// Headless one-shot: do not leave a session transcript on disk. The SDK
+		// only adds --no-session-persistence when PersistSession is explicitly
+		// false; leaving it nil falls back to the CLI default, which persists.
+		types.WithPersistSession(false),
 	)
 	if err != nil {
 		DefaultLogger("classifier: claude SDK error: %v", err)

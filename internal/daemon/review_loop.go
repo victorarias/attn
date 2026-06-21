@@ -885,6 +885,11 @@ func (d *Daemon) executeReviewLoopPrompt(ctx context.Context, run *protocol.Revi
 		types.WithMaxTurns(reviewLoopSDKFallbackMaxTurns),
 		types.WithTools("Bash", "Read", "Write", "Edit", "Glob", "Grep"),
 		types.WithAllowedTools("Bash", "Read", "Write", "Edit", "Glob", "Grep"),
+		// Headless one-shot (connect → single query → close): do not persist a
+		// session transcript. The SDK only adds --no-session-persistence when
+		// PersistSession is explicitly false; nil falls back to the CLI default,
+		// which persists.
+		types.WithPersistSession(false),
 	}
 	client := sdk.NewClient(opts...)
 	d.logf("[review-loop] connect loop=%s repo=%s model=%s timeout=%s fallback_max_turns=%d", run.LoopID, run.RepoPath, model, reviewLoopIterationTimeout(), reviewLoopSDKFallbackMaxTurns)
