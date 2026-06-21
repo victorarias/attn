@@ -94,12 +94,8 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await page.waitForFunction(() => window.__HARNESS__?.ready === true);
     await page.waitForSelector('.cm-content');
 
-    // Top-bar chrome (folded into the header): mode control, chief pulse, footer.
-    await expect(page.locator('.notebook-browser-mode')).toBeVisible();
+    // Header chrome (folded into the existing header): the chief pulse and a kind badge.
     await expect(page.locator('.notebook-browser-chief-pulse')).toContainText('chief: active');
-    await expect(page.locator('.notebook-browser-footer')).toContainText('stored in the attn vault');
-    await expect(page.locator('.notebook-browser-footer')).toContainText('knowledge/index.md');
-    // Kind badge in the note header.
     await expect(page.locator('.notebook-browser-kind-badge')).toBeVisible();
     await page.screenshot({ path: 'test-results/notebook-stage5-chrome.png' });
 

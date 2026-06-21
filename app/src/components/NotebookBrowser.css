@@ -105,38 +105,6 @@
   gap: 12px;
 }
 
-/* Segmented mode control. Stage 5 renders it as a visibly-disabled placeholder:
-   Fullscreen is the only mode until stage 7 adds workspace tiles. No keyboard
-   shortcut (that would risk colliding with a native menu accelerator). */
-.notebook-browser-mode {
-  display: flex;
-  padding: 2px;
-  background: var(--color-bg-app);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 8px;
-}
-
-.notebook-browser-mode button {
-  padding: 4px 10px;
-  color: var(--color-text-tertiary);
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  font: 600 11px/1.2 var(--font-sans, system-ui);
-  cursor: pointer;
-}
-
-.notebook-browser-mode button.is-active {
-  color: var(--color-text-primary);
-  background: var(--color-bg-elevated);
-  cursor: default;
-}
-
-.notebook-browser-mode button:disabled {
-  color: var(--color-text-dimmed);
-  cursor: not-allowed;
-}
-
 /* Chief pulse: a live two-state indicator — a pulsing green dot + "chief: active"
    while a chief-of-staff session is working, a dim dot + "chief: idle" otherwise.
    Rendered only when a chief session exists at all. */
@@ -170,79 +138,6 @@
   to { box-shadow: 0 0 0 7px transparent; }
 }
 
-.notebook-browser-help-wrap {
-  position: relative;
-  display: flex;
-}
-
-.notebook-browser-help-btn {
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-tertiary);
-  background: transparent;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 50%;
-  font: 700 12px/1 var(--font-sans, system-ui);
-  cursor: pointer;
-}
-
-.notebook-browser-help-btn:hover,
-.notebook-browser-help-btn[aria-expanded='true'] {
-  color: var(--color-text-primary);
-  border-color: var(--color-border);
-}
-
-.notebook-browser-help-pop {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 10;
-  width: 232px;
-  padding: 12px 14px;
-  background: var(--color-bg-panel);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.4);
-}
-
-.notebook-browser-help-pop p {
-  margin: 0 0 8px;
-  color: var(--color-text-muted);
-  font: 700 9px/1 ui-monospace, monospace;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.notebook-browser-help-pop ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-
-.notebook-browser-help-pop li {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-}
-
-.notebook-browser-help-pop kbd {
-  flex-shrink: 0;
-  padding: 1px 5px;
-  color: var(--color-text-tertiary);
-  background: var(--color-bg-app);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  font: 600 10px/1.3 ui-monospace, monospace;
-}
-
 /* Registered length custom properties so a fold can ANIMATE the column width to 0
    (an unregistered custom property would jump). The tree/rail panes stay MOUNTED at
    0 width — folding never unmounts them, so CodeMirror/scroll state survives. Where
@@ -263,8 +158,6 @@
   min-height: 0;
   flex: 1;
   display: grid;
-  /* Row 1 holds the panes; row 2 is the footer, spanning every column. */
-  grid-template-rows: minmax(0, 1fr) auto;
   grid-template-columns: var(--nb-treew) minmax(0, 1fr);
   --nb-treew: 280px;
   --nb-railw: 280px;
@@ -1047,46 +940,6 @@
 .notebook-browser-fold-rail {
   right: var(--nb-railw);
   margin-right: 4px;
-}
-
-/* --- Footer: spans every body column (grid row 2), reflows flush as panes fold --- */
-.notebook-browser-footer {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 7px clamp(14px, 3vw, 22px);
-  background: color-mix(in srgb, var(--color-bg-app) 58%, transparent);
-  border-top: 1px solid var(--color-border-subtle);
-  color: var(--color-text-muted);
-  font-size: 11px;
-}
-
-.notebook-browser-footer-vault {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  white-space: nowrap;
-}
-
-.notebook-browser-footer-vault svg {
-  width: 12px;
-  height: 12px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.notebook-browser-footer-path {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text-tertiary);
-  font: 10px/1.4 ui-monospace, 'SFMono-Regular', monospace;
 }
 
 @keyframes notebook-browser-reveal {

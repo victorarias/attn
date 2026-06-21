@@ -138,9 +138,6 @@ export function NotebookBrowser({
   const autoFold = false;
   const treeFolded = treeOverride === null ? autoFold : treeOverride;
   const railFolded = railOverride === null ? autoFold : railOverride;
-  // The header help popover; Escape-dismissible (above the modal on the escape stack).
-  const [helpOpen, setHelpOpen] = useState(false);
-  const helpWrapRef = useRef<HTMLDivElement>(null);
   // The kind/type pill in the note header: a markdown note's frontmatter `type`
   // (defaulting to "note"), or "text" for a plain-text file. Parsed off the loaded
   // content (not the live draft) so it doesn't churn on every keystroke. Self-
@@ -170,20 +167,6 @@ export function NotebookBrowser({
   const handleEscape = useCallback(() => void requestClose(), [requestClose]);
 
   useEscapeStack(handleEscape, isOpen);
-  // Help popover gets its own escape registration; pushed after the modal's, so when
-  // help is open Escape closes IT first (LIFO) and the modal stays open.
-  useEscapeStack(() => setHelpOpen(false), isOpen && helpOpen);
-
-  // Close the help popover on a pointer down outside it (a click on the toggle is
-  // handled by the toggle itself).
-  useEffect(() => {
-    if (!helpOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!helpWrapRef.current?.contains(event.target as Node)) setHelpOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown, true);
-    return () => document.removeEventListener('pointerdown', onPointerDown, true);
-  }, [helpOpen]);
 
   // Fetch the durable runner's task list. A transient WS failure surfaces an error
   // rather than silently wiping the rows. The stale-guard drops a response that
@@ -674,10 +657,6 @@ export function NotebookBrowser({
               </div>
             </div>
             <div className="notebook-browser-chrome">
-              <div className="notebook-browser-mode" role="group" aria-label="View mode">
-                <button type="button" className="is-active" aria-pressed="true">Fullscreen</button>
-                <button type="button" disabled title="Coming with workspace tiles">Tile</button>
-              </div>
               {chiefActive !== undefined && (
                 <span
                   className={`notebook-browser-chief-pulse${chiefActive ? ' is-active' : ''}`}
@@ -687,27 +666,6 @@ export function NotebookBrowser({
                   chief: {chiefActive ? 'active' : 'idle'}
                 </span>
               )}
-              <div className="notebook-browser-help-wrap" ref={helpWrapRef}>
-                <button
-                  type="button"
-                  className="notebook-browser-help-btn"
-                  aria-label="Keyboard help"
-                  aria-expanded={helpOpen}
-                  onClick={() => setHelpOpen((open) => !open)}
-                >
-                  ?
-                </button>
-                {helpOpen && (
-                  <div className="notebook-browser-help-pop" role="dialog" aria-label="Keyboard help">
-                    <p>Keyboard</p>
-                    <ul>
-                      <li><kbd>Esc</kbd> close the notebook</li>
-                      <li><kbd>⌘</kbd> + click a link to follow it</li>
-                      <li>Click the ‹ › edges to fold a pane</li>
-                    </ul>
-                  </div>
-                )}
-              </div>
               <button type="button" className="notebook-browser-close" onClick={() => void requestClose()}>
                 <span>Close</span><kbd>esc</kbd>
               </button>
@@ -1025,16 +983,6 @@ export function NotebookBrowser({
                 {railFolded ? '‹' : '›'}
               </button>
             )}
-
-            <footer className="notebook-browser-footer">
-              <span className="notebook-browser-footer-vault">
-                <LockIcon />
-                stored in the attn vault
-              </span>
-              <span className="notebook-browser-footer-path" title={selectedPath ?? undefined}>
-                {selectedPath || 'no file open'}
-              </span>
-            </footer>
           </div>
           {chiefSel && (
             <button
@@ -1108,17 +1056,6 @@ function formatNextAttempt(iso: string): string {
   if (abs < 5) return 'now';
   const unit = abs < 60 ? `${abs}s` : abs < 3600 ? `${Math.round(abs / 60)}m` : `${Math.round(abs / 3600)}h`;
   return deltaSec >= 0 ? `in ${unit}` : `${unit} ago`;
-}
-
-// A small padlock for the footer's "saved to the attn vault" line. Purely decorative
-// (it does not imply encryption) — an inline SVG, not the 🔒 emoji, for crispness.
-function LockIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="5" y="11" width="14" height="9" rx="2" />
-      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-    </svg>
-  );
 }
 
 function NotebookIcon() {

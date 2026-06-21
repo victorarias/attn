@@ -1,12 +1,23 @@
 ---
 title: Notebook UI Stage 5 — chrome design
-status: proposed
+status: shipped (revised — see As-built)
 related: docs/plans/2026-06-20-notebook-ui-gap.md
 ---
 
 > Synthesized by an ultracode design workflow (sonnet readers + opus design panel/judges).
 > Companion to the gap-map plan; covers gap items 12 (collapsible rails), 13 (responsiveness),
 > 16 (top-bar chrome), 17 (footer), with 19/20 visual touches.
+
+> **As-built revision (after live `attn-dev` testing).** Shipped as **one** frontend-only PR
+> (#376), not four. After testing, Victor dropped three pieces of the designed chrome that
+> didn't earn their place *before tiling exists*: the **footer** (gap item 17 — path/vault
+> status brought no value), the **disabled Fullscreen/Tile mode control** (gap item 16 — it
+> only advertised a feature that isn't built), and the **`?` help popover**. What shipped:
+> collapsible edge-rail folds (12), a header **chief pulse** + note **kind badge**, and the
+> width-responsive grid. Folded panes are `inert` (keyboard-a11y, not just `aria-hidden`).
+> Tile mode is important and lands in **stage 7**; revisit the header mode UX there (the
+> in-app UX is still unclear). The tri-state fold seam (`override ?? auto`) is preserved for it.
+> Sections below describe the *original* four-PR design; read them as rationale, not as-shipped.
 
 # Stage 5 — Notebook UI Chrome: Final Design
 

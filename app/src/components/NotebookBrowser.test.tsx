@@ -797,11 +797,11 @@ describe('parseNotebookHref', () => {
   });
 });
 
-// Stage 5 chrome: the manual edge-rail folds, the top-bar chief pulse, the footer,
-// and the note kind badge. The fold ANIMATION and grid collapse are a real-browser
-// concern (covered by the Playwright harness); here we assert the state wiring with
-// the mocked editor — that handles toggle the body's fold classes (panes stay
-// mounted), that the pulse reflects the prop, and that the footer/badge read right.
+// Stage 5 chrome: the manual edge-rail folds, the header chief pulse, and the note
+// kind badge. The fold ANIMATION and grid collapse are a real-browser concern
+// (covered by the Playwright harness); here we assert the state wiring with the
+// mocked editor — that handles toggle the body's fold classes (panes stay mounted),
+// that the pulse reflects the prop, and that the badge reads right.
 describe('NotebookBrowser stage 5 chrome', () => {
   afterEach(() => {
     editorMock.current = null;
@@ -860,17 +860,6 @@ describe('NotebookBrowser stage 5 chrome', () => {
 
     render(<NotebookBrowser {...makeProps().props} />);
     expect(screen.queryByText(/chief:/)).not.toBeInTheDocument();
-  });
-
-  it('renders the footer with the open note path', async () => {
-    const { props } = makeProps();
-    render(<NotebookBrowser {...props} />);
-    await waitForNoteLoaded();
-
-    expect(screen.getByText('stored in the attn vault')).toBeInTheDocument();
-    expect(
-      screen.getByText('knowledge/index.md', { selector: '.notebook-browser-footer-path' }),
-    ).toBeInTheDocument();
   });
 
   it('renders a kind badge from the note frontmatter type', async () => {
