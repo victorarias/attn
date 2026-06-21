@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-06-21]
 
+### Fixed
+- **The last line of a terminal is no longer cut off at the bottom of the window.** When a session's terminal was sized one row taller than the window could actually show — for example after the window's height landed on an awkward boundary, or when the session was opened at a size different from where its grid was last set — the bottom line (your prompt, or attn's `auto mode on` status line) got clipped at the window edge. The terminal now re-asserts a row count that fits the visible area, so the last line stays fully on screen at any window size.
+
 ### Added
 - **Dock the Notebook beside your terminals.** The Notebook no longer only opens fullscreen — you can now dock it as a tile in a workspace, next to your panes, with `⌘⌥N` or the action menu ("Open Notebook tile"). It's the same live notebook — folder tree, live editor, context rail, send-to-chief — and it folds its side panels away as the tile narrows so a note still fits. Each tile remembers the note it was showing and reopens to it, you can have more than one tile open on different notes, and the layout survives restarts. (`⌘⌥⇧N` still opens the fullscreen view.)
 - **Jump to any note from a Notebook tile with `⌘P`.** A fresh notebook tile opens straight into a fuzzy file finder — start typing and it matches notes by name or title across the whole notebook, even with scattered letters (e.g. "kbidx" finds `knowledge/index.md`). Arrow keys move, Enter (or a click) opens the note in that tile, and Esc drops you back to the folder tree. Already reading a note? `⌘P` re-summons the finder for just that tile.
