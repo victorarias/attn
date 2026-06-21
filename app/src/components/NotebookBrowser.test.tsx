@@ -17,6 +17,10 @@ const editorMock = vi.hoisted(() => ({
   // can assert the outline jumped the editor to a heading (the real scroll is a CM
   // browser behavior, covered by the Playwright harness).
   scrollCalls: [] as number[],
+  // Content pushed through the scroll-preserving applyExternalContent handle, so a test
+  // can assert that a live refresh applies a genuine change via the minimal-edit path
+  // (which keeps the reader anchored) rather than a full document swap.
+  externalApplies: [] as string[],
 }));
 
 vi.mock('./notebook/LiveMarkdownEditor', async () => {
@@ -36,10 +40,18 @@ vi.mock('./notebook/LiveMarkdownEditor', async () => {
         onSelectionChange?: (sel: { text: string; top: number; left: number } | null) => void;
         ariaLabel?: string;
       },
-      ref: React.Ref<{ scrollToPos: (pos: number) => void }>,
+      ref: React.Ref<{ scrollToPos: (pos: number) => void; applyExternalContent: (next: string) => void }>,
     ) {
       editorMock.current = { onFollowLink, onSelectionChange };
-      useImperativeHandle(ref, () => ({ scrollToPos: (pos: number) => editorMock.scrollCalls.push(pos) }), []);
+      useImperativeHandle(ref, () => ({
+        scrollToPos: (pos: number) => editorMock.scrollCalls.push(pos),
+        // Mirror the real handle: record the pushed content and report it through
+        // onChange, the way a CodeMirror dispatch would, so the controlled value tracks.
+        applyExternalContent: (next: string) => {
+          editorMock.externalApplies.push(next);
+          onChange(next);
+        },
+      }), [onChange]);
       return (
         <textarea
           aria-label={ariaLabel ?? 'Note'}
@@ -168,6 +180,7 @@ describe('NotebookBrowser', () => {
   afterEach(() => {
     editorMock.current = null;
     editorMock.scrollCalls.length = 0;
+    editorMock.externalApplies.length = 0;
     vi.restoreAllMocks();
   });
 
@@ -383,6 +396,58 @@ describe('NotebookBrowser', () => {
         openNoteReadsBefore,
       ),
     );
+  });
+
+  it('does not disturb the open note when an unrelated change re-reads it unchanged', async () => {
+    const { props, readFile, backlinksNotebook } = makeProps();
+    const { rerender } = render(<NotebookBrowser {...props} />);
+    await waitForNoteLoaded();
+    // Content + backlinks loaded once on open.
+    await waitFor(() => expect(backlinksNotebook).toHaveBeenCalledTimes(1));
+    const valueBefore = editor().value;
+
+    // An fs_changed for some OTHER file bumps the shared signal. The open note is
+    // re-read to check it, but its bytes are identical (same hash h1)...
+    rerender(<NotebookBrowser {...props} changeSignal={1} />);
+    await waitFor(() =>
+      expect(readFile.mock.calls.filter((c) => c[0] === 'knowledge/index.md').length).toBeGreaterThan(1),
+    );
+
+    // ...so nothing is applied: no scroll-preserving push into the editor, no backlinks
+    // re-walk, and the buffer is left exactly as it was. (In the real app this is what
+    // keeps the reader's scroll position and selection from churning.)
+    expect(editorMock.externalApplies).toHaveLength(0);
+    expect(backlinksNotebook).toHaveBeenCalledTimes(1);
+    expect(editor().value).toBe(valueBefore);
+  });
+
+  it('applies a genuine on-disk change to the open note via the scroll-preserving path', async () => {
+    const { props, readFile, backlinksNotebook } = makeProps();
+    // The open note reads its original body initially (the probe); a later reload
+    // (triggered by the change signal) returns new bytes with a new hash — an agent
+    // rewrote the note the user is reading.
+    let indexReads = 0;
+    readFile.mockImplementation((path) => {
+      if (path === 'knowledge/index.md') {
+        indexReads += 1;
+        if (indexReads >= 2) {
+          return Promise.resolve({ path, content: '# knowledge/index.md\n\nNEW agent-written body.', hash: 'h-new' });
+        }
+      }
+      return Promise.resolve({ path, content: `# ${path}\n\noriginal body`, hash: 'h1' });
+    });
+    const { rerender } = render(<NotebookBrowser {...props} />);
+    await waitFor(() => expect(editor().value).toContain('original body'));
+    await waitFor(() => expect(backlinksNotebook).toHaveBeenCalledTimes(1));
+
+    rerender(<NotebookBrowser {...props} changeSignal={1} />);
+
+    // The new content shows — pushed through applyExternalContent (the minimal-edit
+    // handle that keeps the reader's scroll anchored), not a full document swap — and
+    // backlinks are re-walked because the links may have moved.
+    await waitFor(() => expect(editor().value).toContain('NEW agent-written body'));
+    expect(editorMock.externalApplies).toContain('# knowledge/index.md\n\nNEW agent-written body.');
+    await waitFor(() => expect(backlinksNotebook).toHaveBeenCalledTimes(2));
   });
 
   it('shows the file as unavailable when a change-signal reload finds it deleted', async () => {
@@ -808,6 +873,7 @@ describe('NotebookBrowser stage 5 chrome', () => {
   afterEach(() => {
     editorMock.current = null;
     editorMock.scrollCalls.length = 0;
+    editorMock.externalApplies.length = 0;
     vi.restoreAllMocks();
   });
 
