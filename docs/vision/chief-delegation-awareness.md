@@ -98,14 +98,19 @@ Coarse and expected to evolve — not a task tracker.
   failure; excludes routine approvals; covers crash states). In flight: PR #394
   (shared classifier in `internal/dispatch`, reuses `list_dispatches`, no new
   protocol surface) — ready to merge.
-- [ ] **Reliable doneness-on-close** — today a session that finishes *without*
-  filing a structured terminal report classifies as `failed` (the safe
-  silence≠success default), so a real success can surface as a false `[failed]`
-  once its session closes — and the *same* work reads `done` while idle but
-  `failed` once closed. Fix doneness at the source: the daemon infers completion
-  on a clean close, or agents reliably file a terminal report, so the signal
-  isn't a false alarm. Surfaced by the #394 alignment review; also closes the
-  re-arming open question below.
+- [x] **Reliable doneness-on-close** — a close without a structured terminal
+  report is now the neutral terminal `ended` (silence is neither success nor
+  failure), so an unreported success no longer cries a false `[failed]`. attn does
+  *not* infer completion on a clean close — doneness stays agent-claimed, never
+  guessed. The one close it *does* assert is a crash: the daemon captures the
+  delegated session's last attn-classified state the moment its process exits
+  (before the idle-clobber/removal erases it) and surfaces a close that was cut
+  off mid-flight — `working` / `launching` / `pending_approval` — as `failed`,
+  while a clean rest (`idle` / `waiting_input`) or an unconfirmed close (`unknown`
+  / unstamped) stays neutral `ended`. So a real crash is visible, a real success
+  is never overwritten, and the safe direction (never a false `done`) holds. The
+  neutral `ended` landed with the #394 alignment; crash-visibility-on-close
+  followed. Also resolves the re-arming caveat below.
 - [ ] **Delegation-time injection** — at delegation, attn instructs the chief to
   arm a persistent, non-blocking Monitor on the new dispatch. Scoped to the
   dispatch id, self-retiring on terminal, default-on but overridable.
@@ -157,9 +162,10 @@ Coarse and expected to evolve — not a task tracker.
   truth.)
 - **Re-arming across sessions.** If the chief compacts or restarts while a
   monitor is armed, how is the watch re-established from journal / dispatch
-  state so a thread isn't silently dropped? (Related: re-arming a watch on an
-  already-finished, already-closed agent reads `failed` for success until
-  *reliable doneness-on-close* lands.)
+  state so a thread isn't silently dropped? (The old failure mode here — re-arming
+  a watch on an already-finished, already-closed agent reading `failed` for a
+  success — is resolved: a clean close now reads neutral `ended`, and only a real
+  mid-flight crash reads `failed`. See *reliable doneness-on-close* above.)
 - **Idle-nudge reliability.** Does the pty "go check" nudge for non-Claude
   chiefs land reliably (idle detection, injection timing), or do some agents
   still need a self-driven timer as backstop?

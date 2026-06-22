@@ -455,6 +455,7 @@ CREATE INDEX IF NOT EXISTS idx_workflow_agent_calls_run_id
 	// phantom 51 or 52. NOTE: confirm MAX(version) on the real prod/dev DBs before
 	// install — if either build burned 51/52 there, these may need to move higher.
 	{52, "rename workspace context janitor backups to keeper compact backups", ""},
+	{53, "add closed_state to chief of staff dispatches", ""},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -610,6 +611,11 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 52 {
 			if err := applyMigration52(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 53 {
+			if err := applyMigration53(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -824,6 +830,31 @@ func applyMigration52(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// applyMigration53 adds the closed_state column to chief_of_staff_dispatches,
+// recording a delegated session's last attn-classified runtime state at close so
+// the dispatch signal classifier can tell a clean stop (idle / waiting_input)
+// from a crash or kill mid-flight (working / launching / pending_approval). It is
+// guarded with tableExists (a partial-schema test DB may seed only some tables)
+// and columnExists (idempotent re-run safety).
+func applyMigration53(tx *sql.Tx) error {
+	exists, err := tableExists(tx, "chief_of_staff_dispatches")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	hasColumn, err := columnExists(tx, "chief_of_staff_dispatches", "closed_state")
+	if err != nil {
+		return err
+	}
+	if hasColumn {
+		return nil
+	}
+	_, err = tx.Exec(`ALTER TABLE chief_of_staff_dispatches ADD COLUMN closed_state TEXT NOT NULL DEFAULT ''`)
+	return err
 }
 
 // tableExists reports whether a table of the given name exists in the schema.

@@ -10,6 +10,18 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
+// chiefDispatchSelect is the canonical column list + source for reading a chief
+// dispatch row. Every read shares it so the SELECT column order can never drift
+// from scanChiefOfStaffDispatch's scan order — the fan-out trap when adding a
+// column. closed_state is last; the INSERT omits it and relies on the column
+// DEFAULT ” because it is only ever populated by the close-state capture, never
+// at creation.
+const chiefDispatchSelect = `
+	SELECT id, chief_session_id, session_id, workspace_id, brief, label, agent,
+		directory, branch, latest_report, structured_report_json, reported_at,
+		created_at, updated_at, closed_state
+	FROM chief_of_staff_dispatches`
+
 func cloneChiefOfStaffDispatch(dispatch *protocol.ChiefOfStaffDispatch) *protocol.ChiefOfStaffDispatch {
 	if dispatch == nil {
 		return nil
@@ -30,6 +42,9 @@ func cloneChiefOfStaffDispatch(dispatch *protocol.ChiefOfStaffDispatch) *protoco
 	}
 	if dispatch.Actionable != nil {
 		cloned.Actionable = protocol.Ptr(protocol.Deref(dispatch.Actionable))
+	}
+	if dispatch.ClosedState != nil {
+		cloned.ClosedState = protocol.Ptr(protocol.Deref(dispatch.ClosedState))
 	}
 	return &cloned
 }
@@ -165,14 +180,7 @@ func (s *Store) GetChiefOfStaffDispatchBySession(sessionID string) *protocol.Chi
 		return nil
 	}
 
-	row := s.db.QueryRow(`
-		SELECT id, chief_session_id, session_id, workspace_id, brief, label, agent,
-			directory, branch, latest_report, structured_report_json, reported_at,
-			created_at, updated_at
-		FROM chief_of_staff_dispatches
-		WHERE session_id = ?`,
-		sessionID,
-	)
+	row := s.db.QueryRow(chiefDispatchSelect+` WHERE session_id = ?`, sessionID)
 	return scanChiefOfStaffDispatch(row)
 }
 
@@ -225,14 +233,7 @@ func (s *Store) GetChiefOfStaffDispatch(id string) *protocol.ChiefOfStaffDispatc
 	if s.db == nil {
 		return cloneChiefOfStaffDispatch(s.chiefDispatches[id])
 	}
-	row := s.db.QueryRow(`
-		SELECT id, chief_session_id, session_id, workspace_id, brief, label, agent,
-			directory, branch, latest_report, structured_report_json, reported_at,
-			created_at, updated_at
-		FROM chief_of_staff_dispatches
-		WHERE id = ?`,
-		id,
-	)
+	row := s.db.QueryRow(chiefDispatchSelect+` WHERE id = ?`, id)
 	return scanChiefOfStaffDispatch(row)
 }
 
@@ -258,11 +259,7 @@ func (s *Store) ListChiefOfStaffDispatches(chiefSessionID string) []*protocol.Ch
 		return result
 	}
 
-	query := `
-		SELECT id, chief_session_id, session_id, workspace_id, brief, label, agent,
-			directory, branch, latest_report, structured_report_json, reported_at,
-			created_at, updated_at
-		FROM chief_of_staff_dispatches`
+	query := chiefDispatchSelect
 	var (
 		rows *sql.Rows
 		err  error
@@ -360,19 +357,70 @@ func (s *Store) UpdateChiefOfStaffDispatchReportEnvelope(
 		return nil, fmt.Errorf("session %s is not a tracked dispatch", sessionID)
 	}
 
-	row := s.db.QueryRow(`
-		SELECT id, chief_session_id, session_id, workspace_id, brief, label, agent,
-			directory, branch, latest_report, structured_report_json, reported_at,
-			created_at, updated_at
-		FROM chief_of_staff_dispatches
-		WHERE session_id = ?`,
-		sessionID,
-	)
+	row := s.db.QueryRow(chiefDispatchSelect+` WHERE session_id = ?`, sessionID)
 	dispatch := scanChiefOfStaffDispatch(row)
 	if dispatch == nil {
 		return nil, fmt.Errorf("updated dispatch for session %s could not be read", sessionID)
 	}
 	return dispatch, nil
+}
+
+// SetChiefOfStaffDispatchClosedStateBySession records, exactly once, the last
+// attn-classified runtime state of a delegated session onto its dispatch as
+// closed_state. It is first-writer-wins: the update matches only a row whose
+// closed_state is still empty, so the earliest observation of the session ending
+// (the pre-clobber PTY exit) sticks and a later teardown read cannot overwrite the
+// true close-state with the clobbered idle. It returns changed=true only when a
+// row was actually stamped; changed=false with no error is the normal no-op when
+// the session is not a tracked dispatch, or its close-state was already recorded.
+func (s *Store) SetChiefOfStaffDispatchClosedStateBySession(sessionID, closedState string) (*protocol.ChiefOfStaffDispatch, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sessionID = strings.TrimSpace(sessionID)
+	closedState = strings.TrimSpace(closedState)
+	if sessionID == "" {
+		return nil, false, fmt.Errorf("source session id cannot be empty")
+	}
+	if closedState == "" {
+		return nil, false, fmt.Errorf("closed state cannot be empty")
+	}
+
+	if s.db == nil {
+		for id, dispatch := range s.chiefDispatches {
+			if dispatch.SessionID != sessionID {
+				continue
+			}
+			if strings.TrimSpace(protocol.Deref(dispatch.ClosedState)) != "" {
+				return nil, false, nil // already recorded; first writer wins
+			}
+			updated := cloneChiefOfStaffDispatch(dispatch)
+			updated.ClosedState = protocol.Ptr(closedState)
+			s.chiefDispatches[id] = updated
+			return cloneChiefOfStaffDispatch(updated), true, nil
+		}
+		return nil, false, nil // not a tracked dispatch
+	}
+
+	result, err := s.db.Exec(`
+		UPDATE chief_of_staff_dispatches
+		SET closed_state = ?
+		WHERE session_id = ? AND closed_state = ''`,
+		closedState,
+		sessionID,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("set dispatch closed_state: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, false, fmt.Errorf("read dispatch closed_state update result: %w", err)
+	}
+	if rows == 0 {
+		return nil, false, nil // not a tracked dispatch, or already recorded
+	}
+	row := s.db.QueryRow(chiefDispatchSelect+` WHERE session_id = ?`, sessionID)
+	return scanChiefOfStaffDispatch(row), true, nil
 }
 
 func (s *Store) ResolveChiefOfStaffDispatchRequest(
@@ -399,14 +447,7 @@ func (s *Store) ResolveChiefOfStaffDispatchRequest(
 	if s.db == nil {
 		dispatch = cloneChiefOfStaffDispatch(s.chiefDispatches[dispatchID])
 	} else {
-		row := s.db.QueryRow(`
-			SELECT id, chief_session_id, session_id, workspace_id, brief, label, agent,
-				directory, branch, latest_report, structured_report_json, reported_at,
-				created_at, updated_at
-			FROM chief_of_staff_dispatches
-			WHERE id = ?`,
-			dispatchID,
-		)
+		row := s.db.QueryRow(chiefDispatchSelect+` WHERE id = ?`, dispatchID)
 		dispatch = scanChiefOfStaffDispatch(row)
 	}
 	if dispatch == nil {
@@ -459,8 +500,8 @@ type dispatchScanner interface {
 
 func scanChiefOfStaffDispatch(scanner dispatchScanner) *protocol.ChiefOfStaffDispatch {
 	var (
-		dispatch                                               protocol.ChiefOfStaffDispatch
-		branch, latestReport, structuredReportJSON, reportedAt sql.NullString
+		dispatch                                                            protocol.ChiefOfStaffDispatch
+		branch, latestReport, structuredReportJSON, reportedAt, closedState sql.NullString
 	)
 	if err := scanner.Scan(
 		&dispatch.ID,
@@ -477,6 +518,7 @@ func scanChiefOfStaffDispatch(scanner dispatchScanner) *protocol.ChiefOfStaffDis
 		&reportedAt,
 		&dispatch.CreatedAt,
 		&dispatch.UpdatedAt,
+		&closedState,
 	); err != nil {
 		return nil
 	}
@@ -491,6 +533,9 @@ func scanChiefOfStaffDispatch(scanner dispatchScanner) *protocol.ChiefOfStaffDis
 	}
 	if reportedAt.Valid && reportedAt.String != "" {
 		dispatch.ReportedAt = protocol.Ptr(reportedAt.String)
+	}
+	if closedState.Valid && closedState.String != "" {
+		dispatch.ClosedState = protocol.Ptr(closedState.String)
 	}
 	return &dispatch
 }

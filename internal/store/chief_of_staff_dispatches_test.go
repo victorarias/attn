@@ -303,3 +303,113 @@ func TestChiefOfStaffStructuredReportPersistsAndResolves(t *testing.T) {
 		t.Fatal("resolve with wrong chief succeeded")
 	}
 }
+
+func TestChiefOfStaffDispatchClosedStateCapture(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "attn.db")
+	s, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	now := string(protocol.TimestampNow())
+	dispatch := &protocol.ChiefOfStaffDispatch{
+		ID:             "dispatch-close",
+		ChiefSessionID: "chief-1",
+		SessionID:      "worker-1",
+		WorkspaceID:    "workspace-1",
+		Brief:          "Do the work.",
+		Label:          "Work",
+		Agent:          "codex",
+		Directory:      "/tmp/project",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := s.AddChiefOfStaffDispatch(dispatch); err != nil {
+		t.Fatalf("add dispatch: %v", err)
+	}
+
+	// A fresh dispatch has no captured close-state.
+	if got := s.GetChiefOfStaffDispatchBySession("worker-1"); got == nil || got.ClosedState != nil {
+		t.Fatalf("fresh dispatch close-state = %+v", got)
+	}
+
+	// An untracked session is a silent no-op (changed=false, no error) — most
+	// session exits are not dispatches.
+	if _, changed, err := s.SetChiefOfStaffDispatchClosedStateBySession("not-a-worker", "working"); err != nil || changed {
+		t.Fatalf("untracked set: changed=%v err=%v", changed, err)
+	}
+
+	// Empty inputs are rejected.
+	if _, _, err := s.SetChiefOfStaffDispatchClosedStateBySession("", "working"); err == nil {
+		t.Fatal("empty session id accepted")
+	}
+	if _, _, err := s.SetChiefOfStaffDispatchClosedStateBySession("worker-1", "  "); err == nil {
+		t.Fatal("empty close-state accepted")
+	}
+
+	// The first capture wins and is recorded.
+	updated, changed, err := s.SetChiefOfStaffDispatchClosedStateBySession("worker-1", "working")
+	if err != nil || !changed {
+		t.Fatalf("first capture: changed=%v err=%v", changed, err)
+	}
+	if protocol.Deref(updated.ClosedState) != "working" {
+		t.Fatalf("first capture close-state = %+v", updated.ClosedState)
+	}
+
+	// A later capture must NOT overwrite (first-writer-wins): a teardown read that
+	// sees the clobbered idle cannot erase the true mid-flight close-state.
+	again, changed, err := s.SetChiefOfStaffDispatchClosedStateBySession("worker-1", "idle")
+	if err != nil {
+		t.Fatalf("second capture err: %v", err)
+	}
+	if changed || again != nil {
+		t.Fatalf("second capture overwrote: changed=%v dispatch=%+v", changed, again)
+	}
+	if got := s.GetChiefOfStaffDispatchBySession("worker-1"); protocol.Deref(got.ClosedState) != "working" {
+		t.Fatalf("close-state after second capture = %+v", got.ClosedState)
+	}
+
+	// The close-state survives a reopen (durable across a daemon restart).
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	s, err = NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if got := s.GetChiefOfStaffDispatchBySession("worker-1"); got == nil || protocol.Deref(got.ClosedState) != "working" {
+		t.Fatalf("persisted close-state = %+v", got)
+	}
+}
+
+func TestChiefOfStaffDispatchClosedStateInMemory(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	now := string(protocol.TimestampNow())
+	if err := s.AddChiefOfStaffDispatch(&protocol.ChiefOfStaffDispatch{
+		ID:             "d1",
+		ChiefSessionID: "chief",
+		SessionID:      "w1",
+		WorkspaceID:    "ws",
+		Brief:          "b",
+		Label:          "l",
+		Agent:          "codex",
+		Directory:      "/tmp",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	if _, changed, err := s.SetChiefOfStaffDispatchClosedStateBySession("w1", "pending_approval"); err != nil || !changed {
+		t.Fatalf("first capture: changed=%v err=%v", changed, err)
+	}
+	if _, changed, _ := s.SetChiefOfStaffDispatchClosedStateBySession("w1", "idle"); changed {
+		t.Fatal("in-memory close-state overwrite happened (must be first-writer-wins)")
+	}
+	if got := s.GetChiefOfStaffDispatchBySession("w1"); protocol.Deref(got.ClosedState) != "pending_approval" {
+		t.Fatalf("in-memory close-state = %+v", got.ClosedState)
+	}
+}
