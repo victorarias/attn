@@ -9,11 +9,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/victorarias/attn/internal/dispatch"
 	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-const closedDispatchStatus = "closed"
+// closedDispatchStatus is the projected Status for a dispatch whose delegated
+// session is gone. The literal is owned by internal/dispatch (the watch signal
+// classifier consumes it), so reference it here rather than duplicating it.
+const closedDispatchStatus = dispatch.SessionClosedStatus
 const dispatchWakePrompt = "Check your attn inbox and act on pending messages."
 
 func chiefOfStaffDispatchPrompt(brief string) string {

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/victorarias/attn/internal/dispatch"
 	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -45,11 +46,11 @@ func journalDispatchMarker(dispatchID string) string {
 // isTerminalDispatchReport reports whether a structured report represents a
 // finished dispatch (completed or failed) — the point at which a dispatch is worth
 // a durable journal entry. needs_input / ready_for_review / in_progress are
-// mid-flight and are not journaled by the report path.
+// mid-flight and are not journaled by the report path. The definition lives in
+// internal/dispatch so the journal path and the dispatch-watch signal classifier
+// share one notion of a terminal report.
 func isTerminalDispatchReport(report *protocol.DispatchReport) bool {
-	return report != nil &&
-		(report.WorkState == protocol.DispatchWorkStateCompleted ||
-			report.WorkState == protocol.DispatchWorkStateFailed)
+	return dispatch.IsTerminalReport(report)
 }
 
 // journalDispatchOutcome captures a dispatch's outcome to the raw tier, exactly
