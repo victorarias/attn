@@ -234,6 +234,33 @@ func (c *Client) ReportDispatchEnvelope(
 	return resp.ChiefOfStaffDispatch, nil
 }
 
+// HandoffDispatch writes a dispatched agent's artifact into the Notebook at `to`
+// and records a dispatch report referencing it. report and structuredReport are
+// optional extra coordination, identical in meaning to ReportDispatchEnvelope's.
+func (c *Client) HandoffDispatch(
+	sourceSessionID, to, content, report string,
+	structuredReport *protocol.DispatchReport,
+) (*protocol.ChiefOfStaffDispatch, error) {
+	msg := protocol.HandoffDispatchMessage{
+		Cmd:              protocol.CmdHandoffDispatch,
+		SourceSessionID:  sourceSessionID,
+		To:               to,
+		Content:          content,
+		StructuredReport: structuredReport,
+	}
+	if strings.TrimSpace(report) != "" {
+		msg.Report = &report
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.ChiefOfStaffDispatch == nil {
+		return nil, errors.New("daemon returned no dispatch")
+	}
+	return resp.ChiefOfStaffDispatch, nil
+}
+
 func (c *Client) GetDispatch(sourceSessionID string) (*protocol.ChiefOfStaffDispatch, error) {
 	resp, err := c.send(protocol.GetDispatchMessage{
 		Cmd:             protocol.CmdGetDispatch,

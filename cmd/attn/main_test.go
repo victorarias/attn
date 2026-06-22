@@ -573,6 +573,48 @@ func TestParseDispatchReportArgsReadsFile(t *testing.T) {
 	}
 }
 
+func TestParseDispatchHandoffArgsReadsArtifact(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "worker-1")
+	path := filepath.Join(t.TempDir(), "artifact.md")
+	artifact := "# Findings\n\nThe long report.\n"
+	if err := os.WriteFile(path, []byte(artifact), 0o600); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+	sessionID, to, content, message, structured, err := parseDispatchHandoffArgs([]string{
+		"--file", path,
+		"--to", "projects/audit/findings.md",
+		"--message", "Audit done.",
+	})
+	if err != nil {
+		t.Fatalf("parseDispatchHandoffArgs() error = %v", err)
+	}
+	if sessionID != "worker-1" || to != "projects/audit/findings.md" || message != "Audit done." {
+		t.Fatalf("handoff = (%q, %q, %q)", sessionID, to, message)
+	}
+	if content != artifact { // the artifact is sent verbatim, not trimmed
+		t.Fatalf("artifact not verbatim: %q", content)
+	}
+	if structured != nil {
+		t.Fatalf("unexpected structured report: %+v", structured)
+	}
+}
+
+func TestParseDispatchHandoffArgsRequiresToAndFile(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "worker-1")
+	path := filepath.Join(t.TempDir(), "artifact.md")
+	if err := os.WriteFile(path, []byte("body"), 0o600); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+	if _, _, _, _, _, err := parseDispatchHandoffArgs([]string{"--file", path}); err == nil ||
+		!strings.Contains(err.Error(), "--to is required") {
+		t.Fatalf("missing --to error = %v", err)
+	}
+	if _, _, _, _, _, err := parseDispatchHandoffArgs([]string{"--to", "projects/x.md"}); err == nil ||
+		!strings.Contains(err.Error(), "--file is required") {
+		t.Fatalf("missing --file error = %v", err)
+	}
+}
+
 func TestParseDispatchReportArgsRejectsAmbiguousContent(t *testing.T) {
 	_, _, _, err := parseDispatchReportArgs([]string{
 		"--session", "worker-1",

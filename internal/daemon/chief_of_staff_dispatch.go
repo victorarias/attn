@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -26,8 +27,19 @@ Send a concise update when you reach a meaningful milestone, need input, or fini
 
 For a longer update, write it to a file and use ` + "`--file <path>`" + `.
 When work is blocked, ready for review, completed, or failed, attach structured
-coordination fields with ` + "`--coordination-file <json>`" + `. Use
-` + "`dispatch status`" + ` to read a chief's durable response to a decision request.
+coordination fields with ` + "`--coordination-file <json>`" + `.
+
+attn has a Notebook — a durable, profile-wide markdown store. A dispatch report is a
+small payload; when you produce a large durable artifact (a report, design doc, or
+findings — often built with the user), hand it into the Notebook instead of inlining
+it, and the reference goes back to the chief:
+
+    "$ATTN_WRAPPER_PATH" dispatch handoff --file <artifact> --to <notebook-path> --message "<update>"
+
+Write to the Notebook path the chief or user designated. If none was designated and
+the artifact warrants one, ask the chief in a report rather than inventing a location.
+
+Use ` + "`dispatch status`" + ` to read a chief's durable response to a decision request.
 Before reporting completion or waiting for more work, run
 ` + "`dispatch inbox --unread`" + `, read pending messages, and acknowledge each
 one after acting on it.
@@ -281,6 +293,113 @@ func (d *Daemon) handleReportDispatch(conn net.Conn, msg *protocol.ReportDispatc
 		ChiefOfStaffDispatch: decorated,
 	})
 	d.broadcastChiefOfStaffDispatchesUpdated()
+}
+
+// handleHandoffDispatch writes a dispatched agent's large artifact into the
+// Notebook at the chief-designated path, then records a normal dispatch report
+// whose message embeds the resolved reference. A dispatch report is a small
+// payload; the Notebook carries the bulky artifact the agent built (often with the
+// user), and the report hands the chief a reference it can act on, move, or
+// promote. The Notebook write happens before the report is recorded, so a report
+// can never reference an artifact that failed to land.
+func (d *Daemon) handleHandoffDispatch(conn net.Conn, msg *protocol.HandoffDispatchMessage) {
+	sourceSessionID := strings.TrimSpace(msg.SourceSessionID)
+	to := strings.TrimSpace(msg.To)
+	if sourceSessionID == "" {
+		d.sendError(conn, "dispatch handoff: source_session_id is required")
+		return
+	}
+	if to == "" {
+		d.sendError(conn, "dispatch handoff: to is required")
+		return
+	}
+	if strings.TrimSpace(msg.Content) == "" {
+		d.sendError(conn, "dispatch handoff: content is required")
+		return
+	}
+	if err := validateDispatchReport(msg.StructuredReport); err != nil {
+		d.sendError(conn, "dispatch handoff: "+err.Error())
+		return
+	}
+	// Only a tracked dispatch may hand off into the Notebook: the session must be
+	// delegated work the chief is tracking, not an arbitrary caller.
+	if _, err := d.validateDispatchWorker(sourceSessionID); err != nil {
+		d.sendError(conn, "dispatch handoff: "+err.Error())
+		return
+	}
+	rel, err := notebook.CleanPath(to)
+	if err != nil {
+		d.sendError(conn, "dispatch handoff: "+err.Error())
+		return
+	}
+	store, err := d.notebookStoreFor()
+	if err != nil {
+		d.sendError(conn, "dispatch handoff: notebook unavailable: "+err.Error())
+		return
+	}
+	hash, err := writeNotebookOverwrite(store, rel, []byte(msg.Content))
+	if err != nil {
+		d.sendError(conn, "dispatch handoff: "+err.Error())
+		return
+	}
+	// Record the write so the watcher does not re-broadcast it as an external edit,
+	// then announce it as an agent-origin change (refreshes any open in-app browser).
+	d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: rel, Hash: hash})
+	d.broadcastNotebookChanged(originAgent, rel)
+
+	report := composeHandoffReport(strings.TrimSpace(protocol.Deref(msg.Report)), rel)
+	dispatch, err := d.store.UpdateChiefOfStaffDispatchReportEnvelope(
+		sourceSessionID,
+		report,
+		msg.StructuredReport,
+	)
+	if err != nil {
+		d.sendError(conn, "dispatch handoff: "+err.Error())
+		return
+	}
+	if isTerminalDispatchReport(msg.StructuredReport) {
+		d.journalDispatchOutcome(dispatch)
+	}
+	decorated := d.decorateChiefOfStaffDispatch(dispatch)
+	_ = json.NewEncoder(conn).Encode(protocol.Response{
+		Ok:                   true,
+		ChiefOfStaffDispatch: decorated,
+	})
+	d.broadcastChiefOfStaffDispatchesUpdated()
+}
+
+// composeHandoffReport builds the dispatch report message for a handoff: the
+// agent's optional note (or a neutral default) followed by a resolvable
+// root-absolute reference to the artifact the daemon just wrote. The reference is
+// composed server-side so it always points at the real written path.
+func composeHandoffReport(note, rel string) string {
+	if note == "" {
+		note = "Handed off an artifact to the Notebook."
+	}
+	return note + "\n\nArtifact in the Notebook: /" + rel
+}
+
+// writeNotebookOverwrite writes content to rel, creating it or overwriting an
+// existing note — a refined re-handoff to the same chief-designated path updates
+// the one note. It tries a create-only write first and, on the resulting conflict,
+// a hash-CAS overwrite, so the write stays safe against a concurrent edit of the
+// same path rather than blindly clobbering it.
+func writeNotebookOverwrite(store *notebook.Store, rel string, content []byte) (string, error) {
+	hash, conflict, err := store.Write(rel, content, "")
+	if err != nil {
+		return "", err
+	}
+	if conflict == nil {
+		return hash, nil
+	}
+	hash, conflict, err = store.Write(rel, content, conflict.CurrentHash)
+	if err != nil {
+		return "", err
+	}
+	if conflict != nil {
+		return "", fmt.Errorf("notebook: %q changed during handoff; retry", rel)
+	}
+	return hash, nil
 }
 
 func (d *Daemon) handleGetDispatch(conn net.Conn, msg *protocol.GetDispatchMessage) {

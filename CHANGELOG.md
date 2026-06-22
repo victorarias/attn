@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Added
 - **See which sessions your chief of staff started.** Sessions the chief of staff delegated now carry a small "↳" marker in the sidebar, next to where the chief's own badge sits — so at a glance you can tell the agents the chief spun up from the ones you started yourself. Only delegations that came from the chief get it; a plain hand-off between two regular sessions doesn't.
+- **Delegated agents can hand a large artifact back through the Notebook.** A delegated agent's report to its chief is meant to be a short update, so an agent that built up a full report or document with you had no way to forward it. It can now stash that artifact in the Notebook and report back just a reference (`attn dispatch handoff --file <artifact> --to <notebook-path>`); the chief decides whether to leave it, move it, or promote it into the knowledge base. The agent only writes where the chief (or you) designated — it never invents a location.
 
 ### Changed
 - **The chief of staff is now blue.** The chief-of-staff badge (in the sidebar and the dashboard) and its related controls — the "Make chief of staff" action and the transfer confirmation — moved from the app's orange accent to a distinct blue, giving the chief its own identity and setting the new delegated-from-chief marker (which shares that blue) apart from everything else.
