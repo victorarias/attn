@@ -711,6 +711,38 @@ func TestParseDispatchInboxArgsDefaultsToCurrentSession(t *testing.T) {
 	}
 }
 
+func TestParseDispatchWatchArgs(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "chief-1")
+
+	// Positional id then flags (the natural invocation) must parse — the std
+	// flag package stops at the first positional, so the parser pulls the id off
+	// the front first.
+	source, id, interval, err := parseDispatchWatchArgs([]string{"d-123", "--session", "chief-2", "--interval", "2s"})
+	if err != nil {
+		t.Fatalf("parseDispatchWatchArgs() error = %v", err)
+	}
+	if source != "chief-2" || id != "d-123" || interval != 2*time.Second {
+		t.Fatalf("watch args = (%q, %q, %v)", source, id, interval)
+	}
+
+	// Bare id falls back to ATTN_SESSION_ID and a zero interval (loop default).
+	source, id, interval, err = parseDispatchWatchArgs([]string{"d-456"})
+	if err != nil {
+		t.Fatalf("parseDispatchWatchArgs() bare error = %v", err)
+	}
+	if source != "chief-1" || id != "d-456" || interval != 0 {
+		t.Fatalf("bare watch args = (%q, %q, %v)", source, id, interval)
+	}
+
+	// A missing id (or a leading flag where the id should be) is a usage error.
+	if _, _, _, err := parseDispatchWatchArgs([]string{}); err == nil {
+		t.Error("expected error for missing dispatch id")
+	}
+	if _, _, _, err := parseDispatchWatchArgs([]string{"--session", "chief-2"}); err == nil {
+		t.Error("expected error when the id is omitted before flags")
+	}
+}
+
 func TestParseDispatchMessagesArgsRequiresDispatch(t *testing.T) {
 	t.Setenv("ATTN_SESSION_ID", "chief-1")
 	sessionID, dispatchID, err := parseDispatchMessagesArgs([]string{"--dispatch", "dispatch-1"})

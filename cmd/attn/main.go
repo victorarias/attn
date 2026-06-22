@@ -24,6 +24,7 @@ import (
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/daemonctl"
+	"github.com/victorarias/attn/internal/dispatch"
 	"github.com/victorarias/attn/internal/hooks"
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/protocol"
@@ -608,6 +609,8 @@ func runDispatch() {
 			os.Exit(1)
 		}
 		printJSON(dispatches)
+	case "watch":
+		runDispatchWatch(os.Args[3:])
 	case "report":
 		sourceSessionID, report, structuredReport, err := parseDispatchReportArgs(os.Args[3:])
 		if err != nil {
@@ -733,6 +736,8 @@ func writeDispatchHelp(w io.Writer) {
 
 commands:
   list [--session <id>]                          list work dispatched by this chief
+  watch <dispatch-id> [--session <id>]           stream meaningful events until terminal
+        [--interval <dur>]
   report (--message <text> | --file <path>)     report progress from a dispatched agent
          [--coordination-file <json>]
   handoff --file <path> --to <notebook-path>    write a large artifact into the notebook and
@@ -770,6 +775,77 @@ func parseDispatchSourceSession(args []string) (string, error) {
 		return "", errors.New("no session; run inside attn or pass --session")
 	}
 	return source, nil
+}
+
+// runDispatchWatch blocks streaming one line per meaningful event for a single
+// dispatch and exits when it reaches a terminal state. It reuses the existing
+// list_dispatches IPC (the chief already sees its own dispatches with full
+// decorated snapshots) and filters client-side by id, so it adds no protocol
+// surface. The state -> event classification lives in internal/dispatch so this
+// command, dispatch status, and any future poll path share one definition.
+func runDispatchWatch(args []string) {
+	sourceSessionID, dispatchID, interval, err := parseDispatchWatchArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dispatch watch: %v\n", err)
+		os.Exit(2)
+	}
+
+	c := client.New("")
+	fetch := func() (*protocol.ChiefOfStaffDispatch, bool, error) {
+		dispatches, err := c.ListDispatches(sourceSessionID)
+		if err != nil {
+			return nil, false, err
+		}
+		for i := range dispatches {
+			if dispatches[i].ID == dispatchID {
+				return &dispatches[i], true, nil
+			}
+		}
+		return nil, false, nil
+	}
+
+	// Validate up front so a wrong id fails fast and clearly instead of being
+	// reported as a terminal failure event a second later.
+	if _, found, err := fetch(); err != nil {
+		fmt.Fprintf(os.Stderr, "dispatch watch: %v\n", err)
+		os.Exit(1)
+	} else if !found {
+		fmt.Fprintf(os.Stderr, "dispatch watch: dispatch %s not found for this chief\n", dispatchID)
+		os.Exit(2)
+	}
+
+	os.Exit(dispatch.RunWatch(fetch, os.Stdout, dispatch.WatchOptions{
+		DispatchID: dispatchID,
+		Interval:   interval,
+	}))
+}
+
+func parseDispatchWatchArgs(args []string) (string, string, time.Duration, error) {
+	// The dispatch id is a leading positional. Go's flag package stops at the
+	// first non-flag arg, so pull the id off the front before parsing flags;
+	// this keeps the natural `watch <id> --session X --interval 2s` working.
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return "", "", 0, errors.New("usage: dispatch watch <dispatch-id> [--session <id>] [--interval <dur>]")
+	}
+	dispatchID := strings.TrimSpace(args[0])
+	fs := flag.NewFlagSet("dispatch watch", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	sessionID := fs.String("session", "", "chief session id (defaults to ATTN_SESSION_ID)")
+	interval := fs.Duration("interval", 0, "poll interval (default 1s)")
+	if err := fs.Parse(args[1:]); err != nil {
+		return "", "", 0, err
+	}
+	if fs.NArg() != 0 {
+		return "", "", 0, fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	if dispatchID == "" {
+		return "", "", 0, errors.New("dispatch id is required")
+	}
+	source, err := resolveDispatchSession(*sessionID)
+	if err != nil {
+		return "", "", 0, err
+	}
+	return source, dispatchID, *interval, nil
 }
 
 func parseDispatchReportArgs(args []string) (string, string, *protocol.DispatchReport, error) {
