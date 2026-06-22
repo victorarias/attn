@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 // Editing controls the LiveMarkdownEditor harness exposes for the scroll tests below.
 declare global {
@@ -8,6 +8,24 @@ declare global {
       swapValue: (next: string) => void;
     };
   }
+}
+
+// Scroll well down into the long note and wait for CodeMirror to ACKNOWLEDGE the scroll
+// before returning the settled scrollTop. This gate matters: CM doesn't react to a raw
+// `scrollTop =` write until its scroll listener fires a measure that moves its internal
+// scroll anchor. Acting before that measure races CM — and a full-document swap that
+// finds the anchor still pinned at the top has nothing to snap *from*, so it leaves the
+// viewport where it was instead of jumping to the top. (That race flaked the contrast
+// test below on slow CI: scrollTop stuck at ~608 where it expected < 50.) CM virtualizes,
+// so a deep below-the-fold line is rendered into the DOM only once that scroll measure
+// has run — making "paragraph 25 is attached" a deterministic "CM has settled" signal.
+async function scrollIntoLongNote(page: Page): Promise<number> {
+  const scroller = page.locator('.cm-scroller');
+  await scroller.evaluate((el) => { el.scrollTop = 600; });
+  await expect(
+    page.locator('.cm-line', { hasText: 'Paragraph line number 25 of the long note' }),
+  ).toBeAttached();
+  return scroller.evaluate((el) => el.scrollTop);
 }
 
 // The notebook's single read-and-type surface (CodeMirror live preview), rendered
@@ -127,9 +145,8 @@ test.describe('LiveMarkdownEditor (live preview)', () => {
     await page.waitForSelector('.cm-content');
 
     const scroller = page.locator('.cm-scroller');
-    // Scroll well down into the long note.
-    await scroller.evaluate((el) => { el.scrollTop = 600; });
-    const before = await scroller.evaluate((el) => el.scrollTop);
+    // Scroll well down into the long note, and wait for CM to settle there first.
+    const before = await scrollIntoLongNote(page);
     expect(before).toBeGreaterThan(400);
 
     // An agent rewrites a line near the END of the note (below the fold). Applied as a
@@ -148,8 +165,11 @@ test.describe('LiveMarkdownEditor (live preview)', () => {
       return !!last && last.includes('EDITED BY AGENT');
     });
     // ... and the scroller did NOT jump (allow a couple px for re-measure rounding).
-    const after = await scroller.evaluate((el) => el.scrollTop);
-    expect(Math.abs(after - before)).toBeLessThanOrEqual(4);
+    // Poll the settled offset rather than reading once, so a transient re-measure can't
+    // flip the result; a real regression that snaps to the top stays ~600px off and fails.
+    await expect
+      .poll(() => scroller.evaluate((el, b) => Math.abs(el.scrollTop - b), before))
+      .toBeLessThanOrEqual(4);
   });
 
   test('contrast: a full value swap snaps the scroller to the top (the bug the fix avoids)', async ({ page }) => {
@@ -161,8 +181,11 @@ test.describe('LiveMarkdownEditor (live preview)', () => {
     await page.waitForSelector('.cm-content');
 
     const scroller = page.locator('.cm-scroller');
-    await scroller.evaluate((el) => { el.scrollTop = 600; });
-    expect(await scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(400);
+    // Wait for CM to settle at the scrolled position before swapping — otherwise the
+    // full-document swap races CM's scroll measure and may not snap to the top (see
+    // scrollIntoLongNote). The snap below is what we're proving, so the precondition
+    // has to be deterministic.
+    expect(await scrollIntoLongNote(page)).toBeGreaterThan(400);
 
     await page.evaluate(() => {
       const doc = Array.from({ length: 80 }, (_, i) => `Paragraph line number ${i + 1} of the long note.`);
