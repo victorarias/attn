@@ -1111,6 +1111,12 @@ func (d *Daemon) handleWorkspaceLayoutClosePane(client *wsClient, msg *protocol.
 		return
 	}
 
+	if d.isChiefOfStaffSession(sessionID) {
+		d.logf("refusing to close pane %s for chief-of-staff session %s; unset the chief role first", msg.PaneID, sessionID)
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutClosePane, msg.WorkspaceID, protocol.Ptr(msg.PaneID), fmt.Errorf("%s", chiefOfStaffProtectedError))
+		return
+	}
+
 	layout, _ := workspacelayout.Remove(snapshot.Layout, msg.PaneID)
 	snapshot.Layout = layout
 	snapshot.Panes = nextPanes
