@@ -193,11 +193,12 @@ func shortID(id string) string {
 }
 
 // oneLine collapses all interior whitespace runs to single spaces and truncates
-// to keep one event on one line.
+// to keep one event on one line. Truncation counts runes (not bytes) so it never
+// splits a multi-byte character.
 func oneLine(s string) string {
 	s = trim(strings.Join(strings.Fields(s), " "))
-	if len(s) > summaryLineLimit {
-		return s[:summaryLineLimit-1] + "…"
+	if r := []rune(s); len(r) > summaryLineLimit {
+		return string(r[:summaryLineLimit-1]) + "…"
 	}
 	return s
 }

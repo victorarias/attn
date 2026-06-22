@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -184,6 +185,25 @@ func TestRunWatch_AbortsAfterRepeatedFetchErrors(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "aborted") {
 		t.Errorf("out = %q, want an abort line", buf.String())
+	}
+}
+
+func TestOneLineCollapsesAndTruncatesOnRuneBoundary(t *testing.T) {
+	if got := oneLine("a\n  b\tc"); got != "a b c" {
+		t.Errorf("oneLine collapse = %q, want %q", got, "a b c")
+	}
+	// A long run of multi-byte runes must truncate without producing invalid
+	// UTF-8 (byte slicing would split a rune).
+	long := strings.Repeat("é", 400)
+	got := oneLine(long)
+	if !utf8.ValidString(got) {
+		t.Errorf("truncated output is not valid UTF-8: %q", got)
+	}
+	if r := []rune(got); len(r) != summaryLineLimit {
+		t.Errorf("truncated rune length = %d, want %d", len(r), summaryLineLimit)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("truncated output should end with ellipsis, got %q", got[len(got)-4:])
 	}
 }
 
