@@ -97,12 +97,12 @@ func (e *emitter) step(d *protocol.ChiefOfStaffDispatch, found bool) (line strin
 	if !found || d == nil {
 		// The dispatch is gone. Records are durable in production, so this only
 		// happens if one was explicitly deleted (or never existed). Either way,
-		// never hang: emit a terminal failure and exit.
+		// never hang: emit a neutral terminal and exit. Absence is not failure.
 		reason := "dispatch_gone"
 		if !e.seen {
 			reason = "not_found"
 		}
-		return formatGoneLine(e.dispatchID, reason), true, true, 1
+		return formatGoneLine(e.dispatchID, reason), true, true, 0
 	}
 	e.seen = true
 
@@ -156,7 +156,7 @@ func FormatLine(d protocol.ChiefOfStaffDispatch, ev Event) string {
 }
 
 func formatGoneLine(dispatchID, reason string) string {
-	return fmt.Sprintf("[%s] dispatch (%s) · %s", KindFailed, shortID(dispatchID), defaultSummary(reason))
+	return fmt.Sprintf("[%s] dispatch (%s) · %s", KindEnded, shortID(dispatchID), defaultSummary(reason))
 }
 
 func formatAbortLine(dispatchID string, err error) string {
@@ -167,9 +167,9 @@ func formatAbortLine(dispatchID string, err error) string {
 func defaultSummary(reason string) string {
 	switch reason {
 	case "session_closed":
-		return "session closed before reporting completion"
+		return "session ended without a structured report"
 	case "session_idle":
-		return "agent finished (no structured report filed)"
+		return "agent stopped without a structured report"
 	case "awaiting_input":
 		return "agent is waiting for direction (no report filed)"
 	case "dispatch_gone":

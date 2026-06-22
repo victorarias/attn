@@ -20,36 +20,40 @@
 //     files via `attn dispatch report --coordination-file` (work_state,
 //     report_type, an optional decision Request, summary, next_action).
 //
-// The agent's explicit declaration (StructuredReport) is authoritative for what
-// an event *means*; the runtime Status is authoritative for liveness/death and
-// is the fallback when no report pins the meaning down.
+// Doneness and failure are claimed by the agent, not inferred. Only an explicit
+// structured report yields Done or Failed; the runtime Status governs liveness
+// and the interim/neutral states.
 //
 // Classify maps those two dimensions onto exactly the events the vision says are
 // worth a chief notification, and nothing else. In priority order:
 //
-//  1. report work_state=failed OR report_type=failure  -> Failed   (terminal)
-//  2. report work_state=completed OR report_type=completion -> Done (terminal)
-//  3. report has a pending decision Request            -> Blocker  (interim)
-//  4. report work_state=needs_input OR report_type=blocker -> Blocker (interim)
-//  5. report work_state=ready_for_review              -> Review   (terminal)
-//  6. status=closed (session gone, no clean completion) -> Failed  (terminal)
-//  7. status=idle (agent stopped; attn defines idle = done) -> Done (terminal)
-//  8. status=waiting_input (stopped, needs direction) -> Blocker  (interim)
-//  9. everything else                                 -> None     (no emit)
+//  1. report work_state=failed OR report_type=failure       -> Failed  (terminal, exit 1)
+//  2. report work_state=completed OR report_type=completion  -> Done    (terminal, exit 0)
+//  3. status=closed, no explicit terminal outcome            -> Ended   (terminal, exit 0)
+//  4. report has a pending decision Request                  -> Blocker (interim)
+//  5. report work_state=needs_input OR report_type=blocker   -> Blocker (interim)
+//  6. report work_state=ready_for_review                     -> Review  (terminal, exit 0)
+//  7. status=idle, no explicit outcome                       -> Ended   (terminal, exit 0)
+//  8. status=waiting_input                                   -> Blocker (interim)
+//  9. everything else                                        -> None    (no emit)
 //
-// Step 9 is the crux: it swallows routine tool-permission prompts
-// (status=pending_approval), plus working/launching/scheduled/unknown. A routine
-// "approve this tool call" is NOT a decision worth waking the chief for, and it
-// is cleanly distinguishable from a genuine decision-request: the former is the
-// runtime status pending_approval; the latter is an explicit structured
-// Request / needs_input declaration (steps 3-4). The two come from different
-// data sources, so the exclusion is expressible from existing state.
+// Step 9 is the crux of *noise* suppression: it swallows routine tool-permission
+// prompts (status=pending_approval), plus working/launching/scheduled/unknown. A
+// routine "approve this tool call" is NOT a decision worth waking the chief for,
+// and it is cleanly distinguishable from a genuine decision-request: the former
+// is the runtime status pending_approval; the latter is an explicit structured
+// Request / needs_input declaration (steps 4-5). The two come from different data
+// sources, so the exclusion is expressible from existing state.
 //
-// "Silence != success": every way a dispatch can end is covered. A session that
-// dies without a completion report (status=closed, step 6) emits Failed and
-// exits — it never hangs silently. Only the interim Blocker kinds keep a watch
-// alive, and only while the agent is genuinely waiting on the chief; if that
-// session then dies, step 6 still fires.
+// Silence implies NEITHER success nor failure. A dispatch that ends without an
+// explicit terminal report — its session simply closes (step 3), or the agent
+// stops at idle without reporting (step 7) — is the neutral terminal kind Ended:
+// it emits and exits (so a watch never hangs and every terminal state is
+// covered), but it asserts no outcome. Only the agent's own structured report
+// turns an end into Done (step 2) or Failed (step 1). This is why step 3 sits
+// ahead of the interim report states: once the session is gone, a stale
+// needs_input is not a live blocker, so a dead session resolves to a neutral
+// terminal instead of hanging or being mislabeled.
 package dispatch
 
 import "github.com/victorarias/attn/internal/protocol"
@@ -67,7 +71,7 @@ const (
 	// KindNone is a routine, non-emitting state (the tool-permission exclusion
 	// and all mid-flight runtime states).
 	KindNone EventKind = "none"
-	// KindDone is a successful terminal completion with a report ready.
+	// KindDone is a successful completion the agent explicitly declared.
 	KindDone EventKind = "done"
 	// KindBlocker is a genuine blocker / decision-request: the agent needs the
 	// chief's judgement to proceed. Interim — a watch keeps running through it.
@@ -75,7 +79,11 @@ const (
 	// KindReview is a reviewable deliverable handed back for the chief to look
 	// at. Terminal — the agent considers its push done.
 	KindReview EventKind = "review"
-	// KindFailed is a failure, crash, or abnormal/unconfirmed termination.
+	// KindEnded is a neutral terminal: the dispatch ended without an explicit
+	// outcome (its session closed, or it stopped at idle without reporting). It
+	// implies neither success nor failure — drill into the narrative to know.
+	KindEnded EventKind = "ended"
+	// KindFailed is a failure the agent explicitly declared.
 	KindFailed EventKind = "failed"
 )
 
@@ -85,8 +93,8 @@ type Event struct {
 	// Terminal reports whether a watch should stop after this event.
 	Terminal bool
 	// ExitCode is the process exit code a watch should use when Terminal: 0 for
-	// a clean end (done/review), non-zero for a failure end. Meaningless when
-	// not Terminal.
+	// any non-failure terminal (done/review/ended), non-zero only for an
+	// explicitly declared failure. Meaningless when not Terminal.
 	ExitCode int
 	// Reason is a short stable token naming the trigger (e.g. "reported_failure",
 	// "session_closed", "decision_request"). Stable across releases for logs.
@@ -104,6 +112,8 @@ func Classify(d protocol.ChiefOfStaffDispatch) Event {
 	summary := dispatchSummary(d)
 	nextAction := trim(deref(structuredNextAction(d)))
 
+	// 1-2. Explicit terminal OUTCOME the agent declared — authoritative even if
+	// the session has since closed (a completed-then-closed dispatch is done).
 	if r := d.StructuredReport; r != nil {
 		switch {
 		case r.WorkState == protocol.DispatchWorkStateFailed ||
@@ -113,6 +123,18 @@ func Classify(d protocol.ChiefOfStaffDispatch) Event {
 			r.ReportType == protocol.DispatchReportTypeCompletion:
 			return Event{KindDone, true, 0, "reported_completion", summary, nextAction}
 		}
+	}
+
+	// 3. Session gone with no explicit terminal outcome → neutral terminal.
+	// Checked BEFORE the interim report states so a dead session never hangs (a
+	// stale needs_input is not a live blocker once the agent is gone) and is
+	// never read as success or failure.
+	if d.Status == SessionClosedStatus {
+		return Event{KindEnded, true, 0, "session_closed", summary, nextAction}
+	}
+
+	// 4-6. Live, explicit non-terminal report states.
+	if r := d.StructuredReport; r != nil {
 		if req := r.Request; req != nil && req.Status == protocol.DispatchRequestStatusPending {
 			s := summary
 			if q := trim(req.Question); q != "" {
@@ -127,15 +149,14 @@ func Classify(d protocol.ChiefOfStaffDispatch) Event {
 		case r.WorkState == protocol.DispatchWorkStateReadyForReview:
 			return Event{KindReview, true, 0, "ready_for_review", summary, nextAction}
 		}
-		// A report present but in_progress / progress / handoff does not pin the
-		// meaning; fall through to the runtime status.
 	}
 
+	// 7-9. Live runtime resting states with no actionable report. idle is a stop
+	// without a structured outcome, so it is neutral Ended too — attn does not
+	// claim a success the agent never declared.
 	switch d.Status {
-	case SessionClosedStatus:
-		return Event{KindFailed, true, 1, "session_closed", summary, nextAction}
 	case string(protocol.SessionStateIdle):
-		return Event{KindDone, true, 0, "session_idle", summary, nextAction}
+		return Event{KindEnded, true, 0, "session_idle", summary, nextAction}
 	case string(protocol.SessionStateWaitingInput):
 		return Event{KindBlocker, false, 0, "awaiting_input", summary, nextAction}
 	default:

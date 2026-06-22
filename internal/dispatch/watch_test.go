@@ -94,18 +94,64 @@ func TestRunWatch_StaysSilentThenExitsOnRoutineApproval(t *testing.T) {
 	}
 }
 
-func TestRunWatch_FailsAndExitsNonZeroOnSessionClose(t *testing.T) {
+func TestRunWatch_SessionCloseIsNeutralEndedExitZero(t *testing.T) {
+	// Silence is not failure: a session that closes without a structured report
+	// is the neutral [ended], exit 0 — it emits and exits (never hangs), but
+	// asserts no outcome.
 	closed := &protocol.ChiefOfStaffDispatch{ID: "d1", Label: "badge", Status: SessionClosedStatus}
 	code, out, _ := runWatchScript(t, []fetchStep{
 		{working(), true, nil},
 		{closed, true, nil},
 	})
+	if code != 0 {
+		t.Errorf("exit = %d, want 0 — close-without-report is neutral, not failure", code)
+	}
+	lines := nonEmptyLines(out)
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], "[ended]") {
+		t.Fatalf("want a single [ended] line, got: %q", out)
+	}
+}
+
+func TestRunWatch_ExplicitFailureExitsNonZero(t *testing.T) {
+	// Only an explicitly declared failure is [failed], exit 1.
+	failed := &protocol.ChiefOfStaffDispatch{
+		ID: "d1", Label: "badge", Status: "working",
+		StructuredReport: &protocol.DispatchReport{
+			WorkState: protocol.DispatchWorkStateFailed,
+			Summary:   "build is red",
+		},
+	}
+	code, out, _ := runWatchScript(t, []fetchStep{
+		{working(), true, nil},
+		{failed, true, nil},
+	})
 	if code == 0 {
-		t.Errorf("exit = 0, want non-zero for a session that died without completing")
+		t.Errorf("exit = 0, want non-zero for an explicitly reported failure")
 	}
 	lines := nonEmptyLines(out)
 	if len(lines) != 1 || !strings.HasPrefix(lines[0], "[failed]") {
 		t.Fatalf("want a single [failed] line, got: %q", out)
+	}
+}
+
+func TestRunWatch_DeadSessionWithStaleBlockerDoesNotHang(t *testing.T) {
+	// A needs_input report on a session that then closes must resolve to a
+	// neutral terminal — not stay a (non-terminal) blocker and hang forever.
+	stuck := &protocol.ChiefOfStaffDispatch{
+		ID: "d1", Label: "badge", Status: SessionClosedStatus,
+		StructuredReport: &protocol.DispatchReport{
+			WorkState: protocol.DispatchWorkStateNeedsInput,
+			Summary:   "was waiting on a decision",
+		},
+	}
+	code, out, _ := runWatchScript(t, []fetchStep{
+		{stuck, true, nil},
+	})
+	if code != 0 {
+		t.Errorf("exit = %d, want 0", code)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(out), "[ended]") {
+		t.Fatalf("dead session with a stale blocker must end neutrally, got: %q", out)
 	}
 }
 
@@ -158,16 +204,18 @@ func TestRunWatch_AlreadyTerminalOnFirstPollEmitsAndExits(t *testing.T) {
 	}
 }
 
-func TestRunWatch_GoneAfterSeenIsTerminalFailure(t *testing.T) {
+func TestRunWatch_GoneAfterSeenIsNeutralEnded(t *testing.T) {
+	// A vanished record is absence, not failure → neutral [ended], exit 0, and
+	// crucially it still terminates rather than hanging.
 	code, out, _ := runWatchScript(t, []fetchStep{
 		{working(), true, nil},
 		{nil, false, nil}, // record vanished
 	})
-	if code == 0 {
-		t.Errorf("exit = 0, want non-zero when a seen dispatch vanishes")
+	if code != 0 {
+		t.Errorf("exit = %d, want 0 — a vanished record is neutral, not failure", code)
 	}
-	if !strings.HasPrefix(strings.TrimSpace(out), "[failed]") {
-		t.Errorf("out = %q, want a [failed] line", out)
+	if !strings.HasPrefix(strings.TrimSpace(out), "[ended]") {
+		t.Errorf("out = %q, want an [ended] line", out)
 	}
 }
 

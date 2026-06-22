@@ -44,24 +44,31 @@ func TestClassify(t *testing.T) {
 		wantExit     int
 		wantReason   string
 	}{
-		// --- terminal completion (category 1) ---
+		// --- explicit completion → done (the agent SAID it finished) ---
 		{"reported completion", "working", report(protocol.DispatchWorkStateCompleted, protocol.DispatchReportTypeCompletion), KindDone, true, 0, "reported_completion"},
 		{"completion type only", "working", report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeCompletion), KindDone, true, 0, "reported_completion"},
-		{"idle without report = done", string(protocol.SessionStateIdle), nil, KindDone, true, 0, "session_idle"},
-		{"idle after progress report = done", string(protocol.SessionStateIdle), report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeProgress), KindDone, true, 0, "session_idle"},
+		{"completed then closed = done (report wins over close)", SessionClosedStatus, report(protocol.DispatchWorkStateCompleted, protocol.DispatchReportTypeCompletion), KindDone, true, 0, "reported_completion"},
 		{"ready for review = terminal handoff", "working", report(protocol.DispatchWorkStateReadyForReview, protocol.DispatchReportTypeProgress), KindReview, true, 0, "ready_for_review"},
 
-		// --- genuine blocker / decision-request (category 2) ---
+		// --- silence implies neither success nor failure → neutral Ended ---
+		{"idle without report = ended (not done)", string(protocol.SessionStateIdle), nil, KindEnded, true, 0, "session_idle"},
+		{"idle after progress report = ended", string(protocol.SessionStateIdle), report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeProgress), KindEnded, true, 0, "session_idle"},
+		{"session closed without report = ended (not failed)", SessionClosedStatus, nil, KindEnded, true, 0, "session_closed"},
+		{"session closed after progress report = ended", SessionClosedStatus, report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeProgress), KindEnded, true, 0, "session_closed"},
+		// A dead session beats a stale interim report — never hang, never mislabel.
+		{"needs_input then closed = ended (no hang)", SessionClosedStatus, report(protocol.DispatchWorkStateNeedsInput, protocol.DispatchReportTypeProgress), KindEnded, true, 0, "session_closed"},
+		{"ready_for_review then closed = ended", SessionClosedStatus, report(protocol.DispatchWorkStateReadyForReview, protocol.DispatchReportTypeProgress), KindEnded, true, 0, "session_closed"},
+		{"decision request then closed = ended", SessionClosedStatus, pendingRequest, KindEnded, true, 0, "session_closed"},
+
+		// --- genuine blocker / decision-request (interim, live) ---
 		{"pending decision request", "waiting_input", pendingRequest, KindBlocker, false, 0, "decision_request"},
 		{"needs_input work state", "working", report(protocol.DispatchWorkStateNeedsInput, protocol.DispatchReportTypeProgress), KindBlocker, false, 0, "needs_input"},
 		{"blocker report type", "working", report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeBlocker), KindBlocker, false, 0, "needs_input"},
 		{"waiting_input without report", string(protocol.SessionStateWaitingInput), nil, KindBlocker, false, 0, "awaiting_input"},
 
-		// --- failure / crash / abnormal termination (category 3) ---
+		// --- explicit failure → failed (the agent SAID it failed) ---
 		{"reported failure", "working", report(protocol.DispatchWorkStateFailed, protocol.DispatchReportTypeFailure), KindFailed, true, 1, "reported_failure"},
 		{"failure type only", "working", report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeFailure), KindFailed, true, 1, "reported_failure"},
-		{"session closed without completion", SessionClosedStatus, nil, KindFailed, true, 1, "session_closed"},
-		{"session closed after progress report", SessionClosedStatus, report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeProgress), KindFailed, true, 1, "session_closed"},
 
 		// --- the exclusion: routine tool-permission prompt (category MUST NOT emit) ---
 		{"pending_approval is routine, no emit", string(protocol.SessionStatePendingApproval), nil, KindNone, false, 0, ""},
