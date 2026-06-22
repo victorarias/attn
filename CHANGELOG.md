@@ -6,6 +6,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-22]
+
+### Added
+- **See which sessions your chief of staff started.** Sessions the chief of staff delegated now carry a small "↳" marker in the sidebar, next to where the chief's own badge sits — so at a glance you can tell the agents the chief spun up from the ones you started yourself. Only delegations that came from the chief get it; a plain hand-off between two regular sessions doesn't.
+
+### Changed
+- **The chief of staff is now blue.** The chief-of-staff badge (in the sidebar and the dashboard) and its related controls — the "Make chief of staff" action and the transfer confirmation — moved from the app's orange accent to a distinct blue, giving the chief its own identity and setting the new delegated-from-chief marker (which shares that blue) apart from everything else.
+
 ## [2026-06-21]
 
 ### Fixed

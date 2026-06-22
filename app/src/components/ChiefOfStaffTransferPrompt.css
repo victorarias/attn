@@ -67,12 +67,12 @@
 }
 
 .chief-transfer-actions .confirm {
-  background: rgba(255, 107, 53, 0.14);
-  border-color: rgba(255, 107, 53, 0.35);
-  color: #ff8b61;
+  background: rgba(88, 166, 255, 0.14);
+  border-color: rgba(88, 166, 255, 0.35);
+  color: #79b8ff;
 }
 
 .chief-transfer-actions button:focus-visible {
-  outline: 2px solid rgba(255, 107, 53, 0.6);
+  outline: 2px solid rgba(88, 166, 255, 0.6);
   outline-offset: 2px;
 }

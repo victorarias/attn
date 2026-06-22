@@ -2599,12 +2599,17 @@ func cloneSession(session *protocol.Session) *protocol.Session {
 }
 
 func (d *Daemon) sessionForBroadcast(session *protocol.Session) *protocol.Session {
-	return d.sessionForBroadcastWithChiefOfStaff(session, d.chiefOfStaffSessionID())
+	return d.sessionForBroadcastWithChiefOfStaff(
+		session,
+		d.chiefOfStaffSessionID(),
+		d.delegatedFromChiefSessionIDs(),
+	)
 }
 
 func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	session *protocol.Session,
 	chiefOfStaffSessionID string,
+	delegatedFromChief map[string]bool,
 ) *protocol.Session {
 	clone := cloneSession(session)
 	if clone == nil {
@@ -2616,6 +2621,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 		clone.NeedsReviewAfterLongRun = nil
 	}
 	d.decorateChiefOfStaffWithSessionID(clone, chiefOfStaffSessionID)
+	d.decorateDelegatedFromChief(clone, delegatedFromChief)
 	d.decorateSessionWithWorkspace(clone)
 	return clone
 }
@@ -2625,9 +2631,10 @@ func (d *Daemon) sessionsForBroadcast(sessions []*protocol.Session) []protocol.S
 		return nil
 	}
 	chiefOfStaffSessionID := d.chiefOfStaffSessionID()
+	delegatedFromChief := d.delegatedFromChiefSessionIDs()
 	out := make([]protocol.Session, 0, len(sessions))
 	for _, session := range sessions {
-		if decorated := d.sessionForBroadcastWithChiefOfStaff(session, chiefOfStaffSessionID); decorated != nil {
+		if decorated := d.sessionForBroadcastWithChiefOfStaff(session, chiefOfStaffSessionID, delegatedFromChief); decorated != nil {
 			out = append(out, *decorated)
 		}
 	}

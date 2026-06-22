@@ -176,6 +176,44 @@ func (s *Store) GetChiefOfStaffDispatchBySession(sessionID string) *protocol.Chi
 	return scanChiefOfStaffDispatch(row)
 }
 
+// DelegatedFromChiefSessionIDs returns the set of session IDs that were
+// delegated from the chief of staff. A chief-of-staff dispatch is created only
+// when a session is delegated and its source session is the current chief (see
+// daemon.delegate's trackedByChief), and dispatch records are retained for the
+// session's lifetime, so a dispatch's existence is exactly the "delegated from
+// chief" signal. This bulk read lets a single broadcast decorate every session
+// without one query per session.
+func (s *Store) DelegatedFromChiefSessionIDs() map[string]bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make(map[string]bool)
+	if s.db == nil {
+		for _, dispatch := range s.chiefDispatches {
+			if sid := strings.TrimSpace(dispatch.SessionID); sid != "" {
+				out[sid] = true
+			}
+		}
+		return out
+	}
+
+	rows, err := s.db.Query("SELECT session_id FROM chief_of_staff_dispatches")
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sessionID string
+		if err := rows.Scan(&sessionID); err != nil {
+			continue
+		}
+		if sid := strings.TrimSpace(sessionID); sid != "" {
+			out[sid] = true
+		}
+	}
+	return out
+}
+
 func (s *Store) GetChiefOfStaffDispatch(id string) *protocol.ChiefOfStaffDispatch {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

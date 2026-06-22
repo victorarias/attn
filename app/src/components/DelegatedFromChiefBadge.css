@@ -1,0 +1,20 @@
+/* A session delegated FROM the chief carries a small icon-only "↳" chip in the
+   chief's blue family — the shared blue reads as "spawned from the chief", while
+   the tiny icon (vs the chief's worded "⌁ CHIEF" badge) keeps the two distinct. */
+.delegated-from-chief-badge {
+  align-items: center;
+  background: rgba(88, 166, 255, 0.14);
+  border: 1px solid rgba(88, 166, 255, 0.34);
+  border-radius: 999px;
+  color: #79b8ff;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  height: 18px;
+  justify-content: center;
+  line-height: 1;
+  min-width: 18px;
+  padding: 0;
+}

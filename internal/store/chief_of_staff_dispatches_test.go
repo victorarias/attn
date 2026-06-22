@@ -52,6 +52,44 @@ func TestChiefOfStaffDispatchLifecycle(t *testing.T) {
 	}
 }
 
+func TestDelegatedFromChiefSessionIDs(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	if ids := s.DelegatedFromChiefSessionIDs(); len(ids) != 0 {
+		t.Fatalf("empty store delegated set = %+v", ids)
+	}
+
+	now := string(protocol.TimestampNow())
+	add := func(id, sessionID string) {
+		t.Helper()
+		if err := s.AddChiefOfStaffDispatch(&protocol.ChiefOfStaffDispatch{
+			ID:             id,
+			ChiefSessionID: "chief-1",
+			SessionID:      sessionID,
+			WorkspaceID:    "workspace-1",
+			Brief:          "brief",
+			Label:          "label",
+			Agent:          "codex",
+			Directory:      "/tmp/project",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}); err != nil {
+			t.Fatalf("add dispatch %s: %v", id, err)
+		}
+	}
+	add("dispatch-1", "worker-1")
+	add("dispatch-2", "worker-2")
+
+	ids := s.DelegatedFromChiefSessionIDs()
+	if len(ids) != 2 || !ids["worker-1"] || !ids["worker-2"] {
+		t.Fatalf("delegated set = %+v", ids)
+	}
+	if ids["never-delegated"] {
+		t.Fatalf("unexpected non-delegated session in set: %+v", ids)
+	}
+}
+
 func TestChiefOfStaffDispatchMessageLifecycle(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "attn.db")
 	s, err := NewWithDB(dbPath)

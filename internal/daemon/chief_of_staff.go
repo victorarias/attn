@@ -46,6 +46,30 @@ func (d *Daemon) decorateChiefOfStaffWithSessionID(session *protocol.Session, ch
 	session.ChiefOfStaff = nil
 }
 
+// delegatedFromChiefSessionIDs returns the set of session IDs that the chief of
+// staff delegated, so a single broadcast can decorate every session without one
+// store lookup per session.
+func (d *Daemon) delegatedFromChiefSessionIDs() map[string]bool {
+	if d.store == nil {
+		return nil
+	}
+	return d.store.DelegatedFromChiefSessionIDs()
+}
+
+// decorateDelegatedFromChief marks a session that was delegated from the chief
+// of staff. Mirrors decorateChiefOfStaffWithSessionID: the field is set only
+// when true and cleared otherwise so it round-trips as an omitted boolean.
+func (d *Daemon) decorateDelegatedFromChief(session *protocol.Session, delegatedFromChief map[string]bool) {
+	if session == nil {
+		return
+	}
+	if delegatedFromChief[session.ID] {
+		session.DelegatedFromChief = protocol.Ptr(true)
+		return
+	}
+	session.DelegatedFromChief = nil
+}
+
 func (d *Daemon) sessionExists(sessionID string) bool {
 	if d.store != nil && d.store.Get(sessionID) != nil {
 		return true

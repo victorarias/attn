@@ -169,6 +169,7 @@ model Session {
   needs_review_after_long_run?: boolean; // True when a 5m+ run finished and awaits user visualization
   recoverable?: boolean;        // True when session can be recovered after daemon restart (agent has resumable conversation)
   chief_of_staff?: boolean;     // True when this session holds the profile-wide coordinator role
+  delegated_from_chief?: boolean; // True when this session was delegated from the chief of staff (has a chief dispatch)
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
 }
