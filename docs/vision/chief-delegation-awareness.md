@@ -33,12 +33,15 @@ where he already looks — not buried in a dashboard he never opens.
   a few minutes — so the check fires at a sensible moment, not on a busy loop.
 - **The loop runs both ways.** Observing is half a loop; the chief must also be
   able to *steer* a running agent. The reverse channel (the dispatch mailbox)
-  gets the same event-driven, ambient treatment as the forward one: Claude
-  agents watch their own inbox and self-deliver; the human-facing signal lives
-  where Victor already looks — a left-sidebar pending-mail badge and an on-agent
-  overlay to deliver — never dashboard-bound. Keep the existing boundary: the
-  daemon delivers durable mail and triggers a *read*; it never streams message
-  content into the PTY.
+  gets the same event-driven, ambient treatment as the forward one. Delivery by
+  situation: a **Claude** agent watches its own inbox (a Monitor) and
+  self-delivers — no human in the loop. An agent that **can't self-monitor**
+  (codex) falls back to attn — an **on-agent overlay** Victor clicks when he's
+  driving it, and an **automatic idle-wake** (attn pty-nudges it to check the
+  inbox after a few minutes idle) when no one is. A **left-sidebar pending-mail
+  badge** flags the session either way. Never dashboard-bound. Keep the existing
+  boundary: the daemon delivers durable mail and triggers a *read*; it never
+  streams message content into the PTY.
 - **attn owns the signal; the chief stays dumb.** A first-class
   `attn dispatch watch` defines what an "event" *is*. The chief just arms it and
   reacts. One source of truth for doneness — reused verbatim by the poll
@@ -95,6 +98,14 @@ Coarse and expected to evolve — not a task tracker.
   failure; excludes routine approvals; covers crash states). In flight: PR #394
   (shared classifier in `internal/dispatch`, reuses `list_dispatches`, no new
   protocol surface) — ready to merge.
+- [ ] **Reliable doneness-on-close** — today a session that finishes *without*
+  filing a structured terminal report classifies as `failed` (the safe
+  silence≠success default), so a real success can surface as a false `[failed]`
+  once its session closes — and the *same* work reads `done` while idle but
+  `failed` once closed. Fix doneness at the source: the daemon infers completion
+  on a clean close, or agents reliably file a terminal report, so the signal
+  isn't a false alarm. Surfaced by the #394 alignment review; also closes the
+  re-arming open question below.
 - [ ] **Delegation-time injection** — at delegation, attn instructs the chief to
   arm a persistent, non-blocking Monitor on the new dispatch. Scoped to the
   dispatch id, self-retiring on terminal, default-on but overridable.
@@ -112,14 +123,18 @@ Coarse and expected to evolve — not a task tracker.
   has been idle a few minutes, rather than leaving it on a timer.
 
 **Reverse — steer (chief → agent):**
-- [ ] **Agents watch their own inbox** — delegated Claude agents arm a Monitor
-  on `dispatch inbox` and self-deliver mail on arrival. Brief-level; needs no
-  attn change (can start today).
+- [~] **Agents watch their own inbox** — delegated Claude agents arm a Monitor
+  on `dispatch inbox` and self-deliver mail on arrival. Brief-level, no attn
+  change; now a standing line in every delegation brief.
+- [ ] **Auto-wake on idle** — for agents that can't self-monitor (codex), attn
+  pty-nudges them to check the inbox after a few minutes idle. The *unattended*
+  fallback — mirror of the idle-nudge on the forward side.
+- [ ] **On-agent mailbox overlay** — a top-right overlay on an agent that has
+  pending mail, for when Victor is *driving* that agent; click fires the
+  inbox-doorbell PTY injection to it (the *attended* manual path; message
+  content stays out of the PTY).
 - [ ] **Pending-mail sidebar badge** — a per-session left-sidebar badge when an
   agent has unread mail (sibling of the chief / delegated-from-chief badges).
-- [ ] **On-agent mailbox overlay** — a top-right overlay on an agent that has
-  pending mail; click fires the inbox-doorbell PTY injection to *that* agent
-  (the manual / non-Claude delivery path; message content stays out of the PTY).
 - [ ] **Fix mailbox delivery, kill limbo** — mail reaches a live agent promptly
   instead of waiting for a lifecycle boundary or a dashboard click; mail
   lifecycle ties to the dispatch so nothing strands when it closes. Durable /
@@ -142,7 +157,9 @@ Coarse and expected to evolve — not a task tracker.
   truth.)
 - **Re-arming across sessions.** If the chief compacts or restarts while a
   monitor is armed, how is the watch re-established from journal / dispatch
-  state so a thread isn't silently dropped?
+  state so a thread isn't silently dropped? (Related: re-arming a watch on an
+  already-finished, already-closed agent reads `failed` for success until
+  *reliable doneness-on-close* lands.)
 - **Idle-nudge reliability.** Does the pty "go check" nudge for non-Claude
   chiefs land reliably (idle detection, injection timing), or do some agents
   still need a self-driven timer as backstop?
