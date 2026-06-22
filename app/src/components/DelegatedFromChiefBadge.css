@@ -1,0 +1,29 @@
+/* Visually analogous to the chief-of-staff badge (same orange family, same
+   dimensions and glyph-then-label structure) but outline-only and a touch
+   muted, so a session delegated FROM the chief reads as related to — yet
+   distinct from — the chief session's own filled badge. */
+.delegated-from-chief-badge {
+  align-items: center;
+  background: transparent;
+  border: 1px solid rgba(255, 107, 53, 0.28);
+  border-radius: 4px;
+  color: #e6a07e;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  gap: 3px;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 3px 5px;
+  text-transform: uppercase;
+}
+
+.delegated-from-chief-badge.compact {
+  border-radius: 999px;
+  height: 18px;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 5px;
+}

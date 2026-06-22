@@ -497,6 +497,7 @@ export interface SessionElement {
     agent:                        string;
     branch?:                      string;
     chief_of_staff?:              boolean;
+    delegated_from_chief?:        boolean;
     directory:                    string;
     endpoint_id?:                 string;
     id:                           string;
@@ -3252,6 +3253,7 @@ export interface Session {
     agent:                        string;
     branch?:                      string;
     chief_of_staff?:              boolean;
+    delegated_from_chief?:        boolean;
     directory:                    string;
     endpoint_id?:                 string;
     id:                           string;
@@ -7023,6 +7025,7 @@ const typeMap: any = {
         { json: "agent", js: "agent", typ: "" },
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "chief_of_staff", js: "chief_of_staff", typ: u(undefined, true) },
+        { json: "delegated_from_chief", js: "delegated_from_chief", typ: u(undefined, true) },
         { json: "directory", js: "directory", typ: "" },
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "id", js: "id", typ: "" },
@@ -8654,6 +8657,7 @@ const typeMap: any = {
         { json: "agent", js: "agent", typ: "" },
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "chief_of_staff", js: "chief_of_staff", typ: u(undefined, true) },
+        { json: "delegated_from_chief", js: "delegated_from_chief", typ: u(undefined, true) },
         { json: "directory", js: "directory", typ: "" },
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "id", js: "id", typ: "" },

@@ -3216,6 +3216,9 @@ type Session struct {
 	// ChiefOfStaff corresponds to the JSON schema field "chief_of_staff".
 	ChiefOfStaff *bool `json:"chief_of_staff,omitempty,omitzero"`
 
+	// DelegatedFromChief corresponds to the JSON schema field "delegated_from_chief".
+	DelegatedFromChief *bool `json:"delegated_from_chief,omitempty,omitzero"`
+
 	// Directory corresponds to the JSON schema field "directory".
 	Directory string `json:"directory"`
 

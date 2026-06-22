@@ -29,6 +29,7 @@ interface TestSession {
   recoverable?: boolean;
   reviewLoopStatus?: string;
   chiefOfStaff?: boolean;
+  delegatedFromChief?: boolean;
 }
 
 function buildSidebarData(sessions: TestSession[]) {
@@ -429,6 +430,24 @@ describe('Sidebar', () => {
     );
 
     expect(screen.getByLabelText('Review loop running')).toBeInTheDocument();
+  });
+
+  it('shows the delegated-from-chief badge only on sessions delegated from the chief', () => {
+    const sessions: TestSession[] = [
+      { id: 's1', label: 'delegated', state: 'working', agent: 'claude', delegatedFromChief: true },
+      { id: 's2', label: 'self-started', state: 'working', agent: 'claude' },
+    ];
+    render(
+      <Sidebar
+        {...baseProps}
+        {...buildSidebarData(sessions)}
+      />
+    );
+
+    const badges = screen.getAllByLabelText('Delegated from chief of staff');
+    expect(badges).toHaveLength(1);
+    expect(screen.getByTestId('sidebar-session-s1')).toContainElement(badges[0]);
+    expect(screen.getByTestId('sidebar-session-s2')).not.toContainElement(badges[0]);
   });
 
   it('renders workspace shortcuts in workspace visual order', () => {

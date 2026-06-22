@@ -182,6 +182,87 @@ func TestChiefOfStaffDelegateCreatesTrackedDispatch(t *testing.T) {
 	}
 }
 
+func TestDelegatedFromChiefDecoratesBroadcastSession(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, sourceSessionID); err != nil {
+		t.Fatalf("set chief role: %v", err)
+	}
+	consumeDelegatedPrompt(t, backend)
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Investigate the tracked task.",
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+
+	// Exercise the same list-broadcast path the sidebar receives.
+	var delegated, chief *protocol.Session
+	for _, session := range d.sessionsForBroadcast(d.store.List("")) {
+		session := session
+		switch session.ID {
+		case result.SessionID:
+			delegated = &session
+		case sourceSessionID:
+			chief = &session
+		}
+	}
+
+	if delegated == nil {
+		t.Fatal("delegated session missing from broadcast")
+	}
+	if !protocol.Deref(delegated.DelegatedFromChief) {
+		t.Fatalf("delegated session = %+v, want delegated_from_chief=true", delegated)
+	}
+	if protocol.Deref(delegated.ChiefOfStaff) {
+		t.Fatalf("delegated session should not be the chief itself: %+v", delegated)
+	}
+
+	if chief == nil {
+		t.Fatal("chief session missing from broadcast")
+	}
+	if !protocol.Deref(chief.ChiefOfStaff) {
+		t.Fatalf("chief session = %+v, want chief_of_staff=true", chief)
+	}
+	if protocol.Deref(chief.DelegatedFromChief) {
+		t.Fatalf("chief session should not carry delegated_from_chief: %+v", chief)
+	}
+}
+
+func TestOrdinaryDelegationDoesNotDecorateDelegatedFromChief(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	// No chief role is set, so this is a plain session-to-session delegation.
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Plain delegated task.",
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	if result.DispatchID != nil {
+		t.Fatalf("ordinary delegation should not create a dispatch: %+v", result)
+	}
+
+	delegated := d.sessionForBroadcast(d.store.Get(result.SessionID))
+	if delegated == nil {
+		t.Fatal("delegated session missing")
+	}
+	if protocol.Deref(delegated.DelegatedFromChief) {
+		t.Fatalf("ordinary delegated session should not carry delegated_from_chief: %+v", delegated)
+	}
+}
+
 func TestDispatchReportUpdatesTrackedRecord(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}

@@ -1239,6 +1239,7 @@ sendFetchPRDetails,
       recoverable: daemonSession?.recoverable ?? false,
       reviewLoopStatus: reviewLoop?.status,
       chiefOfStaff: daemonSession?.chief_of_staff ?? false,
+      delegatedFromChief: daemonSession?.delegated_from_chief ?? false,
     };
   });
 

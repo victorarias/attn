@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-22]
+
+### Added
+- **See which sessions your chief of staff started.** Sessions the chief of staff delegated now carry a small "↳ chief" badge in the sidebar, right where the chief's own badge sits — so at a glance you can tell the agents the chief spun up from the ones you started yourself. Only delegations that came from the chief get the badge; a plain hand-off between two regular sessions doesn't, and the chief's own badge is unchanged.
+
 ## [2026-06-21]
 
 ### Fixed
