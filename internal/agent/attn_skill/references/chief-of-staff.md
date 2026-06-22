@@ -13,6 +13,12 @@ See the delegation reference for the full boundary. attn tracks a delegated
 session automatically only when the current source session holds the
 chief-of-staff role.
 
+When you delegate work that will produce a large durable artifact — a report, a
+design doc, findings — designate where it should land in the Notebook in the brief
+(for example a `projects/<slug>/` note). The dispatched agent hands the artifact off
+with `dispatch handoff` and reports back a reference; you then decide whether to
+leave it, move it, or promote it into the knowledge base.
+
 Review your dispatched work with:
 
     "$ATTN_WRAPPER_PATH" dispatch list
@@ -68,6 +74,21 @@ Keep a short report concrete: outcome, evidence, and next action.
 For a longer report, write it to a file and submit the file:
 
     "$ATTN_WRAPPER_PATH" dispatch report --file /tmp/dispatch-report.md
+
+A report is a small payload. When you build a large durable artifact — a report, a
+design doc, findings, often built with the user — write it into the Notebook and
+report the reference instead of inlining it:
+
+    "$ATTN_WRAPPER_PATH" dispatch handoff \
+      --file /tmp/auth-audit.md \
+      --to projects/auth-audit/findings.md \
+      --message "Auth audit complete; full findings in the Notebook."
+
+`--to` is the Notebook path the chief (or user) designated; the daemon writes the
+artifact there and the reference travels back in your report. If no destination was
+designated and the artifact warrants one, ask the chief in a report rather than
+inventing a location. Add `--coordination-file <json>` to a terminal handoff just as
+you would to a report.
 
 For actionable coordination, keep the narrative and attach a JSON envelope:
 

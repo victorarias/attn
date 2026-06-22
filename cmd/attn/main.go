@@ -620,6 +620,18 @@ func runDispatch() {
 			os.Exit(1)
 		}
 		printJSON(dispatch)
+	case "handoff":
+		sourceSessionID, to, content, message, structuredReport, err := parseDispatchHandoffArgs(os.Args[3:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch handoff: %v\n", err)
+			os.Exit(2)
+		}
+		dispatch, err := client.New("").HandoffDispatch(sourceSessionID, to, content, message, structuredReport)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch handoff: %v\n", err)
+			os.Exit(1)
+		}
+		printJSON(dispatch)
 	case "status":
 		sourceSessionID, err := parseDispatchSourceSession(os.Args[3:])
 		if err != nil {
@@ -723,6 +735,8 @@ commands:
   list [--session <id>]                          list work dispatched by this chief
   report (--message <text> | --file <path>)     report progress from a dispatched agent
          [--coordination-file <json>]
+  handoff --file <path> --to <notebook-path>    write a large artifact into the notebook and
+         [--message <text>] [--coordination-file <json>]   report a reference back to the chief
   status [--session <id>]                        show this delegated session's report and response
   resolve --dispatch <id>                        answer the active decision request
           (--response <text> | --file <path>) [--link <url>] [--session <id>]
@@ -805,6 +819,62 @@ func parseDispatchReportArgs(args []string) (string, string, *protocol.DispatchR
 		structuredReport = &parsed
 	}
 	return source, report, structuredReport, nil
+}
+
+// parseDispatchHandoffArgs parses `dispatch handoff` flags. The artifact file is
+// read here (like a coordination file) and its bytes are sent verbatim — the
+// notebook note keeps the artifact exactly as built. --to and --file are required;
+// the chief (or user) designates --to, so there is no default destination.
+func parseDispatchHandoffArgs(args []string) (string, string, string, string, *protocol.DispatchReport, error) {
+	fs := flag.NewFlagSet("dispatch handoff", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	file := fs.String("file", "", "file containing the artifact to write into the notebook")
+	to := fs.String("to", "", "destination notebook path (root-relative, .md) the chief designated")
+	message := fs.String("message", "", "optional note to accompany the reference in the report")
+	coordinationFile := fs.String("coordination-file", "", "JSON file containing structured coordination fields")
+	if err := fs.Parse(args); err != nil {
+		return "", "", "", "", nil, err
+	}
+	if fs.NArg() != 0 {
+		return "", "", "", "", nil, fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	source := strings.TrimSpace(*sessionID)
+	if source == "" {
+		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+	}
+	if source == "" {
+		return "", "", "", "", nil, errors.New("no session; run inside attn or pass --session")
+	}
+	dest := strings.TrimSpace(*to)
+	if dest == "" {
+		return "", "", "", "", nil, errors.New("--to is required (the chief designates the notebook destination)")
+	}
+	path := strings.TrimSpace(*file)
+	if path == "" {
+		return "", "", "", "", nil, errors.New("--file is required")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", "", "", nil, fmt.Errorf("read artifact file: %w", err)
+	}
+	content := string(raw)
+	if strings.TrimSpace(content) == "" {
+		return "", "", "", "", nil, errors.New("artifact file is empty")
+	}
+	var structuredReport *protocol.DispatchReport
+	if p := strings.TrimSpace(*coordinationFile); p != "" {
+		data, readErr := os.ReadFile(p)
+		if readErr != nil {
+			return "", "", "", "", nil, fmt.Errorf("read coordination file: %w", readErr)
+		}
+		var parsed protocol.DispatchReport
+		if jsonErr := json.Unmarshal(data, &parsed); jsonErr != nil {
+			return "", "", "", "", nil, fmt.Errorf("parse coordination file: %w", jsonErr)
+		}
+		structuredReport = &parsed
+	}
+	return source, dest, content, strings.TrimSpace(*message), structuredReport, nil
 }
 
 func parseDispatchResolveArgs(args []string) (string, string, string, string, error) {

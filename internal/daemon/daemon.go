@@ -1841,6 +1841,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleListDispatches(conn, msg.(*protocol.ListDispatchesMessage))
 	case protocol.CmdReportDispatch:
 		d.handleReportDispatch(conn, msg.(*protocol.ReportDispatchMessage))
+	case protocol.CmdHandoffDispatch:
+		d.handleHandoffDispatch(conn, msg.(*protocol.HandoffDispatchMessage))
 	case protocol.CmdGetDispatch:
 		d.handleGetDispatch(conn, msg.(*protocol.GetDispatchMessage))
 	case protocol.CmdResolveDispatchRequest:
