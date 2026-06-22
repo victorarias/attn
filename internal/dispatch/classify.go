@@ -29,10 +29,10 @@
 //
 //  1. report work_state=failed OR report_type=failure       -> Failed  (terminal, exit 1)
 //  2. report work_state=completed OR report_type=completion  -> Done    (terminal, exit 0)
-//  3. status=closed, no explicit terminal outcome            -> Ended   (terminal, exit 0)
-//  4. report has a pending decision Request                  -> Blocker (interim)
-//  5. report work_state=needs_input OR report_type=blocker   -> Blocker (interim)
-//  6. report work_state=ready_for_review                     -> Review  (terminal, exit 0)
+//  3. report work_state=ready_for_review                     -> Review  (terminal, exit 0)
+//  4. status=closed, no explicit terminal outcome            -> Ended   (terminal, exit 0)
+//  5. report has a pending decision Request                  -> Blocker (interim)
+//  6. report work_state=needs_input OR report_type=blocker   -> Blocker (interim)
 //  7. status=idle, no explicit outcome                       -> Ended   (terminal, exit 0)
 //  8. status=waiting_input                                   -> Blocker (interim)
 //  9. everything else                                        -> None    (no emit)
@@ -42,18 +42,25 @@
 // routine "approve this tool call" is NOT a decision worth waking the chief for,
 // and it is cleanly distinguishable from a genuine decision-request: the former
 // is the runtime status pending_approval; the latter is an explicit structured
-// Request / needs_input declaration (steps 4-5). The two come from different data
+// Request / needs_input declaration (steps 5-6). The two come from different data
 // sources, so the exclusion is expressible from existing state.
 //
-// Silence implies NEITHER success nor failure. A dispatch that ends without an
-// explicit terminal report — its session simply closes (step 3), or the agent
+// The agent's explicit terminal declarations — Failed, Done, and Review (steps
+// 1-3) — are authoritative over runtime liveness: a report of completion,
+// failure, or ready_for_review stands even once the session has closed, so a
+// review handoff filed just before the agent exits is never lost. They sit ahead
+// of the closed check (step 4) for exactly that reason.
+//
+// Silence implies NEITHER success nor failure. A dispatch that ends WITHOUT an
+// explicit terminal report — its session simply closes (step 4), or the agent
 // stops at idle without reporting (step 7) — is the neutral terminal kind Ended:
 // it emits and exits (so a watch never hangs and every terminal state is
-// covered), but it asserts no outcome. Only the agent's own structured report
-// turns an end into Done (step 2) or Failed (step 1). This is why step 3 sits
-// ahead of the interim report states: once the session is gone, a stale
-// needs_input is not a live blocker, so a dead session resolves to a neutral
-// terminal instead of hanging or being mislabeled.
+// covered), but it asserts no outcome. This is why the closed check (step 4) sits
+// ahead of the *interim* report states (steps 5-6): those are non-terminal, so
+// once the session is gone a stale needs_input is not a live blocker — a dead
+// session must resolve to a neutral terminal instead of hanging on it. Review
+// does not have that problem because it is itself terminal, which is why it can
+// stay authoritative above the closed check.
 package dispatch
 
 import "github.com/victorarias/attn/internal/protocol"
@@ -112,8 +119,11 @@ func Classify(d protocol.ChiefOfStaffDispatch) Event {
 	summary := dispatchSummary(d)
 	nextAction := trim(deref(structuredNextAction(d)))
 
-	// 1-2. Explicit terminal OUTCOME the agent declared — authoritative even if
-	// the session has since closed (a completed-then-closed dispatch is done).
+	// 1-3. Explicit TERMINAL outcome the agent declared — authoritative even if the
+	// session has since closed (a completed-, failed-, or ready_for_review-then-
+	// closed dispatch keeps that outcome). All three are terminal, so keeping them
+	// ahead of the closed check cannot hang a watch; it only preserves the handoff
+	// a report filed just before the agent exits would otherwise lose to the race.
 	if r := d.StructuredReport; r != nil {
 		switch {
 		case r.WorkState == protocol.DispatchWorkStateFailed ||
@@ -122,18 +132,20 @@ func Classify(d protocol.ChiefOfStaffDispatch) Event {
 		case r.WorkState == protocol.DispatchWorkStateCompleted ||
 			r.ReportType == protocol.DispatchReportTypeCompletion:
 			return Event{KindDone, true, 0, "reported_completion", summary, nextAction}
+		case r.WorkState == protocol.DispatchWorkStateReadyForReview:
+			return Event{KindReview, true, 0, "ready_for_review", summary, nextAction}
 		}
 	}
 
-	// 3. Session gone with no explicit terminal outcome → neutral terminal.
-	// Checked BEFORE the interim report states so a dead session never hangs (a
-	// stale needs_input is not a live blocker once the agent is gone) and is
-	// never read as success or failure.
+	// 4. Session gone with no explicit terminal outcome → neutral terminal.
+	// Checked BEFORE the interim report states (steps 5-6) so a dead session never
+	// hangs (a stale needs_input is not a live blocker once the agent is gone) and
+	// is never read as success or failure.
 	if d.Status == SessionClosedStatus {
 		return Event{KindEnded, true, 0, "session_closed", summary, nextAction}
 	}
 
-	// 4-6. Live, explicit non-terminal report states.
+	// 5-6. Live, explicit INTERIM (non-terminal) report states.
 	if r := d.StructuredReport; r != nil {
 		if req := r.Request; req != nil && req.Status == protocol.DispatchRequestStatusPending {
 			s := summary
@@ -142,12 +154,9 @@ func Classify(d protocol.ChiefOfStaffDispatch) Event {
 			}
 			return Event{KindBlocker, false, 0, "decision_request", s, nextAction}
 		}
-		switch {
-		case r.WorkState == protocol.DispatchWorkStateNeedsInput ||
-			r.ReportType == protocol.DispatchReportTypeBlocker:
+		if r.WorkState == protocol.DispatchWorkStateNeedsInput ||
+			r.ReportType == protocol.DispatchReportTypeBlocker {
 			return Event{KindBlocker, false, 0, "needs_input", summary, nextAction}
-		case r.WorkState == protocol.DispatchWorkStateReadyForReview:
-			return Event{KindReview, true, 0, "ready_for_review", summary, nextAction}
 		}
 	}
 

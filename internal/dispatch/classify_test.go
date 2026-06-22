@@ -49,15 +49,20 @@ func TestClassify(t *testing.T) {
 		{"completion type only", "working", report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeCompletion), KindDone, true, 0, "reported_completion"},
 		{"completed then closed = done (report wins over close)", SessionClosedStatus, report(protocol.DispatchWorkStateCompleted, protocol.DispatchReportTypeCompletion), KindDone, true, 0, "reported_completion"},
 		{"ready for review = terminal handoff", "working", report(protocol.DispatchWorkStateReadyForReview, protocol.DispatchReportTypeProgress), KindReview, true, 0, "ready_for_review"},
+		// An explicit ready_for_review is a TERMINAL outcome and stays authoritative
+		// over a closed session, exactly like completion/failure — the review handoff
+		// must survive the agent filing it and exiting before the watcher's next poll.
+		{"ready_for_review then closed = review (report wins over close)", SessionClosedStatus, report(protocol.DispatchWorkStateReadyForReview, protocol.DispatchReportTypeProgress), KindReview, true, 0, "ready_for_review"},
 
 		// --- silence implies neither success nor failure → neutral Ended ---
 		{"idle without report = ended (not done)", string(protocol.SessionStateIdle), nil, KindEnded, true, 0, "session_idle"},
 		{"idle after progress report = ended", string(protocol.SessionStateIdle), report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeProgress), KindEnded, true, 0, "session_idle"},
 		{"session closed without report = ended (not failed)", SessionClosedStatus, nil, KindEnded, true, 0, "session_closed"},
 		{"session closed after progress report = ended", SessionClosedStatus, report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeProgress), KindEnded, true, 0, "session_closed"},
-		// A dead session beats a stale interim report — never hang, never mislabel.
+		// A dead session beats a stale INTERIM (non-terminal) report — never hang,
+		// never mislabel. (A TERMINAL report like ready_for_review wins over close
+		// instead; see the explicit case above.)
 		{"needs_input then closed = ended (no hang)", SessionClosedStatus, report(protocol.DispatchWorkStateNeedsInput, protocol.DispatchReportTypeProgress), KindEnded, true, 0, "session_closed"},
-		{"ready_for_review then closed = ended", SessionClosedStatus, report(protocol.DispatchWorkStateReadyForReview, protocol.DispatchReportTypeProgress), KindEnded, true, 0, "session_closed"},
 		{"decision request then closed = ended", SessionClosedStatus, pendingRequest, KindEnded, true, 0, "session_closed"},
 
 		// --- genuine blocker / decision-request (interim, live) ---

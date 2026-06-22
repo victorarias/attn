@@ -155,6 +155,31 @@ func TestRunWatch_DeadSessionWithStaleBlockerDoesNotHang(t *testing.T) {
 	}
 }
 
+func TestRunWatch_ReadyForReviewSurvivesSessionClose(t *testing.T) {
+	// The race figgyster flagged: the agent files work_state=ready_for_review and
+	// the session closes before the next poll, so the snapshot carries BOTH a
+	// closed Status and the structured review report. The explicit review handoff
+	// must win over the close — [review], exit 0 — not collapse to neutral [ended].
+	reviewing := &protocol.ChiefOfStaffDispatch{
+		ID: "d1", Label: "badge", Status: SessionClosedStatus,
+		StructuredReport: &protocol.DispatchReport{
+			WorkState: protocol.DispatchWorkStateReadyForReview,
+			Summary:   "branch pushed; PR open",
+		},
+	}
+	code, out, _ := runWatchScript(t, []fetchStep{
+		{working(), true, nil},
+		{reviewing, true, nil},
+	})
+	if code != 0 {
+		t.Errorf("exit = %d, want 0", code)
+	}
+	lines := nonEmptyLines(out)
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], "[review]") {
+		t.Fatalf("ready_for_review must survive session close as a [review] handoff, got: %q", out)
+	}
+}
+
 func TestRunWatch_BlockerEmitsButDoesNotExitThenCompletes(t *testing.T) {
 	blocker := &protocol.ChiefOfStaffDispatch{
 		ID: "d1", Label: "badge", Status: "waiting_input",
