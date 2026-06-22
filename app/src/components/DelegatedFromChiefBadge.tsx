@@ -1,18 +1,13 @@
 import './DelegatedFromChiefBadge.css';
 
-interface DelegatedFromChiefBadgeProps {
-  compact?: boolean;
-}
-
-export function DelegatedFromChiefBadge({ compact = false }: DelegatedFromChiefBadgeProps) {
+export function DelegatedFromChiefBadge() {
   return (
     <span
-      className={`delegated-from-chief-badge ${compact ? 'compact' : ''}`}
+      className="delegated-from-chief-badge"
       title="Delegated from chief of staff"
       aria-label="Delegated from chief of staff"
     >
       <span aria-hidden="true">↳</span>
-      {!compact && <span>chief</span>}
     </span>
   );
 }
