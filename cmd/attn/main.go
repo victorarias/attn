@@ -111,15 +111,40 @@ func hasPendingSessionCron(input hookInput) bool {
 // reads a not-yet-flushed transcript and mis-detects the session as
 // idle/unknown. Running background work outranks a parked schedule, so a Stop
 // with both stays "working"; once both drain, the next Stop classifies normally.
-func nonTerminalStopState(input hookInput) string {
+//
+// relaxBackgroundWork drops the background-work -> "working" rule. It is set for
+// the chief of staff: a chief that has merely armed a Monitor to watch its
+// delegations (or a poll loop) is async-waiting, not working, and pegging it
+// green makes the at-a-glance "is the chief actually working?" signal
+// meaningless. With it set, background work no longer forces "working" (the Stop
+// falls through to normal classification, settling idle/waiting), while a pending
+// scheduled wakeup still parks "scheduled" (quiet/blue, not green).
+func nonTerminalStopState(input hookInput, relaxBackgroundWork bool) string {
 	switch {
-	case hasActiveBackgroundTask(input):
+	case !relaxBackgroundWork && hasActiveBackgroundTask(input):
 		return protocol.StateWorking
 	case hasPendingSessionCron(input):
 		return protocol.StateScheduled
 	default:
 		return ""
 	}
+}
+
+// sessionIsChiefOfStaff reports whether sessionID currently holds the
+// profile-wide chief-of-staff role. The daemon owns the role, so the hook asks
+// it (the same decorated session list `attn list` shows). Best-effort: any query
+// error reports false, leaving the default (non-relaxed) busy detection intact.
+func sessionIsChiefOfStaff(c *client.Client, sessionID string) bool {
+	sessions, err := c.Query("")
+	if err != nil {
+		return false
+	}
+	for i := range sessions {
+		if sessions[i].ID == sessionID {
+			return sessions[i].ChiefOfStaff != nil && *sessions[i].ChiefOfStaff
+		}
+	}
+	return false
 }
 
 // todoWriteInput represents the tool_input for TodoWrite
@@ -2250,7 +2275,15 @@ func runHookStop() {
 	// A Stop is not always terminal: if the turn yields with background work in
 	// flight or parked on a scheduled wakeup, report that non-terminal state and
 	// skip classification (see nonTerminalStopState for the precedence/rationale).
-	if state := nonTerminalStopState(input); state != "" {
+	// For the chief of staff we relax the background-work -> "working" rule so a
+	// chief merely watching its delegations is not pegged green; only resolve the
+	// (daemon-owned) chief role when there is background work to relax, so normal
+	// stops pay nothing.
+	relaxBackgroundWork := false
+	if hasActiveBackgroundTask(input) {
+		relaxBackgroundWork = sessionIsChiefOfStaff(c, sessionID)
+	}
+	if state := nonTerminalStopState(input, relaxBackgroundWork); state != "" {
 		if err := c.UpdateState(sessionID, state); err != nil {
 			fmt.Fprintf(os.Stderr, "error sending %s state: %v\n", state, err)
 			os.Exit(1)
