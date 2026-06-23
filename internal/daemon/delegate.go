@@ -326,6 +326,16 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 				fmt.Errorf("persist chief of staff dispatch: %w", err),
 			)
 		}
+		if _, errMsg := d.setWorkspaceMuted(workspaceID, false); errMsg != "" {
+			_ = d.store.DeleteChiefOfStaffDispatch(dispatch.ID)
+			d.unregisterSession(sessionID, syscall.SIGTERM)
+			d.removeWorkspaceLayoutPaneForSession(sessionID)
+			return nil, d.rollbackDelegation(
+				createdWorkspaceID,
+				createdWorktreePath,
+				fmt.Errorf("make delegated workspace visible: %s", errMsg),
+			)
+		}
 	}
 	result := &protocol.DelegateResult{
 		SessionID:   session.ID,

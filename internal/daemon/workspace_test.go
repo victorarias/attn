@@ -477,6 +477,17 @@ func TestSessionForBroadcast_PopulatesWorkspaceID(t *testing.T) {
 	if got.WorkspaceID != "ws1" {
 		t.Fatalf("workspace_id = %q, want ws1", got.WorkspaceID)
 	}
+	if got.WorkspaceMuted != nil {
+		t.Fatalf("workspace_muted = %v, want omitted for visible workspace", protocol.Deref(got.WorkspaceMuted))
+	}
+
+	if _, errMsg := d.toggleWorkspaceMute("ws1"); errMsg != "" {
+		t.Fatalf("mute workspace: %s", errMsg)
+	}
+	got = d.sessionForBroadcast(d.store.Get("s1"))
+	if got == nil || !protocol.Deref(got.WorkspaceMuted) {
+		t.Fatalf("workspace_muted = %v, want true", got)
+	}
 
 }
 

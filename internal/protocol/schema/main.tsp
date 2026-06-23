@@ -160,6 +160,7 @@ model Session {
   directory: string;
   endpoint_id?: string;         // Optional: owning endpoint for remote/session-aware routing
   workspace_id: string;         // Owning workspace
+  workspace_muted?: boolean;    // True when the owning workspace is hidden from normal sidebar/attention surfaces
   branch?: string;              // Optional: might not be in git repo
   is_worktree?: boolean;        // Optional: false if not worktree
   main_repo?: string;           // Optional: only set if worktree

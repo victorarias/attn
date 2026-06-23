@@ -868,6 +868,9 @@ func TestDelegateTargetsExistingWorkspace(t *testing.T) {
 		Title:     "Target",
 		Directory: targetDir,
 	})
+	if _, errMsg := d.toggleWorkspaceMute(targetWorkspaceID); errMsg != "" {
+		t.Fatalf("mute target workspace: %s", errMsg)
+	}
 
 	result, err := d.delegate(&protocol.DelegateMessage{
 		Cmd:             protocol.CmdDelegate,
@@ -881,6 +884,51 @@ func TestDelegateTargetsExistingWorkspace(t *testing.T) {
 	}
 	if result.WorkspaceID != targetWorkspaceID || result.Directory != targetDir {
 		t.Fatalf("result = %+v", result)
+	}
+	if workspace := d.store.GetWorkspace(targetWorkspaceID); workspace == nil || !workspace.Muted {
+		t.Fatalf("ordinary delegation changed target mute state: %+v", workspace)
+	}
+}
+
+func TestChiefOfStaffDelegateUnmutesExistingWorkspace(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, sourceSessionID); err != nil {
+		t.Fatalf("set chief role: %v", err)
+	}
+	targetDir := t.TempDir()
+	targetWorkspaceID := "workspace-muted-target"
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        targetWorkspaceID,
+		Title:     "Muted target",
+		Directory: targetDir,
+	})
+	if _, errMsg := d.toggleWorkspaceMute(targetWorkspaceID); errMsg != "" {
+		t.Fatalf("mute target workspace: %s", errMsg)
+	}
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Join the muted target workspace.",
+		Placement:       protocol.Ptr(delegationPlacementExisting),
+		WorkspaceID:     protocol.Ptr(targetWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	if result.DispatchID == nil {
+		t.Fatalf("chief delegation missing dispatch: %+v", result)
+	}
+	if workspace := d.store.GetWorkspace(targetWorkspaceID); workspace == nil || workspace.Muted {
+		t.Fatalf("chief delegation did not unmute target workspace: %+v", workspace)
+	}
+	workspace, ok := d.workspaces.snapshot(targetWorkspaceID)
+	if !ok || workspace.Muted {
+		t.Fatalf("registry target workspace still muted: %+v, found=%v", workspace, ok)
 	}
 }
 

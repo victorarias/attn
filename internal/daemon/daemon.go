@@ -2625,6 +2625,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	d.decorateChiefOfStaffWithSessionID(clone, chiefOfStaffSessionID)
 	d.decorateDelegatedFromChief(clone, delegatedFromChief)
 	d.decorateSessionWithWorkspace(clone)
+	d.decorateSessionWithWorkspaceMute(clone)
 	return clone
 }
 
