@@ -283,6 +283,13 @@ model ChiefOfStaffDispatch {
   branch?: string;
   status: string;
   status_since: string;
+  // closed_state is the delegated session's last attn-classified runtime state,
+  // captured once when the session ends (before the idle-clobber/removal erases
+  // it). Empty until the session closes. It lets the signal classifier tell a
+  // clean stop (idle / waiting_input) from a real crash or kill mid-flight
+  // (working / launching / pending_approval), so a cut-off close surfaces as a
+  // failure instead of a neutral end.
+  closed_state?: string;
   latest_report?: string;
   structured_report?: DispatchReport;
   concise_summary?: string;

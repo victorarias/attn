@@ -410,6 +410,9 @@ type ChiefOfStaffDispatch struct {
 	// ChiefSessionID corresponds to the JSON schema field "chief_session_id".
 	ChiefSessionID string `json:"chief_session_id"`
 
+	// ClosedState corresponds to the JSON schema field "closed_state".
+	ClosedState *string `json:"closed_state,omitempty,omitzero"`
+
 	// ConciseSummary corresponds to the JSON schema field "concise_summary".
 	ConciseSummary *string `json:"concise_summary,omitempty,omitzero"`
 

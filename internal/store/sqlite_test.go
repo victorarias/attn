@@ -715,7 +715,10 @@ func TestMigration52RenamesKeeperBackupsAndRealignsSentinel(t *testing.T) {
 
 	// Seed a context row, then roll the DB back to a pre-52 shape: plant the legacy
 	// 'attn-janitor' sentinel, drop the keeper-named table, recreate the legacy
-	// janitor-named one, and unrecord migration 52 so migrateDB re-applies it.
+	// janitor-named one, and unrecord migration 52 (and everything after it) so
+	// migrateDB re-applies it. getCurrentVersion is MAX-based, so a higher recorded
+	// version (53+) would otherwise gate 52's re-run out; the later migrations are
+	// idempotent and simply re-run as no-ops.
 	s.AddWorkspace(&protocol.Workspace{ID: "workspace-1", Title: "W", Directory: t.TempDir()})
 	if _, _, err := s.UpdateWorkspaceContext("workspace-1", "ctx", "session-1", 0); err != nil {
 		t.Fatalf("seed context: %v", err)
@@ -737,7 +740,7 @@ func TestMigration52RenamesKeeperBackupsAndRealignsSentinel(t *testing.T) {
 	)`); err != nil {
 		t.Fatalf("recreate legacy table: %v", err)
 	}
-	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version = 52`); err != nil {
+	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 52`); err != nil {
 		t.Fatalf("unrecord migration 52: %v", err)
 	}
 
@@ -757,6 +760,57 @@ func TestMigration52RenamesKeeperBackupsAndRealignsSentinel(t *testing.T) {
 	}
 	if updater != "attn-keeper" {
 		t.Fatalf("sentinel = %q, want attn-keeper", updater)
+	}
+}
+
+func TestMigration53AddsClosedStateColumnIdempotently(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewWithDB error: %v", err)
+	}
+	defer s.Close()
+
+	hasClosedState := func() bool {
+		rows, err := s.db.Query(`PRAGMA table_info(chief_of_staff_dispatches)`)
+		if err != nil {
+			t.Fatalf("table_info: %v", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				cid     int
+				name    string
+				colType string
+				notNull int
+				dflt    sql.NullString
+				pk      int
+			)
+			if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+				t.Fatalf("scan table_info: %v", err)
+			}
+			if name == "closed_state" {
+				return true
+			}
+		}
+		return false
+	}
+
+	// A fresh DB has the column from migration 53.
+	if !hasClosedState() {
+		t.Fatal("closed_state column missing after migrations")
+	}
+
+	// Re-applying migration 53 over an existing column must be a no-op (the
+	// columnExists guard), not a duplicate-column error. Unrecord 53 and re-migrate.
+	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 53`); err != nil {
+		t.Fatalf("unrecord migration 53: %v", err)
+	}
+	if err := migrateDB(s.db); err != nil {
+		t.Fatalf("re-run migrateDB after unrecording 53: %v", err)
+	}
+	if !hasClosedState() {
+		t.Fatal("closed_state column missing after idempotent re-run")
 	}
 }
 

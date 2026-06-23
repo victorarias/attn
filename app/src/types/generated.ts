@@ -684,6 +684,7 @@ export interface ChiefOfStaffDispatch {
     branch?:               string;
     brief:                 string;
     chief_session_id:      string;
+    closed_state?:         string;
     concise_summary?:      string;
     created_at:            string;
     directory:             string;
@@ -782,6 +783,7 @@ export interface ChiefOfStaffDispatchElement {
     branch?:               string;
     brief:                 string;
     chief_session_id:      string;
+    closed_state?:         string;
     concise_summary?:      string;
     created_at:            string;
     directory:             string;
@@ -7252,6 +7254,7 @@ const typeMap: any = {
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "brief", js: "brief", typ: "" },
         { json: "chief_session_id", js: "chief_session_id", typ: "" },
+        { json: "closed_state", js: "closed_state", typ: u(undefined, "") },
         { json: "concise_summary", js: "concise_summary", typ: u(undefined, "") },
         { json: "created_at", js: "created_at", typ: "" },
         { json: "directory", js: "directory", typ: "" },
@@ -7317,6 +7320,7 @@ const typeMap: any = {
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "brief", js: "brief", typ: "" },
         { json: "chief_session_id", js: "chief_session_id", typ: "" },
+        { json: "closed_state", js: "closed_state", typ: u(undefined, "") },
         { json: "concise_summary", js: "concise_summary", typ: u(undefined, "") },
         { json: "created_at", js: "created_at", typ: "" },
         { json: "directory", js: "directory", typ: "" },
