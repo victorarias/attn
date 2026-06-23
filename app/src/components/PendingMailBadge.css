@@ -1,0 +1,32 @@
+/* Unread chief→agent mail chip. A warm amber sets it apart from the chief's blue
+   family (chief / delegated-from-chief badges) so "you have mail" reads at a
+   glance and never blends into the lineage badges. */
+.pending-mail-badge {
+  align-items: center;
+  background: rgba(240, 173, 78, 0.16);
+  border: 1px solid rgba(240, 173, 78, 0.4);
+  border-radius: 999px;
+  color: #f0ad4e;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 3px;
+  height: 18px;
+  justify-content: center;
+  line-height: 1;
+  min-width: 18px;
+  padding: 0 5px;
+}
+
+.pending-mail-badge.compact {
+  min-width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: 999px;
+}
+
+.pending-mail-badge.compact > span {
+  display: none;
+}

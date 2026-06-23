@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { RenamePopover } from './RenamePopover';
 import { ChiefOfStaffBadge } from './ChiefOfStaffBadge';
 import { DelegatedFromChiefBadge } from './DelegatedFromChiefBadge';
+import { PendingMailBadge } from './PendingMailBadge';
 import { SessionActionsPopover } from './SessionActionsPopover';
 import { GridLayoutControl } from './grid/GridLayoutControl';
 import type { GridLayout } from './grid/gridLayout';
@@ -29,6 +30,7 @@ interface LocalSession {
   reviewLoopStatus?: string;
   chiefOfStaff?: boolean;
   delegatedFromChief?: boolean;
+  unreadMailCount?: number;
 }
 
 type SidebarWorkspace = WorkspaceWithSessions<LocalSession>;
@@ -806,6 +808,9 @@ export function Sidebar({
               {workspace.sessions.some((session) => isAttentionSessionState(session.state)) && (
                 <span className={`mini-badge ${workspace.status === 'pending_approval' ? 'pending' : ''} ${workspace.status === 'unknown' ? 'unknown' : ''}`} />
               )}
+              {workspace.sessions.some((session) => (session.unreadMailCount ?? 0) > 0) && (
+                <span className="mini-badge mail" title="An agent here has unread chief mail" />
+              )}
             </button>
           ))}
           <button className="icon-btn" onClick={onNewSession} title="New Session (⌘N)">
@@ -1030,6 +1035,7 @@ export function Sidebar({
                     )}
                     {session.chiefOfStaff && <ChiefOfStaffBadge />}
                     {session.delegatedFromChief && <DelegatedFromChiefBadge />}
+                    {session.unreadMailCount ? <PendingMailBadge count={session.unreadMailCount} /> : null}
                     {reviewLoopIndicator(session.reviewLoopStatus) && (
                       <span
                         className={`session-loop-indicator session-loop-indicator--${session.reviewLoopStatus}`}
@@ -1179,6 +1185,7 @@ export function Sidebar({
                           <span className="session-label">{session.label}</span>
                           {session.chiefOfStaff && <ChiefOfStaffBadge />}
                           {session.delegatedFromChief && <DelegatedFromChiefBadge />}
+                          {session.unreadMailCount ? <PendingMailBadge count={session.unreadMailCount} /> : null}
                           {session.endpointName && (
                             <span className={`session-endpoint-badge status-${session.endpointStatus || 'connected'}`}>
                               {session.endpointName}

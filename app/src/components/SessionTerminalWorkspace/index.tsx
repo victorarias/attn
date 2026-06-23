@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { GhosttyTerminal, type BlockStateSnapshot, type GhosttyTerminalHandle } from '../GhosttyTerminal';
+import { OnAgentMailOverlay, type PendingAgentMail } from '../OnAgentMailOverlay';
 import { RenamePopover } from '../RenamePopover';
 import { useShortcut } from '../../shortcuts';
 import {
@@ -116,6 +117,10 @@ interface SessionTerminalWorkspaceProps {
   // instead. The terminal rehydrates from daemon replay when it remounts.
   terminalsLive?: boolean;
   eventRouter: PaneRuntimeEventRouter;
+  // Unread chief→agent mail per session, driving the on-agent overlay. Absent when
+  // there is no pending mail anywhere.
+  pendingMailBySessionId?: Map<string, PendingAgentMail>;
+  onWakeDispatch?: (chiefSessionId: string, dispatchId: string) => Promise<void>;
   onSplitPane: (targetPaneId: string, direction: TerminalSplitDirection) => void;
   onClosePane: (paneId: string) => void;
   onFocusPane: (paneId: string) => void;
@@ -158,6 +163,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     isSessionViewVisible = true,
     terminalsLive = true,
     eventRouter,
+    pendingMailBySessionId,
+    onWakeDispatch,
     onSplitPane,
     onClosePane,
     onFocusPane,
@@ -702,6 +709,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
             data-pane-path={path}
             style={frameStyle}
           >
+            {(() => {
+              const mail = pendingMailBySessionId?.get(agentPane.sessionId);
+              return mail ? <OnAgentMailOverlay mail={mail} onWake={onWakeDispatch} /> : null;
+            })()}
             <div
               className={`workspace-pane-header ${showPaneHeader ? 'workspace-pane-header--draggable' : 'workspace-pane-header-hidden'}`.trim()}
               aria-hidden={showPaneHeader ? undefined : true}
@@ -824,6 +835,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       resolvedTheme,
       runtime,
       showPaneHeader,
+      pendingMailBySessionId,
+      onWakeDispatch,
     ]);
 
     const focusModeTitle = useMemo(() => {

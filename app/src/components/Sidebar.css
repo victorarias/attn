@@ -1166,6 +1166,15 @@
   border: none;
 }
 
+/* Unread chief→agent mail in a collapsed-rail workspace. Pinned bottom-right so it
+   never collides with the top-right attention dot, in the pending-mail amber. */
+.mini-badge.mail {
+  top: auto;
+  bottom: 4px;
+  right: 4px;
+  background: #f0ad4e;
+}
+
 @keyframes flash-pending {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }

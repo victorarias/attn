@@ -26,6 +26,7 @@ import { SessionCreationProgress, type SessionCreationPhase } from './components
 import { RightDock } from './components/RightDock';
 import { SessionTerminalWorkspace } from './components/SessionTerminalWorkspace';
 import type { DockTarget } from './components/SessionTerminalWorkspace/dockTarget';
+import type { PendingAgentMail } from './components/OnAgentMailOverlay';
 import { SettingsModal } from './components/SettingsModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { ShortcutEditorModal } from './components/ShortcutEditorModal';
@@ -1067,7 +1068,7 @@ sendFetchPRDetails,
   const [workspaceContextsError, setWorkspaceContextsError] = useState<string | null>(null);
   const [workspaceContexts, setWorkspaceContexts] = useState<Awaited<ReturnType<typeof sendListWorkspaceContexts>>>([]);
   const whatsNew = useWhatsNew();
-  const { repoStates, authorStates } = useDaemonStore();
+  const { repoStates, authorStates, chiefOfStaffDispatches } = useDaemonStore();
   const mutedRepos = useMemo(() =>
     repoStates.filter(r => r.muted).map(r => r.repo),
     [repoStates],
@@ -1216,6 +1217,21 @@ sendFetchPRDetails,
     [daemonEndpoints],
   );
 
+  // Unread chief→agent mail per session, derived from the dispatch list already in
+  // the store (each ChiefOfStaffDispatch carries unread_message_count keyed by its
+  // session_id) — no extra protocol surface. Drives the sidebar pending-mail badge.
+  const dispatchesWithMail = chiefOfStaffDispatches ?? [];
+  const unreadMailBySessionId = new Map<string, number>();
+  for (const dispatch of dispatchesWithMail) {
+    const count = dispatch.unread_message_count ?? 0;
+    if (count > 0) {
+      unreadMailBySessionId.set(
+        dispatch.session_id,
+        (unreadMailBySessionId.get(dispatch.session_id) ?? 0) + count,
+      );
+    }
+  }
+
   const enrichedLocalSessions = sessions.map((s) => {
     const daemonSession = daemonSessions.find((ds) => ds.id === s.id);
     const rawState = daemonSession?.state ?? s.state;
@@ -1240,10 +1256,33 @@ sendFetchPRDetails,
       reviewLoopStatus: reviewLoop?.status,
       chiefOfStaff: daemonSession?.chief_of_staff ?? false,
       delegatedFromChief: daemonSession?.delegated_from_chief ?? false,
+      unreadMailCount: unreadMailBySessionId.get(s.id) ?? 0,
     };
   });
 
   const visibleEnrichedSessions = filterSessionsRepresentedInWorkspaceLayouts(daemonWorkspaces, enrichedLocalSessions);
+
+  // Per-session pending mail for the on-agent overlay: the unread count plus the
+  // dispatch/chief routing the wake doorbell needs, and whether the agent is in a
+  // pokeable state (mirrors the dashboard's canWake gate).
+  const pendingMailBySessionId = new Map<string, PendingAgentMail>();
+  for (const dispatch of dispatchesWithMail) {
+    const count = dispatch.unread_message_count ?? 0;
+    if (count <= 0) continue;
+    const session = enrichedLocalSessions.find((entry) => entry.id === dispatch.session_id);
+    const wakeable = Boolean(
+      session
+      && !session.endpointName
+      && (session.state === 'idle' || session.state === 'waiting_input'),
+    );
+    const existing = pendingMailBySessionId.get(dispatch.session_id);
+    pendingMailBySessionId.set(dispatch.session_id, {
+      unreadCount: (existing?.unreadCount ?? 0) + count,
+      dispatchId: existing?.dispatchId ?? dispatch.id,
+      chiefSessionId: existing?.chiefSessionId ?? dispatch.chief_session_id,
+      wakeable: existing ? existing.wakeable || wakeable : wakeable,
+    });
+  }
 
   // The Notebook top-bar chief pulse: undefined when no chief-of-staff session exists
   // (indicator hidden), else true while it is working. Derived locally from sessions
@@ -3650,6 +3689,8 @@ sendFetchPRDetails,
                     isSessionViewVisible={view === 'session'}
                     terminalsLive={terminalsLive}
                     eventRouter={paneRuntimeEventRouter}
+                    pendingMailBySessionId={pendingMailBySessionId}
+                    onWakeDispatch={sendWakeDispatchAgent}
                     onSplitPane={(targetPaneId, direction) => {
                       void createSplitSession('shell', direction, targetPaneId);
                     }}

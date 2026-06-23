@@ -1,0 +1,48 @@
+/* Overlay layer over an agent pane. The container is click-through (pointer-events:
+   none) so it never intercepts terminal input or focus; only the chip opts back in.
+   Positioned top-right, clear of the pane header drag handle. */
+.on-agent-mail-overlay {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.on-agent-mail-chip {
+  pointer-events: auto;
+  align-items: center;
+  background: rgba(240, 173, 78, 0.9);
+  border: none;
+  border-radius: 999px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  color: #1b1b1b;
+  cursor: pointer;
+  display: inline-flex;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 4px;
+  height: 22px;
+  line-height: 1;
+  padding: 0 9px;
+}
+
+.on-agent-mail-chip:disabled {
+  cursor: default;
+  background: rgba(240, 173, 78, 0.55);
+}
+
+.on-agent-mail-error {
+  pointer-events: auto;
+  background: rgba(20, 20, 20, 0.9);
+  border-radius: 6px;
+  color: #f7c08a;
+  font-size: 11px;
+  max-width: 220px;
+  padding: 3px 6px;
+}
