@@ -660,6 +660,111 @@ func TestParseDispatchReportArgsReadsCoordinationFile(t *testing.T) {
 	}
 }
 
+func TestParseDispatchReportArgsDoneFlagSynthesizesCompletion(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "worker-1")
+	_, report, structured, err := parseDispatchReportArgs([]string{"--done", "--message", "shipped it"})
+	if err != nil {
+		t.Fatalf("parseDispatchReportArgs() error = %v", err)
+	}
+	if report != "shipped it" {
+		t.Fatalf("report = %q", report)
+	}
+	if structured == nil ||
+		structured.WorkState != protocol.DispatchWorkStateCompleted ||
+		structured.ReportType != protocol.DispatchReportTypeCompletion ||
+		structured.Summary != "shipped it" {
+		t.Fatalf("structured = %+v", structured)
+	}
+}
+
+func TestParseDispatchReportArgsStateFlagAloneSynthesizesMessage(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "worker-1")
+	// A bare state flag with no --message must still produce a non-empty freeform
+	// report (the daemon requires it) and a non-empty structured summary.
+	_, report, structured, err := parseDispatchReportArgs([]string{"--failed"})
+	if err != nil {
+		t.Fatalf("parseDispatchReportArgs() error = %v", err)
+	}
+	if report == "" || structured == nil || structured.Summary == "" {
+		t.Fatalf("report = %q, structured = %+v", report, structured)
+	}
+	if structured.WorkState != protocol.DispatchWorkStateFailed ||
+		structured.ReportType != protocol.DispatchReportTypeFailure {
+		t.Fatalf("structured = %+v", structured)
+	}
+}
+
+func TestParseDispatchReportArgsBlockedWithQuestionBuildsRequest(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "worker-1")
+	_, _, structured, err := parseDispatchReportArgs([]string{
+		"--blocked",
+		"--question", "Postgres or SQLite for the cache?",
+		"--recommendation", "SQLite",
+		"--consequence", "wrong pick means a migration later",
+	})
+	if err != nil {
+		t.Fatalf("parseDispatchReportArgs() error = %v", err)
+	}
+	if structured == nil ||
+		structured.WorkState != protocol.DispatchWorkStateNeedsInput ||
+		structured.ReportType != protocol.DispatchReportTypeBlocker ||
+		structured.Request == nil {
+		t.Fatalf("structured = %+v", structured)
+	}
+	req := structured.Request
+	if req.Question != "Postgres or SQLite for the cache?" ||
+		req.ExpectedResponder != "chief" ||
+		req.Status != protocol.DispatchRequestStatusPending {
+		t.Fatalf("request = %+v", req)
+	}
+	if req.Recommendation == nil || *req.Recommendation != "SQLite" {
+		t.Fatalf("recommendation = %v", req.Recommendation)
+	}
+	if req.Consequence == nil || *req.Consequence != "wrong pick means a migration later" {
+		t.Fatalf("consequence = %v", req.Consequence)
+	}
+}
+
+func TestParseDispatchReportArgsRejectsConflictingStateFlags(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "worker-1")
+	if _, _, _, err := parseDispatchReportArgs([]string{"--done", "--failed"}); err == nil ||
+		!strings.Contains(err.Error(), "only one of --done") {
+		t.Fatalf("conflicting state flags error = %v", err)
+	}
+}
+
+func TestParseDispatchReportArgsRejectsStateFlagWithCoordinationFile(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "worker-1")
+	if _, _, _, err := parseDispatchReportArgs([]string{
+		"--done", "--coordination-file", "/tmp/whatever.json",
+	}); err == nil || !strings.Contains(err.Error(), "not both") {
+		t.Fatalf("state flag + coordination-file error = %v", err)
+	}
+}
+
+func TestParseDispatchReportArgsRejectsDecisionFlagsWithoutBlocked(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "worker-1")
+	if _, _, _, err := parseDispatchReportArgs([]string{
+		"--done", "--question", "really?",
+	}); err == nil || !strings.Contains(err.Error(), "require --blocked") {
+		t.Fatalf("decision flag without --blocked error = %v", err)
+	}
+}
+
+func TestParseDispatchReportArgsBareMessageHasNoStructuredReport(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "worker-1")
+	// A freeform progress note carries no structured report, so the watch stays
+	// silent on it — "never report progress" is enforced by the trigger, not by
+	// forbidding the note.
+	_, report, structured, err := parseDispatchReportArgs([]string{"--message", "halfway there"})
+	if err != nil {
+		t.Fatalf("parseDispatchReportArgs() error = %v", err)
+	}
+	if report != "halfway there" || structured != nil {
+		t.Fatalf("report = %q, structured = %+v", report, structured)
+	}
+}
+
 func TestParseDispatchResolveArgsReadsResponseFile(t *testing.T) {
 	t.Setenv("ATTN_SESSION_ID", "chief-1")
 	path := filepath.Join(t.TempDir(), "response.md")

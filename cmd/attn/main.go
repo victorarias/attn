@@ -738,8 +738,11 @@ commands:
   list [--session <id>]                          list work dispatched by this chief
   watch <dispatch-id> [--session <id>]           stream meaningful events until terminal
         [--interval <dur>]
-  report (--message <text> | --file <path>)     report progress from a dispatched agent
-         [--coordination-file <json>]
+  report (--done | --failed | --review | --blocked)   self-report a terminal/blocked
+         [--message <text> | --file <path>]           outcome (the watch trigger). --blocked
+         [--question <text>] [--recommendation <text>] [--consequence <text>]
+         [--coordination-file <json>]                 takes an optional decision for the chief.
+                                                      A bare --message is a silent note.
   handoff --file <path> --to <notebook-path>    write a large artifact into the notebook and
          [--message <text>] [--coordination-file <json>]   report a reference back to the chief
   status [--session <id>]                        show this delegated session's report and response
@@ -852,9 +855,19 @@ func parseDispatchReportArgs(args []string) (string, string, *protocol.DispatchR
 	fs := flag.NewFlagSet("dispatch report", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
-	message := fs.String("message", "", "concise progress or completion update")
-	reportFile := fs.String("file", "", "file containing a progress or completion update")
-	coordinationFile := fs.String("coordination-file", "", "JSON file containing structured coordination fields")
+	message := fs.String("message", "", "concise terminal/blocked update")
+	reportFile := fs.String("file", "", "file containing the update")
+	coordinationFile := fs.String("coordination-file", "", "JSON file with a full structured report (escape hatch)")
+	// Convenience state flags — the reliable self-report affordance. Exactly one of
+	// these (or none) declares the terminal/blocked outcome the watch triggers on,
+	// so an agent never has to hand-author coordination JSON for the common cases.
+	done := fs.Bool("done", false, "self-report a successful completion (terminal)")
+	failed := fs.Bool("failed", false, "self-report a failure (terminal)")
+	review := fs.Bool("review", false, "self-report ready for review (terminal)")
+	blocked := fs.Bool("blocked", false, "self-report blocked, needs the chief (interim)")
+	question := fs.String("question", "", "the decision the chief must make (with --blocked)")
+	recommendation := fs.String("recommendation", "", "your recommended answer (with --blocked)")
+	consequence := fs.String("consequence", "", "what is at stake / why it matters (with --blocked)")
 	if err := fs.Parse(args); err != nil {
 		return "", "", nil, err
 	}
@@ -879,12 +892,39 @@ func parseDispatchReportArgs(args []string) (string, string, *protocol.DispatchR
 		}
 		report = strings.TrimSpace(string(content))
 	}
-	if report == "" {
-		return "", "", nil, errors.New("--message or --file is required")
+
+	stateFlags := 0
+	for _, on := range []bool{*done, *failed, *review, *blocked} {
+		if on {
+			stateFlags++
+		}
 	}
+	if stateFlags > 1 {
+		return "", "", nil, errors.New("pass only one of --done, --failed, --review, --blocked")
+	}
+	coordPath := strings.TrimSpace(*coordinationFile)
+	if stateFlags == 1 && coordPath != "" {
+		return "", "", nil, errors.New("pass a state flag (--done/--failed/--review/--blocked) or --coordination-file, not both")
+	}
+	if !*blocked {
+		if strings.TrimSpace(*question) != "" ||
+			strings.TrimSpace(*recommendation) != "" ||
+			strings.TrimSpace(*consequence) != "" {
+			return "", "", nil, errors.New("--question, --recommendation, and --consequence require --blocked")
+		}
+	}
+
 	var structuredReport *protocol.DispatchReport
-	if path := strings.TrimSpace(*coordinationFile); path != "" {
-		content, err := os.ReadFile(path)
+	switch {
+	case stateFlags == 1:
+		report, structuredReport = dispatchReportFromState(
+			report, *done, *failed, *review,
+			strings.TrimSpace(*question),
+			strings.TrimSpace(*recommendation),
+			strings.TrimSpace(*consequence),
+		)
+	case coordPath != "":
+		content, err := os.ReadFile(coordPath)
 		if err != nil {
 			return "", "", nil, fmt.Errorf("read coordination file: %w", err)
 		}
@@ -894,7 +934,60 @@ func parseDispatchReportArgs(args []string) (string, string, *protocol.DispatchR
 		}
 		structuredReport = &parsed
 	}
+
+	if report == "" {
+		return "", "", nil, errors.New("--message or --file is required (or pass a state flag)")
+	}
 	return source, report, structuredReport, nil
+}
+
+// dispatchReportFromState synthesizes the structured report for a convenience
+// state flag, reusing the freeform message as the structured summary. When no
+// message was given it falls back to a sensible default so the freeform report
+// (which the daemon requires non-empty) and the structured summary are both set.
+func dispatchReportFromState(message string, done, failed, review bool, question, recommendation, consequence string) (string, *protocol.DispatchReport) {
+	r := &protocol.DispatchReport{}
+	defaultMsg := ""
+	switch {
+	case done:
+		r.WorkState = protocol.DispatchWorkStateCompleted
+		r.ReportType = protocol.DispatchReportTypeCompletion
+		defaultMsg = "Completed."
+	case failed:
+		r.WorkState = protocol.DispatchWorkStateFailed
+		r.ReportType = protocol.DispatchReportTypeFailure
+		defaultMsg = "Failed."
+	case review:
+		r.WorkState = protocol.DispatchWorkStateReadyForReview
+		r.ReportType = protocol.DispatchReportTypeHandoff
+		defaultMsg = "Ready for review."
+	default: // blocked
+		r.WorkState = protocol.DispatchWorkStateNeedsInput
+		r.ReportType = protocol.DispatchReportTypeBlocker
+		defaultMsg = "Blocked — needs the chief."
+		if question != "" {
+			if message == "" {
+				defaultMsg = question
+			}
+			req := &protocol.DispatchDecisionRequest{
+				Question:          question,
+				ExpectedResponder: "chief",
+				Status:            protocol.DispatchRequestStatusPending,
+			}
+			if recommendation != "" {
+				req.Recommendation = protocol.Ptr(recommendation)
+			}
+			if consequence != "" {
+				req.Consequence = protocol.Ptr(consequence)
+			}
+			r.Request = req
+		}
+	}
+	if message == "" {
+		message = defaultMsg
+	}
+	r.Summary = message
+	return message, r
 }
 
 // parseDispatchHandoffArgs parses `dispatch handoff` flags. The artifact file is
