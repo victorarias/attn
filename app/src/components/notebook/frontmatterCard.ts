@@ -202,7 +202,14 @@ const cardField = StateField.define<DecorationSet>({
 // click cannot temporarily replace the card using CM's stale position-0 selection.
 const blurTracker = EditorView.domEventHandlers({
   blur: (_event, view) => {
-    view.dispatch({ effects: setEditingFrontmatter.of(false) });
+    const fm = parseFrontmatter(view.state.doc.toString());
+    const selectionInside = fm && view.state.selection.ranges.some(
+      (range) => range.from < fm.to && range.to > fm.from,
+    );
+    view.dispatch({
+      ...(selectionInside ? { selection: { anchor: fm.to } } : {}),
+      effects: setEditingFrontmatter.of(false),
+    });
     return false;
   },
 });

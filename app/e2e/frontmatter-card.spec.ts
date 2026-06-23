@@ -70,6 +70,32 @@ test.describe('FrontmatterCard', () => {
     )).toBe(false);
   });
 
+  test('moves the caret out of hidden YAML when frontmatter editing loses focus', async ({ page }) => {
+    await page.goto('/test-harness/?component=FrontmatterCard');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    const content = page.locator('.cm-content');
+
+    await page.locator('.cm-md-frontmatter').click();
+    await expect(content).toContainText('type: area');
+    await content.evaluate((el) => (el as HTMLElement).blur());
+    await expect(page.locator('.cm-md-frontmatter')).toBeVisible();
+
+    // Keyboard-style refocus must type into the visible body, never into the YAML
+    // range now hidden behind the restored card.
+    await content.focus();
+    await page.keyboard.type('VISIBLE_BODY_TOKEN');
+    await page.waitForFunction(() => {
+      const calls = window.__HARNESS__.getCalls('change');
+      return calls.some((call) => String(call[0]).includes('VISIBLE_BODY_TOKEN'));
+    });
+    const changed = await page.evaluate(() => {
+      const calls = window.__HARNESS__.getCalls('change');
+      return String(calls[calls.length - 1][0]);
+    });
+    expect(changed.indexOf('VISIBLE_BODY_TOKEN')).toBeGreaterThan(changed.indexOf('\n---\n'));
+    await expect(page.locator('.cm-md-frontmatter')).toBeVisible();
+  });
+
   test('keeps long markdown rendered and ArrowUp local beyond character 3,000', async ({ page }) => {
     await page.goto('/test-harness/?component=FrontmatterCard&long=1');
     await page.waitForFunction(() => window.__HARNESS__?.ready === true);
