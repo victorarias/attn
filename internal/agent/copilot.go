@@ -55,8 +55,15 @@ func (c *Copilot) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	if opts.YoloMode {
 		args = append(args, "--yolo")
 	}
+	// Copilot's -i/--interactive starts an interactive session that auto-executes
+	// the prompt and stays alive for steering — the model attn delegation needs,
+	// matching how claude/codex keep an interactive session after their initial
+	// prompt. Do NOT use -p/--prompt: that runs non-interactively and exits after
+	// completion, which would tear the delegated session down immediately.
+	// Verified against copilot CLI v1.0.63 (`copilot --help`; example
+	// `copilot -i "Fix the bug in main.js"`).
 	if strings.TrimSpace(opts.InitialPrompt) != "" {
-		args = append(args, "-i", opts.InitialPrompt)
+		args = append(args, "--interactive", opts.InitialPrompt)
 	}
 	return exec.Command(opts.Executable, args...)
 }

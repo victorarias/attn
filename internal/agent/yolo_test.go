@@ -210,7 +210,7 @@ func TestBuildCommand_AppendsInitialPromptAfterOptionTerminator(t *testing.T) {
 
 func TestCopilotSupportsInitialPrompt(t *testing.T) {
 	if !(&Copilot{}).Capabilities().HasInitialPrompt {
-		t.Fatal("expected Copilot to support initial prompts via -i flag")
+		t.Fatal("expected Copilot to support initial prompts via --interactive flag")
 	}
 }
 
@@ -223,12 +223,12 @@ func TestCopilotBuildCommandInitialPrompt(t *testing.T) {
 	args := cmd.Args[1:] // skip executable
 	found := false
 	for i, a := range args {
-		if a == "-i" && i+1 < len(args) && args[i+1] == "fix the bug" {
+		if a == "--interactive" && i+1 < len(args) && args[i+1] == "fix the bug" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected -i flag with prompt in args, got: %v", args)
+		t.Fatalf("expected --interactive flag with prompt in args, got: %v", args)
 	}
 }

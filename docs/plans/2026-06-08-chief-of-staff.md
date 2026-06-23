@@ -170,8 +170,12 @@ ChiefOfStaffDispatch {
   attached to the agent that created them and remain visible as history.
 - Placement defaults to the current workspace. `--new-workspace`, `--cwd`, and
   `--worktree` opt into a new workspace; `--workspace` targets an existing one.
-- Copilot is excluded from delegation for now; ordinary Copilot sessions remain
-  supported.
+- ~~Copilot is excluded from delegation for now; ordinary Copilot sessions remain
+  supported.~~ **Superseded (PR #399):** Copilot now supports initial-prompt
+  delegation. It declares the `initial_prompt` capability and launches with
+  `copilot --interactive <brief>`, which starts an interactive session that
+  auto-executes the brief and stays alive for steering (the same persistent-session
+  model as claude/codex). Ordinary Copilot sessions remain supported.
 
 ## Follow-ups
 
