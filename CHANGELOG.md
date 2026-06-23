@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-06-23]
 
 ### Fixed
+- **Long Notebook notes keep their rendered formatting and cursor position while you edit.** Moving the cursor beyond the first few thousand characters no longer turns the rest of a note back into raw Markdown or sends ArrowUp to the properties card. Clicking into the body also leaves the frontmatter card stable; raw YAML appears only when you click the card to edit it.
 - **Chief-of-staff delegations no longer disappear into muted workspaces.** Delegating into an existing muted workspace now brings that workspace back into the sidebar, and `attn list` marks sessions whose workspace is muted so the chief can see that state before choosing a target.
 
 ## [2026-06-22]

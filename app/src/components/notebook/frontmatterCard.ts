@@ -1,8 +1,6 @@
 // The in-editor frontmatter card (notebook UI stage 4b, "Option A"). A note's leading
-// `---…---` YAML renders as a compact properties strip in place of the raw block; when
-// the editor is focused and the cursor enters the block, the card yields to the raw
-// YAML so it can be edited — the same reveal model the inline live-preview uses, at
-// block level.
+// `---…---` YAML renders as a compact properties strip in place of the raw block. The
+// card yields to raw YAML only when the user explicitly clicks it to edit properties.
 //
 // The card shows PROPERTIES only (type, summary, tags, sources, dates) — never a
 // title. A note's title is its leading `# H1` (the single canonical title; the keeper
@@ -19,16 +17,25 @@ import { type EditorState, type Extension, RangeSet, StateEffect, StateField } f
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { type Frontmatter, type FrontmatterValue, parseFrontmatter } from './frontmatter';
 
-// Editor focus, carried into state. A StateField can't read `view.hasFocus`, but the
-// card must show when the editor is unfocused even though CM keeps a selection at
-// position 0 (which sits inside the frontmatter block). Without this, a freshly opened
-// note would show raw YAML instead of the card.
-const setFocused = StateEffect.define<boolean>();
+// Raw frontmatter is an explicit editing mode, not a consequence of editor focus.
+// CodeMirror focuses before it places a pointer selection. Tying the card to focus
+// therefore expanded the YAML under an in-flight body click (the stale selection was
+// still at position 0), changing document geometry while CM resolved that click.
+const setEditingFrontmatter = StateEffect.define<boolean>();
 
-const focusedField = StateField.define<boolean>({
+const editingFrontmatterField = StateField.define<boolean>({
   create: () => false,
   update(value, tr) {
-    for (const effect of tr.effects) if (effect.is(setFocused)) value = effect.value;
+    for (const effect of tr.effects) {
+      if (effect.is(setEditingFrontmatter)) value = effect.value;
+    }
+    if (value && tr.selection) {
+      const fm = parseFrontmatter(tr.state.doc.toString());
+      const remainsInside = fm && tr.state.selection.ranges.some(
+        (range) => range.from < fm.to && range.to > fm.from,
+      );
+      if (!remainsInside) value = false;
+    }
     return value;
   },
 });
@@ -139,7 +146,10 @@ class FrontmatterCardWidget extends WidgetType {
     card.addEventListener('mousedown', (event) => {
       event.preventDefault();
       const revealAt = view.state.doc.line(2).from; // line 1 is the opening fence
-      view.dispatch({ selection: { anchor: revealAt } });
+      view.dispatch({
+        selection: { anchor: revealAt },
+        effects: setEditingFrontmatter.of(true),
+      });
       view.focus();
     });
 
@@ -149,15 +159,15 @@ class FrontmatterCardWidget extends WidgetType {
 
 // Pure decoration builder (no view), so the gate is unit-testable headlessly like
 // buildDecorations. Returns the block-replace card, or an empty set when there's no
-// frontmatter or when a focused cursor sits inside the block (reveal raw for editing).
-export function frontmatterCardDecorations(state: EditorState, focused: boolean): DecorationSet {
+// frontmatter or while explicit frontmatter editing is active.
+export function frontmatterCardDecorations(state: EditorState, editing: boolean): DecorationSet {
   const doc = state.doc.toString();
   const fm = parseFrontmatter(doc);
   if (!fm || fm.to <= fm.from) return Decoration.none;
   // Don't swallow the whole document: a note that is ONLY frontmatter has no body line
   // to keep the cursor on, so leave it as raw text.
   if (fm.to >= doc.length) return Decoration.none;
-  if (focused) {
+  if (editing) {
     for (const range of state.selection.ranges) {
       if (range.from < fm.to && range.to > fm.from) return Decoration.none;
     }
@@ -168,26 +178,31 @@ export function frontmatterCardDecorations(state: EditorState, focused: boolean)
 }
 
 const cardField = StateField.define<DecorationSet>({
-  create: (state) => frontmatterCardDecorations(state, state.field(focusedField, false) ?? false),
+  create: (state) => frontmatterCardDecorations(
+    state,
+    state.field(editingFrontmatterField, false) ?? false,
+  ),
   update(value, tr) {
-    // Recompute when the doc, the selection, or focus changes — any of which can flip
-    // the card between shown and revealed.
-    if (tr.docChanged || tr.selection || tr.effects.some((e) => e.is(setFocused))) {
-      return frontmatterCardDecorations(tr.state, tr.state.field(focusedField, false) ?? false);
+    if (
+      tr.docChanged ||
+      tr.selection ||
+      tr.effects.some((effect) => effect.is(setEditingFrontmatter))
+    ) {
+      return frontmatterCardDecorations(
+        tr.state,
+        tr.state.field(editingFrontmatterField, false) ?? false,
+      );
     }
     return value.map(tr.changes);
   },
   provide: (field) => EditorView.decorations.from(field),
 });
 
-// Push focus changes into state so the card field can react to them.
-const focusTracker = EditorView.domEventHandlers({
-  focus: (_event, view) => {
-    view.dispatch({ effects: setFocused.of(true) });
-    return false;
-  },
+// Leaving the editor ends property editing. Ordinary focus does nothing, so a body
+// click cannot temporarily replace the card using CM's stale position-0 selection.
+const blurTracker = EditorView.domEventHandlers({
   blur: (_event, view) => {
-    view.dispatch({ effects: setFocused.of(false) });
+    view.dispatch({ effects: setEditingFrontmatter.of(false) });
     return false;
   },
 });
@@ -248,8 +263,8 @@ const cardTheme = EditorView.baseTheme({
   },
 });
 
-// The extension: focus tracking, the card field, its atomic range, and styles. Order
+// The extension: explicit editing state, the card field, its atomic range, and styles. Order
 // puts the field before the atomic facet, which reads it.
 export function frontmatterCard(): Extension {
-  return [focusedField, cardField, cardAtomic, focusTracker, cardTheme];
+  return [editingFrontmatterField, cardField, cardAtomic, blurTracker, cardTheme];
 }

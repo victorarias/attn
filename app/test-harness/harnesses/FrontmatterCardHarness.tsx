@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import '../../src/App.css';
+import '../../src/components/NotebookBrowser.css';
 import { LiveMarkdownEditor } from '../../src/components/notebook/LiveMarkdownEditor';
 import type { HarnessProps } from '../types';
 
@@ -34,9 +35,31 @@ summary: A note that is only properties, with no body.
 ---
 `;
 
+const LONG_SAMPLE = `${SAMPLE}
+## Stage 1: Rendered before the initial parse boundary
+
+${Array.from(
+  { length: 55 },
+  (_, i) => `Supporting paragraph ${i + 1} keeps this realistic long-form notebook document readable.`,
+).join('\n\n')}
+
+### Stage 2: Rendered after the initial parse boundary
+
+**Output:** Markdown after character 3,000 remains rendered when the cursor moves.
+
+### Stage 3: Rendering remains stable
+
+**Stage complete when:** ArrowUp moves one visual line without returning to frontmatter.
+`;
+
 export function FrontmatterCardHarness({ onReady, setTriggerRerender }: HarnessProps) {
   const params = new URLSearchParams(window.location.search);
-  const [value, setValue] = useState(params.get('empty') === '1' ? SAMPLE_NO_BODY : SAMPLE);
+  const initial = params.get('empty') === '1'
+    ? SAMPLE_NO_BODY
+    : params.get('long') === '1'
+      ? LONG_SAMPLE
+      : SAMPLE;
+  const [value, setValue] = useState(initial);
   const [, force] = useState(0);
 
   const handleChange = useCallback((next: string) => {
@@ -52,7 +75,10 @@ export function FrontmatterCardHarness({ onReady, setTriggerRerender }: HarnessP
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', padding: 24, background: 'var(--color-bg-app)' }}>
-      <div style={{ flex: 1, minHeight: 0, border: '1px solid var(--color-border)', borderRadius: 8 }}>
+      <div
+        className="notebook-browser-live-editor"
+        style={{ border: '1px solid var(--color-border)', borderRadius: 8 }}
+      >
         <LiveMarkdownEditor value={value} onChange={handleChange} ariaLabel="Note" />
       </div>
     </div>

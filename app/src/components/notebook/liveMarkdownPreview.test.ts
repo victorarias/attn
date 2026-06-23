@@ -61,6 +61,22 @@ describe('liveMarkdownPreview decorations', () => {
     expect(hideAt(decos, 0, 2)).toBe(true);
   });
 
+  it('decorates syntax beyond CodeMirror\'s initial 3,000-character parse window', () => {
+    const prefix = `${'ordinary paragraph text '.repeat(140)}\n\n`;
+    const heading = '### Stage 2 remains rendered';
+    const doc = `${prefix}${heading}\n\nbody`;
+    const headingFrom = doc.indexOf(heading);
+    expect(headingFrom).toBeGreaterThan(3000);
+
+    const decos = decosFor(doc, doc.length, false);
+    expect(
+      decos.some(
+        (d) => d.class === 'cm-md-h3' && d.from === headingFrom && d.to === headingFrom + heading.length,
+      ),
+    ).toBe(true);
+    expect(hideAt(decos, headingFrom, headingFrom + 4)).toBe(true);
+  });
+
   it('reveals the heading marker when the cursor is on the heading line', () => {
     const doc = '# Title\n\nbody';
     const decos = decosFor(doc, 1); // cursor inside the heading line
