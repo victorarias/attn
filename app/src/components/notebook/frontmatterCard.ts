@@ -81,8 +81,9 @@ class FrontmatterCardWidget extends WidgetType {
     const f = this.fm.fields;
     const card = document.createElement('div');
     card.className = 'cm-md-frontmatter';
-    card.setAttribute('role', 'group');
-    card.setAttribute('aria-label', 'Note properties');
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', 'Edit note properties');
+    card.tabIndex = 0;
 
     // Header row: the type pill and the dates — the card's compact identity line.
     // No title: the note's `# H1` below the card is the title.
@@ -140,17 +141,26 @@ class FrontmatterCardWidget extends WidgetType {
     hint.textContent = 'click to edit';
     card.appendChild(hint);
 
-    // Click reveals the raw YAML for editing: move the cursor just inside the block
-    // (the first YAML line) so the reveal gate fires, and take focus. preventDefault
-    // stops CM from also placing a selection at the click point.
-    card.addEventListener('mousedown', (event) => {
-      event.preventDefault();
+    // Pointer or keyboard activation reveals the raw YAML for editing: move the cursor
+    // just inside the block (the first YAML line) so the reveal gate fires, then hand
+    // focus back to the editor at that visible selection.
+    const reveal = () => {
       const revealAt = view.state.doc.line(2).from; // line 1 is the opening fence
       view.dispatch({
         selection: { anchor: revealAt },
         effects: setEditingFrontmatter.of(true),
       });
       view.focus();
+    };
+    card.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      reveal();
+    });
+    card.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      event.stopPropagation();
+      reveal();
     });
 
     return card;

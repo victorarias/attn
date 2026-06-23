@@ -43,6 +43,19 @@ test.describe('FrontmatterCard', () => {
     await expect(page.locator('.cm-content')).not.toContainText('type: area');
   });
 
+  test('opens frontmatter editing from the keyboard', async ({ page }) => {
+    await page.goto('/test-harness/?component=FrontmatterCard');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    const card = page.getByRole('button', { name: 'Edit note properties' });
+    await card.focus();
+    await expect(card).toBeFocused();
+
+    await page.keyboard.press('Enter');
+    await expect(card).toHaveCount(0);
+    await expect(page.locator('.cm-content')).toContainText('type: area');
+    await expect(page.locator('.cm-content')).toBeFocused();
+  });
+
   test('focusing the body never expands frontmatter under the pointer click', async ({ page }) => {
     await page.goto('/test-harness/?component=FrontmatterCard');
     await page.waitForFunction(() => window.__HARNESS__?.ready === true);
