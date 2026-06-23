@@ -171,9 +171,21 @@ timeout→escalate; any daemon-push / stop-hook / state auto-inference.
 ## Progress
 - [x] Understand — 6-reader subsystem map (watch, state, self-report, mailbox, UI, guidance).
 - [x] Design — decisions above; implementation map filled.
-- [ ] Step 1 — forward trigger (Classify).
-- [ ] Step 2 — self-report affordance (CLI flags).
-- [ ] Step 3 — launch prompt + guidance.
-- [ ] Step 4 — reverse ambient UI (badge + overlay).
-- [ ] Step 5 — changelog + progress.
+- [x] Step 1 — forward trigger (Classify): removed daemon-state steps 4/7/8.
+- [x] Step 2 — self-report affordance (CLI flags --done/--failed/--review/--blocked).
+- [x] Step 3 — launch prompt + guidance (chief-of-staff.md, delegation.md).
+- [x] Step 4 — reverse ambient UI (PendingMailBadge + OnAgentMailOverlay).
+- [x] Step 5 — changelog + progress.
 - [ ] Adversarial review + CI green + figgyster.
+
+## Outcome notes
+- **No ProtocolVersion bump.** Every change reuses existing protocol surfaces
+  (DispatchReport enums, unread_message_count, wake_dispatch_agent). Verified.
+- **"watching ≠ working" dissolved via the quiet watch — no explicit state code.**
+  The state-inference reader confirmed an armed loop reads `working` only via the
+  Stop `background_tasks=running` payload or the live animated-status-frame PTY
+  detector; a quiet watch produces neither and settles to idle on its own. Guidance
+  makes the watch quiet by construction.
+- **Accepted gap (documented):** removing the closed/idle/waiting_input fallbacks
+  means an agent that ends without a terminal self-report leaves a quiet, non-exiting
+  watch (silence ≠ success). The deferred watch-timeout→escalate is the backstop.

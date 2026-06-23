@@ -8,6 +8,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-06-23]
 
+### Added
+- **Self-report finishing or getting stuck with one flag — no JSON.** A delegated agent can now declare a terminal or blocked outcome directly: `attn dispatch report --done` / `--review` / `--failed` / `--blocked`. `--blocked` takes `--question`, `--recommendation`, and `--consequence` to put a concrete decision in front of the chief. A plain `--message` with no flag is a silent note that does not wake the chief. The full `--coordination-file` JSON envelope stays as an escape hatch.
+- **See pending chief mail without opening the dashboard.** A delegated agent that has unread mail from its chief now shows an amber envelope badge in the sidebar (and a small dot on the collapsed rail), plus an overlay on the agent's own terminal. Clicking the overlay prompts that agent to check its inbox.
+
+### Changed
+- **A chief's `dispatch watch` fires only on what an agent reports, not on its process state.** Watching a delegation no longer reacts to the agent's runtime status, so a turn-boundary rest is never misread as "ended" and stopping with an empty report is no longer a false "waiting" blocker. The watch wakes the chief only when the agent self-reports done, ready-for-review, failed, or blocked. Trade-off: an agent that ends without filing a report now leaves its watch quietly waiting rather than emitting a neutral "ended" — silence is neither success nor failure.
+
 ### Fixed
 - **Long Notebook notes keep their rendered formatting and cursor position while you edit.** Moving the cursor beyond the first few thousand characters no longer turns the rest of a note back into raw Markdown or sends ArrowUp to the properties card. Clicking into the body also leaves the frontmatter card stable; raw YAML appears only when you click the card to edit it.
 - **Chief-of-staff delegations no longer disappear into muted workspaces.** Delegating into an existing muted workspace now brings that workspace back into the sidebar, and `attn list` marks sessions whose workspace is muted so the chief can see that state before choosing a target.
