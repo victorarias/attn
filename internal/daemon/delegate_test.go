@@ -182,6 +182,120 @@ func TestChiefOfStaffDelegateCreatesTrackedDispatch(t *testing.T) {
 	}
 }
 
+func TestChiefOfStaffDelegationPreservesCoordinationIdentityAcrossPlacements(t *testing.T) {
+	for _, placement := range []string{
+		delegationPlacementCurrent,
+		delegationPlacementNew,
+		delegationPlacementExisting,
+	} {
+		t.Run(placement, func(t *testing.T) {
+			d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+			backend := &fakeSpawnBackend{}
+			_, chiefSessionID, _ := setupDelegationSource(t, d, backend)
+			if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefSessionID); err != nil {
+				t.Fatalf("set chief role: %v", err)
+			}
+			consumeDelegatedPrompt(t, backend)
+
+			msg := &protocol.DelegateMessage{
+				Cmd:             protocol.CmdDelegate,
+				SourceSessionID: chiefSessionID,
+				Brief:           "Exercise tracked coordination identity.",
+				Agent:           protocol.Ptr("codex"),
+				Placement:       protocol.Ptr(placement),
+			}
+			switch placement {
+			case delegationPlacementNew:
+				msg.Cwd = protocol.Ptr(t.TempDir())
+			case delegationPlacementExisting:
+				targetDirectory := t.TempDir()
+				msg.WorkspaceID = protocol.Ptr("workspace-target")
+				d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+					Cmd:       protocol.CmdRegisterWorkspace,
+					ID:        protocol.Deref(msg.WorkspaceID),
+					Title:     "Target",
+					Directory: targetDirectory,
+				})
+			}
+
+			result, err := d.delegate(msg)
+			if err != nil {
+				t.Fatalf("delegate() error = %v", err)
+			}
+			spawn, ok := backend.LastSpawn()
+			if !ok || spawn.ID != result.SessionID || spawn.CWD != result.Directory {
+				t.Fatalf("spawn = %+v, result = %+v", spawn, result)
+			}
+			dispatch := d.store.GetChiefOfStaffDispatchBySession(spawn.ID)
+			if dispatch == nil || dispatch.ID != protocol.Deref(result.DispatchID) ||
+				dispatch.WorkspaceID != result.WorkspaceID {
+				t.Fatalf("dispatch = %+v, result = %+v", dispatch, result)
+			}
+
+			reportServer, reportClient := net.Pipe()
+			go func() {
+				d.handleReportDispatch(reportServer, &protocol.ReportDispatchMessage{
+					Cmd:             protocol.CmdReportDispatch,
+					SourceSessionID: spawn.ID,
+					Report:          "Placement identity verified.",
+				})
+				_ = reportServer.Close()
+			}()
+			var reportResponse protocol.Response
+			if err := json.NewDecoder(reportClient).Decode(&reportResponse); err != nil {
+				t.Fatalf("decode report response: %v", err)
+			}
+			_ = reportClient.Close()
+			if !reportResponse.Ok || reportResponse.ChiefOfStaffDispatch == nil ||
+				reportResponse.ChiefOfStaffDispatch.SessionID != spawn.ID {
+				t.Fatalf("report response = %+v", reportResponse)
+			}
+
+			inboxServer, inboxClient := net.Pipe()
+			go func() {
+				d.handleListDispatchMessages(inboxServer, &protocol.ListDispatchMessagesMessage{
+					Cmd:             protocol.CmdListDispatchMessages,
+					SourceSessionID: spawn.ID,
+					UnreadOnly:      protocol.Ptr(true),
+				})
+				_ = inboxServer.Close()
+			}()
+			var inboxResponse protocol.Response
+			if err := json.NewDecoder(inboxClient).Decode(&inboxResponse); err != nil {
+				t.Fatalf("decode inbox response: %v", err)
+			}
+			_ = inboxClient.Close()
+			if !inboxResponse.Ok {
+				t.Fatalf("inbox response = %+v", inboxResponse)
+			}
+
+			checkout, err := d.checkoutWorkspaceContext(&protocol.WorkspaceContextCheckoutMessage{
+				SourceSessionID: spawn.ID,
+			})
+			if err != nil {
+				t.Fatalf("checkout workspace context: %v", err)
+			}
+			if checkout.SessionID != spawn.ID || checkout.WorkspaceID != result.WorkspaceID {
+				t.Fatalf("checkout = %+v, spawn = %+v, result = %+v", checkout, spawn, result)
+			}
+			if err := os.WriteFile(checkout.Path, []byte("# Workspace Context\n\n## Area\nDelegation identity.\n\n## Current Picture\nCoordination is routed by the delegated session.\n"), 0o600); err != nil {
+				t.Fatalf("edit workspace context: %v", err)
+			}
+			updated, changed, err := d.updateWorkspaceContext(&protocol.WorkspaceContextUpdateMessage{
+				SourceSessionID: spawn.ID,
+			})
+			if err != nil || !changed || updated.SessionID != spawn.ID ||
+				updated.WorkspaceID != result.WorkspaceID {
+				t.Fatalf("workspace context update = %+v, changed=%v, err=%v", updated, changed, err)
+			}
+			canonical, err := d.store.GetWorkspaceContext(result.WorkspaceID)
+			if err != nil || canonical.UpdatedBySessionID != spawn.ID {
+				t.Fatalf("canonical workspace context = %+v, err=%v", canonical, err)
+			}
+		})
+	}
+}
+
 func TestDelegatedFromChiefDecoratesBroadcastSession(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}

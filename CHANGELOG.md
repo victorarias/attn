@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Chief-of-staff delegations no longer disappear into muted workspaces.** Delegating into an existing muted workspace now brings that workspace back into the sidebar, and `attn list` marks sessions whose workspace is muted so the chief can see that state before choosing a target.
+- **Delegated Codex agents keep their attn identity when working in child directories.** An agent launched in a shared parent directory could lose its session ID and attn wrapper path after running tools from a branch-specific child worktree, so tracked reports, inbox access, and workspace-context publication failed with "no session." Managed Codex launches now preserve the correct session routing across tool working directories and workspace placement modes.
 
 ## [2026-06-22]
 

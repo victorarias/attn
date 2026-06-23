@@ -119,6 +119,15 @@ func TestGenerateHooks_DefaultsWrapperToAttn(t *testing.T) {
 func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {
 	overrides := GenerateCodexConfigOverrides("session-1", "/tmp/attn.sock", "/tmp/attn", "/tmp/context.md", "", false)
 	joined := strings.Join(overrides, "\n")
+	for _, expected := range []string{
+		`shell_environment_policy.set.ATTN_SESSION_ID="session-1"`,
+		`shell_environment_policy.set.ATTN_WRAPPER_PATH="/tmp/attn"`,
+		`shell_environment_policy.set.ATTN_SOCKET_PATH="/tmp/attn.sock"`,
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("codex overrides missing stable tool environment %q: %q", expected, joined)
+		}
+	}
 
 	if !strings.Contains(joined, "hooks.SessionStart=") {
 		t.Fatal("codex overrides should include SessionStart hook")
@@ -129,11 +138,9 @@ func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {
 	if !strings.Contains(joined, "startup|resume|clear|compact") {
 		t.Fatal("codex SessionStart hook should run after context resets")
 	}
-	if strings.Contains(joined, "session-1") {
-		t.Fatal("codex hook commands should not embed per-session attn ids")
-	}
-	if strings.Contains(joined, "/tmp/attn.sock") {
-		t.Fatal("codex hook commands should not embed per-session socket paths")
+	if strings.Contains(joined, "_hook-session-start session-1") ||
+		strings.Contains(joined, "_hook-state working session-1") {
+		t.Fatal("codex hook commands should read identity from their stable environment")
 	}
 	if !strings.Contains(joined, "features.hooks=true") {
 		t.Fatal("codex overrides should enable hooks for attn-managed sessions")
@@ -154,6 +161,17 @@ func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {
 	if !strings.Contains(joined, "developer_instructions=") ||
 		!strings.Contains(joined, "/tmp/context.md") {
 		t.Fatal("codex overrides should inject workspace context as developer instructions")
+	}
+}
+
+func TestGenerateCodexConfigOverrides_OmitsEmptySocketButKeepsSessionIdentity(t *testing.T) {
+	overrides := strings.Join(GenerateCodexConfigOverrides("session-2", "", "", "", "", false), "\n")
+	if !strings.Contains(overrides, `shell_environment_policy.set.ATTN_SESSION_ID="session-2"`) ||
+		!strings.Contains(overrides, `shell_environment_policy.set.ATTN_WRAPPER_PATH="attn"`) {
+		t.Fatalf("codex overrides dropped required attn identity: %q", overrides)
+	}
+	if strings.Contains(overrides, "ATTN_SOCKET_PATH") {
+		t.Fatalf("codex overrides should omit an empty socket path: %q", overrides)
 	}
 }
 
