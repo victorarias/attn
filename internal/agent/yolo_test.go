@@ -208,8 +208,27 @@ func TestBuildCommand_AppendsInitialPromptAfterOptionTerminator(t *testing.T) {
 	}
 }
 
-func TestCopilotDoesNotSupportInitialPrompt(t *testing.T) {
-	if (&Copilot{}).Capabilities().HasInitialPrompt {
-		t.Fatal("expected Copilot delegation support to remain disabled")
+func TestCopilotSupportsInitialPrompt(t *testing.T) {
+	if !(&Copilot{}).Capabilities().HasInitialPrompt {
+		t.Fatal("expected Copilot to support initial prompts via --interactive flag")
+	}
+}
+
+func TestCopilotBuildCommandInitialPrompt(t *testing.T) {
+	c := &Copilot{}
+	cmd := c.BuildCommand(SpawnOpts{
+		Executable:    "copilot",
+		InitialPrompt: "fix the bug",
+	})
+	args := cmd.Args[1:] // skip executable
+	found := false
+	for i, a := range args {
+		if a == "--interactive" && i+1 < len(args) && args[i+1] == "fix the bug" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected --interactive flag with prompt in args, got: %v", args)
 	}
 }

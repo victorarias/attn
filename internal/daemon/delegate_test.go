@@ -804,23 +804,49 @@ func TestDelegateRollsBackPaneWhenSpawnFails(t *testing.T) {
 	}
 }
 
-func TestDelegateRejectsCopilotInitialPrompt(t *testing.T) {
+// Copilot now supports initial-prompt delegation (it auto-executes the brief via
+// `copilot --interactive`), so delegating to it must succeed and spawn a tracked
+// session carrying the brief — the inverse of the old "rejects" assertion this
+// replaces.
+func TestDelegateAcceptsCopilotInitialPrompt(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
-	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	workspaceID, sourceSessionID, _ := setupDelegationSource(t, d, backend)
 
-	_, err := d.delegate(&protocol.DelegateMessage{
+	var prompt string
+	backend.onSpawn = func(opts ptybackend.SpawnOptions) {
+		if opts.ID == sourceSessionID || opts.InitialPromptFile == "" {
+			return
+		}
+		content, err := os.ReadFile(opts.InitialPromptFile)
+		if err != nil {
+			t.Fatalf("read initial prompt: %v", err)
+		}
+		prompt = string(content)
+		if err := os.Remove(opts.InitialPromptFile); err != nil {
+			t.Fatalf("remove initial prompt: %v", err)
+		}
+	}
+
+	result, err := d.delegate(&protocol.DelegateMessage{
 		Cmd:             protocol.CmdDelegate,
 		SourceSessionID: sourceSessionID,
 		Brief:           "Use Copilot for this delegated task.",
 		Agent:           protocol.Ptr("copilot"),
 	})
-	if err == nil || !strings.Contains(err.Error(), "does not support initial prompts") {
-		t.Fatalf("delegate() error = %v, want unsupported initial prompt error", err)
+	if err != nil {
+		t.Fatalf("delegate() error = %v, want copilot delegation to succeed", err)
 	}
-	layout := d.store.GetWorkspaceLayout("workspace-source")
-	if layout == nil || len(layout.Panes) != 1 || layout.Panes[0].SessionID != sourceSessionID {
-		t.Fatalf("workspace layout after rejection = %+v", layout)
+	if prompt != "Use Copilot for this delegated task." {
+		t.Fatalf("delegated initial prompt = %q", prompt)
+	}
+	session := d.store.Get(result.SessionID)
+	if session == nil || session.WorkspaceID != workspaceID || session.Agent != protocol.SessionAgentCopilot {
+		t.Fatalf("delegated session = %+v, want copilot session in %s", session, workspaceID)
+	}
+	layout := d.store.GetWorkspaceLayout(workspaceID)
+	if layout == nil || len(layout.Panes) != 2 {
+		t.Fatalf("workspace layout = %+v, want source + delegated panes", layout)
 	}
 }
 

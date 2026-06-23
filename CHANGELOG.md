@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-06-23]
 
+### Added
+- **The chief of staff can now delegate to GitHub Copilot.** Copilot joins Claude and Codex as a delegation target: the chief spins up a Copilot session with the brief, and the agent starts in an interactive session that runs the brief and stays open for follow-up steering. Ordinary (non-delegated) Copilot sessions are unaffected.
+
 ### Changed
 - **A delegated agent that crashes or is killed mid-work now surfaces as a failure to its chief.** When a chief-of-staff dispatch's session ends, attn now tells a clean stop from a real crash: a session cut off while it was still working, starting up, or waiting on a tool approval is reported as a failure (`[failed]`), while a session that closed from a settled rest — or one attn couldn't classify — stays the neutral "ended" introduced with `dispatch watch`. attn still never claims a success the agent didn't report; this only makes a genuine crash visible instead of letting it look like an uneventful end.
 
