@@ -31,11 +31,14 @@ exactly one per dispatch, right after delegating:
     "$ATTN_WRAPPER_PATH" dispatch watch <id>
 
 It blocks and prints one line per *meaningful* event, then exits when the work
-reaches a terminal state. It fires on exactly two things: the agent's
-self-reported terminal/blocked outcome (forward), and the agent reacting to your
-mail (reverse) — nothing from runtime state. Run it as a quiet background watch
-(for a Claude chief, a Monitor) so it stays silent between events: an armed watch
-must not make you look busy, and you must not narrate intermediate ticks.
+reaches a terminal state. This watch fires on one thing: the agent's self-reported
+terminal or blocked outcome (the forward channel) — nothing from runtime state.
+The reverse channel — your mail reaching the agent — is a *separate* watch running
+in the agent's own process, not this one; you track its progress through
+acknowledgement state in `dispatch messages` and the ambient pending-mail UI, not
+through `dispatch watch`. Run this watch as a quiet background watch (for a Claude
+chief, a Monitor) so it stays silent between events: an armed watch must not make
+you look busy, and you must not narrate intermediate ticks.
 
 Do NOT watch the agent's process/daemon status, and do NOT spelunk its
 transcript. Runtime state flickers and is not a signal; re-engage only when the

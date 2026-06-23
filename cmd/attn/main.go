@@ -913,6 +913,14 @@ func parseDispatchReportArgs(args []string) (string, string, *protocol.DispatchR
 			return "", "", nil, errors.New("--question, --recommendation, and --consequence require --blocked")
 		}
 	}
+	// --recommendation/--consequence only travel attached to a decision Request,
+	// which is built only when --question is present. Without --question they would
+	// be silently dropped (a daemon-valid blocker with the agent's reasoning lost),
+	// so reject the combination explicitly instead of losing the data.
+	if (strings.TrimSpace(*recommendation) != "" || strings.TrimSpace(*consequence) != "") &&
+		strings.TrimSpace(*question) == "" {
+		return "", "", nil, errors.New("--recommendation and --consequence require --question")
+	}
 
 	var structuredReport *protocol.DispatchReport
 	switch {

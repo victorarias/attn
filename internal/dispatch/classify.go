@@ -29,10 +29,18 @@
 //  1. report work_state=failed OR report_type=failure       -> Failed  (terminal, exit 1)
 //  2. report work_state=completed OR report_type=completion  -> Done    (terminal, exit 0)
 //  3. report work_state=ready_for_review                     -> Review  (terminal, exit 0)
-//  4. report has a pending decision Request                  -> Blocker (interim)
-//  5. report work_state=needs_input OR report_type=blocker   -> Blocker (interim)
-//  6. everything else (no report, a progress report, or any  -> None    (no emit)
-//     runtime status whatsoever)
+//  4. report has a PENDING decision Request                  -> Blocker (interim)
+//  5. report work_state=needs_input OR report_type=blocker,  -> Blocker (interim)
+//     and no decision Request is attached
+//  6. everything else: no report, a progress report, OR a    -> None    (no emit)
+//     report whose decision Request was already RESOLVED
+//
+// Step 6's resolved-Request case matters: when the chief answers a blocker via
+// `dispatch resolve`, the store flips only the Request status to resolved and
+// leaves work_state=needs_input untouched. That is a store-state transition, not
+// a fresh self-report, so it must stay silent — otherwise the watch would re-fire
+// the very blocker the chief just answered. A still-pending Request (step 4)
+// outranks the needs_input check; a resolved Request suppresses it (step 6).
 //
 // Step 6 is the crux of *noise* suppression. A bare freeform `dispatch report
 // --message` (a progress note) carries no structured terminal/blocked claim, so
@@ -133,22 +141,28 @@ func Classify(d protocol.ChiefOfStaffDispatch) Event {
 		return Event{KindReview, true, 0, "ready_for_review", summary, nextAction}
 	}
 
-	// 4-5. Explicit BLOCKED self-report (interim — a watch keeps running through
-	// it so the chief can steer and the loop continues).
-	if req := r.Request; req != nil && req.Status == protocol.DispatchRequestStatusPending {
-		s := summary
-		if q := trim(req.Question); q != "" {
-			s = q
+	// 4-6. Explicit BLOCKED self-report (interim — a watch keeps running through
+	// it so the chief can steer and the loop continues). A decision Request is
+	// authoritative when present: pending fires the blocker; resolved is silent —
+	// the chief already answered, and the resolve is a store-state transition (not
+	// a fresh self-report), so re-firing it off the still-needs_input work_state
+	// would wake the chief about the blocker it just cleared.
+	if req := r.Request; req != nil {
+		if req.Status == protocol.DispatchRequestStatusPending {
+			s := summary
+			if q := trim(req.Question); q != "" {
+				s = q
+			}
+			return Event{KindBlocker, false, 0, "decision_request", s, nextAction}
 		}
-		return Event{KindBlocker, false, 0, "decision_request", s, nextAction}
+		return Event{Kind: KindNone}
 	}
 	if r.WorkState == protocol.DispatchWorkStateNeedsInput ||
 		r.ReportType == protocol.DispatchReportTypeBlocker {
 		return Event{KindBlocker, false, 0, "needs_input", summary, nextAction}
 	}
 
-	// 6. A progress / in_progress report (or a resolved request) is a silent note,
-	// not a trigger.
+	// 6. A progress / in_progress report is a silent note, not a trigger.
 	return Event{Kind: KindNone}
 }
 

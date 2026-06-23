@@ -1262,9 +1262,15 @@ sendFetchPRDetails,
 
   const visibleEnrichedSessions = filterSessionsRepresentedInWorkspaceLayouts(daemonWorkspaces, enrichedLocalSessions);
 
+  // The currently active chief-of-staff session, if any. Used both for the Notebook
+  // top-bar pulse below and for the on-agent overlay's wake gate (a wake routes
+  // through this chief, so it must be the one that owns the dispatch).
+  const notebookChiefSession = enrichedLocalSessions.find((session) => session.chiefOfStaff);
+
   // Per-session pending mail for the on-agent overlay: the unread count plus the
   // dispatch/chief routing the wake doorbell needs, and whether the agent is in a
-  // pokeable state (mirrors the dashboard's canWake gate).
+  // pokeable state (mirrors the dashboard's canWake gate, including that the
+  // dispatch's chief is the currently active chief session).
   const pendingMailBySessionId = new Map<string, PendingAgentMail>();
   for (const dispatch of dispatchesWithMail) {
     const count = dispatch.unread_message_count ?? 0;
@@ -1273,7 +1279,8 @@ sendFetchPRDetails,
     const wakeable = Boolean(
       session
       && !session.endpointName
-      && (session.state === 'idle' || session.state === 'waiting_input'),
+      && (session.state === 'idle' || session.state === 'waiting_input')
+      && notebookChiefSession?.id === dispatch.chief_session_id,
     );
     const existing = pendingMailBySessionId.get(dispatch.session_id);
     pendingMailBySessionId.set(dispatch.session_id, {
@@ -1285,9 +1292,8 @@ sendFetchPRDetails,
   }
 
   // The Notebook top-bar chief pulse: undefined when no chief-of-staff session exists
-  // (indicator hidden), else true while it is working. Derived locally from sessions
-  // already in hand — no extra socket call or threaded daemon function.
-  const notebookChiefSession = enrichedLocalSessions.find((session) => session.chiefOfStaff);
+  // (indicator hidden), else true while it is working. Reuses notebookChiefSession
+  // derived above — no extra socket call or threaded daemon function.
   const notebookChiefActive = notebookChiefSession ? notebookChiefSession.state === 'working' : undefined;
 
   const {

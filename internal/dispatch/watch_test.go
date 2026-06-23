@@ -235,6 +235,56 @@ func TestRunWatch_BlockerEmitsButDoesNotExitThenCompletes(t *testing.T) {
 	}
 }
 
+func TestRunWatch_ResolvedDecisionDoesNotRefireBlocker(t *testing.T) {
+	// The core reverse-channel flow: the agent files a decision request (pending),
+	// the chief resolves it. `dispatch resolve` flips ONLY Request.Status to
+	// resolved and leaves work_state=needs_input — so the post-resolve snapshot is
+	// {WorkState: NeedsInput, Request.Status: Resolved}. The resolve is a
+	// store-state transition, not a fresh self-report, so it must NOT surface a
+	// second [blocker] to the chief who just answered. Only the agent's later
+	// completion ends the watch.
+	pending := &protocol.ChiefOfStaffDispatch{
+		ID: "d1", Label: "badge", Status: "waiting_input",
+		StructuredReport: &protocol.DispatchReport{
+			WorkState: protocol.DispatchWorkStateNeedsInput,
+			Summary:   "need a decision",
+			Request: &protocol.DispatchDecisionRequest{
+				Status:            protocol.DispatchRequestStatusPending,
+				Question:          "flag or not?",
+				ExpectedResponder: "chief",
+			},
+		},
+	}
+	resolved := &protocol.ChiefOfStaffDispatch{
+		ID: "d1", Label: "badge", Status: "working",
+		StructuredReport: &protocol.DispatchReport{
+			WorkState: protocol.DispatchWorkStateNeedsInput, // resolve leaves this as-is
+			Summary:   "need a decision",
+			Request: &protocol.DispatchDecisionRequest{
+				Status:            protocol.DispatchRequestStatusResolved,
+				Question:          "flag or not?",
+				ExpectedResponder: "chief",
+			},
+		},
+	}
+	code, out, _ := runWatchScript(t, []fetchStep{
+		{pending, true, nil},  // emits [blocker], keeps watching
+		{resolved, true, nil}, // chief answered → silent, NOT a second blocker
+		{resolved, true, nil}, // still silent
+		{completed(), true, nil},
+	})
+	if code != 0 {
+		t.Errorf("exit = %d, want 0", code)
+	}
+	lines := nonEmptyLines(out)
+	if len(lines) != 2 {
+		t.Fatalf("want exactly 2 lines (one [blocker], then [done]); a resolved request must not re-fire. got %d: %q", len(lines), out)
+	}
+	if !strings.HasPrefix(lines[0], "[blocker]") || !strings.HasPrefix(lines[1], "[done]") {
+		t.Fatalf("want [blocker] then [done], got: %q", out)
+	}
+}
+
 func TestRunWatch_AlreadyTerminalOnFirstPollEmitsAndExits(t *testing.T) {
 	code, out, calls := runWatchScript(t, []fetchStep{
 		{completed(), true, nil},

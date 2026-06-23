@@ -707,6 +707,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
             data-pane-id={agentPane.id}
             data-pane-kind="agent"
             data-pane-path={path}
+            data-header-shown={showPaneHeader ? '' : undefined}
             style={frameStyle}
           >
             {(() => {

@@ -24,9 +24,16 @@ func TestClassify(t *testing.T) {
 			ExpectedResponder: "chief",
 		},
 	}
+	// The exact shape the system produces after a chief resolves a blocked
+	// decision: `dispatch report --blocked --question` synthesizes
+	// WorkState=NeedsInput + ReportType=Blocker + a pending Request, and
+	// `dispatch resolve` flips ONLY Request.Status to resolved — work_state and
+	// report_type are left untouched. Classify must read the resolved Request as
+	// authoritative and stay silent; the earlier InProgress fixture dodged the
+	// needs_input branch and masked a re-fire bug.
 	resolvedRequest := &protocol.DispatchReport{
-		WorkState:  protocol.DispatchWorkStateInProgress,
-		ReportType: protocol.DispatchReportTypeProgress,
+		WorkState:  protocol.DispatchWorkStateNeedsInput,
+		ReportType: protocol.DispatchReportTypeBlocker,
 		Summary:    "mid-flight",
 		Request: &protocol.DispatchDecisionRequest{
 			Status:            protocol.DispatchRequestStatusResolved,
@@ -85,8 +92,14 @@ func TestClassify(t *testing.T) {
 		{"scheduled (will auto-resume)", string(protocol.SessionStateScheduled), nil, KindNone, false, 0, ""},
 		{"unknown (do not cry wolf)", string(protocol.SessionStateUnknown), nil, KindNone, false, 0, ""},
 
-		// --- a resolved request is no longer a blocker ---
+		// --- a resolved request is no longer a blocker: the chief answered, and the
+		// resolve (a store-state flip, not a self-report) must not re-fire even though
+		// work_state still reads needs_input. This is the real post-`dispatch resolve`
+		// shape; a present-but-resolved Request suppresses the needs_input branch. ---
 		{"resolved request is silent", "working", resolvedRequest, KindNone, false, 0, ""},
+		// A genuine needs_input/blocker with NO decision Request (e.g. `--blocked`
+		// without `--question`) still emits — only an attached Request gates it.
+		{"needs_input without a request still emits", "working", report(protocol.DispatchWorkStateNeedsInput, protocol.DispatchReportTypeBlocker), KindBlocker, false, 0, "needs_input"},
 	}
 
 	for _, tt := range tests {

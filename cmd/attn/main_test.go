@@ -751,6 +751,23 @@ func TestParseDispatchReportArgsRejectsDecisionFlagsWithoutBlocked(t *testing.T)
 	}
 }
 
+func TestParseDispatchReportArgsRejectsDecisionContextWithoutQuestion(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "worker-1")
+	// --recommendation/--consequence only travel attached to a decision Request,
+	// which is built only when --question is present. Omitting --question would
+	// silently drop them into a daemon-valid blocker, so it must error instead.
+	if _, _, _, err := parseDispatchReportArgs([]string{
+		"--blocked", "--recommendation", "SQLite",
+	}); err == nil || !strings.Contains(err.Error(), "require --question") {
+		t.Fatalf("recommendation without --question error = %v", err)
+	}
+	if _, _, _, err := parseDispatchReportArgs([]string{
+		"--blocked", "--consequence", "a migration later",
+	}); err == nil || !strings.Contains(err.Error(), "require --question") {
+		t.Fatalf("consequence without --question error = %v", err)
+	}
+}
+
 func TestParseDispatchReportArgsBareMessageHasNoStructuredReport(t *testing.T) {
 	t.Setenv("ATTN_SESSION_ID", "worker-1")
 	// A freeform progress note carries no structured report, so the watch stays

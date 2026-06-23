@@ -176,7 +176,8 @@ timeout→escalate; any daemon-push / stop-hook / state auto-inference.
 - [x] Step 3 — launch prompt + guidance (chief-of-staff.md, delegation.md).
 - [x] Step 4 — reverse ambient UI (PendingMailBadge + OnAgentMailOverlay).
 - [x] Step 5 — changelog + progress.
-- [ ] Adversarial review + CI green + figgyster.
+- [x] Adversarial review — 15-agent fan-out; fixed every confirmed finding (see below).
+- [ ] CI green + figgyster.
 
 ## Outcome notes
 - **No ProtocolVersion bump.** Every change reuses existing protocol surfaces
@@ -189,3 +190,26 @@ timeout→escalate; any daemon-push / stop-hook / state auto-inference.
 - **Accepted gap (documented):** removing the closed/idle/waiting_input fallbacks
   means an agent that ends without a terminal self-report leaves a quiet, non-exiting
   watch (silence ≠ success). The deferred watch-timeout→escalate is the backstop.
+- **Adversarial review fixes (2026-06-23).** A 15-agent review of the change found
+  five confirmed issues, all fixed in-PR:
+  - **(HIGH) Resolved decision re-fired the blocker.** `dispatch resolve` flips only
+    `Request.Status`, leaving `work_state=needs_input`, so `Classify` re-emitted a
+    `[blocker]` (reason `needs_input`) after the chief answered — a store-state
+    transition triggering a wake, the exact noise class this PR kills. Fixed: a
+    present-but-resolved `Request` is authoritative and silent (`KindNone`); the
+    `needs_input` branch now fires only when no `Request` is attached (preserving
+    `--blocked` without `--question`). Guarded by a `classify_test` case on the real
+    post-resolve shape + a `watch_test` for the full pending→resolve→done flow.
+  - **(MEDIUM) Test masked the above.** `classify_test` exercised a `WorkState=InProgress`
+    resolved-request shape the system never produces; corrected to the real
+    `needs_input`/blocker shape.
+  - **(MEDIUM) Silent data loss in the CLI.** `dispatch report --blocked --recommendation/
+    --consequence` without `--question` built no `Request`, dropping the agent's
+    reasoning into a daemon-valid blocker. Now an explicit error.
+  - **(HIGH, docs) Reverse-channel claim was wrong.** `chief-of-staff.md` said the
+    chief's `dispatch watch` fires on the agent reacting to mail; it only classifies
+    self-reports. Reworded: the reverse channel is the agent's own inbox watch,
+    surfaced via ack state + ambient UI.
+  - **(LOW) Two UI gaps.** The on-agent overlay's wake gate now also requires the
+    dispatch's chief to be the active chief (mirrors `Dashboard.canWake`); the mail
+    chip drops below a shown pane header so it no longer occludes the rename button.

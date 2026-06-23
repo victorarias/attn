@@ -13,6 +13,13 @@
   pointer-events: none;
 }
 
+/* When the pane header is shown (multi-leaf workspaces), it carries a
+   hover-revealed rename button pinned at the same top-right corner. Drop the
+   overlay below the header so the interactive chip never occludes that button. */
+.workspace-pane[data-header-shown] .on-agent-mail-overlay {
+  top: 34px;
+}
+
 .on-agent-mail-chip {
   pointer-events: auto;
   align-items: center;
