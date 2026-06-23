@@ -153,7 +153,13 @@ class FrontmatterCardWidget extends WidgetType {
       view.focus();
     };
     card.addEventListener('mousedown', (event) => {
+      // Keep CodeMirror from placing a selection around the atomic widget before the
+      // ensuing semantic click activates it.
       event.preventDefault();
+    });
+    card.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       reveal();
     });
     card.addEventListener('keydown', (event) => {

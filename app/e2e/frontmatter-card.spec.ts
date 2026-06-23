@@ -56,6 +56,18 @@ test.describe('FrontmatterCard', () => {
     await expect(page.locator('.cm-content')).toBeFocused();
   });
 
+  test('opens frontmatter editing from a synthesized semantic click', async ({ page }) => {
+    await page.goto('/test-harness/?component=FrontmatterCard');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    const card = page.getByRole('button', { name: 'Edit note properties' });
+
+    // VoiceOver and other assistive technologies invoke a button action through click
+    // without first emitting the raw pointer or keyboard events.
+    await card.evaluate((el) => (el as HTMLElement).click());
+    await expect(card).toHaveCount(0);
+    await expect(page.locator('.cm-content')).toContainText('type: area');
+  });
+
   test('focusing the body never expands frontmatter under the pointer click', async ({ page }) => {
     await page.goto('/test-harness/?component=FrontmatterCard');
     await page.waitForFunction(() => window.__HARNESS__?.ready === true);
