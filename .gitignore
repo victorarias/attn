@@ -22,3 +22,6 @@ app/src-tauri/binaries/
 
 # Generated per-profile Tauri config overlays (see scripts/build-app-profile.sh)
 app/src-tauri/*.gen.conf.json
+
+# Local env files
+**/.npmrc

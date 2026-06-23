@@ -2,6 +2,7 @@ package agent
 
 import (
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/victorarias/attn/internal/classifier"
@@ -40,6 +41,7 @@ func (c *Copilot) Capabilities() Capabilities {
 		HasStateDetector:     true,
 		HasResume:            true,
 		HasYolo:              true,
+		HasInitialPrompt:     true,
 	}
 }
 
@@ -52,6 +54,9 @@ func (c *Copilot) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	}
 	if opts.YoloMode {
 		args = append(args, "--yolo")
+	}
+	if strings.TrimSpace(opts.InitialPrompt) != "" {
+		args = append(args, "-i", opts.InitialPrompt)
 	}
 	return exec.Command(opts.Executable, args...)
 }
