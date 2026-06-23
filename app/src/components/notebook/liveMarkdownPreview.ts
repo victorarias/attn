@@ -8,7 +8,7 @@
 // that line reads exactly as the file does on disk. Everything is derived from the
 // Lezer markdown syntax tree, so it tracks the parser rather than re-implementing it.
 
-import { syntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { type EditorState, type Extension, type Range } from '@codemirror/state';
 import {
   Decoration,
@@ -18,6 +18,7 @@ import {
   type ViewUpdate,
   WidgetType,
 } from '@codemirror/view';
+import type { Tree } from '@lezer/common';
 
 export interface LiveMarkdownOptions {
   // Invoked when the user mod-clicks (⌘/Ctrl) a rendered link. Receives the raw href.
@@ -43,6 +44,10 @@ const HEADING_MARK = [1, 2, 3, 4, 5, 6].map((n) => Decoration.mark({ class: `cm-
 const HIDE = Decoration.replace({});
 const CODEFENCE = Decoration.mark({ class: 'cm-md-codefence' });
 const CODEINFO = Decoration.mark({ class: 'cm-md-codeinfo' });
+// Keep nearby layout decorations stable while CM adjusts its viewport after edits.
+// Scanning only the exact viewport let a heading cross the boundary during scroll
+// anchoring, changing its line height and nudging the reader by several pixels.
+const DECORATION_MARGIN = 5000;
 // A line decoration applied to every row of a fenced code block, giving the block a
 // contiguous monospace panel (the fences stay visible but dimmed, so nothing shifts).
 const CODEBLOCK_LINE = Decoration.line({ class: 'cm-md-codeblock' });
@@ -116,15 +121,31 @@ function activeLines(state: EditorState): Set<number> {
 // markdown (nothing "active"), so a freshly-opened note reads like a rendered doc
 // even though CM always keeps a selection at position 0. Once focused, the cursor's
 // line reveals its raw markers for editing.
-export function buildDecorations(state: EditorState, focused = true): DecorationSet {
+interface DecorationRange {
+  from: number;
+  to: number;
+}
+
+export function buildDecorations(
+  state: EditorState,
+  focused = true,
+  parsedTree?: Tree,
+  range?: DecorationRange,
+): DecorationSet {
   const decos: Range<Decoration>[] = [];
   const { doc } = state;
   const active = focused ? activeLines(state) : new Set<number>();
-  const tree = syntaxTree(state);
+  // Headless callers want the complete document. The live ViewPlugin passes an
+  // already-ensured tree plus its logical viewport so cursor motion never reparses an
+  // arbitrarily large note synchronously.
+  const tree = parsedTree ?? ensureSyntaxTree(state, doc.length, 100) ?? syntaxTree(state);
+  const scanRange = range ?? { from: 0, to: doc.length };
 
   const onActiveLine = (pos: number) => active.has(doc.lineAt(pos).number);
 
   tree.iterate({
+    from: scanRange.from,
+    to: scanRange.to,
     enter: (node) => {
       const name = node.name;
 
@@ -294,15 +315,48 @@ export function liveMarkdownPreview(options: LiveMarkdownOptions = {}): Extensio
   const plugin = ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
+      tree: Tree;
+
       constructor(view: EditorView) {
-        this.decorations = buildDecorations(view.state, view.hasFocus);
+        this.tree = syntaxTree(view.state);
+        this.decorations = Decoration.none;
+        this.rebuild(view);
       }
+
+      rebuild(view: EditorView) {
+        // CodeMirror deliberately parses only the first 3,000 characters on state
+        // creation, then advances around the viewport in the background. Restricting
+        // decorations to the logical viewport plus a bounded margin keeps work bounded,
+        // while ensuring through that range prevents a cursor transaction from replacing
+        // rendered markdown with raw text at the initial parse boundary. The margin also
+        // keeps line-height decorations stable while CM anchors scroll across edits.
+        const range = {
+          from: Math.max(0, view.viewport.from - DECORATION_MARGIN),
+          to: Math.min(view.state.doc.length, view.viewport.to + DECORATION_MARGIN),
+        };
+        const upto = range.to;
+        this.tree = ensureSyntaxTree(view.state, upto, 20) ?? syntaxTree(view.state);
+        this.decorations = buildDecorations(
+          view.state,
+          view.hasFocus,
+          this.tree,
+          range,
+        );
+      }
+
       update(update: ViewUpdate) {
+        const currentTree = syntaxTree(update.state);
         // Markers reveal/hide as the cursor moves and as focus changes (an unfocused
-        // editor renders fully clean), so rebuild on selection and focus changes too,
-        // not only document/viewport changes.
-        if (update.docChanged || update.viewportChanged || update.selectionSet || update.focusChanged) {
-          this.decorations = buildDecorations(update.state, update.view.hasFocus);
+        // editor renders fully clean). A parse-only transaction must also rebuild so
+        // newly parsed visible syntax becomes decorated without another user action.
+        if (
+          update.docChanged ||
+          update.viewportChanged ||
+          update.selectionSet ||
+          update.focusChanged ||
+          currentTree !== this.tree
+        ) {
+          this.rebuild(update.view);
         }
       }
     },
