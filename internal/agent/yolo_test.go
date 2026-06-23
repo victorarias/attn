@@ -180,10 +180,14 @@ func TestCodexConfigOverrides_NonChiefOmitsJournalingDirective(t *testing.T) {
 func TestCodexBuildEnvMarksNotebookGuidance(t *testing.T) {
 	env := (&Codex{}).BuildEnv(SpawnOpts{
 		SessionID:    "sess-1",
+		WrapperPath:  "/Applications/attn-dev.app/Contents/MacOS/attn",
 		NotebookRoot: "/home/u/attn-notebook",
 	})
 	if !slices.Contains(env, "ATTN_NOTEBOOK_GUIDANCE=developer_instructions") {
 		t.Fatalf("env = %#v, want notebook guidance marker", env)
+	}
+	if !slices.Contains(env, "ATTN_WRAPPER_PATH=/Applications/attn-dev.app/Contents/MacOS/attn") {
+		t.Fatalf("env = %#v, want explicit wrapper path", env)
 	}
 }
 

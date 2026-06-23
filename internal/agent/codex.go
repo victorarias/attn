@@ -89,6 +89,9 @@ func (c *Codex) BuildEnv(opts SpawnOpts) []string {
 		"ATTN_SESSION_ID=" + opts.SessionID,
 		"ATTN_AGENT=codex",
 	}
+	if wrapper := strings.TrimSpace(opts.WrapperPath); wrapper != "" {
+		env = append(env, "ATTN_WRAPPER_PATH="+wrapper)
+	}
 	if strings.TrimSpace(opts.NotebookRoot) != "" {
 		// A chief launch injected Notebook guidance at launch; mark it so the
 		// SessionStart hook does not also emit workspace-context guidance.

@@ -14,8 +14,6 @@ import (
 // attn has always owned the resize-reflow value for its embedded renderer:
 // xterm needed it disabled, while Ghostty correctly renders the enabled redraw.
 func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath, workspaceContextPath, notebookRoot string, injectWorkflow bool) []string {
-	_ = sessionID  // Commands read ATTN_SESSION_ID from the Codex process env.
-	_ = socketPath // Hook commands inherit ATTN_SOCKET_PATH from the Codex process env.
 	wrapper := strings.TrimSpace(wrapperPath)
 	if wrapper == "" {
 		wrapper = "attn"
@@ -47,6 +45,13 @@ func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath, workspaceC
 	stop := command("_hook-stop")
 
 	overrides := []string{
+		// Codex's shell environment policy is applied independently for each tool
+		// working directory. Values inherited by the top-level Codex process can
+		// therefore disappear when an agent runs a tool from a child worktree.
+		// Pin attn's routing identity in the per-launch policy so hooks and agent
+		// commands keep targeting this session regardless of tool cwd.
+		"shell_environment_policy.set.ATTN_SESSION_ID=" + strconv.Quote(strings.TrimSpace(sessionID)),
+		"shell_environment_policy.set.ATTN_WRAPPER_PATH=" + strconv.Quote(wrapper),
 		"features.hooks=true",
 		// Ghostty renders Codex's SIGWINCH redraw correctly, and enabling
 		// reflow prevents resized inline UIs from leaving stale headers.
@@ -65,6 +70,11 @@ func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath, workspaceC
 		"hooks.PreToolUse=" + group("*", preToolUse),
 		"hooks.PostToolUse=" + group("*", postToolUse),
 		"hooks.Stop=" + group("", stop),
+	}
+	if socket := strings.TrimSpace(socketPath); socket != "" {
+		overrides = append(overrides,
+			"shell_environment_policy.set.ATTN_SOCKET_PATH="+strconv.Quote(socket),
+		)
 	}
 	// A chief-of-staff launch (notebookRoot set) gets Notebook guidance instead
 	// of the workspace-context checkout guidance. Every other workspace agent gets
