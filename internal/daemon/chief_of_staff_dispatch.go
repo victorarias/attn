@@ -88,6 +88,9 @@ func (d *Daemon) decorateChiefOfStaffDispatch(dispatch *protocol.ChiefOfStaffDis
 	if dispatch.ReportedAt != nil {
 		decorated.ReportedAt = protocol.Ptr(protocol.Deref(dispatch.ReportedAt))
 	}
+	if dispatch.ClosedState != nil {
+		decorated.ClosedState = protocol.Ptr(protocol.Deref(dispatch.ClosedState))
+	}
 	decorated.StructuredReport = cloneDispatchReportForDisplay(dispatch.StructuredReport)
 	if decorated.StructuredReport != nil {
 		summary := strings.TrimSpace(decorated.StructuredReport.Summary)
@@ -109,7 +112,16 @@ func (d *Daemon) decorateChiefOfStaffDispatch(dispatch *protocol.ChiefOfStaffDis
 	} else {
 		d.logf("chief dispatch %s unread count: %v", dispatch.ID, err)
 	}
-	if session := d.store.Get(dispatch.SessionID); session != nil {
+	// A captured close-state means the delegated process has ended — even if a
+	// stale, idle-clobbered session record still lingers in the store (handlePTYExit
+	// forces idle on any exit without removing the record). Project the terminal
+	// "closed" status, carrying the captured close-state, so a crash/cut-off is
+	// classified the moment the process dies, not only once the record is finally
+	// removed. A live, unclosed dispatch falls through to its real runtime state.
+	if strings.TrimSpace(protocol.Deref(decorated.ClosedState)) != "" {
+		decorated.Status = closedDispatchStatus
+		decorated.StatusSince = ""
+	} else if session := d.store.Get(dispatch.SessionID); session != nil {
 		decorated.Status = string(session.State)
 		decorated.StatusSince = session.StateSince
 	} else {
@@ -117,6 +129,30 @@ func (d *Daemon) decorateChiefOfStaffDispatch(dispatch *protocol.ChiefOfStaffDis
 		decorated.StatusSince = ""
 	}
 	return &decorated
+}
+
+// captureDispatchCloseState records the delegated session's last attn-classified
+// runtime state onto its dispatch the first time the session is observed ending —
+// before handlePTYExit's idle-clobber or the store removal erases it. That state
+// is the signal Classify uses to tell a clean stop (idle / waiting_input) from a
+// real crash or kill mid-flight (working / launching / pending_approval), so a
+// cut-off close surfaces as a failure instead of a neutral end. First-writer-wins
+// in the store keeps the pre-clobber exit authoritative over any later teardown
+// read. A no-op for non-dispatch sessions; broadcasts only when a dispatch row was
+// actually stamped, so the dashboard reflects the new terminal classification at
+// once rather than at the next poll.
+func (d *Daemon) captureDispatchCloseState(sessionID, state string) {
+	if strings.TrimSpace(state) == "" {
+		return
+	}
+	_, changed, err := d.store.SetChiefOfStaffDispatchClosedStateBySession(sessionID, state)
+	if err != nil {
+		d.logf("capture dispatch close-state for %s: %v", sessionID, err)
+		return
+	}
+	if changed {
+		d.broadcastChiefOfStaffDispatchesUpdated()
+	}
 }
 
 func (d *Daemon) validateDispatchChief(dispatchID, chiefSessionID string) (*protocol.ChiefOfStaffDispatch, error) {

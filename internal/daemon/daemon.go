@@ -1366,6 +1366,11 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 	}
 
 	if session := d.store.Get(info.ID); session != nil {
+		// Capture the pre-clobber state for any chief dispatch on this session: the
+		// idle-clobber just below erases whether the agent was mid-flight (a crash or
+		// kill) or at a clean rest when its process exited — the signal the dispatch
+		// classifier needs to surface a cut-off close as a failure.
+		d.captureDispatchCloseState(info.ID, string(session.State))
 		d.store.Touch(info.ID)
 		d.store.UpdateState(info.ID, protocol.StateIdle)
 		updated := d.sessionForBroadcast(d.store.Get(info.ID))
@@ -1472,6 +1477,13 @@ func (d *Daemon) removeReapedSession(sessionID string) {
 // capture is idempotent (a prior terminal-report write wins via the per-dispatch
 // marker) and a no-op for non-dispatch sessions.
 func (d *Daemon) dropSessionRecord(sessionID string) {
+	// Backstop the close-state capture for removal paths that bypass handlePTYExit
+	// (reaped on restart, liveness sweep, or torn down with a worktree). First-
+	// writer-wins means a real pre-clobber exit capture already on the dispatch wins
+	// over this later read, which would otherwise only see the clobbered idle.
+	if session := d.store.Get(sessionID); session != nil {
+		d.captureDispatchCloseState(sessionID, string(session.State))
+	}
 	d.journalDispatchOnSessionGone(sessionID)
 	d.store.Remove(sessionID)
 }

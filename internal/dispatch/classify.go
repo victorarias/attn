@@ -30,7 +30,10 @@
 //  1. report work_state=failed OR report_type=failure       -> Failed  (terminal, exit 1)
 //  2. report work_state=completed OR report_type=completion  -> Done    (terminal, exit 0)
 //  3. report work_state=ready_for_review                     -> Review  (terminal, exit 0)
-//  4. status=closed, no explicit terminal outcome            -> Ended   (terminal, exit 0)
+//  4. status=closed, no explicit terminal outcome:
+//     cut off mid-flight (close-state working/launching/pending_approval)
+//     -> Failed  (terminal, exit 1)
+//     else (clean rest idle/waiting_input, or unconfirmed) -> Ended   (terminal, exit 0)
 //  5. report has a pending decision Request                  -> Blocker (interim)
 //  6. report work_state=needs_input OR report_type=blocker   -> Blocker (interim)
 //  7. status=idle, no explicit outcome                       -> Ended   (terminal, exit 0)
@@ -61,6 +64,17 @@
 // session must resolve to a neutral terminal instead of hanging on it. Review
 // does not have that problem because it is itself terminal, which is why it can
 // stay authoritative above the closed check.
+//
+// The one exception to silent-close-is-neutral is a CRASH: when a session closes
+// while the agent was still cut off mid-flight (its captured close-state is
+// working, launching, or pending_approval), step 4 surfaces Failed instead of
+// Ended. This is not inferring failure from silence — it is positive evidence
+// that the agent's process died before it could reach a resting point or file a
+// report. The safe direction is preserved: a clean stop (idle / waiting_input) or
+// an unconfirmed close (unknown / unstamped) is still neutral Ended, so attn
+// never asserts a failure it cannot evidence, just as it never asserts an
+// unearned success. The close-state is captured by the daemon the moment the
+// process exits — see captureDispatchCloseState — and rides on ClosedState.
 package dispatch
 
 import "github.com/victorarias/attn/internal/protocol"
@@ -137,11 +151,20 @@ func Classify(d protocol.ChiefOfStaffDispatch) Event {
 		}
 	}
 
-	// 4. Session gone with no explicit terminal outcome → neutral terminal.
-	// Checked BEFORE the interim report states (steps 5-6) so a dead session never
-	// hangs (a stale needs_input is not a live blocker once the agent is gone) and
-	// is never read as success or failure.
+	// 4. Session gone with no explicit terminal outcome. Checked BEFORE the interim
+	// report states (steps 5-6) so a dead session never hangs (a stale needs_input is
+	// not a live blocker once the agent is gone). By default a silent close is the
+	// neutral terminal Ended — silence is neither success nor failure. But when the
+	// daemon captured a close-state showing the agent was cut off mid-flight (still
+	// working, launching, or awaiting a tool approval when its process died), that is
+	// a real crash/kill: surface it as a failure so a killed agent is visible, not
+	// quietly neutral. A clean rest (idle / waiting_input) or an unconfirmed close
+	// (unknown / unstamped) stays neutral — attn never asserts a failure it cannot
+	// evidence, exactly as it never asserts an unearned success.
 	if d.Status == SessionClosedStatus {
+		if closedMidFlight(d.ClosedState) {
+			return Event{KindFailed, true, 1, "session_crashed", summary, nextAction}
+		}
 		return Event{KindEnded, true, 0, "session_closed", summary, nextAction}
 	}
 
@@ -171,6 +194,25 @@ func Classify(d protocol.ChiefOfStaffDispatch) Event {
 	default:
 		// working, launching, pending_approval (the exclusion), scheduled, unknown.
 		return Event{Kind: KindNone}
+	}
+}
+
+// closedMidFlight reports whether a closed dispatch's captured ClosedState shows
+// the agent was cut off mid-flight — still working, launching, or awaiting a tool
+// approval — rather than at a settled rest (idle / waiting_input) or an
+// unconfirmed close (unknown, or unstamped: nil/empty). It is the positive-
+// evidence test that turns a real crash/kill into a visible failure while leaving
+// every clean or ambiguous close neutral. The unstamped case returning false
+// preserves the prior behavior (a silent close is Ended) for legacy records and
+// any removal path that never captured a state.
+func closedMidFlight(closedState *string) bool {
+	switch protocol.SessionState(trim(deref(closedState))) {
+	case protocol.SessionStateWorking,
+		protocol.SessionStateLaunching,
+		protocol.SessionStatePendingApproval:
+		return true
+	default:
+		return false
 	}
 }
 

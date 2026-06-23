@@ -166,6 +166,8 @@ func formatAbortLine(dispatchID string, err error) string {
 
 func defaultSummary(reason string) string {
 	switch reason {
+	case "session_crashed":
+		return "session was cut off mid-run without a structured report (crashed or killed)"
 	case "session_closed":
 		return "session ended without a structured report"
 	case "session_idle":

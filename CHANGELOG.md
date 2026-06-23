@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-06-23]
 
+### Changed
+- **A delegated agent that crashes or is killed mid-work now surfaces as a failure to its chief.** When a chief-of-staff dispatch's session ends, attn now tells a clean stop from a real crash: a session cut off while it was still working, starting up, or waiting on a tool approval is reported as a failure (`[failed]`), while a session that closed from a settled rest — or one attn couldn't classify — stays the neutral "ended" introduced with `dispatch watch`. attn still never claims a success the agent didn't report; this only makes a genuine crash visible instead of letting it look like an uneventful end.
+
 ### Fixed
 - **Long Notebook notes keep their rendered formatting and cursor position while you edit.** Moving the cursor beyond the first few thousand characters no longer turns the rest of a note back into raw Markdown or sends ArrowUp to the properties card. Clicking into the body also leaves the frontmatter card stable; raw YAML appears only when you click the card to edit it.
 - **Chief-of-staff delegations no longer disappear into muted workspaces.** Delegating into an existing muted workspace now brings that workspace back into the sidebar, and `attn list` marks sessions whose workspace is muted so the chief can see that state before choosing a target.
