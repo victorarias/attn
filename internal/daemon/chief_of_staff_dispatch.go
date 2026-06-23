@@ -24,30 +24,39 @@ func chiefOfStaffDispatchPrompt(brief string) string {
 	return strings.TrimSpace(brief) + `
 
 ---
-This task is tracked by the chief of staff in attn.
-Send a concise update when you reach a meaningful milestone, need input, or finish:
+This task is tracked by the chief of staff in attn. Two rules keep the chief aware
+of you and able to steer you, without babysitting:
 
-    "$ATTN_WRAPPER_PATH" dispatch report --message "<update>"
+1. SELF-REPORT ONLY AT A TERMINAL OR BLOCKED POINT — never progress, never status.
+   One flag declares the outcome; it is the chief's trigger:
 
-For a longer update, write it to a file and use ` + "`--file <path>`" + `.
-When work is blocked, ready for review, completed, or failed, attach structured
-coordination fields with ` + "`--coordination-file <json>`" + `.
+       "$ATTN_WRAPPER_PATH" dispatch report --done    --message "<what landed>"
+       "$ATTN_WRAPPER_PATH" dispatch report --review  --message "<what to review>"
+       "$ATTN_WRAPPER_PATH" dispatch report --failed  --message "<what went wrong>"
+       "$ATTN_WRAPPER_PATH" dispatch report --blocked --question "<the decision>" \
+           --recommendation "<your pick>" --consequence "<what is at stake>"
 
-attn has a Notebook — a durable, profile-wide markdown store. A dispatch report is a
-small payload; when you produce a large durable artifact (a report, design doc, or
-findings — often built with the user), hand it into the Notebook instead of inlining
-it, and the reference goes back to the chief:
+   A bare ` + "`--message`" + ` with no flag is a silent note (no trigger) — prefer
+   silence between terminal/blocked points. Use ` + "`--file <path>`" + ` for a long update.
+
+2. ARM A QUIET WATCH ON YOUR INBOX so the chief can steer you without a manual
+   wake. If your agent supports background watches (e.g. Claude's Monitor), watch
+
+       "$ATTN_WRAPPER_PATH" dispatch inbox --unread
+
+   and when mail arrives, read it, act, then ` + "`dispatch ack --message-id <id>`" + `.
+   Keep the watch quiet — it should emit only when there is new mail.
+
+A large durable artifact (report, design doc, findings) goes into the Notebook, not
+inline — hand it off and report just the reference:
 
     "$ATTN_WRAPPER_PATH" dispatch handoff --file <artifact> --to <notebook-path> --message "<update>"
 
 Write to the Notebook path the chief or user designated. If none was designated and
 the artifact warrants one, ask the chief in a report rather than inventing a location.
 
-Use ` + "`dispatch status`" + ` to read a chief's durable response to a decision request.
-Before reporting completion or waiting for more work, run
-` + "`dispatch inbox --unread`" + `, read pending messages, and acknowledge each
-one after acting on it.
-Continue the assigned work after reporting unless you are blocked or finished.`
+Use ` + "`dispatch status`" + ` to read the chief's durable response to a decision.
+Continue working after a blocked report unless you are truly stuck; stop when finished.`
 }
 
 func (d *Daemon) newChiefOfStaffDispatch(

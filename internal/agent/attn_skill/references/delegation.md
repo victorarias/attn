@@ -15,7 +15,12 @@ when the user explicitly asks for delegation, an interactive agent, a separate
 workspace/session, or a collaborator they can steer themselves.
 
 Attn delegation starts another agent with a focused brief; it does not create
-durable parent-child lineage or require you to monitor the new agent.
+durable parent-child lineage. When you hold the chief-of-staff role the delegation
+is tracked, and you arm exactly one quiet watch on it so you stay aware without
+babysitting — see the chief-of-staff reference for the watch, the reverse mailbox
+channel, and the response discipline. The brief should tell the agent it is
+tracked: self-report only at a terminal or blocked point, and watch its own inbox
+for your steering.
 
 ## Brief Workflow
 

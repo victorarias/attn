@@ -49,9 +49,12 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 	chiefOfStaff := readSkillFile(t, skillDir, "references/chief-of-staff.md")
 	for _, expected := range []string{
 		"dispatch list",
-		"dispatch report --message",
-		"dispatch report --file",
-		"latest report",
+		"dispatch watch <id>",
+		"dispatch report --done",
+		"dispatch report --blocked",
+		"escalate to Victor",
+		"Watch your inbox",
+		"without a manual wake",
 		"visible, full interactive",
 		"default to native subagents",
 		"not proof that the work is correct",

@@ -158,7 +158,8 @@ func TestChiefOfStaffDelegateCreatesTrackedDispatch(t *testing.T) {
 		t.Fatalf("delegate result = %+v, want dispatch id", result)
 	}
 	if !strings.Contains(prompt, "Investigate the tracked task.") ||
-		!strings.Contains(prompt, "dispatch report --message") {
+		!strings.Contains(prompt, "dispatch report --done") ||
+		!strings.Contains(prompt, "SELF-REPORT ONLY AT A TERMINAL OR BLOCKED POINT") {
 		t.Fatalf("tracked initial prompt = %q", prompt)
 	}
 

@@ -23,20 +23,44 @@ Review your dispatched work with:
 
     "$ATTN_WRAPPER_PATH" dispatch list
 
-Runtime status and delegated work state are separate. Use the target session's
-live status plus the latest report and its structured `work_state`, `next_actor`,
-`next_action`, actionable request, artifact, and verification to decide whether
-to wait, inspect its work, answer a blocker, or give the user a summary.
+### Arm one watch per delegation
 
-Resolve the dispatch's one active decision request with:
+The watch is how you stay aware of a delegation without babysitting it. Arm
+exactly one per dispatch, right after delegating:
+
+    "$ATTN_WRAPPER_PATH" dispatch watch <id>
+
+It blocks and prints one line per *meaningful* event, then exits when the work
+reaches a terminal state. It fires on exactly two things: the agent's
+self-reported terminal/blocked outcome (forward), and the agent reacting to your
+mail (reverse) — nothing from runtime state. Run it as a quiet background watch
+(for a Claude chief, a Monitor) so it stays silent between events: an armed watch
+must not make you look busy, and you must not narrate intermediate ticks.
+
+Do NOT watch the agent's process/daemon status, and do NOT spelunk its
+transcript. Runtime state flickers and is not a signal; re-engage only when the
+watch fires. To peek at a delegation's live state on demand, use `dispatch list`
+or `dispatch status` — a deliberate peek, not a standing watch.
+
+### Respond with discipline
+
+When a watch fires with a blocked event, do NOT reflexively answer to unblock the
+agent. You usually lack the full context, and a confident-but-wrong steer is worse
+than waiting. Steer back only when you are SURE of the answer or the decision is
+low-consequence. Otherwise escalate to Victor and wait — surface the blocker (the
+question, the agent's recommendation, what is at stake) and let him decide.
+
+Answer a dispatch's one active decision request with:
 
     "$ATTN_WRAPPER_PATH" dispatch resolve \
       --dispatch <id> \
       --response "Use AisNoOperationV1." \
       --link "https://external-system.example/decision"
 
-The response is stored on the dispatch and becomes available to the delegated
-agent through `dispatch status`.
+The response is stored on the dispatch and reaches the delegated agent through
+`dispatch status`.
+
+### Steer a running agent (the reverse channel)
 
 Send durable instructions to a delegated agent with:
 
@@ -44,9 +68,11 @@ Send durable instructions to a delegated agent with:
       --dispatch <id> \
       --message "Rebase onto main, rerun the focused tests, and report conflicts."
 
-Messages are mailbox entries, not terminal input. Do not assume a working agent
-has seen one immediately. The dashboard shows unread mail and lets the user
-explicitly wake an idle agent with a fixed inbox-check prompt.
+Mail is durable and acknowledgement-tracked. A delegated Claude agent watches its
+own inbox, so a new message reaches it without a manual wake. attn also surfaces
+pending mail ambiently — a per-session sidebar badge and an on-agent overlay — so
+you (or Victor) see unread mail without opening a dashboard. The message content
+never streams into the agent's terminal; it triggers a read of the durable mailbox.
 
 Inspect sent messages, including read and acknowledgement state, with:
 
@@ -60,20 +86,21 @@ working agents just to request status.
 
 ## As a Dispatched Agent
 
-If the initial task says the work is tracked, report when you:
+If the initial task says the work is tracked, SELF-REPORT ONLY AT A TERMINAL OR
+BLOCKED POINT — never progress, never status. Prefer silence between those points.
 
-- reach a meaningful milestone
-- need input or are blocked
-- finish the requested work
+Declare the outcome with one flag — it is the chief's trigger:
 
-Keep a short report concrete: outcome, evidence, and next action.
+    "$ATTN_WRAPPER_PATH" dispatch report --done    --message "<what landed>"
+    "$ATTN_WRAPPER_PATH" dispatch report --review  --message "<what to review>"
+    "$ATTN_WRAPPER_PATH" dispatch report --failed  --message "<what went wrong>"
+    "$ATTN_WRAPPER_PATH" dispatch report --blocked \
+      --question "<the decision the chief must make>" \
+      --recommendation "<your pick>" --consequence "<what is at stake>"
 
-    "$ATTN_WRAPPER_PATH" dispatch report --message \
-      "Implemented the parser and tests pass. Next: review the error wording."
-
-For a longer report, write it to a file and submit the file:
-
-    "$ATTN_WRAPPER_PATH" dispatch report --file /tmp/dispatch-report.md
+Keep the message concrete: outcome, evidence, next action. For a long update, use
+`--file <path>`. A bare `dispatch report --message "<text>"` with no state flag is
+a silent note — stored and visible on demand, but it does not wake the chief.
 
 A report is a small payload. When you build a large durable artifact — a report, a
 design doc, findings, often built with the user — write it into the Notebook and
@@ -87,10 +114,34 @@ report the reference instead of inlining it:
 `--to` is the Notebook path the chief (or user) designated; the daemon writes the
 artifact there and the reference travels back in your report. If no destination was
 designated and the artifact warrants one, ask the chief in a report rather than
-inventing a location. Add `--coordination-file <json>` to a terminal handoff just as
-you would to a report.
+inventing a location. Add a state flag (or `--coordination-file <json>`) to a
+terminal handoff just as you would to a report.
 
-For actionable coordination, keep the narrative and attach a JSON envelope:
+### Watch your inbox
+
+Arm a quiet watch on your inbox so the chief's steering reaches you without a
+manual wake. If your agent supports background watches (for a Claude agent, a
+Monitor), watch:
+
+    "$ATTN_WRAPPER_PATH" dispatch inbox --unread
+
+Keep it quiet — it should emit only when there is new mail. When mail arrives,
+read it, act on it, then acknowledge:
+
+    "$ATTN_WRAPPER_PATH" dispatch read --message-id <id>
+    "$ATTN_WRAPPER_PATH" dispatch ack \
+      --message-id <id> \
+      --message "Rebased cleanly; focused tests pass."
+
+After requesting a decision, read the durable chief response with:
+
+    "$ATTN_WRAPPER_PATH" dispatch status
+
+### Full structured reports (escape hatch)
+
+The state flags cover the common cases. For a report that needs the full
+coordination envelope — remaining scope, constraints, artifact identity, and
+verification evidence — keep the narrative and attach a JSON envelope:
 
 ```json
 {
@@ -129,24 +180,6 @@ Submit it with:
       --message "Core implementation is ready; event emission needs a decision." \
       --coordination-file /tmp/dispatch-coordination.json
 
-After requesting a decision, read the durable chief response with:
-
-    "$ATTN_WRAPPER_PATH" dispatch status
-
-Before reporting completion or entering a waiting state, check unread mail:
-
-    "$ATTN_WRAPPER_PATH" dispatch inbox --unread
-
-For each message, mark it read when you start handling it:
-
-    "$ATTN_WRAPPER_PATH" dispatch read --message-id <id>
-
-After acting on it, acknowledge it, optionally with a concise result:
-
-    "$ATTN_WRAPPER_PATH" dispatch ack \
-      --message-id <id> \
-      --message "Rebased cleanly; focused tests pass."
-
-Reporting does not stop or transfer your session. Continue working unless the
-task is blocked or complete. Do not use dispatch reporting for ordinary,
-untracked delegation.
+Reporting does not stop or transfer your session. Continue working after a blocked
+report unless you are truly stuck; stop only when finished.
+Do not use dispatch reporting for ordinary, untracked delegation.
