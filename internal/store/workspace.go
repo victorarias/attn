@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -114,6 +115,30 @@ func (s *Store) ToggleWorkspaceMute(id string) {
 	if _, err := s.db.Exec(`UPDATE workspaces SET muted = NOT muted WHERE id = ?`, id); err != nil {
 		log.Printf("[store] ToggleWorkspaceMute: failed for workspace %s: %v", id, err)
 	}
+}
+
+// SetWorkspaceMuted writes an explicit workspace mute state. Callers that need
+// idempotent behavior (for example, making a chief delegation visible) should
+// use this instead of toggling an unknown current value.
+func (s *Store) SetWorkspaceMuted(id string, muted bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return nil
+	}
+	result, err := s.db.Exec(`UPDATE workspaces SET muted = ? WHERE id = ?`, boolToInt(muted), id)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("workspace not found: %s", id)
+	}
+	return nil
 }
 
 // UpdateWorkspaceTitle sets a workspace's title. The stored title is the durable

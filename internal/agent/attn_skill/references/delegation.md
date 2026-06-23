@@ -62,6 +62,11 @@ Join an existing workspace:
 
     "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" --workspace <workspace-id>
 
+`attn list` marks sessions in hidden workspaces with `workspace_muted: true`.
+When the source session is the chief of staff, delegating into a muted existing
+workspace automatically unmutes it so the new agent is visible in the sidebar.
+Ordinary delegation preserves the workspace's current mute state.
+
 Create an isolated worktree in the current workspace:
 
     "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" \

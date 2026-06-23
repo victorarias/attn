@@ -97,6 +97,17 @@ func (r *workspaceRegistry) toggleMuted(id string) (protocol.Workspace, bool) {
 	return snapshotEntry(entry), true
 }
 
+func (r *workspaceRegistry) setMuted(id string, muted bool) (protocol.Workspace, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.workspaces[id]
+	if !ok {
+		return protocol.Workspace{}, false
+	}
+	entry.muted = muted
+	return snapshotEntry(entry), true
+}
+
 func (r *workspaceRegistry) unregister(id string) (protocol.Workspace, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -456,6 +467,36 @@ func (d *Daemon) toggleWorkspaceMute(workspaceID string) (protocol.Workspace, st
 	return snapshot, ""
 }
 
+func (d *Daemon) setWorkspaceMuted(workspaceID string, muted bool) (protocol.Workspace, string) {
+	id := strings.TrimSpace(workspaceID)
+	if id == "" {
+		return protocol.Workspace{}, "missing workspace_id"
+	}
+	if d.workspaces == nil {
+		return protocol.Workspace{}, "workspace registry unavailable"
+	}
+	current, ok := d.workspaces.snapshot(id)
+	if !ok {
+		return protocol.Workspace{}, "workspace not found"
+	}
+	if current.Muted == muted {
+		return current, ""
+	}
+	if err := d.store.SetWorkspaceMuted(id, muted); err != nil {
+		return protocol.Workspace{}, "persist workspace mute: " + err.Error()
+	}
+	snapshot, ok := d.workspaces.setMuted(id, muted)
+	if !ok {
+		_ = d.store.SetWorkspaceMuted(id, current.Muted)
+		return protocol.Workspace{}, "workspace disappeared while updating mute state"
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:     protocol.EventWorkspaceStateChanged,
+		Workspace: &snapshot,
+	})
+	return snapshot, ""
+}
+
 // tearDownRemovedWorkspace runs the shared removal sequence for a workspace whose
 // registry entry was just unregistered. The caller owns the unregister + !removed
 // guard and any site-specific rationale, and passes the resulting snapshot. It drops
@@ -693,4 +734,19 @@ func (d *Daemon) decorateSessionWithWorkspace(session *protocol.Session) {
 	if id := d.workspaces.workspaceIDForSession(session.ID); id != "" {
 		session.WorkspaceID = id
 	}
+}
+
+// decorateSessionWithWorkspaceMute exposes hidden workspace ownership to CLI
+// consumers such as a chief deciding where to delegate. False is omitted to
+// keep the common `attn list` output compact.
+func (d *Daemon) decorateSessionWithWorkspaceMute(session *protocol.Session) {
+	if session == nil || d.store == nil {
+		return
+	}
+	workspace := d.store.GetWorkspace(session.WorkspaceID)
+	if workspace != nil && workspace.Muted {
+		session.WorkspaceMuted = protocol.Ptr(true)
+		return
+	}
+	session.WorkspaceMuted = nil
 }

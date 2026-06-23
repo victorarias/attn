@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-23]
+
+### Fixed
+- **Chief-of-staff delegations no longer disappear into muted workspaces.** Delegating into an existing muted workspace now brings that workspace back into the sidebar, and `attn list` marks sessions whose workspace is muted so the chief can see that state before choosing a target.
+
 ## [2026-06-22]
 
 ### Added
