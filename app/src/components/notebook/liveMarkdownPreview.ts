@@ -44,6 +44,10 @@ const HEADING_MARK = [1, 2, 3, 4, 5, 6].map((n) => Decoration.mark({ class: `cm-
 const HIDE = Decoration.replace({});
 const CODEFENCE = Decoration.mark({ class: 'cm-md-codefence' });
 const CODEINFO = Decoration.mark({ class: 'cm-md-codeinfo' });
+// Keep nearby layout decorations stable while CM adjusts its viewport after edits.
+// Scanning only the exact viewport let a heading cross the boundary during scroll
+// anchoring, changing its line height and nudging the reader by several pixels.
+const DECORATION_MARGIN = 5000;
 // A line decoration applied to every row of a fenced code block, giving the block a
 // contiguous monospace panel (the fences stay visible but dimmed, so nothing shifts).
 const CODEBLOCK_LINE = Decoration.line({ class: 'cm-md-codeblock' });
@@ -322,16 +326,21 @@ export function liveMarkdownPreview(options: LiveMarkdownOptions = {}): Extensio
       rebuild(view: EditorView) {
         // CodeMirror deliberately parses only the first 3,000 characters on state
         // creation, then advances around the viewport in the background. Restricting
-        // decorations to the logical viewport keeps work bounded, while ensuring through
-        // the viewport prevents a cursor transaction from replacing rendered markdown
-        // with raw text at that initial parse boundary.
-        const upto = view.viewport.to;
+        // decorations to the logical viewport plus a bounded margin keeps work bounded,
+        // while ensuring through that range prevents a cursor transaction from replacing
+        // rendered markdown with raw text at the initial parse boundary. The margin also
+        // keeps line-height decorations stable while CM anchors scroll across edits.
+        const range = {
+          from: Math.max(0, view.viewport.from - DECORATION_MARGIN),
+          to: Math.min(view.state.doc.length, view.viewport.to + DECORATION_MARGIN),
+        };
+        const upto = range.to;
         this.tree = ensureSyntaxTree(view.state, upto, 20) ?? syntaxTree(view.state);
         this.decorations = buildDecorations(
           view.state,
           view.hasFocus,
           this.tree,
-          view.viewport,
+          range,
         );
       }
 
