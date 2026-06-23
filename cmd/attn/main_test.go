@@ -1056,12 +1056,15 @@ func TestHasPendingSessionCron(t *testing.T) {
 	}
 }
 
-// TestDecideStop locks the non-terminal-Stop precedence: running background
-// work outranks a parked schedule, and either outranks classification.
+// TestNonTerminalStopState locks the non-terminal-Stop precedence: running
+// background work outranks a parked schedule, and either outranks classification.
+// The relax cases lock the chief-of-staff relaxation: background work no longer
+// pegs "working", but a parked schedule still parks "scheduled".
 func TestNonTerminalStopState(t *testing.T) {
 	cases := []struct {
 		name    string
 		payload string
+		relax   bool
 		want    string
 	}{
 		{
@@ -1094,6 +1097,24 @@ func TestNonTerminalStopState(t *testing.T) {
 			payload: `{"hook_event_name":"Stop","stop_hook_active":false}`,
 			want:    "",
 		},
+		{
+			name:    "chief relax: background running, no cron -> classify (empty), not working",
+			payload: `{"background_tasks":[{"type":"shell","status":"running"}],"session_crons":[]}`,
+			relax:   true,
+			want:    "",
+		},
+		{
+			name:    "chief relax: background running + cron pending -> scheduled, not working",
+			payload: `{"background_tasks":[{"type":"shell","status":"running"}],"session_crons":[{"id":"d0055050","schedule":"*/30 * * * *","recurring":true,"prompt":"echo x"}]}`,
+			relax:   true,
+			want:    protocol.StateScheduled,
+		},
+		{
+			name:    "chief relax: cron only -> scheduled (unchanged by relax)",
+			payload: `{"background_tasks":[],"session_crons":[{"id":"5e9a0f21","schedule":"18 14 * * *","recurring":false,"prompt":"echo x"}]}`,
+			relax:   true,
+			want:    protocol.StateScheduled,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1101,7 +1122,7 @@ func TestNonTerminalStopState(t *testing.T) {
 			if err := json.Unmarshal([]byte(tc.payload), &input); err != nil {
 				t.Fatalf("unmarshal payload: %v", err)
 			}
-			if got := nonTerminalStopState(input); got != tc.want {
+			if got := nonTerminalStopState(input, tc.relax); got != tc.want {
 				t.Fatalf("nonTerminalStopState() = %q, want %q", got, tc.want)
 			}
 		})
