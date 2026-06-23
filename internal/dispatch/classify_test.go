@@ -45,31 +45,31 @@ func TestClassify(t *testing.T) {
 		wantReason   string
 	}{
 		// --- explicit completion → done (the agent SAID it finished) ---
+		// The runtime status is irrelevant: the trigger keys on the report alone.
 		{"reported completion", "working", report(protocol.DispatchWorkStateCompleted, protocol.DispatchReportTypeCompletion), KindDone, true, 0, "reported_completion"},
 		{"completion type only", "working", report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeCompletion), KindDone, true, 0, "reported_completion"},
-		{"completed then closed = done (report wins over close)", SessionClosedStatus, report(protocol.DispatchWorkStateCompleted, protocol.DispatchReportTypeCompletion), KindDone, true, 0, "reported_completion"},
+		{"completed stands even once closed", SessionClosedStatus, report(protocol.DispatchWorkStateCompleted, protocol.DispatchReportTypeCompletion), KindDone, true, 0, "reported_completion"},
 		{"ready for review = terminal handoff", "working", report(protocol.DispatchWorkStateReadyForReview, protocol.DispatchReportTypeProgress), KindReview, true, 0, "ready_for_review"},
-		// An explicit ready_for_review is a TERMINAL outcome and stays authoritative
-		// over a closed session, exactly like completion/failure — the review handoff
-		// must survive the agent filing it and exiting before the watcher's next poll.
-		{"ready_for_review then closed = review (report wins over close)", SessionClosedStatus, report(protocol.DispatchWorkStateReadyForReview, protocol.DispatchReportTypeProgress), KindReview, true, 0, "ready_for_review"},
+		{"ready_for_review stands even once closed", SessionClosedStatus, report(protocol.DispatchWorkStateReadyForReview, protocol.DispatchReportTypeProgress), KindReview, true, 0, "ready_for_review"},
 
-		// --- silence implies neither success nor failure → neutral Ended ---
-		{"idle without report = ended (not done)", string(protocol.SessionStateIdle), nil, KindEnded, true, 0, "session_idle"},
-		{"idle after progress report = ended", string(protocol.SessionStateIdle), report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeProgress), KindEnded, true, 0, "session_idle"},
-		{"session closed without report = ended (not failed)", SessionClosedStatus, nil, KindEnded, true, 0, "session_closed"},
-		{"session closed after progress report = ended", SessionClosedStatus, report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeProgress), KindEnded, true, 0, "session_closed"},
-		// A dead session beats a stale INTERIM (non-terminal) report — never hang,
-		// never mislabel. (A TERMINAL report like ready_for_review wins over close
-		// instead; see the explicit case above.)
-		{"needs_input then closed = ended (no hang)", SessionClosedStatus, report(protocol.DispatchWorkStateNeedsInput, protocol.DispatchReportTypeProgress), KindEnded, true, 0, "session_closed"},
-		{"decision request then closed = ended", SessionClosedStatus, pendingRequest, KindEnded, true, 0, "session_closed"},
+		// --- no self-report → silence, regardless of runtime status. Runtime state
+		// (idle / closed / waiting_input / working / …) is NEVER a trigger now. ---
+		{"idle without report = silent", string(protocol.SessionStateIdle), nil, KindNone, false, 0, ""},
+		{"idle after progress report = silent", string(protocol.SessionStateIdle), report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeProgress), KindNone, false, 0, ""},
+		{"session closed without report = silent", SessionClosedStatus, nil, KindNone, false, 0, ""},
+		{"session closed after progress report = silent", SessionClosedStatus, report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeProgress), KindNone, false, 0, ""},
+		{"waiting_input without report = silent (the #399 misfire, now killed)", string(protocol.SessionStateWaitingInput), nil, KindNone, false, 0, ""},
+
+		// --- a self-reported blocker stands even once the session is gone. The
+		// dispatch hangs on it (accepted crash-while-blocked gap); only an explicit
+		// terminal report or a deleted record ends the watch. ---
+		{"needs_input stands even once closed", SessionClosedStatus, report(protocol.DispatchWorkStateNeedsInput, protocol.DispatchReportTypeProgress), KindBlocker, false, 0, "needs_input"},
+		{"decision request stands even once closed", SessionClosedStatus, pendingRequest, KindBlocker, false, 0, "decision_request"},
 
 		// --- genuine blocker / decision-request (interim, live) ---
 		{"pending decision request", "waiting_input", pendingRequest, KindBlocker, false, 0, "decision_request"},
 		{"needs_input work state", "working", report(protocol.DispatchWorkStateNeedsInput, protocol.DispatchReportTypeProgress), KindBlocker, false, 0, "needs_input"},
 		{"blocker report type", "working", report(protocol.DispatchWorkStateInProgress, protocol.DispatchReportTypeBlocker), KindBlocker, false, 0, "needs_input"},
-		{"waiting_input without report", string(protocol.SessionStateWaitingInput), nil, KindBlocker, false, 0, "awaiting_input"},
 
 		// --- explicit failure → failed (the agent SAID it failed) ---
 		{"reported failure", "working", report(protocol.DispatchWorkStateFailed, protocol.DispatchReportTypeFailure), KindFailed, true, 1, "reported_failure"},
@@ -86,7 +86,7 @@ func TestClassify(t *testing.T) {
 		{"unknown (do not cry wolf)", string(protocol.SessionStateUnknown), nil, KindNone, false, 0, ""},
 
 		// --- a resolved request is no longer a blocker ---
-		{"resolved request falls through to status", "working", resolvedRequest, KindNone, false, 0, ""},
+		{"resolved request is silent", "working", resolvedRequest, KindNone, false, 0, ""},
 	}
 
 	for _, tt := range tests {
@@ -136,6 +136,8 @@ func TestClassify_ApprovalExclusionIsExpressible(t *testing.T) {
 }
 
 func TestClassify_SummaryPrefersConciseThenReportThenLatest(t *testing.T) {
+	// dispatchSummary is consulted only for an emitting (self-reported) event, so
+	// every case carries a terminal report; only the summary SOURCE varies.
 	d := protocol.ChiefOfStaffDispatch{
 		Status:         string(protocol.SessionStateIdle),
 		ConciseSummary: ptr("concise wins"),
@@ -154,7 +156,9 @@ func TestClassify_SummaryPrefersConciseThenReportThenLatest(t *testing.T) {
 		t.Errorf("summary = %q, want report summary", got)
 	}
 
-	d.StructuredReport = nil
+	// No concise summary and an empty structured summary → fall back to the
+	// freeform latest report.
+	d.StructuredReport.Summary = ""
 	if got := Classify(d).Summary; got != "freeform loses" {
 		t.Errorf("summary = %q, want latest report", got)
 	}

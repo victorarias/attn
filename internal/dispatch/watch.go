@@ -166,12 +166,6 @@ func formatAbortLine(dispatchID string, err error) string {
 
 func defaultSummary(reason string) string {
 	switch reason {
-	case "session_closed":
-		return "session ended without a structured report"
-	case "session_idle":
-		return "agent stopped without a structured report"
-	case "awaiting_input":
-		return "agent is waiting for direction (no report filed)"
 	case "dispatch_gone":
 		return "dispatch record is no longer present"
 	case "not_found":

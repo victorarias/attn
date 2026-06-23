@@ -9,66 +9,60 @@
 //
 // # The signal definition
 //
-// A dispatch carries two independent state dimensions, both projected onto
-// protocol.ChiefOfStaffDispatch when it is read:
+// The trigger fires on the agent's SELF-REPORT and nothing else. A dispatch's
+// runtime/daemon Status (working / waiting_input / idle / pending_approval /
+// "closed" …) is deliberately NOT a trigger: it flickers (working↔waiting_input
+// on a turn boundary) and misfires "ended" on a routine rest, which is exactly
+// the noise this classifier exists to suppress. The chief peeks at runtime state
+// on demand via `dispatch status` / `dispatch list`; the watch only fires on
+// meaningful, agent-declared events.
 //
-//   - Status: the delegated session's projected runtime state — launching,
-//     working, pending_approval, waiting_input, idle, scheduled, unknown — or
-//     the sentinel "closed" once the session is gone. This comes from attn's
-//     PTY/stop classifier.
-//   - StructuredReport: the coordination envelope the delegated agent explicitly
-//     files via `attn dispatch report --coordination-file` (work_state,
-//     report_type, an optional decision Request, summary, next_action).
+// The only input Classify keys on is the StructuredReport — the coordination
+// envelope the delegated agent explicitly files via `attn dispatch report`
+// (`--done` / `--failed` / `--review` / `--blocked`, or `--coordination-file`):
+// work_state, report_type, an optional decision Request, summary, next_action.
+// Doneness, failure, review, and blocked are CLAIMED by the agent, never inferred.
 //
-// Doneness and failure are claimed by the agent, not inferred. Only an explicit
-// structured report yields Done or Failed; the runtime Status governs liveness
-// and the interim/neutral states.
-//
-// Classify maps those two dimensions onto exactly the events the vision says are
-// worth a chief notification, and nothing else. In priority order:
+// Classify maps the report onto exactly the events worth a chief notification, in
+// priority order:
 //
 //  1. report work_state=failed OR report_type=failure       -> Failed  (terminal, exit 1)
 //  2. report work_state=completed OR report_type=completion  -> Done    (terminal, exit 0)
 //  3. report work_state=ready_for_review                     -> Review  (terminal, exit 0)
-//  4. status=closed, no explicit terminal outcome            -> Ended   (terminal, exit 0)
-//  5. report has a pending decision Request                  -> Blocker (interim)
-//  6. report work_state=needs_input OR report_type=blocker   -> Blocker (interim)
-//  7. status=idle, no explicit outcome                       -> Ended   (terminal, exit 0)
-//  8. status=waiting_input                                   -> Blocker (interim)
-//  9. everything else                                        -> None    (no emit)
+//  4. report has a pending decision Request                  -> Blocker (interim)
+//  5. report work_state=needs_input OR report_type=blocker   -> Blocker (interim)
+//  6. everything else (no report, a progress report, or any  -> None    (no emit)
+//     runtime status whatsoever)
 //
-// Step 9 is the crux of *noise* suppression: it swallows routine tool-permission
-// prompts (status=pending_approval), plus working/launching/scheduled/unknown. A
-// routine "approve this tool call" is NOT a decision worth waking the chief for,
-// and it is cleanly distinguishable from a genuine decision-request: the former
-// is the runtime status pending_approval; the latter is an explicit structured
-// Request / needs_input declaration (steps 5-6). The two come from different data
-// sources, so the exclusion is expressible from existing state.
+// Step 6 is the crux of *noise* suppression. A bare freeform `dispatch report
+// --message` (a progress note) carries no structured terminal/blocked claim, so
+// it classifies as None: it is a silent, on-demand-readable note, never a wake.
+// Routine tool-permission prompts (runtime status pending_approval) are likewise
+// not a trigger — only an explicit structured Request / needs_input declaration
+// (steps 4-5) is. A genuine decision-request and a routine approval prompt thus
+// classify differently from the same runtime moment, because the trigger reads
+// the report, not the status.
 //
-// The agent's explicit terminal declarations — Failed, Done, and Review (steps
-// 1-3) — are authoritative over runtime liveness: a report of completion,
-// failure, or ready_for_review stands even once the session has closed, so a
-// review handoff filed just before the agent exits is never lost. They sit ahead
-// of the closed check (step 4) for exactly that reason.
-//
-// Silence implies NEITHER success nor failure. A dispatch that ends WITHOUT an
-// explicit terminal report — its session simply closes (step 4), or the agent
-// stops at idle without reporting (step 7) — is the neutral terminal kind Ended:
-// it emits and exits (so a watch never hangs and every terminal state is
-// covered), but it asserts no outcome. This is why the closed check (step 4) sits
-// ahead of the *interim* report states (steps 5-6): those are non-terminal, so
-// once the session is gone a stale needs_input is not a live blocker — a dead
-// session must resolve to a neutral terminal instead of hanging on it. Review
-// does not have that problem because it is itself terminal, which is why it can
-// stay authoritative above the closed check.
+// All five emitting events are self-reported, so there is no liveness race to
+// arbitrate: a completion / failure / review / blocked claim stands on its own
+// regardless of whether the session has since gone idle or closed. The cost is
+// the deliberate, accepted gap: an agent that ends WITHOUT a terminal self-report
+// (a crash, or simply forgetting) produces silence — a watch on it does not exit
+// on its own. Silence implies neither success nor failure; the backstop for a
+// genuinely stuck/dead agent is a chief-side watch timeout that escalates to the
+// user (a deferred follow-up), NOT daemon-state inference here. The one non-report
+// terminal the watch still honors is an actually-deleted dispatch RECORD (handled
+// in the watch loop as dispatch_gone / not_found), which is definitive removal,
+// not runtime-state flicker.
 package dispatch
 
 import "github.com/victorarias/attn/internal/protocol"
 
 // SessionClosedStatus is the sentinel ChiefOfStaffDispatch.Status value the
-// daemon projects once the delegated session is gone. The daemon's decorate path
-// is the producer; this package is the consumer, so the literal lives here as
-// the single source of truth.
+// daemon projects once the delegated session is gone. It is a DISPLAY status only
+// (shown in `dispatch status` / `list`); Classify deliberately does not key on it,
+// because runtime state is not a trigger. The literal lives in this package as the
+// single source of truth shared with the daemon's decorate path (the producer).
 const SessionClosedStatus = "closed"
 
 // EventKind is the category of a meaningful dispatch event.
@@ -86,9 +80,9 @@ const (
 	// KindReview is a reviewable deliverable handed back for the chief to look
 	// at. Terminal — the agent considers its push done.
 	KindReview EventKind = "review"
-	// KindEnded is a neutral terminal: the dispatch ended without an explicit
-	// outcome (its session closed, or it stopped at idle without reporting). It
-	// implies neither success nor failure — drill into the narrative to know.
+	// KindEnded is a neutral terminal used only when the dispatch RECORD itself is
+	// gone (explicitly deleted, or never existed) — see the watch loop. It implies
+	// neither success nor failure and is never produced from runtime/daemon state.
 	KindEnded EventKind = "ended"
 	// KindFailed is a failure the agent explicitly declared.
 	KindFailed EventKind = "failed"
@@ -116,62 +110,46 @@ type Event struct {
 // Classify maps a dispatch snapshot to its signal Event. It is a pure function
 // of the snapshot — the single source of truth described in the package doc.
 func Classify(d protocol.ChiefOfStaffDispatch) Event {
+	// The trigger keys ONLY on the agent's self-report. With no structured report
+	// there is nothing the agent has declared, so there is nothing to wake the
+	// chief for — runtime/daemon Status is never a trigger (see the package doc).
+	r := d.StructuredReport
+	if r == nil {
+		return Event{Kind: KindNone}
+	}
+
 	summary := dispatchSummary(d)
 	nextAction := trim(deref(structuredNextAction(d)))
 
-	// 1-3. Explicit TERMINAL outcome the agent declared — authoritative even if the
-	// session has since closed (a completed-, failed-, or ready_for_review-then-
-	// closed dispatch keeps that outcome). All three are terminal, so keeping them
-	// ahead of the closed check cannot hang a watch; it only preserves the handoff
-	// a report filed just before the agent exits would otherwise lose to the race.
-	if r := d.StructuredReport; r != nil {
-		switch {
-		case r.WorkState == protocol.DispatchWorkStateFailed ||
-			r.ReportType == protocol.DispatchReportTypeFailure:
-			return Event{KindFailed, true, 1, "reported_failure", summary, nextAction}
-		case r.WorkState == protocol.DispatchWorkStateCompleted ||
-			r.ReportType == protocol.DispatchReportTypeCompletion:
-			return Event{KindDone, true, 0, "reported_completion", summary, nextAction}
-		case r.WorkState == protocol.DispatchWorkStateReadyForReview:
-			return Event{KindReview, true, 0, "ready_for_review", summary, nextAction}
-		}
+	// 1-3. Explicit TERMINAL outcome the agent declared.
+	switch {
+	case r.WorkState == protocol.DispatchWorkStateFailed ||
+		r.ReportType == protocol.DispatchReportTypeFailure:
+		return Event{KindFailed, true, 1, "reported_failure", summary, nextAction}
+	case r.WorkState == protocol.DispatchWorkStateCompleted ||
+		r.ReportType == protocol.DispatchReportTypeCompletion:
+		return Event{KindDone, true, 0, "reported_completion", summary, nextAction}
+	case r.WorkState == protocol.DispatchWorkStateReadyForReview:
+		return Event{KindReview, true, 0, "ready_for_review", summary, nextAction}
 	}
 
-	// 4. Session gone with no explicit terminal outcome → neutral terminal.
-	// Checked BEFORE the interim report states (steps 5-6) so a dead session never
-	// hangs (a stale needs_input is not a live blocker once the agent is gone) and
-	// is never read as success or failure.
-	if d.Status == SessionClosedStatus {
-		return Event{KindEnded, true, 0, "session_closed", summary, nextAction}
+	// 4-5. Explicit BLOCKED self-report (interim — a watch keeps running through
+	// it so the chief can steer and the loop continues).
+	if req := r.Request; req != nil && req.Status == protocol.DispatchRequestStatusPending {
+		s := summary
+		if q := trim(req.Question); q != "" {
+			s = q
+		}
+		return Event{KindBlocker, false, 0, "decision_request", s, nextAction}
+	}
+	if r.WorkState == protocol.DispatchWorkStateNeedsInput ||
+		r.ReportType == protocol.DispatchReportTypeBlocker {
+		return Event{KindBlocker, false, 0, "needs_input", summary, nextAction}
 	}
 
-	// 5-6. Live, explicit INTERIM (non-terminal) report states.
-	if r := d.StructuredReport; r != nil {
-		if req := r.Request; req != nil && req.Status == protocol.DispatchRequestStatusPending {
-			s := summary
-			if q := trim(req.Question); q != "" {
-				s = q
-			}
-			return Event{KindBlocker, false, 0, "decision_request", s, nextAction}
-		}
-		if r.WorkState == protocol.DispatchWorkStateNeedsInput ||
-			r.ReportType == protocol.DispatchReportTypeBlocker {
-			return Event{KindBlocker, false, 0, "needs_input", summary, nextAction}
-		}
-	}
-
-	// 7-9. Live runtime resting states with no actionable report. idle is a stop
-	// without a structured outcome, so it is neutral Ended too — attn does not
-	// claim a success the agent never declared.
-	switch d.Status {
-	case string(protocol.SessionStateIdle):
-		return Event{KindEnded, true, 0, "session_idle", summary, nextAction}
-	case string(protocol.SessionStateWaitingInput):
-		return Event{KindBlocker, false, 0, "awaiting_input", summary, nextAction}
-	default:
-		// working, launching, pending_approval (the exclusion), scheduled, unknown.
-		return Event{Kind: KindNone}
-	}
+	// 6. A progress / in_progress report (or a resolved request) is a silent note,
+	// not a trigger.
+	return Event{Kind: KindNone}
 }
 
 // IsTerminalReport reports whether a structured report represents a finished

@@ -94,21 +94,31 @@ func TestRunWatch_StaysSilentThenExitsOnRoutineApproval(t *testing.T) {
 	}
 }
 
-func TestRunWatch_SessionCloseIsNeutralEndedExitZero(t *testing.T) {
-	// Silence is not failure: a session that closes without a structured report
-	// is the neutral [ended], exit 0 — it emits and exits (never hangs), but
-	// asserts no outcome.
+func TestRunWatch_SessionCloseWithoutReportStaysSilent(t *testing.T) {
+	// Runtime state is not a trigger: a session that closes WITHOUT a terminal
+	// self-report emits nothing and the watch keeps running (the accepted
+	// crash-without-report gap; a deferred chief-side watch-timeout is the backstop).
+	// A real terminal report — even filed just before close — still ends it cleanly.
 	closed := &protocol.ChiefOfStaffDispatch{ID: "d1", Label: "badge", Status: SessionClosedStatus}
+	doneAtClose := &protocol.ChiefOfStaffDispatch{
+		ID: "d1", Label: "badge", Status: SessionClosedStatus,
+		StructuredReport: &protocol.DispatchReport{
+			WorkState: protocol.DispatchWorkStateCompleted,
+			Summary:   "done and green",
+		},
+	}
 	code, out, _ := runWatchScript(t, []fetchStep{
 		{working(), true, nil},
 		{closed, true, nil},
+		{closed, true, nil}, // still silent — close is not a signal
+		{doneAtClose, true, nil},
 	})
 	if code != 0 {
-		t.Errorf("exit = %d, want 0 — close-without-report is neutral, not failure", code)
+		t.Errorf("exit = %d, want 0", code)
 	}
 	lines := nonEmptyLines(out)
-	if len(lines) != 1 || !strings.HasPrefix(lines[0], "[ended]") {
-		t.Fatalf("want a single [ended] line, got: %q", out)
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], "[done]") {
+		t.Fatalf("close-without-report must be silent; only the [done] report emits. got: %q", out)
 	}
 }
 
@@ -134,32 +144,43 @@ func TestRunWatch_ExplicitFailureExitsNonZero(t *testing.T) {
 	}
 }
 
-func TestRunWatch_DeadSessionWithStaleBlockerDoesNotHang(t *testing.T) {
-	// A needs_input report on a session that then closes must resolve to a
-	// neutral terminal — not stay a (non-terminal) blocker and hang forever.
-	stuck := &protocol.ChiefOfStaffDispatch{
+func TestRunWatch_SelfReportedBlockerStandsEvenWhenClosed(t *testing.T) {
+	// A self-reported blocker is keyed on the report, not runtime state, so it stays
+	// a (non-terminal) blocker even once the session shows closed — the watch keeps
+	// running through it. Only a terminal report (or a deleted record) ends it.
+	blocked := &protocol.ChiefOfStaffDispatch{
 		ID: "d1", Label: "badge", Status: SessionClosedStatus,
 		StructuredReport: &protocol.DispatchReport{
 			WorkState: protocol.DispatchWorkStateNeedsInput,
 			Summary:   "was waiting on a decision",
 		},
 	}
+	done := &protocol.ChiefOfStaffDispatch{
+		ID: "d1", Label: "badge", Status: SessionClosedStatus,
+		StructuredReport: &protocol.DispatchReport{
+			WorkState: protocol.DispatchWorkStateCompleted,
+			Summary:   "resolved and finished",
+		},
+	}
 	code, out, _ := runWatchScript(t, []fetchStep{
-		{stuck, true, nil},
+		{blocked, true, nil},
+		{blocked, true, nil}, // same blocker: deduped, silent, still running
+		{done, true, nil},
 	})
 	if code != 0 {
 		t.Errorf("exit = %d, want 0", code)
 	}
-	if !strings.HasPrefix(strings.TrimSpace(out), "[ended]") {
-		t.Fatalf("dead session with a stale blocker must end neutrally, got: %q", out)
+	lines := nonEmptyLines(out)
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "[blocker]") || !strings.HasPrefix(lines[1], "[done]") {
+		t.Fatalf("want [blocker] then [done], got: %q", out)
 	}
 }
 
 func TestRunWatch_ReadyForReviewSurvivesSessionClose(t *testing.T) {
-	// The race figgyster flagged: the agent files work_state=ready_for_review and
-	// the session closes before the next poll, so the snapshot carries BOTH a
-	// closed Status and the structured review report. The explicit review handoff
-	// must win over the close — [review], exit 0 — not collapse to neutral [ended].
+	// The agent files work_state=ready_for_review and the session closes before the
+	// next poll, so the snapshot carries BOTH a closed Status and the structured
+	// review report. The trigger keys on the report, not runtime state, so the
+	// review handoff stands — [review], exit 0 — regardless of the close.
 	reviewing := &protocol.ChiefOfStaffDispatch{
 		ID: "d1", Label: "badge", Status: SessionClosedStatus,
 		StructuredReport: &protocol.DispatchReport{
