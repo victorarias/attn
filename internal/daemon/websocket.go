@@ -923,6 +923,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleMuteAuthorWS(msg.(*protocol.MuteAuthorMessage))
 	case protocol.CmdMuteWorkspace:
 		d.handleMuteWorkspaceWS(client, msg.(*protocol.MuteWorkspaceMessage))
+	case protocol.CmdPinWorkspace:
+		d.handlePinWorkspaceWS(client, msg.(*protocol.PinWorkspaceMessage))
 	case protocol.CmdRefreshPRs:
 		d.handleRefreshPRsWS(client)
 	case protocol.CmdFetchPRDetails:

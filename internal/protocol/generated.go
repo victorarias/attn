@@ -2390,6 +2390,17 @@ type PathInspection struct {
 	ResolvedPath string `json:"resolved_path"`
 }
 
+type PinWorkspaceMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Pinned corresponds to the JSON schema field "pinned".
+	Pinned bool `json:"pinned"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
 type PluginActionResultMessage struct {
 	// Action corresponds to the JSON schema field "action".
 	Action string `json:"action"`
@@ -4142,6 +4153,9 @@ type Workspace struct {
 	// Muted corresponds to the JSON schema field "muted".
 	Muted bool `json:"muted"`
 
+	// Pinned corresponds to the JSON schema field "pinned".
+	Pinned bool `json:"pinned"`
+
 	// Rank corresponds to the JSON schema field "rank".
 	Rank string `json:"rank"`
 
@@ -4430,29 +4444,6 @@ const WorkspaceLayoutDockEdgeLeft WorkspaceLayoutDockEdge = "left"
 const WorkspaceLayoutDockEdgeRight WorkspaceLayoutDockEdge = "right"
 const WorkspaceLayoutDockEdgeTop WorkspaceLayoutDockEdge = "top"
 
-type WorkspaceLayoutDockPanelMessage struct {
-	// AnchorPaneID corresponds to the JSON schema field "anchor_pane_id".
-	AnchorPaneID string `json:"anchor_pane_id"`
-
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Edge corresponds to the JSON schema field "edge".
-	Edge WorkspaceLayoutDockEdge `json:"edge"`
-
-	// PanelID corresponds to the JSON schema field "panel_id".
-	PanelID string `json:"panel_id"`
-
-	// PanelKind corresponds to the JSON schema field "panel_kind".
-	PanelKind string `json:"panel_kind"`
-
-	// Ratio corresponds to the JSON schema field "ratio".
-	Ratio *float64 `json:"ratio,omitempty,omitzero"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
-}
-
 type WorkspaceLayoutDockTileMessage struct {
 	// AnchorPaneID corresponds to the JSON schema field "anchor_pane_id".
 	AnchorPaneID string `json:"anchor_pane_id"`
@@ -4638,17 +4629,6 @@ type WorkspaceLayoutSplitDirection string
 const WorkspaceLayoutSplitDirectionHorizontal WorkspaceLayoutSplitDirection = "horizontal"
 const WorkspaceLayoutSplitDirectionVertical WorkspaceLayoutSplitDirection = "vertical"
 
-type WorkspaceLayoutUndockPanelMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// PanelID corresponds to the JSON schema field "panel_id".
-	PanelID string `json:"panel_id"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
-}
-
 type WorkspaceLayoutUndockTileMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -4683,40 +4663,6 @@ type WorkspaceLayoutUpdatedMessage struct {
 
 	// WorkspaceLayout corresponds to the JSON schema field "workspace_layout".
 	WorkspaceLayout WorkspaceLayout `json:"workspace_layout"`
-}
-
-type WorkspacePanelContentGetMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// PanelID corresponds to the JSON schema field "panel_id".
-	PanelID string `json:"panel_id"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
-}
-
-type WorkspacePanelContentMessage struct {
-	// Content corresponds to the JSON schema field "content".
-	Content string `json:"content"`
-
-	// Error corresponds to the JSON schema field "error".
-	Error *string `json:"error,omitempty,omitzero"`
-
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// PanelID corresponds to the JSON schema field "panel_id".
-	PanelID string `json:"panel_id"`
-
-	// PanelKind corresponds to the JSON schema field "panel_kind".
-	PanelKind string `json:"panel_kind"`
-
-	// Path corresponds to the JSON schema field "path".
-	Path string `json:"path"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
 }
 
 type WorkspaceRegisteredMessage struct {

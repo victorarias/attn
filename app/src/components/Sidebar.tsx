@@ -148,6 +148,7 @@ interface SidebarProps {
   mutedExpanded?: boolean;
   onMutedExpandedChange?: (expanded: boolean) => void;
   onMuteWorkspace?: (workspaceId: string, endpointId?: string) => void;
+  onPinWorkspace?: (workspaceId: string, pinned: boolean) => void;
   onRenameSession?: (sessionId: string, label: string) => Promise<void>;
   onRenameWorkspace?: (workspaceId: string, title: string) => Promise<void>;
   onChangeChiefOfStaff?: (sessionId: string, enabled: boolean) => void;
@@ -344,6 +345,7 @@ export function Sidebar({
   mutedExpanded: mutedExpandedProp,
   onMutedExpandedChange,
   onMuteWorkspace,
+  onPinWorkspace,
   onRenameSession,
   onRenameWorkspace,
   onChangeChiefOfStaff,
@@ -414,7 +416,7 @@ export function Sidebar({
     onMutedExpandedChange?.(v);
   };
 
-  const isWorkspaceVisible = (workspace: SidebarWorkspace) => !isSessionless(workspace) || showSessionless;
+  const isWorkspaceVisible = (workspace: SidebarWorkspace) => workspace.pinned || !isSessionless(workspace) || showSessionless;
   const visibleWorkspaces = workspaces.filter(isWorkspaceVisible);
   const visibleVisualOrder = visualOrder.filter(isWorkspaceVisible);
   const visibleVisualIndexByWorkspaceId = new Map(
@@ -955,8 +957,23 @@ export function Sidebar({
                   </span>
                 )}
                 <span className="session-shortcut">⌘{workspaceIndex + 1}</span>
-                {(onRenameWorkspace || onMuteWorkspace) && (
+                {(onRenameWorkspace || onMuteWorkspace || onPinWorkspace) && (
                   <span className="workspace-actions">
+                    {onPinWorkspace && (
+                      <button
+                        type="button"
+                        className={`workspace-action-btn pin-workspace-btn${workspace.pinned ? ' pinned' : ''}`}
+                        data-testid={`pin-workspace-${workspace.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onPinWorkspace(workspace.id, !workspace.pinned);
+                        }}
+                        title={workspace.pinned ? 'Unpin workspace' : 'Pin workspace'}
+                        aria-label={`${workspace.pinned ? 'Unpin' : 'Pin'} workspace ${workspace.title}`}
+                      >
+                        {workspace.pinned ? '\u{1F4CC}' : '\u{1F4CD}'}
+                      </button>
+                    )}
                     {onRenameWorkspace && (
                       <button
                         type="button"

@@ -21,6 +21,7 @@ type workspaceEntry struct {
 	directory string
 	status    protocol.WorkspaceStatus
 	muted     bool
+	pinned    bool
 	// rank is the fractional sidebar-order key; the store is the durable
 	// authority. Empty until a workspace is seeded or loaded from store.
 	rank string
@@ -50,7 +51,7 @@ func newWorkspaceRegistry() *workspaceRegistry {
 // from the incoming value when it is empty: a re-register that omits the rank
 // (or the caller passes the stored rank back) leaves a user reorder intact. The
 // caller seeds rank for brand-new workspaces before this runs.
-func (r *workspaceRegistry) register(id, title, directory, rank string, muted bool) (protocol.Workspace, bool) {
+func (r *workspaceRegistry) register(id, title, directory, rank string, muted, pinned bool) (protocol.Workspace, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -66,6 +67,7 @@ func (r *workspaceRegistry) register(id, title, directory, rank string, muted bo
 	entry.title = title
 	entry.directory = directory
 	entry.muted = muted
+	entry.pinned = pinned
 	if rank != "" {
 		entry.rank = rank
 	}
@@ -105,6 +107,17 @@ func (r *workspaceRegistry) setMuted(id string, muted bool) (protocol.Workspace,
 		return protocol.Workspace{}, false
 	}
 	entry.muted = muted
+	return snapshotEntry(entry), true
+}
+
+func (r *workspaceRegistry) setPinned(id string, pinned bool) (protocol.Workspace, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.workspaces[id]
+	if !ok {
+		return protocol.Workspace{}, false
+	}
+	entry.pinned = pinned
 	return snapshotEntry(entry), true
 }
 
@@ -266,6 +279,7 @@ func snapshotEntry(e *workspaceEntry) protocol.Workspace {
 		Directory: e.directory,
 		Status:    e.status,
 		Muted:     e.muted,
+		Pinned:    e.pinned,
 		Rank:      e.rank,
 	}
 }
@@ -410,6 +424,7 @@ func (d *Daemon) handleRegisterWorkspace(client *wsClient, msg *protocol.Registe
 	}
 	existing := d.store.GetWorkspace(id)
 	muted := existing != nil && existing.Muted
+	pinned := existing != nil && existing.Pinned
 	// Preserve a user-applied rename across re-registration. A reconnect or
 	// retry can re-register the same workspace id with the old derived title;
 	// the only authoritative way to change a title is the rename_workspace
@@ -419,7 +434,7 @@ func (d *Daemon) handleRegisterWorkspace(client *wsClient, msg *protocol.Registe
 		title = existing.Title
 	}
 	rank := d.resolveWorkspaceRank(existing)
-	snapshot, isNew := d.workspaces.register(id, title, directory, rank, muted)
+	snapshot, isNew := d.workspaces.register(id, title, directory, rank, muted, pinned)
 	d.store.AddWorkspace(&snapshot)
 	// Make workspace directories available in the recent-locations picker.
 	d.store.UpsertRecentLocation(directory)
@@ -489,6 +504,42 @@ func (d *Daemon) setWorkspaceMuted(workspaceID string, muted bool) (protocol.Wor
 	if !ok {
 		_ = d.store.SetWorkspaceMuted(id, current.Muted)
 		return protocol.Workspace{}, "workspace disappeared while updating mute state"
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:     protocol.EventWorkspaceStateChanged,
+		Workspace: &snapshot,
+	})
+	return snapshot, ""
+}
+
+func (d *Daemon) handlePinWorkspaceWS(client *wsClient, msg *protocol.PinWorkspaceMessage) {
+	if _, errMsg := d.setWorkspacePinned(msg.WorkspaceID, msg.Pinned); errMsg != "" {
+		d.sendCommandError(client, protocol.CmdPinWorkspace, errMsg)
+	}
+}
+
+func (d *Daemon) setWorkspacePinned(workspaceID string, pinned bool) (protocol.Workspace, string) {
+	id := strings.TrimSpace(workspaceID)
+	if id == "" {
+		return protocol.Workspace{}, "missing workspace_id"
+	}
+	if d.workspaces == nil {
+		return protocol.Workspace{}, "workspace registry unavailable"
+	}
+	current, ok := d.workspaces.snapshot(id)
+	if !ok {
+		return protocol.Workspace{}, "workspace not found"
+	}
+	if current.Pinned == pinned {
+		return current, ""
+	}
+	if err := d.store.SetWorkspacePinned(id, pinned); err != nil {
+		return protocol.Workspace{}, "persist workspace pin: " + err.Error()
+	}
+	snapshot, ok := d.workspaces.setPinned(id, pinned)
+	if !ok {
+		_ = d.store.SetWorkspacePinned(id, current.Pinned)
+		return protocol.Workspace{}, "workspace disappeared while updating pin state"
 	}
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:     protocol.EventWorkspaceStateChanged,
@@ -582,6 +633,7 @@ func (d *Daemon) loadWorkspacesFromStore() []string {
 			// content such as docked tiles.
 			_, registered := d.workspaces.snapshot(ws.ID)
 			if !registered &&
+				!ws.Pinned &&
 				!d.workspaceHasPendingSpawn(ws.ID) &&
 				!d.workspaceHasSessionlessContent(ws.ID) {
 				// loadWorkspacesFromStore runs during Start() before the compaction
@@ -598,7 +650,7 @@ func (d *Daemon) loadWorkspacesFromStore() []string {
 				continue
 			}
 		}
-		d.workspaces.register(ws.ID, ws.Title, ws.Directory, ws.Rank, ws.Muted)
+		d.workspaces.register(ws.ID, ws.Title, ws.Directory, ws.Rank, ws.Muted, ws.Pinned)
 	}
 	for _, session := range d.store.List("") {
 		if session == nil {
@@ -691,10 +743,12 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 		return
 	}
 	if remaining == 0 {
-		// A workspace whose last session leaves normally tears down. Visible
-		// sessionless content keeps it alive. This runs before the session pane
-		// is removed, so a retained tile is still visible in the stored layout.
-		if d.workspaceHasSessionlessContent(workspaceID) {
+		// A workspace whose last session leaves normally tears down. Pinned
+		// workspaces and visible sessionless content keep it alive. This runs
+		// before the session pane is removed, so a retained tile is still
+		// visible in the stored layout.
+		snap, _ := d.workspaces.snapshot(workspaceID)
+		if snap.Pinned || d.workspaceHasSessionlessContent(workspaceID) {
 			updated, changed := d.recomputeWorkspaceStatus(workspaceID)
 			if !changed {
 				updated, _ = d.workspaces.snapshot(workspaceID)

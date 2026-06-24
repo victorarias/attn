@@ -23,12 +23,12 @@ func (s *Store) AddWorkspace(ws *protocol.Workspace) {
 	// the durable authority for ordering and must survive — like title, it is not
 	// re-derived from the incoming struct so a user reorder sticks.
 	if _, err := s.db.Exec(`
-		INSERT INTO workspaces (id, title, directory, muted, created_at, rank)
-		VALUES (?, ?, ?, COALESCE(?, 0), ?, ?)
+		INSERT INTO workspaces (id, title, directory, muted, pinned, created_at, rank)
+		VALUES (?, ?, ?, COALESCE(?, 0), COALESCE(?, 0), ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
 			directory = excluded.directory`,
-		ws.ID, ws.Title, ws.Directory, boolToInt(ws.Muted), createdAt, ws.Rank,
+		ws.ID, ws.Title, ws.Directory, boolToInt(ws.Muted), boolToInt(ws.Pinned), createdAt, ws.Rank,
 	); err != nil {
 		log.Printf("[store] AddWorkspace: failed to upsert workspace %s: %v", ws.ID, err)
 	}
@@ -63,14 +63,15 @@ func (s *Store) GetWorkspace(id string) *protocol.Workspace {
 		return nil
 	}
 	var ws protocol.Workspace
-	var muted int
+	var muted, pinned int
 	err := s.db.QueryRow(`
-		SELECT id, title, directory, muted, rank FROM workspaces WHERE id = ?`, id).
-		Scan(&ws.ID, &ws.Title, &ws.Directory, &muted, &ws.Rank)
+		SELECT id, title, directory, muted, pinned, rank FROM workspaces WHERE id = ?`, id).
+		Scan(&ws.ID, &ws.Title, &ws.Directory, &muted, &pinned, &ws.Rank)
 	if err != nil {
 		return nil
 	}
 	ws.Muted = muted == 1
+	ws.Pinned = pinned == 1
 	return &ws
 }
 
@@ -83,7 +84,7 @@ func (s *Store) ListWorkspaces() []*protocol.Workspace {
 	if s.db == nil {
 		return nil
 	}
-	rows, err := s.db.Query(`SELECT id, title, directory, muted, rank FROM workspaces ORDER BY rank, created_at`)
+	rows, err := s.db.Query(`SELECT id, title, directory, muted, pinned, rank FROM workspaces ORDER BY rank, created_at`)
 	if err != nil {
 		return nil
 	}
@@ -92,11 +93,12 @@ func (s *Store) ListWorkspaces() []*protocol.Workspace {
 	var out []*protocol.Workspace
 	for rows.Next() {
 		var ws protocol.Workspace
-		var muted int
-		if err := rows.Scan(&ws.ID, &ws.Title, &ws.Directory, &muted, &ws.Rank); err != nil {
+		var muted, pinned int
+		if err := rows.Scan(&ws.ID, &ws.Title, &ws.Directory, &muted, &pinned, &ws.Rank); err != nil {
 			continue
 		}
 		ws.Muted = muted == 1
+		ws.Pinned = pinned == 1
 		out = append(out, &ws)
 	}
 	return out
@@ -128,6 +130,28 @@ func (s *Store) SetWorkspaceMuted(id string, muted bool) error {
 		return nil
 	}
 	result, err := s.db.Exec(`UPDATE workspaces SET muted = ? WHERE id = ?`, boolToInt(muted), id)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("workspace not found: %s", id)
+	}
+	return nil
+}
+
+// SetWorkspacePinned writes an explicit workspace pinned state.
+func (s *Store) SetWorkspacePinned(id string, pinned bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return nil
+	}
+	result, err := s.db.Exec(`UPDATE workspaces SET pinned = ? WHERE id = ?`, boolToInt(pinned), id)
 	if err != nil {
 		return err
 	}

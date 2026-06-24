@@ -18,7 +18,7 @@ func setupWorkspaceContextSession(t *testing.T, d *Daemon, sessionID, workspaceI
 		Title:     workspaceID,
 		Directory: t.TempDir(),
 	})
-	d.workspaces.register(workspaceID, workspaceID, t.TempDir(), "", false)
+	d.workspaces.register(workspaceID, workspaceID, t.TempDir(), "", false, false)
 	now := string(protocol.TimestampNow())
 	d.store.Add(&protocol.Session{
 		ID:             sessionID,

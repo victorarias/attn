@@ -82,6 +82,8 @@ describe('workspaceViewModels', () => {
         directory: '/repo/pending',
         status: 'launching',
         muted: false,
+        pinned: false,
+        rank: undefined,
         endpointId: undefined,
         sessions: [],
         children: [],

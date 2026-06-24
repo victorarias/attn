@@ -182,6 +182,7 @@ model Workspace {
   directory: string;
   status: WorkspaceStatus;
   muted: boolean;               // Muting parks the whole workspace out of attention surfaces.
+  pinned: boolean;              // Pinned workspaces persist in the sidebar even when empty.
   rank: string;                 // Fractional-index sort key; default order is opening (creation) order.
   layout?: WorkspaceLayout;
 }
@@ -790,6 +791,12 @@ model MuteWorkspaceMessage {
   cmd: "mute_workspace";
   workspace_id: string;
   endpoint_id?: string;
+}
+
+model PinWorkspaceMessage {
+  cmd: "pin_workspace";
+  workspace_id: string;
+  pinned: boolean;
 }
 
 model QueryPRsMessage {

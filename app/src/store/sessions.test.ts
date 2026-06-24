@@ -395,6 +395,7 @@ describe('sessions store', () => {
         directory: '/tmp/workspace',
         status: WorkspaceStatus.Idle,
         muted: false,
+        pinned: false,
         rank: '',
         layout: {
           workspace_id: `workspace-${sessionId}`,
@@ -447,6 +448,7 @@ describe('sessions store', () => {
         directory: '/tmp/workspace',
         status: WorkspaceStatus.Idle,
         muted: false,
+        pinned: false,
         rank: '',
         layout: {
           workspace_id: `workspace-${sessionId}`,
@@ -463,6 +465,7 @@ describe('sessions store', () => {
         directory: '/tmp/unknown',
         status: WorkspaceStatus.Idle,
         muted: false,
+        pinned: false,
         rank: '',
         layout: {
           workspace_id: 'workspace-unknown-session',
