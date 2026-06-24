@@ -2465,11 +2465,11 @@ sendFetchPRDetails,
     [daemonWorkspaces, visibleEnrichedSessions],
   );
   const unmutedWorkspaceViews = useMemo(
-    () => workspaceViews.filter((workspace) => !workspace.muted && workspace.sessions.length > 0),
+    () => workspaceViews.filter((workspace) => !workspace.muted && (workspace.pinned || workspace.sessions.length > 0)),
     [workspaceViews],
   );
   const mutedWorkspaceViews = useMemo(
-    () => workspaceViews.filter((workspace) => workspace.muted && workspace.sessions.length > 0),
+    () => workspaceViews.filter((workspace) => workspace.muted && (workspace.pinned || workspace.sessions.length > 0)),
     [workspaceViews],
   );
   const unmutedEnrichedSessions = useMemo(
@@ -2596,7 +2596,7 @@ sendFetchPRDetails,
   }, []);
   const sidebarWorkspaceViews = useMemo(
     () => workspaceViews.filter(
-      (workspace) => !workspace.muted && (workspace.sessions.length > 0 || showSessionlessWorkspaces),
+      (workspace) => !workspace.muted && (workspace.pinned || workspace.sessions.length > 0 || showSessionlessWorkspaces),
     ),
     [workspaceViews, showSessionlessWorkspaces],
   );
