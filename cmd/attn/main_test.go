@@ -504,6 +504,20 @@ func TestParseDelegateArgsDefaultsToCurrentWorkspace(t *testing.T) {
 	}
 }
 
+func TestParseDelegateArgsNameSetsLabel(t *testing.T) {
+	parsed, err := parseDelegateArgs([]string{
+		"--source-session", "source-session",
+		"--brief", "Investigate this",
+		"--name", "  launcher  ",
+	})
+	if err != nil {
+		t.Fatalf("parseDelegateArgs() error = %v", err)
+	}
+	if parsed.options.Label != "launcher" {
+		t.Fatalf("options.Label = %q, want %q", parsed.options.Label, "launcher")
+	}
+}
+
 func TestParseDelegateArgsWorktreeUsesCurrentWorkspace(t *testing.T) {
 	parsed, err := parseDelegateArgs([]string{
 		"--source-session", "source-session",
@@ -825,10 +839,14 @@ func TestWriteDelegateHelpMentionsPlacementOptions(t *testing.T) {
 		"--worktree <branch>",
 		"combine with --new-workspace to place the worktree in a new workspace",
 		"--agent <name>",
+		"--name <text>",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("delegate help missing %q: %q", expected, text)
 		}
+	}
+	if strings.Contains(text, "--label") {
+		t.Fatalf("delegate help still mentions removed --label flag: %q", text)
 	}
 }
 

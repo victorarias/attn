@@ -11,6 +11,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **Pin workspaces to keep them in the sidebar even when empty.** A workspace can now be toggled pinned/unpinned from the sidebar. A pinned workspace survives its last session closing and daemon restarts — it stays visible and ready for a new agent launch. Existing tile-only and context-based workspace retention continues to work alongside pinning.
 
+### Changed
+- **Delegated agents and their workspaces now get real, readable names.** `attn delegate` takes `--name` (replacing `--label`); it names the agent and, when the delegation creates a new workspace, the workspace too — so a delegated workspace shows a human name in the sidebar instead of its worktree folder. Omit `--name` to default to the directory name. Names are capped at 16 characters and must be unique (a workspace name across all workspaces, a session name within its workspace); when a name is too long or already taken — including a too-long worktree-folder default — the command fails with a clear message telling you to pass `--name`.
+
 ## [2026-06-23]
 
 ### Added

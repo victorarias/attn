@@ -609,7 +609,9 @@ worktree options:
 
 session options:
   --agent <name>             configured prompt-capable built-in or plugin agent
-  --label <text>             session label
+  --name <text>              name for the agent and, when a new workspace is
+                             created, the workspace (max 16 chars, must be
+                             unique; defaults to the directory name)
   --source-session <id>      source session (defaults to ATTN_SESSION_ID)
   --yolo                     bypass agent approval prompts
 `)
@@ -1290,7 +1292,7 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	briefText := fs.String("brief", "", "delegated task brief")
 	briefFile := fs.String("brief-file", "", "file containing the delegated task brief")
 	agentName := fs.String("agent", "", "target agent (defaults to the source session agent)")
-	label := fs.String("label", "", "target session label")
+	name := fs.String("name", "", "name for the agent and, when a new workspace is created, the workspace")
 	sourceSessionID := fs.String("source-session", "", "source session id (defaults to ATTN_SESSION_ID)")
 	yolo := fs.Bool("yolo", false, "launch the target agent in yolo mode")
 	newWorkspace := fs.Bool("new-workspace", false, "create a new workspace for the delegated agent")
@@ -1356,7 +1358,7 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 		brief:           brief,
 		options: client.DelegateOptions{
 			Agent:        strings.TrimSpace(*agentName),
-			Label:        strings.TrimSpace(*label),
+			Label:        strings.TrimSpace(*name),
 			Yolo:         *yolo,
 			Placement:    placement,
 			WorkspaceID:  explicitWorkspace,
