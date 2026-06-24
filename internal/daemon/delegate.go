@@ -48,17 +48,50 @@ func readInternalActionResult(client *wsClient) (internalActionResult, error) {
 	}
 }
 
-func delegationLabel(brief string) string {
-	line := strings.TrimSpace(strings.SplitN(brief, "\n", 2)[0])
-	if line == "" {
-		return "Delegated task"
+// maxDelegationNameRunes bounds a delegated session/workspace display name.
+// Names are short, human, and glanceable in the sidebar; longer strings (e.g. a
+// worktree folder like "attn--feat-some-long-branch") are rejected so the caller
+// supplies a real name with --name.
+const maxDelegationNameRunes = 16
+
+// validateDelegationName enforces the naming rules for a resolved delegation
+// name (whether it came from --name or the directory-basename default):
+//
+//   - non-empty and at most maxDelegationNameRunes runes
+//   - when a new workspace is being created, unique across workspace titles
+//   - unique among the session labels already in the target workspace
+//
+// targetWorkspaceID is the workspace whose sessions are checked for a clash; it
+// is empty when a brand-new (and therefore empty) workspace is being created.
+func (d *Daemon) validateDelegationName(name string, creatingWorkspace bool, targetWorkspaceID string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("a name is required; pass --name")
 	}
-	const maxRunes = 64
-	runes := []rune(line)
-	if len(runes) > maxRunes {
-		line = string(runes[:maxRunes-3]) + "..."
+	if name == "." || name == string(filepath.Separator) {
+		// A directory-basename default can degenerate to "." or "/" for an odd
+		// directory; those are not usable names, so ask for an explicit one.
+		return fmt.Errorf("%q is not a usable name; pass --name", name)
 	}
-	return line
+	if len([]rune(name)) > maxDelegationNameRunes {
+		return fmt.Errorf("name %q is too long (max %d characters); pass a shorter --name", name, maxDelegationNameRunes)
+	}
+	if creatingWorkspace {
+		for _, ws := range d.store.ListWorkspaces() {
+			if strings.EqualFold(strings.TrimSpace(ws.Title), name) {
+				return fmt.Errorf("workspace name %q is already in use; pass a unique --name", name)
+			}
+		}
+	}
+	if targetWorkspaceID != "" {
+		for _, sessionID := range d.store.SessionsInWorkspace(targetWorkspaceID) {
+			existing := d.store.Get(sessionID)
+			if existing != nil && strings.EqualFold(strings.TrimSpace(existing.Label), name) {
+				return fmt.Errorf("session name %q is already used in this workspace; pass a unique --name", name)
+			}
+		}
+	}
+	return nil
 }
 
 func (d *Daemon) resolveDelegationAgent(sourceAgent string, requested *string) (string, error) {
@@ -188,10 +221,9 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 	if err != nil {
 		return nil, err
 	}
-	label := strings.TrimSpace(protocol.Deref(msg.Label))
-	if label == "" {
-		label = delegationLabel(brief)
-	}
+	// name is the explicit --name, or empty to default to the directory basename
+	// once the directory is finalized below.
+	name := strings.TrimSpace(protocol.Deref(msg.Label))
 	sessionID := uuid.NewString()
 	chiefSessionID := d.chiefOfStaffSessionID()
 	trackedByChief := chiefSessionID == sourceSessionID
@@ -239,6 +271,21 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 		return nil, fmt.Errorf("unsupported placement %q", placement)
 	}
 
+	// Naming scope: a new workspace must take a globally-unique name; a session
+	// must be unique among the sessions already in its target workspace (empty
+	// for a brand-new workspace). Validate an explicit --name now, before any
+	// side effects, so a bad name fails fast without creating a worktree.
+	creatingWorkspace := placement == delegationPlacementNew
+	sessionNameWorkspaceID := ""
+	if !creatingWorkspace {
+		sessionNameWorkspaceID = workspaceID
+	}
+	if name != "" {
+		if err := d.validateDelegationName(name, creatingWorkspace, sessionNameWorkspaceID); err != nil {
+			return nil, err
+		}
+	}
+
 	if msg.Worktree != nil {
 		worktreePath, createErr := d.createDelegationWorktree(source.Directory, msg.Worktree)
 		if createErr != nil {
@@ -252,21 +299,32 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 		directory = validatedDirectory
 	}
 
+	// Finalize a new workspace's directory before resolving the name so a
+	// directory-basename default reflects the real directory.
 	if placement == delegationPlacementNew {
 		validatedDirectory, directoryErr := validateDelegationDirectory(directory)
 		if directoryErr != nil {
 			return nil, d.rollbackDelegation("", createdWorktreePath, directoryErr)
 		}
 		directory = validatedDirectory
-		workspaceID = "workspace-" + sessionID
-		workspaceTitle := filepath.Base(directory)
-		if workspaceTitle == "." || workspaceTitle == string(filepath.Separator) || workspaceTitle == "" {
-			workspaceTitle = label
+	}
+
+	// Default the name to the directory basename when --name was not given, then
+	// validate the final name. Only a worktree may exist at this point, so a
+	// validation failure rolls it back (no workspace/pane/session yet).
+	if name == "" {
+		name = filepath.Base(directory)
+		if err := d.validateDelegationName(name, creatingWorkspace, sessionNameWorkspaceID); err != nil {
+			return nil, d.rollbackDelegation("", createdWorktreePath, err)
 		}
+	}
+
+	if placement == delegationPlacementNew {
+		workspaceID = "workspace-" + sessionID
 		d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
 			Cmd:       protocol.CmdRegisterWorkspace,
 			ID:        workspaceID,
-			Title:     workspaceTitle,
+			Title:     name,
 			Directory: directory,
 		})
 		if d.store.GetWorkspace(workspaceID) == nil {
@@ -281,7 +339,7 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 		WorkspaceID: workspaceID,
 		PaneID:      protocol.Ptr(paneID),
 		SessionID:   sessionID,
-		Title:       protocol.Ptr(label),
+		Title:       protocol.Ptr(name),
 	})
 	if _, err := readInternalActionResult(paneClient); err != nil {
 		return nil, d.rollbackDelegation(createdWorkspaceID, createdWorktreePath, fmt.Errorf("create delegated pane: %w", err))
@@ -300,7 +358,7 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 		Agent:         agent,
 		Cols:          80,
 		Rows:          24,
-		Label:         protocol.Ptr(label),
+		Label:         protocol.Ptr(name),
 		YoloMode:      msg.YoloMode,
 		InitialPrompt: protocol.Ptr(initialPrompt),
 	})
@@ -316,7 +374,7 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 	}
 	var dispatch *protocol.ChiefOfStaffDispatch
 	if trackedByChief {
-		dispatch = d.newChiefOfStaffDispatch(chiefSessionID, session, workspaceID, brief, label, agent)
+		dispatch = d.newChiefOfStaffDispatch(chiefSessionID, session, workspaceID, brief, name, agent)
 		if err := d.store.AddChiefOfStaffDispatch(dispatch); err != nil {
 			d.unregisterSession(sessionID, syscall.SIGTERM)
 			d.removeWorkspaceLayoutPaneForSession(sessionID)

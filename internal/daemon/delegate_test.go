@@ -995,6 +995,276 @@ func TestDelegateCreatesNewWorkspaceAtCustomDirectory(t *testing.T) {
 	}
 }
 
+func TestDelegateNamesNewWorkspaceAndSessionFromExplicitName(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+	targetDir := t.TempDir()
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Name everything from --name.",
+		Placement:       protocol.Ptr(delegationPlacementNew),
+		Cwd:             protocol.Ptr(targetDir),
+		Label:           protocol.Ptr("launcher"),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	if workspace := d.store.GetWorkspace(result.WorkspaceID); workspace == nil || workspace.Title != "launcher" {
+		t.Fatalf("delegated workspace = %+v, want title %q", workspace, "launcher")
+	}
+	if session := d.store.Get(result.SessionID); session == nil || session.Label != "launcher" {
+		t.Fatalf("delegated session = %+v, want label %q", session, "launcher")
+	}
+	layout := d.store.GetWorkspaceLayout(result.WorkspaceID)
+	if layout == nil || len(layout.Panes) != 1 || layout.Panes[0].Title != "launcher" {
+		t.Fatalf("delegated layout = %+v, want one pane titled %q", layout, "launcher")
+	}
+}
+
+func TestDelegateDefaultsNameToDirectoryBasename(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+	targetDir := filepath.Join(t.TempDir(), "myproj")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Default the name to the folder.",
+		Placement:       protocol.Ptr(delegationPlacementNew),
+		Cwd:             protocol.Ptr(targetDir),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	if workspace := d.store.GetWorkspace(result.WorkspaceID); workspace == nil || workspace.Title != "myproj" {
+		t.Fatalf("delegated workspace = %+v, want title %q", workspace, "myproj")
+	}
+	if session := d.store.Get(result.SessionID); session == nil || session.Label != "myproj" {
+		t.Fatalf("delegated session = %+v, want label %q", session, "myproj")
+	}
+}
+
+func TestDelegateRejectsNameTooLong(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+	targetDir := t.TempDir()
+
+	_, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Name is too long.",
+		Placement:       protocol.Ptr(delegationPlacementNew),
+		Cwd:             protocol.Ptr(targetDir),
+		Label:           protocol.Ptr("this-name-is-way-too-long"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "too long") {
+		t.Fatalf("delegate() error = %v, want a name-too-long error", err)
+	}
+	if workspaces := d.store.ListWorkspaces(); len(workspaces) != 1 {
+		t.Fatalf("workspaces = %+v, want only the source workspace", workspaces)
+	}
+}
+
+func TestDelegateRejectsDuplicateWorkspaceName(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        "workspace-taken",
+		Title:     "taken",
+		Directory: t.TempDir(),
+	})
+
+	_, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Reuse a workspace name.",
+		Placement:       protocol.Ptr(delegationPlacementNew),
+		Cwd:             protocol.Ptr(t.TempDir()),
+		Label:           protocol.Ptr("taken"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "already in use") {
+		t.Fatalf("delegate() error = %v, want a duplicate-workspace error", err)
+	}
+}
+
+func TestDelegateRejectsDuplicateSessionNameInWorkspace(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+	targetDir := t.TempDir()
+
+	first, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "First agent.",
+		Placement:       protocol.Ptr(delegationPlacementNew),
+		Cwd:             protocol.Ptr(targetDir),
+		Label:           protocol.Ptr("alpha"),
+	})
+	if err != nil {
+		t.Fatalf("first delegate() error = %v", err)
+	}
+
+	_, err = d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Second agent, same name, same workspace.",
+		Placement:       protocol.Ptr(delegationPlacementExisting),
+		WorkspaceID:     protocol.Ptr(first.WorkspaceID),
+		Label:           protocol.Ptr("alpha"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "already used in this workspace") {
+		t.Fatalf("second delegate() error = %v, want a duplicate-session error", err)
+	}
+}
+
+func TestDelegateRejectsLongWorktreeDefaultNameAndRollsBack(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	runGitDaemon(t, mainRepo, "init")
+	runGitDaemon(t, mainRepo, "commit", "--allow-empty", "-m", "init")
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSourceAt(t, d, backend, mainRepo)
+	consumeDelegatedPrompt(t, backend)
+	worktreePath := filepath.Join(root, "repo--feat-delegated-long")
+
+	_, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "No --name; the worktree folder is too long.",
+		Placement:       protocol.Ptr(delegationPlacementNew),
+		Worktree: &protocol.DelegateWorktreeRequest{
+			Repo:   protocol.Ptr(mainRepo),
+			Branch: "feat/delegated-long",
+			Path:   protocol.Ptr(worktreePath),
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "too long") {
+		t.Fatalf("delegate() error = %v, want a name-too-long error", err)
+	}
+	if _, statErr := os.Stat(worktreePath); !os.IsNotExist(statErr) {
+		t.Fatalf("worktree still exists after rollback: %v", statErr)
+	}
+	if workspaces := d.store.ListWorkspaces(); len(workspaces) != 1 {
+		t.Fatalf("workspaces = %+v, want only the source workspace", workspaces)
+	}
+}
+
+func TestValidateDelegationName(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: "ws-taken", Title: "Taken", Directory: t.TempDir(),
+	})
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: "ws-busy", Title: "Busy WS", Directory: t.TempDir(),
+	})
+	d.store.Add(&protocol.Session{ID: "sess-busy", Label: "Busy", WorkspaceID: "ws-busy", Directory: t.TempDir()})
+
+	cases := []struct {
+		name              string
+		input             string
+		creatingWorkspace bool
+		targetWorkspaceID string
+		wantErr           string // substring; "" means expect success
+	}{
+		{"sixteen ASCII accepted", strings.Repeat("a", 16), false, "", ""},
+		{"seventeen ASCII rejected", strings.Repeat("a", 17), false, "", "too long"},
+		{"sixteen runes accepted", strings.Repeat("é", 16), false, "", ""},           // 16 runes, 32 bytes
+		{"seventeen runes rejected", strings.Repeat("é", 17), false, "", "too long"}, // 17 runes
+		{"blank rejected", "   ", false, "", "a name is required"},
+		{"dot rejected", ".", false, "", "not a usable name"},
+		{"separator rejected", string(filepath.Separator), false, "", "not a usable name"},
+		{"workspace duplicate is case-insensitive", "taken", true, "", "already in use"},
+		{"fresh workspace name accepted", "fresh", true, "", ""},
+		{"session duplicate is case-insensitive", "busy", false, "ws-busy", "already used in this workspace"},
+		{"distinct session name accepted", "other", false, "ws-busy", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := d.validateDelegationName(tc.input, tc.creatingWorkspace, tc.targetWorkspaceID)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateDelegationName(%q) = %v, want nil", tc.input, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("validateDelegationName(%q) = %v, want error containing %q", tc.input, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestDelegateRejectsDuplicateWorkspaceNameFromDefault(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: "ws-existing", Title: "myproj", Directory: t.TempDir(),
+	})
+	// No --name: the directory basename defaults to "myproj", which collides
+	// with the existing workspace title. The default path must still validate.
+	targetDir := filepath.Join(t.TempDir(), "myproj")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+
+	_, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Default name collides with an existing workspace.",
+		Placement:       protocol.Ptr(delegationPlacementNew),
+		Cwd:             protocol.Ptr(targetDir),
+	})
+	if err == nil || !strings.Contains(err.Error(), "already in use") {
+		t.Fatalf("delegate() error = %v, want a duplicate-workspace error from the default-name path", err)
+	}
+}
+
+func TestDelegateRejectsNameMatchingSourceSession(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+
+	source := d.store.Get(sourceSessionID)
+	if source == nil || strings.TrimSpace(source.Label) == "" {
+		t.Fatalf("source session has no label: %+v", source)
+	}
+	// Delegating into the current workspace with the source session's own label
+	// (different case) must be rejected as a within-workspace duplicate.
+	_, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Clash with the pre-existing source session name.",
+		Label:           protocol.Ptr(strings.ToLower(source.Label)),
+	})
+	if err == nil || !strings.Contains(err.Error(), "already used in this workspace") {
+		t.Fatalf("delegate() error = %v, want a duplicate-session error", err)
+	}
+}
+
 func TestDelegateTargetsExistingWorkspace(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
@@ -1111,6 +1381,7 @@ func TestDelegateCreatesWorktreeInSourceWorkspace(t *testing.T) {
 		Cmd:             protocol.CmdDelegate,
 		SourceSessionID: sourceSessionID,
 		Brief:           "Implement this in an isolated branch in this workspace.",
+		Label:           protocol.Ptr("delegated"),
 		Worktree: &protocol.DelegateWorktreeRequest{
 			Repo:   protocol.Ptr(mainRepo),
 			Branch: "feat/delegated-current",
@@ -1134,6 +1405,7 @@ func TestDelegateCreatesWorktreeInSourceWorkspace(t *testing.T) {
 	if session == nil ||
 		session.WorkspaceID != sourceWorkspaceID ||
 		session.Directory != worktreePath ||
+		session.Label != "delegated" ||
 		protocol.Deref(session.Branch) != "feat/delegated-current" {
 		t.Fatalf("delegated worktree session = %+v", session)
 	}
@@ -1163,6 +1435,7 @@ func TestDelegateCreatesWorktreeAndNewWorkspace(t *testing.T) {
 		SourceSessionID: sourceSessionID,
 		Brief:           "Implement this in an isolated branch.",
 		Placement:       protocol.Ptr(delegationPlacementNew),
+		Label:           protocol.Ptr("delegated"),
 		Worktree: &protocol.DelegateWorktreeRequest{
 			Repo:   protocol.Ptr(mainRepo),
 			Branch: "feat/delegated",
@@ -1181,6 +1454,10 @@ func TestDelegateCreatesWorktreeAndNewWorkspace(t *testing.T) {
 	}
 	if workspaces := d.store.ListWorkspaces(); len(workspaces) != 2 {
 		t.Fatalf("workspaces = %+v, want source and delegated workspaces", workspaces)
+	}
+	delegatedWorkspace := d.store.GetWorkspace(result.WorkspaceID)
+	if delegatedWorkspace == nil || delegatedWorkspace.Title != "delegated" {
+		t.Fatalf("delegated workspace = %+v, want title %q", delegatedWorkspace, "delegated")
 	}
 	if info, err := os.Stat(worktreePath); err != nil || !info.IsDir() {
 		t.Fatalf("worktree path stat = %v, info = %+v", err, info)
@@ -1210,6 +1487,7 @@ func TestDelegateRollsBackCurrentWorkspaceWorktreeWhenSpawnFails(t *testing.T) {
 		Cmd:             protocol.CmdDelegate,
 		SourceSessionID: sourceSessionID,
 		Brief:           "This spawn should roll back in the source workspace.",
+		Label:           protocol.Ptr("rollback"),
 		Worktree: &protocol.DelegateWorktreeRequest{
 			Repo:   protocol.Ptr(mainRepo),
 			Branch: "feat/current-rollback",
@@ -1250,6 +1528,7 @@ func TestDelegateRollsBackNewWorkspaceAndWorktreeWhenSpawnFails(t *testing.T) {
 		SourceSessionID: sourceSessionID,
 		Brief:           "This spawn should roll back.",
 		Placement:       protocol.Ptr(delegationPlacementNew),
+		Label:           protocol.Ptr("rollback"),
 		Worktree: &protocol.DelegateWorktreeRequest{
 			Repo:   protocol.Ptr(mainRepo),
 			Branch: "feat/rollback",
