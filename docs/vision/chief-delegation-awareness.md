@@ -16,6 +16,25 @@ chief is the one that catches it. The outputs are what make the chief *useful* �
 awareness is the entire difference between a dispatcher and a chief of staff.
 This is the capability that lets the chief actually help, rather than just route.
 
+Think of the chief as Alfred to Victor's Batman. Alfred runs the house and keeps
+track of every thread, so the moment Batman asks how things are going, he already
+knows. He handles the small, obvious things himself and hands the real calls to
+Batman — he is there to *inform and tee up decisions*, never to make them for
+him. That is the spirit of this loop: it exists to make the chief **aware, not
+autonomous**. The point is a chief that is *ready to help*, with Victor firmly in
+control — not a step toward automating Victor out of his own decisions.
+
+**Where the analogy breaks.** Alfred sits *between* Batman and the field — Batman
+works through him. Victor doesn't. He works at every level at once: he talks to
+the chief, and he reaches into the agents directly and steers them himself. So
+the chief is **not a gatekeeper Victor routes through — it is an awareness layer
+he works alongside.** That is exactly why context must flow *back* to the chief
+even for threads Victor (or an agent) drove without it: the chief's worth is
+being one complete, durable picture Victor can return to — to resume a
+conversation, track a project across days — not a controller that owns the work.
+Miss this and the chief silently goes stale the moment Victor steers an agent
+himself, and stops being a place he can pick the thread back up.
+
 But observing is only half a loop — a chief that can *see* a running agent yet
 not *reach* it is a sensor, not a hand. So the loop closes both ways: the chief,
 and Victor through it, can steer work already in flight — answer a blocker,
@@ -58,9 +77,14 @@ where he already looks — not buried in a dashboard he never opens.
   and across time, and context windows are neither.
 - **Default-on, overridable.** The chief arms monitoring by default, but Victor
   can always say "leave it for the dashboard" and the chief steps back.
-- **Awareness serves Victor, not itself.** The point of knowing is to *act*:
-  synthesize across agents, queue the next step, catch conflicts, and surface
-  the one thing that actually needs him.
+- **Awareness serves Victor, not itself — and stops short of deciding for him.**
+  The point of knowing is to be *ready*: synthesize across agents, catch
+  conflicts, prepare the next step, and surface the one thing that actually needs
+  him. But the chief informs and tees up; it does not decide. It acts on its own
+  only on the small, obvious, reversible things — answering a trivial,
+  low-consequence blocker, say — and anything with real consequence it hands to
+  Victor and waits. Inform-and-prepare by default; act only at the margins. A
+  confident-but-wrong steer is worse than waiting.
 
 ## Scope & non-goals
 
@@ -155,8 +179,6 @@ Coarse and expected to evolve — not a task tracker.
   Victor vs simply hold it until he asks? Where's the threshold?
 - **Multi-delegation synthesis.** When several agents finish close together, how
   does the chief batch them into one coherent update instead of N pings?
-- **Autonomy line.** How far does the chief act *unbidden* — on a finished output
-  *or* by sending mail to steer a running agent — before it must wait for Victor?
 - **Ownership of "meaningful."** Is the event definition wholly attn-core, or is
   some of "what matters" agent-defined? (Leaning attn-core for one source of
   truth.)
