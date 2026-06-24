@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-24]
+
+### Added
+- **Pin workspaces to keep them in the sidebar even when empty.** A workspace can now be toggled pinned/unpinned from the sidebar. A pinned workspace survives its last session closing and daemon restarts — it stays visible and ready for a new agent launch. Existing tile-only and context-based workspace retention continues to work alongside pinning.
+
 ## [2026-06-23]
 
 ### Added

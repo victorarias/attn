@@ -456,6 +456,7 @@ CREATE INDEX IF NOT EXISTS idx_workflow_agent_calls_run_id
 	// install — if either build burned 51/52 there, these may need to move higher.
 	{52, "rename workspace context janitor backups to keeper compact backups", ""},
 	{53, "add closed_state to chief of staff dispatches", ""},
+	{54, "add pinned to workspaces", ""},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -616,6 +617,11 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 53 {
 			if err := applyMigration53(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 54 {
+			if err := applyMigration54(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -830,6 +836,28 @@ func applyMigration52(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// applyMigration54 adds the pinned column to workspaces, allowing users to pin
+// workspaces so they stay visible at the top of the list. Guarded with
+// tableExists and columnExists for idempotent re-run safety.
+func applyMigration54(tx *sql.Tx) error {
+	exists, err := tableExists(tx, "workspaces")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	hasColumn, err := columnExists(tx, "workspaces", "pinned")
+	if err != nil {
+		return err
+	}
+	if hasColumn {
+		return nil
+	}
+	_, err = tx.Exec(`ALTER TABLE workspaces ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`)
+	return err
 }
 
 // applyMigration53 adds the closed_state column to chief_of_staff_dispatches,

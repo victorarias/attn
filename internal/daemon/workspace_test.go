@@ -126,7 +126,7 @@ func TestRollupWorkspaceStatus_PriorityOrdering(t *testing.T) {
 
 func TestWorkspaceRegistry_RegisterUnregister(t *testing.T) {
 	r := newWorkspaceRegistry()
-	snapshot, isNew := r.register("ws1", "Workspace 1", "/repo", "", false)
+	snapshot, isNew := r.register("ws1", "Workspace 1", "/repo", "", false, false)
 	if !isNew {
 		t.Fatal("first register should be new")
 	}
@@ -137,7 +137,7 @@ func TestWorkspaceRegistry_RegisterUnregister(t *testing.T) {
 		t.Fatalf("initial status = %q, want idle", snapshot.Status)
 	}
 
-	_, isNew = r.register("ws1", "Renamed", "/repo", "", false)
+	_, isNew = r.register("ws1", "Renamed", "/repo", "", false, false)
 	if isNew {
 		t.Fatal("second register should not be new")
 	}
@@ -156,8 +156,8 @@ func TestWorkspaceRegistry_RegisterUnregister(t *testing.T) {
 
 func TestWorkspaceRegistry_AssociateAndDissociate(t *testing.T) {
 	r := newWorkspaceRegistry()
-	r.register("ws1", "ws", "/repo", "", false)
-	r.register("ws2", "ws", "/repo", "", false)
+	r.register("ws1", "ws", "/repo", "", false, false)
+	r.register("ws2", "ws", "/repo", "", false, false)
 
 	if !r.associateSession("s1", "ws1", "Session 1") {
 		t.Fatal("associate should succeed")
@@ -226,7 +226,7 @@ func TestDissociateLastSessionUnregistersWorkspace(t *testing.T) {
 
 func TestWorkspaceRegistry_UnregisterCleansSessionLinks(t *testing.T) {
 	r := newWorkspaceRegistry()
-	r.register("ws1", "ws", "/repo", "", false)
+	r.register("ws1", "ws", "/repo", "", false, false)
 	r.associateSession("s1", "ws1", "Session 1")
 	r.associateSession("s2", "ws1", "Session 2")
 
@@ -729,5 +729,122 @@ func TestAssociateSessionWithWorkspace_PersistsToStore(t *testing.T) {
 	got = d.store.Get("s1")
 	if got != nil {
 		t.Fatalf("session should be removed instead of workspace_id being cleared: %+v", got)
+	}
+}
+
+func TestPinnedWorkspaceSurvivesFinalSessionClose(t *testing.T) {
+	d := newDaemonForTest(t)
+	cap := captureBroadcasts(d)
+	now := string(protocol.TimestampNow())
+
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: "ws1", Title: "ws", Directory: "/repo",
+	})
+	d.setWorkspacePinned("ws1", true)
+
+	d.store.Add(&protocol.Session{
+		ID: "s1", Label: "s1", Agent: protocol.SessionAgentCodex, Directory: "/repo",
+		State: protocol.SessionStateIdle, StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	})
+	d.associateSessionWithWorkspace("s1", "ws1")
+
+	d.dissociateSessionFromWorkspace("s1")
+
+	if _, ok := d.workspaces.snapshot("ws1"); !ok {
+		t.Fatal("pinned workspace was removed after last session departed")
+	}
+
+	events := cap.snapshot()
+	for _, e := range events {
+		if e.Event == protocol.EventWorkspaceUnregistered && e.Workspace != nil && e.Workspace.ID == "ws1" {
+			t.Fatal("pinned workspace emitted workspace_unregistered")
+		}
+	}
+}
+
+func TestUnpinnedWorkspaceRemovedOnFinalSessionClose(t *testing.T) {
+	d := newDaemonForTest(t)
+	now := string(protocol.TimestampNow())
+
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: "ws1", Title: "ws", Directory: "/repo",
+	})
+
+	d.store.Add(&protocol.Session{
+		ID: "s1", Label: "s1", Agent: protocol.SessionAgentCodex, Directory: "/repo",
+		State: protocol.SessionStateIdle, StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	})
+	d.associateSessionWithWorkspace("s1", "ws1")
+
+	d.dissociateSessionFromWorkspace("s1")
+
+	if _, ok := d.workspaces.snapshot("ws1"); ok {
+		t.Fatal("unpinned workspace should be removed after last session departed")
+	}
+}
+
+func TestPinnedEmptyWorkspaceSurvivesStartupCleanup(t *testing.T) {
+	d := newDaemonForTest(t)
+
+	d.store.AddWorkspace(&protocol.Workspace{
+		ID: "ws-pinned", Title: "Pinned", Directory: "/repo", Pinned: true,
+	})
+	d.store.AddWorkspace(&protocol.Workspace{
+		ID: "ws-unpinned", Title: "Unpinned", Directory: "/repo",
+	})
+
+	reaped := d.loadWorkspacesFromStore()
+
+	if _, ok := d.workspaces.snapshot("ws-pinned"); !ok {
+		t.Fatal("pinned empty workspace was reaped during startup load")
+	}
+	if _, ok := d.workspaces.snapshot("ws-unpinned"); ok {
+		t.Fatal("unpinned empty workspace should be reaped during startup load")
+	}
+
+	found := false
+	for _, id := range reaped {
+		if id == "ws-unpinned" {
+			found = true
+		}
+		if id == "ws-pinned" {
+			t.Fatal("pinned workspace should not be in reaped list")
+		}
+	}
+	if !found {
+		t.Fatal("unpinned workspace should be in reaped list")
+	}
+}
+
+func TestSetWorkspacePinned_PersistsAndBroadcasts(t *testing.T) {
+	d := newDaemonForTest(t)
+	cap := captureBroadcasts(d)
+
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: "ws1", Title: "ws", Directory: "/repo",
+	})
+
+	snap, errMsg := d.setWorkspacePinned("ws1", true)
+	if errMsg != "" {
+		t.Fatalf("setWorkspacePinned: %s", errMsg)
+	}
+	if !snap.Pinned {
+		t.Fatal("snapshot after pin should have Pinned=true")
+	}
+
+	stored := d.store.GetWorkspace("ws1")
+	if stored == nil || !stored.Pinned {
+		t.Fatalf("store should persist pinned state: %+v", stored)
+	}
+
+	events := cap.snapshot()
+	var foundStateChanged bool
+	for _, e := range events {
+		if e.Event == protocol.EventWorkspaceStateChanged && e.Workspace != nil && e.Workspace.ID == "ws1" && e.Workspace.Pinned {
+			foundStateChanged = true
+		}
+	}
+	if !foundStateChanged {
+		t.Fatal("expected workspace_state_changed broadcast with Pinned=true")
 	}
 }

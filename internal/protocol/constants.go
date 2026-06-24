@@ -82,6 +82,7 @@ const (
 	CmdSessionSelected                       = "session_selected"
 	CmdWorkspaceSelected                     = "workspace_selected"
 	CmdMuteWorkspace                         = "mute_workspace"
+	CmdPinWorkspace                          = "pin_workspace"
 	CmdQueryPRs                              = "query_prs"
 	CmdMutePR                                = "mute_pr"
 	CmdMuteRepo                              = "mute_repo"
@@ -635,6 +636,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg MuteWorkspaceMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdPinWorkspace:
+		var msg PinWorkspaceMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal pin_workspace: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

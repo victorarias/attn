@@ -1938,6 +1938,13 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 			return
 		}
 		d.sendOK(conn)
+	case protocol.CmdPinWorkspace:
+		m := msg.(*protocol.PinWorkspaceMessage)
+		if _, errMsg := d.setWorkspacePinned(m.WorkspaceID, m.Pinned); errMsg != "" {
+			d.sendError(conn, errMsg)
+			return
+		}
+		d.sendOK(conn)
 	case protocol.CmdCollapseRepo:
 		d.handleCollapseRepo(conn, msg.(*protocol.CollapseRepoMessage))
 	case protocol.CmdQueryRepos:
@@ -2022,7 +2029,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	// first forever. A re-register carries the stored key forward.
 	workspaceRank := d.resolveWorkspaceRank(existingWS)
 	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: workspaceTitle, Directory: session.Directory, Status: protocol.WorkspaceStatusLaunching, Rank: workspaceRank})
-	d.workspaces.register(workspaceID, workspaceTitle, session.Directory, workspaceRank, false)
+	d.workspaces.register(workspaceID, workspaceTitle, session.Directory, workspaceRank, false, false)
 	d.store.Add(session)
 	if resumeSessionID := d.consumePendingResumeSessionID(session.ID); resumeSessionID != "" {
 		d.store.SetResumeSessionID(session.ID, resumeSessionID)
@@ -3240,7 +3247,7 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 			Rank:      workspaceRank,
 		})
 	}
-	d.workspaces.register(workspaceID, msg.Session.Label, msg.Session.Directory, workspaceRank, false)
+	d.workspaces.register(workspaceID, msg.Session.Label, msg.Session.Directory, workspaceRank, false, false)
 
 	// Add session directly to store
 	d.store.Add(&msg.Session)

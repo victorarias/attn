@@ -465,6 +465,7 @@ function App() {
     sendMuteRepo,
     sendMuteAuthor,
     sendMuteWorkspace,
+    sendPinWorkspace,
     sendPRVisited,
     sendRefreshPRs,
     sendRegisterWorkspace,
@@ -620,6 +621,7 @@ function App() {
         sendMuteRepo={sendMuteRepo}
         sendMuteAuthor={sendMuteAuthor}
         sendMuteWorkspace={sendMuteWorkspace}
+        sendPinWorkspace={sendPinWorkspace}
         sendPRVisited={sendPRVisited}
         sendRefreshPRs={sendRefreshPRs}
         sendRegisterWorkspace={sendRegisterWorkspace}
@@ -735,6 +737,7 @@ interface AppContentProps {
   sendMuteRepo: ReturnType<typeof useDaemonSocket>['sendMuteRepo'];
   sendMuteAuthor: ReturnType<typeof useDaemonSocket>['sendMuteAuthor'];
   sendMuteWorkspace: ReturnType<typeof useDaemonSocket>['sendMuteWorkspace'];
+  sendPinWorkspace: ReturnType<typeof useDaemonSocket>['sendPinWorkspace'];
   sendPRVisited: ReturnType<typeof useDaemonSocket>['sendPRVisited'];
   sendRefreshPRs: ReturnType<typeof useDaemonSocket>['sendRefreshPRs'];
   sendRegisterWorkspace: ReturnType<typeof useDaemonSocket>['sendRegisterWorkspace'];
@@ -844,6 +847,7 @@ function AppContent({
   sendMuteRepo,
   sendMuteAuthor,
   sendMuteWorkspace,
+  sendPinWorkspace,
   sendPRVisited,
   sendRefreshPRs,
   sendRegisterWorkspace,
@@ -3572,6 +3576,7 @@ sendFetchPRDetails,
           mutedExpanded={sidebarMutedExpanded}
           onMutedExpandedChange={setSidebarMutedExpanded}
           onMuteWorkspace={sendMuteWorkspace}
+          onPinWorkspace={sendPinWorkspace}
           onRenameSession={sendRenameSession}
           onRenameWorkspace={sendRenameWorkspace}
           onChangeChiefOfStaff={handleChangeChiefOfStaff}

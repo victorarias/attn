@@ -3353,6 +3353,16 @@ export function useDaemonSocket({
     }));
   }, []);
 
+  const sendPinWorkspace = useCallback((workspaceId: string, pinned: boolean) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({
+      cmd: 'pin_workspace',
+      workspace_id: workspaceId,
+      pinned,
+    }));
+  }, []);
+
   // Request daemon to refresh PRs from GitHub
   const sendRefreshPRs = useCallback((): Promise<PRActionResult> => {
     return new Promise((resolve, reject) => {
@@ -4874,6 +4884,7 @@ export function useDaemonSocket({
     sendMuteRepo,
     sendMuteAuthor,
     sendMuteWorkspace,
+    sendPinWorkspace,
     sendRefreshPRs,
     sendFetchPRDetails,
     sendClearSessions,

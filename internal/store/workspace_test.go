@@ -130,6 +130,72 @@ func idsOf(list []*protocol.Workspace) []string {
 	return ids
 }
 
+func TestSetWorkspacePinned(t *testing.T) {
+	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewWithDB error: %v", err)
+	}
+	defer s.Close()
+
+	s.AddWorkspace(&protocol.Workspace{ID: "workspace-1", Title: "Project", Directory: "/tmp/project"})
+
+	if got := s.GetWorkspace("workspace-1"); got == nil || got.Pinned {
+		t.Fatalf("new workspace pinned = true, want false")
+	}
+
+	if err := s.SetWorkspacePinned("workspace-1", true); err != nil {
+		t.Fatalf("SetWorkspacePinned(true): %v", err)
+	}
+	if got := s.GetWorkspace("workspace-1"); got == nil || !got.Pinned {
+		t.Fatalf("workspace after pin = %+v, want pinned", got)
+	}
+
+	if err := s.SetWorkspacePinned("workspace-1", false); err != nil {
+		t.Fatalf("SetWorkspacePinned(false): %v", err)
+	}
+	if got := s.GetWorkspace("workspace-1"); got == nil || got.Pinned {
+		t.Fatalf("workspace after unpin = %+v, want unpinned", got)
+	}
+}
+
+func TestAddWorkspacePinnedField(t *testing.T) {
+	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewWithDB error: %v", err)
+	}
+	defer s.Close()
+
+	s.AddWorkspace(&protocol.Workspace{ID: "workspace-1", Title: "Pinned", Directory: "/tmp/p", Pinned: true})
+	got := s.GetWorkspace("workspace-1")
+	if got == nil || !got.Pinned {
+		t.Fatalf("workspace with Pinned=true = %+v, want pinned", got)
+	}
+}
+
+func TestListWorkspacesPinnedField(t *testing.T) {
+	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewWithDB error: %v", err)
+	}
+	defer s.Close()
+
+	s.AddWorkspace(&protocol.Workspace{ID: "ws-a", Title: "A", Directory: "/tmp/a"})
+	s.AddWorkspace(&protocol.Workspace{ID: "ws-b", Title: "B", Directory: "/tmp/b", Pinned: true})
+
+	list := s.ListWorkspaces()
+	if len(list) != 2 {
+		t.Fatalf("ListWorkspaces() = %d, want 2", len(list))
+	}
+	for _, ws := range list {
+		if ws.ID == "ws-a" && ws.Pinned {
+			t.Fatalf("ws-a should not be pinned")
+		}
+		if ws.ID == "ws-b" && !ws.Pinned {
+			t.Fatalf("ws-b should be pinned")
+		}
+	}
+}
+
 func TestAssignSessionWorkspaceRefusesEmptyWorkspace(t *testing.T) {
 	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

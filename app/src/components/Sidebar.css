@@ -685,6 +685,14 @@
   color: var(--color-text-primary);
 }
 
+/* Keep the pin button visible and accented when the workspace is pinned,
+   even when the header row is not hovered. */
+.pin-workspace-btn.pinned {
+  opacity: 1;
+  pointer-events: auto;
+  color: var(--color-text-primary);
+}
+
 .session-item:hover .session-actions,
 .session-item:focus-within .session-actions {
   opacity: 1;
