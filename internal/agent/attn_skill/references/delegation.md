@@ -46,7 +46,20 @@ Copilot delegation is currently unsupported.
 
 ## Placement
 
-No placement flag adds the delegated session to the current workspace:
+Before creating a new workspace, check whether an existing one already fits the
+work. `attn list` returns sessions grouped by `workspace_id`; use the session
+labels, directories, and workspace IDs to identify domain workspaces the user
+already has (e.g. code reviews, goalie rotation, triage). When the delegated
+task matches an existing workspace's domain, place it there with `--workspace`:
+
+    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" --workspace <workspace-id>
+
+When delegating multiple independent items in parallel, route each agent to the
+workspace that fits its domain rather than creating a new workspace per item.
+
+If no existing workspace fits, use one of:
+
+No placement flag — adds the session to the current workspace:
 
     "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file"
 
@@ -58,28 +71,29 @@ Create a workspace at an existing directory:
 
     "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" --cwd /path/to/project
 
-Join an existing workspace:
-
-    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" --workspace <workspace-id>
-
 `attn list` marks sessions in hidden workspaces with `workspace_muted: true`.
 When the source session is the chief of staff, delegating into a muted existing
 workspace automatically unmutes it so the new agent is visible in the sidebar.
 Ordinary delegation preserves the workspace's current mute state.
 
-Create an isolated worktree in the current workspace:
+`--worktree` creates an isolated git worktree for branch isolation. It combines
+with any placement:
 
+    # worktree in the current workspace
     "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" \
       --worktree feat/delegated-task
 
-Place the isolated worktree in a separate new workspace:
+    # worktree in an existing workspace
+    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" \
+      --workspace <workspace-id> --worktree feat/delegated-task
 
+    # worktree in a new workspace
     "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" \
       --new-workspace --worktree feat/delegated-task
 
 Worktree options:
 
-- `--repo <path>` chooses the main repository.
+- `--repo <path>` chooses the main repository (defaults to the workspace's repo).
 - `--from <ref>` chooses the starting branch or ref.
 - `--worktree-path <path>` chooses an explicit worktree location.
 
