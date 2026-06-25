@@ -57,10 +57,6 @@ task matches an existing workspace's domain, place it there with `--workspace`:
 When delegating multiple independent items in parallel, route each agent to the
 workspace that fits its domain rather than creating a new workspace per item.
 
-`--workspace` cannot be combined with `--worktree`, `--new-workspace`, or
-`--cwd`. When a task needs both workspace reuse and branch isolation, place it
-in the matching workspace without `--worktree`.
-
 If no existing workspace fits, use one of:
 
 No placement flag — adds the session to the current workspace:
