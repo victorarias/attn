@@ -208,6 +208,54 @@ func TestHandoffDispatchRejectsEmptyContent(t *testing.T) {
 	}
 }
 
+func TestHandoffDispatchRejectsInvalidOutcomeBeforeNotebookWrite(t *testing.T) {
+	tests := []struct {
+		name    string
+		outcome protocol.DispatchReport
+		wantErr string
+	}{
+		{
+			name: "non-handoff report type",
+			outcome: protocol.DispatchReport{
+				ReportType: protocol.DispatchReportTypeProgress,
+				WorkState:  protocol.DispatchWorkStateReadyForReview,
+				Summary:    "Artifact ready.",
+			},
+			wantErr: "report_type must be",
+		},
+		{
+			name: "non-terminal work state",
+			outcome: protocol.DispatchReport{
+				ReportType: protocol.DispatchReportTypeHandoff,
+				WorkState:  protocol.DispatchWorkStateInProgress,
+				Summary:    "Artifact still in progress.",
+			},
+			wantErr: "work_state must be",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			d := newNotebookDaemon(t)
+			addHandoffDispatch(t, d, "worker-invalid", "dsp-invalid")
+			resp := callHandoff(t, d, &protocol.HandoffDispatchMessage{
+				Cmd:              protocol.CmdHandoffDispatch,
+				SourceSessionID:  "worker-invalid",
+				To:               "projects/audit/invalid.md",
+				Content:          "must not be written",
+				StructuredReport: test.outcome,
+			})
+			if resp.Ok || resp.Error == nil || !strings.Contains(*resp.Error, test.wantErr) {
+				t.Fatalf("invalid handoff outcome = %+v", resp)
+			}
+			root := d.store.GetSetting(SettingNotebookRoot)
+			if _, err := os.Stat(filepath.Join(root, "projects/audit/invalid.md")); !os.IsNotExist(err) {
+				t.Fatalf("invalid handoff wrote Notebook artifact: %v", err)
+			}
+		})
+	}
+}
+
 // The full unix-socket path (ParseMessage decode -> daemon route -> handler) wires
 // the new command end to end, not just the handler in isolation.
 func TestHandoffDispatchFullSocketPath(t *testing.T) {
@@ -244,7 +292,7 @@ func TestHandoffDispatchTerminalAlsoJournals(t *testing.T) {
 		To: "projects/audit/final.md", Content: "# Final\n",
 		Report: protocol.Ptr("Done."),
 		StructuredReport: protocol.DispatchReport{
-			ReportType: protocol.DispatchReportTypeCompletion,
+			ReportType: protocol.DispatchReportTypeHandoff,
 			WorkState:  protocol.DispatchWorkStateCompleted,
 			Summary:    "Audit finished; findings handed off.",
 		},

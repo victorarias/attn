@@ -262,6 +262,25 @@ func validateDispatchReport(report *protocol.DispatchReport) error {
 	return nil
 }
 
+func validateHandoffDispatchReport(report *protocol.DispatchReport) error {
+	if err := validateDispatchReport(report); err != nil {
+		return err
+	}
+	if report.ReportType != protocol.DispatchReportTypeHandoff {
+		return fmt.Errorf("report_type must be %q", protocol.DispatchReportTypeHandoff)
+	}
+	switch report.WorkState {
+	case protocol.DispatchWorkStateReadyForReview, protocol.DispatchWorkStateCompleted:
+		return nil
+	default:
+		return fmt.Errorf(
+			"work_state must be %q or %q",
+			protocol.DispatchWorkStateReadyForReview,
+			protocol.DispatchWorkStateCompleted,
+		)
+	}
+}
+
 func (d *Daemon) chiefOfStaffDispatches(chiefSessionID string) []protocol.ChiefOfStaffDispatch {
 	records := d.store.ListChiefOfStaffDispatches(chiefSessionID)
 	result := make([]protocol.ChiefOfStaffDispatch, 0, len(records))
@@ -364,7 +383,7 @@ func (d *Daemon) handleHandoffDispatch(conn net.Conn, msg *protocol.HandoffDispa
 		d.sendError(conn, "dispatch handoff: content is required")
 		return
 	}
-	if err := validateDispatchReport(&msg.StructuredReport); err != nil {
+	if err := validateHandoffDispatchReport(&msg.StructuredReport); err != nil {
 		d.sendError(conn, "dispatch handoff: "+err.Error())
 		return
 	}
