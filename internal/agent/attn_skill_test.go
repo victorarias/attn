@@ -81,7 +81,7 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"--workspace <workspace-id>",
 		"--cwd /path/to/project",
 		"--worktree feat/delegated-task",
-		"isolated worktree in the current workspace",
+		"isolated git worktree for branch isolation",
 		"--new-workspace --worktree feat/delegated-task",
 		"--worktree-path <path>",
 		"--source-session <session-id>",
