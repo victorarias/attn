@@ -1354,23 +1354,62 @@ func TestChiefOfStaffDelegateUnmutesExistingWorkspace(t *testing.T) {
 	}
 }
 
-func TestDelegateRejectsWorktreeInExistingWorkspace(t *testing.T) {
+func TestDelegateCreatesWorktreeInExistingWorkspace(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	runGitDaemon(t, mainRepo, "init")
+	runGitDaemon(t, mainRepo, "commit", "--allow-empty", "-m", "init")
+
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
-	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	_, sourceSessionID, _ := setupDelegationSourceAt(t, d, backend, mainRepo)
+	consumeDelegatedPrompt(t, backend)
 
-	_, err := d.delegate(&protocol.DelegateMessage{
+	targetWorkspaceID := "workspace-target"
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        targetWorkspaceID,
+		Title:     "Target",
+		Directory: mainRepo,
+	})
+
+	worktreePath := filepath.Join(root, "repo--feat-existing-ws")
+	result, err := d.delegate(&protocol.DelegateMessage{
 		Cmd:             protocol.CmdDelegate,
 		SourceSessionID: sourceSessionID,
-		Brief:           "Do not create this unsupported worktree.",
+		Brief:           "Work in a worktree placed in an existing workspace.",
+		Label:           protocol.Ptr("delegated"),
 		Placement:       protocol.Ptr(delegationPlacementExisting),
-		WorkspaceID:     protocol.Ptr("workspace-source"),
+		WorkspaceID:     protocol.Ptr(targetWorkspaceID),
 		Worktree: &protocol.DelegateWorktreeRequest{
-			Branch: "feat/unsupported",
+			Branch: "feat/existing-ws",
+			Path:   protocol.Ptr(worktreePath),
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "existing_workspace placement does not accept cwd or worktree") {
+	if err != nil {
 		t.Fatalf("delegate() error = %v", err)
+	}
+	worktreePath = git.CanonicalizePath(worktreePath)
+	if result.Placement != delegationPlacementExisting ||
+		result.WorkspaceID != targetWorkspaceID ||
+		result.Directory != worktreePath ||
+		!protocol.Deref(result.WorktreeCreated) {
+		t.Fatalf("result = %+v", result)
+	}
+	session := d.store.Get(result.SessionID)
+	if session == nil ||
+		session.WorkspaceID != targetWorkspaceID ||
+		session.Directory != worktreePath ||
+		session.Label != "delegated" ||
+		protocol.Deref(session.Branch) != "feat/existing-ws" {
+		t.Fatalf("delegated worktree session = %+v", session)
+	}
+	layout := d.store.GetWorkspaceLayout(targetWorkspaceID)
+	if layout == nil || len(layout.Panes) != 1 {
+		t.Fatalf("target workspace layout = %+v, want one pane", layout)
 	}
 }
 

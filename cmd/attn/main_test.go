@@ -560,7 +560,7 @@ func TestParseDelegateArgsWorktreeUsesExplicitNewWorkspace(t *testing.T) {
 func TestParseDelegateArgsRejectsAmbiguousPlacement(t *testing.T) {
 	for _, args := range [][]string{
 		{"--workspace", "workspace-target", "--new-workspace"},
-		{"--workspace", "workspace-target", "--worktree", "feat/parser"},
+		{"--workspace", "workspace-target", "--cwd", "/some/dir"},
 	} {
 		_, err := parseDelegateArgs(append([]string{
 			"--source-session", "source-session",
@@ -569,6 +569,23 @@ func TestParseDelegateArgsRejectsAmbiguousPlacement(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "--workspace cannot be combined") {
 			t.Fatalf("parseDelegateArgs(%v) error = %v", args, err)
 		}
+	}
+}
+
+func TestParseDelegateArgsAcceptsWorkspaceWithWorktree(t *testing.T) {
+	parsed, err := parseDelegateArgs([]string{
+		"--source-session", "source-session",
+		"--brief", "Work in an existing workspace with a worktree",
+		"--workspace", "workspace-target",
+		"--worktree", "feat/parser",
+	})
+	if err != nil {
+		t.Fatalf("parseDelegateArgs error = %v", err)
+	}
+	if parsed.options.Placement != "existing_workspace" ||
+		parsed.options.WorkspaceID != "workspace-target" ||
+		parsed.options.Worktree != "feat/parser" {
+		t.Fatalf("options = %+v", parsed.options)
 	}
 }
 
@@ -887,7 +904,7 @@ func TestWriteDelegateHelpMentionsPlacementOptions(t *testing.T) {
 		"--workspace <id>",
 		"--cwd <path>",
 		"--worktree <branch>",
-		"combine with --new-workspace to place the worktree in a new workspace",
+		"combine with any placement (current, --workspace, or --new-workspace)",
 		"--agent <name>",
 		"--name <text>",
 	} {
