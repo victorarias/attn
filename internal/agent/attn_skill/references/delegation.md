@@ -46,7 +46,20 @@ Copilot delegation is currently unsupported.
 
 ## Placement
 
-No placement flag adds the delegated session to the current workspace:
+Before creating a new workspace, check whether an existing one already fits the
+work. `attn list` returns a `workspaces` array; each entry has `id`, `title`,
+`directory`, and `pinned`. Pinned workspaces are long-lived domain spaces the
+user keeps around (e.g. code reviews, goalie rotation, triage). When the
+delegated task matches a workspace's domain, place it there with `--workspace`:
+
+    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" --workspace <workspace-id>
+
+When delegating multiple independent items in parallel, route each agent to the
+workspace that fits its domain rather than creating a new workspace per item.
+
+If no existing workspace fits, use one of:
+
+No placement flag — adds the session to the current workspace:
 
     "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file"
 
@@ -57,10 +70,6 @@ Create a separate workspace using the source directory:
 Create a workspace at an existing directory:
 
     "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" --cwd /path/to/project
-
-Join an existing workspace:
-
-    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" --workspace <workspace-id>
 
 `attn list` marks sessions in hidden workspaces with `workspace_muted: true`.
 When the source session is the chief of staff, delegating into a muted existing
