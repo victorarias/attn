@@ -47,15 +47,19 @@ Copilot delegation is currently unsupported.
 ## Placement
 
 Before creating a new workspace, check whether an existing one already fits the
-work. `attn list` returns a `workspaces` array; each entry has `id`, `title`,
-`directory`, and `pinned`. Pinned workspaces are long-lived domain spaces the
-user keeps around (e.g. code reviews, goalie rotation, triage). When the
-delegated task matches a workspace's domain, place it there with `--workspace`:
+work. `attn list` returns sessions grouped by `workspace_id`; use the session
+labels, directories, and workspace IDs to identify domain workspaces the user
+already has (e.g. code reviews, goalie rotation, triage). When the delegated
+task matches an existing workspace's domain, place it there with `--workspace`:
 
     "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" --workspace <workspace-id>
 
 When delegating multiple independent items in parallel, route each agent to the
 workspace that fits its domain rather than creating a new workspace per item.
+
+`--workspace` cannot be combined with `--worktree`, `--new-workspace`, or
+`--cwd`. When a task needs both workspace reuse and branch isolation, place it
+in the matching workspace without `--worktree`.
 
 If no existing workspace fits, use one of:
 

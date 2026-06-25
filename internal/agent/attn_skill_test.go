@@ -77,6 +77,7 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"user explicitly asks for delegation",
 		"delegate --brief-file",
 		"--new-workspace",
+		"Before creating a new workspace, check whether an existing one already fits",
 		"--workspace <workspace-id>",
 		"--cwd /path/to/project",
 		"--worktree feat/delegated-task",
