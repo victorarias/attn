@@ -1626,7 +1626,7 @@ type HandoffDispatchMessage struct {
 	SourceSessionID string `json:"source_session_id"`
 
 	// StructuredReport corresponds to the JSON schema field "structured_report".
-	StructuredReport *DispatchReport `json:"structured_report,omitempty,omitzero"`
+	StructuredReport DispatchReport `json:"structured_report"`
 
 	// To corresponds to the JSON schema field "to".
 	To string `json:"to"`
@@ -2779,20 +2779,6 @@ type RepoState struct {
 	Repo string `json:"repo"`
 }
 
-type ReportDispatchMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Report corresponds to the JSON schema field "report".
-	Report string `json:"report"`
-
-	// SourceSessionID corresponds to the JSON schema field "source_session_id".
-	SourceSessionID string `json:"source_session_id"`
-
-	// StructuredReport corresponds to the JSON schema field "structured_report".
-	StructuredReport *DispatchReport `json:"structured_report,omitempty,omitzero"`
-}
-
 type ReposUpdatedMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
@@ -3592,6 +3578,20 @@ type StopReviewLoopMessage struct {
 
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID string `json:"session_id"`
+}
+
+type SubmitDispatchOutcomeMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Report corresponds to the JSON schema field "report".
+	Report string `json:"report"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+
+	// StructuredReport corresponds to the JSON schema field "structured_report".
+	StructuredReport DispatchReport `json:"structured_report"`
 }
 
 type SubscribeGitStatusMessage struct {

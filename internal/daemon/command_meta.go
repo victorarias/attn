@@ -30,7 +30,7 @@ func commandMetadata(scope CommandScope, blocksDuringRecovery bool, log bool) Co
 var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdRegister:                              commandMetadata(ScopeSession, false, true),
 	protocol.CmdListDispatches:                        commandMetadata(ScopeHubLocal, false, true),
-	protocol.CmdReportDispatch:                        commandMetadata(ScopeSession, false, true),
+	protocol.CmdSubmitDispatchOutcome:                 commandMetadata(ScopeSession, false, true),
 	protocol.CmdHandoffDispatch:                       commandMetadata(ScopeSession, false, true),
 	protocol.CmdSendDispatchMessage:                   commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdListDispatchMessages:                  commandMetadata(ScopeSession, false, true),

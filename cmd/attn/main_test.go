@@ -572,44 +572,123 @@ func TestParseDelegateArgsRejectsAmbiguousPlacement(t *testing.T) {
 	}
 }
 
-func TestParseDispatchReportArgsReadsFile(t *testing.T) {
+func TestParseDispatchOutcomeArgsBuildsTypedCompletion(t *testing.T) {
 	t.Setenv("ATTN_SESSION_ID", "worker-1")
 	path := filepath.Join(t.TempDir(), "report.md")
 	if err := os.WriteFile(path, []byte("Implemented the fix.\nTests pass.\n"), 0o600); err != nil {
 		t.Fatalf("write report: %v", err)
 	}
-	sessionID, report, structuredReport, err := parseDispatchReportArgs([]string{"--file", path})
+	parsed, err := parseDispatchOutcomeArgs("complete", []string{
+		"--summary", "Parser implemented",
+		"--details-file", path,
+		"--next-actor", "chief",
+		"--next-action", "Review the result",
+		"--constraint", "no push",
+	})
 	if err != nil {
-		t.Fatalf("parseDispatchReportArgs() error = %v", err)
+		t.Fatalf("parseDispatchOutcomeArgs() error = %v", err)
 	}
-	if sessionID != "worker-1" || report != "Implemented the fix.\nTests pass." || structuredReport != nil {
-		t.Fatalf("dispatch report = (%q, %q, %+v)", sessionID, report, structuredReport)
+	if parsed.SourceSessionID != "worker-1" || parsed.Report != "Implemented the fix.\nTests pass." {
+		t.Fatalf("dispatch outcome = %+v", parsed)
+	}
+	structured := parsed.StructuredReport
+	if structured.ReportType != protocol.DispatchReportTypeCompletion ||
+		structured.WorkState != protocol.DispatchWorkStateCompleted ||
+		structured.Summary != "Parser implemented" ||
+		protocol.Deref(structured.NextActor) != "chief" ||
+		protocol.Deref(structured.NextAction) != "Review the result" ||
+		len(structured.Constraints) != 1 || structured.Constraints[0] != "no push" {
+		t.Fatalf("structured outcome = %+v", structured)
 	}
 }
 
-func TestParseDispatchHandoffArgsReadsArtifact(t *testing.T) {
+func TestDispatchOutcomeTypes(t *testing.T) {
+	tests := []struct {
+		outcome    string
+		reportType protocol.DispatchReportType
+		workState  protocol.DispatchWorkState
+	}{
+		{"update", protocol.DispatchReportTypeProgress, protocol.DispatchWorkStateInProgress},
+		{"block", protocol.DispatchReportTypeBlocker, protocol.DispatchWorkStateNeedsInput},
+		{"review", protocol.DispatchReportTypeHandoff, protocol.DispatchWorkStateReadyForReview},
+		{"complete", protocol.DispatchReportTypeCompletion, protocol.DispatchWorkStateCompleted},
+		{"fail", protocol.DispatchReportTypeFailure, protocol.DispatchWorkStateFailed},
+	}
+	for _, test := range tests {
+		t.Run(test.outcome, func(t *testing.T) {
+			reportType, workState, ok := dispatchOutcomeTypes(test.outcome)
+			if !ok || reportType != test.reportType || workState != test.workState {
+				t.Fatalf("dispatchOutcomeTypes(%q) = (%q, %q, %v)", test.outcome, reportType, workState, ok)
+			}
+		})
+	}
+}
+
+func TestParseDispatchBlockRequiresQuestionAndBuildsRequest(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "worker-1")
+	if _, err := parseDispatchOutcomeArgs("block", []string{"--summary", "Need input"}); err == nil ||
+		!strings.Contains(err.Error(), "--question is required") {
+		t.Fatalf("missing question error = %v", err)
+	}
+	parsed, err := parseDispatchOutcomeArgs("block", []string{
+		"--summary", "Need the event contract",
+		"--question", "Which event should be emitted?",
+		"--recommendation", "Use AisNoOperationV1",
+		"--consequence", "Emission remains blocked",
+	})
+	if err != nil {
+		t.Fatalf("parseDispatchOutcomeArgs() error = %v", err)
+	}
+	structured := parsed.StructuredReport
+	if structured.ReportType != protocol.DispatchReportTypeBlocker ||
+		structured.WorkState != protocol.DispatchWorkStateNeedsInput ||
+		structured.Request == nil ||
+		structured.Request.Question != "Which event should be emitted?" ||
+		structured.Request.ExpectedResponder != "chief" ||
+		protocol.Deref(structured.Request.Recommendation) != "Use AisNoOperationV1" {
+		t.Fatalf("block outcome = %+v", structured)
+	}
+}
+
+func TestParseDispatchOutcomeArgsRejectsLegacyCoordinationFile(t *testing.T) {
+	_, err := parseDispatchOutcomeArgs("complete", []string{
+		"--session", "worker-1",
+		"--summary", "Done",
+		"--coordination-file", "/tmp/coordination.json",
+	})
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("legacy coordination error = %v", err)
+	}
+}
+
+func TestParseDispatchHandoffArgsReadsArtifactAndBuildsReview(t *testing.T) {
 	t.Setenv("ATTN_SESSION_ID", "worker-1")
 	path := filepath.Join(t.TempDir(), "artifact.md")
 	artifact := "# Findings\n\nThe long report.\n"
 	if err := os.WriteFile(path, []byte(artifact), 0o600); err != nil {
 		t.Fatalf("write artifact: %v", err)
 	}
-	sessionID, to, content, message, structured, err := parseDispatchHandoffArgs([]string{
+	parsed, err := parseDispatchHandoffArgs([]string{
 		"--file", path,
 		"--to", "projects/audit/findings.md",
-		"--message", "Audit done.",
+		"--summary", "Audit ready",
+		"--details", "Review the access findings.",
+		"--review",
 	})
 	if err != nil {
 		t.Fatalf("parseDispatchHandoffArgs() error = %v", err)
 	}
-	if sessionID != "worker-1" || to != "projects/audit/findings.md" || message != "Audit done." {
-		t.Fatalf("handoff = (%q, %q, %q)", sessionID, to, message)
+	if parsed.SourceSessionID != "worker-1" || parsed.To != "projects/audit/findings.md" ||
+		parsed.Report != "Review the access findings." {
+		t.Fatalf("handoff = %+v", parsed)
 	}
-	if content != artifact { // the artifact is sent verbatim, not trimmed
-		t.Fatalf("artifact not verbatim: %q", content)
+	if parsed.Content != artifact { // the artifact is sent verbatim, not trimmed
+		t.Fatalf("artifact not verbatim: %q", parsed.Content)
 	}
-	if structured != nil {
-		t.Fatalf("unexpected structured report: %+v", structured)
+	if parsed.StructuredReport.ReportType != protocol.DispatchReportTypeHandoff ||
+		parsed.StructuredReport.WorkState != protocol.DispatchWorkStateReadyForReview ||
+		parsed.StructuredReport.Summary != "Audit ready" {
+		t.Fatalf("structured handoff = %+v", parsed.StructuredReport)
 	}
 }
 
@@ -619,58 +698,29 @@ func TestParseDispatchHandoffArgsRequiresToAndFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("body"), 0o600); err != nil {
 		t.Fatalf("write artifact: %v", err)
 	}
-	if _, _, _, _, _, err := parseDispatchHandoffArgs([]string{"--file", path}); err == nil ||
+	if _, err := parseDispatchHandoffArgs([]string{"--file", path}); err == nil ||
 		!strings.Contains(err.Error(), "--to is required") {
 		t.Fatalf("missing --to error = %v", err)
 	}
-	if _, _, _, _, _, err := parseDispatchHandoffArgs([]string{"--to", "projects/x.md"}); err == nil ||
+	if _, err := parseDispatchHandoffArgs([]string{"--to", "projects/x.md"}); err == nil ||
 		!strings.Contains(err.Error(), "--file is required") {
 		t.Fatalf("missing --file error = %v", err)
 	}
 }
 
-func TestParseDispatchReportArgsRejectsAmbiguousContent(t *testing.T) {
-	_, _, _, err := parseDispatchReportArgs([]string{
-		"--session", "worker-1",
-		"--message", "done",
-		"--file", "/tmp/report.md",
-	})
-	if err == nil || !strings.Contains(err.Error(), "only one of --message or --file") {
-		t.Fatalf("parseDispatchReportArgs() error = %v", err)
-	}
-}
-
-func TestParseDispatchReportArgsReadsCoordinationFile(t *testing.T) {
+func TestParseDispatchHandoffRequiresExplicitOutcome(t *testing.T) {
 	t.Setenv("ATTN_SESSION_ID", "worker-1")
-	path := filepath.Join(t.TempDir(), "coordination.json")
-	if err := os.WriteFile(path, []byte(`{
-		"report_type": "blocker",
-		"summary": "Core implementation ready locally",
-		"work_state": "needs_input",
-		"next_actor": "team",
-		"request": {
-			"question": "Which event contract should be used?",
-			"expected_responder": "team",
-			"status": "pending"
-		}
-	}`), 0o600); err != nil {
-		t.Fatalf("write coordination file: %v", err)
+	path := filepath.Join(t.TempDir(), "artifact.md")
+	if err := os.WriteFile(path, []byte("artifact"), 0o600); err != nil {
+		t.Fatalf("write artifact: %v", err)
 	}
-	sessionID, report, structured, err := parseDispatchReportArgs([]string{
-		"--message", "Waiting for the event contract decision.",
-		"--coordination-file", path,
+	_, err := parseDispatchHandoffArgs([]string{
+		"--file", path,
+		"--to", "projects/audit/findings.md",
+		"--summary", "Audit ready",
 	})
-	if err != nil {
-		t.Fatalf("parseDispatchReportArgs() error = %v", err)
-	}
-	if sessionID != "worker-1" || report != "Waiting for the event contract decision." {
-		t.Fatalf("dispatch report = (%q, %q)", sessionID, report)
-	}
-	if structured == nil ||
-		structured.ReportType != protocol.DispatchReportTypeBlocker ||
-		structured.WorkState != protocol.DispatchWorkStateNeedsInput ||
-		structured.Request == nil {
-		t.Fatalf("structured report = %+v", structured)
+	if err == nil || !strings.Contains(err.Error(), "exactly one of --review or --complete") {
+		t.Fatalf("missing handoff outcome error = %v", err)
 	}
 }
 

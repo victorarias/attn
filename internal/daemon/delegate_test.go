@@ -158,7 +158,9 @@ func TestChiefOfStaffDelegateCreatesTrackedDispatch(t *testing.T) {
 		t.Fatalf("delegate result = %+v, want dispatch id", result)
 	}
 	if !strings.Contains(prompt, "Investigate the tracked task.") ||
-		!strings.Contains(prompt, "dispatch report --message") {
+		!strings.Contains(prompt, "dispatch update --summary") ||
+		!strings.Contains(prompt, "dispatch complete --summary") ||
+		strings.Contains(prompt, "coordination-file") {
 		t.Fatalf("tracked initial prompt = %q", prompt)
 	}
 
@@ -234,10 +236,15 @@ func TestChiefOfStaffDelegationPreservesCoordinationIdentityAcrossPlacements(t *
 
 			reportServer, reportClient := net.Pipe()
 			go func() {
-				d.handleReportDispatch(reportServer, &protocol.ReportDispatchMessage{
-					Cmd:             protocol.CmdReportDispatch,
+				d.handleSubmitDispatchOutcome(reportServer, &protocol.SubmitDispatchOutcomeMessage{
+					Cmd:             protocol.CmdSubmitDispatchOutcome,
 					SourceSessionID: spawn.ID,
 					Report:          "Placement identity verified.",
+					StructuredReport: protocol.DispatchReport{
+						ReportType: protocol.DispatchReportTypeProgress,
+						WorkState:  protocol.DispatchWorkStateInProgress,
+						Summary:    "Placement identity verified.",
+					},
 				})
 				_ = reportServer.Close()
 			}()
@@ -377,7 +384,7 @@ func TestOrdinaryDelegationDoesNotDecorateDelegatedFromChief(t *testing.T) {
 	}
 }
 
-func TestDispatchReportUpdatesTrackedRecord(t *testing.T) {
+func TestSubmitDispatchOutcomeUpdatesTrackedRecord(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
 	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
@@ -398,10 +405,15 @@ func TestDispatchReportUpdatesTrackedRecord(t *testing.T) {
 	server, client := net.Pipe()
 	defer client.Close()
 	go func() {
-		d.handleReportDispatch(server, &protocol.ReportDispatchMessage{
-			Cmd:             protocol.CmdReportDispatch,
+		d.handleSubmitDispatchOutcome(server, &protocol.SubmitDispatchOutcomeMessage{
+			Cmd:             protocol.CmdSubmitDispatchOutcome,
 			SourceSessionID: result.SessionID,
 			Report:          "Implementation complete; focused tests pass.",
+			StructuredReport: protocol.DispatchReport{
+				ReportType: protocol.DispatchReportTypeCompletion,
+				WorkState:  protocol.DispatchWorkStateCompleted,
+				Summary:    "Implementation complete; focused tests pass.",
+			},
 		})
 		_ = server.Close()
 	}()
@@ -682,11 +694,11 @@ func TestStructuredDispatchReportSeparatesRuntimeAndSupportsResolution(t *testin
 	server, client := net.Pipe()
 	reportDone := make(chan struct{})
 	go func() {
-		d.handleReportDispatch(server, &protocol.ReportDispatchMessage{
-			Cmd:              protocol.CmdReportDispatch,
+		d.handleSubmitDispatchOutcome(server, &protocol.SubmitDispatchOutcomeMessage{
+			Cmd:              protocol.CmdSubmitDispatchOutcome,
 			SourceSessionID:  result.SessionID,
 			Report:           "Core implementation ready; decision required.",
-			StructuredReport: report,
+			StructuredReport: *report,
 		})
 		_ = server.Close()
 		close(reportDone)

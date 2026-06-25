@@ -52,6 +52,14 @@ func addHandoffDispatch(t *testing.T, d *Daemon, sessionID, dispatchID string) {
 	}
 }
 
+func handoffReviewOutcome(summary string) protocol.DispatchReport {
+	return protocol.DispatchReport{
+		ReportType: protocol.DispatchReportTypeHandoff,
+		WorkState:  protocol.DispatchWorkStateReadyForReview,
+		Summary:    summary,
+	}
+}
+
 // The happy path: a tracked dispatch hands an artifact into the Notebook; the bytes
 // land verbatim at the designated path and the report carries a resolvable
 // root-absolute reference alongside the agent's note.
@@ -61,11 +69,12 @@ func TestHandoffDispatchWritesArtifactAndReferences(t *testing.T) {
 
 	artifact := "# Findings\n\nA long report the agent built with the user.\n"
 	resp := callHandoff(t, d, &protocol.HandoffDispatchMessage{
-		Cmd:             protocol.CmdHandoffDispatch,
-		SourceSessionID: "worker-1",
-		To:              "projects/audit/findings.md",
-		Content:         artifact,
-		Report:          protocol.Ptr("Audit complete."),
+		Cmd:              protocol.CmdHandoffDispatch,
+		SourceSessionID:  "worker-1",
+		To:               "projects/audit/findings.md",
+		Content:          artifact,
+		Report:           protocol.Ptr("Audit complete."),
+		StructuredReport: handoffReviewOutcome("Audit complete."),
 	})
 	if !resp.Ok || resp.ChiefOfStaffDispatch == nil {
 		t.Fatalf("handoff response = %+v", resp)
@@ -91,10 +100,11 @@ func TestHandoffDispatchDefaultNoteAndPathNormalization(t *testing.T) {
 	addHandoffDispatch(t, d, "worker-2", "dsp-2")
 
 	resp := callHandoff(t, d, &protocol.HandoffDispatchMessage{
-		Cmd:             protocol.CmdHandoffDispatch,
-		SourceSessionID: "worker-2",
-		To:              "/areas/notes.md", // leading slash is accepted and normalized away
-		Content:         "body",
+		Cmd:              protocol.CmdHandoffDispatch,
+		SourceSessionID:  "worker-2",
+		To:               "/areas/notes.md", // leading slash is accepted and normalized away
+		Content:          "body",
+		StructuredReport: handoffReviewOutcome("Notes ready for review."),
 	})
 	if !resp.Ok {
 		t.Fatalf("handoff response = %+v", resp)
@@ -116,6 +126,7 @@ func TestHandoffDispatchOverwritesOnRehandoff(t *testing.T) {
 	first := callHandoff(t, d, &protocol.HandoffDispatchMessage{
 		Cmd: protocol.CmdHandoffDispatch, SourceSessionID: "worker-3",
 		To: "projects/x/report.md", Content: "v1",
+		StructuredReport: handoffReviewOutcome("First version ready."),
 	})
 	if !first.Ok {
 		t.Fatalf("first handoff = %+v", first)
@@ -123,6 +134,7 @@ func TestHandoffDispatchOverwritesOnRehandoff(t *testing.T) {
 	second := callHandoff(t, d, &protocol.HandoffDispatchMessage{
 		Cmd: protocol.CmdHandoffDispatch, SourceSessionID: "worker-3",
 		To: "projects/x/report.md", Content: "v2",
+		StructuredReport: handoffReviewOutcome("Second version ready."),
 	})
 	if !second.Ok {
 		t.Fatalf("re-handoff should overwrite, got %+v", second)
@@ -141,6 +153,7 @@ func TestHandoffDispatchRejectsNonDispatchSession(t *testing.T) {
 	resp := callHandoff(t, d, &protocol.HandoffDispatchMessage{
 		Cmd: protocol.CmdHandoffDispatch, SourceSessionID: "rando",
 		To: "projects/x/report.md", Content: "body",
+		StructuredReport: handoffReviewOutcome("Artifact ready."),
 	})
 	if resp.Ok {
 		t.Fatalf("expected rejection, got ok response")
@@ -161,6 +174,7 @@ func TestHandoffDispatchRejectsBadDestination(t *testing.T) {
 		resp := callHandoff(t, d, &protocol.HandoffDispatchMessage{
 			Cmd: protocol.CmdHandoffDispatch, SourceSessionID: "worker-4",
 			To: dest, Content: "body",
+			StructuredReport: handoffReviewOutcome("Artifact ready."),
 		})
 		if resp.Ok {
 			t.Fatalf("dest %q should be rejected", dest)
@@ -171,6 +185,7 @@ func TestHandoffDispatchRejectsBadDestination(t *testing.T) {
 	resp := callHandoff(t, d, &protocol.HandoffDispatchMessage{
 		Cmd: protocol.CmdHandoffDispatch, SourceSessionID: "worker-4",
 		To: "../escape.md", Content: "body",
+		StructuredReport: handoffReviewOutcome("Artifact ready."),
 	})
 	if !resp.Ok {
 		t.Fatalf("parent escape should be contained, got %+v", resp)
@@ -186,6 +201,7 @@ func TestHandoffDispatchRejectsEmptyContent(t *testing.T) {
 	resp := callHandoff(t, d, &protocol.HandoffDispatchMessage{
 		Cmd: protocol.CmdHandoffDispatch, SourceSessionID: "worker-5",
 		To: "projects/x/report.md", Content: "   \n",
+		StructuredReport: handoffReviewOutcome("Artifact ready."),
 	})
 	if resp.Ok || resp.Error == nil || !strings.Contains(*resp.Error, "content is required") {
 		t.Fatalf("expected content-required error, got ok=%v err=%v", resp.Ok, resp.Error)
@@ -199,11 +215,12 @@ func TestHandoffDispatchFullSocketPath(t *testing.T) {
 	addHandoffDispatch(t, d, "worker-sock", "dsp-sock")
 
 	resp := sendNotebookCmd(t, d, protocol.HandoffDispatchMessage{
-		Cmd:             protocol.CmdHandoffDispatch,
-		SourceSessionID: "worker-sock",
-		To:              "projects/sock/report.md",
-		Content:         "wired",
-		Report:          protocol.Ptr("Routed."),
+		Cmd:              protocol.CmdHandoffDispatch,
+		SourceSessionID:  "worker-sock",
+		To:               "projects/sock/report.md",
+		Content:          "wired",
+		Report:           protocol.Ptr("Routed."),
+		StructuredReport: handoffReviewOutcome("Routed."),
 	})
 	if resp.ChiefOfStaffDispatch == nil {
 		t.Fatalf("socket handoff returned no dispatch: %+v", resp)
@@ -226,7 +243,7 @@ func TestHandoffDispatchTerminalAlsoJournals(t *testing.T) {
 		Cmd: protocol.CmdHandoffDispatch, SourceSessionID: "worker-6",
 		To: "projects/audit/final.md", Content: "# Final\n",
 		Report: protocol.Ptr("Done."),
-		StructuredReport: &protocol.DispatchReport{
+		StructuredReport: protocol.DispatchReport{
 			ReportType: protocol.DispatchReportTypeCompletion,
 			WorkState:  protocol.DispatchWorkStateCompleted,
 			Summary:    "Audit finished; findings handed off.",

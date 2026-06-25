@@ -36,7 +36,11 @@ func TestChiefOfStaffDispatchLifecycle(t *testing.T) {
 		t.Fatalf("other chief dispatches = %+v", other)
 	}
 
-	updated, err := s.UpdateChiefOfStaffDispatchReport("worker-1", "Root cause found.")
+	updated, err := s.UpdateChiefOfStaffDispatchOutcome("worker-1", "Root cause found.", protocol.DispatchReport{
+		ReportType: protocol.DispatchReportTypeProgress,
+		WorkState:  protocol.DispatchWorkStateInProgress,
+		Summary:    "Root cause found.",
+	})
 	if err != nil {
 		t.Fatalf("update report: %v", err)
 	}
@@ -244,10 +248,10 @@ func TestChiefOfStaffStructuredReportPersistsAndResolves(t *testing.T) {
 			},
 		},
 	}
-	updated, err := s.UpdateChiefOfStaffDispatchReportEnvelope(
+	updated, err := s.UpdateChiefOfStaffDispatchOutcome(
 		"worker-1",
 		"Core implementation is ready; event emission needs a decision.",
-		report,
+		*report,
 	)
 	if err != nil {
 		t.Fatalf("update structured report: %v", err)

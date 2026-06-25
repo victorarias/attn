@@ -283,13 +283,9 @@ func (s *Store) ListChiefOfStaffDispatches(chiefSessionID string) []*protocol.Ch
 	return result
 }
 
-func (s *Store) UpdateChiefOfStaffDispatchReport(sessionID, report string) (*protocol.ChiefOfStaffDispatch, error) {
-	return s.UpdateChiefOfStaffDispatchReportEnvelope(sessionID, report, nil)
-}
-
-func (s *Store) UpdateChiefOfStaffDispatchReportEnvelope(
+func (s *Store) UpdateChiefOfStaffDispatchOutcome(
 	sessionID, report string,
-	structuredReport *protocol.DispatchReport,
+	structuredReport protocol.DispatchReport,
 ) (*protocol.ChiefOfStaffDispatch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -303,20 +299,18 @@ func (s *Store) UpdateChiefOfStaffDispatchReportEnvelope(
 		return nil, fmt.Errorf("report cannot be empty")
 	}
 	now := string(protocol.TimestampNow())
-	structuredReport = cloneDispatchReport(structuredReport)
-	if structuredReport != nil {
-		structuredReport.ReportedAt = now
-		artifactIdentity := ""
-		if structuredReport.Artifact != nil {
-			artifactIdentity = strings.TrimSpace(structuredReport.Artifact.Identity)
-		}
-		for i := range structuredReport.Verification {
-			current := artifactIdentity != "" &&
-				strings.TrimSpace(structuredReport.Verification[i].ArtifactIdentity) == artifactIdentity
-			structuredReport.Verification[i].Current = protocol.Ptr(current)
-		}
+	storedOutcome := cloneDispatchReport(&structuredReport)
+	storedOutcome.ReportedAt = now
+	artifactIdentity := ""
+	if storedOutcome.Artifact != nil {
+		artifactIdentity = strings.TrimSpace(storedOutcome.Artifact.Identity)
 	}
-	structuredReportJSON, err := encodeDispatchReport(structuredReport)
+	for i := range storedOutcome.Verification {
+		current := artifactIdentity != "" &&
+			strings.TrimSpace(storedOutcome.Verification[i].ArtifactIdentity) == artifactIdentity
+		storedOutcome.Verification[i].Current = protocol.Ptr(current)
+	}
+	structuredReportJSON, err := encodeDispatchReport(storedOutcome)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +321,7 @@ func (s *Store) UpdateChiefOfStaffDispatchReportEnvelope(
 			}
 			updated := cloneChiefOfStaffDispatch(dispatch)
 			updated.LatestReport = protocol.Ptr(report)
-			updated.StructuredReport = structuredReport
+			updated.StructuredReport = storedOutcome
 			updated.ReportedAt = protocol.Ptr(now)
 			updated.UpdatedAt = now
 			s.chiefDispatches[id] = updated
@@ -347,11 +341,11 @@ func (s *Store) UpdateChiefOfStaffDispatchReportEnvelope(
 		sessionID,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("update dispatch report: %w", err)
+		return nil, fmt.Errorf("update dispatch outcome: %w", err)
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return nil, fmt.Errorf("read dispatch report update result: %w", err)
+		return nil, fmt.Errorf("read dispatch outcome update result: %w", err)
 	}
 	if rows == 0 {
 		return nil, fmt.Errorf("session %s is not a tracked dispatch", sessionID)

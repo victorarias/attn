@@ -1851,8 +1851,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleDelegate(conn, msg.(*protocol.DelegateMessage))
 	case protocol.CmdListDispatches:
 		d.handleListDispatches(conn, msg.(*protocol.ListDispatchesMessage))
-	case protocol.CmdReportDispatch:
-		d.handleReportDispatch(conn, msg.(*protocol.ReportDispatchMessage))
+	case protocol.CmdSubmitDispatchOutcome:
+		d.handleSubmitDispatchOutcome(conn, msg.(*protocol.SubmitDispatchOutcomeMessage))
 	case protocol.CmdHandoffDispatch:
 		d.handleHandoffDispatch(conn, msg.(*protocol.HandoffDispatchMessage))
 	case protocol.CmdGetDispatch:

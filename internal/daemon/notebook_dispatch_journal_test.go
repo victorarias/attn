@@ -423,7 +423,7 @@ func TestRenderDispatchJournalEntryWallClockHeaderDrifts(t *testing.T) {
 
 // The full report path: reporting a completed dispatch over the socket lands a
 // single grounded journal block, and re-reporting it does not duplicate it.
-func TestReportDispatchAutoJournals(t *testing.T) {
+func TestSubmitDispatchOutcomeAutoJournals(t *testing.T) {
 	d := newNotebookDaemon(t)
 	addIdleNotebookSession(d, "worker-1", protocol.SessionStateWorking)
 	if err := d.store.AddChiefOfStaffDispatch(&protocol.ChiefOfStaffDispatch{
@@ -433,11 +433,11 @@ func TestReportDispatchAutoJournals(t *testing.T) {
 		t.Fatalf("add dispatch: %v", err)
 	}
 
-	report := protocol.ReportDispatchMessage{
-		Cmd:             protocol.CmdReportDispatch,
+	report := protocol.SubmitDispatchOutcomeMessage{
+		Cmd:             protocol.CmdSubmitDispatchOutcome,
 		SourceSessionID: "worker-1",
 		Report:          "done",
-		StructuredReport: &protocol.DispatchReport{
+		StructuredReport: protocol.DispatchReport{
 			ReportType: protocol.DispatchReportTypeCompletion,
 			WorkState:  protocol.DispatchWorkStateCompleted,
 			Summary:    "Wired the auto-journal into the report path.",
@@ -465,7 +465,7 @@ func TestReportDispatchAutoJournals(t *testing.T) {
 
 // A non-terminal report (needs_input) is NOT journaled by the report path — only
 // finished dispatches become durable entries.
-func TestReportDispatchNonTerminalDoesNotJournal(t *testing.T) {
+func TestSubmitDispatchOutcomeNonTerminalDoesNotJournal(t *testing.T) {
 	d := newNotebookDaemon(t)
 	addIdleNotebookSession(d, "worker-3", protocol.SessionStateWorking)
 	if err := d.store.AddChiefOfStaffDispatch(&protocol.ChiefOfStaffDispatch{
@@ -475,11 +475,11 @@ func TestReportDispatchNonTerminalDoesNotJournal(t *testing.T) {
 		t.Fatalf("add dispatch: %v", err)
 	}
 
-	sendNotebookCmd(t, d, protocol.ReportDispatchMessage{
-		Cmd:             protocol.CmdReportDispatch,
+	sendNotebookCmd(t, d, protocol.SubmitDispatchOutcomeMessage{
+		Cmd:             protocol.CmdSubmitDispatchOutcome,
 		SourceSessionID: "worker-3",
 		Report:          "progress",
-		StructuredReport: &protocol.DispatchReport{
+		StructuredReport: protocol.DispatchReport{
 			ReportType: protocol.DispatchReportTypeProgress,
 			WorkState:  protocol.DispatchWorkStateInProgress,
 			Summary:    "Still working.",

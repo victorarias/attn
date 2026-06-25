@@ -13,6 +13,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Delegated agents and their workspaces now get real, readable names.** `attn delegate` takes `--name` (replacing `--label`); it names the agent and, when the delegation creates a new workspace, the workspace too — so a delegated workspace shows a human name in the sidebar instead of its worktree folder. Omit `--name` to default to the directory name. Names are capped at 16 characters and must be unique (a workspace name across all workspaces, a session name within its workspace); when a name is too long or already taken — including a too-long worktree-folder default — the command fails with a clear message telling you to pass `--name`.
+- **Delegated agents now report explicit outcomes instead of assembling coordination JSON.** The new `attn dispatch update`, `block`, `review`, `complete`, and `fail` commands capture the work state directly, keep concise summaries separate from optional detailed reports, check unread chief messages before handoffs, and return a short confirmation instead of echoing the entire assignment. Notebook handoffs likewise require an explicit `--review` or `--complete` outcome.
+
+### Removed
+- **Removed `attn dispatch report` and `--coordination-file`.** Raw coordination envelopes and unstructured reports are no longer accepted; every delegated-agent update now has a typed outcome.
 
 ## [2026-06-23]
 
