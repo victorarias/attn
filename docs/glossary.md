@@ -136,11 +136,11 @@ The chief is **keeper-aware**: because the keeper already narrates each workspac
 own work into the journal, the chief does not duplicate per-workspace play-by-play.
 It writes the cross-workspace layer the keeper cannot see.
 
-## Dispatch / dispatch report
+## Dispatch / dispatch outcome
 
 The chief delegates a unit of work to a sub-agent — a **dispatch**. The sub-agent
-reports its outcome back to the chief as a structured **dispatch report** (a summary
-plus a decision). A terminal dispatch report is captured deterministically into the
+reports back through a typed **dispatch outcome** (an update, blocker, review handoff,
+completion, or failure). A terminal dispatch outcome is captured deterministically into the
 raw tier (`.attn/raw/dispatches/<id>.md`) and persisted in SQLite. The keeper reads
 those raw dispatch outcomes and weaves the terminal ones into the workspace
 narrative; the chief may also reference them in its cross-workspace journaling.

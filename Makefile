@@ -202,6 +202,7 @@ clean:
 
 # Type generation pipeline: TypeSpec -> JSON Schema -> go-jsonschema/quicktype
 generate-types:
+	rm -rf internal/protocol/schema/tsp-output/json-schema
 	cd internal/protocol/schema && pnpm exec tsp compile .
 	$(HOME)/go/bin/go-jsonschema -p protocol --only-models --tags json --resolve-extension json \
 		--capitalization ID --capitalization URL --capitalization SHA --capitalization PR --capitalization CI \

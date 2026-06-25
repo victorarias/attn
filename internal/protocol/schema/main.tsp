@@ -544,27 +544,27 @@ model ListDispatchesMessage {
   source_session_id: string;
 }
 
-model ReportDispatchMessage {
-  cmd: "report_dispatch";
+model SubmitDispatchOutcomeMessage {
+  cmd: "submit_dispatch_outcome";
   source_session_id: string;
   report: string;
-  structured_report?: DispatchReport;
+  structured_report: DispatchReport;
 }
 
 // Hand a large artifact built by a dispatched agent into the Notebook and report
 // the reference back to the chief. `to` is a root-relative Notebook path the chief
 // (or user) designated; `content` is the artifact bytes the daemon writes there.
-// The daemon records a normal dispatch report whose message embeds the resolved
+// The daemon records a typed dispatch outcome whose message embeds the resolved
 // reference, so the handoff flows through the same report/capture path — there is
-// no separate structured artifact field. report/structured_report are optional
-// extra coordination, identical in meaning to ReportDispatchMessage's.
+// no separate structured artifact field. `report` is optional detail;
+// `structured_report` is the required typed outcome.
 model HandoffDispatchMessage {
   cmd: "handoff_dispatch";
   source_session_id: string;
   to: string;
   content: string;
   report?: string;
-  structured_report?: DispatchReport;
+  structured_report: DispatchReport;
 }
 
 model GetDispatchMessage {

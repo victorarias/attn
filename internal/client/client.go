@@ -211,16 +211,12 @@ func (c *Client) ListDispatches(sourceSessionID string) ([]protocol.ChiefOfStaff
 	return resp.ChiefOfStaffDispatches, nil
 }
 
-func (c *Client) ReportDispatch(sourceSessionID, report string) (*protocol.ChiefOfStaffDispatch, error) {
-	return c.ReportDispatchEnvelope(sourceSessionID, report, nil)
-}
-
-func (c *Client) ReportDispatchEnvelope(
+func (c *Client) SubmitDispatchOutcome(
 	sourceSessionID, report string,
-	structuredReport *protocol.DispatchReport,
+	structuredReport protocol.DispatchReport,
 ) (*protocol.ChiefOfStaffDispatch, error) {
-	resp, err := c.send(protocol.ReportDispatchMessage{
-		Cmd:              protocol.CmdReportDispatch,
+	resp, err := c.send(protocol.SubmitDispatchOutcomeMessage{
+		Cmd:              protocol.CmdSubmitDispatchOutcome,
 		SourceSessionID:  sourceSessionID,
 		Report:           report,
 		StructuredReport: structuredReport,
@@ -235,11 +231,10 @@ func (c *Client) ReportDispatchEnvelope(
 }
 
 // HandoffDispatch writes a dispatched agent's artifact into the Notebook at `to`
-// and records a dispatch report referencing it. report and structuredReport are
-// optional extra coordination, identical in meaning to ReportDispatchEnvelope's.
+// and records a typed dispatch outcome referencing it.
 func (c *Client) HandoffDispatch(
 	sourceSessionID, to, content, report string,
-	structuredReport *protocol.DispatchReport,
+	structuredReport protocol.DispatchReport,
 ) (*protocol.ChiefOfStaffDispatch, error) {
 	msg := protocol.HandoffDispatchMessage{
 		Cmd:              protocol.CmdHandoffDispatch,

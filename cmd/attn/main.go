@@ -638,30 +638,57 @@ func runDispatch() {
 		printJSON(dispatches)
 	case "watch":
 		runDispatchWatch(os.Args[3:])
-	case "report":
-		sourceSessionID, report, structuredReport, err := parseDispatchReportArgs(os.Args[3:])
+	case "update", "block", "review", "complete", "fail":
+		outcome := os.Args[2]
+		if hasHelpFlag(os.Args[3:]) {
+			writeDispatchOutcomeHelp(os.Stdout, outcome)
+			return
+		}
+		parsed, err := parseDispatchOutcomeArgs(outcome, os.Args[3:])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch report: %v\n", err)
+			fmt.Fprintf(os.Stderr, "dispatch %s: %v\n", outcome, err)
 			os.Exit(2)
 		}
-		dispatch, err := client.New("").ReportDispatchEnvelope(sourceSessionID, report, structuredReport)
+		c := client.New("")
+		if outcome != "update" {
+			if err := ensureDispatchInboxClear(c, parsed.SourceSessionID); err != nil {
+				fmt.Fprintf(os.Stderr, "dispatch %s: %v\n", outcome, err)
+				os.Exit(2)
+			}
+		}
+		dispatch, err := c.SubmitDispatchOutcome(parsed.SourceSessionID, parsed.Report, parsed.StructuredReport)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch report: %v\n", err)
+			fmt.Fprintf(os.Stderr, "dispatch %s: %v\n", outcome, err)
 			os.Exit(1)
 		}
-		printJSON(dispatch)
+		printDispatchOutcomeResult(outcome, parsed.JSON, dispatch)
 	case "handoff":
-		sourceSessionID, to, content, message, structuredReport, err := parseDispatchHandoffArgs(os.Args[3:])
+		if hasHelpFlag(os.Args[3:]) {
+			writeDispatchHandoffHelp(os.Stdout)
+			return
+		}
+		parsed, err := parseDispatchHandoffArgs(os.Args[3:])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "dispatch handoff: %v\n", err)
 			os.Exit(2)
 		}
-		dispatch, err := client.New("").HandoffDispatch(sourceSessionID, to, content, message, structuredReport)
+		c := client.New("")
+		if err := ensureDispatchInboxClear(c, parsed.SourceSessionID); err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch handoff: %v\n", err)
+			os.Exit(2)
+		}
+		dispatch, err := c.HandoffDispatch(
+			parsed.SourceSessionID,
+			parsed.To,
+			parsed.Content,
+			parsed.Report,
+			parsed.StructuredReport,
+		)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "dispatch handoff: %v\n", err)
 			os.Exit(1)
 		}
-		printJSON(dispatch)
+		printDispatchOutcomeResult("handoff", parsed.JSON, dispatch)
 	case "status":
 		sourceSessionID, err := parseDispatchSourceSession(os.Args[3:])
 		if err != nil {
@@ -765,23 +792,128 @@ commands:
   list [--session <id>]                          list work dispatched by this chief
   watch <dispatch-id> [--session <id>]           stream meaningful events until terminal
         [--interval <dur>]
-  report (--message <text> | --file <path>)     report progress from a dispatched agent
-         [--coordination-file <json>]
-  handoff --file <path> --to <notebook-path>    write a large artifact into the notebook and
-         [--message <text>] [--coordination-file <json>]   report a reference back to the chief
+  update --summary <text>                        report meaningful progress
+  block --summary <text> --question <text>       request input before work can continue
+  review --summary <text>                        hand work back for review
+  complete --summary <text>                      report successful completion
+  fail --summary <text>                          report terminal failure
+  handoff --file <path> --to <notebook-path>     hand off a durable artifact
+          --summary <text> (--review | --complete)
   status [--session <id>]                        show this delegated session's report and response
   resolve --dispatch <id>                        answer the active decision request
           (--response <text> | --file <path>) [--link <url>] [--session <id>]
-	  message --dispatch <id>                        send durable mail to a delegated agent
-	          (--message <text> | --file <path>) [--session <id>]
-	  messages --dispatch <id> [--session <id>]      list sent mail and acknowledgement state
-	  inbox [--unread] [--session <id>]              list this delegated agent's mail
+  message --dispatch <id>                        send durable mail to a delegated agent
+          (--message <text> | --file <path>) [--session <id>]
+  messages --dispatch <id> [--session <id>]      list sent mail and acknowledgement state
+  inbox [--unread] [--session <id>]              list this delegated agent's mail
   read --message-id <id> [--session <id>]        mark one message read
   ack --message-id <id>                          acknowledge one message
       [--message <text> | --file <path>] [--session <id>]
 
 The session defaults to ATTN_SESSION_ID.
+
+Outcome commands accept --details <text> or --details-file <path>, plus
+--next-actor, --next-action, repeated --remaining-scope and --constraint,
+and --json. Run attn dispatch <outcome> --help for exact usage.
 `)
+}
+
+func hasHelpFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
+func writeDispatchOutcomeHelp(w io.Writer, outcome string) {
+	usage := "attn dispatch " + outcome + " --summary <text> [options]"
+	if outcome == "block" {
+		usage = "attn dispatch block --summary <text> --question <text> [options]"
+	}
+	fmt.Fprintf(w, `usage: %s
+
+options:
+  --summary <text>            concise outcome shown to the chief (required)
+  --details <text>            detailed report text
+  --details-file <path>       read detailed report text from a file
+  --next-actor <text>         who acts next
+  --next-action <text>        what happens next
+  --remaining-scope <text>    remaining item (repeatable)
+  --constraint <text>         constraint (repeatable)
+  --session <id>              session id (defaults to ATTN_SESSION_ID)
+  --json                      print the full dispatch as JSON
+`, usage)
+	if outcome == "block" {
+		fmt.Fprint(w, `  --question <text>           decision or input required (required)
+  --recommendation <text>     recommended response
+  --consequence <text>        effect of leaving the request unresolved
+  --expected-responder <text> who should answer (default: chief)
+`)
+	}
+}
+
+func writeDispatchHandoffHelp(w io.Writer) {
+	fmt.Fprint(w, `usage: attn dispatch handoff --file <path> --to <notebook-path>
+       --summary <text> (--review | --complete) [options]
+
+options:
+  --file <path>               artifact to write into the Notebook (required)
+  --to <notebook-path>        chief-designated Notebook destination (required)
+  --summary <text>            concise outcome shown to the chief (required)
+  --review                    hand the artifact back for review
+  --complete                  hand off the artifact as completed work
+  --details <text>            note accompanying the artifact reference
+  --details-file <path>       read the note from a file
+  --next-actor <text>         who acts next
+  --next-action <text>        what happens next
+  --remaining-scope <text>    remaining item (repeatable)
+  --constraint <text>         constraint (repeatable)
+  --session <id>              session id (defaults to ATTN_SESSION_ID)
+  --json                      print the full dispatch as JSON
+`)
+}
+
+func ensureDispatchInboxClear(c *client.Client, sourceSessionID string) error {
+	messages, err := c.ListDispatchMessages(sourceSessionID, "", true)
+	if err != nil {
+		return fmt.Errorf("check unread inbox: %w", err)
+	}
+	if len(messages) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"%d unread chief message(s); run `attn dispatch inbox --unread`, handle them, then acknowledge each before reporting this outcome",
+		len(messages),
+	)
+}
+
+func printDispatchOutcomeResult(
+	outcome string,
+	jsonOutput bool,
+	dispatch *protocol.ChiefOfStaffDispatch,
+) {
+	if jsonOutput {
+		printJSON(dispatch)
+		return
+	}
+	summary := ""
+	if dispatch != nil && dispatch.StructuredReport != nil {
+		summary = strings.TrimSpace(dispatch.StructuredReport.Summary)
+	}
+	if summary == "" {
+		summary = "Outcome recorded"
+	}
+	dispatchID := ""
+	if dispatch != nil {
+		dispatchID = strings.TrimSpace(dispatch.ID)
+	}
+	if dispatchID == "" {
+		fmt.Printf("Reported %s to the chief: %s\n", outcome, summary)
+		return
+	}
+	fmt.Printf("Reported %s to the chief (%s): %s\n", outcome, dispatchID, summary)
 }
 
 func parseDispatchSourceSession(args []string) (string, error) {
@@ -875,109 +1007,249 @@ func parseDispatchWatchArgs(args []string) (string, string, time.Duration, error
 	return source, dispatchID, *interval, nil
 }
 
-func parseDispatchReportArgs(args []string) (string, string, *protocol.DispatchReport, error) {
-	fs := flag.NewFlagSet("dispatch report", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
-	message := fs.String("message", "", "concise progress or completion update")
-	reportFile := fs.String("file", "", "file containing a progress or completion update")
-	coordinationFile := fs.String("coordination-file", "", "JSON file containing structured coordination fields")
-	if err := fs.Parse(args); err != nil {
-		return "", "", nil, err
-	}
-	if fs.NArg() != 0 {
-		return "", "", nil, fmt.Errorf("unexpected arguments: %v", fs.Args())
-	}
-	source := strings.TrimSpace(*sessionID)
-	if source == "" {
-		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
-	}
-	if source == "" {
-		return "", "", nil, errors.New("no session; run inside attn or pass --session")
-	}
-	if strings.TrimSpace(*message) != "" && strings.TrimSpace(*reportFile) != "" {
-		return "", "", nil, errors.New("pass only one of --message or --file")
-	}
-	report := strings.TrimSpace(*message)
-	if path := strings.TrimSpace(*reportFile); path != "" {
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return "", "", nil, fmt.Errorf("read report file: %w", err)
-		}
-		report = strings.TrimSpace(string(content))
-	}
-	if report == "" {
-		return "", "", nil, errors.New("--message or --file is required")
-	}
-	var structuredReport *protocol.DispatchReport
-	if path := strings.TrimSpace(*coordinationFile); path != "" {
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return "", "", nil, fmt.Errorf("read coordination file: %w", err)
-		}
-		var parsed protocol.DispatchReport
-		if err := json.Unmarshal(content, &parsed); err != nil {
-			return "", "", nil, fmt.Errorf("parse coordination file: %w", err)
-		}
-		structuredReport = &parsed
-	}
-	return source, report, structuredReport, nil
+type stringListFlag []string
+
+func (values *stringListFlag) String() string {
+	return strings.Join(*values, ", ")
 }
 
-// parseDispatchHandoffArgs parses `dispatch handoff` flags. The artifact file is
-// read here (like a coordination file) and its bytes are sent verbatim — the
-// notebook note keeps the artifact exactly as built. --to and --file are required;
-// the chief (or user) designates --to, so there is no default destination.
-func parseDispatchHandoffArgs(args []string) (string, string, string, string, *protocol.DispatchReport, error) {
+func (values *stringListFlag) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return errors.New("value cannot be empty")
+	}
+	*values = append(*values, value)
+	return nil
+}
+
+type dispatchOutcomeArgs struct {
+	SourceSessionID  string
+	Report           string
+	StructuredReport protocol.DispatchReport
+	JSON             bool
+}
+
+func parseDispatchOutcomeArgs(outcome string, args []string) (dispatchOutcomeArgs, error) {
+	var result dispatchOutcomeArgs
+	fs := flag.NewFlagSet("dispatch "+outcome, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	summary := fs.String("summary", "", "concise outcome shown to the chief")
+	details := fs.String("details", "", "optional detailed report text")
+	detailsFile := fs.String("details-file", "", "file containing optional detailed report text")
+	nextActor := fs.String("next-actor", "", "who acts next")
+	nextAction := fs.String("next-action", "", "what happens next")
+	jsonOutput := fs.Bool("json", false, "print the full dispatch as JSON")
+	var remainingScope stringListFlag
+	var constraints stringListFlag
+	fs.Var(&remainingScope, "remaining-scope", "remaining item (repeatable)")
+	fs.Var(&constraints, "constraint", "constraint (repeatable)")
+
+	var question, recommendation, consequence, expectedResponder *string
+	if outcome == "block" {
+		question = fs.String("question", "", "decision or input required")
+		recommendation = fs.String("recommendation", "", "recommended response")
+		consequence = fs.String("consequence", "", "effect of leaving the request unresolved")
+		expectedResponder = fs.String("expected-responder", "chief", "who should answer")
+	}
+	if err := fs.Parse(args); err != nil {
+		return result, err
+	}
+	if fs.NArg() != 0 {
+		return result, fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+
+	source, err := resolveDispatchSession(*sessionID)
+	if err != nil {
+		return result, err
+	}
+	resolvedSummary := strings.TrimSpace(*summary)
+	if resolvedSummary == "" {
+		return result, errors.New("--summary is required")
+	}
+	report, err := readDispatchDetails(*details, *detailsFile)
+	if err != nil {
+		return result, err
+	}
+	if report == "" {
+		report = resolvedSummary
+	}
+
+	reportType, workState, ok := dispatchOutcomeTypes(outcome)
+	if !ok {
+		return result, fmt.Errorf("unknown outcome %q", outcome)
+	}
+	structured := protocol.DispatchReport{
+		ReportType:     reportType,
+		Summary:        resolvedSummary,
+		WorkState:      workState,
+		RemainingScope: remainingScope,
+		Constraints:    constraints,
+	}
+	if value := strings.TrimSpace(*nextActor); value != "" {
+		structured.NextActor = protocol.Ptr(value)
+	}
+	if value := strings.TrimSpace(*nextAction); value != "" {
+		structured.NextAction = protocol.Ptr(value)
+	}
+	if outcome == "block" {
+		resolvedQuestion := strings.TrimSpace(*question)
+		if resolvedQuestion == "" {
+			return result, errors.New("--question is required")
+		}
+		responder := strings.TrimSpace(*expectedResponder)
+		if responder == "" {
+			return result, errors.New("--expected-responder cannot be empty")
+		}
+		request := &protocol.DispatchDecisionRequest{
+			Question:          resolvedQuestion,
+			ExpectedResponder: responder,
+			Status:            protocol.DispatchRequestStatusPending,
+		}
+		if value := strings.TrimSpace(*recommendation); value != "" {
+			request.Recommendation = protocol.Ptr(value)
+		}
+		if value := strings.TrimSpace(*consequence); value != "" {
+			request.Consequence = protocol.Ptr(value)
+		}
+		structured.Request = request
+	}
+
+	result.SourceSessionID = source
+	result.Report = report
+	result.StructuredReport = structured
+	result.JSON = *jsonOutput
+	return result, nil
+}
+
+func dispatchOutcomeTypes(outcome string) (protocol.DispatchReportType, protocol.DispatchWorkState, bool) {
+	switch outcome {
+	case "update":
+		return protocol.DispatchReportTypeProgress, protocol.DispatchWorkStateInProgress, true
+	case "block":
+		return protocol.DispatchReportTypeBlocker, protocol.DispatchWorkStateNeedsInput, true
+	case "review":
+		return protocol.DispatchReportTypeHandoff, protocol.DispatchWorkStateReadyForReview, true
+	case "complete":
+		return protocol.DispatchReportTypeCompletion, protocol.DispatchWorkStateCompleted, true
+	case "fail":
+		return protocol.DispatchReportTypeFailure, protocol.DispatchWorkStateFailed, true
+	default:
+		return "", "", false
+	}
+}
+
+type dispatchHandoffArgs struct {
+	SourceSessionID  string
+	To               string
+	Content          string
+	Report           string
+	StructuredReport protocol.DispatchReport
+	JSON             bool
+}
+
+// parseDispatchHandoffArgs reads the artifact verbatim and creates a typed
+// review or completion outcome. The chief or user must designate the Notebook
+// destination; handoff never invents one.
+func parseDispatchHandoffArgs(args []string) (dispatchHandoffArgs, error) {
+	var result dispatchHandoffArgs
 	fs := flag.NewFlagSet("dispatch handoff", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
 	file := fs.String("file", "", "file containing the artifact to write into the notebook")
 	to := fs.String("to", "", "destination notebook path (root-relative, .md) the chief designated")
-	message := fs.String("message", "", "optional note to accompany the reference in the report")
-	coordinationFile := fs.String("coordination-file", "", "JSON file containing structured coordination fields")
+	summary := fs.String("summary", "", "concise outcome shown to the chief")
+	details := fs.String("details", "", "optional note accompanying the artifact reference")
+	detailsFile := fs.String("details-file", "", "file containing the optional note")
+	nextActor := fs.String("next-actor", "", "who acts next")
+	nextAction := fs.String("next-action", "", "what happens next")
+	review := fs.Bool("review", false, "hand the artifact back for review")
+	complete := fs.Bool("complete", false, "hand off the artifact as completed work")
+	jsonOutput := fs.Bool("json", false, "print the full dispatch as JSON")
+	var remainingScope stringListFlag
+	var constraints stringListFlag
+	fs.Var(&remainingScope, "remaining-scope", "remaining item (repeatable)")
+	fs.Var(&constraints, "constraint", "constraint (repeatable)")
 	if err := fs.Parse(args); err != nil {
-		return "", "", "", "", nil, err
+		return result, err
 	}
 	if fs.NArg() != 0 {
-		return "", "", "", "", nil, fmt.Errorf("unexpected arguments: %v", fs.Args())
+		return result, fmt.Errorf("unexpected arguments: %v", fs.Args())
 	}
-	source := strings.TrimSpace(*sessionID)
-	if source == "" {
-		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
-	}
-	if source == "" {
-		return "", "", "", "", nil, errors.New("no session; run inside attn or pass --session")
+	source, err := resolveDispatchSession(*sessionID)
+	if err != nil {
+		return result, err
 	}
 	dest := strings.TrimSpace(*to)
 	if dest == "" {
-		return "", "", "", "", nil, errors.New("--to is required (the chief designates the notebook destination)")
+		return result, errors.New("--to is required (the chief designates the notebook destination)")
 	}
 	path := strings.TrimSpace(*file)
 	if path == "" {
-		return "", "", "", "", nil, errors.New("--file is required")
+		return result, errors.New("--file is required")
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return "", "", "", "", nil, fmt.Errorf("read artifact file: %w", err)
+		return result, fmt.Errorf("read artifact file: %w", err)
 	}
 	content := string(raw)
 	if strings.TrimSpace(content) == "" {
-		return "", "", "", "", nil, errors.New("artifact file is empty")
+		return result, errors.New("artifact file is empty")
 	}
-	var structuredReport *protocol.DispatchReport
-	if p := strings.TrimSpace(*coordinationFile); p != "" {
-		data, readErr := os.ReadFile(p)
-		if readErr != nil {
-			return "", "", "", "", nil, fmt.Errorf("read coordination file: %w", readErr)
-		}
-		var parsed protocol.DispatchReport
-		if jsonErr := json.Unmarshal(data, &parsed); jsonErr != nil {
-			return "", "", "", "", nil, fmt.Errorf("parse coordination file: %w", jsonErr)
-		}
-		structuredReport = &parsed
+	resolvedSummary := strings.TrimSpace(*summary)
+	if resolvedSummary == "" {
+		return result, errors.New("--summary is required")
 	}
-	return source, dest, content, strings.TrimSpace(*message), structuredReport, nil
+	if *review == *complete {
+		return result, errors.New("pass exactly one of --review or --complete")
+	}
+	report, err := readDispatchDetails(*details, *detailsFile)
+	if err != nil {
+		return result, err
+	}
+	if report == "" {
+		report = resolvedSummary
+	}
+	workState := protocol.DispatchWorkStateReadyForReview
+	if *complete {
+		workState = protocol.DispatchWorkStateCompleted
+	}
+	structured := protocol.DispatchReport{
+		ReportType:     protocol.DispatchReportTypeHandoff,
+		Summary:        resolvedSummary,
+		WorkState:      workState,
+		RemainingScope: remainingScope,
+		Constraints:    constraints,
+	}
+	if value := strings.TrimSpace(*nextActor); value != "" {
+		structured.NextActor = protocol.Ptr(value)
+	}
+	if value := strings.TrimSpace(*nextAction); value != "" {
+		structured.NextAction = protocol.Ptr(value)
+	}
+	result.SourceSessionID = source
+	result.To = dest
+	result.Content = content
+	result.Report = report
+	result.StructuredReport = structured
+	result.JSON = *jsonOutput
+	return result, nil
+}
+
+func readDispatchDetails(details, path string) (string, error) {
+	details = strings.TrimSpace(details)
+	path = strings.TrimSpace(path)
+	if details != "" && path != "" {
+		return "", errors.New("pass only one of --details or --details-file")
+	}
+	if path == "" {
+		return details, nil
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read details file: %w", err)
+	}
+	return strings.TrimSpace(string(content)), nil
 }
 
 func parseDispatchResolveArgs(args []string) (string, string, string, string, error) {

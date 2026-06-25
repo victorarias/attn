@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -157,7 +158,7 @@ func TestParseDispatchCommands(t *testing.T) {
 	}
 
 	cmd, data, err = ParseMessage([]byte(`{
-		"cmd":"report_dispatch",
+		"cmd":"submit_dispatch_outcome",
 		"source_session_id":"worker-1",
 		"report":"waiting for a decision",
 		"structured_report":{
@@ -168,13 +169,12 @@ func TestParseDispatchCommands(t *testing.T) {
 		}
 	}`))
 	if err != nil {
-		t.Fatalf("ParseMessage(report_dispatch) error = %v", err)
+		t.Fatalf("ParseMessage(submit_dispatch_outcome) error = %v", err)
 	}
-	report := data.(*ReportDispatchMessage)
-	if cmd != CmdReportDispatch ||
+	report := data.(*SubmitDispatchOutcomeMessage)
+	if cmd != CmdSubmitDispatchOutcome ||
 		report.SourceSessionID != "worker-1" ||
 		report.Report != "waiting for a decision" ||
-		report.StructuredReport == nil ||
 		report.StructuredReport.WorkState != DispatchWorkStateNeedsInput {
 		t.Fatalf("report dispatch = %q %+v", cmd, report)
 	}
@@ -202,6 +202,17 @@ func TestParseDispatchCommands(t *testing.T) {
 		resolution.DispatchID != "dispatch-1" ||
 		resolution.Response != "Use V1." {
 		t.Fatalf("resolve dispatch request = %q %+v", cmd, resolution)
+	}
+}
+
+func TestParseMessageRejectsRemovedReportDispatchCommand(t *testing.T) {
+	_, _, err := ParseMessage([]byte(`{
+		"cmd":"report_dispatch",
+		"source_session_id":"worker-1",
+		"report":"done"
+	}`))
+	if err == nil || !strings.Contains(err.Error(), "unknown command") {
+		t.Fatalf("removed report_dispatch error = %v", err)
 	}
 }
 

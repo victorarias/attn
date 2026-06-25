@@ -49,17 +49,24 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 	chiefOfStaff := readSkillFile(t, skillDir, "references/chief-of-staff.md")
 	for _, expected := range []string{
 		"dispatch list",
-		"dispatch report --message",
-		"dispatch report --file",
+		"dispatch update --summary",
+		"dispatch block",
+		"dispatch review",
+		"dispatch complete",
+		"dispatch fail",
 		"latest report",
 		"visible, full interactive",
 		"default to native subagents",
 		"not proof that the work is correct",
-		"Do not use dispatch reporting for ordinary",
+		"Do not use dispatch outcome commands for ordinary",
 	} {
 		if !strings.Contains(chiefOfStaff, expected) {
 			t.Fatalf("chief of staff reference missing %q: %q", expected, chiefOfStaff)
 		}
+	}
+	if strings.Contains(chiefOfStaff, "coordination-file") ||
+		strings.Contains(chiefOfStaff, "dispatch report --") {
+		t.Fatalf("chief of staff reference retains legacy reporting UX: %q", chiefOfStaff)
 	}
 
 	delegation := readSkillFile(t, skillDir, "references/delegation.md")

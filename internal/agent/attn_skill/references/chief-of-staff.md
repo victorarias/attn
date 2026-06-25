@@ -66,14 +66,35 @@ If the initial task says the work is tracked, report when you:
 - need input or are blocked
 - finish the requested work
 
-Keep a short report concrete: outcome, evidence, and next action.
+Use the command matching the current outcome. Keep the summary concrete: outcome,
+evidence, and next action.
 
-    "$ATTN_WRAPPER_PATH" dispatch report --message \
+    "$ATTN_WRAPPER_PATH" dispatch update --summary \
       "Implemented the parser and tests pass. Next: review the error wording."
 
-For a longer report, write it to a file and submit the file:
+When work needs input, is ready for review, completes, or fails, use the matching
+typed command:
 
-    "$ATTN_WRAPPER_PATH" dispatch report --file /tmp/dispatch-report.md
+    "$ATTN_WRAPPER_PATH" dispatch block \
+      --summary "Core implementation is ready locally" \
+      --question "Which event contract should be used?" \
+      --recommendation "Use AisNoOperationV1" \
+      --consequence "Event emission remains blocked"
+
+    "$ATTN_WRAPPER_PATH" dispatch review \
+      --summary "Parser implementation is ready for review"
+
+    "$ATTN_WRAPPER_PATH" dispatch complete \
+      --summary "Parser implemented and focused tests pass"
+
+    "$ATTN_WRAPPER_PATH" dispatch fail \
+      --summary "Implementation cannot continue because the required API was removed"
+
+Add `--details <text>` or `--details-file <path>` when the chief needs a longer
+report. Use `--next-actor`, `--next-action`, repeated `--remaining-scope`, and
+repeated `--constraint` to make the handoff explicit. Outcome commands print one
+confirmation line by default; add `--json` only when the full dispatch record is
+needed.
 
 A report is a small payload. When you build a large durable artifact — a report, a
 design doc, findings, often built with the user — write it into the Notebook and
@@ -82,52 +103,14 @@ report the reference instead of inlining it:
     "$ATTN_WRAPPER_PATH" dispatch handoff \
       --file /tmp/auth-audit.md \
       --to projects/auth-audit/findings.md \
-      --message "Auth audit complete; full findings in the Notebook."
+      --summary "Auth audit is ready for review" \
+      --review
 
 `--to` is the Notebook path the chief (or user) designated; the daemon writes the
 artifact there and the reference travels back in your report. If no destination was
-designated and the artifact warrants one, ask the chief in a report rather than
-inventing a location. Add `--coordination-file <json>` to a terminal handoff just as
-you would to a report.
-
-For actionable coordination, keep the narrative and attach a JSON envelope:
-
-```json
-{
-  "report_type": "blocker",
-  "summary": "Core freshness gate implemented locally",
-  "work_state": "needs_input",
-  "next_actor": "team",
-  "next_action": "Decide the AisNoOperationV1 event contract",
-  "remaining_scope": ["Emit the event", "Add the integration test"],
-  "constraints": ["uncommitted", "no push", "no PR"],
-  "request": {
-    "question": "Should the worker emit AisNoOperationV1?",
-    "recommendation": "Use AisNoOperationV1",
-    "consequence": "Event emission remains blocked",
-    "expected_responder": "team",
-    "status": "pending"
-  },
-  "artifact": {
-    "identity": "dirty:<stable-status-hash>",
-    "branch": "feat/example",
-    "dirty": true
-  },
-  "verification": [{
-    "actor": "agent",
-    "target": "go test ./internal/feature",
-    "result": "passed",
-    "timestamp": "2026-06-09T18:00:00Z",
-    "artifact_identity": "dirty:<stable-status-hash>"
-  }]
-}
-```
-
-Submit it with:
-
-    "$ATTN_WRAPPER_PATH" dispatch report \
-      --message "Core implementation is ready; event emission needs a decision." \
-      --coordination-file /tmp/dispatch-coordination.json
+designated and the artifact warrants one, ask the chief with `dispatch block`
+rather than inventing a location. Pass exactly one of `--review` or `--complete`
+so the handoff has an explicit work state.
 
 After requesting a decision, read the durable chief response with:
 
@@ -148,5 +131,5 @@ After acting on it, acknowledge it, optionally with a concise result:
       --message "Rebased cleanly; focused tests pass."
 
 Reporting does not stop or transfer your session. Continue working unless the
-task is blocked or complete. Do not use dispatch reporting for ordinary,
+task is blocked or complete. Do not use dispatch outcome commands for ordinary,
 untracked delegation.

@@ -17,8 +17,8 @@
 //     the sentinel "closed" once the session is gone. This comes from attn's
 //     PTY/stop classifier.
 //   - StructuredReport: the coordination envelope the delegated agent explicitly
-//     files via `attn dispatch report --coordination-file` (work_state,
-//     report_type, an optional decision Request, summary, next_action).
+//     outcome commands such as `attn dispatch complete` and `dispatch block`
+//     (work_state, report_type, an optional decision Request, summary, next_action).
 //
 // Doneness and failure are claimed by the agent, not inferred. Only an explicit
 // structured report yields Done or Failed; the runtime Status governs liveness

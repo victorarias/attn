@@ -25,23 +25,30 @@ func chiefOfStaffDispatchPrompt(brief string) string {
 
 ---
 This task is tracked by the chief of staff in attn.
-Send a concise update when you reach a meaningful milestone, need input, or finish:
+Report meaningful progress with:
 
-    "$ATTN_WRAPPER_PATH" dispatch report --message "<update>"
+    "$ATTN_WRAPPER_PATH" dispatch update --summary "<progress and next action>"
 
-For a longer update, write it to a file and use ` + "`--file <path>`" + `.
-When work is blocked, ready for review, completed, or failed, attach structured
-coordination fields with ` + "`--coordination-file <json>`" + `.
+Use the command that matches the outcome when work needs input or reaches a handoff:
 
-attn has a Notebook — a durable, profile-wide markdown store. A dispatch report is a
+    "$ATTN_WRAPPER_PATH" dispatch block --summary "<blocker>" --question "<needed decision>"
+    "$ATTN_WRAPPER_PATH" dispatch review --summary "<what is ready>"
+    "$ATTN_WRAPPER_PATH" dispatch complete --summary "<completed outcome>"
+    "$ATTN_WRAPPER_PATH" dispatch fail --summary "<terminal failure>"
+
+Add ` + "`--details <text>`" + ` or ` + "`--details-file <path>`" + ` when the chief needs more than the
+concise summary. Add ` + "`--next-actor`" + ` and ` + "`--next-action`" + ` when responsibility moves.
+
+attn has a Notebook — a durable, profile-wide markdown store. A dispatch outcome is a
 small payload; when you produce a large durable artifact (a report, design doc, or
 findings — often built with the user), hand it into the Notebook instead of inlining
 it, and the reference goes back to the chief:
 
-    "$ATTN_WRAPPER_PATH" dispatch handoff --file <artifact> --to <notebook-path> --message "<update>"
+    "$ATTN_WRAPPER_PATH" dispatch handoff --file <artifact> --to <notebook-path> \
+      --summary "<outcome>" --review
 
 Write to the Notebook path the chief or user designated. If none was designated and
-the artifact warrants one, ask the chief in a report rather than inventing a location.
+the artifact warrants one, ask the chief with ` + "`dispatch block`" + ` rather than inventing a location.
 
 Use ` + "`dispatch status`" + ` to read a chief's durable response to a decision request.
 Before reporting completion or waiting for more work, run
@@ -255,6 +262,25 @@ func validateDispatchReport(report *protocol.DispatchReport) error {
 	return nil
 }
 
+func validateHandoffDispatchReport(report *protocol.DispatchReport) error {
+	if err := validateDispatchReport(report); err != nil {
+		return err
+	}
+	if report.ReportType != protocol.DispatchReportTypeHandoff {
+		return fmt.Errorf("report_type must be %q", protocol.DispatchReportTypeHandoff)
+	}
+	switch report.WorkState {
+	case protocol.DispatchWorkStateReadyForReview, protocol.DispatchWorkStateCompleted:
+		return nil
+	default:
+		return fmt.Errorf(
+			"work_state must be %q or %q",
+			protocol.DispatchWorkStateReadyForReview,
+			protocol.DispatchWorkStateCompleted,
+		)
+	}
+}
+
 func (d *Daemon) chiefOfStaffDispatches(chiefSessionID string) []protocol.ChiefOfStaffDispatch {
 	records := d.store.ListChiefOfStaffDispatches(chiefSessionID)
 	result := make([]protocol.ChiefOfStaffDispatch, 0, len(records))
@@ -292,28 +318,28 @@ func (d *Daemon) handleListDispatches(conn net.Conn, msg *protocol.ListDispatche
 	})
 }
 
-func (d *Daemon) handleReportDispatch(conn net.Conn, msg *protocol.ReportDispatchMessage) {
+func (d *Daemon) handleSubmitDispatchOutcome(conn net.Conn, msg *protocol.SubmitDispatchOutcomeMessage) {
 	sourceSessionID := strings.TrimSpace(msg.SourceSessionID)
 	report := strings.TrimSpace(msg.Report)
 	if sourceSessionID == "" {
-		d.sendError(conn, "dispatch report: source_session_id is required")
+		d.sendError(conn, "dispatch outcome: source_session_id is required")
 		return
 	}
 	if report == "" {
-		d.sendError(conn, "dispatch report: report is required")
+		d.sendError(conn, "dispatch outcome: report is required")
 		return
 	}
-	if err := validateDispatchReport(msg.StructuredReport); err != nil {
-		d.sendError(conn, "dispatch report: "+err.Error())
+	if err := validateDispatchReport(&msg.StructuredReport); err != nil {
+		d.sendError(conn, "dispatch outcome: "+err.Error())
 		return
 	}
-	dispatch, err := d.store.UpdateChiefOfStaffDispatchReportEnvelope(
+	dispatch, err := d.store.UpdateChiefOfStaffDispatchOutcome(
 		sourceSessionID,
 		report,
 		msg.StructuredReport,
 	)
 	if err != nil {
-		d.sendError(conn, "dispatch report: "+err.Error())
+		d.sendError(conn, "dispatch outcome: "+err.Error())
 		return
 	}
 	// Capture finished delegated work in the durable journal BEFORE acking the
@@ -324,7 +350,7 @@ func (d *Daemon) handleReportDispatch(conn net.Conn, msg *protocol.ReportDispatc
 	// observable to the caller — when the response returns the per-dispatch file is
 	// on disk — so a socket-level test never races t.TempDir() cleanup against a
 	// still-pending post-response write.
-	if isTerminalDispatchReport(msg.StructuredReport) {
+	if isTerminalDispatchReport(&msg.StructuredReport) {
 		d.journalDispatchOutcome(dispatch)
 	}
 	decorated := d.decorateChiefOfStaffDispatch(dispatch)
@@ -336,8 +362,8 @@ func (d *Daemon) handleReportDispatch(conn net.Conn, msg *protocol.ReportDispatc
 }
 
 // handleHandoffDispatch writes a dispatched agent's large artifact into the
-// Notebook at the chief-designated path, then records a normal dispatch report
-// whose message embeds the resolved reference. A dispatch report is a small
+// Notebook at the chief-designated path, then records a typed dispatch outcome
+// whose message embeds the resolved reference. A dispatch outcome is a small
 // payload; the Notebook carries the bulky artifact the agent built (often with the
 // user), and the report hands the chief a reference it can act on, move, or
 // promote. The Notebook write happens before the report is recorded, so a report
@@ -357,7 +383,7 @@ func (d *Daemon) handleHandoffDispatch(conn net.Conn, msg *protocol.HandoffDispa
 		d.sendError(conn, "dispatch handoff: content is required")
 		return
 	}
-	if err := validateDispatchReport(msg.StructuredReport); err != nil {
+	if err := validateHandoffDispatchReport(&msg.StructuredReport); err != nil {
 		d.sendError(conn, "dispatch handoff: "+err.Error())
 		return
 	}
@@ -388,7 +414,7 @@ func (d *Daemon) handleHandoffDispatch(conn net.Conn, msg *protocol.HandoffDispa
 	d.broadcastNotebookChanged(originAgent, rel)
 
 	report := composeHandoffReport(strings.TrimSpace(protocol.Deref(msg.Report)), rel)
-	dispatch, err := d.store.UpdateChiefOfStaffDispatchReportEnvelope(
+	dispatch, err := d.store.UpdateChiefOfStaffDispatchOutcome(
 		sourceSessionID,
 		report,
 		msg.StructuredReport,
@@ -397,7 +423,7 @@ func (d *Daemon) handleHandoffDispatch(conn net.Conn, msg *protocol.HandoffDispa
 		d.sendError(conn, "dispatch handoff: "+err.Error())
 		return
 	}
-	if isTerminalDispatchReport(msg.StructuredReport) {
+	if isTerminalDispatchReport(&msg.StructuredReport) {
 		d.journalDispatchOutcome(dispatch)
 	}
 	decorated := d.decorateChiefOfStaffDispatch(dispatch)
@@ -408,7 +434,7 @@ func (d *Daemon) handleHandoffDispatch(conn net.Conn, msg *protocol.HandoffDispa
 	d.broadcastChiefOfStaffDispatchesUpdated()
 }
 
-// composeHandoffReport builds the dispatch report message for a handoff: the
+// composeHandoffReport builds the outcome details for a handoff: the
 // agent's optional note (or a neutral default) followed by a resolvable
 // root-absolute reference to the artifact the daemon just wrote. The reference is
 // composed server-side so it always points at the real written path.
