@@ -2170,6 +2170,7 @@ model Response {
   dispatch_message?: DispatchMessage;
   dispatch_messages?: DispatchMessage[];
   sessions?: Session[];
+  workspaces?: Workspace[];
   prs?: PR[];
   repos?: RepoState[];
   authors?: AuthorState[];

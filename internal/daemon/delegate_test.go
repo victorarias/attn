@@ -1312,6 +1312,41 @@ func TestDelegateTargetsExistingWorkspace(t *testing.T) {
 	}
 }
 
+func TestDelegateTargetsPinnedEmptyWorkspace(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+	targetDir := t.TempDir()
+	targetWorkspaceID := "workspace-empty-pinned"
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        targetWorkspaceID,
+		Title:     "Empty pinned",
+		Directory: targetDir,
+	})
+	if _, errMsg := d.setWorkspacePinned(targetWorkspaceID, true); errMsg != "" {
+		t.Fatalf("pin target workspace: %s", errMsg)
+	}
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Reuse the empty pinned workspace.",
+		Placement:       protocol.Ptr(delegationPlacementExisting),
+		WorkspaceID:     protocol.Ptr(targetWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	if result.WorkspaceID != targetWorkspaceID || result.Directory != targetDir {
+		t.Fatalf("result = %+v", result)
+	}
+	if sessions := d.store.SessionsInWorkspace(targetWorkspaceID); len(sessions) != 1 || sessions[0] != result.SessionID {
+		t.Fatalf("target workspace sessions = %v, want delegated session %s", sessions, result.SessionID)
+	}
+}
+
 func TestChiefOfStaffDelegateUnmutesExistingWorkspace(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}

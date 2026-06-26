@@ -23,6 +23,11 @@ type Client struct {
 	socketPath string
 }
 
+type ListResult struct {
+	Sessions   []protocol.Session   `json:"sessions"`
+	Workspaces []protocol.Workspace `json:"workspaces"`
+}
+
 // New creates a new client
 func New(socketPath string) *Client {
 	if socketPath == "" {
@@ -448,8 +453,7 @@ func (c *Client) NotebookGuide(sessionID string) (*protocol.NotebookGuideResult,
 	return resp.NotebookGuide, nil
 }
 
-// Query returns sessions matching the filter
-func (c *Client) Query(filter string) ([]protocol.Session, error) {
+func (c *Client) queryResponse(filter string) (*protocol.Response, error) {
 	var filterPtr *string
 	if filter != "" {
 		filterPtr = &filter
@@ -462,7 +466,36 @@ func (c *Client) Query(filter string) ([]protocol.Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	return resp, nil
+}
+
+// Query returns sessions matching the filter.
+func (c *Client) Query(filter string) ([]protocol.Session, error) {
+	resp, err := c.queryResponse(filter)
+	if err != nil {
+		return nil, err
+	}
 	return resp.Sessions, nil
+}
+
+// List returns the decorated sessions and workspace snapshots used by `attn list`.
+func (c *Client) List(filter string) (*ListResult, error) {
+	resp, err := c.queryResponse(filter)
+	if err != nil {
+		return nil, err
+	}
+	sessions := resp.Sessions
+	if sessions == nil {
+		sessions = []protocol.Session{}
+	}
+	workspaces := resp.Workspaces
+	if workspaces == nil {
+		workspaces = []protocol.Workspace{}
+	}
+	return &ListResult{
+		Sessions:   sessions,
+		Workspaces: workspaces,
+	}, nil
 }
 
 // Heartbeat sends a heartbeat for a session

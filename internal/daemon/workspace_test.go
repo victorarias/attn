@@ -816,6 +816,41 @@ func TestPinnedEmptyWorkspaceSurvivesStartupCleanup(t *testing.T) {
 	}
 }
 
+func TestQueryIncludesPinnedEmptyWorkspace(t *testing.T) {
+	d := newDaemonForTest(t)
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        "ws-pinned",
+		Title:     "Pinned",
+		Directory: "/repo",
+	})
+	if _, errMsg := d.setWorkspacePinned("ws-pinned", true); errMsg != "" {
+		t.Fatalf("pin workspace: %s", errMsg)
+	}
+
+	server, client := net.Pipe()
+	defer client.Close()
+	go func() {
+		defer server.Close()
+		d.handleQuery(server, &protocol.QueryMessage{Cmd: protocol.CmdQuery})
+	}()
+
+	var resp protocol.Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode query response: %v", err)
+	}
+	if len(resp.Sessions) != 0 {
+		t.Fatalf("sessions = %d, want none", len(resp.Sessions))
+	}
+	if len(resp.Workspaces) != 1 {
+		t.Fatalf("workspaces = %d, want pinned empty workspace", len(resp.Workspaces))
+	}
+	got := resp.Workspaces[0]
+	if got.ID != "ws-pinned" || !got.Pinned || got.Status != protocol.WorkspaceStatusIdle {
+		t.Fatalf("workspace = %+v, want pinned idle ws-pinned", got)
+	}
+}
+
 func TestSetWorkspacePinned_PersistsAndBroadcasts(t *testing.T) {
 	d := newDaemonForTest(t)
 	cap := captureBroadcasts(d)

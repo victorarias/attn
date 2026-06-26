@@ -2890,6 +2890,9 @@ type Response struct {
 
 	// WorkspaceContexts corresponds to the JSON schema field "workspace_contexts".
 	WorkspaceContexts []WorkspaceContext `json:"workspace_contexts,omitempty,omitzero"`
+
+	// Workspaces corresponds to the JSON schema field "workspaces".
+	Workspaces []Workspace `json:"workspaces,omitempty,omitzero"`
 }
 
 type ReviewComment struct {
