@@ -498,6 +498,25 @@ CREATE TABLE IF NOT EXISTS ticket_attachments (
 );
 CREATE INDEX IF NOT EXISTS idx_ticket_attachments_ticket
     ON ticket_attachments(ticket_id, id ASC);`},
+	{56, "create ticket event log", `CREATE TABLE IF NOT EXISTS ticket_events (
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id   TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    author      TEXT NOT NULL DEFAULT '',
+    from_status TEXT NOT NULL DEFAULT '',
+    to_status   TEXT NOT NULL DEFAULT '',
+    comment     TEXT NOT NULL DEFAULT '',
+    detail      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_events_ticket
+    ON ticket_events(ticket_id, seq);
+CREATE TABLE IF NOT EXISTS ticket_event_cursors (
+    observer_id TEXT PRIMARY KEY,
+    cursor      INTEGER NOT NULL DEFAULT 0,
+    updated_at  TEXT NOT NULL DEFAULT ''
+);`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

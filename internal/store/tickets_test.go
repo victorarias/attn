@@ -31,7 +31,7 @@ func TestTicketCRUDRoundTrip(t *testing.T) {
 		Assignee:    "agent7",
 		Cwd:         "/tmp/project",
 		LastAgentID: "agent7",
-	}, ticketBase)
+	}, "chief", ticketBase)
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
@@ -70,13 +70,13 @@ func TestTicketValidation(t *testing.T) {
 	s := New()
 	t.Cleanup(func() { _ = s.Close() })
 
-	if _, err := s.CreateTicket(Ticket{ID: "Has Spaces", Title: "x"}, ticketBase); !errors.Is(err, ErrInvalidTicketID) {
+	if _, err := s.CreateTicket(Ticket{ID: "Has Spaces", Title: "x"}, "you", ticketBase); !errors.Is(err, ErrInvalidTicketID) {
 		t.Fatalf("invalid id err = %v, want ErrInvalidTicketID", err)
 	}
-	if _, err := s.CreateTicket(Ticket{ID: "no-title"}, ticketBase); !errors.Is(err, ErrTicketTitleRequired) {
+	if _, err := s.CreateTicket(Ticket{ID: "no-title"}, "you", ticketBase); !errors.Is(err, ErrTicketTitleRequired) {
 		t.Fatalf("missing title err = %v, want ErrTicketTitleRequired", err)
 	}
-	if _, err := s.CreateTicket(Ticket{ID: "bad-status", Title: "x", Status: "weird"}, ticketBase); !errors.Is(err, ErrInvalidTicketStatus) {
+	if _, err := s.CreateTicket(Ticket{ID: "bad-status", Title: "x", Status: "weird"}, "you", ticketBase); !errors.Is(err, ErrInvalidTicketStatus) {
 		t.Fatalf("bad status err = %v, want ErrInvalidTicketStatus", err)
 	}
 }
@@ -85,10 +85,10 @@ func TestTicketIDCollision(t *testing.T) {
 	s := New()
 	t.Cleanup(func() { _ = s.Close() })
 
-	if _, err := s.CreateTicket(Ticket{ID: "dup", Title: "first"}, ticketBase); err != nil {
+	if _, err := s.CreateTicket(Ticket{ID: "dup", Title: "first"}, "you", ticketBase); err != nil {
 		t.Fatalf("first CreateTicket: %v", err)
 	}
-	_, err := s.CreateTicket(Ticket{ID: "dup", Title: "second"}, ticketBase)
+	_, err := s.CreateTicket(Ticket{ID: "dup", Title: "second"}, "you", ticketBase)
 	if !errors.Is(err, ErrTicketIDTaken) {
 		t.Fatalf("collision err = %v, want ErrTicketIDTaken", err)
 	}
@@ -107,7 +107,7 @@ func TestTicketStatusTransitions(t *testing.T) {
 	s := New()
 	t.Cleanup(func() { _ = s.Close() })
 
-	if _, err := s.CreateTicket(Ticket{ID: "tk", Title: "work"}, ticketBase); err != nil {
+	if _, err := s.CreateTicket(Ticket{ID: "tk", Title: "work"}, "you", ticketBase); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
 
@@ -171,7 +171,7 @@ func TestTicketCommentsAndEdits(t *testing.T) {
 	s := New()
 	t.Cleanup(func() { _ = s.Close() })
 
-	if _, err := s.CreateTicket(Ticket{ID: "tk", Title: "work"}, ticketBase); err != nil {
+	if _, err := s.CreateTicket(Ticket{ID: "tk", Title: "work"}, "you", ticketBase); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
 
@@ -183,10 +183,10 @@ func TestTicketCommentsAndEdits(t *testing.T) {
 	if _, err := s.AddTicketComment("tk", "agent7", "almost there", t2); err != nil {
 		t.Fatalf("AddTicketComment: %v", err)
 	}
-	if err := s.EditTicketDescription("tk", "Revised brief.", t2); err != nil {
+	if err := s.EditTicketDescription("tk", "Revised brief.", "you", t2); err != nil {
 		t.Fatalf("EditTicketDescription: %v", err)
 	}
-	if err := s.AssignTicket("tk", "agent9", t2); err != nil {
+	if err := s.AssignTicket("tk", "agent9", "you", t2); err != nil {
 		t.Fatalf("AssignTicket: %v", err)
 	}
 	if err := s.SetTicketSession("tk", "/repo", "agent9", t2); err != nil {
@@ -214,7 +214,7 @@ func TestTicketCommentsAndEdits(t *testing.T) {
 	}
 
 	// Edits / comments on a missing ticket fail rather than orphan.
-	if err := s.EditTicketDescription("ghost", "x", t2); !errors.Is(err, ErrTicketNotFound) {
+	if err := s.EditTicketDescription("ghost", "x", "you", t2); !errors.Is(err, ErrTicketNotFound) {
 		t.Fatalf("edit missing = %v, want ErrTicketNotFound", err)
 	}
 	if _, err := s.AddTicketComment("ghost", "", "x", t2); !errors.Is(err, ErrTicketNotFound) {
@@ -226,7 +226,7 @@ func TestTicketAttachments(t *testing.T) {
 	s := New()
 	t.Cleanup(func() { _ = s.Close() })
 
-	if _, err := s.CreateTicket(Ticket{ID: "tk", Title: "work"}, ticketBase); err != nil {
+	if _, err := s.CreateTicket(Ticket{ID: "tk", Title: "work"}, "you", ticketBase); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
 	t1 := ticketBase.Add(1 * time.Minute)
@@ -235,7 +235,7 @@ func TestTicketAttachments(t *testing.T) {
 		Filename: "results.json",
 		Path:     "/handover/results.json",
 		Note:     "benchmark output",
-	}, t1)
+	}, "agent7", t1)
 	if err != nil {
 		t.Fatalf("AddTicketAttachment: %v", err)
 	}
@@ -258,10 +258,10 @@ func TestTicketAttachments(t *testing.T) {
 	}
 
 	// A filename is required; a missing ticket is rejected.
-	if _, err := s.AddTicketAttachment(TicketAttachment{TicketID: "tk"}, t1); err == nil {
+	if _, err := s.AddTicketAttachment(TicketAttachment{TicketID: "tk"}, "agent7", t1); err == nil {
 		t.Fatal("AddTicketAttachment with no filename: want error")
 	}
-	if _, err := s.AddTicketAttachment(TicketAttachment{TicketID: "ghost", Filename: "x"}, t1); !errors.Is(err, ErrTicketNotFound) {
+	if _, err := s.AddTicketAttachment(TicketAttachment{TicketID: "ghost", Filename: "x"}, "agent7", t1); !errors.Is(err, ErrTicketNotFound) {
 		t.Fatalf("attach to missing = %v, want ErrTicketNotFound", err)
 	}
 }
@@ -271,13 +271,13 @@ func TestTicketListAndArchive(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	// Three tickets across columns.
-	if _, err := s.CreateTicket(Ticket{ID: "backlog", Title: "later"}, ticketBase); err != nil {
+	if _, err := s.CreateTicket(Ticket{ID: "backlog", Title: "later"}, "you", ticketBase); err != nil {
 		t.Fatalf("create backlog: %v", err)
 	}
-	if _, err := s.CreateTicket(Ticket{ID: "active", Title: "now", Status: TicketStatusWorking}, ticketBase.Add(time.Minute)); err != nil {
+	if _, err := s.CreateTicket(Ticket{ID: "active", Title: "now", Status: TicketStatusWorking}, "you", ticketBase.Add(time.Minute)); err != nil {
 		t.Fatalf("create active: %v", err)
 	}
-	if _, err := s.CreateTicket(Ticket{ID: "shipped", Title: "old", Status: TicketStatusDone}, ticketBase.Add(2*time.Minute)); err != nil {
+	if _, err := s.CreateTicket(Ticket{ID: "shipped", Title: "old", Status: TicketStatusDone}, "you", ticketBase.Add(2*time.Minute)); err != nil {
 		t.Fatalf("create shipped: %v", err)
 	}
 
@@ -377,22 +377,22 @@ func TestTicketTTLSweep(t *testing.T) {
 	now := ticketBase
 
 	// An open backlog ticket — never swept.
-	if _, err := s.CreateTicket(Ticket{ID: "open", Title: "live"}, now.Add(-90*24*time.Hour)); err != nil {
+	if _, err := s.CreateTicket(Ticket{ID: "open", Title: "live"}, "you", now.Add(-90*24*time.Hour)); err != nil {
 		t.Fatalf("create open: %v", err)
 	}
 	// A recently-closed ticket — within TTL, kept.
-	if _, err := s.CreateTicket(Ticket{ID: "recent", Title: "recent", Status: TicketStatusDone}, now.Add(-5*24*time.Hour)); err != nil {
+	if _, err := s.CreateTicket(Ticket{ID: "recent", Title: "recent", Status: TicketStatusDone}, "you", now.Add(-5*24*time.Hour)); err != nil {
 		t.Fatalf("create recent: %v", err)
 	}
 	// A long-closed ticket with activity + an attachment — swept, cascading.
-	if _, err := s.CreateTicket(Ticket{ID: "stale", Title: "stale"}, now.Add(-100*24*time.Hour)); err != nil {
+	if _, err := s.CreateTicket(Ticket{ID: "stale", Title: "stale"}, "you", now.Add(-100*24*time.Hour)); err != nil {
 		t.Fatalf("create stale: %v", err)
 	}
 	closedAt := now.Add(-60 * 24 * time.Hour)
 	if _, err := s.SetTicketStatus("stale", TicketStatusDone, "agent7", "done long ago", closedAt); err != nil {
 		t.Fatalf("close stale: %v", err)
 	}
-	if _, err := s.AddTicketAttachment(TicketAttachment{TicketID: "stale", Filename: "old.txt"}, closedAt); err != nil {
+	if _, err := s.AddTicketAttachment(TicketAttachment{TicketID: "stale", Filename: "old.txt"}, "agent7", closedAt); err != nil {
 		t.Fatalf("attach stale: %v", err)
 	}
 
@@ -415,15 +415,18 @@ func TestTicketTTLSweep(t *testing.T) {
 	}
 
 	// Cascade: the swept ticket's activity + attachment rows are gone too.
-	var orphanActivity, orphanAttachments int
+	var orphanActivity, orphanAttachments, orphanEvents int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM ticket_activity WHERE ticket_id = 'stale'`).Scan(&orphanActivity); err != nil {
 		t.Fatalf("count orphan activity: %v", err)
 	}
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM ticket_attachments WHERE ticket_id = 'stale'`).Scan(&orphanAttachments); err != nil {
 		t.Fatalf("count orphan attachments: %v", err)
 	}
-	if orphanActivity != 0 || orphanAttachments != 0 {
-		t.Fatalf("cascade leak: %d activity, %d attachments left", orphanActivity, orphanAttachments)
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM ticket_events WHERE ticket_id = 'stale'`).Scan(&orphanEvents); err != nil {
+		t.Fatalf("count orphan events: %v", err)
+	}
+	if orphanActivity != 0 || orphanAttachments != 0 || orphanEvents != 0 {
+		t.Fatalf("cascade leak: %d activity, %d attachments, %d events left", orphanActivity, orphanAttachments, orphanEvents)
 	}
 }
 
@@ -433,7 +436,7 @@ func TestTicketPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWithDB: %v", err)
 	}
-	if _, err := s.CreateTicket(Ticket{ID: "persist", Title: "survives restart"}, ticketBase); err != nil {
+	if _, err := s.CreateTicket(Ticket{ID: "persist", Title: "survives restart"}, "you", ticketBase); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
 	if _, err := s.SetTicketStatus("persist", TicketStatusInReview, "agent7", "ready", ticketBase.Add(time.Minute)); err != nil {

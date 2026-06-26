@@ -229,7 +229,7 @@ each is a meaningful, verifiable chunk.
 | # | slice | status |
 |---|---|---|
 | 1 | Ticket store + lifecycle | 🟡 |
-| 2 | Event-driven notification core | ⬜ |
+| 2 | Event-driven notification core | 🟡 |
 | 3 | Delegation ⇄ tickets (live wiring) | ⬜ |
 | 4 | Ticket view + resume + attachments | ⬜ |
 | 5 | Board view | ⬜ |
