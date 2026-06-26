@@ -688,8 +688,9 @@ func (d *Daemon) workspaceHasSessionlessContent(workspaceID string) bool {
 	return d.workspaceLayoutHasTiles(workspaceID)
 }
 
-// listWorkspaces returns a snapshot of the current workspaces for InitialState.
-func (d *Daemon) listWorkspaces() []protocol.Workspace {
+// listLocalWorkspaces returns a snapshot of the local workspaces that can be
+// targeted by local CLI operations such as `attn delegate --workspace`.
+func (d *Daemon) listLocalWorkspaces() []protocol.Workspace {
 	if d.workspaces == nil {
 		return nil
 	}
@@ -700,6 +701,13 @@ func (d *Daemon) listWorkspaces() []protocol.Workspace {
 			workspaces[i].Layout = layout
 		}
 	}
+	return workspaces
+}
+
+// listWorkspaces returns a snapshot of the current local and remote workspaces
+// for app InitialState.
+func (d *Daemon) listWorkspaces() []protocol.Workspace {
+	workspaces := d.listLocalWorkspaces()
 	if d.hubManager != nil {
 		workspaces = append(workspaces, d.hubManager.RemoteWorkspaces()...)
 	}

@@ -510,7 +510,7 @@ func TestSessionForBroadcast_PreservesPersistedWorkspaceIDDuringRegistryRecovery
 	}
 }
 
-func TestListWorkspaces_IncludesRegistered(t *testing.T) {
+func TestListLocalWorkspaces_IncludesRegistered(t *testing.T) {
 	d := newDaemonForTest(t)
 	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
 		Cmd: protocol.CmdRegisterWorkspace, ID: "ws1", Title: "A", Directory: "/a",
@@ -519,7 +519,7 @@ func TestListWorkspaces_IncludesRegistered(t *testing.T) {
 		Cmd: protocol.CmdRegisterWorkspace, ID: "ws2", Title: "B", Directory: "/b",
 	})
 
-	list := d.listWorkspaces()
+	list := d.listLocalWorkspaces()
 	if len(list) != 2 {
 		t.Fatalf("expected 2 workspaces, got %d (%+v)", len(list), list)
 	}

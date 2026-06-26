@@ -2784,7 +2784,7 @@ func (d *Daemon) handleQuery(conn net.Conn, msg *protocol.QueryMessage) {
 	resp := protocol.Response{
 		Ok:         true,
 		Sessions:   d.sessionsForBroadcast(sessions),
-		Workspaces: d.listWorkspaces(),
+		Workspaces: d.listLocalWorkspaces(),
 	}
 	json.NewEncoder(conn).Encode(resp)
 }
