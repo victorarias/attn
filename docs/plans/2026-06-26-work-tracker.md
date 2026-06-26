@@ -235,6 +235,7 @@ each is a meaningful, verifiable chunk.
 | 5 | Board view | ⬜ |
 | 6 | Codex nudge path | ⬜ |
 | 7 | Retire the `dispatch` namespace | ⬜ |
+| 8 | Export ticket state (CLI) — *post-merge, lands on `main`* | ⬜ |
 
 1. **Ticket store + lifecycle.** The `tickets` + `activity` + `attachments` tables, the
    status enum (incl. Todo / Crashed), human-friendly ids, CRUD + status transitions,
@@ -266,6 +267,15 @@ each is a meaningful, verifiable chunk.
    (`watch / report / message / inbox / messages / resolve / status / handoff / list`)
    and the mailbox / journal / `Classify` / #397 remnants — once the `ticket` surface
    covers them. *Test:* the `dispatch` surface is gone and nothing references it.
+
+8. **Export ticket state (CLI).** *Lands after `feat/tickets` merges to `main`, as a
+   standalone PR to `main` — not on the integration branch.* `ticket export <id>`
+   writes a **self-contained archive** of the whole ticket — the full record (id, title,
+   description, status, assignee, cwd / last agent, timestamps), the complete activity
+   thread (every status change + comment), and the attachment files themselves — so the
+   finished work can be **archived outside attn** and survives the closed-ticket sweep.
+   *Test:* export a worked ticket; the archive round-trips its activity + attachments
+   with nothing left dangling in attn.
 
 ## Deferred / open
 
