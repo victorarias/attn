@@ -216,6 +216,19 @@ enum DispatchRequestStatus {
   resolved,
 }
 
+// TicketStatus is the column a ticket lives in on the work-tracker board.
+// `crashed` is attn-authored only (an agent that died without reporting); the
+// rest are reachable by the chief or the agent's own self-report.
+enum TicketStatus {
+  todo,
+  working,
+  blocked,
+  in_review,
+  done,
+  failed,
+  crashed,
+}
+
 model DispatchDecisionRequest {
   question: string;
   recommendation?: string;
@@ -612,6 +625,24 @@ model WakeDispatchAgentMessage {
   source_session_id: string;
   dispatch_id: string;
   request_id: string;
+}
+
+// SetTicketStatusMessage is an agent self-reporting the work state of its own
+// bound ticket. The daemon resolves the ticket from the calling session (the
+// assignee) — the agent does not name an id — and maps the reported work state
+// onto a ticket column. `comment` is an optional note recorded on the change.
+model SetTicketStatusMessage {
+  cmd: "set_ticket_status";
+  source_session_id: string;
+  work_state: DispatchWorkState;
+  comment?: string;
+}
+
+// TicketStatusResult echoes the resolved ticket id and the column it now sits in
+// after a status change, so the caller can confirm what moved.
+model TicketStatusResult {
+  ticket_id: string;
+  status: TicketStatus;
 }
 
 model WorkspaceContextCheckoutMessage {
@@ -2179,6 +2210,7 @@ model Response {
   notebook_read?: NotebookReadResult;
   notebook_write?: NotebookWriteResult;
   notebook_guide?: NotebookGuideResult;
+  ticket_status_result?: TicketStatusResult;
 }
 
 model DelegateResult {

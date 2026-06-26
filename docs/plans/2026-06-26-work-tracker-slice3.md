@@ -47,8 +47,8 @@ it lands as **stacked, additive-first sub-PRs**, with the removal **last and gat
 
 | # | branch | additive? | scope |
 |---|---|---|---|
-| 3a | `tickets/slice-3a-binding` | ✅ additive | delegate creates + binds a ticket (slug, Working, assignee=session) and emits the created event; `ActiveTicketForSession` lookup. No migration/protocol change. |
-| 3b | `tickets/slice-3b-report` | ✅ additive | `ticket status` verb + daemon handler → `SetTicketStatus` on the bound ticket; new protocol command (version bump). |
+| 3a | `tickets/slice-3a-binding` | ✅ additive | ✅ **merged-ready (#415, figgy-approved)** — delegate creates + binds a ticket (slug, Working, assignee=session) and emits the created event; `ActiveTicketForSession` lookup. No migration/protocol change. |
+| 3b | `tickets/slice-3b-report` | ✅ additive | ✅ **built** — `attn ticket status <work-state>` verb + `handleSetTicketStatus` → `SetTicketStatus` on the session's bound ticket (resolved via `ActiveTicketForSession`, never a caller id); `work_state`→column map; protocol v124. |
 | 3c | `tickets/slice-3c-crash` | ✅ additive | wire the crash seam to author `Crashed` on a bound, non-terminal ticket. |
 | 3d | `tickets/slice-3d-observe` | ✅ additive | chief + agent observers on live sessions; ticket events drive `Notify` (Claude watch / codex-nudge stub); end-to-end with a real Claude agent. |
 | 3e | `tickets/slice-3e-remove-dispatch` | ⚠️ **destructive — gated on Victor's confirm** | delete the dispatch mailbox (`message/inbox/messages/read/ack`, store file, handlers, protocol) and the outcome-report verbs, now that tickets cover them. |

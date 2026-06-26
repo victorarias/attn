@@ -374,6 +374,28 @@ func (c *Client) AcknowledgeDispatchMessage(
 	return resp.DispatchMessage, nil
 }
 
+// SetTicketStatus reports the calling agent's work state; the daemon moves the
+// session's bound ticket to the matching column and echoes the resolved id and
+// status back.
+func (c *Client) SetTicketStatus(sourceSessionID, workState, comment string) (*protocol.TicketStatusResult, error) {
+	msg := protocol.SetTicketStatusMessage{
+		Cmd:             protocol.CmdSetTicketStatus,
+		SourceSessionID: sourceSessionID,
+		WorkState:       protocol.DispatchWorkState(workState),
+	}
+	if value := strings.TrimSpace(comment); value != "" {
+		msg.Comment = protocol.Ptr(value)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.TicketStatusResult == nil {
+		return nil, errors.New("daemon returned no ticket status result")
+	}
+	return resp.TicketStatusResult, nil
+}
+
 func (c *Client) CheckoutWorkspaceContext(sourceSessionID string, force bool) (*protocol.WorkspaceContextResult, error) {
 	msg := protocol.WorkspaceContextCheckoutMessage{
 		Cmd:             protocol.CmdWorkspaceContextCheckout,
