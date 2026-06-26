@@ -307,7 +307,9 @@ func (s *Store) ListTickets(filter TicketListFilter) ([]*Ticket, error) {
 // SetTicketStatus moves a ticket to a new column and records the change in the
 // activity thread (from -> to, with an optional comment). Transitions are
 // permissive. Entering a terminal status stamps closed_at; leaving one clears it
-// so reopened work becomes durable again. Returns the updated ticket row.
+// AND un-archives the ticket — reopening to an open status makes it durable and
+// visible on the board again, never a hidden zombie immune to the TTL sweep.
+// Returns the updated ticket row.
 func (s *Store) SetTicketStatus(id string, to TicketStatus, author, comment string, now time.Time) (*Ticket, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -335,17 +337,22 @@ func (s *Store) SetTicketStatus(id string, to TicketStatus, author, comment stri
 
 	from := current.Status
 	closedAt := current.ClosedAt
+	archivedAt := current.ArchivedAt
 	switch {
 	case to.IsTerminal() && !from.IsTerminal():
 		closed := now
 		closedAt = &closed
 	case !to.IsTerminal():
+		// Reopening to an open status: clear closed_at AND un-archive, so the
+		// ticket returns to the durable, visible, sweepable board. Otherwise an
+		// archived-then-reopened ticket becomes an invisible zombie.
 		closedAt = nil
+		archivedAt = nil
 	}
 
 	if _, err := tx.Exec(`
-		UPDATE tickets SET status = ?, updated_at = ?, closed_at = ? WHERE id = ?
-	`, string(to), formatTicketTime(now), formatTicketTimePtr(closedAt), id); err != nil {
+		UPDATE tickets SET status = ?, updated_at = ?, closed_at = ?, archived_at = ? WHERE id = ?
+	`, string(to), formatTicketTime(now), formatTicketTimePtr(closedAt), formatTicketTimePtr(archivedAt), id); err != nil {
 		return nil, err
 	}
 	if _, err := tx.Exec(`
@@ -360,6 +367,7 @@ func (s *Store) SetTicketStatus(id string, to TicketStatus, author, comment stri
 
 	current.Status = to
 	current.ClosedAt = closedAt
+	current.ArchivedAt = archivedAt
 	current.UpdatedAt = now
 	return current, nil
 }

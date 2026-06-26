@@ -326,6 +326,49 @@ func TestTicketListAndArchive(t *testing.T) {
 	}
 }
 
+// Reopening an archived ticket un-archives it: a closed+archived ticket moved back
+// to an open status must return to the default board and shed its archived_at, not
+// linger as an invisible zombie immune to the TTL sweep.
+func TestArchivedTicketReopenedBecomesVisible(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	if _, err := s.CreateTicket(Ticket{ID: "zombie", Title: "shipped", Status: TicketStatusDone}, ticketBase); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := s.ArchiveTicket("zombie", ticketBase.Add(time.Minute)); err != nil {
+		t.Fatalf("ArchiveTicket: %v", err)
+	}
+	// Archived: hidden from the default board.
+	if board, err := s.ListTickets(TicketListFilter{}); err != nil || len(board) != 0 {
+		t.Fatalf("board after archive = %d (err %v), want 0", len(board), err)
+	}
+
+	// Reopen it to an open status.
+	reopened, err := s.SetTicketStatus("zombie", TicketStatusWorking, "you", "back to it", ticketBase.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("SetTicketStatus: %v", err)
+	}
+	if reopened.ArchivedAt != nil {
+		t.Fatalf("reopened ArchivedAt = %v, want nil (un-archived)", reopened.ArchivedAt)
+	}
+	if reopened.ClosedAt != nil {
+		t.Fatalf("reopened ClosedAt = %v, want nil", reopened.ClosedAt)
+	}
+
+	// It is visible on the default board again.
+	board, err := s.ListTickets(TicketListFilter{})
+	if err != nil {
+		t.Fatalf("ListTickets: %v", err)
+	}
+	if len(board) != 1 || board[0].ID != "zombie" {
+		t.Fatalf("board after reopen = %+v, want [zombie]", board)
+	}
+	if board[0].ArchivedAt != nil {
+		t.Fatalf("persisted ArchivedAt = %v, want nil", board[0].ArchivedAt)
+	}
+}
+
 func TestTicketTTLSweep(t *testing.T) {
 	s := New()
 	t.Cleanup(func() { _ = s.Close() })
