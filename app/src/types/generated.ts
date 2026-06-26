@@ -2969,6 +2969,7 @@ export interface Response {
     workspace_context_maintenance_result?: WorkspaceContextMaintenanceResultObject;
     workspace_context_result?:             WorkspaceContextResultObject;
     workspace_contexts?:                   WorkspaceContextElement[];
+    workspaces?:                           WorkspaceElement[];
     [property: string]: any;
 }
 
@@ -8505,6 +8506,7 @@ const typeMap: any = {
         { json: "workspace_context_maintenance_result", js: "workspace_context_maintenance_result", typ: u(undefined, r("WorkspaceContextMaintenanceResultObject")) },
         { json: "workspace_context_result", js: "workspace_context_result", typ: u(undefined, r("WorkspaceContextResultObject")) },
         { json: "workspace_contexts", js: "workspace_contexts", typ: u(undefined, a(r("WorkspaceContextElement"))) },
+        { json: "workspaces", js: "workspaces", typ: u(undefined, a(r("WorkspaceElement"))) },
     ], "any"),
     "DispatchMessageObject": o([
         { json: "acknowledged_at", js: "acknowledged_at", typ: u(undefined, "") },

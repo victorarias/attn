@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-26]
+
+### Fixed
+- **`attn list` now shows pinned workspaces even when they are empty.** The command returns workspace snapshots alongside live sessions, so chief-of-staff agents can see a pinned workspace's ID, name, directory, and pinned state before delegating into it instead of creating a duplicate workspace.
+
 ## [2026-06-24]
 
 ### Added

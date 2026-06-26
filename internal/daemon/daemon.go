@@ -2782,8 +2782,9 @@ func (d *Daemon) handleTodos(conn net.Conn, msg *protocol.TodosMessage) {
 func (d *Daemon) handleQuery(conn net.Conn, msg *protocol.QueryMessage) {
 	sessions := d.store.List(protocol.Deref(msg.Filter))
 	resp := protocol.Response{
-		Ok:       true,
-		Sessions: d.sessionsForBroadcast(sessions),
+		Ok:         true,
+		Sessions:   d.sessionsForBroadcast(sessions),
+		Workspaces: d.listLocalWorkspaces(),
 	}
 	json.NewEncoder(conn).Encode(resp)
 }

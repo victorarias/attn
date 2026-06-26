@@ -510,7 +510,7 @@ func TestSessionForBroadcast_PreservesPersistedWorkspaceIDDuringRegistryRecovery
 	}
 }
 
-func TestListWorkspaces_IncludesRegistered(t *testing.T) {
+func TestListLocalWorkspaces_IncludesRegistered(t *testing.T) {
 	d := newDaemonForTest(t)
 	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
 		Cmd: protocol.CmdRegisterWorkspace, ID: "ws1", Title: "A", Directory: "/a",
@@ -519,7 +519,7 @@ func TestListWorkspaces_IncludesRegistered(t *testing.T) {
 		Cmd: protocol.CmdRegisterWorkspace, ID: "ws2", Title: "B", Directory: "/b",
 	})
 
-	list := d.listWorkspaces()
+	list := d.listLocalWorkspaces()
 	if len(list) != 2 {
 		t.Fatalf("expected 2 workspaces, got %d (%+v)", len(list), list)
 	}
@@ -813,6 +813,41 @@ func TestPinnedEmptyWorkspaceSurvivesStartupCleanup(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("unpinned workspace should be in reaped list")
+	}
+}
+
+func TestQueryIncludesPinnedEmptyWorkspace(t *testing.T) {
+	d := newDaemonForTest(t)
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        "ws-pinned",
+		Title:     "Pinned",
+		Directory: "/repo",
+	})
+	if _, errMsg := d.setWorkspacePinned("ws-pinned", true); errMsg != "" {
+		t.Fatalf("pin workspace: %s", errMsg)
+	}
+
+	server, client := net.Pipe()
+	defer client.Close()
+	go func() {
+		defer server.Close()
+		d.handleQuery(server, &protocol.QueryMessage{Cmd: protocol.CmdQuery})
+	}()
+
+	var resp protocol.Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode query response: %v", err)
+	}
+	if len(resp.Sessions) != 0 {
+		t.Fatalf("sessions = %d, want none", len(resp.Sessions))
+	}
+	if len(resp.Workspaces) != 1 {
+		t.Fatalf("workspaces = %d, want pinned empty workspace", len(resp.Workspaces))
+	}
+	got := resp.Workspaces[0]
+	if got.ID != "ws-pinned" || !got.Pinned || got.Status != protocol.WorkspaceStatusIdle {
+		t.Fatalf("workspace = %+v, want pinned idle ws-pinned", got)
 	}
 }
 

@@ -514,15 +514,15 @@ func runWSRelay() {
 func runList() {
 	warnIfDaemonVersionMismatch()
 	c := client.New("")
-	sessions, err := c.Query("")
+	result, err := c.List("")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(sessions); err != nil {
-		fmt.Fprintf(os.Stderr, "error encoding sessions: %v\n", err)
+	if err := enc.Encode(result); err != nil {
+		fmt.Fprintf(os.Stderr, "error encoding list: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -564,7 +564,7 @@ commands:
   browser <command>                 open and control the in-app browser
   review-loop <command>             manage an autonomous review loop
   workflow <command>                run, inspect, and resume durable workflows
-  list                              list sessions
+  list                              list sessions and workspaces
   daemon <command>                  manage the daemon
   profile <status|resolve|list>     show / resolve the active profile's resources
   profile-env <profile|--unset>     print shell commands for selecting a profile
