@@ -513,9 +513,12 @@ CREATE INDEX IF NOT EXISTS idx_ticket_attachments_ticket
 CREATE INDEX IF NOT EXISTS idx_ticket_events_ticket
     ON ticket_events(ticket_id, seq);
 CREATE TABLE IF NOT EXISTS ticket_event_cursors (
-    observer_id TEXT PRIMARY KEY,
-    cursor      INTEGER NOT NULL DEFAULT 0,
-    updated_at  TEXT NOT NULL DEFAULT ''
+    identity   TEXT NOT NULL,
+    ticket_id  TEXT NOT NULL,
+    cursor     INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (identity, ticket_id),
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
 );`},
 }
 

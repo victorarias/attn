@@ -572,8 +572,9 @@ func (s *Store) ArchiveTicket(id string, now time.Time) error {
 }
 
 // SweepExpiredTickets hard-deletes terminal tickets whose closed_at is older than
-// now-ttl, cascading to their activity and attachments. Open tickets (a durable
-// backlog) are never swept. Returns the number of tickets removed. The caller
+// now-ttl, cascading to their activity, attachments, events, and event cursors.
+// Open tickets (a durable backlog) are never swept. Returns the number of tickets
+// removed. The caller
 // passes now and the TTL (production: time.Now() and 30 days); tests inject both.
 func (s *Store) SweepExpiredTickets(now time.Time, ttl time.Duration) (int, error) {
 	s.mu.Lock()
@@ -601,6 +602,9 @@ func (s *Store) SweepExpiredTickets(now time.Time, ttl time.Duration) (int, erro
 		return 0, err
 	}
 	if _, err := tx.Exec(`DELETE FROM ticket_events WHERE ticket_id IN (SELECT id FROM tickets WHERE `+expired+`)`, cutoff); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`DELETE FROM ticket_event_cursors WHERE ticket_id IN (SELECT id FROM tickets WHERE `+expired+`)`, cutoff); err != nil {
 		return 0, err
 	}
 	res, err := tx.Exec(`DELETE FROM tickets WHERE `+expired, cutoff)

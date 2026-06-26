@@ -1,16 +1,26 @@
 // Package ticketnotify is the event-driven notification core of the work tracker
 // (slice 2 of docs/plans/2026-06-26-work-tracker.md). It is the decoupled layer
-// that sits above the store's append-only event log: observers subscribe, their
-// cursors express "unread", and two handlers turn pending events into a
-// notification — a watch-consume for agents that self-monitor (Claude), and an
-// idle pty-nudge for those that can't (codex).
+// that sits above the store's append-only event log: every identity has a
+// per-ticket cursor, events past it are unread, and two handlers turn unread
+// events into a notification — a watch-consume for agents that self-monitor
+// (Claude), and an idle pty-nudge for those that can't (codex).
+//
+// Identity is uniform: you, the chief, and each agent are all just identities (the
+// chief is one of the agents). There is no special "sees everything" observer —
+// an identity is involved with a ticket when it is assigned to it or has authored
+// an event on it (the chief authors the created event when it delegates, so it
+// stays aware of its own delegations without a special case). Each identity has
+// its OWN cursor PER ticket, so a ticket newly assigned to an agent arrives with
+// its full history (the brief, prior steers) and an agent's progress on one ticket
+// never skips another it has not looked at yet.
 //
 // This package re-homes the dispatch gateway's settled mechanics:
 //
 //	gateway                         here
 //	------------------------------  -----------------------------------------
-//	ack = output / consume pending  cursor: events since the observer's cursor
-//	bundle by sender                Consume groups pending events by ticket
+//	ack = output / consume pending  per-(identity, ticket) cursors: events past
+//	                                an identity's cursor on a ticket are unread
+//	bundle by sender                Consume groups unread events by ticket
 //	hardcoded chief id              ObserverChief, a well-known literal
 //	two consumers (watch / nudge)   the two Delivery paths below
 //	never stream content to a PTY   Nudger carries only a fixed trigger
@@ -20,24 +30,29 @@
 package ticketnotify
 
 import (
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/victorarias/attn/internal/store"
 )
 
-// ObserverChief is the well-known chief observer — the awareness layer that
-// observes every ticket. Re-homes the gateway's hardcoded chief id as a literal,
-// so addressing it needs no lookup.
+// ObserverChief is the well-known chief identity — the chief is just one of the
+// agents, but its id is fixed (it has no spawned session id) so addressing it
+// needs no lookup. It enjoys no special scope: like any identity it sees events on
+// the tickets it is involved with (the ones it delegated/authored, plus any
+// assigned to it). Slice 3 supplies the real chief session id.
 const ObserverChief = "chief"
 
 // EventStore is the store surface the notifier needs. The real *store.Store
 // satisfies it; the harness uses the real store, so there is no mock to drift.
+//
+// UnreadTicketEvents folds the participant set, the per-(identity, ticket)
+// cursors, and the self-author exclusion into one query; SetTicketCursor advances
+// a single ticket's cursor for an identity.
 type EventStore interface {
-	TicketEventsSince(cursor int64) ([]store.TicketEvent, error)
-	GetObserverCursor(observerID string) (int64, error)
-	SetObserverCursor(observerID string, cursor int64, now time.Time) error
-	GetTicket(id string) (*store.Ticket, error)
+	UnreadTicketEvents(identity string) ([]store.TicketEvent, error)
+	SetTicketCursor(identity, ticketID string, cursor int64, now time.Time) error
 }
 
 // Observer is a subscriber to ticket events. ID is ObserverChief or an agent's
@@ -66,42 +81,48 @@ func HasSelfMonitor(agent string) bool {
 	return strings.EqualFold(strings.TrimSpace(agent), "claude")
 }
 
-// Bundle is an observer's pending events for a single ticket. Consume returns one
-// Bundle per ticket, in first-seen order — the gateway's "bundle by sender",
-// re-homed to "bundle by ticket".
+// Bundle is an observer's unread events for a single ticket. Consume returns one
+// Bundle per ticket, in oldest-activity-first order — the gateway's "bundle by
+// sender", re-homed to "bundle by ticket".
 type Bundle struct {
 	TicketID string
 	Events   []store.TicketEvent
 }
 
-// Consume returns the observer's unread events (those after its cursor that it
-// should see), bundled by ticket, and advances the cursor past everything
-// examined. This is the watch-consume handler: a self-monitoring observer calls it
-// when its Monitor fires; a nudged observer calls it after the nudge lands.
+// Consume returns the observer's unread events, bundled by ticket, and advances
+// the observer's cursor on each of those tickets past everything just delivered.
+// This is the watch-consume handler: a self-monitoring observer calls it when its
+// Monitor fires; a nudged observer calls it after the nudge lands.
 //
-// Single-consumer-per-observer assumption: Consume reads the cursor, reads events,
-// then writes the cursor as three separately-locked store calls, so two Consume
+// Single-consumer-per-observer assumption: Consume reads unread events then writes
+// each touched ticket's cursor as separately-locked store calls, so two Consume
 // calls racing for the SAME observer can double-deliver. In practice an observer is
 // one session with one Monitor, so its consumes are serialized. Slice 3 makes this
 // atomic if real concurrency appears.
 func Consume(es EventStore, obs Observer, now time.Time) ([]Bundle, error) {
-	matched, newCursor, err := pending(es, obs)
+	bundles, advance, err := pending(es, obs)
 	if err != nil {
 		return nil, err
 	}
-	if err := es.SetObserverCursor(obs.ID, newCursor, now); err != nil {
-		return nil, err
+	for ticketID, seq := range advance {
+		if err := es.SetTicketCursor(obs.ID, ticketID, seq, now); err != nil {
+			return nil, err
+		}
 	}
-	return bundleByTicket(matched), nil
+	return bundles, nil
 }
 
-// Unread counts the observer's pending events without consuming them.
+// Unread counts the observer's unread events without consuming them.
 func Unread(es EventStore, obs Observer) (int, error) {
-	matched, _, err := pending(es, obs)
+	bundles, _, err := pending(es, obs)
 	if err != nil {
 		return 0, err
 	}
-	return len(matched), nil
+	n := 0
+	for _, b := range bundles {
+		n += len(b.Events)
+	}
+	return n, nil
 }
 
 // Delivery is how the notifier decided to reach an observer about pending events.
@@ -156,74 +177,23 @@ func Notify(es EventStore, obs Observer, idle bool, nudger Nudger, now time.Time
 	return DeliveryNudge, nil
 }
 
-// pending returns the observer's unread, relevant events and the cursor to advance
-// to. The cursor advances past every event examined (matched or not), so unrelated
-// events are never re-scanned. An observer never sees events it authored.
+// pending returns the observer's unread events, already bundled by ticket, and the
+// per-ticket cursor each bundle's ticket should advance to. The store's
+// UnreadTicketEvents has already applied the scope (tickets the identity is
+// assigned to or has authored an event on), the per-(identity, ticket) cursors, and
+// the self-author exclusion — so this only groups and orders the result.
 //
-// Scope: the chief observes every ticket; an agent observes only tickets currently
-// assigned to it.
-//
-// KNOWN LIMITATION — agent scope is preliminary (resolved in slice 3's live wiring).
-// A single global cursor per observer does not compose cleanly with the per-agent
-// "current assignee" filter, and reassignment is genuinely undecided:
-//   - an agent's cursor advances past events on tickets not (yet) assigned to it, so
-//     a ticket assigned to it AFTER it has consumed loses its pre-assignment context
-//     (the created event / brief);
-//   - conversely a brand-new assignee, whose cursor sits below a ticket's history,
-//     would see the prior assignee's events.
-//
-// The chief observer (global scope) is unaffected and correct. Slice 3 decides the
-// agent audience model — emit-time audience snapshot or per-(observer,ticket)
-// cursors — when real delegation exists to pin the desired semantics.
-func pending(es EventStore, obs Observer) (matched []store.TicketEvent, newCursor int64, err error) {
-	cursor, err := es.GetObserverCursor(obs.ID)
+// Because each ticket is compared against the identity's own cursor on THAT ticket
+// (default 0), a ticket the identity has never looked at — a fresh assignment, or a
+// reassignment to it — is delivered from the start, brief and all. Bundles are
+// ordered by their oldest unread event so cross-ticket order stays chronological.
+func pending(es EventStore, obs Observer) (bundles []Bundle, advance map[string]int64, err error) {
+	events, err := es.UnreadTicketEvents(obs.ID)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, err
 	}
-	events, err := es.TicketEventsSince(cursor)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	newCursor = cursor
-	assigneeOf := map[string]string{}
-	for _, e := range events {
-		if e.Seq > newCursor {
-			newCursor = e.Seq
-		}
-		if e.Author == obs.ID {
-			continue // never notify an observer of its own action
-		}
-		if obs.ID == ObserverChief {
-			matched = append(matched, e)
-			continue
-		}
-		assignee, ok := assigneeOf[e.TicketID]
-		if !ok {
-			ticket, err := es.GetTicket(e.TicketID)
-			if err != nil {
-				return nil, 0, err
-			}
-			if ticket != nil {
-				assignee = ticket.Assignee
-			}
-			assigneeOf[e.TicketID] = assignee
-		}
-		if assignee == obs.ID {
-			matched = append(matched, e)
-		}
-	}
-	return matched, newCursor, nil
-}
-
-// bundleByTicket groups events by ticket, preserving first-seen ticket order and
-// per-ticket event order.
-func bundleByTicket(events []store.TicketEvent) []Bundle {
-	if len(events) == 0 {
-		return nil
-	}
+	advance = map[string]int64{}
 	index := map[string]int{}
-	var bundles []Bundle
 	for _, e := range events {
 		i, ok := index[e.TicketID]
 		if !ok {
@@ -232,6 +202,12 @@ func bundleByTicket(events []store.TicketEvent) []Bundle {
 			bundles = append(bundles, Bundle{TicketID: e.TicketID})
 		}
 		bundles[i].Events = append(bundles[i].Events, e)
+		if e.Seq > advance[e.TicketID] {
+			advance[e.TicketID] = e.Seq
+		}
 	}
-	return bundles
+	sort.SliceStable(bundles, func(i, j int) bool {
+		return bundles[i].Events[0].Seq < bundles[j].Events[0].Seq
+	})
+	return bundles, advance, nil
 }

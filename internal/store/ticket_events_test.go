@@ -124,7 +124,7 @@ func TestTicketEventDedupSemantics(t *testing.T) {
 	}
 }
 
-// The event log and observer cursors survive a daemon restart.
+// The event log and per-(identity, ticket) cursors survive a daemon restart.
 func TestTicketEventCursorPersistence(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "attn.db")
 	s, err := NewWithDB(dbPath)
@@ -141,8 +141,8 @@ func TestTicketEventCursorPersistence(t *testing.T) {
 	if err != nil || latest == 0 {
 		t.Fatalf("LatestTicketEventSeq = %d (err %v), want > 0", latest, err)
 	}
-	if err := s.SetObserverCursor("chief", latest, eventBase.Add(2*time.Minute)); err != nil {
-		t.Fatalf("SetObserverCursor: %v", err)
+	if err := s.SetTicketCursor("chief", "tk", latest, eventBase.Add(2*time.Minute)); err != nil {
+		t.Fatalf("SetTicketCursor: %v", err)
 	}
 	if err := s.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -158,7 +158,7 @@ func TestTicketEventCursorPersistence(t *testing.T) {
 	if err != nil || len(events) != 2 {
 		t.Fatalf("events after reopen = %d (err %v), want 2", len(events), err)
 	}
-	cursor, err := reopened.GetObserverCursor("chief")
+	cursor, err := reopened.GetTicketCursor("chief", "tk")
 	if err != nil || cursor != latest {
 		t.Fatalf("cursor after reopen = %d (err %v), want %d", cursor, err, latest)
 	}

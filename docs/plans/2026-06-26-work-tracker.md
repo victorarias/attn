@@ -147,11 +147,20 @@ knows *nothing* about who's listening:
 - `TicketCreated`, `TicketStatusChanged` (from→to), `TicketCommented`,
   `TicketAssigned`, `TicketDescriptionEdited`, `TicketAttachmentAdded`.
 
-**2. Observers subscribe** to events for tickets they care about:
+**2. Observers subscribe** to events for tickets they care about. Identity is uniform
+— **you, the chief, and each agent are all just identities** (the chief is one of the
+agents). An identity is *involved* with a ticket when it is assigned to it or has
+authored an event on it:
 
-- the **chief** observes events on the tickets it delegated / owns;
+- the **chief** observes events on the tickets it delegated / owns (it authored their
+  `created` event, so it needs no special "sees everything" scope);
 - an **assignee agent** observes events on its ticket that it *didn't author* (the
   chief's comments, status changes, re-briefs).
+
+Each identity keeps its **own cursor per ticket**, not one global cursor. So a ticket
+newly assigned to an agent — or reassigned to it — arrives with its **full history**
+(the brief and prior steers), and an agent's progress on one ticket never advances its
+bookmark on another it hasn't looked at.
 
 **3. Decoupled handlers** turn an event into a notification — adding a channel is adding
 a handler, never touching the mutators:
@@ -169,7 +178,7 @@ The gateway's settled mechanics map onto the event log:
 | gateway mechanic | here |
 |---|---|
 | dedup by content | idempotent events (no double-emitted transition/comment) |
-| ack = output; consume returns pending | **unread** — events since the observer's cursor |
+| ack = output; consume returns pending | **unread** — events past the identity's per-(identity, ticket) cursor |
 | bundle by sender | a consume groups pending events **by ticket** |
 | hardcoded chief id | the chief is a well-known observer (literal constant) |
 | two consumers (watch / nudge) | the two decoupled handlers above |

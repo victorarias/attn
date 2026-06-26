@@ -8,9 +8,15 @@ import (
 // The ticket event log is the notification substrate for the work tracker (slice
 // 2 of docs/plans/2026-06-26-work-tracker.md). It re-homes the dispatch gateway's
 // settled mechanics: an append-only log with idempotent (deduped) events, a global
-// monotonic seq that doubles as the cursor space, and per-observer cursors that
-// express "unread". The decoupled notification handlers live in internal/ticketnotify;
-// this file is only the durable substrate.
+// monotonic seq that doubles as the cursor space, and per-(identity, ticket)
+// cursors that express "unread". The decoupled notification handlers live in
+// internal/ticketnotify; this file is only the durable substrate.
+//
+// Cursors are keyed by (identity, ticket), not one global cursor per identity:
+// every identity — you, the chief, each agent (the chief is just another agent) —
+// has its own bookmark PER ticket. So a ticket newly assigned to an agent is
+// delivered from the start (it carries the brief and pre-assignment context),
+// and an agent's progress on one ticket never advances its bookmark on another.
 //
 // Events are a SUPERSET of the display activity thread (slice 1): activity holds
 // the two human-facing kinds (status_change, comment); the event log carries all
@@ -130,24 +136,11 @@ func appendTicketEventTx(tx *sql.Tx, e TicketEvent, now time.Time) (int64, bool,
 	return seq, true, nil
 }
 
-// TicketEventsSince returns every event with seq greater than the given cursor,
-// in seq (chronological) order. A cursor of 0 returns the whole log.
-func (s *Store) TicketEventsSince(cursor int64) ([]TicketEvent, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.db == nil {
-		return nil, nil
-	}
-	rows, err := s.db.Query(`
-		SELECT seq, ticket_id, kind, author, from_status, to_status, comment, detail, created_at
-		FROM ticket_events WHERE seq > ? ORDER BY seq ASC
-	`, cursor)
-	if err != nil {
-		return nil, err
-	}
+// scanTicketEventRows scans a ticket_events result set whose columns are, in
+// order: seq, ticket_id, kind, author, from_status, to_status, comment, detail,
+// created_at. It closes rows.
+func scanTicketEventRows(rows *sql.Rows) ([]TicketEvent, error) {
 	defer rows.Close()
-
 	var events []TicketEvent
 	for rows.Next() {
 		var (
@@ -168,6 +161,94 @@ func (s *Store) TicketEventsSince(cursor int64) ([]TicketEvent, error) {
 	return events, rows.Err()
 }
 
+// TicketEventsSince returns every event with seq greater than the given cursor,
+// in seq (chronological) order. A cursor of 0 returns the whole log.
+func (s *Store) TicketEventsSince(cursor int64) ([]TicketEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT seq, ticket_id, kind, author, from_status, to_status, comment, detail, created_at
+		FROM ticket_events WHERE seq > ? ORDER BY seq ASC
+	`, cursor)
+	if err != nil {
+		return nil, err
+	}
+	return scanTicketEventRows(rows)
+}
+
+// UnreadTicketEvents returns, for an identity, every event it has not yet
+// consumed across the tickets it participates in — those currently assigned to it
+// plus any it has authored an event on — excluding events it authored itself.
+// Each event is compared against the identity's OWN per-(identity, ticket) cursor,
+// so a ticket the identity has never looked at is delivered from the start (the
+// brief and all pre-involvement context). Results are ordered by ticket then seq.
+//
+// This is the consume query: one statement folds the participant set, the
+// per-ticket cursors, and the self-author exclusion together, so a quiet or
+// closed ticket the identity has nothing new on costs only an indexed lookup.
+func (s *Store) UnreadTicketEvents(identity string) ([]TicketEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil || identity == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT e.seq, e.ticket_id, e.kind, e.author, e.from_status, e.to_status, e.comment, e.detail, e.created_at
+		FROM ticket_events e
+		LEFT JOIN ticket_event_cursors c
+			ON c.identity = ? AND c.ticket_id = e.ticket_id
+		WHERE e.author != ?
+			AND e.seq > COALESCE(c.cursor, 0)
+			AND e.ticket_id IN (
+				SELECT id FROM tickets WHERE assignee = ?
+				UNION
+				SELECT DISTINCT ticket_id FROM ticket_events WHERE author = ?
+			)
+		ORDER BY e.ticket_id, e.seq ASC
+	`, identity, identity, identity, identity)
+	if err != nil {
+		return nil, err
+	}
+	return scanTicketEventRows(rows)
+}
+
+// InvolvedTicketIDs returns the ids of tickets an identity participates in: those
+// currently assigned to it, plus any it has authored an event on. This is the
+// uniform "which tickets do I care about" rule — the chief is just an identity
+// that authored the created event when it delegated, so it needs no special case.
+func (s *Store) InvolvedTicketIDs(identity string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil || identity == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT id FROM tickets WHERE assignee = ?
+		UNION
+		SELECT DISTINCT ticket_id FROM ticket_events WHERE author = ?
+		ORDER BY 1 ASC
+	`, identity, identity)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // LatestTicketEventSeq returns the highest event seq, or 0 when the log is empty.
 func (s *Store) LatestTicketEventSeq() (int64, error) {
 	s.mu.RLock()
@@ -186,9 +267,11 @@ func (s *Store) LatestTicketEventSeq() (int64, error) {
 	return seq.Int64, nil
 }
 
-// GetObserverCursor returns an observer's cursor — the seq through which it has
-// consumed. A never-seen observer starts at 0 (everything is unread).
-func (s *Store) GetObserverCursor(observerID string) (int64, error) {
+// GetTicketCursor returns an identity's cursor on a single ticket — the seq
+// through which it has consumed that ticket's events. An identity that has never
+// looked at the ticket starts at 0 (everything on it is unread), which is what
+// delivers a freshly-assigned ticket's full history.
+func (s *Store) GetTicketCursor(identity, ticketID string) (int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -196,7 +279,7 @@ func (s *Store) GetObserverCursor(observerID string) (int64, error) {
 		return 0, nil
 	}
 	var cursor int64
-	err := s.db.QueryRow(`SELECT cursor FROM ticket_event_cursors WHERE observer_id = ?`, observerID).Scan(&cursor)
+	err := s.db.QueryRow(`SELECT cursor FROM ticket_event_cursors WHERE identity = ? AND ticket_id = ?`, identity, ticketID).Scan(&cursor)
 	if err == sql.ErrNoRows {
 		return 0, nil
 	}
@@ -206,8 +289,8 @@ func (s *Store) GetObserverCursor(observerID string) (int64, error) {
 	return cursor, nil
 }
 
-// SetObserverCursor advances (upserts) an observer's cursor.
-func (s *Store) SetObserverCursor(observerID string, cursor int64, now time.Time) error {
+// SetTicketCursor advances (upserts) an identity's cursor on a single ticket.
+func (s *Store) SetTicketCursor(identity, ticketID string, cursor int64, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -215,9 +298,9 @@ func (s *Store) SetObserverCursor(observerID string, cursor int64, now time.Time
 		return nil
 	}
 	_, err := s.db.Exec(`
-		INSERT INTO ticket_event_cursors (observer_id, cursor, updated_at)
-		VALUES (?, ?, ?)
-		ON CONFLICT(observer_id) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at
-	`, observerID, cursor, formatTicketTime(now))
+		INSERT INTO ticket_event_cursors (identity, ticket_id, cursor, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(identity, ticket_id) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at
+	`, identity, ticketID, cursor, formatTicketTime(now))
 	return err
 }

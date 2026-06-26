@@ -284,7 +284,9 @@ func TestHarnessAgentScopeAndSelfAuthored(t *testing.T) {
 		t.Fatalf("agent7 missing the chief's note: %+v", bundles[0].Events)
 	}
 
-	// The chief, by contrast, observes every ticket's events (minus its own note).
+	// The chief, having delegated both, observes events on both (minus its own note)
+	// — not via a special "sees everything" scope, but because it authored the
+	// created event on each.
 	chiefBundles, _ := Consume(h.s, chief, h.tick())
 	tickets := map[string]bool{}
 	for _, b := range chiefBundles {
@@ -297,5 +299,90 @@ func TestHarnessAgentScopeAndSelfAuthored(t *testing.T) {
 	}
 	if !tickets["alpha"] || !tickets["beta"] {
 		t.Fatalf("chief tickets = %v, want both alpha and beta", tickets)
+	}
+}
+
+// Per-ticket cursors fix the lost-briefing bug: an agent that already advanced its
+// bookmark on OTHER tickets still receives a ticket's full pre-assignment history
+// when it is assigned that ticket later. With one global cursor this context was
+// silently skipped.
+func TestHarnessLateAssignmentDeliversContext(t *testing.T) {
+	h := newHarness(t)
+	agent7 := AgentObserver("agent7", "claude")
+
+	// agent7 has prior work it already consumed — its bookmark on "early" is advanced.
+	h.create("early", "agent7", ObserverChief)
+	h.status("early", store.TicketStatusWorking, "agent7", "on early")
+	if _, err := Consume(h.s, agent7, h.tick()); err != nil {
+		t.Fatalf("consume early: %v", err)
+	}
+
+	// Meanwhile the chief opens a ticket agent7 is NOT yet on, and briefs it.
+	h.create("late", "", ObserverChief) // unassigned at first
+	h.comment("late", ObserverChief, "pre-assignment brief")
+
+	// agent7 isn't involved with "late" yet — nothing new for it.
+	if n, err := Unread(h.s, agent7); err != nil || n != 0 {
+		t.Fatalf("unread before assignment = %d (err %v), want 0", n, err)
+	}
+
+	// The chief assigns "late" to agent7. agent7's per-ticket bookmark on "late" is
+	// still 0, so it receives the ticket's FULL history, brief included.
+	if err := h.s.AssignTicket("late", "agent7", ObserverChief, h.tick()); err != nil {
+		t.Fatalf("AssignTicket: %v", err)
+	}
+	bundles, err := Consume(h.s, agent7, h.tick())
+	if err != nil {
+		t.Fatalf("Consume: %v", err)
+	}
+	if len(bundles) != 1 || bundles[0].TicketID != "late" {
+		t.Fatalf("bundles = %+v, want only late", bundles)
+	}
+	if !hasComment(bundles[0].Events, "pre-assignment brief") {
+		t.Fatalf("late did not deliver its pre-assignment brief: %+v", bundles[0].Events)
+	}
+	sawCreated := false
+	for _, e := range bundles[0].Events {
+		if e.Kind == store.TicketEventCreated {
+			sawCreated = true
+		}
+	}
+	if !sawCreated {
+		t.Fatalf("late did not deliver its created event: %+v", bundles[0].Events)
+	}
+}
+
+// Reassignment hands the new assignee the whole thread: because its per-ticket
+// cursor starts at 0, a mid-flight handoff delivers the brief and the prior
+// assignee's progress, so the new agent picks up with full context.
+func TestHarnessReassignmentHandsOverHistory(t *testing.T) {
+	h := newHarness(t)
+	agent9 := AgentObserver("agent9", "claude")
+
+	// agent7 works a ticket and reports progress.
+	h.create("handoff", "agent7", ObserverChief)
+	h.status("handoff", store.TicketStatusWorking, "agent7", "did the first half")
+
+	// The chief reassigns it to agent9 mid-flight.
+	if err := h.s.AssignTicket("handoff", "agent9", ObserverChief, h.tick()); err != nil {
+		t.Fatalf("AssignTicket: %v", err)
+	}
+
+	bundles, err := Consume(h.s, agent9, h.tick())
+	if err != nil {
+		t.Fatalf("Consume: %v", err)
+	}
+	if len(bundles) != 1 || bundles[0].TicketID != "handoff" {
+		t.Fatalf("bundles = %+v, want only handoff", bundles)
+	}
+	kinds := map[store.TicketEventKind]bool{}
+	for _, e := range bundles[0].Events {
+		kinds[e.Kind] = true
+	}
+	if !kinds[store.TicketEventCreated] || !kinds[store.TicketEventStatusChanged] {
+		t.Fatalf("agent9 did not inherit the full thread: %+v", bundles[0].Events)
+	}
+	if !hasComment(bundles[0].Events, "did the first half") {
+		t.Fatalf("agent9 missing the prior progress note: %+v", bundles[0].Events)
 	}
 }

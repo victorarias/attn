@@ -16,28 +16,27 @@ type failingNudger struct{ called bool }
 func (n *failingNudger) Nudge(string) error { n.called = true; return errors.New("pty gone") }
 
 // erroringStore is an EventStore that fails on a chosen method, to exercise error
-// propagation through Consume / Unread / Notify.
+// propagation through Consume / Unread / Notify. UnreadTicketEvents returns one
+// unread event (when not failing) so Consume reaches the cursor-write path.
 type erroringStore struct {
-	failSince  bool
-	failCursor bool
+	failUnread bool
+	failSet    bool
 }
 
 var errBoom = errors.New("boom")
 
-func (e erroringStore) TicketEventsSince(int64) ([]store.TicketEvent, error) {
-	if e.failSince {
+func (e erroringStore) UnreadTicketEvents(string) ([]store.TicketEvent, error) {
+	if e.failUnread {
 		return nil, errBoom
 	}
 	return []store.TicketEvent{{Seq: 1, TicketID: "tk", Kind: store.TicketEventCommented, Author: "agent7"}}, nil
 }
-func (e erroringStore) GetObserverCursor(string) (int64, error) {
-	if e.failCursor {
-		return 0, errBoom
+func (e erroringStore) SetTicketCursor(string, string, int64, time.Time) error {
+	if e.failSet {
+		return errBoom
 	}
-	return 0, nil
+	return nil
 }
-func (e erroringStore) SetObserverCursor(string, int64, time.Time) error { return nil }
-func (e erroringStore) GetTicket(string) (*store.Ticket, error)          { return nil, nil }
 
 func TestNotifyNudgeError(t *testing.T) {
 	h := newHarness(t)
@@ -62,13 +61,18 @@ func TestNotifyAndConsumePropagateStoreErrors(t *testing.T) {
 	obs := ChiefObserver()
 	now := edgeBase
 
-	if _, err := Consume(erroringStore{failSince: true}, obs, now); !errors.Is(err, errBoom) {
-		t.Fatalf("Consume error = %v, want boom", err)
+	if _, err := Consume(erroringStore{failUnread: true}, obs, now); !errors.Is(err, errBoom) {
+		t.Fatalf("Consume(failUnread) error = %v, want boom", err)
 	}
-	if _, err := Unread(erroringStore{failCursor: true}, obs); !errors.Is(err, errBoom) {
+	// failSet exercises the cursor-write path: pending returns an unread event, so
+	// Consume reaches SetTicketCursor, which errors.
+	if _, err := Consume(erroringStore{failSet: true}, obs, now); !errors.Is(err, errBoom) {
+		t.Fatalf("Consume(failSet) error = %v, want boom", err)
+	}
+	if _, err := Unread(erroringStore{failUnread: true}, obs); !errors.Is(err, errBoom) {
 		t.Fatalf("Unread error = %v, want boom", err)
 	}
-	if _, err := Notify(erroringStore{failSince: true}, obs, true, &failingNudger{}, now); !errors.Is(err, errBoom) {
+	if _, err := Notify(erroringStore{failUnread: true}, obs, true, &failingNudger{}, now); !errors.Is(err, errBoom) {
 		t.Fatalf("Notify error = %v, want boom", err)
 	}
 }
