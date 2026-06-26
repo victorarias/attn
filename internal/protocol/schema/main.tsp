@@ -229,6 +229,46 @@ enum TicketStatus {
   crashed,
 }
 
+// TicketEventKind is the type of a ticket activity event in the notification log.
+enum TicketEventKind {
+  created,
+  status_changed,
+  commented,
+  assigned,
+  description_edited,
+  attachment_added,
+}
+
+// TicketEvent is one entry in a ticket's append-only event log, as delivered to an
+// observer reading its unread queue. The store's per-ticket sequence is the cursor
+// key and stays server-side; the wire event is for display. from_status /
+// to_status are present only on a status_changed event; comment / detail are
+// present when the kind carries them.
+model TicketEvent {
+  ticket_id: string;
+  kind: TicketEventKind;
+  author: string;
+  from_status?: TicketStatus;
+  to_status?: TicketStatus;
+  comment?: string;
+  detail?: string;
+  created_at: string;
+}
+
+// TicketEventBundle groups an observer's unread events for a single ticket,
+// oldest-first — the consume's "bundle by ticket".
+model TicketEventBundle {
+  ticket_id: string;
+  events: TicketEvent[];
+}
+
+// TicketInboxResult is the calling identity's unread events, bundled by ticket.
+// Reading the inbox advances the identity's per-ticket cursors past everything
+// returned, so a second read is empty until new events land.
+model TicketInboxResult {
+  bundles: TicketEventBundle[];
+}
+
 model DispatchDecisionRequest {
   question: string;
   recommendation?: string;
@@ -643,6 +683,14 @@ model SetTicketStatusMessage {
 model TicketStatusResult {
   ticket_id: string;
   status: TicketStatus;
+}
+
+// TicketInboxMessage reads (and consumes) the calling session's unread ticket
+// events. The daemon resolves the observer identity from the session, so the agent
+// names nothing — it just asks for what it has not yet seen.
+model TicketInboxMessage {
+  cmd: "ticket_inbox";
+  source_session_id: string;
 }
 
 model WorkspaceContextCheckoutMessage {
@@ -2211,6 +2259,7 @@ model Response {
   notebook_write?: NotebookWriteResult;
   notebook_guide?: NotebookGuideResult;
   ticket_status_result?: TicketStatusResult;
+  ticket_inbox_result?: TicketInboxResult;
 }
 
 model DelegateResult {

@@ -2880,6 +2880,9 @@ type Response struct {
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`
 
+	// TicketInboxResult corresponds to the JSON schema field "ticket_inbox_result".
+	TicketInboxResult *TicketInboxResult `json:"ticket_inbox_result,omitempty,omitzero"`
+
 	// TicketStatusResult corresponds to the JSON schema field "ticket_status_result".
 	TicketStatusResult *TicketStatusResult `json:"ticket_status_result,omitempty,omitzero"`
 
@@ -3620,6 +3623,62 @@ type SubscribeGitStatusMessage struct {
 
 	// Directory corresponds to the JSON schema field "directory".
 	Directory string `json:"directory"`
+}
+
+type TicketEvent struct {
+	// Author corresponds to the JSON schema field "author".
+	Author string `json:"author"`
+
+	// Comment corresponds to the JSON schema field "comment".
+	Comment *string `json:"comment,omitempty,omitzero"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// Detail corresponds to the JSON schema field "detail".
+	Detail *string `json:"detail,omitempty,omitzero"`
+
+	// FromStatus corresponds to the JSON schema field "from_status".
+	FromStatus *TicketStatus `json:"from_status,omitempty,omitzero"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind TicketEventKind `json:"kind"`
+
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID string `json:"ticket_id"`
+
+	// ToStatus corresponds to the JSON schema field "to_status".
+	ToStatus *TicketStatus `json:"to_status,omitempty,omitzero"`
+}
+
+type TicketEventBundle struct {
+	// Events corresponds to the JSON schema field "events".
+	Events []TicketEvent `json:"events"`
+
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID string `json:"ticket_id"`
+}
+
+type TicketEventKind string
+
+const TicketEventKindAssigned TicketEventKind = "assigned"
+const TicketEventKindAttachmentAdded TicketEventKind = "attachment_added"
+const TicketEventKindCommented TicketEventKind = "commented"
+const TicketEventKindCreated TicketEventKind = "created"
+const TicketEventKindDescriptionEdited TicketEventKind = "description_edited"
+const TicketEventKindStatusChanged TicketEventKind = "status_changed"
+
+type TicketInboxMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+}
+
+type TicketInboxResult struct {
+	// Bundles corresponds to the JSON schema field "bundles".
+	Bundles []TicketEventBundle `json:"bundles"`
 }
 
 type TicketStatus string
