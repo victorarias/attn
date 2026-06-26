@@ -228,7 +228,7 @@ each is a meaningful, verifiable chunk.
 
 | # | slice | status |
 |---|---|---|
-| 1 | Ticket store + lifecycle | ⬜ |
+| 1 | Ticket store + lifecycle | 🟡 |
 | 2 | Event-driven notification core | ⬜ |
 | 3 | Delegation ⇄ tickets (live wiring) | ⬜ |
 | 4 | Ticket view + resume + attachments | ⬜ |
@@ -237,10 +237,14 @@ each is a meaningful, verifiable chunk.
 | 7 | Retire the `dispatch` namespace | ⬜ |
 | 8 | Export ticket state (CLI) — *post-merge, lands on `main`* | ⬜ |
 
-1. **Ticket store + lifecycle.** The `tickets` + `activity` + `attachments` tables, the
-   status enum (incl. Todo / Crashed), human-friendly ids, CRUD + status transitions,
-   and the archive / 30-day-TTL sweep. Evolves `chief_of_staff_dispatches`. *Test:*
-   store-level — create/read/update, transitions, archival, TTL with injected time.
+1. **Ticket store + lifecycle.** Fresh `tickets` / `ticket_activity` /
+   `ticket_attachments` tables (migration 55), the status enum (incl. Todo / Crashed),
+   human-friendly slug ids (uniqueness check + collision guidance), CRUD + permissive
+   status transitions, and the archive / 30-day-TTL sweep. Store-local row types (the
+   wire shape comes later). The old `chief_of_staff_dispatches` table is left untouched
+   and dies with its namespace in slice 7 — a fresh table is cleaner than evolving one we
+   tear out anyway. *Test:* store-level — create/read/update, transitions, archival, TTL
+   with injected time.
 2. **Event-driven notification core.** Mutations emit events; observers + cursors;
    the two decoupled handlers (watch-consume / nudge), bundled-by-ticket, dedup,
    unread. Built against the store, **proven by a simulation harness** (drives
