@@ -852,37 +852,71 @@ func runTicket() {
 	}
 }
 
+type ticketStatusArgs struct {
+	WorkState string
+	Session   string
+	Comment   string
+	JSON      bool
+}
+
+// parseTicketStatusArgs reads `ticket status <work-state> [flags]`. Go's flag
+// parser stops at the first positional, so a naive Parse would silently drop any
+// flag written after the work state — exactly the documented form. We interleave
+// instead: parse, peel one positional, repeat, so flags may sit on either side of
+// the state and the single positional is the work state regardless of order.
+func parseTicketStatusArgs(args []string) (ticketStatusArgs, error) {
+	var result ticketStatusArgs
+	fs := flag.NewFlagSet("ticket status", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	session := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	comment := fs.String("comment", "", "optional note recorded with the status change")
+	jsonOutput := fs.Bool("json", false, "print the result as JSON")
+
+	var positionals []string
+	rest := args
+	for {
+		if err := fs.Parse(rest); err != nil {
+			return result, err
+		}
+		rest = fs.Args()
+		if len(rest) == 0 {
+			break
+		}
+		positionals = append(positionals, rest[0])
+		rest = rest[1:]
+	}
+	if len(positionals) != 1 {
+		return result, fmt.Errorf("expected exactly one work state argument, got %d", len(positionals))
+	}
+	result.WorkState = positionals[0]
+	result.Session = *session
+	result.Comment = *comment
+	result.JSON = *jsonOutput
+	return result, nil
+}
+
 // runTicketStatus reports the calling agent's work state, moving its bound ticket
 // to the matching column. The work state is the same vocabulary the agent reports
 // to the chief (in_progress, needs_input, ready_for_review, completed, failed);
 // the daemon resolves which ticket from the session and maps the column.
 func runTicketStatus(args []string) {
-	fs := flag.NewFlagSet("ticket status", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
-	comment := fs.String("comment", "", "optional note recorded with the status change")
-	jsonOutput := fs.Bool("json", false, "print the result as JSON")
-	if err := fs.Parse(args); err != nil {
+	parsed, err := parseTicketStatusArgs(args)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "ticket status: %v\n", err)
-		os.Exit(2)
-	}
-	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "ticket status: expected exactly one work state argument")
 		writeTicketHelp(os.Stderr)
 		os.Exit(2)
 	}
-	workState := fs.Arg(0)
-	source, err := resolveDispatchSession(*sessionID)
+	source, err := resolveDispatchSession(parsed.Session)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ticket status: %v\n", err)
 		os.Exit(2)
 	}
-	result, err := client.New("").SetTicketStatus(source, workState, *comment)
+	result, err := client.New("").SetTicketStatus(source, parsed.WorkState, parsed.Comment)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ticket status: %v\n", err)
 		os.Exit(1)
 	}
-	if *jsonOutput {
+	if parsed.JSON {
 		printJSON(result)
 		return
 	}
