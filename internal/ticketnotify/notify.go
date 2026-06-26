@@ -78,6 +78,12 @@ type Bundle struct {
 // should see), bundled by ticket, and advances the cursor past everything
 // examined. This is the watch-consume handler: a self-monitoring observer calls it
 // when its Monitor fires; a nudged observer calls it after the nudge lands.
+//
+// Single-consumer-per-observer assumption: Consume reads the cursor, reads events,
+// then writes the cursor as three separately-locked store calls, so two Consume
+// calls racing for the SAME observer can double-deliver. In practice an observer is
+// one session with one Monitor, so its consumes are serialized. Slice 3 makes this
+// atomic if real concurrency appears.
 func Consume(es EventStore, obs Observer, now time.Time) ([]Bundle, error) {
 	matched, newCursor, err := pending(es, obs)
 	if err != nil {
@@ -155,8 +161,20 @@ func Notify(es EventStore, obs Observer, idle bool, nudger Nudger, now time.Time
 // events are never re-scanned. An observer never sees events it authored.
 //
 // Scope: the chief observes every ticket; an agent observes only tickets currently
-// assigned to it. (Slice 3 narrows the chief to tickets it delegated/owns once
-// delegation exists.)
+// assigned to it.
+//
+// KNOWN LIMITATION — agent scope is preliminary (resolved in slice 3's live wiring).
+// A single global cursor per observer does not compose cleanly with the per-agent
+// "current assignee" filter, and reassignment is genuinely undecided:
+//   - an agent's cursor advances past events on tickets not (yet) assigned to it, so
+//     a ticket assigned to it AFTER it has consumed loses its pre-assignment context
+//     (the created event / brief);
+//   - conversely a brand-new assignee, whose cursor sits below a ticket's history,
+//     would see the prior assignee's events.
+//
+// The chief observer (global scope) is unaffected and correct. Slice 3 decides the
+// agent audience model — emit-time audience snapshot or per-(observer,ticket)
+// cursors — when real delegation exists to pin the desired semantics.
 func pending(es EventStore, obs Observer) (matched []store.TicketEvent, newCursor int64, err error) {
 	cursor, err := es.GetObserverCursor(obs.ID)
 	if err != nil {

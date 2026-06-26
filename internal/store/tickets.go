@@ -443,12 +443,16 @@ func (s *Store) AddTicketComment(id, author, comment string, now time.Time) (*Ti
 }
 
 // EditTicketDescription replaces the ticket's brief, bumps updated_at, and emits a
-// description_edited event authored by author.
+// description_edited event authored by author. Detail carries the new brief so the
+// event is self-describing AND so the dedup signature distinguishes one re-brief
+// from another — without it, two consecutive edits would look identical and the
+// second (a real re-brief / steer) would be silently deduped away.
 func (s *Store) EditTicketDescription(id, description, author string, now time.Time) error {
 	return s.updateTicketFieldWithEvent(id, "description", description, TicketEvent{
 		TicketID: id,
 		Kind:     TicketEventDescriptionEdited,
 		Author:   author,
+		Detail:   description,
 	}, now)
 }
 
