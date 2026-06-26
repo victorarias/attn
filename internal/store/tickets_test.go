@@ -333,7 +333,7 @@ func TestArchivedTicketReopenedBecomesVisible(t *testing.T) {
 	s := New()
 	t.Cleanup(func() { _ = s.Close() })
 
-	if _, err := s.CreateTicket(Ticket{ID: "zombie", Title: "shipped", Status: TicketStatusDone}, ticketBase); err != nil {
+	if _, err := s.CreateTicket(Ticket{ID: "zombie", Title: "shipped", Status: TicketStatusDone}, "you", ticketBase); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if err := s.ArchiveTicket("zombie", ticketBase.Add(time.Minute)); err != nil {

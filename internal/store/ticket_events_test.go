@@ -124,6 +124,36 @@ func TestTicketEventDedupSemantics(t *testing.T) {
 	}
 }
 
+// A cursor only ever moves forward. A stale or overlapping consume that writes a
+// lower seq must not rewind it — otherwise already-consumed events resurface as
+// unread (double-delivery). Writing 3 then a stale 2 must leave it at 3.
+func TestTicketCursorMonotonic(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	if err := s.SetTicketCursor("agent7", "tk", 3, eventBase); err != nil {
+		t.Fatalf("SetTicketCursor 3: %v", err)
+	}
+	// A stale writer tries to move it backwards.
+	if err := s.SetTicketCursor("agent7", "tk", 2, eventBase.Add(time.Minute)); err != nil {
+		t.Fatalf("SetTicketCursor 2: %v", err)
+	}
+	if got, _ := s.GetTicketCursor("agent7", "tk"); got != 3 {
+		t.Fatalf("cursor after stale write = %d, want 3 (no rewind)", got)
+	}
+	// A genuine forward write still advances.
+	if err := s.SetTicketCursor("agent7", "tk", 5, eventBase.Add(2*time.Minute)); err != nil {
+		t.Fatalf("SetTicketCursor 5: %v", err)
+	}
+	if got, _ := s.GetTicketCursor("agent7", "tk"); got != 5 {
+		t.Fatalf("cursor after forward write = %d, want 5", got)
+	}
+	// Cursors are scoped per (identity, ticket) — another identity is independent.
+	if got, _ := s.GetTicketCursor("agent9", "tk"); got != 0 {
+		t.Fatalf("unrelated identity cursor = %d, want 0", got)
+	}
+}
+
 // The event log and per-(identity, ticket) cursors survive a daemon restart.
 func TestTicketEventCursorPersistence(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "attn.db")

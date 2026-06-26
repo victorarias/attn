@@ -289,7 +289,11 @@ func (s *Store) GetTicketCursor(identity, ticketID string) (int64, error) {
 	return cursor, nil
 }
 
-// SetTicketCursor advances (upserts) an identity's cursor on a single ticket.
+// SetTicketCursor advances an identity's cursor on a single ticket. The write is
+// monotonic: it only ever moves the cursor FORWARD (MAX of the stored and proposed
+// seq). A cursor named "consumed through here" must never rewind, so a stale or
+// overlapping consume that writes a lower seq cannot resurrect already-consumed
+// events as unread or double-deliver them.
 func (s *Store) SetTicketCursor(identity, ticketID string, cursor int64, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -300,7 +304,9 @@ func (s *Store) SetTicketCursor(identity, ticketID string, cursor int64, now tim
 	_, err := s.db.Exec(`
 		INSERT INTO ticket_event_cursors (identity, ticket_id, cursor, updated_at)
 		VALUES (?, ?, ?, ?)
-		ON CONFLICT(identity, ticket_id) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at
+		ON CONFLICT(identity, ticket_id) DO UPDATE SET
+			cursor = MAX(cursor, excluded.cursor),
+			updated_at = excluded.updated_at
 	`, identity, ticketID, cursor, formatTicketTime(now))
 	return err
 }
