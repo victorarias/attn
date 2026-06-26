@@ -1371,6 +1371,7 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 		// kill) or at a clean rest when its process exited — the signal the dispatch
 		// classifier needs to surface a cut-off close as a failure.
 		d.captureDispatchCloseState(info.ID, string(session.State))
+		d.captureTicketCrashState(info.ID, string(session.State))
 		d.store.Touch(info.ID)
 		d.store.UpdateState(info.ID, protocol.StateIdle)
 		updated := d.sessionForBroadcast(d.store.Get(info.ID))
@@ -1483,6 +1484,7 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 	// over this later read, which would otherwise only see the clobbered idle.
 	if session := d.store.Get(sessionID); session != nil {
 		d.captureDispatchCloseState(sessionID, string(session.State))
+		d.captureTicketCrashState(sessionID, string(session.State))
 	}
 	d.journalDispatchOnSessionGone(sessionID)
 	d.store.Remove(sessionID)
