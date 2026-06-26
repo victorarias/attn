@@ -12,6 +12,7 @@ import (
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/store"
 )
 
 func setupDelegationSource(t *testing.T, d *Daemon, backend *fakeSpawnBackend) (string, string, string) {
@@ -780,6 +781,68 @@ func TestStructuredDispatchReportSeparatesRuntimeAndSupportsResolution(t *testin
 		statusResponse.ChiefOfStaffDispatch == nil ||
 		protocol.Deref(statusResponse.ChiefOfStaffDispatch.StructuredReport.Request.Response) != "Use AisNoOperationV1." {
 		t.Fatalf("delegated status response = %+v", statusResponse)
+	}
+}
+
+// Delegating from the chief creates and binds a ticket: the brief is the
+// description, the delegated session is the assignee (its observer identity), the
+// ticket is in-flight (Working), and a created event lands authored by the chief.
+func TestDelegateCreatesAndBindsTicket(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, chiefSessionID, _ := setupDelegationSource(t, d, backend)
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefSessionID); err != nil {
+		t.Fatalf("set chief role: %v", err)
+	}
+	consumeDelegatedPrompt(t, backend)
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: chiefSessionID,
+		Brief:           "Migrate the store to X",
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+
+	ticket, err := d.store.ActiveTicketForSession(result.SessionID)
+	if err != nil {
+		t.Fatalf("ActiveTicketForSession: %v", err)
+	}
+	if ticket == nil {
+		t.Fatal("delegate did not create a ticket bound to the session")
+	}
+	if ticket.Description != "Migrate the store to X" {
+		t.Fatalf("ticket description = %q, want the brief", ticket.Description)
+	}
+	if ticket.Assignee != result.SessionID {
+		t.Fatalf("ticket assignee = %q, want session id %q", ticket.Assignee, result.SessionID)
+	}
+	if ticket.Status != store.TicketStatusWorking {
+		t.Fatalf("ticket status = %q, want working", ticket.Status)
+	}
+	if ticket.Cwd == "" {
+		t.Fatal("ticket cwd not set (needed for resume)")
+	}
+
+	// The created event is authored by the chief, so the agent observes it as its
+	// "assigned to you" signal and the chief never sees its own action.
+	events, err := d.store.TicketEventsSince(0)
+	if err != nil {
+		t.Fatalf("TicketEventsSince: %v", err)
+	}
+	var created *store.TicketEvent
+	for i := range events {
+		if events[i].TicketID == ticket.ID && events[i].Kind == store.TicketEventCreated {
+			created = &events[i]
+		}
+	}
+	if created == nil {
+		t.Fatalf("no created event for ticket %q", ticket.ID)
+	}
+	if created.Author != chiefSessionID {
+		t.Fatalf("created event author = %q, want chief %q", created.Author, chiefSessionID)
 	}
 }
 

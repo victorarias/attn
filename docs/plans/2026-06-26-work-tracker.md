@@ -239,7 +239,7 @@ each is a meaningful, verifiable chunk.
 |---|---|---|
 | 1 | Ticket store + lifecycle | 🟡 |
 | 2 | Event-driven notification core | 🟡 |
-| 3 | Delegation ⇄ tickets (live wiring) | ⬜ |
+| 3 | Delegation ⇄ tickets (live wiring) | 🟡 (sub-split — see `2026-06-26-work-tracker-slice3.md`) |
 | 4 | Ticket view + resume + attachments | ⬜ |
 | 5 | Board view | ⬜ |
 | 6 | Codex nudge path | ⬜ |
