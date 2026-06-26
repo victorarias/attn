@@ -75,4 +75,8 @@ func (d *Daemon) handleSetTicketStatus(conn net.Conn, msg *protocol.SetTicketSta
 			Status:   protocol.TicketStatus(updated.Status),
 		},
 	})
+	// The agent moved its own ticket; notify the other observers (the chief) so the
+	// board→watcher direction reflects it. The agent itself authored the event, so
+	// Notify excludes it — no self-nudge.
+	d.notifyTicketObservers(updated.ID)
 }

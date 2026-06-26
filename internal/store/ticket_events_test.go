@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -198,5 +199,36 @@ func TestTicketEventCursorPersistence(t *testing.T) {
 	}
 	if next, _ := reopened.LatestTicketEventSeq(); next <= latest {
 		t.Fatalf("seq after reopen = %d, want > %d (monotonic)", next, latest)
+	}
+}
+
+// TicketParticipants is the inverse of involvement: the assignee plus everyone who
+// authored an event on the ticket, deduped and sorted, with empties excluded.
+func TestTicketParticipants(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	tick := eventBase
+	next := func() time.Time { tick = tick.Add(time.Minute); return tick }
+
+	if _, err := s.CreateTicket(Ticket{ID: "tk", Title: "work", Assignee: "agent7"}, "chief", next()); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if _, err := s.AddTicketComment("tk", "agent9", "a note", next()); err != nil {
+		t.Fatalf("AddTicketComment: %v", err)
+	}
+
+	got, err := s.TicketParticipants("tk")
+	if err != nil {
+		t.Fatalf("TicketParticipants: %v", err)
+	}
+	// assignee agent7 + authors {chief, agent9}, deduped + sorted.
+	want := []string{"agent7", "agent9", "chief"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("participants = %v, want %v", got, want)
+	}
+
+	if ids, err := s.TicketParticipants("missing"); err != nil || len(ids) != 0 {
+		t.Fatalf("participants of unknown ticket = (%v, %v), want (nil, nil)", ids, err)
 	}
 }

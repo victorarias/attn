@@ -57,4 +57,7 @@ func (d *Daemon) captureTicketCrashState(sessionID, state string) {
 		return
 	}
 	d.logf("ticket %q crashed: session %s ended mid-flight (%s)", ticket.ID, sessionID, state)
+	// attn authored the crash; notify the chief (the crashed session is gone, so it
+	// is skipped as a non-live participant).
+	d.notifyTicketObservers(ticket.ID)
 }
