@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { noteResize, recordDiag, recordPaint, registerRenderProbe } from './terminalDiagnosticsLog';
+import {
+  dumpTerminalGeometry,
+  noteResize,
+  recordDiag,
+  recordPaint,
+  registerRenderProbe,
+  type RenderProbe,
+} from './terminalDiagnosticsLog';
 
 function ringEventsFor(pane: string) {
   return (window.__ATTN_TERMINAL_DIAG_DUMP?.() ?? []).filter((event) => event.pane === pane);
@@ -134,5 +141,95 @@ describe('blank-after-resize watchdog', () => {
     const events = ringEventsFor(pane);
     expect(events.filter((event) => event.kind === 'incident')).toHaveLength(0);
     expect(events.some((event) => event.kind === 'watchdog' && event.skipped === 'inactive')).toBe(true);
+  });
+});
+
+describe('bottom-clip detector', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('attn:terminal-diagnostics', '1');
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const probeWith = (over: Partial<RenderProbe>): RenderProbe => ({
+    cols: 80,
+    rows: 24,
+    modelPrintable: 100,
+    lastPaintAt: Date.now(),
+    lastPaintQuads: 100,
+    active: true,
+    ...over,
+  });
+
+  it('flags an active pane whose grid is one row taller than its container', () => {
+    const pane = 'pane-clip-overflow';
+    // floor(540/21)=25 rows fit, but the daemon left the model at 26 → 6px spill.
+    const unregister = registerRenderProbe(pane, () => probeWith({
+      rows: 26, cellHeight: 21, clientHeight: 540, cellWidth: 9, clientWidth: 720,
+      session: 's-clip', isActivePane: true, hasMeasuredSize: true,
+    }));
+    vi.advanceTimersByTime(1600);
+    unregister();
+
+    const incidents = ringEventsFor(pane).filter((event) => event.kind === 'incident');
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]?.reason).toBe('bottom_clip');
+    expect(incidents[0]?.flooredRows).toBe(25);
+    expect(incidents[0]?.extraRows).toBe(1);
+    expect(incidents[0]?.overflowPx).toBe(6);
+  });
+
+  it('does not flag a grid that fits within the container', () => {
+    const pane = 'pane-clip-fits';
+    const unregister = registerRenderProbe(pane, () => probeWith({
+      rows: 25, cellHeight: 21, clientHeight: 540,
+    }));
+    vi.advanceTimersByTime(1600);
+    unregister();
+    expect(ringEventsFor(pane).filter((event) => event.kind === 'incident')).toHaveLength(0);
+  });
+
+  it('does not flag an inactive pane even when its grid overflows', () => {
+    const pane = 'pane-clip-inactive';
+    const unregister = registerRenderProbe(pane, () => probeWith({
+      active: false, rows: 26, cellHeight: 21, clientHeight: 540,
+    }));
+    vi.advanceTimersByTime(1600);
+    unregister();
+    expect(ringEventsFor(pane).filter((event) => event.kind === 'incident')).toHaveLength(0);
+  });
+
+  it('reports the clip once, then a resolution when it clears', () => {
+    const pane = 'pane-clip-resolve';
+    let rows = 26;
+    const unregister = registerRenderProbe(pane, () => probeWith({
+      rows, cellHeight: 21, clientHeight: 540,
+    }));
+    vi.advanceTimersByTime(1600); // onset
+    vi.advanceTimersByTime(1600); // still clipping → edge-triggered, no repeat
+    rows = 25; // a refit floored it back
+    vi.advanceTimersByTime(1600); // resolution
+    unregister();
+
+    const reasons = ringEventsFor(pane)
+      .filter((event) => event.kind === 'incident')
+      .map((event) => event.reason);
+    expect(reasons).toEqual(['bottom_clip', 'bottom_clip_resolved']);
+  });
+
+  it('dumpTerminalGeometry computes overflow and floored dims per pane', () => {
+    const pane = 'pane-clip-dump';
+    const unregister = registerRenderProbe(pane, () => probeWith({
+      rows: 26, cols: 80, cellHeight: 21, cellWidth: 9, clientHeight: 540, clientWidth: 720,
+    }));
+    const snapshot = dumpTerminalGeometry().find((entry) => entry.pane === pane);
+    unregister();
+
+    expect(snapshot).toMatchObject({
+      rows: 26, flooredRows: 25, flooredCols: 80, overflowPx: 6, clipping: true,
+    });
   });
 });

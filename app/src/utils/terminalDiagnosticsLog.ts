@@ -13,12 +13,20 @@
 //     if the model holds content but the surface drew ~nothing, it writes an
 //     INCIDENT record (with ring context) to a separate file. That captures the
 //     blank automatically, so the user only has to keep using the app.
+//   - A second sweep (the bottom-clip detector) periodically checks each active
+//     pane for a grid that is taller than its container — the "last line cut off
+//     at the bottom of the window" bug. It records a `bottom_clip` incident (with
+//     ring context) when the clip appears and a `bottom_clip_resolved` marker
+//     when it clears, so the trigger sequence is captured in the wild.
 //   - Disk writes are async/non-blocking and size-capped, so they never perturb
 //     the render timing we are trying to diagnose.
 //
 // Read the results from:
 //   $APPLOCALDATA/debug/terminal-diagnostics.jsonl   (lifecycle stream)
-//   $APPLOCALDATA/debug/terminal-incidents.jsonl      (auto-captured blanks)
+//   $APPLOCALDATA/debug/terminal-incidents.jsonl      (auto-captured blanks + bottom clips)
+//
+// Dump every mounted pane's live geometry on demand (DevTools console):
+//   window.__ATTN_TERMINAL_GEOMETRY()
 //
 // Disable at runtime with localStorage['attn:terminal-diagnostics']='0'.
 import { isTauri } from '@tauri-apps/api/core';
@@ -42,6 +50,14 @@ const WATCHDOG_DELAYS_MS = [1200, 3500];
 // Do not emit more than one incident per pane within this window (avoids spam
 // while a pane stays blank across several repaint attempts).
 const INCIDENT_COOLDOWN_MS = 8000;
+// Bottom-clip detector: how often to sweep active panes for a rendered grid
+// taller than its container (the last row(s) clipped below the viewport). Low
+// frequency — the clip persists until a remount, so a slow sweep still catches
+// it, and the cost is one layout read per active pane per tick.
+const BOTTOM_CLIP_SWEEP_MS = 1500;
+// Pixel slack mirroring geometryOverflowsContainer: ignore sub-pixel container
+// heights so we only act on a genuine extra row.
+const BOTTOM_CLIP_SLACK_PX = 1;
 
 export type DiagKind =
   | 'pane_mount'
@@ -91,6 +107,33 @@ export interface RenderProbe {
   // "blank" is meaningless — it will paint on activation via the model's
   // accumulated dirty flag.
   active: boolean;
+  // Geometry for the bottom-clip detector / on-demand dump. Optional so other
+  // probe producers and tests keep compiling; `null` means "not measured yet".
+  session?: string;
+  isActivePane?: boolean | null;
+  hasMeasuredSize?: boolean;
+  cellWidth?: number | null;
+  cellHeight?: number | null;
+  clientWidth?: number | null;
+  clientHeight?: number | null;
+}
+
+export interface TerminalGeometrySnapshot {
+  pane: string;
+  session?: string;
+  active: boolean;
+  isActivePane: boolean | null;
+  hasMeasuredSize: boolean | null;
+  cols: number;
+  rows: number;
+  cellWidth: number | null;
+  cellHeight: number | null;
+  clientWidth: number | null;
+  clientHeight: number | null;
+  flooredCols: number | null;
+  flooredRows: number | null;
+  overflowPx: number | null;
+  clipping: boolean;
 }
 
 interface PaneHealth {
@@ -111,6 +154,8 @@ declare global {
     __ATTN_TERMINAL_DIAG_DUMP?: () => DiagEvent[];
     __ATTN_TERMINAL_DIAG_FILES?: { lifecycle: string; incidents: string };
     __ATTN_TERMINAL_DIAG_ENABLE?: (enabled: boolean) => void;
+    // On-demand: dump every mounted pane's live geometry (and persist a snapshot).
+    __ATTN_TERMINAL_GEOMETRY?: () => TerminalGeometrySnapshot[];
     // Back-compat alias used by the split-blank e2e repro spec.
     __ATTN_RENDER_TRACE?: unknown[];
     __ATTN_RENDER_TRACE_ON?: boolean;
@@ -123,6 +168,10 @@ let ringWrapped = false;
 const paneHealth = new Map<string, PaneHealth>();
 const renderProbes = new Map<string, () => RenderProbe | null>();
 const watchdogTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
+// Per-pane "currently clipping at the bottom" flag so the detector reports the
+// clip's onset (and its resolution) once, not on every sweep tick.
+const clipState = new Map<string, boolean>();
+let clipSweepTimer: ReturnType<typeof setInterval> | null = null;
 
 let lifecycleBytes = 0;
 let incidentBytes = 0;
@@ -173,6 +222,9 @@ function ensureGlobals() {
         // ignore
       }
     };
+  }
+  if (!window.__ATTN_TERMINAL_GEOMETRY) {
+    window.__ATTN_TERMINAL_GEOMETRY = dumpTerminalGeometry;
   }
 }
 
@@ -365,8 +417,11 @@ export function recordPaint(sample: PaintSample): void {
 
 export function registerRenderProbe(pane: string, probe: () => RenderProbe | null): () => void {
   renderProbes.set(pane, probe);
+  ensureClipSweep();
   return () => {
     renderProbes.delete(pane);
+    clipState.delete(pane);
+    stopClipSweepIfIdle();
   };
 }
 
@@ -481,10 +536,176 @@ function maybeFlushIncident(pane: string, reason: string, detail: Record<string,
   enqueueWrite('incident', `${JSON.stringify(record)}\n`);
 }
 
+// --- Bottom-clip detector --------------------------------------------------
+// `fit()` floors rows so it can never overflow, but the daemon's authoritative
+// geometry is applied unfloored and the floor-correction (`fit()`) bails while
+// a pane is inactive — so a pane can end up one or two rows taller than its
+// container with no container resize to re-fire the ResizeObserver, clipping the
+// bottom line below the viewport. This sweep notices that state on any active
+// pane and captures it with full ring context (the resize trail that led there).
+
+function bottomClipOverflowPx(probe: RenderProbe): number | null {
+  const cellHeight = probe.cellHeight ?? 0;
+  const clientHeight = probe.clientHeight ?? 0;
+  if (cellHeight <= 0 || clientHeight <= 0 || probe.rows <= 0) {
+    return null;
+  }
+  return probe.rows * cellHeight - clientHeight;
+}
+
+function recordBottomClipIncident(pane: string, detail: Record<string, unknown>): void {
+  const now = Date.now();
+  const session = typeof detail.session === 'string' ? detail.session : undefined;
+  const marker: DiagEvent = { at: now, kind: 'incident', pane, session, reason: 'bottom_clip', ...detail };
+  pushRing(marker);
+  enqueueWrite('lifecycle', `${JSON.stringify(marker)}\n`);
+  // Full record carries the surrounding ring context (resizes, paints, layout)
+  // that produced the clip — the whole point of capturing it in the wild.
+  const record = {
+    at: now,
+    kind: 'incident',
+    pane,
+    session,
+    reason: 'bottom_clip',
+    detail,
+    context: ringSnapshot().slice(-INCIDENT_CONTEXT_EVENTS),
+  };
+  enqueueWrite('incident', `${JSON.stringify(record)}\n`);
+}
+
+function sweepBottomClip(): void {
+  if (typeof window === 'undefined' || !isEnabled()) {
+    return;
+  }
+  for (const [pane, probeFn] of renderProbes) {
+    let probe: RenderProbe | null = null;
+    try {
+      probe = probeFn();
+    } catch {
+      probe = null;
+    }
+    const wasClipping = clipState.get(pane) ?? false;
+    // Only judge active (visible) panes. An inactive pane legitimately holds the
+    // daemon's geometry until it re-fits on activation, and its container is
+    // display:none (height 0). Clear the flag so a later activation that still
+    // clips re-reports the onset.
+    if (!probe || !probe.active) {
+      if (wasClipping) clipState.set(pane, false);
+      continue;
+    }
+    const overflowPx = bottomClipOverflowPx(probe);
+    if (overflowPx == null) {
+      continue;
+    }
+    const clipping = overflowPx > BOTTOM_CLIP_SLACK_PX;
+    if (clipping === wasClipping) {
+      continue;
+    }
+    clipState.set(pane, clipping);
+    const cellHeight = probe.cellHeight ?? 0;
+    const clientHeight = probe.clientHeight ?? 0;
+    const flooredRows = cellHeight > 0 ? Math.floor(clientHeight / cellHeight) : 0;
+    if (clipping) {
+      recordBottomClipIncident(pane, {
+        rows: probe.rows,
+        cols: probe.cols,
+        flooredRows,
+        extraRows: probe.rows - flooredRows,
+        overflowPx: Math.round(overflowPx),
+        cellHeight,
+        cellWidth: probe.cellWidth ?? null,
+        clientHeight,
+        clientWidth: probe.clientWidth ?? null,
+        hasMeasuredSize: probe.hasMeasuredSize ?? null,
+        isActivePane: probe.isActivePane ?? null,
+        session: probe.session,
+        dpr: window.devicePixelRatio,
+        winInnerWidth: window.innerWidth,
+        winInnerHeight: window.innerHeight,
+      });
+    } else {
+      // The clip cleared (a remount, a window resize that re-fit, or an
+      // activation refit). Record what fixed it so the trail is self-describing.
+      recordDiag({
+        kind: 'incident',
+        pane,
+        session: probe.session,
+        reason: 'bottom_clip_resolved',
+        rows: probe.rows,
+        cols: probe.cols,
+        flooredRows,
+        overflowPx: Math.round(overflowPx),
+        cellHeight,
+        clientHeight,
+      });
+    }
+  }
+}
+
+function ensureClipSweep(): void {
+  if (typeof window === 'undefined' || clipSweepTimer != null) {
+    return;
+  }
+  clipSweepTimer = setInterval(sweepBottomClip, BOTTOM_CLIP_SWEEP_MS);
+}
+
+function stopClipSweepIfIdle(): void {
+  if (clipSweepTimer != null && renderProbes.size === 0) {
+    clearInterval(clipSweepTimer);
+    clipSweepTimer = null;
+  }
+}
+
+// On-demand: snapshot every mounted pane's live geometry, persist it, and (in a
+// console) table it. Useful to inspect the moment the clip is on screen.
+export function dumpTerminalGeometry(): TerminalGeometrySnapshot[] {
+  const snapshots: TerminalGeometrySnapshot[] = [];
+  for (const [pane, probeFn] of renderProbes) {
+    let probe: RenderProbe | null = null;
+    try {
+      probe = probeFn();
+    } catch {
+      probe = null;
+    }
+    if (!probe) {
+      continue;
+    }
+    const cellHeight = probe.cellHeight ?? null;
+    const cellWidth = probe.cellWidth ?? null;
+    const clientHeight = probe.clientHeight ?? null;
+    const clientWidth = probe.clientWidth ?? null;
+    const overflowPx = cellHeight && clientHeight ? probe.rows * cellHeight - clientHeight : null;
+    snapshots.push({
+      pane,
+      session: probe.session,
+      active: probe.active,
+      isActivePane: probe.isActivePane ?? null,
+      hasMeasuredSize: probe.hasMeasuredSize ?? null,
+      cols: probe.cols,
+      rows: probe.rows,
+      cellWidth,
+      cellHeight,
+      clientWidth,
+      clientHeight,
+      flooredCols: cellWidth && clientWidth ? Math.floor(clientWidth / cellWidth) : null,
+      flooredRows: cellHeight && clientHeight ? Math.floor(clientHeight / cellHeight) : null,
+      overflowPx: overflowPx == null ? null : Math.round(overflowPx),
+      clipping: overflowPx != null && overflowPx > BOTTOM_CLIP_SLACK_PX,
+    });
+  }
+  enqueueWrite('incident', `${JSON.stringify({ at: Date.now(), kind: 'geometry_dump', snapshots })}\n`);
+  if (typeof console !== 'undefined' && typeof console.table === 'function') {
+    console.table(snapshots);
+  }
+  return snapshots;
+}
+
 export function disposePaneDiagnostics(pane: string): void {
   clearWatchdog(pane);
   paneHealth.delete(pane);
   renderProbes.delete(pane);
+  clipState.delete(pane);
+  stopClipSweepIfIdle();
 }
 
 ensureGlobals();

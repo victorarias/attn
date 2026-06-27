@@ -542,7 +542,13 @@ describe('useGhosttyPaneRuntime', () => {
     });
   });
 
-  it('does not send transient unusable session-pane sizes to the PTY', async () => {
+  it('forwards a genuinely small fit so the PTY matches a deep split (no bottom clip)', async () => {
+    // GhosttyTerminal.fit() is the geometry authority: it already suppresses
+    // transient/garbage measurements and deliberately emits a small grid when a
+    // pane is legitimately short (a deep stacked split, or a short window). The
+    // runtime must NOT re-apply the MIN_USABLE "suspicious" threshold here —
+    // dropping a real small fit strands the PTY taller than the pane and clips
+    // the bottom rows below the overflow:hidden edge.
     const { result } = renderHook(() => useGhosttyPaneRuntime([
       {
         paneId: 'pane-session',
@@ -565,7 +571,28 @@ describe('useGhosttyPaneRuntime', () => {
       result.current.handleTerminalResize('pane-session-2')(10, 6);
     });
 
-    expect(mockPtyResize).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'runtime-1', cols: 10, rows: 6 }));
-    expect(mockPtyResize).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'runtime-2', cols: 10, rows: 6 }));
+    expect(mockPtyResize).toHaveBeenCalledWith(expect.objectContaining({ id: 'runtime-1', cols: 10, rows: 6 }));
+    expect(mockPtyResize).toHaveBeenCalledWith(expect.objectContaining({ id: 'runtime-2', cols: 10, rows: 6 }));
+  });
+
+  it('drops a degenerate (zero/negative/non-finite) fit', async () => {
+    const { result } = renderHook(() => useGhosttyPaneRuntime([
+      {
+        paneId: 'pane-session',
+        runtimeId: 'runtime-1',
+        paneKind: 'agent',
+      },
+    ], 'pane-session', router, { current: true }));
+    const terminal = createTerminal();
+
+    await act(async () => {
+      await result.current.handleTerminalReady('pane-session')(terminal);
+      result.current.handleTerminalResize('pane-session')(80, 0);
+      result.current.handleTerminalResize('pane-session')(0, 24);
+      result.current.handleTerminalResize('pane-session')(-1, 24);
+      result.current.handleTerminalResize('pane-session')(Number.NaN, 24);
+    });
+
+    expect(mockPtyResize).not.toHaveBeenCalled();
   });
 });
