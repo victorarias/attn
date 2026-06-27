@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-27]
+
+### Fixed
+- **A terminal's last rows no longer get cut off outside the window.** Under some conditions — most often after splitting a workspace into several stacked panes, or making the window short — the bottom one or two lines of a terminal could render past the edge of its pane and stay there: invisible, and impossible to scroll into view, until you restarted the app or cycled away and back to the workspace. A safeguard meant to ignore transient/garbage size measurements was also rejecting legitimately small panes, leaving the terminal larger than the space it had. It now keeps the terminal sized to its pane so every row stays on screen (the same fix covers the right-most columns being clipped in very narrow side-by-side splits).
+
 ## [2026-06-26]
 
 ### Fixed
