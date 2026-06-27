@@ -40,12 +40,23 @@ func (d *Daemon) ticketsForBroadcast() []protocol.Ticket {
 // Run it after any producer that mutates a ticket (create, status, crash, and the
 // chief edits to come), mirroring broadcastChiefOfStaffDispatchesUpdated.
 func (d *Daemon) broadcastTicketsUpdated() {
-	if d.wsHub == nil || d.store == nil {
+	if d.store == nil {
+		return
+	}
+	tickets := d.ticketsForBroadcast()
+	// An optional in-process hook lets tests observe the board push deterministically
+	// without a live socket — TicketsUpdatedMessage is its own top-level event, so the
+	// wsHub's WebSocketEvent-only broadcastListener cannot see it (same pattern as
+	// broadcastWorkflowRunUpdated).
+	if d.ticketsBroadcastHook != nil {
+		d.ticketsBroadcastHook(tickets)
+	}
+	if d.wsHub == nil {
 		return
 	}
 	d.broadcastMessage(&protocol.TicketsUpdatedMessage{
 		Event:   protocol.EventTicketsUpdated,
-		Tickets: d.ticketsForBroadcast(),
+		Tickets: tickets,
 	})
 }
 

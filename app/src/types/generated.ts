@@ -3052,11 +3052,9 @@ export interface Response {
     repos?:                                RepoElement[];
     review_loop_run?:                      ReviewLoopRunObject;
     sessions?:                             SessionElement[];
-    ticket?:                               TicketElement;
     ticket_attach_result?:                 TicketAttachResultObject;
     ticket_inbox_result?:                  TicketInboxResultObject;
     ticket_status_result?:                 TicketStatusResultObject;
-    tickets?:                              TicketElement[];
     workspace_context_maintenance_result?: WorkspaceContextMaintenanceResultObject;
     workspace_context_result?:             WorkspaceContextResultObject;
     workspace_contexts?:                   WorkspaceContextElement[];
@@ -9026,11 +9024,9 @@ const typeMap: any = {
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
         { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
-        { json: "ticket", js: "ticket", typ: u(undefined, r("TicketElement")) },
         { json: "ticket_attach_result", js: "ticket_attach_result", typ: u(undefined, r("TicketAttachResultObject")) },
         { json: "ticket_inbox_result", js: "ticket_inbox_result", typ: u(undefined, r("TicketInboxResultObject")) },
         { json: "ticket_status_result", js: "ticket_status_result", typ: u(undefined, r("TicketStatusResultObject")) },
-        { json: "tickets", js: "tickets", typ: u(undefined, a(r("TicketElement"))) },
         { json: "workspace_context_maintenance_result", js: "workspace_context_maintenance_result", typ: u(undefined, r("WorkspaceContextMaintenanceResultObject")) },
         { json: "workspace_context_result", js: "workspace_context_result", typ: u(undefined, r("WorkspaceContextResultObject")) },
         { json: "workspace_contexts", js: "workspace_contexts", typ: u(undefined, a(r("WorkspaceContextElement"))) },

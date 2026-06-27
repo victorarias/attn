@@ -133,3 +133,95 @@ func TestTicketActionUnknownTicketFails(t *testing.T) {
 		t.Fatalf("result = %+v, want failure with error", res)
 	}
 }
+
+// A chief action re-pushes the whole board so the open detail view and the live
+// board refresh off the mutation — the load-bearing second half of the fan-out.
+func TestTicketChangeStatusBroadcastsBoard(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	_, agentID, _ := delegateForNotify(t, d, "codex")
+	ticketID := boundTicketID(t, d, agentID)
+	latestBroadcast := captureTicketBroadcasts(d)
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleTicketChangeStatus(client, &protocol.TicketChangeStatusMessage{
+		Cmd:       protocol.CmdTicketChangeStatus,
+		RequestID: protocol.Ptr("req-b"),
+		TicketID:  ticketID,
+		Status:    protocol.TicketStatus(store.TicketStatusBlocked),
+	})
+
+	board := latestBroadcast()
+	if board == nil {
+		t.Fatal("the status change fired no tickets_updated board push")
+	}
+	var moved *protocol.Ticket
+	for i := range board {
+		if board[i].ID == ticketID {
+			moved = &board[i]
+		}
+	}
+	if moved == nil {
+		t.Fatalf("tickets_updated %v missing %q", ticketIDs(board), ticketID)
+	}
+	if moved.Status != protocol.TicketStatus(store.TicketStatusBlocked) {
+		t.Fatalf("broadcast ticket status = %v, want blocked", moved.Status)
+	}
+}
+
+// A failed mutation skips the fan-out: afterTicketMutation early-returns on error,
+// so the idle assigned agent (which has an unread assignment that would otherwise
+// trip a nudge) is not notified about a change that never happened.
+func TestTicketActionFailureDoesNotNotify(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	_, agentID, inputs := delegateForNotify(t, d, "codex")
+	ticketID := boundTicketID(t, d, agentID)
+	d.store.UpdateState(agentID, protocol.StateIdle)
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleTicketChangeStatus(client, &protocol.TicketChangeStatusMessage{
+		Cmd:       protocol.CmdTicketChangeStatus,
+		RequestID: protocol.Ptr("req-f"),
+		TicketID:  ticketID,
+		Status:    protocol.TicketStatus("not-a-status"),
+	})
+
+	var res protocol.TicketActionResultMessage
+	readTicketResult(t, client.send, &res)
+	if res.Success || res.Error == nil {
+		t.Fatalf("result = %+v, want failure for an invalid status", res)
+	}
+	if wasNudged(inputs(agentID)) {
+		t.Fatal("a failed mutation must not notify the assigned agent")
+	}
+}
+
+// crashed is attn-authored; the chief cannot forge it from the board. The daemon
+// rejects it before mutating, leaving the ticket untouched and firing no fan-out.
+func TestTicketChangeStatusRejectsCrashed(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	_, agentID, inputs := delegateForNotify(t, d, "codex")
+	ticketID := boundTicketID(t, d, agentID)
+	d.store.UpdateState(agentID, protocol.StateIdle)
+	before, _ := d.store.GetTicket(ticketID)
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleTicketChangeStatus(client, &protocol.TicketChangeStatusMessage{
+		Cmd:       protocol.CmdTicketChangeStatus,
+		RequestID: protocol.Ptr("req-c"),
+		TicketID:  ticketID,
+		Status:    protocol.TicketStatus(store.TicketStatusCrashed),
+	})
+
+	var res protocol.TicketActionResultMessage
+	readTicketResult(t, client.send, &res)
+	if res.Success || res.Error == nil {
+		t.Fatalf("result = %+v, want failure — crashed is not a manual transition", res)
+	}
+	after, _ := d.store.GetTicket(ticketID)
+	if after.Status != before.Status {
+		t.Fatalf("status moved to %v despite rejection (was %v)", after.Status, before.Status)
+	}
+	if wasNudged(inputs(agentID)) {
+		t.Fatal("a rejected action must not notify")
+	}
+}

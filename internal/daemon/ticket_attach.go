@@ -37,7 +37,7 @@ func (d *Daemon) handleTicketAttach(conn net.Conn, msg *protocol.TicketAttachMes
 	// The display name the user sees; fall back to the source basename. Basename
 	// here also neutralizes any path in the caller-supplied filename.
 	filename := filepath.Base(strings.TrimSpace(msg.Filename))
-	if filename == "" || filename == "." || filename == string(filepath.Separator) {
+	if filename == "" || filename == "." || filename == ".." || filename == string(filepath.Separator) {
 		filename = filepath.Base(sourcePath)
 	}
 
@@ -108,11 +108,7 @@ func (d *Daemon) copyTicketAttachment(ticketID, sourcePath, filename string) (st
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	dest := uniqueAttachmentPath(dir, filename)
-	if err := copyFileContents(sourcePath, dest); err != nil {
-		return "", err
-	}
-	return dest, nil
+	return copyIntoUniqueAttachment(dir, filename, sourcePath)
 }
 
 // uniqueAttachmentPath returns a path in dir for filename that does not collide
@@ -138,22 +134,44 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// copyFileContents copies src to dst, creating dst (failing if it already exists,
-// since uniqueAttachmentPath has already chosen a free name).
-func copyFileContents(src, dst string) error {
+// maxAttachmentNameAttempts bounds the dedup retry loop. A collision only advances
+// the suffix (report.md -> report-2.md ...), so the loop converges in a step or two
+// even under a same-name race; the cap is a backstop against a pathological spin.
+const maxAttachmentNameAttempts = 10_000
+
+// copyIntoUniqueAttachment copies src into dir under filename, deduping the on-disk
+// name so two attachments sharing a basename never clobber each other. Name
+// selection and the exclusive create are one bounded loop because O_EXCL is the
+// real authority: if another attach claims the chosen name between the existence
+// check and the create (a TOCTOU race), we advance to the next name instead of
+// surfacing a raw EEXIST. A mid-copy failure removes the partial file it just
+// created, so a failed attach never leaves an untracked orphan in the ticket store.
+func copyIntoUniqueAttachment(dir, filename, src string) (string, error) {
 	in, err := os.Open(src)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer in.Close()
 
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		return err
+	for attempt := 0; attempt < maxAttachmentNameAttempts; attempt++ {
+		dest := uniqueAttachmentPath(dir, filename)
+		out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, os.ErrExist) {
+			continue // lost the name race; re-pick and retry
+		}
+		if err != nil {
+			return "", err
+		}
+		if _, err := io.Copy(out, in); err != nil {
+			out.Close()
+			os.Remove(dest)
+			return "", err
+		}
+		if err := out.Close(); err != nil {
+			os.Remove(dest)
+			return "", err
+		}
+		return dest, nil
 	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
+	return "", fmt.Errorf("could not find a free attachment name for %q", filename)
 }

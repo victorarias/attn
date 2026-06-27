@@ -94,8 +94,10 @@ export function TicketDetailPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Action UI state. busyAction names the in-flight action (or null) so its
-  // control can disable and the others can stay live; actionError surfaces a
+  // Action UI state. busyAction names the in-flight action (or null). Only one
+  // mutation runs at a time: every mutating control disables while any action is
+  // in flight, so a sibling's settle (which clears the single slot) can never
+  // re-enable or relabel another still-pending control. actionError surfaces a
   // failed mutation separately from a failed fetch.
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -279,7 +281,7 @@ export function TicketDetailPanel({
                     type="button"
                     className="ticket-edit-save"
                     data-testid="ticket-save-description"
-                    disabled={busyAction === 'description'}
+                    disabled={busyAction !== null}
                     onClick={() => {
                       if (!onEditDescription) return;
                       runAction('description', () => onEditDescription(fullTicket.id, descriptionDraft))
@@ -340,7 +342,7 @@ export function TicketDetailPanel({
                   type="submit"
                   className="ticket-comment-submit"
                   data-testid="ticket-add-comment"
-                  disabled={busyAction === 'comment' || commentDraft.trim() === ''}
+                  disabled={busyAction !== null || commentDraft.trim() === ''}
                 >
                   {busyAction === 'comment' ? 'Adding…' : 'Add comment'}
                 </button>

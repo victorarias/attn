@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { planTicketResume, type TicketResumeInput } from './ticketResume';
+import { describe, it, expect, vi } from 'vitest';
+import {
+  executeTicketResumePlan,
+  planTicketResume,
+  type TicketResumeInput,
+} from './ticketResume';
 
 function ticket(overrides: Partial<TicketResumeInput> = {}): TicketResumeInput {
   return {
@@ -52,5 +56,42 @@ describe('planTicketResume', () => {
       kind: 'error',
       message: 'This ticket has no agent session to resume.',
     });
+  });
+});
+
+describe('executeTicketResumePlan', () => {
+  function handlers() {
+    return { focus: vi.fn(), spawn: vi.fn(), error: vi.fn() };
+  }
+
+  it('routes a focus plan to the focus handler only (no duplicate spawn)', () => {
+    const h = handlers();
+    executeTicketResumePlan({ kind: 'focus', sessionId: 'sess-1' }, h);
+    expect(h.focus).toHaveBeenCalledWith('sess-1');
+    expect(h.spawn).not.toHaveBeenCalled();
+    expect(h.error).not.toHaveBeenCalled();
+  });
+
+  it('routes a spawn plan to the spawn handler with the full plan', () => {
+    const h = handlers();
+    const plan = {
+      kind: 'spawn',
+      sessionId: 'sess-1',
+      cwd: '/repo',
+      agent: 'codex',
+      label: 'Migrate the store',
+    } as const;
+    executeTicketResumePlan(plan, h);
+    expect(h.spawn).toHaveBeenCalledWith(plan);
+    expect(h.focus).not.toHaveBeenCalled();
+    expect(h.error).not.toHaveBeenCalled();
+  });
+
+  it('routes an error plan to the error handler', () => {
+    const h = handlers();
+    executeTicketResumePlan({ kind: 'error', message: 'no agent' }, h);
+    expect(h.error).toHaveBeenCalledWith('no agent');
+    expect(h.focus).not.toHaveBeenCalled();
+    expect(h.spawn).not.toHaveBeenCalled();
   });
 });

@@ -81,7 +81,7 @@ import {
   resolvePreferredAgent,
 } from './utils/agentAvailability';
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
-import { planTicketResume } from './utils/ticketResume';
+import { executeTicketResumePlan, planTicketResume } from './utils/ticketResume';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
 import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
 import './App.css';
@@ -3199,11 +3199,13 @@ sendFetchPRDetails,
   }, [closeDockPanel]);
 
   // Resume a ticket's agent session. If the bound session is still tracked locally,
-  // focus it (the app's attach/resume-recovery revives a dead runtime) — re-spawning
-  // its id would append a duplicate local session. Otherwise reopen the agent in the
-  // ticket's stored cwd, reusing the bound id so the daemon resolves the prior
-  // conversation's resume id (precise resume; the resume picker is the fallback once
-  // that id is gone). Then close the detail view — the resumed session takes focus.
+  // focus it — re-spawning its id would append a duplicate local session, and on
+  // re-mount the app's attach path revives the runtime only when it is recoverable
+  // (Claude, or explicitly marked recoverable); a dead non-recoverable pane surfaces
+  // its own close-and-restart prompt. Otherwise reopen the agent in the ticket's
+  // stored cwd, reusing the bound id so the daemon resolves the prior conversation's
+  // resume id (precise resume; the resume picker is the fallback once that id is
+  // gone). Then close the detail view — the resumed session takes focus.
   const handleResumeTicket = useCallback((ticketId: string) => {
     const ticket = tickets.find((entry) => entry.id === ticketId);
     if (!ticket) {
@@ -3211,19 +3213,19 @@ sendFetchPRDetails,
       return;
     }
     const plan = planTicketResume(ticket, new Set(sessions.map((session) => session.id)));
-    if (plan.kind === 'error') {
-      showError(plan.message);
-      return;
-    }
-    if (plan.kind === 'focus') {
-      handleSelectSession(plan.sessionId);
-      handleCloseTicketDetail();
-      return;
-    }
-    const agent = normalizeSessionAgent(plan.agent, 'claude');
-    void createWorkspaceSession(plan.label, plan.cwd, plan.sessionId, agent, undefined, false, { resumePicker: true })
-      .then(() => handleCloseTicketDetail())
-      .catch((error) => showError(error instanceof Error ? error.message : 'Failed to resume ticket'));
+    executeTicketResumePlan(plan, {
+      error: showError,
+      focus: (sessionId) => {
+        handleSelectSession(sessionId);
+        handleCloseTicketDetail();
+      },
+      spawn: (spawnPlan) => {
+        const agent = normalizeSessionAgent(spawnPlan.agent, 'claude');
+        void createWorkspaceSession(spawnPlan.label, spawnPlan.cwd, spawnPlan.sessionId, agent, undefined, false, { resumePicker: true })
+          .then(() => handleCloseTicketDetail())
+          .catch((error) => showError(error instanceof Error ? error.message : 'Failed to resume ticket'));
+      },
+    });
   }, [tickets, sessions, handleSelectSession, createWorkspaceSession, handleCloseTicketDetail, showError]);
 
   const handleSendToClaude = useCallback((reference: string) => {

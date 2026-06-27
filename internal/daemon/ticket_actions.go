@@ -50,8 +50,18 @@ func (d *Daemon) handleTicketChangeStatus(client *wsClient, msg *protocol.Ticket
 		d.sendTicketActionResult(client, requestID, fmt.Errorf("ticket_id is required"))
 		return
 	}
+	// crashed is the one status attn authors itself (a session that died without
+	// reporting); the board never offers it as a manual destination. The daemon is
+	// the authority, so it rejects it here rather than trusting the UI's
+	// SELECTABLE_STATUSES allowlist — all other transitions stay permissive
+	// (awareness, not autonomy).
+	status := store.TicketStatus(msg.Status)
+	if status == store.TicketStatusCrashed {
+		d.sendTicketActionResult(client, requestID, fmt.Errorf("crashed is an attn-authored status, not a manual transition"))
+		return
+	}
 	comment := strings.TrimSpace(protocol.Deref(msg.Comment))
-	_, err := d.store.SetTicketStatus(ticketID, store.TicketStatus(msg.Status), store.TicketAuthorYou, comment, time.Now())
+	_, err := d.store.SetTicketStatus(ticketID, status, store.TicketAuthorYou, comment, time.Now())
 	d.afterTicketMutation(ticketID, err)
 	d.sendTicketActionResult(client, requestID, err)
 }
