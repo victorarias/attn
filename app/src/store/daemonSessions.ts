@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ChiefOfStaffDispatch, DaemonSession, DaemonPR, RepoState, AuthorState } from '../hooks/useDaemonSocket';
+import { ChiefOfStaffDispatch, DaemonSession, DaemonPR, RepoState, AuthorState, Ticket } from '../hooks/useDaemonSocket';
 
 interface DaemonStore {
   // Sessions from daemon (attn-tracked sessions)
@@ -8,6 +8,11 @@ interface DaemonStore {
 
   chiefOfStaffDispatches: ChiefOfStaffDispatch[];
   setChiefOfStaffDispatches: (dispatches: ChiefOfStaffDispatch[]) => void;
+
+  // Work-tracker board: non-archived tickets (bare rows). The detail view fetches
+  // the full record on demand via get_ticket.
+  tickets: Ticket[];
+  setTickets: (tickets: Ticket[]) => void;
 
   // PRs from daemon
   prs: DaemonPR[];
@@ -38,6 +43,9 @@ export const useDaemonStore = create<DaemonStore>((set, get) => ({
 
   chiefOfStaffDispatches: [],
   setChiefOfStaffDispatches: (dispatches) => set({ chiefOfStaffDispatches: dispatches }),
+
+  tickets: [],
+  setTickets: (tickets) => set({ tickets }),
 
   prs: [],
   setPRs: (prs) => set({ prs }),

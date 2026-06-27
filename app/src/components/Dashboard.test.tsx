@@ -4,6 +4,7 @@ import { Dashboard } from './Dashboard';
 
 const daemonStoreState = vi.hoisted(() => ({
   chiefOfStaffDispatches: [] as Array<Record<string, unknown>>,
+  tickets: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('../contexts/DaemonContext', () => ({
@@ -17,6 +18,7 @@ vi.mock('../contexts/DaemonContext', () => ({
 vi.mock('../store/daemonSessions', () => ({
   useDaemonStore: () => ({
     chiefOfStaffDispatches: daemonStoreState.chiefOfStaffDispatches,
+    tickets: daemonStoreState.tickets,
     repoStates: [],
     authorStates: [],
   }),
@@ -38,6 +40,7 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
 describe('Dashboard sessions', () => {
   beforeEach(() => {
     daemonStoreState.chiefOfStaffDispatches = [];
+    daemonStoreState.tickets = [];
   });
 
   it('shows pending approval sessions on home screen', () => {
@@ -178,6 +181,77 @@ describe('Dashboard sessions', () => {
     expect(screen.getByText('Root cause found; implementing the fix.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /parser-worker/i }));
     expect(onSelectSession).toHaveBeenCalledWith('worker-1');
+  });
+
+  it('opens the bound ticket detail from a delegated session', () => {
+    daemonStoreState.chiefOfStaffDispatches = [{
+      id: 'dispatch-1',
+      chief_session_id: 'chief-1',
+      session_id: 'worker-1',
+      workspace_id: 'workspace-1',
+      brief: 'Investigate the parser.',
+      label: 'Parser investigation',
+      agent: 'codex',
+      directory: '/repo/a',
+      status: 'working',
+      status_since: '2026-06-09T10:00:00Z',
+      created_at: '2026-06-09T10:00:00Z',
+      updated_at: '2026-06-09T10:10:00Z',
+    }];
+    // The ticket is bound to the delegated session (assignee == session id).
+    daemonStoreState.tickets = [{ id: 'parser-investigation', assignee: 'worker-1' }];
+    const onOpenTicketDetail = vi.fn();
+    render(
+      <Dashboard
+        sessions={[
+          { id: 'chief-1', label: 'planner', state: 'working', cwd: '/repo/a', chiefOfStaff: true },
+          { id: 'worker-1', label: 'parser-worker', state: 'working', cwd: '/repo/a' },
+        ]}
+        prs={[]}
+        isLoading={false}
+        onSelectSession={vi.fn()}
+        onOpenTicketDetail={onOpenTicketDetail}
+        onNewSession={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('dispatch-ticket-link-parser-investigation'));
+    expect(onOpenTicketDetail).toHaveBeenCalledWith('parser-investigation');
+  });
+
+  it('shows no ticket affordance for a session with no bound ticket', () => {
+    daemonStoreState.chiefOfStaffDispatches = [{
+      id: 'dispatch-1',
+      chief_session_id: 'chief-1',
+      session_id: 'worker-1',
+      workspace_id: 'workspace-1',
+      brief: 'Investigate the parser.',
+      label: 'Parser investigation',
+      agent: 'codex',
+      directory: '/repo/a',
+      status: 'working',
+      status_since: '2026-06-09T10:00:00Z',
+      created_at: '2026-06-09T10:00:00Z',
+      updated_at: '2026-06-09T10:10:00Z',
+    }];
+    daemonStoreState.tickets = [{ id: 'other', assignee: 'someone-else' }];
+    render(
+      <Dashboard
+        sessions={[
+          { id: 'chief-1', label: 'planner', state: 'working', cwd: '/repo/a', chiefOfStaff: true },
+          { id: 'worker-1', label: 'parser-worker', state: 'working', cwd: '/repo/a' },
+        ]}
+        prs={[]}
+        isLoading={false}
+        onSelectSession={vi.fn()}
+        onOpenTicketDetail={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText('View ticket')).toBeNull();
   });
 
   it('shows unread delegated messages and explicitly wakes an idle worker', async () => {

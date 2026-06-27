@@ -22,6 +22,7 @@ import type {
   WarningElement as GeneratedWarning,
   WorkspaceContext as GeneratedWorkspaceContext,
   NotebookTask as GeneratedNotebookTask,
+  Ticket as GeneratedTicket,
   PRRole,
   HeatState,
 } from '../types/generated';
@@ -62,6 +63,7 @@ import { useWorkflowRunsStore } from '../store/workflowRuns';
 // Short names for daemon payloads used throughout the app.
 export type DaemonSession = GeneratedSession;
 export type ChiefOfStaffDispatch = GeneratedChiefOfStaffDispatch;
+export type Ticket = GeneratedTicket;
 export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
@@ -493,6 +495,9 @@ interface UseDaemonSocketOptions {
   // the generic filesystem surface (fs_changed).
   onFsChanged?: (origin: string, paths: string[]) => void;
   onChiefOfStaffDispatchesUpdate?: (dispatches: ChiefOfStaffDispatch[]) => void;
+  // Fired with the non-archived ticket board (bare rows) on initial_state and on
+  // every tickets_updated broadcast. The detail view fetches full records itself.
+  onTicketsUpdate?: (tickets: Ticket[]) => void;
   onWorkspacesUpdate: (workspaces: DaemonWorkspace[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
   onEndpointsUpdate?: (endpoints: DaemonEndpoint[]) => void;
@@ -776,6 +781,7 @@ export function useDaemonSocket({
   onNotebookTasksChanged,
   onFsChanged,
   onChiefOfStaffDispatchesUpdate,
+  onTicketsUpdate,
   onWorkspacesUpdate,
   onPRsUpdate,
   onEndpointsUpdate,
@@ -807,6 +813,7 @@ export function useDaemonSocket({
     onNotebookTasksChanged,
     onFsChanged,
     onChiefOfStaffDispatchesUpdate,
+    onTicketsUpdate,
     onWorkspacesUpdate,
     onPRsUpdate,
     onEndpointsUpdate,
@@ -827,6 +834,7 @@ export function useDaemonSocket({
     onNotebookTasksChanged,
     onFsChanged,
     onChiefOfStaffDispatchesUpdate,
+    onTicketsUpdate,
     onWorkspacesUpdate,
     onPRsUpdate,
     onEndpointsUpdate,
@@ -1262,6 +1270,7 @@ export function useDaemonSocket({
             sessionsRef.current = nextSessions;
             callbacksRef.current.onSessionsUpdate(nextSessions);
             callbacksRef.current.onChiefOfStaffDispatchesUpdate?.(data.chief_of_staff_dispatches || []);
+            callbacksRef.current.onTicketsUpdate?.(data.tickets || []);
             const nextWorkspaces = data.workspaces || [];
             workspacesRef.current = nextWorkspaces;
             callbacksRef.current.onWorkspacesUpdate(nextWorkspaces);
@@ -1390,6 +1399,10 @@ export function useDaemonSocket({
 
           case 'chief_of_staff_dispatches_updated':
             callbacksRef.current.onChiefOfStaffDispatchesUpdate?.(data.dispatches || []);
+            break;
+
+          case 'tickets_updated':
+            callbacksRef.current.onTicketsUpdate?.(data.tickets || []);
             break;
 
           case 'wake_dispatch_agent_result': {
@@ -1667,6 +1680,25 @@ export function useDaemonSocket({
               pending.resolve(data.result);
             } else {
               pending.reject(new Error(data.error || 'Notebook read failed'));
+            }
+            break;
+          }
+
+          case 'ticket_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `get_ticket:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success && data.ticket) {
+              pending.resolve(data.ticket);
+            } else {
+              pending.reject(new Error(data.error || 'Ticket fetch failed'));
             }
             break;
           }
@@ -3970,6 +4002,29 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
+  // Fetch one ticket's full record (row + activity thread + attachments) for the
+  // detail view. The board feed carries only bare rows, so the detail panel pulls
+  // the full record by id, correlated by request_id against the ticket_result event.
+  const fetchTicket = useCallback((ticketId: string): Promise<Ticket> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('get_ticket');
+      const key = `get_ticket:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'get_ticket', request_id: requestId, ticket_id: ticketId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Ticket fetch timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
   // List the durable runner's tasks (newest-updated first). Resolves with an empty
   // array when the runner is disabled or has no tasks.
   const sendNotebookTaskList = useCallback((): Promise<NotebookTask[]> => {
@@ -4913,6 +4968,7 @@ export function useDaemonSocket({
     sendListWorkspaceContexts,
     sendNotebookList,
     sendNotebookRead,
+    fetchTicket,
     sendNotebookTaskList,
     sendNotebookTaskRetry,
     sendNotebookBacklinks,
