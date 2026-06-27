@@ -65,6 +65,7 @@ func (c *Claude) Capabilities() Capabilities {
 		HasYolo:              true,
 		HasInitialPrompt:     true,
 		HasWorkspaceContext:  true,
+		HasSelfMonitor:       true,
 	}
 }
 

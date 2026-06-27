@@ -242,7 +242,7 @@ each is a meaningful, verifiable chunk.
 | 3 | Delegation ⇄ tickets (live wiring) | ✅ (sub-split — see `2026-06-26-work-tracker-slice3.md`) |
 | 4 | Ticket view + resume + attachments | ✅ (sub-split — see `2026-06-26-work-tracker-slice4.md`) |
 | 5 | Board view | ✅ (status columns + Todo backlog + filters; read-only awareness surface, opened from ⌘K) |
-| 6 | Codex nudge path | ⬜ |
+| 6 | Codex nudge path | ✅ (self-monitor formalized as an `agent.Capabilities` flag; daemon resolves it from the driver registry; pure `ticketnotify` + end-to-end codex-nudge roundtrip test) |
 | 7 | Retire the `dispatch` namespace | ⬜ |
 | 8 | Export ticket state (CLI) — *post-merge, lands on `main`* | ⬜ |
 

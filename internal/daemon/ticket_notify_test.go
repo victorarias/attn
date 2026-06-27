@@ -88,6 +88,54 @@ func TestNotifyDoesNotNudgeClaudeObserver(t *testing.T) {
 	}
 }
 
+// Full slice-6 roundtrip: a real chief producer (the human commenting on the
+// agent's bound ticket via handleTicketAddComment) drives notifyTicketObservers,
+// which nudges the idle codex agent (DeliveryNudge, because the codex driver's
+// HasSelfMonitor capability is false, resolved through ticketObserverForSession).
+// The agent then runs `attn ticket inbox`, consumes the chief's event, and a
+// second inbox is empty because the cursor advanced — proving it consumed, not
+// peeked. No real codex binary or PTY: the fake spawn backend captures the doorbell.
+func TestCodexNudgeRoundtrip(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	_, agentID, inputs := delegateForNotify(t, d, "codex")
+	ticketID := boundTicketID(t, d, agentID)
+	d.store.UpdateState(agentID, protocol.StateIdle)
+
+	// Drive a REAL chief→agent producer: the human comments on the codex agent's
+	// ticket, authored as "you" — an event the agent did not author, so it is unread.
+	client := &wsClient{send: make(chan outboundMessage, 8)}
+	d.handleTicketAddComment(client, &protocol.TicketAddCommentMessage{
+		Cmd:      protocol.CmdTicketAddComment,
+		TicketID: ticketID,
+		Comment:  "please take a look at the failing test",
+	})
+
+	// 1) The idle codex agent was nudged by the chief's comment on its ticket.
+	if !wasNudged(inputs(agentID)) {
+		t.Fatal("idle codex agent was not nudged on chief ticket comment")
+	}
+
+	// 2) Consume side: the agent's inbox carries the chief's comment on its ticket.
+	bundles := callTicketInbox(t, d, agentID)
+	if len(bundles) == 0 {
+		t.Fatal("codex inbox returned no bundles after nudge")
+	}
+	found := false
+	for _, b := range bundles {
+		if b.TicketID == ticketID && len(b.Events) > 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("inbox missing chief event on ticket %s: %+v", ticketID, bundles)
+	}
+
+	// 3) Cursor advanced: a second consume is empty (consumed, not peeked).
+	if again := callTicketInbox(t, d, agentID); len(again) != 0 {
+		t.Fatalf("second inbox not empty, cursor did not advance: %+v", again)
+	}
+}
+
 // A busy codex agent is deferred — no doorbell mid-task — then gets it the moment
 // it goes idle, which is what notifyTicketSessionWentIdle flushes.
 func TestNotifyDefersBusyCodexThenFlushesOnIdle(t *testing.T) {

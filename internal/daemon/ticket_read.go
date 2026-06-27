@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/ticketnotify"
@@ -15,14 +16,18 @@ import (
 // is uniform: every session — the chief included — observes as its own session id,
 // the same string it authors events with, so involvement (assignee or author) and
 // the self-author exclusion line up. The literal ticketnotify.ObserverChief is only
-// the slice-2 harness placeholder; real wiring keys off the live session. The agent
-// decides the delivery path (Claude self-monitors; codex is nudged).
+// the slice-2 harness placeholder; real wiring keys off the live session. The
+// delivery path comes from the session's agent driver capability
+// (agent.Capabilities.HasSelfMonitor, resolved via the registry): Claude
+// self-monitors and watches; codex and the rest are nudged. An empty/unknown agent
+// resolves to nil → Capabilities{} → false, the safe nudge default.
 func (d *Daemon) ticketObserverForSession(sessionID string) ticketnotify.Observer {
-	agent := ""
+	agentName := ""
 	if s := d.store.Get(sessionID); s != nil {
-		agent = s.Agent
+		agentName = s.Agent
 	}
-	return ticketnotify.AgentObserver(sessionID, agent)
+	selfMonitor := agentdriver.EffectiveCapabilities(agentdriver.Get(agentName)).HasSelfMonitor
+	return ticketnotify.Observer{ID: sessionID, HasSelfMonitor: selfMonitor}
 }
 
 // handleTicketInbox returns the calling session's unread ticket events, bundled by
