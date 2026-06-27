@@ -49,8 +49,11 @@ it lands as **stacked, additive-first sub-PRs**, with the removal **last and gat
 |---|---|---|---|
 | 3a | `tickets/slice-3a-binding` | ✅ additive | ✅ **merged-ready (#415, figgy-approved)** — delegate creates + binds a ticket (slug, Working, assignee=session) and emits the created event; `ActiveTicketForSession` lookup. No migration/protocol change. |
 | 3b | `tickets/slice-3b-report` | ✅ additive | ✅ **built** — `attn ticket status <work-state>` verb + `handleSetTicketStatus` → `SetTicketStatus` on the session's bound ticket (resolved via `ActiveTicketForSession`, never a caller id); `work_state`→column map; protocol v124. |
-| 3c | `tickets/slice-3c-crash` | ✅ additive | wire the crash seam to author `Crashed` on a bound, non-terminal ticket. |
-| 3d | `tickets/slice-3d-observe` | ✅ additive | chief + agent observers on live sessions; ticket events drive `Notify` (Claude watch / codex-nudge stub); end-to-end with a real Claude agent. |
+| 3c | `tickets/slice-3c-crash` | ✅ additive | ✅ **built (#417)** — wire the crash seam to author `Crashed` on a bound, non-terminal ticket. |
+| 3d | (sub-split below) | ✅ additive | chief + agent observers on live sessions; ticket events drive `Notify` (Claude watch / codex-nudge stub); end-to-end with a real Claude agent. **Too big for one PR → split 3d-1..3d-3.** |
+| 3d-1 | `tickets/slice-3d-read` | ✅ additive | ✅ **built** — `attn ticket inbox` consume path: protocol ticket-event types, `ticketObserverForSession` (uniform identity = session id; chief is just a Claude session, `ObserverChief` is harness-only), `handleTicketInbox` → `ticketnotify.Consume`. The nudge target. protocol v125. |
+| 3d-2 | `tickets/slice-3d-notify` | ✅ additive | real `Nudger` (`typeDoorbell` fixed trigger) + `notifyTicketObservers(ticketID)` run after every ticket-event producer (create / status / crash / chief comment), deciding Watch (Claude) / Nudge (idle codex) / Deferred. |
+| 3d-3 | `tickets/slice-3d-e2e` | ✅ additive | agent prompt rewired to `attn ticket inbox`/`status`; end-to-end with a real Claude agent via the dev install. |
 | 3e | `tickets/slice-3e-remove-dispatch` | ⚠️ **destructive — gated on Victor's confirm** | delete the dispatch mailbox (`message/inbox/messages/read/ack`, store file, handlers, protocol) and the outcome-report verbs, now that tickets cover them. |
 
 CI is main-only, so each PR is verified green locally + figgyster-reviewed. The

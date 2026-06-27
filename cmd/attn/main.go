@@ -845,6 +845,12 @@ func runTicket() {
 			return
 		}
 		runTicketStatus(os.Args[3:])
+	case "inbox":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketInbox(os.Args[3:])
 	default:
 		fmt.Fprintf(os.Stderr, "ticket: unknown command %q\n", os.Args[2])
 		writeTicketHelp(os.Stderr)
@@ -923,12 +929,67 @@ func runTicketStatus(args []string) {
 	fmt.Printf("ticket %s → %s\n", result.TicketID, result.Status)
 }
 
+// runTicketInbox reads (and consumes) this session's unread ticket events — the
+// chief's comments, status changes, and re-briefs it has not yet seen. Reading
+// advances the cursor, so a second call returns only what landed since.
+func runTicketInbox(args []string) {
+	fs := flag.NewFlagSet("ticket inbox", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	jsonOutput := fs.Bool("json", false, "print the unread bundles as JSON")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "ticket inbox: %v\n", err)
+		os.Exit(2)
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(os.Stderr, "ticket inbox: unexpected arguments: %v\n", fs.Args())
+		os.Exit(2)
+	}
+	source, err := resolveDispatchSession(*sessionID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket inbox: %v\n", err)
+		os.Exit(2)
+	}
+	bundles, err := client.New("").TicketInbox(source)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket inbox: %v\n", err)
+		os.Exit(1)
+	}
+	if *jsonOutput {
+		printJSON(bundles)
+		return
+	}
+	printTicketInbox(bundles)
+}
+
+func printTicketInbox(bundles []protocol.TicketEventBundle) {
+	if len(bundles) == 0 {
+		fmt.Println("no unread ticket activity")
+		return
+	}
+	for _, b := range bundles {
+		fmt.Printf("%s\n", b.TicketID)
+		for _, e := range b.Events {
+			line := fmt.Sprintf("  [%s] %s by %s", e.CreatedAt, e.Kind, e.Author)
+			if e.FromStatus != nil && e.ToStatus != nil {
+				line += fmt.Sprintf(" (%s → %s)", *e.FromStatus, *e.ToStatus)
+			}
+			fmt.Println(line)
+			if e.Comment != nil && *e.Comment != "" {
+				fmt.Printf("    %s\n", *e.Comment)
+			}
+		}
+	}
+}
+
 func writeTicketHelp(w io.Writer) {
 	fmt.Fprint(w, `usage: attn ticket <command>
 
 commands:
   status <work-state> [--session <id>] [--comment <text>] [--json]
         move this session's bound ticket to the column for the reported state
+  inbox [--session <id>] [--json]
+        read (and mark read) this session's unread ticket activity
 
 work states:
   in_progress       working

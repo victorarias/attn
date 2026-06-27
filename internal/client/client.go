@@ -396,6 +396,23 @@ func (c *Client) SetTicketStatus(sourceSessionID, workState, comment string) (*p
 	return resp.TicketStatusResult, nil
 }
 
+// TicketInbox reads and consumes the calling session's unread ticket events,
+// bundled by ticket. Reading advances the session's per-ticket cursors, so a
+// second call returns only what landed since.
+func (c *Client) TicketInbox(sourceSessionID string) ([]protocol.TicketEventBundle, error) {
+	resp, err := c.send(protocol.TicketInboxMessage{
+		Cmd:             protocol.CmdTicketInbox,
+		SourceSessionID: sourceSessionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.TicketInboxResult == nil {
+		return nil, errors.New("daemon returned no ticket inbox result")
+	}
+	return resp.TicketInboxResult.Bundles, nil
+}
+
 func (c *Client) CheckoutWorkspaceContext(sourceSessionID string, force bool) (*protocol.WorkspaceContextResult, error) {
 	msg := protocol.WorkspaceContextCheckoutMessage{
 		Cmd:             protocol.CmdWorkspaceContextCheckout,
