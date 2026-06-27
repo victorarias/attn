@@ -284,6 +284,44 @@ export function geometryOverflowsContainer(
   return rows * cellHeight > clientHeight + 1;
 }
 
+// Whether fit() should SUPPRESS applying `dims` because they look like a
+// transient/garbage measurement (taken before layout settles on relaunch,
+// first-show, or a split topology change) rather than a real container.
+//
+// The guard only fires for agent panes whose floored size is "suspicious"
+// (MIN_USABLE_TERMINAL_*). But a genuinely small container — a deep stacked
+// split, a narrow side-by-side split, or a short window — yields a legitimately
+// small grid. Refusing it would leave the model LARGER than the container, so the
+// overflowing edge (the bottom row(s) for a short pane, or the right column(s)
+// for a narrow one) renders past the overflow:hidden viewport edge and cannot be
+// scrolled into view. So when the live model already overflows the measured
+// container in either axis, the small fit is required (a correctly sized small
+// terminal beats a clipped one) and we do NOT bail. A not-yet-laid-out container
+// (clientWidth/clientHeight ~0) never registers as overflowing (see
+// geometryOverflowsContainer), so the transient case still bails.
+export function fitShouldBailAsSuspicious(
+  paneKind: string | undefined,
+  dims: TerminalDimensions,
+  modelCols: number,
+  modelRows: number,
+  cellWidth: number,
+  cellHeight: number,
+  clientWidth: number,
+  clientHeight: number,
+): boolean {
+  if (paneKind !== 'agent') {
+    return false;
+  }
+  if (!isSuspiciousTerminalSize(dims.cols, dims.rows)) {
+    return false;
+  }
+  // geometryOverflowsContainer is axis-agnostic (count * cellSize > client + 1);
+  // apply it to height (rows) and width (cols) so a narrow split is covered too.
+  const overflows = geometryOverflowsContainer(modelRows, cellHeight, clientHeight)
+    || geometryOverflowsContainer(modelCols, cellWidth, clientWidth);
+  return !overflows;
+}
+
 // Geometry the queued (not yet applied) historical replay will end at.
 // `resizes` counts replay resize operations still on the write chain.
 export interface PendingReplayGeometry extends TerminalDimensions {
@@ -1488,7 +1526,16 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         return;
       }
       const dims = renderer.fitDimensions(container.clientWidth, container.clientHeight);
-      if (runtimeMetaRef.current?.paneKind === 'agent' && isSuspiciousTerminalSize(dims.cols, dims.rows)) {
+      if (fitShouldBailAsSuspicious(
+        runtimeMetaRef.current?.paneKind,
+        dims,
+        terminalRef.current?.cols ?? 0,
+        terminalRef.current?.rows ?? 0,
+        renderer.cellWidth,
+        renderer.cellHeight,
+        container.clientWidth,
+        container.clientHeight,
+      )) {
         noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'suspiciousSize', toCols: dims.cols, toRows: dims.rows });
         return;
       }
@@ -1614,6 +1661,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         registerRenderProbe(diagKeyRef.current, () => {
           const model = terminalRef.current;
           if (!model) return null;
+          const activeRenderer = rendererRef.current;
+          const activeContainer = containerRef.current;
           return {
             cols: model.cols,
             rows: model.rows,
@@ -1623,6 +1672,16 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             // Mirrors renderSurface's inactive-session bail: a pane that is
             // not allowed to paint must not be judged blank by the watchdog.
             active: runtimeMetaRef.current ? runtimeMetaRef.current.isActiveSession : true,
+            // Geometry for the bottom-clip detector / on-demand dump. Reads the
+            // container live (forces a layout), so only the low-frequency sweep
+            // and the manual dump call this — never the per-frame paint path.
+            session: runtimeMetaRef.current?.sessionId ?? undefined,
+            isActivePane: runtimeMetaRef.current?.isActivePane ?? null,
+            hasMeasuredSize: hasMeasuredSizeRef.current,
+            cellWidth: activeRenderer?.cellWidth ?? null,
+            cellHeight: activeRenderer?.cellHeight ?? null,
+            clientWidth: activeContainer?.clientWidth ?? null,
+            clientHeight: activeContainer?.clientHeight ?? null,
           };
         });
         inputRef.current = new InputHandler(

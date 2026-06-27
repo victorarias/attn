@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   fitRequiresTerminalResize,
+  fitShouldBailAsSuspicious,
   geometryOverflowsContainer,
   isWorkspaceResizeDragActive,
   liveResizeConflictsWithQueuedReplay,
@@ -65,6 +66,42 @@ describe('geometryOverflowsContainer', () => {
     expect(geometryOverflowsContainer(27, 21, 0)).toBe(false);
     expect(geometryOverflowsContainer(0, 21, 540)).toBe(false);
     expect(geometryOverflowsContainer(27, 0, 540)).toBe(false);
+  });
+});
+
+describe('fitShouldBailAsSuspicious', () => {
+  // cellWidth 9, cellHeight 21 throughout, matching the captured incident.
+  // Args: (paneKind, dims, modelCols, modelRows, cellWidth, cellHeight, clientWidth, clientHeight).
+  it('does NOT bail when a small fit is required to stop the bottom-row clip', () => {
+    // The bug: a deep stacked split fits ~7 rows (rows<=10 => "suspicious"), but
+    // the live model is stranded at 13 rows, overflowing the 147px container. The
+    // small fit MUST apply — refusing it leaves the model taller than the pane and
+    // the last rows clip below the overflow:hidden edge.
+    expect(fitShouldBailAsSuspicious('agent', { cols: 73, rows: 7 }, 73, 13, 9, 21, 720, 147)).toBe(false);
+  });
+
+  it('does NOT bail when a small fit is required to stop the right-column clip', () => {
+    // The width analog: a narrow side-by-side split fits ~16 cols (cols<=20 =>
+    // "suspicious"), but the model is stranded at 40 cols overflowing the 150px
+    // container width. Height fits, so only the width check catches this.
+    expect(fitShouldBailAsSuspicious('agent', { cols: 16, rows: 40 }, 40, 40, 9, 21, 150, 840)).toBe(false);
+  });
+
+  it('bails on a suspicious fit when the model does not overflow (transient measurement)', () => {
+    // Pre-layout / first-show: container not yet measured (client ~0), so the
+    // model cannot overflow it. The tiny dims are garbage and must be suppressed.
+    expect(fitShouldBailAsSuspicious('agent', { cols: 2, rows: 1 }, 13, 13, 9, 21, 0, 0)).toBe(true);
+    // A settled, comfortably-sized container with a transient tiny fit also bails.
+    expect(fitShouldBailAsSuspicious('agent', { cols: 4, rows: 2 }, 24, 24, 9, 21, 720, 540)).toBe(true);
+  });
+
+  it('never bails for non-agent panes (utility terminals manage their own size)', () => {
+    expect(fitShouldBailAsSuspicious('utility', { cols: 2, rows: 1 }, 24, 24, 9, 21, 720, 540)).toBe(false);
+    expect(fitShouldBailAsSuspicious(undefined, { cols: 2, rows: 1 }, 24, 24, 9, 21, 720, 540)).toBe(false);
+  });
+
+  it('never bails when the floored fit is a normal usable size', () => {
+    expect(fitShouldBailAsSuspicious('agent', { cols: 120, rows: 40 }, 120, 40, 9, 21, 1080, 840)).toBe(false);
   });
 });
 

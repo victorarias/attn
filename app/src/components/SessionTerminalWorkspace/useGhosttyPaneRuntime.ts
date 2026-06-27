@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { ptyAttach, ptyDetach, ptyResize, ptyWrite, type PtyEventPayload } from '../../pty/bridge';
 import { formatExitNotice } from '../../pty/exitNotice';
-import { isSuspiciousTerminalSize } from '../../utils/terminalDebug';
 import { recordFocus } from '../../utils/terminalDiagnosticsLog';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import type { BlockStateSnapshot, GhosttyTerminalHandle } from '../GhosttyTerminal';
@@ -331,7 +330,14 @@ export function useGhosttyPaneRuntime(
     if (!isActiveSessionRef.current) return;
     const pane = paneFor(paneId);
     if (!pane) return;
-    if (isSuspiciousTerminalSize(cols, rows)) return;
+    // GhosttyTerminal.fit() is the geometry authority: it measures the real,
+    // settled container and suppresses transient/degenerate measurements itself,
+    // and deliberately emits a small grid for a genuinely small pane (a deep
+    // stacked split, or a short window) so the bottom rows are not clipped.
+    // Re-applying the MIN_USABLE "suspicious" threshold here dropped those
+    // legitimate small fits and stranded the PTY taller than the pane. Guard only
+    // against a non-sensical size.
+    if (!Number.isFinite(cols) || !Number.isFinite(rows) || cols < 1 || rows < 1) return;
     const reason = options?.reason ?? 'ghostty_fit';
     if (!readyRuntimesRef.current.has(pane.runtimeId)) {
       pendingResizeRef.current.set(pane.runtimeId, { cols, rows, reason });
