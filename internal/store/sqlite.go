@@ -457,6 +457,47 @@ CREATE INDEX IF NOT EXISTS idx_workflow_agent_calls_run_id
 	{52, "rename workspace context janitor backups to keeper compact backups", ""},
 	{53, "add closed_state to chief of staff dispatches", ""},
 	{54, "add pinned to workspaces", ""},
+	{55, "create ticket tables", `CREATE TABLE IF NOT EXISTS tickets (
+    id            TEXT PRIMARY KEY,
+    title         TEXT NOT NULL,
+    description   TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL,
+    assignee      TEXT NOT NULL DEFAULT '',
+    cwd           TEXT NOT NULL DEFAULT '',
+    last_agent_id TEXT NOT NULL DEFAULT '',
+    project_id    TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    closed_at     TEXT NOT NULL DEFAULT '',
+    archived_at   TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
+CREATE INDEX IF NOT EXISTS idx_tickets_archived_closed
+    ON tickets(archived_at, closed_at);
+CREATE TABLE IF NOT EXISTS ticket_activity (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id   TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    author      TEXT NOT NULL DEFAULT '',
+    from_status TEXT NOT NULL DEFAULT '',
+    to_status   TEXT NOT NULL DEFAULT '',
+    comment     TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_activity_ticket
+    ON ticket_activity(ticket_id, id ASC);
+CREATE TABLE IF NOT EXISTS ticket_attachments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id   TEXT NOT NULL,
+    filename    TEXT NOT NULL,
+    path        TEXT NOT NULL DEFAULT '',
+    note        TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_attachments_ticket
+    ON ticket_attachments(ticket_id, id ASC);`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
