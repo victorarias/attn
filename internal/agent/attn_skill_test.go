@@ -23,7 +23,8 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 	index := readSkillFile(t, skillDir, "SKILL.md")
 	for _, expected := range []string{
 		"name: attn",
-		"delegate work",
+		"Not for private research", // description boundary vs native subagents
+		"use native subagents for those",
 		"visible interactive agent",
 		"ATTN_WRAPPER_PATH",
 		"references/delegation.md",
@@ -56,7 +57,9 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"ticket board",
 		"visible, full interactive",
 		"default to native subagents",
-		"not proof that the work is correct",
+		"do not validate that specialist work", // chief surfaces, Victor reviews
+		"review it on the merits",              // the docs/prose exception
+		"the agent's claim, not as confirmed",
 		"Do not report ticket status for ordinary",
 	} {
 		if !strings.Contains(chiefOfStaff, expected) {

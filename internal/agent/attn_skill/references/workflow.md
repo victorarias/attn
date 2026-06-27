@@ -6,6 +6,12 @@ subagents. The engine runs in the `attn workflow run` process, journals every
 journaled prefix and re-running only what changed. Use workflows when you want a
 reproducible multi-step agent pipeline you can observe, retrieve, and resume.
 
+## Contents
+
+- **Authoring a script** — the `meta` block, host functions (`agent`/`parallel`/`pipeline`), the determinism hard-bans.
+- **Designing a workflow** — fan-out / pipeline / verify / judge shapes; picking a model.
+- **CLI** — `run` / `result` / `show` / `list`; running and monitoring a run, including that a long-running call is not a stall — don't cancel a healthy run.
+
 ## Authoring a script
 
 A workflow script is plain JS. Its top-level body runs inside an implicit async

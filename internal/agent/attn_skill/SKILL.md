@@ -1,6 +1,6 @@
 ---
 name: attn
-description: Drive attn from an agent. Use to delegate work, run durable multi-agent workflows, maintain shared workspace context, run review loops, open markdown, or control attn's persistent in-app browser.
+description: "Drive attn from an agent: spawn a visible interactive agent the user can inspect and steer, run durable resumable multi-agent workflows, maintain shared workspace context, journal as chief of staff, run review loops, open markdown, or control attn's persistent in-app browser. Use when the user explicitly asks for an attn session, delegation, workflow, review loop, browser, or to show a markdown explainer or doc in the app, or when you are attn's chief of staff. Not for private research, verification, or parallel reasoning you synthesize yourself — use native subagents for those."
 ---
 
 # attn
