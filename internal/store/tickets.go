@@ -49,6 +49,13 @@ const (
 // nobody's unread feed.
 const TicketAuthorAttn = "attn"
 
+// TicketAuthorYou is the identity the human user authors with when acting on a
+// ticket directly from the app (changing status, commenting, re-briefing). It is a
+// participant like any other — its events notify the assigned agent — but it has no
+// session, so it is never itself nudged; the app sees changes through the live
+// board broadcast instead.
+const TicketAuthorYou = "you"
+
 // IsValid reports whether st is a known status.
 func (st TicketStatus) IsValid() bool {
 	switch st {

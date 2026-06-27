@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "126"
+const ProtocolVersion = "127"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -56,6 +56,9 @@ const (
 	CmdSetTicketStatus                       = "set_ticket_status"
 	CmdTicketInbox                           = "ticket_inbox"
 	CmdGetTicket                             = "get_ticket"
+	CmdTicketChangeStatus                    = "ticket_change_status"
+	CmdTicketAddComment                      = "ticket_add_comment"
+	CmdTicketEditDescription                 = "ticket_edit_description"
 	CmdWorkspaceContextCheckout              = "workspace_context_checkout"
 	CmdWorkspaceContextUpdate                = "workspace_context_update"
 	CmdWorkspaceContextStatus                = "workspace_context_status"
@@ -198,6 +201,7 @@ const (
 	EventChiefOfStaffDispatchesUpdated = "chief_of_staff_dispatches_updated"
 	EventTicketsUpdated                = "tickets_updated"
 	EventTicketResult                  = "ticket_result"
+	EventTicketActionResult            = "ticket_action_result"
 	EventWakeDispatchAgentResult       = "wake_dispatch_agent_result"
 	EventDelegateResult                = "delegate_result"
 	EventWorkspaceContextResult        = "workspace_context_result"
@@ -457,6 +461,27 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdGetTicket:
 		var msg GetTicketMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdTicketChangeStatus:
+		var msg TicketChangeStatusMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdTicketAddComment:
+		var msg TicketAddCommentMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdTicketEditDescription:
+		var msg TicketEditDescriptionMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

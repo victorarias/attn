@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor, sleep } from '../test/utils';
+import { render, screen, waitFor, sleep, fireEvent } from '../test/utils';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import type { Ticket } from '../hooks/useDaemonSocket';
 import { TicketStatus, TicketActivityKind } from '../types/generated';
@@ -161,5 +161,114 @@ describe('TicketDetailPanel', () => {
     await waitFor(() => screen.getByText('Move the store to X'));
     screen.getByLabelText('Close ticket detail').click();
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('changes status through the select', async () => {
+    const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
+    const onChangeStatus = vi.fn().mockResolvedValue(undefined);
+    render(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={makeTicket()}
+        fetchTicket={fetchTicket}
+        onChangeStatus={onChangeStatus}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => screen.getByTestId('ticket-status-select'));
+
+    fireEvent.change(screen.getByTestId('ticket-status-select'), { target: { value: 'done' } });
+    expect(onChangeStatus).toHaveBeenCalledTimes(1);
+    expect(onChangeStatus).toHaveBeenCalledWith('store-migration', 'done');
+  });
+
+  it('adds a comment and clears the draft on success', async () => {
+    const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
+    const onAddComment = vi.fn().mockResolvedValue(undefined);
+    render(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={makeTicket()}
+        fetchTicket={fetchTicket}
+        onAddComment={onAddComment}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => screen.getByTestId('ticket-comment-input'));
+
+    const input = screen.getByTestId('ticket-comment-input') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'try the other approach' } });
+    fireEvent.click(screen.getByTestId('ticket-add-comment'));
+
+    expect(onAddComment).toHaveBeenCalledWith('store-migration', 'try the other approach');
+    await waitFor(() => expect(input.value).toBe(''));
+  });
+
+  it('edits the description through the edit toggle', async () => {
+    const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
+    const onEditDescription = vi.fn().mockResolvedValue(undefined);
+    render(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={makeTicket()}
+        fetchTicket={fetchTicket}
+        onEditDescription={onEditDescription}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => screen.getByTestId('ticket-edit-description'));
+
+    fireEvent.click(screen.getByTestId('ticket-edit-description'));
+    const input = (await screen.findByTestId('ticket-description-input')) as HTMLTextAreaElement;
+    // The editor pre-fills with the current description.
+    expect(input.value).toBe('Move the store to X');
+
+    fireEvent.change(input, { target: { value: 'Re-scoped: read path only' } });
+    fireEvent.click(screen.getByTestId('ticket-save-description'));
+
+    expect(onEditDescription).toHaveBeenCalledWith('store-migration', 'Re-scoped: read path only');
+    // The editor closes on success.
+    await waitFor(() => expect(screen.queryByTestId('ticket-description-input')).toBeNull());
+  });
+
+  it('surfaces an action error without claiming success', async () => {
+    const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
+    const onChangeStatus = vi.fn().mockRejectedValue(new Error('daemon refused the move'));
+    render(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={makeTicket()}
+        fetchTicket={fetchTicket}
+        onChangeStatus={onChangeStatus}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => screen.getByTestId('ticket-status-select'));
+
+    fireEvent.change(screen.getByTestId('ticket-status-select'), { target: { value: 'failed' } });
+    await waitFor(() => screen.getByRole('alert'));
+    expect(screen.getByText('daemon refused the move')).toBeTruthy();
+  });
+
+  it('renders read-only when no action handlers are wired', async () => {
+    const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
+    render(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={makeTicket()}
+        fetchTicket={fetchTicket}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => screen.getByText('Move the store to X'));
+
+    expect(screen.queryByTestId('ticket-status-select')).toBeNull();
+    expect(screen.queryByTestId('ticket-comment-input')).toBeNull();
+    expect(screen.queryByTestId('ticket-edit-description')).toBeNull();
   });
 });

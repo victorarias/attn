@@ -10,6 +10,12 @@ interface TicketDetailPanelProps {
   // re-fetch when the ticket changes under an open panel.
   ticketRow?: Ticket;
   fetchTicket: (ticketId: string) => Promise<Ticket>;
+  // Chief/user actions (slice 4c). Optional so the panel can render read-only
+  // when an owner does not wire them. Each resolves once the daemon confirms;
+  // the refreshed record arrives via the live re-fetch, not the resolve value.
+  onChangeStatus?: (ticketId: string, status: Ticket['status'], comment?: string) => Promise<void>;
+  onAddComment?: (ticketId: string, comment: string) => Promise<void>;
+  onEditDescription?: (ticketId: string, description: string) => Promise<void>;
   onClose: () => void;
 }
 
@@ -22,6 +28,11 @@ const STATUS_LABELS: Record<string, string> = {
   failed: 'Failed',
   crashed: 'Crashed',
 };
+
+// Statuses a human can move a ticket into from the board. `crashed` is excluded
+// because it is an attn-authored signal, not a manual destination; the open
+// ticket's own status is always added so the select can show it.
+const SELECTABLE_STATUSES = ['todo', 'working', 'blocked', 'in_review', 'done', 'failed'];
 
 function statusLabel(status: string): string {
   return STATUS_LABELS[status] ?? status;
@@ -65,10 +76,28 @@ function ActivityEntry({ entry }: { entry: Ticket['activity'][number] }) {
   );
 }
 
-export function TicketDetailPanel({ isOpen, ticketId, ticketRow, fetchTicket, onClose }: TicketDetailPanelProps) {
+export function TicketDetailPanel({
+  isOpen,
+  ticketId,
+  ticketRow,
+  fetchTicket,
+  onChangeStatus,
+  onAddComment,
+  onEditDescription,
+  onClose,
+}: TicketDetailPanelProps) {
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Action UI state. busyAction names the in-flight action (or null) so its
+  // control can disable and the others can stay live; actionError surfaces a
+  // failed mutation separately from a failed fetch.
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [commentDraft, setCommentDraft] = useState('');
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState('');
 
   // updated_at moves on every mutation; using it as a dep makes the open panel
   // re-fetch the full record live when the ticket changes (a status move, a new
@@ -99,6 +128,29 @@ export function TicketDetailPanel({ isOpen, ticketId, ticketRow, fetchTicket, on
       ignore = true;
     };
   }, [isOpen, ticketId, refreshKey, fetchTicket]);
+
+  // Switching tickets clears any in-progress edit so a draft never bleeds from
+  // one ticket onto another.
+  useEffect(() => {
+    setActionError(null);
+    setCommentDraft('');
+    setEditingDescription(false);
+    setDescriptionDraft('');
+  }, [ticketId]);
+
+  // runAction wraps a mutation in the shared busy/error handling. It rethrows so
+  // a caller can chain a success-only side effect (clearing a draft) without
+  // duplicating the error path.
+  const runAction = (name: string, fn: () => Promise<void>): Promise<void> => {
+    setBusyAction(name);
+    setActionError(null);
+    return fn()
+      .catch((err) => {
+        setActionError(err instanceof Error ? err.message : 'Action failed');
+        throw err;
+      })
+      .finally(() => setBusyAction(null));
+  };
 
   if (!isOpen) {
     return null;
@@ -141,9 +193,92 @@ export function TicketDetailPanel({ isOpen, ticketId, ticketRow, fetchTicket, on
 
       {fullTicket && (
         <div className="ticket-detail-body">
+          {onChangeStatus && (
+            <div className="ticket-action-row">
+              <label className="ticket-action-label" htmlFor="ticket-status-select">
+                Status
+              </label>
+              <select
+                id="ticket-status-select"
+                data-testid="ticket-status-select"
+                className="ticket-status-select"
+                value={fullTicket.status}
+                disabled={busyAction !== null}
+                onChange={(event) => {
+                  const next = event.target.value as Ticket['status'];
+                  if (next === fullTicket.status) return;
+                  runAction('status', () => onChangeStatus(fullTicket.id, next)).catch(() => {});
+                }}
+              >
+                {(SELECTABLE_STATUSES.includes(fullTicket.status)
+                  ? SELECTABLE_STATUSES
+                  : [fullTicket.status, ...SELECTABLE_STATUSES]
+                ).map((status) => (
+                  <option key={status} value={status}>
+                    {statusLabel(status)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {actionError && (
+            <div className="ticket-action-error" role="alert">
+              {actionError}
+            </div>
+          )}
+
           <section className="ticket-detail-section">
-            <h3 className="ticket-section-label">Description</h3>
-            {fullTicket.description ? (
+            <div className="ticket-section-head">
+              <h3 className="ticket-section-label">Description</h3>
+              {onEditDescription && !editingDescription && (
+                <button
+                  type="button"
+                  className="ticket-section-action"
+                  data-testid="ticket-edit-description"
+                  onClick={() => {
+                    setDescriptionDraft(fullTicket.description);
+                    setEditingDescription(true);
+                  }}
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+            {editingDescription ? (
+              <div className="ticket-edit-block">
+                <textarea
+                  className="ticket-edit-textarea"
+                  data-testid="ticket-description-input"
+                  value={descriptionDraft}
+                  onChange={(event) => setDescriptionDraft(event.target.value)}
+                  rows={4}
+                />
+                <div className="ticket-edit-buttons">
+                  <button
+                    type="button"
+                    className="ticket-edit-save"
+                    data-testid="ticket-save-description"
+                    disabled={busyAction === 'description'}
+                    onClick={() => {
+                      if (!onEditDescription) return;
+                      runAction('description', () => onEditDescription(fullTicket.id, descriptionDraft))
+                        .then(() => setEditingDescription(false))
+                        .catch(() => {});
+                    }}
+                  >
+                    {busyAction === 'description' ? 'Saving…' : 'Save'}
+                  </button>
+                  <button
+                    type="button"
+                    className="ticket-edit-cancel"
+                    onClick={() => setEditingDescription(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : fullTicket.description ? (
               <p className="ticket-detail-description">{fullTicket.description}</p>
             ) : (
               <p className="ticket-detail-empty">No description.</p>
@@ -160,6 +295,36 @@ export function TicketDetailPanel({ isOpen, ticketId, ticketRow, fetchTicket, on
               </ul>
             ) : (
               <p className="ticket-detail-empty">No activity yet.</p>
+            )}
+            {onAddComment && (
+              <form
+                className="ticket-comment-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const text = commentDraft.trim();
+                  if (!text) return;
+                  runAction('comment', () => onAddComment(fullTicket.id, text))
+                    .then(() => setCommentDraft(''))
+                    .catch(() => {});
+                }}
+              >
+                <textarea
+                  className="ticket-comment-input"
+                  data-testid="ticket-comment-input"
+                  placeholder="Add a comment…"
+                  value={commentDraft}
+                  onChange={(event) => setCommentDraft(event.target.value)}
+                  rows={2}
+                />
+                <button
+                  type="submit"
+                  className="ticket-comment-submit"
+                  data-testid="ticket-add-comment"
+                  disabled={busyAction === 'comment' || commentDraft.trim() === ''}
+                >
+                  {busyAction === 'comment' ? 'Adding…' : 'Add comment'}
+                </button>
+              </form>
             )}
           </section>
 
