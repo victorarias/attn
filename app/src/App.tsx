@@ -81,6 +81,7 @@ import {
   resolvePreferredAgent,
 } from './utils/agentAvailability';
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
+import { planTicketResume } from './utils/ticketResume';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
 import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
 import './App.css';
@@ -3197,29 +3198,33 @@ sendFetchPRDetails,
     setSelectedTicketId(null);
   }, [closeDockPanel]);
 
-  // Resume a ticket's agent session: reopen the agent in the ticket's stored cwd,
-  // reusing the bound session id so the daemon can resolve the prior conversation's
-  // resume id (precise resume) and the ticket stays bound to the same session. The
-  // resume picker is the safe fallback once that id is gone. Then close the detail
-  // view — the resumed session takes focus.
+  // Resume a ticket's agent session. If the bound session is still tracked locally,
+  // focus it (the app's attach/resume-recovery revives a dead runtime) — re-spawning
+  // its id would append a duplicate local session. Otherwise reopen the agent in the
+  // ticket's stored cwd, reusing the bound id so the daemon resolves the prior
+  // conversation's resume id (precise resume; the resume picker is the fallback once
+  // that id is gone). Then close the detail view — the resumed session takes focus.
   const handleResumeTicket = useCallback((ticketId: string) => {
     const ticket = tickets.find((entry) => entry.id === ticketId);
     if (!ticket) {
       showError('Ticket not found.');
       return;
     }
-    const cwd = ticket.cwd?.trim();
-    const agentId = ticket.last_agent_id?.trim();
-    if (!cwd || !agentId) {
-      showError('This ticket has no agent session to resume.');
+    const plan = planTicketResume(ticket, new Set(sessions.map((session) => session.id)));
+    if (plan.kind === 'error') {
+      showError(plan.message);
       return;
     }
-    const agent = normalizeSessionAgent(agentId, 'claude');
-    const resumeId = ticket.assignee && ticket.assignee !== 'you' ? ticket.assignee : undefined;
-    void createWorkspaceSession(ticket.title, cwd, resumeId, agent, undefined, false, { resumePicker: true })
+    if (plan.kind === 'focus') {
+      handleSelectSession(plan.sessionId);
+      handleCloseTicketDetail();
+      return;
+    }
+    const agent = normalizeSessionAgent(plan.agent, 'claude');
+    void createWorkspaceSession(plan.label, plan.cwd, plan.sessionId, agent, undefined, false, { resumePicker: true })
       .then(() => handleCloseTicketDetail())
       .catch((error) => showError(error instanceof Error ? error.message : 'Failed to resume ticket'));
-  }, [tickets, createWorkspaceSession, handleCloseTicketDetail, showError]);
+  }, [tickets, sessions, handleSelectSession, createWorkspaceSession, handleCloseTicketDetail, showError]);
 
   const handleSendToClaude = useCallback((reference: string) => {
     if (!activeSessionId) return;
