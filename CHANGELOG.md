@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-27]
+
+### Added
+- **Open and act on a delegated agent's ticket from the app.** Delegated work now has a ticket you can open from its session: see its description, status, full history, and attachments, all updating live as the work moves. From the ticket you can change its status, add a comment, or re-brief the agent — each notifies the agent — and **resume** a stopped session to pick the work back up where it left off. Agents can hand a file to their ticket with `attn ticket attach --file <path>`, and it shows up in the ticket's attachments.
+
 ## [2026-06-26]
 
 ### Fixed

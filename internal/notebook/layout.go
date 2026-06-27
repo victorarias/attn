@@ -45,6 +45,20 @@ func DefaultRoot(home, profile string) string {
 	return base + "-" + p
 }
 
+// TicketsDir returns the absolute .attn/tickets directory for a notebook root —
+// the store for ticket attachment files. Like the raw tier it lives under .attn/,
+// which CleanPath rejects and a dotfile-skipping external sync scanner ignores, so
+// it is written with direct filesystem I/O, not the notebook.Store APIs.
+func TicketsDir(root string) string {
+	return filepath.Join(root, machineDir, "tickets")
+}
+
+// TicketAttachmentsDir returns the absolute directory holding one ticket's copied
+// attachment files (.attn/tickets/<id>/).
+func TicketAttachmentsDir(root, ticketID string) string {
+	return filepath.Join(TicketsDir(root), ticketID)
+}
+
 // CleanPath validates and normalizes a notebook path. The input may be
 // root-absolute ("/knowledge/areas/foo.md", matching the link convention) or
 // relative ("knowledge/areas/foo.md"); the result is always a clean, slash-separated relative

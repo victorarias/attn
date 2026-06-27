@@ -39,6 +39,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdWakeDispatchAgent:                     commandMetadata(ScopeHubLocal, true, true),
 	protocol.CmdSetTicketStatus:                       commandMetadata(ScopeSession, false, true),
 	protocol.CmdTicketInbox:                           commandMetadata(ScopeSession, false, true),
+	protocol.CmdTicketAttach:                          commandMetadata(ScopeSession, false, true),
 	protocol.CmdUnregister:                            commandMetadata(ScopeSession, true, true),
 	protocol.CmdState:                                 commandMetadata(ScopeSession, false, true),
 	protocol.CmdSetSessionResumeID:                    commandMetadata(ScopeSession, false, true),

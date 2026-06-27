@@ -354,7 +354,9 @@ export function TicketDetailPanel({
               <ul className="ticket-attachment-list">
                 {fullTicket.attachments.map((att) => (
                   <li key={att.id} className="ticket-attachment">
-                    <span className="ticket-attachment-name">{att.filename}</span>
+                    <span className="ticket-attachment-name" title={att.path || undefined}>
+                      {att.filename}
+                    </span>
                     {att.note && <span className="ticket-attachment-note">{att.note}</span>}
                   </li>
                 ))}
