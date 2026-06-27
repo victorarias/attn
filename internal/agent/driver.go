@@ -117,6 +117,13 @@ type Capabilities struct {
 	// HasWorkspaceContext indicates attn can give the agent hidden launch
 	// instructions for using a workspace context checkout.
 	HasWorkspaceContext bool
+
+	// HasSelfMonitor indicates the agent watches its own ticket/event stream via
+	// a live Monitor (true push) rather than needing an idle PTY nudge when ticket
+	// activity arrives. Consumed by the work-tracker notifier (internal/ticketnotify)
+	// to pick DeliveryWatch (self-monitor) vs DeliveryNudge (idle pty-nudge). Only
+	// Claude self-monitors today.
+	HasSelfMonitor bool
 }
 
 var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
@@ -134,6 +141,7 @@ var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
 //   - ATTN_AGENT_<AGENT>_YOLO=0|1
 //   - ATTN_AGENT_<AGENT>_INITIAL_PROMPT=0|1
 //   - ATTN_AGENT_<AGENT>_WORKSPACE_CONTEXT=0|1
+//   - ATTN_AGENT_<AGENT>_SELF_MONITOR=0|1
 //
 // <AGENT> is uppercased with non-alphanumeric chars replaced by underscores
 // (e.g. "gemini-cli" -> "GEMINI_CLI").
@@ -173,6 +181,9 @@ func EffectiveCapabilities(d Driver) Capabilities {
 	}
 	if v, ok := boolEnv(prefix + "WORKSPACE_CONTEXT"); ok {
 		caps.HasWorkspaceContext = v
+	}
+	if v, ok := boolEnv(prefix + "SELF_MONITOR"); ok {
+		caps.HasSelfMonitor = v
 	}
 
 	// Consistency: transcript watcher requires transcript support.

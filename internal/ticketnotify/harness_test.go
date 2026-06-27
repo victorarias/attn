@@ -193,15 +193,11 @@ func TestHarnessDedup(t *testing.T) {
 func TestHarnessNudgePath(t *testing.T) {
 	h := newHarness(t)
 
-	// A codex agent can't self-monitor; a Claude agent can.
-	codex := AgentObserver("codexbot", "codex")
-	claude := AgentObserver("agent7", "claude")
-	if codex.HasSelfMonitor {
-		t.Fatal("codex should not self-monitor")
-	}
-	if !claude.HasSelfMonitor {
-		t.Fatal("claude should self-monitor")
-	}
+	// A codex agent can't self-monitor; a Claude agent can. The agent->capability
+	// mapping now lives on the agent driver (internal/agent); here the bool is given
+	// explicitly, which is more honest for this pure package.
+	codex := Observer{ID: "codexbot", HasSelfMonitor: false}
+	claude := Observer{ID: "agent7", HasSelfMonitor: true}
 
 	h.create("alpha", "codexbot", ObserverChief)
 	h.create("beta", "agent7", ObserverChief)
@@ -256,7 +252,7 @@ func TestHarnessNudgePath(t *testing.T) {
 func TestHarnessAgentScopeAndSelfAuthored(t *testing.T) {
 	h := newHarness(t)
 	chief := ChiefObserver()
-	agent7 := AgentObserver("agent7", "claude")
+	agent7 := Observer{ID: "agent7", HasSelfMonitor: true}
 
 	h.create("alpha", "agent7", ObserverChief) // assigned to agent7
 	h.create("beta", "agent9", ObserverChief)  // assigned to someone else
@@ -308,7 +304,7 @@ func TestHarnessAgentScopeAndSelfAuthored(t *testing.T) {
 // silently skipped.
 func TestHarnessLateAssignmentDeliversContext(t *testing.T) {
 	h := newHarness(t)
-	agent7 := AgentObserver("agent7", "claude")
+	agent7 := Observer{ID: "agent7", HasSelfMonitor: true}
 
 	// agent7 has prior work it already consumed — its bookmark on "early" is advanced.
 	h.create("early", "agent7", ObserverChief)
@@ -357,7 +353,7 @@ func TestHarnessLateAssignmentDeliversContext(t *testing.T) {
 // assignee's progress, so the new agent picks up with full context.
 func TestHarnessReassignmentHandsOverHistory(t *testing.T) {
 	h := newHarness(t)
-	agent9 := AgentObserver("agent9", "claude")
+	agent9 := Observer{ID: "agent9", HasSelfMonitor: true}
 
 	// agent7 works a ticket and reports progress.
 	h.create("handoff", "agent7", ObserverChief)

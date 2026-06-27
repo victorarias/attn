@@ -31,7 +31,6 @@ package ticketnotify
 
 import (
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/victorarias/attn/internal/store"
@@ -57,28 +56,19 @@ type EventStore interface {
 
 // Observer is a subscriber to ticket events. ID is ObserverChief or an agent's
 // session id. HasSelfMonitor picks the delivery path: a self-monitoring agent's
-// own watch consumes; others are nudged when idle.
+// own watch consumes; others are nudged when idle. The caller supplies the bool —
+// this package stays pure and knows nothing about agent types; the daemon reads it
+// from the agent driver's capability (internal/agent.Capabilities.HasSelfMonitor).
 type Observer struct {
 	ID             string
 	HasSelfMonitor bool
 }
 
-// ChiefObserver returns the well-known chief observer. The chief is a Claude
-// session, so it self-monitors.
+// ChiefObserver returns the well-known chief observer. Harness/test-only: the live
+// chief is built from its real agent via the daemon, like any other session. The
+// chief is a self-monitoring session here, so it watches rather than is nudged.
 func ChiefObserver() Observer {
 	return Observer{ID: ObserverChief, HasSelfMonitor: true}
-}
-
-// AgentObserver returns an observer for a delegated agent session.
-func AgentObserver(sessionID, agent string) Observer {
-	return Observer{ID: sessionID, HasSelfMonitor: HasSelfMonitor(agent)}
-}
-
-// HasSelfMonitor reports whether an agent can watch its own events (true push via
-// a Monitor) or must be polled/nudged. Only Claude self-monitors today; codex and
-// the rest fall back to the idle nudge — matching the vision's split.
-func HasSelfMonitor(agent string) bool {
-	return strings.EqualFold(strings.TrimSpace(agent), "claude")
 }
 
 // Bundle is an observer's unread events for a single ticket. Consume returns one
