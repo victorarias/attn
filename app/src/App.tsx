@@ -1011,6 +1011,7 @@ sendFetchPRDetails,
     agent?: SessionAgent,
     endpointId?: string,
     yoloMode = false,
+    options?: { resumePicker?: boolean },
   ) => {
     const sessionId = providedSessionId || crypto.randomUUID();
     const workspaceId = `workspace-${sessionId}`;
@@ -1026,6 +1027,12 @@ sendFetchPRDetails,
       const spawnArgs = takeSessionSpawnArgs(sessionId, 80, 24);
       if (!spawnArgs) {
         throw new Error('Session spawn arguments were not prepared.');
+      }
+      if (options?.resumePicker) {
+        // Resume into the agent's own conversation picker, scoped to this cwd.
+        // When the daemon still holds the prior session's resume id it resolves
+        // that for a precise resume; otherwise the picker is the safe fallback.
+        spawnArgs.resume_picker = true;
       }
       await ptySpawn({ args: spawnArgs });
       return createdSessionId;
@@ -3190,6 +3197,30 @@ sendFetchPRDetails,
     setSelectedTicketId(null);
   }, [closeDockPanel]);
 
+  // Resume a ticket's agent session: reopen the agent in the ticket's stored cwd,
+  // reusing the bound session id so the daemon can resolve the prior conversation's
+  // resume id (precise resume) and the ticket stays bound to the same session. The
+  // resume picker is the safe fallback once that id is gone. Then close the detail
+  // view — the resumed session takes focus.
+  const handleResumeTicket = useCallback((ticketId: string) => {
+    const ticket = tickets.find((entry) => entry.id === ticketId);
+    if (!ticket) {
+      showError('Ticket not found.');
+      return;
+    }
+    const cwd = ticket.cwd?.trim();
+    const agentId = ticket.last_agent_id?.trim();
+    if (!cwd || !agentId) {
+      showError('This ticket has no agent session to resume.');
+      return;
+    }
+    const agent = normalizeSessionAgent(agentId, 'claude');
+    const resumeId = ticket.assignee && ticket.assignee !== 'you' ? ticket.assignee : undefined;
+    void createWorkspaceSession(ticket.title, cwd, resumeId, agent, undefined, false, { resumePicker: true })
+      .then(() => handleCloseTicketDetail())
+      .catch((error) => showError(error instanceof Error ? error.message : 'Failed to resume ticket'));
+  }, [tickets, createWorkspaceSession, handleCloseTicketDetail, showError]);
+
   const handleSendToClaude = useCallback((reference: string) => {
     if (!activeSessionId) return;
     sendRuntimeInput(activeSessionId, reference, 'user');
@@ -3881,6 +3912,7 @@ sendFetchPRDetails,
                   onChangeStatus={sendTicketChangeStatus}
                   onAddComment={sendTicketAddComment}
                   onEditDescription={sendTicketEditDescription}
+                  onResume={handleResumeTicket}
                   onClose={handleCloseTicketDetail}
                 />
               ),

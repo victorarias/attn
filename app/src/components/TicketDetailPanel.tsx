@@ -16,6 +16,9 @@ interface TicketDetailPanelProps {
   onChangeStatus?: (ticketId: string, status: Ticket['status'], comment?: string) => Promise<void>;
   onAddComment?: (ticketId: string, comment: string) => Promise<void>;
   onEditDescription?: (ticketId: string, description: string) => Promise<void>;
+  // Reopen the ticket's agent session (in its stored cwd, resuming the prior
+  // conversation). Optional; shown only when the ticket has a resumable agent.
+  onResume?: (ticketId: string) => void;
   onClose: () => void;
 }
 
@@ -84,6 +87,7 @@ export function TicketDetailPanel({
   onChangeStatus,
   onAddComment,
   onEditDescription,
+  onResume,
   onClose,
 }: TicketDetailPanelProps) {
   const [ticket, setTicket] = useState<Ticket | null>(null);
@@ -161,6 +165,10 @@ export function TicketDetailPanel({
   // bare row until the new fetch lands.
   const fullTicket = ticket && ticket.id === ticketId ? ticket : null;
   const header = fullTicket ?? ticketRow ?? null;
+  // A ticket is resumable when it carries a bound agent session — a stored cwd and
+  // agent id, both set only for delegated work. Works off the bare row too, so the
+  // button is live before the full record loads.
+  const canResume = Boolean(onResume && ticketId && header?.cwd && header?.last_agent_id);
 
   return (
     <div className="ticket-detail-panel" data-testid="ticket-detail-panel">
@@ -183,9 +191,21 @@ export function TicketDetailPanel({
             <h2 className="ticket-detail-title">Ticket</h2>
           )}
         </div>
-        <button type="button" className="ticket-detail-close" onClick={onClose} aria-label="Close ticket detail">
-          ✕
-        </button>
+        <div className="ticket-detail-header-actions">
+          {canResume && (
+            <button
+              type="button"
+              className="ticket-detail-resume"
+              data-testid="ticket-resume"
+              onClick={() => ticketId && onResume?.(ticketId)}
+            >
+              ↻ Resume
+            </button>
+          )}
+          <button type="button" className="ticket-detail-close" onClick={onClose} aria-label="Close ticket detail">
+            ✕
+          </button>
+        </div>
       </div>
 
       {error && <div className="ticket-detail-error" role="alert">{error}</div>}
