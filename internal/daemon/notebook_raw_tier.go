@@ -14,22 +14,18 @@ import (
 // pipeline. It holds machine inputs the narrate pass later consumes, under
 // <notebook.root>/.attn/raw/ — physically unreachable through the user-facing
 // notebook APIs (CleanPath rejects dotdir segments) and skipped by the watcher,
-// so raw writes emit no external-edit broadcast. Two deterministic daemon writes
-// land here and SHARE this one atomic writer + the one neutralizeJournalMarkers
-// step so they are built, reviewed, and tested together:
+// so raw writes emit no external-edit broadcast. The deterministic context-snapshot
+// write lands here through this one atomic writer + the one neutralizeJournalMarkers
+// step:
 //
 //   - context-snapshots/<wsID>.md — the synchronous context.md snapshot taken at
 //     every workspace-removal site, BEFORE store.RemoveWorkspace runs its
 //     DELETE FROM workspace_contexts (an async writer cannot win that race).
-//   - dispatches/<dispatchID>.md  — the redirected dispatch outcome capture (see
-//     notebook_dispatch_journal.go).
 //
-// They cannot collide: distinct per-item files under distinct subdirs, distinct
-// exactly-once ledgers (file existence + a source footer / marker), and both
-// bodies pass through neutralizeJournalMarkers so no free-text field can forge a
-// journal marker.
+// The snapshot body passes through neutralizeJournalMarkers so no free-text field
+// can forge a journal marker.
 
-// rawTierFilename turns a raw-tier item id (a workspace id or dispatch id) into a
+// rawTierFilename turns a raw-tier item id (a workspace id) into a
 // single safe "<id>.md" filename, or errors if the id cannot be a single path
 // segment. This is the load-bearing guard that keeps a CLIENT-CONTROLLED id (the
 // workspace id from register_workspace is accepted verbatim over the socket, with
@@ -41,9 +37,8 @@ import (
 // notebook APIs, and the daemon must never write the curated journal; an id that
 // is not a plain filename violates both, so we reject it rather than join it.
 //
-// Dispatch ids are server UUIDs and never trip this, but routing both writers
-// through the same guard keeps the invariant in one place instead of resting on a
-// per-call-site property a future caller could quietly break.
+// Centralizing the guard here keeps the invariant in one place instead of resting
+// on a per-call-site property a future caller could quietly break.
 func rawTierFilename(id string) (string, error) {
 	return rawTierName(id, ".md")
 }
@@ -110,7 +105,7 @@ func writeRawAtomic(root, dir, id string, content []byte) error {
 	}
 	// The lexical checks above only prove the string join stayed under dir. The
 	// root is externally syncable, so a user/sync client could turn a raw-tier
-	// ancestor (e.g. .attn/raw/dispatches) into a symlink pointing outside the
+	// ancestor (e.g. .attn/raw/sessions) into a symlink pointing outside the
 	// notebook root, and MkdirAll/Rename would then write through it. Resolve the
 	// deepest existing ancestor and require it within the resolved root before we
 	// create any directory or write — the same guard Store.Read/Write/List apply.
@@ -176,7 +171,7 @@ func (d *Daemon) snapshotWorkspaceContextOnRemove(id, title string) {
 
 	// Neutralize the verbatim overlay BEFORE appending the genuine source footer,
 	// so no free-text field in the body can forge a journal marker while the real
-	// footer stays intact (same pattern renderDispatchJournalEntry uses).
+	// footer stays intact.
 	var doc strings.Builder
 	doc.WriteString(neutralizeJournalMarkers(canonical.Content))
 	fmt.Fprintf(&doc, "\nsource: workspace-context:%s@%d\n", id, canonical.Revision)
@@ -186,4 +181,11 @@ func (d *Daemon) snapshotWorkspaceContextOnRemove(id, title string) {
 		d.logf("context snapshot %s (%s): write under %s: %v", id, title, dir, err)
 		return
 	}
+}
+
+// neutralizeJournalMarkers breaks any HTML-comment opener ("<!--") in a rendered
+// body so a free-text field can never forge a raw-tier source marker. The real
+// footer the writer appends afterward stays the only authentic marker.
+func neutralizeJournalMarkers(s string) string {
+	return strings.ReplaceAll(s, "<!--", "<! --")
 }

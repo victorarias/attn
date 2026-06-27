@@ -1367,11 +1367,10 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 	}
 
 	if session := d.store.Get(info.ID); session != nil {
-		// Capture the pre-clobber state for any chief dispatch on this session: the
+		// Capture the pre-clobber state for any delegated ticket on this session: the
 		// idle-clobber just below erases whether the agent was mid-flight (a crash or
-		// kill) or at a clean rest when its process exited — the signal the dispatch
-		// classifier needs to surface a cut-off close as a failure.
-		d.captureDispatchCloseState(info.ID, string(session.State))
+		// kill) or at a clean rest when its process exited — the signal the ticket
+		// crash detector needs to surface a cut-off close as a Crashed ticket.
 		d.captureTicketCrashState(info.ID, string(session.State))
 		d.store.Touch(info.ID)
 		d.store.UpdateState(info.ID, protocol.StateIdle)
@@ -1471,23 +1470,22 @@ func (d *Daemon) removeReapedSession(sessionID string) {
 	d.removeWorkspaceLayoutPaneForSession(sessionID)
 }
 
-// dropSessionRecord removes a session's store record, first capturing the outcome
-// of any chief-of-staff dispatch it was running. Routing every session-removal
-// path through here means a delegated worker's result is journaled no matter how
-// its session ends — cleanly unregistered, reaped on restart/liveness sweep, or
-// torn down with its worktree — and not just on the orderly close path. The
-// capture is idempotent (a prior terminal-report write wins via the per-dispatch
-// marker) and a no-op for non-dispatch sessions.
+// dropSessionRecord removes a session's store record, first capturing the crash
+// outcome of any delegated ticket it was running. Routing every session-removal
+// path through here means a delegated worker that died mid-flight surfaces as a
+// Crashed ticket no matter how its session ends — cleanly unregistered, reaped on
+// restart/liveness sweep, or torn down with its worktree — and not just on the
+// orderly close path. The capture is idempotent (a prior terminal-report write
+// wins) and a no-op for sessions without an active ticket.
 func (d *Daemon) dropSessionRecord(sessionID string) {
-	// Backstop the close-state capture for removal paths that bypass handlePTYExit
+	// Backstop the crash capture for removal paths that bypass handlePTYExit
 	// (reaped on restart, liveness sweep, or torn down with a worktree). First-
-	// writer-wins means a real pre-clobber exit capture already on the dispatch wins
-	// over this later read, which would otherwise only see the clobbered idle.
+	// writer-wins means a real pre-clobber exit capture already recorded on the
+	// ticket wins over this later read, which would otherwise only see the
+	// clobbered idle.
 	if session := d.store.Get(sessionID); session != nil {
-		d.captureDispatchCloseState(sessionID, string(session.State))
 		d.captureTicketCrashState(sessionID, string(session.State))
 	}
-	d.journalDispatchOnSessionGone(sessionID)
 	d.store.Remove(sessionID)
 }
 
@@ -1858,24 +1856,6 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleRegister(conn, msg.(*protocol.RegisterMessage))
 	case protocol.CmdDelegate:
 		d.handleDelegate(conn, msg.(*protocol.DelegateMessage))
-	case protocol.CmdListDispatches:
-		d.handleListDispatches(conn, msg.(*protocol.ListDispatchesMessage))
-	case protocol.CmdSubmitDispatchOutcome:
-		d.handleSubmitDispatchOutcome(conn, msg.(*protocol.SubmitDispatchOutcomeMessage))
-	case protocol.CmdHandoffDispatch:
-		d.handleHandoffDispatch(conn, msg.(*protocol.HandoffDispatchMessage))
-	case protocol.CmdGetDispatch:
-		d.handleGetDispatch(conn, msg.(*protocol.GetDispatchMessage))
-	case protocol.CmdResolveDispatchRequest:
-		d.handleResolveDispatchRequest(conn, msg.(*protocol.ResolveDispatchRequestMessage))
-	case protocol.CmdSendDispatchMessage:
-		d.handleSendDispatchMessage(conn, msg.(*protocol.SendDispatchMessage))
-	case protocol.CmdListDispatchMessages:
-		d.handleListDispatchMessages(conn, msg.(*protocol.ListDispatchMessagesMessage))
-	case protocol.CmdReadDispatchMessage:
-		d.handleReadDispatchMessage(conn, msg.(*protocol.ReadDispatchMessage))
-	case protocol.CmdAcknowledgeDispatchMessage:
-		d.handleAcknowledgeDispatchMessage(conn, msg.(*protocol.AcknowledgeDispatchMessage))
 	case protocol.CmdSetTicketStatus:
 		d.handleSetTicketStatus(conn, msg.(*protocol.SetTicketStatusMessage))
 	case protocol.CmdTicketInbox:

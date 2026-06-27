@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "129"
+const ProtocolVersion = "130"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -43,16 +43,6 @@ const (
 	CmdClientHello                           = "client_hello"
 	CmdRegister                              = "register"
 	CmdDelegate                              = "delegate"
-	CmdListDispatches                        = "list_dispatches"
-	CmdSubmitDispatchOutcome                 = "submit_dispatch_outcome"
-	CmdHandoffDispatch                       = "handoff_dispatch"
-	CmdGetDispatch                           = "get_dispatch"
-	CmdResolveDispatchRequest                = "resolve_dispatch_request"
-	CmdSendDispatchMessage                   = "send_dispatch_message"
-	CmdListDispatchMessages                  = "list_dispatch_messages"
-	CmdReadDispatchMessage                   = "read_dispatch_message"
-	CmdAcknowledgeDispatchMessage            = "acknowledge_dispatch_message"
-	CmdWakeDispatchAgent                     = "wake_dispatch_agent"
 	CmdSetTicketStatus                       = "set_ticket_status"
 	CmdTicketInbox                           = "ticket_inbox"
 	CmdTicketAttach                          = "ticket_attach"
@@ -187,99 +177,97 @@ const (
 
 // WebSocket Events (daemon -> client)
 const (
-	EventSessionRegistered             = "session_registered"
-	EventSessionUnregistered           = "session_unregistered"
-	EventSessionStateChanged           = "session_state_changed"
-	EventWorkspaceRegistered           = "workspace_registered"
-	EventWorkspaceUnregistered         = "workspace_unregistered"
-	EventWorkspaceStateChanged         = "workspace_state_changed"
-	EventWorkspaceContextChanged       = "workspace_context_changed"
-	EventNotebookChanged               = "notebook_changed"
-	EventSessionTodosUpdated           = "session_todos_updated"
-	EventSessionsUpdated               = "sessions_updated"
-	EventRenameResult                  = "rename_result"
-	EventChiefOfStaffResult            = "chief_of_staff_result"
-	EventChiefOfStaffDispatchesUpdated = "chief_of_staff_dispatches_updated"
-	EventTicketsUpdated                = "tickets_updated"
-	EventTicketResult                  = "ticket_result"
-	EventTicketActionResult            = "ticket_action_result"
-	EventWakeDispatchAgentResult       = "wake_dispatch_agent_result"
-	EventDelegateResult                = "delegate_result"
-	EventWorkspaceContextResult        = "workspace_context_result"
-	EventWorkspaceContextListResult    = "workspace_context_list_result"
-	EventNotebookListResult            = "notebook_list_result"
-	EventNotebookReadResult            = "notebook_read_result"
-	EventNotebookBacklinksResult       = "notebook_backlinks_result"
-	EventNotebookWriteResult           = "notebook_write_result"
-	EventNotebookSendToChiefResult     = "notebook_send_to_chief_result"
-	EventNotebookTaskListResult        = "notebook_task_list_result"
-	EventNotebookTaskRetryResult       = "notebook_task_retry_result"
-	EventNotebookTasksChanged          = "notebook_tasks_changed"
-	EventFsListResult                  = "fs_list_result"
-	EventFsReadResult                  = "fs_read_result"
-	EventFsWriteResult                 = "fs_write_result"
-	EventFsExistsResult                = "fs_exists_result"
-	EventFsChanged                     = "fs_changed"
-	EventPRsUpdated                    = "prs_updated"
-	EventReposUpdated                  = "repos_updated"
-	EventAuthorsUpdated                = "authors_updated"
-	EventInitialState                  = "initial_state"
-	EventEndpointStatusChanged         = "endpoint_status_changed"
-	EventEndpointsUpdated              = "endpoints_updated"
-	EventEndpointActionResult          = "endpoint_action_result"
-	EventPRActionResult                = "pr_action_result"
-	EventRefreshPRsResult              = "refresh_prs_result"
-	EventFetchPRDetailsResult          = "fetch_pr_details_result"
-	EventBranchChanged                 = "branch_changed"
-	EventWorktreeCreated               = "worktree_created"
-	EventWorktreeDeleted               = "worktree_deleted"
-	EventWorktreesUpdated              = "worktrees_updated"
-	EventCreateWorktreeResult          = "create_worktree_result"
-	EventDeleteWorktreeResult          = "delete_worktree_result"
-	EventGitOperationStarted           = "git_operation_started"
-	EventGitOperationFinished          = "git_operation_finished"
-	EventSettingsUpdated               = "settings_updated"
-	EventGitHubHostsUpdated            = "github_hosts_updated"
-	EventPluginsUpdated                = "plugins_updated"
-	EventPluginActionResult            = "plugin_action_result"
-	EventRateLimited                   = "rate_limited"
-	EventRecentLocationsResult         = "recent_locations_result"
-	EventBrowseDirectoryResult         = "browse_directory_result"
-	EventInspectPathResult             = "inspect_path_result"
-	EventBranchesResult                = "branches_result"
-	EventGetDefaultBranchResult        = "get_default_branch_result"
-	EventFetchRemotesResult            = "fetch_remotes_result"
-	EventListRemoteBranchesResult      = "list_remote_branches_result"
-	EventEnsureRepoResult              = "ensure_repo_result"
-	EventGitStatusUpdate               = "git_status_update"
-	EventFileDiffResult                = "file_diff_result"
-	EventBranchDiffFilesResult         = "branch_diff_files_result"
-	EventGetRepoInfoResult             = "get_repo_info_result"
-	EventGetReviewStateResult          = "get_review_state_result"
-	EventReviewLoopResult              = "review_loop_result"
-	EventReviewLoopUpdated             = "review_loop_updated"
-	EventWorkflowRunUpdated            = "workflow_run_updated"
-	EventWorkflowActionResult          = "workflow_action_result"
-	EventMarkFileViewedResult          = "mark_file_viewed_result"
-	EventAddCommentResult              = "add_comment_result"
-	EventUpdateCommentResult           = "update_comment_result"
-	EventResolveCommentResult          = "resolve_comment_result"
-	EventDeleteCommentResult           = "delete_comment_result"
-	EventGetCommentsResult             = "get_comments_result"
-	EventPtyOutput                     = "pty_output"
-	EventSpawnResult                   = "spawn_result"
-	EventAttachResult                  = "attach_result"
-	EventGetScreenSnapshotResult       = "get_screen_snapshot_result"
-	EventSessionExited                 = "session_exited"
-	EventPtyDesync                     = "pty_desync"
-	EventPtyResized                    = "pty_resized"
-	EventWorkspaceLayout               = "workspace_layout"
-	EventWorkspaceLayoutUpdated        = "workspace_layout_updated"
-	EventWorkspaceLayoutActionResult   = "workspace_layout_action_result"
-	EventWorkspaceTileContent          = "workspace_tile_content"
-	EventBrowserControlResponse        = "browser_control_response"
-	EventBrowserControlRequest         = "browser_control_request"
-	EventCommandError                  = "command_error"
+	EventSessionRegistered           = "session_registered"
+	EventSessionUnregistered         = "session_unregistered"
+	EventSessionStateChanged         = "session_state_changed"
+	EventWorkspaceRegistered         = "workspace_registered"
+	EventWorkspaceUnregistered       = "workspace_unregistered"
+	EventWorkspaceStateChanged       = "workspace_state_changed"
+	EventWorkspaceContextChanged     = "workspace_context_changed"
+	EventNotebookChanged             = "notebook_changed"
+	EventSessionTodosUpdated         = "session_todos_updated"
+	EventSessionsUpdated             = "sessions_updated"
+	EventRenameResult                = "rename_result"
+	EventChiefOfStaffResult          = "chief_of_staff_result"
+	EventTicketsUpdated              = "tickets_updated"
+	EventTicketResult                = "ticket_result"
+	EventTicketActionResult          = "ticket_action_result"
+	EventDelegateResult              = "delegate_result"
+	EventWorkspaceContextResult      = "workspace_context_result"
+	EventWorkspaceContextListResult  = "workspace_context_list_result"
+	EventNotebookListResult          = "notebook_list_result"
+	EventNotebookReadResult          = "notebook_read_result"
+	EventNotebookBacklinksResult     = "notebook_backlinks_result"
+	EventNotebookWriteResult         = "notebook_write_result"
+	EventNotebookSendToChiefResult   = "notebook_send_to_chief_result"
+	EventNotebookTaskListResult      = "notebook_task_list_result"
+	EventNotebookTaskRetryResult     = "notebook_task_retry_result"
+	EventNotebookTasksChanged        = "notebook_tasks_changed"
+	EventFsListResult                = "fs_list_result"
+	EventFsReadResult                = "fs_read_result"
+	EventFsWriteResult               = "fs_write_result"
+	EventFsExistsResult              = "fs_exists_result"
+	EventFsChanged                   = "fs_changed"
+	EventPRsUpdated                  = "prs_updated"
+	EventReposUpdated                = "repos_updated"
+	EventAuthorsUpdated              = "authors_updated"
+	EventInitialState                = "initial_state"
+	EventEndpointStatusChanged       = "endpoint_status_changed"
+	EventEndpointsUpdated            = "endpoints_updated"
+	EventEndpointActionResult        = "endpoint_action_result"
+	EventPRActionResult              = "pr_action_result"
+	EventRefreshPRsResult            = "refresh_prs_result"
+	EventFetchPRDetailsResult        = "fetch_pr_details_result"
+	EventBranchChanged               = "branch_changed"
+	EventWorktreeCreated             = "worktree_created"
+	EventWorktreeDeleted             = "worktree_deleted"
+	EventWorktreesUpdated            = "worktrees_updated"
+	EventCreateWorktreeResult        = "create_worktree_result"
+	EventDeleteWorktreeResult        = "delete_worktree_result"
+	EventGitOperationStarted         = "git_operation_started"
+	EventGitOperationFinished        = "git_operation_finished"
+	EventSettingsUpdated             = "settings_updated"
+	EventGitHubHostsUpdated          = "github_hosts_updated"
+	EventPluginsUpdated              = "plugins_updated"
+	EventPluginActionResult          = "plugin_action_result"
+	EventRateLimited                 = "rate_limited"
+	EventRecentLocationsResult       = "recent_locations_result"
+	EventBrowseDirectoryResult       = "browse_directory_result"
+	EventInspectPathResult           = "inspect_path_result"
+	EventBranchesResult              = "branches_result"
+	EventGetDefaultBranchResult      = "get_default_branch_result"
+	EventFetchRemotesResult          = "fetch_remotes_result"
+	EventListRemoteBranchesResult    = "list_remote_branches_result"
+	EventEnsureRepoResult            = "ensure_repo_result"
+	EventGitStatusUpdate             = "git_status_update"
+	EventFileDiffResult              = "file_diff_result"
+	EventBranchDiffFilesResult       = "branch_diff_files_result"
+	EventGetRepoInfoResult           = "get_repo_info_result"
+	EventGetReviewStateResult        = "get_review_state_result"
+	EventReviewLoopResult            = "review_loop_result"
+	EventReviewLoopUpdated           = "review_loop_updated"
+	EventWorkflowRunUpdated          = "workflow_run_updated"
+	EventWorkflowActionResult        = "workflow_action_result"
+	EventMarkFileViewedResult        = "mark_file_viewed_result"
+	EventAddCommentResult            = "add_comment_result"
+	EventUpdateCommentResult         = "update_comment_result"
+	EventResolveCommentResult        = "resolve_comment_result"
+	EventDeleteCommentResult         = "delete_comment_result"
+	EventGetCommentsResult           = "get_comments_result"
+	EventPtyOutput                   = "pty_output"
+	EventSpawnResult                 = "spawn_result"
+	EventAttachResult                = "attach_result"
+	EventGetScreenSnapshotResult     = "get_screen_snapshot_result"
+	EventSessionExited               = "session_exited"
+	EventPtyDesync                   = "pty_desync"
+	EventPtyResized                  = "pty_resized"
+	EventWorkspaceLayout             = "workspace_layout"
+	EventWorkspaceLayoutUpdated      = "workspace_layout_updated"
+	EventWorkspaceLayoutActionResult = "workspace_layout_action_result"
+	EventWorkspaceTileContent        = "workspace_tile_content"
+	EventBrowserControlResponse      = "browser_control_response"
+	EventBrowserControlRequest       = "browser_control_request"
+	EventCommandError                = "command_error"
 )
 
 // Session states (values for SessionState enum)
@@ -371,76 +359,6 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdDelegate:
 		var msg DelegateMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdListDispatches:
-		var msg ListDispatchesMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdSubmitDispatchOutcome:
-		var msg SubmitDispatchOutcomeMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdHandoffDispatch:
-		var msg HandoffDispatchMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdGetDispatch:
-		var msg GetDispatchMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdResolveDispatchRequest:
-		var msg ResolveDispatchRequestMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdSendDispatchMessage:
-		var msg SendDispatchMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdListDispatchMessages:
-		var msg ListDispatchMessagesMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdReadDispatchMessage:
-		var msg ReadDispatchMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdAcknowledgeDispatchMessage:
-		var msg AcknowledgeDispatchMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdWakeDispatchAgent:
-		var msg WakeDispatchAgentMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

@@ -430,6 +430,59 @@ func TestTicketTTLSweep(t *testing.T) {
 	}
 }
 
+func TestDelegatedFromChiefSessionIDs(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	// No chief / empty arg -> empty set, never the full table.
+	if ids := s.DelegatedFromChiefSessionIDs(""); len(ids) != 0 {
+		t.Fatalf("empty chief = %v, want none", ids)
+	}
+
+	// A ticket the chief authored and assigned to a session is the delegated signal.
+	if _, err := s.CreateTicket(Ticket{
+		ID:       "delegated",
+		Title:    "do the thing",
+		Assignee: "sess-delegated",
+	}, "chief-1", ticketBase); err != nil {
+		t.Fatalf("CreateTicket delegated: %v", err)
+	}
+	// A ticket authored by someone else must not leak into the chief's set.
+	if _, err := s.CreateTicket(Ticket{
+		ID:       "self-authored",
+		Title:    "user work",
+		Assignee: "sess-other",
+	}, "you", ticketBase); err != nil {
+		t.Fatalf("CreateTicket self: %v", err)
+	}
+
+	ids := s.DelegatedFromChiefSessionIDs("chief-1")
+	if !ids["sess-delegated"] {
+		t.Fatalf("delegated session missing from set: %v", ids)
+	}
+	if ids["sess-other"] {
+		t.Fatalf("non-chief-authored session leaked into set: %v", ids)
+	}
+
+	// Persists after a terminal report (tickets are not archived on terminal
+	// status, so the delegated-from-chief signal survives the report — as the
+	// dispatch rows did).
+	if _, err := s.SetTicketStatus("delegated", TicketStatusDone, "sess-delegated", "shipped", ticketBase.Add(time.Minute)); err != nil {
+		t.Fatalf("SetTicketStatus terminal: %v", err)
+	}
+	if ids := s.DelegatedFromChiefSessionIDs("chief-1"); !ids["sess-delegated"] {
+		t.Fatalf("delegated session lost after terminal report: %v", ids)
+	}
+
+	// Archiving the ticket removes the signal.
+	if err := s.ArchiveTicket("delegated", ticketBase.Add(2*time.Minute)); err != nil {
+		t.Fatalf("ArchiveTicket: %v", err)
+	}
+	if ids := s.DelegatedFromChiefSessionIDs("chief-1"); ids["sess-delegated"] {
+		t.Fatalf("archived ticket still in set: %v", ids)
+	}
+}
+
 func TestTicketPersistence(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "attn.db")
 	s, err := NewWithDB(dbPath)

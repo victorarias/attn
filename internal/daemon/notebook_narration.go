@@ -471,7 +471,6 @@ func (d *Daemon) gatherNarrateWorkspaceInputs(root, workspaceID string) (narrate
 		WorkspaceID:         workspaceID,
 		ContextSnapshotPath: filepath.Join(notebook.RawContextSnapshotsDir(root), snapshotName),
 		RawSessionsDir:      sessionsDir,
-		RawDispatchesDir:    notebook.RawDispatchesDir(root),
 		JournalDir:          filepath.Join(root, notebook.DirJournal),
 		JournalPath:         filepath.Join(root, notebook.DirJournal, today+".md"),
 		KnowledgeDir:        filepath.Join(root, notebook.DirKnowledge),

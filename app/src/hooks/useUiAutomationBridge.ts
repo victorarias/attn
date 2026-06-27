@@ -2584,8 +2584,8 @@ export function useUiAutomationBridge({
             cwd: ticket.cwd,
           })),
         };
-      // Open the panel the way the Dashboard "View ticket" button does: click
-      // the real link for the ticket bound to a delegated dispatch session.
+      // Open the detail panel for the ticket bound to a delegated session
+      // (assignee == session id), mirroring the "from a session" entry point.
       case 'ticket_open_via_dashboard': {
         if (!openTicketDetail) {
           throw new Error('ticket_open_via_dashboard is not configured');
@@ -2598,7 +2598,7 @@ export function useUiAutomationBridge({
         if (!boundTicket) {
           throw new Error(`No ticket is bound to session ${sessionId}`);
         }
-        clickTestId(`dispatch-ticket-link-${boundTicket.id}`);
+        openTicketDetail(boundTicket.id);
         await settleUi(3);
         return collectTicketDetailUiState();
       }

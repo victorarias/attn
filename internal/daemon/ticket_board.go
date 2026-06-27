@@ -38,7 +38,7 @@ func (d *Daemon) ticketsForBroadcast() []protocol.Ticket {
 
 // broadcastTicketsUpdated re-pushes the whole non-archived board to every client.
 // Run it after any producer that mutates a ticket (create, status, crash, and the
-// chief edits to come), mirroring broadcastChiefOfStaffDispatchesUpdated.
+// chief edits to come).
 func (d *Daemon) broadcastTicketsUpdated() {
 	if d.store == nil {
 		return

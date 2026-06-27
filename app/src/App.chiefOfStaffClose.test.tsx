@@ -162,7 +162,6 @@ describe('chief-of-staff session is protected from close', () => {
         chief_of_staff: chiefOfStaff,
       }],
       setDaemonSessions: vi.fn(),
-      setChiefOfStaffDispatches: vi.fn(),
       prs: [], setPRs: vi.fn(),
       repoStates: [], setRepoStates: vi.fn(),
       authorStates: [], setAuthorStates: vi.fn(),

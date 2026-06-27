@@ -170,7 +170,7 @@ model Session {
   needs_review_after_long_run?: boolean; // True when a 5m+ run finished and awaits user visualization
   recoverable?: boolean;        // True when session can be recovered after daemon restart (agent has resumable conversation)
   chief_of_staff?: boolean;     // True when this session holds the profile-wide coordinator role
-  delegated_from_chief?: boolean; // True when this session was delegated from the chief of staff (has a chief dispatch)
+  delegated_from_chief?: boolean; // True when this session was delegated from the chief of staff (assignee of a chief-authored ticket)
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
 }
@@ -195,25 +195,15 @@ model WorkspaceContext {
   updated_at: string;
 }
 
-enum DispatchReportType {
-  progress,
-  blocker,
-  handoff,
-  completion,
-  failure,
-}
-
+// DispatchWorkState is the agent-reported work state carried on a set_ticket_status
+// command (and mapped onto a TicketStatus). It is the one Dispatch-named symbol
+// retained after the chief-of-staff dispatch namespace was retired.
 enum DispatchWorkState {
   in_progress,
   needs_input,
   ready_for_review,
   completed,
   failed,
-}
-
-enum DispatchRequestStatus {
-  pending,
-  resolved,
 }
 
 // TicketStatus is the column a ticket lives in on the work-tracker board.
@@ -318,91 +308,6 @@ model Ticket {
   archived_at?: string;
   activity: TicketActivity[];
   attachments: TicketAttachment[];
-}
-
-model DispatchDecisionRequest {
-  question: string;
-  recommendation?: string;
-  consequence?: string;
-  expected_responder: string;
-  status: DispatchRequestStatus;
-  response?: string;
-  resolution_link?: string;
-  responded_by?: string;
-  responded_at?: string;
-}
-
-model DispatchArtifact {
-  identity: string;
-  workspace_id?: string;
-  branch?: string;
-  revision?: string;
-  dirty?: boolean;
-  description?: string;
-}
-
-model DispatchVerification {
-  actor: string;
-  target: string;
-  result: string;
-  timestamp: string;
-  artifact_identity: string;
-  current?: boolean;
-}
-
-model DispatchReport {
-  report_type: DispatchReportType;
-  summary: string;
-  work_state: DispatchWorkState;
-  next_actor?: string;
-  next_action?: string;
-  remaining_scope?: string[];
-  constraints?: string[];
-  request?: DispatchDecisionRequest;
-  artifact?: DispatchArtifact;
-  verification?: DispatchVerification[];
-  reported_at: string;
-}
-
-model DispatchMessage {
-  id: string;
-  dispatch_id: string;
-  sender_session_id: string;
-  target_session_id: string;
-  content: string;
-  created_at: string;
-  read_at?: string;
-  acknowledged_at?: string;
-  acknowledgement?: string;
-}
-
-model ChiefOfStaffDispatch {
-  id: string;
-  chief_session_id: string;
-  session_id: string;
-  workspace_id: string;
-  brief: string;
-  label: string;
-  agent: string;
-  directory: string;
-  branch?: string;
-  status: string;
-  status_since: string;
-  // closed_state is the delegated session's last attn-classified runtime state,
-  // captured once when the session ends (before the idle-clobber/removal erases
-  // it). Empty until the session closes. It lets the signal classifier tell a
-  // clean stop (idle / waiting_input) from a real crash or kill mid-flight
-  // (working / launching / pending_approval), so a cut-off close surfaces as a
-  // failure instead of a neutral end.
-  closed_state?: string;
-  latest_report?: string;
-  structured_report?: DispatchReport;
-  concise_summary?: string;
-  actionable?: boolean;
-  unread_message_count?: int32;
-  reported_at?: string;
-  created_at: string;
-  updated_at: string;
 }
 
 model PR {
@@ -641,81 +546,6 @@ model DelegateMessage {
   workspace_id?: string;
   cwd?: string;
   worktree?: DelegateWorktreeRequest;
-}
-
-model ListDispatchesMessage {
-  cmd: "list_dispatches";
-  source_session_id: string;
-}
-
-model SubmitDispatchOutcomeMessage {
-  cmd: "submit_dispatch_outcome";
-  source_session_id: string;
-  report: string;
-  structured_report: DispatchReport;
-}
-
-// Hand a large artifact built by a dispatched agent into the Notebook and report
-// the reference back to the chief. `to` is a root-relative Notebook path the chief
-// (or user) designated; `content` is the artifact bytes the daemon writes there.
-// The daemon records a typed dispatch outcome whose message embeds the resolved
-// reference, so the handoff flows through the same report/capture path — there is
-// no separate structured artifact field. `report` is optional detail;
-// `structured_report` is the required typed outcome.
-model HandoffDispatchMessage {
-  cmd: "handoff_dispatch";
-  source_session_id: string;
-  to: string;
-  content: string;
-  report?: string;
-  structured_report: DispatchReport;
-}
-
-model GetDispatchMessage {
-  cmd: "get_dispatch";
-  source_session_id: string;
-}
-
-model ResolveDispatchRequestMessage {
-  cmd: "resolve_dispatch_request";
-  source_session_id: string;
-  dispatch_id: string;
-  response: string;
-  resolution_link?: string;
-}
-
-model SendDispatchMessage {
-  cmd: "send_dispatch_message";
-  source_session_id: string;
-  dispatch_id: string;
-  content: string;
-}
-
-model ListDispatchMessagesMessage {
-  cmd: "list_dispatch_messages";
-  source_session_id: string;
-  dispatch_id?: string;
-  unread_only?: boolean;
-}
-
-model ReadDispatchMessage {
-  cmd: "read_dispatch_message";
-  source_session_id: string;
-  message_id: string;
-}
-
-model AcknowledgeDispatchMessage {
-  cmd: "acknowledge_dispatch_message";
-  source_session_id: string;
-  message_id: string;
-  acknowledgement?: string;
-}
-
-model WakeDispatchAgentMessage {
-  cmd: "wake_dispatch_agent";
-  source_session_id: string;
-  dispatch_id: string;
-  request_id: string;
 }
 
 // SetTicketStatusMessage is an agent self-reporting the work state of its own
@@ -1669,7 +1499,6 @@ model InitialStateMessage {
   github_hosts?: string[];
   settings?: Record<string>;
   warnings?: DaemonWarning[];
-  chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
   tickets?: Ticket[];
 }
 
@@ -1777,11 +1606,6 @@ model ChiefOfStaffResultMessage {
   error?: string;
 }
 
-model ChiefOfStaffDispatchesUpdatedMessage {
-  event: "chief_of_staff_dispatches_updated";
-  dispatches: ChiefOfStaffDispatch[];
-}
-
 // TicketsUpdatedMessage is the live board feed: the non-archived ticket rows
 // (bare — no activity/attachments), re-pushed whenever any ticket mutates. It is
 // the same shape carried in InitialStateMessage.tickets, so a client renders the
@@ -1799,14 +1623,6 @@ model TicketResultMessage {
   request_id: string;
   success: boolean;
   ticket?: Ticket;
-  error?: string;
-}
-
-model WakeDispatchAgentResultMessage {
-  event: "wake_dispatch_agent_result";
-  dispatch_id: string;
-  request_id: string;
-  success: boolean;
   error?: string;
 }
 
@@ -2391,10 +2207,6 @@ model Response {
   workspace_context_result?: WorkspaceContextResult;
   workspace_context_maintenance_result?: WorkspaceContextMaintenanceResult;
   workspace_contexts?: WorkspaceContext[];
-  chief_of_staff_dispatch?: ChiefOfStaffDispatch;
-  chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
-  dispatch_message?: DispatchMessage;
-  dispatch_messages?: DispatchMessage[];
   sessions?: Session[];
   workspaces?: Workspace[];
   prs?: PR[];
@@ -2417,7 +2229,6 @@ model DelegateResult {
   branch?: string;
   placement: string;
   worktree_created?: boolean;
-  dispatch_id?: string;
 }
 
 model DelegateResultMessage {
@@ -2774,13 +2585,9 @@ model WebSocketEvent {
 
   review_loop_run?: ReviewLoopRun;
   workspace_context_result?: WorkspaceContextResult;
-  chief_of_staff_dispatch?: ChiefOfStaffDispatch;
-  chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
   ticket?: Ticket;
   tickets?: Ticket[];
   workspace_contexts?: WorkspaceContext[];
-  dispatch_message?: DispatchMessage;
-  dispatch_messages?: DispatchMessage[];
 }
 
 alias DaemonEvent =
@@ -2800,11 +2607,9 @@ alias DaemonEvent =
   | WorkspaceLayoutActionResultMessage
   | RenameResultMessage
   | ChiefOfStaffResultMessage
-  | ChiefOfStaffDispatchesUpdatedMessage
   | TicketsUpdatedMessage
   | TicketResultMessage
   | TicketActionResultMessage
-  | WakeDispatchAgentResultMessage
   | WorkspaceTileContentMessage
   | BrowserControlResponseMessage
   | PRsUpdatedMessage
