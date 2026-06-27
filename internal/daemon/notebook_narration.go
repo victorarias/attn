@@ -47,7 +47,7 @@ func headlessScratchCwd() (string, error) {
 //     (RawSessionsDir/<wsID>/<sessionID>.md). Pure machine input for the narrate duty;
 //     high frequency, so it runs on the cheap model.
 //   - narrate_workspace (strong tier): per-workspace, coalesced. Reads the workspace's
-//     digests + context snapshot + dispatch outcomes and writes/refreshes the curated
+//     digests + context snapshot and writes/refreshes the curated
 //     journal entry for today (journal/<today>.md). The load-bearing product surface.
 //
 // Both are NATIVE-TOOLS tasks: the agent uses its own file tools and writes the
@@ -471,7 +471,6 @@ func (d *Daemon) gatherNarrateWorkspaceInputs(root, workspaceID string) (narrate
 		WorkspaceID:         workspaceID,
 		ContextSnapshotPath: filepath.Join(notebook.RawContextSnapshotsDir(root), snapshotName),
 		RawSessionsDir:      sessionsDir,
-		RawDispatchesDir:    notebook.RawDispatchesDir(root),
 		JournalDir:          filepath.Join(root, notebook.DirJournal),
 		JournalPath:         filepath.Join(root, notebook.DirJournal, today+".md"),
 		KnowledgeDir:        filepath.Join(root, notebook.DirKnowledge),

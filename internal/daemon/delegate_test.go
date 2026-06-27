@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"encoding/json"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,10 +122,10 @@ func TestDelegateSpawnsAgentInSourceWorkspaceWithBrief(t *testing.T) {
 	}
 }
 
-func TestChiefOfStaffDelegateCreatesTrackedDispatch(t *testing.T) {
+func TestChiefOfStaffDelegateBindsTicketAndPrompt(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
-	workspaceID, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
 	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, sourceSessionID); err != nil {
 		t.Fatalf("set chief role: %v", err)
 	}
@@ -155,33 +154,30 @@ func TestChiefOfStaffDelegateCreatesTrackedDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delegate() error = %v", err)
 	}
-	if result.DispatchID == nil || protocol.Deref(result.DispatchID) == "" {
-		t.Fatalf("delegate result = %+v, want dispatch id", result)
-	}
+
+	// A chief delegation now binds a ticket (no parallel dispatch record), and the
+	// initial prompt teaches the agent to self-report via `ticket status`.
 	if !strings.Contains(prompt, "Investigate the tracked task.") ||
-		!strings.Contains(prompt, "dispatch update --summary") ||
-		!strings.Contains(prompt, "dispatch complete --summary") ||
-		strings.Contains(prompt, "coordination-file") {
+		!strings.Contains(prompt, "ticket status in_progress") ||
+		!strings.Contains(prompt, "ticket status completed") ||
+		strings.Contains(prompt, "dispatch ") {
 		t.Fatalf("tracked initial prompt = %q", prompt)
 	}
 
-	dispatches := d.chiefOfStaffDispatches(sourceSessionID)
-	if len(dispatches) != 1 {
-		t.Fatalf("dispatches = %+v", dispatches)
+	ticket, err := d.store.ActiveTicketForSession(result.SessionID)
+	if err != nil {
+		t.Fatalf("ActiveTicketForSession: %v", err)
 	}
-	dispatch := dispatches[0]
-	if dispatch.ID != protocol.Deref(result.DispatchID) ||
-		dispatch.ChiefSessionID != sourceSessionID ||
-		dispatch.SessionID != result.SessionID ||
-		dispatch.WorkspaceID != workspaceID ||
-		dispatch.Brief != "Investigate the tracked task." {
-		t.Fatalf("dispatch = %+v", dispatch)
+	if ticket == nil {
+		t.Fatalf("delegation did not bind a ticket to session %s", result.SessionID)
+	}
+	if ticket.Assignee != result.SessionID || ticket.Description != "Investigate the tracked task." {
+		t.Fatalf("bound ticket = %+v", ticket)
 	}
 
-	d.store.UpdateState(result.SessionID, string(protocol.SessionStateWaitingInput))
-	dispatches = d.chiefOfStaffDispatches(sourceSessionID)
-	if len(dispatches) != 1 || dispatches[0].Status != string(protocol.SessionStateWaitingInput) {
-		t.Fatalf("updated dispatches = %+v", dispatches)
+	// The delegated session is recognized as chief-delegated via the ticket binding.
+	if ids := d.delegatedFromChiefSessionIDs(); !ids[result.SessionID] {
+		t.Fatalf("delegated session missing from chief-delegated set: %v", ids)
 	}
 }
 
@@ -229,54 +225,15 @@ func TestChiefOfStaffDelegationPreservesCoordinationIdentityAcrossPlacements(t *
 			if !ok || spawn.ID != result.SessionID || spawn.CWD != result.Directory {
 				t.Fatalf("spawn = %+v, result = %+v", spawn, result)
 			}
-			dispatch := d.store.GetChiefOfStaffDispatchBySession(spawn.ID)
-			if dispatch == nil || dispatch.ID != protocol.Deref(result.DispatchID) ||
-				dispatch.WorkspaceID != result.WorkspaceID {
-				t.Fatalf("dispatch = %+v, result = %+v", dispatch, result)
+
+			// The delegated session owns a ticket in its resolved workspace.
+			ticket, err := d.store.ActiveTicketForSession(spawn.ID)
+			if err != nil || ticket == nil || ticket.Assignee != spawn.ID {
+				t.Fatalf("active ticket = %+v, err=%v", ticket, err)
 			}
 
-			reportServer, reportClient := net.Pipe()
-			go func() {
-				d.handleSubmitDispatchOutcome(reportServer, &protocol.SubmitDispatchOutcomeMessage{
-					Cmd:             protocol.CmdSubmitDispatchOutcome,
-					SourceSessionID: spawn.ID,
-					Report:          "Placement identity verified.",
-					StructuredReport: protocol.DispatchReport{
-						ReportType: protocol.DispatchReportTypeProgress,
-						WorkState:  protocol.DispatchWorkStateInProgress,
-						Summary:    "Placement identity verified.",
-					},
-				})
-				_ = reportServer.Close()
-			}()
-			var reportResponse protocol.Response
-			if err := json.NewDecoder(reportClient).Decode(&reportResponse); err != nil {
-				t.Fatalf("decode report response: %v", err)
-			}
-			_ = reportClient.Close()
-			if !reportResponse.Ok || reportResponse.ChiefOfStaffDispatch == nil ||
-				reportResponse.ChiefOfStaffDispatch.SessionID != spawn.ID {
-				t.Fatalf("report response = %+v", reportResponse)
-			}
-
-			inboxServer, inboxClient := net.Pipe()
-			go func() {
-				d.handleListDispatchMessages(inboxServer, &protocol.ListDispatchMessagesMessage{
-					Cmd:             protocol.CmdListDispatchMessages,
-					SourceSessionID: spawn.ID,
-					UnreadOnly:      protocol.Ptr(true),
-				})
-				_ = inboxServer.Close()
-			}()
-			var inboxResponse protocol.Response
-			if err := json.NewDecoder(inboxClient).Decode(&inboxResponse); err != nil {
-				t.Fatalf("decode inbox response: %v", err)
-			}
-			_ = inboxClient.Close()
-			if !inboxResponse.Ok {
-				t.Fatalf("inbox response = %+v", inboxResponse)
-			}
-
+			// Coordination identity is preserved: the delegated session, not the chief,
+			// owns the workspace context across every placement.
 			checkout, err := d.checkoutWorkspaceContext(&protocol.WorkspaceContextCheckoutMessage{
 				SourceSessionID: spawn.ID,
 			})
@@ -372,8 +329,14 @@ func TestOrdinaryDelegationDoesNotDecorateDelegatedFromChief(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delegate() error = %v", err)
 	}
-	if result.DispatchID != nil {
-		t.Fatalf("ordinary delegation should not create a dispatch: %+v", result)
+
+	// Ordinary (non-chief) delegation binds no ticket and decorates nothing.
+	ticket, err := d.store.ActiveTicketForSession(result.SessionID)
+	if err != nil {
+		t.Fatalf("ActiveTicketForSession: %v", err)
+	}
+	if ticket != nil {
+		t.Fatalf("ordinary delegation should not bind a ticket: %+v", ticket)
 	}
 
 	delegated := d.sessionForBroadcast(d.store.Get(result.SessionID))
@@ -382,405 +345,6 @@ func TestOrdinaryDelegationDoesNotDecorateDelegatedFromChief(t *testing.T) {
 	}
 	if protocol.Deref(delegated.DelegatedFromChief) {
 		t.Fatalf("ordinary delegated session should not carry delegated_from_chief: %+v", delegated)
-	}
-}
-
-func TestSubmitDispatchOutcomeUpdatesTrackedRecord(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backend := &fakeSpawnBackend{}
-	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
-	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, sourceSessionID); err != nil {
-		t.Fatalf("set chief role: %v", err)
-	}
-	consumeDelegatedPrompt(t, backend)
-	result, err := d.delegate(&protocol.DelegateMessage{
-		Cmd:             protocol.CmdDelegate,
-		SourceSessionID: sourceSessionID,
-		Brief:           "Produce a tracked report.",
-		Agent:           protocol.Ptr("codex"),
-	})
-	if err != nil {
-		t.Fatalf("delegate() error = %v", err)
-	}
-
-	server, client := net.Pipe()
-	defer client.Close()
-	go func() {
-		d.handleSubmitDispatchOutcome(server, &protocol.SubmitDispatchOutcomeMessage{
-			Cmd:             protocol.CmdSubmitDispatchOutcome,
-			SourceSessionID: result.SessionID,
-			Report:          "Implementation complete; focused tests pass.",
-			StructuredReport: protocol.DispatchReport{
-				ReportType: protocol.DispatchReportTypeCompletion,
-				WorkState:  protocol.DispatchWorkStateCompleted,
-				Summary:    "Implementation complete; focused tests pass.",
-			},
-		})
-		_ = server.Close()
-	}()
-
-	var response protocol.Response
-	if err := json.NewDecoder(client).Decode(&response); err != nil {
-		t.Fatalf("decode report response: %v", err)
-	}
-	if !response.Ok || response.ChiefOfStaffDispatch == nil {
-		t.Fatalf("report response = %+v", response)
-	}
-	if protocol.Deref(response.ChiefOfStaffDispatch.LatestReport) != "Implementation complete; focused tests pass." {
-		t.Fatalf("reported dispatch = %+v", response.ChiefOfStaffDispatch)
-	}
-}
-
-func TestDispatchMailboxAuthorizesChiefAndWorker(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backend := &fakeSpawnBackend{}
-	_, chiefSessionID, _ := setupDelegationSource(t, d, backend)
-	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefSessionID); err != nil {
-		t.Fatalf("set chief role: %v", err)
-	}
-	consumeDelegatedPrompt(t, backend)
-	result, err := d.delegate(&protocol.DelegateMessage{
-		Cmd:             protocol.CmdDelegate,
-		SourceSessionID: chiefSessionID,
-		Brief:           "Investigate mailbox behavior.",
-		Agent:           protocol.Ptr("codex"),
-	})
-	if err != nil {
-		t.Fatalf("delegate() error = %v", err)
-	}
-	dispatchID := protocol.Deref(result.DispatchID)
-
-	server, client := net.Pipe()
-	sendServer := server
-	go func() {
-		d.handleSendDispatchMessage(sendServer, &protocol.SendDispatchMessage{
-			Cmd:             protocol.CmdSendDispatchMessage,
-			SourceSessionID: chiefSessionID,
-			DispatchID:      dispatchID,
-			Content:         "Re-check the current branch.",
-		})
-		_ = sendServer.Close()
-	}()
-	var sent protocol.Response
-	if err := json.NewDecoder(client).Decode(&sent); err != nil {
-		t.Fatalf("decode send response: %v", err)
-	}
-	_ = client.Close()
-	if !sent.Ok || sent.DispatchMessage == nil || sent.DispatchMessage.TargetSessionID != result.SessionID {
-		t.Fatalf("send response = %+v", sent)
-	}
-	if got := protocol.Deref(d.decorateChiefOfStaffDispatch(
-		d.store.GetChiefOfStaffDispatch(dispatchID),
-	).UnreadMessageCount); got != 1 {
-		t.Fatalf("unread count = %d, want 1", got)
-	}
-
-	server, client = net.Pipe()
-	inboxServer := server
-	go func() {
-		d.handleListDispatchMessages(inboxServer, &protocol.ListDispatchMessagesMessage{
-			Cmd:             protocol.CmdListDispatchMessages,
-			SourceSessionID: result.SessionID,
-			UnreadOnly:      protocol.Ptr(true),
-		})
-		_ = inboxServer.Close()
-	}()
-	var inbox protocol.Response
-	if err := json.NewDecoder(client).Decode(&inbox); err != nil {
-		t.Fatalf("decode inbox response: %v", err)
-	}
-	_ = client.Close()
-	if !inbox.Ok || len(inbox.DispatchMessages) != 1 ||
-		inbox.DispatchMessages[0].Content != "Re-check the current branch." {
-		t.Fatalf("inbox response = %+v", inbox)
-	}
-
-	server, client = net.Pipe()
-	ackServer := server
-	go func() {
-		d.handleAcknowledgeDispatchMessage(ackServer, &protocol.AcknowledgeDispatchMessage{
-			Cmd:             protocol.CmdAcknowledgeDispatchMessage,
-			SourceSessionID: result.SessionID,
-			MessageID:       sent.DispatchMessage.ID,
-			Acknowledgement: protocol.Ptr("Re-check complete."),
-		})
-		_ = ackServer.Close()
-	}()
-	var acknowledged protocol.Response
-	if err := json.NewDecoder(client).Decode(&acknowledged); err != nil {
-		t.Fatalf("decode acknowledge response: %v", err)
-	}
-	_ = client.Close()
-	unreadCount, unreadErr := d.store.CountUnreadDispatchMessages(dispatchID)
-	if !acknowledged.Ok || acknowledged.DispatchMessage == nil ||
-		protocol.Deref(acknowledged.DispatchMessage.Acknowledgement) != "Re-check complete." ||
-		unreadErr != nil || unreadCount != 0 {
-		t.Fatalf("acknowledge response = %+v", acknowledged)
-	}
-
-	server, client = net.Pipe()
-	sentMessagesServer := server
-	go func() {
-		d.handleListDispatchMessages(sentMessagesServer, &protocol.ListDispatchMessagesMessage{
-			Cmd:             protocol.CmdListDispatchMessages,
-			SourceSessionID: chiefSessionID,
-			DispatchID:      protocol.Ptr(dispatchID),
-		})
-		_ = sentMessagesServer.Close()
-	}()
-	var sentMessages protocol.Response
-	if err := json.NewDecoder(client).Decode(&sentMessages); err != nil {
-		t.Fatalf("decode sent messages response: %v", err)
-	}
-	_ = client.Close()
-	if !sentMessages.Ok || len(sentMessages.DispatchMessages) != 1 ||
-		protocol.Deref(sentMessages.DispatchMessages[0].Acknowledgement) != "Re-check complete." ||
-		sentMessages.DispatchMessages[0].AcknowledgedAt == nil {
-		t.Fatalf("sent messages response = %+v", sentMessages)
-	}
-
-	server, client = net.Pipe()
-	unauthorizedServer := server
-	go func() {
-		d.handleSendDispatchMessage(unauthorizedServer, &protocol.SendDispatchMessage{
-			Cmd:             protocol.CmdSendDispatchMessage,
-			SourceSessionID: "other-session",
-			DispatchID:      dispatchID,
-			Content:         "Unauthorized.",
-		})
-		_ = unauthorizedServer.Close()
-	}()
-	var unauthorized protocol.Response
-	if err := json.NewDecoder(client).Decode(&unauthorized); err != nil {
-		t.Fatalf("decode unauthorized response: %v", err)
-	}
-	_ = client.Close()
-	if unauthorized.Ok {
-		t.Fatalf("unauthorized send response = %+v", unauthorized)
-	}
-
-	d.store.Remove(result.SessionID)
-	server, client = net.Pipe()
-	closedServer := server
-	go func() {
-		d.handleSendDispatchMessage(closedServer, &protocol.SendDispatchMessage{
-			Cmd:             protocol.CmdSendDispatchMessage,
-			SourceSessionID: chiefSessionID,
-			DispatchID:      dispatchID,
-			Content:         "This worker is closed.",
-		})
-		_ = closedServer.Close()
-	}()
-	var closed protocol.Response
-	if err := json.NewDecoder(client).Decode(&closed); err != nil {
-		t.Fatalf("decode closed worker response: %v", err)
-	}
-	_ = client.Close()
-	if closed.Ok || !strings.Contains(protocol.Deref(closed.Error), "is closed") {
-		t.Fatalf("closed worker response = %+v", closed)
-	}
-}
-
-func TestWakeDispatchAgentInjectsOnlyInboxPrompt(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backend := &fakeSpawnBackend{}
-	_, chiefSessionID, _ := setupDelegationSource(t, d, backend)
-	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefSessionID); err != nil {
-		t.Fatalf("set chief role: %v", err)
-	}
-	consumeDelegatedPrompt(t, backend)
-	result, err := d.delegate(&protocol.DelegateMessage{
-		Cmd:             protocol.CmdDelegate,
-		SourceSessionID: chiefSessionID,
-		Brief:           "Investigate wake behavior.",
-		Agent:           protocol.Ptr("codex"),
-	})
-	if err != nil {
-		t.Fatalf("delegate() error = %v", err)
-	}
-	dispatchID := protocol.Deref(result.DispatchID)
-	if err := d.store.AddDispatchMessage(&protocol.DispatchMessage{
-		ID:              "message-secret",
-		DispatchID:      dispatchID,
-		SenderSessionID: chiefSessionID,
-		TargetSessionID: result.SessionID,
-		Content:         "Mailbox content must not reach the PTY.",
-		CreatedAt:       string(protocol.TimestampNow()),
-	}); err != nil {
-		t.Fatalf("add dispatch message: %v", err)
-	}
-	d.store.UpdateState(result.SessionID, string(protocol.SessionStateWaitingInput))
-
-	var inputSessionIDs []string
-	var inputs []string
-	backend.onInput = func(sessionID string, data []byte) {
-		inputSessionIDs = append(inputSessionIDs, sessionID)
-		inputs = append(inputs, string(data))
-	}
-	wsClient := newWorkspaceProtocolTestClient()
-	d.handleWakeDispatchAgent(wsClient, &protocol.WakeDispatchAgentMessage{
-		Cmd:             protocol.CmdWakeDispatchAgent,
-		SourceSessionID: chiefSessionID,
-		DispatchID:      dispatchID,
-		RequestID:       "wake-request-1",
-	})
-	select {
-	case outbound := <-wsClient.send:
-		var response protocol.WakeDispatchAgentResultMessage
-		if err := json.Unmarshal(outbound.payload, &response); err != nil {
-			t.Fatalf("decode wake response: %v", err)
-		}
-		if !response.Success || response.RequestID != "wake-request-1" {
-			t.Fatalf("wake response = %+v", response)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for wake response")
-	}
-	if len(inputs) != 2 ||
-		inputSessionIDs[0] != result.SessionID ||
-		inputSessionIDs[1] != result.SessionID ||
-		inputs[0] != dispatchWakePrompt ||
-		inputs[1] != "\r" {
-		t.Fatalf("PTY inputs = (%q, %q)", inputSessionIDs, inputs)
-	}
-	if strings.Contains(strings.Join(inputs, ""), "Mailbox content") {
-		t.Fatalf("PTY input included mailbox content: %q", inputs)
-	}
-}
-
-func TestStructuredDispatchReportSeparatesRuntimeAndSupportsResolution(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backend := &fakeSpawnBackend{}
-	_, chiefSessionID, _ := setupDelegationSource(t, d, backend)
-	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefSessionID); err != nil {
-		t.Fatalf("set chief role: %v", err)
-	}
-	consumeDelegatedPrompt(t, backend)
-	result, err := d.delegate(&protocol.DelegateMessage{
-		Cmd:             protocol.CmdDelegate,
-		SourceSessionID: chiefSessionID,
-		Brief:           "Produce a structured tracked report.",
-		Agent:           protocol.Ptr("codex"),
-	})
-	if err != nil {
-		t.Fatalf("delegate() error = %v", err)
-	}
-	d.store.UpdateState(result.SessionID, string(protocol.SessionStateIdle))
-
-	report := &protocol.DispatchReport{
-		ReportType: protocol.DispatchReportTypeBlocker,
-		Summary:    "Core implementation ready locally",
-		WorkState:  protocol.DispatchWorkStateNeedsInput,
-		NextActor:  protocol.Ptr("team"),
-		NextAction: protocol.Ptr("Decide the event contract"),
-		Request: &protocol.DispatchDecisionRequest{
-			Question:          "Which event contract should be used?",
-			Recommendation:    protocol.Ptr("Use AisNoOperationV1"),
-			Consequence:       protocol.Ptr("Event emission remains blocked"),
-			ExpectedResponder: "team",
-		},
-		Artifact: &protocol.DispatchArtifact{
-			Identity: "dirty:abc123",
-		},
-		Verification: []protocol.DispatchVerification{
-			{
-				Actor:            "agent",
-				Target:           "go test ./internal/feature",
-				Result:           "passed",
-				Timestamp:        string(protocol.TimestampNow()),
-				ArtifactIdentity: "commit:old",
-			},
-		},
-	}
-	server, client := net.Pipe()
-	reportDone := make(chan struct{})
-	go func() {
-		d.handleSubmitDispatchOutcome(server, &protocol.SubmitDispatchOutcomeMessage{
-			Cmd:              protocol.CmdSubmitDispatchOutcome,
-			SourceSessionID:  result.SessionID,
-			Report:           "Core implementation ready; decision required.",
-			StructuredReport: *report,
-		})
-		_ = server.Close()
-		close(reportDone)
-	}()
-	var reportResponse protocol.Response
-	if err := json.NewDecoder(client).Decode(&reportResponse); err != nil {
-		t.Fatalf("decode report response: %v", err)
-	}
-	_ = client.Close()
-	<-reportDone
-	dispatch := reportResponse.ChiefOfStaffDispatch
-	if !reportResponse.Ok || dispatch == nil || dispatch.StructuredReport == nil {
-		t.Fatalf("report response = %+v", reportResponse)
-	}
-	if dispatch.Status != string(protocol.SessionStateIdle) ||
-		dispatch.StructuredReport.WorkState != protocol.DispatchWorkStateNeedsInput {
-		t.Fatalf("runtime/work state = (%q, %q)", dispatch.Status, dispatch.StructuredReport.WorkState)
-	}
-	if !protocol.Deref(dispatch.Actionable) ||
-		protocol.Deref(dispatch.ConciseSummary) != "Core implementation ready locally" {
-		t.Fatalf("actionable dispatch = %+v", dispatch)
-	}
-	if protocol.Deref(dispatch.StructuredReport.Verification[0].Current) {
-		t.Fatalf("stale verification shown current: %+v", dispatch.StructuredReport.Verification)
-	}
-
-	server, client = net.Pipe()
-	resolveServer := server
-	resolveDone := make(chan struct{})
-	go func() {
-		d.handleResolveDispatchRequest(resolveServer, &protocol.ResolveDispatchRequestMessage{
-			Cmd:             protocol.CmdResolveDispatchRequest,
-			SourceSessionID: chiefSessionID,
-			DispatchID:      protocol.Deref(result.DispatchID),
-			Response:        "Use AisNoOperationV1.",
-			ResolutionLink:  protocol.Ptr("https://example.test/decision"),
-		})
-		_ = resolveServer.Close()
-		close(resolveDone)
-	}()
-	var resolveResponse protocol.Response
-	if err := json.NewDecoder(client).Decode(&resolveResponse); err != nil {
-		t.Fatalf("decode resolve response: %v", err)
-	}
-	_ = client.Close()
-	<-resolveDone
-	resolved := resolveResponse.ChiefOfStaffDispatch
-	if !resolveResponse.Ok || resolved == nil || resolved.StructuredReport == nil {
-		t.Fatalf("resolve response = %+v", resolveResponse)
-	}
-	if resolved.StructuredReport.Request.Status != protocol.DispatchRequestStatusResolved ||
-		protocol.Deref(resolved.StructuredReport.Request.Response) != "Use AisNoOperationV1." ||
-		protocol.Deref(resolved.Actionable) {
-		t.Fatalf("resolved dispatch = %+v", resolved)
-	}
-	persisted := d.store.GetChiefOfStaffDispatchBySession(result.SessionID)
-	if persisted == nil {
-		t.Fatal("resolved dispatch was not persisted")
-	}
-	if _, err := json.Marshal(d.decorateChiefOfStaffDispatch(persisted)); err != nil {
-		t.Fatalf("marshal persisted dispatch: %v", err)
-	}
-
-	server, client = net.Pipe()
-	statusServer := server
-	go func() {
-		d.handleGetDispatch(statusServer, &protocol.GetDispatchMessage{
-			Cmd:             protocol.CmdGetDispatch,
-			SourceSessionID: result.SessionID,
-		})
-		_ = statusServer.Close()
-	}()
-	var statusResponse protocol.Response
-	if err := json.NewDecoder(client).Decode(&statusResponse); err != nil {
-		t.Fatalf("decode status response: %v", err)
-	}
-	_ = client.Close()
-	if !statusResponse.Ok ||
-		statusResponse.ChiefOfStaffDispatch == nil ||
-		protocol.Deref(statusResponse.ChiefOfStaffDispatch.StructuredReport.Request.Response) != "Use AisNoOperationV1." {
-		t.Fatalf("delegated status response = %+v", statusResponse)
 	}
 }
 
@@ -843,19 +407,6 @@ func TestDelegateCreatesAndBindsTicket(t *testing.T) {
 	}
 	if created.Author != chiefSessionID {
 		t.Fatalf("created event author = %q, want chief %q", created.Author, chiefSessionID)
-	}
-}
-
-func TestReadyForReviewDispatchIsActionable(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	dispatch := d.decorateChiefOfStaffDispatch(&protocol.ChiefOfStaffDispatch{
-		StructuredReport: &protocol.DispatchReport{
-			Summary:   "Implementation ready",
-			WorkState: protocol.DispatchWorkStateReadyForReview,
-		},
-	})
-	if dispatch == nil || !protocol.Deref(dispatch.Actionable) {
-		t.Fatalf("ready-for-review dispatch = %+v, want actionable", dispatch)
 	}
 }
 
@@ -1440,8 +991,8 @@ func TestChiefOfStaffDelegateUnmutesExistingWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delegate() error = %v", err)
 	}
-	if result.DispatchID == nil {
-		t.Fatalf("chief delegation missing dispatch: %+v", result)
+	if ticket, err := d.store.ActiveTicketForSession(result.SessionID); err != nil || ticket == nil {
+		t.Fatalf("chief delegation missing bound ticket: ticket=%+v err=%v", ticket, err)
 	}
 	if workspace := d.store.GetWorkspace(targetWorkspaceID); workspace == nil || workspace.Muted {
 		t.Fatalf("chief delegation did not unmute target workspace: %+v", workspace)

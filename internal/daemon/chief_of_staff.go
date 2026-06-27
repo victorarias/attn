@@ -53,7 +53,11 @@ func (d *Daemon) delegatedFromChiefSessionIDs() map[string]bool {
 	if d.store == nil {
 		return nil
 	}
-	return d.store.DelegatedFromChiefSessionIDs()
+	chiefSessionID := d.chiefOfStaffSessionID()
+	if chiefSessionID == "" {
+		return nil
+	}
+	return d.store.DelegatedFromChiefSessionIDs(chiefSessionID)
 }
 
 // decorateDelegatedFromChief marks a session that was delegated from the chief

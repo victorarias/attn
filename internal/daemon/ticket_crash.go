@@ -31,9 +31,9 @@ func isMidFlightCrashState(state string) bool {
 // It is a no-op when the close was a clean rest, when the session has no bound
 // non-terminal ticket (already reported a terminal status, or never a delegated
 // session), and is naturally idempotent — once the ticket is Crashed it is
-// terminal, so a later teardown read finds no active ticket. It runs alongside
-// captureDispatchCloseState at every session-end path, fed the same pre-clobber
-// state so it sees the real runtime before handlePTYExit's idle-clobber erases it.
+// terminal, so a later teardown read finds no active ticket. It runs at every
+// session-end path, fed the same pre-clobber state so it sees the real runtime
+// before handlePTYExit's idle-clobber erases it.
 func (d *Daemon) captureTicketCrashState(sessionID, state string) {
 	if !isMidFlightCrashState(state) {
 		return

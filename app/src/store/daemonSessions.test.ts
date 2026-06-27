@@ -6,7 +6,6 @@ describe('daemonSessions store', () => {
     // Reset store state between tests
     useDaemonStore.setState({
       daemonSessions: [],
-      chiefOfStaffDispatches: [],
       prs: [],
       repoStates: [],
       isConnected: false,

@@ -357,6 +357,51 @@ func (s *Store) ActiveTicketForSession(sessionID string) (*Ticket, error) {
 	return nil, rows.Err()
 }
 
+// DelegatedFromChiefSessionIDs returns the set of session IDs that were
+// delegated from the given chief of staff. A chief-delegated session is the
+// Assignee of a non-archived ticket the chief authored (see
+// daemon.createDelegatedTicket: the chief is the ticket's creator and the
+// session its assignee). Tickets persist for the session's lifetime, so an
+// assigned non-archived ticket authored by the chief is exactly the "delegated
+// from chief" signal. This bulk read lets a single broadcast decorate every
+// session without one query per session. Returns an empty map when chief is
+// unset or the store is db-less.
+func (s *Store) DelegatedFromChiefSessionIDs(chiefSessionID string) map[string]bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make(map[string]bool)
+	chiefSessionID = strings.TrimSpace(chiefSessionID)
+	if s.db == nil || chiefSessionID == "" {
+		return out
+	}
+
+	// The ticket's author lives on its created event (ticket_events kind
+	// "created"), not the tickets row, so join through to scope by chief.
+	rows, err := s.db.Query(`
+		SELECT DISTINCT t.assignee
+		FROM tickets t
+		JOIN ticket_events e
+			ON e.ticket_id = t.id AND e.kind = ? AND e.author = ?
+		WHERE t.assignee != '' AND t.archived_at = ''`,
+		string(TicketEventCreated), chiefSessionID,
+	)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var assignee string
+		if err := rows.Scan(&assignee); err != nil {
+			continue
+		}
+		if sid := strings.TrimSpace(assignee); sid != "" {
+			out[sid] = true
+		}
+	}
+	return out
+}
+
 // SetTicketStatus moves a ticket to a new column and records the change in the
 // activity thread (from -> to, with an optional comment). Transitions are
 // permissive. Entering a terminal status stamps closed_at; leaving one clears it

@@ -195,16 +195,19 @@ func TestSnapshotWorkspaceContextReplayIsIdenticalOverwrite(t *testing.T) {
 // free-text overlay content can forge a marker in the raw tier.
 func TestSnapshotWorkspaceContextNeutralizesForgedMarker(t *testing.T) {
 	d := newNotebookDaemon(t)
-	forged := "Notes\n" + journalDispatchMarker("dsp-victim") + "\nmore notes"
+	// Any HTML-comment opener in free-text overlay content must be broken so it
+	// cannot forge a raw-tier source marker.
+	const forgedMarker = "<!-- attn:source:forged -->"
+	forged := "Notes\n" + forgedMarker + "\nmore notes"
 	seedWorkspaceContext(t, d, "session-1", "ws-forge", forged)
 
 	d.snapshotWorkspaceContextOnRemove("ws-forge", "Forge")
 
 	snap := readContextSnapshot(t, d, "ws-forge")
-	if strings.Contains(snap, journalDispatchMarker("dsp-victim")) {
+	if strings.Contains(snap, forgedMarker) {
 		t.Fatalf("forged marker survived neutralization:\n%s", snap)
 	}
-	if !strings.Contains(snap, "<! -- attn:dispatch:dsp-victim -->") {
+	if !strings.Contains(snap, "<! -- attn:source:forged -->") {
 		t.Fatalf("forged marker should be neutralized to a non-opener:\n%s", snap)
 	}
 }
@@ -241,9 +244,9 @@ func TestSnapshotWorkspaceContextRejectsPathTraversal(t *testing.T) {
 		},
 		{
 			name:      "nested subdir escape",
-			craftedID: "../dispatches/dsp-victim",
+			craftedID: "../sessions/sess-victim",
 			target: func(root string) string {
-				return filepath.Join(notebook.RawDispatchesDir(root), "dsp-victim.md")
+				return filepath.Join(notebook.RawSessionsDir(root), "sess-victim.md")
 			},
 		},
 	}

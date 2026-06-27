@@ -348,7 +348,7 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 	spawnClient := newInternalWSClient()
 	initialPrompt := brief
 	if trackedByChief {
-		initialPrompt = chiefOfStaffDispatchPrompt(brief)
+		initialPrompt = delegatedTicketPrompt(brief)
 	}
 	d.handleSpawnSession(spawnClient, &protocol.SpawnSessionMessage{
 		Cmd:           protocol.CmdSpawnSession,
@@ -372,20 +372,8 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 		d.removeWorkspaceLayoutPaneForSession(sessionID)
 		return nil, d.rollbackDelegation(createdWorkspaceID, createdWorktreePath, fmt.Errorf("delegated session was not persisted"))
 	}
-	var dispatch *protocol.ChiefOfStaffDispatch
 	if trackedByChief {
-		dispatch = d.newChiefOfStaffDispatch(chiefSessionID, session, workspaceID, brief, name, agent)
-		if err := d.store.AddChiefOfStaffDispatch(dispatch); err != nil {
-			d.unregisterSession(sessionID, syscall.SIGTERM)
-			d.removeWorkspaceLayoutPaneForSession(sessionID)
-			return nil, d.rollbackDelegation(
-				createdWorkspaceID,
-				createdWorktreePath,
-				fmt.Errorf("persist chief of staff dispatch: %w", err),
-			)
-		}
 		if _, errMsg := d.setWorkspaceMuted(workspaceID, false); errMsg != "" {
-			_ = d.store.DeleteChiefOfStaffDispatch(dispatch.ID)
 			d.unregisterSession(sessionID, syscall.SIGTERM)
 			d.removeWorkspaceLayoutPaneForSession(sessionID)
 			return nil, d.rollbackDelegation(
@@ -396,7 +384,6 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 		}
 		ticketID, err := d.createDelegatedTicket(chiefSessionID, session, brief, name, agent)
 		if err != nil {
-			_ = d.store.DeleteChiefOfStaffDispatch(dispatch.ID)
 			d.unregisterSession(sessionID, syscall.SIGTERM)
 			d.removeWorkspaceLayoutPaneForSession(sessionID)
 			return nil, d.rollbackDelegation(
@@ -420,11 +407,31 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 	if session.Branch != nil && strings.TrimSpace(*session.Branch) != "" {
 		result.Branch = protocol.Ptr(strings.TrimSpace(*session.Branch))
 	}
-	if dispatch != nil {
-		result.DispatchID = protocol.Ptr(dispatch.ID)
-		d.broadcastChiefOfStaffDispatchesUpdated()
-	}
 	return result, nil
+}
+
+// delegatedTicketPrompt augments a chief-delegated agent's brief with the
+// self-report contract: the agent's work is bound to an attn ticket (assignee ==
+// session), and it moves that ticket across the board by reporting its own work
+// state. This replaces the retired chief-of-staff dispatch reporting surface —
+// the chief reads the ticket board instead of a parallel dispatch record.
+func delegatedTicketPrompt(brief string) string {
+	return strings.TrimSpace(brief) + `
+
+---
+This task is tracked as a ticket in attn. Report your work state so the ticket
+moves across the board and the chief of staff can see your progress:
+
+    "$ATTN_WRAPPER_PATH" ticket status in_progress --comment "<progress and next action>"
+
+Use the state that matches the outcome when work needs input, is ready, or ends:
+
+    "$ATTN_WRAPPER_PATH" ticket status needs_input --comment "<needed decision>"
+    "$ATTN_WRAPPER_PATH" ticket status ready_for_review --comment "<what is ready>"
+    "$ATTN_WRAPPER_PATH" ticket status completed --comment "<completed outcome>"
+    "$ATTN_WRAPPER_PATH" ticket status failed --comment "<terminal failure>"
+
+Continue the assigned work after reporting unless you are blocked or finished.`
 }
 
 func (d *Daemon) handleDelegate(conn net.Conn, msg *protocol.DelegateMessage) {

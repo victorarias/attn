@@ -1,8 +1,7 @@
 // To parse this data:
 //
-//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HandoffDispatchMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchesMessage, ListDispatchMessagesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubmitDispatchOutcomeMessage, SubscribeGitStatusMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketAttachment, TicketAttachMessage, TicketAttachResult, TicketChangeStatusMessage, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketResultMessage, TicketStatus, TicketStatusResult, TicketsUpdatedMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketAttachment, TicketAttachMessage, TicketAttachResult, TicketChangeStatusMessage, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketResultMessage, TicketStatus, TicketStatusResult, TicketsUpdatedMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
-//   const acknowledgeDispatchMessage = Convert.toAcknowledgeDispatchMessage(json);
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
 //   const addEndpointMessage = Convert.toAddEndpointMessage(json);
@@ -25,8 +24,6 @@
 //   const browserControlRequestMessage = Convert.toBrowserControlRequestMessage(json);
 //   const browserControlResponseMessage = Convert.toBrowserControlResponseMessage(json);
 //   const browserControlResultMessage = Convert.toBrowserControlResultMessage(json);
-//   const chiefOfStaffDispatch = Convert.toChiefOfStaffDispatch(json);
-//   const chiefOfStaffDispatchesUpdatedMessage = Convert.toChiefOfStaffDispatchesUpdatedMessage(json);
 //   const chiefOfStaffResultMessage = Convert.toChiefOfStaffResultMessage(json);
 //   const clearSessionsMessage = Convert.toClearSessionsMessage(json);
 //   const clearWarningsMessage = Convert.toClearWarningsMessage(json);
@@ -47,13 +44,6 @@
 //   const deleteWorktreeResultMessage = Convert.toDeleteWorktreeResultMessage(json);
 //   const detachSessionMessage = Convert.toDetachSessionMessage(json);
 //   const directoryEntry = Convert.toDirectoryEntry(json);
-//   const dispatchArtifact = Convert.toDispatchArtifact(json);
-//   const dispatchDecisionRequest = Convert.toDispatchDecisionRequest(json);
-//   const dispatchMessage = Convert.toDispatchMessage(json);
-//   const dispatchReport = Convert.toDispatchReport(json);
-//   const dispatchReportType = Convert.toDispatchReportType(json);
-//   const dispatchRequestStatus = Convert.toDispatchRequestStatus(json);
-//   const dispatchVerification = Convert.toDispatchVerification(json);
 //   const dispatchWorkState = Convert.toDispatchWorkState(json);
 //   const endpointActionResultMessage = Convert.toEndpointActionResultMessage(json);
 //   const endpointCapabilities = Convert.toEndpointCapabilities(json);
@@ -85,7 +75,6 @@
 //   const getCommentsResultMessage = Convert.toGetCommentsResultMessage(json);
 //   const getDefaultBranchMessage = Convert.toGetDefaultBranchMessage(json);
 //   const getDefaultBranchResultMessage = Convert.toGetDefaultBranchResultMessage(json);
-//   const getDispatchMessage = Convert.toGetDispatchMessage(json);
 //   const getFileDiffMessage = Convert.toGetFileDiffMessage(json);
 //   const getRecentLocationsMessage = Convert.toGetRecentLocationsMessage(json);
 //   const getRepoInfoMessage = Convert.toGetRepoInfoMessage(json);
@@ -106,7 +95,6 @@
 //   const gitOperationStartedMessage = Convert.toGitOperationStartedMessage(json);
 //   const gitOperationStatus = Convert.toGitOperationStatus(json);
 //   const gitStatusUpdateMessage = Convert.toGitStatusUpdateMessage(json);
-//   const handoffDispatchMessage = Convert.toHandoffDispatchMessage(json);
 //   const heartbeatMessage = Convert.toHeartbeatMessage(json);
 //   const heatState = Convert.toHeatState(json);
 //   const initialStateMessage = Convert.toInitialStateMessage(json);
@@ -117,8 +105,6 @@
 //   const installPluginMessage = Convert.toInstallPluginMessage(json);
 //   const killSessionMessage = Convert.toKillSessionMessage(json);
 //   const listBranchesMessage = Convert.toListBranchesMessage(json);
-//   const listDispatchesMessage = Convert.toListDispatchesMessage(json);
-//   const listDispatchMessagesMessage = Convert.toListDispatchMessagesMessage(json);
 //   const listEndpointsMessage = Convert.toListEndpointsMessage(json);
 //   const listPluginsMessage = Convert.toListPluginsMessage(json);
 //   const listRemoteBranchesMessage = Convert.toListRemoteBranchesMessage(json);
@@ -177,7 +163,6 @@
 //   const queryPRsMessage = Convert.toQueryPRsMessage(json);
 //   const queryReposMessage = Convert.toQueryReposMessage(json);
 //   const rateLimitedMessage = Convert.toRateLimitedMessage(json);
-//   const readDispatchMessage = Convert.toReadDispatchMessage(json);
 //   const recentLocation = Convert.toRecentLocation(json);
 //   const recentLocationsResultMessage = Convert.toRecentLocationsResultMessage(json);
 //   const refreshPRsMessage = Convert.toRefreshPRsMessage(json);
@@ -195,7 +180,6 @@
 //   const reposUpdatedMessage = Convert.toReposUpdatedMessage(json);
 //   const resolveCommentMessage = Convert.toResolveCommentMessage(json);
 //   const resolveCommentResultMessage = Convert.toResolveCommentResultMessage(json);
-//   const resolveDispatchRequestMessage = Convert.toResolveDispatchRequestMessage(json);
 //   const response = Convert.toResponse(json);
 //   const reviewComment = Convert.toReviewComment(json);
 //   const reviewLoopDecision = Convert.toReviewLoopDecision(json);
@@ -210,7 +194,6 @@
 //   const reviewLoopStatus = Convert.toReviewLoopStatus(json);
 //   const reviewLoopUpdatedMessage = Convert.toReviewLoopUpdatedMessage(json);
 //   const reviewState = Convert.toReviewState(json);
-//   const sendDispatchMessage = Convert.toSendDispatchMessage(json);
 //   const session = Convert.toSession(json);
 //   const sessionExitedMessage = Convert.toSessionExitedMessage(json);
 //   const sessionRegisteredMessage = Convert.toSessionRegisteredMessage(json);
@@ -236,7 +219,6 @@
 //   const stateMessage = Convert.toStateMessage(json);
 //   const stopMessage = Convert.toStopMessage(json);
 //   const stopReviewLoopMessage = Convert.toStopReviewLoopMessage(json);
-//   const submitDispatchOutcomeMessage = Convert.toSubmitDispatchOutcomeMessage(json);
 //   const subscribeGitStatusMessage = Convert.toSubscribeGitStatusMessage(json);
 //   const ticket = Convert.toTicket(json);
 //   const ticketActionResultMessage = Convert.toTicketActionResultMessage(json);
@@ -264,8 +246,6 @@
 //   const updateCommentMessage = Convert.toUpdateCommentMessage(json);
 //   const updateCommentResultMessage = Convert.toUpdateCommentResultMessage(json);
 //   const updateEndpointMessage = Convert.toUpdateEndpointMessage(json);
-//   const wakeDispatchAgentMessage = Convert.toWakeDispatchAgentMessage(json);
-//   const wakeDispatchAgentResultMessage = Convert.toWakeDispatchAgentResultMessage(json);
 //   const webSocketEvent = Convert.toWebSocketEvent(json);
 //   const workflowActionResultMessage = Convert.toWorkflowActionResultMessage(json);
 //   const workflowAgentCall = Convert.toWorkflowAgentCall(json);
@@ -327,18 +307,6 @@
 //
 // These functions will throw an error if the JSON doesn't
 // match the expected interface, even if the JSON is valid.
-
-export interface AcknowledgeDispatchMessage {
-    acknowledgement?:  string;
-    cmd:               AcknowledgeDispatchMessageCmd;
-    message_id:        string;
-    source_session_id: string;
-    [property: string]: any;
-}
-
-export enum AcknowledgeDispatchMessageCmd {
-    AcknowledgeDispatchMessage = "acknowledge_dispatch_message",
-}
 
 export interface AddCommentMessage {
     cmd:        AddCommentMessageCmd;
@@ -696,133 +664,6 @@ export enum BrowserControlResultMessageCmd {
     BrowserControlResult = "browser_control_result",
 }
 
-export interface ChiefOfStaffDispatch {
-    actionable?:           boolean;
-    agent:                 string;
-    branch?:               string;
-    brief:                 string;
-    chief_session_id:      string;
-    closed_state?:         string;
-    concise_summary?:      string;
-    created_at:            string;
-    directory:             string;
-    id:                    string;
-    label:                 string;
-    latest_report?:        string;
-    reported_at?:          string;
-    session_id:            string;
-    status:                string;
-    status_since:          string;
-    structured_report?:    Report;
-    unread_message_count?: number;
-    updated_at:            string;
-    workspace_id:          string;
-    [property: string]: any;
-}
-
-export interface Report {
-    artifact?:        Artifact;
-    constraints?:     string[];
-    next_action?:     string;
-    next_actor?:      string;
-    remaining_scope?: string[];
-    report_type:      DispatchReportType;
-    reported_at:      string;
-    request?:         Request;
-    summary:          string;
-    verification?:    VerificationElement[];
-    work_state:       DispatchWorkState;
-    [property: string]: any;
-}
-
-export interface Artifact {
-    branch?:       string;
-    description?:  string;
-    dirty?:        boolean;
-    identity:      string;
-    revision?:     string;
-    workspace_id?: string;
-    [property: string]: any;
-}
-
-export enum DispatchReportType {
-    Blocker = "blocker",
-    Completion = "completion",
-    Failure = "failure",
-    Handoff = "handoff",
-    Progress = "progress",
-}
-
-export interface Request {
-    consequence?:       string;
-    expected_responder: string;
-    question:           string;
-    recommendation?:    string;
-    resolution_link?:   string;
-    responded_at?:      string;
-    responded_by?:      string;
-    response?:          string;
-    status:             DispatchRequestStatus;
-    [property: string]: any;
-}
-
-export enum DispatchRequestStatus {
-    Pending = "pending",
-    Resolved = "resolved",
-}
-
-export interface VerificationElement {
-    actor:             string;
-    artifact_identity: string;
-    current?:          boolean;
-    result:            string;
-    target:            string;
-    timestamp:         string;
-    [property: string]: any;
-}
-
-export enum DispatchWorkState {
-    Completed = "completed",
-    Failed = "failed",
-    InProgress = "in_progress",
-    NeedsInput = "needs_input",
-    ReadyForReview = "ready_for_review",
-}
-
-export interface ChiefOfStaffDispatchesUpdatedMessage {
-    dispatches: ChiefOfStaffDispatchElement[];
-    event:      ChiefOfStaffDispatchesUpdatedMessageEvent;
-    [property: string]: any;
-}
-
-export interface ChiefOfStaffDispatchElement {
-    actionable?:           boolean;
-    agent:                 string;
-    branch?:               string;
-    brief:                 string;
-    chief_session_id:      string;
-    closed_state?:         string;
-    concise_summary?:      string;
-    created_at:            string;
-    directory:             string;
-    id:                    string;
-    label:                 string;
-    latest_report?:        string;
-    reported_at?:          string;
-    session_id:            string;
-    status:                string;
-    status_since:          string;
-    structured_report?:    Report;
-    unread_message_count?: number;
-    updated_at:            string;
-    workspace_id:          string;
-    [property: string]: any;
-}
-
-export enum ChiefOfStaffDispatchesUpdatedMessageEvent {
-    ChiefOfStaffDispatchesUpdated = "chief_of_staff_dispatches_updated",
-}
-
 export interface ChiefOfStaffResultMessage {
     chief_of_staff:       boolean;
     error?:               string;
@@ -965,7 +806,6 @@ export interface DelegateMessageWorktree {
 export interface DelegateResult {
     branch?:           string;
     directory:         string;
-    dispatch_id?:      string;
     placement:         string;
     session_id:        string;
     workspace_id:      string;
@@ -988,7 +828,6 @@ export enum DelegateResultMessageEvent {
 export interface DelegateResultObject {
     branch?:           string;
     directory:         string;
-    dispatch_id?:      string;
     placement:         string;
     session_id:        string;
     workspace_id:      string;
@@ -1072,67 +911,6 @@ export enum DetachSessionMessageCmd {
 export interface DirectoryEntry {
     name: string;
     path: string;
-    [property: string]: any;
-}
-
-export interface DispatchArtifact {
-    branch?:       string;
-    description?:  string;
-    dirty?:        boolean;
-    identity:      string;
-    revision?:     string;
-    workspace_id?: string;
-    [property: string]: any;
-}
-
-export interface DispatchDecisionRequest {
-    consequence?:       string;
-    expected_responder: string;
-    question:           string;
-    recommendation?:    string;
-    resolution_link?:   string;
-    responded_at?:      string;
-    responded_by?:      string;
-    response?:          string;
-    status:             DispatchRequestStatus;
-    [property: string]: any;
-}
-
-export interface DispatchMessage {
-    acknowledged_at?:  string;
-    acknowledgement?:  string;
-    content:           string;
-    created_at:        string;
-    dispatch_id:       string;
-    id:                string;
-    read_at?:          string;
-    sender_session_id: string;
-    target_session_id: string;
-    [property: string]: any;
-}
-
-export interface DispatchReport {
-    artifact?:        Artifact;
-    constraints?:     string[];
-    next_action?:     string;
-    next_actor?:      string;
-    remaining_scope?: string[];
-    report_type:      DispatchReportType;
-    reported_at:      string;
-    request?:         Request;
-    summary:          string;
-    verification?:    VerificationElement[];
-    work_state:       DispatchWorkState;
-    [property: string]: any;
-}
-
-export interface DispatchVerification {
-    actor:             string;
-    artifact_identity: string;
-    current?:          boolean;
-    result:            string;
-    target:            string;
-    timestamp:         string;
     [property: string]: any;
 }
 
@@ -1573,16 +1351,6 @@ export enum GetDefaultBranchResultMessageEvent {
     GetDefaultBranchResult = "get_default_branch_result",
 }
 
-export interface GetDispatchMessage {
-    cmd:               GetDispatchMessageCmd;
-    source_session_id: string;
-    [property: string]: any;
-}
-
-export enum GetDispatchMessageCmd {
-    GetDispatch = "get_dispatch",
-}
-
 export interface GetFileDiffMessage {
     base_ref?: string;
     cmd:       GetFileDiffMessageCmd;
@@ -1854,20 +1622,6 @@ export interface StagedElement {
     [property: string]: any;
 }
 
-export interface HandoffDispatchMessage {
-    cmd:               HandoffDispatchMessageCmd;
-    content:           string;
-    report?:           string;
-    source_session_id: string;
-    structured_report: Report;
-    to:                string;
-    [property: string]: any;
-}
-
-export enum HandoffDispatchMessageCmd {
-    HandoffDispatch = "handoff_dispatch",
-}
-
 export interface HeartbeatMessage {
     cmd: HeartbeatMessageCmd;
     id:  string;
@@ -1879,21 +1633,20 @@ export enum HeartbeatMessageCmd {
 }
 
 export interface InitialStateMessage {
-    authors?:                   AuthorElement[];
-    chief_of_staff_dispatches?: ChiefOfStaffDispatchElement[];
-    daemon_instance_id?:        string;
-    endpoints?:                 Endpoint[];
-    event:                      InitialStateMessageEvent;
-    github_hosts?:              string[];
-    protocol_version?:          string;
-    prs?:                       PRElement[];
-    repos?:                     RepoElement[];
-    sessions?:                  SessionElement[];
-    settings?:                  { [key: string]: any };
-    source_fingerprint?:        string;
-    tickets?:                   TicketElement[];
-    warnings?:                  WarningElement[];
-    workspaces?:                WorkspaceElement[];
+    authors?:            AuthorElement[];
+    daemon_instance_id?: string;
+    endpoints?:          Endpoint[];
+    event:               InitialStateMessageEvent;
+    github_hosts?:       string[];
+    protocol_version?:   string;
+    prs?:                PRElement[];
+    repos?:              RepoElement[];
+    sessions?:           SessionElement[];
+    settings?:           { [key: string]: any };
+    source_fingerprint?: string;
+    tickets?:            TicketElement[];
+    warnings?:           WarningElement[];
+    workspaces?:         WorkspaceElement[];
     [property: string]: any;
 }
 
@@ -2095,28 +1848,6 @@ export interface ListBranchesMessage {
 
 export enum ListBranchesMessageCmd {
     ListBranches = "list_branches",
-}
-
-export interface ListDispatchesMessage {
-    cmd:               ListDispatchesMessageCmd;
-    source_session_id: string;
-    [property: string]: any;
-}
-
-export enum ListDispatchesMessageCmd {
-    ListDispatches = "list_dispatches",
-}
-
-export interface ListDispatchMessagesMessage {
-    cmd:               ListDispatchMessagesMessageCmd;
-    dispatch_id?:      string;
-    source_session_id: string;
-    unread_only?:      boolean;
-    [property: string]: any;
-}
-
-export enum ListDispatchMessagesMessageCmd {
-    ListDispatchMessages = "list_dispatch_messages",
 }
 
 export interface ListEndpointsMessage {
@@ -2821,17 +2552,6 @@ export enum RateLimitedMessageEvent {
     RateLimited = "rate_limited",
 }
 
-export interface ReadDispatchMessage {
-    cmd:               ReadDispatchMessageCmd;
-    message_id:        string;
-    source_session_id: string;
-    [property: string]: any;
-}
-
-export enum ReadDispatchMessageCmd {
-    ReadDispatchMessage = "read_dispatch_message",
-}
-
 export interface RecentLocation {
     last_seen: string;
     path:      string;
@@ -3021,27 +2741,10 @@ export enum ResolveCommentResultMessageEvent {
     ResolveCommentResult = "resolve_comment_result",
 }
 
-export interface ResolveDispatchRequestMessage {
-    cmd:               ResolveDispatchRequestMessageCmd;
-    dispatch_id:       string;
-    resolution_link?:  string;
-    response:          string;
-    source_session_id: string;
-    [property: string]: any;
-}
-
-export enum ResolveDispatchRequestMessageCmd {
-    ResolveDispatchRequest = "resolve_dispatch_request",
-}
-
 export interface Response {
     authors?:                              AuthorElement[];
-    chief_of_staff_dispatch?:              ChiefOfStaffDispatchElement;
-    chief_of_staff_dispatches?:            ChiefOfStaffDispatchElement[];
     data?:                                 string;
     delegate_result?:                      DelegateResultObject;
-    dispatch_message?:                     DispatchMessageObject;
-    dispatch_messages?:                    DispatchMessageObject[];
     error?:                                string;
     notebook_entries?:                     NotebookEntryElement[];
     notebook_guide?:                       NotebookGuide;
@@ -3059,19 +2762,6 @@ export interface Response {
     workspace_context_result?:             WorkspaceContextResultObject;
     workspace_contexts?:                   WorkspaceContextElement[];
     workspaces?:                           WorkspaceElement[];
-    [property: string]: any;
-}
-
-export interface DispatchMessageObject {
-    acknowledged_at?:  string;
-    acknowledgement?:  string;
-    content:           string;
-    created_at:        string;
-    dispatch_id:       string;
-    id:                string;
-    read_at?:          string;
-    sender_session_id: string;
-    target_session_id: string;
     [property: string]: any;
 }
 
@@ -3390,18 +3080,6 @@ export interface ReviewState {
     [property: string]: any;
 }
 
-export interface SendDispatchMessage {
-    cmd:               SendDispatchMessageCmd;
-    content:           string;
-    dispatch_id:       string;
-    source_session_id: string;
-    [property: string]: any;
-}
-
-export enum SendDispatchMessageCmd {
-    SendDispatchMessage = "send_dispatch_message",
-}
-
 export interface Session {
     agent:                        string;
     branch?:                      string;
@@ -3585,6 +3263,14 @@ export enum SetTicketStatusMessageCmd {
     SetTicketStatus = "set_ticket_status",
 }
 
+export enum DispatchWorkState {
+    Completed = "completed",
+    Failed = "failed",
+    InProgress = "in_progress",
+    NeedsInput = "needs_input",
+    ReadyForReview = "ready_for_review",
+}
+
 export interface SettingsUpdatedMessage {
     changed_key?: string;
     error?:       string;
@@ -3691,18 +3377,6 @@ export interface StopReviewLoopMessage {
 
 export enum StopReviewLoopMessageCmd {
     StopReviewLoop = "stop_review_loop",
-}
-
-export interface SubmitDispatchOutcomeMessage {
-    cmd:               SubmitDispatchOutcomeMessageCmd;
-    report:            string;
-    source_session_id: string;
-    structured_report: Report;
-    [property: string]: any;
-}
-
-export enum SubmitDispatchOutcomeMessageCmd {
-    SubmitDispatchOutcome = "submit_dispatch_outcome",
 }
 
 export interface SubscribeGitStatusMessage {
@@ -3959,113 +3633,84 @@ export enum UpdateEndpointMessageCmd {
     UpdateEndpoint = "update_endpoint",
 }
 
-export interface WakeDispatchAgentMessage {
-    cmd:               WakeDispatchAgentMessageCmd;
-    dispatch_id:       string;
-    request_id:        string;
-    source_session_id: string;
-    [property: string]: any;
-}
-
-export enum WakeDispatchAgentMessageCmd {
-    WakeDispatchAgent = "wake_dispatch_agent",
-}
-
-export interface WakeDispatchAgentResultMessage {
-    dispatch_id: string;
-    error?:      string;
-    event:       WakeDispatchAgentResultMessageEvent;
-    request_id:  string;
-    success:     boolean;
-    [property: string]: any;
-}
-
-export enum WakeDispatchAgentResultMessageEvent {
-    WakeDispatchAgentResult = "wake_dispatch_agent_result",
-}
-
 export interface WebSocketEvent {
-    action?:                    string;
-    authors?:                   AuthorElement[];
-    base_ref?:                  string;
-    branch?:                    string;
-    branches?:                  BranchElement[];
-    chief_of_staff?:            boolean;
-    chief_of_staff_dispatch?:   ChiefOfStaffDispatchElement;
-    chief_of_staff_dispatches?: ChiefOfStaffDispatchElement[];
-    cloned?:                    boolean;
-    cmd?:                       string;
-    cols?:                      number;
-    conflict?:                  boolean;
-    content?:                   string;
-    data?:                      string;
-    directory?:                 string;
-    dirty?:                     boolean;
-    dispatch_message?:          DispatchMessageObject;
-    dispatch_messages?:         DispatchMessageObject[];
-    error?:                     string;
-    event:                      string;
-    exit_code?:                 number;
-    files?:                     FileElement[];
-    found?:                     boolean;
-    id?:                        string;
-    last_seq?:                  number;
-    modified?:                  string;
-    name?:                      string;
-    operation?:                 Operation;
-    original?:                  string;
-    pane_id?:                   string;
-    path?:                      string;
-    pid?:                       number;
-    plugin_issues?:             IssueElement[];
-    plugins?:                   PluginElement[];
-    previous_session_id?:       string;
-    priority?:                  number;
-    protocol_version?:          string;
-    prs?:                       PRElement[];
-    rate_limit_reset_at?:       string;
-    rate_limit_resource?:       string;
-    reason?:                    string;
-    recent_locations?:          RecentLocationElement[];
-    repos?:                     RepoElement[];
-    review_loop_run?:           ReviewLoopRunObject;
-    rows?:                      number;
-    running?:                   boolean;
-    runtime_id?:                string;
-    screen_cols?:               number;
-    screen_cursor_visible?:     boolean;
-    screen_cursor_x?:           number;
-    screen_cursor_y?:           number;
-    screen_rows?:               number;
-    screen_snapshot?:           string;
-    screen_snapshot_fresh?:     boolean;
-    scrollback?:                string;
-    scrollback_truncated?:      boolean;
-    seq?:                       number;
-    session?:                   SessionElement;
-    session_id?:                string;
-    sessions?:                  SessionElement[];
-    settings?:                  { [key: string]: any };
-    signal?:                    string;
-    split_id?:                  string;
-    staged?:                    StagedElement[];
-    stash_ref?:                 string;
-    success?:                   boolean;
-    target_path?:               string;
-    ticket?:                    TicketElement;
-    tickets?:                   TicketElement[];
-    tile_id?:                   string;
-    tile_kind?:                 string;
-    unstaged?:                  StagedElement[];
-    untracked?:                 StagedElement[];
-    warnings?:                  WarningElement[];
-    workspace?:                 WorkspaceElement;
-    workspace_context_result?:  WorkspaceContextResultObject;
-    workspace_contexts?:        WorkspaceContextElement[];
-    workspace_id?:              string;
-    workspace_layout?:          Layout;
-    workspaces?:                WorkspaceElement[];
-    worktrees?:                 WorktreeElement[];
+    action?:                   string;
+    authors?:                  AuthorElement[];
+    base_ref?:                 string;
+    branch?:                   string;
+    branches?:                 BranchElement[];
+    chief_of_staff?:           boolean;
+    cloned?:                   boolean;
+    cmd?:                      string;
+    cols?:                     number;
+    conflict?:                 boolean;
+    content?:                  string;
+    data?:                     string;
+    directory?:                string;
+    dirty?:                    boolean;
+    error?:                    string;
+    event:                     string;
+    exit_code?:                number;
+    files?:                    FileElement[];
+    found?:                    boolean;
+    id?:                       string;
+    last_seq?:                 number;
+    modified?:                 string;
+    name?:                     string;
+    operation?:                Operation;
+    original?:                 string;
+    pane_id?:                  string;
+    path?:                     string;
+    pid?:                      number;
+    plugin_issues?:            IssueElement[];
+    plugins?:                  PluginElement[];
+    previous_session_id?:      string;
+    priority?:                 number;
+    protocol_version?:         string;
+    prs?:                      PRElement[];
+    rate_limit_reset_at?:      string;
+    rate_limit_resource?:      string;
+    reason?:                   string;
+    recent_locations?:         RecentLocationElement[];
+    repos?:                    RepoElement[];
+    review_loop_run?:          ReviewLoopRunObject;
+    rows?:                     number;
+    running?:                  boolean;
+    runtime_id?:               string;
+    screen_cols?:              number;
+    screen_cursor_visible?:    boolean;
+    screen_cursor_x?:          number;
+    screen_cursor_y?:          number;
+    screen_rows?:              number;
+    screen_snapshot?:          string;
+    screen_snapshot_fresh?:    boolean;
+    scrollback?:               string;
+    scrollback_truncated?:     boolean;
+    seq?:                      number;
+    session?:                  SessionElement;
+    session_id?:               string;
+    sessions?:                 SessionElement[];
+    settings?:                 { [key: string]: any };
+    signal?:                   string;
+    split_id?:                 string;
+    staged?:                   StagedElement[];
+    stash_ref?:                string;
+    success?:                  boolean;
+    target_path?:              string;
+    ticket?:                   TicketElement;
+    tickets?:                  TicketElement[];
+    tile_id?:                  string;
+    tile_kind?:                string;
+    unstaged?:                 StagedElement[];
+    untracked?:                StagedElement[];
+    warnings?:                 WarningElement[];
+    workspace?:                WorkspaceElement;
+    workspace_context_result?: WorkspaceContextResultObject;
+    workspace_contexts?:       WorkspaceContextElement[];
+    workspace_id?:             string;
+    workspace_layout?:         Layout;
+    workspaces?:               WorkspaceElement[];
+    worktrees?:                WorktreeElement[];
     [property: string]: any;
 }
 
@@ -4718,14 +4363,6 @@ export enum WorktreesUpdatedMessageEvent {
 // Converts JSON strings to/from your types
 // and asserts the results of JSON.parse at runtime
 export class Convert {
-    public static toAcknowledgeDispatchMessage(json: string): AcknowledgeDispatchMessage {
-        return cast(JSON.parse(json), r("AcknowledgeDispatchMessage"));
-    }
-
-    public static acknowledgeDispatchMessageToJson(value: AcknowledgeDispatchMessage): string {
-        return JSON.stringify(uncast(value, r("AcknowledgeDispatchMessage")), null, 2);
-    }
-
     public static toAddCommentMessage(json: string): AddCommentMessage {
         return cast(JSON.parse(json), r("AddCommentMessage"));
     }
@@ -4902,22 +4539,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("BrowserControlResultMessage")), null, 2);
     }
 
-    public static toChiefOfStaffDispatch(json: string): ChiefOfStaffDispatch {
-        return cast(JSON.parse(json), r("ChiefOfStaffDispatch"));
-    }
-
-    public static chiefOfStaffDispatchToJson(value: ChiefOfStaffDispatch): string {
-        return JSON.stringify(uncast(value, r("ChiefOfStaffDispatch")), null, 2);
-    }
-
-    public static toChiefOfStaffDispatchesUpdatedMessage(json: string): ChiefOfStaffDispatchesUpdatedMessage {
-        return cast(JSON.parse(json), r("ChiefOfStaffDispatchesUpdatedMessage"));
-    }
-
-    public static chiefOfStaffDispatchesUpdatedMessageToJson(value: ChiefOfStaffDispatchesUpdatedMessage): string {
-        return JSON.stringify(uncast(value, r("ChiefOfStaffDispatchesUpdatedMessage")), null, 2);
-    }
-
     public static toChiefOfStaffResultMessage(json: string): ChiefOfStaffResultMessage {
         return cast(JSON.parse(json), r("ChiefOfStaffResultMessage"));
     }
@@ -5076,62 +4697,6 @@ export class Convert {
 
     public static directoryEntryToJson(value: DirectoryEntry): string {
         return JSON.stringify(uncast(value, r("DirectoryEntry")), null, 2);
-    }
-
-    public static toDispatchArtifact(json: string): DispatchArtifact {
-        return cast(JSON.parse(json), r("DispatchArtifact"));
-    }
-
-    public static dispatchArtifactToJson(value: DispatchArtifact): string {
-        return JSON.stringify(uncast(value, r("DispatchArtifact")), null, 2);
-    }
-
-    public static toDispatchDecisionRequest(json: string): DispatchDecisionRequest {
-        return cast(JSON.parse(json), r("DispatchDecisionRequest"));
-    }
-
-    public static dispatchDecisionRequestToJson(value: DispatchDecisionRequest): string {
-        return JSON.stringify(uncast(value, r("DispatchDecisionRequest")), null, 2);
-    }
-
-    public static toDispatchMessage(json: string): DispatchMessage {
-        return cast(JSON.parse(json), r("DispatchMessage"));
-    }
-
-    public static dispatchMessageToJson(value: DispatchMessage): string {
-        return JSON.stringify(uncast(value, r("DispatchMessage")), null, 2);
-    }
-
-    public static toDispatchReport(json: string): DispatchReport {
-        return cast(JSON.parse(json), r("DispatchReport"));
-    }
-
-    public static dispatchReportToJson(value: DispatchReport): string {
-        return JSON.stringify(uncast(value, r("DispatchReport")), null, 2);
-    }
-
-    public static toDispatchReportType(json: string): DispatchReportType {
-        return cast(JSON.parse(json), r("DispatchReportType"));
-    }
-
-    public static dispatchReportTypeToJson(value: DispatchReportType): string {
-        return JSON.stringify(uncast(value, r("DispatchReportType")), null, 2);
-    }
-
-    public static toDispatchRequestStatus(json: string): DispatchRequestStatus {
-        return cast(JSON.parse(json), r("DispatchRequestStatus"));
-    }
-
-    public static dispatchRequestStatusToJson(value: DispatchRequestStatus): string {
-        return JSON.stringify(uncast(value, r("DispatchRequestStatus")), null, 2);
-    }
-
-    public static toDispatchVerification(json: string): DispatchVerification {
-        return cast(JSON.parse(json), r("DispatchVerification"));
-    }
-
-    public static dispatchVerificationToJson(value: DispatchVerification): string {
-        return JSON.stringify(uncast(value, r("DispatchVerification")), null, 2);
     }
 
     public static toDispatchWorkState(json: string): DispatchWorkState {
@@ -5382,14 +4947,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("GetDefaultBranchResultMessage")), null, 2);
     }
 
-    public static toGetDispatchMessage(json: string): GetDispatchMessage {
-        return cast(JSON.parse(json), r("GetDispatchMessage"));
-    }
-
-    public static getDispatchMessageToJson(value: GetDispatchMessage): string {
-        return JSON.stringify(uncast(value, r("GetDispatchMessage")), null, 2);
-    }
-
     public static toGetFileDiffMessage(json: string): GetFileDiffMessage {
         return cast(JSON.parse(json), r("GetFileDiffMessage"));
     }
@@ -5550,14 +5107,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("GitStatusUpdateMessage")), null, 2);
     }
 
-    public static toHandoffDispatchMessage(json: string): HandoffDispatchMessage {
-        return cast(JSON.parse(json), r("HandoffDispatchMessage"));
-    }
-
-    public static handoffDispatchMessageToJson(value: HandoffDispatchMessage): string {
-        return JSON.stringify(uncast(value, r("HandoffDispatchMessage")), null, 2);
-    }
-
     public static toHeartbeatMessage(json: string): HeartbeatMessage {
         return cast(JSON.parse(json), r("HeartbeatMessage"));
     }
@@ -5636,22 +5185,6 @@ export class Convert {
 
     public static listBranchesMessageToJson(value: ListBranchesMessage): string {
         return JSON.stringify(uncast(value, r("ListBranchesMessage")), null, 2);
-    }
-
-    public static toListDispatchesMessage(json: string): ListDispatchesMessage {
-        return cast(JSON.parse(json), r("ListDispatchesMessage"));
-    }
-
-    public static listDispatchesMessageToJson(value: ListDispatchesMessage): string {
-        return JSON.stringify(uncast(value, r("ListDispatchesMessage")), null, 2);
-    }
-
-    public static toListDispatchMessagesMessage(json: string): ListDispatchMessagesMessage {
-        return cast(JSON.parse(json), r("ListDispatchMessagesMessage"));
-    }
-
-    public static listDispatchMessagesMessageToJson(value: ListDispatchMessagesMessage): string {
-        return JSON.stringify(uncast(value, r("ListDispatchMessagesMessage")), null, 2);
     }
 
     public static toListEndpointsMessage(json: string): ListEndpointsMessage {
@@ -6118,14 +5651,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("RateLimitedMessage")), null, 2);
     }
 
-    public static toReadDispatchMessage(json: string): ReadDispatchMessage {
-        return cast(JSON.parse(json), r("ReadDispatchMessage"));
-    }
-
-    public static readDispatchMessageToJson(value: ReadDispatchMessage): string {
-        return JSON.stringify(uncast(value, r("ReadDispatchMessage")), null, 2);
-    }
-
     public static toRecentLocation(json: string): RecentLocation {
         return cast(JSON.parse(json), r("RecentLocation"));
     }
@@ -6262,14 +5787,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("ResolveCommentResultMessage")), null, 2);
     }
 
-    public static toResolveDispatchRequestMessage(json: string): ResolveDispatchRequestMessage {
-        return cast(JSON.parse(json), r("ResolveDispatchRequestMessage"));
-    }
-
-    public static resolveDispatchRequestMessageToJson(value: ResolveDispatchRequestMessage): string {
-        return JSON.stringify(uncast(value, r("ResolveDispatchRequestMessage")), null, 2);
-    }
-
     public static toResponse(json: string): Response {
         return cast(JSON.parse(json), r("Response"));
     }
@@ -6380,14 +5897,6 @@ export class Convert {
 
     public static reviewStateToJson(value: ReviewState): string {
         return JSON.stringify(uncast(value, r("ReviewState")), null, 2);
-    }
-
-    public static toSendDispatchMessage(json: string): SendDispatchMessage {
-        return cast(JSON.parse(json), r("SendDispatchMessage"));
-    }
-
-    public static sendDispatchMessageToJson(value: SendDispatchMessage): string {
-        return JSON.stringify(uncast(value, r("SendDispatchMessage")), null, 2);
     }
 
     public static toSession(json: string): Session {
@@ -6588,14 +6097,6 @@ export class Convert {
 
     public static stopReviewLoopMessageToJson(value: StopReviewLoopMessage): string {
         return JSON.stringify(uncast(value, r("StopReviewLoopMessage")), null, 2);
-    }
-
-    public static toSubmitDispatchOutcomeMessage(json: string): SubmitDispatchOutcomeMessage {
-        return cast(JSON.parse(json), r("SubmitDispatchOutcomeMessage"));
-    }
-
-    public static submitDispatchOutcomeMessageToJson(value: SubmitDispatchOutcomeMessage): string {
-        return JSON.stringify(uncast(value, r("SubmitDispatchOutcomeMessage")), null, 2);
     }
 
     public static toSubscribeGitStatusMessage(json: string): SubscribeGitStatusMessage {
@@ -6812,22 +6313,6 @@ export class Convert {
 
     public static updateEndpointMessageToJson(value: UpdateEndpointMessage): string {
         return JSON.stringify(uncast(value, r("UpdateEndpointMessage")), null, 2);
-    }
-
-    public static toWakeDispatchAgentMessage(json: string): WakeDispatchAgentMessage {
-        return cast(JSON.parse(json), r("WakeDispatchAgentMessage"));
-    }
-
-    public static wakeDispatchAgentMessageToJson(value: WakeDispatchAgentMessage): string {
-        return JSON.stringify(uncast(value, r("WakeDispatchAgentMessage")), null, 2);
-    }
-
-    public static toWakeDispatchAgentResultMessage(json: string): WakeDispatchAgentResultMessage {
-        return cast(JSON.parse(json), r("WakeDispatchAgentResultMessage"));
-    }
-
-    public static wakeDispatchAgentResultMessageToJson(value: WakeDispatchAgentResultMessage): string {
-        return JSON.stringify(uncast(value, r("WakeDispatchAgentResultMessage")), null, 2);
     }
 
     public static toWebSocketEvent(json: string): WebSocketEvent {
@@ -7448,12 +6933,6 @@ function r(name: string) {
 }
 
 const typeMap: any = {
-    "AcknowledgeDispatchMessage": o([
-        { json: "acknowledgement", js: "acknowledgement", typ: u(undefined, "") },
-        { json: "cmd", js: "cmd", typ: r("AcknowledgeDispatchMessageCmd") },
-        { json: "message_id", js: "message_id", typ: "" },
-        { json: "source_session_id", js: "source_session_id", typ: "" },
-    ], "any"),
     "AddCommentMessage": o([
         { json: "cmd", js: "cmd", typ: r("AddCommentMessageCmd") },
         { json: "content", js: "content", typ: "" },
@@ -7666,94 +7145,6 @@ const typeMap: any = {
         { json: "request_id", js: "request_id", typ: "" },
         { json: "success", js: "success", typ: true },
     ], "any"),
-    "ChiefOfStaffDispatch": o([
-        { json: "actionable", js: "actionable", typ: u(undefined, true) },
-        { json: "agent", js: "agent", typ: "" },
-        { json: "branch", js: "branch", typ: u(undefined, "") },
-        { json: "brief", js: "brief", typ: "" },
-        { json: "chief_session_id", js: "chief_session_id", typ: "" },
-        { json: "closed_state", js: "closed_state", typ: u(undefined, "") },
-        { json: "concise_summary", js: "concise_summary", typ: u(undefined, "") },
-        { json: "created_at", js: "created_at", typ: "" },
-        { json: "directory", js: "directory", typ: "" },
-        { json: "id", js: "id", typ: "" },
-        { json: "label", js: "label", typ: "" },
-        { json: "latest_report", js: "latest_report", typ: u(undefined, "") },
-        { json: "reported_at", js: "reported_at", typ: u(undefined, "") },
-        { json: "session_id", js: "session_id", typ: "" },
-        { json: "status", js: "status", typ: "" },
-        { json: "status_since", js: "status_since", typ: "" },
-        { json: "structured_report", js: "structured_report", typ: u(undefined, r("Report")) },
-        { json: "unread_message_count", js: "unread_message_count", typ: u(undefined, 0) },
-        { json: "updated_at", js: "updated_at", typ: "" },
-        { json: "workspace_id", js: "workspace_id", typ: "" },
-    ], "any"),
-    "Report": o([
-        { json: "artifact", js: "artifact", typ: u(undefined, r("Artifact")) },
-        { json: "constraints", js: "constraints", typ: u(undefined, a("")) },
-        { json: "next_action", js: "next_action", typ: u(undefined, "") },
-        { json: "next_actor", js: "next_actor", typ: u(undefined, "") },
-        { json: "remaining_scope", js: "remaining_scope", typ: u(undefined, a("")) },
-        { json: "report_type", js: "report_type", typ: r("DispatchReportType") },
-        { json: "reported_at", js: "reported_at", typ: "" },
-        { json: "request", js: "request", typ: u(undefined, r("Request")) },
-        { json: "summary", js: "summary", typ: "" },
-        { json: "verification", js: "verification", typ: u(undefined, a(r("VerificationElement"))) },
-        { json: "work_state", js: "work_state", typ: r("DispatchWorkState") },
-    ], "any"),
-    "Artifact": o([
-        { json: "branch", js: "branch", typ: u(undefined, "") },
-        { json: "description", js: "description", typ: u(undefined, "") },
-        { json: "dirty", js: "dirty", typ: u(undefined, true) },
-        { json: "identity", js: "identity", typ: "" },
-        { json: "revision", js: "revision", typ: u(undefined, "") },
-        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
-    ], "any"),
-    "Request": o([
-        { json: "consequence", js: "consequence", typ: u(undefined, "") },
-        { json: "expected_responder", js: "expected_responder", typ: "" },
-        { json: "question", js: "question", typ: "" },
-        { json: "recommendation", js: "recommendation", typ: u(undefined, "") },
-        { json: "resolution_link", js: "resolution_link", typ: u(undefined, "") },
-        { json: "responded_at", js: "responded_at", typ: u(undefined, "") },
-        { json: "responded_by", js: "responded_by", typ: u(undefined, "") },
-        { json: "response", js: "response", typ: u(undefined, "") },
-        { json: "status", js: "status", typ: r("DispatchRequestStatus") },
-    ], "any"),
-    "VerificationElement": o([
-        { json: "actor", js: "actor", typ: "" },
-        { json: "artifact_identity", js: "artifact_identity", typ: "" },
-        { json: "current", js: "current", typ: u(undefined, true) },
-        { json: "result", js: "result", typ: "" },
-        { json: "target", js: "target", typ: "" },
-        { json: "timestamp", js: "timestamp", typ: "" },
-    ], "any"),
-    "ChiefOfStaffDispatchesUpdatedMessage": o([
-        { json: "dispatches", js: "dispatches", typ: a(r("ChiefOfStaffDispatchElement")) },
-        { json: "event", js: "event", typ: r("ChiefOfStaffDispatchesUpdatedMessageEvent") },
-    ], "any"),
-    "ChiefOfStaffDispatchElement": o([
-        { json: "actionable", js: "actionable", typ: u(undefined, true) },
-        { json: "agent", js: "agent", typ: "" },
-        { json: "branch", js: "branch", typ: u(undefined, "") },
-        { json: "brief", js: "brief", typ: "" },
-        { json: "chief_session_id", js: "chief_session_id", typ: "" },
-        { json: "closed_state", js: "closed_state", typ: u(undefined, "") },
-        { json: "concise_summary", js: "concise_summary", typ: u(undefined, "") },
-        { json: "created_at", js: "created_at", typ: "" },
-        { json: "directory", js: "directory", typ: "" },
-        { json: "id", js: "id", typ: "" },
-        { json: "label", js: "label", typ: "" },
-        { json: "latest_report", js: "latest_report", typ: u(undefined, "") },
-        { json: "reported_at", js: "reported_at", typ: u(undefined, "") },
-        { json: "session_id", js: "session_id", typ: "" },
-        { json: "status", js: "status", typ: "" },
-        { json: "status_since", js: "status_since", typ: "" },
-        { json: "structured_report", js: "structured_report", typ: u(undefined, r("Report")) },
-        { json: "unread_message_count", js: "unread_message_count", typ: u(undefined, 0) },
-        { json: "updated_at", js: "updated_at", typ: "" },
-        { json: "workspace_id", js: "workspace_id", typ: "" },
-    ], "any"),
     "ChiefOfStaffResultMessage": o([
         { json: "chief_of_staff", js: "chief_of_staff", typ: true },
         { json: "error", js: "error", typ: u(undefined, "") },
@@ -7832,7 +7223,6 @@ const typeMap: any = {
     "DelegateResult": o([
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "directory", js: "directory", typ: "" },
-        { json: "dispatch_id", js: "dispatch_id", typ: u(undefined, "") },
         { json: "placement", js: "placement", typ: "" },
         { json: "session_id", js: "session_id", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: "" },
@@ -7847,7 +7237,6 @@ const typeMap: any = {
     "DelegateResultObject": o([
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "directory", js: "directory", typ: "" },
-        { json: "dispatch_id", js: "dispatch_id", typ: u(undefined, "") },
         { json: "placement", js: "placement", typ: "" },
         { json: "session_id", js: "session_id", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: "" },
@@ -7890,57 +7279,6 @@ const typeMap: any = {
     "DirectoryEntry": o([
         { json: "name", js: "name", typ: "" },
         { json: "path", js: "path", typ: "" },
-    ], "any"),
-    "DispatchArtifact": o([
-        { json: "branch", js: "branch", typ: u(undefined, "") },
-        { json: "description", js: "description", typ: u(undefined, "") },
-        { json: "dirty", js: "dirty", typ: u(undefined, true) },
-        { json: "identity", js: "identity", typ: "" },
-        { json: "revision", js: "revision", typ: u(undefined, "") },
-        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
-    ], "any"),
-    "DispatchDecisionRequest": o([
-        { json: "consequence", js: "consequence", typ: u(undefined, "") },
-        { json: "expected_responder", js: "expected_responder", typ: "" },
-        { json: "question", js: "question", typ: "" },
-        { json: "recommendation", js: "recommendation", typ: u(undefined, "") },
-        { json: "resolution_link", js: "resolution_link", typ: u(undefined, "") },
-        { json: "responded_at", js: "responded_at", typ: u(undefined, "") },
-        { json: "responded_by", js: "responded_by", typ: u(undefined, "") },
-        { json: "response", js: "response", typ: u(undefined, "") },
-        { json: "status", js: "status", typ: r("DispatchRequestStatus") },
-    ], "any"),
-    "DispatchMessage": o([
-        { json: "acknowledged_at", js: "acknowledged_at", typ: u(undefined, "") },
-        { json: "acknowledgement", js: "acknowledgement", typ: u(undefined, "") },
-        { json: "content", js: "content", typ: "" },
-        { json: "created_at", js: "created_at", typ: "" },
-        { json: "dispatch_id", js: "dispatch_id", typ: "" },
-        { json: "id", js: "id", typ: "" },
-        { json: "read_at", js: "read_at", typ: u(undefined, "") },
-        { json: "sender_session_id", js: "sender_session_id", typ: "" },
-        { json: "target_session_id", js: "target_session_id", typ: "" },
-    ], "any"),
-    "DispatchReport": o([
-        { json: "artifact", js: "artifact", typ: u(undefined, r("Artifact")) },
-        { json: "constraints", js: "constraints", typ: u(undefined, a("")) },
-        { json: "next_action", js: "next_action", typ: u(undefined, "") },
-        { json: "next_actor", js: "next_actor", typ: u(undefined, "") },
-        { json: "remaining_scope", js: "remaining_scope", typ: u(undefined, a("")) },
-        { json: "report_type", js: "report_type", typ: r("DispatchReportType") },
-        { json: "reported_at", js: "reported_at", typ: "" },
-        { json: "request", js: "request", typ: u(undefined, r("Request")) },
-        { json: "summary", js: "summary", typ: "" },
-        { json: "verification", js: "verification", typ: u(undefined, a(r("VerificationElement"))) },
-        { json: "work_state", js: "work_state", typ: r("DispatchWorkState") },
-    ], "any"),
-    "DispatchVerification": o([
-        { json: "actor", js: "actor", typ: "" },
-        { json: "artifact_identity", js: "artifact_identity", typ: "" },
-        { json: "current", js: "current", typ: u(undefined, true) },
-        { json: "result", js: "result", typ: "" },
-        { json: "target", js: "target", typ: "" },
-        { json: "timestamp", js: "timestamp", typ: "" },
     ], "any"),
     "EndpointActionResultMessage": o([
         { json: "action", js: "action", typ: "" },
@@ -8198,10 +7536,6 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("GetDefaultBranchResultMessageEvent") },
         { json: "success", js: "success", typ: true },
     ], "any"),
-    "GetDispatchMessage": o([
-        { json: "cmd", js: "cmd", typ: r("GetDispatchMessageCmd") },
-        { json: "source_session_id", js: "source_session_id", typ: "" },
-    ], "any"),
     "GetFileDiffMessage": o([
         { json: "base_ref", js: "base_ref", typ: u(undefined, "") },
         { json: "cmd", js: "cmd", typ: r("GetFileDiffMessageCmd") },
@@ -8357,21 +7691,12 @@ const typeMap: any = {
         { json: "path", js: "path", typ: "" },
         { json: "status", js: "status", typ: "" },
     ], "any"),
-    "HandoffDispatchMessage": o([
-        { json: "cmd", js: "cmd", typ: r("HandoffDispatchMessageCmd") },
-        { json: "content", js: "content", typ: "" },
-        { json: "report", js: "report", typ: u(undefined, "") },
-        { json: "source_session_id", js: "source_session_id", typ: "" },
-        { json: "structured_report", js: "structured_report", typ: r("Report") },
-        { json: "to", js: "to", typ: "" },
-    ], "any"),
     "HeartbeatMessage": o([
         { json: "cmd", js: "cmd", typ: r("HeartbeatMessageCmd") },
         { json: "id", js: "id", typ: "" },
     ], "any"),
     "InitialStateMessage": o([
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
-        { json: "chief_of_staff_dispatches", js: "chief_of_staff_dispatches", typ: u(undefined, a(r("ChiefOfStaffDispatchElement"))) },
         { json: "daemon_instance_id", js: "daemon_instance_id", typ: u(undefined, "") },
         { json: "endpoints", js: "endpoints", typ: u(undefined, a(r("Endpoint"))) },
         { json: "event", js: "event", typ: r("InitialStateMessageEvent") },
@@ -8496,16 +7821,6 @@ const typeMap: any = {
     "ListBranchesMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListBranchesMessageCmd") },
         { json: "main_repo", js: "main_repo", typ: "" },
-    ], "any"),
-    "ListDispatchesMessage": o([
-        { json: "cmd", js: "cmd", typ: r("ListDispatchesMessageCmd") },
-        { json: "source_session_id", js: "source_session_id", typ: "" },
-    ], "any"),
-    "ListDispatchMessagesMessage": o([
-        { json: "cmd", js: "cmd", typ: r("ListDispatchMessagesMessageCmd") },
-        { json: "dispatch_id", js: "dispatch_id", typ: u(undefined, "") },
-        { json: "source_session_id", js: "source_session_id", typ: "" },
-        { json: "unread_only", js: "unread_only", typ: u(undefined, true) },
     ], "any"),
     "ListEndpointsMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListEndpointsMessageCmd") },
@@ -8893,11 +8208,6 @@ const typeMap: any = {
         { json: "rate_limit_reset_at", js: "rate_limit_reset_at", typ: "" },
         { json: "rate_limit_resource", js: "rate_limit_resource", typ: "" },
     ], "any"),
-    "ReadDispatchMessage": o([
-        { json: "cmd", js: "cmd", typ: r("ReadDispatchMessageCmd") },
-        { json: "message_id", js: "message_id", typ: "" },
-        { json: "source_session_id", js: "source_session_id", typ: "" },
-    ], "any"),
     "RecentLocation": o([
         { json: "last_seen", js: "last_seen", typ: "" },
         { json: "path", js: "path", typ: "" },
@@ -8999,21 +8309,10 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("ResolveCommentResultMessageEvent") },
         { json: "success", js: "success", typ: true },
     ], "any"),
-    "ResolveDispatchRequestMessage": o([
-        { json: "cmd", js: "cmd", typ: r("ResolveDispatchRequestMessageCmd") },
-        { json: "dispatch_id", js: "dispatch_id", typ: "" },
-        { json: "resolution_link", js: "resolution_link", typ: u(undefined, "") },
-        { json: "response", js: "response", typ: "" },
-        { json: "source_session_id", js: "source_session_id", typ: "" },
-    ], "any"),
     "Response": o([
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
-        { json: "chief_of_staff_dispatch", js: "chief_of_staff_dispatch", typ: u(undefined, r("ChiefOfStaffDispatchElement")) },
-        { json: "chief_of_staff_dispatches", js: "chief_of_staff_dispatches", typ: u(undefined, a(r("ChiefOfStaffDispatchElement"))) },
         { json: "data", js: "data", typ: u(undefined, "") },
         { json: "delegate_result", js: "delegate_result", typ: u(undefined, r("DelegateResultObject")) },
-        { json: "dispatch_message", js: "dispatch_message", typ: u(undefined, r("DispatchMessageObject")) },
-        { json: "dispatch_messages", js: "dispatch_messages", typ: u(undefined, a(r("DispatchMessageObject"))) },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "notebook_entries", js: "notebook_entries", typ: u(undefined, a(r("NotebookEntryElement"))) },
         { json: "notebook_guide", js: "notebook_guide", typ: u(undefined, r("NotebookGuide")) },
@@ -9031,17 +8330,6 @@ const typeMap: any = {
         { json: "workspace_context_result", js: "workspace_context_result", typ: u(undefined, r("WorkspaceContextResultObject")) },
         { json: "workspace_contexts", js: "workspace_contexts", typ: u(undefined, a(r("WorkspaceContextElement"))) },
         { json: "workspaces", js: "workspaces", typ: u(undefined, a(r("WorkspaceElement"))) },
-    ], "any"),
-    "DispatchMessageObject": o([
-        { json: "acknowledged_at", js: "acknowledged_at", typ: u(undefined, "") },
-        { json: "acknowledgement", js: "acknowledgement", typ: u(undefined, "") },
-        { json: "content", js: "content", typ: "" },
-        { json: "created_at", js: "created_at", typ: "" },
-        { json: "dispatch_id", js: "dispatch_id", typ: "" },
-        { json: "id", js: "id", typ: "" },
-        { json: "read_at", js: "read_at", typ: u(undefined, "") },
-        { json: "sender_session_id", js: "sender_session_id", typ: "" },
-        { json: "target_session_id", js: "target_session_id", typ: "" },
     ], "any"),
     "NotebookGuide": o([
         { json: "guidance", js: "guidance", typ: "" },
@@ -9258,12 +8546,6 @@ const typeMap: any = {
         { json: "review_id", js: "review_id", typ: "" },
         { json: "viewed_files", js: "viewed_files", typ: a("") },
     ], "any"),
-    "SendDispatchMessage": o([
-        { json: "cmd", js: "cmd", typ: r("SendDispatchMessageCmd") },
-        { json: "content", js: "content", typ: "" },
-        { json: "dispatch_id", js: "dispatch_id", typ: "" },
-        { json: "source_session_id", js: "source_session_id", typ: "" },
-    ], "any"),
     "Session": o([
         { json: "agent", js: "agent", typ: "" },
         { json: "branch", js: "branch", typ: u(undefined, "") },
@@ -9415,12 +8697,6 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("StopReviewLoopMessageCmd") },
         { json: "session_id", js: "session_id", typ: "" },
     ], "any"),
-    "SubmitDispatchOutcomeMessage": o([
-        { json: "cmd", js: "cmd", typ: r("SubmitDispatchOutcomeMessageCmd") },
-        { json: "report", js: "report", typ: "" },
-        { json: "source_session_id", js: "source_session_id", typ: "" },
-        { json: "structured_report", js: "structured_report", typ: r("Report") },
-    ], "any"),
     "SubscribeGitStatusMessage": o([
         { json: "cmd", js: "cmd", typ: r("SubscribeGitStatusMessageCmd") },
         { json: "directory", js: "directory", typ: "" },
@@ -9563,19 +8839,6 @@ const typeMap: any = {
         { json: "profile", js: "profile", typ: u(undefined, "") },
         { json: "ssh_target", js: "ssh_target", typ: u(undefined, "") },
     ], "any"),
-    "WakeDispatchAgentMessage": o([
-        { json: "cmd", js: "cmd", typ: r("WakeDispatchAgentMessageCmd") },
-        { json: "dispatch_id", js: "dispatch_id", typ: "" },
-        { json: "request_id", js: "request_id", typ: "" },
-        { json: "source_session_id", js: "source_session_id", typ: "" },
-    ], "any"),
-    "WakeDispatchAgentResultMessage": o([
-        { json: "dispatch_id", js: "dispatch_id", typ: "" },
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("WakeDispatchAgentResultMessageEvent") },
-        { json: "request_id", js: "request_id", typ: "" },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
     "WebSocketEvent": o([
         { json: "action", js: "action", typ: u(undefined, "") },
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
@@ -9583,8 +8846,6 @@ const typeMap: any = {
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "branches", js: "branches", typ: u(undefined, a(r("BranchElement"))) },
         { json: "chief_of_staff", js: "chief_of_staff", typ: u(undefined, true) },
-        { json: "chief_of_staff_dispatch", js: "chief_of_staff_dispatch", typ: u(undefined, r("ChiefOfStaffDispatchElement")) },
-        { json: "chief_of_staff_dispatches", js: "chief_of_staff_dispatches", typ: u(undefined, a(r("ChiefOfStaffDispatchElement"))) },
         { json: "cloned", js: "cloned", typ: u(undefined, true) },
         { json: "cmd", js: "cmd", typ: u(undefined, "") },
         { json: "cols", js: "cols", typ: u(undefined, 0) },
@@ -9593,8 +8854,6 @@ const typeMap: any = {
         { json: "data", js: "data", typ: u(undefined, "") },
         { json: "directory", js: "directory", typ: u(undefined, "") },
         { json: "dirty", js: "dirty", typ: u(undefined, true) },
-        { json: "dispatch_message", js: "dispatch_message", typ: u(undefined, r("DispatchMessageObject")) },
-        { json: "dispatch_messages", js: "dispatch_messages", typ: u(undefined, a(r("DispatchMessageObject"))) },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: "" },
         { json: "exit_code", js: "exit_code", typ: u(undefined, 0) },
@@ -10017,9 +9276,6 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("WorktreesUpdatedMessageEvent") },
         { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
     ], "any"),
-    "AcknowledgeDispatchMessageCmd": [
-        "acknowledge_dispatch_message",
-    ],
     "AddCommentMessageCmd": [
         "add_comment",
     ],
@@ -10087,27 +9343,6 @@ const typeMap: any = {
     ],
     "BrowserControlResultMessageCmd": [
         "browser_control_result",
-    ],
-    "DispatchReportType": [
-        "blocker",
-        "completion",
-        "failure",
-        "handoff",
-        "progress",
-    ],
-    "DispatchRequestStatus": [
-        "pending",
-        "resolved",
-    ],
-    "DispatchWorkState": [
-        "completed",
-        "failed",
-        "in_progress",
-        "needs_input",
-        "ready_for_review",
-    ],
-    "ChiefOfStaffDispatchesUpdatedMessageEvent": [
-        "chief_of_staff_dispatches_updated",
     ],
     "ChiefOfStaffResultMessageEvent": [
         "chief_of_staff_result",
@@ -10244,9 +9479,6 @@ const typeMap: any = {
     "GetDefaultBranchResultMessageEvent": [
         "get_default_branch_result",
     ],
-    "GetDispatchMessageCmd": [
-        "get_dispatch",
-    ],
     "GetFileDiffMessageCmd": [
         "get_file_diff",
     ],
@@ -10300,9 +9532,6 @@ const typeMap: any = {
     "GitStatusUpdateMessageEvent": [
         "git_status_update",
     ],
-    "HandoffDispatchMessageCmd": [
-        "handoff_dispatch",
-    ],
     "HeartbeatMessageCmd": [
         "heartbeat",
     ],
@@ -10350,12 +9579,6 @@ const typeMap: any = {
     ],
     "ListBranchesMessageCmd": [
         "list_branches",
-    ],
-    "ListDispatchesMessageCmd": [
-        "list_dispatches",
-    ],
-    "ListDispatchMessagesMessageCmd": [
-        "list_dispatch_messages",
     ],
     "ListEndpointsMessageCmd": [
         "list_endpoints",
@@ -10498,9 +9721,6 @@ const typeMap: any = {
     "RateLimitedMessageEvent": [
         "rate_limited",
     ],
-    "ReadDispatchMessageCmd": [
-        "read_dispatch_message",
-    ],
     "RecentLocationsResultMessageEvent": [
         "recent_locations_result",
     ],
@@ -10539,9 +9759,6 @@ const typeMap: any = {
     ],
     "ResolveCommentResultMessageEvent": [
         "resolve_comment_result",
-    ],
-    "ResolveDispatchRequestMessageCmd": [
-        "resolve_dispatch_request",
     ],
     "ReviewLoopDecision": [
         "continue",
@@ -10594,9 +9811,6 @@ const typeMap: any = {
     "ReviewLoopUpdatedMessageEvent": [
         "review_loop_updated",
     ],
-    "SendDispatchMessageCmd": [
-        "send_dispatch_message",
-    ],
     "SessionExitedMessageEvent": [
         "session_exited",
     ],
@@ -10642,6 +9856,13 @@ const typeMap: any = {
     "SetTicketStatusMessageCmd": [
         "set_ticket_status",
     ],
+    "DispatchWorkState": [
+        "completed",
+        "failed",
+        "in_progress",
+        "needs_input",
+        "ready_for_review",
+    ],
     "SettingsUpdatedMessageEvent": [
         "settings_updated",
     ],
@@ -10665,9 +9886,6 @@ const typeMap: any = {
     ],
     "StopReviewLoopMessageCmd": [
         "stop_review_loop",
-    ],
-    "SubmitDispatchOutcomeMessageCmd": [
-        "submit_dispatch_outcome",
     ],
     "SubscribeGitStatusMessageCmd": [
         "subscribe_git_status",
@@ -10716,12 +9934,6 @@ const typeMap: any = {
     ],
     "UpdateEndpointMessageCmd": [
         "update_endpoint",
-    ],
-    "WakeDispatchAgentMessageCmd": [
-        "wake_dispatch_agent",
-    ],
-    "WakeDispatchAgentResultMessageEvent": [
-        "wake_dispatch_agent_result",
     ],
     "WorkflowActionResultMessageEvent": [
         "workflow_action_result",

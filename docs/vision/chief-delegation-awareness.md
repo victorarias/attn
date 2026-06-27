@@ -1,5 +1,13 @@
 # Vision: The chief in the loop
 
+> **Implementation note.** The "why" below is the durable goal. The implementation
+> shipped as the **ticket** model (the work-tracker epic — see
+> [docs/plans/2026-06-26-work-tracker.md](../plans/2026-06-26-work-tracker.md) and the
+> Ticket entry in [docs/glossary.md](../glossary.md)), which **superseded** the
+> `dispatch`-based approach sketched in the roadmap checkboxes further down. References
+> to `attn dispatch …`, `internal/dispatch`, the dispatch mailbox, and `.attn/raw/dispatches`
+> below are historical: that surface was retired once delegated work moved onto tickets.
+
 ## End state (the why)
 
 The chief of staff stops being a switchboard. Today it can fire work into the

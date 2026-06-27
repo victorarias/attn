@@ -119,7 +119,7 @@ Your agents can work as a team, not just side by side:
 
 - **Shared workspace context** — a living brief agents read and keep current, so a new session orients itself without you re-explaining the task.
 - **Delegation** — an agent can spin up a fresh, visible session with a focused brief (`attn delegate`) instead of cramming everything into one context.
-- **Chief of staff** — promote one session to track and hand off work to the agents it delegates, through a dispatch + mailbox you watch from the dashboard.
+- **Chief of staff** — promote one session to track and hand off work to the agents it delegates; each delegation gets a **ticket** you watch from the dashboard and ticket board.
 - **In-app browser** — `attn browser open <url>` docks a real browser an agent can drive; log in once and it persists.
 
 ## How it works

@@ -152,7 +152,7 @@ the only evidence that you succeeded — make sure the write lands.`
 // section 8; the removal-pass knowledge-base archive step is added from
 // docs/plans/2026-06-18-knowledge-base.md (PR3) and is the source of truth for its
 // exact wording. The absolute INPUT/OUTPUT path block (WORKSPACE_TITLE, WORKSPACE_ID,
-// CONTEXT_SNAPSHOT_PATH, RAW_SESSIONS_DIR, RAW_DISPATCHES_DIR, TRANSCRIPT_PATHS,
+// CONTEXT_SNAPSHOT_PATH, RAW_SESSIONS_DIR, TRANSCRIPT_PATHS,
 // JOURNAL_PATH, JOURNAL_DIR, KNOWLEDGE_DIR, IS_REMOVAL_PASS) is appended by
 // buildNarrateWorkspacePrompt.
 const narrateWorkspacePromptBrief = `You are the attn keeper, narrating this workspace's work into the journal. The
@@ -174,8 +174,6 @@ INPUTS (absolute paths, given to you below this brief):
   removal pass this is the final snapshot. THIS IS SALIENCE, NOT TRUTH (see below).
 - RAW_SESSIONS_DIR: directory of per-session digests for this workspace's sessions
   (files named <sessionId>.md). Read these.
-- RAW_DISPATCHES_DIR: directory of per-dispatch outcome files for terminal
-  chief-of-staff dispatches (may be empty). Read these for delegated-work outcomes.
 - TRANSCRIPT_PATHS: absolute paths to the underlying session transcripts, available
   if you need to verify a claim or resolve a divergence at the source.
 - JOURNAL_PATH: today's curated journal file — journal/<today>.md — the file you
@@ -196,7 +194,7 @@ INPUTS (absolute paths, given to you below this brief):
    constraints they set, the current picture. LEAD WITH IT for salience: it tells
    you where to point your attention.
 
-2. Read every digest in RAW_SESSIONS_DIR and every file in RAW_DISPATCHES_DIR. These
+2. Read every digest in RAW_SESSIONS_DIR. These
    are the grounded raw record (each digest already separates tool-result truth from
    agent claims; respect that tiering — do not promote a "claimed, unconfirmed"
    item to a shipped fact).
@@ -212,8 +210,8 @@ INPUTS (absolute paths, given to you below this brief):
    a short-lived workspace removed before any daily pass ran), there is no prior
    history to continue — write a self-contained entry from the raw inputs alone. On a
    removal pass with no prior entries, the retrospective IS the whole story told once,
-   not a continuation; build it entirely from CONTEXT_SNAPSHOT_PATH + the digests +
-   the dispatch outcomes. Never block or skip the write because prior history is
+   not a continuation; build it entirely from CONTEXT_SNAPSHOT_PATH + the session
+   digests. Never block or skip the write because prior history is
    missing — missing history is the common short-workspace case, not an error.
 
 4. Only open TRANSCRIPT_PATHS when you need to verify a specific claim or chase a
@@ -223,7 +221,7 @@ INPUTS (absolute paths, given to you below this brief):
 
 context.md is the editorial OVERLAY — it tells you what people CARED about, which is
 where to aim. But it is ephemeral, sometimes aspirational, and sometimes wrong. The
-session digests and dispatch outcomes (grounded in tool results) are the TRUTH. Your
+session digests (grounded in tool results) are the TRUTH. Your
 craft is to reconcile the two and SURFACE THE DIVERGENCE, because the gaps are the
 most valuable thing in a work-journal:
 
@@ -378,7 +376,6 @@ type narrateWorkspacePromptInputs struct {
 	WorkspaceID         string
 	ContextSnapshotPath string
 	RawSessionsDir      string
-	RawDispatchesDir    string
 	TranscriptPaths     []string
 	JournalPath         string
 	JournalDir          string
@@ -397,7 +394,6 @@ func buildNarrateWorkspacePrompt(in narrateWorkspacePromptInputs) string {
 	fmt.Fprintf(&b, "WORKSPACE_ID: %s\n", in.WorkspaceID)
 	fmt.Fprintf(&b, "CONTEXT_SNAPSHOT_PATH: %s\n", in.ContextSnapshotPath)
 	fmt.Fprintf(&b, "RAW_SESSIONS_DIR: %s\n", in.RawSessionsDir)
-	fmt.Fprintf(&b, "RAW_DISPATCHES_DIR: %s\n", in.RawDispatchesDir)
 	if len(in.TranscriptPaths) == 0 {
 		b.WriteString("TRANSCRIPT_PATHS: (none resolved)\n")
 	} else {

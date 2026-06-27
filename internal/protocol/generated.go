@@ -2,20 +2,6 @@
 
 package protocol
 
-type AcknowledgeDispatchMessage struct {
-	// Acknowledgement corresponds to the JSON schema field "acknowledgement".
-	Acknowledgement *string `json:"acknowledgement,omitempty,omitzero"`
-
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// MessageID corresponds to the JSON schema field "message_id".
-	MessageID string `json:"message_id"`
-
-	// SourceSessionID corresponds to the JSON schema field "source_session_id".
-	SourceSessionID string `json:"source_session_id"`
-}
-
 type AddCommentMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -394,76 +380,6 @@ type BrowserControlResultMessage struct {
 	Success bool `json:"success"`
 }
 
-type ChiefOfStaffDispatch struct {
-	// Actionable corresponds to the JSON schema field "actionable".
-	Actionable *bool `json:"actionable,omitempty,omitzero"`
-
-	// Agent corresponds to the JSON schema field "agent".
-	Agent string `json:"agent"`
-
-	// Branch corresponds to the JSON schema field "branch".
-	Branch *string `json:"branch,omitempty,omitzero"`
-
-	// Brief corresponds to the JSON schema field "brief".
-	Brief string `json:"brief"`
-
-	// ChiefSessionID corresponds to the JSON schema field "chief_session_id".
-	ChiefSessionID string `json:"chief_session_id"`
-
-	// ClosedState corresponds to the JSON schema field "closed_state".
-	ClosedState *string `json:"closed_state,omitempty,omitzero"`
-
-	// ConciseSummary corresponds to the JSON schema field "concise_summary".
-	ConciseSummary *string `json:"concise_summary,omitempty,omitzero"`
-
-	// CreatedAt corresponds to the JSON schema field "created_at".
-	CreatedAt string `json:"created_at"`
-
-	// Directory corresponds to the JSON schema field "directory".
-	Directory string `json:"directory"`
-
-	// ID corresponds to the JSON schema field "id".
-	ID string `json:"id"`
-
-	// Label corresponds to the JSON schema field "label".
-	Label string `json:"label"`
-
-	// LatestReport corresponds to the JSON schema field "latest_report".
-	LatestReport *string `json:"latest_report,omitempty,omitzero"`
-
-	// ReportedAt corresponds to the JSON schema field "reported_at".
-	ReportedAt *string `json:"reported_at,omitempty,omitzero"`
-
-	// SessionID corresponds to the JSON schema field "session_id".
-	SessionID string `json:"session_id"`
-
-	// Status corresponds to the JSON schema field "status".
-	Status string `json:"status"`
-
-	// StatusSince corresponds to the JSON schema field "status_since".
-	StatusSince string `json:"status_since"`
-
-	// StructuredReport corresponds to the JSON schema field "structured_report".
-	StructuredReport *DispatchReport `json:"structured_report,omitempty,omitzero"`
-
-	// UnreadMessageCount corresponds to the JSON schema field "unread_message_count".
-	UnreadMessageCount *int `json:"unread_message_count,omitempty,omitzero"`
-
-	// UpdatedAt corresponds to the JSON schema field "updated_at".
-	UpdatedAt string `json:"updated_at"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
-}
-
-type ChiefOfStaffDispatchesUpdatedMessage struct {
-	// Dispatches corresponds to the JSON schema field "dispatches".
-	Dispatches []ChiefOfStaffDispatch `json:"dispatches"`
-
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-}
-
 type ChiefOfStaffResultMessage struct {
 	// ChiefOfStaff corresponds to the JSON schema field "chief_of_staff".
 	ChiefOfStaff bool `json:"chief_of_staff"`
@@ -634,9 +550,6 @@ type DelegateResult struct {
 	// Directory corresponds to the JSON schema field "directory".
 	Directory string `json:"directory"`
 
-	// DispatchID corresponds to the JSON schema field "dispatch_id".
-	DispatchID *string `json:"dispatch_id,omitempty,omitzero"`
-
 	// Placement corresponds to the JSON schema field "placement".
 	Placement string `json:"placement"`
 
@@ -748,152 +661,6 @@ type DirectoryEntry struct {
 
 	// Path corresponds to the JSON schema field "path".
 	Path string `json:"path"`
-}
-
-type DispatchArtifact struct {
-	// Branch corresponds to the JSON schema field "branch".
-	Branch *string `json:"branch,omitempty,omitzero"`
-
-	// Description corresponds to the JSON schema field "description".
-	Description *string `json:"description,omitempty,omitzero"`
-
-	// Dirty corresponds to the JSON schema field "dirty".
-	Dirty *bool `json:"dirty,omitempty,omitzero"`
-
-	// Identity corresponds to the JSON schema field "identity".
-	Identity string `json:"identity"`
-
-	// Revision corresponds to the JSON schema field "revision".
-	Revision *string `json:"revision,omitempty,omitzero"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
-}
-
-type DispatchDecisionRequest struct {
-	// Consequence corresponds to the JSON schema field "consequence".
-	Consequence *string `json:"consequence,omitempty,omitzero"`
-
-	// ExpectedResponder corresponds to the JSON schema field "expected_responder".
-	ExpectedResponder string `json:"expected_responder"`
-
-	// Question corresponds to the JSON schema field "question".
-	Question string `json:"question"`
-
-	// Recommendation corresponds to the JSON schema field "recommendation".
-	Recommendation *string `json:"recommendation,omitempty,omitzero"`
-
-	// ResolutionLink corresponds to the JSON schema field "resolution_link".
-	ResolutionLink *string `json:"resolution_link,omitempty,omitzero"`
-
-	// RespondedAt corresponds to the JSON schema field "responded_at".
-	RespondedAt *string `json:"responded_at,omitempty,omitzero"`
-
-	// RespondedBy corresponds to the JSON schema field "responded_by".
-	RespondedBy *string `json:"responded_by,omitempty,omitzero"`
-
-	// Response corresponds to the JSON schema field "response".
-	Response *string `json:"response,omitempty,omitzero"`
-
-	// Status corresponds to the JSON schema field "status".
-	Status DispatchRequestStatus `json:"status"`
-}
-
-type DispatchMessage struct {
-	// AcknowledgedAt corresponds to the JSON schema field "acknowledged_at".
-	AcknowledgedAt *string `json:"acknowledged_at,omitempty,omitzero"`
-
-	// Acknowledgement corresponds to the JSON schema field "acknowledgement".
-	Acknowledgement *string `json:"acknowledgement,omitempty,omitzero"`
-
-	// Content corresponds to the JSON schema field "content".
-	Content string `json:"content"`
-
-	// CreatedAt corresponds to the JSON schema field "created_at".
-	CreatedAt string `json:"created_at"`
-
-	// DispatchID corresponds to the JSON schema field "dispatch_id".
-	DispatchID string `json:"dispatch_id"`
-
-	// ID corresponds to the JSON schema field "id".
-	ID string `json:"id"`
-
-	// ReadAt corresponds to the JSON schema field "read_at".
-	ReadAt *string `json:"read_at,omitempty,omitzero"`
-
-	// SenderSessionID corresponds to the JSON schema field "sender_session_id".
-	SenderSessionID string `json:"sender_session_id"`
-
-	// TargetSessionID corresponds to the JSON schema field "target_session_id".
-	TargetSessionID string `json:"target_session_id"`
-}
-
-type DispatchReport struct {
-	// Artifact corresponds to the JSON schema field "artifact".
-	Artifact *DispatchArtifact `json:"artifact,omitempty,omitzero"`
-
-	// Constraints corresponds to the JSON schema field "constraints".
-	Constraints []string `json:"constraints,omitempty,omitzero"`
-
-	// NextAction corresponds to the JSON schema field "next_action".
-	NextAction *string `json:"next_action,omitempty,omitzero"`
-
-	// NextActor corresponds to the JSON schema field "next_actor".
-	NextActor *string `json:"next_actor,omitempty,omitzero"`
-
-	// RemainingScope corresponds to the JSON schema field "remaining_scope".
-	RemainingScope []string `json:"remaining_scope,omitempty,omitzero"`
-
-	// ReportType corresponds to the JSON schema field "report_type".
-	ReportType DispatchReportType `json:"report_type"`
-
-	// ReportedAt corresponds to the JSON schema field "reported_at".
-	ReportedAt string `json:"reported_at"`
-
-	// Request corresponds to the JSON schema field "request".
-	Request *DispatchDecisionRequest `json:"request,omitempty,omitzero"`
-
-	// Summary corresponds to the JSON schema field "summary".
-	Summary string `json:"summary"`
-
-	// Verification corresponds to the JSON schema field "verification".
-	Verification []DispatchVerification `json:"verification,omitempty,omitzero"`
-
-	// WorkState corresponds to the JSON schema field "work_state".
-	WorkState DispatchWorkState `json:"work_state"`
-}
-
-type DispatchReportType string
-
-const DispatchReportTypeBlocker DispatchReportType = "blocker"
-const DispatchReportTypeCompletion DispatchReportType = "completion"
-const DispatchReportTypeFailure DispatchReportType = "failure"
-const DispatchReportTypeHandoff DispatchReportType = "handoff"
-const DispatchReportTypeProgress DispatchReportType = "progress"
-
-type DispatchRequestStatus string
-
-const DispatchRequestStatusPending DispatchRequestStatus = "pending"
-const DispatchRequestStatusResolved DispatchRequestStatus = "resolved"
-
-type DispatchVerification struct {
-	// Actor corresponds to the JSON schema field "actor".
-	Actor string `json:"actor"`
-
-	// ArtifactIdentity corresponds to the JSON schema field "artifact_identity".
-	ArtifactIdentity string `json:"artifact_identity"`
-
-	// Current corresponds to the JSON schema field "current".
-	Current *bool `json:"current,omitempty,omitzero"`
-
-	// Result corresponds to the JSON schema field "result".
-	Result string `json:"result"`
-
-	// Target corresponds to the JSON schema field "target".
-	Target string `json:"target"`
-
-	// Timestamp corresponds to the JSON schema field "timestamp".
-	Timestamp string `json:"timestamp"`
 }
 
 type DispatchWorkState string
@@ -1330,14 +1097,6 @@ type GetDefaultBranchResultMessage struct {
 	Success bool `json:"success"`
 }
 
-type GetDispatchMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// SourceSessionID corresponds to the JSON schema field "source_session_id".
-	SourceSessionID string `json:"source_session_id"`
-}
-
 type GetFileDiffMessage struct {
 	// BaseRef corresponds to the JSON schema field "base_ref".
 	BaseRef *string `json:"base_ref,omitempty,omitzero"`
@@ -1623,26 +1382,6 @@ type GitStatusUpdateMessage struct {
 	Untracked []GitFileChange `json:"untracked"`
 }
 
-type HandoffDispatchMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Content corresponds to the JSON schema field "content".
-	Content string `json:"content"`
-
-	// Report corresponds to the JSON schema field "report".
-	Report *string `json:"report,omitempty,omitzero"`
-
-	// SourceSessionID corresponds to the JSON schema field "source_session_id".
-	SourceSessionID string `json:"source_session_id"`
-
-	// StructuredReport corresponds to the JSON schema field "structured_report".
-	StructuredReport DispatchReport `json:"structured_report"`
-
-	// To corresponds to the JSON schema field "to".
-	To string `json:"to"`
-}
-
 type HeartbeatMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1660,10 +1399,6 @@ const HeatStateWarm HeatState = "warm"
 type InitialStateMessage struct {
 	// Authors corresponds to the JSON schema field "authors".
 	Authors []AuthorState `json:"authors,omitempty,omitzero"`
-
-	// ChiefOfStaffDispatches corresponds to the JSON schema field
-	// "chief_of_staff_dispatches".
-	ChiefOfStaffDispatches []ChiefOfStaffDispatch `json:"chief_of_staff_dispatches,omitempty,omitzero"`
 
 	// DaemonInstanceID corresponds to the JSON schema field "daemon_instance_id".
 	DaemonInstanceID *string `json:"daemon_instance_id,omitempty,omitzero"`
@@ -1780,28 +1515,6 @@ type ListBranchesMessage struct {
 
 	// MainRepo corresponds to the JSON schema field "main_repo".
 	MainRepo string `json:"main_repo"`
-}
-
-type ListDispatchMessagesMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// DispatchID corresponds to the JSON schema field "dispatch_id".
-	DispatchID *string `json:"dispatch_id,omitempty,omitzero"`
-
-	// SourceSessionID corresponds to the JSON schema field "source_session_id".
-	SourceSessionID string `json:"source_session_id"`
-
-	// UnreadOnly corresponds to the JSON schema field "unread_only".
-	UnreadOnly *bool `json:"unread_only,omitempty,omitzero"`
-}
-
-type ListDispatchesMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// SourceSessionID corresponds to the JSON schema field "source_session_id".
-	SourceSessionID string `json:"source_session_id"`
 }
 
 type ListEndpointsMessage struct {
@@ -2590,17 +2303,6 @@ type RateLimitedMessage struct {
 	RateLimitResource string `json:"rate_limit_resource"`
 }
 
-type ReadDispatchMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// MessageID corresponds to the JSON schema field "message_id".
-	MessageID string `json:"message_id"`
-
-	// SourceSessionID corresponds to the JSON schema field "source_session_id".
-	SourceSessionID string `json:"source_session_id"`
-}
-
 type RecentLocation struct {
 	// LastSeen corresponds to the JSON schema field "last_seen".
 	LastSeen string `json:"last_seen"`
@@ -2823,46 +2525,15 @@ type ResolveCommentResultMessage struct {
 	Success bool `json:"success"`
 }
 
-type ResolveDispatchRequestMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// DispatchID corresponds to the JSON schema field "dispatch_id".
-	DispatchID string `json:"dispatch_id"`
-
-	// ResolutionLink corresponds to the JSON schema field "resolution_link".
-	ResolutionLink *string `json:"resolution_link,omitempty,omitzero"`
-
-	// Response corresponds to the JSON schema field "response".
-	Response string `json:"response"`
-
-	// SourceSessionID corresponds to the JSON schema field "source_session_id".
-	SourceSessionID string `json:"source_session_id"`
-}
-
 type Response struct {
 	// Authors corresponds to the JSON schema field "authors".
 	Authors []AuthorState `json:"authors,omitempty,omitzero"`
-
-	// ChiefOfStaffDispatch corresponds to the JSON schema field
-	// "chief_of_staff_dispatch".
-	ChiefOfStaffDispatch *ChiefOfStaffDispatch `json:"chief_of_staff_dispatch,omitempty,omitzero"`
-
-	// ChiefOfStaffDispatches corresponds to the JSON schema field
-	// "chief_of_staff_dispatches".
-	ChiefOfStaffDispatches []ChiefOfStaffDispatch `json:"chief_of_staff_dispatches,omitempty,omitzero"`
 
 	// Data corresponds to the JSON schema field "data".
 	Data *string `json:"data,omitempty,omitzero"`
 
 	// DelegateResult corresponds to the JSON schema field "delegate_result".
 	DelegateResult *DelegateResult `json:"delegate_result,omitempty,omitzero"`
-
-	// DispatchMessage corresponds to the JSON schema field "dispatch_message".
-	DispatchMessage *DispatchMessage `json:"dispatch_message,omitempty,omitzero"`
-
-	// DispatchMessages corresponds to the JSON schema field "dispatch_messages".
-	DispatchMessages []DispatchMessage `json:"dispatch_messages,omitempty,omitzero"`
 
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
@@ -3238,20 +2909,6 @@ type ReviewState struct {
 	ViewedFiles []string `json:"viewed_files"`
 }
 
-type SendDispatchMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Content corresponds to the JSON schema field "content".
-	Content string `json:"content"`
-
-	// DispatchID corresponds to the JSON schema field "dispatch_id".
-	DispatchID string `json:"dispatch_id"`
-
-	// SourceSessionID corresponds to the JSON schema field "source_session_id".
-	SourceSessionID string `json:"source_session_id"`
-}
-
 type Session struct {
 	// Agent corresponds to the JSON schema field "agent".
 	Agent string `json:"agent"`
@@ -3620,20 +3277,6 @@ type StopReviewLoopMessage struct {
 	SessionID string `json:"session_id"`
 }
 
-type SubmitDispatchOutcomeMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Report corresponds to the JSON schema field "report".
-	Report string `json:"report"`
-
-	// SourceSessionID corresponds to the JSON schema field "source_session_id".
-	SourceSessionID string `json:"source_session_id"`
-
-	// StructuredReport corresponds to the JSON schema field "structured_report".
-	StructuredReport DispatchReport `json:"structured_report"`
-}
-
 type SubscribeGitStatusMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -3989,37 +3632,6 @@ type UpdateEndpointMessage struct {
 	SshTarget *string `json:"ssh_target,omitempty,omitzero"`
 }
 
-type WakeDispatchAgentMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// DispatchID corresponds to the JSON schema field "dispatch_id".
-	DispatchID string `json:"dispatch_id"`
-
-	// RequestID corresponds to the JSON schema field "request_id".
-	RequestID string `json:"request_id"`
-
-	// SourceSessionID corresponds to the JSON schema field "source_session_id".
-	SourceSessionID string `json:"source_session_id"`
-}
-
-type WakeDispatchAgentResultMessage struct {
-	// DispatchID corresponds to the JSON schema field "dispatch_id".
-	DispatchID string `json:"dispatch_id"`
-
-	// Error corresponds to the JSON schema field "error".
-	Error *string `json:"error,omitempty,omitzero"`
-
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// RequestID corresponds to the JSON schema field "request_id".
-	RequestID string `json:"request_id"`
-
-	// Success corresponds to the JSON schema field "success".
-	Success bool `json:"success"`
-}
-
 type WebSocketEvent struct {
 	// Action corresponds to the JSON schema field "action".
 	Action *string `json:"action,omitempty,omitzero"`
@@ -4038,14 +3650,6 @@ type WebSocketEvent struct {
 
 	// ChiefOfStaff corresponds to the JSON schema field "chief_of_staff".
 	ChiefOfStaff *bool `json:"chief_of_staff,omitempty,omitzero"`
-
-	// ChiefOfStaffDispatch corresponds to the JSON schema field
-	// "chief_of_staff_dispatch".
-	ChiefOfStaffDispatch *ChiefOfStaffDispatch `json:"chief_of_staff_dispatch,omitempty,omitzero"`
-
-	// ChiefOfStaffDispatches corresponds to the JSON schema field
-	// "chief_of_staff_dispatches".
-	ChiefOfStaffDispatches []ChiefOfStaffDispatch `json:"chief_of_staff_dispatches,omitempty,omitzero"`
 
 	// Cloned corresponds to the JSON schema field "cloned".
 	Cloned *bool `json:"cloned,omitempty,omitzero"`
@@ -4070,12 +3674,6 @@ type WebSocketEvent struct {
 
 	// Dirty corresponds to the JSON schema field "dirty".
 	Dirty *bool `json:"dirty,omitempty,omitzero"`
-
-	// DispatchMessage corresponds to the JSON schema field "dispatch_message".
-	DispatchMessage *DispatchMessage `json:"dispatch_message,omitempty,omitzero"`
-
-	// DispatchMessages corresponds to the JSON schema field "dispatch_messages".
-	DispatchMessages []DispatchMessage `json:"dispatch_messages,omitempty,omitzero"`
 
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
