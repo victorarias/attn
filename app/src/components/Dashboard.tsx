@@ -44,6 +44,8 @@ interface DashboardProps {
   onRebootstrapEndpoint?: (endpointId: string) => Promise<void>;
   onSelectSession: (id: string) => void;
   onWakeDispatch?: (sourceSessionId: string, dispatchId: string) => Promise<void>;
+  // Open the detail view for the ticket bound to a delegated session.
+  onOpenTicketDetail?: (ticketId: string) => void;
   onNewSession: () => void;
   onRefreshPRs?: () => void;
   onOpenPR?: (pr: DaemonPR) => void;
@@ -77,6 +79,7 @@ export function Dashboard({
   onRebootstrapEndpoint,
   onSelectSession,
   onWakeDispatch,
+  onOpenTicketDetail,
   onNewSession,
   onRefreshPRs,
   onOpenPR,
@@ -126,7 +129,7 @@ export function Dashboard({
   const [wakingDispatches, setWakingDispatches] = useState<Set<string>>(new Set());
   const [wakeErrors, setWakeErrors] = useState<Record<string, string>>({});
   const { sendMuteRepo, sendPRVisited } = useDaemonContext();
-  const { chiefOfStaffDispatches } = useDaemonStore();
+  const { chiefOfStaffDispatches, tickets } = useDaemonStore();
   const visibleDispatches = chiefOfStaffDispatches.filter((dispatch) =>
     dispatchSessions.some((session) => session.id === dispatch.session_id)
   );
@@ -157,6 +160,9 @@ export function Dashboard({
     );
     const isWaking = wakingDispatches.has(dispatch.id);
     const wakeError = wakeErrors[dispatch.id];
+    // The ticket bound to this delegated session (assignee == session id). The
+    // detail view opens from here — the "from a session" entry point.
+    const boundTicket = tickets.find((ticket) => ticket.assignee === dispatch.session_id);
 
     const wakeAgent = async () => {
       if (!canWake || !chiefSession || !onWakeDispatch) return;
@@ -245,6 +251,19 @@ export function Dashboard({
           </span>
           <span className="dispatch-open-hint" aria-hidden="true">›</span>
         </button>
+        {boundTicket && onOpenTicketDetail && (
+          <div className="dispatch-ticket">
+            <button
+              type="button"
+              className="dispatch-ticket-link"
+              data-testid={`dispatch-ticket-link-${boundTicket.id}`}
+              title="Open the work-tracker ticket for this delegated session"
+              onClick={() => onOpenTicketDetail(boundTicket.id)}
+            >
+              View ticket
+            </button>
+          </div>
+        )}
         {unreadCount > 0 && (
           <div className="dispatch-mailbox">
             <span className="dispatch-unread">

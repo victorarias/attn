@@ -1,0 +1,200 @@
+.ticket-detail-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-bg-panel);
+  color: var(--color-text-primary);
+}
+
+.ticket-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ticket-detail-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ticket-detail-title {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  word-break: break-word;
+}
+
+.ticket-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.ticket-detail-id {
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-tertiary);
+}
+
+.ticket-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+}
+
+.ticket-status-working { color: var(--color-accent); border-color: var(--color-accent); }
+.ticket-status-blocked,
+.ticket-status-failed,
+.ticket-status-crashed { color: var(--color-error); border-color: var(--color-error); }
+.ticket-status-done { color: var(--color-text-muted); }
+
+.ticket-detail-close {
+  flex-shrink: 0;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-button);
+  color: var(--color-text-secondary);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+}
+
+.ticket-detail-close:hover {
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+}
+
+.ticket-detail-error {
+  margin: 12px 20px 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--color-error);
+  color: var(--color-error);
+  font-size: var(--font-size-sm);
+}
+
+.ticket-detail-loading {
+  padding: 24px 20px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.ticket-detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.ticket-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ticket-section-label {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-tertiary);
+}
+
+.ticket-detail-description {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
+
+.ticket-detail-empty {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-dimmed);
+  font-style: italic;
+}
+
+.ticket-activity-list,
+.ticket-attachment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ticket-activity-entry {
+  border-left: 2px solid var(--color-border);
+  padding-left: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ticket-activity-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--font-size-sm);
+}
+
+.ticket-activity-author {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.ticket-activity-move {
+  color: var(--color-text-muted);
+}
+
+.ticket-activity-when {
+  margin-left: auto;
+  color: var(--color-text-dimmed);
+  font-size: var(--font-size-xs);
+}
+
+.ticket-activity-comment {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+}
+
+.ticket-attachment {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ticket-attachment-name {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.ticket-attachment-note {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}

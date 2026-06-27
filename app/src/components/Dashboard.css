@@ -575,6 +575,27 @@
   font-size: var(--font-size-xs);
 }
 
+.dispatch-ticket {
+  display: flex;
+  padding: 0 12px 10px;
+}
+
+.dispatch-ticket-link {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  padding: 3px 7px;
+}
+
+.dispatch-ticket-link:hover {
+  border-color: var(--color-text-dimmed);
+  color: var(--color-text-primary);
+}
+
 .session-group {
   margin-bottom: 16px;
 }

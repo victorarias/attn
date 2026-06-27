@@ -14,6 +14,7 @@ import { CloseSessionPrompt } from './components/CloseSessionPrompt';
 import { ChiefOfStaffTransferPrompt } from './components/ChiefOfStaffTransferPrompt';
 import { ChangesPanel } from './components/ChangesPanel';
 import { DiffDetailPanel } from './components/DiffDetailPanel';
+import { TicketDetailPanel } from './components/TicketDetailPanel';
 import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
 import { WorkflowRunView } from './components/WorkflowRunView';
 import {
@@ -326,6 +327,7 @@ function App() {
     daemonSessions,
     setDaemonSessions,
     setChiefOfStaffDispatches,
+    setTickets,
     prs,
     setPRs,
     setRepoStates,
@@ -531,6 +533,7 @@ function App() {
     listWorkflowRuns,
     getWorkflowRun,
     getReviewState,
+    fetchTicket,
     markFileViewed,
     sendAddComment,
     sendUpdateComment,
@@ -556,6 +559,7 @@ function App() {
     // refetches the runner's list (the broadcast itself is payload-free).
     onNotebookTasksChanged: () => setNotebookTaskChangeSignal((n) => n + 1),
     onChiefOfStaffDispatchesUpdate: setChiefOfStaffDispatches,
+    onTicketsUpdate: setTickets,
     onWorkspacesUpdate: setDaemonWorkspaces,
     onPRsUpdate: setPRs,
     onEndpointsUpdate: setDaemonEndpoints,
@@ -689,6 +693,7 @@ function App() {
         listWorkflowRuns={listWorkflowRuns}
         getWorkflowRun={getWorkflowRun}
         getReviewState={getReviewState}
+        fetchTicket={fetchTicket}
         markFileViewed={markFileViewed}
         sendAddComment={sendAddComment}
         sendUpdateComment={sendUpdateComment}
@@ -805,6 +810,7 @@ interface AppContentProps {
   listWorkflowRuns: ReturnType<typeof useDaemonSocket>['listWorkflowRuns'];
   getWorkflowRun: ReturnType<typeof useDaemonSocket>['getWorkflowRun'];
   getReviewState: ReturnType<typeof useDaemonSocket>['getReviewState'];
+  fetchTicket: ReturnType<typeof useDaemonSocket>['fetchTicket'];
   markFileViewed: ReturnType<typeof useDaemonSocket>['markFileViewed'];
   sendAddComment: ReturnType<typeof useDaemonSocket>['sendAddComment'];
   sendUpdateComment: ReturnType<typeof useDaemonSocket>['sendUpdateComment'];
@@ -915,6 +921,7 @@ sendFetchPRDetails,
   listWorkflowRuns,
   getWorkflowRun,
   getReviewState,
+  fetchTicket,
   markFileViewed,
   sendAddComment,
   sendUpdateComment,
@@ -1071,7 +1078,7 @@ sendFetchPRDetails,
   const [workspaceContextsError, setWorkspaceContextsError] = useState<string | null>(null);
   const [workspaceContexts, setWorkspaceContexts] = useState<Awaited<ReturnType<typeof sendListWorkspaceContexts>>>([]);
   const whatsNew = useWhatsNew();
-  const { repoStates, authorStates } = useDaemonStore();
+  const { repoStates, authorStates, tickets } = useDaemonStore();
   const mutedRepos = useMemo(() =>
     repoStates.filter(r => r.muted).map(r => r.repo),
     [repoStates],
@@ -1284,7 +1291,7 @@ sendFetchPRDetails,
     void connect();
   }, [connect]);
 
-  type DockPanelId = 'diff' | 'reviewLoop' | 'workflowRun' | 'attention' | 'diffDetail';
+  type DockPanelId = 'diff' | 'reviewLoop' | 'workflowRun' | 'attention' | 'diffDetail' | 'ticketDetail';
 
   // Muted section expansion (controlled by Dashboard click)
   const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
@@ -1301,9 +1308,17 @@ sendFetchPRDetails,
         workflowRun: false,
         attention: false,
         diffDetail: false,
+        ticketDetail: false,
     },
     stack: ['diff'],
   });
+  // The ticket whose detail panel is open (null when none). Paired with the
+  // ticketDetail dock panel.
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
+  const selectedTicketRow = useMemo(
+    () => (selectedTicketId ? tickets.find((ticket) => ticket.id === selectedTicketId) : undefined),
+    [tickets, selectedTicketId],
+  );
   const dockPanelCloseTimersRef = useRef<Partial<Record<DockPanelId, number>>>({});
   const gitStatusSubscribedDirRef = useRef<string | null>(null);
   const activeSessionVisibleSinceRef = useRef<{ id: string; at: number } | null>(null);
@@ -1677,6 +1692,7 @@ sendFetchPRDetails,
   const workflowRunPanelOpen = openDockPanels.workflowRun;
   const attentionPanelOpen = openDockPanels.attention;
   const diffDetailPanelOpen = openDockPanels.diffDetail;
+  const ticketDetailPanelOpen = openDockPanels.ticketDetail;
   const changesPanelVisible = view === 'session' && diffPanelOpen && Boolean(activeRepoDaemonSession?.directory);
   const blockingOverlayOpen = locationPickerOpen
     || whatsNew.isOpen
@@ -3150,6 +3166,18 @@ sendFetchPRDetails,
     setDiffSelectedFilePath(null);
   }, [closeDockPanel]);
 
+  // Ticket detail panel handlers — opened from a delegated session (the "from a
+  // session" entry); the panel fetches the full record for the selected id.
+  const handleOpenTicketDetail = useCallback((ticketId: string) => {
+    setSelectedTicketId(ticketId);
+    openDockPanel('ticketDetail');
+  }, [openDockPanel]);
+
+  const handleCloseTicketDetail = useCallback(() => {
+    closeDockPanel('ticketDetail');
+    setSelectedTicketId(null);
+  }, [closeDockPanel]);
+
   const handleSendToClaude = useCallback((reference: string) => {
     if (!activeSessionId) return;
     sendRuntimeInput(activeSessionId, reference, 'user');
@@ -3543,6 +3571,7 @@ sendFetchPRDetails,
           onRebootstrapEndpoint={handleRebootstrapEndpoint}
           onSelectSession={handleSelectSession}
           onWakeDispatch={sendWakeDispatchAgent}
+          onOpenTicketDetail={handleOpenTicketDetail}
           onNewSession={() => handleNewSession('vertical')}
           onRefreshPRs={handleRefreshPRs}
           onOpenPR={handleOpenPR}
@@ -3823,6 +3852,21 @@ sendFetchPRDetails,
                   onOpenEditor={handleOpenEditorForReview}
                   onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
                   scale={scale}
+                />
+              ),
+            },
+            {
+              id: 'ticketDetail',
+              isOpen: ticketDetailPanelOpen,
+              width: 'clamp(420px, 38vw, 640px)',
+              className: 'dock-panel dock-panel--ticket-detail',
+              children: (
+                <TicketDetailPanel
+                  isOpen={ticketDetailPanelOpen}
+                  ticketId={selectedTicketId}
+                  ticketRow={selectedTicketRow}
+                  fetchTicket={fetchTicket}
+                  onClose={handleCloseTicketDetail}
                 />
               ),
             },
