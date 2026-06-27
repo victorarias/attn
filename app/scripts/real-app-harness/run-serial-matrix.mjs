@@ -73,6 +73,14 @@ const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-diff-review'],
   },
   {
+    id: 'ticket-lifecycle',
+    label: 'Ticket lifecycle: chief delegates, worker reports, chief reviews in the panel',
+    command: ['pnpm', 'run', 'real-app:scenario-ticket-lifecycle'],
+    // Bootstraps a chief + a real codex delegation + the full worker→chief
+    // review loop in one app lifecycle; needs more than the default budget.
+    timeoutMs: 360_000,
+  },
+  {
     id: 'terminal-block-copy',
     label: 'OSC 133 block copy via real fish + native Cmd+C',
     command: ['pnpm', 'run', 'real-app:scenario-terminal-block-copy'],
