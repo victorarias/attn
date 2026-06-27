@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HandoffDispatchMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchesMessage, ListDispatchMessagesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubmitDispatchOutcomeMessage, SubscribeGitStatusMessage, Ticket, TicketActivity, TicketActivityKind, TicketAttachment, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketResultMessage, TicketStatus, TicketStatusResult, TicketsUpdatedMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HandoffDispatchMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchesMessage, ListDispatchMessagesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubmitDispatchOutcomeMessage, SubscribeGitStatusMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketAttachment, TicketChangeStatusMessage, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketResultMessage, TicketStatus, TicketStatusResult, TicketsUpdatedMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const acknowledgeDispatchMessage = Convert.toAcknowledgeDispatchMessage(json);
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
@@ -239,9 +239,13 @@
 //   const submitDispatchOutcomeMessage = Convert.toSubmitDispatchOutcomeMessage(json);
 //   const subscribeGitStatusMessage = Convert.toSubscribeGitStatusMessage(json);
 //   const ticket = Convert.toTicket(json);
+//   const ticketActionResultMessage = Convert.toTicketActionResultMessage(json);
 //   const ticketActivity = Convert.toTicketActivity(json);
 //   const ticketActivityKind = Convert.toTicketActivityKind(json);
+//   const ticketAddCommentMessage = Convert.toTicketAddCommentMessage(json);
 //   const ticketAttachment = Convert.toTicketAttachment(json);
+//   const ticketChangeStatusMessage = Convert.toTicketChangeStatusMessage(json);
+//   const ticketEditDescriptionMessage = Convert.toTicketEditDescriptionMessage(json);
 //   const ticketEvent = Convert.toTicketEvent(json);
 //   const ticketEventBundle = Convert.toTicketEventBundle(json);
 //   const ticketEventKind = Convert.toTicketEventKind(json);
@@ -3722,6 +3726,18 @@ export interface Ticket {
     [property: string]: any;
 }
 
+export interface TicketActionResultMessage {
+    error?:     string;
+    event:      TicketActionResultMessageEvent;
+    request_id: string;
+    success:    boolean;
+    [property: string]: any;
+}
+
+export enum TicketActionResultMessageEvent {
+    TicketActionResult = "ticket_action_result",
+}
+
 export interface TicketActivity {
     author:       string;
     comment?:     string;
@@ -3733,6 +3749,18 @@ export interface TicketActivity {
     [property: string]: any;
 }
 
+export interface TicketAddCommentMessage {
+    cmd:         TicketAddCommentMessageCmd;
+    comment:     string;
+    request_id?: string;
+    ticket_id:   string;
+    [property: string]: any;
+}
+
+export enum TicketAddCommentMessageCmd {
+    TicketAddComment = "ticket_add_comment",
+}
+
 export interface TicketAttachment {
     created_at: string;
     filename:   string;
@@ -3740,6 +3768,31 @@ export interface TicketAttachment {
     note?:      string;
     path:       string;
     [property: string]: any;
+}
+
+export interface TicketChangeStatusMessage {
+    cmd:         TicketChangeStatusMessageCmd;
+    comment?:    string;
+    request_id?: string;
+    status:      TicketStatus;
+    ticket_id:   string;
+    [property: string]: any;
+}
+
+export enum TicketChangeStatusMessageCmd {
+    TicketChangeStatus = "ticket_change_status",
+}
+
+export interface TicketEditDescriptionMessage {
+    cmd:         TicketEditDescriptionMessageCmd;
+    description: string;
+    request_id?: string;
+    ticket_id:   string;
+    [property: string]: any;
+}
+
+export enum TicketEditDescriptionMessageCmd {
+    TicketEditDescription = "ticket_edit_description",
 }
 
 export interface TicketEvent {
@@ -6535,6 +6588,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("Ticket")), null, 2);
     }
 
+    public static toTicketActionResultMessage(json: string): TicketActionResultMessage {
+        return cast(JSON.parse(json), r("TicketActionResultMessage"));
+    }
+
+    public static ticketActionResultMessageToJson(value: TicketActionResultMessage): string {
+        return JSON.stringify(uncast(value, r("TicketActionResultMessage")), null, 2);
+    }
+
     public static toTicketActivity(json: string): TicketActivity {
         return cast(JSON.parse(json), r("TicketActivity"));
     }
@@ -6551,12 +6612,36 @@ export class Convert {
         return JSON.stringify(uncast(value, r("TicketActivityKind")), null, 2);
     }
 
+    public static toTicketAddCommentMessage(json: string): TicketAddCommentMessage {
+        return cast(JSON.parse(json), r("TicketAddCommentMessage"));
+    }
+
+    public static ticketAddCommentMessageToJson(value: TicketAddCommentMessage): string {
+        return JSON.stringify(uncast(value, r("TicketAddCommentMessage")), null, 2);
+    }
+
     public static toTicketAttachment(json: string): TicketAttachment {
         return cast(JSON.parse(json), r("TicketAttachment"));
     }
 
     public static ticketAttachmentToJson(value: TicketAttachment): string {
         return JSON.stringify(uncast(value, r("TicketAttachment")), null, 2);
+    }
+
+    public static toTicketChangeStatusMessage(json: string): TicketChangeStatusMessage {
+        return cast(JSON.parse(json), r("TicketChangeStatusMessage"));
+    }
+
+    public static ticketChangeStatusMessageToJson(value: TicketChangeStatusMessage): string {
+        return JSON.stringify(uncast(value, r("TicketChangeStatusMessage")), null, 2);
+    }
+
+    public static toTicketEditDescriptionMessage(json: string): TicketEditDescriptionMessage {
+        return cast(JSON.parse(json), r("TicketEditDescriptionMessage"));
+    }
+
+    public static ticketEditDescriptionMessageToJson(value: TicketEditDescriptionMessage): string {
+        return JSON.stringify(uncast(value, r("TicketEditDescriptionMessage")), null, 2);
     }
 
     public static toTicketEvent(json: string): TicketEvent {
@@ -9311,6 +9396,12 @@ const typeMap: any = {
         { json: "title", js: "title", typ: "" },
         { json: "updated_at", js: "updated_at", typ: "" },
     ], "any"),
+    "TicketActionResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("TicketActionResultMessageEvent") },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
     "TicketActivity": o([
         { json: "author", js: "author", typ: "" },
         { json: "comment", js: "comment", typ: u(undefined, "") },
@@ -9320,12 +9411,31 @@ const typeMap: any = {
         { json: "kind", js: "kind", typ: r("TicketActivityKind") },
         { json: "to_status", js: "to_status", typ: u(undefined, r("TicketStatus")) },
     ], "any"),
+    "TicketAddCommentMessage": o([
+        { json: "cmd", js: "cmd", typ: r("TicketAddCommentMessageCmd") },
+        { json: "comment", js: "comment", typ: "" },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+        { json: "ticket_id", js: "ticket_id", typ: "" },
+    ], "any"),
     "TicketAttachment": o([
         { json: "created_at", js: "created_at", typ: "" },
         { json: "filename", js: "filename", typ: "" },
         { json: "id", js: "id", typ: 0 },
         { json: "note", js: "note", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
+    ], "any"),
+    "TicketChangeStatusMessage": o([
+        { json: "cmd", js: "cmd", typ: r("TicketChangeStatusMessageCmd") },
+        { json: "comment", js: "comment", typ: u(undefined, "") },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+        { json: "status", js: "status", typ: r("TicketStatus") },
+        { json: "ticket_id", js: "ticket_id", typ: "" },
+    ], "any"),
+    "TicketEditDescriptionMessage": o([
+        { json: "cmd", js: "cmd", typ: r("TicketEditDescriptionMessageCmd") },
+        { json: "description", js: "description", typ: "" },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+        { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
     "TicketEvent": o([
         { json: "author", js: "author", typ: "" },
@@ -10505,6 +10615,18 @@ const typeMap: any = {
     ],
     "SubscribeGitStatusMessageCmd": [
         "subscribe_git_status",
+    ],
+    "TicketActionResultMessageEvent": [
+        "ticket_action_result",
+    ],
+    "TicketAddCommentMessageCmd": [
+        "ticket_add_comment",
+    ],
+    "TicketChangeStatusMessageCmd": [
+        "ticket_change_status",
+    ],
+    "TicketEditDescriptionMessageCmd": [
+        "ticket_edit_description",
     ],
     "TicketInboxMessageCmd": [
         "ticket_inbox",

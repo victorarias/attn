@@ -174,7 +174,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '126';
+export const PROTOCOL_VERSION = '127';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -1699,6 +1699,25 @@ export function useDaemonSocket({
               pending.resolve(data.ticket);
             } else {
               pending.reject(new Error(data.error || 'Ticket fetch failed'));
+            }
+            break;
+          }
+
+          case 'ticket_action_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `ticket_action:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success) {
+              pending.resolve(undefined);
+            } else {
+              pending.reject(new Error(data.error || 'Ticket action failed'));
             }
             break;
           }
@@ -4025,6 +4044,51 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
+  // Shared sender for a chief/user ticket action (change status, comment,
+  // re-brief). Resolves on a successful ticket_action_result and rejects on its
+  // error; the mutated data arrives separately via the tickets_updated broadcast.
+  const sendTicketAction = useCallback((cmd: string, payload: Record<string, unknown>): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('ticket_action');
+      const key = `ticket_action:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd, request_id: requestId, ...payload }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Ticket action timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
+  const sendTicketChangeStatus = useCallback(
+    (ticketId: string, status: Ticket['status'], comment?: string): Promise<void> =>
+      sendTicketAction('ticket_change_status', {
+        ticket_id: ticketId,
+        status,
+        ...(comment ? { comment } : {}),
+      }),
+    [sendTicketAction],
+  );
+
+  const sendTicketAddComment = useCallback(
+    (ticketId: string, comment: string): Promise<void> =>
+      sendTicketAction('ticket_add_comment', { ticket_id: ticketId, comment }),
+    [sendTicketAction],
+  );
+
+  const sendTicketEditDescription = useCallback(
+    (ticketId: string, description: string): Promise<void> =>
+      sendTicketAction('ticket_edit_description', { ticket_id: ticketId, description }),
+    [sendTicketAction],
+  );
+
   // List the durable runner's tasks (newest-updated first). Resolves with an empty
   // array when the runner is disabled or has no tasks.
   const sendNotebookTaskList = useCallback((): Promise<NotebookTask[]> => {
@@ -4969,6 +5033,9 @@ export function useDaemonSocket({
     sendNotebookList,
     sendNotebookRead,
     fetchTicket,
+    sendTicketChangeStatus,
+    sendTicketAddComment,
+    sendTicketEditDescription,
     sendNotebookTaskList,
     sendNotebookTaskRetry,
     sendNotebookBacklinks,

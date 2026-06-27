@@ -755,6 +755,50 @@ model GetTicketMessage {
   ticket_id: string;
 }
 
+// The chief/user acting on a ticket from the app. These are by-id mutations
+// authored as the human identity ("you"); the daemon notifies the assigned agent
+// and re-broadcasts the board. All three reply with the shared ticket_action_result
+// event, correlated by request_id; the updated record reaches the panel through the
+// tickets_updated broadcast (which the open detail view re-fetches on).
+
+// ticket_change_status moves a ticket to a chosen column (the chief picks the
+// status directly, unlike the agent's work-state forward channel). An optional
+// comment is recorded on the change.
+model TicketChangeStatusMessage {
+  cmd: "ticket_change_status";
+  request_id?: string;
+  ticket_id: string;
+  status: TicketStatus;
+  comment?: string;
+}
+
+// ticket_add_comment appends a freeform note to a ticket's thread — the chief's
+// steer to the agent, carrying real content.
+model TicketAddCommentMessage {
+  cmd: "ticket_add_comment";
+  request_id?: string;
+  ticket_id: string;
+  comment: string;
+}
+
+// ticket_edit_description replaces a ticket's brief (a re-brief / re-scope).
+model TicketEditDescriptionMessage {
+  cmd: "ticket_edit_description";
+  request_id?: string;
+  ticket_id: string;
+  description: string;
+}
+
+// TicketActionResultMessage is the shared reply to a chief ticket action,
+// correlated by request_id. success/error report whether the mutation landed; the
+// resulting data reaches the UI through the tickets_updated broadcast.
+model TicketActionResultMessage {
+  event: "ticket_action_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+}
+
 model WorkspaceContextCheckoutMessage {
   cmd: "workspace_context_checkout";
   source_session_id: string;
@@ -2740,6 +2784,7 @@ alias DaemonEvent =
   | ChiefOfStaffDispatchesUpdatedMessage
   | TicketsUpdatedMessage
   | TicketResultMessage
+  | TicketActionResultMessage
   | WakeDispatchAgentResultMessage
   | WorkspaceTileContentMessage
   | BrowserControlResponseMessage

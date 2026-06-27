@@ -534,6 +534,9 @@ function App() {
     getWorkflowRun,
     getReviewState,
     fetchTicket,
+    sendTicketChangeStatus,
+    sendTicketAddComment,
+    sendTicketEditDescription,
     markFileViewed,
     sendAddComment,
     sendUpdateComment,
@@ -694,6 +697,9 @@ function App() {
         getWorkflowRun={getWorkflowRun}
         getReviewState={getReviewState}
         fetchTicket={fetchTicket}
+        sendTicketChangeStatus={sendTicketChangeStatus}
+        sendTicketAddComment={sendTicketAddComment}
+        sendTicketEditDescription={sendTicketEditDescription}
         markFileViewed={markFileViewed}
         sendAddComment={sendAddComment}
         sendUpdateComment={sendUpdateComment}
@@ -811,6 +817,9 @@ interface AppContentProps {
   getWorkflowRun: ReturnType<typeof useDaemonSocket>['getWorkflowRun'];
   getReviewState: ReturnType<typeof useDaemonSocket>['getReviewState'];
   fetchTicket: ReturnType<typeof useDaemonSocket>['fetchTicket'];
+  sendTicketChangeStatus: ReturnType<typeof useDaemonSocket>['sendTicketChangeStatus'];
+  sendTicketAddComment: ReturnType<typeof useDaemonSocket>['sendTicketAddComment'];
+  sendTicketEditDescription: ReturnType<typeof useDaemonSocket>['sendTicketEditDescription'];
   markFileViewed: ReturnType<typeof useDaemonSocket>['markFileViewed'];
   sendAddComment: ReturnType<typeof useDaemonSocket>['sendAddComment'];
   sendUpdateComment: ReturnType<typeof useDaemonSocket>['sendUpdateComment'];
@@ -922,6 +931,9 @@ sendFetchPRDetails,
   getWorkflowRun,
   getReviewState,
   fetchTicket,
+  sendTicketChangeStatus,
+  sendTicketAddComment,
+  sendTicketEditDescription,
   markFileViewed,
   sendAddComment,
   sendUpdateComment,
@@ -3866,6 +3878,9 @@ sendFetchPRDetails,
                   ticketId={selectedTicketId}
                   ticketRow={selectedTicketRow}
                   fetchTicket={fetchTicket}
+                  onChangeStatus={sendTicketChangeStatus}
+                  onAddComment={sendTicketAddComment}
+                  onEditDescription={sendTicketEditDescription}
                   onClose={handleCloseTicketDetail}
                 />
               ),
