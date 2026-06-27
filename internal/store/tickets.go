@@ -166,9 +166,10 @@ func ValidateTicketID(id string) error {
 
 // CreateTicket inserts a new ticket. The id is an agent-chosen memorable slug; on
 // collision it fails with ErrTicketIDTaken and actionable guidance. An empty
-// status defaults to Todo. The supplied now stamps created_at/updated_at (and
-// closed_at, in the unusual case of creating directly into a terminal status).
-func (s *Store) CreateTicket(t Ticket, now time.Time) (*Ticket, error) {
+// status defaults to Todo. author records who created it (for the emitted event).
+// The supplied now stamps created_at/updated_at (and closed_at, in the unusual
+// case of creating directly into a terminal status).
+func (s *Store) CreateTicket(t Ticket, author string, now time.Time) (*Ticket, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -227,6 +228,14 @@ func (s *Store) CreateTicket(t Ticket, now time.Time) (*Ticket, error) {
 		t.ProjectID, formatTicketTime(now), formatTicketTime(now),
 		formatTicketTimePtr(t.ClosedAt), formatTicketTimePtr(t.ArchivedAt),
 	); err != nil {
+		return nil, err
+	}
+	if _, _, err := appendTicketEventTx(tx, TicketEvent{
+		TicketID: t.ID,
+		Kind:     TicketEventCreated,
+		Author:   author,
+		ToStatus: t.Status,
+	}, now); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -361,6 +370,16 @@ func (s *Store) SetTicketStatus(id string, to TicketStatus, author, comment stri
 	`, id, string(TicketActivityStatusChange), author, string(from), string(to), comment, formatTicketTime(now)); err != nil {
 		return nil, err
 	}
+	if _, _, err := appendTicketEventTx(tx, TicketEvent{
+		TicketID:   id,
+		Kind:       TicketEventStatusChanged,
+		Author:     author,
+		FromStatus: from,
+		ToStatus:   to,
+		Comment:    comment,
+	}, now); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -402,6 +421,14 @@ func (s *Store) AddTicketComment(id, author, comment string, now time.Time) (*Ti
 	if err != nil {
 		return nil, err
 	}
+	if _, _, err := appendTicketEventTx(tx, TicketEvent{
+		TicketID: id,
+		Kind:     TicketEventCommented,
+		Author:   author,
+		Comment:  comment,
+	}, now); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -415,14 +442,29 @@ func (s *Store) AddTicketComment(id, author, comment string, now time.Time) (*Ti
 	}, nil
 }
 
-// EditTicketDescription replaces the ticket's brief and bumps updated_at.
-func (s *Store) EditTicketDescription(id, description string, now time.Time) error {
-	return s.updateTicketField(id, "description", description, now)
+// EditTicketDescription replaces the ticket's brief, bumps updated_at, and emits a
+// description_edited event authored by author. Detail carries the new brief so the
+// event is self-describing AND so the dedup signature distinguishes one re-brief
+// from another — without it, two consecutive edits would look identical and the
+// second (a real re-brief / steer) would be silently deduped away.
+func (s *Store) EditTicketDescription(id, description, author string, now time.Time) error {
+	return s.updateTicketFieldWithEvent(id, "description", description, TicketEvent{
+		TicketID: id,
+		Kind:     TicketEventDescriptionEdited,
+		Author:   author,
+		Detail:   description,
+	}, now)
 }
 
-// AssignTicket sets (or clears, with "") the assignee and bumps updated_at.
-func (s *Store) AssignTicket(id, assignee string, now time.Time) error {
-	return s.updateTicketField(id, "assignee", assignee, now)
+// AssignTicket sets (or clears, with "") the assignee, bumps updated_at, and emits
+// an assigned event (Detail = the new assignee) authored by author.
+func (s *Store) AssignTicket(id, assignee, author string, now time.Time) error {
+	return s.updateTicketFieldWithEvent(id, "assignee", assignee, TicketEvent{
+		TicketID: id,
+		Kind:     TicketEventAssigned,
+		Author:   author,
+		Detail:   assignee,
+	}, now)
 }
 
 // SetTicketSession records the last session's working dir and agent id, which the
@@ -443,9 +485,10 @@ func (s *Store) SetTicketSession(id, cwd, lastAgentID string, now time.Time) err
 	return ticketUpdateResult(res, id)
 }
 
-// AddTicketAttachment records a handover file on the ticket and bumps updated_at.
-// Returns the stored attachment (with its assigned id).
-func (s *Store) AddTicketAttachment(att TicketAttachment, now time.Time) (*TicketAttachment, error) {
+// AddTicketAttachment records a handover file on the ticket, bumps updated_at, and
+// emits an attachment_added event (Detail = filename) authored by author. Returns
+// the stored attachment (with its assigned id).
+func (s *Store) AddTicketAttachment(att TicketAttachment, author string, now time.Time) (*TicketAttachment, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -475,6 +518,14 @@ func (s *Store) AddTicketAttachment(att TicketAttachment, now time.Time) (*Ticke
 	}
 	attachmentID, err := res.LastInsertId()
 	if err != nil {
+		return nil, err
+	}
+	if _, _, err := appendTicketEventTx(tx, TicketEvent{
+		TicketID: att.TicketID,
+		Kind:     TicketEventAttachmentAdded,
+		Author:   author,
+		Detail:   att.Filename,
+	}, now); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -521,8 +572,9 @@ func (s *Store) ArchiveTicket(id string, now time.Time) error {
 }
 
 // SweepExpiredTickets hard-deletes terminal tickets whose closed_at is older than
-// now-ttl, cascading to their activity and attachments. Open tickets (a durable
-// backlog) are never swept. Returns the number of tickets removed. The caller
+// now-ttl, cascading to their activity, attachments, events, and event cursors.
+// Open tickets (a durable backlog) are never swept. Returns the number of tickets
+// removed. The caller
 // passes now and the TTL (production: time.Now() and 30 days); tests inject both.
 func (s *Store) SweepExpiredTickets(now time.Time, ttl time.Duration) (int, error) {
 	s.mu.Lock()
@@ -549,6 +601,12 @@ func (s *Store) SweepExpiredTickets(now time.Time, ttl time.Duration) (int, erro
 	if _, err := tx.Exec(`DELETE FROM ticket_attachments WHERE ticket_id IN (SELECT id FROM tickets WHERE `+expired+`)`, cutoff); err != nil {
 		return 0, err
 	}
+	if _, err := tx.Exec(`DELETE FROM ticket_events WHERE ticket_id IN (SELECT id FROM tickets WHERE `+expired+`)`, cutoff); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`DELETE FROM ticket_event_cursors WHERE ticket_id IN (SELECT id FROM tickets WHERE `+expired+`)`, cutoff); err != nil {
+		return 0, err
+	}
 	res, err := tx.Exec(`DELETE FROM tickets WHERE `+expired, cutoff)
 	if err != nil {
 		return 0, err
@@ -570,23 +628,35 @@ const ticketSelect = `
 		project_id, created_at, updated_at, closed_at, archived_at
 	FROM tickets`
 
-// updateTicketField sets a single text column plus updated_at. column is a
-// trusted internal literal, never caller input.
-func (s *Store) updateTicketField(id, column, value string, now time.Time) error {
+// updateTicketFieldWithEvent sets a single text column plus updated_at and emits
+// evt, atomically. column is a trusted internal literal, never caller input.
+func (s *Store) updateTicketFieldWithEvent(id, column, value string, evt TicketEvent, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.db == nil {
 		return nil
 	}
-	res, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(
 		`UPDATE tickets SET `+column+` = ?, updated_at = ? WHERE id = ?`,
 		value, formatTicketTime(now), id,
 	)
 	if err != nil {
 		return err
 	}
-	return ticketUpdateResult(res, id)
+	if err := ticketUpdateResult(res, id); err != nil {
+		return err
+	}
+	if _, _, err := appendTicketEventTx(tx, evt, now); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // touchTicketTx bumps updated_at within a transaction, returning ErrTicketNotFound
