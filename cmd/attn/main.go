@@ -851,6 +851,12 @@ func runTicket() {
 			return
 		}
 		runTicketInbox(os.Args[3:])
+	case "attach":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketAttach(os.Args[3:])
 	default:
 		fmt.Fprintf(os.Stderr, "ticket: unknown command %q\n", os.Args[2])
 		writeTicketHelp(os.Stderr)
@@ -929,6 +935,82 @@ func runTicketStatus(args []string) {
 	fmt.Printf("ticket %s → %s\n", result.TicketID, result.Status)
 }
 
+type ticketAttachArgs struct {
+	File    string
+	Note    string
+	Session string
+	JSON    bool
+}
+
+// parseTicketAttachArgs reads `ticket attach --file <path> [flags]`. --file is
+// required; the rest are optional. Unlike status there is no positional, so a plain
+// Parse suffices.
+func parseTicketAttachArgs(args []string) (ticketAttachArgs, error) {
+	var result ticketAttachArgs
+	fs := flag.NewFlagSet("ticket attach", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	file := fs.String("file", "", "path to the file to attach")
+	note := fs.String("note", "", "optional note recorded with the attachment")
+	session := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	jsonOutput := fs.Bool("json", false, "print the result as JSON")
+	if err := fs.Parse(args); err != nil {
+		return result, err
+	}
+	if fs.NArg() != 0 {
+		return result, fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	path := strings.TrimSpace(*file)
+	if path == "" {
+		return result, errors.New("--file is required")
+	}
+	result.File = path
+	result.Note = strings.TrimSpace(*note)
+	result.Session = *session
+	result.JSON = *jsonOutput
+	return result, nil
+}
+
+// runTicketAttach hands a file to this session's bound ticket. The path is resolved
+// to absolute (the daemon reads it from its own cwd) and stat-checked here for a
+// clear early error; the daemon copies it into the ticket's store and records it.
+func runTicketAttach(args []string) {
+	parsed, err := parseTicketAttachArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket attach: %v\n", err)
+		writeTicketHelp(os.Stderr)
+		os.Exit(2)
+	}
+	source, err := resolveDispatchSession(parsed.Session)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket attach: %v\n", err)
+		os.Exit(2)
+	}
+	absPath, err := filepath.Abs(parsed.File)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket attach: %v\n", err)
+		os.Exit(2)
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket attach: %v\n", err)
+		os.Exit(1)
+	}
+	if info.IsDir() {
+		fmt.Fprintf(os.Stderr, "ticket attach: %q is a directory, not a file\n", absPath)
+		os.Exit(1)
+	}
+	result, err := client.New("").AttachTicket(source, absPath, filepath.Base(absPath), parsed.Note)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket attach: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.JSON {
+		printJSON(result)
+		return
+	}
+	fmt.Printf("attached %s to ticket %s\n", result.Filename, result.TicketID)
+}
+
 // runTicketInbox reads (and consumes) this session's unread ticket events — the
 // chief's comments, status changes, and re-briefs it has not yet seen. Reading
 // advances the cursor, so a second call returns only what landed since.
@@ -990,6 +1072,8 @@ commands:
         move this session's bound ticket to the column for the reported state
   inbox [--session <id>] [--json]
         read (and mark read) this session's unread ticket activity
+  attach --file <path> [--note <text>] [--session <id>] [--json]
+        copy a file onto this session's bound ticket as an attachment
 
 work states:
   in_progress       working

@@ -1272,3 +1272,29 @@ func TestParseTicketStatusArgsErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestParseTicketAttachArgs(t *testing.T) {
+	got, err := parseTicketAttachArgs([]string{"--file", "report.md", "--note", "for review", "--session", "s1", "--json"})
+	if err != nil {
+		t.Fatalf("parseTicketAttachArgs: %v", err)
+	}
+	want := ticketAttachArgs{File: "report.md", Note: "for review", Session: "s1", JSON: true}
+	if got != want {
+		t.Fatalf("parseTicketAttachArgs = %+v, want %+v", got, want)
+	}
+}
+
+func TestParseTicketAttachArgsErrors(t *testing.T) {
+	cases := map[string][]string{
+		"missing file":         {"--note", "hi"},
+		"unexpected positional": {"--file", "a.md", "extra"},
+		"unknown flag":         {"--file", "a.md", "--bogus"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseTicketAttachArgs(args); err == nil {
+				t.Fatalf("parseTicketAttachArgs(%v) = nil error, want error", args)
+			}
+		})
+	}
+}

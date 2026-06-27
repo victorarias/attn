@@ -744,6 +744,26 @@ model TicketInboxMessage {
   source_session_id: string;
 }
 
+// TicketAttachMessage hands a file to the calling session's bound ticket. The
+// daemon resolves the ticket from the session (the assignee), copies the file at
+// source_path into the ticket's store directory (.attn/tickets/<id>/), and records
+// the attachment authored by the session. source_path is absolute (the CLI resolves
+// it against its cwd) and read by the daemon, so this is a same-machine operation.
+model TicketAttachMessage {
+  cmd: "ticket_attach";
+  source_session_id: string;
+  source_path: string;
+  filename: string;
+  note?: string;
+}
+
+// TicketAttachResult echoes the ticket the file landed on and the stored filename,
+// so the caller can confirm what was attached and where.
+model TicketAttachResult {
+  ticket_id: string;
+  filename: string;
+}
+
 // GetTicketMessage fetches one ticket's full record — the row plus its activity
 // thread and attachments — for the detail view. A by-id read needs no caller
 // identity: the board feed (the initial_state push / tickets_updated broadcast)
@@ -2387,6 +2407,7 @@ model Response {
   notebook_guide?: NotebookGuideResult;
   ticket_status_result?: TicketStatusResult;
   ticket_inbox_result?: TicketInboxResult;
+  ticket_attach_result?: TicketAttachResult;
   ticket?: Ticket;
   tickets?: Ticket[];
 }

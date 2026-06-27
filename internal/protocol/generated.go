@@ -2897,6 +2897,9 @@ type Response struct {
 	// Ticket corresponds to the JSON schema field "ticket".
 	Ticket *Ticket `json:"ticket,omitempty,omitzero"`
 
+	// TicketAttachResult corresponds to the JSON schema field "ticket_attach_result".
+	TicketAttachResult *TicketAttachResult `json:"ticket_attach_result,omitempty,omitzero"`
+
 	// TicketInboxResult corresponds to the JSON schema field "ticket_inbox_result".
 	TicketInboxResult *TicketInboxResult `json:"ticket_inbox_result,omitempty,omitzero"`
 
@@ -3740,6 +3743,31 @@ type TicketAddCommentMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID string `json:"ticket_id"`
+}
+
+type TicketAttachMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Filename corresponds to the JSON schema field "filename".
+	Filename string `json:"filename"`
+
+	// Note corresponds to the JSON schema field "note".
+	Note *string `json:"note,omitempty,omitzero"`
+
+	// SourcePath corresponds to the JSON schema field "source_path".
+	SourcePath string `json:"source_path"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+}
+
+type TicketAttachResult struct {
+	// Filename corresponds to the JSON schema field "filename".
+	Filename string `json:"filename"`
 
 	// TicketID corresponds to the JSON schema field "ticket_id".
 	TicketID string `json:"ticket_id"`

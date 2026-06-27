@@ -396,6 +396,30 @@ func (c *Client) SetTicketStatus(sourceSessionID, workState, comment string) (*p
 	return resp.TicketStatusResult, nil
 }
 
+// AttachTicket hands a file to the calling session's bound ticket. sourcePath is
+// the absolute path of the file the daemon copies into the ticket's store; the
+// daemon resolves which ticket from the session and echoes the id and stored
+// filename back.
+func (c *Client) AttachTicket(sourceSessionID, sourcePath, filename, note string) (*protocol.TicketAttachResult, error) {
+	msg := protocol.TicketAttachMessage{
+		Cmd:             protocol.CmdTicketAttach,
+		SourceSessionID: sourceSessionID,
+		SourcePath:      sourcePath,
+		Filename:        filename,
+	}
+	if value := strings.TrimSpace(note); value != "" {
+		msg.Note = protocol.Ptr(value)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.TicketAttachResult == nil {
+		return nil, errors.New("daemon returned no ticket attach result")
+	}
+	return resp.TicketAttachResult, nil
+}
+
 // TicketInbox reads and consumes the calling session's unread ticket events,
 // bundled by ticket. Reading advances the session's per-ticket cursors, so a
 // second call returns only what landed since.
