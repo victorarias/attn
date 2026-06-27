@@ -15,6 +15,7 @@ import { ChiefOfStaffTransferPrompt } from './components/ChiefOfStaffTransferPro
 import { ChangesPanel } from './components/ChangesPanel';
 import { DiffDetailPanel } from './components/DiffDetailPanel';
 import { TicketDetailPanel } from './components/TicketDetailPanel';
+import { TicketBoardPanel } from './components/TicketBoardPanel';
 import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
 import { WorkflowRunView } from './components/WorkflowRunView';
 import {
@@ -132,6 +133,16 @@ function KeyboardActionIcon() {
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <rect x="3" y="6" width="18" height="12" rx="2" />
       <path d="M7 10h.01M11 10h.01M15 10h.01M8 13.5h8" />
+    </svg>
+  );
+}
+
+function BoardActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="4" y="4" width="4.5" height="16" rx="1" />
+      <rect x="9.75" y="4" width="4.5" height="11" rx="1" />
+      <rect x="15.5" y="4" width="4.5" height="14" rx="1" />
     </svg>
   );
 }
@@ -1311,7 +1322,7 @@ sendFetchPRDetails,
     void connect();
   }, [connect]);
 
-  type DockPanelId = 'diff' | 'reviewLoop' | 'workflowRun' | 'attention' | 'diffDetail' | 'ticketDetail';
+  type DockPanelId = 'diff' | 'reviewLoop' | 'workflowRun' | 'attention' | 'diffDetail' | 'ticketDetail' | 'board';
 
   // Muted section expansion (controlled by Dashboard click)
   const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
@@ -1329,6 +1340,7 @@ sendFetchPRDetails,
         attention: false,
         diffDetail: false,
         ticketDetail: false,
+        board: false,
     },
     stack: ['diff'],
   });
@@ -1713,6 +1725,7 @@ sendFetchPRDetails,
   const attentionPanelOpen = openDockPanels.attention;
   const diffDetailPanelOpen = openDockPanels.diffDetail;
   const ticketDetailPanelOpen = openDockPanels.ticketDetail;
+  const boardPanelOpen = openDockPanels.board;
   const changesPanelVisible = view === 'session' && diffPanelOpen && Boolean(activeRepoDaemonSession?.directory);
   const blockingOverlayOpen = locationPickerOpen
     || whatsNew.isOpen
@@ -1818,6 +1831,14 @@ sendFetchPRDetails,
       icon: <AttentionActionIcon />,
       shortcut: [shortcutTokens('dock.attention')],
       run: () => openDockPanel('attention'),
+    },
+    {
+      id: 'tickets-board',
+      title: 'Open ticket board',
+      description: 'Tickets grouped by status',
+      keywords: ['ticket', 'board', 'kanban', 'tickets'],
+      icon: <BoardActionIcon />,
+      run: () => openDockPanel('board'),
     },
     {
       id: 'customize-shortcuts',
@@ -3933,6 +3954,20 @@ sendFetchPRDetails,
                   onEditDescription={sendTicketEditDescription}
                   onResume={handleResumeTicket}
                   onClose={handleCloseTicketDetail}
+                />
+              ),
+            },
+            {
+              id: 'board',
+              isOpen: boardPanelOpen,
+              width: 'clamp(560px, 52vw, 880px)',
+              className: 'dock-panel dock-panel--board',
+              children: (
+                <TicketBoardPanel
+                  isOpen={boardPanelOpen}
+                  tickets={tickets}
+                  onOpenTicket={handleOpenTicketDetail}
+                  onClose={() => closeDockPanel('board')}
                 />
               ),
             },

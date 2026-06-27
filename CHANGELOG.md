@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Added
 - **Open and act on a delegated agent's ticket from the app.** Delegated work now has a ticket you can open from its session: see its description, status, full history, and attachments, all updating live as the work moves. From the ticket you can change its status, add a comment, or re-brief the agent — each notifies the agent — and **resume** a stopped session to pick the work back up where it left off. Agents can hand a file to their ticket with `attn ticket attach --file <path>`, and it shows up in the ticket's attachments.
+- **See all your tickets on a board, grouped by status.** A new **ticket board** — open it from the ⌘K command menu — lays out every active ticket in columns (Todo · Working · Blocked · In Review · Done) so you can see at a glance where delegated work stands. Each card shows the title, id, who's on it, and when it last moved; click one to open its full detail. Filter to just what's **blocked**, **in review**, or **closed today**, and finished-bad work (failed or crashed) collects in a Closed lane under Done. The board updates live as agents report progress.
 
 ## [2026-06-26]
 

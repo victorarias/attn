@@ -237,11 +237,11 @@ each is a meaningful, verifiable chunk.
 
 | # | slice | status |
 |---|---|---|
-| 1 | Ticket store + lifecycle | 🟡 |
-| 2 | Event-driven notification core | 🟡 |
-| 3 | Delegation ⇄ tickets (live wiring) | 🟡 (sub-split — see `2026-06-26-work-tracker-slice3.md`) |
-| 4 | Ticket view + resume + attachments | ⬜ |
-| 5 | Board view | ⬜ |
+| 1 | Ticket store + lifecycle | ✅ |
+| 2 | Event-driven notification core | ✅ |
+| 3 | Delegation ⇄ tickets (live wiring) | ✅ (sub-split — see `2026-06-26-work-tracker-slice3.md`) |
+| 4 | Ticket view + resume + attachments | ✅ (sub-split — see `2026-06-26-work-tracker-slice4.md`) |
+| 5 | Board view | ✅ (status columns + Todo backlog + filters; read-only awareness surface, opened from ⌘K) |
 | 6 | Codex nudge path | ⬜ |
 | 7 | Retire the `dispatch` namespace | ⬜ |
 | 8 | Export ticket state (CLI) — *post-merge, lands on `main`* | ⬜ |
