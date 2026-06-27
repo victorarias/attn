@@ -167,8 +167,8 @@ directory axis) with an OKF ` + "`type`" + ` on every note (the frontmatter axis
 - ` + "`resources/`" + ` — reference material worth keeping.
 - ` + "`archive/`" + ` — finished or inactive items, moved here when a project closes.
 
-Every note is grounded — carry resolvable ` + "`sources:`" + ` (journal anchors,
-` + "`dispatch:<id>`" + `, or URLs), never paraphrase alone.
+Every note is grounded — carry resolvable ` + "`sources:`" + ` (journal anchors
+or URLs), never paraphrase alone.
 `
 
 // paraIndexTemplates seeds each PARA directory's reserved index.md.
