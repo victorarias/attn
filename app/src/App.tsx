@@ -2364,6 +2364,18 @@ sendFetchPRDetails,
     },
     getReviewLoopState,
     answerReviewLoop,
+    // Ticket detail panel. Inlined (not the handleOpen/CloseTicketDetail
+    // callbacks) because those are defined later in the body — past this call's
+    // temporal-dead zone — and these are the same two trivial operations.
+    openTicketDetail: (ticketId: string) => {
+      setSelectedTicketId(ticketId);
+      openDockPanel('ticketDetail');
+    },
+    closeTicketDetail: () => {
+      closeDockPanel('ticketDetail');
+      setSelectedTicketId(null);
+    },
+    tickets,
     resetSessionPaneTerminal,
     injectSessionPaneBytes,
     injectSessionPaneBase64,

@@ -141,12 +141,17 @@ pub fn bundle_identifier() -> &'static str {
 
 /// Decide whether the UI automation bridge should run this launch.
 ///
-///   - `ATTN_AUTOMATION=1`  → on
-///   - `ATTN_AUTOMATION=0`  → off
-///   - `ATTN_PROFILE=dev`   → on   (default for dev)
-///   - otherwise            → off  (default for prod / unset)
+///   - `ATTN_AUTOMATION=1`                     → on
+///   - `ATTN_AUTOMATION=0`                     → off
+///   - any non-empty `ATTN_PROFILE`            → on   (dev sibling or any named profile)
+///   - otherwise (prod's empty profile / unset) → off
 ///
-/// `apply_build_profile_env` must run first so a dev build always sees the
+/// Every non-empty profile is an isolated, non-prod world (the `dev` sibling or
+/// a named profile like `ticketqa`/`agent7`) the real-app harness may attach to.
+/// Production is the empty-profile bundle, so it stays off unless an operator
+/// opts in with `ATTN_AUTOMATION=1`.
+///
+/// `apply_build_profile_env` must run first so a profiled build always sees the
 /// right profile name when this is consulted.
 pub fn automation_enabled() -> bool {
     let automation = env::var("ATTN_AUTOMATION").ok();
@@ -163,11 +168,9 @@ fn decide_automation_enabled(automation: Option<&str>, profile: Option<&str>) ->
         // automation in CI.
         Some(_) => return false,
     }
-    profile
-        .map(str::trim)
-        .map(|p| p.to_ascii_lowercase())
-        .as_deref()
-        == Some("dev")
+    // Any non-empty profile is a non-prod, isolated world; production is the
+    // empty-profile bundle and stays off (handled above via ATTN_AUTOMATION).
+    profile.map(str::trim).is_some_and(|p| !p.is_empty())
 }
 
 #[cfg(test)]
@@ -186,20 +189,29 @@ mod tests {
 
     #[test]
     fn automation_decision_rules() {
+        // Explicit override wins regardless of profile.
         assert!(decide_automation_enabled(Some("1"), None));
         assert!(decide_automation_enabled(Some("1"), Some("dev")));
+        assert!(decide_automation_enabled(Some("1"), Some("")));
         assert!(!decide_automation_enabled(Some("0"), None));
         assert!(!decide_automation_enabled(Some("0"), Some("dev")));
+        assert!(!decide_automation_enabled(Some("0"), Some("ticketqa")));
+        // Unrecognized override value is strict-off (typo guard).
         assert!(!decide_automation_enabled(Some("yes"), Some("dev")));
+        // Any non-empty profile (dev sibling or any named profile) → on.
         assert!(decide_automation_enabled(None, Some("dev")));
-        assert!(!decide_automation_enabled(None, Some("ci")));
-        assert!(!decide_automation_enabled(None, None));
-        assert!(decide_automation_enabled(Some(""), Some("dev")));
-        assert!(decide_automation_enabled(Some("  "), Some("dev")));
-        assert!(!decide_automation_enabled(Some("  "), None));
-        // Profile case-insensitive (Go side accepts only lowercase but
-        // mixed case here would mean the parent env wasn't normalized;
-        // handle defensively).
         assert!(decide_automation_enabled(None, Some("DEV")));
+        assert!(decide_automation_enabled(None, Some("ticketqa")));
+        assert!(decide_automation_enabled(None, Some("agent7")));
+        assert!(decide_automation_enabled(None, Some("ci")));
+        // Production is the empty profile (or unset) → off.
+        assert!(!decide_automation_enabled(None, None));
+        assert!(!decide_automation_enabled(None, Some("")));
+        assert!(!decide_automation_enabled(None, Some("  ")));
+        // Blank/whitespace override falls through to the profile rule.
+        assert!(decide_automation_enabled(Some(""), Some("dev")));
+        assert!(decide_automation_enabled(Some("  "), Some("ticketqa")));
+        assert!(!decide_automation_enabled(Some("  "), None));
+        assert!(!decide_automation_enabled(Some(""), Some("")));
     }
 }
