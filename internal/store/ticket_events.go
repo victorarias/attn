@@ -249,6 +249,40 @@ func (s *Store) InvolvedTicketIDs(identity string) ([]string, error) {
 	return ids, rows.Err()
 }
 
+// TicketParticipants returns the identities involved with a single ticket — its
+// current assignee plus everyone who has authored an event on it. This is the
+// inverse of InvolvedTicketIDs (identities-for-a-ticket, not tickets-for-an-
+// identity): when an event lands, the notifier reaches exactly these identities,
+// each of which sees only what it did not author. Empty authors/assignees are
+// excluded.
+func (s *Store) TicketParticipants(ticketID string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil || ticketID == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT assignee FROM tickets WHERE id = ? AND assignee != ''
+		UNION
+		SELECT DISTINCT author FROM ticket_events WHERE ticket_id = ? AND author != ''
+		ORDER BY 1 ASC
+	`, ticketID, ticketID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // LatestTicketEventSeq returns the highest event seq, or 0 when the log is empty.
 func (s *Store) LatestTicketEventSeq() (int64, error) {
 	s.mu.RLock()

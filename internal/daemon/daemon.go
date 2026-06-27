@@ -1523,6 +1523,12 @@ func (d *Daemon) handlePTYState(sessionID, state string) {
 		Session: updated,
 	})
 	d.recomputeAndBroadcastWorkspaceForSession(sessionID)
+	// A non-self-monitoring agent that was busy when a ticket event landed gets its
+	// deferred doorbell the moment it goes idle. Off the read-loop goroutine: the
+	// doorbell write briefly blocks, and a no-unread observer is a quick no-op.
+	if isIdleForNudge(state) {
+		go d.notifyTicketSessionWentIdle(sessionID)
+	}
 }
 
 // initHTTPServer creates the HTTP server synchronously to avoid race with Stop().
