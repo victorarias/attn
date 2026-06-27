@@ -224,7 +224,8 @@ check-types: generate-types
 # ATTN_BUILD_WS_PORT / ATTN_BUILD_BUNDLE_ID into the binary so it can never
 # point at another profile's daemon. UI automation is gated at runtime (see
 # profile::automation_enabled) — a profiled build sees its ATTN_PROFILE and
-# enables automation for dev; prod stays off unless ATTN_AUTOMATION=1.
+# enables automation for any named profile (dev, ticketqa, agent7, …); prod (the
+# empty-profile bundle) stays off unless ATTN_AUTOMATION=1.
 build-app: ensure-codesign-identity build
 	@PROFILE="$(PROFILE)" ATTN_BIN="$(CURDIR)/$(OUTPUT)" \
 		VERSION='$(VERSION)' SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' \

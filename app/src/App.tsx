@@ -14,6 +14,8 @@ import { CloseSessionPrompt } from './components/CloseSessionPrompt';
 import { ChiefOfStaffTransferPrompt } from './components/ChiefOfStaffTransferPrompt';
 import { ChangesPanel } from './components/ChangesPanel';
 import { DiffDetailPanel } from './components/DiffDetailPanel';
+import { TicketDetailPanel } from './components/TicketDetailPanel';
+import { TicketBoardPanel } from './components/TicketBoardPanel';
 import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
 import { WorkflowRunView } from './components/WorkflowRunView';
 import {
@@ -80,6 +82,7 @@ import {
   resolvePreferredAgent,
 } from './utils/agentAvailability';
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
+import { executeTicketResumePlan, planTicketResume } from './utils/ticketResume';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
 import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
 import './App.css';
@@ -130,6 +133,16 @@ function KeyboardActionIcon() {
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <rect x="3" y="6" width="18" height="12" rx="2" />
       <path d="M7 10h.01M11 10h.01M15 10h.01M8 13.5h8" />
+    </svg>
+  );
+}
+
+function BoardActionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="4" y="4" width="4.5" height="16" rx="1" />
+      <rect x="9.75" y="4" width="4.5" height="11" rx="1" />
+      <rect x="15.5" y="4" width="4.5" height="14" rx="1" />
     </svg>
   );
 }
@@ -325,7 +338,7 @@ function App() {
   const {
     daemonSessions,
     setDaemonSessions,
-    setChiefOfStaffDispatches,
+    setTickets,
     prs,
     setPRs,
     setRepoStates,
@@ -473,7 +486,6 @@ function App() {
     sendRenameSession,
     sendRenameWorkspace,
     sendSetChiefOfStaff,
-    sendWakeDispatchAgent,
     sendUnregisterSession,
     sendSetSetting,
     sendCreateWorktree,
@@ -531,6 +543,10 @@ function App() {
     listWorkflowRuns,
     getWorkflowRun,
     getReviewState,
+    fetchTicket,
+    sendTicketChangeStatus,
+    sendTicketAddComment,
+    sendTicketEditDescription,
     markFileViewed,
     sendAddComment,
     sendUpdateComment,
@@ -555,7 +571,7 @@ function App() {
     // A task lifecycle transition broadcast bumps the signal so an open Tasks panel
     // refetches the runner's list (the broadcast itself is payload-free).
     onNotebookTasksChanged: () => setNotebookTaskChangeSignal((n) => n + 1),
-    onChiefOfStaffDispatchesUpdate: setChiefOfStaffDispatches,
+    onTicketsUpdate: setTickets,
     onWorkspacesUpdate: setDaemonWorkspaces,
     onPRsUpdate: setPRs,
     onEndpointsUpdate: setDaemonEndpoints,
@@ -629,7 +645,6 @@ function App() {
         sendRenameSession={sendRenameSession}
         sendRenameWorkspace={sendRenameWorkspace}
         sendSetChiefOfStaff={sendSetChiefOfStaff}
-        sendWakeDispatchAgent={sendWakeDispatchAgent}
         sendUnregisterSession={sendUnregisterSession}
         sendSetSetting={sendSetSetting}
         sendCreateWorktree={sendCreateWorktree}
@@ -689,6 +704,10 @@ function App() {
         listWorkflowRuns={listWorkflowRuns}
         getWorkflowRun={getWorkflowRun}
         getReviewState={getReviewState}
+        fetchTicket={fetchTicket}
+        sendTicketChangeStatus={sendTicketChangeStatus}
+        sendTicketAddComment={sendTicketAddComment}
+        sendTicketEditDescription={sendTicketEditDescription}
         markFileViewed={markFileViewed}
         sendAddComment={sendAddComment}
         sendUpdateComment={sendUpdateComment}
@@ -745,7 +764,6 @@ interface AppContentProps {
   sendRenameSession: ReturnType<typeof useDaemonSocket>['sendRenameSession'];
   sendRenameWorkspace: ReturnType<typeof useDaemonSocket>['sendRenameWorkspace'];
   sendSetChiefOfStaff: ReturnType<typeof useDaemonSocket>['sendSetChiefOfStaff'];
-  sendWakeDispatchAgent: ReturnType<typeof useDaemonSocket>['sendWakeDispatchAgent'];
   sendUnregisterSession: ReturnType<typeof useDaemonSocket>['sendUnregisterSession'];
   sendSetSetting: ReturnType<typeof useDaemonSocket>['sendSetSetting'];
   sendCreateWorktree: ReturnType<typeof useDaemonSocket>['sendCreateWorktree'];
@@ -805,6 +823,10 @@ interface AppContentProps {
   listWorkflowRuns: ReturnType<typeof useDaemonSocket>['listWorkflowRuns'];
   getWorkflowRun: ReturnType<typeof useDaemonSocket>['getWorkflowRun'];
   getReviewState: ReturnType<typeof useDaemonSocket>['getReviewState'];
+  fetchTicket: ReturnType<typeof useDaemonSocket>['fetchTicket'];
+  sendTicketChangeStatus: ReturnType<typeof useDaemonSocket>['sendTicketChangeStatus'];
+  sendTicketAddComment: ReturnType<typeof useDaemonSocket>['sendTicketAddComment'];
+  sendTicketEditDescription: ReturnType<typeof useDaemonSocket>['sendTicketEditDescription'];
   markFileViewed: ReturnType<typeof useDaemonSocket>['markFileViewed'];
   sendAddComment: ReturnType<typeof useDaemonSocket>['sendAddComment'];
   sendUpdateComment: ReturnType<typeof useDaemonSocket>['sendUpdateComment'];
@@ -855,7 +877,6 @@ function AppContent({
   sendRenameSession,
   sendRenameWorkspace,
   sendSetChiefOfStaff,
-  sendWakeDispatchAgent,
   sendUnregisterSession,
   sendSetSetting,
   sendCreateWorktree,
@@ -915,6 +936,10 @@ sendFetchPRDetails,
   listWorkflowRuns,
   getWorkflowRun,
   getReviewState,
+  fetchTicket,
+  sendTicketChangeStatus,
+  sendTicketAddComment,
+  sendTicketEditDescription,
   markFileViewed,
   sendAddComment,
   sendUpdateComment,
@@ -992,6 +1017,7 @@ sendFetchPRDetails,
     agent?: SessionAgent,
     endpointId?: string,
     yoloMode = false,
+    options?: { resumePicker?: boolean },
   ) => {
     const sessionId = providedSessionId || crypto.randomUUID();
     const workspaceId = `workspace-${sessionId}`;
@@ -1007,6 +1033,12 @@ sendFetchPRDetails,
       const spawnArgs = takeSessionSpawnArgs(sessionId, 80, 24);
       if (!spawnArgs) {
         throw new Error('Session spawn arguments were not prepared.');
+      }
+      if (options?.resumePicker) {
+        // Resume into the agent's own conversation picker, scoped to this cwd.
+        // When the daemon still holds the prior session's resume id it resolves
+        // that for a precise resume; otherwise the picker is the safe fallback.
+        spawnArgs.resume_picker = true;
       }
       await ptySpawn({ args: spawnArgs });
       return createdSessionId;
@@ -1071,7 +1103,7 @@ sendFetchPRDetails,
   const [workspaceContextsError, setWorkspaceContextsError] = useState<string | null>(null);
   const [workspaceContexts, setWorkspaceContexts] = useState<Awaited<ReturnType<typeof sendListWorkspaceContexts>>>([]);
   const whatsNew = useWhatsNew();
-  const { repoStates, authorStates } = useDaemonStore();
+  const { repoStates, authorStates, tickets } = useDaemonStore();
   const mutedRepos = useMemo(() =>
     repoStates.filter(r => r.muted).map(r => r.repo),
     [repoStates],
@@ -1284,7 +1316,7 @@ sendFetchPRDetails,
     void connect();
   }, [connect]);
 
-  type DockPanelId = 'diff' | 'reviewLoop' | 'workflowRun' | 'attention' | 'diffDetail';
+  type DockPanelId = 'diff' | 'reviewLoop' | 'workflowRun' | 'attention' | 'diffDetail' | 'ticketDetail' | 'board';
 
   // Muted section expansion (controlled by Dashboard click)
   const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
@@ -1301,9 +1333,18 @@ sendFetchPRDetails,
         workflowRun: false,
         attention: false,
         diffDetail: false,
+        ticketDetail: false,
+        board: false,
     },
     stack: ['diff'],
   });
+  // The ticket whose detail panel is open (null when none). Paired with the
+  // ticketDetail dock panel.
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
+  const selectedTicketRow = useMemo(
+    () => (selectedTicketId ? tickets.find((ticket) => ticket.id === selectedTicketId) : undefined),
+    [tickets, selectedTicketId],
+  );
   const dockPanelCloseTimersRef = useRef<Partial<Record<DockPanelId, number>>>({});
   const gitStatusSubscribedDirRef = useRef<string | null>(null);
   const activeSessionVisibleSinceRef = useRef<{ id: string; at: number } | null>(null);
@@ -1677,6 +1718,8 @@ sendFetchPRDetails,
   const workflowRunPanelOpen = openDockPanels.workflowRun;
   const attentionPanelOpen = openDockPanels.attention;
   const diffDetailPanelOpen = openDockPanels.diffDetail;
+  const ticketDetailPanelOpen = openDockPanels.ticketDetail;
+  const boardPanelOpen = openDockPanels.board;
   const changesPanelVisible = view === 'session' && diffPanelOpen && Boolean(activeRepoDaemonSession?.directory);
   const blockingOverlayOpen = locationPickerOpen
     || whatsNew.isOpen
@@ -1782,6 +1825,14 @@ sendFetchPRDetails,
       icon: <AttentionActionIcon />,
       shortcut: [shortcutTokens('dock.attention')],
       run: () => openDockPanel('attention'),
+    },
+    {
+      id: 'tickets-board',
+      title: 'Open ticket board',
+      description: 'Tickets grouped by status',
+      keywords: ['ticket', 'board', 'kanban', 'tickets'],
+      icon: <BoardActionIcon />,
+      run: () => openDockPanel('board'),
     },
     {
       id: 'customize-shortcuts',
@@ -2328,6 +2379,18 @@ sendFetchPRDetails,
     },
     getReviewLoopState,
     answerReviewLoop,
+    // Ticket detail panel. Inlined (not the handleOpen/CloseTicketDetail
+    // callbacks) because those are defined later in the body — past this call's
+    // temporal-dead zone — and these are the same two trivial operations.
+    openTicketDetail: (ticketId: string) => {
+      setSelectedTicketId(ticketId);
+      openDockPanel('ticketDetail');
+    },
+    closeTicketDetail: () => {
+      closeDockPanel('ticketDetail');
+      setSelectedTicketId(null);
+    },
+    tickets,
     resetSessionPaneTerminal,
     injectSessionPaneBytes,
     injectSessionPaneBase64,
@@ -3150,6 +3213,48 @@ sendFetchPRDetails,
     setDiffSelectedFilePath(null);
   }, [closeDockPanel]);
 
+  // Ticket detail panel handlers — opened from a delegated session (the "from a
+  // session" entry); the panel fetches the full record for the selected id.
+  const handleOpenTicketDetail = useCallback((ticketId: string) => {
+    setSelectedTicketId(ticketId);
+    openDockPanel('ticketDetail');
+  }, [openDockPanel]);
+
+  const handleCloseTicketDetail = useCallback(() => {
+    closeDockPanel('ticketDetail');
+    setSelectedTicketId(null);
+  }, [closeDockPanel]);
+
+  // Resume a ticket's agent session. If the bound session is still tracked locally,
+  // focus it — re-spawning its id would append a duplicate local session, and on
+  // re-mount the app's attach path revives the runtime only when it is recoverable
+  // (Claude, or explicitly marked recoverable); a dead non-recoverable pane surfaces
+  // its own close-and-restart prompt. Otherwise reopen the agent in the ticket's
+  // stored cwd, reusing the bound id so the daemon resolves the prior conversation's
+  // resume id (precise resume; the resume picker is the fallback once that id is
+  // gone). Then close the detail view — the resumed session takes focus.
+  const handleResumeTicket = useCallback((ticketId: string) => {
+    const ticket = tickets.find((entry) => entry.id === ticketId);
+    if (!ticket) {
+      showError('Ticket not found.');
+      return;
+    }
+    const plan = planTicketResume(ticket, new Set(sessions.map((session) => session.id)));
+    executeTicketResumePlan(plan, {
+      error: showError,
+      focus: (sessionId) => {
+        handleSelectSession(sessionId);
+        handleCloseTicketDetail();
+      },
+      spawn: (spawnPlan) => {
+        const agent = normalizeSessionAgent(spawnPlan.agent, 'claude');
+        void createWorkspaceSession(spawnPlan.label, spawnPlan.cwd, spawnPlan.sessionId, agent, undefined, false, { resumePicker: true })
+          .then(() => handleCloseTicketDetail())
+          .catch((error) => showError(error instanceof Error ? error.message : 'Failed to resume ticket'));
+      },
+    });
+  }, [tickets, sessions, handleSelectSession, createWorkspaceSession, handleCloseTicketDetail, showError]);
+
   const handleSendToClaude = useCallback((reference: string) => {
     if (!activeSessionId) return;
     sendRuntimeInput(activeSessionId, reference, 'user');
@@ -3532,7 +3637,6 @@ sendFetchPRDetails,
       <div className={`view-container ${view === 'dashboard' ? 'visible' : 'hidden'}`}>
         <Dashboard
           sessions={unmutedEnrichedSessions}
-          dispatchSessions={visibleEnrichedSessions}
           mutedWorkspaces={mutedWorkspaceViews}
           prs={prs}
           isLoading={!hasReceivedInitialState}
@@ -3542,7 +3646,6 @@ sendFetchPRDetails,
           endpoints={daemonEndpoints}
           onRebootstrapEndpoint={handleRebootstrapEndpoint}
           onSelectSession={handleSelectSession}
-          onWakeDispatch={sendWakeDispatchAgent}
           onNewSession={() => handleNewSession('vertical')}
           onRefreshPRs={handleRefreshPRs}
           onOpenPR={handleOpenPR}
@@ -3823,6 +3926,39 @@ sendFetchPRDetails,
                   onOpenEditor={handleOpenEditorForReview}
                   onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
                   scale={scale}
+                />
+              ),
+            },
+            {
+              id: 'ticketDetail',
+              isOpen: ticketDetailPanelOpen,
+              width: 'clamp(420px, 38vw, 640px)',
+              className: 'dock-panel dock-panel--ticket-detail',
+              children: (
+                <TicketDetailPanel
+                  isOpen={ticketDetailPanelOpen}
+                  ticketId={selectedTicketId}
+                  ticketRow={selectedTicketRow}
+                  fetchTicket={fetchTicket}
+                  onChangeStatus={sendTicketChangeStatus}
+                  onAddComment={sendTicketAddComment}
+                  onEditDescription={sendTicketEditDescription}
+                  onResume={handleResumeTicket}
+                  onClose={handleCloseTicketDetail}
+                />
+              ),
+            },
+            {
+              id: 'board',
+              isOpen: boardPanelOpen,
+              width: 'clamp(560px, 52vw, 880px)',
+              className: 'dock-panel dock-panel--board',
+              children: (
+                <TicketBoardPanel
+                  isOpen={boardPanelOpen}
+                  tickets={tickets}
+                  onOpenTicket={handleOpenTicketDetail}
+                  onClose={() => closeDockPanel('board')}
                 />
               ),
             },

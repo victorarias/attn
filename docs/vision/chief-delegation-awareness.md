@@ -1,20 +1,34 @@
 # Vision: The chief in the loop
 
+> **What vs. why.** This doc is the durable **why** — the north star for the
+> chief's awareness of, and reach into, its delegations. The **what** — the domain
+> model and the surfaces that realize it — lives in
+> [docs/plans/2026-06-26-work-tracker.md](../plans/2026-06-26-work-tracker.md) and the
+> **Ticket** / **Chief of staff** entries in [docs/glossary.md](../glossary.md). The
+> loop shipped as the **ticket** model. The `dispatch`-based mechanism this doc
+> originally sketched — a per-thread `dispatch watch`, a separate mailbox, a Monitor
+> the chief had to keep armed — was retired once delegated work moved onto durable
+> tickets (ProtocolVersion 130).
+
 ## End state (the why)
 
-The chief of staff stops being a switchboard. Today it can fire work into the
-void — delegate an agent and forget it, learning the outcome only if Victor
-goes looking or the chief remembers to poll. The end state is a chief that
-**holds every thread it spun up**: it knows what each delegated agent is doing,
-sees what they produce the moment they finish, and folds those outputs back into
-its understanding of Victor's world.
+The chief of staff stops being a switchboard. A switchboard fires work into the
+void — delegate an agent and forget it, learning the outcome only if Victor goes
+looking or the chief remembers to poll. The end state is a chief that **holds
+every thread it spun up**: it knows what each delegated agent is doing, sees what
+they produce the moment they finish, and folds those outputs back into its
+understanding of Victor's world.
 
+It holds them the *durable* way. Each delegation is a **ticket** — a tracked work
+item with its own state, history, and artifacts — not something the chief has to
+keep alive in its own attention. The thread persists on the board whether or not
+the chief is looking, so awareness survives a compaction, a restart, tomorrow.
 When three agents are working, Victor gets **one coherent picture** from the
 chief, not three dashboards to reconcile himself. When an agent finishes, the
 chief already knows the natural next step. When two agents' work collides, the
-chief is the one that catches it. The outputs are what make the chief *useful* —
-awareness is the entire difference between a dispatcher and a chief of staff.
-This is the capability that lets the chief actually help, rather than just route.
+chief is the one that catches it. Awareness is the entire difference between a
+dispatcher and a chief of staff — it is what lets the chief actually help, rather
+than just route.
 
 Think of the chief as Alfred to Victor's Batman. Alfred runs the house and keeps
 track of every thread, so the moment Batman asks how things are going, he already
@@ -28,9 +42,10 @@ control — not a step toward automating Victor out of his own decisions.
 works through him. Victor doesn't. He works at every level at once: he talks to
 the chief, and he reaches into the agents directly and steers them himself. So
 the chief is **not a gatekeeper Victor routes through — it is an awareness layer
-he works alongside.** That is exactly why context must flow *back* to the chief
-even for threads Victor (or an agent) drove without it: the chief's worth is
-being one complete, durable picture Victor can return to — to resume a
+he works alongside.** That is exactly why every change to a ticket is authored by
+*anyone* — agent, chief, or Victor — and flows through the same history: the
+chief's picture stays whole even for threads Victor drove without it. The chief's
+worth is being one complete, durable picture Victor can return to — to resume a
 conversation, track a project across days — not a controller that owns the work.
 Miss this and the chief silently goes stale the moment Victor steers an agent
 himself, and stops being a place he can pick the thread back up.
@@ -38,159 +53,155 @@ himself, and stops being a place he can pick the thread back up.
 But observing is only half a loop — a chief that can *see* a running agent yet
 not *reach* it is a sensor, not a hand. So the loop closes both ways: the chief,
 and Victor through it, can steer work already in flight — answer a blocker,
-redirect it, feed it context. And the reverse channel must be as ambient as the
-forward one: mail to an agent never rots in an inbox no one watches. The agent
-learns of it the moment it lands, and Victor sees pending mail in the sidebar
-where he already looks — not buried in a dashboard he never opens.
+re-brief it, feed it context — by editing the same ticket. And the reverse
+channel must be as ambient as the forward one: a steer to an agent never rots in a
+queue no one watches. A self-monitoring agent learns of it the moment it lands; an
+agent that can't is nudged to check at a sensible moment; and Victor sees the
+pending signal in the sidebar where he already looks — never buried in a dashboard
+he never opens.
+
+## The shape: an issue tracker, not a switchboard
+
+The realization is an **issue tracker** — Linear, not Jira — with one twist: the
+assignees are autonomous agents that **report their own status**, and the chief is
+*notified the instant a ticket moves* instead of polling. Borrow Linear's restraint:
+a handful of fields, no sprints, no required transitions, no custom machinery. **The
+board informs; it never gates.** That sentence is the whole spine — awareness, not
+autonomy — made concrete.
+
+How it runs:
+
+- **Delegating mints a durable ticket** bound to the new session — the brief is its
+  description, the session is its assignee, and it opens in the **Working** column.
+  The ticket has its own identity, so it can be resumed, reassigned, or sit in a
+  backlog without depending on a live session.
+- **The agent moves its own ticket** with `attn ticket status` (`in_progress` /
+  `needs_input` / `ready_for_review` / `completed` / `failed`), each optionally
+  carrying a comment. attn authors exactly one status itself — **crashed** — the one
+  a dead worker can't report.
+- **The chief reads the board** (Todo · Working · Blocked · In Review · Done) and is
+  pushed a `tickets_updated` the instant a ticket moves; it opens a ticket for the
+  full activity thread and attachments only when a decision needs the detail.
+- **Steering back goes through the same ticket** — a comment, a re-brief, a status
+  nudge — which the agent picks up with `attn ticket inbox`. There is no separate
+  mailbox; the reverse channel is just more events on the ticket.
+- **So the chief's loop is "delegate → record → report, then the turn is done."**
+  The board carries the state, so the chief re-engages on a signal (a ticket needs
+  input, fails, or finishes) instead of babysitting a running agent.
 
 ## North-star principles
 
-- **Event-driven where we can; attn-triggered where we can't.** Claude chiefs
-  get true push (Monitor) — they learn of meaningful change *when it happens*.
-  Other agents (codex, etc.) can only poll. Even there, avoid a dumb timer:
-  attn nudges the agent to poll — injecting via pty once the chief has been idle
-  a few minutes — so the check fires at a sensible moment, not on a busy loop.
-- **The loop runs both ways.** Observing is half a loop; the chief must also be
-  able to *steer* a running agent. The reverse channel (the dispatch mailbox)
-  gets the same event-driven, ambient treatment as the forward one. Delivery by
-  situation: a **Claude** agent watches its own inbox (a Monitor) and
-  self-delivers — no human in the loop. An agent that **can't self-monitor**
-  (codex) falls back to attn — an **on-agent overlay** Victor clicks when he's
-  driving it, and an **automatic idle-wake** (attn pty-nudges it to check the
-  inbox after a few minutes idle) when no one is. A **left-sidebar pending-mail
-  badge** flags the session either way. Never dashboard-bound. Keep the existing
-  boundary: the daemon delivers durable mail and triggers a *read*; it never
-  streams message content into the PTY.
-- **attn owns the signal; the chief stays dumb.** A first-class
-  `attn dispatch watch` defines what an "event" *is*. The chief just arms it and
-  reacts. One source of truth for doneness — reused verbatim by the poll
-  fallback, so "done" is never defined twice.
-- **Signal, not noise.** Wake the chief for terminal completion, genuine
-  blockers, and failures — *never* routine tool-approval prompts. And silence
-  must never equal success: every terminal state emits, including crashes.
-- **Distilled by default, drill-in on demand.** The chief ingests the concise
-  report + actionables; it pulls the full transcript only when a decision needs
-  it. Awareness must make the chief *more* useful, not drown its context.
-- **Awareness lives in two places.** Live context for immediate help; the
-  durable journal so a *future* chief — post-compaction, next day, another
-  machine — still holds the thread. The chief's job is coherence across threads
-  and across time, and context windows are neither.
-- **Default-on, overridable.** The chief arms monitoring by default, but Victor
-  can always say "leave it for the dashboard" and the chief steps back.
-- **Awareness serves Victor, not itself — and stops short of deciding for him.**
-  The point of knowing is to be *ready*: synthesize across agents, catch
-  conflicts, prepare the next step, and surface the one thing that actually needs
-  him. But the chief informs and tees up; it does not decide. It acts on its own
-  only on the small, obvious, reversible things — answering a trivial,
-  low-consequence blocker, say — and anything with real consequence it hands to
-  Victor and waits. Inform-and-prepare by default; act only at the margins. A
-  confident-but-wrong steer is worse than waiting.
+- **Event-driven where we can; attn-triggered where we can't.** A ticket move emits
+  an event. A self-monitoring agent (Claude) watches the event stream live and drains
+  it the moment it lands; an agent that can't (codex, etc.) gets a fixed doorbell
+  typed into its PTY *only when it is idle*, nudging it to run `attn ticket inbox` — a
+  sensible-moment poke, not a busy-loop timer. The split is a first-class capability
+  (`HasSelfMonitor`), resolved from the driver registry, never guessed.
+- **The loop runs both ways.** Observing is half a loop; the chief must also steer a
+  running agent. Steering is just another authored event on the ticket (comment,
+  re-brief, status), delivered by the same layer and read with `attn ticket inbox` —
+  the reverse channel gets the same ambient treatment as the forward one.
+- **One source of truth for doneness.** The ticket's status enum *is* the definition
+  of "done" — derived once, read everywhere (the board column, the notification, the
+  chief's view). Nothing defines "done" twice. The board derives from the status; it
+  never holds a second opinion.
+- **The daemon delivers a doorbell, never content.** attn triggers a *read*; it never
+  streams message content into a PTY. The durable ticket and its event log hold the
+  payload; the agent pulls it. This boundary is load-bearing — breaking it turns an
+  ambient nudge into the daemon putting words in an agent's mouth.
+- **Signal, not noise.** A ticket moves on terminal completion, genuine blockers, and
+  failures — never on routine tool-approval prompts. And silence never equals success:
+  a mid-flight death surfaces as **crashed**, captured from the session's pre-clobber
+  runtime state the instant its process exits, not left as a stale Working column.
+- **Distilled by default, drill-in on demand.** The activity thread — status changes
+  plus comments — is the digest the chief ingests; it opens the full ticket (history,
+  attachments, the handover artifact, the transcript) only when a decision needs it.
+  Big outputs land as **attachments** or a Notebook note referenced from the ticket,
+  so awareness makes the chief *more* useful, not drowned.
+- **Awareness lives in durable structure, not just attention.** The ticket and board
+  persist on disk, so a *future* chief — post-compaction, next day, another machine —
+  still holds the thread without re-arming anything. Live context for immediate help;
+  the durable board and the journal for coherence across time.
+- **Awareness serves Victor — and stops short of deciding for him.** The chief informs
+  and tees up. It acts on its own only on small, reversible coordination — answering a
+  trivial blocker, posting an update, carrying out the one delegation Victor asked for —
+  and hands anything with real consequence (fanning out more agents, creating
+  workspaces, an irreversible or outward-facing call) to Victor and waits. And it
+  *surfaces* delegated outcomes; it does **not** validate or accept specialist work —
+  reviewing the code, the implementation, the engineering is Victor's. The one exception
+  is work within the chief's own competence: documentation and prose, which it can
+  review on the merits. (Alfred proofreads the correspondence; he doesn't sign off on
+  the rebuilt engine.) Inform-and-prepare by default; a confident-but-wrong steer is
+  worse than waiting.
 
 ## Scope & non-goals
 
-**In scope.** The chief monitoring the agents *it* delegated; ingesting their
-outputs into both live context and the durable journal; the `dispatch watch`
-command and its event definition; the Monitor-based path for Claude chiefs and
-the polling fallback for other agents. And the **reverse channel**: fixing the
-dispatch mailbox so steering reaches a running agent promptly — agents watching
-their own inbox, plus a sidebar pending-mail badge and an on-agent overlay for
-Victor.
+**In scope.** The durable **ticket** model (status, activity thread, attachments,
+resume); the **board** as the read-only awareness surface the chief reads instead of
+polling; agent self-report via `attn ticket status`; the reverse channel via
+`attn ticket inbox`; the **notification split** (a live watch for self-monitoring
+agents, an idle pty-nudge for the rest) and the per-identity read cursor that tracks
+delivery; and attn-authored **crash** capture so a silent death is still visible.
 
 **Non-goals.**
-- *Not* a general pub/sub between arbitrary sessions. Built on general
-  primitives, but the vision is specifically the **chief's** awareness of, and
-  reach into, its delegations.
-- *Not* a new dashboard or screen. The signal lives in the chief's cognition and
-  small ambient affordances (a sidebar badge, an on-agent overlay) — not a
-  separate surface you have to go visit.
-- *Not* auto-acting on agent output. Awareness enables proactivity, but
-  irreversible or outward-facing actions stay gated behind Victor.
-- *Not* a replacement for Victor steering agents directly. The badge and overlay
-  give him ambient reach; he can still drive any agent himself whenever he wants.
-- *Not* a rewrite of the mailbox — its durable, ack-tracked model stays; only
-  delivery and ergonomics change.
-- *Not* the chief's notebook inbox — that's a separate channel (the chief's own
-  inbox, stored as a notebook note), out of scope here.
+- *Not Jira.* Linear's restraint — a few fields, and a board that **informs, never
+  gates**. No sprints, workflows, required transitions, or custom fields.
+- *Not a new dashboard you must visit.* The board is an ambient surface (⌘K) and the
+  signal lives in the chief's cognition plus small per-session affordances (badges) —
+  not a place you have to go babysit.
+- *Not auto-acting on agent output.* Awareness enables proactivity, but irreversible
+  or outward-facing actions stay gated behind Victor.
+- *Not a replacement for Victor steering agents directly.* He works at every level;
+  the ticket stays coherent because every event is authored-by-anyone, including him.
+- *Not projects or grouping yet.* The ticket carries a `project_id` seam, unused for
+  now.
 
-## Big rocks (the arc)
+## The arc — shipped and open
 
-Coarse and expected to evolve — not a task tracker.
+The work-tracker epic delivered the loop across slices 1–7.
 
-**Forward — observe (agent → chief):**
-- [~] **`attn dispatch watch <id>`** — blocking command, one line per meaningful
-  event, exits on terminal. Owns the signal definition (done / blocker /
-  failure; excludes routine approvals; covers crash states). In flight: PR #394
-  (shared classifier in `internal/dispatch`, reuses `list_dispatches`, no new
-  protocol surface) — ready to merge.
-- [x] **Reliable doneness-on-close** — a close without a structured terminal
-  report is now the neutral terminal `ended` (silence is neither success nor
-  failure), so an unreported success no longer cries a false `[failed]`. attn does
-  *not* infer completion on a clean close — doneness stays agent-claimed, never
-  guessed. The one close it *does* assert is a crash: the daemon captures the
-  delegated session's last attn-classified state the moment its process exits
-  (before the idle-clobber/removal erases it) and surfaces a close that was cut
-  off mid-flight — `working` / `launching` / `pending_approval` — as `failed`,
-  while a clean rest (`idle` / `waiting_input`) or an unconfirmed close (`unknown`
-  / unstamped) stays neutral `ended`. So a real crash is visible, a real success
-  is never overwritten, and the safe direction (never a false `done`) holds. The
-  neutral `ended` landed with the #394 alignment; crash-visibility-on-close
-  followed. Also resolves the re-arming caveat below.
-- [ ] **Delegation-time injection** — at delegation, attn instructs the chief to
-  arm a persistent, non-blocking Monitor on the new dispatch. Scoped to the
-  dispatch id, self-retiring on terminal, default-on but overridable.
-- [ ] **Output-into-context** — the event carries the *distilled* report
-  (`concise_summary` / `structured_report` / `actionable`); the chief drills
-  into the full transcript on demand. The *large-output* branch already ships:
-  `attn dispatch handoff` lets a delegated agent stash a big artifact in the
-  Notebook and report just the reference, so the drill-in target can be a durable
-  note, not only the transcript ([plan](../plans/2026-06-22-dispatch-notebook-handoff.md)).
-- [ ] **Durable capture** — the chief journals the outcome so awareness survives
-  compaction and session restarts.
-- [ ] **Non-Claude poll path** — agents that can't be pushed to (codex, etc.)
-  poll `dispatch status` (same doneness semantics, stop-on-terminal). attn makes
-  the poll quasi-event-driven by pty-injecting a "go check" nudge once the chief
-  has been idle a few minutes, rather than leaving it on a timer.
+**Shipped:**
+- [x] **Durable ticket store + lifecycle** — status enum, activity thread (status
+  changes + comments, no separate "report"), attachments, memorable slugs, archive/TTL.
+- [x] **Event-driven notification core** — one event log, per-identity per-ticket
+  unread cursors, dedup.
+- [x] **Delegation ⇄ tickets** — delegating mints and binds a ticket (description =
+  brief, assignee = session, opens **Working**).
+- [x] **Agent forward channel** — `attn ticket status`; attn-authored **crashed** on a
+  mid-flight close.
+- [x] **Agent reverse channel** — `attn ticket inbox` consume path; the steering edits
+  the chief makes are read here.
+- [x] **Notification split by capability** — `HasSelfMonitor`: Claude watches live;
+  codex is idle-nudged with a fixed doorbell.
+- [x] **Ticket view + resume + attachments** — the chief edits, comments, and changes
+  status from the UI; **resume** reopens a stopped agent on the same ticket (its cwd +
+  last agent id); `attn ticket attach` hands over a file.
+- [x] **The board** — status columns + a Todo backlog + filters (blocked / in review /
+  closed today), read-only, live `tickets_updated`.
+- [x] **The `dispatch` namespace retired** — tickets-only delegation via
+  `delegatedTicketPrompt`; the dispatch CLI, store, handlers, and protocol removed.
 
-**Reverse — steer (chief → agent):**
-- [~] **Agents watch their own inbox** — delegated Claude agents arm a Monitor
-  on `dispatch inbox` and self-deliver mail on arrival. Brief-level, no attn
-  change; now a standing line in every delegation brief.
-- [ ] **Auto-wake on idle** — for agents that can't self-monitor (codex), attn
-  pty-nudges them to check the inbox after a few minutes idle. The *unattended*
-  fallback — mirror of the idle-nudge on the forward side.
-- [ ] **On-agent mailbox overlay** — a top-right overlay on an agent that has
-  pending mail, for when Victor is *driving* that agent; click fires the
-  inbox-doorbell PTY injection to it (the *attended* manual path; message
-  content stays out of the PTY).
-- [ ] **Pending-mail sidebar badge** — a per-session left-sidebar badge when an
-  agent has unread mail (sibling of the chief / delegated-from-chief badges).
-- [ ] **Fix mailbox delivery, kill limbo** — mail reaches a live agent promptly
-  instead of waiting for a lifecycle boundary or a dashboard click; mail
-  lifecycle ties to the dispatch so nothing strands when it closes. Durable /
-  ack model unchanged.
+**Still open:**
+- [ ] **The "went quiet" floor.** A ticket sitting in **Working** that simply stops
+  emitting — no terminal event — is the one silence the model doesn't yet catch. A
+  floor that notices a thread has gone quiet (vs. crashed, vs. done) is still owed.
+- [ ] **Push vs. hold.** When does an ingested move make the chief proactively ping
+  Victor vs. hold it until he asks? The threshold is unsettled.
+- [ ] **Multi-delegation synthesis.** Several tickets moving close together should
+  become one coherent update, not N pings.
+- [ ] **Backlog without a delegation.** `todo` is the state for a ticket created
+  without delegating, but there is no `attn ticket new` yet — so the Todo column only
+  fills from real backlog items. A first-class create path is open.
+- [ ] **Ticket export** (slice 8) — a self-contained archive of a ticket's state;
+  deferred to a standalone PR on `main`.
 
-**On screen:**
-- [~] **"Delegated from chief" sidebar badge** — already in flight (PR #392); the
-  visual sibling the pending-mail badge follows.
-
-## Open questions
-
-- **Push vs hold.** When does an ingested output make the chief proactively ping
-  Victor vs simply hold it until he asks? Where's the threshold?
-- **Multi-delegation synthesis.** When several agents finish close together, how
-  does the chief batch them into one coherent update instead of N pings?
-- **Ownership of "meaningful."** Is the event definition wholly attn-core, or is
-  some of "what matters" agent-defined? (Leaning attn-core for one source of
-  truth.)
-- **Re-arming across sessions.** If the chief compacts or restarts while a
-  monitor is armed, how is the watch re-established from journal / dispatch
-  state so a thread isn't silently dropped? (The old failure mode here — re-arming
-  a watch on an already-finished, already-closed agent reading `failed` for a
-  success — is resolved: a clean close now reads neutral `ended`, and only a real
-  mid-flight crash reads `failed`. See *reliable doneness-on-close* above.)
-- **Idle-nudge reliability.** Does the pty "go check" nudge for non-Claude
-  chiefs land reliably (idle detection, injection timing), or do some agents
-  still need a self-driven timer as backstop?
-- **Ack ergonomics.** With self-delivery, how much of the read → mark-read → ack
-  ceremony survives? What's the minimum that still tracks "delivered / acted on"
-  without making mail a chore?
+**Resolved by the ticket model** (questions the old `dispatch` design carried, now
+dissolved):
+- **Re-arming watches across sessions.** The old design's hardest question —
+  re-establishing a Monitor after the chief compacts or restarts — is gone: the board
+  is durable state, so there is nothing to re-arm. The chief just reads it.
+- **Ack ergonomics.** Replaced by the per-identity read cursor that `attn ticket
+  inbox` advances — delivered/seen is tracked without ceremony.
+- **Doneness-on-close.** Settled: a mid-flight death is **crashed** (captured from
+  pre-clobber runtime state); a clean close leaves the agent's last reported column
+  untouched. attn never guesses a `done`.

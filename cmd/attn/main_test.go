@@ -589,272 +589,12 @@ func TestParseDelegateArgsAcceptsWorkspaceWithWorktree(t *testing.T) {
 	}
 }
 
-func TestParseDispatchOutcomeArgsBuildsTypedCompletion(t *testing.T) {
-	t.Setenv("ATTN_SESSION_ID", "worker-1")
-	path := filepath.Join(t.TempDir(), "report.md")
-	if err := os.WriteFile(path, []byte("Implemented the fix.\nTests pass.\n"), 0o600); err != nil {
-		t.Fatalf("write report: %v", err)
-	}
-	parsed, err := parseDispatchOutcomeArgs("complete", []string{
-		"--summary", "Parser implemented",
-		"--details-file", path,
-		"--next-actor", "chief",
-		"--next-action", "Review the result",
-		"--constraint", "no push",
-	})
-	if err != nil {
-		t.Fatalf("parseDispatchOutcomeArgs() error = %v", err)
-	}
-	if parsed.SourceSessionID != "worker-1" || parsed.Report != "Implemented the fix.\nTests pass." {
-		t.Fatalf("dispatch outcome = %+v", parsed)
-	}
-	structured := parsed.StructuredReport
-	if structured.ReportType != protocol.DispatchReportTypeCompletion ||
-		structured.WorkState != protocol.DispatchWorkStateCompleted ||
-		structured.Summary != "Parser implemented" ||
-		protocol.Deref(structured.NextActor) != "chief" ||
-		protocol.Deref(structured.NextAction) != "Review the result" ||
-		len(structured.Constraints) != 1 || structured.Constraints[0] != "no push" {
-		t.Fatalf("structured outcome = %+v", structured)
-	}
-}
-
-func TestDispatchOutcomeTypes(t *testing.T) {
-	tests := []struct {
-		outcome    string
-		reportType protocol.DispatchReportType
-		workState  protocol.DispatchWorkState
-	}{
-		{"update", protocol.DispatchReportTypeProgress, protocol.DispatchWorkStateInProgress},
-		{"block", protocol.DispatchReportTypeBlocker, protocol.DispatchWorkStateNeedsInput},
-		{"review", protocol.DispatchReportTypeHandoff, protocol.DispatchWorkStateReadyForReview},
-		{"complete", protocol.DispatchReportTypeCompletion, protocol.DispatchWorkStateCompleted},
-		{"fail", protocol.DispatchReportTypeFailure, protocol.DispatchWorkStateFailed},
-	}
-	for _, test := range tests {
-		t.Run(test.outcome, func(t *testing.T) {
-			reportType, workState, ok := dispatchOutcomeTypes(test.outcome)
-			if !ok || reportType != test.reportType || workState != test.workState {
-				t.Fatalf("dispatchOutcomeTypes(%q) = (%q, %q, %v)", test.outcome, reportType, workState, ok)
-			}
-		})
-	}
-}
-
-func TestParseDispatchBlockRequiresQuestionAndBuildsRequest(t *testing.T) {
-	t.Setenv("ATTN_SESSION_ID", "worker-1")
-	if _, err := parseDispatchOutcomeArgs("block", []string{"--summary", "Need input"}); err == nil ||
-		!strings.Contains(err.Error(), "--question is required") {
-		t.Fatalf("missing question error = %v", err)
-	}
-	parsed, err := parseDispatchOutcomeArgs("block", []string{
-		"--summary", "Need the event contract",
-		"--question", "Which event should be emitted?",
-		"--recommendation", "Use AisNoOperationV1",
-		"--consequence", "Emission remains blocked",
-	})
-	if err != nil {
-		t.Fatalf("parseDispatchOutcomeArgs() error = %v", err)
-	}
-	structured := parsed.StructuredReport
-	if structured.ReportType != protocol.DispatchReportTypeBlocker ||
-		structured.WorkState != protocol.DispatchWorkStateNeedsInput ||
-		structured.Request == nil ||
-		structured.Request.Question != "Which event should be emitted?" ||
-		structured.Request.ExpectedResponder != "chief" ||
-		protocol.Deref(structured.Request.Recommendation) != "Use AisNoOperationV1" {
-		t.Fatalf("block outcome = %+v", structured)
-	}
-}
-
-func TestParseDispatchOutcomeArgsRejectsLegacyCoordinationFile(t *testing.T) {
-	_, err := parseDispatchOutcomeArgs("complete", []string{
-		"--session", "worker-1",
-		"--summary", "Done",
-		"--coordination-file", "/tmp/coordination.json",
-	})
-	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
-		t.Fatalf("legacy coordination error = %v", err)
-	}
-}
-
-func TestParseDispatchHandoffArgsReadsArtifactAndBuildsReview(t *testing.T) {
-	t.Setenv("ATTN_SESSION_ID", "worker-1")
-	path := filepath.Join(t.TempDir(), "artifact.md")
-	artifact := "# Findings\n\nThe long report.\n"
-	if err := os.WriteFile(path, []byte(artifact), 0o600); err != nil {
-		t.Fatalf("write artifact: %v", err)
-	}
-	parsed, err := parseDispatchHandoffArgs([]string{
-		"--file", path,
-		"--to", "projects/audit/findings.md",
-		"--summary", "Audit ready",
-		"--details", "Review the access findings.",
-		"--review",
-	})
-	if err != nil {
-		t.Fatalf("parseDispatchHandoffArgs() error = %v", err)
-	}
-	if parsed.SourceSessionID != "worker-1" || parsed.To != "projects/audit/findings.md" ||
-		parsed.Report != "Review the access findings." {
-		t.Fatalf("handoff = %+v", parsed)
-	}
-	if parsed.Content != artifact { // the artifact is sent verbatim, not trimmed
-		t.Fatalf("artifact not verbatim: %q", parsed.Content)
-	}
-	if parsed.StructuredReport.ReportType != protocol.DispatchReportTypeHandoff ||
-		parsed.StructuredReport.WorkState != protocol.DispatchWorkStateReadyForReview ||
-		parsed.StructuredReport.Summary != "Audit ready" {
-		t.Fatalf("structured handoff = %+v", parsed.StructuredReport)
-	}
-}
-
-func TestParseDispatchHandoffArgsRequiresToAndFile(t *testing.T) {
-	t.Setenv("ATTN_SESSION_ID", "worker-1")
-	path := filepath.Join(t.TempDir(), "artifact.md")
-	if err := os.WriteFile(path, []byte("body"), 0o600); err != nil {
-		t.Fatalf("write artifact: %v", err)
-	}
-	if _, err := parseDispatchHandoffArgs([]string{"--file", path}); err == nil ||
-		!strings.Contains(err.Error(), "--to is required") {
-		t.Fatalf("missing --to error = %v", err)
-	}
-	if _, err := parseDispatchHandoffArgs([]string{"--to", "projects/x.md"}); err == nil ||
-		!strings.Contains(err.Error(), "--file is required") {
-		t.Fatalf("missing --file error = %v", err)
-	}
-}
-
-func TestParseDispatchHandoffRequiresExplicitOutcome(t *testing.T) {
-	t.Setenv("ATTN_SESSION_ID", "worker-1")
-	path := filepath.Join(t.TempDir(), "artifact.md")
-	if err := os.WriteFile(path, []byte("artifact"), 0o600); err != nil {
-		t.Fatalf("write artifact: %v", err)
-	}
-	_, err := parseDispatchHandoffArgs([]string{
-		"--file", path,
-		"--to", "projects/audit/findings.md",
-		"--summary", "Audit ready",
-	})
-	if err == nil || !strings.Contains(err.Error(), "exactly one of --review or --complete") {
-		t.Fatalf("missing handoff outcome error = %v", err)
-	}
-}
-
-func TestParseDispatchResolveArgsReadsResponseFile(t *testing.T) {
-	t.Setenv("ATTN_SESSION_ID", "chief-1")
-	path := filepath.Join(t.TempDir(), "response.md")
-	if err := os.WriteFile(path, []byte("Use AisNoOperationV1.\n"), 0o600); err != nil {
-		t.Fatalf("write response file: %v", err)
-	}
-	sessionID, dispatchID, response, link, err := parseDispatchResolveArgs([]string{
-		"--dispatch", "dispatch-1",
-		"--file", path,
-		"--link", "https://example.test/decision",
-	})
-	if err != nil {
-		t.Fatalf("parseDispatchResolveArgs() error = %v", err)
-	}
-	if sessionID != "chief-1" ||
-		dispatchID != "dispatch-1" ||
-		response != "Use AisNoOperationV1." ||
-		link != "https://example.test/decision" {
-		t.Fatalf("dispatch resolve = (%q, %q, %q, %q)", sessionID, dispatchID, response, link)
-	}
-}
-
-func TestParseDispatchMessageArgsReadsFile(t *testing.T) {
-	t.Setenv("ATTN_SESSION_ID", "chief-1")
-	path := filepath.Join(t.TempDir(), "message.md")
-	if err := os.WriteFile(path, []byte("Re-check the current branch.\n"), 0o600); err != nil {
-		t.Fatalf("write message: %v", err)
-	}
-	sessionID, dispatchID, message, err := parseDispatchMessageArgs([]string{
-		"--dispatch", "dispatch-1",
-		"--file", path,
-	})
-	if err != nil {
-		t.Fatalf("parseDispatchMessageArgs() error = %v", err)
-	}
-	if sessionID != "chief-1" || dispatchID != "dispatch-1" || message != "Re-check the current branch." {
-		t.Fatalf("dispatch message = (%q, %q, %q)", sessionID, dispatchID, message)
-	}
-}
-
-func TestParseDispatchInboxArgsDefaultsToCurrentSession(t *testing.T) {
-	t.Setenv("ATTN_SESSION_ID", "worker-1")
-	sessionID, unreadOnly, err := parseDispatchInboxArgs([]string{"--unread"})
-	if err != nil {
-		t.Fatalf("parseDispatchInboxArgs() error = %v", err)
-	}
-	if sessionID != "worker-1" || !unreadOnly {
-		t.Fatalf("dispatch inbox = (%q, %t)", sessionID, unreadOnly)
-	}
-}
-
-func TestParseDispatchWatchArgs(t *testing.T) {
-	t.Setenv("ATTN_SESSION_ID", "chief-1")
-
-	// Positional id then flags (the natural invocation) must parse — the std
-	// flag package stops at the first positional, so the parser pulls the id off
-	// the front first.
-	source, id, interval, err := parseDispatchWatchArgs([]string{"d-123", "--session", "chief-2", "--interval", "2s"})
-	if err != nil {
-		t.Fatalf("parseDispatchWatchArgs() error = %v", err)
-	}
-	if source != "chief-2" || id != "d-123" || interval != 2*time.Second {
-		t.Fatalf("watch args = (%q, %q, %v)", source, id, interval)
-	}
-
-	// Bare id falls back to ATTN_SESSION_ID and a zero interval (loop default).
-	source, id, interval, err = parseDispatchWatchArgs([]string{"d-456"})
-	if err != nil {
-		t.Fatalf("parseDispatchWatchArgs() bare error = %v", err)
-	}
-	if source != "chief-1" || id != "d-456" || interval != 0 {
-		t.Fatalf("bare watch args = (%q, %q, %v)", source, id, interval)
-	}
-
-	// A missing id (or a leading flag where the id should be) is a usage error.
-	if _, _, _, err := parseDispatchWatchArgs([]string{}); err == nil {
-		t.Error("expected error for missing dispatch id")
-	}
-	if _, _, _, err := parseDispatchWatchArgs([]string{"--session", "chief-2"}); err == nil {
-		t.Error("expected error when the id is omitted before flags")
-	}
-}
-
-func TestParseDispatchMessagesArgsRequiresDispatch(t *testing.T) {
-	t.Setenv("ATTN_SESSION_ID", "chief-1")
-	sessionID, dispatchID, err := parseDispatchMessagesArgs([]string{"--dispatch", "dispatch-1"})
-	if err != nil {
-		t.Fatalf("parseDispatchMessagesArgs() error = %v", err)
-	}
-	if sessionID != "chief-1" || dispatchID != "dispatch-1" {
-		t.Fatalf("dispatch messages = (%q, %q)", sessionID, dispatchID)
-	}
-}
-
-func TestParseDispatchAckArgsReadsAcknowledgement(t *testing.T) {
-	t.Setenv("ATTN_SESSION_ID", "worker-1")
-	sessionID, messageID, acknowledgement, err := parseDispatchAckArgs([]string{
-		"--message-id", "message-1",
-		"--message", "Re-check complete.",
-	})
-	if err != nil {
-		t.Fatalf("parseDispatchAckArgs() error = %v", err)
-	}
-	if sessionID != "worker-1" || messageID != "message-1" || acknowledgement != "Re-check complete." {
-		t.Fatalf("dispatch ack = (%q, %q, %q)", sessionID, messageID, acknowledgement)
-	}
-}
-
 func TestWriteHelpMentionsPresenceAndOpen(t *testing.T) {
 	var output bytes.Buffer
 	writeHelp(&output)
 
 	text := output.String()
-	for _, expected := range []string{"presence", "delegate --brief-file <path>", "dispatch <command>", "workspace context <command>", "open <file.md> [--session <id>]", "review-loop <command>"} {
+	for _, expected := range []string{"presence", "delegate --brief-file <path>", "workspace context <command>", "open <file.md> [--session <id>]", "review-loop <command>"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("help output missing %q: %q", expected, text)
 		}
@@ -1209,6 +949,91 @@ func TestNonTerminalStopState(t *testing.T) {
 			}
 			if got := nonTerminalStopState(input, tc.relax); got != tc.want {
 				t.Fatalf("nonTerminalStopState() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// parseTicketStatusArgs must accept flags on either side of the work-state
+// positional. Go's flag parser stops at the first positional, so the regression
+// here is the documented `ticket status <state> --comment ...` form (flags after
+// the state) silently dropping the flags.
+func TestParseTicketStatusArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want ticketStatusArgs
+	}{
+		{
+			name: "flags after state (the documented form)",
+			args: []string{"ready_for_review", "--comment", "ready for a look", "--session", "s1"},
+			want: ticketStatusArgs{WorkState: "ready_for_review", Comment: "ready for a look", Session: "s1"},
+		},
+		{
+			name: "flags before state",
+			args: []string{"--session", "s1", "--comment", "wip", "in_progress"},
+			want: ticketStatusArgs{WorkState: "in_progress", Comment: "wip", Session: "s1"},
+		},
+		{
+			name: "flags around state",
+			args: []string{"--session", "s1", "completed", "--json"},
+			want: ticketStatusArgs{WorkState: "completed", Session: "s1", JSON: true},
+		},
+		{
+			name: "bare state",
+			args: []string{"failed"},
+			want: ticketStatusArgs{WorkState: "failed"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseTicketStatusArgs(tc.args)
+			if err != nil {
+				t.Fatalf("parseTicketStatusArgs(%v): %v", tc.args, err)
+			}
+			if got != tc.want {
+				t.Fatalf("parseTicketStatusArgs(%v) = %+v, want %+v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseTicketStatusArgsErrors(t *testing.T) {
+	cases := map[string][]string{
+		"no state":     {"--comment", "hi"},
+		"two states":   {"working", "failed"},
+		"unknown flag": {"working", "--bogus"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseTicketStatusArgs(args); err == nil {
+				t.Fatalf("parseTicketStatusArgs(%v) = nil error, want error", args)
+			}
+		})
+	}
+}
+
+func TestParseTicketAttachArgs(t *testing.T) {
+	got, err := parseTicketAttachArgs([]string{"--file", "report.md", "--note", "for review", "--session", "s1", "--json"})
+	if err != nil {
+		t.Fatalf("parseTicketAttachArgs: %v", err)
+	}
+	want := ticketAttachArgs{File: "report.md", Note: "for review", Session: "s1", JSON: true}
+	if got != want {
+		t.Fatalf("parseTicketAttachArgs = %+v, want %+v", got, want)
+	}
+}
+
+func TestParseTicketAttachArgsErrors(t *testing.T) {
+	cases := map[string][]string{
+		"missing file":          {"--note", "hi"},
+		"unexpected positional": {"--file", "a.md", "extra"},
+		"unknown flag":          {"--file", "a.md", "--bogus"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseTicketAttachArgs(args); err == nil {
+				t.Fatalf("parseTicketAttachArgs(%v) = nil error, want error", args)
 			}
 		})
 	}

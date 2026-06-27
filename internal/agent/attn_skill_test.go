@@ -23,7 +23,8 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 	index := readSkillFile(t, skillDir, "SKILL.md")
 	for _, expected := range []string{
 		"name: attn",
-		"delegate work",
+		"Not for private research", // description boundary vs native subagents
+		"use native subagents for those",
 		"visible interactive agent",
 		"ATTN_WRAPPER_PATH",
 		"references/delegation.md",
@@ -48,25 +49,26 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 
 	chiefOfStaff := readSkillFile(t, skillDir, "references/chief-of-staff.md")
 	for _, expected := range []string{
-		"dispatch list",
-		"dispatch update --summary",
-		"dispatch block",
-		"dispatch review",
-		"dispatch complete",
-		"dispatch fail",
-		"latest report",
+		"ticket status in_progress",
+		"ticket status needs_input",
+		"ticket status ready_for_review",
+		"ticket status completed",
+		"ticket status failed",
+		"ticket board",
 		"visible, full interactive",
 		"default to native subagents",
-		"not proof that the work is correct",
-		"Do not use dispatch outcome commands for ordinary",
+		"do not validate that specialist work", // chief surfaces, Victor reviews
+		"review it on the merits",              // the docs/prose exception
+		"the agent's claim, not as confirmed",
+		"Do not report ticket status for ordinary",
 	} {
 		if !strings.Contains(chiefOfStaff, expected) {
 			t.Fatalf("chief of staff reference missing %q: %q", expected, chiefOfStaff)
 		}
 	}
 	if strings.Contains(chiefOfStaff, "coordination-file") ||
-		strings.Contains(chiefOfStaff, "dispatch report --") {
-		t.Fatalf("chief of staff reference retains legacy reporting UX: %q", chiefOfStaff)
+		strings.Contains(chiefOfStaff, "dispatch ") {
+		t.Fatalf("chief of staff reference retains legacy dispatch UX: %q", chiefOfStaff)
 	}
 
 	delegation := readSkillFile(t, skillDir, "references/delegation.md")

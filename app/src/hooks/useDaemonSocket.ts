@@ -3,7 +3,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '@tauri-apps/api/core';
 import type {
   Session as GeneratedSession,
-  ChiefOfStaffDispatch as GeneratedChiefOfStaffDispatch,
   Workspace as GeneratedWorkspaceSnapshot,
   PR as GeneratedPR,
   Worktree as GeneratedWorktree,
@@ -22,6 +21,7 @@ import type {
   WarningElement as GeneratedWarning,
   WorkspaceContext as GeneratedWorkspaceContext,
   NotebookTask as GeneratedNotebookTask,
+  Ticket as GeneratedTicket,
   PRRole,
   HeatState,
 } from '../types/generated';
@@ -61,7 +61,7 @@ import { useWorkflowRunsStore } from '../store/workflowRuns';
 
 // Short names for daemon payloads used throughout the app.
 export type DaemonSession = GeneratedSession;
-export type ChiefOfStaffDispatch = GeneratedChiefOfStaffDispatch;
+export type Ticket = GeneratedTicket;
 export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
@@ -148,7 +148,6 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   inspection?: PathInspection;
   plugins?: DaemonPlugin[];
   issues?: DaemonPluginIssue[];
-  dispatches?: ChiefOfStaffDispatch[];
   github_hosts?: string[];
   contexts?: DaemonWorkspaceContext[];
   // Legacy review event fields
@@ -172,7 +171,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '123';
+export const PROTOCOL_VERSION = '130';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -492,7 +491,9 @@ interface UseDaemonSocketOptions {
   // are root-relative; origin is agent|ui|external. Mirrors onNotebookChanged for
   // the generic filesystem surface (fs_changed).
   onFsChanged?: (origin: string, paths: string[]) => void;
-  onChiefOfStaffDispatchesUpdate?: (dispatches: ChiefOfStaffDispatch[]) => void;
+  // Fired with the non-archived ticket board (bare rows) on initial_state and on
+  // every tickets_updated broadcast. The detail view fetches full records itself.
+  onTicketsUpdate?: (tickets: Ticket[]) => void;
   onWorkspacesUpdate: (workspaces: DaemonWorkspace[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
   onEndpointsUpdate?: (endpoints: DaemonEndpoint[]) => void;
@@ -775,7 +776,7 @@ export function useDaemonSocket({
   onNotebookChanged,
   onNotebookTasksChanged,
   onFsChanged,
-  onChiefOfStaffDispatchesUpdate,
+  onTicketsUpdate,
   onWorkspacesUpdate,
   onPRsUpdate,
   onEndpointsUpdate,
@@ -806,7 +807,7 @@ export function useDaemonSocket({
     onNotebookChanged,
     onNotebookTasksChanged,
     onFsChanged,
-    onChiefOfStaffDispatchesUpdate,
+    onTicketsUpdate,
     onWorkspacesUpdate,
     onPRsUpdate,
     onEndpointsUpdate,
@@ -826,7 +827,7 @@ export function useDaemonSocket({
     onNotebookChanged,
     onNotebookTasksChanged,
     onFsChanged,
-    onChiefOfStaffDispatchesUpdate,
+    onTicketsUpdate,
     onWorkspacesUpdate,
     onPRsUpdate,
     onEndpointsUpdate,
@@ -951,9 +952,6 @@ export function useDaemonSocket({
         return;
       case 'unregister_workspace':
         rejectPendingByPredicate((key) => key.startsWith('unregister_workspace:'), error);
-        return;
-      case 'wake_dispatch_agent':
-        rejectPendingByPredicate((key) => key.startsWith('wake_dispatch_agent:'), error);
         return;
       case 'workspace_layout_add_session_pane':
       case 'workspace_layout_close_pane':
@@ -1261,7 +1259,7 @@ export function useDaemonSocket({
             const nextSessions = dedupeSessionsByID(data.sessions || []);
             sessionsRef.current = nextSessions;
             callbacksRef.current.onSessionsUpdate(nextSessions);
-            callbacksRef.current.onChiefOfStaffDispatchesUpdate?.(data.chief_of_staff_dispatches || []);
+            callbacksRef.current.onTicketsUpdate?.(data.tickets || []);
             const nextWorkspaces = data.workspaces || [];
             workspacesRef.current = nextWorkspaces;
             callbacksRef.current.onWorkspacesUpdate(nextWorkspaces);
@@ -1388,25 +1386,9 @@ export function useDaemonSocket({
             break;
           }
 
-          case 'chief_of_staff_dispatches_updated':
-            callbacksRef.current.onChiefOfStaffDispatchesUpdate?.(data.dispatches || []);
+          case 'tickets_updated':
+            callbacksRef.current.onTicketsUpdate?.(data.tickets || []);
             break;
-
-          case 'wake_dispatch_agent_result': {
-            if (typeof data.dispatch_id === 'string' && typeof data.request_id === 'string') {
-              const key = `wake_dispatch_agent:${data.dispatch_id}:${data.request_id}`;
-              const pending = pendingActionsRef.current.get(key);
-              if (pending) {
-                pendingActionsRef.current.delete(key);
-                if (data.success) {
-                  pending.resolve(undefined);
-                } else {
-                  pending.reject(new Error(data.error || 'Wake agent failed'));
-                }
-              }
-            }
-            break;
-          }
 
           case 'workspace_tile_content': {
             if (typeof data.workspace_id === 'string' && typeof data.tile_id === 'string') {
@@ -1667,6 +1649,44 @@ export function useDaemonSocket({
               pending.resolve(data.result);
             } else {
               pending.reject(new Error(data.error || 'Notebook read failed'));
+            }
+            break;
+          }
+
+          case 'ticket_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `get_ticket:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success && data.ticket) {
+              pending.resolve(data.ticket);
+            } else {
+              pending.reject(new Error(data.error || 'Ticket fetch failed'));
+            }
+            break;
+          }
+
+          case 'ticket_action_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `ticket_action:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success) {
+              pending.resolve(undefined);
+            } else {
+              pending.reject(new Error(data.error || 'Ticket action failed'));
             }
             break;
           }
@@ -3537,42 +3557,6 @@ export function useDaemonSocket({
     });
   }, []);
 
-  const sendWakeDispatchAgent = useCallback((sourceSessionId: string, dispatchId: string): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      if (!sourceSessionId || !dispatchId) {
-        reject(new Error('Chief session and dispatch are required'));
-        return;
-      }
-      const ws = wsRef.current;
-      if (!hasReceivedInitialStateRef.current || !ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const keyPrefix = `wake_dispatch_agent:${dispatchId}:`;
-      if (Array.from(pendingActionsRef.current.keys()).some((key) => key.startsWith(keyPrefix))) {
-        reject(new Error(`Wake agent is already pending for dispatch ${dispatchId}`));
-        return;
-      }
-      const requestId = nextRequestID('wake_dispatch_agent');
-      const key = `${keyPrefix}${requestId}`;
-      const pending = { resolve: () => resolve(), reject };
-      pendingActionsRef.current.set(key, pending);
-      ws.send(JSON.stringify({
-        cmd: 'wake_dispatch_agent',
-        source_session_id: sourceSessionId,
-        dispatch_id: dispatchId,
-        request_id: requestId,
-      }));
-      window.setTimeout(() => {
-        if (pendingActionsRef.current.get(key) !== pending) {
-          return;
-        }
-        pendingActionsRef.current.delete(key);
-        reject(new Error(`Wake agent timed out for dispatch ${dispatchId}`));
-      }, 10_000);
-    });
-  }, [nextRequestID]);
-
   // Unregister a single session from daemon
   const sendUnregisterSession = useCallback((sessionId: string): Promise<void> => {
     return new Promise((resolve, reject) => {
@@ -3969,6 +3953,74 @@ export function useDaemonSocket({
       }, 10000);
     });
   }, [nextRequestID]);
+
+  // Fetch one ticket's full record (row + activity thread + attachments) for the
+  // detail view. The board feed carries only bare rows, so the detail panel pulls
+  // the full record by id, correlated by request_id against the ticket_result event.
+  const fetchTicket = useCallback((ticketId: string): Promise<Ticket> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('get_ticket');
+      const key = `get_ticket:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'get_ticket', request_id: requestId, ticket_id: ticketId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Ticket fetch timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
+  // Shared sender for a chief/user ticket action (change status, comment,
+  // re-brief). Resolves on a successful ticket_action_result and rejects on its
+  // error; the mutated data arrives separately via the tickets_updated broadcast.
+  const sendTicketAction = useCallback((cmd: string, payload: Record<string, unknown>): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('ticket_action');
+      const key = `ticket_action:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd, request_id: requestId, ...payload }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Ticket action timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
+  const sendTicketChangeStatus = useCallback(
+    (ticketId: string, status: Ticket['status'], comment?: string): Promise<void> =>
+      sendTicketAction('ticket_change_status', {
+        ticket_id: ticketId,
+        status,
+        ...(comment ? { comment } : {}),
+      }),
+    [sendTicketAction],
+  );
+
+  const sendTicketAddComment = useCallback(
+    (ticketId: string, comment: string): Promise<void> =>
+      sendTicketAction('ticket_add_comment', { ticket_id: ticketId, comment }),
+    [sendTicketAction],
+  );
+
+  const sendTicketEditDescription = useCallback(
+    (ticketId: string, description: string): Promise<void> =>
+      sendTicketAction('ticket_edit_description', { ticket_id: ticketId, description }),
+    [sendTicketAction],
+  );
 
   // List the durable runner's tasks (newest-updated first). Resolves with an empty
   // array when the runner is disabled or has no tasks.
@@ -4894,7 +4946,6 @@ export function useDaemonSocket({
     sendRenameSession,
     sendRenameWorkspace,
     sendSetChiefOfStaff,
-    sendWakeDispatchAgent,
     sendPRVisited,
     sendListWorktrees,
     sendCreateWorktree,
@@ -4913,6 +4964,10 @@ export function useDaemonSocket({
     sendListWorkspaceContexts,
     sendNotebookList,
     sendNotebookRead,
+    fetchTicket,
+    sendTicketChangeStatus,
+    sendTicketAddComment,
+    sendTicketEditDescription,
     sendNotebookTaskList,
     sendNotebookTaskRetry,
     sendNotebookBacklinks,

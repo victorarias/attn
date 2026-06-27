@@ -205,173 +205,67 @@ func (c *Client) Delegate(sourceSessionID, brief string, opts DelegateOptions) (
 	return resp.DelegateResult, nil
 }
 
-func (c *Client) ListDispatches(sourceSessionID string) ([]protocol.ChiefOfStaffDispatch, error) {
-	resp, err := c.send(protocol.ListDispatchesMessage{
-		Cmd:             protocol.CmdListDispatches,
+// SetTicketStatus reports the calling agent's work state; the daemon moves the
+// session's bound ticket to the matching column and echoes the resolved id and
+// status back.
+func (c *Client) SetTicketStatus(sourceSessionID, workState, comment string) (*protocol.TicketStatusResult, error) {
+	msg := protocol.SetTicketStatusMessage{
+		Cmd:             protocol.CmdSetTicketStatus,
 		SourceSessionID: sourceSessionID,
-	})
-	if err != nil {
-		return nil, err
+		WorkState:       protocol.DispatchWorkState(workState),
 	}
-	return resp.ChiefOfStaffDispatches, nil
-}
-
-func (c *Client) SubmitDispatchOutcome(
-	sourceSessionID, report string,
-	structuredReport protocol.DispatchReport,
-) (*protocol.ChiefOfStaffDispatch, error) {
-	resp, err := c.send(protocol.SubmitDispatchOutcomeMessage{
-		Cmd:              protocol.CmdSubmitDispatchOutcome,
-		SourceSessionID:  sourceSessionID,
-		Report:           report,
-		StructuredReport: structuredReport,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if resp.ChiefOfStaffDispatch == nil {
-		return nil, errors.New("daemon returned no dispatch")
-	}
-	return resp.ChiefOfStaffDispatch, nil
-}
-
-// HandoffDispatch writes a dispatched agent's artifact into the Notebook at `to`
-// and records a typed dispatch outcome referencing it.
-func (c *Client) HandoffDispatch(
-	sourceSessionID, to, content, report string,
-	structuredReport protocol.DispatchReport,
-) (*protocol.ChiefOfStaffDispatch, error) {
-	msg := protocol.HandoffDispatchMessage{
-		Cmd:              protocol.CmdHandoffDispatch,
-		SourceSessionID:  sourceSessionID,
-		To:               to,
-		Content:          content,
-		StructuredReport: structuredReport,
-	}
-	if strings.TrimSpace(report) != "" {
-		msg.Report = &report
+	if value := strings.TrimSpace(comment); value != "" {
+		msg.Comment = protocol.Ptr(value)
 	}
 	resp, err := c.send(msg)
 	if err != nil {
 		return nil, err
 	}
-	if resp.ChiefOfStaffDispatch == nil {
-		return nil, errors.New("daemon returned no dispatch")
+	if resp.TicketStatusResult == nil {
+		return nil, errors.New("daemon returned no ticket status result")
 	}
-	return resp.ChiefOfStaffDispatch, nil
+	return resp.TicketStatusResult, nil
 }
 
-func (c *Client) GetDispatch(sourceSessionID string) (*protocol.ChiefOfStaffDispatch, error) {
-	resp, err := c.send(protocol.GetDispatchMessage{
-		Cmd:             protocol.CmdGetDispatch,
+// AttachTicket hands a file to the calling session's bound ticket. sourcePath is
+// the absolute path of the file the daemon copies into the ticket's store; the
+// daemon resolves which ticket from the session and echoes the id and stored
+// filename back.
+func (c *Client) AttachTicket(sourceSessionID, sourcePath, filename, note string) (*protocol.TicketAttachResult, error) {
+	msg := protocol.TicketAttachMessage{
+		Cmd:             protocol.CmdTicketAttach,
 		SourceSessionID: sourceSessionID,
-	})
-	if err != nil {
-		return nil, err
+		SourcePath:      sourcePath,
+		Filename:        filename,
 	}
-	if resp.ChiefOfStaffDispatch == nil {
-		return nil, errors.New("daemon returned no dispatch")
-	}
-	return resp.ChiefOfStaffDispatch, nil
-}
-
-func (c *Client) ResolveDispatchRequest(
-	sourceSessionID, dispatchID, response, resolutionLink string,
-) (*protocol.ChiefOfStaffDispatch, error) {
-	msg := protocol.ResolveDispatchRequestMessage{
-		Cmd:             protocol.CmdResolveDispatchRequest,
-		SourceSessionID: sourceSessionID,
-		DispatchID:      dispatchID,
-		Response:        response,
-	}
-	if value := strings.TrimSpace(resolutionLink); value != "" {
-		msg.ResolutionLink = protocol.Ptr(value)
+	if value := strings.TrimSpace(note); value != "" {
+		msg.Note = protocol.Ptr(value)
 	}
 	resp, err := c.send(msg)
 	if err != nil {
 		return nil, err
 	}
-	if resp.ChiefOfStaffDispatch == nil {
-		return nil, errors.New("daemon returned no dispatch")
+	if resp.TicketAttachResult == nil {
+		return nil, errors.New("daemon returned no ticket attach result")
 	}
-	return resp.ChiefOfStaffDispatch, nil
+	return resp.TicketAttachResult, nil
 }
 
-func (c *Client) SendDispatchMessage(
-	sourceSessionID, dispatchID, content string,
-) (*protocol.DispatchMessage, error) {
-	resp, err := c.send(protocol.SendDispatchMessage{
-		Cmd:             protocol.CmdSendDispatchMessage,
+// TicketInbox reads and consumes the calling session's unread ticket events,
+// bundled by ticket. Reading advances the session's per-ticket cursors, so a
+// second call returns only what landed since.
+func (c *Client) TicketInbox(sourceSessionID string) ([]protocol.TicketEventBundle, error) {
+	resp, err := c.send(protocol.TicketInboxMessage{
+		Cmd:             protocol.CmdTicketInbox,
 		SourceSessionID: sourceSessionID,
-		DispatchID:      dispatchID,
-		Content:         content,
 	})
 	if err != nil {
 		return nil, err
 	}
-	if resp.DispatchMessage == nil {
-		return nil, errors.New("daemon returned no dispatch message")
+	if resp.TicketInboxResult == nil {
+		return nil, errors.New("daemon returned no ticket inbox result")
 	}
-	return resp.DispatchMessage, nil
-}
-
-func (c *Client) ListDispatchMessages(
-	sourceSessionID, dispatchID string,
-	unreadOnly bool,
-) ([]protocol.DispatchMessage, error) {
-	msg := protocol.ListDispatchMessagesMessage{
-		Cmd:             protocol.CmdListDispatchMessages,
-		SourceSessionID: sourceSessionID,
-	}
-	if value := strings.TrimSpace(dispatchID); value != "" {
-		msg.DispatchID = protocol.Ptr(value)
-	}
-	if unreadOnly {
-		msg.UnreadOnly = protocol.Ptr(true)
-	}
-	resp, err := c.send(msg)
-	if err != nil {
-		return nil, err
-	}
-	return resp.DispatchMessages, nil
-}
-
-func (c *Client) ReadDispatchMessage(
-	sourceSessionID, messageID string,
-) (*protocol.DispatchMessage, error) {
-	resp, err := c.send(protocol.ReadDispatchMessage{
-		Cmd:             protocol.CmdReadDispatchMessage,
-		SourceSessionID: sourceSessionID,
-		MessageID:       messageID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if resp.DispatchMessage == nil {
-		return nil, errors.New("daemon returned no dispatch message")
-	}
-	return resp.DispatchMessage, nil
-}
-
-func (c *Client) AcknowledgeDispatchMessage(
-	sourceSessionID, messageID, acknowledgement string,
-) (*protocol.DispatchMessage, error) {
-	msg := protocol.AcknowledgeDispatchMessage{
-		Cmd:             protocol.CmdAcknowledgeDispatchMessage,
-		SourceSessionID: sourceSessionID,
-		MessageID:       messageID,
-	}
-	if value := strings.TrimSpace(acknowledgement); value != "" {
-		msg.Acknowledgement = protocol.Ptr(value)
-	}
-	resp, err := c.send(msg)
-	if err != nil {
-		return nil, err
-	}
-	if resp.DispatchMessage == nil {
-		return nil, errors.New("daemon returned no dispatch message")
-	}
-	return resp.DispatchMessage, nil
+	return resp.TicketInboxResult.Bundles, nil
 }
 
 func (c *Client) CheckoutWorkspaceContext(sourceSessionID string, force bool) (*protocol.WorkspaceContextResult, error) {

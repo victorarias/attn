@@ -4,6 +4,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { ptyAttach, ptyDetach, ptyKill, ptySpawn } from '../pty/bridge';
 import { PROTOCOL_VERSION, retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
+import { TicketStatus } from '../types/generated';
 
 class FakeWebSocket {
   static readonly CONNECTING = 0;
@@ -2579,222 +2580,6 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('wakes a delegated agent through an explicit daemon result', async () => {
-    const onSessionsUpdate = vi.fn();
-    const onWorkspacesUpdate = vi.fn();
-    const onPRsUpdate = vi.fn();
-    const onReposUpdate = vi.fn();
-    const onAuthorsUpdate = vi.fn();
-    const { result, unmount } = renderHook(() =>
-      useDaemonSocket({
-        onSessionsUpdate,
-        onWorkspacesUpdate,
-        onPRsUpdate,
-        onReposUpdate,
-        onAuthorsUpdate,
-        wsUrl: 'ws://localhost:9999/ws',
-      }),
-    );
-
-    const ws = await waitForOpenSocket();
-    act(() => {
-      ws.emit({
-        event: 'initial_state',
-        protocol_version: PROTOCOL_VERSION,
-        sessions: [],
-        workspaces: [],
-        prs: [],
-        repos: [],
-        authors: [],
-        settings: {},
-      });
-    });
-    await waitFor(() => {
-      expect(result.current.hasReceivedInitialState).toBe(true);
-    });
-
-    let wakePromise!: Promise<void>;
-    act(() => {
-      wakePromise = result.current.sendWakeDispatchAgent('chief-1', 'dispatch-1');
-    });
-    await waitFor(() => {
-      expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual(expect.objectContaining({
-        cmd: 'wake_dispatch_agent',
-        source_session_id: 'chief-1',
-        dispatch_id: 'dispatch-1',
-        request_id: expect.any(String),
-      }));
-    });
-    const wakeCommand = ws.sent.map((entry) => JSON.parse(entry))
-      .find((entry) => entry.cmd === 'wake_dispatch_agent');
-
-    act(() => {
-      ws.emit({
-        event: 'wake_dispatch_agent_result',
-        dispatch_id: 'dispatch-1',
-        request_id: wakeCommand.request_id,
-        success: true,
-      });
-    });
-    await expect(wakePromise).resolves.toBeUndefined();
-
-    unmount();
-  });
-
-  it('correlates wake retries, duplicates, and command errors', async () => {
-    const onSessionsUpdate = vi.fn();
-    const onWorkspacesUpdate = vi.fn();
-    const onPRsUpdate = vi.fn();
-    const onReposUpdate = vi.fn();
-    const onAuthorsUpdate = vi.fn();
-    const { result, unmount } = renderHook(() =>
-      useDaemonSocket({
-        onSessionsUpdate,
-        onWorkspacesUpdate,
-        onPRsUpdate,
-        onReposUpdate,
-        onAuthorsUpdate,
-        wsUrl: 'ws://localhost:9999/ws',
-      }),
-    );
-
-    const ws = await waitForOpenSocket();
-    act(() => {
-      ws.emit({
-        event: 'initial_state',
-        protocol_version: PROTOCOL_VERSION,
-        sessions: [],
-        workspaces: [],
-        prs: [],
-        repos: [],
-        authors: [],
-        settings: {},
-      });
-    });
-    await waitFor(() => {
-      expect(result.current.hasReceivedInitialState).toBe(true);
-    });
-
-    const scheduledTimeouts: TimerHandler[] = [];
-    const originalWindowSetTimeout = window.setTimeout;
-    window.setTimeout = ((handler: TimerHandler) => {
-      scheduledTimeouts.push(handler);
-      return 1;
-    }) as typeof window.setTimeout;
-
-    const firstWake = result.current.sendWakeDispatchAgent('chief-1', 'dispatch-1');
-    const firstCommand = JSON.parse(ws.sent[ws.sent.length - 1]);
-    const duplicateWake = result.current.sendWakeDispatchAgent('chief-1', 'dispatch-1');
-    await expect(duplicateWake).rejects.toThrow('already pending');
-    act(() => {
-      ws.emit({
-        event: 'wake_dispatch_agent_result',
-        dispatch_id: 'dispatch-1',
-        request_id: firstCommand.request_id,
-        success: true,
-      });
-    });
-    await expect(firstWake).resolves.toBeUndefined();
-
-    const retryWake = result.current.sendWakeDispatchAgent('chief-1', 'dispatch-1');
-    const retryCommand = JSON.parse(ws.sent[ws.sent.length - 1]);
-    act(() => {
-      const staleTimeout = scheduledTimeouts[0];
-      if (typeof staleTimeout === 'function') {
-        staleTimeout();
-      }
-      ws.emit({
-        event: 'wake_dispatch_agent_result',
-        dispatch_id: 'dispatch-1',
-        request_id: firstCommand.request_id,
-        success: true,
-      });
-      ws.emit({
-        event: 'wake_dispatch_agent_result',
-        dispatch_id: 'dispatch-1',
-        request_id: retryCommand.request_id,
-        success: false,
-        error: 'retry failed',
-      });
-    });
-    await expect(retryWake).rejects.toThrow('retry failed');
-
-    const failedWake = result.current.sendWakeDispatchAgent('chief-1', 'dispatch-1');
-    act(() => {
-      ws.emit({
-        event: 'command_error',
-        cmd: 'wake_dispatch_agent',
-        success: false,
-        error: 'wake rejected',
-      });
-    });
-    await expect(failedWake).rejects.toThrow('wake rejected');
-
-    window.setTimeout = originalWindowSetTimeout;
-    unmount();
-  });
-
-  it('publishes chief-of-staff dispatch snapshots from initial state and updates', async () => {
-    const onChiefOfStaffDispatchesUpdate = vi.fn();
-    const { unmount } = renderHook(() =>
-      useDaemonSocket({
-        onSessionsUpdate: vi.fn(),
-        onChiefOfStaffDispatchesUpdate,
-        onWorkspacesUpdate: vi.fn(),
-        onPRsUpdate: vi.fn(),
-        onReposUpdate: vi.fn(),
-        onAuthorsUpdate: vi.fn(),
-        wsUrl: 'ws://localhost:9999/ws',
-      }),
-    );
-
-    const ws = await waitForOpenSocket();
-    const dispatch = {
-      id: 'dispatch-1',
-      chief_session_id: 'chief-1',
-      session_id: 'worker-1',
-      workspace_id: 'workspace-1',
-      brief: 'Investigate.',
-      label: 'Investigate',
-      agent: 'codex',
-      directory: '/repo',
-      status: 'working',
-      status_since: '2026-06-09T10:00:00Z',
-      created_at: '2026-06-09T10:00:00Z',
-      updated_at: '2026-06-09T10:00:00Z',
-    };
-    act(() => {
-      ws.emit({
-        event: 'initial_state',
-        protocol_version: PROTOCOL_VERSION,
-        sessions: [],
-        workspaces: [],
-        prs: [],
-        repos: [],
-        authors: [],
-        settings: {},
-        chief_of_staff_dispatches: [dispatch],
-      });
-    });
-    await waitFor(() => {
-      expect(onChiefOfStaffDispatchesUpdate).toHaveBeenLastCalledWith([dispatch]);
-    });
-
-    act(() => {
-      ws.emit({
-        event: 'chief_of_staff_dispatches_updated',
-        dispatches: [{ ...dispatch, latest_report: 'Done.' }],
-      });
-    });
-    await waitFor(() => {
-      expect(onChiefOfStaffDispatchesUpdate).toHaveBeenLastCalledWith([
-        { ...dispatch, latest_report: 'Done.' },
-      ]);
-    });
-
-    unmount();
-  });
-
 });
 
 describe('useDaemonSocket workflow runs', () => {
@@ -3055,6 +2840,110 @@ describe('useDaemonSocket fs surface', () => {
       ws.emit({ event: 'fs_changed', origin: 'ui', paths: ['notes/todo.txt'] });
     });
     expect(onFsChanged).toHaveBeenCalledWith('ui', ['notes/todo.txt']);
+    unmount();
+  });
+});
+
+describe('useDaemonSocket ticket request/result', () => {
+  let originalWebSocket: typeof WebSocket;
+
+  beforeEach(() => {
+    originalWebSocket = globalThis.WebSocket;
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+  });
+  afterEach(() => {
+    globalThis.WebSocket = originalWebSocket;
+    vi.clearAllMocks();
+  });
+
+  function renderTicketHook() {
+    return renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+  }
+
+  // request_id correlates the result event the test then emits back.
+  function lastSent(ws: FakeWebSocket): { cmd: string; request_id: string; [k: string]: unknown } {
+    return JSON.parse(ws.sent[ws.sent.length - 1]);
+  }
+
+  it('resolves fetchTicket with the record on a matching ticket_result', async () => {
+    const { result, unmount } = renderTicketHook();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.fetchTicket('tk-1');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent.cmd).toBe('get_ticket');
+    expect(sent.ticket_id).toBe('tk-1');
+
+    ws.emit({
+      event: 'ticket_result',
+      request_id: sent.request_id,
+      success: true,
+      ticket: { id: 'tk-1', title: 'Migrate' },
+    });
+    await expect(promise).resolves.toEqual({ id: 'tk-1', title: 'Migrate' });
+    unmount();
+  });
+
+  it('rejects fetchTicket when ticket_result carries an error', async () => {
+    const { result, unmount } = renderTicketHook();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.fetchTicket('missing');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+
+    ws.emit({
+      event: 'ticket_result',
+      request_id: sent.request_id,
+      success: false,
+      error: 'ticket not found: missing',
+    });
+    await expect(promise).rejects.toThrow('ticket not found: missing');
+    unmount();
+  });
+
+  it('rejects a ticket action when ticket_action_result reports failure', async () => {
+    const { result, unmount } = renderTicketHook();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.sendTicketChangeStatus('tk-1', TicketStatus.Blocked);
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent.cmd).toBe('ticket_change_status');
+    expect(sent.status).toBe('blocked');
+
+    ws.emit({
+      event: 'ticket_action_result',
+      request_id: sent.request_id,
+      success: false,
+      error: 'mutation failed',
+    });
+    await expect(promise).rejects.toThrow('mutation failed');
+    unmount();
+  });
+
+  it('resolves a ticket action on a successful ticket_action_result', async () => {
+    const { result, unmount } = renderTicketHook();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.sendTicketAddComment('tk-1', 'looks good');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent.cmd).toBe('ticket_add_comment');
+
+    ws.emit({ event: 'ticket_action_result', request_id: sent.request_id, success: true });
+    await expect(promise).resolves.toBeUndefined();
     unmount();
   });
 });

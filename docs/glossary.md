@@ -83,7 +83,7 @@ Distinct from the journal along one axis: the journal is a **dated log of what
 happened**; a knowledge note is a **timeless statement of what is known**. The
 knowledge base is not a task tracker — capture what is *known*, not what is *to do*.
 Chief-authored knowledge is **grounded** with resolvable `sources:` (journal
-anchors, `dispatch:<id>`, or URLs) rather than written from paraphrase alone; the
+anchors or URLs) rather than written from paraphrase alone; the
 user's own notes in the same space are theirs to keep however they like.
 
 ## Note title
@@ -105,7 +105,7 @@ The single automated entity that **tends each workspace**. One persona, two duti
 1. **Keeps the workspace context tidy** — compacts/prunes `context.md` when it
    grows past threshold.
 2. **Narrates the workspace's work into the journal** — turns the workspace's
-   sessions (and delegated dispatch outcomes) into the curated per-workspace
+   sessions into the curated per-workspace
    journal narrative. On a workspace's final removal pass it also files that
    workspace's linked `knowledge/projects/<slug>/` folder (the one whose `index.md`
    carries `resource: attn:workspace/<id>`) under `knowledge/archive/` — a
@@ -136,14 +136,15 @@ The chief is **keeper-aware**: because the keeper already narrates each workspac
 own work into the journal, the chief does not duplicate per-workspace play-by-play.
 It writes the cross-workspace layer the keeper cannot see.
 
-## Dispatch / dispatch outcome
+## Ticket
 
-The chief delegates a unit of work to a sub-agent — a **dispatch**. The sub-agent
-reports back through a typed **dispatch outcome** (an update, blocker, review handoff,
-completion, or failure). A terminal dispatch outcome is captured deterministically into the
-raw tier (`.attn/raw/dispatches/<id>.md`) and persisted in SQLite. The keeper reads
-those raw dispatch outcomes and weaves the terminal ones into the workspace
-narrative; the chief may also reference them in its cross-workspace journaling.
+The chief delegates a unit of work to a sub-agent, and that work is tracked as a
+**ticket** bound to the delegated session (the session is the ticket's assignee).
+The agent reports its own **work state** — in progress, needs input, ready for
+review, completed, or failed — which moves the ticket across the board
+(Todo · Working · Blocked · In Review · Done). Comments, status changes, and
+handover attachments accumulate on the ticket's activity thread, and the chief
+watches progress from the ticket view and board rather than polling the agent.
 
 ## The raw tier
 
@@ -153,7 +154,6 @@ user-facing and never part of the curated journal:
 - `sessions/<wsID>/<sessionID>.md` — per-session digests (the summarize step's
   output), nested under the owning workspace; a session with no workspace lands in
   the reserved `sessions/_solo/<sessionID>.md` bucket.
-- `dispatches/<dispatchID>.md` — captured dispatch outcomes.
 - `context-snapshots/<wsID>.md` — the `context.md` snapshot taken synchronously at
   workspace removal (the deterministic data-safety floor, so the editorial overlay
   is never lost before the keeper can narrate it).

@@ -14,7 +14,6 @@ import "path/filepath"
 const (
 	rawDir                 = "raw"
 	rawContextSnapshotsDir = "context-snapshots"
-	rawDispatchesDir       = "dispatches"
 	rawSessionsDir         = "sessions"
 )
 
@@ -27,12 +26,6 @@ func RawDir(root string) string {
 // context.md removal snapshots (<wsID>.md).
 func RawContextSnapshotsDir(root string) string {
 	return filepath.Join(RawDir(root), rawContextSnapshotsDir)
-}
-
-// RawDispatchesDir returns the absolute directory holding per-dispatch outcome
-// files (<dispatchID>.md).
-func RawDispatchesDir(root string) string {
-	return filepath.Join(RawDir(root), rawDispatchesDir)
 }
 
 // RawSessionsDir returns the absolute directory holding per-session digest files

@@ -24,7 +24,6 @@ import (
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/daemonctl"
-	"github.com/victorarias/attn/internal/dispatch"
 	"github.com/victorarias/attn/internal/hooks"
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/protocol"
@@ -250,9 +249,9 @@ func main() {
 	case "delegate":
 		maybePrintProfileBanner()
 		runDelegate()
-	case "dispatch":
+	case "ticket":
 		maybePrintProfileBanner()
-		runDispatch()
+		runTicket()
 	case "workspace":
 		maybePrintProfileBanner()
 		runWorkspace()
@@ -558,7 +557,6 @@ func writeHelp(w io.Writer) {
 commands:
   presence                          check whether the current shell runs inside attn
   delegate --brief-file <path>      start another agent with a delegated brief
-  dispatch <command>                 list or report chief-of-staff dispatches
   workspace context <command>       edit shared workspace context
   open <file.md> [--session <id>]   show a markdown file in attn
   browser <command>                 open and control the in-app browser
@@ -617,207 +615,6 @@ session options:
 `)
 }
 
-func runDispatch() {
-	if len(os.Args) < 3 || os.Args[2] == "-h" || os.Args[2] == "--help" {
-		writeDispatchHelp(os.Stdout)
-		return
-	}
-	warnIfDaemonVersionMismatch()
-	switch os.Args[2] {
-	case "list":
-		sourceSessionID, err := parseDispatchSourceSession(os.Args[3:])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch list: %v\n", err)
-			os.Exit(2)
-		}
-		dispatches, err := client.New("").ListDispatches(sourceSessionID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch list: %v\n", err)
-			os.Exit(1)
-		}
-		printJSON(dispatches)
-	case "watch":
-		runDispatchWatch(os.Args[3:])
-	case "update", "block", "review", "complete", "fail":
-		outcome := os.Args[2]
-		if hasHelpFlag(os.Args[3:]) {
-			writeDispatchOutcomeHelp(os.Stdout, outcome)
-			return
-		}
-		parsed, err := parseDispatchOutcomeArgs(outcome, os.Args[3:])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch %s: %v\n", outcome, err)
-			os.Exit(2)
-		}
-		c := client.New("")
-		if outcome != "update" {
-			if err := ensureDispatchInboxClear(c, parsed.SourceSessionID); err != nil {
-				fmt.Fprintf(os.Stderr, "dispatch %s: %v\n", outcome, err)
-				os.Exit(2)
-			}
-		}
-		dispatch, err := c.SubmitDispatchOutcome(parsed.SourceSessionID, parsed.Report, parsed.StructuredReport)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch %s: %v\n", outcome, err)
-			os.Exit(1)
-		}
-		printDispatchOutcomeResult(outcome, parsed.JSON, dispatch)
-	case "handoff":
-		if hasHelpFlag(os.Args[3:]) {
-			writeDispatchHandoffHelp(os.Stdout)
-			return
-		}
-		parsed, err := parseDispatchHandoffArgs(os.Args[3:])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch handoff: %v\n", err)
-			os.Exit(2)
-		}
-		c := client.New("")
-		if err := ensureDispatchInboxClear(c, parsed.SourceSessionID); err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch handoff: %v\n", err)
-			os.Exit(2)
-		}
-		dispatch, err := c.HandoffDispatch(
-			parsed.SourceSessionID,
-			parsed.To,
-			parsed.Content,
-			parsed.Report,
-			parsed.StructuredReport,
-		)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch handoff: %v\n", err)
-			os.Exit(1)
-		}
-		printDispatchOutcomeResult("handoff", parsed.JSON, dispatch)
-	case "status":
-		sourceSessionID, err := parseDispatchSourceSession(os.Args[3:])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch status: %v\n", err)
-			os.Exit(2)
-		}
-		dispatch, err := client.New("").GetDispatch(sourceSessionID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch status: %v\n", err)
-			os.Exit(1)
-		}
-		printJSON(dispatch)
-	case "resolve":
-		sourceSessionID, dispatchID, response, resolutionLink, err := parseDispatchResolveArgs(os.Args[3:])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch resolve: %v\n", err)
-			os.Exit(2)
-		}
-		dispatch, err := client.New("").ResolveDispatchRequest(
-			sourceSessionID,
-			dispatchID,
-			response,
-			resolutionLink,
-		)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch resolve: %v\n", err)
-			os.Exit(1)
-		}
-		printJSON(dispatch)
-	case "message":
-		sourceSessionID, dispatchID, content, err := parseDispatchMessageArgs(os.Args[3:])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch message: %v\n", err)
-			os.Exit(2)
-		}
-		message, err := client.New("").SendDispatchMessage(sourceSessionID, dispatchID, content)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch message: %v\n", err)
-			os.Exit(1)
-		}
-		printJSON(message)
-	case "inbox":
-		sourceSessionID, unreadOnly, err := parseDispatchInboxArgs(os.Args[3:])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch inbox: %v\n", err)
-			os.Exit(2)
-		}
-		messages, err := client.New("").ListDispatchMessages(sourceSessionID, "", unreadOnly)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch inbox: %v\n", err)
-			os.Exit(1)
-		}
-		printJSON(messages)
-	case "messages":
-		sourceSessionID, dispatchID, err := parseDispatchMessagesArgs(os.Args[3:])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch messages: %v\n", err)
-			os.Exit(2)
-		}
-		messages, err := client.New("").ListDispatchMessages(sourceSessionID, dispatchID, false)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch messages: %v\n", err)
-			os.Exit(1)
-		}
-		printJSON(messages)
-	case "read":
-		sourceSessionID, messageID, err := parseDispatchMessageIDArgs("dispatch read", os.Args[3:])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch read: %v\n", err)
-			os.Exit(2)
-		}
-		message, err := client.New("").ReadDispatchMessage(sourceSessionID, messageID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch read: %v\n", err)
-			os.Exit(1)
-		}
-		printJSON(message)
-	case "ack":
-		sourceSessionID, messageID, acknowledgement, err := parseDispatchAckArgs(os.Args[3:])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch ack: %v\n", err)
-			os.Exit(2)
-		}
-		message, err := client.New("").AcknowledgeDispatchMessage(sourceSessionID, messageID, acknowledgement)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dispatch ack: %v\n", err)
-			os.Exit(1)
-		}
-		printJSON(message)
-	default:
-		fmt.Fprintf(os.Stderr, "dispatch: unknown command %q\n\n", os.Args[2])
-		writeDispatchHelp(os.Stderr)
-		os.Exit(2)
-	}
-}
-
-func writeDispatchHelp(w io.Writer) {
-	fmt.Fprint(w, `usage: attn dispatch <command>
-
-commands:
-  list [--session <id>]                          list work dispatched by this chief
-  watch <dispatch-id> [--session <id>]           stream meaningful events until terminal
-        [--interval <dur>]
-  update --summary <text>                        report meaningful progress
-  block --summary <text> --question <text>       request input before work can continue
-  review --summary <text>                        hand work back for review
-  complete --summary <text>                      report successful completion
-  fail --summary <text>                          report terminal failure
-  handoff --file <path> --to <notebook-path>     hand off a durable artifact
-          --summary <text> (--review | --complete)
-  status [--session <id>]                        show this delegated session's report and response
-  resolve --dispatch <id>                        answer the active decision request
-          (--response <text> | --file <path>) [--link <url>] [--session <id>]
-  message --dispatch <id>                        send durable mail to a delegated agent
-          (--message <text> | --file <path>) [--session <id>]
-  messages --dispatch <id> [--session <id>]      list sent mail and acknowledgement state
-  inbox [--unread] [--session <id>]              list this delegated agent's mail
-  read --message-id <id> [--session <id>]        mark one message read
-  ack --message-id <id>                          acknowledge one message
-      [--message <text> | --file <path>] [--session <id>]
-
-The session defaults to ATTN_SESSION_ID.
-
-Outcome commands accept --details <text> or --details-file <path>, plus
---next-actor, --next-action, repeated --remaining-scope and --constraint,
-and --json. Run attn dispatch <outcome> --help for exact usage.
-`)
-}
-
 func hasHelpFlag(args []string) bool {
 	for _, arg := range args {
 		if arg == "-h" || arg == "--help" {
@@ -827,581 +624,260 @@ func hasHelpFlag(args []string) bool {
 	return false
 }
 
-func writeDispatchOutcomeHelp(w io.Writer, outcome string) {
-	usage := "attn dispatch " + outcome + " --summary <text> [options]"
-	if outcome == "block" {
-		usage = "attn dispatch block --summary <text> --question <text> [options]"
-	}
-	fmt.Fprintf(w, `usage: %s
-
-options:
-  --summary <text>            concise outcome shown to the chief (required)
-  --details <text>            detailed report text
-  --details-file <path>       read detailed report text from a file
-  --next-actor <text>         who acts next
-  --next-action <text>        what happens next
-  --remaining-scope <text>    remaining item (repeatable)
-  --constraint <text>         constraint (repeatable)
-  --session <id>              session id (defaults to ATTN_SESSION_ID)
-  --json                      print the full dispatch as JSON
-`, usage)
-	if outcome == "block" {
-		fmt.Fprint(w, `  --question <text>           decision or input required (required)
-  --recommendation <text>     recommended response
-  --consequence <text>        effect of leaving the request unresolved
-  --expected-responder <text> who should answer (default: chief)
-`)
-	}
-}
-
-func writeDispatchHandoffHelp(w io.Writer) {
-	fmt.Fprint(w, `usage: attn dispatch handoff --file <path> --to <notebook-path>
-       --summary <text> (--review | --complete) [options]
-
-options:
-  --file <path>               artifact to write into the Notebook (required)
-  --to <notebook-path>        chief-designated Notebook destination (required)
-  --summary <text>            concise outcome shown to the chief (required)
-  --review                    hand the artifact back for review
-  --complete                  hand off the artifact as completed work
-  --details <text>            note accompanying the artifact reference
-  --details-file <path>       read the note from a file
-  --next-actor <text>         who acts next
-  --next-action <text>        what happens next
-  --remaining-scope <text>    remaining item (repeatable)
-  --constraint <text>         constraint (repeatable)
-  --session <id>              session id (defaults to ATTN_SESSION_ID)
-  --json                      print the full dispatch as JSON
-`)
-}
-
-func ensureDispatchInboxClear(c *client.Client, sourceSessionID string) error {
-	messages, err := c.ListDispatchMessages(sourceSessionID, "", true)
-	if err != nil {
-		return fmt.Errorf("check unread inbox: %w", err)
-	}
-	if len(messages) == 0 {
-		return nil
-	}
-	return fmt.Errorf(
-		"%d unread chief message(s); run `attn dispatch inbox --unread`, handle them, then acknowledge each before reporting this outcome",
-		len(messages),
-	)
-}
-
-func printDispatchOutcomeResult(
-	outcome string,
-	jsonOutput bool,
-	dispatch *protocol.ChiefOfStaffDispatch,
-) {
-	if jsonOutput {
-		printJSON(dispatch)
+// runTicket routes `attn ticket <command>`. Today the only verb is `status`, the
+// agent's forward channel onto its own bound ticket; more arrive with the board.
+func runTicket() {
+	if len(os.Args) < 3 || os.Args[2] == "-h" || os.Args[2] == "--help" {
+		writeTicketHelp(os.Stdout)
 		return
 	}
-	summary := ""
-	if dispatch != nil && dispatch.StructuredReport != nil {
-		summary = strings.TrimSpace(dispatch.StructuredReport.Summary)
-	}
-	if summary == "" {
-		summary = "Outcome recorded"
-	}
-	dispatchID := ""
-	if dispatch != nil {
-		dispatchID = strings.TrimSpace(dispatch.ID)
-	}
-	if dispatchID == "" {
-		fmt.Printf("Reported %s to the chief: %s\n", outcome, summary)
-		return
-	}
-	fmt.Printf("Reported %s to the chief (%s): %s\n", outcome, dispatchID, summary)
-}
-
-func parseDispatchSourceSession(args []string) (string, error) {
-	fs := flag.NewFlagSet("dispatch", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
-	if err := fs.Parse(args); err != nil {
-		return "", err
-	}
-	if fs.NArg() != 0 {
-		return "", fmt.Errorf("unexpected arguments: %v", fs.Args())
-	}
-	source := strings.TrimSpace(*sessionID)
-	if source == "" {
-		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
-	}
-	if source == "" {
-		return "", errors.New("no session; run inside attn or pass --session")
-	}
-	return source, nil
-}
-
-// runDispatchWatch blocks streaming one line per meaningful event for a single
-// dispatch and exits when it reaches a terminal state. It reuses the existing
-// list_dispatches IPC (the chief already sees its own dispatches with full
-// decorated snapshots) and filters client-side by id, so it adds no protocol
-// surface. The state -> event classification lives in internal/dispatch so this
-// command, dispatch status, and any future poll path share one definition.
-func runDispatchWatch(args []string) {
-	sourceSessionID, dispatchID, interval, err := parseDispatchWatchArgs(args)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "dispatch watch: %v\n", err)
+	warnIfDaemonVersionMismatch()
+	switch os.Args[2] {
+	case "status":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketStatus(os.Args[3:])
+	case "inbox":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketInbox(os.Args[3:])
+	case "attach":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketAttach(os.Args[3:])
+	default:
+		fmt.Fprintf(os.Stderr, "ticket: unknown command %q\n", os.Args[2])
+		writeTicketHelp(os.Stderr)
 		os.Exit(2)
 	}
-
-	c := client.New("")
-	fetch := func() (*protocol.ChiefOfStaffDispatch, bool, error) {
-		dispatches, err := c.ListDispatches(sourceSessionID)
-		if err != nil {
-			return nil, false, err
-		}
-		for i := range dispatches {
-			if dispatches[i].ID == dispatchID {
-				return &dispatches[i], true, nil
-			}
-		}
-		return nil, false, nil
-	}
-
-	// Validate up front so a wrong id fails fast and clearly instead of being
-	// reported as a terminal failure event a second later.
-	if _, found, err := fetch(); err != nil {
-		fmt.Fprintf(os.Stderr, "dispatch watch: %v\n", err)
-		os.Exit(1)
-	} else if !found {
-		fmt.Fprintf(os.Stderr, "dispatch watch: dispatch %s not found for this chief\n", dispatchID)
-		os.Exit(2)
-	}
-
-	os.Exit(dispatch.RunWatch(fetch, os.Stdout, dispatch.WatchOptions{
-		DispatchID: dispatchID,
-		Interval:   interval,
-	}))
 }
 
-func parseDispatchWatchArgs(args []string) (string, string, time.Duration, error) {
-	// The dispatch id is a leading positional. Go's flag package stops at the
-	// first non-flag arg, so pull the id off the front before parsing flags;
-	// this keeps the natural `watch <id> --session X --interval 2s` working.
-	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return "", "", 0, errors.New("usage: dispatch watch <dispatch-id> [--session <id>] [--interval <dur>]")
-	}
-	dispatchID := strings.TrimSpace(args[0])
-	fs := flag.NewFlagSet("dispatch watch", flag.ContinueOnError)
+type ticketStatusArgs struct {
+	WorkState string
+	Session   string
+	Comment   string
+	JSON      bool
+}
+
+// parseTicketStatusArgs reads `ticket status <work-state> [flags]`. Go's flag
+// parser stops at the first positional, so a naive Parse would silently drop any
+// flag written after the work state — exactly the documented form. We interleave
+// instead: parse, peel one positional, repeat, so flags may sit on either side of
+// the state and the single positional is the work state regardless of order.
+func parseTicketStatusArgs(args []string) (ticketStatusArgs, error) {
+	var result ticketStatusArgs
+	fs := flag.NewFlagSet("ticket status", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	sessionID := fs.String("session", "", "chief session id (defaults to ATTN_SESSION_ID)")
-	interval := fs.Duration("interval", 0, "poll interval (default 1s)")
-	if err := fs.Parse(args[1:]); err != nil {
-		return "", "", 0, err
-	}
-	if fs.NArg() != 0 {
-		return "", "", 0, fmt.Errorf("unexpected arguments: %v", fs.Args())
-	}
-	if dispatchID == "" {
-		return "", "", 0, errors.New("dispatch id is required")
-	}
-	source, err := resolveDispatchSession(*sessionID)
-	if err != nil {
-		return "", "", 0, err
-	}
-	return source, dispatchID, *interval, nil
-}
+	session := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	comment := fs.String("comment", "", "optional note recorded with the status change")
+	jsonOutput := fs.Bool("json", false, "print the result as JSON")
 
-type stringListFlag []string
-
-func (values *stringListFlag) String() string {
-	return strings.Join(*values, ", ")
-}
-
-func (values *stringListFlag) Set(value string) error {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return errors.New("value cannot be empty")
-	}
-	*values = append(*values, value)
-	return nil
-}
-
-type dispatchOutcomeArgs struct {
-	SourceSessionID  string
-	Report           string
-	StructuredReport protocol.DispatchReport
-	JSON             bool
-}
-
-func parseDispatchOutcomeArgs(outcome string, args []string) (dispatchOutcomeArgs, error) {
-	var result dispatchOutcomeArgs
-	fs := flag.NewFlagSet("dispatch "+outcome, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
-	summary := fs.String("summary", "", "concise outcome shown to the chief")
-	details := fs.String("details", "", "optional detailed report text")
-	detailsFile := fs.String("details-file", "", "file containing optional detailed report text")
-	nextActor := fs.String("next-actor", "", "who acts next")
-	nextAction := fs.String("next-action", "", "what happens next")
-	jsonOutput := fs.Bool("json", false, "print the full dispatch as JSON")
-	var remainingScope stringListFlag
-	var constraints stringListFlag
-	fs.Var(&remainingScope, "remaining-scope", "remaining item (repeatable)")
-	fs.Var(&constraints, "constraint", "constraint (repeatable)")
-
-	var question, recommendation, consequence, expectedResponder *string
-	if outcome == "block" {
-		question = fs.String("question", "", "decision or input required")
-		recommendation = fs.String("recommendation", "", "recommended response")
-		consequence = fs.String("consequence", "", "effect of leaving the request unresolved")
-		expectedResponder = fs.String("expected-responder", "chief", "who should answer")
-	}
-	if err := fs.Parse(args); err != nil {
-		return result, err
-	}
-	if fs.NArg() != 0 {
-		return result, fmt.Errorf("unexpected arguments: %v", fs.Args())
-	}
-
-	source, err := resolveDispatchSession(*sessionID)
-	if err != nil {
-		return result, err
-	}
-	resolvedSummary := strings.TrimSpace(*summary)
-	if resolvedSummary == "" {
-		return result, errors.New("--summary is required")
-	}
-	report, err := readDispatchDetails(*details, *detailsFile)
-	if err != nil {
-		return result, err
-	}
-	if report == "" {
-		report = resolvedSummary
-	}
-
-	reportType, workState, ok := dispatchOutcomeTypes(outcome)
-	if !ok {
-		return result, fmt.Errorf("unknown outcome %q", outcome)
-	}
-	structured := protocol.DispatchReport{
-		ReportType:     reportType,
-		Summary:        resolvedSummary,
-		WorkState:      workState,
-		RemainingScope: remainingScope,
-		Constraints:    constraints,
-	}
-	if value := strings.TrimSpace(*nextActor); value != "" {
-		structured.NextActor = protocol.Ptr(value)
-	}
-	if value := strings.TrimSpace(*nextAction); value != "" {
-		structured.NextAction = protocol.Ptr(value)
-	}
-	if outcome == "block" {
-		resolvedQuestion := strings.TrimSpace(*question)
-		if resolvedQuestion == "" {
-			return result, errors.New("--question is required")
+	var positionals []string
+	rest := args
+	for {
+		if err := fs.Parse(rest); err != nil {
+			return result, err
 		}
-		responder := strings.TrimSpace(*expectedResponder)
-		if responder == "" {
-			return result, errors.New("--expected-responder cannot be empty")
+		rest = fs.Args()
+		if len(rest) == 0 {
+			break
 		}
-		request := &protocol.DispatchDecisionRequest{
-			Question:          resolvedQuestion,
-			ExpectedResponder: responder,
-			Status:            protocol.DispatchRequestStatusPending,
-		}
-		if value := strings.TrimSpace(*recommendation); value != "" {
-			request.Recommendation = protocol.Ptr(value)
-		}
-		if value := strings.TrimSpace(*consequence); value != "" {
-			request.Consequence = protocol.Ptr(value)
-		}
-		structured.Request = request
+		positionals = append(positionals, rest[0])
+		rest = rest[1:]
 	}
-
-	result.SourceSessionID = source
-	result.Report = report
-	result.StructuredReport = structured
+	if len(positionals) != 1 {
+		return result, fmt.Errorf("expected exactly one work state argument, got %d", len(positionals))
+	}
+	result.WorkState = positionals[0]
+	result.Session = *session
+	result.Comment = *comment
 	result.JSON = *jsonOutput
 	return result, nil
 }
 
-func dispatchOutcomeTypes(outcome string) (protocol.DispatchReportType, protocol.DispatchWorkState, bool) {
-	switch outcome {
-	case "update":
-		return protocol.DispatchReportTypeProgress, protocol.DispatchWorkStateInProgress, true
-	case "block":
-		return protocol.DispatchReportTypeBlocker, protocol.DispatchWorkStateNeedsInput, true
-	case "review":
-		return protocol.DispatchReportTypeHandoff, protocol.DispatchWorkStateReadyForReview, true
-	case "complete":
-		return protocol.DispatchReportTypeCompletion, protocol.DispatchWorkStateCompleted, true
-	case "fail":
-		return protocol.DispatchReportTypeFailure, protocol.DispatchWorkStateFailed, true
-	default:
-		return "", "", false
+// runTicketStatus reports the calling agent's work state, moving its bound ticket
+// to the matching column. The work state is the same vocabulary the agent reports
+// to the chief (in_progress, needs_input, ready_for_review, completed, failed);
+// the daemon resolves which ticket from the session and maps the column.
+func runTicketStatus(args []string) {
+	parsed, err := parseTicketStatusArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket status: %v\n", err)
+		writeTicketHelp(os.Stderr)
+		os.Exit(2)
 	}
+	source, err := resolveDispatchSession(parsed.Session)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket status: %v\n", err)
+		os.Exit(2)
+	}
+	result, err := client.New("").SetTicketStatus(source, parsed.WorkState, parsed.Comment)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket status: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.JSON {
+		printJSON(result)
+		return
+	}
+	fmt.Printf("ticket %s → %s\n", result.TicketID, result.Status)
 }
 
-type dispatchHandoffArgs struct {
-	SourceSessionID  string
-	To               string
-	Content          string
-	Report           string
-	StructuredReport protocol.DispatchReport
-	JSON             bool
+type ticketAttachArgs struct {
+	File    string
+	Note    string
+	Session string
+	JSON    bool
 }
 
-// parseDispatchHandoffArgs reads the artifact verbatim and creates a typed
-// review or completion outcome. The chief or user must designate the Notebook
-// destination; handoff never invents one.
-func parseDispatchHandoffArgs(args []string) (dispatchHandoffArgs, error) {
-	var result dispatchHandoffArgs
-	fs := flag.NewFlagSet("dispatch handoff", flag.ContinueOnError)
+// parseTicketAttachArgs reads `ticket attach --file <path> [flags]`. --file is
+// required; the rest are optional. Unlike status there is no positional, so a plain
+// Parse suffices.
+func parseTicketAttachArgs(args []string) (ticketAttachArgs, error) {
+	var result ticketAttachArgs
+	fs := flag.NewFlagSet("ticket attach", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
-	file := fs.String("file", "", "file containing the artifact to write into the notebook")
-	to := fs.String("to", "", "destination notebook path (root-relative, .md) the chief designated")
-	summary := fs.String("summary", "", "concise outcome shown to the chief")
-	details := fs.String("details", "", "optional note accompanying the artifact reference")
-	detailsFile := fs.String("details-file", "", "file containing the optional note")
-	nextActor := fs.String("next-actor", "", "who acts next")
-	nextAction := fs.String("next-action", "", "what happens next")
-	review := fs.Bool("review", false, "hand the artifact back for review")
-	complete := fs.Bool("complete", false, "hand off the artifact as completed work")
-	jsonOutput := fs.Bool("json", false, "print the full dispatch as JSON")
-	var remainingScope stringListFlag
-	var constraints stringListFlag
-	fs.Var(&remainingScope, "remaining-scope", "remaining item (repeatable)")
-	fs.Var(&constraints, "constraint", "constraint (repeatable)")
+	file := fs.String("file", "", "path to the file to attach")
+	note := fs.String("note", "", "optional note recorded with the attachment")
+	session := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	jsonOutput := fs.Bool("json", false, "print the result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return result, err
 	}
 	if fs.NArg() != 0 {
 		return result, fmt.Errorf("unexpected arguments: %v", fs.Args())
-	}
-	source, err := resolveDispatchSession(*sessionID)
-	if err != nil {
-		return result, err
-	}
-	dest := strings.TrimSpace(*to)
-	if dest == "" {
-		return result, errors.New("--to is required (the chief designates the notebook destination)")
 	}
 	path := strings.TrimSpace(*file)
 	if path == "" {
 		return result, errors.New("--file is required")
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return result, fmt.Errorf("read artifact file: %w", err)
-	}
-	content := string(raw)
-	if strings.TrimSpace(content) == "" {
-		return result, errors.New("artifact file is empty")
-	}
-	resolvedSummary := strings.TrimSpace(*summary)
-	if resolvedSummary == "" {
-		return result, errors.New("--summary is required")
-	}
-	if *review == *complete {
-		return result, errors.New("pass exactly one of --review or --complete")
-	}
-	report, err := readDispatchDetails(*details, *detailsFile)
-	if err != nil {
-		return result, err
-	}
-	if report == "" {
-		report = resolvedSummary
-	}
-	workState := protocol.DispatchWorkStateReadyForReview
-	if *complete {
-		workState = protocol.DispatchWorkStateCompleted
-	}
-	structured := protocol.DispatchReport{
-		ReportType:     protocol.DispatchReportTypeHandoff,
-		Summary:        resolvedSummary,
-		WorkState:      workState,
-		RemainingScope: remainingScope,
-		Constraints:    constraints,
-	}
-	if value := strings.TrimSpace(*nextActor); value != "" {
-		structured.NextActor = protocol.Ptr(value)
-	}
-	if value := strings.TrimSpace(*nextAction); value != "" {
-		structured.NextAction = protocol.Ptr(value)
-	}
-	result.SourceSessionID = source
-	result.To = dest
-	result.Content = content
-	result.Report = report
-	result.StructuredReport = structured
+	result.File = path
+	result.Note = strings.TrimSpace(*note)
+	result.Session = *session
 	result.JSON = *jsonOutput
 	return result, nil
 }
 
-func readDispatchDetails(details, path string) (string, error) {
-	details = strings.TrimSpace(details)
-	path = strings.TrimSpace(path)
-	if details != "" && path != "" {
-		return "", errors.New("pass only one of --details or --details-file")
-	}
-	if path == "" {
-		return details, nil
-	}
-	content, err := os.ReadFile(path)
+// runTicketAttach hands a file to this session's bound ticket. The path is resolved
+// to absolute (the daemon reads it from its own cwd) and stat-checked here for a
+// clear early error; the daemon copies it into the ticket's store and records it.
+func runTicketAttach(args []string) {
+	parsed, err := parseTicketAttachArgs(args)
 	if err != nil {
-		return "", fmt.Errorf("read details file: %w", err)
+		fmt.Fprintf(os.Stderr, "ticket attach: %v\n", err)
+		writeTicketHelp(os.Stderr)
+		os.Exit(2)
 	}
-	return strings.TrimSpace(string(content)), nil
+	source, err := resolveDispatchSession(parsed.Session)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket attach: %v\n", err)
+		os.Exit(2)
+	}
+	absPath, err := filepath.Abs(parsed.File)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket attach: %v\n", err)
+		os.Exit(2)
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket attach: %v\n", err)
+		os.Exit(1)
+	}
+	if info.IsDir() {
+		fmt.Fprintf(os.Stderr, "ticket attach: %q is a directory, not a file\n", absPath)
+		os.Exit(1)
+	}
+	result, err := client.New("").AttachTicket(source, absPath, filepath.Base(absPath), parsed.Note)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket attach: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.JSON {
+		printJSON(result)
+		return
+	}
+	fmt.Printf("attached %s to ticket %s\n", result.Filename, result.TicketID)
 }
 
-func parseDispatchResolveArgs(args []string) (string, string, string, string, error) {
-	fs := flag.NewFlagSet("dispatch resolve", flag.ContinueOnError)
+// runTicketInbox reads (and consumes) this session's unread ticket events — the
+// chief's comments, status changes, and re-briefs it has not yet seen. Reading
+// advances the cursor, so a second call returns only what landed since.
+func runTicketInbox(args []string) {
+	fs := flag.NewFlagSet("ticket inbox", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	sessionID := fs.String("session", "", "chief session id (defaults to ATTN_SESSION_ID)")
-	dispatchID := fs.String("dispatch", "", "dispatch id")
-	response := fs.String("response", "", "decision response")
-	responseFile := fs.String("file", "", "file containing the decision response")
-	resolutionLink := fs.String("link", "", "optional external decision URL")
+	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	jsonOutput := fs.Bool("json", false, "print the unread bundles as JSON")
 	if err := fs.Parse(args); err != nil {
-		return "", "", "", "", err
+		fmt.Fprintf(os.Stderr, "ticket inbox: %v\n", err)
+		os.Exit(2)
 	}
 	if fs.NArg() != 0 {
-		return "", "", "", "", fmt.Errorf("unexpected arguments: %v", fs.Args())
+		fmt.Fprintf(os.Stderr, "ticket inbox: unexpected arguments: %v\n", fs.Args())
+		os.Exit(2)
 	}
-	source := strings.TrimSpace(*sessionID)
-	if source == "" {
-		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+	source, err := resolveDispatchSession(*sessionID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket inbox: %v\n", err)
+		os.Exit(2)
 	}
-	if source == "" {
-		return "", "", "", "", errors.New("no session; run inside attn or pass --session")
+	bundles, err := client.New("").TicketInbox(source)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket inbox: %v\n", err)
+		os.Exit(1)
 	}
-	if strings.TrimSpace(*dispatchID) == "" {
-		return "", "", "", "", errors.New("--dispatch is required")
+	if *jsonOutput {
+		printJSON(bundles)
+		return
 	}
-	if strings.TrimSpace(*response) != "" && strings.TrimSpace(*responseFile) != "" {
-		return "", "", "", "", errors.New("pass only one of --response or --file")
+	printTicketInbox(bundles)
+}
+
+func printTicketInbox(bundles []protocol.TicketEventBundle) {
+	if len(bundles) == 0 {
+		fmt.Println("no unread ticket activity")
+		return
 	}
-	resolvedResponse := strings.TrimSpace(*response)
-	if path := strings.TrimSpace(*responseFile); path != "" {
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return "", "", "", "", fmt.Errorf("read response file: %w", err)
+	for _, b := range bundles {
+		fmt.Printf("%s\n", b.TicketID)
+		for _, e := range b.Events {
+			line := fmt.Sprintf("  [%s] %s by %s", e.CreatedAt, e.Kind, e.Author)
+			if e.FromStatus != nil && e.ToStatus != nil {
+				line += fmt.Sprintf(" (%s → %s)", *e.FromStatus, *e.ToStatus)
+			}
+			fmt.Println(line)
+			if e.Comment != nil && *e.Comment != "" {
+				fmt.Printf("    %s\n", *e.Comment)
+			}
 		}
-		resolvedResponse = strings.TrimSpace(string(content))
 	}
-	if resolvedResponse == "" {
-		return "", "", "", "", errors.New("--response or --file is required")
-	}
-	return source, strings.TrimSpace(*dispatchID), resolvedResponse, strings.TrimSpace(*resolutionLink), nil
 }
 
-func parseDispatchMessageArgs(args []string) (string, string, string, error) {
-	fs := flag.NewFlagSet("dispatch message", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	sessionID := fs.String("session", "", "chief session id (defaults to ATTN_SESSION_ID)")
-	dispatchID := fs.String("dispatch", "", "dispatch id")
-	message := fs.String("message", "", "message content")
-	messageFile := fs.String("file", "", "file containing the message")
-	if err := fs.Parse(args); err != nil {
-		return "", "", "", err
-	}
-	if fs.NArg() != 0 {
-		return "", "", "", fmt.Errorf("unexpected arguments: %v", fs.Args())
-	}
-	source, err := resolveDispatchSession(*sessionID)
-	if err != nil {
-		return "", "", "", err
-	}
-	if strings.TrimSpace(*dispatchID) == "" {
-		return "", "", "", errors.New("--dispatch is required")
-	}
-	content, err := readOptionalFlagContent(*message, *messageFile, true)
-	if err != nil {
-		return "", "", "", err
-	}
-	return source, strings.TrimSpace(*dispatchID), content, nil
-}
+func writeTicketHelp(w io.Writer) {
+	fmt.Fprint(w, `usage: attn ticket <command>
 
-func parseDispatchInboxArgs(args []string) (string, bool, error) {
-	fs := flag.NewFlagSet("dispatch inbox", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
-	unreadOnly := fs.Bool("unread", false, "show only unread messages")
-	if err := fs.Parse(args); err != nil {
-		return "", false, err
-	}
-	if fs.NArg() != 0 {
-		return "", false, fmt.Errorf("unexpected arguments: %v", fs.Args())
-	}
-	source, err := resolveDispatchSession(*sessionID)
-	return source, *unreadOnly, err
-}
+commands:
+  status <work-state> [--session <id>] [--comment <text>] [--json]
+        move this session's bound ticket to the column for the reported state
+  inbox [--session <id>] [--json]
+        read (and mark read) this session's unread ticket activity
+  attach --file <path> [--note <text>] [--session <id>] [--json]
+        copy a file onto this session's bound ticket as an attachment
 
-func parseDispatchMessagesArgs(args []string) (string, string, error) {
-	fs := flag.NewFlagSet("dispatch messages", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	sessionID := fs.String("session", "", "chief session id (defaults to ATTN_SESSION_ID)")
-	dispatchID := fs.String("dispatch", "", "dispatch id")
-	if err := fs.Parse(args); err != nil {
-		return "", "", err
-	}
-	if fs.NArg() != 0 {
-		return "", "", fmt.Errorf("unexpected arguments: %v", fs.Args())
-	}
-	source, err := resolveDispatchSession(*sessionID)
-	if err != nil {
-		return "", "", err
-	}
-	if strings.TrimSpace(*dispatchID) == "" {
-		return "", "", errors.New("--dispatch is required")
-	}
-	return source, strings.TrimSpace(*dispatchID), nil
-}
+work states:
+  in_progress       working
+  needs_input       blocked
+  ready_for_review  in review
+  completed         done
+  failed            failed
 
-func parseDispatchMessageIDArgs(name string, args []string) (string, string, error) {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
-	messageID := fs.String("message-id", "", "dispatch message id")
-	if err := fs.Parse(args); err != nil {
-		return "", "", err
-	}
-	if fs.NArg() != 0 {
-		return "", "", fmt.Errorf("unexpected arguments: %v", fs.Args())
-	}
-	source, err := resolveDispatchSession(*sessionID)
-	if err != nil {
-		return "", "", err
-	}
-	if strings.TrimSpace(*messageID) == "" {
-		return "", "", errors.New("--message-id is required")
-	}
-	return source, strings.TrimSpace(*messageID), nil
-}
-
-func parseDispatchAckArgs(args []string) (string, string, string, error) {
-	fs := flag.NewFlagSet("dispatch ack", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
-	messageID := fs.String("message-id", "", "dispatch message id")
-	message := fs.String("message", "", "optional acknowledgement")
-	messageFile := fs.String("file", "", "file containing the acknowledgement")
-	if err := fs.Parse(args); err != nil {
-		return "", "", "", err
-	}
-	if fs.NArg() != 0 {
-		return "", "", "", fmt.Errorf("unexpected arguments: %v", fs.Args())
-	}
-	source, err := resolveDispatchSession(*sessionID)
-	if err != nil {
-		return "", "", "", err
-	}
-	if strings.TrimSpace(*messageID) == "" {
-		return "", "", "", errors.New("--message-id is required")
-	}
-	acknowledgement, err := readOptionalFlagContent(*message, *messageFile, false)
-	if err != nil {
-		return "", "", "", err
-	}
-	return source, strings.TrimSpace(*messageID), acknowledgement, nil
+The session defaults to ATTN_SESSION_ID.
+`)
 }
 
 func resolveDispatchSession(value string) (string, error) {

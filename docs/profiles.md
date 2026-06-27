@@ -104,7 +104,12 @@ The model above is fully implemented: the `internal/config` authority and
 **frontend e2e** (derives its daemon + Vite ports from the active profile and
 scopes its teardown kill to its own port) and **real-app harness** (honors
 `ATTN_PROFILE` with an `ATTN_HARNESS_PROFILE` override, resolves every resource
-via `attn profile resolve`, never targets prod by omission); the
+via `attn profile resolve`, never targets prod by omission). Every non-empty
+profile (the `dev` sibling or any named profile) exposes the **UI automation
+layer** — the app writes a `ui-automation.json` manifest and serves the
+localhost+token bridge the harness drives. Production (the empty-profile bundle)
+stays off unless an operator opts in with `ATTN_AUTOMATION=1` (see
+`profile::automation_enabled`). The model also covers the
 **per-profile app build** (`make install PROFILE=<name>` — bundle metadata
 generated from `attn profile tauri-config`, the authority's port and bundle id
 baked into the binary so a profiled app can never reach another profile's

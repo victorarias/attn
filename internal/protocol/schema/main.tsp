@@ -170,7 +170,7 @@ model Session {
   needs_review_after_long_run?: boolean; // True when a 5m+ run finished and awaits user visualization
   recoverable?: boolean;        // True when session can be recovered after daemon restart (agent has resumable conversation)
   chief_of_staff?: boolean;     // True when this session holds the profile-wide coordinator role
-  delegated_from_chief?: boolean; // True when this session was delegated from the chief of staff (has a chief dispatch)
+  delegated_from_chief?: boolean; // True when this session was delegated from the chief of staff (assignee of a chief-authored ticket)
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
 }
@@ -195,14 +195,9 @@ model WorkspaceContext {
   updated_at: string;
 }
 
-enum DispatchReportType {
-  progress,
-  blocker,
-  handoff,
-  completion,
-  failure,
-}
-
+// DispatchWorkState is the agent-reported work state carried on a set_ticket_status
+// command (and mapped onto a TicketStatus). It is the one Dispatch-named symbol
+// retained after the chief-of-staff dispatch namespace was retired.
 enum DispatchWorkState {
   in_progress,
   needs_input,
@@ -211,94 +206,108 @@ enum DispatchWorkState {
   failed,
 }
 
-enum DispatchRequestStatus {
-  pending,
-  resolved,
+// TicketStatus is the column a ticket lives in on the work-tracker board.
+// `crashed` is attn-authored only (an agent that died without reporting); the
+// rest are reachable by the chief or the agent's own self-report.
+enum TicketStatus {
+  todo,
+  working,
+  blocked,
+  in_review,
+  done,
+  failed,
+  crashed,
 }
 
-model DispatchDecisionRequest {
-  question: string;
-  recommendation?: string;
-  consequence?: string;
-  expected_responder: string;
-  status: DispatchRequestStatus;
-  response?: string;
-  resolution_link?: string;
-  responded_by?: string;
-  responded_at?: string;
+// TicketEventKind is the type of a ticket activity event in the notification log.
+enum TicketEventKind {
+  created,
+  status_changed,
+  commented,
+  assigned,
+  description_edited,
+  attachment_added,
 }
 
-model DispatchArtifact {
-  identity: string;
-  workspace_id?: string;
-  branch?: string;
-  revision?: string;
-  dirty?: boolean;
-  description?: string;
-}
-
-model DispatchVerification {
-  actor: string;
-  target: string;
-  result: string;
-  timestamp: string;
-  artifact_identity: string;
-  current?: boolean;
-}
-
-model DispatchReport {
-  report_type: DispatchReportType;
-  summary: string;
-  work_state: DispatchWorkState;
-  next_actor?: string;
-  next_action?: string;
-  remaining_scope?: string[];
-  constraints?: string[];
-  request?: DispatchDecisionRequest;
-  artifact?: DispatchArtifact;
-  verification?: DispatchVerification[];
-  reported_at: string;
-}
-
-model DispatchMessage {
-  id: string;
-  dispatch_id: string;
-  sender_session_id: string;
-  target_session_id: string;
-  content: string;
+// TicketEvent is one entry in a ticket's append-only event log, as delivered to an
+// observer reading its unread queue. The store's per-ticket sequence is the cursor
+// key and stays server-side; the wire event is for display. from_status /
+// to_status are present only on a status_changed event; comment / detail are
+// present when the kind carries them.
+model TicketEvent {
+  ticket_id: string;
+  kind: TicketEventKind;
+  author: string;
+  from_status?: TicketStatus;
+  to_status?: TicketStatus;
+  comment?: string;
+  detail?: string;
   created_at: string;
-  read_at?: string;
-  acknowledged_at?: string;
-  acknowledgement?: string;
 }
 
-model ChiefOfStaffDispatch {
+// TicketEventBundle groups an observer's unread events for a single ticket,
+// oldest-first — the consume's "bundle by ticket".
+model TicketEventBundle {
+  ticket_id: string;
+  events: TicketEvent[];
+}
+
+// TicketInboxResult is the calling identity's unread events, bundled by ticket.
+// Reading the inbox advances the identity's per-ticket cursors past everything
+// returned, so a second read is empty until new events land.
+model TicketInboxResult {
+  bundles: TicketEventBundle[];
+}
+
+// TicketActivityKind is the type of a human-facing history entry in a ticket's
+// detail view: a status change (column move, optional note) or a freeform comment.
+// It is the display subset of the richer event log (TicketEventKind).
+enum TicketActivityKind {
+  status_change,
+  comment,
+}
+
+// TicketActivity is one entry in a ticket's history thread, as shown in the detail
+// view. from_status / to_status are present only on a status_change; comment is
+// present when the entry carries a note (a comment, or a note on a status change).
+model TicketActivity {
+  id: int32;
+  kind: TicketActivityKind;
+  author: string;
+  from_status?: TicketStatus;
+  to_status?: TicketStatus;
+  comment?: string;
+  created_at: string;
+}
+
+// TicketAttachment is a file handed over with a ticket's work, copied into the
+// ticket's store and shown in the detail view.
+model TicketAttachment {
+  id: int32;
+  filename: string;
+  path: string;
+  note?: string;
+  created_at: string;
+}
+
+// Ticket is the wire shape of a durable tracked-work record. `activity` and
+// `attachments` are the full history thread and handover files — populated on the
+// get_ticket full record, and left empty on the list / board feed for cheapness.
+model Ticket {
   id: string;
-  chief_session_id: string;
-  session_id: string;
-  workspace_id: string;
-  brief: string;
-  label: string;
-  agent: string;
-  directory: string;
-  branch?: string;
-  status: string;
-  status_since: string;
-  // closed_state is the delegated session's last attn-classified runtime state,
-  // captured once when the session ends (before the idle-clobber/removal erases
-  // it). Empty until the session closes. It lets the signal classifier tell a
-  // clean stop (idle / waiting_input) from a real crash or kill mid-flight
-  // (working / launching / pending_approval), so a cut-off close surfaces as a
-  // failure instead of a neutral end.
-  closed_state?: string;
-  latest_report?: string;
-  structured_report?: DispatchReport;
-  concise_summary?: string;
-  actionable?: boolean;
-  unread_message_count?: int32;
-  reported_at?: string;
+  title: string;
+  description: string;
+  status: TicketStatus;
+  assignee: string;
+  cwd: string;
+  last_agent_id: string;
+  project_id: string;
   created_at: string;
   updated_at: string;
+  closed_at?: string;
+  archived_at?: string;
+  activity: TicketActivity[];
+  attachments: TicketAttachment[];
 }
 
 model PR {
@@ -539,79 +548,105 @@ model DelegateMessage {
   worktree?: DelegateWorktreeRequest;
 }
 
-model ListDispatchesMessage {
-  cmd: "list_dispatches";
+// SetTicketStatusMessage is an agent self-reporting the work state of its own
+// bound ticket. The daemon resolves the ticket from the calling session (the
+// assignee) — the agent does not name an id — and maps the reported work state
+// onto a ticket column. `comment` is an optional note recorded on the change.
+model SetTicketStatusMessage {
+  cmd: "set_ticket_status";
+  source_session_id: string;
+  work_state: DispatchWorkState;
+  comment?: string;
+}
+
+// TicketStatusResult echoes the resolved ticket id and the column it now sits in
+// after a status change, so the caller can confirm what moved.
+model TicketStatusResult {
+  ticket_id: string;
+  status: TicketStatus;
+}
+
+// TicketInboxMessage reads (and consumes) the calling session's unread ticket
+// events. The daemon resolves the observer identity from the session, so the agent
+// names nothing — it just asks for what it has not yet seen.
+model TicketInboxMessage {
+  cmd: "ticket_inbox";
   source_session_id: string;
 }
 
-model SubmitDispatchOutcomeMessage {
-  cmd: "submit_dispatch_outcome";
+// TicketAttachMessage hands a file to the calling session's bound ticket. The
+// daemon resolves the ticket from the session (the assignee), copies the file at
+// source_path into the ticket's store directory (.attn/tickets/<id>/), and records
+// the attachment authored by the session. source_path is absolute (the CLI resolves
+// it against its cwd) and read by the daemon, so this is a same-machine operation.
+model TicketAttachMessage {
+  cmd: "ticket_attach";
   source_session_id: string;
-  report: string;
-  structured_report: DispatchReport;
+  source_path: string;
+  filename: string;
+  note?: string;
 }
 
-// Hand a large artifact built by a dispatched agent into the Notebook and report
-// the reference back to the chief. `to` is a root-relative Notebook path the chief
-// (or user) designated; `content` is the artifact bytes the daemon writes there.
-// The daemon records a typed dispatch outcome whose message embeds the resolved
-// reference, so the handoff flows through the same report/capture path — there is
-// no separate structured artifact field. `report` is optional detail;
-// `structured_report` is the required typed outcome.
-model HandoffDispatchMessage {
-  cmd: "handoff_dispatch";
-  source_session_id: string;
-  to: string;
-  content: string;
-  report?: string;
-  structured_report: DispatchReport;
+// TicketAttachResult echoes the ticket the file landed on and the stored filename,
+// so the caller can confirm what was attached and where.
+model TicketAttachResult {
+  ticket_id: string;
+  filename: string;
 }
 
-model GetDispatchMessage {
-  cmd: "get_dispatch";
-  source_session_id: string;
+// GetTicketMessage fetches one ticket's full record — the row plus its activity
+// thread and attachments — for the detail view. A by-id read needs no caller
+// identity: the board feed (the initial_state push / tickets_updated broadcast)
+// already bounds what the app can see, and detail is the row it clicked. The
+// daemon replies with a ticket_result event correlated by request_id.
+model GetTicketMessage {
+  cmd: "get_ticket";
+  request_id?: string;
+  ticket_id: string;
 }
 
-model ResolveDispatchRequestMessage {
-  cmd: "resolve_dispatch_request";
-  source_session_id: string;
-  dispatch_id: string;
-  response: string;
-  resolution_link?: string;
+// The chief/user acting on a ticket from the app. These are by-id mutations
+// authored as the human identity ("you"); the daemon notifies the assigned agent
+// and re-broadcasts the board. All three reply with the shared ticket_action_result
+// event, correlated by request_id; the updated record reaches the panel through the
+// tickets_updated broadcast (which the open detail view re-fetches on).
+
+// ticket_change_status moves a ticket to a chosen column (the chief picks the
+// status directly, unlike the agent's work-state forward channel). An optional
+// comment is recorded on the change.
+model TicketChangeStatusMessage {
+  cmd: "ticket_change_status";
+  request_id?: string;
+  ticket_id: string;
+  status: TicketStatus;
+  comment?: string;
 }
 
-model SendDispatchMessage {
-  cmd: "send_dispatch_message";
-  source_session_id: string;
-  dispatch_id: string;
-  content: string;
+// ticket_add_comment appends a freeform note to a ticket's thread — the chief's
+// steer to the agent, carrying real content.
+model TicketAddCommentMessage {
+  cmd: "ticket_add_comment";
+  request_id?: string;
+  ticket_id: string;
+  comment: string;
 }
 
-model ListDispatchMessagesMessage {
-  cmd: "list_dispatch_messages";
-  source_session_id: string;
-  dispatch_id?: string;
-  unread_only?: boolean;
+// ticket_edit_description replaces a ticket's brief (a re-brief / re-scope).
+model TicketEditDescriptionMessage {
+  cmd: "ticket_edit_description";
+  request_id?: string;
+  ticket_id: string;
+  description: string;
 }
 
-model ReadDispatchMessage {
-  cmd: "read_dispatch_message";
-  source_session_id: string;
-  message_id: string;
-}
-
-model AcknowledgeDispatchMessage {
-  cmd: "acknowledge_dispatch_message";
-  source_session_id: string;
-  message_id: string;
-  acknowledgement?: string;
-}
-
-model WakeDispatchAgentMessage {
-  cmd: "wake_dispatch_agent";
-  source_session_id: string;
-  dispatch_id: string;
+// TicketActionResultMessage is the shared reply to a chief ticket action,
+// correlated by request_id. success/error report whether the mutation landed; the
+// resulting data reaches the UI through the tickets_updated broadcast.
+model TicketActionResultMessage {
+  event: "ticket_action_result";
   request_id: string;
+  success: boolean;
+  error?: string;
 }
 
 model WorkspaceContextCheckoutMessage {
@@ -1464,7 +1499,7 @@ model InitialStateMessage {
   github_hosts?: string[];
   settings?: Record<string>;
   warnings?: DaemonWarning[];
-  chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
+  tickets?: Ticket[];
 }
 
 model EndpointStatusChangedMessage {
@@ -1571,16 +1606,23 @@ model ChiefOfStaffResultMessage {
   error?: string;
 }
 
-model ChiefOfStaffDispatchesUpdatedMessage {
-  event: "chief_of_staff_dispatches_updated";
-  dispatches: ChiefOfStaffDispatch[];
+// TicketsUpdatedMessage is the live board feed: the non-archived ticket rows
+// (bare — no activity/attachments), re-pushed whenever any ticket mutates. It is
+// the same shape carried in InitialStateMessage.tickets, so a client renders the
+// board identically from the bootstrap snapshot and from each update.
+model TicketsUpdatedMessage {
+  event: "tickets_updated";
+  tickets: Ticket[];
 }
 
-model WakeDispatchAgentResultMessage {
-  event: "wake_dispatch_agent_result";
-  dispatch_id: string;
+// TicketResultMessage is the reply to a get_ticket request, correlated by
+// request_id. `ticket` carries the full record on success; `error` is set and
+// `ticket` omitted when the id is unknown or the read failed.
+model TicketResultMessage {
+  event: "ticket_result";
   request_id: string;
   success: boolean;
+  ticket?: Ticket;
   error?: string;
 }
 
@@ -2165,10 +2207,6 @@ model Response {
   workspace_context_result?: WorkspaceContextResult;
   workspace_context_maintenance_result?: WorkspaceContextMaintenanceResult;
   workspace_contexts?: WorkspaceContext[];
-  chief_of_staff_dispatch?: ChiefOfStaffDispatch;
-  chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
-  dispatch_message?: DispatchMessage;
-  dispatch_messages?: DispatchMessage[];
   sessions?: Session[];
   workspaces?: Workspace[];
   prs?: PR[];
@@ -2179,6 +2217,9 @@ model Response {
   notebook_read?: NotebookReadResult;
   notebook_write?: NotebookWriteResult;
   notebook_guide?: NotebookGuideResult;
+  ticket_status_result?: TicketStatusResult;
+  ticket_inbox_result?: TicketInboxResult;
+  ticket_attach_result?: TicketAttachResult;
 }
 
 model DelegateResult {
@@ -2188,7 +2229,6 @@ model DelegateResult {
   branch?: string;
   placement: string;
   worktree_created?: boolean;
-  dispatch_id?: string;
 }
 
 model DelegateResultMessage {
@@ -2545,11 +2585,9 @@ model WebSocketEvent {
 
   review_loop_run?: ReviewLoopRun;
   workspace_context_result?: WorkspaceContextResult;
-  chief_of_staff_dispatch?: ChiefOfStaffDispatch;
-  chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
+  ticket?: Ticket;
+  tickets?: Ticket[];
   workspace_contexts?: WorkspaceContext[];
-  dispatch_message?: DispatchMessage;
-  dispatch_messages?: DispatchMessage[];
 }
 
 alias DaemonEvent =
@@ -2569,8 +2607,9 @@ alias DaemonEvent =
   | WorkspaceLayoutActionResultMessage
   | RenameResultMessage
   | ChiefOfStaffResultMessage
-  | ChiefOfStaffDispatchesUpdatedMessage
-  | WakeDispatchAgentResultMessage
+  | TicketsUpdatedMessage
+  | TicketResultMessage
+  | TicketActionResultMessage
   | WorkspaceTileContentMessage
   | BrowserControlResponseMessage
   | PRsUpdatedMessage

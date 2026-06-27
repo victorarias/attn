@@ -6,11 +6,9 @@ import { PRActions } from './PRActions';
 import { StateIndicator } from './StateIndicator';
 import { ChiefOfStaffBadge } from './ChiefOfStaffBadge';
 import { useDaemonContext } from '../contexts/DaemonContext';
-import { useDaemonStore } from '../store/daemonSessions';
 import { getRepoName } from '../utils/repo';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { UISessionState } from '../types/sessionState';
-import { normalizeSessionState } from '../types/sessionState';
 import appIcon from '../assets/icon.png';
 import './Dashboard.css';
 
@@ -33,7 +31,6 @@ type DashboardWorkspace = {
 
 interface DashboardProps {
   sessions: DashboardSession[];
-  dispatchSessions?: DashboardSession[];
   mutedWorkspaces?: DashboardWorkspace[];
   prs: DaemonPR[];
   isLoading: boolean;
@@ -43,7 +40,6 @@ interface DashboardProps {
   endpoints?: DaemonEndpoint[];
   onRebootstrapEndpoint?: (endpointId: string) => Promise<void>;
   onSelectSession: (id: string) => void;
-  onWakeDispatch?: (sourceSessionId: string, dispatchId: string) => Promise<void>;
   onNewSession: () => void;
   onRefreshPRs?: () => void;
   onOpenPR?: (pr: DaemonPR) => void;
@@ -51,22 +47,8 @@ interface DashboardProps {
   onMutedGroupClick?: () => void;
 }
 
-function formatDispatchAge(reportedAt?: string): string | null {
-  if (!reportedAt) return null;
-  const timestamp = Date.parse(reportedAt);
-  if (Number.isNaN(timestamp)) return null;
-  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
-
 export function Dashboard({
   sessions,
-  dispatchSessions = sessions,
   mutedWorkspaces = [],
   prs,
   isLoading,
@@ -76,7 +58,6 @@ export function Dashboard({
   endpoints,
   onRebootstrapEndpoint,
   onSelectSession,
-  onWakeDispatch,
   onNewSession,
   onRefreshPRs,
   onOpenPR,
@@ -118,155 +99,12 @@ export function Dashboard({
   const scheduledSessions = sessions.filter((s) => s.state === 'scheduled');
   const idleSessions = sessions.filter((s) => s.state === 'idle');
   const unknownSessions = sessions.filter((s) => s.state === 'unknown');
-  const chiefSession = dispatchSessions.find((session) => session.chiefOfStaff);
+  const chiefSession = sessions.find((session) => session.chiefOfStaff);
 
   // Group PRs by repo
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(new Set());
   const [fadingPRs, setFadingPRs] = useState<Set<string>>(new Set());
-  const [wakingDispatches, setWakingDispatches] = useState<Set<string>>(new Set());
-  const [wakeErrors, setWakeErrors] = useState<Record<string, string>>({});
   const { sendMuteRepo, sendPRVisited } = useDaemonContext();
-  const { chiefOfStaffDispatches } = useDaemonStore();
-  const visibleDispatches = chiefOfStaffDispatches.filter((dispatch) =>
-    dispatchSessions.some((session) => session.id === dispatch.session_id)
-  );
-  const activeChiefDispatches = chiefSession
-    ? visibleDispatches.filter((dispatch) => dispatch.chief_session_id === chiefSession.id)
-    : [];
-  const historicalChiefDispatches = visibleDispatches.filter(
-    (dispatch) => dispatch.chief_session_id !== chiefSession?.id,
-  );
-
-  const renderDispatch = (dispatch: typeof chiefOfStaffDispatches[number]) => {
-    const target = dispatchSessions.find((session) => session.id === dispatch.session_id);
-    const state = target?.state ?? normalizeSessionState(dispatch.status === 'closed' ? 'unknown' : dispatch.status);
-    const structured = dispatch.structured_report;
-    const summary = dispatch.concise_summary || structured?.summary || dispatch.latest_report || dispatch.brief;
-    const statusLabel = target ? state.replace('_', ' ') : 'closed';
-    const workState = structured?.work_state.replace(/_/g, ' ');
-    const reportAge = formatDispatchAge(dispatch.reported_at);
-    const request = structured?.request;
-    const unreadCount = dispatch.unread_message_count ?? 0;
-    const canWake = Boolean(
-      target
-      && !target.endpointName
-      && chiefSession?.id === dispatch.chief_session_id
-      && unreadCount > 0
-      && (state === 'idle' || state === 'waiting_input')
-      && onWakeDispatch,
-    );
-    const isWaking = wakingDispatches.has(dispatch.id);
-    const wakeError = wakeErrors[dispatch.id];
-
-    const wakeAgent = async () => {
-      if (!canWake || !chiefSession || !onWakeDispatch) return;
-      setWakingDispatches((current) => new Set(current).add(dispatch.id));
-      setWakeErrors((current) => {
-        const next = { ...current };
-        delete next[dispatch.id];
-        return next;
-      });
-      try {
-        await onWakeDispatch(chiefSession.id, dispatch.id);
-      } catch (error) {
-        setWakeErrors((current) => ({
-          ...current,
-          [dispatch.id]: error instanceof Error ? error.message : 'Could not wake agent',
-        }));
-      } finally {
-        setWakingDispatches((current) => {
-          const next = new Set(current);
-          next.delete(dispatch.id);
-          return next;
-        });
-      }
-    };
-
-    return (
-      <div
-        key={dispatch.id}
-        className="dispatch-row"
-        data-testid={`chief-dispatch-${dispatch.id}`}
-        data-state={target ? state : 'closed'}
-        data-actionable={dispatch.actionable ? 'true' : 'false'}
-      >
-        <button
-          type="button"
-          className="dispatch-open"
-          disabled={!target}
-          onClick={() => target && onSelectSession(target.id)}
-        >
-          <StateIndicator state={state} size="sm" seed={dispatch.session_id} />
-          <span className="dispatch-copy">
-            <span className="dispatch-meta">
-              <span>{dispatch.agent} agent</span>
-              <span aria-hidden="true">·</span>
-              <span>Agent status: {statusLabel}</span>
-              {reportAge && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span>Reported {reportAge}</span>
-                </>
-              )}
-            </span>
-            <span className="dispatch-summary-label">Task</span>
-            <span className="dispatch-title">
-              {target?.label || dispatch.label}
-            </span>
-            <span className="dispatch-summary-label">
-              {dispatch.latest_report ? 'Latest update' : 'Assignment'}
-            </span>
-            <span className={`dispatch-summary ${dispatch.latest_report ? 'reported' : ''}`}>
-              {summary}
-            </span>
-            {structured && (
-              <span className="dispatch-coordination">
-                <span className="dispatch-work-state">Work: {workState}</span>
-                {dispatch.actionable && <span className="dispatch-actionable">Action needed</span>}
-                {structured.next_actor && <span>Next: {structured.next_actor}</span>}
-              </span>
-            )}
-            {structured?.next_action && (
-              <>
-                <span className="dispatch-summary-label">Next action</span>
-                <span className="dispatch-summary">{structured.next_action}</span>
-              </>
-            )}
-            {request && (
-              <>
-                <span className="dispatch-summary-label">
-                  {request.status === 'pending' ? 'Decision needed' : 'Decision resolved'}
-                </span>
-                <span className="dispatch-summary">
-                  {request.status === 'pending' ? request.question : request.response || request.question}
-                </span>
-              </>
-            )}
-          </span>
-          <span className="dispatch-open-hint" aria-hidden="true">›</span>
-        </button>
-        {unreadCount > 0 && (
-          <div className="dispatch-mailbox">
-            <span className="dispatch-unread">
-              {unreadCount} unread
-            </span>
-            {canWake && (
-              <button
-                type="button"
-                className="dispatch-wake"
-                disabled={isWaking}
-                title="Prompt this agent to check its attn inbox"
-                onClick={() => void wakeAgent()}
-              >
-                {isWaking ? 'Waking…' : 'Wake agent'}
-              </button>
-            )}
-            {wakeError && <span className="dispatch-wake-error">{wakeError}</span>}
-          </div>
-        )}
-      </div>
-    );
-  };
 
   // PRs that are fully hidden (after fade animation)
   const [hiddenPRs, setHiddenPRs] = useState<Set<string>>(new Set());
@@ -631,48 +469,24 @@ export function Dashboard({
             <h2>Chief of Staff</h2>
           </div>
           <div className="card-body">
-            {!chiefSession && visibleDispatches.length === 0 ? (
+            {!chiefSession ? (
               <div className="card-empty">Assign a session as chief to track delegated work.</div>
             ) : (
-              <>
-                {chiefSession && (
-                  <div className="chief-session-block" data-testid="chief-session-summary">
-                    <div className="chief-section-label">Chief session</div>
-                    <button
-                      type="button"
-                      className="chief-session-summary"
-                      onClick={() => onSelectSession(chiefSession.id)}
-                    >
-                      <StateIndicator state={chiefSession.state} size="sm" seed={chiefSession.id} />
-                      <span className="chief-session-name">{chiefSession.label}</span>
-                      <ChiefOfStaffBadge compact />
-                      <span className="chief-session-state">
-                        Session: {chiefSession.state.replace('_', ' ')}
-                      </span>
-                    </button>
-                  </div>
-                )}
-                {activeChiefDispatches.length > 0 ? (
-                  <div className="dispatch-group">
-                    <div className="dispatch-group-header">
-                      <span>Delegated work</span>
-                      <span>{activeChiefDispatches.length}</span>
-                    </div>
-                    {activeChiefDispatches.map(renderDispatch)}
-                  </div>
-                ) : chiefSession ? (
-                  <div className="card-empty compact">No delegated work yet.</div>
-                ) : null}
-                {historicalChiefDispatches.length > 0 && (
-                  <div className="dispatch-group historical">
-                    <div className="dispatch-group-header">
-                      <span>Past chief dispatches</span>
-                      <span>{historicalChiefDispatches.length}</span>
-                    </div>
-                    {historicalChiefDispatches.map(renderDispatch)}
-                  </div>
-                )}
-              </>
+              <div className="chief-session-block" data-testid="chief-session-summary">
+                <div className="chief-section-label">Chief session</div>
+                <button
+                  type="button"
+                  className="chief-session-summary"
+                  onClick={() => onSelectSession(chiefSession.id)}
+                >
+                  <StateIndicator state={chiefSession.state} size="sm" seed={chiefSession.id} />
+                  <span className="chief-session-name">{chiefSession.label}</span>
+                  <ChiefOfStaffBadge compact />
+                  <span className="chief-session-state">
+                    Session: {chiefSession.state.replace('_', ' ')}
+                  </span>
+                </button>
+              </div>
             )}
           </div>
         </div>

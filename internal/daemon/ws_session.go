@@ -107,11 +107,6 @@ func (d *Daemon) clearAllSessions() {
 	for sessionID := range sessionIDs {
 		d.terminateSession(sessionID, syscall.SIGTERM)
 		d.clearLongRunTracking(sessionID)
-		// Clear-all is a fourth session-removal path; capture any in-flight dispatch
-		// outcome before the bulk delete so it is journaled like every other path
-		// (no-op for non-dispatch sessions). ClearSessions only deletes the sessions
-		// table, so the dispatch row would otherwise be orphaned and never journaled.
-		d.journalDispatchOnSessionGone(sessionID)
 	}
 	d.store.ClearSessions()
 	d.clearChiefOfStaffIfSession(d.chiefOfStaffSessionID())

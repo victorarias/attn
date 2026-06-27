@@ -79,7 +79,7 @@ ATTN_PROFILE=dev ./attn profile resolve --json | grep -E 'port|data_dir|socket'
 | Notebook root (dev) | `~/attn-notebook-dev` |
 | Journal | `~/attn-notebook-dev/journal/<YYYY-MM-DD>.md` |
 | Knowledge base | `~/attn-notebook-dev/knowledge/{projects,areas,resources,archive}/` |
-| Raw tier | `~/attn-notebook-dev/.attn/raw/{sessions,dispatches,context-snapshots}/` |
+| Raw tier | `~/attn-notebook-dev/.attn/raw/{sessions,context-snapshots}/` |
 | Task records | `~/attn-notebook-dev/.attn/tasks/` (one file per task; readable id in the JSON body) |
 | Cron anchor | `~/attn-notebook-dev/.attn/narrate/state.json` |
 | Settings + keeper backups | `~/.attn-dev/attn.db` (`settings`, `workspace_keeper_compact_backups`) |
@@ -153,30 +153,16 @@ edit files directly, and the live-promotion doorbell points at native paths.
 
 ---
 
-### A3 — Dispatch capture → raw tier, exactly once **[DET]**
-**Proves:** a chief-of-staff dispatch's terminal outcome is captured deterministically to the
-raw tier (not the curated journal), exactly once.
+### A3 — Dispatch capture → raw tier, exactly once **[DET]** — *retired*
 
-**Steps:**
-1. With a live chief, dispatch a unit of work (chief delegates a sub-agent).
-2. Let the dispatch reach a terminal report (completed/failed).
-3. Inspect:
-```sh
-ls -la ~/attn-notebook-dev/.attn/raw/dispatches/
-cat ~/attn-notebook-dev/.attn/raw/dispatches/*.md
-```
+> **Retired (tickets epic, slice 7).** The chief-of-staff dispatch namespace and its
+> raw-tier "delivery ledger" (`.attn/raw/dispatches/`) were removed when delegated work
+> moved to the ticket model. There is no dispatch capture to verify; delegated work is now
+> tracked on its ticket (see the ticket board and `attn ticket status`). The original
+> scenario below is kept only as a historical record of what A3 verified at the time.
 
-**Expected:**
-- One `*.md` file per dispatch id.
-- Block carries the rendered outcome, a `source: dispatch:<id>` footer, and a hidden
-  `<!-- attn:dispatch:<id> -->` marker; any `<!--` in free text is neutralized to `<! --`.
-- **Nothing** lands in `journal/<date>.md` from this (capture is raw-tier only).
-
-**Exactly-once check:** restart the daemon (`ATTN_PROFILE=dev ./attn daemon stop` then
-`… daemon ensure`) and confirm the dispatch file count is unchanged (the file + marker is the
-ledger; a replay overwrites the identical file, never duplicates).
-
-**Pass:** one file per dispatch; correct marker/footer; journal untouched.
+**Proved (historical):** a chief-of-staff dispatch's terminal outcome was captured
+deterministically to the raw tier (not the curated journal), exactly once.
 
 ---
 

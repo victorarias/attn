@@ -148,71 +148,29 @@ func TestParseDelegatePlacementAndWorktree(t *testing.T) {
 	}
 }
 
-func TestParseDispatchCommands(t *testing.T) {
-	cmd, data, err := ParseMessage([]byte(`{"cmd":"list_dispatches","source_session_id":"chief-1"}`))
-	if err != nil {
-		t.Fatalf("ParseMessage(list_dispatches) error = %v", err)
+// TestParseMessageRejectsRetiredDispatchCommands asserts the chief-of-staff
+// dispatch command namespace is fully gone: every retired verb now parses as an
+// unknown command rather than a recognized one. set_ticket_status (the surviving
+// agent self-report) is covered separately.
+func TestParseMessageRejectsRetiredDispatchCommands(t *testing.T) {
+	retired := []string{
+		"list_dispatches",
+		"submit_dispatch_outcome",
+		"handoff_dispatch",
+		"get_dispatch",
+		"resolve_dispatch_request",
+		"send_dispatch_message",
+		"list_dispatch_messages",
+		"read_dispatch_message",
+		"acknowledge_dispatch_message",
+		"wake_dispatch_agent",
+		"report_dispatch",
 	}
-	if cmd != CmdListDispatches || data.(*ListDispatchesMessage).SourceSessionID != "chief-1" {
-		t.Fatalf("list dispatches = %q %+v", cmd, data)
-	}
-
-	cmd, data, err = ParseMessage([]byte(`{
-		"cmd":"submit_dispatch_outcome",
-		"source_session_id":"worker-1",
-		"report":"waiting for a decision",
-		"structured_report":{
-			"report_type":"blocker",
-			"summary":"Core implementation ready",
-			"work_state":"needs_input",
-			"reported_at":""
+	for _, cmd := range retired {
+		_, _, err := ParseMessage([]byte(`{"cmd":"` + cmd + `","source_session_id":"worker-1"}`))
+		if err == nil || !strings.Contains(err.Error(), "unknown command") {
+			t.Fatalf("retired %q error = %v, want unknown command", cmd, err)
 		}
-	}`))
-	if err != nil {
-		t.Fatalf("ParseMessage(submit_dispatch_outcome) error = %v", err)
-	}
-	report := data.(*SubmitDispatchOutcomeMessage)
-	if cmd != CmdSubmitDispatchOutcome ||
-		report.SourceSessionID != "worker-1" ||
-		report.Report != "waiting for a decision" ||
-		report.StructuredReport.WorkState != DispatchWorkStateNeedsInput {
-		t.Fatalf("report dispatch = %q %+v", cmd, report)
-	}
-
-	cmd, data, err = ParseMessage([]byte(`{"cmd":"get_dispatch","source_session_id":"worker-1"}`))
-	if err != nil {
-		t.Fatalf("ParseMessage(get_dispatch) error = %v", err)
-	}
-	if cmd != CmdGetDispatch || data.(*GetDispatchMessage).SourceSessionID != "worker-1" {
-		t.Fatalf("get dispatch = %q %+v", cmd, data)
-	}
-
-	cmd, data, err = ParseMessage([]byte(`{
-		"cmd":"resolve_dispatch_request",
-		"source_session_id":"chief-1",
-		"dispatch_id":"dispatch-1",
-		"response":"Use V1.",
-		"resolution_link":"https://example.test/decision"
-	}`))
-	if err != nil {
-		t.Fatalf("ParseMessage(resolve_dispatch_request) error = %v", err)
-	}
-	resolution := data.(*ResolveDispatchRequestMessage)
-	if cmd != CmdResolveDispatchRequest ||
-		resolution.DispatchID != "dispatch-1" ||
-		resolution.Response != "Use V1." {
-		t.Fatalf("resolve dispatch request = %q %+v", cmd, resolution)
-	}
-}
-
-func TestParseMessageRejectsRemovedReportDispatchCommand(t *testing.T) {
-	_, _, err := ParseMessage([]byte(`{
-		"cmd":"report_dispatch",
-		"source_session_id":"worker-1",
-		"report":"done"
-	}`))
-	if err == nil || !strings.Contains(err.Error(), "unknown command") {
-		t.Fatalf("removed report_dispatch error = %v", err)
 	}
 }
 

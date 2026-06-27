@@ -78,8 +78,8 @@ filesystem watcher notices your change and refreshes any open in-app browser.
 ## Rules That Make The Knowledge Base Trustworthy
 
 - **Grounding is required.** Every durable knowledge note must carry resolvable
-  `sources:` in its frontmatter — journal anchors, `dispatch:<id>`, or URLs. Do
-  not author a note from paraphrase alone.
+  `sources:` in its frontmatter — journal anchors or URLs. Do not author a note
+  from paraphrase alone.
 - **Frontmatter is OKF.** `type:` is the one required field — an open,
   author-chosen string (e.g. `note`), not a fixed enum. `title`, `summary`,
   `tags`, `created`, `updated`, and `sources` are recommended. Unknown keys are
