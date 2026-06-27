@@ -695,6 +695,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Settings:               d.settingsWithAgentAvailability(),
 		Warnings:               d.getWarnings(),
 		ChiefOfStaffDispatches: d.chiefOfStaffDispatches(""),
+		Tickets:                d.ticketsForBroadcast(),
 	}
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -899,6 +900,9 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdNotebookTaskRetry:
 		nbTaskRetry := msg.(*protocol.NotebookTaskRetryMessage)
 		go d.sendNotebookTaskRetryWSResult(client, protocol.Deref(nbTaskRetry.RequestID), nbTaskRetry.TaskID)
+	case protocol.CmdGetTicket:
+		getTicket := msg.(*protocol.GetTicketMessage)
+		go d.sendGetTicketWSResult(client, protocol.Deref(getTicket.RequestID), getTicket.TicketID)
 	case protocol.CmdFsList:
 		fsList := msg.(*protocol.FsListMessage)
 		go d.sendFsListWSResult(client, protocol.Deref(fsList.RequestID), protocol.Deref(fsList.Path))

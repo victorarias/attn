@@ -79,4 +79,6 @@ func (d *Daemon) handleSetTicketStatus(conn net.Conn, msg *protocol.SetTicketSta
 	// board→watcher direction reflects it. The agent itself authored the event, so
 	// Notify excludes it — no self-nudge.
 	d.notifyTicketObservers(updated.ID)
+	// Refresh the app's board view: the column moved.
+	d.broadcastTicketsUpdated()
 }

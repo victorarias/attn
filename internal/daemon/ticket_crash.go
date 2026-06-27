@@ -60,4 +60,6 @@ func (d *Daemon) captureTicketCrashState(sessionID, state string) {
 	// attn authored the crash; notify the chief (the crashed session is gone, so it
 	// is skipped as a non-live participant).
 	d.notifyTicketObservers(ticket.ID)
+	// Refresh the app's board view: the ticket moved to the Crashed column.
+	d.broadcastTicketsUpdated()
 }
