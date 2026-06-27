@@ -254,6 +254,43 @@ describe('TicketDetailPanel', () => {
     expect(screen.getByText('daemon refused the move')).toBeTruthy();
   });
 
+  it('shows Resume and calls onResume with the ticket id for a delegated ticket', async () => {
+    const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
+    const onResume = vi.fn();
+    render(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        // Bare row already carries cwd + last_agent_id → the button is live before
+        // the full record loads.
+        ticketRow={makeTicket()}
+        fetchTicket={fetchTicket}
+        onResume={onResume}
+        onClose={() => {}}
+      />,
+    );
+    const button = await screen.findByTestId('ticket-resume');
+    fireEvent.click(button);
+    expect(onResume).toHaveBeenCalledTimes(1);
+    expect(onResume).toHaveBeenCalledWith('store-migration');
+  });
+
+  it('hides Resume when the ticket has no agent session to resume', async () => {
+    const fetchTicket = vi.fn().mockResolvedValue(makeTicket({ cwd: '', last_agent_id: '' }));
+    render(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={makeTicket({ cwd: '', last_agent_id: '' })}
+        fetchTicket={fetchTicket}
+        onResume={vi.fn()}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => screen.getByText('Move the store to X'));
+    expect(screen.queryByTestId('ticket-resume')).toBeNull();
+  });
+
   it('renders read-only when no action handlers are wired', async () => {
     const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
     render(
