@@ -1867,6 +1867,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleReadDispatchMessage(conn, msg.(*protocol.ReadDispatchMessage))
 	case protocol.CmdAcknowledgeDispatchMessage:
 		d.handleAcknowledgeDispatchMessage(conn, msg.(*protocol.AcknowledgeDispatchMessage))
+	case protocol.CmdSetTicketStatus:
+		d.handleSetTicketStatus(conn, msg.(*protocol.SetTicketStatusMessage))
 	case protocol.CmdWorkspaceContextCheckout:
 		d.handleWorkspaceContextCheckout(conn, msg.(*protocol.WorkspaceContextCheckoutMessage))
 	case protocol.CmdWorkspaceContextUpdate:

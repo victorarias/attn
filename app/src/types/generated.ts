@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HandoffDispatchMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchMessagesMessage, ListDispatchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, OpenBrowserMessage, OpenMarkdownMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubmitDispatchOutcomeMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HandoffDispatchMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchesMessage, ListDispatchMessagesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubmitDispatchOutcomeMessage, SubscribeGitStatusMessage, TicketStatus, TicketStatusResult, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const acknowledgeDispatchMessage = Convert.toAcknowledgeDispatchMessage(json);
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
@@ -116,8 +116,8 @@
 //   const installPluginMessage = Convert.toInstallPluginMessage(json);
 //   const killSessionMessage = Convert.toKillSessionMessage(json);
 //   const listBranchesMessage = Convert.toListBranchesMessage(json);
-//   const listDispatchMessagesMessage = Convert.toListDispatchMessagesMessage(json);
 //   const listDispatchesMessage = Convert.toListDispatchesMessage(json);
+//   const listDispatchMessagesMessage = Convert.toListDispatchMessagesMessage(json);
 //   const listEndpointsMessage = Convert.toListEndpointsMessage(json);
 //   const listPluginsMessage = Convert.toListPluginsMessage(json);
 //   const listRemoteBranchesMessage = Convert.toListRemoteBranchesMessage(json);
@@ -155,22 +155,22 @@
 //   const notebookWriteResultMessage = Convert.toNotebookWriteResultMessage(json);
 //   const openBrowserMessage = Convert.toOpenBrowserMessage(json);
 //   const openMarkdownMessage = Convert.toOpenMarkdownMessage(json);
-//   const pR = Convert.toPR(json);
-//   const pRActionResultMessage = Convert.toPRActionResultMessage(json);
-//   const pRRole = Convert.toPRRole(json);
-//   const pRVisitedMessage = Convert.toPRVisitedMessage(json);
-//   const pRsUpdatedMessage = Convert.toPRsUpdatedMessage(json);
 //   const pathInspection = Convert.toPathInspection(json);
 //   const pinWorkspaceMessage = Convert.toPinWorkspaceMessage(json);
 //   const pluginActionResultMessage = Convert.toPluginActionResultMessage(json);
 //   const pluginInfo = Convert.toPluginInfo(json);
 //   const pluginIssue = Convert.toPluginIssue(json);
 //   const pluginsUpdatedMessage = Convert.toPluginsUpdatedMessage(json);
+//   const pR = Convert.toPR(json);
+//   const pRActionResultMessage = Convert.toPRActionResultMessage(json);
+//   const pRRole = Convert.toPRRole(json);
+//   const pRsUpdatedMessage = Convert.toPRsUpdatedMessage(json);
+//   const pRVisitedMessage = Convert.toPRVisitedMessage(json);
 //   const ptyDesyncMessage = Convert.toPtyDesyncMessage(json);
 //   const ptyInputMessage = Convert.toPtyInputMessage(json);
 //   const ptyOutputMessage = Convert.toPtyOutputMessage(json);
-//   const ptyResizeMessage = Convert.toPtyResizeMessage(json);
 //   const ptyResizedMessage = Convert.toPtyResizedMessage(json);
+//   const ptyResizeMessage = Convert.toPtyResizeMessage(json);
 //   const queryAuthorsMessage = Convert.toQueryAuthorsMessage(json);
 //   const queryMessage = Convert.toQueryMessage(json);
 //   const queryPRsMessage = Convert.toQueryPRsMessage(json);
@@ -216,18 +216,19 @@
 //   const sessionSelectedMessage = Convert.toSessionSelectedMessage(json);
 //   const sessionState = Convert.toSessionState(json);
 //   const sessionStateChangedMessage = Convert.toSessionStateChangedMessage(json);
+//   const sessionsUpdatedMessage = Convert.toSessionsUpdatedMessage(json);
 //   const sessionTodosUpdatedMessage = Convert.toSessionTodosUpdatedMessage(json);
 //   const sessionUnregisteredMessage = Convert.toSessionUnregisteredMessage(json);
 //   const sessionVisualizedMessage = Convert.toSessionVisualizedMessage(json);
-//   const sessionsUpdatedMessage = Convert.toSessionsUpdatedMessage(json);
 //   const setChiefOfStaffMessage = Convert.toSetChiefOfStaffMessage(json);
 //   const setEndpointRemoteWebMessage = Convert.toSetEndpointRemoteWebMessage(json);
 //   const setPluginPriorityMessage = Convert.toSetPluginPriorityMessage(json);
 //   const setReviewLoopIterationLimitMessage = Convert.toSetReviewLoopIterationLimitMessage(json);
 //   const setSessionResumeIDMessage = Convert.toSetSessionResumeIDMessage(json);
 //   const setSettingMessage = Convert.toSetSettingMessage(json);
-//   const setWorkspaceRankMessage = Convert.toSetWorkspaceRankMessage(json);
+//   const setTicketStatusMessage = Convert.toSetTicketStatusMessage(json);
 //   const settingsUpdatedMessage = Convert.toSettingsUpdatedMessage(json);
+//   const setWorkspaceRankMessage = Convert.toSetWorkspaceRankMessage(json);
 //   const spawnResultMessage = Convert.toSpawnResultMessage(json);
 //   const spawnSessionMessage = Convert.toSpawnSessionMessage(json);
 //   const startReviewLoopMessage = Convert.toStartReviewLoopMessage(json);
@@ -236,6 +237,8 @@
 //   const stopReviewLoopMessage = Convert.toStopReviewLoopMessage(json);
 //   const submitDispatchOutcomeMessage = Convert.toSubmitDispatchOutcomeMessage(json);
 //   const subscribeGitStatusMessage = Convert.toSubscribeGitStatusMessage(json);
+//   const ticketStatus = Convert.toTicketStatus(json);
+//   const ticketStatusResult = Convert.toTicketStatusResult(json);
 //   const todosMessage = Convert.toTodosMessage(json);
 //   const unregisterMessage = Convert.toUnregisterMessage(json);
 //   const unregisterWorkspaceMessage = Convert.toUnregisterWorkspaceMessage(json);
@@ -290,8 +293,8 @@
 //   const workspaceLayoutSetSplitRatioMessage = Convert.toWorkspaceLayoutSetSplitRatioMessage(json);
 //   const workspaceLayoutSplitDirection = Convert.toWorkspaceLayoutSplitDirection(json);
 //   const workspaceLayoutUndockTileMessage = Convert.toWorkspaceLayoutUndockTileMessage(json);
-//   const workspaceLayoutUpdateTileMessage = Convert.toWorkspaceLayoutUpdateTileMessage(json);
 //   const workspaceLayoutUpdatedMessage = Convert.toWorkspaceLayoutUpdatedMessage(json);
+//   const workspaceLayoutUpdateTileMessage = Convert.toWorkspaceLayoutUpdateTileMessage(json);
 //   const workspaceRegisteredMessage = Convert.toWorkspaceRegisteredMessage(json);
 //   const workspaceSelectedMessage = Convert.toWorkspaceSelectedMessage(json);
 //   const workspaceStateChangedMessage = Convert.toWorkspaceStateChangedMessage(json);
@@ -2011,6 +2014,16 @@ export enum ListBranchesMessageCmd {
     ListBranches = "list_branches",
 }
 
+export interface ListDispatchesMessage {
+    cmd:               ListDispatchesMessageCmd;
+    source_session_id: string;
+    [property: string]: any;
+}
+
+export enum ListDispatchesMessageCmd {
+    ListDispatches = "list_dispatches",
+}
+
 export interface ListDispatchMessagesMessage {
     cmd:               ListDispatchMessagesMessageCmd;
     dispatch_id?:      string;
@@ -2021,16 +2034,6 @@ export interface ListDispatchMessagesMessage {
 
 export enum ListDispatchMessagesMessageCmd {
     ListDispatchMessages = "list_dispatch_messages",
-}
-
-export interface ListDispatchesMessage {
-    cmd:               ListDispatchesMessageCmd;
-    source_session_id: string;
-    [property: string]: any;
-}
-
-export enum ListDispatchesMessageCmd {
-    ListDispatches = "list_dispatches",
 }
 
 export interface ListEndpointsMessage {
@@ -2478,69 +2481,6 @@ export enum OpenMarkdownMessageCmd {
     OpenMarkdown = "open_markdown",
 }
 
-export interface PR {
-    approved_by_me:         boolean;
-    author:                 string;
-    ci_status?:             string;
-    comment_count?:         number;
-    details_fetched:        boolean;
-    details_fetched_at?:    string;
-    has_new_changes:        boolean;
-    head_branch?:           string;
-    head_sha?:              string;
-    heat_state?:            HeatState;
-    host:                   string;
-    id:                     string;
-    last_heat_activity_at?: string;
-    last_polled:            string;
-    last_updated:           string;
-    mergeable?:             boolean;
-    mergeable_state?:       string;
-    muted:                  boolean;
-    number:                 number;
-    reason:                 string;
-    repo:                   string;
-    review_status?:         string;
-    role:                   PRRole;
-    state:                  string;
-    title:                  string;
-    url:                    string;
-    [property: string]: any;
-}
-
-export interface PRActionResultMessage {
-    action:  string;
-    error?:  string;
-    event:   PRActionResultMessageEvent;
-    id:      string;
-    success: boolean;
-    [property: string]: any;
-}
-
-export enum PRActionResultMessageEvent {
-    PRActionResult = "pr_action_result",
-}
-
-export interface PRVisitedMessage {
-    cmd: PRVisitedMessageCmd;
-    id:  string;
-    [property: string]: any;
-}
-
-export enum PRVisitedMessageCmd {
-    PRVisited = "pr_visited",
-}
-
-export interface PRsUpdatedMessage {
-    event: PRsUpdatedMessageEvent;
-    prs?:  PRElement[];
-    [property: string]: any;
-}
-
-export enum PRsUpdatedMessageEvent {
-    PrsUpdated = "prs_updated",
-}
-
 export interface PathInspection {
     exists:        boolean;
     home_path?:    string;
@@ -2626,6 +2566,69 @@ export interface PluginElement {
     [property: string]: any;
 }
 
+export interface PR {
+    approved_by_me:         boolean;
+    author:                 string;
+    ci_status?:             string;
+    comment_count?:         number;
+    details_fetched:        boolean;
+    details_fetched_at?:    string;
+    has_new_changes:        boolean;
+    head_branch?:           string;
+    head_sha?:              string;
+    heat_state?:            HeatState;
+    host:                   string;
+    id:                     string;
+    last_heat_activity_at?: string;
+    last_polled:            string;
+    last_updated:           string;
+    mergeable?:             boolean;
+    mergeable_state?:       string;
+    muted:                  boolean;
+    number:                 number;
+    reason:                 string;
+    repo:                   string;
+    review_status?:         string;
+    role:                   PRRole;
+    state:                  string;
+    title:                  string;
+    url:                    string;
+    [property: string]: any;
+}
+
+export interface PRActionResultMessage {
+    action:  string;
+    error?:  string;
+    event:   PRActionResultMessageEvent;
+    id:      string;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum PRActionResultMessageEvent {
+    PRActionResult = "pr_action_result",
+}
+
+export interface PRsUpdatedMessage {
+    event: PRsUpdatedMessageEvent;
+    prs?:  PRElement[];
+    [property: string]: any;
+}
+
+export enum PRsUpdatedMessageEvent {
+    PrsUpdated = "prs_updated",
+}
+
+export interface PRVisitedMessage {
+    cmd: PRVisitedMessageCmd;
+    id:  string;
+    [property: string]: any;
+}
+
+export enum PRVisitedMessageCmd {
+    PRVisited = "pr_visited",
+}
+
 export interface PtyDesyncMessage {
     event:  PtyDesyncMessageEvent;
     id:     string;
@@ -2661,18 +2664,6 @@ export enum PtyOutputMessageEvent {
     PtyOutput = "pty_output",
 }
 
-export interface PtyResizeMessage {
-    cmd:  PtyResizeMessageCmd;
-    cols: number;
-    id:   string;
-    rows: number;
-    [property: string]: any;
-}
-
-export enum PtyResizeMessageCmd {
-    PtyResize = "pty_resize",
-}
-
 export interface PtyResizedMessage {
     cols:  number;
     event: PtyResizedMessageEvent;
@@ -2683,6 +2674,18 @@ export interface PtyResizedMessage {
 
 export enum PtyResizedMessageEvent {
     PtyResized = "pty_resized",
+}
+
+export interface PtyResizeMessage {
+    cmd:  PtyResizeMessageCmd;
+    cols: number;
+    id:   string;
+    rows: number;
+    [property: string]: any;
+}
+
+export enum PtyResizeMessageCmd {
+    PtyResize = "pty_resize",
 }
 
 export interface QueryAuthorsMessage {
@@ -2966,6 +2969,7 @@ export interface Response {
     repos?:                                RepoElement[];
     review_loop_run?:                      ReviewLoopRunObject;
     sessions?:                             SessionElement[];
+    ticket_status_result?:                 TicketStatusResultObject;
     workspace_context_maintenance_result?: WorkspaceContextMaintenanceResultObject;
     workspace_context_result?:             WorkspaceContextResultObject;
     workspace_contexts?:                   WorkspaceContextElement[];
@@ -3080,6 +3084,22 @@ export enum ReviewLoopRunStatus {
     Error = "error",
     Running = "running",
     Stopped = "stopped",
+}
+
+export interface TicketStatusResultObject {
+    status:    TicketStatus;
+    ticket_id: string;
+    [property: string]: any;
+}
+
+export enum TicketStatus {
+    Blocked = "blocked",
+    Crashed = "crashed",
+    Done = "done",
+    Failed = "failed",
+    InReview = "in_review",
+    Todo = "todo",
+    Working = "working",
 }
 
 export interface WorkspaceContextMaintenanceResultObject {
@@ -3334,6 +3354,16 @@ export enum SessionStateChangedMessageEvent {
     SessionStateChanged = "session_state_changed",
 }
 
+export interface SessionsUpdatedMessage {
+    event:     SessionsUpdatedMessageEvent;
+    sessions?: SessionElement[];
+    [property: string]: any;
+}
+
+export enum SessionsUpdatedMessageEvent {
+    SessionsUpdated = "sessions_updated",
+}
+
 export interface SessionTodosUpdatedMessage {
     event:   SessionTodosUpdatedMessageEvent;
     session: SessionElement;
@@ -3362,16 +3392,6 @@ export interface SessionVisualizedMessage {
 
 export enum SessionVisualizedMessageCmd {
     SessionVisualized = "session_visualized",
-}
-
-export interface SessionsUpdatedMessage {
-    event:     SessionsUpdatedMessageEvent;
-    sessions?: SessionElement[];
-    [property: string]: any;
-}
-
-export enum SessionsUpdatedMessageEvent {
-    SessionsUpdated = "sessions_updated",
 }
 
 export interface SetChiefOfStaffMessage {
@@ -3440,16 +3460,16 @@ export enum SetSettingMessageCmd {
     SetSetting = "set_setting",
 }
 
-export interface SetWorkspaceRankMessage {
-    cmd:                SetWorkspaceRankMessageCmd;
-    next_workspace_id?: string;
-    prev_workspace_id?: string;
-    workspace_id:       string;
+export interface SetTicketStatusMessage {
+    cmd:               SetTicketStatusMessageCmd;
+    comment?:          string;
+    source_session_id: string;
+    work_state:        DispatchWorkState;
     [property: string]: any;
 }
 
-export enum SetWorkspaceRankMessageCmd {
-    SetWorkspaceRank = "set_workspace_rank",
+export enum SetTicketStatusMessageCmd {
+    SetTicketStatus = "set_ticket_status",
 }
 
 export interface SettingsUpdatedMessage {
@@ -3463,6 +3483,18 @@ export interface SettingsUpdatedMessage {
 
 export enum SettingsUpdatedMessageEvent {
     SettingsUpdated = "settings_updated",
+}
+
+export interface SetWorkspaceRankMessage {
+    cmd:                SetWorkspaceRankMessageCmd;
+    next_workspace_id?: string;
+    prev_workspace_id?: string;
+    workspace_id:       string;
+    [property: string]: any;
+}
+
+export enum SetWorkspaceRankMessageCmd {
+    SetWorkspaceRank = "set_workspace_rank",
 }
 
 export interface SpawnResultMessage {
@@ -3568,6 +3600,12 @@ export interface SubscribeGitStatusMessage {
 
 export enum SubscribeGitStatusMessageCmd {
     SubscribeGitStatus = "subscribe_git_status",
+}
+
+export interface TicketStatusResult {
+    status:    TicketStatus;
+    ticket_id: string;
+    [property: string]: any;
 }
 
 export interface TodosMessage {
@@ -4273,6 +4311,16 @@ export enum WorkspaceLayoutUndockTileMessageCmd {
     WorkspaceLayoutUndockTile = "workspace_layout_undock_tile",
 }
 
+export interface WorkspaceLayoutUpdatedMessage {
+    event:            WorkspaceLayoutUpdatedMessageEvent;
+    workspace_layout: Layout;
+    [property: string]: any;
+}
+
+export enum WorkspaceLayoutUpdatedMessageEvent {
+    WorkspaceLayoutUpdated = "workspace_layout_updated",
+}
+
 export interface WorkspaceLayoutUpdateTileMessage {
     cmd:          WorkspaceLayoutUpdateTileMessageCmd;
     request_id:   string;
@@ -4284,16 +4332,6 @@ export interface WorkspaceLayoutUpdateTileMessage {
 
 export enum WorkspaceLayoutUpdateTileMessageCmd {
     WorkspaceLayoutUpdateTile = "workspace_layout_update_tile",
-}
-
-export interface WorkspaceLayoutUpdatedMessage {
-    event:            WorkspaceLayoutUpdatedMessageEvent;
-    workspace_layout: Layout;
-    [property: string]: any;
-}
-
-export enum WorkspaceLayoutUpdatedMessageEvent {
-    WorkspaceLayoutUpdated = "workspace_layout_updated",
 }
 
 export interface WorkspaceRegisteredMessage {
@@ -5315,20 +5353,20 @@ export class Convert {
         return JSON.stringify(uncast(value, r("ListBranchesMessage")), null, 2);
     }
 
-    public static toListDispatchMessagesMessage(json: string): ListDispatchMessagesMessage {
-        return cast(JSON.parse(json), r("ListDispatchMessagesMessage"));
-    }
-
-    public static listDispatchMessagesMessageToJson(value: ListDispatchMessagesMessage): string {
-        return JSON.stringify(uncast(value, r("ListDispatchMessagesMessage")), null, 2);
-    }
-
     public static toListDispatchesMessage(json: string): ListDispatchesMessage {
         return cast(JSON.parse(json), r("ListDispatchesMessage"));
     }
 
     public static listDispatchesMessageToJson(value: ListDispatchesMessage): string {
         return JSON.stringify(uncast(value, r("ListDispatchesMessage")), null, 2);
+    }
+
+    public static toListDispatchMessagesMessage(json: string): ListDispatchMessagesMessage {
+        return cast(JSON.parse(json), r("ListDispatchMessagesMessage"));
+    }
+
+    public static listDispatchMessagesMessageToJson(value: ListDispatchMessagesMessage): string {
+        return JSON.stringify(uncast(value, r("ListDispatchMessagesMessage")), null, 2);
     }
 
     public static toListEndpointsMessage(json: string): ListEndpointsMessage {
@@ -5627,46 +5665,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("OpenMarkdownMessage")), null, 2);
     }
 
-    public static toPR(json: string): PR {
-        return cast(JSON.parse(json), r("PR"));
-    }
-
-    public static pRToJson(value: PR): string {
-        return JSON.stringify(uncast(value, r("PR")), null, 2);
-    }
-
-    public static toPRActionResultMessage(json: string): PRActionResultMessage {
-        return cast(JSON.parse(json), r("PRActionResultMessage"));
-    }
-
-    public static pRActionResultMessageToJson(value: PRActionResultMessage): string {
-        return JSON.stringify(uncast(value, r("PRActionResultMessage")), null, 2);
-    }
-
-    public static toPRRole(json: string): PRRole {
-        return cast(JSON.parse(json), r("PRRole"));
-    }
-
-    public static pRRoleToJson(value: PRRole): string {
-        return JSON.stringify(uncast(value, r("PRRole")), null, 2);
-    }
-
-    public static toPRVisitedMessage(json: string): PRVisitedMessage {
-        return cast(JSON.parse(json), r("PRVisitedMessage"));
-    }
-
-    public static pRVisitedMessageToJson(value: PRVisitedMessage): string {
-        return JSON.stringify(uncast(value, r("PRVisitedMessage")), null, 2);
-    }
-
-    public static toPRsUpdatedMessage(json: string): PRsUpdatedMessage {
-        return cast(JSON.parse(json), r("PRsUpdatedMessage"));
-    }
-
-    public static pRsUpdatedMessageToJson(value: PRsUpdatedMessage): string {
-        return JSON.stringify(uncast(value, r("PRsUpdatedMessage")), null, 2);
-    }
-
     public static toPathInspection(json: string): PathInspection {
         return cast(JSON.parse(json), r("PathInspection"));
     }
@@ -5715,6 +5713,46 @@ export class Convert {
         return JSON.stringify(uncast(value, r("PluginsUpdatedMessage")), null, 2);
     }
 
+    public static toPR(json: string): PR {
+        return cast(JSON.parse(json), r("PR"));
+    }
+
+    public static pRToJson(value: PR): string {
+        return JSON.stringify(uncast(value, r("PR")), null, 2);
+    }
+
+    public static toPRActionResultMessage(json: string): PRActionResultMessage {
+        return cast(JSON.parse(json), r("PRActionResultMessage"));
+    }
+
+    public static pRActionResultMessageToJson(value: PRActionResultMessage): string {
+        return JSON.stringify(uncast(value, r("PRActionResultMessage")), null, 2);
+    }
+
+    public static toPRRole(json: string): PRRole {
+        return cast(JSON.parse(json), r("PRRole"));
+    }
+
+    public static pRRoleToJson(value: PRRole): string {
+        return JSON.stringify(uncast(value, r("PRRole")), null, 2);
+    }
+
+    public static toPRsUpdatedMessage(json: string): PRsUpdatedMessage {
+        return cast(JSON.parse(json), r("PRsUpdatedMessage"));
+    }
+
+    public static pRsUpdatedMessageToJson(value: PRsUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("PRsUpdatedMessage")), null, 2);
+    }
+
+    public static toPRVisitedMessage(json: string): PRVisitedMessage {
+        return cast(JSON.parse(json), r("PRVisitedMessage"));
+    }
+
+    public static pRVisitedMessageToJson(value: PRVisitedMessage): string {
+        return JSON.stringify(uncast(value, r("PRVisitedMessage")), null, 2);
+    }
+
     public static toPtyDesyncMessage(json: string): PtyDesyncMessage {
         return cast(JSON.parse(json), r("PtyDesyncMessage"));
     }
@@ -5739,20 +5777,20 @@ export class Convert {
         return JSON.stringify(uncast(value, r("PtyOutputMessage")), null, 2);
     }
 
-    public static toPtyResizeMessage(json: string): PtyResizeMessage {
-        return cast(JSON.parse(json), r("PtyResizeMessage"));
-    }
-
-    public static ptyResizeMessageToJson(value: PtyResizeMessage): string {
-        return JSON.stringify(uncast(value, r("PtyResizeMessage")), null, 2);
-    }
-
     public static toPtyResizedMessage(json: string): PtyResizedMessage {
         return cast(JSON.parse(json), r("PtyResizedMessage"));
     }
 
     public static ptyResizedMessageToJson(value: PtyResizedMessage): string {
         return JSON.stringify(uncast(value, r("PtyResizedMessage")), null, 2);
+    }
+
+    public static toPtyResizeMessage(json: string): PtyResizeMessage {
+        return cast(JSON.parse(json), r("PtyResizeMessage"));
+    }
+
+    public static ptyResizeMessageToJson(value: PtyResizeMessage): string {
+        return JSON.stringify(uncast(value, r("PtyResizeMessage")), null, 2);
     }
 
     public static toQueryAuthorsMessage(json: string): QueryAuthorsMessage {
@@ -6115,6 +6153,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SessionStateChangedMessage")), null, 2);
     }
 
+    public static toSessionsUpdatedMessage(json: string): SessionsUpdatedMessage {
+        return cast(JSON.parse(json), r("SessionsUpdatedMessage"));
+    }
+
+    public static sessionsUpdatedMessageToJson(value: SessionsUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("SessionsUpdatedMessage")), null, 2);
+    }
+
     public static toSessionTodosUpdatedMessage(json: string): SessionTodosUpdatedMessage {
         return cast(JSON.parse(json), r("SessionTodosUpdatedMessage"));
     }
@@ -6137,14 +6183,6 @@ export class Convert {
 
     public static sessionVisualizedMessageToJson(value: SessionVisualizedMessage): string {
         return JSON.stringify(uncast(value, r("SessionVisualizedMessage")), null, 2);
-    }
-
-    public static toSessionsUpdatedMessage(json: string): SessionsUpdatedMessage {
-        return cast(JSON.parse(json), r("SessionsUpdatedMessage"));
-    }
-
-    public static sessionsUpdatedMessageToJson(value: SessionsUpdatedMessage): string {
-        return JSON.stringify(uncast(value, r("SessionsUpdatedMessage")), null, 2);
     }
 
     public static toSetChiefOfStaffMessage(json: string): SetChiefOfStaffMessage {
@@ -6195,12 +6233,12 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SetSettingMessage")), null, 2);
     }
 
-    public static toSetWorkspaceRankMessage(json: string): SetWorkspaceRankMessage {
-        return cast(JSON.parse(json), r("SetWorkspaceRankMessage"));
+    public static toSetTicketStatusMessage(json: string): SetTicketStatusMessage {
+        return cast(JSON.parse(json), r("SetTicketStatusMessage"));
     }
 
-    public static setWorkspaceRankMessageToJson(value: SetWorkspaceRankMessage): string {
-        return JSON.stringify(uncast(value, r("SetWorkspaceRankMessage")), null, 2);
+    public static setTicketStatusMessageToJson(value: SetTicketStatusMessage): string {
+        return JSON.stringify(uncast(value, r("SetTicketStatusMessage")), null, 2);
     }
 
     public static toSettingsUpdatedMessage(json: string): SettingsUpdatedMessage {
@@ -6209,6 +6247,14 @@ export class Convert {
 
     public static settingsUpdatedMessageToJson(value: SettingsUpdatedMessage): string {
         return JSON.stringify(uncast(value, r("SettingsUpdatedMessage")), null, 2);
+    }
+
+    public static toSetWorkspaceRankMessage(json: string): SetWorkspaceRankMessage {
+        return cast(JSON.parse(json), r("SetWorkspaceRankMessage"));
+    }
+
+    public static setWorkspaceRankMessageToJson(value: SetWorkspaceRankMessage): string {
+        return JSON.stringify(uncast(value, r("SetWorkspaceRankMessage")), null, 2);
     }
 
     public static toSpawnResultMessage(json: string): SpawnResultMessage {
@@ -6273,6 +6319,22 @@ export class Convert {
 
     public static subscribeGitStatusMessageToJson(value: SubscribeGitStatusMessage): string {
         return JSON.stringify(uncast(value, r("SubscribeGitStatusMessage")), null, 2);
+    }
+
+    public static toTicketStatus(json: string): TicketStatus {
+        return cast(JSON.parse(json), r("TicketStatus"));
+    }
+
+    public static ticketStatusToJson(value: TicketStatus): string {
+        return JSON.stringify(uncast(value, r("TicketStatus")), null, 2);
+    }
+
+    public static toTicketStatusResult(json: string): TicketStatusResult {
+        return cast(JSON.parse(json), r("TicketStatusResult"));
+    }
+
+    public static ticketStatusResultToJson(value: TicketStatusResult): string {
+        return JSON.stringify(uncast(value, r("TicketStatusResult")), null, 2);
     }
 
     public static toTodosMessage(json: string): TodosMessage {
@@ -6707,20 +6769,20 @@ export class Convert {
         return JSON.stringify(uncast(value, r("WorkspaceLayoutUndockTileMessage")), null, 2);
     }
 
-    public static toWorkspaceLayoutUpdateTileMessage(json: string): WorkspaceLayoutUpdateTileMessage {
-        return cast(JSON.parse(json), r("WorkspaceLayoutUpdateTileMessage"));
-    }
-
-    public static workspaceLayoutUpdateTileMessageToJson(value: WorkspaceLayoutUpdateTileMessage): string {
-        return JSON.stringify(uncast(value, r("WorkspaceLayoutUpdateTileMessage")), null, 2);
-    }
-
     public static toWorkspaceLayoutUpdatedMessage(json: string): WorkspaceLayoutUpdatedMessage {
         return cast(JSON.parse(json), r("WorkspaceLayoutUpdatedMessage"));
     }
 
     public static workspaceLayoutUpdatedMessageToJson(value: WorkspaceLayoutUpdatedMessage): string {
         return JSON.stringify(uncast(value, r("WorkspaceLayoutUpdatedMessage")), null, 2);
+    }
+
+    public static toWorkspaceLayoutUpdateTileMessage(json: string): WorkspaceLayoutUpdateTileMessage {
+        return cast(JSON.parse(json), r("WorkspaceLayoutUpdateTileMessage"));
+    }
+
+    public static workspaceLayoutUpdateTileMessageToJson(value: WorkspaceLayoutUpdateTileMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceLayoutUpdateTileMessage")), null, 2);
     }
 
     public static toWorkspaceRegisteredMessage(json: string): WorkspaceRegisteredMessage {
@@ -7976,15 +8038,15 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("ListBranchesMessageCmd") },
         { json: "main_repo", js: "main_repo", typ: "" },
     ], "any"),
+    "ListDispatchesMessage": o([
+        { json: "cmd", js: "cmd", typ: r("ListDispatchesMessageCmd") },
+        { json: "source_session_id", js: "source_session_id", typ: "" },
+    ], "any"),
     "ListDispatchMessagesMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListDispatchMessagesMessageCmd") },
         { json: "dispatch_id", js: "dispatch_id", typ: u(undefined, "") },
         { json: "source_session_id", js: "source_session_id", typ: "" },
         { json: "unread_only", js: "unread_only", typ: u(undefined, true) },
-    ], "any"),
-    "ListDispatchesMessage": o([
-        { json: "cmd", js: "cmd", typ: r("ListDispatchesMessageCmd") },
-        { json: "source_session_id", js: "source_session_id", typ: "" },
     ], "any"),
     "ListEndpointsMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListEndpointsMessageCmd") },
@@ -8223,49 +8285,6 @@ const typeMap: any = {
         { json: "path", js: "path", typ: "" },
         { json: "session_id", js: "session_id", typ: u(undefined, "") },
     ], "any"),
-    "PR": o([
-        { json: "approved_by_me", js: "approved_by_me", typ: true },
-        { json: "author", js: "author", typ: "" },
-        { json: "ci_status", js: "ci_status", typ: u(undefined, "") },
-        { json: "comment_count", js: "comment_count", typ: u(undefined, 0) },
-        { json: "details_fetched", js: "details_fetched", typ: true },
-        { json: "details_fetched_at", js: "details_fetched_at", typ: u(undefined, "") },
-        { json: "has_new_changes", js: "has_new_changes", typ: true },
-        { json: "head_branch", js: "head_branch", typ: u(undefined, "") },
-        { json: "head_sha", js: "head_sha", typ: u(undefined, "") },
-        { json: "heat_state", js: "heat_state", typ: u(undefined, r("HeatState")) },
-        { json: "host", js: "host", typ: "" },
-        { json: "id", js: "id", typ: "" },
-        { json: "last_heat_activity_at", js: "last_heat_activity_at", typ: u(undefined, "") },
-        { json: "last_polled", js: "last_polled", typ: "" },
-        { json: "last_updated", js: "last_updated", typ: "" },
-        { json: "mergeable", js: "mergeable", typ: u(undefined, true) },
-        { json: "mergeable_state", js: "mergeable_state", typ: u(undefined, "") },
-        { json: "muted", js: "muted", typ: true },
-        { json: "number", js: "number", typ: 0 },
-        { json: "reason", js: "reason", typ: "" },
-        { json: "repo", js: "repo", typ: "" },
-        { json: "review_status", js: "review_status", typ: u(undefined, "") },
-        { json: "role", js: "role", typ: r("PRRole") },
-        { json: "state", js: "state", typ: "" },
-        { json: "title", js: "title", typ: "" },
-        { json: "url", js: "url", typ: "" },
-    ], "any"),
-    "PRActionResultMessage": o([
-        { json: "action", js: "action", typ: "" },
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("PRActionResultMessageEvent") },
-        { json: "id", js: "id", typ: "" },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
-    "PRVisitedMessage": o([
-        { json: "cmd", js: "cmd", typ: r("PRVisitedMessageCmd") },
-        { json: "id", js: "id", typ: "" },
-    ], "any"),
-    "PRsUpdatedMessage": o([
-        { json: "event", js: "event", typ: r("PRsUpdatedMessageEvent") },
-        { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
-    ], "any"),
     "PathInspection": o([
         { json: "exists", js: "exists", typ: true },
         { json: "home_path", js: "home_path", typ: u(undefined, "") },
@@ -8323,6 +8342,49 @@ const typeMap: any = {
         { json: "running", js: "running", typ: true },
         { json: "version", js: "version", typ: "" },
     ], "any"),
+    "PR": o([
+        { json: "approved_by_me", js: "approved_by_me", typ: true },
+        { json: "author", js: "author", typ: "" },
+        { json: "ci_status", js: "ci_status", typ: u(undefined, "") },
+        { json: "comment_count", js: "comment_count", typ: u(undefined, 0) },
+        { json: "details_fetched", js: "details_fetched", typ: true },
+        { json: "details_fetched_at", js: "details_fetched_at", typ: u(undefined, "") },
+        { json: "has_new_changes", js: "has_new_changes", typ: true },
+        { json: "head_branch", js: "head_branch", typ: u(undefined, "") },
+        { json: "head_sha", js: "head_sha", typ: u(undefined, "") },
+        { json: "heat_state", js: "heat_state", typ: u(undefined, r("HeatState")) },
+        { json: "host", js: "host", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "last_heat_activity_at", js: "last_heat_activity_at", typ: u(undefined, "") },
+        { json: "last_polled", js: "last_polled", typ: "" },
+        { json: "last_updated", js: "last_updated", typ: "" },
+        { json: "mergeable", js: "mergeable", typ: u(undefined, true) },
+        { json: "mergeable_state", js: "mergeable_state", typ: u(undefined, "") },
+        { json: "muted", js: "muted", typ: true },
+        { json: "number", js: "number", typ: 0 },
+        { json: "reason", js: "reason", typ: "" },
+        { json: "repo", js: "repo", typ: "" },
+        { json: "review_status", js: "review_status", typ: u(undefined, "") },
+        { json: "role", js: "role", typ: r("PRRole") },
+        { json: "state", js: "state", typ: "" },
+        { json: "title", js: "title", typ: "" },
+        { json: "url", js: "url", typ: "" },
+    ], "any"),
+    "PRActionResultMessage": o([
+        { json: "action", js: "action", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("PRActionResultMessageEvent") },
+        { json: "id", js: "id", typ: "" },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "PRsUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("PRsUpdatedMessageEvent") },
+        { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
+    ], "any"),
+    "PRVisitedMessage": o([
+        { json: "cmd", js: "cmd", typ: r("PRVisitedMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
     "PtyDesyncMessage": o([
         { json: "event", js: "event", typ: r("PtyDesyncMessageEvent") },
         { json: "id", js: "id", typ: "" },
@@ -8340,15 +8402,15 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "seq", js: "seq", typ: 0 },
     ], "any"),
-    "PtyResizeMessage": o([
-        { json: "cmd", js: "cmd", typ: r("PtyResizeMessageCmd") },
-        { json: "cols", js: "cols", typ: 0 },
-        { json: "id", js: "id", typ: "" },
-        { json: "rows", js: "rows", typ: 0 },
-    ], "any"),
     "PtyResizedMessage": o([
         { json: "cols", js: "cols", typ: 0 },
         { json: "event", js: "event", typ: r("PtyResizedMessageEvent") },
+        { json: "id", js: "id", typ: "" },
+        { json: "rows", js: "rows", typ: 0 },
+    ], "any"),
+    "PtyResizeMessage": o([
+        { json: "cmd", js: "cmd", typ: r("PtyResizeMessageCmd") },
+        { json: "cols", js: "cols", typ: 0 },
         { json: "id", js: "id", typ: "" },
         { json: "rows", js: "rows", typ: 0 },
     ], "any"),
@@ -8503,6 +8565,7 @@ const typeMap: any = {
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
         { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
+        { json: "ticket_status_result", js: "ticket_status_result", typ: u(undefined, r("TicketStatusResultObject")) },
         { json: "workspace_context_maintenance_result", js: "workspace_context_maintenance_result", typ: u(undefined, r("WorkspaceContextMaintenanceResultObject")) },
         { json: "workspace_context_result", js: "workspace_context_result", typ: u(undefined, r("WorkspaceContextResultObject")) },
         { json: "workspace_contexts", js: "workspace_contexts", typ: u(undefined, a(r("WorkspaceContextElement"))) },
@@ -8577,6 +8640,10 @@ const typeMap: any = {
         { json: "loop_id", js: "loop_id", typ: "" },
         { json: "question", js: "question", typ: "" },
         { json: "status", js: "status", typ: r("ReviewLoopInteractionStatus") },
+    ], "any"),
+    "TicketStatusResultObject": o([
+        { json: "status", js: "status", typ: r("TicketStatus") },
+        { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
     "WorkspaceContextMaintenanceResultObject": o([
         { json: "action", js: "action", typ: r("WorkspaceContextMaintenanceAction") },
@@ -8754,6 +8821,10 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("SessionStateChangedMessageEvent") },
         { json: "session", js: "session", typ: r("SessionElement") },
     ], "any"),
+    "SessionsUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("SessionsUpdatedMessageEvent") },
+        { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
+    ], "any"),
     "SessionTodosUpdatedMessage": o([
         { json: "event", js: "event", typ: r("SessionTodosUpdatedMessageEvent") },
         { json: "session", js: "session", typ: r("SessionElement") },
@@ -8765,10 +8836,6 @@ const typeMap: any = {
     "SessionVisualizedMessage": o([
         { json: "cmd", js: "cmd", typ: r("SessionVisualizedMessageCmd") },
         { json: "id", js: "id", typ: "" },
-    ], "any"),
-    "SessionsUpdatedMessage": o([
-        { json: "event", js: "event", typ: r("SessionsUpdatedMessageEvent") },
-        { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
     ], "any"),
     "SetChiefOfStaffMessage": o([
         { json: "chief_of_staff", js: "chief_of_staff", typ: true },
@@ -8800,11 +8867,11 @@ const typeMap: any = {
         { json: "key", js: "key", typ: "" },
         { json: "value", js: "value", typ: "" },
     ], "any"),
-    "SetWorkspaceRankMessage": o([
-        { json: "cmd", js: "cmd", typ: r("SetWorkspaceRankMessageCmd") },
-        { json: "next_workspace_id", js: "next_workspace_id", typ: u(undefined, "") },
-        { json: "prev_workspace_id", js: "prev_workspace_id", typ: u(undefined, "") },
-        { json: "workspace_id", js: "workspace_id", typ: "" },
+    "SetTicketStatusMessage": o([
+        { json: "cmd", js: "cmd", typ: r("SetTicketStatusMessageCmd") },
+        { json: "comment", js: "comment", typ: u(undefined, "") },
+        { json: "source_session_id", js: "source_session_id", typ: "" },
+        { json: "work_state", js: "work_state", typ: r("DispatchWorkState") },
     ], "any"),
     "SettingsUpdatedMessage": o([
         { json: "changed_key", js: "changed_key", typ: u(undefined, "") },
@@ -8812,6 +8879,12 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("SettingsUpdatedMessageEvent") },
         { json: "settings", js: "settings", typ: u(undefined, m("any")) },
         { json: "success", js: "success", typ: u(undefined, true) },
+    ], "any"),
+    "SetWorkspaceRankMessage": o([
+        { json: "cmd", js: "cmd", typ: r("SetWorkspaceRankMessageCmd") },
+        { json: "next_workspace_id", js: "next_workspace_id", typ: u(undefined, "") },
+        { json: "prev_workspace_id", js: "prev_workspace_id", typ: u(undefined, "") },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "SpawnResultMessage": o([
         { json: "error", js: "error", typ: u(undefined, "") },
@@ -8869,6 +8942,10 @@ const typeMap: any = {
     "SubscribeGitStatusMessage": o([
         { json: "cmd", js: "cmd", typ: r("SubscribeGitStatusMessageCmd") },
         { json: "directory", js: "directory", typ: "" },
+    ], "any"),
+    "TicketStatusResult": o([
+        { json: "status", js: "status", typ: r("TicketStatus") },
+        { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
     "TodosMessage": o([
         { json: "cmd", js: "cmd", typ: r("TodosMessageCmd") },
@@ -9297,16 +9374,16 @@ const typeMap: any = {
         { json: "tile_id", js: "tile_id", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
+    "WorkspaceLayoutUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("WorkspaceLayoutUpdatedMessageEvent") },
+        { json: "workspace_layout", js: "workspace_layout", typ: r("Layout") },
+    ], "any"),
     "WorkspaceLayoutUpdateTileMessage": o([
         { json: "cmd", js: "cmd", typ: r("WorkspaceLayoutUpdateTileMessageCmd") },
         { json: "request_id", js: "request_id", typ: "" },
         { json: "tile_id", js: "tile_id", typ: "" },
         { json: "tile_params", js: "tile_params", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: "" },
-    ], "any"),
-    "WorkspaceLayoutUpdatedMessage": o([
-        { json: "event", js: "event", typ: r("WorkspaceLayoutUpdatedMessageEvent") },
-        { json: "workspace_layout", js: "workspace_layout", typ: r("Layout") },
     ], "any"),
     "WorkspaceRegisteredMessage": o([
         { json: "event", js: "event", typ: r("WorkspaceRegisteredMessageEvent") },
@@ -9674,11 +9751,11 @@ const typeMap: any = {
     "ListBranchesMessageCmd": [
         "list_branches",
     ],
-    "ListDispatchMessagesMessageCmd": [
-        "list_dispatch_messages",
-    ],
     "ListDispatchesMessageCmd": [
         "list_dispatches",
+    ],
+    "ListDispatchMessagesMessageCmd": [
+        "list_dispatch_messages",
     ],
     "ListEndpointsMessageCmd": [
         "list_endpoints",
@@ -9773,15 +9850,6 @@ const typeMap: any = {
     "OpenMarkdownMessageCmd": [
         "open_markdown",
     ],
-    "PRActionResultMessageEvent": [
-        "pr_action_result",
-    ],
-    "PRVisitedMessageCmd": [
-        "pr_visited",
-    ],
-    "PRsUpdatedMessageEvent": [
-        "prs_updated",
-    ],
     "PinWorkspaceMessageCmd": [
         "pin_workspace",
     ],
@@ -9790,6 +9858,15 @@ const typeMap: any = {
     ],
     "PluginsUpdatedMessageEvent": [
         "plugins_updated",
+    ],
+    "PRActionResultMessageEvent": [
+        "pr_action_result",
+    ],
+    "PRsUpdatedMessageEvent": [
+        "prs_updated",
+    ],
+    "PRVisitedMessageCmd": [
+        "pr_visited",
     ],
     "PtyDesyncMessageEvent": [
         "pty_desync",
@@ -9800,11 +9877,11 @@ const typeMap: any = {
     "PtyOutputMessageEvent": [
         "pty_output",
     ],
-    "PtyResizeMessageCmd": [
-        "pty_resize",
-    ],
     "PtyResizedMessageEvent": [
         "pty_resized",
+    ],
+    "PtyResizeMessageCmd": [
+        "pty_resize",
     ],
     "QueryAuthorsMessageCmd": [
         "query_authors",
@@ -9891,6 +9968,15 @@ const typeMap: any = {
         "running",
         "stopped",
     ],
+    "TicketStatus": [
+        "blocked",
+        "crashed",
+        "done",
+        "failed",
+        "in_review",
+        "todo",
+        "working",
+    ],
     "WorkspaceContextMaintenanceAction": [
         "compact",
         "rollback",
@@ -9924,6 +10010,9 @@ const typeMap: any = {
     "SessionStateChangedMessageEvent": [
         "session_state_changed",
     ],
+    "SessionsUpdatedMessageEvent": [
+        "sessions_updated",
+    ],
     "SessionTodosUpdatedMessageEvent": [
         "session_todos_updated",
     ],
@@ -9932,9 +10021,6 @@ const typeMap: any = {
     ],
     "SessionVisualizedMessageCmd": [
         "session_visualized",
-    ],
-    "SessionsUpdatedMessageEvent": [
-        "sessions_updated",
     ],
     "SetChiefOfStaffMessageCmd": [
         "set_chief_of_staff",
@@ -9954,11 +10040,14 @@ const typeMap: any = {
     "SetSettingMessageCmd": [
         "set_setting",
     ],
-    "SetWorkspaceRankMessageCmd": [
-        "set_workspace_rank",
+    "SetTicketStatusMessageCmd": [
+        "set_ticket_status",
     ],
     "SettingsUpdatedMessageEvent": [
         "settings_updated",
+    ],
+    "SetWorkspaceRankMessageCmd": [
+        "set_workspace_rank",
     ],
     "SpawnResultMessageEvent": [
         "spawn_result",
@@ -10120,11 +10209,11 @@ const typeMap: any = {
     "WorkspaceLayoutUndockTileMessageCmd": [
         "workspace_layout_undock_tile",
     ],
-    "WorkspaceLayoutUpdateTileMessageCmd": [
-        "workspace_layout_update_tile",
-    ],
     "WorkspaceLayoutUpdatedMessageEvent": [
         "workspace_layout_updated",
+    ],
+    "WorkspaceLayoutUpdateTileMessageCmd": [
+        "workspace_layout_update_tile",
     ],
     "WorkspaceRegisteredMessageEvent": [
         "workspace_registered",

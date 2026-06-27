@@ -1213,3 +1213,62 @@ func TestNonTerminalStopState(t *testing.T) {
 		})
 	}
 }
+
+// parseTicketStatusArgs must accept flags on either side of the work-state
+// positional. Go's flag parser stops at the first positional, so the regression
+// here is the documented `ticket status <state> --comment ...` form (flags after
+// the state) silently dropping the flags.
+func TestParseTicketStatusArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want ticketStatusArgs
+	}{
+		{
+			name: "flags after state (the documented form)",
+			args: []string{"ready_for_review", "--comment", "ready for a look", "--session", "s1"},
+			want: ticketStatusArgs{WorkState: "ready_for_review", Comment: "ready for a look", Session: "s1"},
+		},
+		{
+			name: "flags before state",
+			args: []string{"--session", "s1", "--comment", "wip", "in_progress"},
+			want: ticketStatusArgs{WorkState: "in_progress", Comment: "wip", Session: "s1"},
+		},
+		{
+			name: "flags around state",
+			args: []string{"--session", "s1", "completed", "--json"},
+			want: ticketStatusArgs{WorkState: "completed", Session: "s1", JSON: true},
+		},
+		{
+			name: "bare state",
+			args: []string{"failed"},
+			want: ticketStatusArgs{WorkState: "failed"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseTicketStatusArgs(tc.args)
+			if err != nil {
+				t.Fatalf("parseTicketStatusArgs(%v): %v", tc.args, err)
+			}
+			if got != tc.want {
+				t.Fatalf("parseTicketStatusArgs(%v) = %+v, want %+v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseTicketStatusArgsErrors(t *testing.T) {
+	cases := map[string][]string{
+		"no state":     {"--comment", "hi"},
+		"two states":   {"working", "failed"},
+		"unknown flag": {"working", "--bogus"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseTicketStatusArgs(args); err == nil {
+				t.Fatalf("parseTicketStatusArgs(%v) = nil error, want error", args)
+			}
+		})
+	}
+}

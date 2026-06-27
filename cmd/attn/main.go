@@ -253,6 +253,9 @@ func main() {
 	case "dispatch":
 		maybePrintProfileBanner()
 		runDispatch()
+	case "ticket":
+		maybePrintProfileBanner()
+		runTicket()
 	case "workspace":
 		maybePrintProfileBanner()
 		runWorkspace()
@@ -825,6 +828,117 @@ func hasHelpFlag(args []string) bool {
 		}
 	}
 	return false
+}
+
+// runTicket routes `attn ticket <command>`. Today the only verb is `status`, the
+// agent's forward channel onto its own bound ticket; more arrive with the board.
+func runTicket() {
+	if len(os.Args) < 3 || os.Args[2] == "-h" || os.Args[2] == "--help" {
+		writeTicketHelp(os.Stdout)
+		return
+	}
+	warnIfDaemonVersionMismatch()
+	switch os.Args[2] {
+	case "status":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketStatus(os.Args[3:])
+	default:
+		fmt.Fprintf(os.Stderr, "ticket: unknown command %q\n", os.Args[2])
+		writeTicketHelp(os.Stderr)
+		os.Exit(2)
+	}
+}
+
+type ticketStatusArgs struct {
+	WorkState string
+	Session   string
+	Comment   string
+	JSON      bool
+}
+
+// parseTicketStatusArgs reads `ticket status <work-state> [flags]`. Go's flag
+// parser stops at the first positional, so a naive Parse would silently drop any
+// flag written after the work state — exactly the documented form. We interleave
+// instead: parse, peel one positional, repeat, so flags may sit on either side of
+// the state and the single positional is the work state regardless of order.
+func parseTicketStatusArgs(args []string) (ticketStatusArgs, error) {
+	var result ticketStatusArgs
+	fs := flag.NewFlagSet("ticket status", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	session := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	comment := fs.String("comment", "", "optional note recorded with the status change")
+	jsonOutput := fs.Bool("json", false, "print the result as JSON")
+
+	var positionals []string
+	rest := args
+	for {
+		if err := fs.Parse(rest); err != nil {
+			return result, err
+		}
+		rest = fs.Args()
+		if len(rest) == 0 {
+			break
+		}
+		positionals = append(positionals, rest[0])
+		rest = rest[1:]
+	}
+	if len(positionals) != 1 {
+		return result, fmt.Errorf("expected exactly one work state argument, got %d", len(positionals))
+	}
+	result.WorkState = positionals[0]
+	result.Session = *session
+	result.Comment = *comment
+	result.JSON = *jsonOutput
+	return result, nil
+}
+
+// runTicketStatus reports the calling agent's work state, moving its bound ticket
+// to the matching column. The work state is the same vocabulary the agent reports
+// to the chief (in_progress, needs_input, ready_for_review, completed, failed);
+// the daemon resolves which ticket from the session and maps the column.
+func runTicketStatus(args []string) {
+	parsed, err := parseTicketStatusArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket status: %v\n", err)
+		writeTicketHelp(os.Stderr)
+		os.Exit(2)
+	}
+	source, err := resolveDispatchSession(parsed.Session)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket status: %v\n", err)
+		os.Exit(2)
+	}
+	result, err := client.New("").SetTicketStatus(source, parsed.WorkState, parsed.Comment)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket status: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.JSON {
+		printJSON(result)
+		return
+	}
+	fmt.Printf("ticket %s → %s\n", result.TicketID, result.Status)
+}
+
+func writeTicketHelp(w io.Writer) {
+	fmt.Fprint(w, `usage: attn ticket <command>
+
+commands:
+  status <work-state> [--session <id>] [--comment <text>] [--json]
+        move this session's bound ticket to the column for the reported state
+
+work states:
+  in_progress       working
+  needs_input       blocked
+  ready_for_review  in review
+  completed         done
+  failed            failed
+
+The session defaults to ATTN_SESSION_ID.
+`)
 }
 
 func writeDispatchOutcomeHelp(w io.Writer, outcome string) {

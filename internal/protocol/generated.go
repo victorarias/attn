@@ -2880,6 +2880,9 @@ type Response struct {
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`
 
+	// TicketStatusResult corresponds to the JSON schema field "ticket_status_result".
+	TicketStatusResult *TicketStatusResult `json:"ticket_status_result,omitempty,omitzero"`
+
 	// WorkspaceContextMaintenanceResult corresponds to the JSON schema field
 	// "workspace_context_maintenance_result".
 	WorkspaceContextMaintenanceResult *WorkspaceContextMaintenanceResult `json:"workspace_context_maintenance_result,omitempty,omitzero"`
@@ -3435,6 +3438,20 @@ type SetSettingMessage struct {
 	Value string `json:"value"`
 }
 
+type SetTicketStatusMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Comment corresponds to the JSON schema field "comment".
+	Comment *string `json:"comment,omitempty,omitzero"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+
+	// WorkState corresponds to the JSON schema field "work_state".
+	WorkState DispatchWorkState `json:"work_state"`
+}
+
 type SetWorkspaceRankMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -3604,6 +3621,25 @@ type SubscribeGitStatusMessage struct {
 	// Directory corresponds to the JSON schema field "directory".
 	Directory string `json:"directory"`
 }
+
+type TicketStatus string
+
+const TicketStatusBlocked TicketStatus = "blocked"
+const TicketStatusCrashed TicketStatus = "crashed"
+const TicketStatusDone TicketStatus = "done"
+const TicketStatusFailed TicketStatus = "failed"
+const TicketStatusInReview TicketStatus = "in_review"
+
+type TicketStatusResult struct {
+	// Status corresponds to the JSON schema field "status".
+	Status TicketStatus `json:"status"`
+
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID string `json:"ticket_id"`
+}
+
+const TicketStatusTodo TicketStatus = "todo"
+const TicketStatusWorking TicketStatus = "working"
 
 type TodosMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
