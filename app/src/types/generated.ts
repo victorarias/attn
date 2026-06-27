@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HandoffDispatchMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchesMessage, ListDispatchMessagesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubmitDispatchOutcomeMessage, SubscribeGitStatusMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketStatus, TicketStatusResult, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AcknowledgeDispatchMessage, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffDispatch, ChiefOfStaffDispatchesUpdatedMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchArtifact, DispatchDecisionRequest, DispatchMessage, DispatchReport, DispatchReportType, DispatchRequestStatus, DispatchVerification, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetDispatchMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HandoffDispatchMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListDispatchesMessage, ListDispatchMessagesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, ReadDispatchMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, ResolveDispatchRequestMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, SendDispatchMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubmitDispatchOutcomeMessage, SubscribeGitStatusMessage, Ticket, TicketActivity, TicketActivityKind, TicketAttachment, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketResultMessage, TicketStatus, TicketStatusResult, TicketsUpdatedMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WakeDispatchAgentMessage, WakeDispatchAgentResultMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const acknowledgeDispatchMessage = Convert.toAcknowledgeDispatchMessage(json);
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
@@ -97,6 +97,7 @@
 //   const getScreenSnapshotMessage = Convert.toGetScreenSnapshotMessage(json);
 //   const getScreenSnapshotResultMessage = Convert.toGetScreenSnapshotResultMessage(json);
 //   const getSettingsMessage = Convert.toGetSettingsMessage(json);
+//   const getTicketMessage = Convert.toGetTicketMessage(json);
 //   const gitFileChange = Convert.toGitFileChange(json);
 //   const gitHubHostsUpdatedMessage = Convert.toGitHubHostsUpdatedMessage(json);
 //   const gitOperation = Convert.toGitOperation(json);
@@ -237,13 +238,19 @@
 //   const stopReviewLoopMessage = Convert.toStopReviewLoopMessage(json);
 //   const submitDispatchOutcomeMessage = Convert.toSubmitDispatchOutcomeMessage(json);
 //   const subscribeGitStatusMessage = Convert.toSubscribeGitStatusMessage(json);
+//   const ticket = Convert.toTicket(json);
+//   const ticketActivity = Convert.toTicketActivity(json);
+//   const ticketActivityKind = Convert.toTicketActivityKind(json);
+//   const ticketAttachment = Convert.toTicketAttachment(json);
 //   const ticketEvent = Convert.toTicketEvent(json);
 //   const ticketEventBundle = Convert.toTicketEventBundle(json);
 //   const ticketEventKind = Convert.toTicketEventKind(json);
 //   const ticketInboxMessage = Convert.toTicketInboxMessage(json);
 //   const ticketInboxResult = Convert.toTicketInboxResult(json);
+//   const ticketResultMessage = Convert.toTicketResultMessage(json);
 //   const ticketStatus = Convert.toTicketStatus(json);
 //   const ticketStatusResult = Convert.toTicketStatusResult(json);
+//   const ticketsUpdatedMessage = Convert.toTicketsUpdatedMessage(json);
 //   const todosMessage = Convert.toTodosMessage(json);
 //   const unregisterMessage = Convert.toUnregisterMessage(json);
 //   const unregisterWorkspaceMessage = Convert.toUnregisterWorkspaceMessage(json);
@@ -1732,6 +1739,17 @@ export enum GetSettingsMessageCmd {
     GetSettings = "get_settings",
 }
 
+export interface GetTicketMessage {
+    cmd:         GetTicketMessageCmd;
+    request_id?: string;
+    ticket_id:   string;
+    [property: string]: any;
+}
+
+export enum GetTicketMessageCmd {
+    GetTicket = "get_ticket",
+}
+
 export interface GitFileChange {
     additions?: number;
     deletions?: number;
@@ -1867,6 +1885,7 @@ export interface InitialStateMessage {
     sessions?:                  SessionElement[];
     settings?:                  { [key: string]: any };
     source_fingerprint?:        string;
+    tickets?:                   TicketElement[];
     warnings?:                  WarningElement[];
     workspaces?:                WorkspaceElement[];
     [property: string]: any;
@@ -1880,6 +1899,59 @@ export interface RepoElement {
     collapsed: boolean;
     muted:     boolean;
     repo:      string;
+    [property: string]: any;
+}
+
+export interface TicketElement {
+    activity:      ActivityElement[];
+    archived_at?:  string;
+    assignee:      string;
+    attachments:   AttachmentElement[];
+    closed_at?:    string;
+    created_at:    string;
+    cwd:           string;
+    description:   string;
+    id:            string;
+    last_agent_id: string;
+    project_id:    string;
+    status:        TicketStatus;
+    title:         string;
+    updated_at:    string;
+    [property: string]: any;
+}
+
+export interface ActivityElement {
+    author:       string;
+    comment?:     string;
+    created_at:   string;
+    from_status?: TicketStatus;
+    id:           number;
+    kind:         TicketActivityKind;
+    to_status?:   TicketStatus;
+    [property: string]: any;
+}
+
+export enum TicketStatus {
+    Blocked = "blocked",
+    Crashed = "crashed",
+    Done = "done",
+    Failed = "failed",
+    InReview = "in_review",
+    Todo = "todo",
+    Working = "working",
+}
+
+export enum TicketActivityKind {
+    Comment = "comment",
+    StatusChange = "status_change",
+}
+
+export interface AttachmentElement {
+    created_at: string;
+    filename:   string;
+    id:         number;
+    note?:      string;
+    path:       string;
     [property: string]: any;
 }
 
@@ -2974,8 +3046,10 @@ export interface Response {
     repos?:                                RepoElement[];
     review_loop_run?:                      ReviewLoopRunObject;
     sessions?:                             SessionElement[];
+    ticket?:                               TicketElement;
     ticket_inbox_result?:                  TicketInboxResultObject;
     ticket_status_result?:                 TicketStatusResultObject;
+    tickets?:                              TicketElement[];
     workspace_context_maintenance_result?: WorkspaceContextMaintenanceResultObject;
     workspace_context_result?:             WorkspaceContextResultObject;
     workspace_contexts?:                   WorkspaceContextElement[];
@@ -3113,16 +3187,6 @@ export interface EventElement {
     ticket_id:    string;
     to_status?:   TicketStatus;
     [property: string]: any;
-}
-
-export enum TicketStatus {
-    Blocked = "blocked",
-    Crashed = "crashed",
-    Done = "done",
-    Failed = "failed",
-    InReview = "in_review",
-    Todo = "todo",
-    Working = "working",
 }
 
 export enum TicketEventKind {
@@ -3640,6 +3704,44 @@ export enum SubscribeGitStatusMessageCmd {
     SubscribeGitStatus = "subscribe_git_status",
 }
 
+export interface Ticket {
+    activity:      ActivityElement[];
+    archived_at?:  string;
+    assignee:      string;
+    attachments:   AttachmentElement[];
+    closed_at?:    string;
+    created_at:    string;
+    cwd:           string;
+    description:   string;
+    id:            string;
+    last_agent_id: string;
+    project_id:    string;
+    status:        TicketStatus;
+    title:         string;
+    updated_at:    string;
+    [property: string]: any;
+}
+
+export interface TicketActivity {
+    author:       string;
+    comment?:     string;
+    created_at:   string;
+    from_status?: TicketStatus;
+    id:           number;
+    kind:         TicketActivityKind;
+    to_status?:   TicketStatus;
+    [property: string]: any;
+}
+
+export interface TicketAttachment {
+    created_at: string;
+    filename:   string;
+    id:         number;
+    note?:      string;
+    path:       string;
+    [property: string]: any;
+}
+
 export interface TicketEvent {
     author:       string;
     comment?:     string;
@@ -3673,10 +3775,33 @@ export interface TicketInboxResult {
     [property: string]: any;
 }
 
+export interface TicketResultMessage {
+    error?:     string;
+    event:      TicketResultMessageEvent;
+    request_id: string;
+    success:    boolean;
+    ticket?:    TicketElement;
+    [property: string]: any;
+}
+
+export enum TicketResultMessageEvent {
+    TicketResult = "ticket_result",
+}
+
 export interface TicketStatusResult {
     status:    TicketStatus;
     ticket_id: string;
     [property: string]: any;
+}
+
+export interface TicketsUpdatedMessage {
+    event:   TicketsUpdatedMessageEvent;
+    tickets: TicketElement[];
+    [property: string]: any;
+}
+
+export enum TicketsUpdatedMessageEvent {
+    TicketsUpdated = "tickets_updated",
 }
 
 export interface TodosMessage {
@@ -3848,6 +3973,8 @@ export interface WebSocketEvent {
     stash_ref?:                 string;
     success?:                   boolean;
     target_path?:               string;
+    ticket?:                    TicketElement;
+    tickets?:                   TicketElement[];
     tile_id?:                   string;
     tile_kind?:                 string;
     unstaged?:                  StagedElement[];
@@ -5272,6 +5399,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("GetSettingsMessage")), null, 2);
     }
 
+    public static toGetTicketMessage(json: string): GetTicketMessage {
+        return cast(JSON.parse(json), r("GetTicketMessage"));
+    }
+
+    public static getTicketMessageToJson(value: GetTicketMessage): string {
+        return JSON.stringify(uncast(value, r("GetTicketMessage")), null, 2);
+    }
+
     public static toGitFileChange(json: string): GitFileChange {
         return cast(JSON.parse(json), r("GitFileChange"));
     }
@@ -6392,6 +6527,38 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SubscribeGitStatusMessage")), null, 2);
     }
 
+    public static toTicket(json: string): Ticket {
+        return cast(JSON.parse(json), r("Ticket"));
+    }
+
+    public static ticketToJson(value: Ticket): string {
+        return JSON.stringify(uncast(value, r("Ticket")), null, 2);
+    }
+
+    public static toTicketActivity(json: string): TicketActivity {
+        return cast(JSON.parse(json), r("TicketActivity"));
+    }
+
+    public static ticketActivityToJson(value: TicketActivity): string {
+        return JSON.stringify(uncast(value, r("TicketActivity")), null, 2);
+    }
+
+    public static toTicketActivityKind(json: string): TicketActivityKind {
+        return cast(JSON.parse(json), r("TicketActivityKind"));
+    }
+
+    public static ticketActivityKindToJson(value: TicketActivityKind): string {
+        return JSON.stringify(uncast(value, r("TicketActivityKind")), null, 2);
+    }
+
+    public static toTicketAttachment(json: string): TicketAttachment {
+        return cast(JSON.parse(json), r("TicketAttachment"));
+    }
+
+    public static ticketAttachmentToJson(value: TicketAttachment): string {
+        return JSON.stringify(uncast(value, r("TicketAttachment")), null, 2);
+    }
+
     public static toTicketEvent(json: string): TicketEvent {
         return cast(JSON.parse(json), r("TicketEvent"));
     }
@@ -6432,6 +6599,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("TicketInboxResult")), null, 2);
     }
 
+    public static toTicketResultMessage(json: string): TicketResultMessage {
+        return cast(JSON.parse(json), r("TicketResultMessage"));
+    }
+
+    public static ticketResultMessageToJson(value: TicketResultMessage): string {
+        return JSON.stringify(uncast(value, r("TicketResultMessage")), null, 2);
+    }
+
     public static toTicketStatus(json: string): TicketStatus {
         return cast(JSON.parse(json), r("TicketStatus"));
     }
@@ -6446,6 +6621,14 @@ export class Convert {
 
     public static ticketStatusResultToJson(value: TicketStatusResult): string {
         return JSON.stringify(uncast(value, r("TicketStatusResult")), null, 2);
+    }
+
+    public static toTicketsUpdatedMessage(json: string): TicketsUpdatedMessage {
+        return cast(JSON.parse(json), r("TicketsUpdatedMessage"));
+    }
+
+    public static ticketsUpdatedMessageToJson(value: TicketsUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("TicketsUpdatedMessage")), null, 2);
     }
 
     public static toTodosMessage(json: string): TodosMessage {
@@ -7982,6 +8165,11 @@ const typeMap: any = {
     "GetSettingsMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetSettingsMessageCmd") },
     ], "any"),
+    "GetTicketMessage": o([
+        { json: "cmd", js: "cmd", typ: r("GetTicketMessageCmd") },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+        { json: "ticket_id", js: "ticket_id", typ: "" },
+    ], "any"),
     "GitFileChange": o([
         { json: "additions", js: "additions", typ: u(undefined, 0) },
         { json: "deletions", js: "deletions", typ: u(undefined, 0) },
@@ -8067,6 +8255,7 @@ const typeMap: any = {
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
         { json: "settings", js: "settings", typ: u(undefined, m("any")) },
         { json: "source_fingerprint", js: "source_fingerprint", typ: u(undefined, "") },
+        { json: "tickets", js: "tickets", typ: u(undefined, a(r("TicketElement"))) },
         { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
         { json: "workspaces", js: "workspaces", typ: u(undefined, a(r("WorkspaceElement"))) },
     ], "any"),
@@ -8074,6 +8263,38 @@ const typeMap: any = {
         { json: "collapsed", js: "collapsed", typ: true },
         { json: "muted", js: "muted", typ: true },
         { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "TicketElement": o([
+        { json: "activity", js: "activity", typ: a(r("ActivityElement")) },
+        { json: "archived_at", js: "archived_at", typ: u(undefined, "") },
+        { json: "assignee", js: "assignee", typ: "" },
+        { json: "attachments", js: "attachments", typ: a(r("AttachmentElement")) },
+        { json: "closed_at", js: "closed_at", typ: u(undefined, "") },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "cwd", js: "cwd", typ: "" },
+        { json: "description", js: "description", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "last_agent_id", js: "last_agent_id", typ: "" },
+        { json: "project_id", js: "project_id", typ: "" },
+        { json: "status", js: "status", typ: r("TicketStatus") },
+        { json: "title", js: "title", typ: "" },
+        { json: "updated_at", js: "updated_at", typ: "" },
+    ], "any"),
+    "ActivityElement": o([
+        { json: "author", js: "author", typ: "" },
+        { json: "comment", js: "comment", typ: u(undefined, "") },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "from_status", js: "from_status", typ: u(undefined, r("TicketStatus")) },
+        { json: "id", js: "id", typ: 0 },
+        { json: "kind", js: "kind", typ: r("TicketActivityKind") },
+        { json: "to_status", js: "to_status", typ: u(undefined, r("TicketStatus")) },
+    ], "any"),
+    "AttachmentElement": o([
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "filename", js: "filename", typ: "" },
+        { json: "id", js: "id", typ: 0 },
+        { json: "note", js: "note", typ: u(undefined, "") },
+        { json: "path", js: "path", typ: "" },
     ], "any"),
     "WarningElement": o([
         { json: "code", js: "code", typ: "" },
@@ -8676,8 +8897,10 @@ const typeMap: any = {
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
         { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
+        { json: "ticket", js: "ticket", typ: u(undefined, r("TicketElement")) },
         { json: "ticket_inbox_result", js: "ticket_inbox_result", typ: u(undefined, r("TicketInboxResultObject")) },
         { json: "ticket_status_result", js: "ticket_status_result", typ: u(undefined, r("TicketStatusResultObject")) },
+        { json: "tickets", js: "tickets", typ: u(undefined, a(r("TicketElement"))) },
         { json: "workspace_context_maintenance_result", js: "workspace_context_maintenance_result", typ: u(undefined, r("WorkspaceContextMaintenanceResultObject")) },
         { json: "workspace_context_result", js: "workspace_context_result", typ: u(undefined, r("WorkspaceContextResultObject")) },
         { json: "workspace_contexts", js: "workspace_contexts", typ: u(undefined, a(r("WorkspaceContextElement"))) },
@@ -9072,6 +9295,38 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("SubscribeGitStatusMessageCmd") },
         { json: "directory", js: "directory", typ: "" },
     ], "any"),
+    "Ticket": o([
+        { json: "activity", js: "activity", typ: a(r("ActivityElement")) },
+        { json: "archived_at", js: "archived_at", typ: u(undefined, "") },
+        { json: "assignee", js: "assignee", typ: "" },
+        { json: "attachments", js: "attachments", typ: a(r("AttachmentElement")) },
+        { json: "closed_at", js: "closed_at", typ: u(undefined, "") },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "cwd", js: "cwd", typ: "" },
+        { json: "description", js: "description", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "last_agent_id", js: "last_agent_id", typ: "" },
+        { json: "project_id", js: "project_id", typ: "" },
+        { json: "status", js: "status", typ: r("TicketStatus") },
+        { json: "title", js: "title", typ: "" },
+        { json: "updated_at", js: "updated_at", typ: "" },
+    ], "any"),
+    "TicketActivity": o([
+        { json: "author", js: "author", typ: "" },
+        { json: "comment", js: "comment", typ: u(undefined, "") },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "from_status", js: "from_status", typ: u(undefined, r("TicketStatus")) },
+        { json: "id", js: "id", typ: 0 },
+        { json: "kind", js: "kind", typ: r("TicketActivityKind") },
+        { json: "to_status", js: "to_status", typ: u(undefined, r("TicketStatus")) },
+    ], "any"),
+    "TicketAttachment": o([
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "filename", js: "filename", typ: "" },
+        { json: "id", js: "id", typ: 0 },
+        { json: "note", js: "note", typ: u(undefined, "") },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
     "TicketEvent": o([
         { json: "author", js: "author", typ: "" },
         { json: "comment", js: "comment", typ: u(undefined, "") },
@@ -9093,9 +9348,20 @@ const typeMap: any = {
     "TicketInboxResult": o([
         { json: "bundles", js: "bundles", typ: a(r("BundleElement")) },
     ], "any"),
+    "TicketResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("TicketResultMessageEvent") },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "success", js: "success", typ: true },
+        { json: "ticket", js: "ticket", typ: u(undefined, r("TicketElement")) },
+    ], "any"),
     "TicketStatusResult": o([
         { json: "status", js: "status", typ: r("TicketStatus") },
         { json: "ticket_id", js: "ticket_id", typ: "" },
+    ], "any"),
+    "TicketsUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("TicketsUpdatedMessageEvent") },
+        { json: "tickets", js: "tickets", typ: a(r("TicketElement")) },
     ], "any"),
     "TodosMessage": o([
         { json: "cmd", js: "cmd", typ: r("TodosMessageCmd") },
@@ -9212,6 +9478,8 @@ const typeMap: any = {
         { json: "stash_ref", js: "stash_ref", typ: u(undefined, "") },
         { json: "success", js: "success", typ: u(undefined, true) },
         { json: "target_path", js: "target_path", typ: u(undefined, "") },
+        { json: "ticket", js: "ticket", typ: u(undefined, r("TicketElement")) },
+        { json: "tickets", js: "tickets", typ: u(undefined, a(r("TicketElement"))) },
         { json: "tile_id", js: "tile_id", typ: u(undefined, "") },
         { json: "tile_kind", js: "tile_kind", typ: u(undefined, "") },
         { json: "unstaged", js: "unstaged", typ: u(undefined, a(r("StagedElement"))) },
@@ -9846,6 +10114,9 @@ const typeMap: any = {
     "GetSettingsMessageCmd": [
         "get_settings",
     ],
+    "GetTicketMessageCmd": [
+        "get_ticket",
+    ],
     "GitHubHostsUpdatedMessageEvent": [
         "github_hosts_updated",
     ],
@@ -9871,6 +10142,19 @@ const typeMap: any = {
     ],
     "InitialStateMessageEvent": [
         "initial_state",
+    ],
+    "TicketStatus": [
+        "blocked",
+        "crashed",
+        "done",
+        "failed",
+        "in_review",
+        "todo",
+        "working",
+    ],
+    "TicketActivityKind": [
+        "comment",
+        "status_change",
     ],
     "WorkspaceLayoutPaneKind": [
         "agent",
@@ -10118,15 +10402,6 @@ const typeMap: any = {
         "running",
         "stopped",
     ],
-    "TicketStatus": [
-        "blocked",
-        "crashed",
-        "done",
-        "failed",
-        "in_review",
-        "todo",
-        "working",
-    ],
     "TicketEventKind": [
         "assigned",
         "attachment_added",
@@ -10233,6 +10508,12 @@ const typeMap: any = {
     ],
     "TicketInboxMessageCmd": [
         "ticket_inbox",
+    ],
+    "TicketResultMessageEvent": [
+        "ticket_result",
+    ],
+    "TicketsUpdatedMessageEvent": [
+        "tickets_updated",
     ],
     "TodosMessageCmd": [
         "todos",

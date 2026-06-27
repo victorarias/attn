@@ -406,6 +406,7 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 			)
 		}
 		d.logf("delegate: bound ticket %q to session %s", ticketID, session.ID)
+		d.broadcastTicketsUpdated()
 	}
 	result := &protocol.DelegateResult{
 		SessionID:   session.ID,

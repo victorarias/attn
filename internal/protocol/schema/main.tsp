@@ -269,6 +269,57 @@ model TicketInboxResult {
   bundles: TicketEventBundle[];
 }
 
+// TicketActivityKind is the type of a human-facing history entry in a ticket's
+// detail view: a status change (column move, optional note) or a freeform comment.
+// It is the display subset of the richer event log (TicketEventKind).
+enum TicketActivityKind {
+  status_change,
+  comment,
+}
+
+// TicketActivity is one entry in a ticket's history thread, as shown in the detail
+// view. from_status / to_status are present only on a status_change; comment is
+// present when the entry carries a note (a comment, or a note on a status change).
+model TicketActivity {
+  id: int32;
+  kind: TicketActivityKind;
+  author: string;
+  from_status?: TicketStatus;
+  to_status?: TicketStatus;
+  comment?: string;
+  created_at: string;
+}
+
+// TicketAttachment is a file handed over with a ticket's work, copied into the
+// ticket's store and shown in the detail view.
+model TicketAttachment {
+  id: int32;
+  filename: string;
+  path: string;
+  note?: string;
+  created_at: string;
+}
+
+// Ticket is the wire shape of a durable tracked-work record. `activity` and
+// `attachments` are the full history thread and handover files — populated on the
+// get_ticket full record, and left empty on the list / board feed for cheapness.
+model Ticket {
+  id: string;
+  title: string;
+  description: string;
+  status: TicketStatus;
+  assignee: string;
+  cwd: string;
+  last_agent_id: string;
+  project_id: string;
+  created_at: string;
+  updated_at: string;
+  closed_at?: string;
+  archived_at?: string;
+  activity: TicketActivity[];
+  attachments: TicketAttachment[];
+}
+
 model DispatchDecisionRequest {
   question: string;
   recommendation?: string;
@@ -691,6 +742,17 @@ model TicketStatusResult {
 model TicketInboxMessage {
   cmd: "ticket_inbox";
   source_session_id: string;
+}
+
+// GetTicketMessage fetches one ticket's full record — the row plus its activity
+// thread and attachments — for the detail view. A by-id read needs no caller
+// identity: the board feed (the initial_state push / tickets_updated broadcast)
+// already bounds what the app can see, and detail is the row it clicked. The
+// daemon replies with a ticket_result event correlated by request_id.
+model GetTicketMessage {
+  cmd: "get_ticket";
+  request_id?: string;
+  ticket_id: string;
 }
 
 model WorkspaceContextCheckoutMessage {
@@ -1544,6 +1606,7 @@ model InitialStateMessage {
   settings?: Record<string>;
   warnings?: DaemonWarning[];
   chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
+  tickets?: Ticket[];
 }
 
 model EndpointStatusChangedMessage {
@@ -1653,6 +1716,26 @@ model ChiefOfStaffResultMessage {
 model ChiefOfStaffDispatchesUpdatedMessage {
   event: "chief_of_staff_dispatches_updated";
   dispatches: ChiefOfStaffDispatch[];
+}
+
+// TicketsUpdatedMessage is the live board feed: the non-archived ticket rows
+// (bare — no activity/attachments), re-pushed whenever any ticket mutates. It is
+// the same shape carried in InitialStateMessage.tickets, so a client renders the
+// board identically from the bootstrap snapshot and from each update.
+model TicketsUpdatedMessage {
+  event: "tickets_updated";
+  tickets: Ticket[];
+}
+
+// TicketResultMessage is the reply to a get_ticket request, correlated by
+// request_id. `ticket` carries the full record on success; `error` is set and
+// `ticket` omitted when the id is unknown or the read failed.
+model TicketResultMessage {
+  event: "ticket_result";
+  request_id: string;
+  success: boolean;
+  ticket?: Ticket;
+  error?: string;
 }
 
 model WakeDispatchAgentResultMessage {
@@ -2260,6 +2343,8 @@ model Response {
   notebook_guide?: NotebookGuideResult;
   ticket_status_result?: TicketStatusResult;
   ticket_inbox_result?: TicketInboxResult;
+  ticket?: Ticket;
+  tickets?: Ticket[];
 }
 
 model DelegateResult {
@@ -2628,6 +2713,8 @@ model WebSocketEvent {
   workspace_context_result?: WorkspaceContextResult;
   chief_of_staff_dispatch?: ChiefOfStaffDispatch;
   chief_of_staff_dispatches?: ChiefOfStaffDispatch[];
+  ticket?: Ticket;
+  tickets?: Ticket[];
   workspace_contexts?: WorkspaceContext[];
   dispatch_message?: DispatchMessage;
   dispatch_messages?: DispatchMessage[];
@@ -2651,6 +2738,8 @@ alias DaemonEvent =
   | RenameResultMessage
   | ChiefOfStaffResultMessage
   | ChiefOfStaffDispatchesUpdatedMessage
+  | TicketsUpdatedMessage
+  | TicketResultMessage
   | WakeDispatchAgentResultMessage
   | WorkspaceTileContentMessage
   | BrowserControlResponseMessage
