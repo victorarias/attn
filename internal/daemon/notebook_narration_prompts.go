@@ -210,8 +210,8 @@ INPUTS (absolute paths, given to you below this brief):
    a short-lived workspace removed before any daily pass ran), there is no prior
    history to continue — write a self-contained entry from the raw inputs alone. On a
    removal pass with no prior entries, the retrospective IS the whole story told once,
-   not a continuation; build it entirely from CONTEXT_SNAPSHOT_PATH + the digests +
-   the dispatch outcomes. Never block or skip the write because prior history is
+   not a continuation; build it entirely from CONTEXT_SNAPSHOT_PATH + the session
+   digests. Never block or skip the write because prior history is
    missing — missing history is the common short-workspace case, not an error.
 
 4. Only open TRANSCRIPT_PATHS when you need to verify a specific claim or chase a
@@ -221,7 +221,7 @@ INPUTS (absolute paths, given to you below this brief):
 
 context.md is the editorial OVERLAY — it tells you what people CARED about, which is
 where to aim. But it is ephemeral, sometimes aspirational, and sometimes wrong. The
-session digests and dispatch outcomes (grounded in tool results) are the TRUTH. Your
+session digests (grounded in tool results) are the TRUTH. Your
 craft is to reconcile the two and SURFACE THE DIVERGENCE, because the gaps are the
 most valuable thing in a work-journal:
 

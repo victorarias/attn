@@ -55,15 +55,13 @@ I/O — never through `notebook.Store`** (`internal/notebook/raw_tier.go`,
   workspace**; a session with no workspace lands in the reserved
   `sessions/_solo/<sessionID>.md` bucket
   (`internal/daemon/notebook_narration.go` `notebookSessionDigestPath`).
-- `dispatches/<dispatchID>.md` — one file per captured chief-of-staff dispatch
-  outcome.
 - `context-snapshots/<wsID>.md` — the `context.md` overlay snapshotted
   synchronously at workspace removal, before the row is deleted
   (`snapshotWorkspaceContextOnRemove`), so the editorial overlay is never lost
   before the keeper can narrate it.
 
 `writeRawAtomic` (`internal/daemon/notebook_raw_tier.go`) is the single atomic
-writer for dispatches and context snapshots; it validates the client-controlled
+writer for context snapshots; it validates the client-controlled
 id as one safe path segment (`rawTierFilename`/`rawTierSegment`) so a crafted id
 cannot escape the raw dir. Capture is deterministic and always happens; the
 keeper's narration is best-effort on top of it.
@@ -126,7 +124,7 @@ narrative.
   *file-is-ledger*: the digest file must exist and have changed.
 - **`narrate_workspace`** (strong tier, Claude Sonnet default): writes the
   curated `journal/<date>.md` entry. `narrateWorkspaceExecutor` gathers the
-  context snapshot, the session digests, and the raw dispatch outcomes, and
+  context snapshot and the session digests, and
   composes one entry per workspace per day. Success gate is *file-is-ledger*:
   the journal must carry the workspace marker and the block must have changed.
   Three enqueue sites:
@@ -193,21 +191,6 @@ Entries are safe (one workspace per day, secret-free) and continue the narrative
 across days. The narrate agent reads the **raw tier**, never the curated journal
 itself, so the journal stays editorial.
 
-### Dispatch capture is raw-tier, not journal
-
-When a chief-of-staff dispatch reaches a terminal report (or its session ends),
-`journalDispatchOutcome` (`internal/daemon/notebook_dispatch_journal.go`) writes
-one deterministic file to `.attn/raw/dispatches/<dispatchID>.md` — **not** to
-`journal/<date>.md`. The per-dispatch file plus a hidden
-`<!-- attn:dispatch:<id> -->` marker is the exactly-once ledger (a retried
-capture overwrites the identical file). The keeper later narrates those raw
-outcomes into the curated journal.
-
-> The older `AppendJournalEntryOnce` in-file-marker path is **legacy for
-> dispatches** — it still exists as an API but is no longer the dispatch capture
-> path. `dispatchDecisionText` / `dispatchVerificationLine` render the decision
-> and verification lines inside the raw dispatch block.
-
 ## The knowledge base
 
 Distilled, timeless, agent-facing knowledge under `knowledge/`, organized
@@ -223,7 +206,7 @@ set of kinds.
   native file edits on disk (the chief and the user edit files directly with
   Read/Write/Edit). The former `attn notebook …` CLI write path was removed.
 - **Grounding is a hard rule.** Every note must carry resolvable `sources:`
-  (journal anchors, `dispatch:<id>`, or URLs) — stated in the notebook
+  (journal anchors or URLs) — stated in the notebook
   guidance (`internal/hooks/hooks.go`) and the `knowledge/index.md` scaffold
   (`internal/notebook/layout.go`). No authoring from paraphrase alone.
 - **The chief of staff consumes it.** The launch guidance
