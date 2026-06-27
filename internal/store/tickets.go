@@ -313,6 +313,36 @@ func (s *Store) ListTickets(filter TicketListFilter) ([]*Ticket, error) {
 	return tickets, rows.Err()
 }
 
+// ActiveTicketForSession returns the non-terminal ticket currently assigned to a
+// session — the delegated work it is running — or nil if none. The delegated
+// session's id is the ticket's assignee, so assignee == session is the session ->
+// ticket binding (used by the report path and crash detection). Activity and
+// attachments are not loaded.
+func (s *Store) ActiveTicketForSession(sessionID string) (*Ticket, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil || sessionID == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(ticketSelect+` WHERE assignee = ? ORDER BY created_at DESC, id DESC`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		ticket, err := scanTicket(rows)
+		if err != nil {
+			return nil, err
+		}
+		if !ticket.Status.IsTerminal() {
+			return ticket, nil
+		}
+	}
+	return nil, rows.Err()
+}
+
 // SetTicketStatus moves a ticket to a new column and records the change in the
 // activity thread (from -> to, with an optional comment). Transitions are
 // permissive. Entering a terminal status stamps closed_at; leaving one clears it

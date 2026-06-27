@@ -394,6 +394,18 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 				fmt.Errorf("make delegated workspace visible: %s", errMsg),
 			)
 		}
+		ticketID, err := d.createDelegatedTicket(chiefSessionID, session, brief, name, agent)
+		if err != nil {
+			_ = d.store.DeleteChiefOfStaffDispatch(dispatch.ID)
+			d.unregisterSession(sessionID, syscall.SIGTERM)
+			d.removeWorkspaceLayoutPaneForSession(sessionID)
+			return nil, d.rollbackDelegation(
+				createdWorkspaceID,
+				createdWorktreePath,
+				fmt.Errorf("create delegated ticket: %w", err),
+			)
+		}
+		d.logf("delegate: bound ticket %q to session %s", ticketID, session.ID)
 	}
 	result := &protocol.DelegateResult{
 		SessionID:   session.ID,
