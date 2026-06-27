@@ -245,6 +245,7 @@ each is a meaningful, verifiable chunk.
 | 6 | Codex nudge path | ✅ (self-monitor formalized as an `agent.Capabilities` flag; daemon resolves it from the driver registry; pure `ticketnotify` + end-to-end codex-nudge roundtrip test) |
 | 7 | Retire the `dispatch` namespace | ✅ (atomic: CLI/handlers/store/protocol removed, delegation rewired to tickets-only via `delegatedTicketPrompt`, ProtocolVersion 129→130; dispatch tables orphaned not dropped — append-only migration history; notebook delivery-ledger removed, shared raw-tier kept) |
 | 8 | Export ticket state (CLI) — *post-merge, lands on `main`* | ⬜ |
+| 9 | Standalone ticket create (`ticket new`, no delegation) + agent awareness | ⬜ |
 
 1. **Ticket store + lifecycle.** Fresh `tickets` / `ticket_activity` /
    `ticket_attachments` tables (migration 55), the status enum (incl. Todo / Crashed),
@@ -289,6 +290,31 @@ each is a meaningful, verifiable chunk.
    finished work can be **archived outside attn** and survives the closed-ticket sweep.
    *Test:* export a worked ticket; the archive round-trips its activity + attachments
    with nothing left dangling in attn.
+
+9. **Standalone ticket create — backlog without delegation.** The namespace above lists
+   `ticket new`, but the shipped CLI only got `status` / `inbox` / `attach`, and all
+   three act on a session's *already-bound* ticket. So there is no way to mint a backlog
+   ticket on request — "make a ticket for X" (no delegation) has nothing to call, and the
+   board's **Todo** column stays empty. This slice realizes `new`, in two halves:
+   - **Capability.** `attn ticket new --title <t> [--description <d>] [--id <slug>]`
+     creates an **unbound `todo`** ticket — author = the calling identity, no assignee, no
+     session — distinct from delegation, which mints `working` + bound. A new
+     `ticket_create` socket command + handler reaches the *already-present*
+     `store.CreateTicket` (which defaults to `todo`), emits `TicketCreated`, and
+     broadcasts `tickets_updated`. The slug derives from the title with the same
+     uniqueness-check + collision guidance as delegation. **ProtocolVersion bump.** The
+     board needs no change — its Todo column renders the new ticket live. Available to any
+     session, not gated to the chief: the user asks for it directly.
+   - **Awareness.** An agent can't reach for a capability it doesn't know exists, and
+     today neither the chief nor a normal agent is told tickets are a thing it can create.
+     The always-on system prompt gains a one-line pointer that attn tracks work as tickets
+     and the attn skill carries the how; the skill documents `ticket new` — creating a
+     backlog ticket on request, *without* delegating. Keeps the two-tier split: the prompt
+     creates awareness, the skill carries depth.
+   *Lands as its own standalone PR* (on `feat/tickets` if before the merge, else on
+   `main`). *Test:* `ticket new` creates a `todo` ticket with no session; it shows in the
+   board's Todo column; a slug collision fails with guidance; a normal (non-chief) agent
+   can create one. **Closes** the vision's open *"backlog without a delegation"* item.
 
 ## Deferred / open
 
