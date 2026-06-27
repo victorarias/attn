@@ -42,6 +42,13 @@ const (
 	TicketStatusCrashed TicketStatus = "crashed"
 )
 
+// TicketAuthorAttn is the event author attn uses when it writes a transition on a
+// ticket itself rather than on behalf of the user, the chief, or an agent — today
+// only the Crashed status a dead worker could not report. It is an authoring
+// identity, never an observer, so it accrues no cursors and is excluded from
+// nobody's unread feed.
+const TicketAuthorAttn = "attn"
+
 // IsValid reports whether st is a known status.
 func (st TicketStatus) IsValid() bool {
 	switch st {
