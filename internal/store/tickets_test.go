@@ -516,3 +516,66 @@ func TestTicketPersistence(t *testing.T) {
 		t.Fatalf("persisted activity = %+v", got.Activity)
 	}
 }
+
+// TestTicketResumeSessionID is the crux of immediate ticket resume: the bound
+// session's agent-native resume key is mirrored onto the ticket so it survives
+// the session row being deleted on close. The key is queryable with no session
+// row present — exactly the post-close state in which the old code fell back to
+// the agent's resume picker.
+func TestTicketResumeSessionID(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	const sessionID = "agent-sess-1"
+	if _, err := s.CreateTicket(Ticket{
+		ID:          "resume-me",
+		Title:       "Resume the conversation",
+		Assignee:    sessionID,
+		Cwd:         "/tmp/project",
+		LastAgentID: "claude",
+	}, "chief", ticketBase); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	// Nothing captured yet → empty (resolve falls back to the picker).
+	if got := s.GetTicketResumeSessionID(sessionID); got != "" {
+		t.Fatalf("resume id before capture = %q, want empty", got)
+	}
+
+	// Capture mirrors the key onto the bound ticket without bumping updated_at or
+	// emitting an event (purely internal bookkeeping).
+	before, err := s.GetTicket("resume-me")
+	if err != nil {
+		t.Fatalf("GetTicket: %v", err)
+	}
+	if err := s.SetTicketResumeSessionID(sessionID, "claude-conv-abc"); err != nil {
+		t.Fatalf("SetTicketResumeSessionID: %v", err)
+	}
+	after, err := s.GetTicket("resume-me")
+	if err != nil {
+		t.Fatalf("GetTicket: %v", err)
+	}
+	if after.UpdatedAt != before.UpdatedAt {
+		t.Fatalf("updated_at churned: %q -> %q", before.UpdatedAt, after.UpdatedAt)
+	}
+	if len(after.Activity) != len(before.Activity) {
+		t.Fatalf("activity changed: %d -> %d", len(before.Activity), len(after.Activity))
+	}
+
+	// The key is durable on the ticket — retrievable with no session row present
+	// (the sessions table is empty here), which is the post-close state.
+	if got := s.GetResumeSessionID(sessionID); got != "" {
+		t.Fatalf("session-table resume id = %q, want empty (no session row)", got)
+	}
+	if got := s.GetTicketResumeSessionID(sessionID); got != "claude-conv-abc" {
+		t.Fatalf("ticket resume id = %q, want %q", got, "claude-conv-abc")
+	}
+
+	// A session with no bound ticket: setting is a no-op, getting is empty.
+	if err := s.SetTicketResumeSessionID("unbound", "x"); err != nil {
+		t.Fatalf("SetTicketResumeSessionID unbound: %v", err)
+	}
+	if got := s.GetTicketResumeSessionID("unbound"); got != "" {
+		t.Fatalf("unbound resume id = %q, want empty", got)
+	}
+}

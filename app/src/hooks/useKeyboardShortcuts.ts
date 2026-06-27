@@ -28,6 +28,7 @@ interface KeyboardShortcutsConfig {
   onResetFontSize?: () => void;
   onOpenNotebookTile?: () => void;
   onOpenNotebookFullscreen?: () => void;
+  onOpenBoard?: () => void;
   onQuit?: () => void;
   enabled: boolean;
 }
@@ -57,6 +58,7 @@ export function useKeyboardShortcuts({
   onResetFontSize,
   onOpenNotebookTile,
   onOpenNotebookFullscreen,
+  onOpenBoard,
   onQuit,
   enabled,
 }: KeyboardShortcutsConfig) {
@@ -105,6 +107,9 @@ export function useKeyboardShortcuts({
   // Notebook: dock a tile into the active workspace, or open the fullscreen modal.
   useShortcut('notebook.openTile', onOpenNotebookTile ?? (() => {}), enabled && !!onOpenNotebookTile);
   useShortcut('notebook.openFullscreen', onOpenNotebookFullscreen ?? (() => {}), enabled && !!onOpenNotebookFullscreen);
+
+  // Tickets board: open the fullscreen surface (Esc / the close button dismiss it).
+  useShortcut('board.open', onOpenBoard ?? (() => {}), enabled && !!onOpenBoard);
 
   useEffect(() => {
     const preventWindowCloseShortcut = (e: KeyboardEvent) => {

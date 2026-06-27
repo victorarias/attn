@@ -15,7 +15,7 @@ import { ChiefOfStaffTransferPrompt } from './components/ChiefOfStaffTransferPro
 import { ChangesPanel } from './components/ChangesPanel';
 import { DiffDetailPanel } from './components/DiffDetailPanel';
 import { TicketDetailPanel } from './components/TicketDetailPanel';
-import { TicketBoardPanel } from './components/TicketBoardPanel';
+import { TicketBoardSurface } from './components/TicketBoardSurface';
 import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
 import { WorkflowRunView } from './components/WorkflowRunView';
 import {
@@ -139,10 +139,10 @@ function KeyboardActionIcon() {
 
 function BoardActionIcon() {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="4" y="4" width="4.5" height="16" rx="1" />
-      <rect x="9.75" y="4" width="4.5" height="11" rx="1" />
-      <rect x="15.5" y="4" width="4.5" height="14" rx="1" />
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="2.5" y="2.5" width="3" height="11" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <rect x="6.5" y="2.5" width="3" height="7" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <rect x="10.5" y="2.5" width="3" height="9" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -1099,6 +1099,7 @@ sendFetchPRDetails,
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [workspaceContextsOpen, setWorkspaceContextsOpen] = useState(false);
   const [notebookOpen, setNotebookOpen] = useState(false);
+  const [boardSurfaceOpen, setBoardSurfaceOpen] = useState(false);
   const [workspaceContextsLoading, setWorkspaceContextsLoading] = useState(false);
   const [workspaceContextsError, setWorkspaceContextsError] = useState<string | null>(null);
   const [workspaceContexts, setWorkspaceContexts] = useState<Awaited<ReturnType<typeof sendListWorkspaceContexts>>>([]);
@@ -1316,13 +1317,16 @@ sendFetchPRDetails,
     void connect();
   }, [connect]);
 
-  type DockPanelId = 'diff' | 'reviewLoop' | 'workflowRun' | 'attention' | 'diffDetail' | 'ticketDetail' | 'board';
+  type DockPanelId = 'diff' | 'reviewLoop' | 'workflowRun' | 'attention' | 'diffDetail' | 'ticketDetail';
 
   // Muted section expansion (controlled by Dashboard click)
   const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
 
   // View state management
   const [view, setView] = useState<'dashboard' | 'session' | 'grid'>('dashboard');
+  // Focusable app-shell root: claims keyboard focus on focus-less views (dashboard /
+  // empty workspaces) so the global shortcut listener keeps receiving keys.
+  const appShellRef = useRef<HTMLDivElement>(null);
   const [dockState, setDockState] = useState<{
     openPanels: Record<DockPanelId, boolean>;
     stack: DockPanelId[];
@@ -1334,7 +1338,6 @@ sendFetchPRDetails,
         attention: false,
         diffDetail: false,
         ticketDetail: false,
-        board: false,
     },
     stack: ['diff'],
   });
@@ -1719,7 +1722,6 @@ sendFetchPRDetails,
   const attentionPanelOpen = openDockPanels.attention;
   const diffDetailPanelOpen = openDockPanels.diffDetail;
   const ticketDetailPanelOpen = openDockPanels.ticketDetail;
-  const boardPanelOpen = openDockPanels.board;
   const changesPanelVisible = view === 'session' && diffPanelOpen && Boolean(activeRepoDaemonSession?.directory);
   const blockingOverlayOpen = locationPickerOpen
     || whatsNew.isOpen
@@ -1729,11 +1731,35 @@ sendFetchPRDetails,
     || actionMenuOpen
     || workspaceContextsOpen
     || notebookOpen
+    || boardSurfaceOpen
     || chiefTransferTarget !== null
     || closedWorktree !== null
     || pendingSessionClose !== null
     || sessionCreationJob !== null
     || openPRLauncherJob !== null;
+
+  // The global shortcut listener (a capture-phase window keydown handler) only
+  // receives keys while the WebView holds keyboard focus. A terminal canvas
+  // claims that focus, but the dashboard and empty/pinned workspaces have nothing
+  // focusable — so on those views the WebView can fail to become first responder
+  // and EVERY shortcut (even always-on ones like ⌘K) is dead until the user
+  // clicks into the window. Claim focus on the shell whenever nothing else holds
+  // it and no terminal / focus-trapped overlay owns it. Runs on mount, on view
+  // transitions, and when the window regains focus (e.g. after ⌘-Tab).
+  useEffect(() => {
+    const claimShellFocus = () => {
+      if (activeSessionId) return;     // a terminal owns focus
+      if (blockingOverlayOpen) return; // an overlay's FocusTrap owns focus
+      const shell = appShellRef.current;
+      if (!shell) return;
+      const active = document.activeElement;
+      if (active && active !== document.body) return; // something already focused
+      shell.focus({ preventScroll: true });
+    };
+    claimShellFocus();
+    window.addEventListener('focus', claimShellFocus);
+    return () => window.removeEventListener('focus', claimShellFocus);
+  }, [activeSessionId, blockingOverlayOpen, view]);
 
   const workspaceContextViews = useMemo<WorkspaceContextView[]>(() => {
     const workspacesById = new Map(
@@ -1778,6 +1804,13 @@ sendFetchPRDetails,
 
   const openNotebookBrowser = useCallback(() => {
     setNotebookOpen(true);
+  }, []);
+
+  const openBoardSurface = useCallback(() => {
+    setBoardSurfaceOpen(true);
+  }, []);
+  const closeBoardSurface = useCallback(() => {
+    setBoardSurfaceOpen(false);
   }, []);
 
   // Holds the active workspace id for callbacks that must read it without
@@ -1832,7 +1865,8 @@ sendFetchPRDetails,
       description: 'Tickets grouped by status',
       keywords: ['ticket', 'board', 'kanban', 'tickets'],
       icon: <BoardActionIcon />,
-      run: () => openDockPanel('board'),
+      shortcut: [shortcutTokens('board.open')],
+      run: () => openBoardSurface(),
     },
     {
       id: 'customize-shortcuts',
@@ -1842,7 +1876,7 @@ sendFetchPRDetails,
       icon: <KeyboardActionIcon />,
       run: () => setShortcutEditorOpen(true),
     },
-  ], [openDockPanel, openWorkspaceContextNavigator, handleOpenNotebookTile]);
+  ], [openDockPanel, openWorkspaceContextNavigator, handleOpenNotebookTile, openBoardSurface]);
 
   const handleToggleActionMenu = useCallback(() => {
     if (actionMenuOpen) {
@@ -1850,7 +1884,7 @@ sendFetchPRDetails,
       return;
     }
     if (settingsOpen || shortcutsOpen || locationPickerOpen || whatsNew.isOpen
-      || workspaceContextsOpen || notebookOpen
+      || workspaceContextsOpen || notebookOpen || boardSurfaceOpen
       || chiefTransferTarget !== null || closedWorktree !== null || pendingSessionClose !== null
       || sessionCreationJob !== null || openPRLauncherJob !== null) {
       return;
@@ -1869,6 +1903,7 @@ sendFetchPRDetails,
     whatsNew.isOpen,
     workspaceContextsOpen,
     notebookOpen,
+    boardSurfaceOpen,
   ]);
   const waitingReviewSessions = useMemo(
     () => sessions
@@ -3380,6 +3415,13 @@ sendFetchPRDetails,
       active: notebookOpen,
       onClick: openNotebookBrowser,
     },
+    {
+      id: 'board',
+      title: 'Open Ticket Board (⌘⇧T)',
+      icon: <BoardActionIcon />,
+      active: boardSurfaceOpen,
+      onClick: openBoardSurface,
+    },
   ]), [
     activeReviewLoopAvailable,
     activeReviewLoopState?.status,
@@ -3394,6 +3436,8 @@ sendFetchPRDetails,
     toggleDockPanel,
     notebookOpen,
     openNotebookBrowser,
+    boardSurfaceOpen,
+    openBoardSurface,
   ]);
 
   const activeSessionZoomed = activeWorkspaceId ? Boolean(zoomModeBySessionId[activeWorkspaceId]) : false;
@@ -3547,13 +3591,15 @@ sendFetchPRDetails,
     onResetFontSize: resetScale,
     onOpenNotebookTile: handleOpenNotebookTile,
     onOpenNotebookFullscreen: openNotebookBrowser,
+    onOpenBoard: openBoardSurface,
     onQuit: handleQuitApp,
     enabled: !locationPickerOpen
       && !whatsNew.isOpen
       && !actionMenuOpen
       && !shortcutEditorOpen
       && !workspaceContextsOpen
-      && !notebookOpen,
+      && !notebookOpen
+      && !boardSurfaceOpen,
   });
 
   // The daemon surface shared by the fullscreen Notebook and every notebook tile.
@@ -3589,7 +3635,7 @@ sendFetchPRDetails,
   return (
     <DaemonProvider sendPRAction={sendPRAction} sendMutePR={sendMutePR} sendMuteRepo={sendMuteRepo} sendMuteAuthor={sendMuteAuthor} sendPRVisited={sendPRVisited}>
     <NotebookSurfaceProvider value={notebookSurfaceDaemon}>
-    <div className="app" onPointerDownCapture={handleAppPointerDownCapture}>
+    <div className="app" ref={appShellRef} tabIndex={-1} style={{ outline: 'none' }} onPointerDownCapture={handleAppPointerDownCapture}>
       {/* Error banner for version mismatch */}
       {connectionError && (
         <div className="connection-error-banner">
@@ -3948,20 +3994,6 @@ sendFetchPRDetails,
                 />
               ),
             },
-            {
-              id: 'board',
-              isOpen: boardPanelOpen,
-              width: 'clamp(560px, 52vw, 880px)',
-              className: 'dock-panel dock-panel--board',
-              children: (
-                <TicketBoardPanel
-                  isOpen={boardPanelOpen}
-                  tickets={tickets}
-                  onOpenTicket={handleOpenTicketDetail}
-                  onClose={() => closeDockPanel('board')}
-                />
-              ),
-            },
           ]}
         />
       </div>
@@ -4064,6 +4096,15 @@ sendFetchPRDetails,
         retryTask={sendNotebookTaskRetry}
         taskChangeSignal={notebookTaskChangeSignal}
         chiefActive={notebookChiefActive}
+      />
+      <TicketBoardSurface
+        isOpen={boardSurfaceOpen}
+        tickets={tickets}
+        onOpenTicket={(ticketId) => {
+          closeBoardSurface();
+          handleOpenTicketDetail(ticketId);
+        }}
+        onClose={closeBoardSurface}
       />
       <ActionMenu
         isOpen={actionMenuOpen}

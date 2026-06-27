@@ -489,6 +489,16 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			resumeSessionID,
 			d.store.GetResumeSessionID(msg.ID),
 		)
+	} else if !hasPluginDriver && resumeSessionID == "" && protocol.Deref(msg.ResumePicker) {
+		// Ticket "Resume": the bound session's row (and its resume_session_id) was
+		// deleted on close, so the session-keyed lookup above is skipped. The ticket
+		// persisted the resume key under the same id (its assignee), so resolve it
+		// here to resume the prior conversation directly instead of dropping the
+		// user into the agent's resume picker. Falls back to the picker (resumeSessionID
+		// stays "") when no ticket resume key exists.
+		if ticketResumeID := d.store.GetTicketResumeSessionID(msg.ID); ticketResumeID != "" {
+			resumeSessionID = ticketResumeID
+		}
 	}
 
 	configuredExecutable := strings.TrimSpace(protocol.Deref(msg.Executable))
@@ -671,10 +681,10 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			resumeSessionID,
 			protocol.Deref(msg.ResumePicker),
 		); persistResumeID != "" {
-			d.store.SetResumeSessionID(session.ID, persistResumeID)
+			d.persistResumeSessionID(session.ID, persistResumeID)
 		}
 		if pendingResumeID := d.consumePendingResumeSessionID(session.ID); pendingResumeID != "" {
-			d.store.SetResumeSessionID(session.ID, pendingResumeID)
+			d.persistResumeSessionID(session.ID, pendingResumeID)
 		}
 		if !isShell {
 			d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, spawnStartedAt)

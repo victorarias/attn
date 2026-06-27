@@ -58,8 +58,7 @@ function ActivityEntry({ entry }: { entry: Ticket['activity'][number] }) {
     return (
       <li className="ticket-activity-entry" data-kind="status_change">
         <div className="ticket-activity-head">
-          <span className="ticket-activity-author">{entry.author}</span>
-          <span className="ticket-activity-move">
+            <span className="ticket-activity-move">
             {from} → {to}
           </span>
           {when && <span className="ticket-activity-when">{when}</span>}
@@ -71,7 +70,6 @@ function ActivityEntry({ entry }: { entry: Ticket['activity'][number] }) {
   return (
     <li className="ticket-activity-entry" data-kind="comment">
       <div className="ticket-activity-head">
-        <span className="ticket-activity-author">{entry.author}</span>
         {when && <span className="ticket-activity-when">{when}</span>}
       </div>
       {entry.comment && <div className="ticket-activity-comment">{entry.comment}</div>}

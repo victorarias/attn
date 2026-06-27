@@ -185,11 +185,6 @@
   font-size: var(--font-size-sm);
 }
 
-.ticket-activity-author {
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
 .ticket-activity-move {
   color: var(--color-text-muted);
 }

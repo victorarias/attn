@@ -574,6 +574,57 @@ func (s *Store) SetTicketSession(id, cwd, lastAgentID string, now time.Time) err
 	return ticketUpdateResult(res, id)
 }
 
+// SetTicketResumeSessionID mirrors the bound session's agent-native resume id onto
+// every ticket assigned to that session. The session row (and its own
+// resume_session_id) is deleted on close, so this durable copy on the ticket is
+// what lets Resume reattach the prior conversation directly. Purely internal
+// bookkeeping: it does NOT bump updated_at or emit an event, so it never churns
+// the board. A no-op (zero rows) when the session has no bound ticket.
+func (s *Store) SetTicketResumeSessionID(assignee, resumeSessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return nil
+	}
+	assignee = strings.TrimSpace(assignee)
+	if assignee == "" {
+		return nil
+	}
+	_, err := s.db.Exec(
+		`UPDATE tickets SET resume_session_id = ? WHERE assignee = ?`,
+		strings.TrimSpace(resumeSessionID), assignee,
+	)
+	return err
+}
+
+// GetTicketResumeSessionID returns the stored agent-native resume id for the most
+// recent ticket bound to assignee, or "" when none has one. Used at spawn time to
+// resume a ticket whose session row has already been removed.
+func (s *Store) GetTicketResumeSessionID(assignee string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return ""
+	}
+	assignee = strings.TrimSpace(assignee)
+	if assignee == "" {
+		return ""
+	}
+	var resumeSessionID string
+	err := s.db.QueryRow(
+		`SELECT resume_session_id FROM tickets
+		   WHERE assignee = ? AND resume_session_id != ''
+		   ORDER BY updated_at DESC, id DESC LIMIT 1`,
+		assignee,
+	).Scan(&resumeSessionID)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(resumeSessionID)
+}
+
 // AddTicketAttachment records a handover file on the ticket, bumps updated_at, and
 // emits an attachment_added event (Detail = filename) authored by author. Returns
 // the stored attachment (with its assigned id).

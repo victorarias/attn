@@ -520,6 +520,11 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
     PRIMARY KEY (identity, ticket_id),
     FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
 );`},
+	// Mirror of the bound session's agent-native resume id, kept on the ticket so
+	// it survives the session row being deleted on close — that is what lets the
+	// ticket "Resume" affordance reattach the prior conversation directly instead
+	// of dropping into the agent's resume picker.
+	{57, "add resume_session_id to tickets", "ALTER TABLE tickets ADD COLUMN resume_session_id TEXT NOT NULL DEFAULT ''"},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
