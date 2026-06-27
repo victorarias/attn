@@ -6,24 +6,32 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/ticketnotify"
 )
 
 // callTicketAttach drives handleTicketAttach over an in-memory pipe and returns
-// the decoded response, so a test can assert both the ok and error paths.
+// the decoded response, so a test can assert both the ok and error paths. It waits
+// for the handler to fully return — the response is encoded BEFORE the notify +
+// broadcast fan-out, so without this barrier a test could assert on those side
+// effects before they run.
 func callTicketAttach(t *testing.T, d *Daemon, msg *protocol.TicketAttachMessage) protocol.Response {
 	t.Helper()
 	server, client := net.Pipe()
 	defer client.Close()
+	done := make(chan struct{})
 	go func() {
 		d.handleTicketAttach(server, msg)
 		_ = server.Close()
+		close(done)
 	}()
 	var resp protocol.Response
 	if err := json.NewDecoder(client).Decode(&resp); err != nil {
 		t.Fatalf("decode ticket attach response: %v", err)
 	}
+	<-done
 	return resp
 }
 
@@ -159,6 +167,62 @@ func TestTicketAttachMissingFileFails(t *testing.T) {
 	ticket, _ := d.store.GetTicket(ticketID)
 	if len(ticket.Attachments) != 0 {
 		t.Fatalf("attachments = %d, want 0 (nothing recorded on a failed copy)", len(ticket.Attachments))
+	}
+}
+
+// The attach fan-out reaches both the chief and the board. The agent self-authors
+// the attachment, so the involved chief (idle, not self-monitoring) is nudged while
+// the self-author is not, and the whole board is re-broadcast carrying the row.
+func TestTicketAttachNotifiesChiefAndBroadcasts(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.store.SetSetting(SettingNotebookRoot, t.TempDir())
+	chiefID, agentID, inputs := delegateForNotify(t, d, "codex")
+	ticketID := boundTicketID(t, d, agentID)
+	// Both sides have read their inbox, so the only new event is the attachment the
+	// agent is about to self-author. That isolates the fan-out: the chief is nudged
+	// solely because of the attachment, and the self-authoring agent is not nudged.
+	for _, id := range []string{chiefID, agentID} {
+		if _, err := ticketnotify.Consume(d.store, d.ticketObserverForSession(id), time.Now()); err != nil {
+			t.Fatalf("consume inbox for %s: %v", id, err)
+		}
+	}
+	d.store.UpdateState(chiefID, protocol.StateIdle)
+	d.store.UpdateState(agentID, protocol.StateIdle)
+	latestBroadcast := captureTicketBroadcasts(d)
+
+	src := filepath.Join(t.TempDir(), "report.md")
+	if err := os.WriteFile(src, []byte("the findings"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	resp := callTicketAttach(t, d, &protocol.TicketAttachMessage{
+		Cmd:             protocol.CmdTicketAttach,
+		SourceSessionID: agentID,
+		SourcePath:      src,
+		Filename:        "report.md",
+	})
+	if !resp.Ok {
+		t.Fatalf("attach failed: %+v", resp)
+	}
+
+	if !wasNudged(inputs(chiefID)) {
+		t.Fatal("chief was not notified of the agent's attachment")
+	}
+	if wasNudged(inputs(agentID)) {
+		t.Fatal("the self-authoring agent should not be nudged about its own attachment")
+	}
+
+	board := latestBroadcast()
+	if board == nil {
+		t.Fatal("the attach fired no tickets_updated board push")
+	}
+	seen := false
+	for _, tk := range board {
+		if tk.ID == ticketID {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Fatalf("tickets_updated %v missing the attached ticket %q", ticketIDs(board), ticketID)
 	}
 }
 

@@ -2408,8 +2408,6 @@ model Response {
   ticket_status_result?: TicketStatusResult;
   ticket_inbox_result?: TicketInboxResult;
   ticket_attach_result?: TicketAttachResult;
-  ticket?: Ticket;
-  tickets?: Ticket[];
 }
 
 model DelegateResult {

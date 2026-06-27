@@ -20,6 +20,31 @@ export type TicketResumePlan =
   | { kind: 'spawn'; sessionId: string | undefined; cwd: string; agent: string; label: string }
   | { kind: 'error'; message: string };
 
+export type TicketResumeSpawn = Extract<TicketResumePlan, { kind: 'spawn' }>;
+
+export interface TicketResumeHandlers {
+  focus: (sessionId: string) => void;
+  spawn: (plan: TicketResumeSpawn) => void;
+  error: (message: string) => void;
+}
+
+// Dispatch a resume plan to the app's session handlers. Kept next to the planner so
+// the focus-vs-spawn routing — where the duplicate-local-session regression actually
+// lands for the user — is unit-testable without standing up the whole App.
+export function executeTicketResumePlan(plan: TicketResumePlan, handlers: TicketResumeHandlers): void {
+  switch (plan.kind) {
+    case 'error':
+      handlers.error(plan.message);
+      return;
+    case 'focus':
+      handlers.focus(plan.sessionId);
+      return;
+    case 'spawn':
+      handlers.spawn(plan);
+      return;
+  }
+}
+
 export function planTicketResume(
   ticket: TicketResumeInput,
   existingSessionIds: ReadonlySet<string>,

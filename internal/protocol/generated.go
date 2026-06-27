@@ -2894,9 +2894,6 @@ type Response struct {
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`
 
-	// Ticket corresponds to the JSON schema field "ticket".
-	Ticket *Ticket `json:"ticket,omitempty,omitzero"`
-
 	// TicketAttachResult corresponds to the JSON schema field "ticket_attach_result".
 	TicketAttachResult *TicketAttachResult `json:"ticket_attach_result,omitempty,omitzero"`
 
@@ -2905,9 +2902,6 @@ type Response struct {
 
 	// TicketStatusResult corresponds to the JSON schema field "ticket_status_result".
 	TicketStatusResult *TicketStatusResult `json:"ticket_status_result,omitempty,omitzero"`
-
-	// Tickets corresponds to the JSON schema field "tickets".
-	Tickets []Ticket `json:"tickets,omitempty,omitzero"`
 
 	// WorkspaceContextMaintenanceResult corresponds to the JSON schema field
 	// "workspace_context_maintenance_result".

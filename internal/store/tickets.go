@@ -97,7 +97,7 @@ type Ticket struct {
 	Title       string
 	Description string
 	Status      TicketStatus
-	Assignee    string // agent id, "you", or "" when unassigned
+	Assignee    string // bound session id (delegated work), "you" (human), or "" when unassigned; the session-id form is the resume key
 	Cwd         string // last session's working dir (for resume)
 	LastAgentID string // last session's agent id (for resume)
 	ProjectID   string // future grouping; "" when ungrouped

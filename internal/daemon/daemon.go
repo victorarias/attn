@@ -195,6 +195,7 @@ type Daemon struct {
 	workflowEngineConn    map[string]workflowEngineSink
 	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
 	workflowAttentionHook func(attention.Result)                    // optional, tests only
+	ticketsBroadcastHook  func([]protocol.Ticket)                   // optional, tests only
 
 	workspaceContextCheckoutMu sync.Mutex
 

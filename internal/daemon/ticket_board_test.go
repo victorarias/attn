@@ -23,6 +23,31 @@ func readTicketResult(t *testing.T, ch chan outboundMessage, target any) {
 	}
 }
 
+// ticketIDs collects the ids of a broadcast board feed, for membership assertions.
+func ticketIDs(tickets []protocol.Ticket) []string {
+	ids := make([]string, 0, len(tickets))
+	for _, tk := range tickets {
+		ids = append(ids, tk.ID)
+	}
+	return ids
+}
+
+// captureTicketBroadcasts records every tickets_updated board push the daemon makes,
+// via the in-process hook, so a test can assert the post-mutation board push
+// deterministically. Returns an accessor for the most recent broadcast.
+func captureTicketBroadcasts(d *Daemon) (latest func() []protocol.Ticket) {
+	var broadcasts [][]protocol.Ticket
+	d.ticketsBroadcastHook = func(tickets []protocol.Ticket) {
+		broadcasts = append(broadcasts, tickets)
+	}
+	return func() []protocol.Ticket {
+		if len(broadcasts) == 0 {
+			return nil
+		}
+		return broadcasts[len(broadcasts)-1]
+	}
+}
+
 // get_ticket returns the FULL record: the row plus its activity thread (status
 // changes with from/to + note, freeform comments) and attachments — the detail the
 // bare board feed deliberately omits.
