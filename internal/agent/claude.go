@@ -83,13 +83,13 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	if strings.TrimSpace(opts.SettingsPath) != "" {
 		args = append(args, "--settings", opts.SettingsPath)
 	}
-	// A chief-of-staff launch (NotebookRoot set) gets Notebook guidance instead
+	// A chief-of-staff launch (NotebookRoot set) gets chief guidance instead
 	// of the workspace-context checkout guidance. Every other workspace agent gets
 	// its workspace-context guidance (plus workflow-trigger guidance when enabled,
 	// folded in by hooks.AgentInstructions). Non-chief agents are NOT nudged to
 	// journal: the keeper narrates each workspace's own work into the journal, and
 	// the chief journals the cross-workspace layer.
-	if guidance := hooks.NotebookGuidance(opts.NotebookRoot); guidance != "" {
+	if guidance := hooks.ChiefGuidance(opts.NotebookRoot); guidance != "" {
 		args = append(args, "--append-system-prompt", guidance)
 	} else if instructions := hooks.AgentInstructions(opts.WorkspaceContextPath, opts.InjectWorkflowGuidance); instructions != "" {
 		args = append(args, "--append-system-prompt", instructions)
@@ -113,9 +113,9 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 func (c *Claude) BuildEnv(opts SpawnOpts) []string {
 	var env []string
 	if strings.TrimSpace(opts.NotebookRoot) != "" {
-		// A chief launch injected Notebook guidance at launch; mark it so the
+		// A chief launch injected chief guidance at launch; mark it so the
 		// SessionStart hook does not also emit workspace-context guidance.
-		env = append(env, "ATTN_NOTEBOOK_GUIDANCE=append_system_prompt")
+		env = append(env, "ATTN_CHIEF_GUIDANCE=append_system_prompt")
 	} else if strings.TrimSpace(opts.WorkspaceContextPath) != "" {
 		env = append(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=append_system_prompt")
 	}

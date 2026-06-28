@@ -92,9 +92,9 @@ func TestClaudeBuildEnvMarksAppendSystemPromptGuidance(t *testing.T) {
 	}
 }
 
-// A chief launch (NotebookRoot set) injects Notebook guidance and suppresses the
+// A chief launch (NotebookRoot set) injects chief guidance and suppresses the
 // workspace-context guidance, even if a checkout path is also present.
-func TestClaudeBuildCommand_NotebookGuidanceTakesPrecedence(t *testing.T) {
+func TestClaudeBuildCommand_ChiefGuidanceTakesPrecedence(t *testing.T) {
 	cmd := (&Claude{}).BuildCommand(SpawnOpts{
 		SessionID:            "sess-1",
 		Executable:           "claude",
@@ -119,20 +119,20 @@ func TestClaudeBuildCommand_NotebookGuidanceTakesPrecedence(t *testing.T) {
 	}
 }
 
-func TestClaudeBuildEnvMarksNotebookGuidance(t *testing.T) {
+func TestClaudeBuildEnvMarksChiefGuidance(t *testing.T) {
 	env := (&Claude{}).BuildEnv(SpawnOpts{
 		WorkspaceContextPath: "/tmp/context.md",
 		NotebookRoot:         "/home/u/attn-notebook",
 	})
-	if !slices.Contains(env, "ATTN_NOTEBOOK_GUIDANCE=append_system_prompt") {
-		t.Fatalf("env = %#v, want notebook guidance marker", env)
+	if !slices.Contains(env, "ATTN_CHIEF_GUIDANCE=append_system_prompt") {
+		t.Fatalf("env = %#v, want chief guidance marker", env)
 	}
 	if slices.Contains(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=append_system_prompt") {
 		t.Fatalf("env = %#v, chief launch should not also mark workspace context guidance", env)
 	}
 }
 
-func TestCodexConfigOverrides_NotebookGuidanceTakesPrecedence(t *testing.T) {
+func TestCodexConfigOverrides_ChiefGuidanceTakesPrecedence(t *testing.T) {
 	overrides := (&Codex{}).GenerateConfigOverrides(SpawnOpts{
 		SessionID:            "sess-1",
 		WorkspaceContextPath: "/tmp/context.md",
@@ -186,14 +186,14 @@ func TestCodexConfigOverrides_NonChiefOmitsJournalingDirective(t *testing.T) {
 	}
 }
 
-func TestCodexBuildEnvMarksNotebookGuidance(t *testing.T) {
+func TestCodexBuildEnvMarksChiefGuidance(t *testing.T) {
 	env := (&Codex{}).BuildEnv(SpawnOpts{
 		SessionID:    "sess-1",
 		WrapperPath:  "/Applications/attn-dev.app/Contents/MacOS/attn",
 		NotebookRoot: "/home/u/attn-notebook",
 	})
-	if !slices.Contains(env, "ATTN_NOTEBOOK_GUIDANCE=developer_instructions") {
-		t.Fatalf("env = %#v, want notebook guidance marker", env)
+	if !slices.Contains(env, "ATTN_CHIEF_GUIDANCE=developer_instructions") {
+		t.Fatalf("env = %#v, want chief guidance marker", env)
 	}
 	if !slices.Contains(env, "ATTN_WRAPPER_PATH=/Applications/attn-dev.app/Contents/MacOS/attn") {
 		t.Fatalf("env = %#v, want explicit wrapper path", env)

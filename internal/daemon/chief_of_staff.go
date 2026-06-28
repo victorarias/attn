@@ -165,7 +165,7 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 	// doorbell into its PTY so it pulls Notebook guidance. Only fires on an
 	// idle/waiting session (guarded in the helper), never an agent mid-task.
 	if msg.ChiefOfStaff {
-		go d.activateNotebookGuidanceLive(sessionID)
+		go d.activateChiefGuidanceLive(sessionID)
 	}
 	d.sendChiefOfStaffResult(client, sessionID, msg.ChiefOfStaff, previousSessionID, nil)
 }

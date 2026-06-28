@@ -76,13 +76,13 @@ func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath, workspaceC
 			"shell_environment_policy.set.ATTN_SOCKET_PATH="+strconv.Quote(socket),
 		)
 	}
-	// A chief-of-staff launch (notebookRoot set) gets Notebook guidance instead
+	// A chief-of-staff launch (notebookRoot set) gets chief guidance instead
 	// of the workspace-context checkout guidance. Every other workspace agent gets
 	// its workspace-context guidance (plus workflow-trigger guidance when enabled,
 	// folded in by AgentInstructions). Non-chief agents are NOT nudged to journal:
 	// the keeper narrates each workspace's own work into the journal, and the chief
 	// journals the cross-workspace layer.
-	if guidance := NotebookGuidance(notebookRoot); guidance != "" {
+	if guidance := ChiefGuidance(notebookRoot); guidance != "" {
 		overrides = append(overrides, "developer_instructions="+strconv.Quote(guidance))
 	} else if instructions := AgentInstructions(workspaceContextPath, injectWorkflow); instructions != "" {
 		overrides = append(overrides, "developer_instructions="+strconv.Quote(instructions))

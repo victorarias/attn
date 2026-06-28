@@ -95,9 +95,9 @@ func (c *Codex) BuildEnv(opts SpawnOpts) []string {
 		env = append(env, "ATTN_WRAPPER_PATH="+wrapper)
 	}
 	if strings.TrimSpace(opts.NotebookRoot) != "" {
-		// A chief launch injected Notebook guidance at launch; mark it so the
+		// A chief launch injected chief guidance at launch; mark it so the
 		// SessionStart hook does not also emit workspace-context guidance.
-		env = append(env, "ATTN_NOTEBOOK_GUIDANCE=developer_instructions")
+		env = append(env, "ATTN_CHIEF_GUIDANCE=developer_instructions")
 	} else if strings.TrimSpace(opts.WorkspaceContextPath) != "" {
 		env = append(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=developer_instructions")
 	}

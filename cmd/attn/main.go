@@ -2137,7 +2137,7 @@ func runHookSessionStart() {
 	// The SessionStart hook syncs the agent's native session ID back to attn for
 	// resume, then emits workspace-context guidance as a fallback for sessions that
 	// did not receive it at launch (--append-system-prompt / developer_instructions).
-	// The launch path sets ATTN_WORKSPACE_CONTEXT_GUIDANCE / ATTN_NOTEBOOK_GUIDANCE so
+	// The launch path sets ATTN_WORKSPACE_CONTEXT_GUIDANCE / ATTN_CHIEF_GUIDANCE so
 	// workspaceContextGuidanceProvidedAtLaunch suppresses the fallback when guidance
 	// was already injected.
 	syncSessionResumeID(c, sessionID, input.SessionID)
@@ -2170,9 +2170,9 @@ func workspaceContextSessionStartOutput(
 func workspaceContextGuidanceProvidedAtLaunch() bool {
 	// Either marker means launch-time guidance was already injected, so the
 	// SessionStart hook must not also emit workspace-context guidance. A chief
-	// session is launched with Notebook guidance in place of workspace context.
+	// session is launched with chief guidance in place of workspace context.
 	return strings.TrimSpace(os.Getenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE")) != "" ||
-		strings.TrimSpace(os.Getenv("ATTN_NOTEBOOK_GUIDANCE")) != ""
+		strings.TrimSpace(os.Getenv("ATTN_CHIEF_GUIDANCE")) != ""
 }
 
 type workspaceContextCheckoutClient interface {

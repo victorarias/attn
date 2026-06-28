@@ -196,7 +196,7 @@ func (d *Daemon) handleNotebookGuide(conn net.Conn, msg *protocol.NotebookGuideM
 	_ = json.NewEncoder(conn).Encode(protocol.Response{
 		Ok: true,
 		NotebookGuide: &protocol.NotebookGuideResult{
-			Guidance:       hooks.NotebookGuidance(root),
+			Guidance:       hooks.ChiefGuidance(root),
 			Root:           root,
 			SessionIsChief: sessionIsChief,
 		},
@@ -208,17 +208,17 @@ func (d *Daemon) handleNotebookGuide(conn net.Conn, msg *protocol.NotebookGuideM
 // — never guidance content itself. This is the safe exception to the
 // chief-of-staff "no arbitrary PTY content" boundary: a fixed trigger pointing at
 // a deterministic, attn-authored file. The full operating guidance still flows
-// into the system prompt at launch via hooks.NotebookGuidance; a live promotion
+// into the system prompt at launch via hooks.ChiefGuidance; a live promotion
 // can't reach the system prompt, so it points the agent at the notebook's index.
 func notebookActivationPrompt(root string) string {
 	return fmt.Sprintf("You are now the chief of staff. Your durable home is the attn Notebook, not this workspace's shared context — read %s to get oriented.", filepath.Join(root, "index.md"))
 }
 
-// activateNotebookGuidanceLive types the bounded notebook-activation doorbell
-// into a just-promoted chief session's PTY, but only when that session is idle
-// or waiting for input — never an agent mid-task. It first ensures the notebook
+// activateChiefGuidanceLive types the bounded notebook-activation doorbell into
+// a just-promoted chief session's PTY, but only when that session is idle or
+// waiting for input — never an agent mid-task. It first ensures the notebook
 // scaffold exists. Fire-and-forget: failures are logged, not surfaced.
-func (d *Daemon) activateNotebookGuidanceLive(sessionID string) {
+func (d *Daemon) activateChiefGuidanceLive(sessionID string) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" || d.ptyBackend == nil || d.store == nil {
 		return
