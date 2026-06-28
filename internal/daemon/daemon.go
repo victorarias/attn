@@ -132,6 +132,15 @@ type Daemon struct {
 	reviewLoopCancel map[string]context.CancelFunc
 	inputSourceMu    sync.Mutex
 	pendingInputSrc  map[string]string
+	// ticketBackstop debounces the deferred self-monitor doorbell (see
+	// ticket_notify.go): an idle self-monitor with unread ticket activity is
+	// re-checked after a grace delay and doorbelled only if still unread, so a live
+	// `attn ticket inbox --watch` Monitor (which drains within its poll interval)
+	// self-suppresses it. ticketBackstopGrace is 0 in production (=> the default
+	// const) and a test override otherwise.
+	ticketBackstopMu     sync.Mutex
+	ticketBackstopTimers map[string]*time.Timer
+	ticketBackstopGrace  time.Duration
 	recoveryMu       sync.RWMutex
 	recovering       bool
 	notebookMu       sync.Mutex
@@ -1305,6 +1314,7 @@ func (d *Daemon) Stop() {
 	}
 	d.stopInstalledPlugins()
 	d.stopAllTranscriptWatchers()
+	d.stopTicketBackstops()
 	if d.ptyBackend != nil {
 		_ = d.ptyBackend.Shutdown(context.Background())
 	}

@@ -28,7 +28,7 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"visible interactive agent",
 		"ATTN_WRAPPER_PATH",
 		"references/delegation.md",
-		"references/chief-of-staff.md",
+		"references/delegated-agent.md",
 		"references/tickets.md",
 		"references/workspace-context.md",
 		"references/review-loops.md",
@@ -48,28 +48,32 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		t.Fatalf("skill index contains capability details that belong in a reference: %q", index)
 	}
 
-	chiefOfStaff := readSkillFile(t, skillDir, "references/chief-of-staff.md")
+	delegatedAgent := readSkillFile(t, skillDir, "references/delegated-agent.md")
 	for _, expected := range []string{
 		"ticket status in_progress",
 		"ticket status needs_input",
 		"ticket status ready_for_review",
 		"ticket status completed",
 		"ticket status failed",
-		"ticket board",
-		"visible, full interactive",
-		"default to native subagents",
-		"do not validate that specialist work", // chief surfaces, Victor reviews
-		"review it on the merits",              // the docs/prose exception
-		"the agent's claim, not as confirmed",
 		"Do not report ticket status for ordinary",
 	} {
-		if !strings.Contains(chiefOfStaff, expected) {
-			t.Fatalf("chief of staff reference missing %q: %q", expected, chiefOfStaff)
+		if !strings.Contains(delegatedAgent, expected) {
+			t.Fatalf("delegated-agent reference missing %q: %q", expected, delegatedAgent)
 		}
 	}
-	if strings.Contains(chiefOfStaff, "coordination-file") ||
-		strings.Contains(chiefOfStaff, "dispatch ") {
-		t.Fatalf("chief of staff reference retains legacy dispatch UX: %q", chiefOfStaff)
+	// The chief-of-staff coordination guidance (surface vs act boundary, native
+	// subagents, the prose-review exception) moved to the always-on system prompt
+	// (hooks.ChiefGuidance); this worker-facing reference must not carry it back,
+	// and must keep the retired dispatch UX out.
+	for _, chiefOrLegacy := range []string{
+		"As Chief of Staff",
+		"do not validate that specialist work",
+		"coordination-file",
+		"dispatch ",
+	} {
+		if strings.Contains(delegatedAgent, chiefOrLegacy) {
+			t.Fatalf("delegated-agent reference should not carry chief/legacy guidance %q: %q", chiefOrLegacy, delegatedAgent)
+		}
 	}
 
 	tickets := readSkillFile(t, skillDir, "references/tickets.md")
@@ -216,6 +220,7 @@ func TestAttnSkillInstallsAreIdentical(t *testing.T) {
 	for _, relative := range []string{
 		"SKILL.md",
 		"references/delegation.md",
+		"references/delegated-agent.md",
 		"references/tickets.md",
 		"references/workspace-context.md",
 		"references/review-loops.md",

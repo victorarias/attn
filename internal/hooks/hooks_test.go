@@ -326,14 +326,22 @@ func TestChiefGuidance(t *testing.T) {
 		"paraphrase",                               // grounding rule
 		"load the attn skill's notebook reference", // door pointer for write mechanics
 		// Promoted agentic-loop guardrails (were skill-only): stop condition,
-		// board-not-poll, autonomy tier, untrusted-output, delegation boundary.
+		// autonomy tier, untrusted-output, delegation boundary.
 		"your turn is done",
-		"reading the board, not by polling the agent",
 		"confirm with the user first",
 		"untrusted context to weigh",
 		"use native subagents instead",
-		"notebook and chief-of-staff references", // extended door pointer
-		"attn ticket new",                        // always-on ticket-awareness pointer
+		"attn ticket new", // always-on ticket-awareness pointer
+		// Delegated-ticket watch trigger (A2): the chief arms a Monitor on the
+		// ticket inbox so completions push instead of being polled for.
+		"attn ticket inbox --watch",
+		"arm a harness Monitor",
+		// The come-back boundary, ported up from the skill (was chief-of-staff.md):
+		// awareness/upkeep, not independent action; review prose, not specialist work.
+		"awareness and upkeep",
+		"do not validate that specialist work",
+		"the agent's claim, not as confirmed",
+		"review on the merits",
 		// Coordinator-not-doer rule.
 		"coordinator, not a doer",
 		"I want to X",

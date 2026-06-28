@@ -886,6 +886,8 @@ func runTicketInbox(args []string) {
 	fs.SetOutput(io.Discard)
 	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
 	jsonOutput := fs.Bool("json", false, "print the unread bundles as JSON")
+	watch := fs.Bool("watch", false, "block and print new ticket activity as it lands (for a harness Monitor); silent until something changes")
+	interval := fs.Duration("interval", ticketWatchInterval, "poll interval in --watch mode")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "ticket inbox: %v\n", err)
 		os.Exit(2)
@@ -899,6 +901,10 @@ func runTicketInbox(args []string) {
 		fmt.Fprintf(os.Stderr, "ticket inbox: %v\n", err)
 		os.Exit(2)
 	}
+	if *watch {
+		runTicketInboxWatch(source, *interval, *jsonOutput)
+		return
+	}
 	bundles, err := client.New("").TicketInbox(source)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ticket inbox: %v\n", err)
@@ -911,21 +917,95 @@ func runTicketInbox(args []string) {
 	printTicketInbox(bundles)
 }
 
+// ticketWatchInterval is how often `attn ticket inbox --watch` polls the consuming
+// inbox. It is the lower bound on push latency for a self-monitoring chief, and it
+// is coupled to the daemon's self-monitor backstop grace
+// (defaultTicketBackstopGrace, 8s): the grace must stay above this interval so a
+// live watch drains its queue before the daemon's backstop doorbell would fire.
+const ticketWatchInterval = 3 * time.Second
+
+// runTicketInboxWatch blocks and prints new ticket activity as it lands, so a
+// harness Monitor can wrap it as a true push for a self-monitoring chief. It polls
+// the consuming ticket-inbox: the daemon advances the session's per-ticket cursor
+// on each read, so each event prints exactly once and the client tracks no state.
+// Silent when nothing is new; exits cleanly on SIGINT/SIGTERM (the harness stops
+// the Monitor on session end). A transient daemon error is reported once per outage
+// but does not end the watch. The poll loop lives in watchTicketInbox so it can be
+// tested without a daemon, signals, or a real ticker.
+func runTicketInboxWatch(source string, interval time.Duration, jsonOutput bool) {
+	if interval <= 0 {
+		interval = ticketWatchInterval
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	c := client.New("")
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	watchTicketInbox(ctx, ticker.C, func() ([]protocol.TicketEventBundle, error) {
+		return c.TicketInbox(source)
+	}, os.Stdout, os.Stderr, jsonOutput)
+}
+
+// watchTicketInbox is the poll loop behind `attn ticket inbox --watch`. It prints new
+// bundles each tick and stays silent otherwise. A daemon error is reported once per
+// outage: a wrapping Monitor treats every printed line as new activity, so repeating
+// an unchanged error would nudge the chief every poll — the next success clears the
+// suppression so a recovered-then-failed daemon reports again. Returns when ctx is
+// cancelled (SIGINT/SIGTERM in production).
+func watchTicketInbox(
+	ctx context.Context,
+	tick <-chan time.Time,
+	fetch func() ([]protocol.TicketEventBundle, error),
+	out, errOut io.Writer,
+	jsonOutput bool,
+) {
+	var lastErr string
+	for {
+		bundles, err := fetch()
+		if err != nil {
+			if msg := err.Error(); msg != lastErr {
+				fmt.Fprintf(errOut, "ticket inbox --watch: %s\n", msg)
+				lastErr = msg
+			}
+		} else {
+			lastErr = ""
+			if len(bundles) > 0 {
+				if jsonOutput {
+					if encErr := fprintJSON(out, bundles); encErr != nil {
+						fmt.Fprintf(errOut, "ticket inbox --watch: %v\n", encErr)
+					}
+				} else {
+					fprintTicketInbox(out, bundles)
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick:
+		}
+	}
+}
+
 func printTicketInbox(bundles []protocol.TicketEventBundle) {
+	fprintTicketInbox(os.Stdout, bundles)
+}
+
+func fprintTicketInbox(w io.Writer, bundles []protocol.TicketEventBundle) {
 	if len(bundles) == 0 {
-		fmt.Println("no unread ticket activity")
+		fmt.Fprintln(w, "no unread ticket activity")
 		return
 	}
 	for _, b := range bundles {
-		fmt.Printf("%s\n", b.TicketID)
+		fmt.Fprintf(w, "%s\n", b.TicketID)
 		for _, e := range b.Events {
 			line := fmt.Sprintf("  [%s] %s by %s", e.CreatedAt, e.Kind, e.Author)
 			if e.FromStatus != nil && e.ToStatus != nil {
 				line += fmt.Sprintf(" (%s → %s)", *e.FromStatus, *e.ToStatus)
 			}
-			fmt.Println(line)
+			fmt.Fprintln(w, line)
 			if e.Comment != nil && *e.Comment != "" {
-				fmt.Printf("    %s\n", *e.Comment)
+				fmt.Fprintf(w, "    %s\n", *e.Comment)
 			}
 		}
 	}
@@ -937,8 +1017,9 @@ func writeTicketHelp(w io.Writer) {
 commands:
   status <work-state> [--session <id>] [--comment <text>] [--json]
         move this session's bound ticket to the column for the reported state
-  inbox [--session <id>] [--json]
-        read (and mark read) this session's unread ticket activity
+  inbox [--session <id>] [--json] [--watch [--interval <dur>]]
+        read (and mark read) this session's unread ticket activity;
+        --watch blocks and prints new activity as it lands (for a Monitor)
   attach --file <path> [--note <text>] [--session <id>] [--json]
         copy a file onto this session's bound ticket as an attachment
   new --title <t> [--description <d>] [--id <slug>] [--session <id>] [--json]
@@ -1725,12 +1806,16 @@ func runReviewLoop() {
 }
 
 func printJSON(v interface{}) {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
+	if err := fprintJSON(os.Stdout, v); err != nil {
 		fmt.Fprintf(os.Stderr, "error encoding json: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func fprintJSON(w io.Writer, v interface{}) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
 }
 
 func runWrapper() {

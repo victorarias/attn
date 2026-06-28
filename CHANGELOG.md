@@ -11,6 +11,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **Create backlog tickets without delegating.** `attn ticket new --title <t> [--description <d>] [--id <slug>]` files an unbound ticket in the Todo column — for capturing work you're not handing to an agent yet. Agents now know that tickets are something they can create on your request.
 
+### Changed
+- **Your chief of staff reacts the moment delegated work changes.** Previously, when an agent the chief delegated finished, got blocked, or crashed, the chief found out only the next time you prompted it — the update sat unseen on the board. Now the chief watches its delegated tickets and surfaces a completion, a question, or a failure to you proactively, with a recommended next step, instead of going quiet after handing work off. As a safety net, attn also pokes an idle agent that has unread ticket activity it isn't already watching, so nothing stays silently unread.
+
 ## [2026-06-27]
 
 ### Added
