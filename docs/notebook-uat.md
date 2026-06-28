@@ -117,7 +117,7 @@ ATTN_PROFILE=dev ./attn daemon ensure
 > **UAT-verified trigger:** the scaffold is **not** created at daemon start, nor by
 > browsing/listing the notebook (`notebook_list` returns `success` but writes nothing).
 > `ensureNotebookScaffold` runs only from `handleNotebookGuide` and
-> `activateNotebookGuidanceLive` — i.e. **when a session is promoted to chief of staff**
+> `activateChiefGuidanceLive` — i.e. **when a session is promoted to chief of staff**
 > (or a chief is launched). So scaffold by promoting a session to chief (see A2), then:
 ```sh
 find ~/attn-notebook-dev -maxdepth 2 -not -path '*/.attn/*' | sort
