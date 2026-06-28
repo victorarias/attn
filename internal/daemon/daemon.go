@@ -2027,7 +2027,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	d.workspaces.register(workspaceID, workspaceTitle, session.Directory, workspaceRank, false, false)
 	d.store.Add(session)
 	if resumeSessionID := d.consumePendingResumeSessionID(session.ID); resumeSessionID != "" {
-		d.store.SetResumeSessionID(session.ID, resumeSessionID)
+		d.persistResumeSessionID(session.ID, resumeSessionID)
 	}
 	d.associateSessionWithWorkspace(session.ID, workspaceID)
 	if _, err := d.ensureWorkspaceLayout(workspaceID); err != nil {
@@ -2117,7 +2117,7 @@ func (d *Daemon) setOrQueueResumeSessionID(sessionID, resumeSessionID string) {
 	d.pendingResumeMu.Lock()
 	defer d.pendingResumeMu.Unlock()
 	if d.store.Get(sessionID) != nil {
-		d.store.SetResumeSessionID(sessionID, resumeSessionID)
+		d.persistResumeSessionID(sessionID, resumeSessionID)
 		return
 	}
 	if d.pendingResumeID == nil {
@@ -2138,6 +2138,18 @@ func (d *Daemon) consumePendingResumeSessionID(sessionID string) string {
 	return strings.TrimSpace(resumeSessionID)
 }
 
+// persistResumeSessionID records the agent-native resume id on the session AND
+// mirrors it onto any ticket bound to that session (assignee == sessionID). The
+// session row is deleted on close, taking its resume_session_id with it, so the
+// durable copy on the ticket is what lets ticket Resume reattach the prior
+// conversation directly instead of dropping into the agent's resume picker.
+func (d *Daemon) persistResumeSessionID(sessionID, resumeSessionID string) {
+	d.store.SetResumeSessionID(sessionID, resumeSessionID)
+	if err := d.store.SetTicketResumeSessionID(sessionID, resumeSessionID); err != nil {
+		d.logf("persistResumeSessionID: mirror to ticket failed for session %s: %v", sessionID, err)
+	}
+}
+
 func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	d.logf("handleStop: session=%s, transcript_path=%s", msg.ID, msg.TranscriptPath)
 	if session := d.store.Get(msg.ID); session != nil {
@@ -2145,7 +2157,7 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 			agentdriver.Get(string(session.Agent)),
 			msg.TranscriptPath,
 		); resumeSessionID != "" {
-			d.store.SetResumeSessionID(msg.ID, resumeSessionID)
+			d.persistResumeSessionID(msg.ID, resumeSessionID)
 		}
 	}
 	d.store.Touch(msg.ID)

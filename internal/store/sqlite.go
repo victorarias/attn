@@ -520,6 +520,11 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
     PRIMARY KEY (identity, ticket_id),
     FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
 );`},
+	// Mirror of the bound session's agent-native resume id, kept on the ticket so
+	// it survives the session row being deleted on close — that is what lets the
+	// ticket "Resume" affordance reattach the prior conversation directly instead
+	// of dropping into the agent's resume picker.
+	{57, "add resume_session_id to tickets", "ALTER TABLE tickets ADD COLUMN resume_session_id TEXT NOT NULL DEFAULT ''"},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -688,6 +693,11 @@ func migrateDB(db *sql.DB) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
+		} else if m.version == 57 {
+			if err := applyMigration57(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		} else {
 			if _, err := tx.Exec(m.sql); err != nil {
 				tx.Rollback()
@@ -772,6 +782,23 @@ func applyMigration23(tx *sql.Tx) error {
 		return nil
 	}
 	if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN resume_session_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// applyMigration57 adds resume_session_id to tickets idempotently — guarded by
+// columnExists so a re-run (or a DB that already has the column) is a no-op,
+// mirroring applyMigration23 for the same column on sessions.
+func applyMigration57(tx *sql.Tx) error {
+	hasResumeSessionID, err := columnExists(tx, "tickets", "resume_session_id")
+	if err != nil {
+		return err
+	}
+	if hasResumeSessionID {
+		return nil
+	}
+	if _, err := tx.Exec("ALTER TABLE tickets ADD COLUMN resume_session_id TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	return nil

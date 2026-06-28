@@ -104,6 +104,9 @@ export const SHORTCUTS = {
   // Notebook (meta+alt+N is free — the only meta+alt combos are the pane-focus arrows)
   'notebook.openTile': { key: 'n', meta: true, alt: true },
   'notebook.openFullscreen': { key: 'n', meta: true, alt: true, shift: true },
+
+  // Tickets board (fullscreen surface). meta+shift+T parallels meta+T = new workspace.
+  'board.open': { key: 't', meta: true, shift: true },
 } as const;
 
 export type ShortcutId = keyof typeof SHORTCUTS;
