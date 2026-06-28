@@ -40,6 +40,8 @@ If a command reports an unknown subcommand or shows another tool's help, check
   [references/markdown.md](references/markdown.md).
 - **Operate attn's persistent browser tile:** read
   [references/browser.md](references/browser.md).
+- **Write, review, or improve a system prompt, agent guidance, or skill
+  instruction:** load the `prompting` skill before starting.
 
 Load more than one reference only when the task actually combines capabilities.
 
