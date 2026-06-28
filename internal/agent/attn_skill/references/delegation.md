@@ -34,6 +34,8 @@ The brief should let the delegated agent start immediately. Include:
 
 Use `--brief <text>` only for short, simple tasks.
 
+> The same brief is a ticket's description. To capture a backlog item *without* delegating — an unbound `todo` — use `attn ticket new` (see [tickets.md](tickets.md)); do this only when the user asks.
+
 ## Agent Selection
 
 The source agent is used by default. Select another supported agent with:

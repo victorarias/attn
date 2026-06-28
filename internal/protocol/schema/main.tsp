@@ -566,6 +566,27 @@ model TicketStatusResult {
   status: TicketStatus;
 }
 
+// TicketCreateMessage mints a standalone backlog ticket — unbound (no assignee, no
+// session), starting in todo. Unlike delegation, nothing is dispatched: this is the
+// chief/user capturing work to do later. source_session_id is the author of record;
+// title is the ticket's name (its slug is derived from it); description is the
+// optional brief. An explicit id pins the slug instead of deriving it.
+model TicketCreateMessage {
+  cmd: "ticket_create";
+  source_session_id: string;
+  title: string;
+  description?: string;
+  id?: string;
+}
+
+// TicketCreateResult echoes the resolved ticket id (the derived-or-pinned slug), the
+// column it landed in (todo), and the title, so the caller learns the final slug.
+model TicketCreateResult {
+  ticket_id: string;
+  status: TicketStatus;
+  title: string;
+}
+
 // TicketInboxMessage reads (and consumes) the calling session's unread ticket
 // events. The daemon resolves the observer identity from the session, so the agent
 // names nothing — it just asks for what it has not yet seen.
@@ -2220,6 +2241,7 @@ model Response {
   ticket_status_result?: TicketStatusResult;
   ticket_inbox_result?: TicketInboxResult;
   ticket_attach_result?: TicketAttachResult;
+  ticket_create_result?: TicketCreateResult;
 }
 
 model DelegateResult {

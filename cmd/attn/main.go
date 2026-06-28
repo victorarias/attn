@@ -624,8 +624,9 @@ func hasHelpFlag(args []string) bool {
 	return false
 }
 
-// runTicket routes `attn ticket <command>`. Today the only verb is `status`, the
-// agent's forward channel onto its own bound ticket; more arrive with the board.
+// runTicket routes `attn ticket <command>`: `status` (the agent's forward channel
+// onto its own bound ticket), `inbox`, `attach`, and `new` (mint a standalone,
+// unbound backlog ticket without delegating).
 func runTicket() {
 	if len(os.Args) < 3 || os.Args[2] == "-h" || os.Args[2] == "--help" {
 		writeTicketHelp(os.Stdout)
@@ -651,6 +652,12 @@ func runTicket() {
 			return
 		}
 		runTicketAttach(os.Args[3:])
+	case "new":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketNew(os.Args[3:])
 	default:
 		fmt.Fprintf(os.Stderr, "ticket: unknown command %q\n", os.Args[2])
 		writeTicketHelp(os.Stderr)
@@ -805,6 +812,72 @@ func runTicketAttach(args []string) {
 	fmt.Printf("attached %s to ticket %s\n", result.Filename, result.TicketID)
 }
 
+type ticketNewArgs struct {
+	Title       string
+	Description string
+	ID          string
+	Session     string
+	JSON        bool
+}
+
+// parseTicketNewArgs reads `ticket new --title <t> [flags]`. --title is required;
+// the rest are optional. Like attach there is no positional, so a plain Parse
+// suffices.
+func parseTicketNewArgs(args []string) (ticketNewArgs, error) {
+	var result ticketNewArgs
+	fs := flag.NewFlagSet("ticket new", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	title := fs.String("title", "", "ticket title (the slug is derived from it)")
+	description := fs.String("description", "", "optional brief recorded as the ticket description")
+	id := fs.String("id", "", "optional explicit slug (defaults to one derived from the title)")
+	session := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	jsonOutput := fs.Bool("json", false, "print the result as JSON")
+	if err := fs.Parse(args); err != nil {
+		return result, err
+	}
+	if fs.NArg() != 0 {
+		return result, fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	name := strings.TrimSpace(*title)
+	if name == "" {
+		return result, errors.New("--title is required")
+	}
+	result.Title = name
+	result.Description = strings.TrimSpace(*description)
+	result.ID = strings.TrimSpace(*id)
+	result.Session = *session
+	result.JSON = *jsonOutput
+	return result, nil
+}
+
+// runTicketNew mints a standalone, unbound backlog ticket in the Todo column —
+// distinct from delegation, which mints a working ticket bound to a spawned agent.
+// The daemon derives the slug from the title (or pins --id) and may auto-suffix on
+// collision, so the success line echoes the resolved id back.
+func runTicketNew(args []string) {
+	parsed, err := parseTicketNewArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket new: %v\n", err)
+		writeTicketHelp(os.Stderr)
+		os.Exit(2)
+	}
+	source, err := resolveDispatchSession(parsed.Session)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket new: %v\n", err)
+		os.Exit(2)
+	}
+	result, err := client.New("").CreateTicket(source, parsed.Title, parsed.Description, parsed.ID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket new: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.JSON {
+		printJSON(result)
+		return
+	}
+	fmt.Printf("created ticket %s (%s): %s\n", result.TicketID, result.Status, result.Title)
+}
+
 // runTicketInbox reads (and consumes) this session's unread ticket events — the
 // chief's comments, status changes, and re-briefs it has not yet seen. Reading
 // advances the cursor, so a second call returns only what landed since.
@@ -868,6 +941,8 @@ commands:
         read (and mark read) this session's unread ticket activity
   attach --file <path> [--note <text>] [--session <id>] [--json]
         copy a file onto this session's bound ticket as an attachment
+  new --title <t> [--description <d>] [--id <slug>] [--session <id>] [--json]
+        create an unbound backlog ticket in todo (no agent, no session)
 
 work states:
   in_progress       working

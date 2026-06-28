@@ -18,6 +18,8 @@ When the chief delegates, attn opens a ticket bound to the delegated session
 working column. The delegated agent self-reports its work state, which moves the
 ticket across the board — you read the board instead of polling the agent.
 
+> When the user asks you to capture backlog work without delegating it, mint an unbound `todo` with `attn ticket new` (distinct from delegation, which mints a working, bound ticket) — see the tickets reference. Create one only on the user's request; you may suggest it, never file on your own.
+
 When you delegate work that will produce a large durable artifact — a report, a
 design doc, findings — designate where it should land in the Notebook in the brief
 (for example a `projects/<slug>/` note). The agent writes the artifact into the

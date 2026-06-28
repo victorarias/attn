@@ -245,7 +245,7 @@ each is a meaningful, verifiable chunk.
 | 6 | Codex nudge path | ✅ (self-monitor formalized as an `agent.Capabilities` flag; daemon resolves it from the driver registry; pure `ticketnotify` + end-to-end codex-nudge roundtrip test) |
 | 7 | Retire the `dispatch` namespace | ✅ (atomic: CLI/handlers/store/protocol removed, delegation rewired to tickets-only via `delegatedTicketPrompt`, ProtocolVersion 129→130; dispatch tables orphaned not dropped — append-only migration history; notebook delivery-ledger removed, shared raw-tier kept) |
 | 8 | Export ticket state (CLI) — *post-merge, lands on `main`* | ⬜ |
-| 9 | Standalone ticket create (`ticket new`, no delegation) + agent awareness | ⬜ |
+| 9 | Standalone ticket create (`ticket new`, no delegation) + agent awareness | ✅ (`attn ticket new --title [--description] [--id]` mints an unbound `todo`; two-tier awareness — a thin propose-not-act pointer in both chief + agent system prompts, depth in the attn skill's tickets reference; ProtocolVersion 130→131; user-triggered only — an agent may surface a worth-filing ticket, never files unprompted) |
 
 1. **Ticket store + lifecycle.** Fresh `tickets` / `ticket_activity` /
    `ticket_attachments` tables (migration 55), the status enum (incl. Todo / Crashed),

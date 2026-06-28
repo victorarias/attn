@@ -2,6 +2,7 @@ package agent
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -67,12 +68,13 @@ func TestClaudeBuildCommand_AppendsWorkspaceContextSystemPrompt(t *testing.T) {
 	if flagIndex == -1 || flagIndex+1 >= len(cmd.Args) {
 		t.Fatalf("args = %#v, want --append-system-prompt with guidance", cmd.Args)
 	}
-	// A non-chief workspace agent gets ONLY its workspace-context guidance as the
-	// system-prompt value — no journaling directive is appended. Pin the exact value
-	// so a re-introduced directive (composed or as a separate arg) is caught.
-	want := hooks.WorkspaceContextGuidance("/tmp/context.md")
+	// A non-chief workspace agent gets the production composition as the
+	// system-prompt value: its workspace-context guidance plus the always-on
+	// ticket-awareness pointer — no journaling directive. Pin the exact value so a
+	// re-introduced directive (composed or as a separate arg) is caught.
+	want := hooks.AgentInstructions("/tmp/context.md", false)
 	if cmd.Args[flagIndex+1] != want {
-		t.Fatalf("system prompt = %q, want exactly the workspace-context guidance", cmd.Args[flagIndex+1])
+		t.Fatalf("system prompt = %q, want the workspace-context + ticket composition", cmd.Args[flagIndex+1])
 	}
 	// The same launch sets the suppression marker, so the SessionStart fallback does
 	// not re-emit the guidance on resume/compact.
@@ -151,8 +153,9 @@ func TestCodexConfigOverrides_NotebookGuidanceTakesPrecedence(t *testing.T) {
 	}
 }
 
-// A non-chief Codex launch carries ONLY its workspace-context guidance in a
-// single developer_instructions override — no journaling directive is appended.
+// A non-chief Codex launch carries its workspace-context guidance plus the
+// always-on ticket-awareness pointer in a single developer_instructions
+// override — no journaling directive is appended.
 func TestCodexConfigOverrides_NonChiefOmitsJournalingDirective(t *testing.T) {
 	overrides := (&Codex{}).GenerateConfigOverrides(SpawnOpts{
 		SessionID:            "sess-1",
@@ -164,12 +167,18 @@ func TestCodexConfigOverrides_NonChiefOmitsJournalingDirective(t *testing.T) {
 			devInstr = append(devInstr, o)
 		}
 	}
-	// Exactly one developer_instructions entry, carrying the workspace-context guidance.
+	// Exactly one developer_instructions entry, equal to the value the codex path
+	// composes: the workspace-context guidance plus the ticket-awareness pointer.
 	if len(devInstr) != 1 {
 		t.Fatalf("want exactly one developer_instructions override, got %d: %q", len(devInstr), overrides)
 	}
-	if !strings.Contains(devInstr[0], "/tmp/context.md") {
-		t.Fatalf("developer_instructions should carry workspace-context guidance: %q", devInstr[0])
+	want := "developer_instructions=" + strconv.Quote(hooks.AgentInstructions("/tmp/context.md", false))
+	if devInstr[0] != want {
+		t.Fatalf("developer_instructions = %q, want the workspace + ticket composition %q", devInstr[0], want)
+	}
+	// Still carries the workspace context path and the always-on ticket block.
+	if !strings.Contains(devInstr[0], "/tmp/context.md") || !strings.Contains(devInstr[0], "attn ticket new") {
+		t.Fatalf("developer_instructions should carry workspace-context guidance and the ticket pointer: %q", devInstr[0])
 	}
 	// The journaling directive must NOT be appended for non-chief agents.
 	if strings.Contains(devInstr[0], "notable moments, not routine steps") {
