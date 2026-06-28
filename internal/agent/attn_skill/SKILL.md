@@ -26,6 +26,7 @@ If a command reports an unknown subcommand or shows another tool's help, check
   [references/delegation.md](references/delegation.md).
 - **Coordinate or report chief-of-staff tracked work (tickets):** read
   [references/chief-of-staff.md](references/chief-of-staff.md).
+- **Write a good ticket, or create a backlog ticket without delegating (`ticket new`):** read [references/tickets.md](references/tickets.md).
 - **Read or update shared workspace context:** read
   [references/workspace-context.md](references/workspace-context.md).
 - **Read or maintain the durable Notebook (journal + knowledge base), esp. as

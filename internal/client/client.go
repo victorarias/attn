@@ -251,6 +251,31 @@ func (c *Client) AttachTicket(sourceSessionID, sourcePath, filename, note string
 	return resp.TicketAttachResult, nil
 }
 
+// CreateTicket mints a standalone backlog ticket — unbound, starting in todo. The
+// daemon derives the slug from the title (or pins an explicit id), records the
+// calling session as the author, and echoes the resolved id, status, and title back.
+func (c *Client) CreateTicket(sourceSessionID, title, description, id string) (*protocol.TicketCreateResult, error) {
+	msg := protocol.TicketCreateMessage{
+		Cmd:             protocol.CmdTicketCreate,
+		SourceSessionID: sourceSessionID,
+		Title:           title,
+	}
+	if value := strings.TrimSpace(description); value != "" {
+		msg.Description = protocol.Ptr(value)
+	}
+	if value := strings.TrimSpace(id); value != "" {
+		msg.ID = protocol.Ptr(value)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.TicketCreateResult == nil {
+		return nil, errors.New("daemon returned no ticket create result")
+	}
+	return resp.TicketCreateResult, nil
+}
+
 // TicketInbox reads and consumes the calling session's unread ticket events,
 // bundled by ticket. Reading advances the session's per-ticket cursors, so a
 // second call returns only what landed since.

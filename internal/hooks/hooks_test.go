@@ -228,31 +228,46 @@ func TestWorkflowTriggerGuidance(t *testing.T) {
 func TestAgentInstructionsComposition(t *testing.T) {
 	workflow := WorkflowTriggerGuidance()
 	context := WorkspaceContextGuidance("/tmp/context.md")
+	ticket := TicketAwarenessGuidance()
 
-	// Nothing applies => empty.
-	if got := AgentInstructions("", false); got != "" {
-		t.Fatalf("AgentInstructions(empty, false) = %q, want \"\"", got)
+	// The ticket-awareness pointer is always-on: even with no checkout and no
+	// workflow guidance, AgentInstructions returns exactly the ticket block.
+	if got := AgentInstructions("", false); got != ticket {
+		t.Fatalf("AgentInstructions(empty, false) = %q, want the ticket block %q", got, ticket)
 	}
 
-	// Workspace context only.
+	// Workspace context, then the always-on ticket block.
 	contextOnly := AgentInstructions("/tmp/context.md", false)
-	if !strings.Contains(contextOnly, "/tmp/context.md") {
-		t.Fatalf("context-only instructions missing the path: %q", contextOnly)
+	if want := strings.Join([]string{context, ticket}, "\n\n"); contextOnly != want {
+		t.Fatalf("context-only instructions = %q, want %q", contextOnly, want)
 	}
 	if strings.Contains(contextOnly, "hypercode") {
 		t.Fatalf("context-only instructions leaked workflow guidance: %q", contextOnly)
 	}
 
-	// Workflow guidance only (no checkout).
+	// Workflow guidance (no checkout), then the always-on ticket block.
 	workflowOnly := AgentInstructions("", true)
-	if workflowOnly != workflow {
-		t.Fatalf("workflow-only instructions = %q, want exactly the workflow guidance", workflowOnly)
+	if want := strings.Join([]string{workflow, ticket}, "\n\n"); workflowOnly != want {
+		t.Fatalf("workflow-only instructions = %q, want %q", workflowOnly, want)
 	}
 
-	// Both, joined with a blank line, context first.
+	// Both, joined with a blank line, context first, ticket block last.
 	both := AgentInstructions("/tmp/context.md", true)
-	if want := context + "\n\n" + workflow; both != want {
+	if want := strings.Join([]string{context, workflow, ticket}, "\n\n"); both != want {
 		t.Fatalf("combined instructions = %q, want %q", both, want)
+	}
+}
+
+func TestTicketAwarenessGuidance(t *testing.T) {
+	guidance := TicketAwarenessGuidance()
+	for _, expected := range []string{
+		"attn ticket new",
+		"only when the user asks", // propose-not-act phrase
+		"never file or park work", // on-your-own-initiative boundary
+	} {
+		if !strings.Contains(guidance, expected) {
+			t.Fatalf("ticket awareness guidance missing %q: %q", expected, guidance)
+		}
 	}
 }
 
@@ -318,6 +333,7 @@ func TestNotebookGuidance(t *testing.T) {
 		"untrusted context to weigh",
 		"use native subagents instead",
 		"notebook and chief-of-staff references", // extended door pointer
+		"attn ticket new",                        // always-on ticket-awareness pointer
 	} {
 		if !strings.Contains(guidance, expected) {
 			t.Fatalf("notebook guidance missing %q: %q", expected, guidance)

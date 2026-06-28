@@ -38,28 +38,39 @@ func ticketSlug(label string) string {
 // agent begins immediately. The slug is derived from the label, with a numeric
 // suffix on collision. Returns the created ticket id.
 func (d *Daemon) createDelegatedTicket(chiefSessionID string, session *protocol.Session, brief, label, agent string) (string, error) {
-	base := ticketSlug(label)
-	now := time.Now()
+	created, err := d.createTicketWithUniqueSlug(store.Ticket{
+		Title:       label,
+		Description: brief,
+		Status:      store.TicketStatusWorking,
+		Assignee:    session.ID,
+		Cwd:         session.Directory,
+		LastAgentID: agent,
+	}, ticketSlug(label), chiefSessionID, time.Now())
+	if err != nil {
+		return "", err
+	}
+	return created.ID, nil
+}
+
+// createTicketWithUniqueSlug inserts template under base, falling back to base-2,
+// base-3, ... on slug collision (up to 50 attempts). The template's ID field is
+// ignored — the slug is allocated here. It returns the created ticket, a non-collision
+// CreateTicket error verbatim, or a "could not allocate" exhaustion error. Both
+// createDelegatedTicket (bound, working) and the standalone ticket_create handler
+// (unbound, todo) share this so the auto-suffix behavior is identical.
+func (d *Daemon) createTicketWithUniqueSlug(template store.Ticket, base, author string, now time.Time) (*store.Ticket, error) {
 	for attempt := 0; attempt < 50; attempt++ {
-		id := base
+		template.ID = base
 		if attempt > 0 {
-			id = fmt.Sprintf("%s-%d", base, attempt+1)
+			template.ID = fmt.Sprintf("%s-%d", base, attempt+1)
 		}
-		_, err := d.store.CreateTicket(store.Ticket{
-			ID:          id,
-			Title:       label,
-			Description: brief,
-			Status:      store.TicketStatusWorking,
-			Assignee:    session.ID,
-			Cwd:         session.Directory,
-			LastAgentID: agent,
-		}, chiefSessionID, now)
+		created, err := d.store.CreateTicket(template, author, now)
 		if err == nil {
-			return id, nil
+			return created, nil
 		}
 		if !errors.Is(err, store.ErrTicketIDTaken) {
-			return "", err
+			return nil, err
 		}
 	}
-	return "", fmt.Errorf("could not allocate a unique ticket id from %q", base)
+	return nil, fmt.Errorf("could not allocate a unique ticket id from %q", base)
 }

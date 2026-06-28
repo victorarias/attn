@@ -180,6 +180,10 @@ The work-tracker epic delivered the loop across slices 1–7.
   closed today), read-only, live `tickets_updated`.
 - [x] **The `dispatch` namespace retired** — tickets-only delegation via
   `delegatedTicketPrompt`; the dispatch CLI, store, handlers, and protocol removed.
+- [x] **Backlog without a delegation** — `attn ticket new --title [--description]
+  [--id]` mints an unbound `todo` with no session, so the Todo column fills from
+  first-class captures, not just delegation. User-triggered only: an agent may surface a
+  ticket worth filing, but never creates one on its own initiative.
 
 **Still open:**
 - [ ] **The "went quiet" floor.** A ticket sitting in **Working** that simply stops
@@ -189,9 +193,6 @@ The work-tracker epic delivered the loop across slices 1–7.
   Victor vs. hold it until he asks? The threshold is unsettled.
 - [ ] **Multi-delegation synthesis.** Several tickets moving close together should
   become one coherent update, not N pings.
-- [ ] **Backlog without a delegation.** `todo` is the state for a ticket created
-  without delegating, but there is no `attn ticket new` yet — so the Todo column only
-  fills from real backlog items. A first-class create path is open.
 - [ ] **Ticket export** (slice 8) — a self-contained archive of a ticket's state;
   deferred to a standalone PR on `main`.
 

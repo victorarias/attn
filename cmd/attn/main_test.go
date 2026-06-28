@@ -1038,3 +1038,58 @@ func TestParseTicketAttachArgsErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestParseTicketNewArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want ticketNewArgs
+	}{
+		{
+			name: "title only",
+			args: []string{"--title", "Migrate store to X"},
+			want: ticketNewArgs{Title: "Migrate store to X"},
+		},
+		{
+			name: "title, description, and id",
+			args: []string{"--title", "Migrate store", "--description", "the brief", "--id", "store-migration"},
+			want: ticketNewArgs{Title: "Migrate store", Description: "the brief", ID: "store-migration"},
+		},
+		{
+			name: "json",
+			args: []string{"--title", "Migrate store", "--json"},
+			want: ticketNewArgs{Title: "Migrate store", JSON: true},
+		},
+		{
+			name: "session",
+			args: []string{"--title", "Migrate store", "--session", "s1"},
+			want: ticketNewArgs{Title: "Migrate store", Session: "s1"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseTicketNewArgs(tc.args)
+			if err != nil {
+				t.Fatalf("parseTicketNewArgs(%v): %v", tc.args, err)
+			}
+			if got != tc.want {
+				t.Fatalf("parseTicketNewArgs(%v) = %+v, want %+v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseTicketNewArgsErrors(t *testing.T) {
+	cases := map[string][]string{
+		"missing title":         {"--description", "hi"},
+		"unknown flag":          {"--title", "x", "--bogus"},
+		"unexpected positional": {"--title", "x", "extra"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseTicketNewArgs(args); err == nil {
+				t.Fatalf("parseTicketNewArgs(%v) = nil error, want error", args)
+			}
+		})
+	}
+}

@@ -2568,6 +2568,9 @@ type Response struct {
 	// TicketAttachResult corresponds to the JSON schema field "ticket_attach_result".
 	TicketAttachResult *TicketAttachResult `json:"ticket_attach_result,omitempty,omitzero"`
 
+	// TicketCreateResult corresponds to the JSON schema field "ticket_create_result".
+	TicketCreateResult *TicketCreateResult `json:"ticket_create_result,omitempty,omitzero"`
+
 	// TicketInboxResult corresponds to the JSON schema field "ticket_inbox_result".
 	TicketInboxResult *TicketInboxResult `json:"ticket_inbox_result,omitempty,omitzero"`
 
@@ -3442,6 +3445,34 @@ type TicketChangeStatusMessage struct {
 
 	// TicketID corresponds to the JSON schema field "ticket_id".
 	TicketID string `json:"ticket_id"`
+}
+
+type TicketCreateMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Description corresponds to the JSON schema field "description".
+	Description *string `json:"description,omitempty,omitzero"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID *string `json:"id,omitempty,omitzero"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+}
+
+type TicketCreateResult struct {
+	// Status corresponds to the JSON schema field "status".
+	Status TicketStatus `json:"status"`
+
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID string `json:"ticket_id"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
 }
 
 type TicketEditDescriptionMessage struct {

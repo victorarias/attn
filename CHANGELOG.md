@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-28]
+
+### Added
+- **Create backlog tickets without delegating.** `attn ticket new --title <t> [--description <d>] [--id <slug>]` files an unbound ticket in the Todo column — for capturing work you're not handing to an agent yet. Agents now know that tickets are something they can create on your request.
+
 ## [2026-06-27]
 
 ### Added

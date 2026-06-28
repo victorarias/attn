@@ -29,6 +29,7 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"ATTN_WRAPPER_PATH",
 		"references/delegation.md",
 		"references/chief-of-staff.md",
+		"references/tickets.md",
 		"references/workspace-context.md",
 		"references/review-loops.md",
 		"references/workflow.md",
@@ -69,6 +70,18 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 	if strings.Contains(chiefOfStaff, "coordination-file") ||
 		strings.Contains(chiefOfStaff, "dispatch ") {
 		t.Fatalf("chief of staff reference retains legacy dispatch UX: %q", chiefOfStaff)
+	}
+
+	tickets := readSkillFile(t, skillDir, "references/tickets.md")
+	for _, expected := range []string{
+		"attn ticket new",         // the backlog-create command
+		"backlog",                 // the unbound-todo lane
+		"Only when the user asks", // user-triggered boundary
+		"deliverable",             // deliverable-type shaping guidance
+	} {
+		if !strings.Contains(tickets, expected) {
+			t.Fatalf("tickets reference missing %q: %q", expected, tickets)
+		}
 	}
 
 	delegation := readSkillFile(t, skillDir, "references/delegation.md")
@@ -203,6 +216,7 @@ func TestAttnSkillInstallsAreIdentical(t *testing.T) {
 	for _, relative := range []string{
 		"SKILL.md",
 		"references/delegation.md",
+		"references/tickets.md",
 		"references/workspace-context.md",
 		"references/review-loops.md",
 		"references/workflow.md",
