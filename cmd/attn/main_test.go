@@ -423,21 +423,21 @@ func TestWorkspaceContextCheckoutPathReturnsCheckoutPath(t *testing.T) {
 
 func TestWorkspaceContextGuidanceProvidedAtLaunch(t *testing.T) {
 	t.Setenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE", "developer_instructions")
-	t.Setenv("ATTN_NOTEBOOK_GUIDANCE", "")
+	t.Setenv("ATTN_CHIEF_GUIDANCE", "")
 	if !workspaceContextGuidanceProvidedAtLaunch() {
 		t.Fatal("workspace launch guidance should suppress hook guidance output")
 	}
 
-	// A chief launch injects Notebook guidance (not workspace context); its
+	// A chief launch injects chief guidance (not workspace context); its
 	// marker must equally suppress the SessionStart hook's workspace guidance.
 	t.Setenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE", "")
-	t.Setenv("ATTN_NOTEBOOK_GUIDANCE", "append_system_prompt")
+	t.Setenv("ATTN_CHIEF_GUIDANCE", "append_system_prompt")
 	if !workspaceContextGuidanceProvidedAtLaunch() {
-		t.Fatal("notebook launch guidance should suppress hook guidance output")
+		t.Fatal("chief launch guidance should suppress hook guidance output")
 	}
 
 	t.Setenv("ATTN_WORKSPACE_CONTEXT_GUIDANCE", "")
-	t.Setenv("ATTN_NOTEBOOK_GUIDANCE", "")
+	t.Setenv("ATTN_CHIEF_GUIDANCE", "")
 	if workspaceContextGuidanceProvidedAtLaunch() {
 		t.Fatal("missing launch guidance should preserve hook fallback output")
 	}

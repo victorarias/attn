@@ -555,7 +555,7 @@ func recordingBackend(inputs *[]string, mu *sync.Mutex) *fakeSpawnBackend {
 // idle or waiting for input — never into a busy/parked agent (working,
 // pending_approval typing Enter would answer a prompt, scheduled would disrupt
 // auto-resume, etc.).
-func TestActivateNotebookGuidanceLiveInjectStates(t *testing.T) {
+func TestActivateChiefGuidanceLiveInjectStates(t *testing.T) {
 	inject := []protocol.SessionState{protocol.SessionStateIdle, protocol.SessionStateWaitingInput}
 	skip := []protocol.SessionState{
 		protocol.SessionStateWorking, protocol.SessionStatePendingApproval,
@@ -572,7 +572,7 @@ func TestActivateNotebookGuidanceLiveInjectStates(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		d.activateNotebookGuidanceLive("chief")
+		d.activateChiefGuidanceLive("chief")
 
 		mu.Lock()
 		defer mu.Unlock()
@@ -594,7 +594,7 @@ func TestActivateNotebookGuidanceLiveInjectStates(t *testing.T) {
 
 // TOCTOU: a session demoted (chief role transferred away) between the goroutine
 // launch and execution must not be told it is now the chief, even while idle.
-func TestActivateNotebookGuidanceLiveSkipsDemotedSession(t *testing.T) {
+func TestActivateChiefGuidanceLiveSkipsDemotedSession(t *testing.T) {
 	d := newNotebookDaemon(t)
 	var mu sync.Mutex
 	var inputs []string
@@ -606,7 +606,7 @@ func TestActivateNotebookGuidanceLiveSkipsDemotedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d.activateNotebookGuidanceLive("old-chief")
+	d.activateChiefGuidanceLive("old-chief")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -615,13 +615,13 @@ func TestActivateNotebookGuidanceLiveSkipsDemotedSession(t *testing.T) {
 	}
 }
 
-func TestActivateNotebookGuidanceLiveSkipsMissingSession(t *testing.T) {
+func TestActivateChiefGuidanceLiveSkipsMissingSession(t *testing.T) {
 	d := newNotebookDaemon(t)
 	var mu sync.Mutex
 	var inputs []string
 	d.ptyBackend = recordingBackend(&inputs, &mu)
 	// No session registered for this id.
-	d.activateNotebookGuidanceLive("ghost")
+	d.activateChiefGuidanceLive("ghost")
 
 	mu.Lock()
 	defer mu.Unlock()

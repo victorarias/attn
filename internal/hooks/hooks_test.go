@@ -313,8 +313,8 @@ func TestWorkspaceContextSessionStartOutputWrapsGuidance(t *testing.T) {
 	}
 }
 
-func TestNotebookGuidance(t *testing.T) {
-	guidance := NotebookGuidance("/home/u/attn-notebook")
+func TestChiefGuidance(t *testing.T) {
+	guidance := ChiefGuidance("/home/u/attn-notebook")
 	for _, expected := range []string{
 		"/home/u/attn-notebook",
 		"chief of staff",
@@ -334,9 +334,12 @@ func TestNotebookGuidance(t *testing.T) {
 		"use native subagents instead",
 		"notebook and chief-of-staff references", // extended door pointer
 		"attn ticket new",                        // always-on ticket-awareness pointer
+		// Coordinator-not-doer rule.
+		"coordinator, not a doer",
+		"I want to X",
 	} {
 		if !strings.Contains(guidance, expected) {
-			t.Fatalf("notebook guidance missing %q: %q", expected, guidance)
+			t.Fatalf("chief guidance missing %q: %q", expected, guidance)
 		}
 	}
 	// The notebook CLI was removed; guidance must not tell agents to run it; the
@@ -350,12 +353,12 @@ func TestNotebookGuidance(t *testing.T) {
 	}
 }
 
-func TestNotebookGuidanceEmptyWithoutRoot(t *testing.T) {
-	if got := NotebookGuidance(""); got != "" {
-		t.Fatalf("NotebookGuidance(\"\") = %q, want empty", got)
+func TestChiefGuidanceEmptyWithoutRoot(t *testing.T) {
+	if got := ChiefGuidance(""); got != "" {
+		t.Fatalf("ChiefGuidance(\"\") = %q, want empty", got)
 	}
-	if got := NotebookGuidance("   "); got != "" {
-		t.Fatalf("NotebookGuidance(whitespace) = %q, want empty", got)
+	if got := ChiefGuidance("   "); got != "" {
+		t.Fatalf("ChiefGuidance(whitespace) = %q, want empty", got)
 	}
 }
 
