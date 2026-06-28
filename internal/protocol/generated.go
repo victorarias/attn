@@ -2912,6 +2912,14 @@ type ReviewState struct {
 	ViewedFiles []string `json:"viewed_files"`
 }
 
+type RuntimeRespawnedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+}
+
 type Session struct {
 	// Agent corresponds to the JSON schema field "agent".
 	Agent string `json:"agent"`

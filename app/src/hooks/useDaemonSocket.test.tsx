@@ -170,6 +170,35 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('reattaches with relaunch_restore on runtime_respawned without treating it as an exit', async () => {
+    const onSessionExited = vi.fn();
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        onSessionExited,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    ws.sent = [];
+
+    // The daemon replaced this session's agent in place (chief assign/demote reload).
+    ws.emit({ event: 'runtime_respawned', id: 'reload-sess' });
+
+    const sent = ws.sent.map((entry) => JSON.parse(entry));
+    // Re-attach with explicit relaunch_restore so the fresh worker's scrollback replays.
+    expect(sent).toContainEqual({ cmd: 'attach_session', id: 'reload-sess', attach_policy: 'relaunch_restore' });
+    // A reload is a runtime replacement, not a close: the session must not be torn down.
+    expect(onSessionExited).not.toHaveBeenCalled();
+
+    unmount();
+  });
+
   it('keeps the socket connected across callback rerenders and uses the latest callback', async () => {
     const firstSessionsUpdate = vi.fn();
     const latestSessionsUpdate = vi.fn();

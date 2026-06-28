@@ -22,6 +22,21 @@ type RegistryEntry struct {
 	OwnerPID         int    `json:"owner_pid,omitempty"`
 	OwnerStartedAt   string `json:"owner_started_at,omitempty"`
 	OwnerNonce       string `json:"owner_nonce,omitempty"`
+
+	// Launch params for daemon-side agent reload (chief-of-staff assign/demote).
+	// The daemon does NOT otherwise persist these — they arrive per-spawn from the
+	// client — so the worker records them here for the daemon to read back when it
+	// re-spawns the agent in place. LaunchParamsRecorded distinguishes a worker that
+	// records them from an older one that does not (Version stays 1 so recovery,
+	// which hard-requires Version==1, keeps accepting the entry); when it is false
+	// the daemon must NOT trust YoloMode/Executable and must abort the reload rather
+	// than respawn with defaulted launch flags.
+	LaunchParamsRecorded bool   `json:"launch_params_recorded,omitempty"`
+	YoloMode             bool   `json:"yolo_mode,omitempty"`
+	Executable           string `json:"executable,omitempty"`
+	ClaudeExecutable     string `json:"claude_executable,omitempty"`
+	CodexExecutable      string `json:"codex_executable,omitempty"`
+	CopilotExecutable    string `json:"copilot_executable,omitempty"`
 }
 
 func WriteRegistryAtomic(path string, entry RegistryEntry) error {

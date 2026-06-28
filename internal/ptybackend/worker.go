@@ -920,6 +920,30 @@ func (b *WorkerBackend) SessionInfo(ctx context.Context, sessionID string) (Sess
 	}, nil
 }
 
+// SessionLaunchParams returns the launch flags the worker recorded in its
+// registry entry, so the daemon can re-spawn the agent in place with the same
+// yolo/executable instead of defaulting them. A registry miss, or an entry from a
+// pre-reload worker (LaunchParamsRecorded false), surfaces as Recorded=false so
+// the daemon aborts the reload rather than respawning with wrong launch flags.
+func (b *WorkerBackend) SessionLaunchParams(ctx context.Context, sessionID string) (SessionLaunchParams, error) {
+	session, err := b.getSession(sessionID)
+	if err != nil {
+		return SessionLaunchParams{}, err
+	}
+	entry, err := ptyworker.ReadRegistry(session.RegistryPath)
+	if err != nil {
+		return SessionLaunchParams{}, err
+	}
+	return SessionLaunchParams{
+		Recorded:          entry.LaunchParamsRecorded,
+		YoloMode:          entry.YoloMode,
+		Executable:        entry.Executable,
+		ClaudeExecutable:  entry.ClaudeExecutable,
+		CodexExecutable:   entry.CodexExecutable,
+		CopilotExecutable: entry.CopilotExecutable,
+	}, nil
+}
+
 func (b *WorkerBackend) Snapshot(ctx context.Context, sessionID string) (AttachInfo, error) {
 	session, err := b.getSession(sessionID)
 	if err != nil {

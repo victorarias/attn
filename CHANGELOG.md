@@ -13,6 +13,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Your chief of staff reacts the moment delegated work changes.** Previously, when an agent the chief delegated finished, got blocked, or crashed, the chief found out only the next time you prompted it — the update sat unseen on the board. Now the chief watches its delegated tickets and surfaces a completion, a question, or a failure to you proactively, with a recommended next step, instead of going quiet after handing work off. As a safety net, attn also pokes an idle agent that has unread ticket activity it isn't already watching, so nothing stays silently unread.
+- **Making a running session your chief of staff now takes effect immediately.** Turning the chief role on (or off) reloads that agent in place — keeping its conversation intact — so the chief operating guidance actually applies to the running agent right away, instead of taking hold only the next time it happened to restart.
 
 ## [2026-06-27]
 

@@ -307,6 +307,15 @@ func (r *Runtime) run(ctx context.Context) error {
 	entry.OwnerPID = r.cfg.OwnerPID
 	entry.OwnerStartedAt = r.cfg.OwnerStartedAt
 	entry.OwnerNonce = r.cfg.OwnerNonce
+	// Record the launch params the daemon can't otherwise source, so a daemon-side
+	// reload (chief assign/demote) re-spawns with the same yolo/executable instead
+	// of defaulting them.
+	entry.LaunchParamsRecorded = true
+	entry.YoloMode = r.cfg.YoloMode
+	entry.Executable = r.cfg.Executable
+	entry.ClaudeExecutable = r.cfg.ClaudeExecutable
+	entry.CodexExecutable = r.cfg.CodexExecutable
+	entry.CopilotExecutable = r.cfg.CopilotExecutable
 	if err := WriteRegistryAtomic(r.cfg.RegistryPath, entry); err != nil {
 		return err
 	}
