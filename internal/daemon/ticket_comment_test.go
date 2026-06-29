@@ -79,7 +79,9 @@ func TestHandleTicketCommentValidatesTicket(t *testing.T) {
 // exclusion were broken.
 func TestAgentCommentDoesNotSubscribeCommenter(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
 	t.Cleanup(d.stopTicketBackstops)
+	t.Cleanup(d.stopNudgeCountdowns)
 	_, agents, inputs := delegateMany(t, d, "codex", "Task Y", "Task X")
 	z, x := agents[0], agents[1] // z owns ticket Y; x owns its own ticket
 	ticketY := boundTicketID(t, d, z)
@@ -94,6 +96,7 @@ func TestAgentCommentDoesNotSubscribeCommenter(t *testing.T) {
 
 	// The assignee is a participant -> nudged about the comment on its ticket. This
 	// makes the X-exclusion assertions meaningful: the comment really did route.
+	fireNudgeNow(t, d, z) // the comment armed z's countdown
 	if !wasNudged(inputs(z)) {
 		t.Fatal("assignee was not nudged about the comment on its ticket")
 	}

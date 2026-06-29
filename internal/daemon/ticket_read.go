@@ -47,6 +47,10 @@ func (d *Daemon) handleTicketInbox(conn net.Conn, msg *protocol.TicketInboxMessa
 		d.sendError(conn, "ticket inbox: "+err.Error())
 		return
 	}
+	// The consume advanced this session's cursors, so its unread count just dropped.
+	// Refresh the indicator (and cancel any pending countdown if fully drained) — this
+	// is the chokepoint a self-monitoring agent's own watch drains through.
+	d.refreshTicketUnread(sourceSessionID)
 	_ = json.NewEncoder(conn).Encode(protocol.Response{
 		Ok:                true,
 		TicketInboxResult: &protocol.TicketInboxResult{Bundles: ticketEventBundlesToProtocol(bundles)},

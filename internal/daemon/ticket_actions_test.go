@@ -3,6 +3,7 @@ package daemon
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
@@ -12,6 +13,8 @@ import (
 // is authored as "you", not the agent — notifies the idle assigned agent.
 func TestTicketChangeStatusMovesAndNotifies(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
+	t.Cleanup(d.stopNudgeCountdowns)
 	_, agentID, inputs := delegateForNotify(t, d, "codex")
 	ticketID := boundTicketID(t, d, agentID)
 	d.store.UpdateState(agentID, protocol.StateIdle)
@@ -34,6 +37,7 @@ func TestTicketChangeStatusMovesAndNotifies(t *testing.T) {
 	if tk == nil || tk.Status != store.TicketStatusBlocked {
 		t.Fatalf("ticket status = %v, want blocked", tk)
 	}
+	fireNudgeNow(t, d, agentID) // the notify armed a countdown; fire it
 	if !wasNudged(inputs(agentID)) {
 		t.Fatal("assigned agent was not notified of the human status change")
 	}
@@ -43,6 +47,8 @@ func TestTicketChangeStatusMovesAndNotifies(t *testing.T) {
 // board→agent steer with real content.
 func TestTicketAddCommentLandsAndNotifies(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
+	t.Cleanup(d.stopNudgeCountdowns)
 	_, agentID, inputs := delegateForNotify(t, d, "codex")
 	ticketID := boundTicketID(t, d, agentID)
 	d.store.UpdateState(agentID, protocol.StateIdle)
@@ -70,6 +76,7 @@ func TestTicketAddCommentLandsAndNotifies(t *testing.T) {
 	if !sawComment {
 		t.Fatalf("comment not recorded as authored by 'you': %+v", tk.Activity)
 	}
+	fireNudgeNow(t, d, agentID)
 	if !wasNudged(inputs(agentID)) {
 		t.Fatal("assigned agent was not notified of the human comment")
 	}

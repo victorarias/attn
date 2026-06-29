@@ -42,6 +42,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdHeartbeat:                             commandMetadata(ScopeSession, false, true),
 	protocol.CmdSessionVisualized:                     commandMetadata(ScopeSession, false, true),
 	protocol.CmdSessionSelected:                       commandMetadata(ScopeSession, false, true),
+	protocol.CmdTriggerNudge:                          commandMetadata(ScopeSession, false, true),
 	protocol.CmdWorkspaceSelected:                     commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdMuteWorkspace:                         commandMetadata(ScopeEndpoint, false, true),
 	protocol.CmdQueryPRs:                              commandMetadata(ScopeHubLocal, false, true),

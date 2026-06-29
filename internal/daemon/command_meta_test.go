@@ -18,6 +18,7 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdHeartbeat,
 		protocol.CmdSessionVisualized,
 		protocol.CmdSessionSelected,
+		protocol.CmdTriggerNudge,
 		protocol.CmdMuteWorkspace,
 		protocol.CmdQueryPRs,
 		protocol.CmdMutePR,

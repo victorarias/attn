@@ -946,6 +946,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleSessionVisualizedWS(msg.(*protocol.SessionVisualizedMessage))
 	case protocol.CmdSessionSelected:
 	case protocol.CmdWorkspaceSelected:
+	case protocol.CmdTriggerNudge:
+		go d.handleTriggerNudge(msg.(*protocol.TriggerNudgeMessage))
 	case protocol.CmdPRVisited:
 		d.handlePRVisitedWS(msg.(*protocol.PRVisitedMessage))
 	case protocol.CmdListWorktrees:
@@ -1217,6 +1219,10 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 	case protocol.CmdSessionSelected:
 		if typed, ok := msg.(*protocol.SessionSelectedMessage); ok {
 			return typed.ID
+		}
+	case protocol.CmdTriggerNudge:
+		if typed, ok := msg.(*protocol.TriggerNudgeMessage); ok {
+			return typed.SessionID
 		}
 	case protocol.CmdStartReviewLoop:
 		if typed, ok := msg.(*protocol.StartReviewLoopMessage); ok {

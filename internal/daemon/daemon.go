@@ -152,10 +152,23 @@ type Daemon struct {
 	ticketBackstopMu     sync.Mutex
 	ticketBackstopTimers map[string]*time.Timer
 	ticketBackstopGrace  time.Duration
-	recoveryMu           sync.RWMutex
-	recovering           bool
-	notebookMu           sync.Mutex
-	notebookStore        *notebook.Store
+	// nudge countdown (see nudge_countdown.go): every ticket doorbell arms a
+	// visible per-session countdown instead of injecting immediately. The
+	// currently-selected session's countdown is paused; the timer fire is the only
+	// place a real doorbell happens, and only if no genuine user keystroke landed in
+	// the guard window (the anti-splice guarantee). All maps lazy-init so a
+	// directly-constructed test daemon is nil-safe.
+	nudgeMu             sync.Mutex
+	nudgeCountdowns     map[string]*nudgeCountdown     // presence == a running (unpaused) countdown
+	unreadCache         map[string]bool                // per-session unread ticket activity, for cheap broadcast decoration
+	nudgeWindowOverride time.Duration                  // 0 => defaultNudgeCountdownWindow; a short test override otherwise
+	nudgeFireHook       func(sessionID, action string) // tests only: invoked at the end of a countdown fire
+	lastInputMu         sync.Mutex
+	lastUserInputAt     map[string]time.Time // per-session keystroke recency — the fire-time splice guard
+	recoveryMu          sync.RWMutex
+	recovering          bool
+	notebookMu          sync.Mutex
+	notebookStore       *notebook.Store
 	// notebookWatcher observes notebook.root for external edits; guarded by its
 	// own mutex (distinct from notebookMu) so notebookStoreFor can start it
 	// without nesting locks. Lazily started on first notebook use.
@@ -1326,6 +1339,7 @@ func (d *Daemon) Stop() {
 	d.stopInstalledPlugins()
 	d.stopAllTranscriptWatchers()
 	d.stopTicketBackstops()
+	d.stopNudgeCountdowns()
 	if d.ptyBackend != nil {
 		_ = d.ptyBackend.Shutdown(context.Background())
 	}
@@ -1517,6 +1531,7 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 	if session := d.store.Get(sessionID); session != nil {
 		d.captureTicketCrashState(sessionID, string(session.State))
 	}
+	d.clearNudgeState(sessionID)
 	d.store.Remove(sessionID)
 }
 
@@ -1558,6 +1573,19 @@ func (d *Daemon) handlePTYState(sessionID, state string) {
 	// doorbell write briefly blocks, and a no-unread observer is a quick no-op.
 	if isIdleForNudge(state) {
 		go d.notifyTicketSessionWentIdle(sessionID)
+	}
+	d.cancelNudgeOnLeaveIdle(sessionID, state)
+}
+
+// cancelNudgeOnLeaveIdle cancels a session's pending nudge countdown when its state is
+// no longer idle/waiting — you don't count down to nudge a working agent (the unread
+// marker survives until it reads its inbox). Called from every state-broadcast path so
+// the "armed only while idle" invariant holds regardless of which signal (PTY
+// detector, hook, classifier, transcript) drove the transition; the no-op-when-idle
+// guard makes it safe to call unconditionally.
+func (d *Daemon) cancelNudgeOnLeaveIdle(sessionID, state string) {
+	if !isIdleForNudge(state) {
+		d.cancelNudgeCountdown(sessionID, "left idle")
 	}
 }
 
@@ -2125,6 +2153,9 @@ func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	}
 	d.store.UpdateState(msg.ID, msg.State)
 	d.store.Touch(msg.ID)
+	// The hook is the authoritative state path for codex/claude, which never flow
+	// through handlePTYState, so the leaving-idle countdown cancel must hook here too.
+	d.cancelNudgeOnLeaveIdle(msg.ID, msg.State)
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients
@@ -2691,6 +2722,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	} else {
 		clone.NeedsReviewAfterLongRun = nil
 	}
+	d.decorateSessionWithNudge(clone)
 	d.decorateChiefOfStaffWithSessionID(clone, chiefOfStaffSessionID)
 	d.decorateDelegatedFromChief(clone, delegatedFromChief)
 	d.decorateSessionWithWorkspace(clone)
@@ -2761,6 +2793,7 @@ func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
 		d.clearLongRunTracking(sessionID)
 	}
 	d.store.UpdateState(sessionID, state)
+	d.cancelNudgeOnLeaveIdle(sessionID, state)
 	// Broadcast to WebSocket clients
 	session := d.sessionForBroadcast(d.store.Get(sessionID))
 	if session != nil {
@@ -2784,6 +2817,7 @@ func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, u
 		case protocol.StateIdle, protocol.StateScheduled:
 			d.clearLongRunTracking(sessionID)
 		}
+		d.cancelNudgeOnLeaveIdle(sessionID, state)
 		// Broadcast to WebSocket clients
 		session := d.sessionForBroadcast(d.store.Get(sessionID))
 		if session != nil {
