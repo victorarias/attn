@@ -1160,3 +1160,15 @@ func TestParseTicketCommentArgsErrors(t *testing.T) {
 		})
 	}
 }
+
+// The common mistake `comment tk "looks good"` (comment as a bare positional,
+// no -m) should produce an error that points at -m, not the opaque "got 2".
+func TestParseTicketCommentArgsBareCommentHintsMessageFlag(t *testing.T) {
+	_, err := parseTicketCommentArgs([]string{"tk", "looks good"})
+	if err == nil {
+		t.Fatal("parseTicketCommentArgs with bare comment = nil error, want error")
+	}
+	if !strings.Contains(err.Error(), "-m") {
+		t.Fatalf("error = %q, want it to mention -m", err.Error())
+	}
+}

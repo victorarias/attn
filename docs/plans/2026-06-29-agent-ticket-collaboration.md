@@ -141,3 +141,12 @@ Protocol (one ProtocolVersion bump for the whole set): new agent commands
 - A board/UI affordance to see subscribers, and an app-side "watch" toggle, are out of
   scope here (agent/CLI first).
 - Reconcile dead `InvolvedTicketIDs` with the new participation rule (or delete it).
+  (Done in slice 1 — deleted.)
+- **Discoverability prose for cross-ticket collaboration.** Slice 1 ships `comment` with
+  passive discovery via `attn ticket` help (which spells out "does not subscribe you").
+  The skill-reference prose belongs to the *whole* collaboration surface — comment +
+  subscribe + take read as one capability ("acting on another agent's ticket"), so a
+  dedicated reference section is deferred until slice 3 lands rather than half-documented
+  per slice. The own-ticket self-report references (`delegated-agent.md`,
+  `delegatedTicketPrompt`) are deliberately untouched: they cover `ticket status`, a
+  different surface.

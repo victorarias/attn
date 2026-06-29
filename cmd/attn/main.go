@@ -926,6 +926,11 @@ func parseTicketCommentArgs(args []string) (ticketCommentArgs, error) {
 		rest = rest[1:]
 	}
 	if len(positionals) != 1 {
+		// The most common mistake is writing the comment as a bare argument
+		// (`comment tk "looks good"`) instead of behind -m; point at the fix.
+		if len(positionals) > 1 && strings.TrimSpace(*message) == "" {
+			return result, fmt.Errorf("got %d arguments but no --message; the comment text goes behind -m, e.g. ticket comment %s -m \"<text>\"", len(positionals), positionals[0])
+		}
 		return result, fmt.Errorf("expected exactly one ticket id argument, got %d", len(positionals))
 	}
 	result.TicketID = positionals[0]
