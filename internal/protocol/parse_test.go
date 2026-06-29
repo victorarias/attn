@@ -33,6 +33,16 @@ func TestParseCommand(t *testing.T) {
 			wantCmd: CmdTicketList,
 		},
 		{
+			name:    "ticket subscribe message",
+			input:   `{"cmd":"ticket_subscribe","source_session_id":"abc","ticket_id":"tk"}`,
+			wantCmd: CmdTicketSubscribe,
+		},
+		{
+			name:    "ticket unsubscribe message",
+			input:   `{"cmd":"ticket_unsubscribe","source_session_id":"abc","ticket_id":"tk"}`,
+			wantCmd: CmdTicketUnsubscribe,
+		},
+		{
 			name:    "state message",
 			input:   `{"cmd":"state","id":"abc","state":"waiting"}`,
 			wantCmd: CmdState,

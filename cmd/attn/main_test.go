@@ -1172,3 +1172,51 @@ func TestParseTicketCommentArgsBareCommentHintsMessageFlag(t *testing.T) {
 		t.Fatalf("error = %q, want it to mention -m", err.Error())
 	}
 }
+
+// parseTicketIDArgs (subscribe/unsubscribe) takes exactly one id positional with the
+// session/json flags interleavable on either side.
+func TestParseTicketIDArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want ticketIDArgs
+	}{
+		{name: "id only", args: []string{"tk"}, want: ticketIDArgs{TicketID: "tk"}},
+		{
+			name: "flags after id",
+			args: []string{"tk", "--session", "s1", "--json"},
+			want: ticketIDArgs{TicketID: "tk", Session: "s1", JSON: true},
+		},
+		{
+			name: "flags before id",
+			args: []string{"--session", "s1", "tk"},
+			want: ticketIDArgs{TicketID: "tk", Session: "s1"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseTicketIDArgs("ticket subscribe", tc.args)
+			if err != nil {
+				t.Fatalf("parseTicketIDArgs(%v): %v", tc.args, err)
+			}
+			if got != tc.want {
+				t.Fatalf("parseTicketIDArgs(%v) = %+v, want %+v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseTicketIDArgsErrors(t *testing.T) {
+	cases := map[string][]string{
+		"no args":         {},
+		"two positionals": {"tk", "extra"},
+		"unknown flag":    {"tk", "--bogus"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseTicketIDArgs("ticket subscribe", args); err == nil {
+				t.Fatalf("parseTicketIDArgs(%v) = nil error, want error", args)
+			}
+		})
+	}
+}

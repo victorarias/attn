@@ -525,6 +525,18 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 	// ticket "Resume" affordance reattach the prior conversation directly instead
 	// of dropping into the agent's resume picker.
 	{57, "add resume_session_id to tickets", "ALTER TABLE tickets ADD COLUMN resume_session_id TEXT NOT NULL DEFAULT ''"},
+	// A third participation source beside assignment and non-comment authorship: an
+	// explicit, opt-in subscription. Mirrors ticket_event_cursors (PK (identity,
+	// ticket_id), CASCADE on ticket delete) but carries no cursor — subscribing only
+	// adds the identity to the ticket's participant set; its cursor stays wherever it
+	// was (0 if never read), so the first inbox after subscribing delivers history.
+	{58, "create ticket subscriptions", `CREATE TABLE IF NOT EXISTS ticket_subscriptions (
+    identity   TEXT NOT NULL,
+    ticket_id  TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (identity, ticket_id),
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+);`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

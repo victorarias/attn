@@ -146,11 +146,17 @@ Protocol (one ProtocolVersion bump for the whole set): new agent commands
       + coordinator framing in the chief block + the how in `tickets.md`. Tests: handler
       returns the board (filter honored), CLI parse, protocol decode. ProtocolVersion 134→135
       (one bump). CHANGELOG covers the whole capability.
-- [ ] **Slice 2 — subscribe/unsubscribe:** branch AFTER slice 1 merges (same participation
-      queries collide). Migration 58 + `ticket_subscriptions` store methods + participation
-      UNION + purge cleanup + protocol cmds + CLI + client. Subscribe does NOT advance the
-      cursor (delivers history). Tests: subscribe → events nudge + inbox delivers prior
-      history; unsubscribe → they stop.
+- [x] **Slice 2 — subscribe/unsubscribe:** migration 58 `ticket_subscriptions` (mirror of
+      ticket_event_cursors, CASCADE) + `AddTicketSubscription`/`RemoveTicketSubscription`/
+      `IsTicketSubscribed` + participation UNION in both queries + purge cleanup in
+      SweepExpiredTickets + `ticket_subscribe`/`ticket_unsubscribe` protocol cmds (silent — no
+      event, no broadcast) + `attn ticket subscribe`/`unsubscribe <id>` CLI (shared
+      `parseTicketIDArgs`) + client methods. Subscribe validates the ticket + is idempotent +
+      does NOT advance the cursor (delivers history); unsubscribe is a tolerant idempotent
+      removal. Tests: store participation both ways + idempotency + bad-id; daemon lifecycle
+      (subscribe → chief comment nudges subscriber + inbox delivers; unsubscribe → stops) —
+      trigger via synchronous `commentOnTicket`, NOT the net.Pipe `callSetTicketStatus` (returns
+      before the async doorbell). ProtocolVersion 135→136. CHANGELOG + tickets.md reference.
 - [ ] **Slice 3 — take:** `AssignTicket` store method (+ `assigned` event) + `ticket_take`
       protocol cmd + `handleTicketTake` with `--confirm` guard + CLI + client. Tests:
       take unassigned → assigned; take already-taken without --confirm → error; with

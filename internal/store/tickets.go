@@ -765,6 +765,9 @@ func (s *Store) SweepExpiredTickets(now time.Time, ttl time.Duration) (int, erro
 	if _, err := tx.Exec(`DELETE FROM ticket_event_cursors WHERE ticket_id IN (SELECT id FROM tickets WHERE `+expired+`)`, cutoff); err != nil {
 		return 0, err
 	}
+	if _, err := tx.Exec(`DELETE FROM ticket_subscriptions WHERE ticket_id IN (SELECT id FROM tickets WHERE `+expired+`)`, cutoff); err != nil {
+		return 0, err
+	}
 	res, err := tx.Exec(`DELETE FROM tickets WHERE `+expired, cutoff)
 	if err != nil {
 		return 0, err

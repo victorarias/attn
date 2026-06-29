@@ -181,9 +181,9 @@ func (s *Store) TicketEventsSince(cursor int64) ([]TicketEvent, error) {
 }
 
 // UnreadTicketEvents returns, for an identity, every event it has not yet
-// consumed across the tickets it participates in — those currently assigned to it
-// plus any it has authored a NON-COMMENT event on — excluding events it authored
-// itself. Each event is compared against the identity's OWN per-(identity, ticket)
+// consumed across the tickets it participates in — those currently assigned to it,
+// any it has authored a NON-COMMENT event on, plus any it has explicitly subscribed
+// to — excluding events it authored itself. Each event is compared against the identity's OWN per-(identity, ticket)
 // cursor, so a ticket the identity has never looked at is delivered from the start
 // (the brief and all pre-involvement context). Results are ordered by ticket then seq.
 //
@@ -214,9 +214,11 @@ func (s *Store) UnreadTicketEvents(identity string) ([]TicketEvent, error) {
 				SELECT id FROM tickets WHERE assignee = ?
 				UNION
 				SELECT DISTINCT ticket_id FROM ticket_events WHERE author = ? AND kind != 'commented'
+				UNION
+				SELECT ticket_id FROM ticket_subscriptions WHERE identity = ?
 			)
 		ORDER BY e.ticket_id, e.seq ASC
-	`, identity, identity, identity, identity)
+	`, identity, identity, identity, identity, identity)
 	if err != nil {
 		return nil, err
 	}
@@ -224,12 +226,13 @@ func (s *Store) UnreadTicketEvents(identity string) ([]TicketEvent, error) {
 }
 
 // TicketParticipants returns the identities involved with a single ticket — its
-// current assignee plus everyone who has authored a NON-COMMENT event on it. This
-// is the inverse of UnreadTicketEvents (identities-for-a-ticket, not tickets-for-
-// an-identity): when an event lands, the notifier reaches exactly these
-// identities, each of which sees only what it did not author. Empty
-// authors/assignees are excluded, and comment authorship confers no participation
-// (see UnreadTicketEvents) — so a one-shot commenter is not reached by later events.
+// current assignee, everyone who has authored a NON-COMMENT event on it, and
+// everyone subscribed to it. This is the inverse of UnreadTicketEvents (identities-
+// for-a-ticket, not tickets-for-an-identity): when an event lands, the notifier
+// reaches exactly these identities, each of which sees only what it did not author.
+// Empty authors/assignees/subscribers are excluded, and comment authorship confers
+// no participation (see UnreadTicketEvents) — so a one-shot commenter is not reached
+// by later events, but an explicit subscriber is.
 func (s *Store) TicketParticipants(ticketID string) ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -241,8 +244,10 @@ func (s *Store) TicketParticipants(ticketID string) ([]string, error) {
 		SELECT assignee FROM tickets WHERE id = ? AND assignee != ''
 		UNION
 		SELECT DISTINCT author FROM ticket_events WHERE ticket_id = ? AND author != '' AND kind != 'commented'
+		UNION
+		SELECT identity FROM ticket_subscriptions WHERE ticket_id = ? AND identity != ''
 		ORDER BY 1 ASC
-	`, ticketID, ticketID)
+	`, ticketID, ticketID, ticketID)
 	if err != nil {
 		return nil, err
 	}

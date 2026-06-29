@@ -635,6 +635,37 @@ model TicketListResult {
   tickets: Ticket[];
 }
 
+// TicketSubscribeMessage opts the calling session into a ticket's notifications —
+// an explicit, opt-in standing interest in a ticket it is not assigned to. The
+// daemon records the subscription authored by the session (identity = session), so
+// the agent names only the ticket. Subscribing makes the session a participant
+// (nudged about activity, the ticket delivered in its inbox) without advancing its
+// cursor, so the first inbox after subscribing delivers the ticket's history.
+model TicketSubscribeMessage {
+  cmd: "ticket_subscribe";
+  source_session_id: string;
+  ticket_id: string;
+}
+
+// TicketSubscribeResult echoes the ticket the subscription landed on.
+model TicketSubscribeResult {
+  ticket_id: string;
+}
+
+// TicketUnsubscribeMessage opts the calling session back out of a ticket's
+// notifications. It is idempotent — opting out when not subscribed succeeds — so it
+// does not require the ticket to still exist.
+model TicketUnsubscribeMessage {
+  cmd: "ticket_unsubscribe";
+  source_session_id: string;
+  ticket_id: string;
+}
+
+// TicketUnsubscribeResult echoes the ticket the session unsubscribed from.
+model TicketUnsubscribeResult {
+  ticket_id: string;
+}
+
 // TicketAttachMessage hands a file to the calling session's bound ticket. The
 // daemon resolves the ticket from the session (the assignee), copies the file at
 // source_path into the ticket's store directory (.attn/tickets/<id>/), and records
@@ -2295,6 +2326,8 @@ model Response {
   ticket_attach_result?: TicketAttachResult;
   ticket_create_result?: TicketCreateResult;
   ticket_comment_result?: TicketCommentResult;
+  ticket_subscribe_result?: TicketSubscribeResult;
+  ticket_unsubscribe_result?: TicketUnsubscribeResult;
 }
 
 model DelegateResult {

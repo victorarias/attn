@@ -671,6 +671,18 @@ func runTicket() {
 			return
 		}
 		runTicketComment(os.Args[3:])
+	case "subscribe":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketSubscribe(os.Args[3:])
+	case "unsubscribe":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketUnsubscribe(os.Args[3:])
 	default:
 		fmt.Fprintf(os.Stderr, "ticket: unknown command %q\n", os.Args[2])
 		writeTicketHelp(os.Stderr)
@@ -1034,6 +1046,100 @@ func runTicketComment(args []string) {
 	fmt.Printf("commented on ticket %s\n", result.TicketID)
 }
 
+// ticketIDArgs is a single ticket-id positional plus the common session/json flags —
+// the shape of `ticket subscribe`/`ticket unsubscribe`, which name a ticket and act
+// as the calling session.
+type ticketIDArgs struct {
+	TicketID string
+	Session  string
+	JSON     bool
+}
+
+// parseTicketIDArgs reads `<command> <ticket-id> [--session <id>] [--json]`. Flags
+// may appear on either side of the id (interleave parse, like ticket status/comment).
+func parseTicketIDArgs(name string, args []string) (ticketIDArgs, error) {
+	var result ticketIDArgs
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	session := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	jsonOutput := fs.Bool("json", false, "print the result as JSON")
+
+	var positionals []string
+	rest := args
+	for {
+		if err := fs.Parse(rest); err != nil {
+			return result, err
+		}
+		rest = fs.Args()
+		if len(rest) == 0 {
+			break
+		}
+		positionals = append(positionals, rest[0])
+		rest = rest[1:]
+	}
+	if len(positionals) != 1 {
+		return result, fmt.Errorf("expected exactly one ticket id argument, got %d", len(positionals))
+	}
+	result.TicketID = positionals[0]
+	result.Session = *session
+	result.JSON = *jsonOutput
+	return result, nil
+}
+
+// runTicketSubscribe opts the calling session into a ticket's notifications — a
+// standing interest in a ticket it isn't assigned to. Future activity then nudges it
+// and lands in its inbox; the first inbox after subscribing also delivers the
+// ticket's history (subscribing does not advance the cursor).
+func runTicketSubscribe(args []string) {
+	parsed, err := parseTicketIDArgs("ticket subscribe", args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket subscribe: %v\n", err)
+		writeTicketHelp(os.Stderr)
+		os.Exit(2)
+	}
+	source, err := resolveDispatchSession(parsed.Session)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket subscribe: %v\n", err)
+		os.Exit(2)
+	}
+	result, err := client.New("").SubscribeTicket(source, parsed.TicketID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket subscribe: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.JSON {
+		printJSON(result)
+		return
+	}
+	fmt.Printf("subscribed to ticket %s\n", result.TicketID)
+}
+
+// runTicketUnsubscribe opts the calling session back out. It is idempotent —
+// unsubscribing when not subscribed still succeeds.
+func runTicketUnsubscribe(args []string) {
+	parsed, err := parseTicketIDArgs("ticket unsubscribe", args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket unsubscribe: %v\n", err)
+		writeTicketHelp(os.Stderr)
+		os.Exit(2)
+	}
+	source, err := resolveDispatchSession(parsed.Session)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket unsubscribe: %v\n", err)
+		os.Exit(2)
+	}
+	result, err := client.New("").UnsubscribeTicket(source, parsed.TicketID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket unsubscribe: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.JSON {
+		printJSON(result)
+		return
+	}
+	fmt.Printf("unsubscribed from ticket %s\n", result.TicketID)
+}
+
 // runTicketInbox reads (and consumes) this session's unread ticket events — the
 // chief's comments, status changes, and re-briefs it has not yet seen. Reading
 // advances the cursor, so a second call returns only what landed since.
@@ -1186,6 +1292,11 @@ commands:
   comment <ticket-id> --message <text> [--session <id>] [--json]
         post a one-shot comment onto any ticket by id (does not subscribe you);
         -m is shorthand for --message
+  subscribe <ticket-id> [--session <id>] [--json]
+        opt into a ticket's notifications (future activity nudges you and lands
+        in your inbox; the next inbox also delivers the ticket's history)
+  unsubscribe <ticket-id> [--session <id>] [--json]
+        opt back out of a ticket's notifications (idempotent)
 
 work states:
   in_progress       working
