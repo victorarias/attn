@@ -157,10 +157,15 @@ Protocol (one ProtocolVersion bump for the whole set): new agent commands
       (subscribe → chief comment nudges subscriber + inbox delivers; unsubscribe → stops) —
       trigger via synchronous `commentOnTicket`, NOT the net.Pipe `callSetTicketStatus` (returns
       before the async doorbell). ProtocolVersion 135→136. CHANGELOG + tickets.md reference.
-- [ ] **Slice 3 — take:** `AssignTicket` store method (+ `assigned` event) + `ticket_take`
-      protocol cmd + `handleTicketTake` with `--confirm` guard + CLI + client. Tests:
-      take unassigned → assigned; take already-taken without --confirm → error; with
-      --confirm → reassigned + previous assignee notified.
+- [x] **Slice 3 — take:** reused the existing `AssignTicket` store method (+ `assigned`
+      event) + `ticket_take` protocol cmd + `handleTicketTake` with `--confirm` guard +
+      `attn ticket take <id> [--confirm]` CLI (`parseTicketTakeArgs`) + `TakeTicket` client.
+      Take does not advance the cursor (delivers history); a self-take short-circuits with no
+      redundant event; the result echoes `previous_assignee`. Notify is left to
+      `notifyTicketObservers` (no special-casing the previous assignee — see Open Questions).
+      ProtocolVersion 136→137. CHANGELOG + tickets.md reference. Tests: daemon take-over
+      (refused without --confirm, reassigns + nudges the displaced assignee + delivers history
+      with --confirm), unassigned/self/unknown, CLI parse, protocol decode.
 
 ## Decisions
 
@@ -178,9 +183,16 @@ Protocol (one ProtocolVersion bump for the whole set): new agent commands
 
 ## Open Questions
 
-- Should `take`-over notify the previous assignee specially, or is the `assigned` event
-  (which they receive as a still-participant via prior status authorship) enough? Leaning
-  on the latter.
+- ~~Should `take`-over notify the previous assignee specially, or is the `assigned` event
+  (which they receive as a still-participant via prior status authorship) enough?~~
+  **Resolved: the `assigned` event is enough.** The handler stays behind the participation
+  boundary — it calls `AssignTicket` + `notifyTicketObservers`, which fans out to the
+  ticket's participants. An actively-working previous assignee authored status events, so it
+  remains a participant and is nudged. The only gap is a previous assignee that was assigned
+  but never reported anything: it authored no event, so it is no longer a participant once it
+  loses the assignee slot and is not nudged — acceptable, since it was never visibly working.
+  Special-casing the previous assignee would mean a handler reaching past the store's
+  participation rule, which the Boundaries section forbids.
 
 ## Follow-ups
 

@@ -376,6 +376,28 @@ func (c *Client) UnsubscribeTicket(sourceSessionID, ticketID string) (*protocol.
 	return resp.TicketUnsubscribeResult, nil
 }
 
+// TakeTicket claims a ticket for the calling session. Taking a ticket already
+// assigned to someone else requires confirm=true; without it the daemon refuses
+// so an agent cannot silently take over another's active work.
+func (c *Client) TakeTicket(sourceSessionID, ticketID string, confirm bool) (*protocol.TicketTakeResult, error) {
+	msg := protocol.TicketTakeMessage{
+		Cmd:             protocol.CmdTicketTake,
+		SourceSessionID: sourceSessionID,
+		TicketID:        ticketID,
+	}
+	if confirm {
+		msg.Confirm = protocol.Ptr(true)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.TicketTakeResult == nil {
+		return nil, errors.New("daemon returned no ticket take result")
+	}
+	return resp.TicketTakeResult, nil
+}
+
 func (c *Client) CheckoutWorkspaceContext(sourceSessionID string, force bool) (*protocol.WorkspaceContextResult, error) {
 	msg := protocol.WorkspaceContextCheckoutMessage{
 		Cmd:             protocol.CmdWorkspaceContextCheckout,

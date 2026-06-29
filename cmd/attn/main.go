@@ -683,6 +683,12 @@ func runTicket() {
 			return
 		}
 		runTicketUnsubscribe(os.Args[3:])
+	case "take":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketTake(os.Args[3:])
 	default:
 		fmt.Fprintf(os.Stderr, "ticket: unknown command %q\n", os.Args[2])
 		writeTicketHelp(os.Stderr)
@@ -1140,6 +1146,81 @@ func runTicketUnsubscribe(args []string) {
 	fmt.Printf("unsubscribed from ticket %s\n", result.TicketID)
 }
 
+// ticketTakeArgs is a ticket-id positional plus the common session/json flags and
+// the take-over guard `--confirm`.
+type ticketTakeArgs struct {
+	TicketID string
+	Session  string
+	Confirm  bool
+	JSON     bool
+}
+
+// parseTicketTakeArgs reads `ticket take <ticket-id> [--confirm] [--session <id>]
+// [--json]`. Flags may appear on either side of the id (interleave parse, like the
+// other ticket verbs).
+func parseTicketTakeArgs(args []string) (ticketTakeArgs, error) {
+	var result ticketTakeArgs
+	fs := flag.NewFlagSet("ticket take", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	session := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	confirm := fs.Bool("confirm", false, "take the ticket even if it is already assigned to someone else")
+	jsonOutput := fs.Bool("json", false, "print the result as JSON")
+
+	var positionals []string
+	rest := args
+	for {
+		if err := fs.Parse(rest); err != nil {
+			return result, err
+		}
+		rest = fs.Args()
+		if len(rest) == 0 {
+			break
+		}
+		positionals = append(positionals, rest[0])
+		rest = rest[1:]
+	}
+	if len(positionals) != 1 {
+		return result, fmt.Errorf("expected exactly one ticket id argument, got %d", len(positionals))
+	}
+	result.TicketID = positionals[0]
+	result.Session = *session
+	result.Confirm = *confirm
+	result.JSON = *jsonOutput
+	return result, nil
+}
+
+// runTicketTake claims a ticket for the calling session, making it the assignee.
+// Taking a ticket already assigned to someone else needs --confirm, so an agent
+// cannot silently take over another's active work. Taking does not advance the
+// cursor, so the first inbox after taking delivers the ticket's history.
+func runTicketTake(args []string) {
+	parsed, err := parseTicketTakeArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket take: %v\n", err)
+		writeTicketHelp(os.Stderr)
+		os.Exit(2)
+	}
+	source, err := resolveDispatchSession(parsed.Session)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket take: %v\n", err)
+		os.Exit(2)
+	}
+	result, err := client.New("").TakeTicket(source, parsed.TicketID, parsed.Confirm)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket take: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.JSON {
+		printJSON(result)
+		return
+	}
+	if result.PreviousAssignee != "" && result.PreviousAssignee != source {
+		fmt.Printf("took ticket %s (was assigned to %s)\n", result.TicketID, result.PreviousAssignee)
+		return
+	}
+	fmt.Printf("took ticket %s\n", result.TicketID)
+}
+
 // runTicketInbox reads (and consumes) this session's unread ticket events — the
 // chief's comments, status changes, and re-briefs it has not yet seen. Reading
 // advances the cursor, so a second call returns only what landed since.
@@ -1297,6 +1378,9 @@ commands:
         in your inbox; the next inbox also delivers the ticket's history)
   unsubscribe <ticket-id> [--session <id>] [--json]
         opt back out of a ticket's notifications (idempotent)
+  take <ticket-id> [--confirm] [--session <id>] [--json]
+        claim a ticket (become its assignee); --confirm is required to take over
+        one already assigned to someone else
 
 work states:
   in_progress       working

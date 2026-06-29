@@ -82,3 +82,9 @@ inbox (see the delegated-agent reference). These two commands reach **any** tick
   need to follow a thread you don't own — a chief tracking a ticket it didn't create, or an
   agent whose work depends on another's. Unsubscribe is idempotent. (Commenting alone never
   subscribes you; this is the explicit opt-in.)
+- **`attn ticket take <ticket-id> [--confirm]`** claims a ticket — you become its assignee.
+  Use it to pick up an unassigned backlog ticket, or to hand work over to yourself. Taking a
+  ticket **already assigned to someone else** requires `--confirm`, so you cannot silently
+  take over a sibling's active work — without it the command refuses and names the current
+  assignee. Taking does not skip the backlog: your first `attn ticket inbox` afterward
+  delivers the ticket's history. The displaced assignee is notified of the handover.
