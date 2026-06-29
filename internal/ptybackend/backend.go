@@ -44,6 +44,16 @@ type SpawnOptions struct {
 	// true the worker exports ATTN_WORKFLOW_GUIDANCE_ENABLED so the launched agent's
 	// instructions include the workflow-trigger guidance.
 	WorkflowGuidanceEnabled bool
+
+	// AutoApprove mirrors the daemon's auto_approve_enabled setting. When true the
+	// worker exports ATTN_AUTO_APPROVE so the launched agent starts in its native
+	// auto-approve mode (Claude --permission-mode auto). Yolo overrides it.
+	AutoApprove bool
+
+	// Model, when set, pins the launched agent's model via --model. Sourced from
+	// the chief_model_<agent> setting for chief launches; the worker exports it as
+	// ATTN_CHIEF_MODEL. Empty means the agent's own default.
+	Model string
 }
 
 type AttachInfo struct {
@@ -136,6 +146,31 @@ type LifecycleHooks interface {
 
 type SessionInfoProvider interface {
 	SessionInfo(ctx context.Context, sessionID string) (SessionInfo, error)
+}
+
+// SessionLaunchParams carries the per-spawn launch flags the daemon does not
+// otherwise persist — they arrive per-spawn from the client and otherwise live
+// only in the live worker. Backends that run a per-session worker record them in
+// the worker registry so the daemon can read them back when it re-spawns the
+// agent in place (chief-of-staff assign/demote reload).
+type SessionLaunchParams struct {
+	// Recorded is false for sessions whose worker predates launch-param recording.
+	// The daemon must NOT trust the other fields when false and must abort the
+	// reload rather than respawn with defaulted launch flags.
+	Recorded          bool
+	YoloMode          bool
+	Executable        string
+	ClaudeExecutable  string
+	CodexExecutable   string
+	CopilotExecutable string
+}
+
+// SessionLaunchParamsProvider is implemented by backends that can return the
+// recorded launch params for a live session (the worker backend, via the
+// per-session registry). Backends that cannot (e.g. embedded) omit it, and the
+// daemon aborts the reload rather than respawning with defaults.
+type SessionLaunchParamsProvider interface {
+	SessionLaunchParams(ctx context.Context, sessionID string) (SessionLaunchParams, error)
 }
 
 // WorkerProcessProvider is implemented by backends that run each session in its

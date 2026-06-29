@@ -1235,6 +1235,7 @@ model SpawnSessionMessage {
   resume_session_id?: string;
   resume_picker?: boolean;
   yolo_mode?: boolean;
+  chief_of_staff?: boolean;    // Launch this session already holding the chief role (guidance injected at first spawn)
   initial_prompt?: string;
   executable?: string;         // Generic executable override for selected agent
   claude_executable?: string;  // Backward compatibility
@@ -2191,6 +2192,16 @@ model PtyDesyncMessage {
   reason: string;
 }
 
+// runtime_respawned: the daemon killed and re-spawned a session's agent process
+// in place (e.g. chief-of-staff assign/demote reload). The session id is
+// unchanged and the transcript is resumed; the client must tear down its dead PTY
+// stream and reattach to the new runtime. Distinct from session_exited (which
+// drops the session to a dead pane) — the runtime was replaced, not closed.
+model RuntimeRespawnedMessage {
+  event: "runtime_respawned";
+  id: string;
+}
+
 model PtyResizedMessage {
   event: "pty_resized";
   id: string;
@@ -2690,6 +2701,7 @@ alias DaemonEvent =
   | PtyOutputMessage
   | SessionExitedMessage
   | PtyDesyncMessage
+  | RuntimeRespawnedMessage
   | PtyResizedMessage
   | BrowserControlRequestMessage
   | CommandErrorMessage;

@@ -30,6 +30,7 @@ var _ LaunchPreparer = (*Claude)(nil)
 var _ SessionRecoveryPolicyProvider = (*Claude)(nil)
 var _ PTYStatePolicyProvider = (*Claude)(nil)
 var _ ResumePolicyProvider = (*Claude)(nil)
+var _ ResumeAvailabilityProvider = (*Claude)(nil)
 var _ TranscriptClassificationExtractor = (*Claude)(nil)
 var _ HeadlessTaskProvider = (*Claude)(nil)
 var _ HeadlessTaskAvailabilityProvider = (*Claude)(nil)
@@ -95,6 +96,10 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 		args = append(args, "--append-system-prompt", instructions)
 	}
 
+	if model := strings.TrimSpace(opts.Model); model != "" {
+		args = append(args, "--model", model)
+	}
+
 	if opts.ResumeSessionID != "" {
 		args = append(args, "-r", opts.ResumeSessionID)
 	} else if opts.ResumePicker {
@@ -102,6 +107,12 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	}
 	if opts.YoloMode {
 		args = append(args, "--dangerously-skip-permissions")
+	} else if opts.AutoApprove {
+		// Native auto-approve mode: an LLM permission classifier silently allows
+		// safe/in-scope actions and denies risky ones, so the agent runs unattended
+		// without stalling on approval prompts. Mutually exclusive with yolo, which
+		// bypasses permissions entirely.
+		args = append(args, "--permission-mode", "auto")
 	}
 	if strings.TrimSpace(opts.InitialPrompt) != "" {
 		args = append(args, "--", opts.InitialPrompt)
@@ -429,6 +440,15 @@ func (c *Claude) FindTranscript(sessionID, cwd string, startedAt time.Time) stri
 func (c *Claude) FindTranscriptForResume(resumeID string) string {
 	// Claude transcripts are found by session ID, resume uses the same mechanism.
 	return transcript.FindClaudeTranscript(resumeID)
+}
+
+// ResumeAvailable reports whether resumeID can be resumed. Claude resumes via
+// `claude -r <id>`, which needs a transcript on disk; that transcript is written
+// lazily on the first turn, so a zero-turn session has none and a resume would
+// exit non-zero. The transcript's existence is therefore the exact resumability
+// signal.
+func (c *Claude) ResumeAvailable(resumeID string) bool {
+	return transcript.FindClaudeTranscript(resumeID) != ""
 }
 
 func (c *Claude) BootstrapBytes() int64 {

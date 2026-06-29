@@ -540,6 +540,8 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		LoginShellEnv:     d.cachedLoginShellEnv(),
 
 		WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)),
+		AutoApprove:             parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)),
+		Model:                   d.chiefLaunchModel(agent, protocol.Deref(msg.ChiefOfStaff)),
 	}
 	if existingSession != nil {
 		for _, liveID := range d.ptyBackend.SessionIDs(context.Background()) {
@@ -587,9 +589,18 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		spawnOpts.ExternalCWD = strings.TrimSpace(result.CWD)
 	}
 
+	// Assign the chief role BEFORE Spawn so the agent's launch path (and its async
+	// notebook-guide query) sees chief=true and injects the guidance on the first
+	// boot. Rolled back below if the launch fails, so a never-launched session
+	// never holds the role.
+	chiefAssigned := d.maybeAssignChiefOnSpawn(msg.ID, agent, protocol.Deref(msg.ChiefOfStaff), existingSession)
+
 	if err := d.ptyBackend.Spawn(context.Background(), spawnOpts); err != nil {
 		if hasPluginDriver {
 			d.finishPluginSessionLaunch(msg.ID, false)
+		}
+		if chiefAssigned {
+			d.clearChiefOfStaffIfSession(msg.ID)
 		}
 		d.sendSpawnFailure(client, msg.ID, err)
 		return
@@ -658,6 +669,9 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		if err := d.store.AddChecked(session); err != nil {
 			if hasPluginDriver {
 				d.finishPluginSessionLaunch(msg.ID, false)
+			}
+			if chiefAssigned {
+				d.clearChiefOfStaffIfSession(msg.ID)
 			}
 			killErr := d.ptyBackend.Kill(context.Background(), msg.ID, syscall.SIGTERM)
 			removeErr := d.ptyBackend.Remove(context.Background(), msg.ID)

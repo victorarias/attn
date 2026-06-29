@@ -128,14 +128,34 @@ type Daemon struct {
 	forcedStop       map[string]time.Time
 	pendingResumeMu  sync.Mutex
 	pendingResumeID  map[string]string
+	// reloadingSessions marks sessions whose agent is being re-spawned in place
+	// (chief-of-staff assign/demote reload). handlePTYExit consumes the flag to
+	// suppress the killed worker's session_exited so the reload reads as a runtime
+	// replacement, not a session close. Lazily initialized under reloadingMu.
+	reloadingMu       sync.Mutex
+	reloadingSessions map[string]bool
+	// reloadLocks serializes the kill→remove→spawn composite per session so two
+	// concurrent reloads of the same session (a double-toggle, or a role transfer)
+	// cannot interleave and tear each other's respawn down. Lazily initialized.
+	reloadLocksMu    sync.Mutex
+	reloadLocks      map[string]*sync.Mutex
 	reviewLoopMu     sync.Mutex
 	reviewLoopCancel map[string]context.CancelFunc
 	inputSourceMu    sync.Mutex
 	pendingInputSrc  map[string]string
-	recoveryMu       sync.RWMutex
-	recovering       bool
-	notebookMu       sync.Mutex
-	notebookStore    *notebook.Store
+	// ticketBackstop debounces the deferred self-monitor doorbell (see
+	// ticket_notify.go): an idle self-monitor with unread ticket activity is
+	// re-checked after a grace delay and doorbelled only if still unread, so a live
+	// `attn ticket inbox --watch` Monitor (which drains within its poll interval)
+	// self-suppresses it. ticketBackstopGrace is 0 in production (=> the default
+	// const) and a test override otherwise.
+	ticketBackstopMu     sync.Mutex
+	ticketBackstopTimers map[string]*time.Timer
+	ticketBackstopGrace  time.Duration
+	recoveryMu           sync.RWMutex
+	recovering           bool
+	notebookMu           sync.Mutex
+	notebookStore        *notebook.Store
 	// notebookWatcher observes notebook.root for external edits; guarded by its
 	// own mutex (distinct from notebookMu) so notebookStoreFor can start it
 	// without nesting locks. Lazily started on first notebook use.
@@ -1305,6 +1325,7 @@ func (d *Daemon) Stop() {
 	}
 	d.stopInstalledPlugins()
 	d.stopAllTranscriptWatchers()
+	d.stopTicketBackstops()
 	if d.ptyBackend != nil {
 		_ = d.ptyBackend.Shutdown(context.Background())
 	}
@@ -1339,6 +1360,16 @@ func (d *Daemon) doneContext() context.Context {
 }
 
 func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
+	// A reload (chief assign/demote) killed this worker on purpose and owns the
+	// teardown+respawn itself. Consume the one-shot flag and skip ALL exit
+	// processing — no idle-clobber, no backend Remove (reloadSessionAgent already
+	// removed it before re-spawning), and crucially no session_exited broadcast,
+	// which would drop the just-respawned session to a dead pane. reloadSessionAgent
+	// emits runtime_respawned instead (or session_exited itself if the respawn fails).
+	if d.consumeReloading(info.ID) {
+		d.logf("suppressing exit for reloading session %s (runtime replaced in place)", info.ID)
+		return
+	}
 	if d.queueExitDuringPluginLaunch(info) {
 		return
 	}

@@ -171,7 +171,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '131';
+export const PROTOCOL_VERSION = '133';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -2069,6 +2069,22 @@ export function useDaemonSocket({
             }
             break;
 
+          case 'runtime_respawned':
+            // The daemon killed and re-spawned this session's agent in place (chief
+            // assign/demote reload). We still believe we're attached (the kill's
+            // session_exited was suppressed daemon-side), so mirror pty_desync exactly:
+            // reset + clear the stale stream cache, then re-attach DIRECTLY over the ws
+            // (not via spawnPtyRuntime, which would take the alreadyAttached fast-path
+            // and never re-establish the stream). relaunch_restore replays the fresh
+            // worker's scrollback so the resumed agent redraws cleanly.
+            if (data.id) {
+              recordDiag({ kind: 'attach', session: data.id, reason: 'runtime_respawned' });
+              emitPtyEvent({ event: 'reset', id: data.id, reason: 'respawn' });
+              ptyTransportRef.current.clearRuntimeStream(data.id);
+              ws.send(JSON.stringify({ cmd: 'attach_session', id: data.id, attach_policy: 'relaunch_restore' }));
+            }
+            break;
+
           case 'pty_resized':
             if (data.id && data.cols && data.rows) {
               recordDiag({ kind: 'resize', session: data.id, source: 'pty_resized', toCols: data.cols, toRows: data.rows });
@@ -2726,6 +2742,7 @@ export function useDaemonSocket({
         ...(args.resume_session_id && { resume_session_id: args.resume_session_id }),
         ...(args.resume_picker && { resume_picker: args.resume_picker }),
         ...(args.yolo_mode && { yolo_mode: args.yolo_mode }),
+        ...(args.chief_of_staff && { chief_of_staff: args.chief_of_staff }),
         ...(args.executable && { executable: args.executable }),
         ...(args.claude_executable && { claude_executable: args.claude_executable }),
         ...(args.codex_executable && { codex_executable: args.codex_executable }),

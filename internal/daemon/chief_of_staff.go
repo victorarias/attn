@@ -132,6 +132,41 @@ func (d *Daemon) typeDoorbell(sessionID, prompt string) error {
 	return d.ptyBackend.Input(context.Background(), sessionID, []byte{'\r'})
 }
 
+// maybeAssignChiefOnSpawn assigns the chief-of-staff role at a session's first
+// launch when the spawn requested it (the "create as chief" toggle). This is the
+// only way the very first launch injects chief guidance: ChiefGuidance is gated
+// on the role at launch time, and the post-launch promote path (reload) cannot
+// resume a zero-turn session. Setting the role here — before ptyBackend.Spawn —
+// lets the agent's async notebook-guide query (which can fire before the session
+// row exists) observe chief=true and pull the guidance, because both the role
+// check and the notebook-root resolution are independent of the sessions table.
+//
+// It is intentionally conservative: it assigns only on a genuine first launch
+// (existingSession == nil, never a reload/respawn) of a guidance-capable agent
+// (claude/codex — shells and plugin agents have no guidance launch path) and only
+// when no chief exists yet. A create-as-chief request while a chief is already
+// live is logged and ignored, never a silent role transfer. Returns whether it
+// assigned the role so the caller can roll it back if the launch then fails.
+func (d *Daemon) maybeAssignChiefOnSpawn(sessionID, agent string, requested bool, existingSession *protocol.Session) bool {
+	if !requested || existingSession != nil || d.store == nil {
+		return false
+	}
+	if !agentSupportsChiefReload(agent) {
+		d.logf("create-as-chief: agent %q for session %s has no chief-guidance launch path; ignoring", agent, sessionID)
+		return false
+	}
+	if current := d.chiefOfStaffSessionID(); current != "" {
+		d.logf("create-as-chief: a chief (%s) already exists; ignoring request for session %s", current, sessionID)
+		return false
+	}
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, sessionID); err != nil {
+		d.logf("create-as-chief: set chief role failed for session %s: %v", sessionID, err)
+		return false
+	}
+	d.logf("create-as-chief: session %s assigned chief role at launch", sessionID)
+	return true
+}
+
 func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefOfStaffMessage) {
 	sessionID := strings.TrimSpace(msg.SessionID)
 	if sessionID == "" {
@@ -161,11 +196,28 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 	}
 
 	d.broadcastSessionsUpdated()
-	// Live activation: when a running session becomes the chief, type a bounded
-	// doorbell into its PTY so it pulls Notebook guidance. Only fires on an
-	// idle/waiting session (guarded in the helper), never an agent mid-task.
-	if msg.ChiefOfStaff {
-		go d.activateChiefGuidanceLive(sessionID)
+	// Reload the agent(s) whose chief status actually changed so the new status reaches
+	// the system prompt: ChiefGuidance is injected only at agent-launch, so a live
+	// promotion/demotion must re-run the launch path. The reload is destructive
+	// (kill + resume-respawn), so fire it ONLY on a real role change — a redundant
+	// toggle (re-assigning the current chief, or demoting a session that wasn't chief,
+	// which ClearProfileRole no-ops) must not kill+respawn an innocent agent.
+	// Resume-preserving, fire-and-forget; symmetric — assign injects the guidance,
+	// demote drops it.
+	roleChanged := previousSessionID != sessionID
+	if !msg.ChiefOfStaff {
+		// Demote: changed only if this session actually held the role.
+		roleChanged = previousSessionID == sessionID
+	}
+	if roleChanged {
+		go d.reloadSessionAgent(sessionID)
+		// A role transfer (promote B while A still held it) demotes A via the
+		// single-holder upsert. Reload A too so the displaced chief drops the guidance
+		// now, not whenever it next restarts. Different id → different reload lock, so
+		// this runs concurrently with the promotion reload.
+		if msg.ChiefOfStaff && previousSessionID != "" {
+			go d.reloadSessionAgent(previousSessionID)
+		}
 	}
 	d.sendChiefOfStaffResult(client, sessionID, msg.ChiefOfStaff, previousSessionID, nil)
 }

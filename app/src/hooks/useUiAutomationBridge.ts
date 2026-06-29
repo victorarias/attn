@@ -56,7 +56,7 @@ interface UseUiAutomationBridgeArgs {
   daemonReady?: boolean;
   connectionError?: string | null;
   getActivePaneIdForSession: (session: Session | undefined | null) => string;
-  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string) => Promise<string>;
+  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string, yoloMode?: boolean, options?: { resumePicker?: boolean; chiefOfStaff?: boolean }) => Promise<string>;
   selectSession: (sessionId: string) => void;
   selectWorkspace: (workspaceId: string) => void;
   moveWorkspaceLeafToWorkspace: (
@@ -1768,10 +1768,11 @@ export function useUiAutomationBridge({
         const endpointId = typeof payload.endpoint_id === 'string' && payload.endpoint_id.length > 0
           ? payload.endpoint_id
           : undefined;
+        const chiefOfStaff = payload.chief_of_staff === true;
         if (!cwd) {
           throw new Error('create_session requires cwd');
         }
-        const sessionId = await createSession(label, cwd, providedSessionId, agent, endpointId);
+        const sessionId = await createSession(label, cwd, providedSessionId, agent, endpointId, undefined, { chiefOfStaff });
         await settleUi();
         window.setTimeout(() => {
           fitSessionActivePane(sessionId);

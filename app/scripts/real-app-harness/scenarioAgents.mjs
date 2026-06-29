@@ -194,6 +194,91 @@ export async function ensureCodexInitialPanePromptReady(client, sessionId, timeo
   throw new Error(`Timed out waiting for Codex prompt readiness in session ${sessionId}`);
 }
 
+// --- Focus-free readiness (PTY-driven) -----------------------------------
+//
+// The ensure*InitialPanePromptReady helpers above gate on the pane acquiring
+// DOM *input focus* (click_pane + waitForPaneInputFocus). That focus state
+// reflects the ghostty terminal's real focus/blur events, which WebKit only
+// delivers when the app is the macOS *key window*. The real-app harness keeps
+// the app parked in the background (driver.activateBackground / window_park,
+// "without changing frontmost"), so a backgrounded scenario can never satisfy
+// that gate — the pane renders fine and reads fine, but never reports focus.
+//
+// These variants reach the same "agent is at its interactive prompt" state
+// WITHOUT requiring focus. Every interaction (dismissing the trust gate, the
+// Codex update chooser) is a `write_pane`, which goes straight to the worker
+// PTY's stdin via sendRuntimeInput — exactly the bytes a human's keystrokes
+// become, independent of which window is key. Use these for scenarios that
+// also DRIVE the agent via write_pane (PTY-direct) rather than synthetic
+// keystrokes; keep the focus-gated variants for scenarios that test
+// keystroke/UI input, where focus genuinely matters.
+
+// Answer a TUI menu (trust gate, update chooser) by writing the choice + CR
+// straight to the PTY. A TUI reading stdin sees this identically to a real
+// keypress, so no DOM focus is needed.
+async function answerPaneMenuViaPty(client, sessionId, paneId, choice) {
+  await client.request('write_pane', { sessionId, paneId, text: `${choice}\r`, submit: false });
+}
+
+async function ensureAgentPromptReadyViaPty(client, sessionId, { label, isReady, gates, timeoutMs }) {
+  const startedAt = Date.now();
+  const handled = [];
+
+  while (Date.now() - startedAt < timeoutMs) {
+    // select_session only changes which workspace is shown; it does not steal
+    // OS focus, so it is safe for a backgrounded app. It keeps read_pane_text
+    // resolving against the right workspace view.
+    await client.request('select_session', { sessionId });
+    const initialPane = await waitForFirstWorkspacePane(client, sessionId, `initial pane for ${label} session ${sessionId}`, 20_000);
+    await waitForPaneVisible(client, sessionId, initialPane.paneId, 20_000);
+    const pane = await client.request('read_pane_text', { sessionId, paneId: initialPane.paneId }, { timeoutMs: 20_000 });
+    const text = pane?.text || '';
+
+    if (isReady(text)) {
+      return { paneId: initialPane.paneId, text, handled };
+    }
+
+    const gate = gates.find((entry) => entry.match(text));
+    if (gate) {
+      await answerPaneMenuViaPty(client, sessionId, initialPane.paneId, gate.choice);
+      handled.push(gate.name);
+      await delay(500);
+      continue;
+    }
+
+    await delay(300);
+  }
+
+  throw new Error(`Timed out waiting for ${label} prompt readiness in session ${sessionId} (focus-free / PTY)`);
+}
+
+// Focus-free Claude readiness. Pre-trust the folder (preTrustClaudeFolder)
+// before launch and the trust gate normally never appears; this still handles
+// it defensively via PTY write in case it does.
+export async function ensureClaudePromptReadyViaPty(client, sessionId, timeoutMs = 60_000) {
+  return ensureAgentPromptReadyViaPty(client, sessionId, {
+    label: 'Claude',
+    isReady: hasClaudePrompt,
+    gates: [{ name: 'trust', match: hasTrustPrompt, choice: '1' }],
+    timeoutMs,
+  });
+}
+
+// Focus-free Codex readiness. Codex has no pre-trust path, so the trust gate
+// (choice 1) and the "Update available!" chooser (choice 3 = skip until next
+// version) are both dismissed here via PTY write.
+export async function ensureCodexPromptReadyViaPty(client, sessionId, timeoutMs = 60_000) {
+  return ensureAgentPromptReadyViaPty(client, sessionId, {
+    label: 'Codex',
+    isReady: hasCodexPrompt,
+    gates: [
+      { name: 'trust', match: hasTrustPrompt, choice: '1' },
+      { name: 'update', match: hasCodexUpdatePrompt, choice: '3' },
+    ],
+    timeoutMs,
+  });
+}
+
 export async function promptClaudeForStructuredBlock(client, sessionId, token, lineCount = 8) {
   const lines = Array.from({ length: lineCount }, (_, index) =>
     `${token} line ${index + 1} render width coverage verification payload ${index + 1} for split stability`

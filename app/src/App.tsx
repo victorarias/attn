@@ -1017,7 +1017,7 @@ sendFetchPRDetails,
     agent?: SessionAgent,
     endpointId?: string,
     yoloMode = false,
-    options?: { resumePicker?: boolean },
+    options?: { resumePicker?: boolean; chiefOfStaff?: boolean },
   ) => {
     const sessionId = providedSessionId || crypto.randomUUID();
     const workspaceId = `workspace-${sessionId}`;
@@ -1026,7 +1026,7 @@ sendFetchPRDetails,
     let paneAdded = false;
     try {
       await sendRegisterWorkspace(workspaceId, label, cwd, endpointId);
-      const createdSessionId = await createSession(label, cwd, sessionId, agent, endpointId, yoloMode, workspaceId);
+      const createdSessionId = await createSession(label, cwd, sessionId, agent, endpointId, yoloMode, workspaceId, options?.chiefOfStaff);
       localCreated = true;
       await sendWorkspaceAddSessionPane(workspaceId, sessionId, label, { paneId });
       paneAdded = true;
@@ -2086,7 +2086,7 @@ sendFetchPRDetails,
   }, [activeLocalSession?.workspaceId, handleNewWorkspace]);
 
   const handleLocationSelect = useCallback(
-    async (path: string, agent: SessionAgent, endpointId?: string, yoloMode = false) => {
+    async (path: string, agent: SessionAgent, endpointId?: string, yoloMode = false, chiefOfStaff = false) => {
       const jobId = sessionCreationJobIdRef.current + 1;
       sessionCreationJobIdRef.current = jobId;
       let selectedAgent: SessionAgent;
@@ -2133,7 +2133,7 @@ sendFetchPRDetails,
         error: null,
       });
       try {
-        const sessionId = await createWorkspaceSession(folderName, path, undefined, selectedAgent, endpointId, yoloMode);
+        const sessionId = await createWorkspaceSession(folderName, path, undefined, selectedAgent, endpointId, yoloMode, { chiefOfStaff });
         setSessionCreationJob((current) => (
           current?.id === jobId
             ? { ...current, sessionId, phase: 'starting_session' }
@@ -2245,6 +2245,14 @@ sendFetchPRDetails,
   // round-trip). The daemon enforces the same rule authoritatively as a backstop.
   const isChiefOfStaffSession = useCallback(
     (id: string) => daemonSessions.some((ds) => ds.id === id && ds.chief_of_staff === true),
+    [daemonSessions]
+  );
+
+  // Profile-wide: does any session currently hold the chief role? daemonSessions
+  // spans every workspace, so this is the authoritative "a chief already exists"
+  // signal that gates the new-session dialog's "create as chief" toggle.
+  const hasChiefOfStaff = useMemo(
+    () => daemonSessions.some((ds) => ds.chief_of_staff === true),
     [daemonSessions]
   );
 
@@ -4031,6 +4039,7 @@ sendFetchPRDetails,
         projectsDirectory={settings.projects_directory}
         agentAvailability={agentAvailability}
         endpoints={daemonEndpoints}
+        chiefExists={hasChiefOfStaff}
       />
       <UndoToast />
       <SessionCreationProgress

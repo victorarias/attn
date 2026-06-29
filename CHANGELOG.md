@@ -10,6 +10,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Added
 - **Create backlog tickets without delegating.** `attn ticket new --title <t> [--description <d>] [--id <slug>]` files an unbound ticket in the Todo column — for capturing work you're not handing to an agent yet. Agents now know that tickets are something they can create on your request.
+- **Start a session as your chief of staff.** The new-session/workspace dialog has a "create as chief of staff" toggle — shown only when you don't already have a chief, and only for Claude and Codex — so a brand-new agent launches already running the chief operating guidance, instead of creating it first and then promoting it.
+
+### Changed
+- **Your chief of staff reacts the moment delegated work changes.** Previously, when an agent the chief delegated finished, got blocked, or crashed, the chief found out only the next time you prompted it — the update sat unseen on the board. Now the chief watches its delegated tickets and surfaces a completion, a question, or a failure to you proactively, with a recommended next step, instead of going quiet after handing work off. As a safety net, attn also pokes an idle agent that has unread ticket activity it isn't already watching, so nothing stays silently unread.
+- **Making a running session your chief of staff now takes effect immediately.** Turning the chief role on (or off) reloads that agent in place — keeping its conversation intact — so the chief operating guidance actually applies to the running agent right away, instead of taking hold only the next time it happened to restart.
 
 ## [2026-06-27]
 

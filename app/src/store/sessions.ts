@@ -22,6 +22,11 @@ export interface Session {
   agent: SessionAgent;
   endpointId?: string;
   yoloMode?: boolean;
+  // chiefOfStaff requests that this session be launched already holding the
+  // chief-of-staff role so the notebook guidance is injected on its first boot
+  // (the post-launch promote path can't resume a zero-turn session). Set only at
+  // creation via the new-session dialog's "create as chief" toggle.
+  chiefOfStaff?: boolean;
   transcriptMatched: boolean;
   branch?: string;
   isWorktree?: boolean;
@@ -64,6 +69,7 @@ interface SessionStore {
     endpointId: string | undefined,
     yoloMode: boolean | undefined,
     workspaceId: string,
+    chiefOfStaff?: boolean,
   ) => Promise<string>;
   closeSession: (id: string) => void;
   removeSessionLocalState: (id: string) => void;
@@ -169,6 +175,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     endpointId: string | undefined,
     yoloMode: boolean | undefined,
     providedWorkspaceId: string,
+    chiefOfStaff?: boolean,
   ) => {
     // Use provided ID or generate new one
     const id = providedId || crypto.randomUUID();
@@ -186,6 +193,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       agent: resolvedAgent,
       endpointId,
       yoloMode: yoloMode ?? false,
+      chiefOfStaff: chiefOfStaff ?? false,
       transcriptMatched: resolvedAgent !== 'codex',
       workspace: createDefaultWorkspaceState(),
       daemonActivePaneId: '',
@@ -264,6 +272,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       agent: session.agent,
       resume_session_id: null,
       yolo_mode: session.yoloMode ?? null,
+      ...(session.chiefOfStaff ? { chief_of_staff: true } : {}),
       ...(selectedExecutable ? { executable: selectedExecutable } : {}),
       ...(session.agent === 'claude' && selectedExecutable
         ? { claude_executable: selectedExecutable }

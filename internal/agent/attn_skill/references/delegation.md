@@ -15,7 +15,10 @@ when the user explicitly asks for delegation, an interactive agent, a separate
 workspace/session, or a collaborator they can steer themselves.
 
 Attn delegation starts another agent with a focused brief; it does not create
-durable parent-child lineage or require you to monitor the new agent.
+durable parent-child lineage. If you are the chief of staff, attn binds a ticket
+to the delegated session and your system-prompt guidance covers how you follow it
+(arming a Monitor on `attn ticket inbox --watch`); ordinary delegation needs none
+of that.
 
 ## Brief Workflow
 

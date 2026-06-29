@@ -39,8 +39,17 @@ const (
 	SettingKeeperCompact            = "workspace_keeper_compact"
 	SettingTailscaleEnabled         = "tailscale_enabled"
 	SettingWorkflowsEnabled         = "workflows_enabled"
-	SettingKeybindingsConfig        = "keybindings_config"
-	SettingNewSessionYoloPrefix     = "new_session_yolo_"
+	// SettingAutoApproveEnabled, when true, launches interactive agents in their
+	// native auto-approve mode (Claude `--permission-mode auto`, Codex
+	// `approvals_reviewer=auto_review`) so they can run unattended without
+	// stalling on permission gates. Off by default. Yolo overrides it.
+	SettingAutoApproveEnabled   = "auto_approve_enabled"
+	SettingKeybindingsConfig    = "keybindings_config"
+	SettingNewSessionYoloPrefix = "new_session_yolo_"
+	// SettingChiefModelPrefix + agent (e.g. "chief_model_claude") pins the model a
+	// chief-of-staff launch uses, passed through as --model. Empty/unset => the
+	// agent's own default model. Only consulted for chief launches.
+	SettingChiefModelPrefix = "chief_model_"
 	// SettingNotebookRoot overrides the notebook's filesystem root. Empty =>
 	// the profile-derived default (~/attn-notebook[-profile]).
 	SettingNotebookRoot = "notebook.root"
@@ -219,6 +228,7 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	}
 	settings[SettingTailscaleEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingTailscaleEnabled]))
 	settings[SettingWorkflowsEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingWorkflowsEnabled]))
+	settings[SettingAutoApproveEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingAutoApproveEnabled]))
 	// Normalize the keeper master switch to its EFFECTIVE value so the UI toggle
 	// reflects the default-ON semantics (blank/unset => "true") rather than an
 	// absent key the frontend would read as off.
@@ -261,6 +271,16 @@ func isAgentExecutableAvailable(configuredExecutable, defaultExecutable string) 
 	return err == nil
 }
 
+// chiefLaunchModel returns the configured model for a chief-of-staff launch of
+// the given agent (from chief_model_<agent>), or "" — the agent's own default —
+// when this is not a chief launch or no model is configured.
+func (d *Daemon) chiefLaunchModel(agent string, chief bool) string {
+	if !chief {
+		return ""
+	}
+	return strings.TrimSpace(d.store.GetSetting(SettingChiefModelPrefix + strings.ToLower(strings.TrimSpace(agent))))
+}
+
 func (d *Daemon) validateSetting(key, value string) error {
 	switch key {
 	case SettingProjectsDirectory:
@@ -275,7 +295,7 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return d.validateNewSessionAgent(value)
 	case SettingTheme:
 		return validateTheme(value)
-	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingNotebookTasksEnabled:
+	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled:
 		return validateBooleanSetting(value)
 	case SettingKeeperCompact:
 		return d.validateKeeperCompactSetting(value)
@@ -296,6 +316,11 @@ func (d *Daemon) validateSetting(key, value string) error {
 	default:
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingNewSessionYoloPrefix) {
 			return validateBooleanSetting(value)
+		}
+		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingChiefModelPrefix) {
+			// Model names/aliases are free-form (like the review-loop model
+			// settings); accept any value and let the agent reject bad ones.
+			return nil
 		}
 		if _, ok := isAgentExecutableSettingKey(key); ok {
 			return validateExecutableSetting(value)

@@ -1,14 +1,12 @@
 package daemon
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/hooks"
@@ -201,61 +199,6 @@ func (d *Daemon) handleNotebookGuide(conn net.Conn, msg *protocol.NotebookGuideM
 			SessionIsChief: sessionIsChief,
 		},
 	})
-}
-
-// notebookActivationPrompt is the bounded doorbell typed into a freshly-promoted
-// chief session's PTY. It carries only a pointer to the chief's notebook on disk
-// — never guidance content itself. This is the safe exception to the
-// chief-of-staff "no arbitrary PTY content" boundary: a fixed trigger pointing at
-// a deterministic, attn-authored file. The full operating guidance still flows
-// into the system prompt at launch via hooks.ChiefGuidance; a live promotion
-// can't reach the system prompt, so it points the agent at the notebook's index.
-func notebookActivationPrompt(root string) string {
-	return fmt.Sprintf("You are now the chief of staff. Your durable home is the attn Notebook, not this workspace's shared context — read %s to get oriented.", filepath.Join(root, "index.md"))
-}
-
-// activateChiefGuidanceLive types the bounded notebook-activation doorbell into
-// a just-promoted chief session's PTY, but only when that session is idle or
-// waiting for input — never an agent mid-task. It first ensures the notebook
-// scaffold exists. Fire-and-forget: failures are logged, not surfaced.
-func (d *Daemon) activateChiefGuidanceLive(sessionID string) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" || d.ptyBackend == nil || d.store == nil {
-		return
-	}
-	root, err := d.notebookRoot()
-	if err != nil {
-		d.logf("notebook activation: resolve root failed for %s: %v", sessionID, err)
-		return
-	}
-	if _, _, serr := d.ensureNotebookScaffold(); serr != nil {
-		d.logf("notebook activation: ensure scaffold failed: %v", serr)
-	}
-	session := d.store.Get(sessionID)
-	if session == nil {
-		d.logf("notebook activation: session %s closed or remote; skipping live trigger", sessionID)
-		return
-	}
-	if session.State != protocol.SessionStateIdle && session.State != protocol.SessionStateWaitingInput {
-		d.logf("notebook activation: session %s is %s, not idle/waiting; skipping live trigger", sessionID, session.State)
-		return
-	}
-	// Re-confirm ownership right before typing: the role is a single-holder
-	// upsert, so a promotion of another session between the goroutine's launch
-	// and here would mean this session is no longer the chief. Never tell a
-	// demoted session it is now the chief.
-	if d.chiefOfStaffSessionID() != sessionID {
-		d.logf("notebook activation: session %s no longer holds the chief role; skipping live trigger", sessionID)
-		return
-	}
-	if err := d.ptyBackend.Input(context.Background(), sessionID, []byte(notebookActivationPrompt(root))); err != nil {
-		d.logf("notebook activation: input prompt failed for %s: %v", sessionID, err)
-		return
-	}
-	time.Sleep(100 * time.Millisecond)
-	if err := d.ptyBackend.Input(context.Background(), sessionID, []byte{'\r'}); err != nil {
-		d.logf("notebook activation: input enter failed for %s: %v", sessionID, err)
-	}
 }
 
 // sendNotebookListWSResult lists notes and replies to a websocket client with a

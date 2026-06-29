@@ -168,7 +168,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'ep-1');
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'snipe', 'ep-1', false);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'snipe', 'ep-1', false, false);
     });
     expect(onGetRepoInfo).not.toHaveBeenCalled();
   });
@@ -199,7 +199,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('~/projects', undefined);
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'claude', undefined, false);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'claude', undefined, false, false);
     });
   });
 
@@ -222,7 +222,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('~/projects', undefined);
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'claude', undefined, false);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'claude', undefined, false, false);
     });
   });
 
@@ -356,7 +356,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('/', undefined);
-      expect(onSelect).toHaveBeenCalledWith('/', 'claude', undefined, false);
+      expect(onSelect).toHaveBeenCalledWith('/', 'claude', undefined, false, false);
     });
   });
 
@@ -388,7 +388,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('/tmp/project', undefined);
-      expect(onSelect).toHaveBeenCalledWith('/tmp/project', 'claude', undefined, false);
+      expect(onSelect).toHaveBeenCalledWith('/tmp/project', 'claude', undefined, false, false);
     });
   });
 
@@ -431,7 +431,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('/home/remote/projects/recent-repo', undefined);
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/recent-repo', 'claude', undefined, false);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/recent-repo', 'claude', undefined, false, false);
     });
   });
 
@@ -527,7 +527,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('/tmp/other', undefined);
-      expect(onSelect).toHaveBeenCalledWith('/tmp/other', 'claude', undefined, false);
+      expect(onSelect).toHaveBeenCalledWith('/tmp/other', 'claude', undefined, false, false);
     });
   });
 
@@ -602,7 +602,7 @@ describe('LocationPicker', () => {
         'feat-images',
         undefined,
       );
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin--feat-more', 'claude', undefined, false);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin--feat-more', 'claude', undefined, false, false);
     });
   });
 
@@ -890,7 +890,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('/', 'ep-1');
-      expect(onSelect).toHaveBeenCalledWith('/', 'codex', 'ep-1', false);
+      expect(onSelect).toHaveBeenCalledWith('/', 'codex', 'ep-1', false, false);
     });
   });
 
@@ -1066,7 +1066,7 @@ describe('LocationPicker', () => {
     });
 
     await waitFor(() => {
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin', 'claude', undefined, false);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin', 'claude', undefined, false, false);
     });
   });
 
@@ -1151,7 +1151,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onError).toHaveBeenCalledWith('unborn HEAD');
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin', 'claude', undefined, false);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin', 'claude', undefined, false, false);
     });
   });
 
@@ -1277,7 +1277,7 @@ describe('LocationPicker', () => {
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
 
     await waitFor(() => {
-      expect(onSelect).toHaveBeenCalledWith('/tmp/other', 'claude', undefined, false);
+      expect(onSelect).toHaveBeenCalledWith('/tmp/other', 'claude', undefined, false, false);
     });
 
     firstRepoInfoGate.resolve({
@@ -1447,7 +1447,72 @@ describe('LocationPicker', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
 
     await waitFor(() => {
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'claude', 'ep-1', true);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'claude', 'ep-1', true, false);
+    });
+  });
+
+  describe('create-as-chief toggle', () => {
+    const inspectsTo = (resolved: string) => vi.fn(async (inputPath: string) => ({
+      success: true,
+      inspection: {
+        input_path: inputPath,
+        resolved_path: resolved,
+        home_path: '/home/remote',
+        exists: true,
+        is_directory: true,
+      },
+    }));
+
+    it('shows the chief toggle for claude when no chief exists', () => {
+      renderPicker({ chiefExists: false, purpose: 'workspace' });
+      expect(screen.getByTestId('location-picker-chief-toggle')).toBeInTheDocument();
+    });
+
+    it('hides the chief toggle when a chief already exists', () => {
+      renderPicker({ chiefExists: true, purpose: 'workspace' });
+      expect(screen.queryByTestId('location-picker-chief-toggle')).not.toBeInTheDocument();
+    });
+
+    it('hides the chief toggle in the split-session flow (purpose=session)', () => {
+      // A split into an existing workspace routes through createSplitSession, which
+      // never carries the chief flag — showing the toggle there is a silent no-op.
+      renderPicker({ chiefExists: false, purpose: 'session' });
+      expect(screen.queryByTestId('location-picker-chief-toggle')).not.toBeInTheDocument();
+    });
+
+    it('hides the chief toggle for the terminal (shell) agent', () => {
+      renderPicker({ chiefExists: false, purpose: 'workspace' });
+      // The chief toggle is offered for claude/codex only — selecting the terminal
+      // agent (which has no chief-guidance launch path) must hide it.
+      fireEvent.click(screen.getByRole('radio', { name: /Terminal/i }));
+      expect(screen.queryByTestId('location-picker-chief-toggle')).not.toBeInTheDocument();
+    });
+
+    it('plumbs chiefOfStaff=true through onSelect when the toggle is on', async () => {
+      const onInspectPath = inspectsTo('/home/remote/projects');
+      const { onSelect } = renderPicker({ chiefExists: false, purpose: 'workspace', onInspectPath });
+
+      fireEvent.click(screen.getByTestId('location-picker-chief-toggle'));
+      const input = screen.getByRole('textbox');
+      fireEvent.change(input, { target: { value: '/home/remote/projects' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+
+      await waitFor(() => {
+        expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'claude', undefined, false, true);
+      });
+    });
+
+    it('defaults chiefOfStaff to false when the toggle is left off', async () => {
+      const onInspectPath = inspectsTo('/home/remote/projects');
+      const { onSelect } = renderPicker({ chiefExists: false, purpose: 'workspace', onInspectPath });
+
+      const input = screen.getByRole('textbox');
+      fireEvent.change(input, { target: { value: '/home/remote/projects' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+
+      await waitFor(() => {
+        expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'claude', undefined, false, false);
+      });
     });
   });
 });

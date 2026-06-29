@@ -233,6 +233,19 @@ type SpawnOpts struct {
 	ResumePicker    bool
 	YoloMode        bool
 
+	// AutoApprove, when true (and not YoloMode), launches the agent in its native
+	// auto-approve mode (Claude --permission-mode auto, Codex
+	// approvals_reviewer=auto_review) so it runs unattended without stalling on
+	// permission gates. Gated by the daemon's auto_approve_enabled setting and
+	// threaded into the worker via ATTN_AUTO_APPROVE. Yolo takes precedence.
+	AutoApprove bool
+
+	// Model, when set, pins the interactive agent's model via --model (an alias
+	// like "opus"/"sonnet" or a full model id). Empty means the agent's own
+	// default. Sourced from the daemon's chief_model_<agent> setting for chief
+	// launches and threaded into the worker via ATTN_CHIEF_MODEL.
+	Model string
+
 	// Executable is the resolved executable path (from ResolveExecutable).
 	Executable string
 

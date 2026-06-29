@@ -479,6 +479,12 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 	if opts.WorkflowGuidanceEnabled {
 		workerEnv = append(workerEnv, "ATTN_WORKFLOW_GUIDANCE_ENABLED=1")
 	}
+	if opts.AutoApprove {
+		workerEnv = append(workerEnv, "ATTN_AUTO_APPROVE=1")
+	}
+	if model := strings.TrimSpace(opts.Model); model != "" {
+		workerEnv = append(workerEnv, "ATTN_CHIEF_MODEL="+model)
+	}
 	if len(opts.LoginShellEnv) > 0 {
 		if envJSON, err := json.Marshal(opts.LoginShellEnv); err == nil {
 			workerEnv = append(workerEnv, "ATTN_CACHED_SHELL_ENV="+string(envJSON))
@@ -917,6 +923,30 @@ func (b *WorkerBackend) SessionInfo(ctx context.Context, sessionID string) (Sess
 		LastSeq:    info.LastSeq,
 		ExitCode:   info.ExitCode,
 		ExitSignal: info.ExitSignal,
+	}, nil
+}
+
+// SessionLaunchParams returns the launch flags the worker recorded in its
+// registry entry, so the daemon can re-spawn the agent in place with the same
+// yolo/executable instead of defaulting them. A registry miss, or an entry from a
+// pre-reload worker (LaunchParamsRecorded false), surfaces as Recorded=false so
+// the daemon aborts the reload rather than respawning with wrong launch flags.
+func (b *WorkerBackend) SessionLaunchParams(ctx context.Context, sessionID string) (SessionLaunchParams, error) {
+	session, err := b.getSession(sessionID)
+	if err != nil {
+		return SessionLaunchParams{}, err
+	}
+	entry, err := ptyworker.ReadRegistry(session.RegistryPath)
+	if err != nil {
+		return SessionLaunchParams{}, err
+	}
+	return SessionLaunchParams{
+		Recorded:          entry.LaunchParamsRecorded,
+		YoloMode:          entry.YoloMode,
+		Executable:        entry.Executable,
+		ClaudeExecutable:  entry.ClaudeExecutable,
+		CodexExecutable:   entry.CodexExecutable,
+		CopilotExecutable: entry.CopilotExecutable,
 	}, nil
 }
 

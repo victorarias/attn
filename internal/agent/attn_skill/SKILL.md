@@ -24,8 +24,8 @@ If a command reports an unknown subcommand or shows another tool's help, check
 
 - **Create a visible interactive agent the user can steer:** read
   [references/delegation.md](references/delegation.md).
-- **Coordinate or report chief-of-staff tracked work (tickets):** read
-  [references/chief-of-staff.md](references/chief-of-staff.md).
+- **Report your work state as a delegated agent whose work is tracked (tickets):**
+  read [references/delegated-agent.md](references/delegated-agent.md).
 - **Write a good ticket, or create a backlog ticket without delegating (`ticket new`):** read [references/tickets.md](references/tickets.md).
 - **Read or update shared workspace context:** read
   [references/workspace-context.md](references/workspace-context.md).

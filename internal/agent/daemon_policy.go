@@ -32,6 +32,18 @@ type ResumePolicyProvider interface {
 	ResumeSessionIDFromStopTranscriptPath(transcriptPath string) string
 }
 
+// ResumeAvailabilityProvider reports whether a resolved resume target can
+// actually be resumed on disk right now. A session that booted to its prompt but
+// took zero turns leaves nothing to resume — Claude writes its transcript lazily
+// on the first turn — so a resume against it fails and kills the agent. Drivers
+// that can cheaply check implement this; the daemon downgrades a doomed resume to
+// a fresh spawn instead.
+type ResumeAvailabilityProvider interface {
+	// ResumeAvailable reports whether resumeID can be resumed. resumeID is the
+	// already-resolved resume target and is never empty when called.
+	ResumeAvailable(resumeID string) bool
+}
+
 // TranscriptClassificationExtractor customizes transcript parsing for stop-time
 // classification.
 type TranscriptClassificationExtractor interface {
@@ -89,6 +101,20 @@ func ResolveSpawnResumeSessionID(d Driver, existingSessionID, requestedResumeID,
 		return strings.TrimSpace(p.ResolveSpawnResumeSessionID(existingSessionID, requested, stored))
 	}
 	return requested
+}
+
+// ResumeAvailable reports whether resumeID is resumable for this driver. Drivers
+// that don't implement ResumeAvailabilityProvider are assumed always-resumable
+// (true) so resume behavior is unchanged for them. An empty resumeID is reported
+// as not resumable (there is nothing to resume).
+func ResumeAvailable(d Driver, resumeID string) bool {
+	if strings.TrimSpace(resumeID) == "" {
+		return false
+	}
+	if p, ok := d.(ResumeAvailabilityProvider); ok {
+		return p.ResumeAvailable(resumeID)
+	}
+	return true
 }
 
 func SpawnResumeSessionID(d Driver, sessionID, resolvedResumeID string, resumePicker bool) string {
