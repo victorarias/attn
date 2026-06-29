@@ -3331,6 +3331,7 @@ export enum SpawnResultMessageEvent {
 
 export interface SpawnSessionMessage {
     agent:               string;
+    chief_of_staff?:     boolean;
     claude_executable?:  string;
     cmd:                 SpawnSessionMessageCmd;
     codex_executable?:   string;
@@ -8733,6 +8734,7 @@ const typeMap: any = {
     ], "any"),
     "SpawnSessionMessage": o([
         { json: "agent", js: "agent", typ: "" },
+        { json: "chief_of_staff", js: "chief_of_staff", typ: u(undefined, true) },
         { json: "claude_executable", js: "claude_executable", typ: u(undefined, "") },
         { json: "cmd", js: "cmd", typ: r("SpawnSessionMessageCmd") },
         { json: "codex_executable", js: "codex_executable", typ: u(undefined, "") },

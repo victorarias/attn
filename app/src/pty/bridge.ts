@@ -14,6 +14,7 @@ export interface PtySpawnArgs {
   resume_session_id?: string | null;
   resume_picker?: boolean | null;
   yolo_mode?: boolean | null;
+  chief_of_staff?: boolean | null;
   agent?: string;
   label?: string;
   executable?: string;

@@ -3189,6 +3189,9 @@ type SpawnSessionMessage struct {
 	// Agent corresponds to the JSON schema field "agent".
 	Agent string `json:"agent"`
 
+	// ChiefOfStaff corresponds to the JSON schema field "chief_of_staff".
+	ChiefOfStaff *bool `json:"chief_of_staff,omitempty,omitzero"`
+
 	// ClaudeExecutable corresponds to the JSON schema field "claude_executable".
 	ClaudeExecutable *string `json:"claude_executable,omitempty,omitzero"`
 

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -13,6 +14,23 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
+
+// writeClaudeTranscriptFixture points HOME at a temp dir and writes a Claude
+// transcript for sessionID so FindClaudeTranscript (which walks ~/.claude/projects)
+// treats the session as resumable. Without it a reload-resume id with no transcript
+// on disk is correctly downgraded to a fresh spawn.
+func writeClaudeTranscriptFixture(t *testing.T, sessionID string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projDir := filepath.Join(home, ".claude", "projects", "proj")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatalf("mkdir transcript dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projDir, sessionID+".jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write transcript fixture: %v", err)
+	}
+}
 
 // fakeReloadBackend records the kill/remove/spawn orchestration and serves the
 // SessionInfo (geometry) + SessionLaunchParams (registry) the reload path reads.
@@ -195,6 +213,9 @@ func TestReloadSessionAgentRespawnsWithResumeAndPreservedLaunchParams(t *testing
 	d := newReloadTestDaemon(t, backend)
 	addReloadSession(d, "chief", protocol.SessionAgentClaude, protocol.SessionStateWorking)
 	d.persistResumeSessionID("chief", "resume-xyz")
+	// The resume target must have a transcript on disk to be resumable; otherwise
+	// the reload correctly downgrades to a fresh spawn (see the fresh-spawn test).
+	writeClaudeTranscriptFixture(t, "resume-xyz")
 
 	var respawned, exited bool
 	d.wsHub.broadcastListener = func(e *protocol.WebSocketEvent) {
@@ -245,6 +266,34 @@ func TestReloadSessionAgentRespawnsWithResumeAndPreservedLaunchParams(t *testing
 	}
 	if d.consumeReloading("chief") {
 		t.Fatal("the suppressed exit should have consumed the reloading flag")
+	}
+}
+
+// A chief promoted before it ever took a turn has a resume id (its own session id,
+// assigned at spawn) pointing at a transcript Claude has not written yet. Resuming
+// it would exit non-zero (a dead chief), so the reload must downgrade to a fresh
+// spawn — which reuses --session-id and preserves the session identity.
+func TestReloadSessionAgentFreshSpawnsWhenNotResumable(t *testing.T) {
+	backend := &fakeReloadBackend{
+		liveIDs: []string{"chief"},
+		info:    ptybackend.SessionInfo{Cols: 80, Rows: 24},
+		params:  ptybackend.SessionLaunchParams{Recorded: true},
+	}
+	d := newReloadTestDaemon(t, backend)
+	addReloadSession(d, "chief", protocol.SessionAgentClaude, protocol.SessionStateWorking)
+	// A resume id with NO transcript on disk: point HOME at an empty temp home so
+	// FindClaudeTranscript finds nothing for this id.
+	d.persistResumeSessionID("chief", "chief")
+	t.Setenv("HOME", t.TempDir())
+
+	d.reloadSessionAgent("chief")
+
+	opts, ok := backend.lastSpawn()
+	if !ok {
+		t.Fatal("no respawn recorded")
+	}
+	if opts.ResumeSessionID != "" {
+		t.Fatalf("ResumeSessionID = %q, want empty (fresh spawn — nothing to resume)", opts.ResumeSessionID)
 	}
 }
 

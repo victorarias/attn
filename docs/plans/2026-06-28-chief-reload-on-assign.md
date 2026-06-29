@@ -15,6 +15,25 @@ This is the delivery mechanism that makes the delegated-ticket-awareness work
 (PR #436) actually reach a promoted chief. Without it the guidance is present
 only by luck (whenever the agent next happens to relaunch).
 
+## Phase 2 (2026-06-29): create-as-chief + empty-resume robustness
+
+Real-agent benchmarking surfaced that the **reload can't resume a session with no
+conversation**: `claude -r <id>` exits 1 on an empty session (claude writes the
+transcript lazily on the first turn — a fully-booted, zero-turn session leaves NO
+`~/.claude/projects/.../<id>.jsonl`, EMPIRICALLY confirmed). Promoting a brand-new
+session to chief therefore *killed* it. Two changes close this:
+
+1. **Create-as-chief toggle** (the primary path for a new chief). A toggle in the
+   new-session dialog (`LocationPicker`), shown ONLY when no chief exists and the
+   agent is not a terminal, sets the chief role BEFORE first launch so guidance is
+   injected at launch — no reload, no resume. This is how you *make* a chief; the
+   reload stays for promoting/demoting already-running sessions.
+2. **Fresh-spawn when empty** (reload robustness). When the reload (or any resume)
+   targets a session with no resumable transcript, drop `-r` and launch fresh with
+   `--session-id` instead. Safe because an empty session left no file, so reusing the
+   id can't collide. Loses nothing (there was no conversation) and still injects
+   guidance.
+
 ## Decisions (settled with Victor 2026-06-28)
 
 - **Full daemon-side reload.** The daemon performs kill + resume-respawn itself
@@ -62,6 +81,23 @@ only by luck (whenever the agent next happens to relaunch).
   so the displaced chief drops its guidance now, not whenever it next restarts
   (the symmetric-demote intent applied to the transfer case). Different ids ⇒
   different reload locks ⇒ they run concurrently.
+- **(Phase 2) Create-as-chief sets the role BEFORE spawn, not via reload.** In
+  `handleSpawnSession`, `msg.ChiefOfStaff && existingSession == nil && chief-guidance
+  agent && no current chief` ⇒ `SetProfileRole` before `ptyBackend.Spawn`, so the
+  spawned `attn` child's `notebook guide` query sees the role and injects guidance at
+  first launch. Defends the toggle's "only when no chief" invariant daemon-side
+  (skip + log on an existing chief; never spawn-time-transfer). Chosen over reusing
+  the reload because a brand-new session is empty ⇒ not resumable; launching as chief
+  the first time avoids the resume entirely.
+- **(Phase 2) Empty-resume downgrade lives at the worker/driver, scoped to the
+  reload via the daemon.** `buildReloadSpawnOptions` clears `ResumeSessionID` when the
+  driver reports the session isn't resumable (claude: no `FindClaudeTranscript`), so
+  the reload fresh-spawns instead of issuing a doomed `-r`. Scoped to the reload path
+  (does not change normal resume/recovery behavior).
+- **(Phase 2) Benchmark creates the chief via the toggle** (Victor 2026-06-29): the
+  real-agent scenario passes `chief_of_staff: true` to create_session and drops the
+  promote+reload-gate steps — testing launch-time guidance + instruction-following,
+  no resume edge.
 - **Ship as one PR** (Victor 2026-06-28: minimize PR count; the <1k cap does not
   apply here). The spawn refactor, `reloadSessionAgent`, the protocol bump, and the
   frontend reattach handler land together. The refactor is the first commit (kept a
@@ -265,6 +301,41 @@ abort the reload (Decisions).
         w/ `relaunch_restore`, `onSessionExited` NOT called.
       - real-agent benchmark (`scenario-chief-ticket-watch.mjs`): DROPPED the
         app-relaunch hack — polls `chiefGuidanceProcesses()` after promote.
+
+## Phase 2 Implementation Steps
+
+- [x] Protocol: added `chief_of_staff?: boolean` to `SpawnSessionMessage` (main.tsp);
+      `make generate-types`; bumped `ProtocolVersion` 132→133 (+ frontend
+      `PROTOCOL_VERSION`).
+- [x] Daemon: `maybeAssignChiefOnSpawn` in `chief_of_staff.go`, called from
+      `ws_pty.go handleSpawnSession` before `ptyBackend.Spawn` — assigns when
+      `ChiefOfStaff && existingSession == nil && agentSupportsChiefReload(agent) &&
+      chiefOfStaffSessionID() == ""`; logs + skips when a chief already exists or the
+      agent is unsupported; rolled back on Spawn/AddChecked failure. The session row
+      is unnecessary: both the role check (`chiefOfStaffSessionID` reads
+      `profile_roles`) and the notebook-root resolution (`notebookRoot` reads a
+      setting / profile default) are store-independent, so the agent's async guide
+      query sees chief=true + the right root before `AddChecked`.
+- [x] Driver: `ResumeAvailabilityProvider.ResumeAvailable(resumeID) bool` +
+      `agentdriver.ResumeAvailable` helper (claude: `FindClaudeTranscript != ""`;
+      codex omits → default true, since a zero-turn codex stores no rollout id and
+      never reaches the reload path with a doomed resume). `buildReloadSpawnOptions`
+      clears `ResumeSessionID` when not resumable (fresh-spawn, reuses `--session-id`).
+- [x] Frontend (`LocationPicker.tsx` + `App.tsx`): "create as chief of staff" toggle,
+      shown only when `!chiefExists && (agent === 'claude' || agent === 'codex')`
+      (matches the daemon's `agentSupportsChiefReload` gate, not just `!== 'shell'`);
+      `hasChiefOfStaff` is the profile-wide signal. Flag plumbed through `onSelect` →
+      `handleLocationSelect` → `createWorkspaceSession` → store `createSession` →
+      `takeSessionSpawnArgs` → spawn message `chief_of_staff`; automation
+      `create_session` forwards it too.
+- [x] Benchmark (`scenario-chief-ticket-watch.mjs`): creates with `chief_of_staff:true`;
+      dropped the promote + reload-gate; gates on role-held + `chiefGuidanceProcesses()`
+      at first launch; demotes any leftover chief at start and on teardown (create-as-chief
+      skips when a chief exists, so the role must be cleared between runs).
+- [x] Tests: daemon (`create_as_chief_test.go` — role pre-spawn, skip on existing
+      chief / shell, rollback on spawn failure, no-assign on respawn; `reload_test.go`
+      fresh-spawn-when-not-resumable); agent (`resume_available_test.go`); frontend
+      (LocationPicker toggle visibility + flag plumbed).
 
 ## Verification (turn assumptions into assertions)
 

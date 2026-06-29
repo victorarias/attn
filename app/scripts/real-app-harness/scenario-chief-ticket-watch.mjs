@@ -13,12 +13,15 @@
  * Flow:
  *   1. Seed a small git repo (CHANGELOG.md + README.md) as the chief's cwd so the
  *      delegated task is concrete.
- *   2. Create a real <agent> session, then promote it to chief. The daemon now
- *      RELOADS the agent in place (kill + resume-respawn) on chief-assign, so the
- *      relaunched process carries ChiefGuidance — no app relaunch needed.
- *   3. GATE: confirm the chief's agent process was actually launched with the new
- *      guidance (its --append-system-prompt carries "attn ticket inbox --watch").
- *      Fail fast here so a setup miss never masquerades as a behavioral failure.
+ *   2. Create a real <agent> session ALREADY as chief (the "create as chief" toggle:
+ *      create_session with chief_of_staff:true). The daemon assigns the chief role
+ *      BEFORE spawn, so the very first launch injects ChiefGuidance — no promote, no
+ *      reload (an empty zero-turn session can't be resumed, which is why the first
+ *      launch, not a post-launch reload, must carry the guidance).
+ *   3. GATE: confirm the daemon holds the role for this session AND its agent process
+ *      was actually launched with the guidance (its --append-system-prompt / Codex
+ *      developer_instructions carries "attn ticket inbox --watch"). Fail fast here so
+ *      a setup miss never masquerades as a behavioral failure.
  *   4. Type the human prompt. Observe (no coaching):
  *        - did the chief DELEGATE? (a ticket bound to a NEW worker session appears)
  *        - did it ARM THE WATCH? (a live `attn ticket inbox --watch` process)
@@ -34,8 +37,13 @@
  *   ATTN_HARNESS_PROFILE=uat node scripts/real-app-harness/scenario-chief-ticket-watch.mjs --agent codex
  *
  * Prereqs: claude/codex on PATH; a built ./attn (or ATTN_HARNESS_BIN); a non-prod
- * profile install built from this branch (so its bundled attn has `--watch` and the
- * new guidance) — e.g. `make install PROFILE=uat`.
+ * profile install built from this branch (so its bundled attn has `--watch`, the new
+ * guidance, and the create-as-chief spawn path) — e.g. `make install PROFILE=uat`.
+ *
+ * Repeatability: the chief role is profile-wide and persists in the profile DB, and
+ * create-as-chief SKIPS when a chief already exists (it never transfers). So this
+ * benchmark demotes any leftover chief at startup and again on teardown, leaving the
+ * profile with no chief for the next run.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -153,22 +161,38 @@ function chiefGuidanceProcesses() {
   return shell(`ps -Awwo pid=,command= | grep -- 'arm a harness Monitor running' | grep -v grep`).trim();
 }
 
-async function setChiefOfStaff(client, sessionId) {
+// Drive a session to the desired chief state via the same UI flow a user would
+// (open actions, toggle, confirm any transfer). Idempotent: a no-op when already in
+// the wanted state. Used only for teardown/reset here — the chief itself is born via
+// create-as-chief, not promotion.
+async function setChiefOfStaff(client, sessionId, want) {
   const before = await client.request('chief_of_staff_get_state');
-  if (before.sessions.find((s) => s.id === sessionId)?.chiefOfStaff) return;
+  const isChief = Boolean(before.sessions.find((s) => s.id === sessionId)?.chiefOfStaff);
+  if (isChief === want) return;
   await client.request('chief_of_staff_open_actions', { sessionId });
   await client.request('chief_of_staff_toggle');
   const afterToggle = await client.request('chief_of_staff_get_state');
-  if (afterToggle.transferPrompt) await client.request('chief_of_staff_confirm_transfer');
+  if (want && afterToggle.transferPrompt) await client.request('chief_of_staff_confirm_transfer');
   const ok = await pollFor(
     async () => {
       const state = await client.request('chief_of_staff_get_state');
-      return state.sessions.find((s) => s.id === sessionId)?.chiefOfStaff ? state : null;
+      return Boolean(state.sessions.find((s) => s.id === sessionId)?.chiefOfStaff) === want ? state : null;
     },
-    `session ${sessionId} to become chief-of-staff`,
+    `session ${sessionId} chief=${want}`,
     15_000,
   );
-  assert(ok, `chief role applied to ${sessionId}`);
+  assert(ok, `chief role set to ${want} for ${sessionId}`);
+}
+
+// Demote any session that currently holds the chief role, so create-as-chief (which
+// skips when a chief exists) starts from a clean slate. Catches a chief left live by
+// a prior run that crashed before its teardown.
+async function clearAnyChief(client) {
+  const state = await client.request('chief_of_staff_get_state').catch(() => ({ sessions: [] }));
+  const chief = (state.sessions || []).find((s) => s.chiefOfStaff);
+  if (!chief) return null;
+  await setChiefOfStaff(client, chief.id, false);
+  return chief.id;
 }
 
 async function readChiefPane(client, chiefId) {
@@ -235,41 +259,61 @@ async function main() {
   try {
     await launchFreshAppAndConnect(client, observer);
 
-    // 1) Create the real agent session and wait until it is at its prompt.
-    const created = await client.request('create_session', { cwd: repoDir, label: `chief-${runId.slice(-6)}`, agent });
+    // 0) Clean slate: demote any chief left over from a crashed prior run, since
+    //    create-as-chief skips (never transfers) when a chief already exists.
+    const leftover = await clearAnyChief(client);
+    if (leftover) note(`demoted leftover chief from a prior run`, { leftover });
+
+    // 1) Create the real agent session ALREADY as chief (the create-as-chief toggle).
+    //    The daemon assigns the role before spawn, so the first launch carries
+    //    ChiefGuidance — no promote, no in-place reload.
+    const created = await client.request('create_session', {
+      cwd: repoDir,
+      label: `chief-${runId.slice(-6)}`,
+      agent,
+      chief_of_staff: true,
+    });
     chiefId = created.sessionId;
     await observer.waitForSession({ id: chiefId, timeoutMs: 30_000 });
-    note(`session created`, { chiefId });
+    note(`chief session created (create-as-chief)`, { chiefId });
     await ensureReady(client, chiefId, 90_000);
-    note(`agent booted to prompt`);
+    note(`chief agent booted to prompt`);
 
-    // 2) Promote to chief. The daemon reloads the agent in place (kill + resume-
-    //    respawn) so the relaunched process carries ChiefGuidance — no app relaunch.
-    await client.request('select_session', { sessionId: chiefId });
-    await setChiefOfStaff(client, chiefId);
-    note(`promoted to chief-of-staff; daemon reloading agent in place`);
+    // 2) GATE (role): the daemon must actually hold the chief role for THIS session.
+    //    If it doesn't, the create-as-chief role-set was skipped (e.g. a stale chief
+    //    still held the role) — fail fast and distinctly so it never reads as a
+    //    behavioral result.
+    const roleState = await pollFor(
+      async () => {
+        const state = await client.request('chief_of_staff_get_state').catch(() => null);
+        return state?.sessions?.find((s) => s.id === chiefId)?.chiefOfStaff ? state : null;
+      },
+      'daemon to hold the chief role for the new session',
+      20_000,
+    );
+    evidence.daemonHoldsRole = Boolean(roleState);
+    if (!roleState) {
+      await dumpPane('00-chief-no-role');
+      saveEvidence('setup-failed-no-role');
+      throw new Error('SETUP FAILED: the daemon did not assign the chief role to the new session (create-as-chief was skipped — likely a stale chief still holds the role; reset the profile and re-run).');
+    }
 
-    // 3) GATE: the reload is async server-side, so wait for a guidance-bearing
-    //    worker to come up, then for the resumed agent to reach its prompt. The
-    //    chief must actually carry the new guidance or the behavioral result is
-    //    meaningless — fail fast and distinctly on a setup miss.
+    // 3) GATE (guidance): the agent process must actually carry the guidance in its
+    //    launch args. "arm a harness Monitor running" appears ONLY in the guidance
+    //    text and rides in via --append-system-prompt / developer_instructions.
     await pollFor(
       () => Boolean(chiefGuidanceProcesses()),
-      'chief agent reloaded in place with ChiefGuidance',
-      60_000,
+      'chief agent launched with ChiefGuidance',
+      30_000,
     );
-    await observer.waitForSession({ id: chiefId, timeoutMs: 30_000 });
-    await ensureReady(client, chiefId, 90_000);
-    note(`chief reloaded in place; agent respawned and ready`);
-
     const guidanceProc = chiefGuidanceProcesses();
     evidence.guidanceProcess = guidanceProc;
     if (!guidanceProc) {
-      await dumpPane('00-chief-after-reload');
+      await dumpPane('00-chief-no-guidance');
       saveEvidence('setup-failed-no-guidance');
-      throw new Error('SETUP FAILED: chief agent was not reloaded with ChiefGuidance (no process carries the "ticket inbox --watch" system prompt). The chief-assign reload did not inject guidance.');
+      throw new Error('SETUP FAILED: chief agent was not launched with ChiefGuidance (no process carries the "ticket inbox --watch" system prompt). The create-as-chief role-set did not reach the launch path.');
     }
-    note(`guidance verified in chief launch args`);
+    note(`role + guidance verified at first launch`);
     await dumpPane('01-chief-ready-with-guidance');
 
     // 4) Type the human prompt — then only observe.
@@ -406,7 +450,13 @@ async function main() {
     throw error;
   } finally {
     if (workerId) await client.request('close_session', { sessionId: workerId }).catch(() => {});
-    if (chiefId) await client.request('close_session', { sessionId: chiefId }).catch(() => {});
+    // The chief is protected from closing while it holds the role, so demote it
+    // first (this also clears the role so the next run's create-as-chief is not
+    // blocked), then close.
+    if (chiefId) {
+      await setChiefOfStaff(client, chiefId, false).catch(() => {});
+      await client.request('close_session', { sessionId: chiefId }).catch(() => {});
+    }
     await client.quitApp().catch(() => {});
     await observer.close();
     console.log(`[chief-watch] artifacts in ${runDir}`);

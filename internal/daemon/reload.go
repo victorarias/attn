@@ -210,6 +210,16 @@ func (d *Daemon) buildReloadSpawnOptions(session *protocol.Session) (ptybackend.
 	agent := normalizeSpawnAgent(string(session.Agent))
 	driver := agentdriver.Get(agent)
 	resumeSessionID := agentdriver.ResolveSpawnResumeSessionID(driver, sessionID, "", d.store.GetResumeSessionID(sessionID))
+	// Fresh-spawn when there is nothing to resume. A session is assigned its own
+	// id as the resume target at spawn time, but Claude writes its transcript
+	// lazily on the first turn — so a chief promoted before it ever took a turn
+	// has a resume id pointing at a transcript that does not exist, and a resume
+	// would exit non-zero (a dead chief). Downgrading to a fresh launch (which
+	// reuses --session-id) preserves the session identity without resuming.
+	if resumeSessionID != "" && !agentdriver.ResumeAvailable(driver, resumeSessionID) {
+		d.logf("reload: resume target %s for session %s is not resumable (no transcript yet); fresh-spawning instead", resumeSessionID, sessionID)
+		resumeSessionID = ""
+	}
 
 	return ptybackend.SpawnOptions{
 		ID:                      sessionID,

@@ -434,6 +434,7 @@ describe('worktree cleanup prompt', () => {
         undefined,
         false,
         expect.stringMatching(/^workspace-/),
+        undefined,
       );
     });
     expect(screen.getByRole('dialog')).toHaveTextContent('Starting session');

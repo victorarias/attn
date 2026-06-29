@@ -64,7 +64,7 @@ interface LocationPickerProps {
   isOpen: boolean;
   purpose?: 'workspace' | 'session';
   onClose: () => void;
-  onSelect: (path: string, agent: SessionAgent, endpointId?: string, yoloMode?: boolean) => void;
+  onSelect: (path: string, agent: SessionAgent, endpointId?: string, yoloMode?: boolean, chiefOfStaff?: boolean) => void;
   onGetRecentLocations?: (endpointId?: string) => Promise<{ locations: RecentLocation[]; home_path?: string }>;
   onBrowseDirectory?: (inputPath: string, endpointId?: string) => Promise<BrowseDirectoryResult>;
   onInspectPath?: (path: string, endpointId?: string) => Promise<InspectPathResult>;
@@ -76,6 +76,10 @@ interface LocationPickerProps {
   projectsDirectory?: string;
   agentAvailability?: AgentAvailability;
   endpoints?: DaemonEndpoint[];
+  // chiefExists is the profile-wide "a chief of staff already holds the role"
+  // signal. The "create as chief" toggle is shown only when no chief exists yet
+  // (the role is single-holder), so a second one is never created by accident.
+  chiefExists?: boolean;
 }
 
 const MAX_RECENT_LOCATIONS = 10;
@@ -197,6 +201,7 @@ export function LocationPicker({
   projectsDirectory,
   agentAvailability,
   endpoints = [],
+  chiefExists = false,
 }: LocationPickerProps) {
   const { settings, setSetting } = useSettings();
   const localAgentAvailability = agentAvailability || DEFAULT_AGENT_AVAILABILITY;
@@ -222,6 +227,7 @@ export function LocationPicker({
   const [agent, setAgent] = useState<SessionAgent>('claude');
   const [targetId, setTargetId] = useState(LOCAL_TARGET);
   const [yoloMode, setYoloMode] = useState(false);
+  const [chiefOfStaff, setChiefOfStaff] = useState(false);
   const [repoRootPath, setRepoRootPath] = useState<string | null>(null);
   const [repoInfo, setRepoInfo] = useState<RepoInfo | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -366,6 +372,13 @@ export function LocationPicker({
 
   const savedAgent = normalizeAgent(settings[SESSION_AGENT_KEY]);
   const yoloSupported = Boolean(agentCapabilities[agent]?.yolo);
+  // The "create as chief" toggle is offered only when no chief exists yet (the
+  // role is single-holder), the selected agent has a guidance launch path
+  // (claude/codex only, matching the daemon's agentSupportsChiefReload gate), and
+  // this is the new-workspace flow — a split into an existing workspace
+  // (purpose==='session') routes through createSplitSession, which never carries
+  // the chief flag, so showing the toggle there would be a silent no-op.
+  const chiefToggleEligible = !chiefExists && purpose !== 'session' && (agent === 'claude' || agent === 'codex');
 
   const invalidateRequestGeneration = useCallback(() => {
     requestGenerationRef.current += 1;
@@ -411,6 +424,12 @@ export function LocationPicker({
       setYoloMode(false);
     }
   }, [yoloSupported]);
+
+  useEffect(() => {
+    if (!chiefToggleEligible) {
+      setChiefOfStaff(false);
+    }
+  }, [chiefToggleEligible]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -542,9 +561,9 @@ export function LocationPicker({
 
   const launchSelection = useCallback((path: string) => {
     const selectedAgent = resolvePickerAgent(agent, effectiveAgentAvailability, 'codex');
-    onSelect(path, selectedAgent, selectedEndpointId, yoloMode && yoloSupported);
+    onSelect(path, selectedAgent, selectedEndpointId, yoloMode && yoloSupported, chiefOfStaff && chiefToggleEligible);
     onClose();
-  }, [agent, effectiveAgentAvailability, onClose, onSelect, selectedEndpointId, yoloMode, yoloSupported]);
+  }, [agent, chiefOfStaff, chiefToggleEligible, effectiveAgentAvailability, onClose, onSelect, selectedEndpointId, yoloMode, yoloSupported]);
 
   const updateInputValue = useCallback((nextPath: string) => {
     if (nextPath === inputValue) {
@@ -942,6 +961,27 @@ export function LocationPicker({
             </div>
           </div>
         </div>
+        {chiefToggleEligible && (
+          <div className="picker-chief-bar">
+            <div className="picker-agent-label">CHIEF OF STAFF</div>
+            <div className="picker-chief-controls">
+              <div className="agent-toggle">
+                <button
+                  type="button"
+                  className={`agent-option ${chiefOfStaff ? 'active' : ''}`}
+                  data-testid="location-picker-chief-toggle"
+                  role="switch"
+                  aria-checked={chiefOfStaff}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => setChiefOfStaff((prev) => !prev)}
+                  title="Launch this session as the chief of staff — it runs the notebook and delegates work to other sessions"
+                >
+                  <span className="agent-option-name">{chiefOfStaff ? 'On' : 'Off'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="picker-endpoint-bar">
           <div className="picker-endpoint-leading">
             <div className="picker-endpoint-label">SESSION TARGET</div>

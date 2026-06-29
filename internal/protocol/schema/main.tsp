@@ -1235,6 +1235,7 @@ model SpawnSessionMessage {
   resume_session_id?: string;
   resume_picker?: boolean;
   yolo_mode?: boolean;
+  chief_of_staff?: boolean;    // Launch this session already holding the chief role (guidance injected at first spawn)
   initial_prompt?: string;
   executable?: string;         // Generic executable override for selected agent
   claude_executable?: string;  // Backward compatibility
