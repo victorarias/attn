@@ -252,6 +252,42 @@ func TestNudgeKeystrokeGuardIgnoresAutomation(t *testing.T) {
 	}
 }
 
+// The guard's write path: handlePtyInput must record a genuine keystroke and must NOT
+// record automation/replay writes. The other guard tests poke noteUserInput directly;
+// this one drives the real pty_input handler so the source derivation
+// (Deref + TrimSpace) and the call wiring are covered, not assumed. If genuine input
+// stopped recording the splice guard becomes a no-op; if attach_replay started
+// recording every switched-away session would look "recently typed" and never fire.
+func TestHandlePtyInputRecordsKeystrokeForGuard(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+
+	cases := []struct {
+		name   string
+		source *string
+		want   bool
+	}{
+		{"untagged genuine keystroke", nil, true},
+		{"explicit empty source", protocol.Ptr(""), true},
+		{"automation write", protocol.Ptr("automation"), false},
+		{"attach replay write", protocol.Ptr("attach_replay"), false},
+		{"padded automation is trimmed then ignored", protocol.Ptr("  automation  "), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sessionID := "sess-" + tc.name
+			d.handlePtyInput(nil, &protocol.PtyInputMessage{
+				ID:     sessionID,
+				Data:   "x",
+				Source: tc.source,
+			})
+			if got := d.recentUserInput(sessionID, time.Hour); got != tc.want {
+				t.Fatalf("recentUserInput after handlePtyInput(source=%v) = %v, want %v",
+					protocol.Deref(tc.source), got, tc.want)
+			}
+		})
+	}
+}
+
 // Teardown stops every armed timer so no AfterFunc goroutine outlives the daemon.
 func TestStopNudgeCountdownsClearsTimers(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
