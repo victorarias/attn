@@ -163,6 +163,10 @@ func TestChiefOfStaffDelegateBindsTicketAndPrompt(t *testing.T) {
 		strings.Contains(prompt, "dispatch ") {
 		t.Fatalf("tracked initial prompt = %q", prompt)
 	}
+	// The agent must not close a ticket on its own — completing is gated on the user.
+	if !strings.Contains(prompt, "ask the user to confirm") {
+		t.Fatalf("tracked initial prompt missing confirm-before-complete guidance = %q", prompt)
+	}
 
 	ticket, err := d.store.ActiveTicketForSession(result.SessionID)
 	if err != nil {
