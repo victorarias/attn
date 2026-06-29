@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-29]
+
+### Added
+- **Run agents unattended, and pin your chief's model.** Settings › Agents adds two controls. **Auto-approve** launches managed agents in their native auto-approve mode so they keep working without stopping at every permission prompt — off by default, and yolo sessions already bypass approvals regardless. **Chief-of-staff model** pins the model a chief-of-staff session launches with, per agent (Claude or Codex); leave it blank to use the agent's own default. Both apply to sessions started afterward.
+
 ## [2026-06-28]
 
 ### Added

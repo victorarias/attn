@@ -138,6 +138,9 @@ export function SettingsModal({
   const [projectsDir, setProjectsDir] = useState(settings.projects_directory || '');
   const [notebookRoot, setNotebookRoot] = useState(settings['notebook.root'] || '');
   const [agentExecutables, setAgentExecutables] = useState<Record<SessionAgent, string>>({});
+  // Per-agent chief-of-staff model override (chief_model_<agent>), edited locally
+  // and committed on blur like the executable paths. Blank => the agent default.
+  const [chiefModels, setChiefModels] = useState<Record<SessionAgent, string>>({});
   const [editorExecutable, setEditorExecutable] = useState(settings.editor_executable || '');
   const [defaultAgent, setDefaultAgent] = useState<SessionAgent>('claude');
   const [reviewLoopPresets, setReviewLoopPresets] = useState<ReviewLoopPreset[]>([]);
@@ -181,6 +184,7 @@ export function SettingsModal({
   const effectiveNotebookRoot = settings['notebook.root.effective'] || '';
   const tailscaleEnabled = (settings.tailscale_enabled || 'false') === 'true';
   const workflowsEnabled = (settings.workflows_enabled || 'false') === 'true';
+  const autoApproveEnabled = (settings.auto_approve_enabled || 'false') === 'true';
   const tailscaleStatus = settings.tailscale_status || 'disabled';
   const tailscaleURL = settings.tailscale_url || '';
   const tailscaleDomain = settings.tailscale_domain || '';
@@ -223,6 +227,27 @@ export function SettingsModal({
     () => orderedAgentList.filter((agent) => ['codex', 'claude', 'copilot'].includes(agent)),
     [orderedAgentList],
   );
+  // Agents whose chief launch honors a --model override (claude, codex). Installed
+  // agents only, plus any agent that already has a saved override so its row stays
+  // visible even if it became unavailable — mirrors keeperAgents re-inclusion.
+  const chiefModelAgentList = useMemo(() => {
+    const list = orderedAgentList.filter((agent) => (
+      ['codex', 'claude'].includes(agent) && isAgentAvailable(agentAvailability, agent)
+    ));
+    for (const agent of ['claude', 'codex'] as const) {
+      if (!list.includes(agent) && (settings[`chief_model_${agent}`] || '').trim() !== '') {
+        list.push(agent);
+      }
+    }
+    return list;
+  }, [orderedAgentList, agentAvailability, settings]);
+  const actualChiefModels = useMemo(() => {
+    const out = {} as Record<SessionAgent, string>;
+    for (const agent of chiefModelAgentList) {
+      out[agent] = settings[`chief_model_${agent}`] || '';
+    }
+    return out;
+  }, [settings, chiefModelAgentList]);
   // Agents eligible to run any keeper duty: installed, headless-task capable, and one
   // of claude/codex. Any agent already configured on a duty is kept in the list even
   // if it has since become unavailable, so its row still shows the saved selection.
@@ -267,6 +292,7 @@ export function SettingsModal({
     setProjectsDir(actualProjectsDir);
     setNotebookRoot(actualNotebookRoot);
     setAgentExecutables(actualAgentExecutables);
+    setChiefModels(actualChiefModels);
     setEditorExecutable(actualEditorExecutable);
     setDefaultAgent(resolvedDefaultAgent);
     setReviewLoopPresets(actualReviewLoopPresets);
@@ -291,7 +317,7 @@ export function SettingsModal({
     setPluginSourcePath('');
     setPluginError(null);
     setPluginActionName(null);
-  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualEditorExecutable, resolvedDefaultAgent, actualReviewLoopPresets, actualReviewLoopModel, actualReviewerModel, actualKeeperConfigs, keeperAgents]);
+  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualEditorExecutable, resolvedDefaultAgent, actualReviewLoopPresets, actualReviewLoopModel, actualReviewerModel, actualKeeperConfigs, keeperAgents]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -392,6 +418,22 @@ export function SettingsModal({
       onSetSetting(`${agent}_executable`, nextValue);
     }
   }, [actualAgentExecutables, agentExecutables, onSetSetting]);
+
+  const handleChiefModelChange = useCallback((agent: SessionAgent, value: string) => {
+    setChiefModels((prev) => ({ ...prev, [agent]: value }));
+  }, []);
+
+  const commitChiefModel = useCallback((agent: SessionAgent) => {
+    const nextValue = (chiefModels[agent] || '').trim();
+    const currentValue = (actualChiefModels[agent] || '').trim();
+    if (nextValue !== currentValue) {
+      onSetSetting(`chief_model_${agent}`, nextValue);
+    }
+  }, [actualChiefModels, chiefModels, onSetSetting]);
+
+  const handleToggleAutoApprove = useCallback(() => {
+    onSetSetting('auto_approve_enabled', autoApproveEnabled ? 'false' : 'true');
+  }, [autoApproveEnabled, onSetSetting]);
 
   const handleEditorChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setEditorExecutable(e.target.value);
@@ -793,8 +835,8 @@ export function SettingsModal({
           label: 'Executables and defaults',
           title: 'Agent runtime',
           description: 'Agent executable paths, defaults, context maintenance, capabilities, and PTY runtime mode.',
-          count: orderedAgentList.length + 4,
-          keywords: 'agents executables claude codex cursor default capabilities pty backend editor context keeper compact model',
+          count: orderedAgentList.length + 6,
+          keywords: 'agents executables claude codex cursor default capabilities pty backend editor context keeper compact model workflows auto-approve unattended chief',
         },
       ],
     },
@@ -1704,6 +1746,85 @@ export function SettingsModal({
               {workflowsEnabled ? 'Disable' : 'Enable'}
             </button>
           </div>
+        </div>
+      </section>
+
+      <section className="settings-block">
+        <div className="settings-block-intro">
+          <div className="settings-kicker">Agents</div>
+          <h3>Auto-approve</h3>
+          <p className="settings-description">
+            Launches managed agents in their native auto-approve mode (Claude
+            "--permission-mode auto", Codex auto-review) so they can run unattended
+            without stopping at every permission gate. Off by default.
+          </p>
+        </div>
+        <div className="settings-block-body">
+          <div className="settings-row-card">
+            <div>
+              <p className="settings-row-title">Run agents unattended</p>
+              <p className="settings-row-copy">
+                While off, agents pause for approval on sensitive actions. Yolo sessions
+                already bypass approvals and ignore this setting. Changing it only affects
+                sessions launched afterward.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="settings-action"
+              data-testid="settings-auto-approve-toggle"
+              onClick={handleToggleAutoApprove}
+            >
+              {autoApproveEnabled ? 'Disable' : 'Enable'}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="settings-block">
+        <div className="settings-block-intro">
+          <div className="settings-kicker">Agents</div>
+          <h3>Chief-of-staff model</h3>
+          <p className="settings-description">
+            Pins the model a chief-of-staff session launches with, per agent. Leave blank
+            to use the agent's own default. Only applies to chief launches — regular
+            sessions are unaffected.
+          </p>
+        </div>
+        <div className="settings-block-body">
+          {chiefModelAgentList.length === 0 ? (
+            <div className="settings-warning">No installed agent supports a model override.</div>
+          ) : (
+            <div className="settings-field-grid">
+              {chiefModelAgentList.map((agent) => {
+                const inputId = `settings-chief-model-${agent}`;
+                const value = chiefModels[agent] || '';
+                return (
+                  <div className="settings-field" key={agent}>
+                    <label className="settings-label" htmlFor={inputId}>{agentLabel(agent)}</label>
+                    <input
+                      id={inputId}
+                      data-testid={inputId}
+                      type="text"
+                      value={value}
+                      onChange={(e) => handleChiefModelChange(agent, e.target.value)}
+                      onBlur={() => commitChiefModel(agent)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          commitChiefModel(agent);
+                        }
+                      }}
+                      placeholder={agent === 'claude' ? 'opus — blank for default' : 'gpt-5.4 — blank for default'}
+                      className="settings-input"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </section>
 
