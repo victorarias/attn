@@ -11,6 +11,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **Run agents unattended, and pin your chief's model.** Settings › Agents adds two controls. **Auto-approve** launches managed agents in their native auto-approve mode so they keep working without stopping at every permission prompt — off by default, and yolo sessions already bypass approvals regardless. **Chief-of-staff model** pins the model a chief-of-staff session launches with, per agent (Claude or Codex); leave it blank to use the agent's own default. Both apply to sessions started afterward.
 
+### Fixed
+- **Delegated agents no longer nudge themselves about their own brief.** A freshly delegated agent already receives its brief when it starts, so it no longer gets a spurious "new ticket activity — check your inbox" prompt about that same brief the moment it goes idle. Agents are now only nudged about genuine new activity on their own ticket (a steer, or a status change they didn't make).
+
 ## [2026-06-28]
 
 ### Added

@@ -244,13 +244,31 @@ func (s *Store) CreateTicket(t Ticket, author string, now time.Time) (*Ticket, e
 	); err != nil {
 		return nil, err
 	}
-	if _, _, err := appendTicketEventTx(tx, TicketEvent{
+	createdSeq, _, err := appendTicketEventTx(tx, TicketEvent{
 		TicketID: t.ID,
 		Kind:     TicketEventCreated,
 		Author:   author,
 		ToStatus: t.Status,
-	}, now); err != nil {
+	}, now)
+	if err != nil {
 		return nil, err
+	}
+	// A ticket born WITH an assignee is a chief delegation: the brief was already
+	// handed to that agent out of band via the spawn prompt, so mark the `created`
+	// event consumed for the assignee. Otherwise it lingers unread on the agent's
+	// OWN ticket and doorbells it the moment it goes idle — a self-nudge about a
+	// brief it already holds. A backlog ticket is born unassigned, so a later pickup
+	// still receives the full brief through `attn ticket inbox`.
+	//
+	// This is a DELEGATION policy living in generic store code: it holds only because
+	// delegation is the sole create path that sets an assignee at birth (backlog
+	// create is unbound). A future "create a pre-assigned ticket whose brief SHOULD
+	// arrive via the inbox" would silently lose its brief here — move this guard up to
+	// the delegation caller if that case ever appears.
+	if t.Assignee != "" {
+		if err := setTicketCursorTx(tx, t.Assignee, t.ID, createdSeq, now); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
