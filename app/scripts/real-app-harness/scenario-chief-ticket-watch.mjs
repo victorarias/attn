@@ -140,16 +140,26 @@ function shell(cmd) {
   }
 }
 
-// Is a live `attn ticket inbox --watch` Monitor running (the chief armed the watch)?
-// The agent's OWN launch process also contains "ticket inbox --watch" (inside the
-// guidance blob), so exclude anything carrying the guidance or the system-prompt
-// flags — what remains is a genuine watch invocation, not the agent reading about it.
-function watchProcesses() {
+// Live `attn ticket inbox --watch` processes as "pid command" lines. The agent's
+// OWN launch process also contains "ticket inbox --watch" (inside the guidance
+// blob), so exclude anything carrying the guidance or the system-prompt flags —
+// what remains is a genuine watch invocation, not the agent reading about it.
+function watchProcessLines() {
   return shell(
     `ps -Awwo pid=,command= | grep -- 'ticket inbox --watch'` +
     ` | grep -v 'arm a harness Monitor' | grep -v 'append-system-prompt'` +
     ` | grep -v 'developer_instructions' | grep -v grep`,
-  ).trim();
+  ).split('\n').map((l) => l.trim()).filter(Boolean);
+}
+
+const pidOf = (line) => line.split(/\s+/)[0];
+
+// A watch the CHIEF armed = a `--watch` process whose pid was not already running
+// at baseline (captured before the prompt). This filters out a stray watch left by
+// a prior/other run — e.g. a `smoke-fake-*` Monitor — that would otherwise read as
+// a false "armed: YES".
+function freshWatchProcesses(baselinePids) {
+  return watchProcessLines().filter((l) => !baselinePids.has(pidOf(l))).join('\n');
 }
 
 // Did the chief's agent get launched WITH the new ChiefGuidance? "arm a harness
@@ -316,13 +326,23 @@ async function main() {
     note(`role + guidance verified at first launch`);
     await dumpPane('01-chief-ready-with-guidance');
 
+    // Snapshot any pre-existing `--watch` processes (a stray one left by a prior
+    // run) so only a watch the chief arms AFTER the prompt counts as armed.
+    const baselineWatchPids = new Set(watchProcessLines().map(pidOf));
+
     // 4) Type the human prompt — then only observe.
     const prompt = PROMPTS[agent];
     const pane = await waitForFirstWorkspacePane(client, chiefId, `chief pane ${chiefId}`, 20_000);
     // write_pane goes straight to the worker PTY (sendRuntimeInput) — no DOM
     // focus needed, so no click_pane gate. This is what a human's keystrokes
-    // become on stdin; the trailing CR submits.
-    await client.request('write_pane', { sessionId: chiefId, paneId: pane.paneId, text: `${prompt}\r`, submit: false });
+    // become on stdin. CRUCIAL: send the text and the Enter as SEPARATE writes
+    // with a gap between them. Claude's TUI treats a fast burst ending in CR as a
+    // bracketed paste — the CR lands as a literal newline in the buffer and never
+    // submits (observed: prompt sat in the input at "0 tokens"). A standalone CR
+    // arriving after the paste settles is a genuine Enter, which submits.
+    await client.request('write_pane', { sessionId: chiefId, paneId: pane.paneId, text: prompt, submit: false });
+    await delay(1_200);
+    await client.request('write_pane', { sessionId: chiefId, paneId: pane.paneId, text: '\r', submit: false });
     note(`human prompt sent`, { prompt });
 
     // Live chief state from the daemon (kept current via session_state_changed).
@@ -367,13 +387,13 @@ async function main() {
       const { tickets } = await client.request('ticket_list').catch(() => ({ tickets: [] }));
       const bound = (tickets || []).find((tk) => !baselineIds.has(tk.id) && tk.assignee && tk.assignee !== chiefId);
       if (bound) { delegation = bound; break; }
-      const w = watchProcesses();
+      const w = freshWatchProcesses(baselineWatchPids);
       if (w && !armedWatch) { armedWatch = w; note(`watch armed`, { processes: w.split('\n').length }); }
       if (snap % 6 === 0) await dumpPane(`02-observe-${String(snap).padStart(2, '0')}`);
       snap += 1;
       await delay(2_500);
     }
-    if (!armedWatch) armedWatch = watchProcesses();
+    if (!armedWatch) armedWatch = freshWatchProcesses(baselineWatchPids);
     evidence.armedWatch = armedWatch;
     evidence.delegated = Boolean(delegation);
 
@@ -382,7 +402,23 @@ async function main() {
     if (!delegation) {
       const finalState = chiefState();
       evidence.chiefState = finalState;
-      if (finalState === 'working') {
+      if (finalState === 'pending_approval') {
+        // BLOCKED on a permission-approval gate, not a refusal. A non-yolo chief
+        // runs in claude's default permission mode (attn adds
+        // --dangerously-skip-permissions only for yolo, and its settings carry no
+        // allow-list), so it stalls at the first gated command and cannot proceed
+        // unattended. This is a distinct verdict so a blocked chief never reads as
+        // the behavioral "did-not-delegate" finding.
+        note(`observe window elapsed with chief BLOCKED on approval`, { finalState });
+        saveEvidence('blocked-on-approval');
+        console.log('\n=== BLOCKED: chief is stuck on a permission-approval prompt ===');
+        console.log('Not a behavioral finding — the chief never got to decide. A human (or');
+        console.log('yolo mode) would unblock it. Decide the permission posture, then re-run.');
+        console.log('--- chief pane (tail) ---');
+        console.log(chiefText.split('\n').slice(-40).join('\n'));
+        return;
+      }
+      if (finalState === 'working' || finalState === 'launching') {
         // Still deliberating at the deadline — Opus at xhigh can take a while. This
         // is NOT a refusal; don't trip the discuss-this path on a slow-but-active
         // chief. Bump the window or re-run.
