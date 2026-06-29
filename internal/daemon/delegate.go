@@ -431,7 +431,12 @@ Use the state that matches the outcome when work needs input, is ready, or ends:
     "$ATTN_WRAPPER_PATH" ticket status completed --comment "<completed outcome>"
     "$ATTN_WRAPPER_PATH" ticket status failed --comment "<terminal failure>"
 
-Continue the assigned work after reporting unless you are blocked or finished.`
+Closing a ticket is the user's call, not yours: when you believe the work is
+done, ask the user to confirm and wait for their go-ahead before you report the
+completed state. Report the other states as they happen.
+
+Continue the assigned work after reporting unless you are blocked or waiting on
+the user.`
 }
 
 func (d *Daemon) handleDelegate(conn net.Conn, msg *protocol.DelegateMessage) {
