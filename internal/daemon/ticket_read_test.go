@@ -34,10 +34,11 @@ func callTicketInbox(t *testing.T, d *Daemon, sessionID string) []protocol.Ticke
 	return resp.TicketInboxResult.Bundles
 }
 
-// The inbox is a consume keyed on observer identity: the agent sees the
-// chief-authored events on its ticket (its assignment, later steers) but never its
-// own; the chief sees the agent's reports but never its own; and a second read is
-// empty because the first advanced the cursor.
+// The inbox is a consume keyed on observer identity: a delegated agent's brief is
+// delivered via the spawn prompt and pre-consumed at delegation, so its inbox starts
+// EMPTY rather than echoing the assignment it already holds; it then sees later
+// chief steers but never its own events; the chief sees the agent's reports but never
+// its own; and a second read is empty because the first advanced the cursor.
 func TestTicketInboxConsumesByIdentity(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
@@ -58,16 +59,20 @@ func TestTicketInboxConsumesByIdentity(t *testing.T) {
 	agentSession := result.SessionID
 	ticketID := boundTicketID(t, d, agentSession)
 
-	// Agent's first read: the chief-authored created event (its assignment).
-	bundles := callTicketInbox(t, d, agentSession)
-	if len(bundles) != 1 || bundles[0].TicketID != ticketID {
-		t.Fatalf("agent inbox = %+v, want one bundle for %q", bundles, ticketID)
+	// Agent's first read is empty: the brief was delivered out of band via the spawn
+	// prompt, so the created event is pre-consumed and never re-served as inbox noise.
+	if bundles := callTicketInbox(t, d, agentSession); len(bundles) != 0 {
+		t.Fatalf("agent inbox = %+v, want empty (brief delivered via spawn prompt)", bundles)
 	}
-	if len(bundles[0].Events) != 1 || bundles[0].Events[0].Kind != protocol.TicketEventKind(store.TicketEventCreated) {
-		t.Fatalf("agent inbox events = %+v, want one created event", bundles[0].Events)
+
+	// A later chief steer DOES reach the agent: an event it did not author, unread.
+	commentOnTicket(t, d, ticketID, "one more thing to check")
+	steer := callTicketInbox(t, d, agentSession)
+	if len(steer) != 1 || steer[0].TicketID != ticketID {
+		t.Fatalf("agent inbox after steer = %+v, want one bundle for %q", steer, ticketID)
 	}
-	if bundles[0].Events[0].Author != chiefSessionID {
-		t.Fatalf("created event author = %q, want chief %q", bundles[0].Events[0].Author, chiefSessionID)
+	if len(steer[0].Events) != 1 || steer[0].Events[0].Kind != protocol.TicketEventKind(store.TicketEventCommented) {
+		t.Fatalf("agent inbox events = %+v, want one commented event", steer[0].Events)
 	}
 
 	// Second read: empty — the first consume advanced the agent's cursor.

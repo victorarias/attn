@@ -335,7 +335,21 @@ func (s *Store) SetTicketCursor(identity, ticketID string, cursor int64, now tim
 	if s.db == nil {
 		return nil
 	}
-	_, err := s.db.Exec(`
+	return setTicketCursorTx(s.db, identity, ticketID, cursor, now)
+}
+
+// ticketExecer is the Exec surface shared by *sql.DB and *sql.Tx, so a cursor write
+// can run either standalone or inside an enclosing mutation's transaction (e.g. the
+// delegation create that marks an agent's brief consumed atomically with the ticket).
+type ticketExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// setTicketCursorTx is the monotonic cursor write. It only moves the cursor FORWARD
+// (MAX of stored and proposed), so a stale or overlapping write can never rewind a
+// cursor and resurrect already-consumed events as unread.
+func setTicketCursorTx(ex ticketExecer, identity, ticketID string, cursor int64, now time.Time) error {
+	_, err := ex.Exec(`
 		INSERT INTO ticket_event_cursors (identity, ticket_id, cursor, updated_at)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(identity, ticket_id) DO UPDATE SET

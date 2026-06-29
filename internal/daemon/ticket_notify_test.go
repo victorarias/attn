@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -61,6 +62,48 @@ func makeSelfMonitor(t *testing.T, d *Daemon, sessionID string) {
 	d.store.Add(s)
 }
 
+// delegateMany sets up ONE chief of staff and delegates an agent per brief from it,
+// modeling a chief that fanned work out to a batch of siblings. It returns the chief
+// id, the spawned agent ids (brief order), and an accessor for inputs typed into a
+// session's PTY. Like delegateForNotify, the brief is delivered via the spawn prompt
+// file — never Input — so any recorded input is a nudge.
+func delegateMany(t *testing.T, d *Daemon, agent string, briefs ...string) (chiefID string, agentIDs []string, inputs func(string) []string) {
+	t.Helper()
+	backend := &fakeSpawnBackend{}
+	var mu sync.Mutex
+	rec := map[string][]string{}
+	backend.onInput = func(id string, data []byte) {
+		mu.Lock()
+		rec[id] = append(rec[id], string(data))
+		mu.Unlock()
+	}
+	_, chiefID, _ = setupDelegationSource(t, d, backend)
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefID); err != nil {
+		t.Fatalf("set chief role: %v", err)
+	}
+	consumeDelegatedPrompt(t, backend)
+	for i, brief := range briefs {
+		// Distinct labels: same-workspace siblings can't share an auto-derived name.
+		result, err := d.delegate(&protocol.DelegateMessage{
+			Cmd:             protocol.CmdDelegate,
+			SourceSessionID: chiefID,
+			Brief:           brief,
+			Agent:           protocol.Ptr(agent),
+			Label:           protocol.Ptr(fmt.Sprintf("delegate-%d", i)),
+		})
+		if err != nil {
+			t.Fatalf("delegate(%d, %q): %v", i, brief, err)
+		}
+		agentIDs = append(agentIDs, result.SessionID)
+	}
+	inputs = func(id string) []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), rec[id]...)
+	}
+	return chiefID, agentIDs, inputs
+}
+
 func wasNudged(inputs []string) bool {
 	for _, in := range inputs {
 		if strings.Contains(in, ticketNudgePrompt) {
@@ -71,26 +114,27 @@ func wasNudged(inputs []string) bool {
 }
 
 // An idle agent that can't self-monitor (codex) gets the fixed doorbell when an
-// event it did not author is unread (here its own assignment, authored by the
-// chief). The chief, which authored that event, is never nudged about it.
+// event it did not author is unread — here a chief steer on its ticket. Its own
+// brief is delivered via the spawn prompt and pre-consumed at delegation, so it is
+// never the trigger (see TestDelegatedAgentNotNudgedByOwnDeliveredBrief).
 func TestNotifyNudgesIdleCodexObserver(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	chiefID, agentID, inputs := delegateForNotify(t, d, "codex")
+	_, agentID, inputs := delegateForNotify(t, d, "codex")
 	ticketID := boundTicketID(t, d, agentID)
 	d.store.UpdateState(agentID, protocol.StateIdle)
 
-	d.notifyTicketObservers(ticketID)
+	// A chief steer lands on the agent's ticket — an event it did not author.
+	commentOnTicket(t, d, ticketID, "take a look at the failing test")
 
 	if !wasNudged(inputs(agentID)) {
-		t.Fatal("idle codex agent was not nudged about its unread event")
-	}
-	if wasNudged(inputs(chiefID)) {
-		t.Fatal("chief was nudged about an event it authored")
+		t.Fatal("idle codex agent was not nudged about the chief steer on its ticket")
 	}
 }
 
-// A self-monitoring agent (claude) is never typed into — its own watch drains the
-// queue (DeliveryWatch), so the doorbell would be a redundant interruption.
+// A self-monitoring agent (claude) is never typed into synchronously even with unread
+// activity — its own watch drains the queue (DeliveryWatch), so the doorbell would be
+// a redundant interruption. A real chief steer supplies the unread event (the brief is
+// pre-consumed at delegation, so without a steer there would be nothing to decide on).
 func TestNotifyDoesNotNudgeClaudeObserver(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	t.Cleanup(d.stopTicketBackstops) // idle self-monitor schedules a deferred backstop
@@ -98,7 +142,7 @@ func TestNotifyDoesNotNudgeClaudeObserver(t *testing.T) {
 	ticketID := boundTicketID(t, d, agentID)
 	d.store.UpdateState(agentID, protocol.StateIdle)
 
-	d.notifyTicketObservers(ticketID)
+	commentOnTicket(t, d, ticketID, "one more thing")
 
 	if wasNudged(inputs(agentID)) {
 		t.Fatal("self-monitoring claude agent should not be typed into synchronously")
@@ -154,14 +198,15 @@ func TestCodexNudgeRoundtrip(t *testing.T) {
 }
 
 // A busy codex agent is deferred — no doorbell mid-task — then gets it the moment
-// it goes idle, which is what notifyTicketSessionWentIdle flushes.
+// it goes idle, which is what notifyTicketSessionWentIdle flushes. A real chief steer
+// landing while the agent is busy supplies the unread event.
 func TestNotifyDefersBusyCodexThenFlushesOnIdle(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	_, agentID, inputs := delegateForNotify(t, d, "codex")
 	ticketID := boundTicketID(t, d, agentID)
 	d.store.UpdateState(agentID, protocol.StateWorking)
 
-	d.notifyTicketObservers(ticketID)
+	commentOnTicket(t, d, ticketID, "take a look") // lands mid-task -> deferred
 	if wasNudged(inputs(agentID)) {
 		t.Fatal("busy codex agent was nudged mid-task")
 	}
@@ -170,6 +215,55 @@ func TestNotifyDefersBusyCodexThenFlushesOnIdle(t *testing.T) {
 	d.notifyTicketSessionWentIdle(agentID)
 	if !wasNudged(inputs(agentID)) {
 		t.Fatal("deferred nudge was not flushed when the agent went idle")
+	}
+}
+
+// A chief that fans work out to siblings must not cross-wire their doorbells: when
+// one delegate reports a status change, only that ticket's participants (the agent
+// and the chief) are notified — the OTHER delegates are neither assignee nor author
+// on it, so the event never routes to them. This locks the store-level isolation
+// that makes "agent A is nudged about ticket C" impossible by construction.
+func TestDelegatedSiblingsNotNudgedByEachOther(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	t.Cleanup(d.stopTicketBackstops)
+	_, agents, inputs := delegateMany(t, d, "codex", "Task A", "Task B", "Task C")
+	a, b, c := agents[0], agents[1], agents[2]
+	for _, id := range agents {
+		d.store.UpdateState(id, protocol.StateIdle)
+	}
+
+	// Delegate C reports done — an event on ticket C only.
+	callSetTicketStatus(t, d, c, string(protocol.DispatchWorkStateCompleted), "done")
+
+	if wasNudged(inputs(a)) {
+		t.Fatal("sibling A was nudged by C's status change (cross-ticket leak)")
+	}
+	if wasNudged(inputs(b)) {
+		t.Fatal("sibling B was nudged by C's status change (cross-ticket leak)")
+	}
+}
+
+// The real symptom behind "everyone gets nudged": a delegated agent already has its
+// brief (delivered via the spawn prompt), but the chief-authored `created` event
+// stays unread on the agent's OWN ticket because nothing advances its cursor at
+// delegation. So the moment the agent goes idle, the went-idle flush doorbells it
+// about a brief it already holds. Batch delegation makes the siblings settle around
+// the same time, which reads as "C finishing nudged the whole batch" — but each is
+// only ever self-nudging about its own ticket. The fix marks the brief consumed for
+// the assignee at creation, so nothing is unread and no doorbell fires.
+func TestDelegatedAgentNotNudgedByOwnDeliveredBrief(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	t.Cleanup(d.stopTicketBackstops)
+	_, agents, inputs := delegateMany(t, d, "codex", "Task A")
+	a := agents[0]
+	d.store.UpdateState(a, protocol.StateIdle)
+
+	// The agent settles after its initial run; the went-idle path re-runs the notify
+	// decision for it. With the brief consumed at delegation, there is nothing unread.
+	d.notifyTicketSessionWentIdle(a)
+
+	if wasNudged(inputs(a)) {
+		t.Fatal("delegated agent was doorbelled about its own already-delivered brief")
 	}
 }
 
