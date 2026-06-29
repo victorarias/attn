@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "136"
+const ProtocolVersion = "137"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -48,6 +48,7 @@ const (
 	CmdTicketList                            = "ticket_list"
 	CmdTicketSubscribe                       = "ticket_subscribe"
 	CmdTicketUnsubscribe                     = "ticket_unsubscribe"
+	CmdTicketTake                            = "ticket_take"
 	CmdTicketAttach                          = "ticket_attach"
 	CmdTicketCreate                          = "ticket_create"
 	CmdTicketComment                         = "ticket_comment"
@@ -400,6 +401,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdTicketUnsubscribe:
 		var msg TicketUnsubscribeMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdTicketTake:
+		var msg TicketTakeMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

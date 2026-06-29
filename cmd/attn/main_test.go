@@ -1220,3 +1220,49 @@ func TestParseTicketIDArgsErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestParseTicketTakeArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want ticketTakeArgs
+	}{
+		{name: "id only", args: []string{"tk"}, want: ticketTakeArgs{TicketID: "tk"}},
+		{
+			name: "confirm before id",
+			args: []string{"--confirm", "tk"},
+			want: ticketTakeArgs{TicketID: "tk", Confirm: true},
+		},
+		{
+			name: "all flags after id",
+			args: []string{"tk", "--confirm", "--session", "s1", "--json"},
+			want: ticketTakeArgs{TicketID: "tk", Session: "s1", Confirm: true, JSON: true},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseTicketTakeArgs(tc.args)
+			if err != nil {
+				t.Fatalf("parseTicketTakeArgs(%v): %v", tc.args, err)
+			}
+			if got != tc.want {
+				t.Fatalf("parseTicketTakeArgs(%v) = %+v, want %+v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseTicketTakeArgsErrors(t *testing.T) {
+	cases := map[string][]string{
+		"no args":         {},
+		"two positionals": {"tk", "extra"},
+		"unknown flag":    {"tk", "--bogus"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseTicketTakeArgs(args); err == nil {
+				t.Fatalf("parseTicketTakeArgs(%v) = nil error, want error", args)
+			}
+		})
+	}
+}

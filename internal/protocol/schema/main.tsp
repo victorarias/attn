@@ -666,6 +666,27 @@ model TicketUnsubscribeResult {
   ticket_id: string;
 }
 
+// TicketTakeMessage claims a ticket for the calling session — it becomes the
+// assignee, the way a delegated agent is the assignee of its bound ticket, so the
+// ticket's notifications now route to it. Taking a ticket already assigned to
+// someone else requires confirm=true, a guard against silently stealing another
+// agent's active work; taking an unassigned ticket (a backlog todo) or one already
+// yours does not. Taking does NOT advance the taker's cursor, so its first inbox
+// after this delivers the ticket's history (it is picking up unseen work).
+model TicketTakeMessage {
+  cmd: "ticket_take";
+  source_session_id: string;
+  ticket_id: string;
+  confirm?: boolean;
+}
+
+// TicketTakeResult echoes the ticket and the assignee it was taken FROM (empty when
+// it was unassigned), so the caller can report what changed.
+model TicketTakeResult {
+  ticket_id: string;
+  previous_assignee: string;
+}
+
 // TicketAttachMessage hands a file to the calling session's bound ticket. The
 // daemon resolves the ticket from the session (the assignee), copies the file at
 // source_path into the ticket's store directory (.attn/tickets/<id>/), and records
@@ -2328,6 +2349,7 @@ model Response {
   ticket_comment_result?: TicketCommentResult;
   ticket_subscribe_result?: TicketSubscribeResult;
   ticket_unsubscribe_result?: TicketUnsubscribeResult;
+  ticket_take_result?: TicketTakeResult;
 }
 
 model DelegateResult {

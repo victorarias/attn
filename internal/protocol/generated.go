@@ -2588,6 +2588,9 @@ type Response struct {
 	// "ticket_subscribe_result".
 	TicketSubscribeResult *TicketSubscribeResult `json:"ticket_subscribe_result,omitempty,omitzero"`
 
+	// TicketTakeResult corresponds to the JSON schema field "ticket_take_result".
+	TicketTakeResult *TicketTakeResult `json:"ticket_take_result,omitempty,omitzero"`
+
 	// TicketUnsubscribeResult corresponds to the JSON schema field
 	// "ticket_unsubscribe_result".
 	TicketUnsubscribeResult *TicketUnsubscribeResult `json:"ticket_unsubscribe_result,omitempty,omitzero"`
@@ -3657,6 +3660,28 @@ type TicketSubscribeMessage struct {
 }
 
 type TicketSubscribeResult struct {
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID string `json:"ticket_id"`
+}
+
+type TicketTakeMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Confirm corresponds to the JSON schema field "confirm".
+	Confirm *bool `json:"confirm,omitempty,omitzero"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID string `json:"ticket_id"`
+}
+
+type TicketTakeResult struct {
+	// PreviousAssignee corresponds to the JSON schema field "previous_assignee".
+	PreviousAssignee string `json:"previous_assignee"`
+
 	// TicketID corresponds to the JSON schema field "ticket_id".
 	TicketID string `json:"ticket_id"`
 }
