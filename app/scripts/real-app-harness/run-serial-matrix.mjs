@@ -81,6 +81,14 @@ const scenarioCatalog = [
     timeoutMs: 360_000,
   },
   {
+    id: 'nudge-trigger',
+    label: 'Ticket nudge: paused gate holds, then the real "deliver now" button doorbells the agent',
+    command: ['pnpm', 'run', 'real-app:scenario-nudge-trigger'],
+    // Boots a real codex agent, drives it idle, produces unread ticket activity,
+    // and clicks the live trigger button; needs more than the default budget.
+    timeoutMs: 360_000,
+  },
+  {
     id: 'terminal-block-copy',
     label: 'OSC 133 block copy via real fish + native Cmd+C',
     command: ['pnpm', 'run', 'real-app:scenario-terminal-block-copy'],
