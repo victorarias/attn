@@ -855,3 +855,97 @@ describe('SettingsModal keeper', () => {
     expect(onSetSetting).toHaveBeenCalledWith('notebook.narrate_workspace', '');
   });
 });
+
+describe('SettingsModal chief settings', () => {
+  function renderModal(
+    settings: Record<string, string>,
+    onSetSetting = vi.fn(),
+  ) {
+    render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        githubHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{
+          claude_available: 'true',
+          codex_available: 'true',
+          ...settings,
+        }}
+        endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={onSetSetting}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />,
+    );
+    return onSetSetting;
+  }
+
+  it('enables auto-approve when off', async () => {
+    const onSetSetting = renderModal({ auto_approve_enabled: 'false' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const toggle = await screen.findByTestId('settings-auto-approve-toggle');
+    expect(toggle).toHaveTextContent('Enable');
+    fireEvent.click(toggle);
+    expect(onSetSetting).toHaveBeenCalledWith('auto_approve_enabled', 'true');
+  });
+
+  it('disables auto-approve when on', async () => {
+    const onSetSetting = renderModal({ auto_approve_enabled: 'true' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const toggle = await screen.findByTestId('settings-auto-approve-toggle');
+    expect(toggle).toHaveTextContent('Disable');
+    fireEvent.click(toggle);
+    expect(onSetSetting).toHaveBeenCalledWith('auto_approve_enabled', 'false');
+  });
+
+  it('renders a chief-model input per supported agent and commits a typed model on blur', async () => {
+    const onSetSetting = renderModal({});
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    // claude and codex each get a row; copilot does not (its launch ignores --model).
+    const claudeInput = await screen.findByTestId('settings-chief-model-claude');
+    expect(screen.getByTestId('settings-chief-model-codex')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-chief-model-copilot')).toBeNull();
+
+    fireEvent.change(claudeInput, { target: { value: 'opus' } });
+    fireEvent.blur(claudeInput);
+    expect(onSetSetting).toHaveBeenCalledWith('chief_model_claude', 'opus');
+  });
+
+  it('does not write when a chief-model input blurs unchanged', async () => {
+    const onSetSetting = renderModal({ chief_model_claude: 'opus' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const claudeInput = await screen.findByTestId('settings-chief-model-claude');
+    expect(claudeInput).toHaveValue('opus');
+    fireEvent.blur(claudeInput);
+    expect(onSetSetting).not.toHaveBeenCalledWith('chief_model_claude', expect.anything());
+  });
+
+  it('clears a chief-model override back to the agent default', async () => {
+    const onSetSetting = renderModal({ chief_model_codex: 'gpt-5.4' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const codexInput = await screen.findByTestId('settings-chief-model-codex');
+    expect(codexInput).toHaveValue('gpt-5.4');
+    fireEvent.change(codexInput, { target: { value: '' } });
+    fireEvent.blur(codexInput);
+    expect(onSetSetting).toHaveBeenCalledWith('chief_model_codex', '');
+  });
+});

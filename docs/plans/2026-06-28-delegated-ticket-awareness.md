@@ -277,13 +277,13 @@ so the env hop is what runs). Both default off/empty; yolo overrides auto-approv
   run unattended without stalling on approval gates. Env hop `ATTN_AUTO_APPROVE`.
   - [x] setting + validation (ws_settings.go); ws_pty + reload read; worker.go env; cmd/attn read; SpawnOpts field; claude `--permission-mode auto`; codex `approval_policy`+`approvals_reviewer`
   - [x] codex combo confirmed vs [official docs](https://developers.openai.com/codex/concepts/sandboxing/auto-review): `approvals_reviewer = "auto_review"` requires `approval_policy = "on-request"` (or a granular interactive policy) — exactly the pairing we wire; it routes escalations to a reviewer agent (the reviewer can still deny). Keys are NOT surfaced in `codex --help`/`review --help`/`doctor`, so CLI introspection can't find them — trust the docs (`approval_policy` is separately visible via `codex doctor` → "approval policy OnRequest"). Benchmark: codex ran unattended through the scenario; the reviewer didn't visibly fire in panes (nothing needed approval under the sandbox) — expected, config is correct.
-  - [ ] SettingsModal UI toggle + unit tests
+  - [x] SettingsModal UI toggle + unit tests (Settings › Agents › Auto-approve; mirrors the workflows toggle)
 - **`chief_model_<agent>`** (per-agent string, chief-gated) → `--model <alias>` (e.g.
   `opus`). Empty = agent default. Env hop `ATTN_CHIEF_MODEL`; read only for chief
   launches (`chiefLaunchModel`).
   - [x] setting + validation; ws_pty chief-gated read; worker.go env; cmd/attn read; SpawnOpts field; claude + codex `--model`
-  - [ ] SettingsModal UI toggle (per-agent) + unit tests
-- [ ] **CHANGELOG** entry covering both new settings
+  - [x] SettingsModal UI (per-agent text input, claude+codex only, commit-on-blur, blank=default) + unit tests. Free-form text input over a preset dropdown: the backend is explicitly free-form, and a Default/preset/Custom select hits a snap-back trap (Default and empty-Custom both map to ""). Mirrors the per-agent executable-path inputs.
+- [x] **CHANGELOG** entry covering both new settings (2026-06-29)
 - Real-app gotcha: the source-fingerprint guard compares the app bundle's baked
   fingerprint (`get_state.appBuild`) against the working tree, so Go/frontend edits
   need a full `make install PROFILE=uat`; harness scripts are excluded (edit + re-run
