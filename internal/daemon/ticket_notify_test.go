@@ -119,6 +119,8 @@ func wasNudged(inputs []string) bool {
 // never the trigger (see TestDelegatedAgentNotNudgedByOwnDeliveredBrief).
 func TestNotifyNudgesIdleCodexObserver(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour // hand-fire the countdown deterministically
+	t.Cleanup(d.stopNudgeCountdowns)
 	_, agentID, inputs := delegateForNotify(t, d, "codex")
 	ticketID := boundTicketID(t, d, agentID)
 	d.store.UpdateState(agentID, protocol.StateIdle)
@@ -126,6 +128,9 @@ func TestNotifyNudgesIdleCodexObserver(t *testing.T) {
 	// A chief steer lands on the agent's ticket — an event it did not author.
 	commentOnTicket(t, d, ticketID, "take a look at the failing test")
 
+	// The doorbell is now gated behind a (paused-while-active) countdown; the session
+	// is inactive here, so firing the countdown delivers it.
+	fireNudgeNow(t, d, agentID)
 	if !wasNudged(inputs(agentID)) {
 		t.Fatal("idle codex agent was not nudged about the chief steer on its ticket")
 	}
@@ -158,6 +163,8 @@ func TestNotifyDoesNotNudgeClaudeObserver(t *testing.T) {
 // peeked. No real codex binary or PTY: the fake spawn backend captures the doorbell.
 func TestCodexNudgeRoundtrip(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
+	t.Cleanup(d.stopNudgeCountdowns)
 	_, agentID, inputs := delegateForNotify(t, d, "codex")
 	ticketID := boundTicketID(t, d, agentID)
 	d.store.UpdateState(agentID, protocol.StateIdle)
@@ -171,7 +178,9 @@ func TestCodexNudgeRoundtrip(t *testing.T) {
 		Comment:  "please take a look at the failing test",
 	})
 
-	// 1) The idle codex agent was nudged by the chief's comment on its ticket.
+	// 1) The idle codex agent was nudged by the chief's comment on its ticket (after
+	// the countdown the comment armed fires).
+	fireNudgeNow(t, d, agentID)
 	if !wasNudged(inputs(agentID)) {
 		t.Fatal("idle codex agent was not nudged on chief ticket comment")
 	}
@@ -202,17 +211,23 @@ func TestCodexNudgeRoundtrip(t *testing.T) {
 // landing while the agent is busy supplies the unread event.
 func TestNotifyDefersBusyCodexThenFlushesOnIdle(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
+	t.Cleanup(d.stopNudgeCountdowns)
 	_, agentID, inputs := delegateForNotify(t, d, "codex")
 	ticketID := boundTicketID(t, d, agentID)
 	d.store.UpdateState(agentID, protocol.StateWorking)
 
-	commentOnTicket(t, d, ticketID, "take a look") // lands mid-task -> deferred
+	commentOnTicket(t, d, ticketID, "take a look") // lands mid-task -> deferred, no countdown
 	if wasNudged(inputs(agentID)) {
 		t.Fatal("busy codex agent was nudged mid-task")
 	}
+	if currentNudgeTimer(d, agentID) != nil {
+		t.Fatal("busy codex agent armed a countdown mid-task")
+	}
 
 	d.store.UpdateState(agentID, protocol.StateIdle)
-	d.notifyTicketSessionWentIdle(agentID)
+	d.notifyTicketSessionWentIdle(agentID) // settling arms the countdown
+	fireNudgeNow(t, d, agentID)
 	if !wasNudged(inputs(agentID)) {
 		t.Fatal("deferred nudge was not flushed when the agent went idle")
 	}
@@ -293,14 +308,17 @@ func commentOnTicket(t *testing.T, d *Daemon, ticketID, comment string) {
 // self-monitor subject.
 func TestTicketBackstopDoorbellsIdleSelfMonitorWithUnread(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
 	t.Cleanup(d.stopTicketBackstops)
+	t.Cleanup(d.stopNudgeCountdowns)
 	_, agentID, inputs := delegateForNotify(t, d, "claude")
 	ticketID := boundTicketID(t, d, agentID)
 	d.store.UpdateState(agentID, protocol.StateWorking) // no schedule during the steer
 	commentOnTicket(t, d, ticketID, "take a look at the failing test")
 	d.store.UpdateState(agentID, protocol.StateIdle)
 
-	d.ticketBackstopRecheck(agentID)
+	d.ticketBackstopRecheck(agentID) // arms the countdown
+	fireNudgeNow(t, d, agentID)
 
 	if !wasNudged(inputs(agentID)) {
 		t.Fatal("idle self-monitor with unread was not doorbelled by the backstop")
@@ -319,7 +337,9 @@ func TestTicketBackstopDoorbellsIdleSelfMonitorWithUnread(t *testing.T) {
 func TestTicketBackstopDoorbellsIdleChiefAfterAgentReports(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.ticketBackstopGrace = 15 * time.Millisecond
+	d.nudgeWindowOverride = 15 * time.Millisecond // backstop -> countdown both fire fast
 	t.Cleanup(d.stopTicketBackstops)
+	t.Cleanup(d.stopNudgeCountdowns)
 	chiefID, agentID, inputs := delegateForNotify(t, d, "claude")
 	makeSelfMonitor(t, d, chiefID)                   // the production chief is Claude; the harness default is shell
 	d.store.UpdateState(chiefID, protocol.StateIdle) // delegated, then went idle waiting
@@ -385,7 +405,9 @@ func TestTicketBackstopSuppressedWhenBusy(t *testing.T) {
 func TestNotifySchedulesBackstopForIdleSelfMonitor(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.ticketBackstopGrace = 15 * time.Millisecond
+	d.nudgeWindowOverride = 15 * time.Millisecond
 	t.Cleanup(d.stopTicketBackstops)
+	t.Cleanup(d.stopNudgeCountdowns)
 	_, agentID, inputs := delegateForNotify(t, d, "claude")
 	ticketID := boundTicketID(t, d, agentID)
 	d.store.UpdateState(agentID, protocol.StateIdle)
@@ -430,7 +452,9 @@ func currentBackstopTimer(d *Daemon, sessionID string) *time.Timer {
 func TestTicketBackstopStaleTimerDoesNotDoorbell(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.ticketBackstopGrace = time.Hour
+	d.nudgeWindowOverride = time.Hour // hand-fire the armed countdown too
 	t.Cleanup(d.stopTicketBackstops)
+	t.Cleanup(d.stopNudgeCountdowns)
 	_, agentID, inputs := delegateForNotify(t, d, "claude")
 	ticketID := boundTicketID(t, d, agentID)
 	d.store.UpdateState(agentID, protocol.StateWorking)
@@ -445,12 +469,16 @@ func TestTicketBackstopStaleTimerDoesNotDoorbell(t *testing.T) {
 		t.Fatalf("reschedule did not replace the timer: stale=%p current=%p", stale, current)
 	}
 
-	d.ticketBackstopFire(agentID, stale) // superseded: must bail
+	d.ticketBackstopFire(agentID, stale) // superseded: must bail, arming nothing
+	if currentNudgeTimer(d, agentID) != nil {
+		t.Fatal("a superseded backstop timer armed a nudge countdown")
+	}
 	if wasNudged(inputs(agentID)) {
 		t.Fatal("a superseded backstop timer doorbelled the session (double-doorbell race)")
 	}
 
-	d.ticketBackstopFire(agentID, current) // current: doorbells exactly once
+	d.ticketBackstopFire(agentID, current) // current: arms the countdown
+	fireNudgeNow(t, d, agentID)            // which doorbells exactly once
 	if n := nudgeCount(inputs(agentID)); n != 1 {
 		t.Fatalf("current backstop timer doorbelled %d times, want exactly 1", n)
 	}
@@ -466,7 +494,9 @@ func TestTicketBackstopStaleTimerDoesNotDoorbell(t *testing.T) {
 func TestTicketBackstopDebouncesBurst(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.ticketBackstopGrace = time.Hour
+	d.nudgeWindowOverride = time.Hour
 	t.Cleanup(d.stopTicketBackstops)
+	t.Cleanup(d.stopNudgeCountdowns)
 	_, agentID, inputs := delegateForNotify(t, d, "claude")
 	ticketID := boundTicketID(t, d, agentID)
 	d.store.UpdateState(agentID, protocol.StateIdle)
@@ -485,8 +515,9 @@ func TestTicketBackstopDebouncesBurst(t *testing.T) {
 		t.Fatal("burst left no pending backstop timer")
 	}
 
-	// Firing that single surviving timer doorbells exactly once.
+	// Firing that single surviving timer arms one countdown, which doorbells once.
 	d.ticketBackstopFire(agentID, timer)
+	fireNudgeNow(t, d, agentID)
 	if n := nudgeCount(inputs(agentID)); n != 1 {
 		t.Fatalf("burst produced %d doorbells, want exactly 1 (debounced)", n)
 	}
@@ -498,7 +529,9 @@ func TestTicketBackstopDebouncesBurst(t *testing.T) {
 func TestTicketBackstopScheduledOnWentIdle(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.ticketBackstopGrace = 20 * time.Millisecond
+	d.nudgeWindowOverride = 20 * time.Millisecond
 	t.Cleanup(d.stopTicketBackstops)
+	t.Cleanup(d.stopNudgeCountdowns)
 	_, agentID, inputs := delegateForNotify(t, d, "claude")
 	ticketID := boundTicketID(t, d, agentID)
 	d.store.UpdateState(agentID, protocol.StateWorking)

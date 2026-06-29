@@ -175,6 +175,8 @@ func TestTicketAttachMissingFileFails(t *testing.T) {
 // the self-author is not, and the whole board is re-broadcast carrying the row.
 func TestTicketAttachNotifiesChiefAndBroadcasts(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
+	t.Cleanup(d.stopNudgeCountdowns)
 	d.store.SetSetting(SettingNotebookRoot, t.TempDir())
 	chiefID, agentID, inputs := delegateForNotify(t, d, "codex")
 	ticketID := boundTicketID(t, d, agentID)
@@ -204,6 +206,7 @@ func TestTicketAttachNotifiesChiefAndBroadcasts(t *testing.T) {
 		t.Fatalf("attach failed: %+v", resp)
 	}
 
+	fireNudgeNow(t, d, chiefID) // the attachment armed the chief's countdown
 	if !wasNudged(inputs(chiefID)) {
 		t.Fatal("chief was not notified of the agent's attachment")
 	}

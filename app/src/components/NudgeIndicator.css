@@ -1,0 +1,141 @@
+/* Incoming-ticket-nudge indicator, shared by the sidebar row and the tile overlay.
+   Colors are literal rgba (not theme tokens) so the indicator renders identically in
+   the packaged app regardless of which token blocks are defined. Sky-blue = an
+   incoming countdown; amber = paused and waiting on you; dim = a static unread marker. */
+
+/* ---- Sidebar row: a thin bar pinned to the bottom edge of .session-item ---- */
+
+.nudge-sidebar-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 0 0 6px 6px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.nudge-sidebar-bar-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #38bdf8;
+  box-shadow: 0 0 6px 1px rgba(56, 189, 248, 0.45);
+}
+
+/* Paused: the user is on this session. Clickable strip, slightly taller, amber. */
+.nudge-sidebar-bar--paused {
+  height: 3px;
+  padding: 0;
+  border: none;
+  background: rgba(245, 158, 11, 0.18);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.nudge-sidebar-bar-fill--paused {
+  width: 100%;
+  background: #f59e0b;
+  box-shadow: 0 0 6px 1px rgba(245, 158, 11, 0.4);
+  animation: nudge-paused-pulse 1.6s ease-in-out infinite;
+}
+
+.nudge-sidebar-bar--paused:hover .nudge-sidebar-bar-fill--paused {
+  animation: none;
+  opacity: 1;
+}
+
+/* Static "unread activity" marker (working+unread, or the post-fire transient). */
+.nudge-sidebar-bar--marker {
+  height: 2px;
+  background: rgba(148, 163, 184, 0.45);
+  animation: nudge-marker-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes nudge-paused-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@keyframes nudge-marker-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 0.3; }
+}
+
+/* ---- Tile overlay: a semi-transparent strip across the top of .workspace-pane ---- */
+
+.nudge-tile-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* Above the Ghostty canvas and the split divider (z-index 5), below popovers
+     (z-index 20). The canvas can establish its own stacking context, so a plain
+     positioned sibling is not guaranteed to win without an explicit z-index. */
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+
+.nudge-tile-label {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.nudge-tile-overlay--counting {
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.16), rgba(56, 189, 248, 0));
+  justify-content: flex-end;
+}
+
+/* The counting fill is its own 2px bar pinned to the very top of the strip. */
+.nudge-tile-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  overflow: hidden;
+}
+
+.nudge-tile-bar-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #38bdf8;
+  box-shadow: 0 0 6px 1px rgba(56, 189, 248, 0.5);
+}
+
+.nudge-tile-overlay--marker {
+  background: linear-gradient(180deg, rgba(148, 163, 184, 0.16), rgba(148, 163, 184, 0));
+  animation: nudge-marker-pulse 2.4s ease-in-out infinite;
+}
+
+.nudge-tile-overlay--paused {
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.18), rgba(245, 158, 11, 0));
+  justify-content: flex-end;
+}
+
+.nudge-tile-trigger {
+  pointer-events: auto;
+  cursor: pointer;
+  border: 1px solid rgba(245, 158, 11, 0.6);
+  border-radius: 5px;
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--color-text-primary);
+  font: inherit;
+  padding: 2px 10px;
+  line-height: 1.4;
+}
+
+.nudge-tile-trigger:hover {
+  background: rgba(245, 158, 11, 0.3);
+  border-color: rgba(245, 158, 11, 0.85);
+}

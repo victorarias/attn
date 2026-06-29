@@ -21,6 +21,8 @@ import {
   type TerminalWorkspaceState,
 } from '../../types/workspace';
 import type { SessionAgent } from '../../types/sessionAgent';
+import type { UISessionState } from '../../types/sessionState';
+import { TileNudgeOverlay, deriveNudgeMode } from '../NudgeIndicator';
 import { useGhosttyPaneRuntime } from './useGhosttyPaneRuntime';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import { isSuspiciousTerminalSize } from '../../utils/terminalDebug';
@@ -102,6 +104,10 @@ interface SessionTerminalWorkspaceProps {
     agent: SessionAgent;
     cwd: string;
     endpointId?: string;
+    state?: UISessionState;
+    ticketUnread?: boolean;
+    nudgeFiresAt?: string;
+    isActive?: boolean;
   }>;
   workspace: TerminalWorkspaceState;
   activePaneId: string;
@@ -120,6 +126,7 @@ interface SessionTerminalWorkspaceProps {
   onClosePane: (paneId: string) => void;
   onFocusPane: (paneId: string) => void;
   onRenameSession?: (sessionId: string, label: string) => Promise<void>;
+  onTriggerNudge?: (sessionId: string) => void;
   onZoomModeChange?: (zoomed: boolean) => void;
   onNavigateOutOfSession: (direction: TerminalNavigationDirection) => void;
   onResizeSplit?: (splitId: string, ratio: number) => Promise<unknown> | void;
@@ -162,6 +169,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onClosePane,
     onFocusPane,
     onRenameSession,
+    onTriggerNudge,
     onZoomModeChange,
     onNavigateOutOfSession,
     onResizeSplit,
@@ -691,6 +699,14 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         const paneStatus = agentPane.status || 'ready';
         const isPaneStarting = paneStatus === 'spawning';
         const isPaneFailed = paneStatus === 'failed';
+        const nudgeMode = paneSession?.state
+          ? deriveNudgeMode({
+              ticketUnread: paneSession.ticketUnread,
+              nudgeFiresAt: paneSession.nudgeFiresAt,
+              state: paneSession.state,
+              isActive: Boolean(paneSession.isActive),
+            })
+          : null;
         return (
           <div
             key={agentPane.id}
@@ -733,6 +749,13 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
               ) : null}
             </div>
             <div className="workspace-pane-body">
+              {nudgeMode ? (
+                <TileNudgeOverlay
+                  mode={nudgeMode}
+                  firesAt={paneSession?.nudgeFiresAt}
+                  onTrigger={() => onTriggerNudge?.(agentPane.sessionId)}
+                />
+              ) : null}
               {isPaneStarting || isPaneFailed ? (
                 <div className={`workspace-pane-status workspace-pane-status--${paneStatus}`}>
                   <span className="workspace-pane-status-spinner" aria-hidden="true" />

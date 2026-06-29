@@ -52,6 +52,7 @@
     "real-app:scenario-autoclose-on-exit": "node scripts/real-app-harness/scenario-autoclose-on-exit.mjs",
     "real-app:scenario-diff-review": "node scripts/real-app-harness/scenario-diff-review.mjs",
     "real-app:scenario-ticket-lifecycle": "node scripts/real-app-harness/scenario-ticket-delegation-lifecycle.mjs",
+    "real-app:scenario-nudge-trigger": "node scripts/real-app-harness/scenario-nudge-trigger.mjs",
     "real-app:scenario-terminal-block-copy": "node scripts/real-app-harness/scenario-terminal-block-copy.mjs",
     "real-app:scenario-terminal-context-menu": "node scripts/real-app-harness/scenario-terminal-context-menu.mjs",
     "real-app:scenario-terminal-block-resize": "node scripts/real-app-harness/scenario-terminal-block-resize.mjs",

@@ -2687,6 +2687,25 @@ export function useUiAutomationBridge({
         await settleUi(2);
         return { ok: true };
       }
+      case 'click_nudge_trigger': {
+        // The "deliver now" trigger renders only in NudgeIndicator's paused mode
+        // (the session is selected, idle, and has unread ticket activity). The tile
+        // overlay button and the sidebar-row button both issue the same
+        // trigger_nudge command; prefer the tile button, fall back to the sidebar.
+        const requested = typeof payload.surface === 'string' ? payload.surface : 'any';
+        const tile = document.querySelector('.nudge-tile-trigger');
+        const sidebar = document.querySelector('[aria-label="Deliver the pending ticket nudge now"]');
+        const target =
+          requested === 'sidebar' ? sidebar : requested === 'tile' ? tile : (tile ?? sidebar);
+        if (!(target instanceof HTMLElement)) {
+          throw new Error(
+            `Nudge trigger button not found (surface=${requested}); the session must be selected, idle, and have unread ticket activity`,
+          );
+        }
+        clickElement(target);
+        await settleUi(2);
+        return { clicked: true, surface: target === tile ? 'tile' : 'sidebar' };
+      }
       case 'diff_get_state':
         return collectDiffReviewUiState();
       case 'capture_structured_snapshot':

@@ -17,7 +17,11 @@ const ticketNudgePrompt = "📋 New ticket activity — run `attn ticket inbox` 
 type ticketNudger struct{ d *Daemon }
 
 func (n ticketNudger) Nudge(observerID string) error {
-	return n.d.typeDoorbell(observerID, ticketNudgePrompt)
+	// The immediate doorbell is gone: arm a visible, pausable countdown instead. The
+	// countdown's timer fire is the only place a real doorbell happens, and only when
+	// the user is not actively typing into the session (the anti-splice guard).
+	n.d.armNudgeCountdown(observerID)
+	return nil
 }
 
 // notifyTicketObservers runs the notification handler for every live session
@@ -55,6 +59,10 @@ func (d *Daemon) notifyTicketSession(sessionID string, now time.Time) {
 	if session == nil {
 		return
 	}
+	// Reflect unread ticket activity on the session for the indicator, independent of
+	// the delivery mechanism (nudge / self-monitor watch / deferred-until-idle), so a
+	// working agent and a self-monitoring Claude both surface the unread marker.
+	d.refreshTicketUnread(sessionID)
 	obs := d.ticketObserverForSession(sessionID)
 	idle := isIdleForNudge(string(session.State))
 	delivery, err := ticketnotify.Notify(d.store, obs, idle, ticketNudger{d}, now)
@@ -129,11 +137,12 @@ func (d *Daemon) ticketBackstopFire(sessionID string, self *time.Timer) {
 	}
 }
 
-// ticketBackstopRecheck doorbells the session iff it is still idle and still has
-// unread ticket activity — i.e. no live `--watch` Monitor drained the queue during
-// the grace. A live watch (or the session going busy, or disappearing) leaves
-// nothing to do. This is the only place an idle self-monitor is ever typed into;
-// the synchronous Notify path stays a no-op for it.
+// ticketBackstopRecheck arms a nudge countdown for the session iff it is still idle
+// and still has unread ticket activity — i.e. no live `--watch` Monitor drained the
+// queue during the grace. A live watch (or the session going busy, or disappearing)
+// leaves nothing to do. This is the self-monitor's entry into the countdown; the
+// synchronous Notify path stays a no-op for it, and the countdown owns the actual
+// doorbell.
 func (d *Daemon) ticketBackstopRecheck(sessionID string) {
 	if d.ptyBackend == nil || d.store == nil {
 		return
@@ -151,9 +160,10 @@ func (d *Daemon) ticketBackstopRecheck(sessionID string) {
 	if unread == 0 {
 		return
 	}
-	if err := d.typeDoorbell(sessionID, ticketNudgePrompt); err != nil {
-		d.logf("ticket backstop doorbell: %s: %v", sessionID, err)
-	}
+	// The self-monitor's own watch did not drain the queue within the grace, so fall
+	// through to the same visible countdown every nudge uses rather than doorbelling
+	// straight into the PTY.
+	d.armNudgeCountdown(sessionID)
 }
 
 // stopTicketBackstops cancels every pending backstop re-check. Daemon.Stop() calls

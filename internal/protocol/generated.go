@@ -2976,6 +2976,9 @@ type Session struct {
 	// "needs_review_after_long_run".
 	NeedsReviewAfterLongRun *bool `json:"needs_review_after_long_run,omitempty,omitzero"`
 
+	// NudgeFiresAt corresponds to the JSON schema field "nudge_fires_at".
+	NudgeFiresAt *string `json:"nudge_fires_at,omitempty,omitzero"`
+
 	// Recoverable corresponds to the JSON schema field "recoverable".
 	Recoverable *bool `json:"recoverable,omitempty,omitzero"`
 
@@ -2987,6 +2990,9 @@ type Session struct {
 
 	// StateUpdatedAt corresponds to the JSON schema field "state_updated_at".
 	StateUpdatedAt string `json:"state_updated_at"`
+
+	// TicketUnread corresponds to the JSON schema field "ticket_unread".
+	TicketUnread *bool `json:"ticket_unread,omitempty,omitzero"`
 
 	// Todos corresponds to the JSON schema field "todos".
 	Todos []string `json:"todos,omitempty,omitzero"`
@@ -3719,6 +3725,14 @@ type TodosMessage struct {
 
 	// Todos corresponds to the JSON schema field "todos".
 	Todos []string `json:"todos"`
+}
+
+type TriggerNudgeMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
 }
 
 type UnregisterMessage struct {

@@ -171,7 +171,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '137';
+export const PROTOCOL_VERSION = '138';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -4461,6 +4461,15 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'workspace_selected', workspace_id: workspaceId }));
   }, []);
 
+  // Deliver a session's pending ticket nudge now, bypassing the countdown. Fire and
+  // forget: the daemon re-checks idle/unread and doorbells (exempt from the keystroke
+  // guard — an explicit click is unambiguous intent), then broadcasts the cleared state.
+  const sendTriggerNudge = useCallback((sessionId: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'trigger_nudge', session_id: sessionId }));
+  }, []);
+
   // Get file diff
   // Options: staged (deprecated), baseRef (for PR-like branch diffs)
   const sendGetFileDiff = useCallback((
@@ -5003,6 +5012,7 @@ export function useDaemonSocket({
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
     sendSessionSelected,
+    sendTriggerNudge,
     sendWorkspaceSelected,
     sendSessionVisualized,
     sendWorkspaceGet,

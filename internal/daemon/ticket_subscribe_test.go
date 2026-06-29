@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -57,7 +58,9 @@ func inboxHasTicket(bundles []protocol.TicketEventBundle, ticketID string) bool 
 // net.Pipe-based callSetTicketStatus which would return before the async notify ran.
 func TestTicketSubscribeLifecycle(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
 	t.Cleanup(d.stopTicketBackstops)
+	t.Cleanup(d.stopNudgeCountdowns)
 	_, agents, inputs := delegateMany(t, d, "codex", "Task Y", "Task X")
 	z, x := agents[0], agents[1] // z owns ticket Y; x owns its own ticket
 	ticketY := boundTicketID(t, d, z)
@@ -75,6 +78,7 @@ func TestTicketSubscribeLifecycle(t *testing.T) {
 	commentOnTicket(t, d, ticketY, "chief checking in on this thread")
 
 	// As a subscriber, x is nudged and its inbox carries Y's activity.
+	fireNudgeNow(t, d, x) // the comment armed the subscriber's countdown
 	if !wasNudged(inputs(x)) {
 		t.Fatal("subscriber was not nudged about activity on the ticket it subscribed to")
 	}

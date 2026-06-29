@@ -171,6 +171,8 @@ model Session {
   recoverable?: boolean;        // True when session can be recovered after daemon restart (agent has resumable conversation)
   chief_of_staff?: boolean;     // True when this session holds the profile-wide coordinator role
   delegated_from_chief?: boolean; // True when this session was delegated from the chief of staff (assignee of a chief-authored ticket)
+  ticket_unread?: boolean;      // True when this session has unread ticket events (drives the incoming-nudge indicator)
+  nudge_fires_at?: string;      // ISO timestamp a pending ticket-nudge countdown will fire; absent when paused (active session) or no countdown
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
 }
@@ -933,6 +935,13 @@ model SessionSelectedMessage {
 model WorkspaceSelectedMessage {
   cmd: "workspace_selected";
   workspace_id: string;
+}
+
+// TriggerNudgeMessage is the user clicking the incoming-nudge indicator to deliver
+// the pending ticket doorbell immediately, bypassing the countdown. Fire-and-forget.
+model TriggerNudgeMessage {
+  cmd: "trigger_nudge";
+  session_id: string;
 }
 
 model MuteWorkspaceMessage {
