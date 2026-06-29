@@ -74,3 +74,11 @@ inbox (see the delegated-agent reference). These two commands reach **any** tick
   it is a way to chime in without joining the ticket's future activity. Use it to flag
   something to a sibling agent or annotate a thread you're not on; for your own bound
   ticket, prefer `attn ticket status … --comment` so the note also moves the board.
+- **`attn ticket subscribe <ticket-id>` / `attn ticket unsubscribe <ticket-id>`** opt you
+  into (or back out of) a ticket's notifications — the *standing*-interest counterpart to a
+  one-shot comment. While subscribed you are a **participant**: future activity on the ticket
+  nudges you and lands in your `attn ticket inbox`, and the first inbox after subscribing also
+  delivers the ticket's history (subscribing does not skip the backlog). Subscribe when you
+  need to follow a thread you don't own — a chief tracking a ticket it didn't create, or an
+  agent whose work depends on another's. Unsubscribe is idempotent. (Commenting alone never
+  subscribes you; this is the explicit opt-in.)

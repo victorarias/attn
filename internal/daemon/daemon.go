@@ -1893,6 +1893,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleTicketInbox(conn, msg.(*protocol.TicketInboxMessage))
 	case protocol.CmdTicketList:
 		d.handleTicketList(conn, msg.(*protocol.TicketListMessage))
+	case protocol.CmdTicketSubscribe:
+		d.handleTicketSubscribe(conn, msg.(*protocol.TicketSubscribeMessage))
+	case protocol.CmdTicketUnsubscribe:
+		d.handleTicketUnsubscribe(conn, msg.(*protocol.TicketUnsubscribeMessage))
 	case protocol.CmdTicketAttach:
 		d.handleTicketAttach(conn, msg.(*protocol.TicketAttachMessage))
 	case protocol.CmdTicketCreate:

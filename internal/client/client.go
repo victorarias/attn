@@ -339,6 +339,43 @@ func (c *Client) TicketList(sourceSessionID, status string, includeArchived bool
 	return resp.TicketListResult.Tickets, nil
 }
 
+// SubscribeTicket opts the calling session into a ticket's notifications. The
+// session becomes a participant (nudged about activity, the ticket delivered in its
+// inbox) without advancing its cursor, so its first inbox after this delivers the
+// ticket's history. The ticket must exist; re-subscribing is idempotent.
+func (c *Client) SubscribeTicket(sourceSessionID, ticketID string) (*protocol.TicketSubscribeResult, error) {
+	resp, err := c.send(protocol.TicketSubscribeMessage{
+		Cmd:             protocol.CmdTicketSubscribe,
+		SourceSessionID: sourceSessionID,
+		TicketID:        ticketID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.TicketSubscribeResult == nil {
+		return nil, errors.New("daemon returned no ticket subscribe result")
+	}
+	return resp.TicketSubscribeResult, nil
+}
+
+// UnsubscribeTicket opts the calling session back out of a ticket's notifications.
+// It is idempotent — opting out when not subscribed succeeds — and does not require
+// the ticket to still exist.
+func (c *Client) UnsubscribeTicket(sourceSessionID, ticketID string) (*protocol.TicketUnsubscribeResult, error) {
+	resp, err := c.send(protocol.TicketUnsubscribeMessage{
+		Cmd:             protocol.CmdTicketUnsubscribe,
+		SourceSessionID: sourceSessionID,
+		TicketID:        ticketID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.TicketUnsubscribeResult == nil {
+		return nil, errors.New("daemon returned no ticket unsubscribe result")
+	}
+	return resp.TicketUnsubscribeResult, nil
+}
+
 func (c *Client) CheckoutWorkspaceContext(sourceSessionID string, force bool) (*protocol.WorkspaceContextResult, error) {
 	msg := protocol.WorkspaceContextCheckoutMessage{
 		Cmd:             protocol.CmdWorkspaceContextCheckout,
