@@ -203,7 +203,10 @@ func TestTicketEventCursorPersistence(t *testing.T) {
 }
 
 // TicketParticipants is the inverse of involvement: the assignee plus everyone who
-// authored an event on the ticket, deduped and sorted, with empties excluded.
+// authored a NON-COMMENT event on the ticket, deduped and sorted, with empties
+// excluded. A comment-only author is deliberately NOT a participant, so a one-shot
+// commenter is not reached by the ticket's later events; an author who did
+// something else (a status change) IS, even if they also commented.
 func TestTicketParticipants(t *testing.T) {
 	s := New()
 	t.Cleanup(func() { _ = s.Close() })
@@ -214,21 +217,67 @@ func TestTicketParticipants(t *testing.T) {
 	if _, err := s.CreateTicket(Ticket{ID: "tk", Title: "work", Assignee: "agent7"}, "chief", next()); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
+	// agent9 only ever comments -> excluded. agent5 changes status -> included.
 	if _, err := s.AddTicketComment("tk", "agent9", "a note", next()); err != nil {
 		t.Fatalf("AddTicketComment: %v", err)
+	}
+	if _, err := s.SetTicketStatus("tk", TicketStatusInReview, "agent5", "ready", next()); err != nil {
+		t.Fatalf("SetTicketStatus: %v", err)
 	}
 
 	got, err := s.TicketParticipants("tk")
 	if err != nil {
 		t.Fatalf("TicketParticipants: %v", err)
 	}
-	// assignee agent7 + authors {chief, agent9}, deduped + sorted.
-	want := []string{"agent7", "agent9", "chief"}
+	// assignee agent7 + non-comment authors {chief (created), agent5 (status)};
+	// agent9 (comment-only) excluded; deduped + sorted.
+	want := []string{"agent5", "agent7", "chief"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("participants = %v, want %v", got, want)
 	}
 
 	if ids, err := s.TicketParticipants("missing"); err != nil || len(ids) != 0 {
 		t.Fatalf("participants of unknown ticket = (%v, %v), want (nil, nil)", ids, err)
+	}
+}
+
+// UnreadTicketEvents is the consume side of the same rule: a one-shot comment on a
+// ticket does not enroll the commenter, so later events on that ticket never become
+// unread for them. This pins the consume-query half of the comment exclusion
+// (TestTicketParticipants pins the notify half).
+func TestUnreadTicketEventsExcludesCommentOnlyAuthor(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	tick := eventBase
+	next := func() time.Time { tick = tick.Add(time.Minute); return tick }
+
+	if _, err := s.CreateTicket(Ticket{ID: "tk", Title: "work", Assignee: "agent7"}, "chief", next()); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	// A bystander comments once on a ticket it is not assigned to.
+	if _, err := s.AddTicketComment("tk", "bystander", "drive-by note", next()); err != nil {
+		t.Fatalf("AddTicketComment: %v", err)
+	}
+	// A later event lands on the ticket, authored by someone else.
+	if _, err := s.SetTicketStatus("tk", TicketStatusInReview, "agent7", "ready", next()); err != nil {
+		t.Fatalf("SetTicketStatus: %v", err)
+	}
+
+	// The bystander's only tie to the ticket is its comment, which confers no
+	// participation -> nothing is unread for it.
+	unread, err := s.UnreadTicketEvents("bystander")
+	if err != nil {
+		t.Fatalf("UnreadTicketEvents: %v", err)
+	}
+	if len(unread) != 0 {
+		t.Fatalf("comment-only author has %d unread events, want 0: %+v", len(unread), unread)
+	}
+
+	// Sanity: the assignee, a real participant, does see the later event (proving the
+	// query returns events at all and the bystander's empty result is the exclusion,
+	// not an empty ticket).
+	if got, err := s.UnreadTicketEvents("agent7"); err != nil || len(got) == 0 {
+		t.Fatalf("assignee unread = %d (err %v), want > 0", len(got), err)
 	}
 }

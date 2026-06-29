@@ -1891,10 +1891,14 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleSetTicketStatus(conn, msg.(*protocol.SetTicketStatusMessage))
 	case protocol.CmdTicketInbox:
 		d.handleTicketInbox(conn, msg.(*protocol.TicketInboxMessage))
+	case protocol.CmdTicketList:
+		d.handleTicketList(conn, msg.(*protocol.TicketListMessage))
 	case protocol.CmdTicketAttach:
 		d.handleTicketAttach(conn, msg.(*protocol.TicketAttachMessage))
 	case protocol.CmdTicketCreate:
 		d.handleTicketCreate(conn, msg.(*protocol.TicketCreateMessage))
+	case protocol.CmdTicketComment:
+		d.handleTicketComment(conn, msg.(*protocol.TicketCommentMessage))
 	case protocol.CmdWorkspaceContextCheckout:
 		d.handleWorkspaceContextCheckout(conn, msg.(*protocol.WorkspaceContextCheckoutMessage))
 	case protocol.CmdWorkspaceContextUpdate:

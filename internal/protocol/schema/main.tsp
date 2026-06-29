@@ -587,12 +587,52 @@ model TicketCreateResult {
   title: string;
 }
 
+// TicketCommentMessage posts a one-shot comment from the calling agent onto ANY
+// ticket by id — not just the one bound to its session. The daemon records the
+// comment authored by the session, which informs that ticket's participants but
+// does NOT enroll the commenter in the ticket's future notifications (comment
+// authorship confers no participation; standing interest is opt-in via take or
+// subscribe). This is the agent equivalent of the app's ticket_add_comment, which
+// authors as "you".
+model TicketCommentMessage {
+  cmd: "ticket_comment";
+  source_session_id: string;
+  ticket_id: string;
+  comment: string;
+}
+
+// TicketCommentResult echoes the ticket the comment landed on, so the caller can
+// confirm which ticket it posted to.
+model TicketCommentResult {
+  ticket_id: string;
+}
+
 // TicketInboxMessage reads (and consumes) the calling session's unread ticket
 // events. The daemon resolves the observer identity from the session, so the agent
 // names nothing — it just asks for what it has not yet seen.
 model TicketInboxMessage {
   cmd: "ticket_inbox";
   source_session_id: string;
+}
+
+// TicketListMessage reads the board — every ticket, optionally filtered by status —
+// the way the app sees it, but pulled over the agent socket instead of pushed as a
+// tickets_updated broadcast. This is the read foundation the write verbs depend on:
+// an agent finds a ticket-id here before it can comment on (or take/subscribe to) it.
+// Unlike the write verbs it is NOT identity-scoped — it is a global board read, so
+// source_session_id is optional and unused, present only for command-shape uniformity.
+// Rows carry the description (the brief) but not the activity thread (bare rows, like
+// the broadcast).
+model TicketListMessage {
+  cmd: "ticket_list";
+  source_session_id?: string;
+  status?: string;
+  include_archived?: boolean;
+}
+
+// TicketListResult is the board snapshot — bare ticket rows, newest first.
+model TicketListResult {
+  tickets: Ticket[];
 }
 
 // TicketAttachMessage hands a file to the calling session's bound ticket. The
@@ -2251,8 +2291,10 @@ model Response {
   notebook_guide?: NotebookGuideResult;
   ticket_status_result?: TicketStatusResult;
   ticket_inbox_result?: TicketInboxResult;
+  ticket_list_result?: TicketListResult;
   ticket_attach_result?: TicketAttachResult;
   ticket_create_result?: TicketCreateResult;
+  ticket_comment_result?: TicketCommentResult;
 }
 
 model DelegateResult {

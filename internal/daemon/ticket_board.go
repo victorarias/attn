@@ -1,6 +1,9 @@
 package daemon
 
 import (
+	"encoding/json"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -19,12 +22,19 @@ import (
 // the initial_state snapshot and each tickets_updated broadcast, so a client
 // renders the board identically from either.
 func (d *Daemon) ticketsForBroadcast() []protocol.Ticket {
+	return d.ticketRows(store.TicketListFilter{})
+}
+
+// ticketRows lists the board through a filter and maps each store row to its bare
+// wire shape (activity/attachments empty), newest first. Shared by the app's
+// broadcast feed (empty filter) and the agent's `ticket_list` read (caller filter).
+func (d *Daemon) ticketRows(filter store.TicketListFilter) []protocol.Ticket {
 	if d.store == nil {
 		return nil
 	}
-	rows, err := d.store.ListTickets(store.TicketListFilter{})
+	rows, err := d.store.ListTickets(filter)
 	if err != nil {
-		d.logf("list tickets for broadcast: %v", err)
+		d.logf("list tickets: %v", err)
 		return nil
 	}
 	out := make([]protocol.Ticket, 0, len(rows))
@@ -34,6 +44,26 @@ func (d *Daemon) ticketsForBroadcast() []protocol.Ticket {
 		}
 	}
 	return out
+}
+
+// handleTicketList is the agent's board read — the foundation the write verbs
+// (comment/take/subscribe) stand on, since an agent needs a ticket-id before it
+// can act. Unlike those verbs it is NOT identity-scoped: it returns the whole
+// board (optionally filtered by status / including archived), so source_session_id
+// is accepted but unused. Rows carry the description (the brief) but not the
+// activity thread, matching the broadcast feed.
+func (d *Daemon) handleTicketList(conn net.Conn, msg *protocol.TicketListMessage) {
+	filter := store.TicketListFilter{}
+	if msg.Status != nil {
+		filter.Status = store.TicketStatus(strings.TrimSpace(*msg.Status))
+	}
+	if msg.IncludeArchived != nil {
+		filter.IncludeArchived = *msg.IncludeArchived
+	}
+	_ = json.NewEncoder(conn).Encode(protocol.Response{
+		Ok:               true,
+		TicketListResult: &protocol.TicketListResult{Tickets: d.ticketRows(filter)},
+	})
 }
 
 // broadcastTicketsUpdated re-pushes the whole non-archived board to every client.

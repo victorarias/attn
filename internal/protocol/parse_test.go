@@ -23,6 +23,16 @@ func TestParseCommand(t *testing.T) {
 			wantCmd: CmdDelegate,
 		},
 		{
+			name:    "ticket comment message",
+			input:   `{"cmd":"ticket_comment","source_session_id":"abc","ticket_id":"tk","comment":"lgtm"}`,
+			wantCmd: CmdTicketComment,
+		},
+		{
+			name:    "ticket list message",
+			input:   `{"cmd":"ticket_list","status":"working"}`,
+			wantCmd: CmdTicketList,
+		},
+		{
 			name:    "state message",
 			input:   `{"cmd":"state","id":"abc","state":"waiting"}`,
 			wantCmd: CmdState,

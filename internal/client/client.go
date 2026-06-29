@@ -276,6 +276,26 @@ func (c *Client) CreateTicket(sourceSessionID, title, description, id string) (*
 	return resp.TicketCreateResult, nil
 }
 
+// CommentTicket posts a one-shot comment from the calling session onto any ticket
+// by id — not just the one bound to the session. The daemon authors the comment as
+// the session and notifies the ticket's participants, but commenting does not
+// subscribe the caller to the ticket's future activity. Echoes the ticket id back.
+func (c *Client) CommentTicket(sourceSessionID, ticketID, comment string) (*protocol.TicketCommentResult, error) {
+	resp, err := c.send(protocol.TicketCommentMessage{
+		Cmd:             protocol.CmdTicketComment,
+		SourceSessionID: sourceSessionID,
+		TicketID:        ticketID,
+		Comment:         comment,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.TicketCommentResult == nil {
+		return nil, errors.New("daemon returned no ticket comment result")
+	}
+	return resp.TicketCommentResult, nil
+}
+
 // TicketInbox reads and consumes the calling session's unread ticket events,
 // bundled by ticket. Reading advances the session's per-ticket cursors, so a
 // second call returns only what landed since.
@@ -291,6 +311,32 @@ func (c *Client) TicketInbox(sourceSessionID string) ([]protocol.TicketEventBund
 		return nil, errors.New("daemon returned no ticket inbox result")
 	}
 	return resp.TicketInboxResult.Bundles, nil
+}
+
+// TicketList reads the board — every non-archived ticket, newest first, optionally
+// filtered by status (or including archived). It is a global read, not scoped to the
+// caller: sourceSessionID is passed for command-shape uniformity but the daemon does
+// not use it. status == "" matches any status. Rows carry the description but not the
+// activity thread (bare rows, like the app's board feed).
+func (c *Client) TicketList(sourceSessionID, status string, includeArchived bool) ([]protocol.Ticket, error) {
+	msg := protocol.TicketListMessage{Cmd: protocol.CmdTicketList}
+	if sourceSessionID != "" {
+		msg.SourceSessionID = &sourceSessionID
+	}
+	if status != "" {
+		msg.Status = &status
+	}
+	if includeArchived {
+		msg.IncludeArchived = &includeArchived
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.TicketListResult == nil {
+		return nil, errors.New("daemon returned no ticket list result")
+	}
+	return resp.TicketListResult.Tickets, nil
 }
 
 func (c *Client) CheckoutWorkspaceContext(sourceSessionID string, force bool) (*protocol.WorkspaceContextResult, error) {

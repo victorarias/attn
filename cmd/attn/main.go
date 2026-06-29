@@ -625,8 +625,9 @@ func hasHelpFlag(args []string) bool {
 }
 
 // runTicket routes `attn ticket <command>`: `status` (the agent's forward channel
-// onto its own bound ticket), `inbox`, `attach`, and `new` (mint a standalone,
-// unbound backlog ticket without delegating).
+// onto its own bound ticket), `inbox`, `attach`, `new` (mint a standalone, unbound
+// backlog ticket without delegating), and `comment` (post a one-shot note onto any
+// ticket by id).
 func runTicket() {
 	if len(os.Args) < 3 || os.Args[2] == "-h" || os.Args[2] == "--help" {
 		writeTicketHelp(os.Stdout)
@@ -646,6 +647,12 @@ func runTicket() {
 			return
 		}
 		runTicketInbox(os.Args[3:])
+	case "list":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketList(os.Args[3:])
 	case "attach":
 		if hasHelpFlag(os.Args[3:]) {
 			writeTicketHelp(os.Stdout)
@@ -658,6 +665,12 @@ func runTicket() {
 			return
 		}
 		runTicketNew(os.Args[3:])
+	case "comment":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketComment(os.Args[3:])
 	default:
 		fmt.Fprintf(os.Stderr, "ticket: unknown command %q\n", os.Args[2])
 		writeTicketHelp(os.Stderr)
@@ -878,6 +891,149 @@ func runTicketNew(args []string) {
 	fmt.Printf("created ticket %s (%s): %s\n", result.TicketID, result.Status, result.Title)
 }
 
+type ticketCommentArgs struct {
+	TicketID string
+	Comment  string
+	Session  string
+	JSON     bool
+}
+
+// parseTicketCommentArgs reads `ticket comment <ticket-id> --message <text> [flags]`.
+// The comment text is a flag value (--message / -m), not a trailing positional, so
+// flags compose in any order around the single id positional and the comment may
+// contain spaces and dashes without being mistaken for a flag (e.g. -m "--watch out
+// for X"). This mirrors `ticket status` (one positional, interleaved flags) and the
+// rest of the CLI, where freeform text is always a flag — a trailing-positional
+// comment would silently swallow a --session/--json written after it, since Go's
+// flag parser stops at the first positional. The id and a non-empty message are
+// both required.
+func parseTicketCommentArgs(args []string) (ticketCommentArgs, error) {
+	var result ticketCommentArgs
+	fs := flag.NewFlagSet("ticket comment", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	message := fs.String("message", "", "the comment text")
+	fs.StringVar(message, "m", "", "shorthand for --message")
+	session := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	jsonOutput := fs.Bool("json", false, "print the result as JSON")
+
+	// Interleave parse: Go's flag parser stops at the first positional, so to allow
+	// flags on either side of the id we peel one positional at a time and re-parse.
+	var positionals []string
+	rest := args
+	for {
+		if err := fs.Parse(rest); err != nil {
+			return result, err
+		}
+		rest = fs.Args()
+		if len(rest) == 0 {
+			break
+		}
+		positionals = append(positionals, rest[0])
+		rest = rest[1:]
+	}
+	if len(positionals) != 1 {
+		// The most common mistake is writing the comment as a bare argument
+		// (`comment tk "looks good"`) instead of behind -m; point at the fix.
+		if len(positionals) > 1 && strings.TrimSpace(*message) == "" {
+			return result, fmt.Errorf("got %d arguments but no --message; the comment text goes behind -m, e.g. ticket comment %s -m \"<text>\"", len(positionals), positionals[0])
+		}
+		return result, fmt.Errorf("expected exactly one ticket id argument, got %d", len(positionals))
+	}
+	result.TicketID = positionals[0]
+	result.Comment = strings.TrimSpace(*message)
+	if result.Comment == "" {
+		return result, errors.New("--message is required")
+	}
+	result.Session = *session
+	result.JSON = *jsonOutput
+	return result, nil
+}
+
+// runTicketList reads the board — the foundation for the cross-ticket verbs, since
+// an agent (typically the chief, coordinating) needs a ticket-id before it can
+// comment on a ticket it isn't assigned to. It is a global read, so unlike the other
+// ticket commands it does NOT require a session: --session / ATTN_SESSION_ID is
+// resolved best-effort and passed only for uniformity (the daemon ignores it). This
+// mirrors `attn list` for sessions.
+func runTicketList(args []string) {
+	fs := flag.NewFlagSet("ticket list", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	status := fs.String("status", "", "only tickets in this column (todo|working|blocked|in_review|done|failed|crashed)")
+	all := fs.Bool("all", false, "include archived tickets (hidden by default)")
+	sessionID := fs.String("session", "", "session id (optional; defaults to ATTN_SESSION_ID)")
+	jsonOutput := fs.Bool("json", false, "print the board as JSON (includes each ticket's description)")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "ticket list: %v\n", err)
+		writeTicketHelp(os.Stderr)
+		os.Exit(2)
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(os.Stderr, "ticket list: unexpected arguments: %v\n", fs.Args())
+		os.Exit(2)
+	}
+	// Best-effort: a board read works without a session, so resolve quietly rather
+	// than erroring the way resolveDispatchSession does.
+	source := strings.TrimSpace(*sessionID)
+	if source == "" {
+		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+	}
+	tickets, err := client.New("").TicketList(source, strings.TrimSpace(*status), *all)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket list: %v\n", err)
+		os.Exit(1)
+	}
+	if *jsonOutput {
+		printJSON(tickets)
+		return
+	}
+	printTicketBoard(tickets)
+}
+
+// printTicketBoard renders the board as one compact line per ticket: id, column,
+// assignee, title. The --json form carries the full rows (including description);
+// this human form is a scannable index. An unassigned ticket shows "-".
+func printTicketBoard(tickets []protocol.Ticket) {
+	if len(tickets) == 0 {
+		fmt.Println("no tickets")
+		return
+	}
+	for _, t := range tickets {
+		assignee := t.Assignee
+		if strings.TrimSpace(assignee) == "" {
+			assignee = "-"
+		}
+		fmt.Printf("%s\t%s\t%s\t%s\n", t.ID, t.Status, assignee, t.Title)
+	}
+}
+
+// runTicketComment posts a one-shot comment from the calling session onto any
+// ticket by id — the agent-to-agent note channel. Commenting informs the ticket's
+// participants but does not subscribe the caller, so it is a way to chime in
+// without joining a ticket's future activity.
+func runTicketComment(args []string) {
+	parsed, err := parseTicketCommentArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket comment: %v\n", err)
+		writeTicketHelp(os.Stderr)
+		os.Exit(2)
+	}
+	source, err := resolveDispatchSession(parsed.Session)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket comment: %v\n", err)
+		os.Exit(2)
+	}
+	result, err := client.New("").CommentTicket(source, parsed.TicketID, parsed.Comment)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket comment: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.JSON {
+		printJSON(result)
+		return
+	}
+	fmt.Printf("commented on ticket %s\n", result.TicketID)
+}
+
 // runTicketInbox reads (and consumes) this session's unread ticket events — the
 // chief's comments, status changes, and re-briefs it has not yet seen. Reading
 // advances the cursor, so a second call returns only what landed since.
@@ -1020,10 +1176,16 @@ commands:
   inbox [--session <id>] [--json] [--watch [--interval <dur>]]
         read (and mark read) this session's unread ticket activity;
         --watch blocks and prints new activity as it lands (for a Monitor)
+  list [--status <col>] [--all] [--json]
+        read the board: every ticket (id, column, assignee, title), newest first;
+        --json includes each ticket's description. No session required.
   attach --file <path> [--note <text>] [--session <id>] [--json]
         copy a file onto this session's bound ticket as an attachment
   new --title <t> [--description <d>] [--id <slug>] [--session <id>] [--json]
         create an unbound backlog ticket in todo (no agent, no session)
+  comment <ticket-id> --message <text> [--session <id>] [--json]
+        post a one-shot comment onto any ticket by id (does not subscribe you);
+        -m is shorthand for --message
 
 work states:
   in_progress       working

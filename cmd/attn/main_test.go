@@ -1093,3 +1093,82 @@ func TestParseTicketNewArgsErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestParseTicketCommentArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want ticketCommentArgs
+	}{
+		{
+			name: "id and message",
+			args: []string{"store-migration", "--message", "lgtm"},
+			want: ticketCommentArgs{TicketID: "store-migration", Comment: "lgtm"},
+		},
+		{
+			name: "short -m flag",
+			args: []string{"tk", "-m", "looks good"},
+			want: ticketCommentArgs{TicketID: "tk", Comment: "looks good"},
+		},
+		{
+			// The footgun the design avoids: flags written AFTER the id still parse,
+			// because the interleave parser peels the id and keeps parsing — a
+			// trailing --session would otherwise be swallowed into the comment.
+			name: "flags after the id still parse",
+			args: []string{"tk", "-m", "the note", "--session", "s1", "--json"},
+			want: ticketCommentArgs{TicketID: "tk", Comment: "the note", Session: "s1", JSON: true},
+		},
+		{
+			name: "flags before the id",
+			args: []string{"--session", "s1", "-m", "the note", "tk"},
+			want: ticketCommentArgs{TicketID: "tk", Comment: "the note", Session: "s1"},
+		},
+		{
+			// Dashes inside the quoted message value are safe — it is a flag value, not
+			// re-parsed as flags.
+			name: "dashes inside the message are literal",
+			args: []string{"tk", "-m", "--watch out for the race"},
+			want: ticketCommentArgs{TicketID: "tk", Comment: "--watch out for the race"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseTicketCommentArgs(tc.args)
+			if err != nil {
+				t.Fatalf("parseTicketCommentArgs(%v): %v", tc.args, err)
+			}
+			if got != tc.want {
+				t.Fatalf("parseTicketCommentArgs(%v) = %+v, want %+v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseTicketCommentArgsErrors(t *testing.T) {
+	cases := map[string][]string{
+		"no args":            {},
+		"id without message": {"tk"},
+		"message without id": {"-m", "hi"},
+		"two positionals":    {"tk", "extra", "-m", "hi"},
+		"unknown flag":       {"--bogus", "tk", "-m", "hi"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseTicketCommentArgs(args); err == nil {
+				t.Fatalf("parseTicketCommentArgs(%v) = nil error, want error", args)
+			}
+		})
+	}
+}
+
+// The common mistake `comment tk "looks good"` (comment as a bare positional,
+// no -m) should produce an error that points at -m, not the opaque "got 2".
+func TestParseTicketCommentArgsBareCommentHintsMessageFlag(t *testing.T) {
+	_, err := parseTicketCommentArgs([]string{"tk", "looks good"})
+	if err == nil {
+		t.Fatal("parseTicketCommentArgs with bare comment = nil error, want error")
+	}
+	if !strings.Contains(err.Error(), "-m") {
+		t.Fatalf("error = %q, want it to mention -m", err.Error())
+	}
+}
