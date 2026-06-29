@@ -313,6 +313,32 @@ func (c *Client) TicketInbox(sourceSessionID string) ([]protocol.TicketEventBund
 	return resp.TicketInboxResult.Bundles, nil
 }
 
+// TicketList reads the board — every non-archived ticket, newest first, optionally
+// filtered by status (or including archived). It is a global read, not scoped to the
+// caller: sourceSessionID is passed for command-shape uniformity but the daemon does
+// not use it. status == "" matches any status. Rows carry the description but not the
+// activity thread (bare rows, like the app's board feed).
+func (c *Client) TicketList(sourceSessionID, status string, includeArchived bool) ([]protocol.Ticket, error) {
+	msg := protocol.TicketListMessage{Cmd: protocol.CmdTicketList}
+	if sourceSessionID != "" {
+		msg.SourceSessionID = &sourceSessionID
+	}
+	if status != "" {
+		msg.Status = &status
+	}
+	if includeArchived {
+		msg.IncludeArchived = &includeArchived
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.TicketListResult == nil {
+		return nil, errors.New("daemon returned no ticket list result")
+	}
+	return resp.TicketListResult.Tickets, nil
+}
+
 func (c *Client) CheckoutWorkspaceContext(sourceSessionID string, force bool) (*protocol.WorkspaceContextResult, error) {
 	msg := protocol.WorkspaceContextCheckoutMessage{
 		Cmd:             protocol.CmdWorkspaceContextCheckout,

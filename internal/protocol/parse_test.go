@@ -28,6 +28,11 @@ func TestParseCommand(t *testing.T) {
 			wantCmd: CmdTicketComment,
 		},
 		{
+			name:    "ticket list message",
+			input:   `{"cmd":"ticket_list","status":"working"}`,
+			wantCmd: CmdTicketList,
+		},
+		{
 			name:    "state message",
 			input:   `{"cmd":"state","id":"abc","state":"waiting"}`,
 			wantCmd: CmdState,

@@ -41,15 +41,48 @@ additive plus the comment exclusion.
 
 ```text
 Agent CLI (cmd/attn) ── unix socket ──> daemon handler ──> store
-  attn ticket comment <id> <text>   -> handleTicketComment    -> AddTicketComment(author=session)        -> notify participants
-  attn ticket subscribe <id>        -> handleTicketSubscribe  -> AddTicketSubscription(session, id)       (cursor stays 0: delivers history)
-  attn ticket unsubscribe <id>      -> handleTicketUnsubscribe-> RemoveTicketSubscription(session, id)
-  attn ticket take <id> [--confirm] -> handleTicketTake       -> AssignTicket(id, session, --confirm)     -> `assigned` event, notify
+  attn ticket list [--status X] [--all] -> handleTicketList    -> ListTickets(filter)                     (global board READ)
+  attn ticket comment <id> -m <text>    -> handleTicketComment  -> AddTicketComment(author=session)        -> notify participants
+  attn ticket subscribe <id>            -> handleTicketSubscribe-> AddTicketSubscription(session, id)       (cursor stays 0: delivers history)
+  attn ticket unsubscribe <id>          -> handleTicketUnsubscribe-> RemoveTicketSubscription(session, id)
+  attn ticket take <id> [--confirm]     -> handleTicketTake     -> AssignTicket(id, session, --confirm)     -> `assigned` event, notify
 
-All four are agent commands: resolve identity from source_session_id, author as the
-session, reply via protocol.Response over the unix socket (mirrors handleSetTicketStatus,
-NOT the app's ws ticket_action_result path).
+The write verbs (comment/subscribe/take) are identity-scoped: resolve identity from
+source_session_id, author as the session, reply via protocol.Response over the unix
+socket (mirrors handleSetTicketStatus, NOT the app's ws ticket_action_result path).
+`list` is the read foundation — a GLOBAL board read (reuses the app's ticketToProtocol +
+ListTickets), so it does NOT require a session (mirrors `attn list` for sessions);
+source_session_id is optional and unused, kept only for command-shape uniformity.
 ```
+
+## Discoverability (the read+guidance foundation)
+
+A write verb is useless without a way to obtain a ticket-id, and agents had **no board
+read at all**: `ListTickets` was exposed only to the app UI via the `tickets_updated`
+broadcast. So the foundation slice ships `attn ticket list` (the read) *and* the guidance
+that tells agents the capability exists — folded in so the feature only hits main when an
+agent can actually discover, find, and act on a ticket (Victor's call: "ship as one
+capability").
+
+- **`attn ticket list`** is available to every agent (no code restriction), but guidance
+  frames board-listing as a **chief/coordinator** read — a worker mostly acts on its own
+  ticket plus ids handed to it (Victor's call: "chief-oriented, but unrestricted").
+- **Guidance lives in three tiers, split by the "unrestricted comment / chief-oriented
+  list" decision** (per the prompting principle — thin always-on, depth in the reference):
+  - always-on `TicketAwarenessGuidance` (hooks.go, **all agents**): the **unrestricted**
+    verb only — any agent can post a one-shot note to a ticket it's been handed with
+    `attn ticket comment <id> -m …`. NOT `list` — pushing every worker to scan the board
+    contradicts the chief-oriented steer.
+  - the chief block (hooks.go, **chief only**): board-listing (`attn ticket list`) as the
+    coordinator's read, alongside the existing `attn ticket inbox --watch` Monitor guidance.
+  - the skill's `tickets.md` reference: the how (list filters; comment = one-shot, no
+    subscribe). `list` stays available to every agent (no code restriction) — the reference
+    documents it for any agent that reaches for it; only the always-on *push* is chief-framed.
+    Extended when subscribe/take land — not deferred.
+- **`attn ticket list --json` carries each ticket's `description`** (the brief), not just
+  id/status/assignee — `ListTickets` selects it. So an agent commenting on a found ticket
+  is not blind to its content. A `ticket show` to read a ticket's *activity thread* (prior
+  comments / status history, which list leaves empty) is a clean follow-up, out of scope here.
 
 Participation queries change in `internal/store/ticket_events.go`:
 
@@ -99,13 +132,20 @@ Protocol (one ProtocolVersion bump for the whole set): new agent commands
 
 ## Implementation Steps
 
-- [x] **Slice 1 — comment (#2):** `ticket_comment` protocol cmd + `handleTicketComment` +
+- [x] **Slice 1a — comment (#440):** `ticket_comment` protocol cmd + `handleTicketComment` +
       `attn ticket comment <id> -m <text>` CLI + `CommentTicket` client method. Participation
       queries exclude `commented` authorship (and dead `InvolvedTicketIDs` removed). Tests:
       store-level comment-exclusion (both queries), daemon linchpin (commenter not subscribed
       to later events), CLI parse, protocol decode. ProtocolVersion 133→134. CHANGELOG.
       CLI uses `--message`/`-m` (not a trailing positional) so flags compose around the id —
       a trailing-positional comment swallowed `--session` written after it.
+- [ ] **Slice 1b — board-read + guidance (folded into #440, held to ship as one capability):**
+      `ticket_list` protocol cmd + `handleTicketList` (reuse `ticketToProtocol`) +
+      `attn ticket list [--status X] [--all] [--json]` CLI + `TicketList` client method (global
+      read, optional session). Guidance: lean clause in always-on `TicketAwarenessGuidance`
+      + coordinator framing in the chief block + the how in `tickets.md`. Tests: handler
+      returns the board (filter honored), CLI parse, protocol decode. ProtocolVersion 134→135
+      (one bump). CHANGELOG covers the whole capability.
 - [ ] **Slice 2 — subscribe/unsubscribe:** branch AFTER slice 1 merges (same participation
       queries collide). Migration 58 + `ticket_subscriptions` store methods + participation
       UNION + purge cleanup + protocol cmds + CLI + client. Subscribe does NOT advance the

@@ -54,3 +54,23 @@ validates it.
 - **Slug.** Omit `--id` and the slug is derived from the title and made unique
   automatically. Pass `--id` to choose it; if that id is already taken, creation fails with
   guidance — pick a new name or append a number.
+
+## Reading the board and commenting on another ticket
+
+Most of your ticket interaction is your *own* bound ticket — reporting status, reading your
+inbox (see the delegated-agent reference). These two commands reach **any** ticket:
+
+- **`attn ticket list [--status <col>] [--all] [--json]`** reads the whole board: one line
+  per ticket (id, column, assignee, title), newest first. `--json` adds each ticket's
+  description (the brief). It needs no session — it is a global read, not scoped to you.
+  This is primarily a **coordinator** move: it is how the chief sees every thread and finds
+  a ticket's id. A worker rarely needs it — act on your own ticket and the ids you were
+  handed.
+- **`attn ticket comment <ticket-id> -m "<text>"`** posts a one-shot note onto a ticket by
+  id, even one you aren't assigned to — the agent-to-agent note channel. Put the text behind
+  `-m` (`--message`), not as a bare argument, so it can contain spaces and dashes and so
+  `--session`/`--json` still parse. The comment informs that ticket's **participants** (its
+  assignee, the chief who created it, anyone subscribed) but does **not** subscribe *you*:
+  it is a way to chime in without joining the ticket's future activity. Use it to flag
+  something to a sibling agent or annotate a thread you're not on; for your own bound
+  ticket, prefer `attn ticket status … --comment` so the note also moves the board.

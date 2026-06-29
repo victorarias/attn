@@ -647,6 +647,12 @@ func runTicket() {
 			return
 		}
 		runTicketInbox(os.Args[3:])
+	case "list":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketList(os.Args[3:])
 	case "attach":
 		if hasHelpFlag(os.Args[3:]) {
 			writeTicketHelp(os.Stdout)
@@ -943,6 +949,63 @@ func parseTicketCommentArgs(args []string) (ticketCommentArgs, error) {
 	return result, nil
 }
 
+// runTicketList reads the board — the foundation for the cross-ticket verbs, since
+// an agent (typically the chief, coordinating) needs a ticket-id before it can
+// comment on a ticket it isn't assigned to. It is a global read, so unlike the other
+// ticket commands it does NOT require a session: --session / ATTN_SESSION_ID is
+// resolved best-effort and passed only for uniformity (the daemon ignores it). This
+// mirrors `attn list` for sessions.
+func runTicketList(args []string) {
+	fs := flag.NewFlagSet("ticket list", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	status := fs.String("status", "", "only tickets in this column (todo|working|blocked|in_review|done|failed|crashed)")
+	all := fs.Bool("all", false, "include archived tickets (hidden by default)")
+	sessionID := fs.String("session", "", "session id (optional; defaults to ATTN_SESSION_ID)")
+	jsonOutput := fs.Bool("json", false, "print the board as JSON (includes each ticket's description)")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "ticket list: %v\n", err)
+		writeTicketHelp(os.Stderr)
+		os.Exit(2)
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(os.Stderr, "ticket list: unexpected arguments: %v\n", fs.Args())
+		os.Exit(2)
+	}
+	// Best-effort: a board read works without a session, so resolve quietly rather
+	// than erroring the way resolveDispatchSession does.
+	source := strings.TrimSpace(*sessionID)
+	if source == "" {
+		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+	}
+	tickets, err := client.New("").TicketList(source, strings.TrimSpace(*status), *all)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket list: %v\n", err)
+		os.Exit(1)
+	}
+	if *jsonOutput {
+		printJSON(tickets)
+		return
+	}
+	printTicketBoard(tickets)
+}
+
+// printTicketBoard renders the board as one compact line per ticket: id, column,
+// assignee, title. The --json form carries the full rows (including description);
+// this human form is a scannable index. An unassigned ticket shows "-".
+func printTicketBoard(tickets []protocol.Ticket) {
+	if len(tickets) == 0 {
+		fmt.Println("no tickets")
+		return
+	}
+	for _, t := range tickets {
+		assignee := t.Assignee
+		if strings.TrimSpace(assignee) == "" {
+			assignee = "-"
+		}
+		fmt.Printf("%s\t%s\t%s\t%s\n", t.ID, t.Status, assignee, t.Title)
+	}
+}
+
 // runTicketComment posts a one-shot comment from the calling session onto any
 // ticket by id — the agent-to-agent note channel. Commenting informs the ticket's
 // participants but does not subscribe the caller, so it is a way to chime in
@@ -1113,6 +1176,9 @@ commands:
   inbox [--session <id>] [--json] [--watch [--interval <dur>]]
         read (and mark read) this session's unread ticket activity;
         --watch blocks and prints new activity as it lands (for a Monitor)
+  list [--status <col>] [--all] [--json]
+        read the board: every ticket (id, column, assignee, title), newest first;
+        --json includes each ticket's description. No session required.
   attach --file <path> [--note <text>] [--session <id>] [--json]
         copy a file onto this session's bound ticket as an attachment
   new --title <t> [--description <d>] [--id <slug>] [--session <id>] [--json]

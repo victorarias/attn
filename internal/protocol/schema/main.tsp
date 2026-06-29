@@ -615,6 +615,26 @@ model TicketInboxMessage {
   source_session_id: string;
 }
 
+// TicketListMessage reads the board — every ticket, optionally filtered by status —
+// the way the app sees it, but pulled over the agent socket instead of pushed as a
+// tickets_updated broadcast. This is the read foundation the write verbs depend on:
+// an agent finds a ticket-id here before it can comment on (or take/subscribe to) it.
+// Unlike the write verbs it is NOT identity-scoped — it is a global board read, so
+// source_session_id is optional and unused, present only for command-shape uniformity.
+// Rows carry the description (the brief) but not the activity thread (bare rows, like
+// the broadcast).
+model TicketListMessage {
+  cmd: "ticket_list";
+  source_session_id?: string;
+  status?: string;
+  include_archived?: boolean;
+}
+
+// TicketListResult is the board snapshot — bare ticket rows, newest first.
+model TicketListResult {
+  tickets: Ticket[];
+}
+
 // TicketAttachMessage hands a file to the calling session's bound ticket. The
 // daemon resolves the ticket from the session (the assignee), copies the file at
 // source_path into the ticket's store directory (.attn/tickets/<id>/), and records
@@ -2271,6 +2291,7 @@ model Response {
   notebook_guide?: NotebookGuideResult;
   ticket_status_result?: TicketStatusResult;
   ticket_inbox_result?: TicketInboxResult;
+  ticket_list_result?: TicketListResult;
   ticket_attach_result?: TicketAttachResult;
   ticket_create_result?: TicketCreateResult;
   ticket_comment_result?: TicketCommentResult;
