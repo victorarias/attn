@@ -519,6 +519,7 @@ function App() {
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
     sendSessionSelected,
+    sendTriggerNudge,
     sendWorkspaceSelected,
     sendSessionVisualized,
     sendWorkspaceAddSessionPane,
@@ -680,6 +681,7 @@ function App() {
         sendSubscribeGitStatus={sendSubscribeGitStatus}
         sendUnsubscribeGitStatus={sendUnsubscribeGitStatus}
         sendSessionSelected={sendSessionSelected}
+        sendTriggerNudge={sendTriggerNudge}
         sendWorkspaceSelected={sendWorkspaceSelected}
         sendSessionVisualized={sendSessionVisualized}
         sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
@@ -799,6 +801,7 @@ interface AppContentProps {
   sendSubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendSubscribeGitStatus'];
   sendUnsubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendUnsubscribeGitStatus'];
   sendSessionSelected: ReturnType<typeof useDaemonSocket>['sendSessionSelected'];
+  sendTriggerNudge: ReturnType<typeof useDaemonSocket>['sendTriggerNudge'];
   sendWorkspaceSelected: ReturnType<typeof useDaemonSocket>['sendWorkspaceSelected'];
   sendSessionVisualized: ReturnType<typeof useDaemonSocket>['sendSessionVisualized'];
   sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
@@ -912,6 +915,7 @@ sendFetchPRDetails,
   sendSubscribeGitStatus,
   sendUnsubscribeGitStatus,
   sendSessionSelected,
+  sendTriggerNudge,
   sendWorkspaceSelected,
   sendSessionVisualized,
   sendWorkspaceAddSessionPane,
@@ -1277,6 +1281,8 @@ sendFetchPRDetails,
       reviewLoopStatus: reviewLoop?.status,
       chiefOfStaff: daemonSession?.chief_of_staff ?? false,
       delegatedFromChief: daemonSession?.delegated_from_chief ?? false,
+      ticketUnread: daemonSession?.ticket_unread ?? false,
+      nudgeFiresAt: daemonSession?.nudge_fires_at,
     };
   });
 
@@ -3752,6 +3758,7 @@ sendFetchPRDetails,
           onSessionDragEnd={handleLeafDragEnd}
           onWorkspaceReorder={handleWorkspaceReorder}
           onSelectSession={handleSelectSession}
+          onTriggerNudge={sendTriggerNudge}
           onSelectWorkspace={handleSelectWorkspace}
           onSelectTile={handleSelectTile}
           onCloseTile={handleCloseTile}
@@ -3801,7 +3808,12 @@ sendFetchPRDetails,
                       agent: entry.agent,
                       cwd: entry.cwd,
                       endpointId: entry.endpointId,
+                      state: entry.state,
+                      ticketUnread: entry.ticketUnread,
+                      nudgeFiresAt: entry.nudgeFiresAt,
+                      isActive: entry.id === activeSessionId,
                     }))}
+                    onTriggerNudge={sendTriggerNudge}
                     workspace={workspaceState}
                     activePaneId={activePaneId}
                     fontSize={terminalFontSize}

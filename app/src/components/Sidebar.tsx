@@ -8,6 +8,7 @@ import { SessionActionsPopover } from './SessionActionsPopover';
 import { GridLayoutControl } from './grid/GridLayoutControl';
 import type { GridLayout } from './grid/gridLayout';
 import { StateIndicator } from './StateIndicator';
+import { SidebarNudgeBar, deriveNudgeMode } from './NudgeIndicator';
 import { formatShortcut } from '../shortcuts';
 import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
 import { tileContentKey, type TileContentState, type TileLeaf } from '../types/workspace';
@@ -29,6 +30,8 @@ interface LocalSession {
   reviewLoopStatus?: string;
   chiefOfStaff?: boolean;
   delegatedFromChief?: boolean;
+  ticketUnread?: boolean;
+  nudgeFiresAt?: string;
 }
 
 type SidebarWorkspace = WorkspaceWithSessions<LocalSession>;
@@ -180,6 +183,7 @@ interface SidebarProps {
     nextWorkspaceId?: string;
   }) => void;
   onSelectSession: (id: string) => void;
+  onTriggerNudge?: (id: string) => void;
   onSelectWorkspace: (id: string) => void;
   onSelectTile?: (workspaceId: string, tileId: string) => void;
   onCloseTile?: (workspaceId: string, tileId: string) => void;
@@ -361,6 +365,7 @@ export function Sidebar({
   onSessionDragEnd,
   onWorkspaceReorder,
   onSelectSession,
+  onTriggerNudge,
   onSelectWorkspace,
   onSelectTile,
   onCloseTile,
@@ -1068,6 +1073,21 @@ export function Sidebar({
                         •••
                       </button>
                     </div>
+                    {(() => {
+                      const nudgeMode = deriveNudgeMode({
+                        ticketUnread: session.ticketUnread,
+                        nudgeFiresAt: session.nudgeFiresAt,
+                        state: session.state,
+                        isActive: selectedId === session.id,
+                      });
+                      return nudgeMode ? (
+                        <SidebarNudgeBar
+                          mode={nudgeMode}
+                          firesAt={session.nudgeFiresAt}
+                          onTrigger={() => onTriggerNudge?.(session.id)}
+                        />
+                      ) : null;
+                    })()}
                   </div>
                 );
               })}
