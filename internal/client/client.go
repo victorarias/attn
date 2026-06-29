@@ -276,6 +276,26 @@ func (c *Client) CreateTicket(sourceSessionID, title, description, id string) (*
 	return resp.TicketCreateResult, nil
 }
 
+// CommentTicket posts a one-shot comment from the calling session onto any ticket
+// by id — not just the one bound to the session. The daemon authors the comment as
+// the session and notifies the ticket's participants, but commenting does not
+// subscribe the caller to the ticket's future activity. Echoes the ticket id back.
+func (c *Client) CommentTicket(sourceSessionID, ticketID, comment string) (*protocol.TicketCommentResult, error) {
+	resp, err := c.send(protocol.TicketCommentMessage{
+		Cmd:             protocol.CmdTicketComment,
+		SourceSessionID: sourceSessionID,
+		TicketID:        ticketID,
+		Comment:         comment,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.TicketCommentResult == nil {
+		return nil, errors.New("daemon returned no ticket comment result")
+	}
+	return resp.TicketCommentResult, nil
+}
+
 // TicketInbox reads and consumes the calling session's unread ticket events,
 // bundled by ticket. Reading advances the session's per-ticket cursors, so a
 // second call returns only what landed since.

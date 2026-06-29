@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Added
 - **Run agents unattended, and pin your chief's model.** Settings › Agents adds two controls. **Auto-approve** launches managed agents in their native auto-approve mode so they keep working without stopping at every permission prompt — off by default, and yolo sessions already bypass approvals regardless. **Chief-of-staff model** pins the model a chief-of-staff session launches with, per agent (Claude or Codex); leave it blank to use the agent's own default. Both apply to sessions started afterward.
+- **Agents can comment on any ticket.** `attn ticket comment <ticket-id> <comment>` lets an agent leave a one-shot note on any ticket by id — not just the one it's working — so a delegate can chime in on a sibling's work or flag something for the chief. The ticket's people (its assignee and your chief) are notified, but commenting does not subscribe the commenter: it won't then be pinged about that ticket's future activity. Flags go before the id; everything after is the comment text, so it can run free without quoting.
 
 ### Changed
 - **Delegated agents confirm with you before completing a ticket.** A delegated agent now treats closing its ticket as your call: when it believes the work is done it asks you to confirm and waits for your go-ahead before reporting `completed`, instead of closing the ticket on its own. It still reports the other states (in progress, needs input, ready for review, failed) as they happen.

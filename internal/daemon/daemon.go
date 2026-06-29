@@ -1895,6 +1895,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleTicketAttach(conn, msg.(*protocol.TicketAttachMessage))
 	case protocol.CmdTicketCreate:
 		d.handleTicketCreate(conn, msg.(*protocol.TicketCreateMessage))
+	case protocol.CmdTicketComment:
+		d.handleTicketComment(conn, msg.(*protocol.TicketCommentMessage))
 	case protocol.CmdWorkspaceContextCheckout:
 		d.handleWorkspaceContextCheckout(conn, msg.(*protocol.WorkspaceContextCheckoutMessage))
 	case protocol.CmdWorkspaceContextUpdate:

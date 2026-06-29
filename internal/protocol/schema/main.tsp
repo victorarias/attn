@@ -587,6 +587,26 @@ model TicketCreateResult {
   title: string;
 }
 
+// TicketCommentMessage posts a one-shot comment from the calling agent onto ANY
+// ticket by id — not just the one bound to its session. The daemon records the
+// comment authored by the session, which informs that ticket's participants but
+// does NOT enroll the commenter in the ticket's future notifications (comment
+// authorship confers no participation; standing interest is opt-in via take or
+// subscribe). This is the agent equivalent of the app's ticket_add_comment, which
+// authors as "you".
+model TicketCommentMessage {
+  cmd: "ticket_comment";
+  source_session_id: string;
+  ticket_id: string;
+  comment: string;
+}
+
+// TicketCommentResult echoes the ticket the comment landed on, so the caller can
+// confirm which ticket it posted to.
+model TicketCommentResult {
+  ticket_id: string;
+}
+
 // TicketInboxMessage reads (and consumes) the calling session's unread ticket
 // events. The daemon resolves the observer identity from the session, so the agent
 // names nothing — it just asks for what it has not yet seen.
@@ -2253,6 +2273,7 @@ model Response {
   ticket_inbox_result?: TicketInboxResult;
   ticket_attach_result?: TicketAttachResult;
   ticket_create_result?: TicketCreateResult;
+  ticket_comment_result?: TicketCommentResult;
 }
 
 model DelegateResult {

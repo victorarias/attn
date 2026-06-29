@@ -625,8 +625,9 @@ func hasHelpFlag(args []string) bool {
 }
 
 // runTicket routes `attn ticket <command>`: `status` (the agent's forward channel
-// onto its own bound ticket), `inbox`, `attach`, and `new` (mint a standalone,
-// unbound backlog ticket without delegating).
+// onto its own bound ticket), `inbox`, `attach`, `new` (mint a standalone, unbound
+// backlog ticket without delegating), and `comment` (post a one-shot note onto any
+// ticket by id).
 func runTicket() {
 	if len(os.Args) < 3 || os.Args[2] == "-h" || os.Args[2] == "--help" {
 		writeTicketHelp(os.Stdout)
@@ -658,6 +659,12 @@ func runTicket() {
 			return
 		}
 		runTicketNew(os.Args[3:])
+	case "comment":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketComment(os.Args[3:])
 	default:
 		fmt.Fprintf(os.Stderr, "ticket: unknown command %q\n", os.Args[2])
 		writeTicketHelp(os.Stderr)
@@ -878,6 +885,87 @@ func runTicketNew(args []string) {
 	fmt.Printf("created ticket %s (%s): %s\n", result.TicketID, result.Status, result.Title)
 }
 
+type ticketCommentArgs struct {
+	TicketID string
+	Comment  string
+	Session  string
+	JSON     bool
+}
+
+// parseTicketCommentArgs reads `ticket comment <ticket-id> --message <text> [flags]`.
+// The comment text is a flag value (--message / -m), not a trailing positional, so
+// flags compose in any order around the single id positional and the comment may
+// contain spaces and dashes without being mistaken for a flag (e.g. -m "--watch out
+// for X"). This mirrors `ticket status` (one positional, interleaved flags) and the
+// rest of the CLI, where freeform text is always a flag — a trailing-positional
+// comment would silently swallow a --session/--json written after it, since Go's
+// flag parser stops at the first positional. The id and a non-empty message are
+// both required.
+func parseTicketCommentArgs(args []string) (ticketCommentArgs, error) {
+	var result ticketCommentArgs
+	fs := flag.NewFlagSet("ticket comment", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	message := fs.String("message", "", "the comment text")
+	fs.StringVar(message, "m", "", "shorthand for --message")
+	session := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	jsonOutput := fs.Bool("json", false, "print the result as JSON")
+
+	// Interleave parse: Go's flag parser stops at the first positional, so to allow
+	// flags on either side of the id we peel one positional at a time and re-parse.
+	var positionals []string
+	rest := args
+	for {
+		if err := fs.Parse(rest); err != nil {
+			return result, err
+		}
+		rest = fs.Args()
+		if len(rest) == 0 {
+			break
+		}
+		positionals = append(positionals, rest[0])
+		rest = rest[1:]
+	}
+	if len(positionals) != 1 {
+		return result, fmt.Errorf("expected exactly one ticket id argument, got %d", len(positionals))
+	}
+	result.TicketID = positionals[0]
+	result.Comment = strings.TrimSpace(*message)
+	if result.Comment == "" {
+		return result, errors.New("--message is required")
+	}
+	result.Session = *session
+	result.JSON = *jsonOutput
+	return result, nil
+}
+
+// runTicketComment posts a one-shot comment from the calling session onto any
+// ticket by id — the agent-to-agent note channel. Commenting informs the ticket's
+// participants but does not subscribe the caller, so it is a way to chime in
+// without joining a ticket's future activity.
+func runTicketComment(args []string) {
+	parsed, err := parseTicketCommentArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket comment: %v\n", err)
+		writeTicketHelp(os.Stderr)
+		os.Exit(2)
+	}
+	source, err := resolveDispatchSession(parsed.Session)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket comment: %v\n", err)
+		os.Exit(2)
+	}
+	result, err := client.New("").CommentTicket(source, parsed.TicketID, parsed.Comment)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket comment: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.JSON {
+		printJSON(result)
+		return
+	}
+	fmt.Printf("commented on ticket %s\n", result.TicketID)
+}
+
 // runTicketInbox reads (and consumes) this session's unread ticket events — the
 // chief's comments, status changes, and re-briefs it has not yet seen. Reading
 // advances the cursor, so a second call returns only what landed since.
@@ -1024,6 +1112,9 @@ commands:
         copy a file onto this session's bound ticket as an attachment
   new --title <t> [--description <d>] [--id <slug>] [--session <id>] [--json]
         create an unbound backlog ticket in todo (no agent, no session)
+  comment <ticket-id> --message <text> [--session <id>] [--json]
+        post a one-shot comment onto any ticket by id (does not subscribe you);
+        -m is shorthand for --message
 
 work states:
   in_progress       working
