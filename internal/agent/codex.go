@@ -76,8 +76,18 @@ func (c *Codex) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	}
 
 	args = append(args, "-C", opts.CWD)
+	if model := strings.TrimSpace(opts.Model); model != "" {
+		args = append(args, "--model", model)
+	}
 	if opts.YoloMode {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
+	} else if opts.AutoApprove {
+		// Native auto-approve: route approval requests to codex's guardian LLM
+		// reviewer (auto_review) instead of the user, so the agent runs unattended.
+		// on-request is codex's recommended interactive policy — the model escalates
+		// when it needs to, and auto_review approves/denies in the user's place
+		// (the codex analog of Claude's --permission-mode auto). Yolo bypasses both.
+		args = append(args, "-c", `approval_policy="on-request"`, "-c", `approvals_reviewer="auto_review"`)
 	}
 	if strings.TrimSpace(opts.InitialPrompt) != "" {
 		args = append(args, "--", opts.InitialPrompt)

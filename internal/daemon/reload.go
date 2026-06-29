@@ -236,5 +236,6 @@ func (d *Daemon) buildReloadSpawnOptions(session *protocol.Session) (ptybackend.
 		CopilotExecutable:       params.CopilotExecutable,
 		LoginShellEnv:           d.cachedLoginShellEnv(),
 		WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)),
+		AutoApprove:             parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)),
 	}, nil
 }

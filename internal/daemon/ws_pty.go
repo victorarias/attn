@@ -540,6 +540,8 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		LoginShellEnv:     d.cachedLoginShellEnv(),
 
 		WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)),
+		AutoApprove:             parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)),
+		Model:                   d.chiefLaunchModel(agent, protocol.Deref(msg.ChiefOfStaff)),
 	}
 	if existingSession != nil {
 		for _, liveID := range d.ptyBackend.SessionIDs(context.Background()) {

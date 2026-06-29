@@ -96,6 +96,10 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 		args = append(args, "--append-system-prompt", instructions)
 	}
 
+	if model := strings.TrimSpace(opts.Model); model != "" {
+		args = append(args, "--model", model)
+	}
+
 	if opts.ResumeSessionID != "" {
 		args = append(args, "-r", opts.ResumeSessionID)
 	} else if opts.ResumePicker {
@@ -103,6 +107,12 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	}
 	if opts.YoloMode {
 		args = append(args, "--dangerously-skip-permissions")
+	} else if opts.AutoApprove {
+		// Native auto-approve mode: an LLM permission classifier silently allows
+		// safe/in-scope actions and denies risky ones, so the agent runs unattended
+		// without stalling on approval prompts. Mutually exclusive with yolo, which
+		// bypasses permissions entirely.
+		args = append(args, "--permission-mode", "auto")
 	}
 	if strings.TrimSpace(opts.InitialPrompt) != "" {
 		args = append(args, "--", opts.InitialPrompt)

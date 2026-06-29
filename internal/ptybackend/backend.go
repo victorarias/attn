@@ -44,6 +44,16 @@ type SpawnOptions struct {
 	// true the worker exports ATTN_WORKFLOW_GUIDANCE_ENABLED so the launched agent's
 	// instructions include the workflow-trigger guidance.
 	WorkflowGuidanceEnabled bool
+
+	// AutoApprove mirrors the daemon's auto_approve_enabled setting. When true the
+	// worker exports ATTN_AUTO_APPROVE so the launched agent starts in its native
+	// auto-approve mode (Claude --permission-mode auto). Yolo overrides it.
+	AutoApprove bool
+
+	// Model, when set, pins the launched agent's model via --model. Sourced from
+	// the chief_model_<agent> setting for chief launches; the worker exports it as
+	// ATTN_CHIEF_MODEL. Empty means the agent's own default.
+	Model string
 }
 
 type AttachInfo struct {

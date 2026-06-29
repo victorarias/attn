@@ -479,6 +479,12 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 	if opts.WorkflowGuidanceEnabled {
 		workerEnv = append(workerEnv, "ATTN_WORKFLOW_GUIDANCE_ENABLED=1")
 	}
+	if opts.AutoApprove {
+		workerEnv = append(workerEnv, "ATTN_AUTO_APPROVE=1")
+	}
+	if model := strings.TrimSpace(opts.Model); model != "" {
+		workerEnv = append(workerEnv, "ATTN_CHIEF_MODEL="+model)
+	}
 	if len(opts.LoginShellEnv) > 0 {
 		if envJSON, err := json.Marshal(opts.LoginShellEnv); err == nil {
 			workerEnv = append(workerEnv, "ATTN_CACHED_SHELL_ENV="+string(envJSON))

@@ -229,6 +229,66 @@ Proposed `ChiefGuidance` bullets:
   delegation briefs/docs (the dispatch mailbox was retired); the inbox is the
   ticket inbox. (Memory note also.)
 
+## Real-agent verification (harness benchmark)
+
+A and B are verified against REAL agents via
+`app/scripts/real-app-harness/scenario-chief-ticket-watch.mjs` on the isolated
+**uat** profile (create-as-chief → human delegation prompt → observe; never coached,
+never told it is a test). Two benchmark-support configs (below) let the chief run
+unattended on a known model. Status:
+
+- [x] **A — Opus, watch path:** Opus 4.8 chief delegates via `attn delegate`, arms
+  `attn ticket inbox --watch` in a harness Monitor ("1 monitor", "Allowed by auto
+  mode"), and reacts to the worker's `ready_for_review`. The full intended loop.
+- [x] **B — Opus, no-Monitor backstop** (`--no-watch` mode): a chief told NOT to arm
+  a Monitor delegates, goes idle with no watch, and the daemon doorbells it ("📋 New
+  ticket activity…") after the grace; the chief reacts. Verdict
+  `backstop-nudged-and-reacted`. (Also confirms the doorbell's type→Enter submits.)
+- [x] **Model dependence (finding, accepted):** Sonnet 4.6 did the audit ITSELF
+  inline (no delegation) on the same guidance/prompt. The chief is expected to run on
+  an Opus-class model; not chasing Sonnet. (Effort confound: attn does not pin effort,
+  so Sonnet ran high / Opus xhigh.)
+- [x] **Codex — nudge path:** codex chief (gpt-5.5 low) delegates via `attn delegate
+  --brief-file …`, and the daemon's DIRECT `DeliveryNudge` doorbell ("📋 New ticket
+  activity…") reaches it the instant it is idle with unread; codex genuinely reacts
+  ("Ticket activity came in. I'll read the inbox…"). Validate codex with the idle-first
+  flow (`--no-watch`), NOT the normal path: the normal path fires the event ~2s after
+  delegation while codex is still busy → the nudge defers and the loose react heuristic
+  false-matches codex's own delegation narration. codex's nudge is idle-gated, so the
+  event must be fired after codex goes idle.
+- [x] **Finding — system-prompt vs human conflict (observed once each; confounded):** told
+  "don't set up any watch", Claude/Opus(xhigh) OBEYED the human (idle, no Monitor → backstop
+  path); codex(low) OBEYED the ChiefGuidance and armed `attn ticket inbox --watch` anyway,
+  flagging the conflict ("despite your preference not to watch, the chief-of-staff policy
+  required arming…"). n=1 per agent and effort differs (xhigh vs low), so this could be
+  capability/effort rather than a stable agent trait — don't over-read it. codex still also
+  gets the daemon DIRECT nudge (the daemon's capability model treats codex as non-self-monitor
+  regardless), so it is double-covered. **Open product question for Victor:** should "arm a
+  Monitor" be a hard ChiefGuidance rule or a human-overridable default?
+
+## Benchmark-support configs (folded into this PR)
+
+Two daemon settings thread setting → `SpawnOptions` → worker env → `agent.SpawnOpts`
+→ driver, mirroring the `workflows_enabled` pattern (the worker backend is production,
+so the env hop is what runs). Both default off/empty; yolo overrides auto-approve.
+
+- **`auto_approve_enabled`** (global bool) → Claude `--permission-mode auto`; Codex
+  `-c approval_policy="on-request" -c approvals_reviewer="auto_review"`. Lets the chief
+  run unattended without stalling on approval gates. Env hop `ATTN_AUTO_APPROVE`.
+  - [x] setting + validation (ws_settings.go); ws_pty + reload read; worker.go env; cmd/attn read; SpawnOpts field; claude `--permission-mode auto`; codex `approval_policy`+`approvals_reviewer`
+  - [x] codex combo confirmed vs [official docs](https://developers.openai.com/codex/concepts/sandboxing/auto-review): `approvals_reviewer = "auto_review"` requires `approval_policy = "on-request"` (or a granular interactive policy) — exactly the pairing we wire; it routes escalations to a reviewer agent (the reviewer can still deny). Keys are NOT surfaced in `codex --help`/`review --help`/`doctor`, so CLI introspection can't find them — trust the docs (`approval_policy` is separately visible via `codex doctor` → "approval policy OnRequest"). Benchmark: codex ran unattended through the scenario; the reviewer didn't visibly fire in panes (nothing needed approval under the sandbox) — expected, config is correct.
+  - [ ] SettingsModal UI toggle + unit tests
+- **`chief_model_<agent>`** (per-agent string, chief-gated) → `--model <alias>` (e.g.
+  `opus`). Empty = agent default. Env hop `ATTN_CHIEF_MODEL`; read only for chief
+  launches (`chiefLaunchModel`).
+  - [x] setting + validation; ws_pty chief-gated read; worker.go env; cmd/attn read; SpawnOpts field; claude + codex `--model`
+  - [ ] SettingsModal UI toggle (per-agent) + unit tests
+- [ ] **CHANGELOG** entry covering both new settings
+- Real-app gotcha: the source-fingerprint guard compares the app bundle's baked
+  fingerprint (`get_state.appBuild`) against the working tree, so Go/frontend edits
+  need a full `make install PROFILE=uat`; harness scripts are excluded (edit + re-run
+  free).
+
 ## Decisions
 
 - **A2 over A3 (consolidate into the system prompt).** Token cost isn't the

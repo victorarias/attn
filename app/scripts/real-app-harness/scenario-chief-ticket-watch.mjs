@@ -82,17 +82,45 @@ const PROMPTS = {
     'ping me when there\'s something to look at',
 };
 
+// Pin the chief's model per agent so the benchmark measures the ChiefGuidance on a
+// known model rather than whatever the agent defaults to. Empty => agent default.
+// Set via the chief_model_<agent> setting before create_session; cleared in teardown.
+const CHIEF_MODELS = {
+  claude: 'opus',
+  codex: '',
+};
+
+// --no-watch variant: tell the chief to delegate but explicitly NOT arm a watch /
+// Monitor. This exercises the DAEMON BACKSTOP (ticket_notify.go) — an idle
+// self-monitor with unread ticket activity that no Monitor drained gets the PTY
+// doorbell after the grace. So even a chief told not to watch still gets the nudge.
+const NO_WATCH_PROMPTS = {
+  claude:
+    'hey can you get someone going on a quick CHANGELOG audit? skim the last couple ' +
+    'weeks of entries and flag any that read like they were written for maintainers ' +
+    'instead of users, or that are just vague. have them list the worst ones with a ' +
+    "suggested rewrite. don't bother setting up any watch or monitor on it — just hand " +
+    "it off and i'll check back myself. stepping out",
+  codex:
+    'morning — can you hand a small thing off to someone: go through the README ' +
+    'quickstart and check every command still exists in the CLI (nothing renamed or ' +
+    "dropped). just want a list of anything stale. don't set up any watch on it, i'll " +
+    "circle back myself. i'm in meetings most of the day",
+};
+
 function parseArgs(argv) {
   const args = [...argv];
   if (args[0] === '--') args.shift();
   let agent = 'claude';
+  let noWatch = false;
   const rest = [];
   for (let i = 0; i < args.length; i += 1) {
     if (args[i] === '--agent') agent = args[++i];
+    else if (args[i] === '--no-watch') noWatch = true;
     else rest.push(args[i]);
   }
   const options = parseCommonArgs(rest);
-  return { options, agent, help: args.includes('--help') || args.includes('-h') };
+  return { options, agent, noWatch, help: args.includes('--help') || args.includes('-h') };
 }
 
 function assert(condition, message) {
@@ -212,7 +240,7 @@ async function readChiefPane(client, chiefId) {
 }
 
 async function main() {
-  const { options, agent, help } = parseArgs(process.argv.slice(2));
+  const { options, agent, noWatch, help } = parseArgs(process.argv.slice(2));
   if (help) {
     printCommonHelp('scripts/real-app-harness/scenario-chief-ticket-watch.mjs');
     console.log('\n  --agent claude|codex   which agent the chief runs as (default claude)');
@@ -274,6 +302,22 @@ async function main() {
     const leftover = await clearAnyChief(client);
     if (leftover) note(`demoted leftover chief from a prior run`, { leftover });
 
+    // 0b) Enable auto-approve BEFORE create_session so the spawn reads it: the chief
+    //     must run unattended (the "keep me posted, I'm out" premise), and a default
+    //     permission posture stalls it on the first gate. set_setting + create ride
+    //     the same ordered WS, so the store has it before spawn (same pattern as
+    //     scenario-codex-resume-mapping's set_setting+create). Restored in teardown.
+    await client.request('set_setting', { key: 'auto_approve_enabled', value: 'true' });
+    note('enabled auto_approve_enabled for the benchmark');
+
+    // 0c) Pin the chief's model (chief_model_<agent>) BEFORE create so the launch
+    //     picks it up via --model. Same ordered-WS guarantee as auto_approve above.
+    const chiefModel = CHIEF_MODELS[agent] || '';
+    if (chiefModel) {
+      await client.request('set_setting', { key: `chief_model_${agent}`, value: chiefModel });
+      note(`pinned chief model: ${agent}=${chiefModel}`);
+    }
+
     // 1) Create the real agent session ALREADY as chief (the create-as-chief toggle).
     //    The daemon assigns the role before spawn, so the first launch carries
     //    ChiefGuidance — no promote, no in-place reload.
@@ -324,14 +368,27 @@ async function main() {
       throw new Error('SETUP FAILED: chief agent was not launched with ChiefGuidance (no process carries the "ticket inbox --watch" system prompt). The create-as-chief role-set did not reach the launch path.');
     }
     note(`role + guidance verified at first launch`);
-    await dumpPane('01-chief-ready-with-guidance');
+    const readyPane = (await dumpPane('01-chief-ready-with-guidance')) || '';
+
+    // 3b) GATE (model): if we pinned a model, the chief's status line must show it.
+    //     A silent mispin (e.g. --model not threaded) would otherwise mislabel a
+    //     default-model result as the pinned one. Fail fast and distinctly.
+    if (chiefModel) {
+      if (!new RegExp(chiefModel, 'i').test(readyPane)) {
+        console.log('\n=== SETUP FAILED: chief model did not pin ===');
+        console.log(readyPane.split('\n').slice(-12).join('\n'));
+        saveEvidence('setup-model-not-pinned');
+        throw new Error(`SETUP FAILED: chief was not launched on the pinned model "${chiefModel}" (status line never mentions it); the chief_model_${agent} setting did not reach --model.`);
+      }
+      note(`chief model pinned: ${chiefModel}`);
+    }
 
     // Snapshot any pre-existing `--watch` processes (a stray one left by a prior
     // run) so only a watch the chief arms AFTER the prompt counts as armed.
     const baselineWatchPids = new Set(watchProcessLines().map(pidOf));
 
     // 4) Type the human prompt — then only observe.
-    const prompt = PROMPTS[agent];
+    const prompt = (noWatch ? NO_WATCH_PROMPTS : PROMPTS)[agent];
     const pane = await waitForFirstWorkspacePane(client, chiefId, `chief pane ${chiefId}`, 20_000);
     // write_pane goes straight to the worker PTY (sendRuntimeInput) — no DOM
     // focus needed, so no click_pane gate. This is what a human's keystrokes
@@ -448,6 +505,69 @@ async function main() {
     note(`DELEGATED`, { workerId, ticketId, armedWatch: Boolean(armedWatch) });
     await observer.waitForSession({ id: workerId, timeoutMs: 30_000 }).catch(() => {});
 
+    if (noWatch) {
+      // === DAEMON BACKSTOP PATH (--no-watch) ===
+      // The chief was told NOT to arm a Monitor. Verify attn nudges it anyway: an
+      // idle self-monitor with unread ticket activity that no `--watch` drained gets
+      // the deferred PTY doorbell (ticket_notify.go backstop, grace ~8s).
+      const chiefIdle = () => ['idle', 'waiting_input'].includes(chiefState());
+
+      // 6a) The backstop only fires for an IDLE chief, so wait for its turn to end
+      //     (delegated, reported back, no watch armed) before triggering the event.
+      const wentIdle = await pollFor(() => (chiefIdle() ? true : null), 'chief to finish its turn (no-watch)', 120_000, 1_500);
+      if (!wentIdle) {
+        await dumpPane('06-nowatch-still-working');
+        note(`chief never went idle in the no-watch window`, { finalState: chiefState() });
+        saveEvidence('nowatch-inconclusive-still-working');
+        console.log('\n=== INCONCLUSIVE: chief still working; backstop precondition (idle) never met ===');
+        return;
+      }
+      const strayWatch = freshWatchProcesses(baselineWatchPids);
+      if (strayWatch) {
+        // The chief armed a watch despite being told not to — the backstop would then
+        // self-suppress, so we can't observe it. Report it as the finding.
+        note(`chief ARMED A WATCH despite the no-watch prompt`, { processes: strayWatch.split('\n').length });
+      } else {
+        note(`chief is idle with no watch armed — backstop precondition met`);
+      }
+
+      // 6b) Now fire the producer event. With the chief idle + unread + no watch, the
+      //     daemon schedules the backstop and doorbells after the grace.
+      runAttn(['ticket', 'status', 'ready_for_review', '--comment', 'Audit done — 3 entries flagged, rewrites in the report.', '--session', workerId]);
+      note(`worker reported ready_for_review`);
+
+      // 6c) Wait for the daemon doorbell to land in the chief pane. The exact text is
+      //     the fixed ticketNudgePrompt the daemon types in ("New ticket activity").
+      const nudgeUntil = Date.now() + 90_000;
+      let nudged = null;
+      let reactedNw = null;
+      let nsnap = 0;
+      while (Date.now() < nudgeUntil) {
+        const text = await dumpPane(`06-nudge-${String(nsnap).padStart(2, '0')}`);
+        if (!nudged && /New ticket activity/i.test(text)) { nudged = text; note(`daemon backstop nudge delivered to chief`); }
+        if (nudged && /ticket inbox|ready[ _]for[ _]review|in review|review the|audit/i.test(text.split('\n').slice(-25).join('\n'))) { reactedNw = text; break; }
+        nsnap += 1;
+        await delay(3_000);
+      }
+      evidence.backstopNudged = Boolean(nudged);
+      evidence.reacted = Boolean(reactedNw);
+      evidence.strayWatch = Boolean(strayWatch);
+      const finalText = await dumpPane('07-chief-final-nowatch');
+
+      const verdict = !nudged
+        ? (strayWatch ? 'nowatch-chief-self-armed-watch' : 'backstop-not-delivered')
+        : (reactedNw ? 'backstop-nudged-and-reacted' : 'backstop-nudged-no-reaction');
+      saveEvidence(verdict);
+      console.log(`\n=== VERDICT: ${verdict} ===`);
+      console.log(`delegated: yes (worker=${workerId} ticket=${ticketId})`);
+      console.log(`chief armed its own watch despite no-watch prompt: ${strayWatch ? 'YES' : 'no'}`);
+      console.log(`daemon backstop nudge delivered: ${nudged ? 'YES' : 'no'}`);
+      console.log(`visible reaction to the nudge: ${reactedNw ? 'YES' : 'no'}`);
+      console.log('--- chief pane (tail) ---');
+      console.log(finalText.split('\n').slice(-45).join('\n'));
+      return;
+    }
+
     // 6) Drive the worker to report ready_for_review — the real producer path. The
     // chief cannot tell this from the sub-agent finishing on its own.
     await delay(2_000);
@@ -458,19 +578,31 @@ async function main() {
     // armed --watch Monitor or the daemon backstop. Codex (not a self-monitor): via
     // the daemon's direct nudge. Evidence = the chief runs `attn ticket inbox` /
     // mentions the review without us prompting it again.
-    const reactUntil = Date.now() + 150_000;
+    // The chief arms its watch Monitor AFTER delegating (ChiefGuidance: "right after
+    // delegating, arm a harness Monitor running `attn ticket inbox --watch`"), so the
+    // `--watch` process only appears during THIS post-delegation window — not the
+    // delegation-wait loop above, which breaks the instant a ticket binds. Keep
+    // polling for it here. Claude self-monitors and is expected to arm the watch;
+    // Codex reacts via the daemon nudge and is not, so it breaks on reaction alone.
+    const expectsWatch = agent === 'claude';
+    const reactUntil = Date.now() + 240_000;
     let reacted = null;
     let rsnap = 0;
-    while (Date.now() < reactUntil && !reacted) {
+    while (Date.now() < reactUntil) {
       const text = await dumpPane(`04-react-${String(rsnap).padStart(2, '0')}`);
-      if (/ticket inbox|ready[ _]for[ _]review|in review|review the|delegate|worker|audit/i.test(text.split('\n').slice(-25).join('\n'))) {
+      if (!reacted && /ticket inbox|ready[ _]for[ _]review|in review|review the|delegate|worker|audit/i.test(text.split('\n').slice(-25).join('\n'))) {
         // Heuristic: recent pane mentions the inbox/review. Confirmed by reading below.
         reacted = text;
-        break;
       }
+      if (!armedWatch) {
+        const w = freshWatchProcesses(baselineWatchPids);
+        if (w) { armedWatch = w; note(`watch armed (post-delegation)`, { processes: w.split('\n').length }); }
+      }
+      if (reacted && (!expectsWatch || armedWatch)) break;
       rsnap += 1;
       await delay(3_000);
     }
+    evidence.armedWatch = armedWatch;
     evidence.reacted = Boolean(reacted);
     const finalText = await dumpPane('05-chief-final');
 
@@ -492,6 +624,12 @@ async function main() {
     if (chiefId) {
       await setChiefOfStaff(client, chiefId, false).catch(() => {});
       await client.request('close_session', { sessionId: chiefId }).catch(() => {});
+    }
+    // Restore the global auto-approve setting so it never leaks past the benchmark.
+    await client.request('set_setting', { key: 'auto_approve_enabled', value: 'false' }).catch(() => {});
+    // Clear the pinned chief model so it never leaks past the benchmark.
+    if (CHIEF_MODELS[agent]) {
+      await client.request('set_setting', { key: `chief_model_${agent}`, value: '' }).catch(() => {});
     }
     await client.quitApp().catch(() => {});
     await observer.close();

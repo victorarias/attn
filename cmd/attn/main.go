@@ -2026,6 +2026,11 @@ func runAgentDirectly(requestedAgent string) {
 	// workflows_enabled setting is on. This launch path is the worker process, so
 	// the env var (not a store read) carries the gate here.
 	opts.InjectWorkflowGuidance = strings.TrimSpace(os.Getenv("ATTN_WORKFLOW_GUIDANCE_ENABLED")) == "1"
+	// Likewise the worker exports ATTN_AUTO_APPROVE when the auto_approve_enabled
+	// setting is on, so the launched agent starts in its native auto-approve mode.
+	opts.AutoApprove = strings.TrimSpace(os.Getenv("ATTN_AUTO_APPROVE")) == "1"
+	// ATTN_CHIEF_MODEL pins the chief launch's model (chief_model_<agent>).
+	opts.Model = strings.TrimSpace(os.Getenv("ATTN_CHIEF_MODEL"))
 	if cp, ok := agentdriver.GetConfigOverrideProvider(driver); ok {
 		opts.ConfigOverrides = cp.GenerateConfigOverrides(opts)
 	}
