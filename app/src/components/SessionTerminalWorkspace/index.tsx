@@ -22,7 +22,7 @@ import {
 } from '../../types/workspace';
 import type { SessionAgent } from '../../types/sessionAgent';
 import type { UISessionState } from '../../types/sessionState';
-import { TileNudgeOverlay, deriveNudgeMode } from '../NudgeIndicator';
+import { HeaderNudgeIndicator, deriveNudgeMode } from '../NudgeIndicator';
 import { useGhosttyPaneRuntime } from './useGhosttyPaneRuntime';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import { isSuspiciousTerminalSize } from '../../utils/terminalDebug';
@@ -707,6 +707,11 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
               isActive: Boolean(paneSession.isActive),
             })
           : null;
+        // The pane header is the home for the nudge indicator. It is normally shown
+        // only when the workspace is split; surface it on a lone tile too whenever the
+        // session has a nudge to show, so the indicator has its rectangle. Drag/rename
+        // stay split-only — a nudge-only header is a status bar, not a move handle.
+        const headerVisible = showPaneHeader || nudgeMode != null;
         return (
           <div
             key={agentPane.id}
@@ -719,12 +724,18 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
             style={frameStyle}
           >
             <div
-              className={`workspace-pane-header ${showPaneHeader ? 'workspace-pane-header--draggable' : 'workspace-pane-header-hidden'}`.trim()}
-              aria-hidden={showPaneHeader ? undefined : true}
+              className={`workspace-pane-header ${
+                headerVisible
+                  ? showPaneHeader
+                    ? 'workspace-pane-header--draggable'
+                    : 'workspace-pane-header--nudge'
+                  : 'workspace-pane-header-hidden'
+              }`.trim()}
+              aria-hidden={headerVisible ? undefined : true}
               onPointerDown={showPaneHeader ? (event) => beginLeafDrag(agentPane.id, event) : undefined}
               title={showPaneHeader ? 'Drag to move' : undefined}
             >
-              {showPaneHeader ? <span className="workspace-pane-title">{paneTitle}</span> : null}
+              {headerVisible ? <span className="workspace-pane-title">{paneTitle}</span> : null}
               {showPaneHeader && onRenameSession ? (
                 <button
                   type="button"
@@ -747,15 +758,15 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   ✎
                 </button>
               ) : null}
-            </div>
-            <div className="workspace-pane-body">
               {nudgeMode ? (
-                <TileNudgeOverlay
+                <HeaderNudgeIndicator
                   mode={nudgeMode}
                   firesAt={paneSession?.nudgeFiresAt}
                   onTrigger={() => onTriggerNudge?.(agentPane.sessionId)}
                 />
               ) : null}
+            </div>
+            <div className="workspace-pane-body">
               {isPaneStarting || isPaneFailed ? (
                 <div className={`workspace-pane-status workspace-pane-status--${paneStatus}`}>
                   <span className="workspace-pane-status-spinner" aria-hidden="true" />

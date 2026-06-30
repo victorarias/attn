@@ -1,7 +1,124 @@
-/* Incoming-ticket-nudge indicator, shared by the sidebar row and the tile overlay.
+/* Incoming-ticket-nudge indicator, shared by the sidebar row (a thin bar on the
+   session item) and the pane header (an inline chip in .workspace-pane-header).
    Colors are literal rgba (not theme tokens) so the indicator renders identically in
-   the packaged app regardless of which token blocks are defined. Sky-blue = an
-   incoming countdown; amber = paused and waiting on you; dim = a static unread marker. */
+   the packaged app regardless of which token blocks are defined. Each mode sets a
+   single --nudge-accent (r,g,b) channel that the shared dot/glow rules read, so
+   sky-blue = an incoming countdown, amber = paused and waiting on you, slate = a
+   static unread marker. The indicator is never text-selectable — it is status chrome,
+   not content. */
+
+.nudge-header,
+.nudge-sidebar-bar {
+  --nudge-accent: 148, 163, 184; /* slate (marker default) */
+  --nudge-accent-solid: #9fb0c3;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.nudge-header--counting,
+.nudge-sidebar-bar--counting {
+  --nudge-accent: 56, 189, 248;
+  --nudge-accent-solid: #38bdf8;
+}
+
+.nudge-header--paused,
+.nudge-sidebar-bar--paused {
+  --nudge-accent: 245, 158, 11;
+  --nudge-accent-solid: #f59e0b;
+}
+
+/* ---- Pane header chip: inline, right-aligned inside .workspace-pane-header ---- */
+
+.nudge-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  margin: 0;
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  line-height: 1;
+  white-space: nowrap;
+  color: #c2cedd;
+}
+
+.nudge-header--counting {
+  color: #d4ecfb;
+}
+
+.nudge-header-label {
+  white-space: nowrap;
+}
+
+.nudge-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--nudge-accent-solid);
+  box-shadow: 0 0 8px 1px rgba(var(--nudge-accent), 0.85);
+}
+
+.nudge-header--counting .nudge-dot {
+  animation: nudge-dot-pulse 1.4s ease-in-out infinite;
+}
+
+.nudge-header--marker .nudge-dot {
+  box-shadow: none;
+  animation: nudge-marker-pulse 2.6s ease-in-out infinite;
+}
+
+/* Counting: an accent hairline along the header's bottom edge fills left→right to the
+   deadline (the JS-driven width transition in CountdownFill). The header is
+   position:relative so this pins to it. */
+.nudge-header-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+  background: rgba(56, 189, 248, 0.16);
+  pointer-events: none;
+}
+
+.nudge-header-track-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #38bdf8;
+  box-shadow: 0 0 9px 1px rgba(56, 189, 248, 0.75);
+}
+
+/* Paused: the user is on this session. The whole chip is the deliver-now button. */
+.nudge-header-trigger {
+  pointer-events: auto;
+  cursor: pointer;
+  padding: 2px 9px;
+  border: 1px solid rgba(var(--nudge-accent), 0.55);
+  border-radius: 5px;
+  background: rgba(var(--nudge-accent), 0.16);
+  color: #f6dcab;
+  animation: nudge-header-glow 1.9s ease-in-out infinite;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.nudge-header-trigger .nudge-dot {
+  animation: nudge-dot-pulse 1.4s ease-in-out infinite;
+}
+
+.nudge-header-trigger:hover {
+  background: rgba(var(--nudge-accent), 0.28);
+  border-color: rgba(var(--nudge-accent), 0.9);
+  animation: none;
+}
+
+.nudge-header-trigger:active {
+  transform: translateY(0.5px);
+}
 
 /* ---- Sidebar row: a thin bar pinned to the bottom edge of .session-item ---- */
 
@@ -16,126 +133,76 @@
   pointer-events: none;
 }
 
+.nudge-sidebar-bar--counting {
+  height: 3px;
+  background: rgba(var(--nudge-accent), 0.18);
+}
+
 .nudge-sidebar-bar-fill {
   display: block;
   height: 100%;
   width: 0;
-  background: #38bdf8;
-  box-shadow: 0 0 6px 1px rgba(56, 189, 248, 0.45);
+  background: var(--nudge-accent-solid);
+  box-shadow: 0 0 9px 1px rgba(var(--nudge-accent), 0.7);
 }
 
-/* Paused: the user is on this session. Clickable strip, slightly taller, amber. */
+/* Paused: clickable strip, taller, amber, gently pulsing. */
 .nudge-sidebar-bar--paused {
   height: 3px;
   padding: 0;
   border: none;
-  background: rgba(245, 158, 11, 0.18);
+  background: rgba(var(--nudge-accent), 0.25);
   cursor: pointer;
   pointer-events: auto;
 }
 
 .nudge-sidebar-bar-fill--paused {
   width: 100%;
-  background: #f59e0b;
-  box-shadow: 0 0 6px 1px rgba(245, 158, 11, 0.4);
+  background: var(--nudge-accent-solid);
+  box-shadow: 0 0 9px 1px rgba(var(--nudge-accent), 0.65);
   animation: nudge-paused-pulse 1.6s ease-in-out infinite;
 }
 
 .nudge-sidebar-bar--paused:hover .nudge-sidebar-bar-fill--paused {
   animation: none;
   opacity: 1;
+  box-shadow: 0 0 11px 2px rgba(var(--nudge-accent), 0.85);
 }
 
 /* Static "unread activity" marker (working+unread, or the post-fire transient). */
 .nudge-sidebar-bar--marker {
   height: 2px;
-  background: rgba(148, 163, 184, 0.45);
-  animation: nudge-marker-pulse 2.4s ease-in-out infinite;
+  background: rgba(var(--nudge-accent), 0.7);
+  box-shadow: 0 0 6px 0 rgba(var(--nudge-accent), 0.45);
+  animation: nudge-marker-pulse 2.6s ease-in-out infinite;
 }
 
 @keyframes nudge-paused-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
+  50% { opacity: 0.5; }
 }
 
 @keyframes nudge-marker-pulse {
-  0%, 100% { opacity: 0.7; }
-  50% { opacity: 0.3; }
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 0.4; }
 }
 
-/* ---- Tile overlay: a semi-transparent strip across the top of .workspace-pane ---- */
-
-.nudge-tile-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  /* Above the Ghostty canvas and the split divider (z-index 5), below popovers
-     (z-index 20). The canvas can establish its own stacking context, so a plain
-     positioned sibling is not guaranteed to win without an explicit z-index. */
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 22px;
-  padding: 3px 10px;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  pointer-events: none;
+@keyframes nudge-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.78); }
 }
 
-.nudge-tile-label {
-  color: var(--color-text-secondary);
-  white-space: nowrap;
+@keyframes nudge-header-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--nudge-accent), 0); }
+  50% { box-shadow: 0 0 10px 0 rgba(var(--nudge-accent), 0.45); }
 }
 
-.nudge-tile-overlay--counting {
-  background: linear-gradient(180deg, rgba(56, 189, 248, 0.16), rgba(56, 189, 248, 0));
-  justify-content: flex-end;
-}
-
-/* The counting fill is its own 2px bar pinned to the very top of the strip. */
-.nudge-tile-bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  overflow: hidden;
-}
-
-.nudge-tile-bar-fill {
-  display: block;
-  height: 100%;
-  width: 0;
-  background: #38bdf8;
-  box-shadow: 0 0 6px 1px rgba(56, 189, 248, 0.5);
-}
-
-.nudge-tile-overlay--marker {
-  background: linear-gradient(180deg, rgba(148, 163, 184, 0.16), rgba(148, 163, 184, 0));
-  animation: nudge-marker-pulse 2.4s ease-in-out infinite;
-}
-
-.nudge-tile-overlay--paused {
-  background: linear-gradient(180deg, rgba(245, 158, 11, 0.18), rgba(245, 158, 11, 0));
-  justify-content: flex-end;
-}
-
-.nudge-tile-trigger {
-  pointer-events: auto;
-  cursor: pointer;
-  border: 1px solid rgba(245, 158, 11, 0.6);
-  border-radius: 5px;
-  background: rgba(245, 158, 11, 0.16);
-  color: var(--color-text-primary);
-  font: inherit;
-  padding: 2px 10px;
-  line-height: 1.4;
-}
-
-.nudge-tile-trigger:hover {
-  background: rgba(245, 158, 11, 0.3);
-  border-color: rgba(245, 158, 11, 0.85);
+@media (prefers-reduced-motion: reduce) {
+  .nudge-dot,
+  .nudge-header-trigger,
+  .nudge-sidebar-bar-fill--paused,
+  .nudge-sidebar-bar--marker,
+  .nudge-header--marker .nudge-dot {
+    animation: none !important;
+  }
 }

@@ -219,6 +219,7 @@
 }
 
 .workspace-pane-header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -227,6 +228,11 @@
   padding: 4px 8px;
   border-bottom: 1px solid var(--color-border);
   background: rgba(255, 107, 53, 0.06);
+}
+
+/* Shown on a lone tile only to host the incoming-nudge chip — not a drag handle. */
+.workspace-pane-header--nudge {
+  cursor: default;
 }
 
 .workspace-pane-header-hidden {

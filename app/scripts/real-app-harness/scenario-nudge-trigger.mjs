@@ -249,7 +249,7 @@ async function main() {
 
     // Evidence: the paused "deliver now" button is actually rendered.
     try {
-      const shot = await client.request('capture_screenshot_data', { selector: '.nudge-tile-trigger' });
+      const shot = await client.request('capture_screenshot_data', { selector: '.nudge-header-trigger' });
       if (shot?.pngBase64) {
         fs.writeFileSync(path.join(runDir, 'paused-trigger-button.png'), Buffer.from(shot.pngBase64, 'base64'));
       }
