@@ -350,6 +350,7 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 	if trackedByChief {
 		initialPrompt = delegatedTicketPrompt(brief)
 	}
+	initialPrompt = withLeafIdentity(initialPrompt)
 	d.handleSpawnSession(spawnClient, &protocol.SpawnSessionMessage{
 		Cmd:           protocol.CmdSpawnSession,
 		ID:            sessionID,
@@ -408,6 +409,28 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 		result.Branch = protocol.Ptr(strings.TrimSpace(*session.Branch))
 	}
 	return result, nil
+}
+
+// leafIdentityPreamble is prepended to every delegated agent's initial prompt.
+// attn marks a chief of staff with a passive, positive signal (an env var and a
+// system-prompt block); a delegated leaf gets nothing analogous — it is defined
+// only by the absence of those chief markers, an absence it shares with every
+// ordinary top-level session. Without this line, a leaf delegated by a non-chief
+// session is byte-identical to an ordinary session and has no way to learn it is
+// a leaf, so it can misapply chief-only guidance (like the delegation license) to
+// itself. See docs/plans/2026-06-30-delegated-leaf-not-chief.md.
+const leafIdentityPreamble = "You are a delegated attn session — a leaf, not a " +
+	"coordinator. Do the work below in this session. For your own subtasks, use " +
+	"native subagents (your Task/Agent tools), not `attn delegate` — delegating " +
+	"offloads your assigned work into a session the user who delegated you isn't " +
+	"watching. Spawn a visible attn agent only if the user steering this session " +
+	"explicitly asks for one."
+
+// withLeafIdentity prefixes a delegated agent's composed initial prompt with the
+// leaf identity line, applied uniformly whether or not the delegation is tracked
+// by the chief of staff.
+func withLeafIdentity(prompt string) string {
+	return leafIdentityPreamble + "\n\n---\n\n" + strings.TrimSpace(prompt)
 }
 
 // delegatedTicketPrompt augments a chief-delegated agent's brief with the
