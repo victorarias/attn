@@ -205,6 +205,64 @@ func TestTriggerNudgeFiresImmediately(t *testing.T) {
 	}
 }
 
+// An explicit click delivers even when the session rests in 'unknown' — codex's common
+// resting state when its turn-end classifier can't find a transcript. The auto
+// countdown stays idle-only, but the user's click is unambiguous intent.
+func TestTriggerNudgeDeliversWhenUnknown(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
+	t.Cleanup(d.stopNudgeCountdowns)
+	agentID, inputs := armForTest(t, d)
+	d.store.UpdateState(agentID, protocol.StateUnknown)
+
+	d.handleTriggerNudge(&protocol.TriggerNudgeMessage{
+		Cmd:       protocol.CmdTriggerNudge,
+		SessionID: agentID,
+	})
+
+	if !wasNudged(inputs(agentID)) {
+		t.Fatal("trigger_nudge did not doorbell an at-rest unknown session")
+	}
+}
+
+// An explicit click delivers on demand even while the agent is working — the user has
+// chosen to deliver now, and unlike the automatic countdown the click is not idle-gated.
+func TestTriggerNudgeDeliversWhileWorking(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
+	t.Cleanup(d.stopNudgeCountdowns)
+	agentID, inputs := armForTest(t, d)
+	d.store.UpdateState(agentID, protocol.StateWorking)
+
+	d.handleTriggerNudge(&protocol.TriggerNudgeMessage{
+		Cmd:       protocol.CmdTriggerNudge,
+		SessionID: agentID,
+	})
+
+	if !wasNudged(inputs(agentID)) {
+		t.Fatal("trigger_nudge did not deliver on demand into a working session")
+	}
+}
+
+// The one exception: a click never doorbells a pending_approval session — the
+// doorbell's trailing Enter could answer the approval prompt.
+func TestTriggerNudgeSkipsPendingApproval(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
+	t.Cleanup(d.stopNudgeCountdowns)
+	agentID, inputs := armForTest(t, d)
+	d.store.UpdateState(agentID, protocol.StatePendingApproval)
+
+	d.handleTriggerNudge(&protocol.TriggerNudgeMessage{
+		Cmd:       protocol.CmdTriggerNudge,
+		SessionID: agentID,
+	})
+
+	if wasNudged(inputs(agentID)) {
+		t.Fatal("trigger_nudge typed a doorbell into an approval prompt")
+	}
+}
+
 // The anti-splice guard: a genuine user keystroke within the guard window blocks the
 // fire and re-arms a fresh countdown rather than splicing the doorbell onto the
 // half-typed line.

@@ -290,10 +290,20 @@ func (d *Daemon) refreshTicketUnread(sessionID string) {
 	d.markTicketUnread(sessionID, unread > 0)
 }
 
+// isExplicitNudgeBlocked reports the one state where a user's explicit click must NOT
+// doorbell: pending_approval. Typing the doorbell prompt + Enter into an approval
+// prompt could answer the approval — an unsafe, hard-to-undo side effect. Every other
+// state honors the click on demand (idle, waiting_input, working, unknown, launching):
+// an explicit click is unambiguous intent, so unlike the automatic countdown (which
+// stays idle-only) the user has chosen to deliver now regardless of the agent's state.
+func isExplicitNudgeBlocked(state string) bool {
+	return state == protocol.StatePendingApproval
+}
+
 // handleTriggerNudge is the user clicking the incoming-nudge indicator: deliver the
-// pending doorbell now, bypassing the countdown. It is exempt from the keystroke
-// guard — an explicit click is unambiguous intent — but still respects idle/unread so
-// a click on a stale indicator does nothing harmful.
+// pending doorbell now, on demand, in any state but pending_approval. It is exempt
+// from the keystroke guard — an explicit click is unambiguous intent — and respects
+// only unread (a click on a stale, already-drained indicator is a harmless no-op).
 func (d *Daemon) handleTriggerNudge(msg *protocol.TriggerNudgeMessage) {
 	sessionID := strings.TrimSpace(msg.SessionID)
 	if sessionID == "" {
@@ -304,7 +314,7 @@ func (d *Daemon) handleTriggerNudge(msg *protocol.TriggerNudgeMessage) {
 		return
 	}
 	session := d.store.Get(sessionID)
-	if session == nil || !isIdleForNudge(string(session.State)) {
+	if session == nil || isExplicitNudgeBlocked(string(session.State)) {
 		return
 	}
 	obs := d.ticketObserverForSession(sessionID)

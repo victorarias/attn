@@ -2689,22 +2689,25 @@ export function useUiAutomationBridge({
       }
       case 'click_nudge_trigger': {
         // The "deliver now" trigger renders only in NudgeIndicator's paused mode
-        // (the session is selected, idle, and has unread ticket activity). The tile
-        // overlay button and the sidebar-row button both issue the same
-        // trigger_nudge command; prefer the tile button, fall back to the sidebar.
+        // (the session is selected, has unread ticket activity, and is not stopped at
+        // an approval prompt — the deliver-on-demand chip shows in every other state).
+        // The pane-header chip button and the sidebar-row button both issue the same
+        // trigger_nudge command; prefer the header button, fall back to the sidebar.
+        // 'tile' is accepted as a legacy alias for the header surface.
         const requested = typeof payload.surface === 'string' ? payload.surface : 'any';
-        const tile = document.querySelector('.nudge-tile-trigger');
+        const header = document.querySelector('.nudge-header-trigger');
         const sidebar = document.querySelector('[aria-label="Deliver the pending ticket nudge now"]');
+        const wantsHeader = requested === 'header' || requested === 'tile';
         const target =
-          requested === 'sidebar' ? sidebar : requested === 'tile' ? tile : (tile ?? sidebar);
+          requested === 'sidebar' ? sidebar : wantsHeader ? header : (header ?? sidebar);
         if (!(target instanceof HTMLElement)) {
           throw new Error(
-            `Nudge trigger button not found (surface=${requested}); the session must be selected, idle, and have unread ticket activity`,
+            `Nudge trigger button not found (surface=${requested}); the session must be selected, have unread ticket activity, and not be stopped at an approval prompt`,
           );
         }
         clickElement(target);
         await settleUi(2);
-        return { clicked: true, surface: target === tile ? 'tile' : 'sidebar' };
+        return { clicked: true, surface: target === header ? 'header' : 'sidebar' };
       }
       case 'diff_get_state':
         return collectDiffReviewUiState();
