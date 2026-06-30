@@ -1,8 +1,14 @@
 # Delegation
 
+This file is mechanics. It assumes you already confirmed in SKILL.md's role
+check that delegating is yours to do right now — the chief of staff, or an
+ordinary session the user is steering directly. A delegated leaf re-delegating
+its own assigned work onward is the bug this skill exists to prevent; if that
+might be you, read [delegated-agent.md](delegated-agent.md) first.
+
 Attn delegation creates a visible, full interactive agent session for the user.
 Use it when the user wants another agent they can inspect, converse with, and
-steer directly while you continue coordinating the wider task.
+steer directly.
 
 Do not use attn delegation as an internal parallel-reasoning mechanism. For
 research, adversarial analysis, verification, or other work that you alone will
@@ -34,6 +40,11 @@ The brief should let the delegated agent start immediately. Include:
 2. relevant paths, decisions, or evidence
 3. constraints and explicit non-goals
 4. the expected deliverable or stopping condition
+
+A delegation brief *is* a ticket's description, so the fuller craft in
+[tickets.md](tickets.md) applies here too — write the objective as a stop
+condition, give a verification contract, and let the shape bend by deliverable
+type.
 
 Use `--brief <text>` only for short, simple tasks.
 

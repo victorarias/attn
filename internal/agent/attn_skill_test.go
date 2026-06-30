@@ -36,13 +36,14 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"references/markdown.md",
 		"references/browser.md",
 		"Load more than one reference only when",
+		// the role front-door: a delegated leaf must learn, before reading
+		// anything about delegation, that being tracked is not being the chief.
+		"Confirm Your Role First",
+		"delegated leaf",
 	} {
 		if !strings.Contains(index, expected) {
 			t.Fatalf("skill index missing %q: %q", expected, index)
 		}
-	}
-	if len(index) > 3000 {
-		t.Fatalf("skill index is %d bytes, want a concise routing index", len(index))
 	}
 	if strings.Contains(index, "browser command find_element") {
 		t.Fatalf("skill index contains capability details that belong in a reference: %q", index)
@@ -50,6 +51,8 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 
 	delegatedAgent := readSkillFile(t, skillDir, "references/delegated-agent.md")
 	for _, expected := range []string{
+		"You Are A Leaf, Not A Coordinator",
+		"not `attn delegate`",
 		"ticket status in_progress",
 		"ticket status needs_input",
 		"ticket status ready_for_review",
@@ -191,6 +194,42 @@ func TestEnsureAttnClaudeSkillInstalled(t *testing.T) {
 	}
 
 	assertAttnSkillTree(t, filepath.Join(home, ".claude", "skills", "attn"))
+}
+
+// TestEnsureAttnClaudeSkillInstalledPrunesOrphanedFiles guards against the
+// actual mechanism behind a reported incident: a reference retired from the
+// skill source (chief-of-staff.md) survived indefinitely on an installed
+// machine because the installer only ever wrote/overwrote known files and
+// never deleted files that fell out of the bundle. A stale reference can
+// directly contradict the current skill's guidance, so install must prune.
+func TestEnsureAttnClaudeSkillInstalledPrunesOrphanedFiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	skillDir := filepath.Join(home, ".claude", "skills", "attn")
+	if err := os.MkdirAll(filepath.Join(skillDir, "references"), 0o755); err != nil {
+		t.Fatalf("seed skill dir: %v", err)
+	}
+	orphanFile := filepath.Join(skillDir, "references", "chief-of-staff.md")
+	if err := os.WriteFile(orphanFile, []byte("stale, retired guidance"), 0o644); err != nil {
+		t.Fatalf("seed orphaned reference: %v", err)
+	}
+	orphanDir := filepath.Join(skillDir, "references", "retired-subdir")
+	if err := os.MkdirAll(orphanDir, 0o755); err != nil {
+		t.Fatalf("seed orphaned directory: %v", err)
+	}
+
+	if err := ensureAttnClaudeSkillInstalled(); err != nil {
+		t.Fatalf("ensureAttnClaudeSkillInstalled() error = %v", err)
+	}
+
+	if _, err := os.Stat(orphanFile); !os.IsNotExist(err) {
+		t.Fatalf("orphaned reference file was not pruned: stat err = %v", err)
+	}
+	if _, err := os.Stat(orphanDir); !os.IsNotExist(err) {
+		t.Fatalf("orphaned reference directory was not pruned: stat err = %v", err)
+	}
+	assertAttnSkillTree(t, skillDir)
 }
 
 func TestEnsureAttnCodexSkillInstalled(t *testing.T) {

@@ -1,6 +1,6 @@
 ---
 name: attn
-description: "Drive attn from an agent: spawn a visible interactive agent the user can inspect and steer, run durable resumable multi-agent workflows, maintain shared workspace context, journal as chief of staff, run review loops, open markdown, or control attn's persistent in-app browser. Use when the user explicitly asks for an attn session, delegation, workflow, review loop, browser, or to show a markdown explainer or doc in the app, or when you are attn's chief of staff. Not for private research, verification, or parallel reasoning you synthesize yourself — use native subagents for those."
+description: "Drive attn from an agent: spawn a visible interactive agent the user can inspect and steer, run durable resumable multi-agent workflows, maintain shared workspace context, journal, run review loops, open markdown, or control attn's persistent in-app browser. Use when the user explicitly asks for an attn session, delegation, creating a new ticket, workflow, review loop, browser, or to show a markdown explainer or doc in the app, or when you are attn's chief of staff. Not for private research, verification, or parallel reasoning you synthesize yourself — use native subagents for those."
 ---
 
 # attn
@@ -20,12 +20,32 @@ Inside attn, prefer `"$ATTN_WRAPPER_PATH"` for every command. Fall back to
 If a command reports an unknown subcommand or shows another tool's help, check
 `attn --version` and `which -a attn`, then use `ATTN_WRAPPER_PATH`.
 
+## Confirm Your Role First
+
+A delegated leaf re-delegating its own assigned work — mistaking itself for the
+chief — is this skill's most common failure. Check which you are before reading
+anything about delegation:
+
+- **Chief of staff**, if your system prompt says so: it already carries your
+  full delegation, ticket, and Notebook guidance. Use native subagents for your
+  own research and synthesis.
+- **A delegated leaf**, if your initial task opens with a line identifying you
+  as a delegated attn session: do the work here. Native subagents for your own
+  subtasks; `attn delegate` again only if the user steering *this* session
+  explicitly asks. See [references/delegated-agent.md](references/delegated-agent.md).
+- **Otherwise, an ordinary session:** `attn delegate` only when the user
+  explicitly asks for a visible, steerable agent.
+
+A ticket-tracked task is still a leaf task — being tracked means the chief is
+*watching* your ticket, not that you inherited the chief's delegation license.
+
 ## Capability Index
 
-- **Create a visible interactive agent the user can steer:** read
-  [references/delegation.md](references/delegation.md).
-- **Report your work state as a delegated agent whose work is tracked (tickets):**
-  read [references/delegated-agent.md](references/delegated-agent.md).
+- **Create a visible interactive agent the user can steer** (per the role check
+  above): read [references/delegation.md](references/delegation.md).
+- **You are a delegated leaf — confirm what you may do, and report your work
+  state if it's tracked:** read
+  [references/delegated-agent.md](references/delegated-agent.md).
 - **Write a good ticket, or create a backlog ticket without delegating (`ticket new`):** read [references/tickets.md](references/tickets.md).
 - **Read or update shared workspace context:** read
   [references/workspace-context.md](references/workspace-context.md).
@@ -40,8 +60,6 @@ If a command reports an unknown subcommand or shows another tool's help, check
   [references/markdown.md](references/markdown.md).
 - **Operate attn's persistent browser tile:** read
   [references/browser.md](references/browser.md).
-- **Write, review, or improve a system prompt, agent guidance, or skill
-  instruction:** load the `prompting` skill before starting.
 
 Load more than one reference only when the task actually combines capabilities.
 

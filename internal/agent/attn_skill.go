@@ -13,13 +13,15 @@ import (
 var attnSkillFiles embed.FS
 
 func installAttnSkill(skillDir string) error {
-	return fs.WalkDir(attnSkillFiles, "attn_skill", func(path string, entry fs.DirEntry, walkErr error) error {
+	expected := map[string]bool{}
+	err := fs.WalkDir(attnSkillFiles, "attn_skill", func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		relative := strings.TrimPrefix(path, "attn_skill")
 		relative = strings.TrimPrefix(relative, "/")
 		target := filepath.Join(skillDir, filepath.FromSlash(relative))
+		expected[target] = true
 		if entry.IsDir() {
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				return fmt.Errorf("create attn skill directory %s: %w", target, err)
@@ -38,6 +40,42 @@ func installAttnSkill(skillDir string) error {
 		}
 		if err := os.WriteFile(target, content, 0o644); err != nil {
 			return fmt.Errorf("write attn skill file %s: %w", target, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return pruneOrphanedSkillFiles(skillDir, expected)
+}
+
+// pruneOrphanedSkillFiles removes files and directories under skillDir that are
+// no longer part of the bundled skill — e.g. a reference retired in a later
+// version. installAttnSkill only ever writes/overwrites files present in the
+// current embed, so without this an installed skill accumulates stale content
+// forever: a retired reference stays loadable by name and can directly
+// contradict the current skill's guidance (this is how a leftover
+// chief-of-staff.md, removed from the source tree, kept teaching a delegated
+// leaf that it could re-delegate like the chief).
+func pruneOrphanedSkillFiles(skillDir string, expected map[string]bool) error {
+	return filepath.WalkDir(skillDir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			return walkErr
+		}
+		if expected[path] {
+			return nil
+		}
+		if entry.IsDir() {
+			if err := os.RemoveAll(path); err != nil {
+				return fmt.Errorf("remove orphaned attn skill directory %s: %w", path, err)
+			}
+			return fs.SkipDir
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove orphaned attn skill file %s: %w", path, err)
 		}
 		return nil
 	})

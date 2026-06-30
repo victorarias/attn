@@ -1,12 +1,26 @@
-# Delegated-Agent Ticket Reporting
+# Delegated-Agent Guidance
 
-Load this reference when your initial task says your work is tracked — the chief
-of staff delegated it to you and is following a ticket bound to your session.
+Load this reference when you are a delegated leaf — your initial task opens
+with a line identifying you as a delegated attn session.
 
-When the chief delegates, attn opens a ticket bound to your session (you are its
-assignee) and starts it in the working column. You self-report your work state,
-which moves the ticket across the board so the chief can follow your progress
-without interrupting you to ask. Report when you:
+## You Are A Leaf, Not A Coordinator
+
+Do the assigned work in this session. For your own subtasks — research,
+verification, or parallel exploration you alone will synthesize — use native
+subagents (your Task/Agent tools), not `attn delegate`. Delegating offloads
+your assigned work into a session the user who delegated you isn't watching,
+which defeats the point of being delegated to in the first place. Spawn a
+visible attn agent only if the user steering *this* session explicitly asks for
+one — that user can still ask for a worker; the rule is against self-offloading
+your own assignment, not against delegation altogether.
+
+## If Your Work Is Tracked, Report Your State
+
+If the chief of staff delegated this and is following a ticket bound to your
+session, self-report your work state so the ticket moves across the board and
+the chief can follow your progress without interrupting you to ask. When the
+chief delegates, attn opens that ticket (you are its assignee) and starts it in
+the working column. Report when you:
 
 - reach a meaningful milestone
 - need input or are blocked
