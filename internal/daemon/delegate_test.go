@@ -103,7 +103,11 @@ func TestDelegateSpawnsAgentInSourceWorkspaceWithBrief(t *testing.T) {
 	if result.WorkspaceID != workspaceID || result.Directory != cwd {
 		t.Fatalf("result = %+v, want workspace=%s directory=%s", result, workspaceID, cwd)
 	}
-	if prompt != "Investigate the delegated task." {
+	// Every delegated agent's initial prompt is prefixed with the leaf identity
+	// line so a non-chief-delegated leaf — which gets no ticket-report contract —
+	// still has a positive signal that it is a leaf, not a coordinator.
+	if !strings.Contains(prompt, "a leaf, not a coordinator") ||
+		!strings.Contains(prompt, "Investigate the delegated task.") {
 		t.Fatalf("initial prompt = %q", prompt)
 	}
 	if promptPath == "" {
@@ -467,7 +471,8 @@ func TestDelegateAcceptsCopilotInitialPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delegate() error = %v, want copilot delegation to succeed", err)
 	}
-	if prompt != "Use Copilot for this delegated task." {
+	if !strings.Contains(prompt, "a leaf, not a coordinator") ||
+		!strings.Contains(prompt, "Use Copilot for this delegated task.") {
 		t.Fatalf("delegated initial prompt = %q", prompt)
 	}
 	session := d.store.Get(result.SessionID)
