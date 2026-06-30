@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-06-30]
+
+### Fixed
+- **A delegated agent stays focused on its own task instead of handing it off again.** A delegated agent could misread attn's guidance as a license to delegate onward — spinning up a *third* agent for one of its own subtasks, in a session you weren't watching. Now every delegated session is told up front that it's a worker, not a coordinator: it does the assigned work itself and uses its own internal helpers for subtasks, only creating a new visible attn agent if you explicitly ask it to. (attn also now cleans up stale guidance files from older installs that could keep teaching the old behavior.)
+
 ## [2026-06-29]
 
 ### Added
