@@ -308,4 +308,34 @@ describe('TicketDetailPanel', () => {
     expect(screen.queryByTestId('ticket-comment-input')).toBeNull();
     expect(screen.queryByTestId('ticket-edit-description')).toBeNull();
   });
+
+  it('shows the orphan badge for an open reconciled ticket and hides it otherwise', async () => {
+    const orphan = makeTicket({ status: TicketStatus.Working, reconciled_at: '2026-06-27T10:30:00Z' });
+    const fetchTicket = vi.fn().mockResolvedValue(orphan);
+    const { rerender } = render(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={orphan}
+        fetchTicket={fetchTicket}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => screen.getByText('Move the store to X'));
+    expect(screen.getByTestId('ticket-detail-orphan-badge')).toBeTruthy();
+
+    // Respawn/reassign clears the stamp daemon-side → badge disappears.
+    const owned = makeTicket({ status: TicketStatus.Working });
+    fetchTicket.mockResolvedValue(owned);
+    rerender(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={{ ...owned, updated_at: '2026-06-27T11:00:00Z' }}
+        fetchTicket={fetchTicket}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => expect(screen.queryByTestId('ticket-detail-orphan-badge')).toBeNull());
+  });
 });

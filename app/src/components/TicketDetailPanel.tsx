@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Ticket } from '../hooks/useDaemonSocket';
+import { isTicketOrphaned } from '../utils/ticketOrphan';
 import './TicketDetailPanel.css';
 
 interface TicketDetailPanelProps {
@@ -181,6 +182,15 @@ export function TicketDetailPanel({
                 <span className={`ticket-status-badge ticket-status-${header.status}`}>
                   {statusLabel(header.status)}
                 </span>
+                {isTicketOrphaned(header) && (
+                  <span
+                    className="ticket-orphan-badge"
+                    data-testid="ticket-detail-orphan-badge"
+                    title={`Owning session gone since ${formatTimestamp(header.reconciled_at)}`}
+                  >
+                    ⚠ Orphaned
+                  </span>
+                )}
                 <span className="ticket-detail-id">{header.id}</span>
                 {header.assignee && (
                   <span className="ticket-detail-assignee">assignee: {header.assignee}</span>

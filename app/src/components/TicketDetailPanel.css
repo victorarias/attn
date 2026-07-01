@@ -65,6 +65,21 @@
 .ticket-status-crashed { color: var(--color-error); border-color: var(--color-error); }
 .ticket-status-done { color: var(--color-text-muted); }
 
+/* orphan badge — the ticket's owning session died while it was still open */
+.ticket-orphan-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-error, #ef4444);
+  border: 1px solid color-mix(in srgb, var(--color-error, #ef4444) 60%, transparent);
+  background: color-mix(in srgb, var(--color-error, #ef4444) 12%, transparent);
+}
+
 .ticket-detail-header-actions {
   flex-shrink: 0;
   display: flex;
