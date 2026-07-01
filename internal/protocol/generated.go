@@ -510,8 +510,14 @@ type DelegateMessage struct {
 	// Cwd corresponds to the JSON schema field "cwd".
 	Cwd *string `json:"cwd,omitempty,omitzero"`
 
+	// Effort corresponds to the JSON schema field "effort".
+	Effort *string `json:"effort,omitempty,omitzero"`
+
 	// Label corresponds to the JSON schema field "label".
 	Label *string `json:"label,omitempty,omitzero"`
+
+	// Model corresponds to the JSON schema field "model".
+	Model *string `json:"model,omitempty,omitzero"`
 
 	// Placement corresponds to the JSON schema field "placement".
 	Placement *string `json:"placement,omitempty,omitzero"`
@@ -2919,6 +2925,9 @@ type SpawnSessionMessage struct {
 	// Cwd corresponds to the JSON schema field "cwd".
 	Cwd string `json:"cwd"`
 
+	// Effort corresponds to the JSON schema field "effort".
+	Effort *string `json:"effort,omitempty,omitzero"`
+
 	// EndpointID corresponds to the JSON schema field "endpoint_id".
 	EndpointID *string `json:"endpoint_id,omitempty,omitzero"`
 
@@ -2933,6 +2942,9 @@ type SpawnSessionMessage struct {
 
 	// Label corresponds to the JSON schema field "label".
 	Label *string `json:"label,omitempty,omitzero"`
+
+	// Model corresponds to the JSON schema field "model".
+	Model *string `json:"model,omitempty,omitzero"`
 
 	// ResumePicker corresponds to the JSON schema field "resume_picker".
 	ResumePicker *bool `json:"resume_picker,omitempty,omitzero"`

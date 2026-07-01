@@ -483,7 +483,10 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 		workerEnv = append(workerEnv, "ATTN_AUTO_APPROVE=1")
 	}
 	if model := strings.TrimSpace(opts.Model); model != "" {
-		workerEnv = append(workerEnv, "ATTN_CHIEF_MODEL="+model)
+		workerEnv = append(workerEnv, "ATTN_MODEL="+model)
+	}
+	if effort := strings.TrimSpace(opts.Effort); effort != "" {
+		workerEnv = append(workerEnv, "ATTN_EFFORT="+effort)
 	}
 	if len(opts.LoginShellEnv) > 0 {
 		if envJSON, err := json.Marshal(opts.LoginShellEnv); err == nil {

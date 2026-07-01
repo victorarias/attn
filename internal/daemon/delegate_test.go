@@ -485,6 +485,89 @@ func TestDelegateAcceptsCopilotInitialPrompt(t *testing.T) {
 	}
 }
 
+// --model / --effort ride the delegate request into the spawned session's
+// launch options; effort is normalized to lowercase on the way through.
+func TestDelegateThreadsModelAndEffortIntoSpawn(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Run pinned to a specific model.",
+		Agent:           protocol.Ptr("claude"),
+		Model:           protocol.Ptr("claude-fable-5"),
+		Effort:          protocol.Ptr("Low"),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	spawn, ok := backend.LastSpawn()
+	if !ok || spawn.ID != result.SessionID {
+		t.Fatalf("last spawn = %+v, want delegated session %s", spawn, result.SessionID)
+	}
+	if spawn.Model != "claude-fable-5" || spawn.Effort != "low" {
+		t.Fatalf("spawn model/effort = %q/%q, want claude-fable-5/low", spawn.Model, spawn.Effort)
+	}
+}
+
+// A delegation without pins must not inherit any: the spawned agent keeps its
+// own defaults (empty model/effort all the way down).
+func TestDelegateWithoutModelEffortLeavesAgentDefaults(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+
+	if _, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Run with agent defaults.",
+		Agent:           protocol.Ptr("claude"),
+	}); err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	spawn, ok := backend.LastSpawn()
+	if !ok || spawn.Model != "" || spawn.Effort != "" {
+		t.Fatalf("spawn model/effort = %q/%q, want both empty", spawn.Model, spawn.Effort)
+	}
+}
+
+// Copilot's launch command applies neither pin, so both flags fail fast at
+// delegate time instead of being silently dropped by the spawned session.
+func TestDelegateRejectsModelEffortForUnsupportedAgent(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+
+	for flag, msg := range map[string]*protocol.DelegateMessage{
+		"--model": {
+			Cmd:             protocol.CmdDelegate,
+			SourceSessionID: sourceSessionID,
+			Brief:           "Pin a model on copilot.",
+			Agent:           protocol.Ptr("copilot"),
+			Model:           protocol.Ptr("gpt-5"),
+		},
+		"--effort": {
+			Cmd:             protocol.CmdDelegate,
+			SourceSessionID: sourceSessionID,
+			Brief:           "Pin effort on copilot.",
+			Agent:           protocol.Ptr("copilot"),
+			Effort:          protocol.Ptr("high"),
+		},
+	} {
+		_, err := d.delegate(msg)
+		if err == nil || !strings.Contains(err.Error(), "does not support "+flag) {
+			t.Fatalf("delegate(%s) error = %v, want unsupported-agent rejection", flag, err)
+		}
+	}
+	if len(backend.spawnOpts) != 1 {
+		t.Fatalf("spawn count = %d, want only source session", len(backend.spawnOpts))
+	}
+}
+
 func TestDelegateRejectsRemoteSourceSession(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
