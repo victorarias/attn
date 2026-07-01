@@ -369,6 +369,25 @@ type HeadlessTaskRequest struct {
 	// Empty (the keeper's compaction case) leaves both providers' existing
 	// scratch-only behavior unchanged.
 	ExtraWritableRoots []string
+
+	// --- reconciliation additive (all optional; the keeper/workflow set none) ---
+	// Runaway caps + structured output for judgment-style runs (the ticket
+	// reconciliation classifier). Claude-only: Claude Code is the one agent CLI
+	// with enforceable turn/dollar caps and schema-validated output, which is why
+	// reconciliation always runs `claude -p` regardless of the judged agent (see
+	// docs/plans/2026-07-01-orphaned-ticket-reconciliation.md). Codex ignores all
+	// three, like AllowedTools.
+
+	// MaxTurns caps agentic turns (claude: --max-turns). 0 => uncapped.
+	MaxTurns int
+	// MaxBudgetUSD caps API spend, as a decimal string (claude: --max-budget-usd).
+	// Empty => uncapped.
+	MaxBudgetUSD string
+	// OutputSchema, when non-empty, is passed inline as a JSON Schema the final
+	// answer must validate against (claude: --json-schema). Unlike Schema (the
+	// MCP result-sink path), this IS consumed by the driver argv; the validated
+	// object comes back in HeadlessTaskResult.StructuredOutput.
+	OutputSchema json.RawMessage
 }
 
 // usesNativeToolsPath reports whether this request runs through the native-tools
@@ -407,6 +426,15 @@ type HeadlessTaskResult struct {
 	// Text is the child's captured final assistant text (the no-schema path).
 	// Drivers populate this on a successful run.
 	Text string
+	// StructuredOutput is the schema-validated result object when the request
+	// set OutputSchema (claude: the result envelope's structured_output field).
+	// Empty when no schema was requested or the run ended before producing one
+	// (cap-hit, error) — callers must treat empty as "no verdict".
+	StructuredOutput json.RawMessage
+	// TotalCostUSD / NumTurns are spend telemetry from the result envelope
+	// (claude --output-format json). Zero when the provider doesn't report them.
+	TotalCostUSD float64
+	NumTurns     int
 }
 
 // HeadlessTaskProvider runs a bounded non-interactive agent task.

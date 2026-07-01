@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -171,7 +172,57 @@ func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskReques
 		return result, err
 	}
 	result.Text = parseClaudeFinalText(stdout)
+	meta := parseClaudeResultMeta(stdout)
+	result.StructuredOutput = meta.StructuredOutput
+	result.TotalCostUSD = meta.TotalCostUSD
+	result.NumTurns = meta.NumTurns
 	return result, nil
+}
+
+// claudeResultMeta is the telemetry slice of Claude's `--output-format json`
+// result envelope: the schema-validated structured output (when --json-schema
+// was passed) plus spend/turn accounting.
+type claudeResultMeta struct {
+	StructuredOutput json.RawMessage `json:"structured_output"`
+	TotalCostUSD     float64         `json:"total_cost_usd"`
+	NumTurns         int             `json:"num_turns"`
+}
+
+// parseClaudeResultMeta extracts the result envelope's meta fields from either
+// stdout shape parseClaudeFinalText handles: a single result object, or a
+// stream array whose last `type==result` event is the envelope. Absent fields
+// stay zero — callers treat an empty StructuredOutput as "no verdict".
+func parseClaudeResultMeta(stdout []byte) claudeResultMeta {
+	trimmed := bytes.TrimSpace(stdout)
+	if len(trimmed) == 0 {
+		return claudeResultMeta{}
+	}
+
+	type resultEvent struct {
+		Type string `json:"type"`
+		claudeResultMeta
+	}
+
+	// (a) single result object.
+	var single resultEvent
+	if err := json.Unmarshal(trimmed, &single); err == nil && single.Type == "result" {
+		return single.claudeResultMeta
+	}
+
+	// (b) stream array: last type==result wins.
+	var events []json.RawMessage
+	if err := json.Unmarshal(trimmed, &events); err == nil {
+		for i := len(events) - 1; i >= 0; i-- {
+			var ev resultEvent
+			if json.Unmarshal(events[i], &ev) != nil {
+				continue
+			}
+			if ev.Type == "result" {
+				return ev.claudeResultMeta
+			}
+		}
+	}
+	return claudeResultMeta{}
 }
 
 // buildClaudeHeadlessArgs builds the `claude --print` argv for the MCP-config
@@ -279,6 +330,18 @@ func claudeHeadlessArgs(request HeadlessTaskRequest) []string {
 	// "harness decides" default when agent() has no model override).
 	if model := strings.TrimSpace(request.Model); model != "" {
 		args = append(args, "--model", model)
+	}
+	// Judgment-run caps + structured output (the reconciliation classifier).
+	// --max-turns is accepted by the CLI though absent from --help (verified
+	// empirically, 2.1.198); --max-budget-usd and --json-schema are documented.
+	if request.MaxTurns > 0 {
+		args = append(args, "--max-turns", strconv.Itoa(request.MaxTurns))
+	}
+	if budget := strings.TrimSpace(request.MaxBudgetUSD); budget != "" {
+		args = append(args, "--max-budget-usd", budget)
+	}
+	if len(request.OutputSchema) > 0 {
+		args = append(args, "--json-schema", string(request.OutputSchema))
 	}
 	args = append(args,
 		"--no-session-persistence",

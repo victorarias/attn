@@ -175,6 +175,33 @@ func TestParseClaudeFinalText(t *testing.T) {
 	})
 }
 
+func TestParseClaudeResultMeta(t *testing.T) {
+	// Shapes match the empirically-captured --json-schema envelope (2.1.198):
+	// result event carries structured_output + total_cost_usd + num_turns.
+	t.Run("single result object", func(t *testing.T) {
+		meta := parseClaudeResultMeta([]byte(`{"type":"result","result":"{\"verdict\":\"ok\"}","structured_output":{"verdict":"ok"},"total_cost_usd":0.0053,"num_turns":2}`))
+		if string(meta.StructuredOutput) != `{"verdict":"ok"}` {
+			t.Fatalf("StructuredOutput = %s", meta.StructuredOutput)
+		}
+		if meta.TotalCostUSD != 0.0053 || meta.NumTurns != 2 {
+			t.Fatalf("meta = %+v", meta)
+		}
+	})
+	t.Run("stream array last result wins", func(t *testing.T) {
+		stdout := []byte(`[{"type":"system","subtype":"init"},{"type":"assistant","message":{"content":[]}},{"type":"result","structured_output":{"verdict":"ok"},"total_cost_usd":0.5,"num_turns":15}]`)
+		meta := parseClaudeResultMeta(stdout)
+		if string(meta.StructuredOutput) != `{"verdict":"ok"}` || meta.NumTurns != 15 {
+			t.Fatalf("meta = %+v", meta)
+		}
+	})
+	t.Run("no result event yields zero meta", func(t *testing.T) {
+		meta := parseClaudeResultMeta([]byte(`[{"type":"system","subtype":"init"}]`))
+		if len(meta.StructuredOutput) != 0 || meta.TotalCostUSD != 0 || meta.NumTurns != 0 {
+			t.Fatalf("meta = %+v, want zero", meta)
+		}
+	})
+}
+
 func TestClaudeRunHeadlessTaskScopesSingleToolName(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	dir := t.TempDir()

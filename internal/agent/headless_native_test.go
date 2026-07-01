@@ -69,6 +69,31 @@ func TestClaudeHeadlessArgsUsesFileToolsAndDropsMCPPin(t *testing.T) {
 	)
 }
 
+func TestClaudeHeadlessArgsAppendsJudgmentCapsAndSchema(t *testing.T) {
+	schema := `{"type":"object","properties":{"assessment":{"type":"string"}},"required":["assessment"]}`
+	args := claudeHeadlessArgs(HeadlessTaskRequest{
+		Model:        "sonnet",
+		Prompt:       "judge the transcript",
+		WorkDir:      "/tmp/scratch",
+		AllowedTools: []string{"Read", "Grep", "Glob"},
+		MaxTurns:     15,
+		MaxBudgetUSD: "0.50",
+		OutputSchema: []byte(schema),
+	})
+	assertContainsAll(t, "Claude judgment args", args,
+		"--max-turns", "15",
+		"--max-budget-usd", "0.50",
+		"--json-schema", schema,
+		"--allowedTools", "Read,Grep,Glob",
+	)
+
+	// Unset caps must leave the argv untouched (the keeper path).
+	plain := claudeHeadlessArgs(HeadlessTaskRequest{Model: "sonnet", Prompt: "compact"})
+	assertContainsNone(t, "Claude uncapped args", plain,
+		"--max-turns", "--max-budget-usd", "--json-schema",
+	)
+}
+
 func TestClaudeHeadlessArgsHonorsAllowedToolsOverride(t *testing.T) {
 	args := claudeHeadlessArgs(HeadlessTaskRequest{
 		Model:        "claude-test",
