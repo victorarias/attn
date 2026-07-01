@@ -51,9 +51,16 @@ type SpawnOptions struct {
 	AutoApprove bool
 
 	// Model, when set, pins the launched agent's model via --model. Sourced from
-	// the chief_model_<agent> setting for chief launches; the worker exports it as
-	// ATTN_CHIEF_MODEL. Empty means the agent's own default.
+	// the chief_model_<agent> setting for chief launches or a delegation's
+	// --model flag; the worker exports it as ATTN_MODEL. Empty means the agent's
+	// own default.
 	Model string
+
+	// Effort, when set, pins the launched agent's reasoning effort via its
+	// native mechanism (Claude --effort, Codex model_reasoning_effort). Sourced
+	// from a delegation's --effort flag; the worker exports it as ATTN_EFFORT.
+	// Empty means the agent's own default.
+	Effort string
 }
 
 type AttachInfo struct {

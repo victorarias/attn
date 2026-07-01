@@ -510,6 +510,8 @@ model DelegateMessage {
   workspace_id?: string;
   cwd?: string;
   worktree?: DelegateWorktreeRequest;
+  `model`?: string; // Pin the delegated agent's model (alias or full id); empty = agent default
+  effort?: string; // Pin the delegated agent's reasoning effort; empty = agent default
 }
 
 // SetTicketStatusMessage is an agent self-reporting the work state of its own
@@ -1267,6 +1269,8 @@ model SpawnSessionMessage {
   claude_executable?: string;  // Backward compatibility
   codex_executable?: string;   // Backward compatibility
   copilot_executable?: string; // Backward compatibility
+  `model`?: string;            // Pin the launched agent's model; empty = agent default (chief launches fall back to chief_model_<agent>)
+  effort?: string;             // Pin the launched agent's reasoning effort; empty = agent default
 }
 
 model AttachSessionMessage {

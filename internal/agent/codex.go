@@ -57,6 +57,8 @@ func (c *Codex) Capabilities() Capabilities {
 		HasWorkspaceContext: true,
 		// HasSelfMonitor: false — codex has no live ticket Monitor, so it is
 		// pty-nudged when ticket activity arrives while it is idle.
+		HasModelPin:  true,
+		HasEffortPin: true,
 	}
 }
 
@@ -78,6 +80,11 @@ func (c *Codex) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	args = append(args, "-C", opts.CWD)
 	if model := strings.TrimSpace(opts.Model); model != "" {
 		args = append(args, "--model", model)
+	}
+	if effort := strings.TrimSpace(opts.Effort); effort != "" {
+		// Codex has no dedicated effort flag; model_reasoning_effort is its
+		// native config knob (the -c value is parsed as TOML, hence the quotes).
+		args = append(args, "-c", `model_reasoning_effort="`+effort+`"`)
 	}
 	if opts.YoloMode {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")

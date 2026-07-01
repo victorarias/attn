@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-01]
 
+### Added
+- **Pin a delegated agent's model and effort.** `attn delegate` accepts `--model <alias|id>` and `--effort <level>` to launch that one delegation with a specific model and reasoning effort (Claude's native `--effort` levels, Codex's `model_reasoning_effort`), instead of silently inheriting the machine's default. Omit them and nothing changes; agents without a native mechanism (e.g. Copilot) reject the flags up front.
+
 ### Removed
 - **The automated review loop is gone.** The standalone review-loop feature — the SDK-managed iterating loop, its session sidebar bar, `attn review-loop` CLI, and related settings — has been removed. Diff comments, PR reviews, and the workflow engine are unaffected.
 

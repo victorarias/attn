@@ -541,7 +541,13 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 
 		WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)),
 		AutoApprove:             parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)),
-		Model:                   d.chiefLaunchModel(agent, protocol.Deref(msg.ChiefOfStaff)),
+		Model:                   strings.TrimSpace(protocol.Deref(msg.Model)),
+		Effort:                  strings.TrimSpace(protocol.Deref(msg.Effort)),
+	}
+	if spawnOpts.Model == "" {
+		// No per-spawn pin (delegation); a chief launch falls back to the
+		// chief_model_<agent> setting.
+		spawnOpts.Model = d.chiefLaunchModel(agent, protocol.Deref(msg.ChiefOfStaff))
 	}
 	if existingSession != nil {
 		for _, liveID := range d.ptyBackend.SessionIDs(context.Background()) {

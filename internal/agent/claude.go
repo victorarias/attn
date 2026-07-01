@@ -67,6 +67,8 @@ func (c *Claude) Capabilities() Capabilities {
 		HasInitialPrompt:     true,
 		HasWorkspaceContext:  true,
 		HasSelfMonitor:       true,
+		HasModelPin:          true,
+		HasEffortPin:         true,
 	}
 }
 
@@ -98,6 +100,9 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 
 	if model := strings.TrimSpace(opts.Model); model != "" {
 		args = append(args, "--model", model)
+	}
+	if effort := strings.TrimSpace(opts.Effort); effort != "" {
+		args = append(args, "--effort", effort)
 	}
 
 	if opts.ResumeSessionID != "" {

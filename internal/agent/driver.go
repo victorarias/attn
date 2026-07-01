@@ -124,6 +124,15 @@ type Capabilities struct {
 	// to pick DeliveryWatch (self-monitor) vs DeliveryNudge (idle pty-nudge). Only
 	// Claude self-monitors today.
 	HasSelfMonitor bool
+
+	// HasModelPin indicates the agent's launch command accepts a per-session
+	// model pin (SpawnOpts.Model). Delegation rejects --model for agents without it.
+	HasModelPin bool
+
+	// HasEffortPin indicates the agent's launch command accepts a per-session
+	// reasoning-effort pin (SpawnOpts.Effort). Delegation rejects --effort for
+	// agents without it.
+	HasEffortPin bool
 }
 
 var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
@@ -142,6 +151,8 @@ var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
 //   - ATTN_AGENT_<AGENT>_INITIAL_PROMPT=0|1
 //   - ATTN_AGENT_<AGENT>_WORKSPACE_CONTEXT=0|1
 //   - ATTN_AGENT_<AGENT>_SELF_MONITOR=0|1
+//   - ATTN_AGENT_<AGENT>_MODEL_PIN=0|1
+//   - ATTN_AGENT_<AGENT>_EFFORT_PIN=0|1
 //
 // <AGENT> is uppercased with non-alphanumeric chars replaced by underscores
 // (e.g. "gemini-cli" -> "GEMINI_CLI").
@@ -184,6 +195,12 @@ func EffectiveCapabilities(d Driver) Capabilities {
 	}
 	if v, ok := boolEnv(prefix + "SELF_MONITOR"); ok {
 		caps.HasSelfMonitor = v
+	}
+	if v, ok := boolEnv(prefix + "MODEL_PIN"); ok {
+		caps.HasModelPin = v
+	}
+	if v, ok := boolEnv(prefix + "EFFORT_PIN"); ok {
+		caps.HasEffortPin = v
 	}
 
 	// Consistency: transcript watcher requires transcript support.
@@ -243,8 +260,16 @@ type SpawnOpts struct {
 	// Model, when set, pins the interactive agent's model via --model (an alias
 	// like "opus"/"sonnet" or a full model id). Empty means the agent's own
 	// default. Sourced from the daemon's chief_model_<agent> setting for chief
-	// launches and threaded into the worker via ATTN_CHIEF_MODEL.
+	// launches or a delegation's --model flag, and threaded into the worker via
+	// ATTN_MODEL.
 	Model string
+
+	// Effort, when set, pins the interactive agent's reasoning effort using the
+	// agent's native mechanism (Claude --effort, Codex model_reasoning_effort).
+	// Empty means the agent's own default. Sourced from a delegation's --effort
+	// flag and threaded into the worker via ATTN_EFFORT. Only meaningful for
+	// drivers with HasEffortPin.
+	Effort string
 
 	// Executable is the resolved executable path (from ResolveExecutable).
 	Executable string

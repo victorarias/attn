@@ -118,6 +118,34 @@ func (d *Daemon) resolveDelegationAgent(sourceAgent string, requested *string) (
 	return driver.Name(), nil
 }
 
+// validateDelegationModelEffort rejects --model / --effort for agents whose
+// launch command cannot apply them, so the pin fails fast at delegate time
+// instead of being silently dropped by the spawned session. Values themselves
+// are passed through (aliases, full ids, and new effort levels stay legal
+// without an allowlist to rot); the agent CLI is the authority on them.
+func (d *Daemon) validateDelegationModelEffort(agent, model, effort string) error {
+	if model == "" && effort == "" {
+		return nil
+	}
+	if pluginDriver, ok := d.ensurePluginRegistry().driver(agent); ok {
+		if model != "" && !pluginDriver.Capabilities["model_pin"] {
+			return fmt.Errorf("agent %q does not support --model", agent)
+		}
+		if effort != "" && !pluginDriver.Capabilities["effort_pin"] {
+			return fmt.Errorf("agent %q does not support --effort", agent)
+		}
+		return nil
+	}
+	caps := agentdriver.EffectiveCapabilities(agentdriver.Get(agent))
+	if model != "" && !caps.HasModelPin {
+		return fmt.Errorf("agent %q does not support --model", agent)
+	}
+	if effort != "" && !caps.HasEffortPin {
+		return fmt.Errorf("agent %q does not support --effort", agent)
+	}
+	return nil
+}
+
 func delegationPlacement(msg *protocol.DelegateMessage) string {
 	placement := strings.TrimSpace(strings.ToLower(protocol.Deref(msg.Placement)))
 	if placement != "" {
@@ -219,6 +247,11 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 	}
 	agent, err := d.resolveDelegationAgent(source.Agent, msg.Agent)
 	if err != nil {
+		return nil, err
+	}
+	model := strings.TrimSpace(protocol.Deref(msg.Model))
+	effort := strings.TrimSpace(strings.ToLower(protocol.Deref(msg.Effort)))
+	if err := d.validateDelegationModelEffort(agent, model, effort); err != nil {
 		return nil, err
 	}
 	// name is the explicit --name, or empty to default to the directory basename
@@ -351,7 +384,7 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 		initialPrompt = delegatedTicketPrompt(brief)
 	}
 	initialPrompt = withLeafIdentity(initialPrompt)
-	d.handleSpawnSession(spawnClient, &protocol.SpawnSessionMessage{
+	spawnMsg := &protocol.SpawnSessionMessage{
 		Cmd:           protocol.CmdSpawnSession,
 		ID:            sessionID,
 		Cwd:           directory,
@@ -362,7 +395,14 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 		Label:         protocol.Ptr(name),
 		YoloMode:      msg.YoloMode,
 		InitialPrompt: protocol.Ptr(initialPrompt),
-	})
+	}
+	if model != "" {
+		spawnMsg.Model = protocol.Ptr(model)
+	}
+	if effort != "" {
+		spawnMsg.Effort = protocol.Ptr(effort)
+	}
+	d.handleSpawnSession(spawnClient, spawnMsg)
 	if _, err := readInternalActionResult(spawnClient); err != nil {
 		d.removeWorkspaceLayoutPaneForSession(sessionID)
 		return nil, d.rollbackDelegation(createdWorkspaceID, createdWorktreePath, fmt.Errorf("spawn delegated session: %w", err))
