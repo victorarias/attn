@@ -68,7 +68,7 @@ func TestCaptureTicketCrashStateNoopOnCleanRest(t *testing.T) {
 	sessionID := delegateBoundSession(t, d)
 	ticketID := boundTicketID(t, d, sessionID)
 
-	d.captureTicketCrashState(sessionID, protocol.StateWaitingInput)
+	d.reconcileTicketsOnSessionEnd(sessionID, protocol.StateWaitingInput)
 
 	ticket, err := d.store.GetTicket(ticketID)
 	if err != nil {
@@ -89,7 +89,7 @@ func TestCaptureTicketCrashStateNoopAfterTerminalReport(t *testing.T) {
 		t.Fatalf("SetTicketStatus done: %v", err)
 	}
 
-	d.captureTicketCrashState(sessionID, protocol.StateWorking)
+	d.reconcileTicketsOnSessionEnd(sessionID, protocol.StateWorking)
 
 	ticket, err := d.store.GetTicket(ticketID)
 	if err != nil {

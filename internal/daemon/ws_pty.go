@@ -700,6 +700,12 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		if pendingResumeID := d.consumePendingResumeSessionID(session.ID); pendingResumeID != "" {
 			d.persistResumeSessionID(session.ID, pendingResumeID)
 		}
+		// Re-arm orphaned-ticket reconciliation: the owning session is alive again
+		// (a ticket Resume respawns under the same id), so a future death deserves
+		// a fresh verdict. No-op when nothing is flagged.
+		if err := d.store.ClearTicketReconciliationForAssignee(session.ID); err != nil {
+			d.logf("clear ticket reconciliation on spawn for %s: %v", session.ID, err)
+		}
 		if !isShell {
 			d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, spawnStartedAt)
 		}

@@ -125,6 +125,21 @@ type Daemon struct {
 	forcedStop       map[string]time.Time
 	pendingResumeMu  sync.Mutex
 	pendingResumeID  map[string]string
+	// Orphaned-ticket reconciliation (docs/plans/2026-07-01-orphaned-ticket-
+	// reconciliation.md): when an owning session dies with a non-terminal ticket,
+	// a capped headless classifier judges the dead transcript against the brief.
+	// ticketReconcileExec is the classifier spawn — New() wires the real claude
+	// headless run; it stays nil on test daemons so unit tests never shell out
+	// (the runner logs and skips). ticketReconcileDone is a test observation hook
+	// fired after a claim's verdict (or failure note) lands. ticketOrphanFirstSeen
+	// is the sweep's grace tracker (ticket id -> first pass that saw the owner
+	// dead); in-memory by design — a restart merely restarts the grace clock.
+	// All lazy/nil-safe under ticketReconcileMu.
+	ticketReconcileMu     sync.Mutex
+	ticketReconcileExec   func(ctx context.Context, in ticketReconcileInputs) (agentdriver.HeadlessTaskResult, error)
+	ticketReconcileSem    chan struct{}
+	ticketReconcileDone   func(ticketID string)
+	ticketOrphanFirstSeen map[string]time.Time
 	// reloadingSessions marks sessions whose agent is being re-spawned in place
 	// (chief-of-staff assign/demote reload). handlePTYExit consumes the flag to
 	// suppress the killed worker's session_exited so the reload reads as a runtime
@@ -474,7 +489,7 @@ func New(socketPath string) *Daemon {
 	pidPath := filepath.Join(dataRoot, "attn.pid")
 	manager := pty.NewManager(pty.DefaultScrollbackSize, logger.Infof)
 
-	return &Daemon{
+	d := &Daemon{
 		socketPath:         socketPath,
 		pidPath:            pidPath,
 		dataRoot:           dataRoot,
@@ -505,6 +520,10 @@ func New(socketPath string) *Daemon {
 		pluginDir:          config.PluginDir(),
 		workspaces:         newWorkspaceRegistry(),
 	}
+	// Production wiring for the orphaned-ticket reconciliation classifier. Test
+	// constructors leave this nil so unit tests never shell out to a real CLI.
+	d.ticketReconcileExec = d.execTicketReconcileClassifier
+	return d
 }
 
 // NewForTesting creates a daemon with a non-persistent store for tests
@@ -777,6 +796,11 @@ func (d *Daemon) Start() error {
 
 	// Start branch monitoring
 	go d.monitorBranches()
+
+	// Orphaned-ticket sweep backstop: catches non-terminal tickets whose owning
+	// session died where the session-end seam couldn't run (pre-feature orphans,
+	// a daemon death mid-seam) and repairs claims whose verdict never landed.
+	go d.runTicketReconcileSweep()
 
 	// Construct + start the durable compaction runner (kinds compact_context,
 	// summarize_session, narrate_workspace).
@@ -1389,11 +1413,11 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 	}
 
 	if session := d.store.Get(info.ID); session != nil {
-		// Capture the pre-clobber state for any delegated ticket on this session: the
-		// idle-clobber just below erases whether the agent was mid-flight (a crash or
-		// kill) or at a clean rest when its process exited — the signal the ticket
-		// crash detector needs to surface a cut-off close as a Crashed ticket.
-		d.captureTicketCrashState(info.ID, string(session.State))
+		// Reconcile bound tickets against the pre-clobber state: the idle-clobber
+		// just below erases whether the agent was mid-flight (a crash or kill) or at
+		// a clean rest when its process exited — the signal that decides between the
+		// Crashed stamp and the orphaned-ticket classifier (ticket_reconcile.go).
+		d.reconcileTicketsOnSessionEnd(info.ID, string(session.State))
 		d.store.Touch(info.ID)
 		d.store.UpdateState(info.ID, protocol.StateIdle)
 		updated := d.sessionForBroadcast(d.store.Get(info.ID))
@@ -1498,13 +1522,13 @@ func (d *Daemon) removeReapedSession(sessionID string) {
 // orderly close path. The capture is idempotent (a prior terminal-report write
 // wins) and a no-op for sessions without an active ticket.
 func (d *Daemon) dropSessionRecord(sessionID string) {
-	// Backstop the crash capture for removal paths that bypass handlePTYExit
-	// (reaped on restart, liveness sweep, or torn down with a worktree). First-
-	// writer-wins means a real pre-clobber exit capture already recorded on the
-	// ticket wins over this later read, which would otherwise only see the
-	// clobbered idle.
+	// Backstop the ticket reconciliation for removal paths that bypass
+	// handlePTYExit (reaped on restart, liveness sweep, or torn down with a
+	// worktree). First-writer-wins: a real pre-clobber exit capture already ran
+	// the seam and claimed the flag, so this later read (which may only see the
+	// clobbered idle) loses the claim and is a no-op.
 	if session := d.store.Get(sessionID); session != nil {
-		d.captureTicketCrashState(sessionID, string(session.State))
+		d.reconcileTicketsOnSessionEnd(sessionID, string(session.State))
 	}
 	d.clearNudgeState(sessionID)
 	d.store.Remove(sessionID)
@@ -2062,6 +2086,12 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	d.store.Add(session)
 	if resumeSessionID := d.consumePendingResumeSessionID(session.ID); resumeSessionID != "" {
 		d.persistResumeSessionID(session.ID, resumeSessionID)
+	}
+	// Re-arm orphaned-ticket reconciliation: a registering session under a
+	// flagged ticket's assignee id is that ticket's owner coming back to life
+	// (CLI relaunch/resume), so a future death deserves a fresh verdict.
+	if err := d.store.ClearTicketReconciliationForAssignee(session.ID); err != nil {
+		d.logf("clear ticket reconciliation on register for %s: %v", session.ID, err)
 	}
 	d.associateSessionWithWorkspace(session.ID, workspaceID)
 	if _, err := d.ensureWorkspaceLayout(workspaceID); err != nil {
