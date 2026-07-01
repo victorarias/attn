@@ -3,7 +3,7 @@ import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sidebar, type SidebarHeaderAction, type DockItem, ReviewLoopIcon, WorkflowIcon, EditorIcon, DiffIcon, PRsIcon, NotebookIcon } from './components/Sidebar';
+import { Sidebar, type SidebarHeaderAction, type DockItem, WorkflowIcon, EditorIcon, DiffIcon, PRsIcon, NotebookIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
@@ -16,7 +16,6 @@ import { ChangesPanel } from './components/ChangesPanel';
 import { DiffDetailPanel } from './components/DiffDetailPanel';
 import { TicketDetailPanel } from './components/TicketDetailPanel';
 import { TicketBoardSurface } from './components/TicketBoardSurface';
-import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
 import { WorkflowRunView } from './components/WorkflowRunView';
 import {
   useWorkflowRunsStore,
@@ -48,7 +47,7 @@ import {
   readWarmWorkspaceLimit,
   writeWarmWorkspaceLimit,
 } from './utils/terminalVirtualization';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState, SessionExitInfo } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, SessionExitInfo } from './hooks/useDaemonSocket';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { GridView, type GridSessionTile } from './components/grid/GridView';
@@ -322,7 +321,6 @@ function App() {
     setDaemonPluginIssues(issues);
   }, []);
 
-  const [reviewLoopsBySessionId, setReviewLoopsBySessionId] = useState<Record<string, ReviewLoopState>>({});
   const [daemonWorkspaces, setDaemonWorkspaces] = useState<DaemonWorkspace[]>([]);
 
   // Worktrees state (used by WorktreeCleanupPrompt)
@@ -539,8 +537,6 @@ function App() {
     sendGetFileDiff,
     sendGetBranchDiffFiles,
     getRepoInfo,
-    getReviewLoopRun,
-    getReviewLoopState,
     listWorkflowRuns,
     getWorkflowRun,
     getReviewState,
@@ -554,10 +550,6 @@ function App() {
     sendResolveComment,
     sendDeleteComment,
     sendGetComments,
-    sendStartReviewLoop,
-    sendStopReviewLoop,
-    answerReviewLoop,
-    setReviewLoopIterationLimit,
     connectionError,
     hasReceivedInitialState,
     rateLimit,
@@ -584,23 +576,8 @@ function App() {
     onSettingError: setSettingError,
     onWorktreesUpdate: setWorktrees,
     onGitStatusUpdate: setGitStatus,
-    onReviewLoopUpdate: (state) => {
-      if (!state) return;
-      setReviewLoopsBySessionId(prev => ({ ...prev, [state.source_session_id]: state }));
-    },
     onSessionExited: handleSessionExited,
   });
-
-  const setReviewLoopStateForSession = useCallback((sessionId: string, state: ReviewLoopState | null) => {
-    setReviewLoopsBySessionId(prev => {
-      if (!state) {
-        const next = { ...prev };
-        delete next[sessionId];
-        return next;
-      }
-      return { ...prev, [sessionId]: state };
-    });
-  }, []);
 
   // Memoize clearGitStatus to prevent subscription effect from re-running
   const clearGitStatus = useCallback(() => setGitStatus(null), []);
@@ -620,7 +597,6 @@ function App() {
         daemonGitHubHosts={daemonGitHubHosts}
         settings={settings}
         gitStatus={gitStatus}
-        reviewLoopsBySessionId={reviewLoopsBySessionId}
         connectionError={connectionError}
         hasReceivedInitialState={hasReceivedInitialState}
         rateLimit={rateLimit}
@@ -701,8 +677,6 @@ function App() {
         sendGetFileDiff={sendGetFileDiff}
         sendGetBranchDiffFiles={sendGetBranchDiffFiles}
         getRepoInfo={getRepoInfo}
-        getReviewLoopRun={getReviewLoopRun}
-        getReviewLoopState={getReviewLoopState}
         listWorkflowRuns={listWorkflowRuns}
         getWorkflowRun={getWorkflowRun}
         getReviewState={getReviewState}
@@ -716,11 +690,6 @@ function App() {
         sendResolveComment={sendResolveComment}
         sendDeleteComment={sendDeleteComment}
         sendGetComments={sendGetComments}
-        sendStartReviewLoop={sendStartReviewLoop}
-        sendStopReviewLoop={sendStopReviewLoop}
-        answerReviewLoop={answerReviewLoop}
-        setReviewLoopIterationLimit={setReviewLoopIterationLimit}
-        setReviewLoopStateForSession={setReviewLoopStateForSession}
         clearGitStatus={clearGitStatus}
         registerSessionExitHandler={registerSessionExitHandler}
       />
@@ -740,7 +709,6 @@ interface AppContentProps {
   daemonGitHubHosts: string[];
   settings: Record<string, string>;
   gitStatus: GitStatusUpdate | null;
-  reviewLoopsBySessionId: Record<string, ReviewLoopState>;
   connectionError: string | null;
   hasReceivedInitialState: boolean;
   rateLimit: import('./hooks/useDaemonSocket').RateLimitState | null;
@@ -821,8 +789,6 @@ interface AppContentProps {
   sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
   sendGetBranchDiffFiles: ReturnType<typeof useDaemonSocket>['sendGetBranchDiffFiles'];
   getRepoInfo: ReturnType<typeof useDaemonSocket>['getRepoInfo'];
-  getReviewLoopRun: ReturnType<typeof useDaemonSocket>['getReviewLoopRun'];
-  getReviewLoopState: ReturnType<typeof useDaemonSocket>['getReviewLoopState'];
   listWorkflowRuns: ReturnType<typeof useDaemonSocket>['listWorkflowRuns'];
   getWorkflowRun: ReturnType<typeof useDaemonSocket>['getWorkflowRun'];
   getReviewState: ReturnType<typeof useDaemonSocket>['getReviewState'];
@@ -836,11 +802,6 @@ interface AppContentProps {
   sendResolveComment: ReturnType<typeof useDaemonSocket>['sendResolveComment'];
   sendDeleteComment: ReturnType<typeof useDaemonSocket>['sendDeleteComment'];
   sendGetComments: ReturnType<typeof useDaemonSocket>['sendGetComments'];
-  sendStartReviewLoop: ReturnType<typeof useDaemonSocket>['sendStartReviewLoop'];
-  sendStopReviewLoop: ReturnType<typeof useDaemonSocket>['sendStopReviewLoop'];
-  answerReviewLoop: ReturnType<typeof useDaemonSocket>['answerReviewLoop'];
-  setReviewLoopIterationLimit: ReturnType<typeof useDaemonSocket>['setReviewLoopIterationLimit'];
-  setReviewLoopStateForSession: (sessionId: string, state: ReviewLoopState | null) => void;
   clearGitStatus: () => void;
   registerSessionExitHandler: (handler: ((info: SessionExitInfo) => void) | null) => void;
 }
@@ -855,7 +816,6 @@ function AppContent({
   daemonGitHubHosts,
   settings,
   gitStatus,
-  reviewLoopsBySessionId,
   connectionError,
   hasReceivedInitialState,
   rateLimit,
@@ -935,8 +895,6 @@ sendFetchPRDetails,
   sendGetFileDiff,
   sendGetBranchDiffFiles,
   getRepoInfo,
-  getReviewLoopRun,
-  getReviewLoopState,
   listWorkflowRuns,
   getWorkflowRun,
   getReviewState,
@@ -950,11 +908,6 @@ sendFetchPRDetails,
   sendResolveComment,
   sendDeleteComment,
   sendGetComments,
-  sendStartReviewLoop,
-  sendStopReviewLoop,
-  answerReviewLoop,
-  setReviewLoopIterationLimit,
-  setReviewLoopStateForSession,
   clearGitStatus,
   registerSessionExitHandler,
 }: AppContentProps) {
@@ -1266,7 +1219,6 @@ sendFetchPRDetails,
       : paneStatus === 'spawning'
         ? 'launching'
         : null;
-    const reviewLoop = reviewLoopsBySessionId[s.id];
     const endpointId = daemonSession?.endpoint_id ?? s.endpointId;
     const endpoint = endpointId ? endpointById.get(endpointId) : undefined;
     return {
@@ -1278,7 +1230,6 @@ sendFetchPRDetails,
       branch: daemonSession?.branch ?? s.branch,
       isWorktree: daemonSession?.is_worktree ?? s.isWorktree,
       recoverable: daemonSession?.recoverable ?? false,
-      reviewLoopStatus: reviewLoop?.status,
       chiefOfStaff: daemonSession?.chief_of_staff ?? false,
       delegatedFromChief: daemonSession?.delegated_from_chief ?? false,
       ticketUnread: daemonSession?.ticket_unread ?? false,
@@ -1323,7 +1274,7 @@ sendFetchPRDetails,
     void connect();
   }, [connect]);
 
-  type DockPanelId = 'diff' | 'reviewLoop' | 'workflowRun' | 'attention' | 'diffDetail' | 'ticketDetail';
+  type DockPanelId = 'diff' | 'workflowRun' | 'attention' | 'diffDetail' | 'ticketDetail';
 
   // Muted section expansion (controlled by Dashboard click)
   const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
@@ -1339,7 +1290,6 @@ sendFetchPRDetails,
   }>({
     openPanels: {
         diff: false,
-        reviewLoop: false,
         workflowRun: false,
         attention: false,
         diffDetail: false,
@@ -1679,10 +1629,6 @@ sendFetchPRDetails,
     }
   }, [applyChiefOfStaffChange, chiefTransferSaving, chiefTransferTarget]);
 
-  const activeReviewLoopState = useMemo(
-    () => (activeSessionId ? reviewLoopsBySessionId[activeSessionId] ?? null : null),
-    [activeSessionId, reviewLoopsBySessionId],
-  );
   // Read-only workflow runs: the slice is hydrated by useDaemonSocket on the
   // workflow_run_updated broadcast; listWorkflowRuns backfills the active
   // session's existing runs on selection (broadcasts only fire on change).
@@ -1716,14 +1662,9 @@ sendFetchPRDetails,
     },
     [activeDaemonSession?.endpoint_id, endpointById],
   );
-  const activeReviewLoopAvailable = useMemo(
-    () => Boolean(activeLocalSession && activeDaemonSession),
-    [activeDaemonSession, activeLocalSession],
-  );
   const openDockPanels = dockState.openPanels;
   const dockPanelStack = dockState.stack;
   const diffPanelOpen = openDockPanels.diff;
-  const reviewLoopPanelOpen = openDockPanels.reviewLoop;
   const workflowRunPanelOpen = openDockPanels.workflowRun;
   const attentionPanelOpen = openDockPanels.attention;
   const diffDetailPanelOpen = openDockPanels.diffDetail;
@@ -1911,31 +1852,6 @@ sendFetchPRDetails,
     notebookOpen,
     boardSurfaceOpen,
   ]);
-  const waitingReviewSessions = useMemo(
-    () => sessions
-      .map((session) => ({
-        sessionId: session.id,
-        label: session.label,
-        loopState: reviewLoopsBySessionId[session.id],
-      }))
-      .filter((item): item is { sessionId: string; label: string; loopState: ReviewLoopState } =>
-        Boolean(item.loopState && item.loopState.status === 'awaiting_user')
-      ),
-    [reviewLoopsBySessionId, sessions],
-  );
-
-  useEffect(() => {
-    if (!activeReviewLoopAvailable) {
-      closeDockPanel('reviewLoop');
-    }
-  }, [activeReviewLoopAvailable, closeDockPanel]);
-
-  useEffect(() => {
-    if (activeReviewLoopState?.status === 'awaiting_user' && activeReviewLoopAvailable) {
-      openDockPanel('reviewLoop');
-    }
-  }, [activeReviewLoopAvailable, activeReviewLoopState?.status, openDockPanel]);
-
   useEffect(() => {
     if (!settingError) {
       return;
@@ -1943,25 +1859,6 @@ sendFetchPRDetails,
     showError(settingError);
     clearSettingError();
   }, [clearSettingError, settingError, showError]);
-
-  useEffect(() => {
-    if (!activeSessionId) {
-      return;
-    }
-    let cancelled = false;
-    getReviewLoopState(activeSessionId)
-      .then((result) => {
-        if (cancelled) return;
-        setReviewLoopStateForSession(activeSessionId, result.state);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error('[App] Failed to fetch review loop state:', error);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSessionId, getReviewLoopState, setReviewLoopStateForSession]);
 
   // Backfill the active session's workflow runs into the global slice. The
   // useDaemonSocket workflow_run_updated handler keeps it fresh after this; the
@@ -2414,20 +2311,6 @@ sendFetchPRDetails,
     resolveComment: sendResolveComment,
     deleteComment: sendDeleteComment,
     getComments: sendGetComments,
-    startReviewLoop: async (prompt: string, iterationLimit: number, presetId?: string) => {
-      if (!activeSessionId) {
-        throw new Error('No active session');
-      }
-      await sendStartReviewLoop(activeSessionId, prompt, iterationLimit, presetId);
-    },
-    stopReviewLoop: async () => {
-      if (!activeSessionId) {
-        throw new Error('No active session');
-      }
-      await sendStopReviewLoop(activeSessionId);
-    },
-    getReviewLoopState,
-    answerReviewLoop,
     // Ticket detail panel. Inlined (not the handleOpen/CloseTicketDetail
     // callbacks) because those are defined later in the body — past this call's
     // temporal-dead zone — and these are the same two trivial operations.
@@ -2596,11 +2479,7 @@ sendFetchPRDetails,
     for (const s of unmutedEnrichedSessions) {
       const pane = s.workspace.agents.find((agent) => agent.sessionId === s.id);
       if (!pane) continue;
-      const state = s.reviewLoopStatus === 'error'
-        ? 'unknown'
-        : s.reviewLoopStatus === 'awaiting_user'
-          ? 'waiting_input'
-          : s.state;
+      const state = s.state;
       result.push({
         runtimeId: pane.runtimeId,
         sessionId: s.id,
@@ -2671,22 +2550,14 @@ sendFetchPRDetails,
 
   // Calculate attention count for drawer badge (muted workspaces excluded)
   const waitingLocalSessions = unmutedEnrichedSessions
-    .filter((s) => isAttentionSessionState(s.state) || s.reviewLoopStatus === 'awaiting_user' || s.reviewLoopStatus === 'error')
-    .map((s) => ({
-      ...s,
-      state: s.reviewLoopStatus === 'error'
-        ? 'unknown'
-        : s.reviewLoopStatus === 'awaiting_user'
-          ? 'waiting_input'
-          : s.state,
-    }));
+    .filter((s) => isAttentionSessionState(s.state));
   const { needsAttention: prsNeedingAttention } = usePRsNeedingAttention(prs);
   const attentionCount = waitingLocalSessions.length + prsNeedingAttention.length;
 
   // Keyboard shortcut handlers
   const handleJumpToWaiting = useCallback(() => {
     const waiting = unmutedEnrichedSessions.find((s) =>
-      isAttentionSessionState(s.state) || s.reviewLoopStatus === 'awaiting_user' || s.reviewLoopStatus === 'error'
+      isAttentionSessionState(s.state)
     );
     if (waiting) {
       handleSelectSession(waiting.id);
@@ -3390,15 +3261,6 @@ sendFetchPRDetails,
       onClick: handleOpenEditorForSession,
     },
     {
-      id: 'reviewLoop',
-      title: activeReviewLoopAvailable ? 'Review Loop' : 'Review Loop (No active session)',
-      icon: <ReviewLoopIcon />,
-      active: reviewLoopPanelOpen,
-      disabled: !activeReviewLoopAvailable,
-      toneClassName: activeReviewLoopState?.status ? `sidebar-tool-btn--loop-${activeReviewLoopState.status}` : undefined,
-      onClick: () => toggleDockPanel('reviewLoop'),
-    },
-    {
       id: 'workflowRun',
       title: activeSessionId ? 'Workflow Runs' : 'Workflow Runs (No active session)',
       icon: <WorkflowIcon />,
@@ -3437,15 +3299,12 @@ sendFetchPRDetails,
       onClick: openBoardSurface,
     },
   ]), [
-    activeReviewLoopAvailable,
-    activeReviewLoopState?.status,
     activeSessionId,
     remoteEditorAvailable,
     attentionCount,
     attentionPanelOpen,
     diffPanelOpen,
     handleOpenEditorForSession,
-    reviewLoopPanelOpen,
     workflowRunPanelOpen,
     toggleDockPanel,
     notebookOpen,
@@ -3472,11 +3331,6 @@ sendFetchPRDetails,
       isActive: diffDetailPanelOpen,
       available: Boolean(activeSessionId),
     },
-    'dock.reviewLoop': {
-      run: () => toggleDockPanel('reviewLoop'),
-      isActive: reviewLoopPanelOpen,
-      available: activeReviewLoopAvailable,
-    },
     'dock.diff': {
       run: () => toggleDockPanel('diff'),
       isActive: diffPanelOpen,
@@ -3492,8 +3346,6 @@ sendFetchPRDetails,
     'terminal.toggleZoom': { isActive: activeSessionZoomed, available: Boolean(activeSessionId) },
   }), [
     activeSessionId,
-    reviewLoopPanelOpen,
-    activeReviewLoopAvailable,
     diffPanelOpen,
     diffDetailPanelOpen,
     attentionPanelOpen,
@@ -3519,50 +3371,6 @@ sendFetchPRDetails,
       }];
     })
   ), [keybindings.dock.items, keybindings.config, dockActions]);
-
-  const handleStartReviewLoop = useCallback(async (prompt: string, iterationLimit: number, presetId?: string) => {
-    if (!activeSessionId) return;
-    try {
-      const result = await sendStartReviewLoop(activeSessionId, prompt, iterationLimit, presetId);
-      setReviewLoopStateForSession(activeSessionId, result.state);
-    } catch (error) {
-      showError(error instanceof Error ? error.message : 'Failed to start review loop');
-      throw error;
-    }
-  }, [activeSessionId, sendStartReviewLoop, setReviewLoopStateForSession, showError]);
-
-  const handleStopReviewLoop = useCallback(async () => {
-    if (!activeSessionId) return;
-    try {
-      const result = await sendStopReviewLoop(activeSessionId);
-      setReviewLoopStateForSession(activeSessionId, result.state);
-    } catch (error) {
-      showError(error instanceof Error ? error.message : 'Failed to stop review loop');
-      throw error;
-    }
-  }, [activeSessionId, sendStopReviewLoop, setReviewLoopStateForSession, showError]);
-
-  const handleSetReviewLoopIterations = useCallback(async (iterationLimit: number) => {
-    if (!activeSessionId) return;
-    try {
-      const result = await setReviewLoopIterationLimit(activeSessionId, iterationLimit);
-      setReviewLoopStateForSession(activeSessionId, result.state);
-    } catch (error) {
-      showError(error instanceof Error ? error.message : 'Failed to update review loop iterations');
-      throw error;
-    }
-  }, [activeSessionId, setReviewLoopIterationLimit, setReviewLoopStateForSession, showError]);
-
-  const handleAnswerReviewLoop = useCallback(async (loopId: string, interactionId: string, answer: string) => {
-    if (!activeSessionId) return;
-    try {
-      const result = await answerReviewLoop(loopId, interactionId, answer);
-      setReviewLoopStateForSession(activeSessionId, result.state);
-    } catch (error) {
-      showError(error instanceof Error ? error.message : 'Failed to answer review loop question');
-      throw error;
-    }
-  }, [activeSessionId, answerReviewLoop, setReviewLoopStateForSession, showError]);
 
   const handleQuitApp = useCallback(() => {
     if (isTauri()) {
@@ -3590,9 +3398,6 @@ sendFetchPRDetails,
     onRefreshPRs: handleRefreshPRs,
     onToggleDiffPanel: () => {
       toggleDockPanel('diff');
-    },
-    onToggleReviewLoopPanel: () => {
-      toggleDockPanel('reviewLoop');
     },
     onToggleDiffDetailPanel: () => {
       toggleDockPanel('diffDetail');
@@ -3914,28 +3719,6 @@ sendFetchPRDetails,
                   onOpenDiffClick={handleOpenDiffDetailPanel}
                 />
               ),
-            },
-            {
-              id: 'reviewLoop',
-              isOpen: reviewLoopPanelOpen && Boolean(activeSessionId && activeReviewLoopAvailable && activeLocalSession),
-              width: 'clamp(420px, 50vw, 680px)',
-              tone: activeReviewLoopState ? toneForDockPanel(activeReviewLoopState.status) : 'default',
-              className: 'dock-panel dock-panel--review-loop',
-              children: activeSessionId && activeReviewLoopAvailable && activeLocalSession ? (
-                <SessionReviewLoopBar
-                  sessionId={activeSessionId}
-                  sessionLabel={activeLocalSession.label}
-                  loopState={activeReviewLoopState}
-                  getReviewLoopRun={getReviewLoopRun}
-                  onClose={() => closeDockPanel('reviewLoop')}
-                  waitingReviewSessions={waitingReviewSessions}
-                  onSelectSession={handleSelectSession}
-                  onStart={handleStartReviewLoop}
-                  onStop={handleStopReviewLoop}
-                  onSetIterations={handleSetReviewLoopIterations}
-                  onAnswer={handleAnswerReviewLoop}
-                />
-              ) : null,
             },
             {
               id: 'workflowRun',

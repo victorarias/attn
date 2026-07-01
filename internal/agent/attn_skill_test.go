@@ -31,7 +31,6 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"references/delegated-agent.md",
 		"references/tickets.md",
 		"references/workspace-context.md",
-		"references/review-loops.md",
 		"references/workflow.md",
 		"references/markdown.md",
 		"references/browser.md",
@@ -153,19 +152,6 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		}
 	}
 
-	reviewLoops := readSkillFile(t, skillDir, "references/review-loops.md")
-	for _, expected := range []string{
-		"review-loop start",
-		"review-loop show --loop",
-		"review-loop answer",
-		"Commit the implementation first",
-		"findings do not authorize",
-	} {
-		if !strings.Contains(reviewLoops, expected) {
-			t.Fatalf("review-loop reference missing %q: %q", expected, reviewLoops)
-		}
-	}
-
 	markdown := readSkillFile(t, skillDir, "references/markdown.md")
 	if !strings.Contains(markdown, "open <path/to/file.md>") || !strings.Contains(markdown, "live-reloading") {
 		t.Fatalf("markdown reference is incomplete: %q", markdown)
@@ -262,7 +248,6 @@ func TestAttnSkillInstallsAreIdentical(t *testing.T) {
 		"references/delegated-agent.md",
 		"references/tickets.md",
 		"references/workspace-context.md",
-		"references/review-loops.md",
 		"references/workflow.md",
 		"references/markdown.md",
 		"references/browser.md",

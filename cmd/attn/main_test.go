@@ -594,7 +594,7 @@ func TestWriteHelpMentionsPresenceAndOpen(t *testing.T) {
 	writeHelp(&output)
 
 	text := output.String()
-	for _, expected := range []string{"presence", "delegate --brief-file <path>", "workspace context <command>", "open <file.md> [--session <id>]", "review-loop <command>"} {
+	for _, expected := range []string{"presence", "delegate --brief-file <path>", "workspace context <command>", "open <file.md> [--session <id>]"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("help output missing %q: %q", expected, text)
 		}

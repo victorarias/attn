@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '../test/utils';
 import { SettingsModal } from './SettingsModal';
 
-describe('SettingsModal review loop prompts', () => {
+describe('SettingsModal', () => {
   it('closes on escape', async () => {
     const onClose = vi.fn();
 
@@ -69,56 +69,6 @@ describe('SettingsModal review loop prompts', () => {
 
     expect(await screen.findByText('ghe.example.test')).toBeInTheDocument();
     expect(screen.getByText('github.com')).toBeInTheDocument();
-  });
-
-  it('saves a custom review loop preset to settings', async () => {
-    const onSetSetting = vi.fn();
-
-    render(
-      <SettingsModal
-        isOpen
-        onClose={vi.fn()}
-        mutedRepos={[]}
-        githubHosts={[]}
-        onUnmuteRepo={vi.fn()}
-        mutedAuthors={[]}
-        onUnmuteAuthor={vi.fn()}
-        settings={{}}
-        endpoints={[]}
-        plugins={[]}
-        pluginIssues={[]}
-        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
-        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
-        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
-        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
-        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
-        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
-        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
-        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
-        onSetSetting={onSetSetting}
-        themePreference="system"
-        onSetTheme={vi.fn()}
-      />
-    );
-
-    fireEvent.click(screen.getByTestId('settings-nav-review'));
-    await screen.findByText('Review Loop Prompts');
-    fireEvent.change(screen.getByLabelText('Prompt name'), { target: { value: 'Architect Pass' } });
-    fireEvent.change(screen.getByLabelText('Default iterations'), { target: { value: '5' } });
-    fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Review like an architect' } });
-    fireEvent.click(screen.getByText('Save Prompt'));
-
-    expect(onSetSetting).toHaveBeenCalledWith(
-      'review_loop_prompt_presets',
-      JSON.stringify([
-        {
-          id: 'custom-architect-pass',
-          name: 'Architect Pass',
-          prompt: 'Review like an architect',
-          iterationLimit: 5,
-        },
-      ])
-    );
   });
 
   it('submits a new endpoint through the modal', async () => {

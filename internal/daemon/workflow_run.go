@@ -14,9 +14,8 @@ import (
 // IPC. The engine itself runs in the `attn workflow run` CLI process; the daemon
 // only persists (via the S-store CRUD), coalesced-broadcasts run updates to the
 // read-only UI, serves get/list, and relays cancel to the engine process. Both
-// the socket dispatch (engine + CLI) and the WS dispatch (UI) delegate here, the
-// same split review-loop uses (handle*ReviewLoop / handle*ReviewLoopWS over core
-// funcs).
+// the socket dispatch (engine + CLI) and the WS dispatch (UI) delegate here to
+// shared core funcs (handle* over the socket / handle*WS over WS).
 
 // --- protocol <-> store row conversions -------------------------------------
 
@@ -261,7 +260,7 @@ func (d *Daemon) cancelWorkflowRun(runID string) (*protocol.WorkflowRun, bool, e
 
 // --- socket (engine + CLI) handlers -----------------------------------------
 //
-// Thin wrappers over the core, mirroring review-loop's handle*ReviewLoop. The
+// Thin wrappers over the core. The
 // engine connects over the unix socket, so upsert/call_upsert register the
 // requesting net.Conn as the run's engine sink for a later cancel relay. Replies
 // use WorkflowActionResultMessage (which carries run/runs) because protocol

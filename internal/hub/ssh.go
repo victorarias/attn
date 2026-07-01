@@ -51,9 +51,6 @@ func remoteShellEnvScript(profile string) string {
 	if value := strings.TrimSpace(os.Getenv("ATTN_REMOTE_DB_PATH")); value != "" {
 		assignments = append(assignments, "export ATTN_DB_PATH="+shellQuote(value))
 	}
-	if value := strings.TrimSpace(os.Getenv("ATTN_REVIEW_LOOP_SCRIPT_B64")); value != "" {
-		assignments = append(assignments, "export ATTN_REVIEW_LOOP_SCRIPT_B64="+shellQuote(value))
-	}
 	if len(assignments) == 0 {
 		return ""
 	}

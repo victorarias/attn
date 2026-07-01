@@ -1,11 +1,10 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketAttachment, TicketAttachMessage, TicketAttachResult, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewState, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketAttachment, TicketAttachMessage, TicketAttachResult, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
 //   const addEndpointMessage = Convert.toAddEndpointMessage(json);
-//   const answerReviewLoopMessage = Convert.toAnswerReviewLoopMessage(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
 //   const attachPolicy = Convert.toAttachPolicy(json);
 //   const attachResultMessage = Convert.toAttachResultMessage(json);
@@ -79,8 +78,6 @@
 //   const getRecentLocationsMessage = Convert.toGetRecentLocationsMessage(json);
 //   const getRepoInfoMessage = Convert.toGetRepoInfoMessage(json);
 //   const getRepoInfoResultMessage = Convert.toGetRepoInfoResultMessage(json);
-//   const getReviewLoopRunMessage = Convert.toGetReviewLoopRunMessage(json);
-//   const getReviewLoopStateMessage = Convert.toGetReviewLoopStateMessage(json);
 //   const getReviewStateMessage = Convert.toGetReviewStateMessage(json);
 //   const getReviewStateResultMessage = Convert.toGetReviewStateResultMessage(json);
 //   const getScreenSnapshotMessage = Convert.toGetScreenSnapshotMessage(json);
@@ -182,17 +179,6 @@
 //   const resolveCommentResultMessage = Convert.toResolveCommentResultMessage(json);
 //   const response = Convert.toResponse(json);
 //   const reviewComment = Convert.toReviewComment(json);
-//   const reviewLoopDecision = Convert.toReviewLoopDecision(json);
-//   const reviewLoopInteraction = Convert.toReviewLoopInteraction(json);
-//   const reviewLoopInteractionStatus = Convert.toReviewLoopInteractionStatus(json);
-//   const reviewLoopIteration = Convert.toReviewLoopIteration(json);
-//   const reviewLoopIterationStatus = Convert.toReviewLoopIterationStatus(json);
-//   const reviewLoopResultMessage = Convert.toReviewLoopResultMessage(json);
-//   const reviewLoopRun = Convert.toReviewLoopRun(json);
-//   const reviewLoopRunStatus = Convert.toReviewLoopRunStatus(json);
-//   const reviewLoopState = Convert.toReviewLoopState(json);
-//   const reviewLoopStatus = Convert.toReviewLoopStatus(json);
-//   const reviewLoopUpdatedMessage = Convert.toReviewLoopUpdatedMessage(json);
 //   const reviewState = Convert.toReviewState(json);
 //   const runtimeRespawnedMessage = Convert.toRuntimeRespawnedMessage(json);
 //   const session = Convert.toSession(json);
@@ -208,7 +194,6 @@
 //   const setChiefOfStaffMessage = Convert.toSetChiefOfStaffMessage(json);
 //   const setEndpointRemoteWebMessage = Convert.toSetEndpointRemoteWebMessage(json);
 //   const setPluginPriorityMessage = Convert.toSetPluginPriorityMessage(json);
-//   const setReviewLoopIterationLimitMessage = Convert.toSetReviewLoopIterationLimitMessage(json);
 //   const setSessionResumeIDMessage = Convert.toSetSessionResumeIDMessage(json);
 //   const setSettingMessage = Convert.toSetSettingMessage(json);
 //   const setTicketStatusMessage = Convert.toSetTicketStatusMessage(json);
@@ -216,10 +201,8 @@
 //   const setWorkspaceRankMessage = Convert.toSetWorkspaceRankMessage(json);
 //   const spawnResultMessage = Convert.toSpawnResultMessage(json);
 //   const spawnSessionMessage = Convert.toSpawnSessionMessage(json);
-//   const startReviewLoopMessage = Convert.toStartReviewLoopMessage(json);
 //   const stateMessage = Convert.toStateMessage(json);
 //   const stopMessage = Convert.toStopMessage(json);
-//   const stopReviewLoopMessage = Convert.toStopReviewLoopMessage(json);
 //   const subscribeGitStatusMessage = Convert.toSubscribeGitStatusMessage(json);
 //   const ticket = Convert.toTicket(json);
 //   const ticketActionResultMessage = Convert.toTicketActionResultMessage(json);
@@ -373,18 +356,6 @@ export interface AddEndpointMessage {
 
 export enum AddEndpointMessageCmd {
     AddEndpoint = "add_endpoint",
-}
-
-export interface AnswerReviewLoopMessage {
-    answer:          string;
-    cmd:             AnswerReviewLoopMessageCmd;
-    interaction_id?: string;
-    loop_id:         string;
-    [property: string]: any;
-}
-
-export enum AnswerReviewLoopMessageCmd {
-    AnswerReviewLoop = "answer_review_loop",
 }
 
 export interface ApprovePRMessage {
@@ -1434,26 +1405,6 @@ export interface WorktreeElement {
     main_repo:   string;
     path:        string;
     [property: string]: any;
-}
-
-export interface GetReviewLoopRunMessage {
-    cmd:     GetReviewLoopRunMessageCmd;
-    loop_id: string;
-    [property: string]: any;
-}
-
-export enum GetReviewLoopRunMessageCmd {
-    GetReviewLoopRun = "get_review_loop_run",
-}
-
-export interface GetReviewLoopStateMessage {
-    cmd:        GetReviewLoopStateMessageCmd;
-    session_id: string;
-    [property: string]: any;
-}
-
-export enum GetReviewLoopStateMessageCmd {
-    GetReviewLoopState = "get_review_loop_state",
 }
 
 export interface GetReviewStateMessage {
@@ -2769,7 +2720,6 @@ export interface Response {
     ok:                                    boolean;
     prs?:                                  PRElement[];
     repos?:                                RepoElement[];
-    review_loop_run?:                      ReviewLoopRunObject;
     sessions?:                             SessionElement[];
     ticket_attach_result?:                 TicketAttachResultObject;
     ticket_comment_result?:                TicketCommentResultObject;
@@ -2792,95 +2742,6 @@ export interface NotebookGuide {
     root:             string;
     session_is_chief: boolean;
     [property: string]: any;
-}
-
-export interface ReviewLoopRunObject {
-    completed_at?:           string;
-    created_at:              string;
-    custom_prompt?:          string;
-    handoff_payload_json?:   string;
-    iteration_count:         number;
-    iteration_limit:         number;
-    iterations?:             Iteration[];
-    last_decision?:          ReviewLoopDecision;
-    last_error?:             string;
-    last_result_summary?:    string;
-    latest_iteration?:       Iteration;
-    loop_id:                 string;
-    pending_interaction?:    Interaction;
-    pending_interaction_id?: string;
-    preset_id?:              string;
-    repo_path:               string;
-    resolved_prompt:         string;
-    source_session_id:       string;
-    status:                  ReviewLoopRunStatus;
-    stop_reason?:            string;
-    updated_at:              string;
-    [property: string]: any;
-}
-
-export interface Iteration {
-    assistant_trace_json?:   string;
-    blocking_reason?:        string;
-    change_stats?:           FileElement[];
-    changes_made?:           boolean;
-    completed_at?:           string;
-    decision?:               ReviewLoopDecision;
-    error?:                  string;
-    files_touched?:          string[];
-    id:                      string;
-    iteration_number:        number;
-    loop_id:                 string;
-    result_text?:            string;
-    started_at:              string;
-    status:                  ReviewLoopIterationStatus;
-    structured_output_json?: string;
-    suggested_next_focus?:   string;
-    summary?:                string;
-    [property: string]: any;
-}
-
-export enum ReviewLoopDecision {
-    Continue = "continue",
-    Converged = "converged",
-    Error = "error",
-    NeedsUserInput = "needs_user_input",
-}
-
-export enum ReviewLoopIterationStatus {
-    AwaitingUser = "awaiting_user",
-    Cancelled = "cancelled",
-    Completed = "completed",
-    Error = "error",
-    Running = "running",
-}
-
-export interface Interaction {
-    answer?:       string;
-    answered_at?:  string;
-    consumed_at?:  string;
-    created_at:    string;
-    id:            string;
-    iteration_id?: string;
-    kind:          string;
-    loop_id:       string;
-    question:      string;
-    status:        ReviewLoopInteractionStatus;
-    [property: string]: any;
-}
-
-export enum ReviewLoopInteractionStatus {
-    Answered = "answered",
-    Consumed = "consumed",
-    Pending = "pending",
-}
-
-export enum ReviewLoopRunStatus {
-    AwaitingUser = "awaiting_user",
-    Completed = "completed",
-    Error = "error",
-    Running = "running",
-    Stopped = "stopped",
 }
 
 export interface TicketAttachResultObject {
@@ -3011,120 +2872,6 @@ export interface ReviewComment {
     resolved_by?: string;
     review_id:    string;
     [property: string]: any;
-}
-
-export interface ReviewLoopInteraction {
-    answer?:       string;
-    answered_at?:  string;
-    consumed_at?:  string;
-    created_at:    string;
-    id:            string;
-    iteration_id?: string;
-    kind:          string;
-    loop_id:       string;
-    question:      string;
-    status:        ReviewLoopInteractionStatus;
-    [property: string]: any;
-}
-
-export interface ReviewLoopIteration {
-    assistant_trace_json?:   string;
-    blocking_reason?:        string;
-    change_stats?:           FileElement[];
-    changes_made?:           boolean;
-    completed_at?:           string;
-    decision?:               ReviewLoopDecision;
-    error?:                  string;
-    files_touched?:          string[];
-    id:                      string;
-    iteration_number:        number;
-    loop_id:                 string;
-    result_text?:            string;
-    started_at:              string;
-    status:                  ReviewLoopIterationStatus;
-    structured_output_json?: string;
-    suggested_next_focus?:   string;
-    summary?:                string;
-    [property: string]: any;
-}
-
-export interface ReviewLoopResultMessage {
-    action:           string;
-    error?:           string;
-    event:            ReviewLoopResultMessageEvent;
-    loop_id?:         string;
-    review_loop_run?: ReviewLoopRunObject;
-    session_id:       string;
-    success:          boolean;
-    [property: string]: any;
-}
-
-export enum ReviewLoopResultMessageEvent {
-    ReviewLoopResult = "review_loop_result",
-}
-
-export interface ReviewLoopRun {
-    completed_at?:           string;
-    created_at:              string;
-    custom_prompt?:          string;
-    handoff_payload_json?:   string;
-    iteration_count:         number;
-    iteration_limit:         number;
-    iterations?:             Iteration[];
-    last_decision?:          ReviewLoopDecision;
-    last_error?:             string;
-    last_result_summary?:    string;
-    latest_iteration?:       Iteration;
-    loop_id:                 string;
-    pending_interaction?:    Interaction;
-    pending_interaction_id?: string;
-    preset_id?:              string;
-    repo_path:               string;
-    resolved_prompt:         string;
-    source_session_id:       string;
-    status:                  ReviewLoopRunStatus;
-    stop_reason?:            string;
-    updated_at:              string;
-    [property: string]: any;
-}
-
-export interface ReviewLoopState {
-    advance_token:       string;
-    created_at:          string;
-    custom_prompt?:      string;
-    iteration_count:     number;
-    iteration_limit:     number;
-    last_advance_at?:    string;
-    last_prompt_at?:     string;
-    last_user_input_at?: string;
-    preset_id?:          string;
-    resolved_prompt:     string;
-    session_id:          string;
-    status:              ReviewLoopStatus;
-    stop_reason?:        string;
-    stop_requested:      boolean;
-    updated_at:          string;
-    [property: string]: any;
-}
-
-export enum ReviewLoopStatus {
-    AdvanceReceivedWaitingPrompt = "advance_received_waiting_prompt",
-    Completed = "completed",
-    Error = "error",
-    Running = "running",
-    Stopped = "stopped",
-    WaitingForAgentAdvance = "waiting_for_agent_advance",
-}
-
-export interface ReviewLoopUpdatedMessage {
-    event:            ReviewLoopUpdatedMessageEvent;
-    review_loop_run?: ReviewLoopRunObject;
-    session_id:       string;
-    [property: string]: any;
-}
-
-export enum ReviewLoopUpdatedMessageEvent {
-    ReviewLoopUpdated = "review_loop_updated",
 }
 
 export interface ReviewState {
@@ -3285,17 +3032,6 @@ export enum SetPluginPriorityMessageCmd {
     SetPluginPriority = "set_plugin_priority",
 }
 
-export interface SetReviewLoopIterationLimitMessage {
-    cmd:             SetReviewLoopIterationLimitMessageCmd;
-    iteration_limit: number;
-    session_id:      string;
-    [property: string]: any;
-}
-
-export enum SetReviewLoopIterationLimitMessageCmd {
-    SetReviewLoopIterationLimit = "set_review_loop_iteration_limit",
-}
-
 export interface SetSessionResumeIDMessage {
     cmd:               SetSessionResumeIDMessageCmd;
     id:                string;
@@ -3401,20 +3137,6 @@ export enum SpawnSessionMessageCmd {
     SpawnSession = "spawn_session",
 }
 
-export interface StartReviewLoopMessage {
-    cmd:                   StartReviewLoopMessageCmd;
-    handoff_payload_json?: string;
-    iteration_limit:       number;
-    preset_id?:            string;
-    prompt:                string;
-    session_id:            string;
-    [property: string]: any;
-}
-
-export enum StartReviewLoopMessageCmd {
-    StartReviewLoop = "start_review_loop",
-}
-
 export interface StateMessage {
     cmd:   StateMessageCmd;
     id:    string;
@@ -3435,16 +3157,6 @@ export interface StopMessage {
 
 export enum StopMessageCmd {
     Stop = "stop",
-}
-
-export interface StopReviewLoopMessage {
-    cmd:        StopReviewLoopMessageCmd;
-    session_id: string;
-    [property: string]: any;
-}
-
-export enum StopReviewLoopMessageCmd {
-    StopReviewLoop = "stop_review_loop",
 }
 
 export interface SubscribeGitStatusMessage {
@@ -3855,7 +3567,6 @@ export interface WebSocketEvent {
     reason?:                   string;
     recent_locations?:         RecentLocationElement[];
     repos?:                    RepoElement[];
-    review_loop_run?:          ReviewLoopRunObject;
     rows?:                     number;
     running?:                  boolean;
     runtime_id?:               string;
@@ -4569,14 +4280,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("AddEndpointMessage")), null, 2);
     }
 
-    public static toAnswerReviewLoopMessage(json: string): AnswerReviewLoopMessage {
-        return cast(JSON.parse(json), r("AnswerReviewLoopMessage"));
-    }
-
-    public static answerReviewLoopMessageToJson(value: AnswerReviewLoopMessage): string {
-        return JSON.stringify(uncast(value, r("AnswerReviewLoopMessage")), null, 2);
-    }
-
     public static toApprovePRMessage(json: string): ApprovePRMessage {
         return cast(JSON.parse(json), r("ApprovePRMessage"));
     }
@@ -5159,22 +4862,6 @@ export class Convert {
 
     public static getRepoInfoResultMessageToJson(value: GetRepoInfoResultMessage): string {
         return JSON.stringify(uncast(value, r("GetRepoInfoResultMessage")), null, 2);
-    }
-
-    public static toGetReviewLoopRunMessage(json: string): GetReviewLoopRunMessage {
-        return cast(JSON.parse(json), r("GetReviewLoopRunMessage"));
-    }
-
-    public static getReviewLoopRunMessageToJson(value: GetReviewLoopRunMessage): string {
-        return JSON.stringify(uncast(value, r("GetReviewLoopRunMessage")), null, 2);
-    }
-
-    public static toGetReviewLoopStateMessage(json: string): GetReviewLoopStateMessage {
-        return cast(JSON.parse(json), r("GetReviewLoopStateMessage"));
-    }
-
-    public static getReviewLoopStateMessageToJson(value: GetReviewLoopStateMessage): string {
-        return JSON.stringify(uncast(value, r("GetReviewLoopStateMessage")), null, 2);
     }
 
     public static toGetReviewStateMessage(json: string): GetReviewStateMessage {
@@ -5985,94 +5672,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("ReviewComment")), null, 2);
     }
 
-    public static toReviewLoopDecision(json: string): ReviewLoopDecision {
-        return cast(JSON.parse(json), r("ReviewLoopDecision"));
-    }
-
-    public static reviewLoopDecisionToJson(value: ReviewLoopDecision): string {
-        return JSON.stringify(uncast(value, r("ReviewLoopDecision")), null, 2);
-    }
-
-    public static toReviewLoopInteraction(json: string): ReviewLoopInteraction {
-        return cast(JSON.parse(json), r("ReviewLoopInteraction"));
-    }
-
-    public static reviewLoopInteractionToJson(value: ReviewLoopInteraction): string {
-        return JSON.stringify(uncast(value, r("ReviewLoopInteraction")), null, 2);
-    }
-
-    public static toReviewLoopInteractionStatus(json: string): ReviewLoopInteractionStatus {
-        return cast(JSON.parse(json), r("ReviewLoopInteractionStatus"));
-    }
-
-    public static reviewLoopInteractionStatusToJson(value: ReviewLoopInteractionStatus): string {
-        return JSON.stringify(uncast(value, r("ReviewLoopInteractionStatus")), null, 2);
-    }
-
-    public static toReviewLoopIteration(json: string): ReviewLoopIteration {
-        return cast(JSON.parse(json), r("ReviewLoopIteration"));
-    }
-
-    public static reviewLoopIterationToJson(value: ReviewLoopIteration): string {
-        return JSON.stringify(uncast(value, r("ReviewLoopIteration")), null, 2);
-    }
-
-    public static toReviewLoopIterationStatus(json: string): ReviewLoopIterationStatus {
-        return cast(JSON.parse(json), r("ReviewLoopIterationStatus"));
-    }
-
-    public static reviewLoopIterationStatusToJson(value: ReviewLoopIterationStatus): string {
-        return JSON.stringify(uncast(value, r("ReviewLoopIterationStatus")), null, 2);
-    }
-
-    public static toReviewLoopResultMessage(json: string): ReviewLoopResultMessage {
-        return cast(JSON.parse(json), r("ReviewLoopResultMessage"));
-    }
-
-    public static reviewLoopResultMessageToJson(value: ReviewLoopResultMessage): string {
-        return JSON.stringify(uncast(value, r("ReviewLoopResultMessage")), null, 2);
-    }
-
-    public static toReviewLoopRun(json: string): ReviewLoopRun {
-        return cast(JSON.parse(json), r("ReviewLoopRun"));
-    }
-
-    public static reviewLoopRunToJson(value: ReviewLoopRun): string {
-        return JSON.stringify(uncast(value, r("ReviewLoopRun")), null, 2);
-    }
-
-    public static toReviewLoopRunStatus(json: string): ReviewLoopRunStatus {
-        return cast(JSON.parse(json), r("ReviewLoopRunStatus"));
-    }
-
-    public static reviewLoopRunStatusToJson(value: ReviewLoopRunStatus): string {
-        return JSON.stringify(uncast(value, r("ReviewLoopRunStatus")), null, 2);
-    }
-
-    public static toReviewLoopState(json: string): ReviewLoopState {
-        return cast(JSON.parse(json), r("ReviewLoopState"));
-    }
-
-    public static reviewLoopStateToJson(value: ReviewLoopState): string {
-        return JSON.stringify(uncast(value, r("ReviewLoopState")), null, 2);
-    }
-
-    public static toReviewLoopStatus(json: string): ReviewLoopStatus {
-        return cast(JSON.parse(json), r("ReviewLoopStatus"));
-    }
-
-    public static reviewLoopStatusToJson(value: ReviewLoopStatus): string {
-        return JSON.stringify(uncast(value, r("ReviewLoopStatus")), null, 2);
-    }
-
-    public static toReviewLoopUpdatedMessage(json: string): ReviewLoopUpdatedMessage {
-        return cast(JSON.parse(json), r("ReviewLoopUpdatedMessage"));
-    }
-
-    public static reviewLoopUpdatedMessageToJson(value: ReviewLoopUpdatedMessage): string {
-        return JSON.stringify(uncast(value, r("ReviewLoopUpdatedMessage")), null, 2);
-    }
-
     public static toReviewState(json: string): ReviewState {
         return cast(JSON.parse(json), r("ReviewState"));
     }
@@ -6193,14 +5792,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SetPluginPriorityMessage")), null, 2);
     }
 
-    public static toSetReviewLoopIterationLimitMessage(json: string): SetReviewLoopIterationLimitMessage {
-        return cast(JSON.parse(json), r("SetReviewLoopIterationLimitMessage"));
-    }
-
-    public static setReviewLoopIterationLimitMessageToJson(value: SetReviewLoopIterationLimitMessage): string {
-        return JSON.stringify(uncast(value, r("SetReviewLoopIterationLimitMessage")), null, 2);
-    }
-
     public static toSetSessionResumeIDMessage(json: string): SetSessionResumeIDMessage {
         return cast(JSON.parse(json), r("SetSessionResumeIDMessage"));
     }
@@ -6257,14 +5848,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SpawnSessionMessage")), null, 2);
     }
 
-    public static toStartReviewLoopMessage(json: string): StartReviewLoopMessage {
-        return cast(JSON.parse(json), r("StartReviewLoopMessage"));
-    }
-
-    public static startReviewLoopMessageToJson(value: StartReviewLoopMessage): string {
-        return JSON.stringify(uncast(value, r("StartReviewLoopMessage")), null, 2);
-    }
-
     public static toStateMessage(json: string): StateMessage {
         return cast(JSON.parse(json), r("StateMessage"));
     }
@@ -6279,14 +5862,6 @@ export class Convert {
 
     public static stopMessageToJson(value: StopMessage): string {
         return JSON.stringify(uncast(value, r("StopMessage")), null, 2);
-    }
-
-    public static toStopReviewLoopMessage(json: string): StopReviewLoopMessage {
-        return cast(JSON.parse(json), r("StopReviewLoopMessage"));
-    }
-
-    public static stopReviewLoopMessageToJson(value: StopReviewLoopMessage): string {
-        return JSON.stringify(uncast(value, r("StopReviewLoopMessage")), null, 2);
     }
 
     public static toSubscribeGitStatusMessage(json: string): SubscribeGitStatusMessage {
@@ -7260,12 +6835,6 @@ const typeMap: any = {
         { json: "profile", js: "profile", typ: u(undefined, "") },
         { json: "ssh_target", js: "ssh_target", typ: "" },
     ], "any"),
-    "AnswerReviewLoopMessage": o([
-        { json: "answer", js: "answer", typ: "" },
-        { json: "cmd", js: "cmd", typ: r("AnswerReviewLoopMessageCmd") },
-        { json: "interaction_id", js: "interaction_id", typ: u(undefined, "") },
-        { json: "loop_id", js: "loop_id", typ: "" },
-    ], "any"),
     "ApprovePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("ApprovePRMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -7872,14 +7441,6 @@ const typeMap: any = {
         { json: "created_at", js: "created_at", typ: u(undefined, "") },
         { json: "main_repo", js: "main_repo", typ: "" },
         { json: "path", js: "path", typ: "" },
-    ], "any"),
-    "GetReviewLoopRunMessage": o([
-        { json: "cmd", js: "cmd", typ: r("GetReviewLoopRunMessageCmd") },
-        { json: "loop_id", js: "loop_id", typ: "" },
-    ], "any"),
-    "GetReviewLoopStateMessage": o([
-        { json: "cmd", js: "cmd", typ: r("GetReviewLoopStateMessageCmd") },
-        { json: "session_id", js: "session_id", typ: "" },
     ], "any"),
     "GetReviewStateMessage": o([
         { json: "branch", js: "branch", typ: "" },
@@ -8617,7 +8178,6 @@ const typeMap: any = {
         { json: "ok", js: "ok", typ: true },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
-        { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
         { json: "ticket_attach_result", js: "ticket_attach_result", typ: u(undefined, r("TicketAttachResultObject")) },
         { json: "ticket_comment_result", js: "ticket_comment_result", typ: u(undefined, r("TicketCommentResultObject")) },
@@ -8637,60 +8197,6 @@ const typeMap: any = {
         { json: "guidance", js: "guidance", typ: "" },
         { json: "root", js: "root", typ: "" },
         { json: "session_is_chief", js: "session_is_chief", typ: true },
-    ], "any"),
-    "ReviewLoopRunObject": o([
-        { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
-        { json: "created_at", js: "created_at", typ: "" },
-        { json: "custom_prompt", js: "custom_prompt", typ: u(undefined, "") },
-        { json: "handoff_payload_json", js: "handoff_payload_json", typ: u(undefined, "") },
-        { json: "iteration_count", js: "iteration_count", typ: 0 },
-        { json: "iteration_limit", js: "iteration_limit", typ: 0 },
-        { json: "iterations", js: "iterations", typ: u(undefined, a(r("Iteration"))) },
-        { json: "last_decision", js: "last_decision", typ: u(undefined, r("ReviewLoopDecision")) },
-        { json: "last_error", js: "last_error", typ: u(undefined, "") },
-        { json: "last_result_summary", js: "last_result_summary", typ: u(undefined, "") },
-        { json: "latest_iteration", js: "latest_iteration", typ: u(undefined, r("Iteration")) },
-        { json: "loop_id", js: "loop_id", typ: "" },
-        { json: "pending_interaction", js: "pending_interaction", typ: u(undefined, r("Interaction")) },
-        { json: "pending_interaction_id", js: "pending_interaction_id", typ: u(undefined, "") },
-        { json: "preset_id", js: "preset_id", typ: u(undefined, "") },
-        { json: "repo_path", js: "repo_path", typ: "" },
-        { json: "resolved_prompt", js: "resolved_prompt", typ: "" },
-        { json: "source_session_id", js: "source_session_id", typ: "" },
-        { json: "status", js: "status", typ: r("ReviewLoopRunStatus") },
-        { json: "stop_reason", js: "stop_reason", typ: u(undefined, "") },
-        { json: "updated_at", js: "updated_at", typ: "" },
-    ], "any"),
-    "Iteration": o([
-        { json: "assistant_trace_json", js: "assistant_trace_json", typ: u(undefined, "") },
-        { json: "blocking_reason", js: "blocking_reason", typ: u(undefined, "") },
-        { json: "change_stats", js: "change_stats", typ: u(undefined, a(r("FileElement"))) },
-        { json: "changes_made", js: "changes_made", typ: u(undefined, true) },
-        { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
-        { json: "decision", js: "decision", typ: u(undefined, r("ReviewLoopDecision")) },
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "files_touched", js: "files_touched", typ: u(undefined, a("")) },
-        { json: "id", js: "id", typ: "" },
-        { json: "iteration_number", js: "iteration_number", typ: 0 },
-        { json: "loop_id", js: "loop_id", typ: "" },
-        { json: "result_text", js: "result_text", typ: u(undefined, "") },
-        { json: "started_at", js: "started_at", typ: "" },
-        { json: "status", js: "status", typ: r("ReviewLoopIterationStatus") },
-        { json: "structured_output_json", js: "structured_output_json", typ: u(undefined, "") },
-        { json: "suggested_next_focus", js: "suggested_next_focus", typ: u(undefined, "") },
-        { json: "summary", js: "summary", typ: u(undefined, "") },
-    ], "any"),
-    "Interaction": o([
-        { json: "answer", js: "answer", typ: u(undefined, "") },
-        { json: "answered_at", js: "answered_at", typ: u(undefined, "") },
-        { json: "consumed_at", js: "consumed_at", typ: u(undefined, "") },
-        { json: "created_at", js: "created_at", typ: "" },
-        { json: "id", js: "id", typ: "" },
-        { json: "iteration_id", js: "iteration_id", typ: u(undefined, "") },
-        { json: "kind", js: "kind", typ: "" },
-        { json: "loop_id", js: "loop_id", typ: "" },
-        { json: "question", js: "question", typ: "" },
-        { json: "status", js: "status", typ: r("ReviewLoopInteractionStatus") },
     ], "any"),
     "TicketAttachResultObject": o([
         { json: "filename", js: "filename", typ: "" },
@@ -8778,91 +8284,6 @@ const typeMap: any = {
         { json: "resolved_by", js: "resolved_by", typ: u(undefined, "") },
         { json: "review_id", js: "review_id", typ: "" },
     ], "any"),
-    "ReviewLoopInteraction": o([
-        { json: "answer", js: "answer", typ: u(undefined, "") },
-        { json: "answered_at", js: "answered_at", typ: u(undefined, "") },
-        { json: "consumed_at", js: "consumed_at", typ: u(undefined, "") },
-        { json: "created_at", js: "created_at", typ: "" },
-        { json: "id", js: "id", typ: "" },
-        { json: "iteration_id", js: "iteration_id", typ: u(undefined, "") },
-        { json: "kind", js: "kind", typ: "" },
-        { json: "loop_id", js: "loop_id", typ: "" },
-        { json: "question", js: "question", typ: "" },
-        { json: "status", js: "status", typ: r("ReviewLoopInteractionStatus") },
-    ], "any"),
-    "ReviewLoopIteration": o([
-        { json: "assistant_trace_json", js: "assistant_trace_json", typ: u(undefined, "") },
-        { json: "blocking_reason", js: "blocking_reason", typ: u(undefined, "") },
-        { json: "change_stats", js: "change_stats", typ: u(undefined, a(r("FileElement"))) },
-        { json: "changes_made", js: "changes_made", typ: u(undefined, true) },
-        { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
-        { json: "decision", js: "decision", typ: u(undefined, r("ReviewLoopDecision")) },
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "files_touched", js: "files_touched", typ: u(undefined, a("")) },
-        { json: "id", js: "id", typ: "" },
-        { json: "iteration_number", js: "iteration_number", typ: 0 },
-        { json: "loop_id", js: "loop_id", typ: "" },
-        { json: "result_text", js: "result_text", typ: u(undefined, "") },
-        { json: "started_at", js: "started_at", typ: "" },
-        { json: "status", js: "status", typ: r("ReviewLoopIterationStatus") },
-        { json: "structured_output_json", js: "structured_output_json", typ: u(undefined, "") },
-        { json: "suggested_next_focus", js: "suggested_next_focus", typ: u(undefined, "") },
-        { json: "summary", js: "summary", typ: u(undefined, "") },
-    ], "any"),
-    "ReviewLoopResultMessage": o([
-        { json: "action", js: "action", typ: "" },
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("ReviewLoopResultMessageEvent") },
-        { json: "loop_id", js: "loop_id", typ: u(undefined, "") },
-        { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
-        { json: "session_id", js: "session_id", typ: "" },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
-    "ReviewLoopRun": o([
-        { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
-        { json: "created_at", js: "created_at", typ: "" },
-        { json: "custom_prompt", js: "custom_prompt", typ: u(undefined, "") },
-        { json: "handoff_payload_json", js: "handoff_payload_json", typ: u(undefined, "") },
-        { json: "iteration_count", js: "iteration_count", typ: 0 },
-        { json: "iteration_limit", js: "iteration_limit", typ: 0 },
-        { json: "iterations", js: "iterations", typ: u(undefined, a(r("Iteration"))) },
-        { json: "last_decision", js: "last_decision", typ: u(undefined, r("ReviewLoopDecision")) },
-        { json: "last_error", js: "last_error", typ: u(undefined, "") },
-        { json: "last_result_summary", js: "last_result_summary", typ: u(undefined, "") },
-        { json: "latest_iteration", js: "latest_iteration", typ: u(undefined, r("Iteration")) },
-        { json: "loop_id", js: "loop_id", typ: "" },
-        { json: "pending_interaction", js: "pending_interaction", typ: u(undefined, r("Interaction")) },
-        { json: "pending_interaction_id", js: "pending_interaction_id", typ: u(undefined, "") },
-        { json: "preset_id", js: "preset_id", typ: u(undefined, "") },
-        { json: "repo_path", js: "repo_path", typ: "" },
-        { json: "resolved_prompt", js: "resolved_prompt", typ: "" },
-        { json: "source_session_id", js: "source_session_id", typ: "" },
-        { json: "status", js: "status", typ: r("ReviewLoopRunStatus") },
-        { json: "stop_reason", js: "stop_reason", typ: u(undefined, "") },
-        { json: "updated_at", js: "updated_at", typ: "" },
-    ], "any"),
-    "ReviewLoopState": o([
-        { json: "advance_token", js: "advance_token", typ: "" },
-        { json: "created_at", js: "created_at", typ: "" },
-        { json: "custom_prompt", js: "custom_prompt", typ: u(undefined, "") },
-        { json: "iteration_count", js: "iteration_count", typ: 0 },
-        { json: "iteration_limit", js: "iteration_limit", typ: 0 },
-        { json: "last_advance_at", js: "last_advance_at", typ: u(undefined, "") },
-        { json: "last_prompt_at", js: "last_prompt_at", typ: u(undefined, "") },
-        { json: "last_user_input_at", js: "last_user_input_at", typ: u(undefined, "") },
-        { json: "preset_id", js: "preset_id", typ: u(undefined, "") },
-        { json: "resolved_prompt", js: "resolved_prompt", typ: "" },
-        { json: "session_id", js: "session_id", typ: "" },
-        { json: "status", js: "status", typ: r("ReviewLoopStatus") },
-        { json: "stop_reason", js: "stop_reason", typ: u(undefined, "") },
-        { json: "stop_requested", js: "stop_requested", typ: true },
-        { json: "updated_at", js: "updated_at", typ: "" },
-    ], "any"),
-    "ReviewLoopUpdatedMessage": o([
-        { json: "event", js: "event", typ: r("ReviewLoopUpdatedMessageEvent") },
-        { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
-        { json: "session_id", js: "session_id", typ: "" },
-    ], "any"),
     "ReviewState": o([
         { json: "branch", js: "branch", typ: "" },
         { json: "repo_path", js: "repo_path", typ: "" },
@@ -8945,11 +8366,6 @@ const typeMap: any = {
         { json: "name", js: "name", typ: "" },
         { json: "priority", js: "priority", typ: 0 },
     ], "any"),
-    "SetReviewLoopIterationLimitMessage": o([
-        { json: "cmd", js: "cmd", typ: r("SetReviewLoopIterationLimitMessageCmd") },
-        { json: "iteration_limit", js: "iteration_limit", typ: 0 },
-        { json: "session_id", js: "session_id", typ: "" },
-    ], "any"),
     "SetSessionResumeIDMessage": o([
         { json: "cmd", js: "cmd", typ: r("SetSessionResumeIDMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -9005,14 +8421,6 @@ const typeMap: any = {
         { json: "workspace_id", js: "workspace_id", typ: "" },
         { json: "yolo_mode", js: "yolo_mode", typ: u(undefined, true) },
     ], "any"),
-    "StartReviewLoopMessage": o([
-        { json: "cmd", js: "cmd", typ: r("StartReviewLoopMessageCmd") },
-        { json: "handoff_payload_json", js: "handoff_payload_json", typ: u(undefined, "") },
-        { json: "iteration_limit", js: "iteration_limit", typ: 0 },
-        { json: "preset_id", js: "preset_id", typ: u(undefined, "") },
-        { json: "prompt", js: "prompt", typ: "" },
-        { json: "session_id", js: "session_id", typ: "" },
-    ], "any"),
     "StateMessage": o([
         { json: "cmd", js: "cmd", typ: r("StateMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -9022,10 +8430,6 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("StopMessageCmd") },
         { json: "id", js: "id", typ: "" },
         { json: "transcript_path", js: "transcript_path", typ: "" },
-    ], "any"),
-    "StopReviewLoopMessage": o([
-        { json: "cmd", js: "cmd", typ: r("StopReviewLoopMessageCmd") },
-        { json: "session_id", js: "session_id", typ: "" },
     ], "any"),
     "SubscribeGitStatusMessage": o([
         { json: "cmd", js: "cmd", typ: r("SubscribeGitStatusMessageCmd") },
@@ -9269,7 +8673,6 @@ const typeMap: any = {
         { json: "reason", js: "reason", typ: u(undefined, "") },
         { json: "recent_locations", js: "recent_locations", typ: u(undefined, a(r("RecentLocationElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
-        { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
         { json: "rows", js: "rows", typ: u(undefined, 0) },
         { json: "running", js: "running", typ: u(undefined, true) },
         { json: "runtime_id", js: "runtime_id", typ: u(undefined, "") },
@@ -9675,9 +9078,6 @@ const typeMap: any = {
     "AddEndpointMessageCmd": [
         "add_endpoint",
     ],
-    "AnswerReviewLoopMessageCmd": [
-        "answer_review_loop",
-    ],
     "ApprovePRMessageCmd": [
         "approve_pr",
     ],
@@ -9880,12 +9280,6 @@ const typeMap: any = {
     ],
     "GetRepoInfoResultMessageEvent": [
         "get_repo_info_result",
-    ],
-    "GetReviewLoopRunMessageCmd": [
-        "get_review_loop_run",
-    ],
-    "GetReviewLoopStateMessageCmd": [
-        "get_review_loop_state",
     ],
     "GetReviewStateMessageCmd": [
         "get_review_state",
@@ -10150,31 +9544,6 @@ const typeMap: any = {
     "ResolveCommentResultMessageEvent": [
         "resolve_comment_result",
     ],
-    "ReviewLoopDecision": [
-        "continue",
-        "converged",
-        "error",
-        "needs_user_input",
-    ],
-    "ReviewLoopIterationStatus": [
-        "awaiting_user",
-        "cancelled",
-        "completed",
-        "error",
-        "running",
-    ],
-    "ReviewLoopInteractionStatus": [
-        "answered",
-        "consumed",
-        "pending",
-    ],
-    "ReviewLoopRunStatus": [
-        "awaiting_user",
-        "completed",
-        "error",
-        "running",
-        "stopped",
-    ],
     "TicketEventKind": [
         "assigned",
         "attachment_added",
@@ -10186,20 +9555,6 @@ const typeMap: any = {
     "WorkspaceContextMaintenanceAction": [
         "compact",
         "rollback",
-    ],
-    "ReviewLoopResultMessageEvent": [
-        "review_loop_result",
-    ],
-    "ReviewLoopStatus": [
-        "advance_received_waiting_prompt",
-        "completed",
-        "error",
-        "running",
-        "stopped",
-        "waiting_for_agent_advance",
-    ],
-    "ReviewLoopUpdatedMessageEvent": [
-        "review_loop_updated",
     ],
     "RuntimeRespawnedMessageEvent": [
         "runtime_respawned",
@@ -10237,9 +9592,6 @@ const typeMap: any = {
     "SetPluginPriorityMessageCmd": [
         "set_plugin_priority",
     ],
-    "SetReviewLoopIterationLimitMessageCmd": [
-        "set_review_loop_iteration_limit",
-    ],
     "SetSessionResumeIDMessageCmd": [
         "set_session_resume_id",
     ],
@@ -10268,17 +9620,11 @@ const typeMap: any = {
     "SpawnSessionMessageCmd": [
         "spawn_session",
     ],
-    "StartReviewLoopMessageCmd": [
-        "start_review_loop",
-    ],
     "StateMessageCmd": [
         "state",
     ],
     "StopMessageCmd": [
         "stop",
-    ],
-    "StopReviewLoopMessageCmd": [
-        "stop_review_loop",
     ],
     "SubscribeGitStatusMessageCmd": [
         "subscribe_git_status",

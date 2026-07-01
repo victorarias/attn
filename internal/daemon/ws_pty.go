@@ -997,9 +997,6 @@ func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stre
 
 func (d *Daemon) handlePtyInput(client *wsClient, msg *protocol.PtyInputMessage) {
 	source := strings.TrimSpace(protocol.Deref(msg.Source))
-	if source != "" {
-		d.setPendingInputSource(msg.ID, source)
-	}
 	// Record genuine user keystrokes for the nudge splice guard. A doorbell that fires
 	// within userInputGuardWindow of a keystroke would splice onto the half-typed line.
 	d.noteUserInput(msg.ID, source)

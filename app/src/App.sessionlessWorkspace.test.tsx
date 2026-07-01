@@ -43,7 +43,6 @@ vi.mock('./components/GhosttyTerminal', async () => {
 // Sidebar stub: one select button per visible workspace, plus the reveal toggle.
 vi.mock('./components/Sidebar', () => ({
   EditorIcon: () => null,
-  ReviewLoopIcon: () => null,
   WorkflowIcon: () => null,
   DiffIcon: () => null,
   PRsIcon: () => null,
@@ -253,8 +252,6 @@ describe('tile-only (sessionless) workspace selection and render', () => {
       sendGetFileDiff: vi.fn(async () => ({ success: true, original: '', modified: '' })),
       sendGetBranchDiffFiles: vi.fn(async () => ({ success: true, base_ref: 'main', files: [] })),
       getRepoInfo: vi.fn(async () => ({ success: true, is_git_repo: true, branch: 'main' })),
-      getReviewLoopRun: vi.fn(async () => ({ success: true, state: null })),
-      getReviewLoopState: vi.fn(async () => ({ success: true, state: null })),
       listWorkflowRuns: vi.fn(async () => ({ success: true, runs: [] })),
       getReviewState: vi.fn(async () => ({ success: true })),
       markFileViewed: vi.fn(async () => ({ success: true })),
@@ -263,9 +260,6 @@ describe('tile-only (sessionless) workspace selection and render', () => {
       sendResolveComment: vi.fn(async () => ({ success: true })),
       sendDeleteComment: vi.fn(async () => ({ success: true })),
       sendGetComments: vi.fn(async () => ({ success: true, comments: [] })),
-      sendStartReviewLoop: vi.fn(async () => ({ success: true, state: null })),
-      sendStopReviewLoop: vi.fn(async () => ({ success: true, state: null })),
-      setReviewLoopIterationLimit: vi.fn(async () => ({ success: true, state: null })),
       connectionError: null,
       hasReceivedInitialState: true,
       rateLimit: null,

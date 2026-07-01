@@ -90,10 +90,6 @@ interface UseUiAutomationBridgeArgs {
   resolveComment?: (commentId: string, resolved: boolean) => Promise<{ success: boolean }>;
   deleteComment?: (commentId: string) => Promise<{ success: boolean }>;
   getComments?: (reviewId: string, filepath?: string) => Promise<{ success: boolean; comments?: unknown[] }>;
-  startReviewLoop?: (prompt: string, iterationLimit: number, presetId?: string) => Promise<void>;
-  stopReviewLoop?: () => Promise<void>;
-  getReviewLoopState?: (sessionId: string) => Promise<{ success: boolean; state: unknown | null }>;
-  answerReviewLoop?: (loopId: string, interactionId: string, answer: string) => Promise<{ success: boolean; state: unknown | null }>;
   // Ticket detail panel (work-tracker). The mutation actions drive the real
   // panel controls, so the bridge only needs to open/close the panel and read
   // the live ticket rows; openDockPanel above is reused to mount the dock.
@@ -1425,7 +1421,6 @@ async function capturePerfSnapshot(
       diffViewCount: document.querySelectorAll('.diff-view').length,
       diffDetailOpen: document.querySelectorAll('.dock-panel--diff-detail, .dock-panel--diffDetail').length > 0,
       diffPanelOpen: document.querySelectorAll('.dock-panel--diff').length > 0,
-      reviewLoopOpen: document.querySelectorAll('.dock-panel--review-loop, .dock-panel--reviewLoop').length > 0,
     },
     sessions: {
       count: scopedSessions.length,
@@ -1491,34 +1486,6 @@ function concatByteChunks(chunks: Uint8Array[]): Uint8Array {
     offset += chunk.length;
   }
   return combined;
-}
-
-function collectReviewLoopUiState(sessionId: string) {
-  const requestedDrawer = document.querySelector(`[data-testid="review-loop-drawer-${sessionId}"]`);
-  const fallbackDrawer = document.querySelector('.review-loop-drawer-panel');
-  const drawer = requestedDrawer || fallbackDrawer;
-  const reviewLoopPanel = document.querySelector('.dock-panel--review-loop, .dock-panel--reviewLoop');
-  const summary = drawer?.querySelector('.review-loop-panel-card--summary .review-loop-panel-content');
-  const question = drawer?.querySelector('.review-loop-question-text');
-  const status = drawer?.querySelector('.review-loop-drawer-status');
-  const subtitle = drawer?.querySelector('.review-loop-drawer-subtitle');
-  const files = Array.from(drawer?.querySelectorAll('.review-loop-file-list li, .review-loop-change-path') || [])
-    .map((node) => node.textContent?.trim() || '')
-    .filter(Boolean);
-
-  return {
-    sessionId,
-    open: Boolean(reviewLoopPanel && drawer),
-    drawerBounds: rectSnapshot(drawer || null),
-    panelBounds: rectSnapshot(reviewLoopPanel || null),
-    drawerTestId: drawer instanceof HTMLElement ? drawer.dataset.testid || drawer.getAttribute('data-testid') || '' : '',
-    statusText: status?.textContent?.trim() || '',
-    subtitleText: subtitle?.textContent?.trim() || '',
-    summaryText: summary?.textContent?.trim() || '',
-    questionText: question?.textContent?.trim() || '',
-    answerVisible: Boolean(drawer?.querySelector('.review-loop-answer-box')),
-    files,
-  };
 }
 
 /**
@@ -1604,10 +1571,6 @@ export function useUiAutomationBridge({
   resolveComment,
   deleteComment,
   getComments,
-  startReviewLoop,
-  stopReviewLoop,
-  getReviewLoopState,
-  answerReviewLoop,
   openTicketDetail,
   closeTicketDetail,
   tickets,
@@ -2522,55 +2485,6 @@ export function useUiAutomationBridge({
           throw new Error('review_delete_comment requires commentId');
         }
         return deleteComment(commentId);
-      }
-      case 'review_loop_start': {
-        if (!startReviewLoop) {
-          throw new Error('review_loop_start is not configured');
-        }
-        const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
-        const iterationLimit = typeof payload.iterationLimit === 'number' ? payload.iterationLimit : 1;
-        const presetId = typeof payload.presetId === 'string' ? payload.presetId : undefined;
-        if (!prompt) {
-          throw new Error('review_loop_start requires prompt');
-        }
-        await startReviewLoop(prompt, iterationLimit, presetId);
-        return { ok: true };
-      }
-      case 'review_loop_stop': {
-        if (!stopReviewLoop) {
-          throw new Error('review_loop_stop is not configured');
-        }
-        await stopReviewLoop();
-        return { ok: true };
-      }
-      case 'review_loop_get_state': {
-        if (!getReviewLoopState) {
-          throw new Error('review_loop_get_state is not configured');
-        }
-        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : activeSessionId;
-        if (!sessionId) {
-          throw new Error('review_loop_get_state requires sessionId');
-        }
-        return getReviewLoopState(sessionId);
-      }
-      case 'review_loop_answer': {
-        if (!answerReviewLoop) {
-          throw new Error('review_loop_answer is not configured');
-        }
-        const loopId = typeof payload.loopId === 'string' ? payload.loopId : '';
-        const interactionId = typeof payload.interactionId === 'string' ? payload.interactionId : '';
-        const answer = typeof payload.answer === 'string' ? payload.answer : '';
-        if (!loopId || !interactionId || !answer.trim()) {
-          throw new Error('review_loop_answer requires loopId, interactionId, and answer');
-        }
-        return answerReviewLoop(loopId, interactionId, answer.trim());
-      }
-      case 'review_loop_ui_state': {
-        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : activeSessionId;
-        if (!sessionId) {
-          throw new Error('review_loop_ui_state requires sessionId');
-        }
-        return collectReviewLoopUiState(sessionId);
       }
       // --- Ticket detail panel (work-tracker) ------------------------------
       // Read-only board snapshot (foundation for the slice-5 board scenario).

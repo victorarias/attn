@@ -27,7 +27,6 @@ interface TestSession {
   endpointName?: string;
   endpointStatus?: string;
   recoverable?: boolean;
-  reviewLoopStatus?: string;
   chiefOfStaff?: boolean;
   delegatedFromChief?: boolean;
 }
@@ -412,24 +411,6 @@ describe('Sidebar', () => {
     expect(onWorkspaceReorder).not.toHaveBeenCalled();
     expect(onSelectWorkspace).toHaveBeenCalledWith('workspace-/repo/a');
     expect(screen.queryByTestId('workspace-reorder-seam-0')).not.toBeInTheDocument();
-  });
-
-  it('shows review loop indicator for sessions with loop state', () => {
-    const sessions: TestSession[] = [{
-      id: 's1',
-      label: 'claude',
-      state: 'idle',
-      agent: 'claude',
-      reviewLoopStatus: 'running',
-    }];
-    render(
-      <Sidebar
-        {...baseProps}
-        {...buildSidebarData(sessions)}
-      />
-    );
-
-    expect(screen.getByLabelText('Review loop running')).toBeInTheDocument();
   });
 
   it('shows the delegated-from-chief badge only on sessions delegated from the chief', () => {

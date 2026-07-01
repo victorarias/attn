@@ -138,81 +138,6 @@ function saveText(filePath, value) {
   fs.writeFileSync(filePath, value, 'utf8');
 }
 
-function buildScriptedReviewLoopEnv() {
-  const config = {
-    scenarios: [
-      {
-        name: 'stop-flow',
-        match_prompt_contains: 'ATTN_REMOTE_LOOP_STOP_SCENARIO',
-        iterations: [
-          {
-            delay_ms: 5000,
-            outcome: {
-              loop_decision: 'continue',
-              summary: 'Stop scenario should be interrupted before completion.',
-              changes_made: false,
-              files_touched: ['tracked.txt'],
-              questions_for_user: [],
-              blocking_reason: '',
-              suggested_next_focus: 'Stop the loop from the UI.',
-            },
-            assistant_trace: JSON.stringify({
-              entries: [
-                { kind: 'text', content: 'Scripted stop-flow iteration is running.' },
-              ],
-            }),
-            result_text: 'stop-flow',
-          },
-        ],
-      },
-      {
-        name: 'await-user-flow',
-        match_prompt_contains: 'ATTN_REMOTE_LOOP_QUESTION_SCENARIO',
-        iterations: [
-          {
-            outcome: {
-              loop_decision: 'needs_user_input',
-              summary: 'Need a human decision before the next pass.',
-              changes_made: false,
-              files_touched: ['tracked.txt'],
-              questions_for_user: ['Should the loop continue with answer yes?'],
-              blocking_reason: 'Waiting for explicit approval.',
-              suggested_next_focus: 'Await user answer.',
-            },
-            assistant_trace: JSON.stringify({
-              entries: [
-                { kind: 'text', content: 'Scripted review loop is waiting for an answer.' },
-              ],
-            }),
-            result_text: 'await-user-flow',
-          },
-          {
-            expect_answer: 'Answer: yes',
-            outcome: {
-              loop_decision: 'converged',
-              summary: 'Loop completed after receiving the scripted answer.',
-              changes_made: true,
-              files_touched: ['tracked.txt'],
-              questions_for_user: [],
-              blocking_reason: '',
-              suggested_next_focus: 'Done.',
-            },
-            assistant_trace: JSON.stringify({
-              entries: [
-                { kind: 'text', content: 'Scripted review loop received the answer and completed.' },
-              ],
-            }),
-            result_text: 'completed-after-answer',
-          },
-        ],
-      },
-    ],
-  };
-  return {
-    ATTN_REVIEW_LOOP_SCRIPT_B64: Buffer.from(JSON.stringify(config), 'utf8').toString('base64'),
-  };
-}
-
 function parseArgs(argv) {
   const remaining = [];
   const options = {
@@ -718,42 +643,6 @@ async function waitForSessionUiState(client, sessionId, predicate, description, 
   );
 }
 
-async function waitForReviewLoopState(client, sessionId, predicate, description, timeoutMs = 60_000) {
-  const startedAt = Date.now();
-  let lastState = null;
-  while (Date.now() - startedAt < timeoutMs) {
-    const remainingMs = timeoutMs - (Date.now() - startedAt);
-    lastState = await client.request(
-      'review_loop_get_state',
-      { sessionId },
-      { timeoutMs: Math.max(10_000, Math.min(20_000, remainingMs)) },
-    );
-    if (predicate(lastState)) {
-      return lastState;
-    }
-    await sleep(250);
-  }
-  throw new Error(`Timed out waiting for ${description}. Last state:\n${JSON.stringify(lastState, null, 2)}`);
-}
-
-async function waitForReviewLoopUiState(client, sessionId, predicate, description, timeoutMs = 30_000) {
-  const startedAt = Date.now();
-  let lastState = null;
-  while (Date.now() - startedAt < timeoutMs) {
-    const remainingMs = timeoutMs - (Date.now() - startedAt);
-    lastState = await client.request(
-      'review_loop_ui_state',
-      { sessionId },
-      { timeoutMs: Math.max(10_000, Math.min(20_000, remainingMs)) },
-    );
-    if (predicate(lastState)) {
-      return lastState;
-    }
-    await sleep(250);
-  }
-  throw new Error(`Timed out waiting for ${description}. Last UI state:\n${JSON.stringify(lastState, null, 2)}`);
-}
-
 async function waitForReviewPanelSnapshot(client, predicate, description, timeoutMs = 30_000) {
   const startedAt = Date.now();
   let lastSnapshot = null;
@@ -905,7 +794,7 @@ Remote hub options:
   let remoteWorktreeBranch = null;
   const client = new UiAutomationClient({
     appPath: options.appPath,
-    launchEnv: buildScriptedReviewLoopEnv(),
+    launchEnv: {},
   });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   let currentStep = 'init';
@@ -1480,100 +1369,6 @@ printf '%s\\n' ${shellQuote(diffMarker)} >> ${shellQuote(preparedRepo.trackedFil
         deleteComment,
         commentsAfterDelete,
       });
-
-      setStep('remote-review-loop');
-      const stopLoopPrompt = 'ATTN_REMOTE_LOOP_STOP_SCENARIO stop this loop after it starts.';
-      await client.request('review_loop_start', {
-        prompt: stopLoopPrompt,
-        iterationLimit: 1,
-      }, {
-        timeoutMs: 20_000,
-      });
-      const stopLoopRunning = await waitForReviewLoopState(
-        client,
-        remoteSessionId,
-        (state) => state?.success && state.state?.status === 'running' && !!state.state?.loop_id,
-        `remote review loop running for ${remoteSessionId}`,
-        20_000,
-      );
-      await client.request('review_loop_stop', {}, { timeoutMs: 20_000 });
-      const stopLoopStopped = await waitForReviewLoopState(
-        client,
-        remoteSessionId,
-        (state) => state?.success && state.state?.status === 'stopped',
-        `remote review loop stopped for ${remoteSessionId}`,
-        20_000,
-      );
-      saveJson(path.join(runDir, 'remote-review-loop-stop.json'), {
-        start: stopLoopRunning,
-        stopped: stopLoopStopped,
-      });
-
-      const questionLoopPrompt = 'ATTN_REMOTE_LOOP_QUESTION_SCENARIO ask the scripted question and wait for yes.';
-      await client.request('review_loop_start', {
-        prompt: questionLoopPrompt,
-        iterationLimit: 2,
-      }, {
-        timeoutMs: 20_000,
-      });
-      const awaitingUserState = await waitForReviewLoopState(
-        client,
-        remoteSessionId,
-        (state) => state?.success && state.state?.status === 'awaiting_user' && !!state.state?.pending_interaction?.id,
-        `remote review loop awaiting user for ${remoteSessionId}`,
-        30_000,
-      );
-
-      await client.request('select_session', { sessionId: remoteSessionId });
-      const initialReviewLoopUi = await client.request('review_loop_ui_state', {
-        sessionId: remoteSessionId,
-      });
-      if (!initialReviewLoopUi?.panelBounds) {
-        await client.request('dispatch_shortcut', { shortcutId: 'dock.reviewLoop' });
-      }
-      const awaitingUserUi = await waitForReviewLoopUiState(
-        client,
-        remoteSessionId,
-        (state) => Boolean(state?.panelBounds && state?.questionText?.includes('Should the loop continue with answer yes?')),
-        `remote review loop UI question for ${remoteSessionId}`,
-        20_000,
-      );
-      saveJson(path.join(runDir, 'remote-review-loop-awaiting-user.json'), {
-        state: awaitingUserState,
-        ui: awaitingUserUi,
-      });
-
-      const pendingInteraction = awaitingUserState?.state?.pending_interaction;
-      const answerResult = await client.request('review_loop_answer', {
-        loopId: awaitingUserState.state.loop_id,
-        interactionId: pendingInteraction.id,
-        answer: 'yes',
-      }, {
-        timeoutMs: 20_000,
-      });
-      const completedLoopState = await waitForReviewLoopState(
-        client,
-        remoteSessionId,
-        (state) => state?.success && state.state?.status === 'completed',
-        `remote review loop completed for ${remoteSessionId}`,
-        30_000,
-      );
-      const completedLoopUi = await waitForReviewLoopUiState(
-        client,
-        remoteSessionId,
-        (state) => Boolean(
-          state?.panelBounds &&
-          state?.drawerTestId === `review-loop-drawer-${remoteSessionId}` &&
-          state?.statusText?.includes('All Rounds Done')
-        ),
-        `remote review loop completed UI for ${remoteSessionId}`,
-        20_000,
-      );
-      saveJson(path.join(runDir, 'remote-review-loop-completed.json'), {
-        answerResult,
-        state: completedLoopState,
-        ui: completedLoopUi,
-      });
     }
 
     for (const sessionId of createdRemoteSessionIds) {
@@ -1631,9 +1426,6 @@ printf '%s\\n' ${shellQuote(diffMarker)} >> ${shellQuote(preparedRepo.trackedFil
         reviewState: preparedRepo ? 'remote-review-state.json' : null,
         reviewPanelSnapshot: preparedRepo ? 'remote-review-panel.json' : null,
         commentMutations: preparedRepo ? 'remote-comment-mutations.json' : null,
-        reviewLoopStop: preparedRepo ? 'remote-review-loop-stop.json' : null,
-        reviewLoopAwaitingUser: preparedRepo ? 'remote-review-loop-awaiting-user.json' : null,
-        reviewLoopCompleted: preparedRepo ? 'remote-review-loop-completed.json' : null,
         runtimeDebugConfig: 'runtime-debug-config.json',
         utilityPaneReady: 'remote-utility-pane-ready.json',
         finalSnapshot: 'structured-snapshot-final.json',

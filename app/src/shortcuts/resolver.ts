@@ -40,7 +40,6 @@ export interface KeybindingsConfig {
 // actions, then the sidebar toggle). Every entry must be a real ShortcutId.
 export const DEFAULT_DOCK_ITEMS: ShortcutId[] = [
   'dock.diffDetail',
-  'dock.reviewLoop',
   'dock.diff',
   'dock.attention',
   'terminal.splitVertical',

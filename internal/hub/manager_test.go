@@ -554,7 +554,7 @@ func TestForwardsRawEventIncludesPickerResults(t *testing.T) {
 	}
 }
 
-func TestManagerObserveRemoteEventCachesReviewCommentAndLoopOwnership(t *testing.T) {
+func TestManagerObserveRemoteEventCachesReviewAndCommentOwnership(t *testing.T) {
 	endpointStore := store.New()
 	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
 	if err != nil {
@@ -590,32 +590,11 @@ func TestManagerObserveRemoteEventCachesReviewCommentAndLoopOwnership(t *testing
 	}
 	manager.observeRemoteEvent(record.ID, protocol.EventAddCommentResult, commentPayload)
 
-	loopPayload, err := json.Marshal(protocol.ReviewLoopResultMessage{
-		Event:   protocol.EventReviewLoopResult,
-		Success: true,
-		ReviewLoopRun: &protocol.ReviewLoopRun{
-			LoopID:          "loop-1",
-			SourceSessionID: "sess-1",
-			RepoPath:        "/srv/repo",
-			ResolvedPrompt:  "review",
-			Status:          protocol.ReviewLoopRunStatusRunning,
-			CreatedAt:       "2026-04-03T00:00:00Z",
-			UpdatedAt:       "2026-04-03T00:00:00Z",
-		},
-	})
-	if err != nil {
-		t.Fatalf("Marshal(review loop) error = %v", err)
-	}
-	manager.observeRemoteEvent(record.ID, protocol.EventReviewLoopResult, loopPayload)
-
 	if endpointID, ok := manager.EndpointIDForReview("review-1"); !ok || endpointID != record.ID {
 		t.Fatalf("EndpointIDForReview(review-1) = (%q, %v), want (%q, true)", endpointID, ok, record.ID)
 	}
 	if endpointID, ok := manager.EndpointIDForComment("comment-1"); !ok || endpointID != record.ID {
 		t.Fatalf("EndpointIDForComment(comment-1) = (%q, %v), want (%q, true)", endpointID, ok, record.ID)
-	}
-	if endpointID, ok := manager.EndpointIDForReviewLoop("loop-1"); !ok || endpointID != record.ID {
-		t.Fatalf("EndpointIDForReviewLoop(loop-1) = (%q, %v), want (%q, true)", endpointID, ok, record.ID)
 	}
 
 	manager.mu.Lock()
@@ -628,9 +607,6 @@ func TestManagerObserveRemoteEventCachesReviewCommentAndLoopOwnership(t *testing
 	}
 	if endpointID, ok := manager.EndpointIDForComment("comment-1"); ok || endpointID != "" {
 		t.Fatalf("EndpointIDForComment(after stop) = (%q, %v), want ('', false)", endpointID, ok)
-	}
-	if endpointID, ok := manager.EndpointIDForReviewLoop("loop-1"); ok || endpointID != "" {
-		t.Fatalf("EndpointIDForReviewLoop(after stop) = (%q, %v), want ('', false)", endpointID, ok)
 	}
 }
 

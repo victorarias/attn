@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-01]
+
+### Removed
+- **The automated review loop is gone.** The standalone review-loop feature — the SDK-managed iterating loop, its session sidebar bar, `attn review-loop` CLI, and related settings — has been removed. Diff comments, PR reviews, and the workflow engine are unaffected.
+
 ## [2026-06-30]
 
 ### Fixed

@@ -18,27 +18,22 @@ import (
 )
 
 const (
-	SettingProjectsDirectory        = "projects_directory"
-	SettingUIScale                  = "uiScale"
-	SettingClaudeExecutable         = "claude_executable"
-	SettingCodexExecutable          = "codex_executable"
-	SettingCopilotExecutable        = "copilot_executable"
-	SettingEditorExecutable         = "editor_executable"
-	SettingNewSessionAgent          = "new_session_agent"
-	SettingClaudeAvailable          = "claude_available"
-	SettingCodexAvailable           = "codex_available"
-	SettingCopilotAvailable         = "copilot_available"
-	SettingPTYBackendMode           = "pty_backend_mode"
-	SettingTheme                    = "theme"
-	SettingReviewLoopPresets        = "review_loop_prompt_presets"
-	SettingReviewLoopLastPreset     = "review_loop_last_preset"
-	SettingReviewLoopLastPrompt     = "review_loop_last_prompt"
-	SettingReviewLoopLastIterations = "review_loop_last_iterations"
-	SettingReviewLoopModel          = "review_loop_model"
-	SettingReviewerModel            = "reviewer_model"
-	SettingKeeperCompact            = "workspace_keeper_compact"
-	SettingTailscaleEnabled         = "tailscale_enabled"
-	SettingWorkflowsEnabled         = "workflows_enabled"
+	SettingProjectsDirectory = "projects_directory"
+	SettingUIScale           = "uiScale"
+	SettingClaudeExecutable  = "claude_executable"
+	SettingCodexExecutable   = "codex_executable"
+	SettingCopilotExecutable = "copilot_executable"
+	SettingEditorExecutable  = "editor_executable"
+	SettingNewSessionAgent   = "new_session_agent"
+	SettingClaudeAvailable   = "claude_available"
+	SettingCodexAvailable    = "codex_available"
+	SettingCopilotAvailable  = "copilot_available"
+	SettingPTYBackendMode    = "pty_backend_mode"
+	SettingTheme             = "theme"
+	SettingReviewerModel     = "reviewer_model"
+	SettingKeeperCompact     = "workspace_keeper_compact"
+	SettingTailscaleEnabled  = "tailscale_enabled"
+	SettingWorkflowsEnabled  = "workflows_enabled"
 	// SettingAutoApproveEnabled, when true, launches interactive agents in their
 	// native auto-approve mode (Claude `--permission-mode auto`, Codex
 	// `approvals_reviewer=auto_review`) so they can run unattended without
@@ -311,15 +306,15 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateNotebookCronTimezone(value)
 	case SettingKeybindingsConfig:
 		return validateKeybindingsConfig(value)
-	case SettingReviewLoopPresets, SettingReviewLoopLastPreset, SettingReviewLoopLastPrompt, SettingReviewLoopLastIterations, SettingReviewLoopModel, SettingReviewerModel:
+	case SettingReviewerModel:
 		return nil
 	default:
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingNewSessionYoloPrefix) {
 			return validateBooleanSetting(value)
 		}
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingChiefModelPrefix) {
-			// Model names/aliases are free-form (like the review-loop model
-			// settings); accept any value and let the agent reject bad ones.
+			// Model names/aliases are free-form (like the reviewer_model
+			// setting); accept any value and let the agent reject bad ones.
 			return nil
 		}
 		if _, ok := isAgentExecutableSettingKey(key); ok {

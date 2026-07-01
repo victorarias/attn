@@ -1012,18 +1012,6 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleGetRepoInfoWS(client, msg.(*protocol.GetRepoInfoMessage))
 	case protocol.CmdGetReviewState:
 		d.handleGetReviewState(client, msg.(*protocol.GetReviewStateMessage))
-	case protocol.CmdStartReviewLoop:
-		d.handleStartReviewLoopWS(client, msg.(*protocol.StartReviewLoopMessage))
-	case protocol.CmdStopReviewLoop:
-		d.handleStopReviewLoopWS(client, msg.(*protocol.StopReviewLoopMessage))
-	case protocol.CmdGetReviewLoopState:
-		d.handleGetReviewLoopStateWS(client, msg.(*protocol.GetReviewLoopStateMessage))
-	case protocol.CmdGetReviewLoopRun:
-		d.handleGetReviewLoopRunWS(client, msg.(*protocol.GetReviewLoopRunMessage))
-	case protocol.CmdSetReviewLoopIterations:
-		d.handleSetReviewLoopIterationsWS(client, msg.(*protocol.SetReviewLoopIterationLimitMessage))
-	case protocol.CmdAnswerReviewLoop:
-		d.handleAnswerReviewLoopWS(client, msg.(*protocol.AnswerReviewLoopMessage))
 	case protocol.CmdWorkflowRunGet:
 		d.handleWorkflowRunGetWS(client, msg.(*protocol.WorkflowRunGetMessage))
 	case protocol.CmdWorkflowRunList:
@@ -1224,22 +1212,6 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.TriggerNudgeMessage); ok {
 			return typed.SessionID
 		}
-	case protocol.CmdStartReviewLoop:
-		if typed, ok := msg.(*protocol.StartReviewLoopMessage); ok {
-			return typed.SessionID
-		}
-	case protocol.CmdStopReviewLoop:
-		if typed, ok := msg.(*protocol.StopReviewLoopMessage); ok {
-			return typed.SessionID
-		}
-	case protocol.CmdGetReviewLoopState:
-		if typed, ok := msg.(*protocol.GetReviewLoopStateMessage); ok {
-			return typed.SessionID
-		}
-	case protocol.CmdSetReviewLoopIterations:
-		if typed, ok := msg.(*protocol.SetReviewLoopIterationLimitMessage); ok {
-			return typed.SessionID
-		}
 	case protocol.CmdRenameSession:
 		if typed, ok := msg.(*protocol.RenameSessionMessage); ok {
 			return typed.SessionID
@@ -1387,7 +1359,6 @@ func remoteCommandScopedEndpointID(msg interface{}, manager interface {
 	EndpointIDForPath(path string) (string, bool)
 	EndpointIDForReview(reviewID string) (string, bool)
 	EndpointIDForComment(commentID string) (string, bool)
-	EndpointIDForReviewLoop(loopID string) (string, bool)
 }) (string, bool) {
 	if manager == nil {
 		return "", false
@@ -1404,11 +1375,6 @@ func remoteCommandScopedEndpointID(msg interface{}, manager interface {
 	}
 	if commentID := remoteCommandCommentID(msg); commentID != "" {
 		if endpointID, ok := manager.EndpointIDForComment(commentID); ok {
-			return endpointID, true
-		}
-	}
-	if loopID := remoteCommandReviewLoopID(msg); loopID != "" {
-		if endpointID, ok := manager.EndpointIDForReviewLoop(loopID); ok {
 			return endpointID, true
 		}
 	}
@@ -1469,16 +1435,6 @@ func remoteCommandCommentID(msg interface{}) string {
 		return typed.CommentID
 	case *protocol.DeleteCommentMessage:
 		return typed.CommentID
-	}
-	return ""
-}
-
-func remoteCommandReviewLoopID(msg interface{}) string {
-	switch typed := msg.(type) {
-	case *protocol.GetReviewLoopRunMessage:
-		return typed.LoopID
-	case *protocol.AnswerReviewLoopMessage:
-		return typed.LoopID
 	}
 	return ""
 }

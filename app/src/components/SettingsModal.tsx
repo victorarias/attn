@@ -23,13 +23,6 @@ import {
   orderedAgents,
   resolvePreferredAgent,
 } from '../utils/agentAvailability';
-import {
-  buildCustomReviewLoopPresetID,
-  parseSavedReviewLoopPresets,
-  REVIEW_LOOP_SETTINGS_CUSTOM_PRESETS,
-  type ReviewLoopPreset,
-  serializeSavedReviewLoopPresets,
-} from '../utils/reviewLoopPresets';
 import { BUILD_PROFILE } from '../utils/buildProfile';
 import {
   defaultKeeperDutyModel,
@@ -143,12 +136,6 @@ export function SettingsModal({
   const [chiefModels, setChiefModels] = useState<Record<SessionAgent, string>>({});
   const [editorExecutable, setEditorExecutable] = useState(settings.editor_executable || '');
   const [defaultAgent, setDefaultAgent] = useState<SessionAgent>('claude');
-  const [reviewLoopPresets, setReviewLoopPresets] = useState<ReviewLoopPreset[]>([]);
-  const [reviewLoopPresetName, setReviewLoopPresetName] = useState('');
-  const [reviewLoopPrompt, setReviewLoopPrompt] = useState('');
-  const [reviewLoopIterations, setReviewLoopIterations] = useState(3);
-  const [selectedReviewLoopPresetID, setSelectedReviewLoopPresetID] = useState('');
-  const [reviewLoopModel, setReviewLoopModel] = useState(settings.review_loop_model || '');
   const [reviewerModel, setReviewerModel] = useState(settings.reviewer_model || '');
   // One draft (agent + model) per keeper duty, edited locally and committed per-row.
   const [keeperDrafts, setKeeperDrafts] = useState<Record<KeeperDutyKey, KeeperDraft>>(
@@ -200,11 +187,6 @@ export function SettingsModal({
   );
   const actualEditorExecutable = settings.editor_executable || '';
   const actualDefaultAgent = normalizeSessionAgent(settings.new_session_agent, 'claude');
-  const actualReviewLoopPresets = useMemo(
-    () => parseSavedReviewLoopPresets(settings[REVIEW_LOOP_SETTINGS_CUSTOM_PRESETS]),
-    [settings],
-  );
-  const actualReviewLoopModel = settings.review_loop_model || '';
   const actualReviewerModel = settings.reviewer_model || '';
   // The saved (persisted) config for every keeper duty, keyed by duty. A null entry
   // means the setting is blank (default for always-on duties, disabled for opt-in).
@@ -295,12 +277,6 @@ export function SettingsModal({
     setChiefModels(actualChiefModels);
     setEditorExecutable(actualEditorExecutable);
     setDefaultAgent(resolvedDefaultAgent);
-    setReviewLoopPresets(actualReviewLoopPresets);
-    setSelectedReviewLoopPresetID(actualReviewLoopPresets[0]?.id || '');
-    setReviewLoopPresetName(actualReviewLoopPresets[0]?.name || '');
-    setReviewLoopPrompt(actualReviewLoopPresets[0]?.prompt || '');
-    setReviewLoopIterations(actualReviewLoopPresets[0]?.iterationLimit || 3);
-    setReviewLoopModel(actualReviewLoopModel);
     setReviewerModel(actualReviewerModel);
     setKeeperDrafts({
       summarize: initialKeeperDraft(KEEPER_DUTY_BY_KEY.summarize, actualKeeperConfigs.summarize, keeperAgents),
@@ -317,25 +293,7 @@ export function SettingsModal({
     setPluginSourcePath('');
     setPluginError(null);
     setPluginActionName(null);
-  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualEditorExecutable, resolvedDefaultAgent, actualReviewLoopPresets, actualReviewLoopModel, actualReviewerModel, actualKeeperConfigs, keeperAgents]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const selected = actualReviewLoopPresets.find((preset) => preset.id === selectedReviewLoopPresetID);
-    if (!selected && actualReviewLoopPresets.length > 0) {
-      const first = actualReviewLoopPresets[0];
-      setSelectedReviewLoopPresetID(first.id);
-      setReviewLoopPresetName(first.name);
-      setReviewLoopPrompt(first.prompt);
-      setReviewLoopIterations(first.iterationLimit);
-    }
-    if (!selected && actualReviewLoopPresets.length === 0) {
-      setSelectedReviewLoopPresetID('');
-      setReviewLoopPresetName('');
-      setReviewLoopPrompt('');
-      setReviewLoopIterations(3);
-    }
-  }, [actualReviewLoopPresets, isOpen, selectedReviewLoopPresetID]);
+  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualEditorExecutable, resolvedDefaultAgent, actualReviewerModel, actualKeeperConfigs, keeperAgents]);
 
   useEscapeStack(onClose, isOpen);
 
@@ -512,68 +470,6 @@ export function SettingsModal({
       [dutyKey]: initialKeeperDraft(duty, null, keeperAgents),
     }));
   }, [keeperAgents, onSetSetting]);
-
-  const persistReviewLoopPresets = useCallback((nextPresets: ReviewLoopPreset[]) => {
-    setReviewLoopPresets(nextPresets);
-    onSetSetting(REVIEW_LOOP_SETTINGS_CUSTOM_PRESETS, serializeSavedReviewLoopPresets(nextPresets));
-  }, [onSetSetting]);
-
-  const handleSelectReviewLoopPreset = useCallback((presetId: string) => {
-    setSelectedReviewLoopPresetID(presetId);
-    const selected = reviewLoopPresets.find((preset) => preset.id === presetId);
-    setReviewLoopPresetName(selected?.name || '');
-    setReviewLoopPrompt(selected?.prompt || '');
-    setReviewLoopIterations(selected?.iterationLimit || 3);
-  }, [reviewLoopPresets]);
-
-  const handleSaveReviewLoopPreset = useCallback(() => {
-    const name = reviewLoopPresetName.trim();
-    const prompt = reviewLoopPrompt.trim();
-    if (!name || !prompt || reviewLoopIterations <= 0) return;
-    const id = selectedReviewLoopPresetID || buildCustomReviewLoopPresetID(name);
-    const nextPreset: ReviewLoopPreset = {
-      id,
-      name,
-      prompt,
-      iterationLimit: reviewLoopIterations,
-      builtin: false,
-    };
-    const nextPresets = [...reviewLoopPresets.filter((preset) => preset.id !== id), nextPreset]
-      .sort((a, b) => a.name.localeCompare(b.name));
-    persistReviewLoopPresets(nextPresets);
-    setSelectedReviewLoopPresetID(id);
-  }, [
-    persistReviewLoopPresets,
-    reviewLoopIterations,
-    reviewLoopPresetName,
-    reviewLoopPresets,
-    reviewLoopPrompt,
-    selectedReviewLoopPresetID,
-  ]);
-
-  const handleDeleteReviewLoopPreset = useCallback(() => {
-    if (!selectedReviewLoopPresetID) return;
-    const nextPresets = reviewLoopPresets.filter((preset) => preset.id !== selectedReviewLoopPresetID);
-    persistReviewLoopPresets(nextPresets);
-    const nextSelected = nextPresets[0];
-    setSelectedReviewLoopPresetID(nextSelected?.id || '');
-    setReviewLoopPresetName(nextSelected?.name || '');
-    setReviewLoopPrompt(nextSelected?.prompt || '');
-    setReviewLoopIterations(nextSelected?.iterationLimit || 3);
-  }, [persistReviewLoopPresets, reviewLoopPresets, selectedReviewLoopPresetID]);
-
-  const handleNewReviewLoopPreset = useCallback(() => {
-    setSelectedReviewLoopPresetID('');
-    setReviewLoopPresetName('');
-    setReviewLoopPrompt('');
-    setReviewLoopIterations(3);
-  }, []);
-
-  const commitReviewLoopModel = useCallback(() => {
-    if (reviewLoopModel !== actualReviewLoopModel) {
-      onSetSetting('review_loop_model', reviewLoopModel);
-    }
-  }, [actualReviewLoopModel, onSetSetting, reviewLoopModel]);
 
   const commitReviewerModel = useCallback(() => {
     if (reviewerModel !== actualReviewerModel) {
@@ -785,7 +681,7 @@ export function SettingsModal({
   const mutedItemCount = mutedRepos.length + mutedAuthors.length;
   const pluginProblemCount = pluginIssues.length + plugins.filter((plugin) => plugin.health_status === 'unhealthy').length;
   const hasProjectsDirChange = projectsDir !== actualProjectsDir;
-  const hasReviewModelChange = reviewLoopModel !== actualReviewLoopModel || reviewerModel !== actualReviewerModel;
+  const hasReviewModelChange = reviewerModel !== actualReviewerModel;
 
   const settingsNavGroups = useMemo<SettingsNavGroup[]>(() => [
     {
@@ -845,11 +741,11 @@ export function SettingsModal({
       items: [
         {
           id: 'review',
-          label: 'Loop prompts and models',
-          title: 'Review loop prompts and models',
-          description: 'Saved review-loop prompt presets and model overrides for review automation.',
-          count: Math.max(2, reviewLoopPresets.length + 2),
-          keywords: 'review loop prompt preset model reviewer iterations',
+          label: 'Reviewer model',
+          title: 'Reviewer model',
+          description: 'Model override for SDK-based review work.',
+          count: 1,
+          keywords: 'review model reviewer',
         },
       ],
     },
@@ -873,7 +769,6 @@ export function SettingsModal({
     orderedAgentList.length,
     pluginIssues.length,
     plugins.length,
-    reviewLoopPresets.length,
   ]);
 
   const filteredNavGroups = useMemo(() => {
@@ -932,9 +827,8 @@ export function SettingsModal({
       case 'review':
         return (
           <>
-            <span className="settings-pill">{reviewLoopPresets.length} saved prompts</span>
             <span className={`settings-pill ${hasReviewModelChange ? 'warn' : 'good'}`}>
-              {hasReviewModelChange ? 'unsaved edits' : 'models saved'}
+              {hasReviewModelChange ? 'unsaved edits' : 'model saved'}
             </span>
           </>
         );
@@ -1897,123 +1791,14 @@ export function SettingsModal({
     <>
       <section className="settings-block">
         <div className="settings-block-intro">
-          <div className="settings-kicker">Prompts</div>
-          <h3>Review Loop Prompts</h3>
-          <p className="settings-description">
-            Saved custom prompts for session review loops. Built-in presets stay available in the loop bar.
-          </p>
-        </div>
-        <div className="settings-block-body">
-          <div className="review-loop-settings">
-            <div className="review-loop-settings-list">
-              <div className="settings-row-inline">
-                <label className="settings-label" htmlFor="review-loop-preset-select">Saved prompts</label>
-                <button className="settings-action" onClick={handleNewReviewLoopPreset}>New</button>
-              </div>
-              {reviewLoopPresets.length === 0 ? (
-                <p className="settings-empty">No saved review-loop prompts</p>
-              ) : (
-                <select
-                  id="review-loop-preset-select"
-                  className="settings-input"
-                  value={selectedReviewLoopPresetID}
-                  onChange={(e) => handleSelectReviewLoopPreset(e.target.value)}
-                >
-                  {reviewLoopPresets.map((preset) => (
-                    <option key={preset.id} value={preset.id}>{preset.name}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-            <div className="settings-field">
-              <label className="settings-label" htmlFor="review-loop-preset-name">Prompt name</label>
-              <input
-                id="review-loop-preset-name"
-                type="text"
-                className="settings-input"
-                value={reviewLoopPresetName}
-                onChange={(e) => setReviewLoopPresetName(e.target.value)}
-                placeholder="Architect pass"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-            </div>
-            <div className="settings-field">
-              <label className="settings-label" htmlFor="review-loop-preset-iterations">Default iterations</label>
-              <input
-                id="review-loop-preset-iterations"
-                type="number"
-                min={1}
-                className="settings-input"
-                value={reviewLoopIterations}
-                onChange={(e) => setReviewLoopIterations(Number(e.target.value) || 1)}
-              />
-            </div>
-            <div className="settings-field">
-              <label className="settings-label" htmlFor="review-loop-preset-prompt">Prompt</label>
-              <textarea
-                id="review-loop-preset-prompt"
-                className="settings-textarea"
-                value={reviewLoopPrompt}
-                onChange={(e) => setReviewLoopPrompt(e.target.value)}
-                rows={6}
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                placeholder="Do a full review of these changes..."
-              />
-            </div>
-            <div className="settings-row-inline review-loop-settings-actions">
-              <button
-                className="settings-action"
-                onClick={handleSaveReviewLoopPreset}
-                disabled={!reviewLoopPresetName.trim() || !reviewLoopPrompt.trim()}
-              >
-                Save Prompt
-              </button>
-              <button
-                className="settings-action danger"
-                onClick={handleDeleteReviewLoopPreset}
-                disabled={!selectedReviewLoopPresetID}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="settings-block">
-        <div className="settings-block-intro">
           <div className="settings-kicker">Models</div>
           <h3>Review Models</h3>
           <p className="settings-description">
-            Override the Claude models used for SDK-based review work. Empty values use built-in defaults.
+            Override the Claude model used for SDK-based review work. Empty value uses the built-in default.
           </p>
         </div>
         <div className="settings-block-body">
-          <div className="settings-field-grid two-column">
-            <div className="settings-field">
-              <label className="settings-label" htmlFor="settings-review-loop-model">Review loop model</label>
-              <input
-                id="settings-review-loop-model"
-                type="text"
-                value={reviewLoopModel}
-                onChange={(e) => setReviewLoopModel(e.target.value)}
-                onBlur={commitReviewLoopModel}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    commitReviewLoopModel();
-                  }
-                }}
-                placeholder="claude-sonnet-4-6"
-                className="settings-input"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-            </div>
+          <div className="settings-field-grid">
             <div className="settings-field">
               <label className="settings-label" htmlFor="settings-reviewer-model">Reviewer model</label>
               <input

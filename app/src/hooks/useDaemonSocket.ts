@@ -15,8 +15,6 @@ import type {
   WebSocketEvent as GeneratedWebSocketEvent,
   RecentLocation as GeneratedRecentLocation,
   Comment as GeneratedComment,
-  ReviewLoopRun as GeneratedReviewLoopRun,
-  ReviewLoopInteraction as GeneratedReviewLoopInteraction,
   WorkflowRun as GeneratedWorkflowRun,
   WarningElement as GeneratedWarning,
   WorkspaceContext as GeneratedWorkspaceContext,
@@ -72,8 +70,6 @@ export type DaemonEndpoint = GeneratedEndpoint;
 export type RepoState = GeneratedRepoState;
 export type AuthorState = GeneratedAuthorState;
 export type RecentLocation = GeneratedRecentLocation;
-export type ReviewLoopState = GeneratedReviewLoopRun;
-export type ReviewLoopInteraction = GeneratedReviewLoopInteraction;
 export type WorkflowRunState = GeneratedWorkflowRun;
 export type DaemonSettings = Record<string, string>;
 export type DaemonWarning = GeneratedWarning;
@@ -153,9 +149,7 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   // Legacy review event fields
   review_id?: string;
   session_id?: string;
-  loop_id?: string;
   content?: string;
-  review_loop_run?: ReviewLoopState;
   comment_id?: string;
   tool_use?: {
     name: string;
@@ -171,7 +165,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '138';
+export const PROTOCOL_VERSION = '139';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -296,11 +290,6 @@ interface RepoInfoResult {
   info?: RepoInfo;
   endpoint_id?: string;
   error?: string;
-}
-
-interface ReviewLoopActionResult {
-  success: boolean;
-  state: ReviewLoopState | null;
 }
 
 interface WorkspaceActionResult {
@@ -505,7 +494,6 @@ interface UseDaemonSocketOptions {
   onSettingsUpdate?: (settings: DaemonSettings) => void;
   onSettingError?: (message: string) => void;
   onGitStatusUpdate?: (status: GitStatusUpdate) => void;
-  onReviewLoopUpdate?: (state: ReviewLoopState | null) => void;
   onSessionExited?: (info: SessionExitInfo) => void;
   endpoint?: DaemonEndpointProfile;
   wsUrl?: string;
@@ -788,7 +776,6 @@ export function useDaemonSocket({
   onSettingsUpdate,
   onSettingError,
   onGitStatusUpdate,
-  onReviewLoopUpdate,
   onSessionExited,
   endpoint,
   wsUrl,
@@ -819,7 +806,6 @@ export function useDaemonSocket({
     onSettingsUpdate,
     onSettingError,
     onGitStatusUpdate,
-    onReviewLoopUpdate,
     onSessionExited,
   });
   callbacksRef.current = {
@@ -839,7 +825,6 @@ export function useDaemonSocket({
     onSettingsUpdate,
     onSettingError,
     onGitStatusUpdate,
-    onReviewLoopUpdate,
     onSessionExited,
   };
   const reconnectTimeoutRef = useRef<number | null>(null);
@@ -2493,34 +2478,6 @@ export function useDaemonSocket({
             }
             break;
           }
-
-          case 'review_loop_result': {
-            const action = (data as any).action || 'unknown';
-            const sessionId = (data as any).session_id || '';
-            const loopId = (data as any).loop_id || (data as any).review_loop_run?.loop_id || '';
-            const key = action === 'show' || action === 'answer'
-              ? `${action}_review_loop_${loopId}`
-              : `${action}_review_loop_${sessionId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (pending) {
-              pendingActionsRef.current.delete(key);
-              if ((data as any).success) {
-                pending.resolve({
-                  success: true,
-                  state: (data as any).review_loop_run ?? null,
-                });
-              } else {
-                pending.reject(new Error((data as any).error || 'Review loop command failed'));
-              }
-            }
-            break;
-          }
-
-          case 'review_loop_updated':
-            if (callbacksRef.current.onReviewLoopUpdate) {
-              callbacksRef.current.onReviewLoopUpdate((data as any).review_loop_run ?? null);
-            }
-            break;
 
           case 'workflow_run_updated': {
             const run = (data as any).run;
@@ -4598,93 +4555,6 @@ export function useDaemonSocket({
     });
   }, []);
 
-  const sendStartReviewLoop = useCallback((
-    sessionId: string,
-    prompt: string,
-    iterationLimit: number,
-    presetId?: string
-  ): Promise<ReviewLoopActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const key = `start_review_loop_${sessionId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({
-        cmd: 'start_review_loop',
-        session_id: sessionId,
-        prompt,
-        iteration_limit: iterationLimit,
-        ...(presetId ? { preset_id: presetId } : {}),
-      }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Start review loop timed out'));
-        }
-      }, 15000);
-    });
-  }, []);
-
-  const sendStopReviewLoop = useCallback((sessionId: string): Promise<ReviewLoopActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const key = `stop_review_loop_${sessionId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'stop_review_loop', session_id: sessionId }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Stop review loop timed out'));
-        }
-      }, 15000);
-    });
-  }, []);
-
-  const getReviewLoopState = useCallback((sessionId: string): Promise<ReviewLoopActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const key = `get_review_loop_${sessionId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'get_review_loop_state', session_id: sessionId }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Get review loop state timed out'));
-        }
-      }, 10000);
-    });
-  }, []);
-
-  const getReviewLoopRun = useCallback((loopId: string): Promise<ReviewLoopActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const key = `show_review_loop_${loopId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'get_review_loop_run', loop_id: loopId }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Get review loop run timed out'));
-        }
-      }, 10000);
-    });
-  }, []);
-
   const getWorkflowRun = useCallback((runId: string): Promise<{ success: boolean; run: WorkflowRunState | null }> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
@@ -4720,53 +4590,6 @@ export function useDaemonSocket({
           reject(new Error('List workflow runs timed out'));
         }
       }, 10000);
-    });
-  }, []);
-
-  const setReviewLoopIterationLimit = useCallback((sessionId: string, iterationLimit: number): Promise<ReviewLoopActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const key = `set_iterations_review_loop_${sessionId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({
-        cmd: 'set_review_loop_iteration_limit',
-        session_id: sessionId,
-        iteration_limit: iterationLimit,
-      }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Set review loop iteration limit timed out'));
-        }
-      }, 10000);
-    });
-  }, []);
-
-  const answerReviewLoop = useCallback((loopId: string, interactionId: string, answer: string): Promise<ReviewLoopActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const key = `answer_review_loop_${loopId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({
-        cmd: 'answer_review_loop',
-        loop_id: loopId,
-        interaction_id: interactionId,
-        answer,
-      }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Answer review loop timed out'));
-        }
-      }, 15000);
     });
   }, []);
 
@@ -5036,8 +4859,6 @@ export function useDaemonSocket({
     sendGetBranchDiffFiles,
     getRepoInfo,
     getReviewState,
-    getReviewLoopRun,
-    getReviewLoopState,
     getWorkflowRun,
     listWorkflowRuns,
     markFileViewed,
@@ -5046,9 +4867,5 @@ export function useDaemonSocket({
     sendResolveComment,
     sendDeleteComment,
     sendGetComments,
-    sendStartReviewLoop,
-    sendStopReviewLoop,
-    answerReviewLoop,
-    setReviewLoopIterationLimit,
   };
 }

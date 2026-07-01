@@ -38,7 +38,6 @@ vi.mock('./components/GhosttyTerminal', async () => {
 // control uses (handleRequestCloseSession).
 vi.mock('./components/Sidebar', () => ({
   EditorIcon: () => null,
-  ReviewLoopIcon: () => null,
   WorkflowIcon: () => null,
   DiffIcon: () => null,
   PRsIcon: () => null,
@@ -191,8 +190,6 @@ describe('chief-of-staff session is protected from close', () => {
       sendGetFileDiff: vi.fn(async () => ({ success: true, original: '', modified: '' })),
       sendGetBranchDiffFiles: vi.fn(async () => ({ success: true, base_ref: 'main', files: [] })),
       getRepoInfo: vi.fn(async () => ({ success: true, is_git_repo: true, branch: 'main' })),
-      getReviewLoopRun: vi.fn(async () => ({ success: true, state: null })),
-      getReviewLoopState: vi.fn(async () => ({ success: true, state: null })),
       listWorkflowRuns: vi.fn(async () => ({ success: true, runs: [] })),
       getReviewState: vi.fn(async () => ({ success: true })),
       markFileViewed: vi.fn(async () => ({ success: true })),
@@ -201,9 +198,6 @@ describe('chief-of-staff session is protected from close', () => {
       sendResolveComment: vi.fn(async () => ({ success: true })),
       sendDeleteComment: vi.fn(async () => ({ success: true })),
       sendGetComments: vi.fn(async () => ({ success: true, comments: [] })),
-      sendStartReviewLoop: vi.fn(async () => ({ success: true, state: null })),
-      sendStopReviewLoop: vi.fn(async () => ({ success: true, state: null })),
-      setReviewLoopIterationLimit: vi.fn(async () => ({ success: true, state: null })),
       connectionError: null,
       hasReceivedInitialState: true,
       rateLimit: null,

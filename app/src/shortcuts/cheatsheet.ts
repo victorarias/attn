@@ -68,7 +68,6 @@ export function buildCheatsheet(): CheatsheetCategory[] {
       rows: [
         { label: 'Diff panel', combos: [fromId('dock.diff')] },
         { label: 'Diff detail', combos: [fromId('dock.diffDetail')] },
-        { label: 'Review loop', combos: [fromId('dock.reviewLoop')] },
         { label: 'PRs drawer', combos: [fromId('dock.attention')] },
         { label: 'Refresh PRs', combos: [fromId('session.refreshPRs')] },
       ],
