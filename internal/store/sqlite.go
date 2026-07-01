@@ -544,6 +544,13 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 		DROP TABLE IF EXISTS session_review_loops;
 		DELETE FROM settings WHERE key IN ('review_loop_prompt_presets','review_loop_last_preset','review_loop_last_prompt','review_loop_last_iterations','review_loop_model');
 	`},
+	// Machine-reconciliation flag for orphaned-ticket reconciliation (see
+	// docs/plans/2026-07-01-orphaned-ticket-reconciliation.md). Non-empty means a
+	// dead owning session's outcome was judged once by the reconciliation
+	// classifier; the timestamp is both provenance (this verdict was machine
+	// reconciliation, not agent self-report) and the set-if-unset dedupe lock
+	// between the death-hook and the sweep backstop.
+	{60, "add reconciled_at to tickets", "ALTER TABLE tickets ADD COLUMN reconciled_at TEXT NOT NULL DEFAULT ''"},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -717,6 +724,11 @@ func migrateDB(db *sql.DB) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
+		} else if m.version == 60 {
+			if err := applyMigration60(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		} else {
 			if _, err := tx.Exec(m.sql); err != nil {
 				tx.Rollback()
@@ -801,6 +813,23 @@ func applyMigration23(tx *sql.Tx) error {
 		return nil
 	}
 	if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN resume_session_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// applyMigration60 adds reconciled_at to tickets idempotently — guarded by
+// columnExists so a re-run (or a DB that already has the column) is a no-op,
+// mirroring applyMigration57.
+func applyMigration60(tx *sql.Tx) error {
+	hasReconciledAt, err := columnExists(tx, "tickets", "reconciled_at")
+	if err != nil {
+		return err
+	}
+	if hasReconciledAt {
+		return nil
+	}
+	if _, err := tx.Exec("ALTER TABLE tickets ADD COLUMN reconciled_at TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	return nil
