@@ -1,10 +1,12 @@
 # Design: Orphaned-ticket reconciliation (dead session, non-terminal ticket)
 
-Status: **design only** (this PR ships no implementation). The core design was
-ratified by Victor + chief of staff on 2026-07-01; sections marked **[ratified]**
-restate those decisions with codebase grounding. **[Open — Victor]** marks the
-calls that are still his. Where codebase reality bends the ratified framing, the
-divergence is called out explicitly rather than silently absorbed.
+Status: **implemented in this PR**. The core design was ratified by Victor +
+chief of staff on 2026-07-01; sections marked **[ratified]** restate those
+decisions with codebase grounding. The four questions originally fenced
+**[Open — Victor]** were decided by Victor on 2026-07-01 (see "Decided
+questions" below) and the implementation ships alongside this document. Where
+codebase reality bends the ratified framing, the divergence is called out
+explicitly rather than silently absorbed.
 
 ## Invariant and problem
 
@@ -168,8 +170,12 @@ seam: rename the entry to `reconcileTicketsOnSessionEnd(sessionID, state)` and
 keep both existing call sites unchanged (`handlePTYExit` daemon.go:1391-1396,
 pre-clobber; `dropSessionRecord` daemon.go:1500-1508, backstop). Behavior:
 
-- Mid-flight pre-clobber state → existing crash stamp, untouched.
-- Otherwise, enumerate **all** non-terminal tickets with `assignee ==
+- Mid-flight pre-clobber state → existing crash stamp, untouched — **and**
+  (decided by Victor, 2026-07-01) the same ticket then continues down the
+  reconciliation path, so a crashed ticket gets a classifier verdict comment
+  too. The verdict's went-terminal drop rule treats the just-stamped `crashed`
+  as the expected status so the stamp does not suppress its own verdict.
+- Enumerate **all** non-terminal tickets with `assignee ==
   sessionID` (new store query beside `ActiveTicketForSession` — a
   `ListTickets`-shaped variant without the newest-only cut; fixing the
   newest-only limitation for the crash stamp too is a free adjacent win) and
@@ -400,7 +406,7 @@ Edge worth naming: a ticket with no chief in its participant set (created by
 live participant to notify — the comment still lands and the board badge (§6)
 is the durable surface.
 
-## 6. No auto-transition; board representation **[ratified rule; representation Open — Victor]**
+## 6. No auto-transition; board representation **[ratified rule; representation decided]**
 
 Neither the daemon nor the classifier moves the column on the reconciliation
 path. The chief presents verdict + evidence; Victor decides (close /
@@ -408,25 +414,24 @@ re-delegate / take over / drop). Confidence shapes framing, never action.
 (Reality note §"meets reality" 1: the pre-existing mid-flight crash stamp is
 the standing exception and stays.)
 
-**Open question 1 — how the orphan anomaly appears on the board.** Victor has
-NOT decided this. The user response differs by case — crash → "retry";
-closed-while-In-Review → "output ready, just review" — and conflating them
-loses that.
-
-- **Recommended: a distinct orphan signal, not the `crashed` status.** Surface
-  `reconciled_at` (plus, implicitly, "assignee not live") as a badge on the
-  card in its *current* column + a line in `TicketDetailPanel`. Reusing
-  `crashed` would (a) be a machine transition to a **terminal** status —
-  literally the thing rule 6 forbids — (b) start the 30-day TTL clock
-  (tickets.go:748) on work whose output may be sitting ready for review, and
-  (c) collapse the retry-vs-review framing. Cost: `reconciled_at` must join the
-  protocol `Ticket` model — TypeSpec `main.tsp` → `make generate-types` →
-  `constants.go` → `ProtocolVersion` bump (AGENTS.md critical pattern 1) — and
-  `TicketBoardPanel.tsx`/`TicketDetailPanel.tsx` grow a badge.
-- Alternative (rejected in recommendation, cheap): no UI change at all — the
-  verdict comment and chief inbox are the only surfaces. Zero protocol churn,
-  but the board keeps lying to anyone not reading comments, which is the
-  problem statement.
+**Decided (Victor, 2026-07-01): a distinct orphan badge — with the condition
+that it is genuinely visible on the card face.** Surface `reconciled_at`
+(plus, implicitly, "assignee not live") as a red "orphaned" pill rendered
+*above the card title* in the ticket's *current* column, plus the same badge
+next to the status in `TicketDetailPanel` (tooltip carries the stamp time).
+Reusing `crashed` was rejected because it would (a) be a machine transition to
+a **terminal** status — literally the thing rule 6 forbids — (b) start the
+30-day TTL clock (tickets.go:748) on work whose output may be sitting ready
+for review, and (c) collapse the retry-vs-review framing. The user response
+differs by case — crash → "retry"; closed-while-In-Review → "output ready,
+just review" — and conflating them loses that. Cost paid: `reconciled_at`
+joined the protocol `Ticket` model (TypeSpec `main.tsp` → `make
+generate-types` → `ProtocolVersion` 139→140) and both panels grew the badge.
+The comment-only alternative (zero protocol churn) was rejected because the
+board keeps lying to anyone not reading comments, which is the problem
+statement. Victor also noted the chief will usually handle the verdict comment
+on wake-up anyway — the badge is the durable board-level truth for the cases
+where no chief is watching (§5 edge).
 
 ## 7. Cap-hit is not a verdict **[ratified]**
 
@@ -451,7 +456,10 @@ A periodic daemon loop patterned on `monitorBranches` (daemon.go:3486 — ticker
 completes within ~30s — `deferredRecoveryMaxAttempts=3 × 10s`, daemon.go:1182 —
 and a quick close-then-resume flow lives in minutes; 15 min clears both with
 margin while still surfacing an orphan within the same working session).
-Tunable constants, not settings.
+Tunable (decided by Victor, 2026-07-01): every knob is an env override
+(`ATTN_TICKET_RECONCILE_MODEL` / `_MAX_TURNS` / `_MAX_BUDGET_USD` / `_TIMEOUT`
+/ `_SWEEP_INTERVAL` / `_GRACE`) over the recommended defaults — not a settings
+surface.
 
 Per pass:
 
@@ -498,57 +506,72 @@ seam (daemon.go:1139-1177).
 
 | Decision | Rationale | Rejected |
 |---|---|---|
-| Reconciliation covers neutral-end deaths; mid-flight crash stamp unchanged | The gap is precisely the complement of `captureTicketCrashState`; repealing shipped crash behavior is a separate product call | Replace the crash stamp with reconciliation (strict rule-6 reading — board loses immediate crash truth); also run the classifier on crashed tickets (extra spend for a near-certain "interrupted"; listed as possible follow-up) |
+| Reconciliation covers **all** session deaths: mid-flight keeps the crash stamp and also gets a verdict; neutral ends get a verdict (decided by Victor, 2026-07-01) | The gap is precisely the complement of `captureTicketCrashState`; repealing shipped crash behavior is a separate product call; the verdict is cheap once the runner exists and "interrupted at X" beats a bare Crashed | Replace the crash stamp with reconciliation (strict rule-6 reading — board loses immediate crash truth); verdicts for neutral ends only (a bare Crashed says nothing about what was lost) |
 | Single classifier CLI: always `claude -p` | Only CLI with dollar+turn caps and schema-enforced JSON output; transcript is just a file for an agentic reader | Per-CLI classifiers — no enforceable caps on codex, double prompt/parse surface (§3a) |
 | Flag = `reconciled_at` column + `ClaimTicketReconciliation` CAS | Provenance + lock in one durable cell; `RowsAffected` under the store mutex is a true set-if-unset | Event-kind-as-flag (log scan + protocol enum churn); `orphaned` status (machine transition); in-memory dedupe (restart hole) |
 | Verdict = ticket comment authored `attn` | Durable, chief-restart-proof, already fans out to participants; `TicketAuthorAttn` exists for exactly this | New event kind / protocol message (delivery machinery already exists); comment-as-flag (breaks flag-before-spawn ordering) |
-| Distinct orphan badge, not `crashed` (recommendation) | `crashed` is terminal ⇒ TTL + rule-6 violation + loses retry-vs-review framing | Reuse `crashed`; no UI surface (§6) |
+| Distinct orphan badge, not `crashed` (decided by Victor, 2026-07-01 — conditional on card-face visibility) | `crashed` is terminal ⇒ TTL + rule-6 violation + loses retry-vs-review framing | Reuse `crashed`; no UI surface (§6) |
 | Raw-exec headless runner, extended | Env allowlist, bounded output, failure mapping already solved; caps are CLI flags | SDK path (no budget cap; env hygiene unproven there) |
 | One shot per claim; failures comment, never retry | Rule 7 + runaway protection | Auto-retry on cap-hit (the pathological case retries forever) |
 | Grace via in-memory first-seen-dead | Backstop may delay, must not lose; restart merely delays | Persisted death timestamps (schema for a timer) |
 
-## Open questions **[Open — Victor]**
+## Decided questions (Victor, 2026-07-01)
 
-1. **Board representation of the orphan anomaly** — distinct badge
-   (recommended, §6) vs reusing `crashed` vs comment-only. Decides whether
-   `reconciled_at` enters the protocol `Ticket` now (version bump) or stays
-   store-internal.
-2. **Should mid-flight crashes also get a classifier verdict comment** on the
-   (already-Crashed) ticket? Cheap to add once the runner exists; recommend
-   deferring until orphan verdicts prove their worth.
-3. **Tunables sign-off:** sonnet / 15 turns / $0.50 / 5-min timeout; sweep 5
-   min / grace 15 min / per-pass cap 3 / concurrency 2. Defaults are
-   recommendations with rationale above; none is architectural.
-4. **Re-arm surface** (§2): clear on reassign + assignee-respawn (recommended)
-   — or is once-per-ticket-lifetime provenance preferred (never clear)?
+All four questions originally left open were decided in review of this
+document; the implementation in this PR reflects them.
+
+1. **Board representation of the orphan anomaly → distinct badge, conditional
+   on visibility.** "I'm fine with the badge but only if it would be visible"
+   — so the pill sits on the card face above the title, not buried in the meta
+   row (§6). `reconciled_at` therefore entered the protocol `Ticket` model
+   (ProtocolVersion 139→140). Victor also observed the chief usually handles
+   the verdict comment immediately on wake-up; the badge covers the no-chief
+   and chief-missed cases.
+2. **Mid-flight crashes also get a classifier verdict comment → yes.** The
+   Crashed stamp stays for the immediate board truth; the verdict adds what a
+   bare Crashed cannot — what was in flight and what's left (§1).
+3. **Tunables → yes, tunable.** The recommended defaults (sonnet / 15 turns /
+   $0.50 / 5-min timeout; sweep 5 min / grace 15 min / per-pass cap 3 /
+   concurrency 2) shipped as env overrides `ATTN_TICKET_RECONCILE_*` (§3b,
+   §8).
+4. **Re-arm surface → as recommended.** Clear the flag on `AssignTicket` and
+   on assignee-session respawn/register; never on self-reported status changes
+   (§2).
 
 ## Non-goals **[ratified]**
 
 - Idle-but-alive nudging (explicitly dropped by Victor).
 - Auto-closing or any autonomous chief action; no machine column moves on the
   reconciliation path.
-- Implementation in this PR — this document only.
 
-## Implementation sketch (for the eventual PRs)
+## Implementation map (as shipped in this PR)
 
-1. **Store:** migration 60 (`reconciled_at`); `ClaimTicketReconciliation` /
-   `ClearTicketReconciliation`; all-non-terminal-tickets-for-assignee query.
-   (`internal/store/sqlite.go`, `internal/store/tickets.go`)
-2. **Seam:** `ticket_crash.go` → `reconcileTicketsOnSessionEnd`; synchronous
-   input capture; call sites daemon.go:1391-1396 / :1500-1508 untouched in
-   shape. New `internal/daemon/ticket_reconcile.go` for claim→classify→comment.
+1. **Store:** migration 60 (`reconciled_at`, `columnExists`-guarded for
+   idempotent re-runs); `ClaimTicketReconciliation` /
+   `ClearTicketReconciliationForAssignee`; `ActiveTicketsForSession`
+   (all-non-terminal-for-assignee). (`internal/store/sqlite.go`,
+   `internal/store/tickets.go`)
+2. **Seam:** `ticket_crash.go` reduced to the crash stamp;
+   `reconcileTicketsOnSessionEnd` in the new
+   `internal/daemon/ticket_reconcile.go` owns synchronous input capture and
+   claim→classify→comment; both call sites unchanged in shape.
 3. **Runner:** `HeadlessTaskRequest{MaxTurns, MaxBudgetUSD, OutputSchema}` +
-   `claudeHeadlessArgs` flags; JSON envelope cost surfacing.
-   (`internal/agent/driver.go`, `claude.go`, `headless.go`)
-4. **Sweep:** ticker loop + liveness + grace map + claim cap + claim-crash
-   repair. (`internal/daemon/ticket_reconcile.go`)
-5. **(Pending Q1)** protocol `Ticket.reconciled_at` + board/detail badge.
-6. **Tests:** store CAS races (claim twice, claim-vs-status-write); seam
-   double-fire dedupe; fake-classifier daemon tests mirroring
-   `FakeClassifier` (testharness.go:29) with a `HeadlessTaskProvider` fake;
-   sweep grace/liveness matrix incl. recoverable-row case; transcript
-   resolution fallbacks; rule-7 comment on every failure class; verdict-drop
-   when ticket went terminal mid-classify.
+   `claudeHeadlessArgs` flags; result envelope parsing surfaces
+   `structured_output` / `total_cost_usd` / `num_turns` (single-object and
+   stream-array shapes). (`internal/agent/driver.go`, `claude.go`)
+4. **Sweep:** ticker loop + conservative liveness + in-memory grace map +
+   per-pass claim cap + claim-crash repair.
+   (`internal/daemon/ticket_reconcile.go`)
+5. **Protocol + UI:** `Ticket.reconciled_at` on the wire (ProtocolVersion
+   139→140); card-face orphan badge in `TicketBoardPanel.tsx` and a matching
+   badge in `TicketDetailPanel.tsx` (`isTicketOrphaned`,
+   `app/src/utils/ticketOrphan.ts`).
+6. **Tests:** store CAS (claim twice, re-claim after clear, AssignTicket
+   re-arm); seam double-fire dedupe; fake-classifier daemon tests via an
+   injectable exec (nil in test constructors, real `claude -p` wired only in
+   production `New()`); sweep grace/liveness matrix; transcript resolution
+   fallbacks; rule-7 comment on failure classes; verdict-drop when the ticket
+   went terminal mid-classify; frontend badge visibility matrix.
 
 ## Verification of this doc
 
@@ -556,5 +579,5 @@ Every integration point above names a real code location at current `main`
 (`80c62f6b`); the death seams, crash capture, ticket store surface, notify
 fan-out, headless runner, and transcript discovery were each read directly
 rather than assumed. Ratified decisions are restated with their rationale and
-the rejected alternative; everything still Victor's is fenced in
-**[Open — Victor]**.
+the rejected alternative; the four originally-open calls are recorded under
+"Decided questions" with Victor's 2026-07-01 answers.

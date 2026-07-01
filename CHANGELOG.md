@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-01]
 
+### Added
+- **The board now tells you when a ticket lost its agent — and what the agent left behind.** When a session dies while its ticket is still open (in any column short of Done/Failed/Crashed), attn no longer leaves the board silently wrong. The ticket gets a red "orphaned" badge on its board card and in its detail panel, and a small background classifier reads the dead session's transcript against the ticket's brief and posts a verdict comment on the ticket: whether the work looks done, partially done, interrupted, or blocked — with what's left and the evidence. Your chief of staff is notified through the usual ticket inbox. Nothing moves columns automatically: crashes still get their Crashed stamp (now with a verdict comment explaining what was in flight), and everything else stays put for you or your chief to decide. If the outcome can't be determined (missing transcript, classifier failure), the ticket says so instead of staying silent. The badge clears on its own when the ticket is reassigned or its agent session is resumed. A periodic sweep also catches orphans from before this feature or from daemon restarts.
+
 ### Removed
 - **The automated review loop is gone.** The standalone review-loop feature — the SDK-managed iterating loop, its session sidebar bar, `attn review-loop` CLI, and related settings — has been removed. Diff comments, PR reviews, and the workflow engine are unaffected.
 
