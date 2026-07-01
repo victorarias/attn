@@ -18,22 +18,22 @@ import (
 )
 
 const (
-	SettingProjectsDirectory        = "projects_directory"
-	SettingUIScale                  = "uiScale"
-	SettingClaudeExecutable         = "claude_executable"
-	SettingCodexExecutable          = "codex_executable"
-	SettingCopilotExecutable        = "copilot_executable"
-	SettingEditorExecutable         = "editor_executable"
-	SettingNewSessionAgent          = "new_session_agent"
-	SettingClaudeAvailable          = "claude_available"
-	SettingCodexAvailable           = "codex_available"
-	SettingCopilotAvailable         = "copilot_available"
-	SettingPTYBackendMode           = "pty_backend_mode"
-	SettingTheme                    = "theme"
-	SettingReviewerModel            = "reviewer_model"
-	SettingKeeperCompact            = "workspace_keeper_compact"
-	SettingTailscaleEnabled         = "tailscale_enabled"
-	SettingWorkflowsEnabled         = "workflows_enabled"
+	SettingProjectsDirectory = "projects_directory"
+	SettingUIScale           = "uiScale"
+	SettingClaudeExecutable  = "claude_executable"
+	SettingCodexExecutable   = "codex_executable"
+	SettingCopilotExecutable = "copilot_executable"
+	SettingEditorExecutable  = "editor_executable"
+	SettingNewSessionAgent   = "new_session_agent"
+	SettingClaudeAvailable   = "claude_available"
+	SettingCodexAvailable    = "codex_available"
+	SettingCopilotAvailable  = "copilot_available"
+	SettingPTYBackendMode    = "pty_backend_mode"
+	SettingTheme             = "theme"
+	SettingReviewerModel     = "reviewer_model"
+	SettingKeeperCompact     = "workspace_keeper_compact"
+	SettingTailscaleEnabled  = "tailscale_enabled"
+	SettingWorkflowsEnabled  = "workflows_enabled"
 	// SettingAutoApproveEnabled, when true, launches interactive agents in their
 	// native auto-approve mode (Claude `--permission-mode auto`, Codex
 	// `approvals_reviewer=auto_review`) so they can run unattended without

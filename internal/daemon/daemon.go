@@ -134,8 +134,8 @@ type Daemon struct {
 	// reloadLocks serializes the kill→remove→spawn composite per session so two
 	// concurrent reloads of the same session (a double-toggle, or a role transfer)
 	// cannot interleave and tear each other's respawn down. Lazily initialized.
-	reloadLocksMu    sync.Mutex
-	reloadLocks      map[string]*sync.Mutex
+	reloadLocksMu sync.Mutex
+	reloadLocks   map[string]*sync.Mutex
 	// ticketBackstop debounces the deferred self-monitor doorbell (see
 	// ticket_notify.go): an idle self-monitor with unread ticket activity is
 	// re-checked after a grace delay and doorbelled only if still unread, so a live
