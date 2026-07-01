@@ -233,8 +233,6 @@ func main() {
 		runWSRelay()
 	case "pty-worker":
 		runPTYWorker()
-	case "review-loop":
-		runReviewLoop()
 	case "workflow":
 		maybePrintProfileBanner()
 		runWorkflow()
@@ -327,7 +325,7 @@ func runWorkflowResultMCP(args []string) {
 // maybePrintProfileBanner prints the profile banner to stderr when a
 // non-default ATTN_PROFILE is active. Skipped for hook commands (called
 // on every Claude action) and for silent CLI subcommands (ws-relay,
-// pty-worker, review-loop) that have their own protocols on stderr.
+// pty-worker) that have their own protocols on stderr.
 func maybePrintProfileBanner() {
 	config.PrintProfileBanner(os.Stderr)
 }
@@ -560,7 +558,6 @@ commands:
   workspace context <command>       edit shared workspace context
   open <file.md> [--session <id>]   show a markdown file in attn
   browser <command>                 open and control the in-app browser
-  review-loop <command>             manage an autonomous review loop
   workflow <command>                run, inspect, and resume durable workflows
   list                              list sessions and workspaces
   daemon <command>                  manage the daemon
@@ -2018,146 +2015,6 @@ func runBrowser() {
 	default:
 		fmt.Fprintf(os.Stderr, "unknown browser command: %s\n", subcommand)
 		printBrowserUsage(os.Stderr)
-		os.Exit(1)
-	}
-}
-
-func runReviewLoop() {
-	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "usage: attn review-loop <start|stop|status|show|set-iterations|answer> ...")
-		os.Exit(1)
-	}
-	warnIfDaemonVersionMismatch()
-
-	c := client.New("")
-	switch os.Args[2] {
-	case "start":
-		fs := flag.NewFlagSet("review-loop start", flag.ExitOnError)
-		sessionID := fs.String("session", "", "session id")
-		presetID := fs.String("preset", "", "preset id")
-		prompt := fs.String("prompt", "", "prompt text")
-		iterations := fs.Int("iterations", 1, "iteration limit")
-		handoffFile := fs.String("handoff-file", "", "path to structured handoff JSON")
-		_ = fs.Parse(os.Args[3:])
-		resolvedSessionID := strings.TrimSpace(*sessionID)
-		if resolvedSessionID == "" {
-			resolvedSessionID = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
-		}
-		if resolvedSessionID == "" {
-			fmt.Fprintln(os.Stderr, "review-loop start: --session is required")
-			os.Exit(1)
-		}
-		if strings.TrimSpace(*prompt) == "" {
-			fmt.Fprintln(os.Stderr, "review-loop start: --prompt is required")
-			os.Exit(1)
-		}
-		var handoffPayloadJSON *string
-		if trimmed := strings.TrimSpace(*handoffFile); trimmed != "" {
-			data, err := os.ReadFile(trimmed)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "review-loop start: read handoff file: %v\n", err)
-				os.Exit(1)
-			}
-			text := strings.TrimSpace(string(data))
-			handoffPayloadJSON = &text
-		}
-		state, err := c.StartReviewLoopWithHandoff(resolvedSessionID, *presetID, *prompt, *iterations, handoffPayloadJSON)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "review-loop start error: %v\n", err)
-			os.Exit(1)
-		}
-		printJSON(state)
-
-	case "stop":
-		fs := flag.NewFlagSet("review-loop stop", flag.ExitOnError)
-		sessionID := fs.String("session", "", "session id")
-		_ = fs.Parse(os.Args[3:])
-		if strings.TrimSpace(*sessionID) == "" {
-			fmt.Fprintln(os.Stderr, "review-loop stop: --session is required")
-			os.Exit(1)
-		}
-		state, err := c.StopReviewLoop(*sessionID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "review-loop stop error: %v\n", err)
-			os.Exit(1)
-		}
-		printJSON(state)
-
-	case "status":
-		fs := flag.NewFlagSet("review-loop status", flag.ExitOnError)
-		sessionID := fs.String("session", "", "session id")
-		_ = fs.Parse(os.Args[3:])
-		if strings.TrimSpace(*sessionID) == "" {
-			fmt.Fprintln(os.Stderr, "review-loop status: --session is required")
-			os.Exit(1)
-		}
-		state, err := c.GetReviewLoopState(*sessionID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "review-loop status error: %v\n", err)
-			os.Exit(1)
-		}
-		printJSON(state)
-
-	case "set-iterations":
-		fs := flag.NewFlagSet("review-loop set-iterations", flag.ExitOnError)
-		sessionID := fs.String("session", "", "session id")
-		iterations := fs.Int("iterations", 0, "iteration limit")
-		_ = fs.Parse(os.Args[3:])
-		if strings.TrimSpace(*sessionID) == "" || *iterations <= 0 {
-			fmt.Fprintln(os.Stderr, "review-loop set-iterations: --session and positive --iterations are required")
-			os.Exit(1)
-		}
-		state, err := c.SetReviewLoopIterationLimit(*sessionID, *iterations)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "review-loop set-iterations error: %v\n", err)
-			os.Exit(1)
-		}
-		printJSON(state)
-
-	case "show":
-		fs := flag.NewFlagSet("review-loop show", flag.ExitOnError)
-		loopID := fs.String("loop", "", "loop id")
-		sessionID := fs.String("session", "", "session id")
-		_ = fs.Parse(os.Args[3:])
-		if strings.TrimSpace(*loopID) == "" && strings.TrimSpace(*sessionID) == "" {
-			fmt.Fprintln(os.Stderr, "review-loop show: --loop or --session is required")
-			os.Exit(1)
-		}
-		if strings.TrimSpace(*loopID) != "" {
-			state, err := c.GetReviewLoopRun(strings.TrimSpace(*loopID))
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "review-loop show error: %v\n", err)
-				os.Exit(1)
-			}
-			printJSON(state)
-			return
-		}
-		state, err := c.GetReviewLoopState(strings.TrimSpace(*sessionID))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "review-loop show error: %v\n", err)
-			os.Exit(1)
-		}
-		printJSON(state)
-
-	case "answer":
-		fs := flag.NewFlagSet("review-loop answer", flag.ExitOnError)
-		loopID := fs.String("loop", "", "loop id")
-		interactionID := fs.String("interaction", "", "interaction id")
-		answer := fs.String("answer", "", "user answer")
-		_ = fs.Parse(os.Args[3:])
-		if strings.TrimSpace(*loopID) == "" || strings.TrimSpace(*answer) == "" {
-			fmt.Fprintln(os.Stderr, "review-loop answer: --loop and --answer are required")
-			os.Exit(1)
-		}
-		state, err := c.AnswerReviewLoop(*loopID, *interactionID, *answer)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "review-loop answer error: %v\n", err)
-			os.Exit(1)
-		}
-		printJSON(state)
-
-	default:
-		fmt.Fprintf(os.Stderr, "unknown review-loop command: %s\n", os.Args[2])
 		os.Exit(1)
 	}
 }

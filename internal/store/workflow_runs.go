@@ -265,7 +265,7 @@ func (s *Store) ListWorkflowAgentCalls(runID string) ([]*WorkflowAgentCallRow, e
 
 // DeleteWorkflowRun removes a run and its journaled calls. The store never enables
 // PRAGMA foreign_keys, so the ON DELETE CASCADE clause is inert; child rows are
-// deleted explicitly, mirroring DeleteReviewLoopRun.
+// deleted explicitly.
 func (s *Store) DeleteWorkflowRun(runID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

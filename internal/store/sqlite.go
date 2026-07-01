@@ -537,6 +537,13 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
     PRIMARY KEY (identity, ticket_id),
     FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
 );`},
+	{59, "drop review_loop tables and settings", `
+		DROP TABLE IF EXISTS review_loop_interactions;
+		DROP TABLE IF EXISTS review_loop_iterations;
+		DROP TABLE IF EXISTS review_loop_runs;
+		DROP TABLE IF EXISTS session_review_loops;
+		DELETE FROM settings WHERE key IN ('review_loop_prompt_presets','review_loop_last_preset','review_loop_last_prompt','review_loop_last_iterations','review_loop_model');
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

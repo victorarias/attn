@@ -1698,60 +1698,6 @@ func (b *fakeSpawnBackend) RemovedIDs() []string {
 	return append([]string(nil), b.removed...)
 }
 
-type fakeReviewLoopBackend struct {
-	mu         sync.Mutex
-	inputs     map[string][][]byte
-	scrollback map[string][]byte
-}
-
-func (b *fakeReviewLoopBackend) Spawn(context.Context, ptybackend.SpawnOptions) error { return nil }
-func (b *fakeReviewLoopBackend) Attach(_ context.Context, sessionID string, _ string) (ptybackend.AttachInfo, ptybackend.Stream, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	info := ptybackend.AttachInfo{Running: true}
-	if data, ok := b.scrollback[sessionID]; ok {
-		info.Scrollback = append([]byte(nil), data...)
-	}
-	return info, newFakeOutputStream(), nil
-}
-func (b *fakeReviewLoopBackend) Input(_ context.Context, sessionID string, data []byte) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.inputs == nil {
-		b.inputs = make(map[string][][]byte)
-	}
-	copied := append([]byte(nil), data...)
-	b.inputs[sessionID] = append(b.inputs[sessionID], copied)
-	return nil
-}
-func (b *fakeReviewLoopBackend) Resize(context.Context, string, uint16, uint16) error { return nil }
-func (b *fakeReviewLoopBackend) Kill(context.Context, string, syscall.Signal) error   { return nil }
-func (b *fakeReviewLoopBackend) Remove(context.Context, string) error                 { return nil }
-func (b *fakeReviewLoopBackend) SessionIDs(context.Context) []string                  { return nil }
-func (b *fakeReviewLoopBackend) Recover(context.Context) (ptybackend.RecoveryReport, error) {
-	return ptybackend.RecoveryReport{}, nil
-}
-func (b *fakeReviewLoopBackend) Shutdown(context.Context) error { return nil }
-
-func (b *fakeReviewLoopBackend) Inputs(sessionID string) []string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	var out []string
-	for _, input := range b.inputs[sessionID] {
-		out = append(out, string(input))
-	}
-	return out
-}
-
-func (b *fakeReviewLoopBackend) SetScrollback(sessionID, text string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.scrollback == nil {
-		b.scrollback = make(map[string][]byte)
-	}
-	b.scrollback[sessionID] = []byte(text)
-}
-
 func addTestWorkspace(d *Daemon, id, directory string) {
 	rank := d.resolveWorkspaceRank(d.store.GetWorkspace(id))
 	d.store.AddWorkspace(&protocol.Workspace{ID: id, Title: id, Directory: directory, Status: protocol.WorkspaceStatusLaunching, Rank: rank})
@@ -4233,8 +4179,6 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"empty claude_executable", "claude_executable", "", false},
 		{"empty codex_executable", "codex_executable", "", false},
 		{"empty copilot_executable", "copilot_executable", "", false},
-		{"empty review_loop_model", "review_loop_model", "", false},
-		{"custom review_loop_model", "review_loop_model", "claude-opus-4-6", false},
 		{"empty reviewer_model", "reviewer_model", "", false},
 		{"custom reviewer_model", "reviewer_model", "claude-sonnet-4-6", false},
 		{"empty keeper compact", "workspace_keeper_compact", "", false},

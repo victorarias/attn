@@ -1,6 +1,6 @@
 ---
 name: attn
-description: "Drive attn from an agent: spawn a visible interactive agent the user can inspect and steer, run durable resumable multi-agent workflows, maintain shared workspace context, journal, run review loops, open markdown, or control attn's persistent in-app browser. Use when the user explicitly asks for an attn session, delegation, creating a new ticket, workflow, review loop, browser, or to show a markdown explainer or doc in the app, or when you are attn's chief of staff. Not for private research, verification, or parallel reasoning you synthesize yourself — use native subagents for those."
+description: "Drive attn from an agent: spawn a visible interactive agent the user can inspect and steer, run durable resumable multi-agent workflows, maintain shared workspace context, journal, open markdown, or control attn's persistent in-app browser. Use when the user explicitly asks for an attn session, delegation, creating a new ticket, workflow, browser, or to show a markdown explainer or doc in the app, or when you are attn's chief of staff. Not for private research, verification, or parallel reasoning you synthesize yourself — use native subagents for those."
 ---
 
 # attn
@@ -51,8 +51,6 @@ A ticket-tracked task is still a leaf task — being tracked means the chief is
   [references/workspace-context.md](references/workspace-context.md).
 - **Read or maintain the durable Notebook (journal + knowledge base), esp. as
   chief of staff:** read [references/notebook.md](references/notebook.md).
-- **Start, monitor, or answer a review loop:** read
-  [references/review-loops.md](references/review-loops.md).
 - **Run a durable, resumable multi-agent workflow — a script that spawns
   subagents with fan-out/pipeline, journaled and observable via `attn workflow
   run`:** read [references/workflow.md](references/workflow.md).

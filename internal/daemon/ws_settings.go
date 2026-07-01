@@ -30,11 +30,6 @@ const (
 	SettingCopilotAvailable         = "copilot_available"
 	SettingPTYBackendMode           = "pty_backend_mode"
 	SettingTheme                    = "theme"
-	SettingReviewLoopPresets        = "review_loop_prompt_presets"
-	SettingReviewLoopLastPreset     = "review_loop_last_preset"
-	SettingReviewLoopLastPrompt     = "review_loop_last_prompt"
-	SettingReviewLoopLastIterations = "review_loop_last_iterations"
-	SettingReviewLoopModel          = "review_loop_model"
 	SettingReviewerModel            = "reviewer_model"
 	SettingKeeperCompact            = "workspace_keeper_compact"
 	SettingTailscaleEnabled         = "tailscale_enabled"
@@ -311,15 +306,15 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateNotebookCronTimezone(value)
 	case SettingKeybindingsConfig:
 		return validateKeybindingsConfig(value)
-	case SettingReviewLoopPresets, SettingReviewLoopLastPreset, SettingReviewLoopLastPrompt, SettingReviewLoopLastIterations, SettingReviewLoopModel, SettingReviewerModel:
+	case SettingReviewerModel:
 		return nil
 	default:
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingNewSessionYoloPrefix) {
 			return validateBooleanSetting(value)
 		}
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingChiefModelPrefix) {
-			// Model names/aliases are free-form (like the review-loop model
-			// settings); accept any value and let the agent reject bad ones.
+			// Model names/aliases are free-form (like the reviewer_model
+			// setting); accept any value and let the agent reject bad ones.
 			return nil
 		}
 		if _, ok := isAgentExecutableSettingKey(key); ok {

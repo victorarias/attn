@@ -88,7 +88,6 @@ export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
   // Review & Git
   'dock.diff': { label: 'Diff panel', category: 'review', dockLabel: 'diff' },
   'dock.diffDetail': { label: 'Diff detail', category: 'review', dockLabel: 'detail' },
-  'dock.reviewLoop': { label: 'Review loop', category: 'review', dockLabel: 'loop' },
   'dock.attention': { label: 'PRs drawer', category: 'review', dockLabel: 'PRs' },
   'session.refreshPRs': { label: 'Refresh PRs', category: 'review' },
 

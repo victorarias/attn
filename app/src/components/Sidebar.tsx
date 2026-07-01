@@ -27,7 +27,6 @@ interface LocalSession {
   endpointName?: string;
   endpointStatus?: string;
   recoverable?: boolean;
-  reviewLoopStatus?: string;
   chiefOfStaff?: boolean;
   delegatedFromChief?: boolean;
   ticketUnread?: boolean;
@@ -47,23 +46,6 @@ interface SelectedTile {
 // preference lives in App so every workspace-order derivation stays consistent.
 function isSessionless(workspace: SidebarWorkspace): boolean {
   return workspace.sessions.length === 0;
-}
-
-function reviewLoopIndicator(status?: string): { glyph: string; label: string } | null {
-  switch (status) {
-    case 'running':
-      return { glyph: '⟳', label: 'Review loop running' };
-    case 'awaiting_user':
-      return { glyph: '?', label: 'Review loop needs input' };
-    case 'completed':
-      return { glyph: '✓', label: 'Review loop completed' };
-    case 'stopped':
-      return { glyph: '•', label: 'Review loop stopped' };
-    case 'error':
-      return { glyph: '!', label: 'Review loop error' };
-    default:
-      return null;
-  }
 }
 
 function TileSidebarRow({
@@ -258,16 +240,6 @@ function ExpandIcon() {
   );
 }
 
-
-export function ReviewLoopIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M8 2.5a5.5 5.5 0 1 0 5.2 7.2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M10.5 2.7h3v3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="m13.5 2.7-2.9 2.9" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 export function WorkflowIcon() {
   return (
@@ -1030,7 +1002,7 @@ export function Sidebar({
                 return (
                   <div
                     key={session.id}
-                    className={`session-item grouped ${selectedId === session.id ? 'selected' : ''} ${session.recoverable ? 'recoverable' : ''} ${session.reviewLoopStatus ? `session-item--loop-${session.reviewLoopStatus}` : ''} ${draggable ? 'session-item--draggable' : ''} ${draggingSessionId === session.id ? 'session-item--dragging' : ''}`.trim().replace(/\s+/g, ' ')}
+                    className={`session-item grouped ${selectedId === session.id ? 'selected' : ''} ${session.recoverable ? 'recoverable' : ''} ${draggable ? 'session-item--draggable' : ''} ${draggingSessionId === session.id ? 'session-item--dragging' : ''}`.trim().replace(/\s+/g, ' ')}
                     data-testid={`sidebar-session-${session.id}`}
                     data-state={session.state}
                     onClick={() => onSelectSession(session.id)}
@@ -1052,15 +1024,6 @@ export function Sidebar({
                     )}
                     {session.chiefOfStaff && <ChiefOfStaffBadge />}
                     {session.delegatedFromChief && <DelegatedFromChiefBadge />}
-                    {reviewLoopIndicator(session.reviewLoopStatus) && (
-                      <span
-                        className={`session-loop-indicator session-loop-indicator--${session.reviewLoopStatus}`}
-                        title={reviewLoopIndicator(session.reviewLoopStatus)?.label}
-                        aria-label={reviewLoopIndicator(session.reviewLoopStatus)?.label}
-                      >
-                        {reviewLoopIndicator(session.reviewLoopStatus)?.glyph}
-                      </span>
-                    )}
                     {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                     <div className="session-actions">
                       <button

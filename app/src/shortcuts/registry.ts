@@ -83,7 +83,6 @@ export const SHORTCUTS = {
 
   // Dock panels
   'dock.diff': { key: 'g', meta: true, shift: true },
-  'dock.reviewLoop': { key: 'r', meta: true, shift: true },
   'dock.diffDetail': { key: 'e', meta: true, shift: true },
   'dock.attention': { key: 'p', meta: true, shift: true },
 

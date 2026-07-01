@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "138"
+const ProtocolVersion = "139"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -133,12 +133,6 @@ const (
 	CmdGetBranchDiffFiles                    = "get_branch_diff_files"
 	CmdGetRepoInfo                           = "get_repo_info"
 	CmdGetReviewState                        = "get_review_state"
-	CmdStartReviewLoop                       = "start_review_loop"
-	CmdStopReviewLoop                        = "stop_review_loop"
-	CmdGetReviewLoopState                    = "get_review_loop_state"
-	CmdGetReviewLoopRun                      = "get_review_loop_run"
-	CmdSetReviewLoopIterations               = "set_review_loop_iteration_limit"
-	CmdAnswerReviewLoop                      = "answer_review_loop"
 	CmdWorkflowRunUpsert                     = "workflow_run_upsert"
 	CmdWorkflowCallUpsert                    = "workflow_call_upsert"
 	CmdWorkflowRunGet                        = "workflow_run_get"
@@ -251,8 +245,6 @@ const (
 	EventBranchDiffFilesResult       = "branch_diff_files_result"
 	EventGetRepoInfoResult           = "get_repo_info_result"
 	EventGetReviewStateResult        = "get_review_state_result"
-	EventReviewLoopResult            = "review_loop_result"
-	EventReviewLoopUpdated           = "review_loop_updated"
 	EventWorkflowRunUpdated          = "workflow_run_updated"
 	EventWorkflowActionResult        = "workflow_action_result"
 	EventMarkFileViewedResult        = "mark_file_viewed_result"
@@ -1006,48 +998,6 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg MarkFileViewedMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdStartReviewLoop:
-		var msg StartReviewLoopMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal start_review_loop: %w", err)
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdStopReviewLoop:
-		var msg StopReviewLoopMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal stop_review_loop: %w", err)
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdGetReviewLoopState:
-		var msg GetReviewLoopStateMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal get_review_loop_state: %w", err)
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdGetReviewLoopRun:
-		var msg GetReviewLoopRunMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal get_review_loop_run: %w", err)
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdSetReviewLoopIterations:
-		var msg SetReviewLoopIterationLimitMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal set_review_loop_iteration_limit: %w", err)
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdAnswerReviewLoop:
-		var msg AnswerReviewLoopMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal answer_review_loop: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

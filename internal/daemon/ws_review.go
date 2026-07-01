@@ -28,39 +28,6 @@ func reviewCommentToProtocol(comment *store.ReviewComment) protocol.ReviewCommen
 	return out
 }
 
-func (d *Daemon) handleStartReviewLoopWS(client *wsClient, msg *protocol.StartReviewLoopMessage) {
-	run, err := d.startReviewLoop(msg)
-	d.sendReviewLoopResult(client, "start", msg.SessionID, "", run, err)
-}
-
-func (d *Daemon) handleStopReviewLoopWS(client *wsClient, msg *protocol.StopReviewLoopMessage) {
-	run, err := d.stopReviewLoop(msg.SessionID, reviewLoopStopReasonUserStopped)
-	d.sendReviewLoopResult(client, "stop", msg.SessionID, "", run, err)
-}
-
-func (d *Daemon) handleGetReviewLoopStateWS(client *wsClient, msg *protocol.GetReviewLoopStateMessage) {
-	run, err := d.getReviewLoopRunForSession(msg.SessionID)
-	d.sendReviewLoopResult(client, "get", msg.SessionID, "", run, err)
-}
-
-func (d *Daemon) handleGetReviewLoopRunWS(client *wsClient, msg *protocol.GetReviewLoopRunMessage) {
-	run, err := d.store.GetReviewLoopRun(msg.LoopID)
-	if err == nil && run != nil {
-		run, err = d.hydrateReviewLoopRunWithIterations(run)
-	}
-	d.sendReviewLoopResult(client, "show", "", msg.LoopID, run, err)
-}
-
-func (d *Daemon) handleSetReviewLoopIterationsWS(client *wsClient, msg *protocol.SetReviewLoopIterationLimitMessage) {
-	run, err := d.setReviewLoopIterationLimit(msg.SessionID, msg.IterationLimit)
-	d.sendReviewLoopResult(client, "set_iterations", msg.SessionID, "", run, err)
-}
-
-func (d *Daemon) handleAnswerReviewLoopWS(client *wsClient, msg *protocol.AnswerReviewLoopMessage) {
-	run, err := d.answerReviewLoop(msg)
-	d.sendReviewLoopResult(client, "answer", "", msg.LoopID, run, err)
-}
-
 func (d *Daemon) handleGetReviewState(client *wsClient, msg *protocol.GetReviewStateMessage) {
 	result := protocol.GetReviewStateResultMessage{
 		Event:   protocol.EventGetReviewStateResult,

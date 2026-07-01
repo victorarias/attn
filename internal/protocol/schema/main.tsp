@@ -87,44 +87,6 @@ enum WorkspaceContextMaintenanceAction {
   rollback,
 }
 
-enum ReviewLoopStatus {
-  running,
-  waiting_for_agent_advance,
-  advance_received_waiting_prompt,
-  stopped,
-  completed,
-  error,
-}
-
-enum ReviewLoopRunStatus {
-  running,
-  awaiting_user,
-  stopped,
-  completed,
-  error,
-}
-
-enum ReviewLoopIterationStatus {
-  running,
-  awaiting_user,
-  cancelled,
-  completed,
-  error,
-}
-
-enum ReviewLoopDecision {
-  continue_loop: "continue",
-  converged,
-  needs_user_input,
-  error,
-}
-
-enum ReviewLoopInteractionStatus {
-  pending,
-  answered,
-  consumed,
-}
-
 enum GitOperationKind {
   delete_worktree,
 }
@@ -1220,43 +1182,6 @@ model GetReviewStateMessage {
   branch: string;
 }
 
-model StartReviewLoopMessage {
-  cmd: "start_review_loop";
-  session_id: string;
-  preset_id?: string;
-  prompt: string;
-  iteration_limit: int32;
-  handoff_payload_json?: string;
-}
-
-model StopReviewLoopMessage {
-  cmd: "stop_review_loop";
-  session_id: string;
-}
-
-model GetReviewLoopStateMessage {
-  cmd: "get_review_loop_state";
-  session_id: string;
-}
-
-model GetReviewLoopRunMessage {
-  cmd: "get_review_loop_run";
-  loop_id: string;
-}
-
-model SetReviewLoopIterationLimitMessage {
-  cmd: "set_review_loop_iteration_limit";
-  session_id: string;
-  iteration_limit: int32;
-}
-
-model AnswerReviewLoopMessage {
-  cmd: "answer_review_loop";
-  loop_id: string;
-  interaction_id?: string;
-  answer: string;
-}
-
 model WorkflowRunUpsertMessage {
   cmd: "workflow_run_upsert";
   run: WorkflowRun;
@@ -2020,81 +1945,6 @@ model ReviewState {
   viewed_files: string[];  // List of filepath strings
 }
 
-model ReviewLoopState {
-  session_id: string;
-  status: ReviewLoopStatus;
-  preset_id?: string;
-  custom_prompt?: string;
-  resolved_prompt: string;
-  iteration_count: int32;
-  iteration_limit: int32;
-  stop_requested: boolean;
-  advance_token: string;
-  stop_reason?: string;
-  last_prompt_at?: string;
-  last_advance_at?: string;
-  last_user_input_at?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-model ReviewLoopRun {
-  loop_id: string;
-  source_session_id: string;
-  repo_path: string;
-  status: ReviewLoopRunStatus;
-  preset_id?: string;
-  custom_prompt?: string;
-  resolved_prompt: string;
-  handoff_payload_json?: string;
-  iteration_count: int32;
-  iteration_limit: int32;
-  pending_interaction_id?: string;
-  last_decision?: ReviewLoopDecision;
-  last_result_summary?: string;
-  last_error?: string;
-  stop_reason?: string;
-  created_at: string;
-  updated_at: string;
-  completed_at?: string;
-  pending_interaction?: ReviewLoopInteraction;
-  latest_iteration?: ReviewLoopIteration;
-  iterations?: ReviewLoopIteration[];
-}
-
-model ReviewLoopIteration {
-  id: string;
-  loop_id: string;
-  iteration_number: int32;
-  status: ReviewLoopIterationStatus;
-  decision?: ReviewLoopDecision;
-  summary?: string;
-  result_text?: string;
-  changes_made?: boolean;
-  files_touched?: string[];
-  change_stats?: BranchDiffFile[];
-  blocking_reason?: string;
-  suggested_next_focus?: string;
-  structured_output_json?: string;
-  assistant_trace_json?: string;
-  error?: string;
-  started_at: string;
-  completed_at?: string;
-}
-
-model ReviewLoopInteraction {
-  id: string;
-  loop_id: string;
-  iteration_id?: string;
-  kind: string;
-  question: string;
-  answer?: string;
-  status: ReviewLoopInteractionStatus;
-  created_at: string;
-  answered_at?: string;
-  consumed_at?: string;
-}
-
 model WorkflowAgentCall {
   run_id: string;
   ordinal: string;
@@ -2151,22 +2001,6 @@ model GetReviewStateResultMessage {
   state?: ReviewState;
   success: boolean;
   error?: string;
-}
-
-model ReviewLoopResultMessage {
-  event: "review_loop_result";
-  action: string;
-  session_id: string;
-  loop_id?: string;
-  review_loop_run?: ReviewLoopRun;
-  success: boolean;
-  error?: string;
-}
-
-model ReviewLoopUpdatedMessage {
-  event: "review_loop_updated";
-  session_id: string;
-  review_loop_run?: ReviewLoopRun;
 }
 
 model WorkflowRunUpdatedMessage {
@@ -2345,7 +2179,6 @@ model Response {
   prs?: PR[];
   repos?: RepoState[];
   authors?: AuthorState[];
-  review_loop_run?: ReviewLoopRun;
   notebook_entries?: NotebookEntry[];
   notebook_read?: NotebookReadResult;
   notebook_write?: NotebookWriteResult;
@@ -2722,7 +2555,6 @@ model WebSocketEvent {
   reason?: string;
   signal?: string;
 
-  review_loop_run?: ReviewLoopRun;
   workspace_context_result?: WorkspaceContextResult;
   ticket?: Ticket;
   tickets?: Ticket[];
@@ -2781,8 +2613,6 @@ alias DaemonEvent =
   | BranchDiffFilesResultMessage
   | GetRepoInfoResultMessage
   | GetReviewStateResultMessage
-  | ReviewLoopResultMessage
-  | ReviewLoopUpdatedMessage
   | WorkflowRunUpdatedMessage
   | WorkflowActionResultMessage
   | WorkspaceContextResultMessage

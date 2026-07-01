@@ -102,7 +102,6 @@ type Manager struct {
 	pending         map[string]pendingSessionRoute
 	reviews         map[string]string
 	comments        map[string]string
-	loops           map[string]string
 	browserControls map[string]pendingBrowserControl
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -130,7 +129,6 @@ func NewManager(
 		pending:         make(map[string]pendingSessionRoute),
 		reviews:         make(map[string]string),
 		comments:        make(map[string]string),
-		loops:           make(map[string]string),
 		browserControls: make(map[string]pendingBrowserControl),
 	}
 	for _, record := range endpointStore.ListEndpoints() {
@@ -756,8 +754,6 @@ func forwardsRawEvent(event string) bool {
 		protocol.EventBranchDiffFilesResult,
 		protocol.EventGetRepoInfoResult,
 		protocol.EventGetReviewStateResult,
-		protocol.EventReviewLoopResult,
-		protocol.EventReviewLoopUpdated,
 		protocol.EventMarkFileViewedResult,
 		protocol.EventAddCommentResult,
 		protocol.EventUpdateCommentResult,
@@ -981,17 +977,6 @@ func (m *Manager) EndpointIDForComment(commentID string) (string, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	endpointID, ok := m.comments[commentID]
-	return endpointID, ok
-}
-
-func (m *Manager) EndpointIDForReviewLoop(loopID string) (string, bool) {
-	loopID = strings.TrimSpace(loopID)
-	if loopID == "" {
-		return "", false
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	endpointID, ok := m.loops[loopID]
 	return endpointID, ok
 }
 
@@ -1230,11 +1215,6 @@ func (m *Manager) clearRouteCachesLocked(endpointID string) {
 			delete(m.comments, commentID)
 		}
 	}
-	for loopID, current := range m.loops {
-		if current == endpointID {
-			delete(m.loops, loopID)
-		}
-	}
 }
 
 func (m *Manager) observeRemoteEvent(endpointID, event string, data []byte) {
@@ -1267,23 +1247,6 @@ func (m *Manager) observeRemoteEvent(endpointID, event string, data []byte) {
 			m.recordReviewRoute(endpointID, comment.ReviewID)
 			m.recordCommentRoute(endpointID, comment.ID)
 		}
-	case protocol.EventReviewLoopResult:
-		var msg protocol.ReviewLoopResultMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return
-		}
-		if msg.ReviewLoopRun != nil {
-			m.recordLoopRoute(endpointID, msg.ReviewLoopRun.LoopID)
-		}
-		if msg.LoopID != nil {
-			m.recordLoopRoute(endpointID, *msg.LoopID)
-		}
-	case protocol.EventReviewLoopUpdated:
-		var msg protocol.ReviewLoopUpdatedMessage
-		if err := json.Unmarshal(data, &msg); err != nil || msg.ReviewLoopRun == nil {
-			return
-		}
-		m.recordLoopRoute(endpointID, msg.ReviewLoopRun.LoopID)
 	}
 }
 
@@ -1305,16 +1268,6 @@ func (m *Manager) recordCommentRoute(endpointID, commentID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.comments[commentID] = endpointID
-}
-
-func (m *Manager) recordLoopRoute(endpointID, loopID string) {
-	loopID = strings.TrimSpace(loopID)
-	if endpointID == "" || loopID == "" {
-		return
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.loops[loopID] = endpointID
 }
 
 func (m *Manager) replaceRemoteWorkspaces(id string, workspaces []protocol.Workspace) bool {

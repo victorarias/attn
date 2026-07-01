@@ -56,12 +56,6 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdGetBranchDiffFiles,
 		protocol.CmdGetRepoInfo,
 		protocol.CmdGetReviewState,
-		protocol.CmdStartReviewLoop,
-		protocol.CmdStopReviewLoop,
-		protocol.CmdGetReviewLoopState,
-		protocol.CmdGetReviewLoopRun,
-		protocol.CmdSetReviewLoopIterations,
-		protocol.CmdAnswerReviewLoop,
 		protocol.CmdMarkFileViewed,
 		protocol.CmdAddComment,
 		protocol.CmdUpdateComment,
@@ -121,7 +115,6 @@ type stubRemoteCommandResolver struct {
 	path    map[string]string
 	review  map[string]string
 	comment map[string]string
-	loop    map[string]string
 }
 
 func (s stubRemoteCommandResolver) EndpointIDForPath(path string) (string, bool) {
@@ -139,11 +132,6 @@ func (s stubRemoteCommandResolver) EndpointIDForComment(commentID string) (strin
 	return endpointID, ok
 }
 
-func (s stubRemoteCommandResolver) EndpointIDForReviewLoop(loopID string) (string, bool) {
-	endpointID, ok := s.loop[loopID]
-	return endpointID, ok
-}
-
 func TestRemoteCommandScopedEndpointID(t *testing.T) {
 	resolver := stubRemoteCommandResolver{
 		path: map[string]string{
@@ -154,9 +142,6 @@ func TestRemoteCommandScopedEndpointID(t *testing.T) {
 		},
 		comment: map[string]string{
 			"comment-1": "endpoint-comment",
-		},
-		loop: map[string]string{
-			"loop-1": "endpoint-loop",
 		},
 	}
 
@@ -169,12 +154,9 @@ func TestRemoteCommandScopedEndpointID(t *testing.T) {
 	if endpointID, ok := remoteCommandScopedEndpointID(&protocol.ResolveCommentMessage{CommentID: "comment-1"}, resolver); !ok || endpointID != "endpoint-comment" {
 		t.Fatalf("remoteCommandScopedEndpointID(comment) = (%q, %v), want (%q, true)", endpointID, ok, "endpoint-comment")
 	}
-	if endpointID, ok := remoteCommandScopedEndpointID(&protocol.GetReviewLoopRunMessage{LoopID: "loop-1"}, resolver); !ok || endpointID != "endpoint-loop" {
-		t.Fatalf("remoteCommandScopedEndpointID(loop) = (%q, %v), want (%q, true)", endpointID, ok, "endpoint-loop")
-	}
 }
 
-func TestRemoteCommandSessionID_IncludesReviewLoopCommands(t *testing.T) {
+func TestRemoteCommandSessionID(t *testing.T) {
 	cases := []struct {
 		name string
 		cmd  string
@@ -198,30 +180,6 @@ func TestRemoteCommandSessionID_IncludesReviewLoopCommands(t *testing.T) {
 			cmd:  protocol.CmdSessionSelected,
 			msg:  &protocol.SessionSelectedMessage{ID: "sess-selected"},
 			want: "sess-selected",
-		},
-		{
-			name: "start",
-			cmd:  protocol.CmdStartReviewLoop,
-			msg:  &protocol.StartReviewLoopMessage{SessionID: "sess-start"},
-			want: "sess-start",
-		},
-		{
-			name: "stop",
-			cmd:  protocol.CmdStopReviewLoop,
-			msg:  &protocol.StopReviewLoopMessage{SessionID: "sess-stop"},
-			want: "sess-stop",
-		},
-		{
-			name: "get_state",
-			cmd:  protocol.CmdGetReviewLoopState,
-			msg:  &protocol.GetReviewLoopStateMessage{SessionID: "sess-get"},
-			want: "sess-get",
-		},
-		{
-			name: "set_iterations",
-			cmd:  protocol.CmdSetReviewLoopIterations,
-			msg:  &protocol.SetReviewLoopIterationLimitMessage{SessionID: "sess-set"},
-			want: "sess-set",
 		},
 		{
 			name: "rename_session",

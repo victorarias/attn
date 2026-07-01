@@ -19,7 +19,6 @@ type DashboardSession = {
   cwd: string;
   endpointName?: string;
   endpointStatus?: string;
-  reviewLoopStatus?: string;
   chiefOfStaff?: boolean;
 };
 
@@ -64,23 +63,6 @@ export function Dashboard({
   onOpenSettings,
   onMutedGroupClick,
 }: DashboardProps) {
-  const reviewLoopIndicator = (status?: string): { glyph: string; label: string } | null => {
-    switch (status) {
-      case 'running':
-        return { glyph: '⟳', label: 'Review loop running' };
-      case 'awaiting_user':
-        return { glyph: '?', label: 'Review loop needs input' };
-      case 'completed':
-        return { glyph: '✓', label: 'Review loop completed' };
-      case 'stopped':
-        return { glyph: '•', label: 'Review loop stopped' };
-      case 'error':
-        return { glyph: '!', label: 'Review loop error' };
-      default:
-        return null;
-    }
-  };
-
   const renderEndpointBadge = (session: DashboardProps['sessions'][number]) => {
     if (!session.endpointName) {
       return null;
@@ -284,7 +266,7 @@ export function Dashboard({
                     {waitingSessions.map((s) => (
                       <div
                         key={s.id}
-                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
+                        className="session-row clickable"
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
@@ -293,15 +275,6 @@ export function Dashboard({
                         <span className="session-name">{s.label}</span>
                         {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
                         {renderEndpointBadge(s)}
-                        {reviewLoopIndicator(s.reviewLoopStatus) && (
-                          <span
-                            className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`}
-                            title={reviewLoopIndicator(s.reviewLoopStatus)?.label}
-                            aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}
-                          >
-                            {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
-                          </span>
-                        )}
                       </div>
                     ))}
                   </div>
@@ -312,7 +285,7 @@ export function Dashboard({
                     {pendingApprovalSessions.map((s) => (
                       <div
                         key={s.id}
-                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
+                        className="session-row clickable"
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
@@ -321,11 +294,6 @@ export function Dashboard({
                         <span className="session-name">{s.label}</span>
                         {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
                         {renderEndpointBadge(s)}
-                        {reviewLoopIndicator(s.reviewLoopStatus) && (
-                          <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
-                            {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
-                          </span>
-                        )}
                       </div>
                     ))}
                   </div>
@@ -336,7 +304,7 @@ export function Dashboard({
                     {launchingSessions.map((s) => (
                       <div
                         key={s.id}
-                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
+                        className="session-row clickable"
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
@@ -345,11 +313,6 @@ export function Dashboard({
                         <span className="session-name">{s.label}</span>
                         {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
                         {renderEndpointBadge(s)}
-                        {reviewLoopIndicator(s.reviewLoopStatus) && (
-                          <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
-                            {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
-                          </span>
-                        )}
                       </div>
                     ))}
                   </div>
@@ -360,7 +323,7 @@ export function Dashboard({
                     {workingSessions.map((s) => (
                       <div
                         key={s.id}
-                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
+                        className="session-row clickable"
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
@@ -369,11 +332,6 @@ export function Dashboard({
                         <span className="session-name">{s.label}</span>
                         {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
                         {renderEndpointBadge(s)}
-                        {reviewLoopIndicator(s.reviewLoopStatus) && (
-                          <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
-                            {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
-                          </span>
-                        )}
                       </div>
                     ))}
                   </div>
@@ -384,7 +342,7 @@ export function Dashboard({
                     {scheduledSessions.map((s) => (
                       <div
                         key={s.id}
-                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
+                        className="session-row clickable"
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
@@ -393,11 +351,6 @@ export function Dashboard({
                         <span className="session-name">{s.label}</span>
                         {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
                         {renderEndpointBadge(s)}
-                        {reviewLoopIndicator(s.reviewLoopStatus) && (
-                          <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
-                            {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
-                          </span>
-                        )}
                       </div>
                     ))}
                   </div>
@@ -408,7 +361,7 @@ export function Dashboard({
                     {idleSessions.map((s) => (
                       <div
                         key={s.id}
-                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
+                        className="session-row clickable"
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
@@ -417,11 +370,6 @@ export function Dashboard({
                         <span className="session-name">{s.label}</span>
                         {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
                         {renderEndpointBadge(s)}
-                        {reviewLoopIndicator(s.reviewLoopStatus) && (
-                          <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
-                            {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
-                          </span>
-                        )}
                       </div>
                     ))}
                   </div>
@@ -432,7 +380,7 @@ export function Dashboard({
                     {unknownSessions.map((s) => (
                       <div
                         key={s.id}
-                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
+                        className="session-row clickable"
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
@@ -441,11 +389,6 @@ export function Dashboard({
                         <span className="session-name">{s.label}</span>
                         {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
                         {renderEndpointBadge(s)}
-                        {reviewLoopIndicator(s.reviewLoopStatus) && (
-                          <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
-                            {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
-                          </span>
-                        )}
                       </div>
                     ))}
                   </div>

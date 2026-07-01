@@ -564,8 +564,6 @@
 
 .endpoint-list,
 .plugin-list,
-.review-loop-settings,
-.review-loop-settings-list,
 .agent-capabilities-list,
 .settings-field-grid {
   display: grid;
@@ -591,10 +589,6 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-}
-
-.review-loop-settings-actions {
-  justify-content: flex-start;
 }
 
 .endpoint-card,

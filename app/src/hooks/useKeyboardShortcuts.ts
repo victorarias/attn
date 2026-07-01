@@ -18,7 +18,6 @@ interface KeyboardShortcutsConfig {
   onToggleSidebar?: () => void;
   onRefreshPRs?: () => void;
   onToggleDiffPanel?: () => void;
-  onToggleReviewLoopPanel?: () => void;
   onToggleDiffDetailPanel?: () => void;
   onToggleAttentionPanel?: () => void;
   onOpenSettings?: () => void;
@@ -48,7 +47,6 @@ export function useKeyboardShortcuts({
   onToggleSidebar,
   onRefreshPRs,
   onToggleDiffPanel,
-  onToggleReviewLoopPanel,
   onToggleDiffDetailPanel,
   onToggleAttentionPanel,
   onOpenSettings,
@@ -86,7 +84,6 @@ export function useKeyboardShortcuts({
   useShortcut('workspace.select8', () => onSelectWorkspaceByIndex(7), enabled);
   useShortcut('workspace.select9', () => onSelectWorkspaceByIndex(8), enabled);
   useShortcut('dock.diff', onToggleDiffPanel ?? (() => {}), enabled && !!onToggleDiffPanel);
-  useShortcut('dock.reviewLoop', onToggleReviewLoopPanel ?? (() => {}), enabled && !!onToggleReviewLoopPanel);
   useShortcut('dock.diffDetail', onToggleDiffDetailPanel ?? (() => {}), enabled && !!onToggleDiffDetailPanel);
   useShortcut('dock.attention', onToggleAttentionPanel ?? (() => {}), enabled && !!onToggleAttentionPanel);
 

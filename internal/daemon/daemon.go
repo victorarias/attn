@@ -88,8 +88,6 @@ const (
 	warnGHVersionTooOld           = "gh_version_too_old"
 )
 
-type ReviewLoopExecutor func(ctx context.Context, run *protocol.ReviewLoopRun, prompt string) (*reviewLoopOutcome, string, string, string, error)
-
 // Daemon manages Claude sessions
 type Daemon struct {
 	socketPath       string
@@ -109,7 +107,6 @@ type Daemon struct {
 	ghRegistry       *github.ClientRegistry
 	hubManager       *hub.Manager
 	classifier       Classifier // Optional, uses package-level classifier.Classify if nil
-	reviewLoopExec   ReviewLoopExecutor
 	repoCaches       map[string]*repoCache
 	repoCacheMu      sync.RWMutex
 	gitCoordMu       sync.Mutex
@@ -139,10 +136,6 @@ type Daemon struct {
 	// cannot interleave and tear each other's respawn down. Lazily initialized.
 	reloadLocksMu    sync.Mutex
 	reloadLocks      map[string]*sync.Mutex
-	reviewLoopMu     sync.Mutex
-	reviewLoopCancel map[string]context.CancelFunc
-	inputSourceMu    sync.Mutex
-	pendingInputSrc  map[string]string
 	// ticketBackstop debounces the deferred self-monitor doorbell (see
 	// ticket_notify.go): an idle self-monitor with unread ticket activity is
 	// re-checked after a grace delay and doorbelled only if still unread, so a live
@@ -480,14 +473,6 @@ func New(socketPath string) *Daemon {
 	dataRoot := filepath.Dir(socketPath)
 	pidPath := filepath.Join(dataRoot, "attn.pid")
 	manager := pty.NewManager(pty.DefaultScrollbackSize, logger.Infof)
-	scriptedReviewLoopCfg, scriptedReviewLoopErr := scriptedReviewLoopConfigFromEnv()
-	if scriptedReviewLoopErr != nil {
-		logger.Infof("Failed to load scripted review loop config: %v", scriptedReviewLoopErr)
-	}
-	var reviewLoopExecutor ReviewLoopExecutor
-	if scriptedReviewLoopCfg != nil {
-		reviewLoopExecutor = newScriptedReviewLoopExecutor(scriptedReviewLoopCfg, logger.Infof)
-	}
 
 	return &Daemon{
 		socketPath:         socketPath,
@@ -500,7 +485,6 @@ func New(socketPath string) *Daemon {
 		debugLogging:       logger != nil && logger.DebugEnabled(),
 		ghRegistry:         github.NewClientRegistry(),
 		hubManager:         nil,
-		reviewLoopExec:     reviewLoopExecutor,
 		repoCaches:         make(map[string]*repoCache),
 		gitCoord:           newGitCoordinator(),
 		warnings:           startupWarnings,
@@ -515,8 +499,6 @@ func New(socketPath string) *Daemon {
 		longRun:            make(map[string]longRunSession),
 		forcedStop:         make(map[string]time.Time),
 		pendingResumeID:    make(map[string]string),
-		reviewLoopCancel:   make(map[string]context.CancelFunc),
-		pendingInputSrc:    make(map[string]string),
 		tailscale:          newTailscaleRuntime(),
 		plugins:            newPluginRegistry(),
 		pluginProcesses:    newPluginProcessRegistry(),
@@ -551,8 +533,6 @@ func NewForTesting(socketPath string) *Daemon {
 		longRun:            make(map[string]longRunSession),
 		forcedStop:         make(map[string]time.Time),
 		pendingResumeID:    make(map[string]string),
-		reviewLoopCancel:   make(map[string]context.CancelFunc),
-		pendingInputSrc:    make(map[string]string),
 		tailscale:          newTailscaleRuntime(),
 		plugins:            newPluginRegistry(),
 		pluginProcesses:    newPluginProcessRegistry(),
@@ -596,8 +576,6 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		longRun:            make(map[string]longRunSession),
 		forcedStop:         make(map[string]time.Time),
 		pendingResumeID:    make(map[string]string),
-		reviewLoopCancel:   make(map[string]context.CancelFunc),
-		pendingInputSrc:    make(map[string]string),
 		tailscale:          newTailscaleRuntime(),
 		plugins:            newPluginRegistry(),
 		pluginProcesses:    newPluginProcessRegistry(),
@@ -1402,7 +1380,6 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 	}
 	d.stopTranscriptWatcher(info.ID)
 	d.clearLongRunTracking(info.ID)
-	d.handleReviewLoopSourceSessionExit(info.ID)
 	d.closePluginDriverSession(info.ID, "exited", &info.ExitCode, info.Signal)
 
 	if d.ptyBackend != nil {
@@ -1495,8 +1472,6 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 		session = d.hubManager.RemoteSession(sessionID)
 	}
 	d.terminateSession(sessionID, sig)
-	d.handleReviewLoopSourceSessionExit(sessionID)
-	d.setPendingInputSource(sessionID, "")
 	d.dropSessionRecord(sessionID)
 	d.clearChiefOfStaffIfSession(sessionID)
 	if d.hubManager != nil {
@@ -1962,18 +1937,6 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos:
 		d.handleTodos(conn, msg.(*protocol.TodosMessage))
-	case protocol.CmdStartReviewLoop:
-		d.handleStartReviewLoop(conn, msg.(*protocol.StartReviewLoopMessage))
-	case protocol.CmdStopReviewLoop:
-		d.handleStopReviewLoop(conn, msg.(*protocol.StopReviewLoopMessage))
-	case protocol.CmdGetReviewLoopState:
-		d.handleGetReviewLoopState(conn, msg.(*protocol.GetReviewLoopStateMessage))
-	case protocol.CmdGetReviewLoopRun:
-		d.handleGetReviewLoopRun(conn, msg.(*protocol.GetReviewLoopRunMessage))
-	case protocol.CmdSetReviewLoopIterations:
-		d.handleSetReviewLoopIterations(conn, msg.(*protocol.SetReviewLoopIterationLimitMessage))
-	case protocol.CmdAnswerReviewLoop:
-		d.handleAnswerReviewLoop(conn, msg.(*protocol.AnswerReviewLoopMessage))
 	case protocol.CmdWorkflowRunUpsert:
 		d.handleWorkflowRunUpsert(conn, msg.(*protocol.WorkflowRunUpsertMessage))
 	case protocol.CmdWorkflowCallUpsert:
@@ -2143,7 +2106,6 @@ func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	switch msg.State {
 	case protocol.StateWorking:
 		d.markRunStartedIfNeeded(msg.ID)
-		_ = d.takePendingInputSource(msg.ID)
 	case protocol.StateIdle, protocol.StateScheduled:
 		// Both end the current run for long-run-review purposes: idle is
 		// terminal, and scheduled parks until a future cron fires (the resumed
