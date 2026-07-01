@@ -270,6 +270,10 @@ model Ticket {
   updated_at: string;
   closed_at?: string;
   archived_at?: string;
+  // Machine-reconciliation provenance: set when a dead owning session's outcome
+  // was judged by the reconciliation classifier (the verdict lands as an
+  // attn-authored comment). Non-terminal + reconciled_at set = the orphan badge.
+  reconciled_at?: string;
   activity: TicketActivity[];
   attachments: TicketAttachment[];
 }
