@@ -769,7 +769,9 @@ export interface DelegateMessage {
     brief:             string;
     cmd:               DelegateMessageCmd;
     cwd?:              string;
+    effort?:           string;
     label?:            string;
+    model?:            string;
     placement?:        string;
     source_session_id: string;
     workspace_id?:     string;
@@ -3120,11 +3122,13 @@ export interface SpawnSessionMessage {
     cols:                number;
     copilot_executable?: string;
     cwd:                 string;
+    effort?:             string;
     endpoint_id?:        string;
     executable?:         string;
     id:                  string;
     initial_prompt?:     string;
     label?:              string;
+    model?:              string;
     resume_picker?:      boolean;
     resume_session_id?:  string;
     rows:                number;
@@ -7072,7 +7076,9 @@ const typeMap: any = {
         { json: "brief", js: "brief", typ: "" },
         { json: "cmd", js: "cmd", typ: r("DelegateMessageCmd") },
         { json: "cwd", js: "cwd", typ: u(undefined, "") },
+        { json: "effort", js: "effort", typ: u(undefined, "") },
         { json: "label", js: "label", typ: u(undefined, "") },
+        { json: "model", js: "model", typ: u(undefined, "") },
         { json: "placement", js: "placement", typ: u(undefined, "") },
         { json: "source_session_id", js: "source_session_id", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
@@ -8410,11 +8416,13 @@ const typeMap: any = {
         { json: "cols", js: "cols", typ: 0 },
         { json: "copilot_executable", js: "copilot_executable", typ: u(undefined, "") },
         { json: "cwd", js: "cwd", typ: "" },
+        { json: "effort", js: "effort", typ: u(undefined, "") },
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "executable", js: "executable", typ: u(undefined, "") },
         { json: "id", js: "id", typ: "" },
         { json: "initial_prompt", js: "initial_prompt", typ: u(undefined, "") },
         { json: "label", js: "label", typ: u(undefined, "") },
+        { json: "model", js: "model", typ: u(undefined, "") },
         { json: "resume_picker", js: "resume_picker", typ: u(undefined, true) },
         { json: "resume_session_id", js: "resume_session_id", typ: u(undefined, "") },
         { json: "rows", js: "rows", typ: 0 },

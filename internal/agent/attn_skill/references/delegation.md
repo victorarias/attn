@@ -60,6 +60,17 @@ The source agent is used by default. Select another supported agent with:
 Plugin agents work only when they declare delegated initial-prompt support.
 Copilot delegation is currently unsupported.
 
+`--model` and `--effort` pin the delegated agent's model and reasoning effort
+for that delegation only; omitted, the agent uses its own defaults:
+
+    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" \
+      --agent claude --model opus --effort high
+
+`--model` takes an alias or a full model id. `--effort` takes the agent's
+native levels (claude: low, medium, high, xhigh, max; codex: minimal, low,
+medium, high, xhigh). Agents without a native mechanism (e.g. copilot) reject
+these flags.
+
 ## Placement
 
 Before creating a new workspace, check whether an existing one already fits the

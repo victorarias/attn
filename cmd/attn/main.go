@@ -604,6 +604,12 @@ worktree options:
 
 session options:
   --agent <name>             configured prompt-capable built-in or plugin agent
+  --model <name>             pin the agent's model (alias or full id, e.g.
+                             "opus" or "claude-opus-4-8"; defaults to the
+                             agent's own default)
+  --effort <level>           pin the agent's reasoning effort (claude: low,
+                             medium, high, xhigh, max; codex: minimal, low,
+                             medium, high, xhigh)
   --name <text>              name for the agent and, when a new workspace is
                              created, the workspace (max 16 chars, must be
                              unique; defaults to the directory name)
@@ -1550,6 +1556,8 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	briefText := fs.String("brief", "", "delegated task brief")
 	briefFile := fs.String("brief-file", "", "file containing the delegated task brief")
 	agentName := fs.String("agent", "", "target agent (defaults to the source session agent)")
+	model := fs.String("model", "", "pin the delegated agent's model (alias or full id)")
+	effort := fs.String("effort", "", "pin the delegated agent's reasoning effort")
 	name := fs.String("name", "", "name for the agent and, when a new workspace is created, the workspace")
 	sourceSessionID := fs.String("source-session", "", "source session id (defaults to ATTN_SESSION_ID)")
 	yolo := fs.Bool("yolo", false, "launch the target agent in yolo mode")
@@ -1616,6 +1624,8 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 		brief:           brief,
 		options: client.DelegateOptions{
 			Agent:        strings.TrimSpace(*agentName),
+			Model:        strings.TrimSpace(*model),
+			Effort:       strings.TrimSpace(*effort),
 			Label:        strings.TrimSpace(*name),
 			Yolo:         *yolo,
 			Placement:    placement,
@@ -2243,8 +2253,11 @@ func runAgentDirectly(requestedAgent string) {
 	// Likewise the worker exports ATTN_AUTO_APPROVE when the auto_approve_enabled
 	// setting is on, so the launched agent starts in its native auto-approve mode.
 	opts.AutoApprove = strings.TrimSpace(os.Getenv("ATTN_AUTO_APPROVE")) == "1"
-	// ATTN_CHIEF_MODEL pins the chief launch's model (chief_model_<agent>).
-	opts.Model = strings.TrimSpace(os.Getenv("ATTN_CHIEF_MODEL"))
+	// ATTN_MODEL pins the launch's model (chief_model_<agent> for chief
+	// launches, delegate --model for delegations); ATTN_EFFORT pins the
+	// reasoning effort (delegate --effort).
+	opts.Model = strings.TrimSpace(os.Getenv("ATTN_MODEL"))
+	opts.Effort = strings.TrimSpace(os.Getenv("ATTN_EFFORT"))
 	if cp, ok := agentdriver.GetConfigOverrideProvider(driver); ok {
 		opts.ConfigOverrides = cp.GenerateConfigOverrides(opts)
 	}

@@ -360,6 +360,8 @@ func TestClient_Delegate(t *testing.T) {
 	c := New(sockPath)
 	result, err := c.Delegate("source-session", "Investigate the parser", DelegateOptions{
 		Agent:        "codex",
+		Model:        "gpt-5.2-codex",
+		Effort:       "high",
 		Label:        "Parser task",
 		Yolo:         true,
 		Placement:    "new_workspace",
@@ -382,6 +384,9 @@ func TestClient_Delegate(t *testing.T) {
 	}
 	if protocol.Deref(request.Agent) != "codex" || protocol.Deref(request.Label) != "Parser task" {
 		t.Fatalf("Delegate request options = %+v", request)
+	}
+	if protocol.Deref(request.Model) != "gpt-5.2-codex" || protocol.Deref(request.Effort) != "high" {
+		t.Fatalf("Delegate request model/effort = %+v", request)
 	}
 	if !protocol.Deref(request.YoloMode) {
 		t.Fatal("Delegate request did not enable yolo mode")

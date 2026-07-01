@@ -145,6 +145,8 @@ func (c *Client) UpdateTodos(id string, todos []string) error {
 
 type DelegateOptions struct {
 	Agent        string
+	Model        string
+	Effort       string
 	Label        string
 	Yolo         bool
 	Placement    string
@@ -165,6 +167,12 @@ func (c *Client) Delegate(sourceSessionID, brief string, opts DelegateOptions) (
 	}
 	if value := strings.TrimSpace(opts.Agent); value != "" {
 		msg.Agent = protocol.Ptr(value)
+	}
+	if value := strings.TrimSpace(opts.Model); value != "" {
+		msg.Model = protocol.Ptr(value)
+	}
+	if value := strings.TrimSpace(opts.Effort); value != "" {
+		msg.Effort = protocol.Ptr(value)
 	}
 	if value := strings.TrimSpace(opts.Label); value != "" {
 		msg.Label = protocol.Ptr(value)

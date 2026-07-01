@@ -518,6 +518,21 @@ func TestParseDelegateArgsNameSetsLabel(t *testing.T) {
 	}
 }
 
+func TestParseDelegateArgsModelAndEffort(t *testing.T) {
+	parsed, err := parseDelegateArgs([]string{
+		"--source-session", "source-session",
+		"--brief", "Investigate this",
+		"--model", " claude-fable-5 ",
+		"--effort", " low ",
+	})
+	if err != nil {
+		t.Fatalf("parseDelegateArgs() error = %v", err)
+	}
+	if parsed.options.Model != "claude-fable-5" || parsed.options.Effort != "low" {
+		t.Fatalf("options model/effort = %q/%q", parsed.options.Model, parsed.options.Effort)
+	}
+}
+
 func TestParseDelegateArgsWorktreeUsesCurrentWorkspace(t *testing.T) {
 	parsed, err := parseDelegateArgs([]string{
 		"--source-session", "source-session",
