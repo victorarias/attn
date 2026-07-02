@@ -491,3 +491,30 @@ func TestClaudeHeadlessArgsIgnoreWritableRoots(t *testing.T) {
 		"Read,Write,Edit,Grep,Glob,Bash",
 		"--permission-mode", "dontAsk", "claude-test", "narrate")
 }
+
+func TestClaudeRunHeadlessTaskLeadsFailureOutputWithResultText(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "agent")
+	script := "#!/bin/sh\n" +
+		"printf '[{\"type\":\"system\",\"subtype\":\"init\"},{\"type\":\"result\",\"is_error\":true,\"result\":\"This model may not exist\"}]\\n'\n" +
+		"exit 1\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake agent: %v", err)
+	}
+	result, err := (&Claude{}).RunHeadlessTask(context.Background(), HeadlessTaskRequest{
+		Executable: scriptPath,
+		Model:      "claude-test",
+		Prompt:     "judge",
+		WorkDir:    dir,
+	})
+	if err == nil {
+		t.Fatal("RunHeadlessTask unexpectedly succeeded")
+	}
+	if !strings.HasPrefix(result.FailureOutput, "result: This model may not exist") {
+		t.Fatalf("failure output does not lead with the result text: %q", result.FailureOutput)
+	}
+	if !strings.Contains(result.FailureOutput, "stdout: ") {
+		t.Fatalf("failure output lost the raw tail: %q", result.FailureOutput)
+	}
+}

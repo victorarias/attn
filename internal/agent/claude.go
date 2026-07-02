@@ -174,6 +174,13 @@ func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskReques
 
 	result, stdout, err := runHeadlessCommand(ctx, request.Executable, args, runDir, "claude")
 	if err != nil {
+		// A failed `--output-format json` run usually still ends with a result
+		// event whose text is the human-readable error ("This model may not
+		// exist...", "Not logged in..."); lead FailureOutput with it so callers
+		// that surface the raw cause show the message before the JSON tail.
+		if text := parseClaudeFinalText(stdout); text != "" {
+			result.FailureOutput = strings.TrimSpace("result: " + text + "\n" + result.FailureOutput)
+		}
 		return result, err
 	}
 	result.Text = parseClaudeFinalText(stdout)
