@@ -2,7 +2,7 @@
 
 > North star: `docs/vision/chief-delegation-awareness.md` — read that for the *why*.
 > This doc is the *what*: the domain model and surfaces. It **supersedes and folds in**
-> `docs/plans/2026-06-25-communication-gateway.md` — the gateway's delivery mechanics
+> the earlier communication-gateway design — the gateway's delivery mechanics
 > now live here as the **event-driven activity + notification** layer of the tracker.
 
 ## The reframe
@@ -239,8 +239,8 @@ each is a meaningful, verifiable chunk.
 |---|---|---|
 | 1 | Ticket store + lifecycle | ✅ |
 | 2 | Event-driven notification core | ✅ |
-| 3 | Delegation ⇄ tickets (live wiring) | ✅ (sub-split — see `2026-06-26-work-tracker-slice3.md`) |
-| 4 | Ticket view + resume + attachments | ✅ (sub-split — see `2026-06-26-work-tracker-slice4.md`) |
+| 3 | Delegation ⇄ tickets (live wiring) | ✅ (shipped as a sub-split) |
+| 4 | Ticket view + resume + attachments | ✅ (shipped as a sub-split) |
 | 5 | Board view | ✅ (status columns + Todo backlog + filters; read-only awareness surface, opened from ⌘K) |
 | 6 | Codex nudge path | ✅ (self-monitor formalized as an `agent.Capabilities` flag; daemon resolves it from the driver registry; pure `ticketnotify` + end-to-end codex-nudge roundtrip test) |
 | 7 | Retire the `dispatch` namespace | ✅ (atomic: CLI/handlers/store/protocol removed, delegation rewired to tickets-only via `delegatedTicketPrompt`, ProtocolVersion 129→130; dispatch tables orphaned not dropped — append-only migration history; notebook delivery-ledger removed, shared raw-tier kept) |

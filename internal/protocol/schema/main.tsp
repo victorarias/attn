@@ -765,7 +765,7 @@ model WorkspaceContextRollbackMessage {
 
 // ============================================================================
 // Notebook (durable, profile-wide markdown: a dated journal + a PARA knowledge
-// base). See docs/plans/2026-06-13-notebook.md and 2026-06-18-knowledge-base.md.
+// base).
 // Filesystem-canonical: edits use hash-CAS on file bytes, not a revision table.
 // These messages are the frontend's WebSocket path; the user-facing `attn
 // notebook …` CLI was removed (only notebook_guide remains, for the launcher).
