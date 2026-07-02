@@ -60,6 +60,18 @@ interface SettingsModalProps {
   onSetSetting: (key: string, value: string) => void;
   themePreference: ThemePreference;
   onSetTheme: (theme: ThemePreference) => void;
+  /** App-wide font scale (uiScale setting). Optional so tests without font-size
+      concerns can omit the whole group; App.tsx always provides them. */
+  uiScale?: number;
+  onIncreaseUIScale?: () => void;
+  onDecreaseUIScale?: () => void;
+  onResetUIScale?: () => void;
+  /** Ticket board font scale override; null = match app. */
+  ticketBoardScale?: number | null;
+  effectiveTicketBoardScale?: number;
+  onIncreaseTicketBoardScale?: () => void;
+  onDecreaseTicketBoardScale?: () => void;
+  onMatchAppTicketBoardScale?: () => void;
 }
 
 type SettingsSectionID = 'general' | 'connectivity' | 'plugins' | 'agents' | 'review' | 'hygiene';
@@ -127,6 +139,15 @@ export function SettingsModal({
   onSetSetting,
   themePreference,
   onSetTheme,
+  uiScale = 1,
+  onIncreaseUIScale,
+  onDecreaseUIScale,
+  onResetUIScale,
+  ticketBoardScale = null,
+  effectiveTicketBoardScale,
+  onIncreaseTicketBoardScale,
+  onDecreaseTicketBoardScale,
+  onMatchAppTicketBoardScale,
 }: SettingsModalProps) {
   const [projectsDir, setProjectsDir] = useState(settings.projects_directory || '');
   const [notebookRoot, setNotebookRoot] = useState(settings['notebook.root'] || '');
@@ -888,6 +909,96 @@ export function SettingsModal({
             >
               System
             </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="settings-block">
+        <div className="settings-block-intro">
+          <div className="settings-kicker">Appearance</div>
+          <h3>Font Size</h3>
+          <p className="settings-description">
+            Scale text across attn. The taskboard can use its own size, independent of the rest of
+            the app.
+          </p>
+        </div>
+        <div className="settings-block-body">
+          <div className="settings-row-card">
+            <div>
+              <p className="settings-row-title">App</p>
+              <p className="settings-row-copy">
+                The whole interface, including terminals. Also adjustable with ⌘+ and ⌘−.
+              </p>
+            </div>
+            <div className="settings-font-scale" data-testid="settings-app-font-scale">
+              <button
+                type="button"
+                className="settings-action"
+                onClick={onDecreaseUIScale}
+                aria-label="Decrease app font size"
+              >
+                −
+              </button>
+              <span className="settings-font-scale-value" data-testid="settings-app-font-scale-value">
+                {Math.round(uiScale * 100)}%
+              </span>
+              <button
+                type="button"
+                className="settings-action"
+                onClick={onIncreaseUIScale}
+                aria-label="Increase app font size"
+              >
+                +
+              </button>
+              {uiScale !== 1 && (
+                <button type="button" className="settings-action" onClick={onResetUIScale}>
+                  Reset
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="settings-row-card">
+            <div>
+              <p className="settings-row-title">Taskboard</p>
+              <p className="settings-row-copy">
+                The ticket board and ticket details. Matches the app size until you change it.
+              </p>
+            </div>
+            <div className="settings-font-scale" data-testid="settings-taskboard-font-scale">
+              <button
+                type="button"
+                className="settings-action"
+                onClick={onDecreaseTicketBoardScale}
+                aria-label="Decrease taskboard font size"
+              >
+                −
+              </button>
+              <span
+                className="settings-font-scale-value"
+                data-testid="settings-taskboard-font-scale-value"
+              >
+                {ticketBoardScale === null
+                  ? 'Match app'
+                  : `${Math.round((effectiveTicketBoardScale ?? ticketBoardScale) * 100)}%`}
+              </span>
+              <button
+                type="button"
+                className="settings-action"
+                onClick={onIncreaseTicketBoardScale}
+                aria-label="Increase taskboard font size"
+              >
+                +
+              </button>
+              {ticketBoardScale !== null && (
+                <button
+                  type="button"
+                  className="settings-action"
+                  onClick={onMatchAppTicketBoardScale}
+                >
+                  Match app
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </section>

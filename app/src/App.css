@@ -1,5 +1,8 @@
 :root {
   --ui-scale: 1;
+  /* Ticket board font scale; follows the app scale unless useTicketBoardScale
+     sets an explicit override on the document root. */
+  --ticket-board-scale: var(--ui-scale);
   /* Base font sizes - multiply by scale for responsive sizing */
   --font-size-xs: calc(9px * var(--ui-scale));
   --font-size-sm: calc(11px * var(--ui-scale));
@@ -42,6 +45,18 @@
   --color-text-dimmed: #555;
   --color-scrollbar-thumb: #2a2a2d;
   --color-scrollbar-hover: #3a3a3d;
+}
+
+/* Ticket board surfaces re-derive the font tokens from the board's own scale,
+   so the taskboard font size can differ from the rest of the app. */
+.tb-panel,
+.ticket-detail-panel {
+  --font-size-xs: calc(9px * var(--ticket-board-scale));
+  --font-size-sm: calc(11px * var(--ticket-board-scale));
+  --font-size-md: calc(13px * var(--ticket-board-scale));
+  --font-size: calc(14px * var(--ticket-board-scale));
+  --font-size-lg: calc(18px * var(--ticket-board-scale));
+  --font-size-xl: calc(24px * var(--ticket-board-scale));
 }
 
 /* System light: applies when OS is light and no explicit data-theme is set */

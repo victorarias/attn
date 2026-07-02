@@ -68,6 +68,7 @@ import { useWhatsNew } from './hooks/useWhatsNew';
 import { shortcutTokens, formatShortcut, dockShortcutLabel } from './shortcuts';
 import type { ShortcutId } from './shortcuts';
 import { useUIScale } from './hooks/useUIScale';
+import { useTicketBoardScale } from './hooks/useTicketBoardScale';
 import { useTheme } from './hooks/useTheme';
 import { useOpenPR, type OpenPRProgress } from './hooks/useOpenPR';
 import { useUiAutomationBridge } from './hooks/useUiAutomationBridge';
@@ -1044,6 +1045,9 @@ sendFetchPRDetails,
   // UI scale for font sizing (Cmd+/Cmd-) - now uses SettingsContext
   const { scale, increaseScale, decreaseScale, resetScale } = useUIScale();
   const terminalFontSize = Math.round(14 * scale);
+
+  // Independent font scale for the ticket board surfaces (null = match app)
+  const ticketBoardScale = useTicketBoardScale(scale);
 
   // Theme (dark/light/system)
   const { preference: themePreference, resolved: resolvedTheme, setTheme } = useTheme();
@@ -3958,6 +3962,15 @@ sendFetchPRDetails,
         onSetSetting={sendSetSetting}
         themePreference={themePreference}
         onSetTheme={setTheme}
+        uiScale={scale}
+        onIncreaseUIScale={increaseScale}
+        onDecreaseUIScale={decreaseScale}
+        onResetUIScale={resetScale}
+        ticketBoardScale={ticketBoardScale.scale}
+        effectiveTicketBoardScale={ticketBoardScale.effectiveScale}
+        onIncreaseTicketBoardScale={ticketBoardScale.increaseScale}
+        onDecreaseTicketBoardScale={ticketBoardScale.decreaseScale}
+        onMatchAppTicketBoardScale={ticketBoardScale.matchApp}
       />
     </div>
     </NotebookSurfaceProvider>
