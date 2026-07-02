@@ -74,7 +74,12 @@ type EnqueueOptions struct {
 
 // Options configures a Runner at construction.
 type Options struct {
-	// Root is the notebook root dir. Empty/whitespace ⇒ the runner is disabled.
+	// Store injects the persistence backend. When set it takes precedence over Root
+	// and the runner is enabled. Production passes a SQLite-backed Store; tests and
+	// the legacy on-disk path leave it nil and use Root.
+	Store Store
+	// Root is the notebook root dir. Used only when Store is nil: a non-empty root
+	// selects the file-backed FileStore; empty/whitespace ⇒ the runner is disabled.
 	Root string
 	// Log receives runtime log lines. A nil Log is replaced with a no-op.
 	Log LogFunc
@@ -91,9 +96,9 @@ type Options struct {
 	BackoffCap  time.Duration
 }
 
-// Runner is the durable, file-backed, single-worker task runner.
+// Runner is the durable, single-worker task runner.
 type Runner struct {
-	store    *store
+	store    Store
 	log      LogFunc
 	now      func() time.Time
 	disabled bool
@@ -173,13 +178,16 @@ func New(opts Options) *Runner {
 		backoffCap:   nonZeroDuration(opts.BackoffCap, DefaultBackoffCap),
 		wake:         make(chan struct{}, 1),
 	}
-	if root := trimRoot(opts.Root); root == "" {
+	if opts.Store != nil {
+		r.store = opts.Store
+		return r
+	}
+	root := trimRoot(opts.Root)
+	if root == "" {
 		r.disabled = true
 		return r
-	} else {
-		r.store = newStore(root)
-		r.store.log = log
 	}
+	r.store = NewFileStore(root, log)
 	return r
 }
 
@@ -236,7 +244,7 @@ func (r *Runner) Start() error {
 		r.mu.Unlock()
 		return errors.New("tasks: runner already started")
 	}
-	if err := r.store.init(); err != nil {
+	if err := r.store.Init(); err != nil {
 		r.mu.Unlock()
 		return fmt.Errorf("tasks: init store: %w", err)
 	}
@@ -244,7 +252,7 @@ func (r *Runner) Start() error {
 	// second live Runner on the same root would double-execute every task (its own
 	// worker, its own in-memory CommitGuard). Acquiring the lock fails fast with
 	// ErrAlreadyRunning rather than silently double-applying durable writes.
-	lockPath, err := r.store.acquireLock()
+	lockPath, err := r.store.AcquireLock()
 	if err != nil {
 		r.mu.Unlock()
 		return err
@@ -260,7 +268,7 @@ func (r *Runner) Start() error {
 	// clobbered by recovery's stale in-memory copy (lost update). It runs before
 	// the worker launches, so contention here is nil.
 	r.ioMu.Lock()
-	n, err := r.store.recoverOrphans(r.now())
+	n, err := r.store.RecoverOrphans(r.now())
 	r.ioMu.Unlock()
 	if err != nil {
 		r.log("tasks: recover orphan running tasks: %v", err)
@@ -301,7 +309,7 @@ func (r *Runner) Stop() {
 
 	// Release single-instance ownership only after the worker has fully exited, so
 	// no other Runner can claim the root while ours is still draining.
-	r.store.releaseLock(lockPath)
+	r.store.ReleaseLock(lockPath)
 }
 
 // Enqueue (re-)persists a task for kind+subject, coalescing onto the same record.
@@ -336,7 +344,7 @@ func (r *Runner) Enqueue(kind, subject string, opts EnqueueOptions) (*Task, erro
 	r.ioMu.Lock()
 	defer r.ioMu.Unlock()
 
-	existing, err := r.store.load(id)
+	existing, err := r.store.Load(id)
 	if err != nil {
 		return nil, err
 	}
@@ -387,7 +395,7 @@ func (r *Runner) Enqueue(kind, subject string, opts EnqueueOptions) (*Task, erro
 		task.Meta = cloneStringMap(opts.Meta)
 	}
 
-	if err := r.store.save(task); err != nil {
+	if err := r.store.Save(task); err != nil {
 		return nil, err
 	}
 	r.notifyChange()
@@ -406,7 +414,7 @@ func (r *Runner) Retry(id string) (*Task, error) {
 	r.ioMu.Lock()
 	defer r.ioMu.Unlock()
 
-	existing, err := r.store.load(id)
+	existing, err := r.store.Load(id)
 	if err != nil {
 		return nil, err
 	}
@@ -423,7 +431,7 @@ func (r *Runner) Retry(id string) (*Task, error) {
 	existing.Requeued = false
 	existing.NextAttemptAt = now
 	existing.UpdatedAt = now
-	if err := r.store.save(existing); err != nil {
+	if err := r.store.Save(existing); err != nil {
 		return nil, err
 	}
 	r.notifyChange()
@@ -486,7 +494,7 @@ func (r *Runner) Remove(id string) {
 	}
 	r.Cancel(id)
 	r.ioMu.Lock()
-	err := r.store.delete(id)
+	err := r.store.Delete(id)
 	r.ioMu.Unlock()
 	if err != nil {
 		r.log("tasks: remove %s: %v", id, err)
@@ -501,7 +509,7 @@ func (r *Runner) List() ([]*Task, error) {
 	if r.disabled {
 		return nil, nil
 	}
-	all, err := r.store.list()
+	all, err := r.store.List()
 	if err != nil {
 		return nil, err
 	}
@@ -516,7 +524,7 @@ func (r *Runner) Get(id string) (*Task, error) {
 	if r.disabled {
 		return nil, nil
 	}
-	return r.store.load(id)
+	return r.store.Load(id)
 }
 
 // --- worker loop -----------------------------------------------------------
@@ -564,7 +572,7 @@ func (r *Runner) loop() {
 func (r *Runner) runNext() (bool, error) {
 	r.ioMu.Lock()
 	now := r.now()
-	all, err := r.store.list()
+	all, err := r.store.List()
 	if err != nil {
 		r.ioMu.Unlock()
 		return false, err
@@ -608,7 +616,7 @@ func (r *Runner) runNext() (bool, error) {
 	pick.Attempts++
 	pick.Requeued = false
 	pick.UpdatedAt = now
-	if err := r.store.save(pick); err != nil {
+	if err := r.store.Save(pick); err != nil {
 		r.ioMu.Unlock()
 		r.log("tasks: persist running state for %s: %v", pick.ID, err)
 		return false, nil
@@ -714,7 +722,7 @@ func (r *Runner) execute(t *Task, exec executor) {
 func (r *Runner) finish(id string, runErr error) {
 	r.ioMu.Lock()
 
-	cur, err := r.store.load(id)
+	cur, err := r.store.Load(id)
 	if err != nil {
 		r.ioMu.Unlock()
 		r.log("tasks: reload %s before finish: %v", id, err)
@@ -744,7 +752,7 @@ func (r *Runner) finish(id string, runErr error) {
 			cur.Attempts = 0
 			cur.LastError = runErr.Error()
 			cur.UpdatedAt = now
-			if err := r.store.save(cur); err != nil {
+			if err := r.store.Save(cur); err != nil {
 				r.ioMu.Unlock()
 				r.log("tasks: persist requeued-after-failure state for %s: %v", id, err)
 				return
@@ -768,7 +776,7 @@ func (r *Runner) finish(id string, runErr error) {
 		} else {
 			cur.State = StateDone
 		}
-		if err := r.store.save(cur); err != nil {
+		if err := r.store.Save(cur); err != nil {
 			r.ioMu.Unlock()
 			r.log("tasks: persist done state for %s: %v", id, err)
 			return
@@ -798,7 +806,7 @@ func (r *Runner) recordFailureLocked(t *Task, cause error) {
 		r.log("tasks: %s failed (attempt %d/%d), retry at %s: %v",
 			t.ID, t.Attempts, r.maxAttempts, t.NextAttemptAt.Format(time.RFC3339), cause)
 	}
-	if err := r.store.save(t); err != nil {
+	if err := r.store.Save(t); err != nil {
 		r.log("tasks: persist failure state for %s: %v", t.ID, err)
 	}
 }

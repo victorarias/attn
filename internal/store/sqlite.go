@@ -551,6 +551,21 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 	// reconciliation, not agent self-report) and the set-if-unset dedupe lock
 	// between the death-hook and the sweep backstop.
 	{60, "add reconciled_at to tickets", "ALTER TABLE tickets ADD COLUMN reconciled_at TEXT NOT NULL DEFAULT ''"},
+	// The durable task runner (internal/tasks) persists its records here instead of
+	// one JSON file per task under the notebook root. See docs/plans/2026-07-02-bg-task-notifications.md.
+	{61, "create tasks table", `CREATE TABLE IF NOT EXISTS tasks (
+		id TEXT PRIMARY KEY,
+		kind TEXT NOT NULL,
+		subject TEXT NOT NULL,
+		state TEXT NOT NULL,
+		attempts INTEGER NOT NULL DEFAULT 0,
+		next_attempt_at TEXT NOT NULL,
+		last_error TEXT NOT NULL DEFAULT '',
+		meta_json TEXT NOT NULL DEFAULT '',
+		requeued INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
