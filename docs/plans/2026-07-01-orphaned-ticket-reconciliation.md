@@ -111,8 +111,8 @@ happens, the board lies forever. Mid-flight deaths are already surfaced
 1. **"No auto-transition anywhere" vs the shipped crash stamp.** The ratified
    rule (§6 below) forbids machine column moves — but
    `captureTicketCrashState` already auto-moves mid-flight deaths to terminal
-   `crashed`, and that behavior shipped deliberately (work-tracker slice 3c,
-   `docs/plans/2026-06-26-work-tracker-slice3.md`). This design does **not**
+   `crashed`, and that behavior shipped deliberately (work-tracker slice 3c;
+   see `docs/plans/2026-06-26-work-tracker.md`). This design does **not**
    silently repeal it: reconciliation covers the neutral-end deaths crash
    capture deliberately leaves alone, and the no-auto-transition rule governs
    the new path. Whether the crash stamp itself should eventually be softened
