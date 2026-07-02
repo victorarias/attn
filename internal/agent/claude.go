@@ -174,6 +174,13 @@ func (c *Claude) RunHeadlessTask(ctx context.Context, request HeadlessTaskReques
 
 	result, stdout, err := runHeadlessCommand(ctx, request.Executable, args, runDir, "claude")
 	if err != nil {
+		// A failed `--output-format json` run usually still ends with a result
+		// event whose text is the human-readable error ("This model may not
+		// exist...", "Not logged in..."); lead FailureOutput with it so callers
+		// that surface the raw cause show the message before the JSON tail.
+		if text := parseClaudeFinalText(stdout); text != "" {
+			result.FailureOutput = strings.TrimSpace("result: " + text + "\n" + result.FailureOutput)
+		}
 		return result, err
 	}
 	result.Text = parseClaudeFinalText(stdout)
@@ -330,6 +337,12 @@ func claudeHeadlessArgs(request HeadlessTaskRequest) []string {
 	}
 	args := []string{"--print"}
 	args = append(args, claudeHeadlessIsolationArgs()...)
+	// --strict-mcp-config with no --mcp-config loads ZERO MCP servers. Without
+	// it the user's claude.ai account connectors (Slack/Gmail/Drive/Calendar)
+	// still attach — --setting-sources "" does not cover them (verified
+	// empirically, 2.1.198) — and a failing or needs-auth connector can sink an
+	// otherwise-healthy run. No native-tools task needs MCP.
+	args = append(args, "--strict-mcp-config")
 	// Only pin the model when one is requested; an empty "--model" is rejected as
 	// an invalid model. Omitting it lets Claude use its own default (the faithful
 	// "harness decides" default when agent() has no model override).

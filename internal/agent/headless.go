@@ -33,12 +33,18 @@ func (b *boundedHeadlessOutput) Write(p []byte) (int, error) {
 	return originalLength, nil
 }
 
+// headlessFailureOutputLimit bounds HeadlessTaskResult.FailureOutput. The tail
+// is kept (fatal errors land last on both streams); anything longer is cut.
+const headlessFailureOutputLimit = 4 << 10 // 4 KiB per stream
+
 // runHeadlessCommand runs a bounded headless agent process. It returns the
 // captured stdout bytes (bounded) so drivers can extract the child's final text
 // for the no-schema path. On a non-zero exit it returns a non-nil error with
-// Diagnostics set; the error contract is intentionally unchanged — the janitor
-// caller depends on it, and the workflow boundary (driverAgent) is responsible
-// for the error->null adaptation.
+// Diagnostics and FailureOutput set; the error string itself stays free of
+// child output (it travels into keeper/journal surfaces that must not echo
+// workspace content) — callers that want the raw cause opt in via
+// FailureOutput. The error contract is otherwise unchanged; the workflow
+// boundary (driverAgent) is responsible for the error->null adaptation.
 func runHeadlessCommand(
 	ctx context.Context,
 	executable string,
@@ -58,10 +64,34 @@ func runHeadlessCommand(
 	if err != nil {
 		diagnostics := classifyHeadlessFailure(stdout.String() + "\n" + stderr.String())
 		return HeadlessTaskResult{
-			Diagnostics: diagnostics,
+			Diagnostics:   diagnostics,
+			FailureOutput: headlessFailureOutput(stdout.String(), stderr.String()),
 		}, stdout.Bytes(), fmt.Errorf("%s: %w", diagnostics, err)
 	}
 	return HeadlessTaskResult{}, stdout.Bytes(), nil
+}
+
+// headlessFailureOutput assembles the bounded raw-output tail preserved on a
+// failed run: the ground truth behind the Diagnostics bucket. stderr first —
+// that is where agent CLIs put fatal errors; stdout may hold a partial result
+// envelope.
+func headlessFailureOutput(stdout, stderr string) string {
+	var parts []string
+	if s := strings.TrimSpace(stderr); s != "" {
+		parts = append(parts, "stderr: "+tailString(s, headlessFailureOutputLimit))
+	}
+	if s := strings.TrimSpace(stdout); s != "" {
+		parts = append(parts, "stdout: "+tailString(s, headlessFailureOutputLimit))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// tailString keeps the last limit bytes of s, marking the cut.
+func tailString(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	return "…(truncated) " + s[len(s)-limit:]
 }
 
 // headlessToolNames returns the single-tool list to thread through a driver's
@@ -161,7 +191,7 @@ func classifyHeadlessFailure(output string) string {
 	case strings.Contains(lower, "mcp"),
 		strings.Contains(lower, "tool server"),
 		strings.Contains(lower, "server failed"):
-		return "headless agent keeper tools failed"
+		return "headless agent MCP tool server failed"
 	default:
 		return "headless agent process failed"
 	}
