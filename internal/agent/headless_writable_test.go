@@ -87,7 +87,7 @@ func TestJanitorShapedRequestStaysReadOnly(t *testing.T) {
 		},
 	}
 
-	codexArgv := buildCodexHeadlessArgs(janitor, "")
+	codexArgv := buildCodexHeadlessArgs(janitor, "", 0)
 	if !argvHasPair(codexArgv, "--sandbox", "read-only") {
 		t.Fatalf("janitor codex argv was not read-only: %v", codexArgv)
 	}
@@ -127,7 +127,7 @@ func TestBuildCodexHeadlessArgsReadOnlyDefault(t *testing.T) {
 		MCPServerName:    "attn_context",
 		MCPServerCommand: "/tmp/attn",
 		MCPServerArgs:    []string{"_workspace-context-janitor-mcp", "--source-file", "/tmp/source"},
-	}, "")
+	}, "", 0)
 
 	if !argvHasPair(argv, "--sandbox", "read-only") {
 		t.Fatalf("read-only default did not emit --sandbox read-only: %v", argv)
@@ -175,7 +175,7 @@ func TestBuildCodexHeadlessArgsWritableEnablesSandboxAndShell(t *testing.T) {
 			Args:         []string{"serve"},
 			EnabledTools: []string{"do_thing", "other_thing"},
 		}},
-	}, "/tmp/work/codex-last.txt")
+	}, "/tmp/work/codex-last.txt", 0)
 
 	if !argvHasPair(argv, "--sandbox", "workspace-write") {
 		t.Fatalf("writable did not emit --sandbox workspace-write: %v", argv)
@@ -221,7 +221,7 @@ func TestBuildCodexHeadlessArgsUnknownSandboxFailsClosed(t *testing.T) {
 		Model:   "gpt-test",
 		Prompt:  "x",
 		Sandbox: "full-access", // unrecognized => read-only
-	}, "")
+	}, "", 0)
 	if !argvHasPair(argv, "--sandbox", "read-only") {
 		t.Fatalf("unrecognized sandbox value did not fail closed to read-only: %v", argv)
 	}
@@ -347,7 +347,7 @@ func TestBuildCodexHeadlessArgsOmitsModelWhenEmpty(t *testing.T) {
 		MCPServerName:    "attn_workflow_result",
 		MCPServerCommand: "/tmp/attn",
 		ToolName:         "return_result",
-	}, "")
+	}, "", 0)
 	if argvHas(argv, "-m") {
 		t.Fatalf("empty model still emitted -m: %v", argv)
 	}
@@ -362,7 +362,7 @@ func TestBuildCodexHeadlessArgsOmitsModelWhenEmpty(t *testing.T) {
 		MCPServerName:    "attn_workflow_result",
 		MCPServerCommand: "/tmp/attn",
 		ToolName:         "return_result",
-	}, "")
+	}, "", 0)
 	if !argvHasPair(withModel, "-m", "gpt-test") {
 		t.Fatalf("non-empty model not pinned with -m: %v", withModel)
 	}

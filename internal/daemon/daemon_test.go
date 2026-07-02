@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
@@ -4199,6 +4200,14 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"invalid key", "unknown_setting", "value", true},
 		{"empty projects_directory", "projects_directory", "", true},
 		{"relative path", "projects_directory", "relative/path", true},
+		{"empty chief context cap uses default", "chief_context_window_cap", "", false},
+		{"valid chief context cap", "chief_context_window_cap", "128000", false},
+		{"chief context cap below min", "chief_context_window_cap", "5000", true},
+		{"chief context cap above max", "chief_context_window_cap", "9000000", true},
+		{"non-numeric chief context cap", "chief_context_window_cap", "lots", true},
+		{"empty headless context cap uses default", "headless_context_window_cap", "", false},
+		{"valid headless context cap", "headless_context_window_cap", "200000", false},
+		{"headless context cap below min", "headless_context_window_cap", "1", true},
 	}
 
 	for _, tt := range tests {
@@ -4208,6 +4217,54 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 				t.Errorf("validateSetting(%q, %q) error = %v, wantErr %v", tt.key, tt.value, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestDaemon_ContextWindowCapResolutionAndGating(t *testing.T) {
+	d := &Daemon{store: store.New()}
+
+	// resolveContextWindowCap: blank / unparseable / non-positive => default.
+	for _, v := range []string{"", "  ", "not-a-number", "0", "-100"} {
+		if got := resolveContextWindowCap(v); got != agentdriver.DefaultContextWindowCap {
+			t.Fatalf("resolveContextWindowCap(%q) = %d, want default %d", v, got, agentdriver.DefaultContextWindowCap)
+		}
+	}
+	if got := resolveContextWindowCap("200000"); got != 200000 {
+		t.Fatalf("resolveContextWindowCap(200000) = %d, want 200000", got)
+	}
+
+	// chiefContextWindowCap: 0 for non-chief; default for a chief with no setting;
+	// the configured value for a chief that set one.
+	if got := d.chiefContextWindowCap(false); got != 0 {
+		t.Fatalf("non-chief cap = %d, want 0 (uncapped)", got)
+	}
+	if got := d.chiefContextWindowCap(true); got != agentdriver.DefaultContextWindowCap {
+		t.Fatalf("chief cap with no setting = %d, want default %d", got, agentdriver.DefaultContextWindowCap)
+	}
+	d.store.SetSetting(SettingChiefContextWindowCap, "160000")
+	if got := d.chiefContextWindowCap(true); got != 160000 {
+		t.Fatalf("chief cap = %d, want 160000", got)
+	}
+}
+
+func TestDaemon_ApplyHeadlessContextWindowCap(t *testing.T) {
+	// The global is process-wide; restore it so this test does not leak into
+	// others that run headless spawns in the same binary.
+	t.Cleanup(func() { agentdriver.SetHeadlessContextWindowCap(0) })
+
+	d := &Daemon{store: store.New()}
+
+	// No setting => the default is pushed into the agent package's global.
+	d.applyHeadlessContextWindowCap()
+	if got := agentdriver.HeadlessContextWindowCap(); got != agentdriver.DefaultContextWindowCap {
+		t.Fatalf("headless cap with no setting = %d, want default %d", got, agentdriver.DefaultContextWindowCap)
+	}
+
+	// A configured value flows through on the next apply.
+	d.store.SetSetting(SettingHeadlessContextWindowCap, "180000")
+	d.applyHeadlessContextWindowCap()
+	if got := agentdriver.HeadlessContextWindowCap(); got != 180000 {
+		t.Fatalf("headless cap = %d, want 180000", got)
 	}
 }
 

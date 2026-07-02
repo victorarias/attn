@@ -898,6 +898,51 @@ describe('SettingsModal chief settings', () => {
     fireEvent.blur(codexInput);
     expect(onSetSetting).toHaveBeenCalledWith('chief_model_codex', '');
   });
+
+  it('shows the effective context-window caps and defaults to 128000 when unset', async () => {
+    renderModal({ chief_context_window_cap: '120000', headless_context_window_cap: '90000' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    expect(await screen.findByTestId('settings-chief-context-cap')).toHaveValue(120000);
+    expect(screen.getByTestId('settings-headless-context-cap')).toHaveValue(90000);
+  });
+
+  it('defaults both context-window caps to 128000 when unset', async () => {
+    renderModal({});
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    expect(await screen.findByTestId('settings-chief-context-cap')).toHaveValue(128000);
+    expect(screen.getByTestId('settings-headless-context-cap')).toHaveValue(128000);
+  });
+
+  it('commits a changed chief context-window cap on blur', async () => {
+    const onSetSetting = renderModal({ chief_context_window_cap: '128000' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const input = await screen.findByTestId('settings-chief-context-cap');
+    fireEvent.change(input, { target: { value: '100000' } });
+    fireEvent.blur(input);
+    expect(onSetSetting).toHaveBeenCalledWith('chief_context_window_cap', '100000');
+  });
+
+  it('commits a changed headless context-window cap on blur', async () => {
+    const onSetSetting = renderModal({ headless_context_window_cap: '128000' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const input = await screen.findByTestId('settings-headless-context-cap');
+    fireEvent.change(input, { target: { value: '200000' } });
+    fireEvent.blur(input);
+    expect(onSetSetting).toHaveBeenCalledWith('headless_context_window_cap', '200000');
+  });
+
+  it('does not re-commit an unchanged context-window cap on blur', async () => {
+    const onSetSetting = renderModal({ chief_context_window_cap: '128000' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const input = await screen.findByTestId('settings-chief-context-cap');
+    fireEvent.blur(input);
+    expect(onSetSetting).not.toHaveBeenCalledWith('chief_context_window_cap', expect.anything());
+  });
 });
 
 describe('SettingsModal font size', () => {

@@ -81,6 +81,13 @@ func (c *Codex) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	if model := strings.TrimSpace(opts.Model); model != "" {
 		args = append(args, "--model", model)
 	}
+	if strings.TrimSpace(opts.NotebookRoot) != "" {
+		// Cap the chief's effective context window (model_auto_compact_token_limit
+		// is codex's compaction-trigger knob, the analogue of Claude's
+		// CLAUDE_CODE_AUTO_COMPACT_WINDOW). Gated on the chief branch so delegated
+		// interactive agents are never capped.
+		args = append(args, codexContextWindowCapArgs(opts.AutoCompactWindow)...)
+	}
 	if effort := strings.TrimSpace(opts.Effort); effort != "" {
 		// Codex has no dedicated effort flag; model_reasoning_effort is its
 		// native config knob (the -c value is parsed as TOML, hence the quotes).
@@ -135,8 +142,11 @@ func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest
 	// Dispatch: the keeper/notebook tasks wire NO MCP server and run in
 	// native-tools mode; the workflow engine sets a writable CWD+Sandbox (and an
 	// MCP result sink when schema-validated) and runs the MCP-config path.
+	// The process-global headless cap governs every headless run uniformly; read
+	// it once here and pass it into the pure arg builders as an explicit input.
+	window := HeadlessContextWindowCap()
 	if request.usesNativeToolsPath() {
-		result, stdout, err := runHeadlessCommand(ctx, request.Executable, codexHeadlessArgs(request), request.WorkDir, "codex")
+		result, stdout, err := runHeadlessCommand(ctx, request.Executable, codexHeadlessArgs(request, window), request.WorkDir, "codex")
 		if err != nil {
 			return result, err
 		}
@@ -156,7 +166,7 @@ func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest
 		defer os.Remove(lastMsgPath)
 	}
 
-	args := buildCodexHeadlessArgs(request, lastMsgPath)
+	args := buildCodexHeadlessArgs(request, lastMsgPath, window)
 
 	// The process working directory is CWD when set (the writable engine path
 	// points it at the run's working tree), else WorkDir (back-compat: the
@@ -192,7 +202,7 @@ func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest
 //     and the shell tool.
 //   - any other value (including "") => read-only, byte-identical to the janitor:
 //     `--sandbox read-only` + `features.shell_tool=false`.
-func buildCodexHeadlessArgs(request HeadlessTaskRequest, lastMsgPath string) []string {
+func buildCodexHeadlessArgs(request HeadlessTaskRequest, lastMsgPath string, window int) []string {
 	serverName := strings.TrimSpace(request.MCPServerName)
 	if serverName == "" {
 		serverName = "attn_context"
@@ -246,6 +256,7 @@ func buildCodexHeadlessArgs(request HeadlessTaskRequest, lastMsgPath string) []s
 		}
 		args = append(args, codexMCPServerArgs(name, spec.Command, spec.Args, spec.EnabledTools)...)
 	}
+	args = append(args, codexContextWindowCapArgs(window)...)
 	args = append(args, request.Prompt)
 	return args
 }
@@ -270,6 +281,18 @@ func codexFeatureLocks() []string {
 		"-c", "features.tool_suggest=false",
 		"-c", "features.workspace_dependencies=false",
 	}
+}
+
+// codexContextWindowCapArgs returns the `-c model_auto_compact_token_limit=<n>`
+// override that caps codex's effective context window (auto-compaction fires at
+// this token threshold instead of near the model's full window), or nil when
+// window <= 0. The value is a TOML integer, so it is unquoted. This is codex's
+// analogue of Claude's CLAUDE_CODE_AUTO_COMPACT_WINDOW.
+func codexContextWindowCapArgs(window int) []string {
+	if window <= 0 {
+		return nil
+	}
+	return []string{"-c", "model_auto_compact_token_limit=" + strconv.Itoa(window)}
 }
 
 // codexMCPServerArgs emits the `-c mcp_servers.<name>.*` argv pairs for one MCP
@@ -345,7 +368,7 @@ func parseCodexFinalText(stdout []byte) string {
 // makes cwd (the scratch WorkDir via cmd.Dir) writable, and Codex's default
 // file/exec tooling is active. approval_policy="never" keeps writes autonomous
 // and the run non-interactive.
-func codexHeadlessArgs(request HeadlessTaskRequest) []string {
+func codexHeadlessArgs(request HeadlessTaskRequest, window int) []string {
 	args := []string{
 		"exec",
 		"--json",
@@ -373,6 +396,7 @@ func codexHeadlessArgs(request HeadlessTaskRequest) []string {
 		args = append(args, "--add-dir", root)
 	}
 	args = append(args, codexFeatureLocks()...)
+	args = append(args, codexContextWindowCapArgs(window)...)
 	args = append(args, request.Prompt)
 	return args
 }

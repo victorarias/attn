@@ -450,7 +450,7 @@ func TestCodexHeadlessArgsWidensWritableRootsAdditively(t *testing.T) {
 			Model:              "gpt-test",
 			Prompt:             "narrate",
 			ExtraWritableRoots: []string{"/notebook/root", "  ", "/notebook/raw"},
-		})
+		}, 0)
 		// Both writable roots map to --add-dir, plus the base sandbox + feature locks + prompt.
 		assertContainsAll(t, "codex narrate args", args,
 			"--add-dir\x00/notebook/root", "--add-dir\x00/notebook/raw",
@@ -470,7 +470,7 @@ func TestCodexHeadlessArgsWidensWritableRootsAdditively(t *testing.T) {
 	})
 
 	t.Run("keeper compaction adds nothing", func(t *testing.T) {
-		args := codexHeadlessArgs(HeadlessTaskRequest{Model: "gpt-test", Prompt: "compact"})
+		args := codexHeadlessArgs(HeadlessTaskRequest{Model: "gpt-test", Prompt: "compact"}, 0)
 		assertContainsNone(t, "codex compaction args", args, "--add-dir")
 	})
 }

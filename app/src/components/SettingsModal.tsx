@@ -76,6 +76,10 @@ interface SettingsModalProps {
 
 type SettingsSectionID = 'general' | 'connectivity' | 'plugins' | 'agents' | 'review' | 'hygiene';
 
+// Fallback shown when the daemon has not yet sent a normalized value; the daemon
+// mirrors this default (agent.DefaultContextWindowCap) for both context-window caps.
+const DEFAULT_CONTEXT_WINDOW_CAP = 128000;
+
 interface SettingsNavItem {
   id: SettingsSectionID;
   label: string;
@@ -158,6 +162,15 @@ export function SettingsModal({
   const [editorExecutable, setEditorExecutable] = useState(settings.editor_executable || '');
   const [defaultAgent, setDefaultAgent] = useState<SessionAgent>('claude');
   const [reviewerModel, setReviewerModel] = useState(settings.reviewer_model || '');
+  // Context-window caps (tokens): the chief session and headless runs auto-compact
+  // at these thresholds instead of the model's full window. The daemon normalizes
+  // both to concrete effective values, so a blank fallback is only a safety net.
+  const [chiefContextCap, setChiefContextCap] = useState(
+    settings.chief_context_window_cap || String(DEFAULT_CONTEXT_WINDOW_CAP),
+  );
+  const [headlessContextCap, setHeadlessContextCap] = useState(
+    settings.headless_context_window_cap || String(DEFAULT_CONTEXT_WINDOW_CAP),
+  );
   // One draft (agent + model) per keeper duty, edited locally and committed per-row.
   const [keeperDrafts, setKeeperDrafts] = useState<Record<KeeperDutyKey, KeeperDraft>>(
     emptyKeeperDrafts,
@@ -209,6 +222,8 @@ export function SettingsModal({
   const actualEditorExecutable = settings.editor_executable || '';
   const actualDefaultAgent = normalizeSessionAgent(settings.new_session_agent, 'claude');
   const actualReviewerModel = settings.reviewer_model || '';
+  const actualChiefContextCap = settings.chief_context_window_cap || String(DEFAULT_CONTEXT_WINDOW_CAP);
+  const actualHeadlessContextCap = settings.headless_context_window_cap || String(DEFAULT_CONTEXT_WINDOW_CAP);
   // The saved (persisted) config for every keeper duty, keyed by duty. A null entry
   // means the setting is blank (default for always-on duties, disabled for opt-in).
   const actualKeeperConfigs = useMemo(() => {
@@ -299,6 +314,8 @@ export function SettingsModal({
     setEditorExecutable(actualEditorExecutable);
     setDefaultAgent(resolvedDefaultAgent);
     setReviewerModel(actualReviewerModel);
+    setChiefContextCap(actualChiefContextCap);
+    setHeadlessContextCap(actualHeadlessContextCap);
     setKeeperDrafts({
       summarize: initialKeeperDraft(KEEPER_DUTY_BY_KEY.summarize, actualKeeperConfigs.summarize, keeperAgents),
       narrate: initialKeeperDraft(KEEPER_DUTY_BY_KEY.narrate, actualKeeperConfigs.narrate, keeperAgents),
@@ -314,7 +331,7 @@ export function SettingsModal({
     setPluginSourcePath('');
     setPluginError(null);
     setPluginActionName(null);
-  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualEditorExecutable, resolvedDefaultAgent, actualReviewerModel, actualKeeperConfigs, keeperAgents]);
+  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualEditorExecutable, resolvedDefaultAgent, actualReviewerModel, actualChiefContextCap, actualHeadlessContextCap, actualKeeperConfigs, keeperAgents]);
 
   useEscapeStack(onClose, isOpen);
 
@@ -497,6 +514,20 @@ export function SettingsModal({
       onSetSetting('reviewer_model', reviewerModel);
     }
   }, [actualReviewerModel, onSetSetting, reviewerModel]);
+
+  const commitChiefContextCap = useCallback(() => {
+    const next = chiefContextCap.trim();
+    if (next !== actualChiefContextCap.trim()) {
+      onSetSetting('chief_context_window_cap', next);
+    }
+  }, [chiefContextCap, actualChiefContextCap, onSetSetting]);
+
+  const commitHeadlessContextCap = useCallback(() => {
+    const next = headlessContextCap.trim();
+    if (next !== actualHeadlessContextCap.trim()) {
+      onSetSetting('headless_context_window_cap', next);
+    }
+  }, [headlessContextCap, actualHeadlessContextCap, onSetSetting]);
 
   const handleAddEndpoint = useCallback(async () => {
     const name = newEndpointName.trim();
@@ -752,8 +783,8 @@ export function SettingsModal({
           label: 'Executables and defaults',
           title: 'Agent runtime',
           description: 'Agent executable paths, defaults, context maintenance, capabilities, and PTY runtime mode.',
-          count: orderedAgentList.length + 6,
-          keywords: 'agents executables claude codex cursor default capabilities pty backend editor context keeper compact model workflows auto-approve unattended chief',
+          count: orderedAgentList.length + 8,
+          keywords: 'agents executables claude codex cursor default capabilities pty backend editor context keeper compact model workflows auto-approve unattended chief context window cap tokens compaction auto-compact headless',
         },
       ],
     },
@@ -1830,6 +1861,65 @@ export function SettingsModal({
               })}
             </div>
           )}
+        </div>
+      </section>
+
+      <section className="settings-block">
+        <div className="settings-block-intro">
+          <div className="settings-kicker">Agents</div>
+          <h3>Context window caps</h3>
+          <p className="settings-description">
+            Token thresholds at which auto-compaction fires instead of waiting for the
+            model's full window. Lower caps keep the chief cheaper on each cache-cold
+            wake and keep one-shot headless runs from ballooning. Leave at {DEFAULT_CONTEXT_WINDOW_CAP.toLocaleString()} to
+            use the default. Only the chief session and headless runs (keeper narration,
+            reconciliation, workflow subagents) are affected — regular delegated sessions
+            are never capped.
+          </p>
+        </div>
+        <div className="settings-block-body">
+          <div className="settings-field-grid">
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-chief-context-cap">Chief of staff</label>
+              <input
+                id="settings-chief-context-cap"
+                data-testid="settings-chief-context-cap"
+                type="number"
+                min={10000}
+                max={2000000}
+                step={1000}
+                value={chiefContextCap}
+                onChange={(e) => setChiefContextCap(e.target.value)}
+                onBlur={commitChiefContextCap}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    commitChiefContextCap();
+                  }
+                }}
+                className="settings-input"
+              />
+            </div>
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-headless-context-cap">Headless runs</label>
+              <input
+                id="settings-headless-context-cap"
+                data-testid="settings-headless-context-cap"
+                type="number"
+                min={10000}
+                max={2000000}
+                step={1000}
+                value={headlessContextCap}
+                onChange={(e) => setHeadlessContextCap(e.target.value)}
+                onBlur={commitHeadlessContextCap}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    commitHeadlessContextCap();
+                  }
+                }}
+                className="settings-input"
+              />
+            </div>
+          </div>
         </div>
       </section>
 

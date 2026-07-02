@@ -6,8 +6,46 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"sync/atomic"
 )
+
+// DefaultContextWindowCap is the auto-compaction token threshold attn applies to
+// capped Claude/Codex launches — the chief-of-staff session and headless runs —
+// when the operator has not configured a value. It is applied as
+// CLAUDE_CODE_AUTO_COMPACT_WINDOW (Claude) / model_auto_compact_token_limit
+// (Codex) so compaction fires here instead of at the model's full window. See the
+// chief_context_window_cap and headless_context_window_cap settings.
+const DefaultContextWindowCap = 128000
+
+// headlessContextWindowCap is the process-global auto-compaction token threshold
+// applied to every headless run. Headless runs execute in the daemon process and
+// all funnel through this package's spawn seam, so one process-global value (set
+// by the daemon from the headless_context_window_cap setting) governs them
+// uniformly — there is no per-run override and nothing threads through the
+// request builders, which keeps this refactor-proof against the background-task
+// changes moving those call sites. 0 means uncapped; the daemon resolves the
+// default before any headless run starts.
+var headlessContextWindowCap atomic.Int64
+
+// SetHeadlessContextWindowCap sets the token threshold applied to headless runs
+// (CLAUDE_CODE_AUTO_COMPACT_WINDOW for Claude, model_auto_compact_token_limit for
+// Codex). A value <= 0 clears the cap. The daemon calls this at startup and
+// whenever the setting changes.
+func SetHeadlessContextWindowCap(tokens int) {
+	if tokens < 0 {
+		tokens = 0
+	}
+	headlessContextWindowCap.Store(int64(tokens))
+}
+
+// HeadlessContextWindowCap returns the current process-global headless cap in
+// tokens, or 0 when uncapped. Both the Claude env seam and the Codex arg builders
+// read it; it is exported so callers can observe the value they set.
+func HeadlessContextWindowCap() int {
+	return int(headlessContextWindowCap.Load())
+}
 
 // headlessOutputLimit bounds the captured stdout buffer. It is large enough to
 // hold a Claude `--output-format json` result object or a Codex final message
@@ -170,6 +208,13 @@ func headlessEnvironment(provider string) []string {
 	}
 	if provider == "claude" {
 		env = append(env, "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1")
+		// Cap the effective context window so auto-compaction fires at the
+		// configured threshold instead of the model's full window. Injected here
+		// (not inherited) because the allowlist above drops CLAUDE_CODE_* and the
+		// daemon deliberately scrubs this var from its own environment.
+		if window := HeadlessContextWindowCap(); window > 0 {
+			env = append(env, "CLAUDE_CODE_AUTO_COMPACT_WINDOW="+strconv.Itoa(window))
+		}
 	}
 	return env
 }
