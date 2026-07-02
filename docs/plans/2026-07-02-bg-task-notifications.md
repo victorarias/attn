@@ -189,9 +189,23 @@ Isolate this in its own PR so the invariant change is reviewed alone.
       imported 1 legacy task(s)`, unparseable file dropped, dir retired to
       `.migrated`); the live SQLite-backed runner executed 3 real `narrate_workspace`
       tasks to `done`. Source dev DB untouched; profile torn down.
-- [ ] **PR2 — Runner bounded per-kind concurrency.** Executors concurrent, record
-      mutations serialized; default cap 1. Preserve every invariant above.
-      Backend + tests (race-clean).
+      **Merged** 2026-07-02 as PR #455 (merge commit `335f5e8d`): figgyster APPROVED
+      on head, CI green. A follow-up commit gofmt-aligned `scanTaskRow`'s var block.
+- [x] **PR2 — Runner bounded per-kind concurrency.** Replaced the single
+      run-one-at-a-time worker with a dispatch loop that claims every eligible task
+      whose kind is under its per-kind concurrency cap and launches each as its own
+      goroutine. `executor` gained a `limit`; new `ExecutorConfig{Timeout,
+      MaxConcurrent}` + `RegisterWith` (default cap 1 ⇒ a kind stays serialized with
+      itself, different kinds now run in parallel; reconcile will use 2). Runner
+      state: `run *activeRun` → `runs map[id]*activeRun` + `inflight map[kind]int`,
+      both under `mu`; a claimed slot is reserved under `mu` then persisted under
+      `ioMu` (ioMu stays the outer lock, no store I/O under `mu`). `Stop` reordered
+      for detached runs: close done → wait loop exit → `cancelAll` (fence + join
+      every in-flight run). All prior invariants preserved (commit fence, Requeued
+      coalescing, backoff/dead, orphan recovery, single-instance lock,
+      Cancel-blocks-until-terminal-record). No protocol/frontend change. Tests:
+      cross-kind concurrency, per-kind cap serialization, configured cap 2, Stop
+      drains multiple in-flight; existing suite + new ones race-clean at `-count=10`.
 - [ ] **PR3 — Reconcile → `reconcile` task kind.** *Land after PR #454 merges;
       rebase over main and build on its classifier body — do not port the old
       one.* Register the executor (body = classifier incl. drop-rule/🩺 comment);

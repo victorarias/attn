@@ -1,19 +1,26 @@
-// Package tasks is a general, file-backed, durable task runner.
+// Package tasks is a general, durable task runner.
 //
-// It runs short, retryable units of work (compaction, summarization, narration)
-// out of a single worker goroutine, persisting one atomic-JSON file per task so a
-// daemon crash never loses a pending or in-flight task. It is intentionally
-// daemon-agnostic: it accepts a notebook root dir and a LogFunc at construction
-// and MUST NOT import internal/daemon (the daemon imports this package, so the
-// reverse would be an import cycle).
+// It runs short, retryable units of work (compaction, summarization, narration),
+// persisting each task through a pluggable Store (the daemon injects a
+// SQLite-backed one; a file-backed store backs this package's tests) so a daemon
+// crash never loses a pending or in-flight task. It is intentionally
+// daemon-agnostic: it accepts a Store (or a notebook root dir) and a LogFunc at
+// construction and MUST NOT import internal/daemon (the daemon imports this
+// package, so the reverse would be an import cycle).
+//
+// A single dispatch goroutine selects eligible tasks and launches each as its own
+// goroutine, bounded by a per-kind concurrency cap (default 1): a kind is
+// serialized with itself while different kinds run in parallel. Every record
+// read-modify-write still funnels through one store-level lock, so persistence
+// stays serialized even though executors run concurrently — which is why no
+// per-task lock is needed.
 //
 // The cancel-blocks-until-exit + commit-fence contract is ported from
 // internal/daemon/workspace_keeper.go.
 //
 // What this package is NOT: there are no priorities, no DAG, no cron generality,
-// no worker pool, no SQLite, no per-task lock file, and no heartbeat beyond the
-// runner-owned context.WithTimeout around each executor invocation. The single
-// worker serializes everything, so a per-task lock is unnecessary.
+// no unbounded worker pool, and no heartbeat beyond the runner-owned
+// context.WithTimeout around each executor invocation.
 package tasks
 
 import (
