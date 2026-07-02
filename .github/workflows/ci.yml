@@ -91,11 +91,6 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -110,21 +105,87 @@ jobs:
       - name: Test
         run: pnpm test
 
+  # E2E runs apart from the unit job so the two overlap instead of stacking.
+  # Each shard is its own runner with its own throwaway daemon + Vite server,
+  # so the shared-daemon constraint that forces workers:1 in playwright.config
+  # still holds within a shard.
+  frontend-e2e:
+    name: Frontend E2E (${{ matrix.shard }}/3)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Build attn binary
         run: |
           cd ..
           go build -o /tmp/attn ./cmd/attn
-          target_triple="x86_64-unknown-linux-gnu"
-          mkdir -p app/src-tauri/binaries
-          cp /tmp/attn "app/src-tauri/binaries/attn-${target_triple}"
 
+      - name: Get Playwright version
+        id: playwright-version
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright-version.outputs.version }}
+
+      # The suite only runs chromium (no projects configured), so skip the
+      # firefox/webkit downloads. On a cache hit only the OS packages are needed.
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Install Playwright OS deps
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm exec playwright install-deps chromium
 
       - name: E2E
         env:
           ATTN_E2E_BIN: /tmp/attn
-        run: pnpm run e2e
+        run: pnpm exec playwright test --shard=${{ matrix.shard }}/3
+
+  # Single stable check name over the shard matrix, for branch-protection
+  # rulesets. Green when all shards pass or the frontend filter skipped them.
+  frontend-e2e-gate:
+    name: Frontend E2E
+    needs: frontend-e2e
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check shard results
+        run: |
+          result="${{ needs.frontend-e2e.result }}"
+          echo "shards result: $result"
+          [ "$result" = "success" ] || [ "$result" = "skipped" ]
 
   rust:
     name: Tauri
