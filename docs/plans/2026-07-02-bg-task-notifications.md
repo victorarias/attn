@@ -206,6 +206,15 @@ Isolate this in its own PR so the invariant change is reviewed alone.
       Cancel-blocks-until-terminal-record). No protocol/frontend change. Tests:
       cross-kind concurrency, per-kind cap serialization, configured cap 2, Stop
       drains multiple in-flight; existing suite + new ones race-clean at `-count=10`.
+      **Live-app smoke** (throwaway profile, daemon built from the branch): fresh DB
+      migrated to {61}; the live dispatch loop ran seeded `compact_context` (ws-A/ws-B)
+      + `summarize_session` tasks — cross-kind ran concurrently, the two same-kind
+      compacts serialized (next_attempt_at ~2ms apart, cap 1); both terminal paths
+      (failed+backoff, done) persisted; a seeded `running` orphan was recovered
+      (stale runner lock reclaimed) → re-dispatched → done on next boot. Graceful
+      `runner.Stop()`/`cancelAll` is NOT reachable in prod (nothing calls
+      `Daemon.Stop()` outside the test harness — the daemon is killed and relies on
+      orphan recovery), so that path stays covered by `TestStopDrainsConcurrentInFlightRuns`.
 - [ ] **PR3 — Reconcile → `reconcile` task kind.** *Land after PR #454 merges;
       rebase over main and build on its classifier body — do not port the old
       one.* Register the executor (body = classifier incl. drop-rule/🩺 comment);
