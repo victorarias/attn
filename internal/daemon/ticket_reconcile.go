@@ -36,6 +36,11 @@ const (
 	defaultTicketReconcileMaxBudgetUSD = "0.50"
 	defaultTicketReconcileTimeout      = 5 * time.Minute
 
+	// ticketReconcileFailureDetailLimit bounds the raw classifier output echoed
+	// into a rule-7 failure comment. The head is kept: FailureOutput leads with
+	// stderr, where agent CLIs put the fatal error.
+	ticketReconcileFailureDetailLimit = 1000
+
 	// ticketReconcileConcurrency bounds simultaneous classifier processes: a
 	// workspace teardown can kill several delegated sessions at once, and without
 	// a cap that is N parallel sonnet runs.
@@ -329,7 +334,14 @@ func (d *Daemon) runTicketReconciliation(in ticketReconcileInputs) {
 		}
 		switch {
 		case err != nil:
-			failReason = "classifier run failed: " + firstNonEmptyString(result.Diagnostics, err.Error())
+			// The comment carries the raw cause, not just the keyword bucket:
+			// err summarizes (bucket + exit status), FailureOutput is the child's
+			// actual output tail — without it a failure is undiagnosable (the
+			// 2026-07-02 first fire surfaced only "keeper tools failed").
+			failReason = "classifier run failed: " + err.Error()
+			if tail := strings.TrimSpace(result.FailureOutput); tail != "" {
+				failReason += "\nClassifier output tail:\n" + truncateHeadString(tail, ticketReconcileFailureDetailLimit)
+			}
 		case len(result.StructuredOutput) == 0:
 			failReason = "classifier returned no structured verdict (cap hit or early exit)"
 		default:
@@ -340,6 +352,11 @@ func (d *Daemon) runTicketReconciliation(in ticketReconcileInputs) {
 				verdict = parsed
 			}
 		}
+	}
+	if failReason != "" {
+		// The comment can be dropped (status moved) or fail to post; the log is
+		// the durable copy of what actually went wrong.
+		d.logf("ticket reconcile %s: %s", in.TicketID, failReason)
 	}
 
 	// Drop rule: re-check the ticket after the run. A status change since the
@@ -367,13 +384,12 @@ func (d *Daemon) runTicketReconciliation(in ticketReconcileInputs) {
 	d.broadcastTicketsUpdated()
 }
 
-func firstNonEmptyString(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
+// truncateHeadString keeps the first limit bytes of s, marking the cut.
+func truncateHeadString(s string, limit int) string {
+	if len(s) <= limit {
+		return s
 	}
-	return ""
+	return s[:limit] + " …(truncated)"
 }
 
 // renderTicketReconcileComment renders the durable verdict (or rule-7 failure

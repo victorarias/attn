@@ -6,7 +6,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
-## [2026-07-01]
+## [2026-07-02]
+
+### Fixed
+- **The orphaned-ticket verdict no longer breaks on your MCP setup — and when it does fail, it tells you why.** The background classifier that judges a dead session's work was inheriting the user's claude.ai account connectors (Slack, Gmail, Drive, Calendar), so a connector that was slow or needed re-authentication could sink an otherwise-healthy run; classifier runs are now fully isolated from user MCP configuration (they only read the dead session's transcript). And a failed run's "could not determine the outcome" comment now includes the actual error output instead of an opaque generic label, so a failure is diagnosable from the ticket itself. The classifier is also told to judge against what you explicitly re-scoped or authorized in-session, not just the original brief's wording.
 
 ### Added
 - **The board now tells you when a ticket lost its agent — and what the agent left behind.** When a session dies while its ticket is still open (in any column short of Done/Failed/Crashed), attn no longer leaves the board silently wrong. The ticket gets a red "orphaned" badge on its board card and in its detail panel, and a small background classifier reads the dead session's transcript against the ticket's brief and posts a verdict comment on the ticket: whether the work looks done, partially done, interrupted, or blocked — with what's left and the evidence. Your chief of staff is notified through the usual ticket inbox. Nothing moves columns automatically: crashes still get their Crashed stamp (now with a verdict comment explaining what was in flight), and everything else stays put for you or your chief to decide. If the outcome can't be determined (missing transcript, classifier failure), the ticket says so instead of staying silent. The badge clears on its own when the ticket is reassigned or its agent session is resumed. A periodic sweep also catches orphans from before this feature or from daemon restarts.

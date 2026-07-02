@@ -270,6 +270,10 @@ func TestClaudeRunHeadlessTaskExcludesNonManagedSettingsWithoutExplicitAuthentic
 		"--print",
 		"--setting-sources",
 		"--no-session-persistence",
+		// Hermetic MCP: --strict-mcp-config with NO --mcp-config loads zero MCP
+		// servers. --setting-sources "" alone does not stop the user's claude.ai
+		// account connectors from attaching (the 2026-07-02 classifier failure).
+		"--strict-mcp-config",
 		"--disable-slash-commands",
 		"--no-chrome",
 		"--allowedTools",
@@ -283,12 +287,11 @@ func TestClaudeRunHeadlessTaskExcludesNonManagedSettingsWithoutExplicitAuthentic
 			t.Fatalf("Claude args missing %q:\n%s", want, got)
 		}
 	}
-	if !strings.Contains(got, "--setting-sources\n\n--model") {
+	if !strings.Contains(got, "--setting-sources\n\n--strict-mcp-config") {
 		t.Fatalf("Claude args did not pass an empty setting source list:\n%s", got)
 	}
-	// The constrained-MCP pin must be gone in native mode.
+	// The constrained-MCP config and tool pin must be gone in native mode.
 	for _, forbidden := range []string{
-		"--strict-mcp-config",
 		"--mcp-config",
 		"--tools",
 		"mcp__attn_context__read_context,mcp__attn_context__replace_context",
@@ -370,7 +373,7 @@ func TestRunHeadlessCommandUsesMinimalEnvironmentAndDiscardsOutput(t *testing.T)
 func TestRunHeadlessCommandClassifiesFailureWithoutLeakingOutput(t *testing.T) {
 	dir := t.TempDir()
 	scriptPath := filepath.Join(dir, "agent")
-	script := "#!/bin/sh\nprintf 'authentication_failed workspace context secret\\n'\nexit 1\n"
+	script := "#!/bin/sh\nprintf 'authentication_failed workspace context secret\\n'\nprintf 'real stderr cause\\n' >&2\nexit 1\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake agent: %v", err)
 	}
@@ -383,6 +386,35 @@ func TestRunHeadlessCommandClassifiesFailureWithoutLeakingOutput(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "workspace context secret") {
 		t.Fatalf("error leaked child output: %v", err)
+	}
+	// The raw cause is preserved out-of-band for callers that opt in,
+	// stderr-first (that is where the fatal error lives).
+	if want := "stderr: real stderr cause\nstdout: authentication_failed workspace context secret"; result.FailureOutput != want {
+		t.Fatalf("failure output = %q, want %q", result.FailureOutput, want)
+	}
+}
+
+func TestRunHeadlessCommandBoundsFailureOutputTail(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "agent")
+	// 8 KiB of noise ending in the fatal line: the preserved tail must keep the
+	// end and mark the cut.
+	script := "#!/bin/sh\nawk 'BEGIN { for (i = 0; i < 512; i++) printf \"noise-%d \", i; print \"fatal: the real cause\" }' >&2\nexit 1\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake agent: %v", err)
+	}
+	result, _, err := runHeadlessCommand(context.Background(), scriptPath, nil, dir, "claude")
+	if err == nil {
+		t.Fatal("runHeadlessCommand unexpectedly succeeded")
+	}
+	if !strings.HasPrefix(result.FailureOutput, "stderr: …(truncated) ") {
+		t.Fatalf("failure output not marked truncated: %q", result.FailureOutput[:40])
+	}
+	if !strings.HasSuffix(result.FailureOutput, "fatal: the real cause") {
+		t.Fatalf("failure output lost the tail: %q", result.FailureOutput[len(result.FailureOutput)-60:])
+	}
+	if len(result.FailureOutput) > headlessFailureOutputLimit+64 {
+		t.Fatalf("failure output length = %d, want <= limit + marker", len(result.FailureOutput))
 	}
 }
 

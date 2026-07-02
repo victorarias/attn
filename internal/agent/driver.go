@@ -448,6 +448,12 @@ type MCPServerSpec struct {
 
 type HeadlessTaskResult struct {
 	Diagnostics string
+	// FailureOutput is the bounded raw tail of the failed child's stderr and
+	// stdout — the ground truth behind the Diagnostics keyword bucket. Set only
+	// on a failed run. It can echo prompt/workspace text, so callers choose
+	// whether their surface may show it (the reconcile failure comment does;
+	// keeper journal surfaces stick to Diagnostics).
+	FailureOutput string
 	// Text is the child's captured final assistant text (the no-schema path).
 	// Drivers populate this on a successful run.
 	Text string

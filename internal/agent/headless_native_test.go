@@ -59,10 +59,13 @@ func TestClaudeHeadlessArgsUsesFileToolsAndDropsMCPPin(t *testing.T) {
 		"json",
 		"claude-test",
 		"compact the context file",
+		// Hermetic MCP: --strict-mcp-config with NO --mcp-config loads zero MCP
+		// servers; without it the user's claude.ai account connectors attach and
+		// can sink the run (the 2026-07-02 classifier failure).
+		"--strict-mcp-config",
 	)
 	// The MCP keeper compaction pin must be gone.
 	assertContainsNone(t, "Claude native args", args,
-		"--strict-mcp-config",
 		"--mcp-config",
 		"--tools",
 		"mcp__attn_context__read_context,mcp__attn_context__replace_context",

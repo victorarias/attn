@@ -330,6 +330,12 @@ func claudeHeadlessArgs(request HeadlessTaskRequest) []string {
 	}
 	args := []string{"--print"}
 	args = append(args, claudeHeadlessIsolationArgs()...)
+	// --strict-mcp-config with no --mcp-config loads ZERO MCP servers. Without
+	// it the user's claude.ai account connectors (Slack/Gmail/Drive/Calendar)
+	// still attach — --setting-sources "" does not cover them (verified
+	// empirically, 2.1.198) — and a failing or needs-auth connector can sink an
+	// otherwise-healthy run. No native-tools task needs MCP.
+	args = append(args, "--strict-mcp-config")
 	// Only pin the model when one is requested; an empty "--model" is rejected as
 	// an invalid model. Omitting it lets Claude use its own default (the faithful
 	// "harness decides" default when agent() has no model override).
