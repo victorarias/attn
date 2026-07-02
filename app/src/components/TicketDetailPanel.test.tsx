@@ -206,6 +206,111 @@ describe('TicketDetailPanel', () => {
     await waitFor(() => expect(input.value).toBe(''));
   });
 
+  it('submits a comment with ⌘Return and with Ctrl+Return, clearing the draft', async () => {
+    for (const modifier of ['metaKey', 'ctrlKey'] as const) {
+      const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
+      const onAddComment = vi.fn().mockResolvedValue(undefined);
+      const { unmount } = render(
+        <TicketDetailPanel
+          isOpen
+          ticketId="store-migration"
+          ticketRow={makeTicket()}
+          fetchTicket={fetchTicket}
+          onAddComment={onAddComment}
+          onClose={() => {}}
+        />,
+      );
+      await waitFor(() => screen.getByTestId('ticket-comment-input'));
+
+      const input = screen.getByTestId('ticket-comment-input') as HTMLTextAreaElement;
+      fireEvent.change(input, { target: { value: 'ship it' } });
+      fireEvent.keyDown(input, { key: 'Enter', [modifier]: true });
+
+      expect(onAddComment).toHaveBeenCalledWith('store-migration', 'ship it');
+      await waitFor(() => expect(input.value).toBe(''));
+      unmount();
+    }
+  });
+
+  it('does not submit on a plain Enter (newline, not send)', async () => {
+    const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
+    const onAddComment = vi.fn().mockResolvedValue(undefined);
+    render(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={makeTicket()}
+        fetchTicket={fetchTicket}
+        onAddComment={onAddComment}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => screen.getByTestId('ticket-comment-input'));
+
+    const input = screen.getByTestId('ticket-comment-input') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'a line' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onAddComment).not.toHaveBeenCalled();
+  });
+
+  it('keeps the submit button disabled until the draft has non-whitespace text', async () => {
+    const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
+    const onAddComment = vi.fn().mockResolvedValue(undefined);
+    render(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={makeTicket()}
+        fetchTicket={fetchTicket}
+        onAddComment={onAddComment}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => screen.getByTestId('ticket-comment-input'));
+
+    const input = screen.getByTestId('ticket-comment-input') as HTMLTextAreaElement;
+    const button = screen.getByTestId('ticket-add-comment') as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+
+    // Whitespace only stays disabled, and the shortcut is a no-op on it.
+    fireEvent.change(input, { target: { value: '   ' } });
+    expect(button.disabled).toBe(true);
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    expect(onAddComment).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: 'real text' } });
+    expect(button.disabled).toBe(false);
+  });
+
+  it('disables the submit button and relabels it while the post is in flight', async () => {
+    const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
+    // A never-resolving post keeps the action pending so the busy UI is observable.
+    const onAddComment = vi.fn().mockReturnValue(new Promise<void>(() => {}));
+    render(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={makeTicket()}
+        fetchTicket={fetchTicket}
+        onAddComment={onAddComment}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => screen.getByTestId('ticket-comment-input'));
+
+    const input = screen.getByTestId('ticket-comment-input') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'hang on' } });
+    fireEvent.click(screen.getByTestId('ticket-add-comment'));
+
+    const button = screen.getByTestId('ticket-add-comment') as HTMLButtonElement;
+    await waitFor(() => expect(button.disabled).toBe(true));
+    expect(button.textContent).toBe('Adding…');
+    // A second shortcut press must not fire another post while one is pending.
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    expect(onAddComment).toHaveBeenCalledTimes(1);
+  });
+
   it('edits the description through the edit toggle', async () => {
     const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
     const onEditDescription = vi.fn().mockResolvedValue(undefined);

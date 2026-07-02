@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-02]
+
+### Fixed
+- **You can post comments from the ticket detail panel again.** The panel's comment box had no usable way to submit — the "Add comment" button was rendered in an undefined accent color that painted it invisibly against the panel, and there was no keyboard shortcut — so a comment typed in the app couldn't be posted (only the `attn ticket comment` CLI worked). The button is now visible, and **⌘Return** (Ctrl+Return off-mac) posts the comment without leaving the field; plain Enter still adds a newline. The button stays disabled until you've typed something and while a post is in flight, clears on success, and shows an error if the post fails. The same missing accent/error colors also left ticket status accents and error text uncolored throughout the panel; those now render as intended.
+
 ## [2026-07-01]
 
 ### Added

@@ -171,6 +171,18 @@ export function TicketDetailPanel({
   // button is live before the full record loads.
   const canResume = Boolean(onResume && ticketId && header?.cwd && header?.last_agent_id);
 
+  // Post the current comment draft. Shared by the form's submit button and the
+  // textarea's ⌘/Ctrl+Return shortcut so both paths trim, guard against an empty
+  // draft or an in-flight action, clear on success, and surface errors identically.
+  const submitComment = () => {
+    if (!onAddComment || !fullTicket) return;
+    const text = commentDraft.trim();
+    if (!text || busyAction !== null) return;
+    runAction('comment', () => onAddComment(fullTicket.id, text))
+      .then(() => setCommentDraft(''))
+      .catch(() => {});
+  };
+
   return (
     <div className="ticket-detail-panel" data-testid="ticket-detail-panel">
       <div className="ticket-detail-header">
@@ -331,19 +343,23 @@ export function TicketDetailPanel({
                 className="ticket-comment-form"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  const text = commentDraft.trim();
-                  if (!text) return;
-                  runAction('comment', () => onAddComment(fullTicket.id, text))
-                    .then(() => setCommentDraft(''))
-                    .catch(() => {});
+                  submitComment();
                 }}
               >
                 <textarea
                   className="ticket-comment-input"
                   data-testid="ticket-comment-input"
-                  placeholder="Add a comment…"
+                  placeholder="Add a comment… (⌘⏎ to send)"
                   value={commentDraft}
                   onChange={(event) => setCommentDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    // ⌘Return (mac) / Ctrl+Return (elsewhere) submits without
+                    // leaving the field; plain Enter still inserts a newline.
+                    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                      event.preventDefault();
+                      submitComment();
+                    }
+                  }}
                   rows={2}
                 />
                 <button
