@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Ticket } from '../hooks/useDaemonSocket';
 import { TicketStatus } from '../types/generated';
+import { isTicketOrphaned } from '../utils/ticketOrphan';
 import './TicketBoardPanel.css';
 
 export type BoardFilter = 'all' | 'blocked' | 'in_review' | 'closed_today';
@@ -259,6 +260,7 @@ function BoardCard({ ticket, index, onOpen, terminalBad }: BoardCardProps) {
   const when = relativeTime(ticket.updated_at);
   const active = ticket.status === 'working' || ticket.status === 'blocked';
   const closedToday = isSameLocalDay(ticket.closed_at);
+  const orphaned = isTicketOrphaned(ticket);
   return (
     <button
       type="button"
@@ -269,13 +271,23 @@ function BoardCard({ ticket, index, onOpen, terminalBad }: BoardCardProps) {
       data-terminal={terminalBad ? 'bad' : undefined}
       data-active={active ? 'true' : undefined}
       data-closed-today={closedToday ? 'true' : undefined}
+      data-orphaned={orphaned ? 'true' : undefined}
       style={{ ['--card-i' as string]: Math.min(index, 7) }}
       onClick={() => onOpen(ticket.id)}
-      aria-label={`${ticket.title}, ${STATUS_LABEL[ticket.status] ?? ticket.status}, ${
-        ticket.assignee || 'unassigned'
-      }, updated ${when}. Open detail.`}
+      aria-label={`${ticket.title}, ${STATUS_LABEL[ticket.status] ?? ticket.status}${
+        orphaned ? ', orphaned' : ''
+      }, ${ticket.assignee || 'unassigned'}, updated ${when}. Open detail.`}
     >
       {active && <span className="tb-pulse" aria-hidden="true" />}
+      {orphaned && (
+        <span
+          className="tb-orphan"
+          data-testid="ticket-board-orphan-badge"
+          title={`Owning session gone since ${new Date(ticket.reconciled_at!).toLocaleString()}`}
+        >
+          ⚠ orphaned
+        </span>
+      )}
       <span className="tb-card-title">{ticket.title}</span>
       <span className="tb-card-meta">
         <span className="tb-dot" aria-hidden="true" />

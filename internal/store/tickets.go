@@ -105,6 +105,11 @@ type Ticket struct {
 	UpdatedAt   time.Time
 	ClosedAt    *time.Time // set on entering a terminal status; drives the TTL
 	ArchivedAt  *time.Time // set when manually cleared from the board
+	// ReconciledAt is the machine-reconciliation flag: set (atomically, via
+	// ClaimTicketReconciliation) when a dead owning session's outcome was judged
+	// by the reconciliation classifier. Provenance + dedupe lock in one; cleared
+	// when the ticket is reassigned or its assignee session respawns (re-arm).
+	ReconciledAt *time.Time
 
 	Activity    []TicketActivity   // populated by GetTicket
 	Attachments []TicketAttachment // populated by GetTicket
@@ -231,6 +236,7 @@ func (s *Store) CreateTicket(t Ticket, author string, now time.Time) (*Ticket, e
 		t.ClosedAt = nil
 	}
 	t.ArchivedAt = nil
+	t.ReconciledAt = nil // never born reconciled; the column defaults to ''
 
 	if _, err := tx.Exec(`
 		INSERT INTO tickets (
@@ -373,6 +379,88 @@ func (s *Store) ActiveTicketForSession(sessionID string) (*Ticket, error) {
 		}
 	}
 	return nil, rows.Err()
+}
+
+// ActiveTicketsForSession returns ALL non-terminal tickets currently assigned to
+// a session, newest first — the session-end reconciliation seam needs every one
+// (a session can hold several via `attn ticket take` plus its delegation), where
+// ActiveTicketForSession's newest-only answer suffices for the report path.
+// Activity and attachments are not loaded.
+func (s *Store) ActiveTicketsForSession(sessionID string) ([]*Ticket, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil || sessionID == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(ticketSelect+` WHERE assignee = ? ORDER BY created_at DESC, id DESC`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tickets []*Ticket
+	for rows.Next() {
+		ticket, err := scanTicket(rows)
+		if err != nil {
+			return nil, err
+		}
+		if !ticket.Status.IsTerminal() {
+			tickets = append(tickets, ticket)
+		}
+	}
+	return tickets, rows.Err()
+}
+
+// ClaimTicketReconciliation atomically claims the machine-reconciliation flag
+// (set-if-unset). Returns true when this caller won the claim; false when the
+// flag was already set — another path (death-hook vs sweep, or a double-fired
+// session-end seam) owns this verdict. Purely internal bookkeeping: it does NOT
+// bump updated_at or emit an event — the verdict comment that follows is the
+// visible artifact; the flag is provenance + lock.
+func (s *Store) ClaimTicketReconciliation(id string, now time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return false, nil
+	}
+	res, err := s.db.Exec(
+		`UPDATE tickets SET reconciled_at = ? WHERE id = ? AND reconciled_at = ''`,
+		formatTicketTime(now), id,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
+// ClearTicketReconciliationForAssignee re-arms reconciliation for every ticket
+// bound to a session that just came back to life (a ticket resume respawning the
+// assignee): the claimed flag means "this death was judged once", so a live
+// owner must clear it for the NEXT death to be judged again. Like the claim, it
+// does not bump updated_at or emit an event. A no-op when the session has no
+// flagged tickets.
+func (s *Store) ClearTicketReconciliationForAssignee(assignee string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return nil
+	}
+	assignee = strings.TrimSpace(assignee)
+	if assignee == "" {
+		return nil
+	}
+	_, err := s.db.Exec(
+		`UPDATE tickets SET reconciled_at = '' WHERE assignee = ? AND reconciled_at != ''`,
+		assignee,
+	)
+	return err
 }
 
 // DelegatedFromChiefSessionIDs returns the set of session IDs that were
@@ -564,14 +652,42 @@ func (s *Store) EditTicketDescription(id, description, author string, now time.T
 }
 
 // AssignTicket sets (or clears, with "") the assignee, bumps updated_at, and emits
-// an assigned event (Detail = the new assignee) authored by author.
+// an assigned event (Detail = the new assignee) authored by author. It also clears
+// the machine-reconciliation flag: reassignment gives the ticket a new (or
+// renewed) owner, so a future death of that owner deserves a fresh verdict — the
+// re-arm rule of orphaned-ticket reconciliation.
 func (s *Store) AssignTicket(id, assignee, author string, now time.Time) error {
-	return s.updateTicketFieldWithEvent(id, "assignee", assignee, TicketEvent{
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(
+		`UPDATE tickets SET assignee = ?, reconciled_at = '', updated_at = ? WHERE id = ?`,
+		assignee, formatTicketTime(now), id,
+	)
+	if err != nil {
+		return err
+	}
+	if err := ticketUpdateResult(res, id); err != nil {
+		return err
+	}
+	if _, _, err := appendTicketEventTx(tx, TicketEvent{
 		TicketID: id,
 		Kind:     TicketEventAssigned,
 		Author:   author,
 		Detail:   assignee,
-	}, now)
+	}, now); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SetTicketSession records the last session's working dir and agent id, which the
@@ -786,7 +902,7 @@ func (s *Store) SweepExpiredTickets(now time.Time, ttl time.Duration) (int, erro
 
 const ticketSelect = `
 	SELECT id, title, description, status, assignee, cwd, last_agent_id,
-		project_id, created_at, updated_at, closed_at, archived_at
+		project_id, created_at, updated_at, closed_at, archived_at, reconciled_at
 	FROM tickets`
 
 // updateTicketFieldWithEvent sets a single text column plus updated_at and emits
@@ -898,16 +1014,17 @@ func (s *Store) ticketAttachments(ticketID string) ([]TicketAttachment, error) {
 
 func scanTicket(scanner ticketScanner) (*Ticket, error) {
 	var (
-		t          Ticket
-		status     string
-		createdAt  string
-		updatedAt  string
-		closedAt   string
-		archivedAt string
+		t            Ticket
+		status       string
+		createdAt    string
+		updatedAt    string
+		closedAt     string
+		archivedAt   string
+		reconciledAt string
 	)
 	if err := scanner.Scan(
 		&t.ID, &t.Title, &t.Description, &status, &t.Assignee, &t.Cwd, &t.LastAgentID,
-		&t.ProjectID, &createdAt, &updatedAt, &closedAt, &archivedAt,
+		&t.ProjectID, &createdAt, &updatedAt, &closedAt, &archivedAt, &reconciledAt,
 	); err != nil {
 		return nil, err
 	}
@@ -921,6 +1038,10 @@ func scanTicket(scanner ticketScanner) (*Ticket, error) {
 	if archivedAt != "" {
 		ts := parseTicketTime(archivedAt)
 		t.ArchivedAt = &ts
+	}
+	if reconciledAt != "" {
+		ts := parseTicketTime(reconciledAt)
+		t.ReconciledAt = &ts
 	}
 	return &t, nil
 }

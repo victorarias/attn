@@ -3026,6 +3026,9 @@ type Ticket struct {
 	// ProjectID corresponds to the JSON schema field "project_id".
 	ProjectID string `json:"project_id"`
 
+	// ReconciledAt corresponds to the JSON schema field "reconciled_at".
+	ReconciledAt *string `json:"reconciled_at,omitempty,omitzero"`
+
 	// Status corresponds to the JSON schema field "status".
 	Status TicketStatus `json:"status"`
 

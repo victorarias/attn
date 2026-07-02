@@ -138,6 +138,9 @@ func ticketToProtocol(t *store.Ticket) protocol.Ticket {
 	if t.ArchivedAt != nil {
 		pt.ArchivedAt = protocol.Ptr(t.ArchivedAt.Format(time.RFC3339))
 	}
+	if t.ReconciledAt != nil {
+		pt.ReconciledAt = protocol.Ptr(t.ReconciledAt.Format(time.RFC3339))
+	}
 	for _, a := range t.Activity {
 		pt.Activity = append(pt.Activity, ticketActivityToProtocol(a))
 	}

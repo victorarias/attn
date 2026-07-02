@@ -1631,20 +1631,21 @@ export interface RepoElement {
 }
 
 export interface TicketElement {
-    activity:      ActivityElement[];
-    archived_at?:  string;
-    assignee:      string;
-    attachments:   AttachmentElement[];
-    closed_at?:    string;
-    created_at:    string;
-    cwd:           string;
-    description:   string;
-    id:            string;
-    last_agent_id: string;
-    project_id:    string;
-    status:        TicketStatus;
-    title:         string;
-    updated_at:    string;
+    activity:       ActivityElement[];
+    archived_at?:   string;
+    assignee:       string;
+    attachments:    AttachmentElement[];
+    closed_at?:     string;
+    created_at:     string;
+    cwd:            string;
+    description:    string;
+    id:             string;
+    last_agent_id:  string;
+    project_id:     string;
+    reconciled_at?: string;
+    status:         TicketStatus;
+    title:          string;
+    updated_at:     string;
     [property: string]: any;
 }
 
@@ -3174,20 +3175,21 @@ export enum SubscribeGitStatusMessageCmd {
 }
 
 export interface Ticket {
-    activity:      ActivityElement[];
-    archived_at?:  string;
-    assignee:      string;
-    attachments:   AttachmentElement[];
-    closed_at?:    string;
-    created_at:    string;
-    cwd:           string;
-    description:   string;
-    id:            string;
-    last_agent_id: string;
-    project_id:    string;
-    status:        TicketStatus;
-    title:         string;
-    updated_at:    string;
+    activity:       ActivityElement[];
+    archived_at?:   string;
+    assignee:       string;
+    attachments:    AttachmentElement[];
+    closed_at?:     string;
+    created_at:     string;
+    cwd:            string;
+    description:    string;
+    id:             string;
+    last_agent_id:  string;
+    project_id:     string;
+    reconciled_at?: string;
+    status:         TicketStatus;
+    title:          string;
+    updated_at:     string;
     [property: string]: any;
 }
 
@@ -7591,6 +7593,7 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "last_agent_id", js: "last_agent_id", typ: "" },
         { json: "project_id", js: "project_id", typ: "" },
+        { json: "reconciled_at", js: "reconciled_at", typ: u(undefined, "") },
         { json: "status", js: "status", typ: r("TicketStatus") },
         { json: "title", js: "title", typ: "" },
         { json: "updated_at", js: "updated_at", typ: "" },
@@ -8455,6 +8458,7 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "last_agent_id", js: "last_agent_id", typ: "" },
         { json: "project_id", js: "project_id", typ: "" },
+        { json: "reconciled_at", js: "reconciled_at", typ: u(undefined, "") },
         { json: "status", js: "status", typ: r("TicketStatus") },
         { json: "title", js: "title", typ: "" },
         { json: "updated_at", js: "updated_at", typ: "" },

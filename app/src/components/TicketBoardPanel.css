@@ -259,6 +259,28 @@
   white-space: nowrap;
 }
 
+/* orphan badge — reconciliation stamped this open ticket after its owning
+   session died. Sits above the title so it cannot be missed on the card face. */
+.tb-orphan {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-error, #ef4444);
+  border: 1px solid color-mix(in srgb, var(--color-error, #ef4444) 60%, transparent);
+  background: color-mix(in srgb, var(--color-error, #ef4444) 12%, transparent);
+}
+
+.tb-card[data-orphaned='true'] {
+  border-color: color-mix(in srgb, var(--color-error, #ef4444) 45%, var(--color-border));
+}
+
 /* working/blocked at-rest heartbeat */
 .tb-pulse {
   position: absolute;

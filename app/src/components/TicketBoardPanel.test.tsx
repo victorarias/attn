@@ -344,4 +344,27 @@ describe('TicketBoardPanel', () => {
     fireEvent.click(screen.getByLabelText('Close board'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('shows the orphan badge only on open tickets whose reconciled_at is set', () => {
+    render(
+      <TicketBoardPanel
+        {...baseProps}
+        tickets={[
+          // orphaned: open + stamped
+          makeTicket({ id: 'orphan', status: TicketStatus.Working, reconciled_at: '2026-06-27T10:30:00Z' }),
+          // open but not stamped
+          makeTicket({ id: 'owned', status: TicketStatus.Working }),
+          // stamped but terminal — a closed ticket does not need an owner
+          makeTicket({ id: 'closed', status: TicketStatus.Crashed, reconciled_at: '2026-06-27T10:30:00Z' }),
+        ]}
+      />,
+    );
+    const badges = screen.getAllByTestId('ticket-board-orphan-badge');
+    expect(badges).toHaveLength(1);
+    const cards = screen.getAllByTestId('ticket-board-card');
+    const byId = (id: string) => cards.find((c) => c.getAttribute('data-ticket-id') === id)!;
+    expect(byId('orphan').getAttribute('data-orphaned')).toBe('true');
+    expect(byId('owned').getAttribute('data-orphaned')).toBeNull();
+    expect(byId('closed').getAttribute('data-orphaned')).toBeNull();
+  });
 });
