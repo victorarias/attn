@@ -12,6 +12,15 @@
   --accent: #ff6b35;
   --accent-glow: rgba(255, 107, 53, 0.15);
 
+  /* Functional accent + status colors. Theme-invariant, so defined once here in
+     :root and inherited by every theme block below (which only override the
+     neutral grays). Several components reference these as var(--color-accent,
+     #5b8cff) / var(--color-error, #ef4444); defining them makes the bare
+     references (e.g. the ticket comment submit button, the crashed badge, the
+     action-error text) render instead of collapsing to an invisible no-op. */
+  --color-accent: #5b8cff;
+  --color-error: #ef4444;
+
   color-scheme: dark;
 
   /* Theme colors (dark defaults) */
