@@ -11,12 +11,14 @@ import (
 )
 
 // ErrAlreadyRunning is returned by Start when another live Runner already owns
-// the lock dir. The orphan-recovery and single-worker guarantees assume at most
-// one live worker per store: two workers would both claim the same record, both
+// the lock dir. The orphan-recovery and single-instance guarantees assume at most
+// one live Runner per store: two Runners would both claim the same record, both
 // save StateRunning (atomic rename = last-writer-wins, no torn file), and both
 // invoke the executor concurrently — double-applying the durable write (e.g.
-// double compaction). The CommitGuard is a per-process in-memory latch with no
-// cross-process coordination, so nothing else can fence that.
+// double compaction). Per-kind concurrency bounds parallelism WITHIN one Runner;
+// it does nothing across processes. The CommitGuard is likewise a per-process
+// in-memory latch with no cross-process coordination, so nothing else can fence
+// that.
 var ErrAlreadyRunning = errors.New("tasks: another runner already owns this store")
 
 // lockFileName is the single-instance ownership marker inside the lock dir.

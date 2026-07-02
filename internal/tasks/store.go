@@ -16,9 +16,10 @@ import (
 // os.ReadDir filtered by State. Production now injects a SQLite-backed Store from
 // the daemon instead (docs/plans/2026-07-02-bg-task-notifications.md); this file
 // impl backs the package's own tests and the daemon's one-time JSON->SQLite import
-// of any pre-existing on-disk records. The single worker serializes all writes, so
-// no per-task lock is needed; the only durability guarantee this store owns is
-// atomic temp+rename so a crash mid-write never leaves a half-written record.
+// of any pre-existing on-disk records. The runner funnels every write through one
+// store-level lock, so no per-task lock is needed; the only durability guarantee
+// this store owns is atomic temp+rename so a crash mid-write never leaves a
+// half-written record.
 
 const (
 	machineDir = ".attn"

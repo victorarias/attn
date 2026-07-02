@@ -104,9 +104,10 @@ func (d *Daemon) sendNotebookTaskRetryWSResult(client *wsClient, requestID, task
 
 // broadcastNotebookTasksChanged announces that a task lifecycle transition
 // occurred so an open task panel re-lists. It is wired to the runner's OnChange
-// callback (see startCompactRunner). broadcastMessage -> wsHub.BroadcastValue is
-// non-blocking (a full broadcast channel drops the message), so this is safe to
-// invoke synchronously from the runner's single worker goroutine.
+// callback (see startCompactRunner). It builds a fresh message and does a
+// non-blocking broadcastMessage -> wsHub.BroadcastValue (a full broadcast channel
+// drops the message), holding no shared state, so it is safe to invoke
+// CONCURRENTLY from the runner's dispatch goroutine and its in-flight runs.
 func (d *Daemon) broadcastNotebookTasksChanged() {
 	d.broadcastMessage(protocol.NotebookTasksChangedMessage{
 		Event: protocol.EventNotebookTasksChanged,

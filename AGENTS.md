@@ -63,6 +63,19 @@ pnpm run e2e
 - Diagnose root cause before fixing symptoms.
 - Do not remove requested functionality without explicit approval.
 
+## Live-App Testing Is Required
+
+Automated tests are necessary but not sufficient. Every PR must be exercised in the **live app** (a running daemon/app built from the branch) before it is called done or merged, with exactly two exemptions:
+
+- the change is **trivial** (e.g. a comment, a doc, a rename, a log-string tweak), or
+- the change is one you have **extremely high confidence** in without a live-app test, and you can say concretely why (for example: a pure, well-isolated function fully covered by unit tests, with no daemon-process, protocol, timing, or UI surface).
+
+A large automated suite — even a race-clean concurrency suite — is not by itself one of these exemptions. If the change touches the daemon process lifecycle, protocol, PTY, background runners, or any UI, it needs live-app verification.
+
+Use a **non-prod** profile for this (the `dev` sibling or a throwaway `ATTN_PROFILE`) — that is pre-authorized; never smoke on prod. See [Iterating On Attn Itself](#iterating-on-attn-itself-attn-on-attn-testing) and [docs/profiles.md](docs/profiles.md).
+
+If a PR needs live-app verification and you **cannot** run it (no ability to build/install/run a non-prod profile in this environment), **stop and ask the user for guidance** — do not merge on automated tests alone. State plainly in the PR and to the user what was and was not verified live.
+
 ## Packaged-App Harness
 
 - Real packaged-app scenarios are single-tenant. Never run them in parallel.

@@ -252,11 +252,12 @@ func (d *Daemon) startCompactRunner() {
 			d.logf("notebook narration: register narrate_workspace: %v", err)
 		}
 	}
-	// Surface lifecycle transitions to any open task panel. OnChange fires
-	// SYNCHRONOUSLY inside the runner's single worker goroutine, so the callback
-	// must be cheap and non-blocking: broadcastNotebookTasksChanged ->
-	// broadcastMessage -> wsHub.BroadcastValue uses a non-blocking send that drops
-	// on a full broadcast channel, so it can never stall the worker.
+	// Surface lifecycle transitions to any open task panel. OnChange may fire
+	// CONCURRENTLY from the runner's dispatch goroutine and its in-flight runs, so
+	// the callback must be cheap, non-blocking, and concurrency-safe:
+	// broadcastNotebookTasksChanged -> broadcastMessage -> wsHub.BroadcastValue
+	// builds a fresh message and uses a non-blocking send that drops on a full
+	// broadcast channel, so it can never stall a run.
 	runner.OnChange(func() { d.broadcastNotebookTasksChanged() })
 	d.setCompactRunner(runner)
 	_ = runner.Start()

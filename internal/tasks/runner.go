@@ -23,9 +23,9 @@ const (
 	// wraps around every invocation. Keeper compaction uses 5 minutes; a kind can
 	// override it via RegisterWithTimeout.
 	DefaultExecutorTimeout = 5 * time.Minute
-	// defaultPollInterval is how often the worker wakes to re-scan the queue for a
-	// task whose NextAttemptAt has arrived. The single worker is level-triggered,
-	// so this only bounds scheduling latency for time-gated requeues.
+	// defaultPollInterval is how often the dispatch loop wakes to re-scan the queue
+	// for a task whose NextAttemptAt has arrived. The loop is level-triggered, so
+	// this only bounds scheduling latency for time-gated requeues.
 	defaultPollInterval = time.Second
 )
 
@@ -46,10 +46,28 @@ var ErrUnknownKind = errors.New("tasks: no executor registered for kind")
 // internal/daemon/workspace_keeper.go.
 type ExecutorFunc func(ctx context.Context, task *Task) error
 
-// executor pairs a registered ExecutorFunc with its per-kind timeout.
+// executor pairs a registered ExecutorFunc with its per-kind timeout and
+// concurrency cap.
 type executor struct {
 	fn      ExecutorFunc
 	timeout time.Duration
+	// limit is the max number of tasks OF THIS KIND that may run at once. It is
+	// always >= 1 after registration (a zero MaxConcurrent resolves to 1), so a
+	// kind is serialized with itself by default while different kinds run in
+	// parallel.
+	limit int
+}
+
+// ExecutorConfig tunes a registered executor. The zero value is the default:
+// DefaultExecutorTimeout and a per-kind concurrency cap of 1.
+type ExecutorConfig struct {
+	// Timeout is the per-invocation context.WithTimeout the runner wraps around
+	// every call to this executor. Zero ⇒ DefaultExecutorTimeout.
+	Timeout time.Duration
+	// MaxConcurrent bounds how many tasks of this kind may run simultaneously.
+	// Zero ⇒ 1 (a kind serialized with itself, the pre-concurrency default);
+	// different kinds always run in parallel regardless. The reconcile kind uses 2.
+	MaxConcurrent int
 }
 
 // EnqueueOptions tunes a single Enqueue call.
@@ -96,7 +114,11 @@ type Options struct {
 	BackoffCap  time.Duration
 }
 
-// Runner is the durable, single-worker task runner.
+// Runner is the durable task runner. A single dispatch loop selects eligible
+// tasks and launches each as its own goroutine, bounded by a per-kind
+// concurrency cap (default 1): a kind is serialized with itself while different
+// kinds run in parallel. Every record read-modify-write still funnels through
+// ioMu, so persistence stays serialized even though executors run concurrently.
 type Runner struct {
 	store    Store
 	log      LogFunc
@@ -109,26 +131,35 @@ type Runner struct {
 	backoffCap   time.Duration
 
 	// onChange, if set, fires after every lifecycle transition (for the status
-	// broadcast). It runs synchronously inside the worker, so it must be cheap and
-	// non-blocking; the daemon's wiring just emits a websocket event.
+	// broadcast). It may be called CONCURRENTLY — from the dispatch goroutine, from
+	// each in-flight run's finish(), and from Enqueue/Retry/Remove on arbitrary
+	// daemon goroutines — so it must be cheap, non-blocking, and safe to invoke from
+	// multiple goroutines; the daemon's wiring just emits a websocket event.
 	onChange func()
 
 	mu        sync.Mutex
 	executors map[string]executor
 	started   bool
 
-	// ioMu serializes every read-modify-write cycle on a task record. The single
-	// worker plus arbitrary daemon goroutines calling Enqueue/Retry all mutate the
-	// same on-disk records; without this a concurrent Enqueue and a worker state
-	// write would lost-update each other. It is a coarse store-level lock — correct
-	// and cheap because record I/O is fast and contention is low. It is ALWAYS
-	// acquired without holding mu (and the executor never runs while it is held),
-	// so there is no lock-ordering hazard with mu.
+	// ioMu serializes every read-modify-write cycle on a task record. The dispatch
+	// loop, the in-flight run goroutines' finish(), and arbitrary daemon goroutines
+	// calling Enqueue/Retry all mutate the same records; without this a concurrent
+	// Enqueue and a claim/finish write would lost-update each other. It is a coarse
+	// store-level lock — correct and cheap because record I/O is fast and
+	// contention is low. When both locks are needed, ioMu is ALWAYS the outer lock:
+	// it is acquired without holding mu (dispatch takes ioMu, then briefly mu to
+	// reserve a slot), so there is no lock-ordering hazard with mu.
 	ioMu sync.Mutex
 
-	// run is the state of the currently-running task (nil when idle). Cancel reads
-	// it under mu to coordinate the commit fence and the blocks-until-exit wait.
-	run *activeRun
+	// runs holds every in-flight run keyed by task id (the single-worker design had
+	// one *activeRun). Cancel(id) fences and waits on its entry; Stop drains them
+	// all. Guarded by mu.
+	runs map[string]*activeRun
+
+	// inflight counts currently-running tasks per kind. dispatch reads it to enforce
+	// each kind's concurrency cap; it is bumped when a run is claimed and dropped
+	// when the run goroutine exits. Guarded by mu.
+	inflight map[string]int
 
 	// wake nudges the worker to re-scan the queue immediately after an Enqueue or
 	// Retry, rather than waiting for the next poll tick. Buffered depth 1 so a
@@ -143,11 +174,12 @@ type Runner struct {
 	lockPath string
 }
 
-// activeRun tracks the in-flight task so Cancel can fence its commit and block
+// activeRun tracks one in-flight task so Cancel can fence its commit and block
 // until its goroutine exits. Ported from the keeper compaction cancel/done/committing
 // fields (workspace_keeper.go).
 type activeRun struct {
 	id     string
+	kind   string // so the run goroutine can drop its per-kind in-flight slot on exit
 	cancel context.CancelFunc
 	guard  *CommitGuard
 	done   chan struct{} // closed when the run goroutine has fully exited
@@ -172,6 +204,8 @@ func New(opts Options) *Runner {
 		log:          log,
 		now:          utcNow,
 		executors:    make(map[string]executor),
+		runs:         make(map[string]*activeRun),
+		inflight:     make(map[string]int),
 		pollInterval: nonZeroDuration(opts.PollInterval, defaultPollInterval),
 		maxAttempts:  nonZeroInt(opts.MaxAttempts, DefaultMaxAttempts),
 		backoffBase:  nonZeroDuration(opts.BackoffBase, DefaultBackoffBase),
@@ -202,15 +236,23 @@ func (r *Runner) OnChange(fn func()) {
 	r.mu.Unlock()
 }
 
-// Register wires an executor for a kind with the default per-kind timeout.
+// Register wires an executor for a kind with the default per-kind timeout and a
+// concurrency cap of 1.
 func (r *Runner) Register(kind string, fn ExecutorFunc) error {
-	return r.RegisterWithTimeout(kind, fn, DefaultExecutorTimeout)
+	return r.RegisterWith(kind, fn, ExecutorConfig{})
 }
 
 // RegisterWithTimeout wires an executor for a kind with an explicit timeout (the
-// runner wraps every invocation in context.WithTimeout of this duration). It is
-// an error to register the same kind twice or to pass a nil fn.
+// runner wraps every invocation in context.WithTimeout of this duration) and a
+// concurrency cap of 1.
 func (r *Runner) RegisterWithTimeout(kind string, fn ExecutorFunc, timeout time.Duration) error {
+	return r.RegisterWith(kind, fn, ExecutorConfig{Timeout: timeout})
+}
+
+// RegisterWith wires an executor for a kind with an explicit timeout and per-kind
+// concurrency cap (see ExecutorConfig). It is an error to register the same kind
+// twice or to pass a nil fn.
+func (r *Runner) RegisterWith(kind string, fn ExecutorFunc, cfg ExecutorConfig) error {
 	if r.disabled {
 		return ErrDisabled
 	}
@@ -220,20 +262,25 @@ func (r *Runner) RegisterWithTimeout(kind string, fn ExecutorFunc, timeout time.
 	if kind == "" {
 		return errors.New("tasks: kind must not be empty")
 	}
+	timeout := cfg.Timeout
 	if timeout <= 0 {
 		timeout = DefaultExecutorTimeout
+	}
+	limit := cfg.MaxConcurrent
+	if limit <= 0 {
+		limit = 1
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.executors[kind]; exists {
 		return fmt.Errorf("tasks: kind already registered: %s", kind)
 	}
-	r.executors[kind] = executor{fn: fn, timeout: timeout}
+	r.executors[kind] = executor{fn: fn, timeout: timeout, limit: limit}
 	return nil
 }
 
 // Start recovers orphaned running tasks (reset to queued) and launches the single
-// worker goroutine. It is safe (no-op) on a disabled runner. Calling Start twice
+// dispatch goroutine. It is safe (no-op) on a disabled runner. Calling Start twice
 // is an error.
 func (r *Runner) Start() error {
 	if r.disabled {
@@ -280,10 +327,10 @@ func (r *Runner) Start() error {
 	return nil
 }
 
-// Stop signals the worker to exit and blocks until it has. A Stop concurrent with
-// an in-flight executor lets that executor finish (the worker checks done only
-// between tasks); callers that need a specific task aborted use Cancel first. Safe
-// to call on a disabled or never-started runner.
+// Stop signals the dispatch loop to exit, then cancels and drains every in-flight
+// run. cancelAll honors each commit fence, so an already-committing run still
+// finishes its durable write untorn. Safe to call on a disabled or never-started
+// runner.
 func (r *Runner) Stop() {
 	r.mu.Lock()
 	if !r.started {
@@ -300,15 +347,17 @@ func (r *Runner) Stop() {
 	r.lockPath = ""
 	r.mu.Unlock()
 
-	// Cancel any in-flight run so Stop does not block on a long executor; this
-	// respects the commit fence (an already-committing run still finishes).
-	r.cancelActive()
-
+	// Order matters in the concurrent model: runs are detached goroutines the
+	// dispatch loop does not join. First stop the loop launching MORE runs
+	// (close done, wait for the loop to exit), THEN cancel and join everything
+	// still in flight. Doing it in this order guarantees no new run can appear
+	// while cancelAll drains, so it terminates.
 	close(done)
 	<-exit
+	r.cancelAll()
 
-	// Release single-instance ownership only after the worker has fully exited, so
-	// no other Runner can claim the root while ours is still draining.
+	// Release single-instance ownership only after every run has exited, so no
+	// other Runner can claim the store while ours is still draining.
 	r.store.ReleaseLock(lockPath)
 }
 
@@ -450,8 +499,8 @@ func (r *Runner) Cancel(id string) {
 		return
 	}
 	r.mu.Lock()
-	run := r.run
-	if run == nil || run.id != id {
+	run := r.runs[id]
+	if run == nil {
 		r.mu.Unlock()
 		return
 	}
@@ -527,32 +576,34 @@ func (r *Runner) Get(id string) (*Task, error) {
 	return r.store.Load(id)
 }
 
-// --- worker loop -----------------------------------------------------------
+// --- dispatch loop ---------------------------------------------------------
 
-// loop is the single worker goroutine. It is level-triggered: each pass picks the
-// one eligible task (if any), runs it, then waits for the next nudge or poll tick.
-// There is no worker pool — serialization is the whole point (it removes the need
-// for a per-task lock).
+// loop is the single dispatch goroutine. It is level-triggered: each pass claims
+// and launches every currently-eligible task whose kind has a free concurrency
+// slot (each as its own goroutine), draining until a pass can place nothing more,
+// then waits for the next nudge or poll tick. Executors run concurrently; the loop
+// itself never blocks on one.
 func (r *Runner) loop() {
 	defer close(r.exit)
 	ticker := time.NewTicker(r.pollInterval)
 	defer ticker.Stop()
 	for {
-		// Drain all currently-eligible work before sleeping, so a burst of enqueues
-		// does not stall behind the poll interval.
+		// Drain: keep dispatching until a pass launches nothing (queue empty or
+		// every eligible kind saturated), so a burst of enqueues does not stall
+		// behind the poll interval.
 		for {
-			ran, err := r.runNext()
-			if err != nil {
-				r.log("tasks: worker pass: %v", err)
-				break
-			}
-			if !ran {
-				break
-			}
 			select {
 			case <-r.done:
 				return
 			default:
+			}
+			progressed, err := r.dispatch()
+			if err != nil {
+				r.log("tasks: dispatch pass: %v", err)
+				break
+			}
+			if !progressed {
+				break
 			}
 		}
 		select {
@@ -564,13 +615,22 @@ func (r *Runner) loop() {
 	}
 }
 
-// runNext selects the single most-eligible task and runs it. It reports whether a
-// task ran (so the caller can keep draining). A task is eligible when it is queued
-// (or a failed task past its NextAttemptAt with attempts under the cap) and its
-// NextAttemptAt has arrived. Selection runs under ioMu so a concurrent Enqueue/
-// Retry cannot make the chosen record stale before the run is claimed.
-func (r *Runner) runNext() (bool, error) {
+// dispatch claims every currently-eligible task whose kind is under its per-kind
+// concurrency cap and launches each in its own goroutine. It reports whether it
+// made progress (launched a run, or failed an unknown-kind task in place) so the
+// loop keeps draining until a pass can place nothing more. Selection order is
+// earliest NextAttemptAt, then oldest CreatedAt, so under cap pressure the
+// longest-waiting work claims the freed slot first.
+//
+// The store read and every per-task claim write run under ioMu, so a concurrent
+// Enqueue/Retry cannot make a chosen record stale between selection and claim.
+// The per-kind in-flight accounting and the active-run registry live under mu,
+// which is only ever taken WHILE holding ioMu (never the reverse) — preserving the
+// ioMu-outer lock order. Executors are launched only AFTER both locks are released,
+// so an executor never runs while the runner holds a lock.
+func (r *Runner) dispatch() (progressed bool, err error) {
 	r.ioMu.Lock()
+
 	now := r.now()
 	all, err := r.store.List()
 	if err != nil {
@@ -578,54 +638,87 @@ func (r *Runner) runNext() (bool, error) {
 		return false, err
 	}
 
-	var pick *Task
+	// Collect eligible tasks, earliest-scheduled first (ties: oldest created).
+	eligible := make([]*Task, 0, len(all))
 	for _, t := range all {
-		if !r.eligible(t, now) {
+		if r.eligible(t, now) {
+			eligible = append(eligible, t)
+		}
+	}
+	sort.SliceStable(eligible, func(i, j int) bool {
+		if eligible[i].NextAttemptAt.Equal(eligible[j].NextAttemptAt) {
+			return eligible[i].CreatedAt.Before(eligible[j].CreatedAt)
+		}
+		return eligible[i].NextAttemptAt.Before(eligible[j].NextAttemptAt)
+	})
+
+	type launchSpec struct {
+		task *Task
+		exec executor
+		ctx  context.Context
+		run  *activeRun
+	}
+	var launch []launchSpec
+	failedUnknown := false
+
+	for _, t := range eligible {
+		// Decide + reserve under mu: the executor registry and in-flight counts both
+		// live there. Reserving the slot before persisting the claim keeps a later
+		// candidate of the same kind in this very pass from over-committing the cap.
+		r.mu.Lock()
+		exec, ok := r.executors[t.Kind]
+		if !ok {
+			r.mu.Unlock()
+			// No executor for this kind (e.g. a stale record from an old build). Fail
+			// it in place so it surfaces rather than being re-selected every pass.
+			r.recordFailureLocked(t, fmt.Errorf("%w: %s", ErrUnknownKind, t.Kind))
+			failedUnknown = true
 			continue
 		}
-		// Earliest NextAttemptAt wins; ties broken by oldest CreatedAt for fairness.
-		if pick == nil ||
-			t.NextAttemptAt.Before(pick.NextAttemptAt) ||
-			(t.NextAttemptAt.Equal(pick.NextAttemptAt) && t.CreatedAt.Before(pick.CreatedAt)) {
-			pick = t
+		if r.inflight[t.Kind] >= exec.limit {
+			r.mu.Unlock()
+			continue // this kind is saturated; a finishing run will re-nudge us
 		}
-	}
-	if pick == nil {
-		r.ioMu.Unlock()
-		return false, nil
+		ctx, cancel := context.WithCancel(context.Background())
+		run := &activeRun{
+			id:     t.ID,
+			kind:   t.Kind,
+			cancel: cancel,
+			guard:  &CommitGuard{},
+			done:   make(chan struct{}),
+		}
+		r.inflight[t.Kind]++
+		r.runs[t.ID] = run
+		r.mu.Unlock()
+
+		// Persist the claim (state running) under ioMu — NOT under mu, which must
+		// never wrap store I/O.
+		t.State = StateRunning
+		t.Attempts++
+		t.Requeued = false
+		t.UpdatedAt = now
+		if err := r.store.Save(t); err != nil {
+			r.log("tasks: persist running state for %s: %v", t.ID, err)
+			// Roll the reservation back so the per-kind slot is not leaked forever.
+			r.mu.Lock()
+			delete(r.runs, t.ID)
+			r.inflight[t.Kind]--
+			r.mu.Unlock()
+			cancel()
+			continue
+		}
+		launch = append(launch, launchSpec{task: t, exec: exec, ctx: ctx, run: run})
 	}
 
-	// Claim the task: mark it running and persist while still holding ioMu, so the
-	// claim is atomic against Enqueue/Retry. We then release ioMu and run the
-	// executor unlocked (it may take minutes; holding ioMu would block enqueues
-	// and status reads). Concurrency past this point is handled by the commit
-	// fence and the Requeued flag, not by ioMu.
-	r.mu.Lock()
-	exec, ok := r.executors[pick.Kind]
-	r.mu.Unlock()
-	if !ok {
-		// No executor for this kind (e.g. a stale record from an old build). Fail it
-		// in place so it surfaces rather than spinning the worker.
-		r.recordFailureLocked(pick, fmt.Errorf("%w: %s", ErrUnknownKind, pick.Kind))
-		r.ioMu.Unlock()
-		r.notifyChange()
-		return true, nil
-	}
-
-	pick.State = StateRunning
-	pick.Attempts++
-	pick.Requeued = false
-	pick.UpdatedAt = now
-	if err := r.store.Save(pick); err != nil {
-		r.ioMu.Unlock()
-		r.log("tasks: persist running state for %s: %v", pick.ID, err)
-		return false, nil
-	}
 	r.ioMu.Unlock()
-	r.notifyChange()
 
-	r.execute(pick, exec)
-	return true, nil
+	if failedUnknown || len(launch) > 0 {
+		r.notifyChange()
+	}
+	for _, ls := range launch {
+		go r.execute(ls.task, ls.exec, ls.ctx, ls.run)
+	}
+	return failedUnknown || len(launch) > 0, nil
 }
 
 // eligible reports whether a task may run now. Auto-requeue of a failed task is
@@ -647,21 +740,20 @@ func (r *Runner) eligible(t *Task, now time.Time) bool {
 
 // execute runs one already-claimed task (state == running on disk) through its
 // executor inside a runner-owned timeout, then records the outcome (done /
-// requeued / failed-with-backoff / dead) under ioMu. The executor's CommitGuard
-// fences its durable write against a concurrent Cancel AND against the
-// runner-owned timeout: once the executor has entered its commit, neither Cancel
-// nor the deadline cancels the context, so the single durable write is never
-// torn. This mirrors keeper compaction, whose commit (ApplyKeeperCompactResult)
-// is ctx-free and therefore timeout-immune by construction.
-func (r *Runner) execute(t *Task, exec executor) {
-	// Use WithCancel (not WithTimeout) so the deadline is enforced by a timer we
-	// can route through the commit fence: a timeout that arrives mid-commit must
-	// not cancel the context, exactly like a Cancel that arrives mid-commit.
-	ctx, cancel := context.WithCancel(context.Background())
-	guard := &CommitGuard{}
-	runDone := make(chan struct{})
+// requeued / failed-with-backoff / dead) under ioMu. The ctx, cancel, guard, and
+// activeRun are all built by dispatch at claim time and the run is already
+// registered in r.runs, so a Cancel arriving before this goroutine is scheduled
+// still finds and fences it. The executor's CommitGuard fences its durable write
+// against a concurrent Cancel AND against the runner-owned timeout: once the
+// executor has entered its commit, neither Cancel nor the deadline cancels the
+// context, so the single durable write is never torn. This mirrors keeper
+// compaction, whose commit (ApplyKeeperCompactResult) is ctx-free and therefore
+// timeout-immune by construction.
+func (r *Runner) execute(t *Task, exec executor, ctx context.Context, run *activeRun) {
+	guard := run.guard
+	cancel := run.cancel
 
-	// timeoutFired stops the deadline timer once the run has exited so it cannot
+	// timeoutStop stops the deadline timer once the run has exited so it cannot
 	// fire (and consult the guard) after teardown.
 	timeoutStop := make(chan struct{})
 	timer := time.NewTimer(exec.timeout)
@@ -671,17 +763,13 @@ func (r *Runner) execute(t *Task, exec executor) {
 		case <-timer.C:
 			// The deadline elapsed. Honor the commit fence: if the executor is
 			// already committing, do NOT cancel — let the durable write finish
-			// untorn (the worker still blocks on the executor returning).
+			// untorn (this goroutine still waits for the executor to return).
 			if guard.tryFence() {
 				cancel()
 			}
 		case <-timeoutStop:
 		}
 	}()
-
-	r.mu.Lock()
-	r.run = &activeRun{id: t.ID, cancel: cancel, guard: guard, done: runDone}
-	r.mu.Unlock()
 
 	// Attach the guard so the executor body can fence its durable write.
 	taskForExec := t.clone()
@@ -706,13 +794,17 @@ func (r *Runner) execute(t *Task, exec executor) {
 	// durable ApplyKeeperCompactResult has settled.
 	r.finish(t.ID, runErr)
 
-	// Tear down the active-run registration and signal exit. From here, a Cancel
-	// that was already blocked on run.done unblocks; a Cancel arriving after this
-	// finds r.run == nil (or a different run) and returns immediately.
+	// Deregister the run and free its per-kind slot, THEN signal exit. From here, a
+	// Cancel that was already blocked on run.done unblocks; a Cancel arriving after
+	// this finds no entry for the id and returns immediately.
 	r.mu.Lock()
-	r.run = nil
+	delete(r.runs, run.id)
+	r.inflight[run.kind]--
 	r.mu.Unlock()
-	close(runDone)
+	close(run.done)
+
+	// A freed slot may admit a queued task of a now-uncapped kind; re-dispatch.
+	r.nudge()
 }
 
 // finish records the terminal outcome of a run. It re-loads the record under ioMu
@@ -834,16 +926,25 @@ func (r *Runner) backoff(attempt int) time.Duration {
 	return d
 }
 
-// cancelActive cancels the in-flight run (if any), honoring the commit fence and
-// blocking until it exits. Used by Stop.
-func (r *Runner) cancelActive() {
+// cancelAll cancels every in-flight run (honoring each commit fence) and blocks
+// until they have all exited. Used by Stop AFTER the dispatch loop has exited, so
+// no new run can be registered while it drains. It snapshots r.runs under mu and
+// then fences+waits without holding mu: a run that finishes between the snapshot
+// and the fence closes its done channel (tryFence on a settled guard is a safe
+// no-op) so <-run.done returns immediately.
+func (r *Runner) cancelAll() {
 	r.mu.Lock()
-	run := r.run
-	if run == nil {
-		r.mu.Unlock()
-		return
+	runs := make([]*activeRun, 0, len(r.runs))
+	for _, run := range r.runs {
+		runs = append(runs, run)
 	}
-	r.fenceAndWait(run)
+	r.mu.Unlock()
+	for _, run := range runs {
+		if run.guard.tryFence() {
+			run.cancel()
+		}
+		<-run.done
+	}
 }
 
 // --- helpers ---------------------------------------------------------------
