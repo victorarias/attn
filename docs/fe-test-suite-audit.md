@@ -8,10 +8,15 @@ The vitest suite is 127 files / 1,216 tests and runs in **~9s locally** (10-core
 **46–54s in CI** (4-vCPU ubuntu runner). It is not slow in absolute terms, but **~79% of all
 test execution time (18.7s of 23.7s) is literal sleep**: tests waiting out real production
 timers (2500ms badge dismiss, 1000ms reconnect backoff, 700ms/500ms debounces) and
-`waitFor`'s 50ms polling interval. Killing the sleep in the top 3 files plus moving
-pure-logic files off happy-dom would roughly halve the CI Test step and bring the local
-run to ~5s. Removal candidates exist but are few — the suite is mostly healthy by
-Victor's bar; the waste is in *how* tests wait, not *what* they test.
+`waitFor`'s 50ms polling interval. Removal candidates exist but are few — the suite is
+mostly healthy by Victor's bar; the waste is in *how* tests wait, not *what* they test.
+
+**For CI latency specifically, vitest is the wrong tree to bark up**: it is ~50s of a
+6.5-minute Frontend job. The E2E step is ~4min because Playwright runs 154 tests fully
+serial (`workers: 1`, shared daemon) plus ~40s of uncached browser install. A yaml-only
+restructure — cache browsers, split E2E into its own job sharded 3 ways (each shard gets
+its own daemon, preserving the serial constraint per machine) — takes the Frontend gate
+to **~2–2.5min** with no test changes (§4.4).
 
 ## 1. How the suite runs
 
@@ -229,21 +234,64 @@ touch `window.localStorage`; `store/sessions.ts` assigns `window.__TEST_*` in DE
 - **Startup/transform tuning**: vitest boot is 0.4s and transform ~5s across all workers;
   nothing folkloric to gain.
 
-### 4.4 Context: the real CI cost center is E2E
+### 4.4 The real CI cost center: E2E (measured addendum)
 
-The vitest suite is ~50s of a 6.5-minute Frontend job; Playwright E2E is ~4min plus 44s
-of browser install. If CI latency is the goal, that's the next audit — out of scope here.
+Since CI latency is the driving concern, the E2E step was measured too. The vitest suite
+is ~50s of a 6.5-minute Frontend job; Playwright E2E is ~4min plus ~40s of browser
+install.
 
-## 5. Do these first
+**Why E2E is slow: it is configured fully serial.** `playwright.config.ts` sets
+`workers: 1, fullyParallel: false` ("shared daemon") — 25 spec files / 154 tests run one
+at a time on a 4-vCPU runner.
 
-1. **Delete the DiffDetailPanel fixture/guard-rails blocks** (24 tests, ~390 lines) and
+Measured locally (`ATTN_PROFILE=feaudit pnpm run e2e`, throwaway daemon, 2m26s wall —
+CI's ~4min is the same suite at ~1.65× runner slowdown), per-spec totals:
+
+| spec | time | tests |
+|---|---|---|
+| keyboard-shortcuts | 17.6s | 17 |
+| terminal-interactions | 17.5s | 17 |
+| diff-view | 14.9s | 23 |
+| location-picker | 14.2s | 13 |
+| pr-actions | 8.9s | 6 |
+| split-blank-repro / terminal-blocks | 8.1s each | 4 / 7 |
+| remaining 17 specs | ≤7s each, 55s combined | |
+
+The distribution is flat — no dominating spec — which is the good case for **sharding**:
+splitting by file balances well and scales near-linearly.
+
+**Recommended CI restructure (yaml-only, no test or product changes):**
+
+1. **Cache Playwright browsers** (`actions/cache` on `~/.cache/ms-playwright`, keyed on
+   the Playwright version). Saves ~40s on every run. Trivial.
+2. **Split E2E into its own job, sharded 3 ways** (`playwright test --shard=N/3` matrix).
+   Each shard is a separate machine running its own daemon + vite server through the
+   existing `webServer` config, so the shared-daemon serial constraint is preserved
+   *within* each shard — no isolation work needed. Per-shard: ~82s of tests (245s CI ÷ 3)
+   plus ~35s setup (checkout/node/pnpm/go/binary build, browsers cached). The unit job
+   (typecheck + vitest) runs in parallel at ~1.5–2min.
+   **Frontend gate: ~6.5min → ~2–2.5min.**
+3. Only if that's not enough later: within-machine parallelism (`workers > 1` with
+   per-worker daemon port bands). The `e2e/profileEnv.ts` port-band machinery is halfway
+   there, but per-worker daemon spawning is real design work — unnecessary if sharding
+   lands.
+
+Reproduce: `go build -o ./attn ./cmd/attn && cd app && ATTN_PROFILE=feaudit pnpm run e2e`
+(named profile → disjoint ports, safe next to other sessions; `attn profile clean feaudit`
+afterwards).
+
+## 5. Do these first (ordered for CI latency, the driving concern)
+
+1. **CI restructure (§4.4): browser cache + separate sharded E2E job.** Yaml-only.
+   This is where the minutes are: Frontend gate ~6.5min → ~2–2.5min.
+2. **Delete the DiffDetailPanel fixture/guard-rails blocks** (24 tests, ~390 lines) and
    the 7 scattered duplicates in §3b. Pure hygiene, ~30 minutes, zero coverage lost.
-2. **Fake-timer the NotebookBrowser autosave/badge tests** — the single biggest runtime
-   win (7.1s file → ~1s), and it's the suite's wall-clock long pole.
-3. **Same treatment for DiffDetailPanel + useDaemonSocket + scenarioAgents** (fake timers
-   / `waitFor` interval wrapper / copy the `scenarioAssertions` pattern).
-4. **Flip the 55 verified pure-logic files to node env** via `environmentMatchGlobs`.
+3. **Fake-timer the sleep-heavy vitest files** (§4.1: NotebookBrowser, DiffDetailPanel,
+   useDaemonSocket, scenarioAgents). CI Test step ~50s → ~40s; single-file iteration on
+   NotebookBrowser ~7.5s → <1.5s.
+4. **Defer**: node-env flip for the 55 pure files (small win, adds config surface to
+   maintain); within-machine E2E parallelism (design work, unnecessary once sharding
+   lands).
 
-End state estimate: local run ~9s → ~6.5–7s (floor is per-file env+import overhead at
-10 cores), CI Test step ~50s → ~30–35s, and sleep-free single-file iteration on the three
-worst files.
+End state estimate: Frontend CI gate ~2–2.5min (from ~6.5), local vitest ~9s → ~7s with
+sleep-free iteration on the three worst files.
