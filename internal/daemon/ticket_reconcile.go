@@ -466,6 +466,8 @@ Transcript file (%s agent): %s
 
 Read the transcript with the Read tool. Read backwards from the tail in chunks (check the file size first, then use offset/limit). Stop as soon as you can support a verdict — but judge against the BRIEF above, never the final messages alone: an agent can sound finished while the brief is half-done.
 
+The brief is the starting definition of done, not the final one: the user can re-scope the work mid-session. If the transcript shows the user explicitly authorizing, narrowing, or extending the scope, judge against that latest explicit agreement — work the user approved in-session is in scope even where the original brief's wording says otherwise.
+
 Claude transcripts are JSONL message lines; Codex rollout transcripts are JSONL response items. Either way, extract what the agent actually did and what remains.
 
 Report via structured output:
