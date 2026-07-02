@@ -154,9 +154,9 @@ type rowScanner interface {
 
 func scanTaskRow(sc rowScanner) (*TaskRecord, error) {
 	var (
-		rec               TaskRecord
+		rec                             TaskRecord
 		nextStr, createdStr, updatedStr string
-		requeued          int
+		requeued                        int
 	)
 	if err := sc.Scan(&rec.ID, &rec.Kind, &rec.Subject, &rec.State, &rec.Attempts,
 		&nextStr, &rec.LastError, &rec.MetaJSON, &requeued, &createdStr, &updatedStr); err != nil {
