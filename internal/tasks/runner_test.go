@@ -49,6 +49,18 @@ func testRunner(t *testing.T, clock *fakeClock) *Runner {
 	return r
 }
 
+// storeRoot returns the on-disk root behind a file-backed runner. The runner's
+// store is the Store interface now, so the on-disk assertions reach the concrete
+// FileStore through this helper.
+func storeRoot(t *testing.T, r *Runner) string {
+	t.Helper()
+	fs, ok := r.store.(*FileStore)
+	if !ok {
+		t.Fatalf("runner is not file-backed (%T)", r.store)
+	}
+	return fs.s.root
+}
+
 // waitFor polls cond until it is true or the deadline elapses. It is used ONLY to
 // observe the worker's eventual durable state (the worker runs in its own
 // goroutine on a short ticker); ordering guarantees in the cancel/commit tests use
@@ -132,7 +144,7 @@ func TestDerivedIDEnqueueIsIdempotent(t *testing.T) {
 		t.Fatalf("derived id: got %q want %q", all[0].ID, id)
 	}
 	// Exactly one file on disk.
-	files, _ := os.ReadDir(stateDir(r.store.root))
+	files, _ := os.ReadDir(stateDir(storeRoot(t, r)))
 	jsonCount := 0
 	for _, f := range files {
 		if filepath.Ext(f.Name()) == ".json" {
@@ -805,7 +817,7 @@ func TestRetryOnDeadTask(t *testing.T) {
 		CreatedAt:     clock.now(),
 		UpdatedAt:     clock.now(),
 	}
-	if err := r.store.save(dead); err != nil {
+	if err := r.store.Save(dead); err != nil {
 		t.Fatal(err)
 	}
 	got, err := r.Retry(dead.ID)
@@ -1203,10 +1215,10 @@ func TestPoisonRecordDoesNotWedgeWorker(t *testing.T) {
 	// Place a corrupt record that sorts BEFORE the valid one (ReadDir is sorted),
 	// so list() visits it first. The old code returned on the parse error and the
 	// worker never reached the valid task.
-	if err := r.store.init(); err != nil {
+	if err := r.store.Init(); err != nil {
 		t.Fatal(err)
 	}
-	poison := filepath.Join(stateDir(r.store.root), "aaa_corrupt.json")
+	poison := filepath.Join(stateDir(storeRoot(t, r)), "aaa_corrupt.json")
 	if err := os.WriteFile(poison, []byte("{ this is not valid json"), 0o644); err != nil {
 		t.Fatal(err)
 	}

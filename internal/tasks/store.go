@@ -11,12 +11,14 @@ import (
 	"time"
 )
 
-// The task store is one atomic-JSON file per task under <root>/.attn/tasks/. The
-// "queue" is os.ReadDir filtered by State — there is no index file and no SQLite
-// table (the burned-migration gotcha means a new table would be silently skipped
-// on real DBs). The single worker serializes all writes, so no per-task lock is
-// needed; the only durability guarantee the store owns is atomic temp+rename so a
-// crash mid-write never leaves a half-written record.
+// This is the FILE-backed implementation of the Store seam (see FileStore below):
+// one atomic-JSON file per task under <root>/.attn/tasks/, with the "queue" being
+// os.ReadDir filtered by State. Production now injects a SQLite-backed Store from
+// the daemon instead (docs/plans/2026-07-02-bg-task-notifications.md); this file
+// impl backs the package's own tests and the daemon's one-time JSON->SQLite import
+// of any pre-existing on-disk records. The single worker serializes all writes, so
+// no per-task lock is needed; the only durability guarantee this store owns is
+// atomic temp+rename so a crash mid-write never leaves a half-written record.
 
 const (
 	machineDir = ".attn"
@@ -198,6 +200,60 @@ func (s *store) recoverOrphans(now time.Time) (int, error) {
 	}
 	return recovered, nil
 }
+
+// Store is the persistence + single-instance-lock seam the Runner sits on. The
+// file-backed FileStore below is the default and backs this package's own tests;
+// the daemon injects a SQLite-backed implementation via Options.Store so tasks
+// persist in the profile DB (not under the notebook root). Keeping the seam here
+// (not importing internal/store) preserves this package as a leaf.
+type Store interface {
+	// Init prepares the store (the file store creates its tasks dir; a DB store is
+	// a no-op — migrations create the table).
+	Init() error
+	// AcquireLock takes exclusive single-instance ownership, returning an opaque
+	// token for ReleaseLock. Returns ErrAlreadyRunning if another live process
+	// already holds it.
+	AcquireLock() (string, error)
+	// ReleaseLock releases a token from AcquireLock. Best-effort; never blocks Stop.
+	ReleaseLock(token string)
+	// RecoverOrphans resets any task left in StateRunning back to StateQueued
+	// (NextAttemptAt = now) and returns how many were recovered.
+	RecoverOrphans(now time.Time) (int, error)
+	// Load returns the record for id, or (nil, nil) when there is none.
+	Load(id string) (*Task, error)
+	// Save persists a record (create or overwrite by id).
+	Save(t *Task) error
+	// Delete removes a record by id; a missing record is not an error.
+	Delete(id string) error
+	// List returns every persisted record.
+	List() ([]*Task, error)
+}
+
+// FileStore is the file-backed Store: one atomic-JSON file per task under
+// <root>/.attn/tasks/. It wraps this package's internal file store so both the
+// Runner and the daemon's one-time JSON->SQLite import reach it through the Store
+// interface.
+type FileStore struct{ s *store }
+
+// NewFileStore builds a file-backed Store rooted at root. A nil log is a no-op.
+func NewFileStore(root string, log LogFunc) *FileStore {
+	s := newStore(root)
+	if log != nil {
+		s.log = log
+	}
+	return &FileStore{s: s}
+}
+
+func (f *FileStore) Init() error                  { return f.s.init() }
+func (f *FileStore) AcquireLock() (string, error) { return f.s.acquireLock() }
+func (f *FileStore) ReleaseLock(token string)     { f.s.releaseLock(token) }
+func (f *FileStore) RecoverOrphans(now time.Time) (int, error) {
+	return f.s.recoverOrphans(now)
+}
+func (f *FileStore) Load(id string) (*Task, error) { return f.s.load(id) }
+func (f *FileStore) Save(t *Task) error            { return f.s.save(t) }
+func (f *FileStore) Delete(id string) error        { return f.s.delete(id) }
+func (f *FileStore) List() ([]*Task, error)        { return f.s.list() }
 
 // writeAtomic mirrors notebook.writeAtomic: write to a unique temp file, then
 // rename over the target so a reader never observes a half-written record.

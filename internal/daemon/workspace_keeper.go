@@ -207,11 +207,25 @@ func (d *Daemon) setCompactRunner(runner *tasks.Runner) {
 // Cancel/Enqueue callsites can call d.compactRunner unconditionally.
 func (d *Daemon) startCompactRunner() {
 	root, _ := d.notebookRoot()
+	// One-time import of any legacy on-disk JSON task records (the pre-SQLite
+	// <root>/.attn/tasks/*.json format) into the profile DB.
+	if root != "" {
+		d.migrateLegacyTasksToSQLite(root)
+	}
+	// Tasks now persist in the profile SQLite DB via the injected store, not under
+	// the notebook root. PR1 keeps the runner's enable gate keyed on the notebook
+	// root to preserve today's behavior (no root ⇒ disabled ⇒ inline compaction
+	// fallback); a later slice drops that gate once reconcile — which needs no
+	// notebook — becomes a task kind (docs/plans/2026-07-02-bg-task-notifications.md).
+	opts := tasks.Options{Log: d.logf}
+	if root != "" && d.store != nil {
+		opts.Store = d.newSQLTaskStore()
+	}
 	// Build and register on a LOCAL pointer, then publish it once under the write
 	// lock. Registering on the local (not the published field) keeps a concurrent
 	// reader from ever observing a half-registered runner, and the single
 	// setCompactRunner swap is what Stop()/enqueue/forget synchronize against.
-	runner := tasks.New(tasks.Options{Root: root, Log: d.logf})
+	runner := tasks.New(opts)
 	if !runner.Disabled() {
 		if err := runner.RegisterWithTimeout(
 			compactContextKind,

@@ -11,28 +11,34 @@ import (
 )
 
 // ErrAlreadyRunning is returned by Start when another live Runner already owns
-// the tasks dir for this root. The orphan-recovery and single-worker guarantees
-// assume at most one live worker per root: two workers would both claim the same
-// record, both save StateRunning (atomic rename = last-writer-wins, no torn
-// file), and both invoke the executor concurrently — double-applying the durable
-// write (e.g. double compaction). The CommitGuard is a per-process in-memory
-// latch with no cross-process coordination, so nothing else can fence that.
-var ErrAlreadyRunning = errors.New("tasks: another runner already owns this notebook root")
+// the lock dir. The orphan-recovery and single-worker guarantees assume at most
+// one live worker per store: two workers would both claim the same record, both
+// save StateRunning (atomic rename = last-writer-wins, no torn file), and both
+// invoke the executor concurrently — double-applying the durable write (e.g.
+// double compaction). The CommitGuard is a per-process in-memory latch with no
+// cross-process coordination, so nothing else can fence that.
+var ErrAlreadyRunning = errors.New("tasks: another runner already owns this store")
 
-// lockFileName is the single-instance ownership marker under the tasks dir.
+// lockFileName is the single-instance ownership marker inside the lock dir.
 const lockFileName = ".runner.lock"
 
-// acquireLock takes exclusive ownership of the tasks dir for this process by
-// creating <tasksDir>/.runner.lock with O_EXCL. If the file already exists it
-// either belongs to a live process (refuse with ErrAlreadyRunning) or to a
-// crashed one (stale ⇒ steal it). The PID inside lets a restart after a crash
-// reclaim the lock instead of wedging forever. Returns the path of the acquired
-// lock so the caller can release it on Stop.
-func (s *store) acquireLock() (string, error) {
-	if err := s.init(); err != nil {
+// AcquireDirLock takes exclusive single-instance ownership for this process by
+// creating <dir>/.runner.lock with O_EXCL. If the file already exists it either
+// belongs to a live process (refuse with ErrAlreadyRunning) or to a crashed one
+// (stale ⇒ steal it). The PID inside lets a restart after a crash reclaim the lock
+// instead of wedging forever. Returns the acquired lock path for ReleaseDirLock.
+//
+// It is a free function so both the file store (locking under the notebook tasks
+// dir) and the daemon's SQLite adapter (locking under the profile data dir) share
+// one implementation.
+func AcquireDirLock(dir string, log LogFunc) (string, error) {
+	if log == nil {
+		log = func(string, ...interface{}) {}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	path := filepath.Join(stateDir(s.root), lockFileName)
+	path := filepath.Join(dir, lockFileName)
 	for {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {
@@ -50,7 +56,7 @@ func (s *store) acquireLock() (string, error) {
 			return "", err
 		}
 		// The lock exists. Decide whether it is live (refuse) or stale (steal).
-		if pid, alive := s.lockHolderAlive(path); alive {
+		if pid, alive := lockHolderAlive(path); alive {
 			return "", fmt.Errorf("%w (held by pid %d)", ErrAlreadyRunning, pid)
 		}
 		// Stale lock from a crashed process: remove it and retry the O_EXCL create.
@@ -58,15 +64,40 @@ func (s *store) acquireLock() (string, error) {
 		if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 			return "", rmErr
 		}
-		s.log("tasks: reclaimed stale runner lock at %s", path)
+		log("tasks: reclaimed stale runner lock at %s", path)
 	}
 }
+
+// ReleaseDirLock removes the lock file if it still belongs to this process. It is
+// best-effort: a failure to remove is logged, not returned, because Stop must not
+// block shutdown on a lock-file cleanup error.
+func ReleaseDirLock(path string, log LogFunc) {
+	if path == "" {
+		return
+	}
+	if log == nil {
+		log = func(string, ...interface{}) {}
+	}
+	if pid, _ := lockHolderAlive(path); pid != 0 && pid != os.Getpid() {
+		// Another process re-acquired the lock after we crashed/stalled; do not
+		// delete its marker.
+		return
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log("tasks: release runner lock %s: %v", path, err)
+	}
+}
+
+// acquireLock / releaseLock keep the file store's method shape, delegating to the
+// shared dir-lock helpers. The file store locks under its own .attn/tasks dir.
+func (s *store) acquireLock() (string, error) { return AcquireDirLock(stateDir(s.root), s.log) }
+func (s *store) releaseLock(path string)      { ReleaseDirLock(path, s.log) }
 
 // lockHolderAlive reports the PID recorded in the lock file and whether that
 // process is still alive. An unreadable/garbage lock is treated as stale (alive
 // false) so a corrupt marker can never wedge startup permanently. A lock with no
 // readable PID is also treated as stale.
-func (s *store) lockHolderAlive(path string) (pid int, alive bool) {
+func lockHolderAlive(path string) (pid int, alive bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return 0, false
@@ -81,23 +112,6 @@ func (s *store) lockHolderAlive(path string) (pid int, alive bool) {
 		return pid, true
 	}
 	return pid, processAlive(pid)
-}
-
-// releaseLock removes the lock file if it still belongs to this process. It is
-// best-effort: a failure to remove is logged, not returned, because Stop must not
-// block shutdown on a lock-file cleanup error.
-func (s *store) releaseLock(path string) {
-	if path == "" {
-		return
-	}
-	if pid, _ := s.lockHolderAlive(path); pid != 0 && pid != os.Getpid() {
-		// Another process re-acquired the lock after we crashed/stalled; do not
-		// delete its marker.
-		return
-	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		s.log("tasks: release runner lock %s: %v", path, err)
-	}
 }
 
 // processAlive reports whether a process with the given pid currently exists.
