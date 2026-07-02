@@ -203,7 +203,7 @@ func addSession(args []string) error {
 	// can surface failures (bad cwd, unknown agent, etc.) instead of
 	// printing "ok" and leaving the user to wonder why nothing
 	// appeared.
-	resp, err := sendAndWait(msg, "spawn_result", sessID, 2*time.Second)
+	resp, err := sendAndWait(msg, "spawn_result", sessID, 30*time.Second)
 	if err != nil {
 		return err
 	}
@@ -301,6 +301,9 @@ func list(_ []string) error {
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", wsURL(), err)
 	}
+	// The daemon broadcasts full state (sessions, PRs with details, tickets);
+	// the library's 32 KiB default read limit kills the connection mid-frame.
+	conn.SetReadLimit(16 << 20)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	// First message after connect is initial_state.
@@ -337,6 +340,9 @@ func send(payload map[string]any) error {
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", wsURL(), err)
 	}
+	// The daemon broadcasts full state (sessions, PRs with details, tickets);
+	// the library's 32 KiB default read limit kills the connection mid-frame.
+	conn.SetReadLimit(16 << 20)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	// Daemon sends initial_state on connect; drain it before our write
@@ -372,6 +378,7 @@ func sendAndWait(payload map[string]any, expectedEvent, expectedID string, timeo
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", wsURL(), err)
 	}
+	conn.SetReadLimit(16 << 20)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	if _, _, err := conn.Read(ctx); err != nil {
@@ -404,6 +411,13 @@ func sendAndWait(payload map[string]any, expectedEvent, expectedID string, timeo
 		var event map[string]any
 		if err := json.Unmarshal(data, &event); err != nil {
 			continue
+		}
+		if os.Getenv("WSCTL_TRACE") != "" {
+			snippet := string(data)
+			if len(snippet) > 300 {
+				snippet = snippet[:300]
+			}
+			fmt.Fprintf(os.Stderr, "<- %s\n", snippet)
 		}
 		if event["event"] == expectedEvent {
 			if expectedID == "" {
