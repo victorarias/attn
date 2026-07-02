@@ -245,9 +245,12 @@ func TestRunTicketReconciliationExecErrorPostsFailureNote(t *testing.T) {
 		t.Fatalf("write transcript: %v", err)
 	}
 	d.ticketReconcileExec = func(ctx context.Context, in ticketReconcileInputs) (agentdriver.HeadlessTaskResult, error) {
+		// Real shape: stderr leads with the startup error, stdout ends with the
+		// result event carrying the human-readable error.
 		return agentdriver.HeadlessTaskResult{
-			Diagnostics:   "headless agent MCP tool server failed",
-			FailureOutput: "stderr: MCP server \"claude.ai Slack\" needs authentication\n" + strings.Repeat("x", 2000),
+			Diagnostics: "headless agent MCP tool server failed",
+			FailureOutput: "stderr: MCP server \"claude.ai Slack\" needs authentication\nstdout: " +
+				strings.Repeat("x", 2000) + `{"type":"result","is_error":true,"result":"model not found"}`,
 		}, errors.New("headless agent MCP tool server failed: exit status 1")
 	}
 
@@ -264,18 +267,20 @@ func TestRunTicketReconciliationExecErrorPostsFailureNote(t *testing.T) {
 		t.Fatalf("reconcile comments = %d, want 1", len(comments))
 	}
 	// The failure note carries the actual error — the exec error summary plus
-	// the raw output tail, bounded — never only a keyword bucket.
+	// both bounded ends of the raw output (stderr head, trailing result event)
+	// — never only a keyword bucket.
 	for _, want := range []string{
 		"could not determine",
 		"classifier run failed: headless agent MCP tool server failed: exit status 1",
 		`MCP server "claude.ai Slack" needs authentication`,
+		`"result":"model not found"`,
 		"…(truncated)",
 	} {
 		if !strings.Contains(comments[0], want) {
 			t.Fatalf("failure note missing %q:\n%s", want, comments[0])
 		}
 	}
-	if strings.Contains(comments[0], strings.Repeat("x", ticketReconcileFailureDetailLimit)) {
+	if strings.Contains(comments[0], strings.Repeat("x", 1000)) {
 		t.Fatalf("failure note not truncated:\n%s", comments[0])
 	}
 }

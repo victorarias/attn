@@ -36,10 +36,13 @@ const (
 	defaultTicketReconcileMaxBudgetUSD = "0.50"
 	defaultTicketReconcileTimeout      = 5 * time.Minute
 
-	// ticketReconcileFailureDetailLimit bounds the raw classifier output echoed
-	// into a rule-7 failure comment. The head is kept: FailureOutput leads with
-	// stderr, where agent CLIs put the fatal error.
-	ticketReconcileFailureDetailLimit = 1000
+	// ticketReconcileFailureDetail{Head,Tail} bound the raw classifier output
+	// echoed into a rule-7 failure comment, keeping both ends of the capture:
+	// the head holds FailureOutput's stderr section (fatal CLI errors), the
+	// tail holds the end of stdout — a failed `--output-format json` run puts
+	// the human-readable error in the trailing result event.
+	ticketReconcileFailureDetailHead = 300
+	ticketReconcileFailureDetailTail = 700
 
 	// ticketReconcileConcurrency bounds simultaneous classifier processes: a
 	// workspace teardown can kill several delegated sessions at once, and without
@@ -339,8 +342,9 @@ func (d *Daemon) runTicketReconciliation(in ticketReconcileInputs) {
 			// actual output tail — without it a failure is undiagnosable (the
 			// 2026-07-02 first fire surfaced only "keeper tools failed").
 			failReason = "classifier run failed: " + err.Error()
-			if tail := strings.TrimSpace(result.FailureOutput); tail != "" {
-				failReason += "\nClassifier output tail:\n" + truncateHeadString(tail, ticketReconcileFailureDetailLimit)
+			if raw := strings.TrimSpace(result.FailureOutput); raw != "" {
+				failReason += "\nClassifier output:\n" + truncateMiddleString(raw,
+					ticketReconcileFailureDetailHead, ticketReconcileFailureDetailTail)
 			}
 		case len(result.StructuredOutput) == 0:
 			failReason = "classifier returned no structured verdict (cap hit or early exit)"
@@ -384,12 +388,14 @@ func (d *Daemon) runTicketReconciliation(in ticketReconcileInputs) {
 	d.broadcastTicketsUpdated()
 }
 
-// truncateHeadString keeps the first limit bytes of s, marking the cut.
-func truncateHeadString(s string, limit int) string {
-	if len(s) <= limit {
+// truncateMiddleString keeps the first head and last tail bytes of s, marking
+// the cut — both ends of a failed run's output matter (stderr leads, the fatal
+// result event trails).
+func truncateMiddleString(s string, head, tail int) string {
+	if len(s) <= head+tail {
 		return s
 	}
-	return s[:limit] + " …(truncated)"
+	return s[:head] + " …(truncated) " + s[len(s)-tail:]
 }
 
 // renderTicketReconcileComment renders the durable verdict (or rule-7 failure
