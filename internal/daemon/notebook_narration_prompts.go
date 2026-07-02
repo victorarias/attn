@@ -6,10 +6,10 @@ import (
 )
 
 // The two narration prompts are the load-bearing intelligence of the pipeline.
-// They are embedded VERBATIM from docs/plans/2026-06-14-notebook-narration.md
-// section 8 (the fenced text blocks) — do NOT paraphrase the briefs. Each brief
-// ends by referring to inputs/outputs "given to you below this brief"; the
-// builder funcs append the concrete absolute INPUT/OUTPUT path block at run time.
+// This file is the source of truth for their exact wording — do NOT paraphrase
+// the briefs. Each brief ends by referring to inputs/outputs "given to you below
+// this brief"; the builder funcs append the concrete absolute INPUT/OUTPUT path
+// block at run time.
 
 // summarizeSessionPromptBrief is prompt 8A (summarize_session, cheap tier),
 // verbatim. The absolute TRANSCRIPT_PATH / SESSION_ID / RAW_DIGEST_PATH block is
@@ -147,11 +147,9 @@ with your fresh, faithful version), and write again. Do not append duplicate
 digests; this file holds exactly one digest for this session. The written file is
 the only evidence that you succeeded — make sure the write lands.`
 
-// narrateWorkspacePromptBrief is prompt 8B (narrate_workspace, strong tier). The
-// session-narration text is verbatim from docs/plans/2026-06-14-notebook-narration.md
-// section 8; the removal-pass knowledge-base archive step is added from
-// docs/plans/2026-06-18-knowledge-base.md (PR3) and is the source of truth for its
-// exact wording. The absolute INPUT/OUTPUT path block (WORKSPACE_TITLE, WORKSPACE_ID,
+// narrateWorkspacePromptBrief is prompt 8B (narrate_workspace, strong tier). This
+// const is the source of truth for its exact wording, including the removal-pass
+// knowledge-base archive step. The absolute INPUT/OUTPUT path block (WORKSPACE_TITLE, WORKSPACE_ID,
 // CONTEXT_SNAPSHOT_PATH, RAW_SESSIONS_DIR, TRANSCRIPT_PATHS,
 // JOURNAL_PATH, JOURNAL_DIR, KNOWLEDGE_DIR, IS_REMOVAL_PASS) is appended by
 // buildNarrateWorkspacePrompt.
