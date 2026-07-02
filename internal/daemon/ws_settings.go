@@ -20,6 +20,10 @@ import (
 const (
 	SettingProjectsDirectory = "projects_directory"
 	SettingUIScale           = "uiScale"
+	// SettingTicketBoardScale scales fonts on the ticket board and ticket
+	// detail surfaces independently of the app-wide uiScale. Empty/unset =>
+	// the board follows uiScale.
+	SettingTicketBoardScale  = "ticketBoardScale"
 	SettingClaudeExecutable  = "claude_executable"
 	SettingCodexExecutable   = "codex_executable"
 	SettingCopilotExecutable = "copilot_executable"
@@ -281,6 +285,11 @@ func (d *Daemon) validateSetting(key, value string) error {
 	case SettingProjectsDirectory:
 		return validateProjectsDirectory(value)
 	case SettingUIScale:
+		return validateUIScale(value)
+	case SettingTicketBoardScale:
+		if strings.TrimSpace(value) == "" {
+			return nil
+		}
 		return validateUIScale(value)
 	case SettingClaudeExecutable, SettingCodexExecutable, SettingCopilotExecutable:
 		return validateExecutableSetting(value)

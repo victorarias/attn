@@ -499,6 +499,21 @@
   overflow-wrap: anywhere;
 }
 
+.settings-font-scale {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-font-scale-value {
+  min-width: 72px;
+  text-align: center;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .settings-keeper-duties {
   display: grid;
   gap: 10px;

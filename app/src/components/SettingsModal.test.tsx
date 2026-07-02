@@ -899,3 +899,95 @@ describe('SettingsModal chief settings', () => {
     expect(onSetSetting).toHaveBeenCalledWith('chief_model_codex', '');
   });
 });
+
+describe('SettingsModal font size', () => {
+  function renderModal(overrides: Record<string, unknown> = {}) {
+    render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        githubHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{}}
+        endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={vi.fn()}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+        {...overrides}
+      />,
+    );
+  }
+
+  it('shows the app font scale and steps it through the handlers', async () => {
+    const onIncrease = vi.fn();
+    const onDecrease = vi.fn();
+    renderModal({
+      uiScale: 1.2,
+      onIncreaseUIScale: onIncrease,
+      onDecreaseUIScale: onDecrease,
+    });
+
+    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    expect(await screen.findByTestId('settings-app-font-scale-value')).toHaveTextContent('120%');
+
+    fireEvent.click(screen.getByLabelText('Increase app font size'));
+    fireEvent.click(screen.getByLabelText('Decrease app font size'));
+    expect(onIncrease).toHaveBeenCalledTimes(1);
+    expect(onDecrease).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers an app reset only when the scale is not the default', async () => {
+    const onReset = vi.fn();
+    renderModal({ uiScale: 1.3, onResetUIScale: onReset });
+
+    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    fireEvent.click(await screen.findByText('Reset'));
+    expect(onReset).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the taskboard matching the app by default, without a Match app button', async () => {
+    renderModal({ uiScale: 1, ticketBoardScale: null, effectiveTicketBoardScale: 1 });
+
+    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    expect(await screen.findByTestId('settings-taskboard-font-scale-value')).toHaveTextContent(
+      'Match app',
+    );
+    expect(screen.queryByText('Match app', { selector: 'button' })).not.toBeInTheDocument();
+  });
+
+  it('shows an overridden taskboard scale and reverts it via Match app', async () => {
+    const onMatchApp = vi.fn();
+    const onIncrease = vi.fn();
+    renderModal({
+      uiScale: 1,
+      ticketBoardScale: 1.3,
+      effectiveTicketBoardScale: 1.3,
+      onIncreaseTicketBoardScale: onIncrease,
+      onMatchAppTicketBoardScale: onMatchApp,
+    });
+
+    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    expect(await screen.findByTestId('settings-taskboard-font-scale-value')).toHaveTextContent(
+      '130%',
+    );
+
+    fireEvent.click(screen.getByLabelText('Increase taskboard font size'));
+    expect(onIncrease).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByText('Match app', { selector: 'button' }));
+    expect(onMatchApp).toHaveBeenCalledTimes(1);
+  });
+});
