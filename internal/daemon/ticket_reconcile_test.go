@@ -13,6 +13,7 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/tasks"
+	"github.com/victorarias/attn/internal/transcript"
 )
 
 // installReconcileRunner builds and starts a durable runner with only the
@@ -454,5 +455,55 @@ func TestSweepSkipsTicketWithExistingTask(t *testing.T) {
 	d.ticketReconcileSweepPass(now.Add(ticketReconcileGrace() + time.Hour))
 	if got := reconciledAt(t, d, "already"); got != nil {
 		t.Fatalf("sweep re-claimed a ticket with an existing task (%v)", got)
+	}
+}
+
+// The prompt must inline the deterministic transcript slice (not a
+// Read-the-transcript instruction) alongside the filed ticket brief.
+func TestBuildTicketReconcilePromptInlinesSlice(t *testing.T) {
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "transcript.jsonl")
+	lines := []string{
+		`{"type":"user","origin":{"kind":"human"},"message":{"content":"delegated: wire up the widget"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"widget wired, opening PR"}]}}`,
+	}
+	if err := os.WriteFile(transcriptPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write fixture transcript: %v", err)
+	}
+
+	slice, err := transcript.ExtractConversationSlice(transcriptPath, transcript.DefaultSliceOptions())
+	if err != nil {
+		t.Fatalf("ExtractConversationSlice: %v", err)
+	}
+	if slice.Empty() {
+		t.Fatalf("fixture slice unexpectedly empty")
+	}
+
+	in := ticketReconcileInputs{
+		TicketID:       "tkt-1",
+		Title:          "Wire up the widget",
+		Brief:          "the filed ticket brief text",
+		StatusAtClaim:  store.TicketStatusWorking,
+		Agent:          "claude",
+		TranscriptPath: transcriptPath,
+		CloseContext:   "the agent process exited on its own",
+	}
+
+	prompt := buildTicketReconcilePrompt(in, slice)
+
+	if !strings.Contains(prompt, "widget wired, opening PR") {
+		t.Errorf("prompt missing inlined slice turn content:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "TICKET BRIEF") {
+		t.Errorf("prompt missing slice heading:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, in.Brief) {
+		t.Errorf("prompt missing filed ticket brief:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "Read the transcript") {
+		t.Errorf("prompt still instructs reading the transcript:\n%s", prompt)
+	}
+	if strings.Contains(prompt, in.TranscriptPath) {
+		t.Errorf("prompt still leaks the transcript path:\n%s", prompt)
 	}
 }

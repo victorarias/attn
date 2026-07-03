@@ -12,6 +12,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Notifications when background work fails.** attn now has a notifications feed — the bell in the sidebar, with an unread count — that tells you when a background task gives up after exhausting its retries (context compaction, session summaries, workspace narration, or ticket reconciliation). Open a notification to read what was running and the underlying error, and retry it right there. Notifications persist across restarts and are marked read as you view them (with a "Mark all read").
 - **Background tasks moved to Settings.** The durable task runner's list — every queued, running, failed, or dead background task with its attempt count, next attempt, last error, and a Retry — now lives in its own **Settings → Background Tasks** section. It used to hang off the Notebook's sidebar, but these tasks are a global concern, not a notebook one, so the Notebook's Tasks section is gone.
 
+### Fixed
+- **Orphaned-ticket reconciliation no longer fails on large transcripts.** The background classifier that judges a dead session's work now builds its verdict from a small, deterministically extracted slice of the conversation (the original request, any re-scoping, and the agent's last status turns) inlined into a single cheap model call, instead of agentically reading the whole transcript file. A multi-megabyte transcript used to blow the run's budget cap and post a misleading failure note; now it costs the same as any other.
+
 ## [2026-07-02]
 
 ### Added
